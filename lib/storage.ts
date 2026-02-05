@@ -1,10 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { BrandProfile, ContentItem, Campaign } from './types';
+import type { BrandProfile, ContentItem, Campaign, Ad, PlatformConnection, PostingSchedule } from './types';
 
 const KEYS = {
   BRAND_PROFILE: 'marketmind_brand_profile',
   CONTENT_ITEMS: 'marketmind_content_items',
   CAMPAIGNS: 'marketmind_campaigns',
+  ADS: 'marketmind_ads',
+  PLATFORM_CONNECTIONS: 'marketmind_platform_connections',
+  POSTING_SCHEDULES: 'marketmind_posting_schedules',
 };
 
 const defaultBrandProfile: BrandProfile = {
@@ -14,6 +17,21 @@ const defaultBrandProfile: BrandProfile = {
   targetAudience: '',
   platforms: ['Instagram', 'Facebook'],
 };
+
+const defaultPlatformConnections: PlatformConnection[] = [
+  { id: 'instagram', name: 'Instagram', isConnected: false },
+  { id: 'facebook', name: 'Facebook', isConnected: false },
+  { id: 'twitter', name: 'Twitter', isConnected: false },
+  { id: 'linkedin', name: 'LinkedIn', isConnected: false },
+  { id: 'tiktok', name: 'TikTok', isConnected: false },
+];
+
+const defaultPostingSchedules: PostingSchedule[] = [
+  { platform: 'Instagram', enabled: false, times: ['09:00', '18:00'], days: ['Mon', 'Wed', 'Fri'] },
+  { platform: 'Facebook', enabled: false, times: ['10:00', '15:00'], days: ['Mon', 'Tue', 'Thu'] },
+  { platform: 'Twitter', enabled: false, times: ['08:00', '12:00', '17:00'], days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] },
+  { platform: 'LinkedIn', enabled: false, times: ['09:00'], days: ['Tue', 'Thu'] },
+];
 
 export async function getBrandProfile(): Promise<BrandProfile> {
   try {
@@ -78,6 +96,58 @@ export async function deleteCampaign(id: string): Promise<void> {
   const campaigns = await getCampaigns();
   const filtered = campaigns.filter(c => c.id !== id);
   await AsyncStorage.setItem(KEYS.CAMPAIGNS, JSON.stringify(filtered));
+}
+
+export async function getAds(): Promise<Ad[]> {
+  try {
+    const data = await AsyncStorage.getItem(KEYS.ADS);
+    return data ? JSON.parse(data) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveAd(ad: Ad): Promise<void> {
+  const ads = await getAds();
+  const existingIndex = ads.findIndex(a => a.id === ad.id);
+  if (existingIndex >= 0) {
+    ads[existingIndex] = ad;
+  } else {
+    ads.unshift(ad);
+  }
+  await AsyncStorage.setItem(KEYS.ADS, JSON.stringify(ads));
+}
+
+export async function deleteAd(id: string): Promise<void> {
+  const ads = await getAds();
+  const filtered = ads.filter(a => a.id !== id);
+  await AsyncStorage.setItem(KEYS.ADS, JSON.stringify(filtered));
+}
+
+export async function getPlatformConnections(): Promise<PlatformConnection[]> {
+  try {
+    const data = await AsyncStorage.getItem(KEYS.PLATFORM_CONNECTIONS);
+    return data ? JSON.parse(data) : defaultPlatformConnections;
+  } catch {
+    return defaultPlatformConnections;
+  }
+}
+
+export async function savePlatformConnections(connections: PlatformConnection[]): Promise<void> {
+  await AsyncStorage.setItem(KEYS.PLATFORM_CONNECTIONS, JSON.stringify(connections));
+}
+
+export async function getPostingSchedules(): Promise<PostingSchedule[]> {
+  try {
+    const data = await AsyncStorage.getItem(KEYS.POSTING_SCHEDULES);
+    return data ? JSON.parse(data) : defaultPostingSchedules;
+  } catch {
+    return defaultPostingSchedules;
+  }
+}
+
+export async function savePostingSchedules(schedules: PostingSchedule[]): Promise<void> {
+  await AsyncStorage.setItem(KEYS.POSTING_SCHEDULES, JSON.stringify(schedules));
 }
 
 function generateId(): string {

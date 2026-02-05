@@ -9,6 +9,7 @@ import {
   TextInput,
   Pressable,
   Alert,
+  Switch,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,15 +18,31 @@ import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
 import { PlatformPicker } from '@/components/PlatformPicker';
+import { PlatformConnection } from '@/components/PlatformConnection';
 
 const toneOptions = ['Professional', 'Casual', 'Friendly', 'Authoritative', 'Playful', 'Inspirational'];
+
+const platformIcons: Record<string, { icon: keyof typeof Ionicons.glyphMap; color: string }> = {
+  instagram: { icon: 'logo-instagram', color: '#E1306C' },
+  facebook: { icon: 'logo-facebook', color: '#1877F2' },
+  twitter: { icon: 'logo-twitter', color: '#1DA1F2' },
+  linkedin: { icon: 'logo-linkedin', color: '#0A66C2' },
+  tiktok: { icon: 'musical-notes', color: '#000000' },
+};
 
 export default function SettingsScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
-  const { brandProfile, setBrandProfile } = useApp();
+  const { 
+    brandProfile, 
+    setBrandProfile, 
+    platformConnections, 
+    updatePlatformConnection,
+    postingSchedules,
+    updatePostingSchedule,
+  } = useApp();
 
   const [name, setName] = useState(brandProfile.name);
   const [industry, setIndustry] = useState(brandProfile.industry);
@@ -65,6 +82,25 @@ export default function SettingsScreen() {
     Alert.alert('Saved', 'Your brand profile has been updated.');
   };
 
+  const handleConnect = (id: string) => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    updatePlatformConnection(id, true);
+  };
+
+  const handleDisconnect = (id: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    updatePlatformConnection(id, false);
+  };
+
+  const handleScheduleToggle = (platform: string, enabled: boolean) => {
+    const schedule = postingSchedules.find(s => s.platform === platform);
+    if (schedule) {
+      updatePostingSchedule({ ...schedule, enabled });
+    }
+  };
+
+  const connectedCount = platformConnections.filter(p => p.isConnected).length;
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView
@@ -75,12 +111,84 @@ export default function SettingsScreen() {
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={[styles.title, { color: colors.text }]}>Brand Settings</Text>
+        <Text style={[styles.title, { color: colors.text }]}>Settings</Text>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-          Configure your brand profile for AI-powered content
+          Configure your brand and platform connections
         </Text>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={styles.cardHeader}>
+            <View style={styles.cardTitleRow}>
+              <Ionicons name="link" size={20} color={colors.primary} />
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Connected Platforms</Text>
+            </View>
+            <View style={[styles.badge, { backgroundColor: colors.primary + '20' }]}>
+              <Text style={[styles.badgeText, { color: colors.primary }]}>{connectedCount} active</Text>
+            </View>
+          </View>
+          <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
+            Connect your social media accounts to enable auto-publishing
+          </Text>
+          <View style={styles.connectionsList}>
+            {platformConnections.map(connection => {
+              const style = platformIcons[connection.id] || { icon: 'globe' as const, color: colors.primary };
+              return (
+                <PlatformConnection
+                  key={connection.id}
+                  name={connection.name}
+                  icon={style.icon}
+                  color={style.color}
+                  isConnected={connection.isConnected}
+                  onConnect={() => handleConnect(connection.id)}
+                  onDisconnect={() => handleDisconnect(connection.id)}
+                />
+              );
+            })}
+          </View>
+        </View>
+
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={styles.cardTitleRow}>
+            <Ionicons name="time" size={20} color={colors.accent} />
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Auto-Publish Schedule</Text>
+          </View>
+          <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
+            Enable automatic posting at optimal times
+          </Text>
+          <View style={styles.scheduleList}>
+            {postingSchedules.map(schedule => {
+              const connection = platformConnections.find(c => c.name === schedule.platform);
+              const isConnected = connection?.isConnected || false;
+              return (
+                <View 
+                  key={schedule.platform}
+                  style={[styles.scheduleItem, { backgroundColor: colors.inputBackground }]}
+                >
+                  <View style={styles.scheduleLeft}>
+                    <Text style={[styles.schedulePlatform, { color: colors.text }]}>{schedule.platform}</Text>
+                    <Text style={[styles.scheduleInfo, { color: colors.textMuted }]}>
+                      {schedule.times.join(', ')} on {schedule.days.join(', ')}
+                    </Text>
+                  </View>
+                  <Switch
+                    value={schedule.enabled && isConnected}
+                    onValueChange={(value) => handleScheduleToggle(schedule.platform, value)}
+                    disabled={!isConnected}
+                    trackColor={{ false: colors.inputBorder, true: colors.primary + '50' }}
+                    thumbColor={schedule.enabled && isConnected ? colors.primary : colors.textMuted}
+                  />
+                </View>
+              );
+            })}
+          </View>
+        </View>
+
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={styles.cardTitleRow}>
+            <Ionicons name="business" size={20} color={colors.accentOrange} />
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Brand Profile</Text>
+          </View>
+          
           <View style={styles.inputGroup}>
             <Text style={[styles.inputLabel, { color: colors.text }]}>Brand Name</Text>
             <TextInput
@@ -149,14 +257,6 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <Text style={[styles.cardTitle, { color: colors.text }]}>Active Platforms</Text>
-          <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
-            Select the platforms you want to manage
-          </Text>
-          <PlatformPicker selected={platforms} onChange={setPlatforms} />
-        </View>
-
         {hasChanges && (
           <Pressable
             onPress={handleSave}
@@ -173,16 +273,6 @@ export default function SettingsScreen() {
             </LinearGradient>
           </Pressable>
         )}
-
-        <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <Ionicons name="information-circle-outline" size={24} color={colors.primary} />
-          <View style={styles.infoContent}>
-            <Text style={[styles.infoTitle, { color: colors.text }]}>AI-Powered Marketing</Text>
-            <Text style={[styles.infoText, { color: colors.textSecondary }]}>
-              Your brand settings help the AI create more personalized and on-brand content for your marketing campaigns.
-            </Text>
-          </View>
-        </View>
 
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -213,15 +303,60 @@ const styles = StyleSheet.create({
     padding: 20,
     marginBottom: 16,
   },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  cardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 4,
+  },
   cardTitle: {
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
-    marginBottom: 4,
+  },
+  badge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  badgeText: {
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
   },
   cardSubtitle: {
     fontSize: 13,
     fontFamily: 'Inter_400Regular',
     marginBottom: 16,
+  },
+  connectionsList: {
+    gap: 12,
+  },
+  scheduleList: {
+    gap: 10,
+  },
+  scheduleItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 14,
+    borderRadius: 12,
+  },
+  scheduleLeft: {
+    flex: 1,
+    gap: 2,
+  },
+  schedulePlatform: {
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  scheduleInfo: {
+    fontSize: 11,
+    fontFamily: 'Inter_400Regular',
   },
   inputGroup: {
     marginBottom: 16,
@@ -269,26 +404,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
     color: '#fff',
-  },
-  infoCard: {
-    flexDirection: 'row',
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 16,
-    gap: 12,
-    alignItems: 'flex-start',
-  },
-  infoContent: {
-    flex: 1,
-  },
-  infoTitle: {
-    fontSize: 14,
-    fontFamily: 'Inter_600SemiBold',
-    marginBottom: 4,
-  },
-  infoText: {
-    fontSize: 13,
-    fontFamily: 'Inter_400Regular',
-    lineHeight: 18,
   },
 });

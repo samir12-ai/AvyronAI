@@ -60,6 +60,72 @@ Requirements:
     }
   });
 
+  app.post("/api/generate-ad", async (req, res) => {
+    try {
+      const { brandName, industry, tone, targetAudience, platforms } = req.body;
+
+      const platformList = platforms?.join(', ') || 'social media';
+
+      const systemPrompt = `You are an expert advertising copywriter who creates high-converting ad copy for digital advertising campaigns.
+
+Brand Context:
+- Brand Name: ${brandName || 'the brand'}
+- Industry: ${industry || 'general business'}
+- Brand Voice/Tone: ${tone || 'Professional'}
+- Target Audience: ${targetAudience || 'general audience'}
+
+Guidelines:
+- Create compelling headlines that grab attention
+- Write persuasive body copy that drives action
+- Keep it concise and platform-appropriate
+- Focus on benefits, not just features
+- Create urgency when appropriate
+- Be authentic to the brand voice`;
+
+      const userPrompt = `Create an advertisement that will run on: ${platformList}
+
+Return your response in this exact JSON format:
+{
+  "headline": "Your catchy headline here (max 60 characters)",
+  "body": "Your compelling ad copy here (max 200 characters)"
+}
+
+Make sure the content works well across all the specified platforms.`;
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.1",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        max_completion_tokens: 300,
+      });
+
+      const content = response.choices[0]?.message?.content || "";
+      
+      try {
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          res.json(parsed);
+        } else {
+          res.json({ 
+            headline: "Discover Something Amazing Today",
+            body: "Transform your experience with our innovative solution. Join thousands of satisfied customers who made the switch."
+          });
+        }
+      } catch {
+        res.json({ 
+          headline: "Discover Something Amazing Today",
+          body: "Transform your experience with our innovative solution. Join thousands of satisfied customers who made the switch."
+        });
+      }
+    } catch (error) {
+      console.error("Error generating ad:", error);
+      res.status(500).json({ error: "Failed to generate ad" });
+    }
+  });
+
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
