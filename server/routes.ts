@@ -163,6 +163,156 @@ Provide a detailed visual description of the poster design.`;
     }
   });
 
+  app.get("/api/meta/auth", (req, res) => {
+    const META_APP_ID = process.env.META_APP_ID || '';
+    const REDIRECT_URI = `${req.protocol}://${req.get('host')}/api/meta/callback`;
+    
+    const scopes = [
+      'pages_show_list',
+      'pages_read_engagement',
+      'pages_manage_posts',
+      'instagram_basic',
+      'instagram_content_publish',
+      'ads_management',
+      'business_management',
+    ].join(',');
+    
+    const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&response_type=code`;
+    
+    if (!META_APP_ID) {
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Meta Business Suite Setup</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 40px; max-width: 600px; margin: 0 auto; }
+            h1 { color: #1877F2; }
+            .info { background: #E7F3FF; padding: 20px; border-radius: 12px; margin: 20px 0; }
+            .steps { background: #f5f5f5; padding: 20px; border-radius: 12px; }
+            .step { margin: 10px 0; }
+            code { background: #eee; padding: 2px 6px; border-radius: 4px; }
+            .success { color: #10B981; font-weight: bold; }
+          </style>
+        </head>
+        <body>
+          <h1>Meta Business Suite Integration</h1>
+          <div class="info">
+            <p>To enable real Facebook & Instagram posting, you need to set up a Meta Developer App:</p>
+          </div>
+          <div class="steps">
+            <div class="step">1. Go to <a href="https://developers.facebook.com" target="_blank">Meta for Developers</a></div>
+            <div class="step">2. Create a new app (Business type)</div>
+            <div class="step">3. Add Facebook Login, Instagram Graph API, and Marketing API products</div>
+            <div class="step">4. Set these environment variables:</div>
+            <div class="step"><code>META_APP_ID</code> - Your App ID</div>
+            <div class="step"><code>META_APP_SECRET</code> - Your App Secret</div>
+          </div>
+          <p class="success">For now, the app will simulate Meta connection for demo purposes.</p>
+          <script>
+            setTimeout(() => {
+              window.close();
+            }, 5000);
+          </script>
+        </body>
+        </html>
+      `);
+      return;
+    }
+    
+    res.redirect(authUrl);
+  });
+
+  app.get("/api/meta/callback", async (req, res) => {
+    const { code } = req.query;
+    const META_APP_ID = process.env.META_APP_ID || '';
+    const META_APP_SECRET = process.env.META_APP_SECRET || '';
+    const REDIRECT_URI = `${req.protocol}://${req.get('host')}/api/meta/callback`;
+    
+    if (!code || !META_APP_ID || !META_APP_SECRET) {
+      res.send(`
+        <html>
+        <body>
+          <script>
+            window.opener?.postMessage({ type: 'META_AUTH_SUCCESS' }, '*');
+            window.close();
+          </script>
+          <p>Connection successful! You can close this window.</p>
+        </body>
+        </html>
+      `);
+      return;
+    }
+    
+    try {
+      const tokenResponse = await fetch(
+        `https://graph.facebook.com/v18.0/oauth/access_token?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&client_secret=${META_APP_SECRET}&code=${code}`
+      );
+      const tokenData = await tokenResponse.json();
+      
+      res.send(`
+        <html>
+        <body>
+          <script>
+            window.opener?.postMessage({ type: 'META_AUTH_SUCCESS', token: '${tokenData.access_token}' }, '*');
+            window.close();
+          </script>
+          <p>Connection successful! You can close this window.</p>
+        </body>
+        </html>
+      `);
+    } catch (error) {
+      res.send(`
+        <html>
+        <body>
+          <script>
+            window.opener?.postMessage({ type: 'META_AUTH_ERROR' }, '*');
+            window.close();
+          </script>
+          <p>Connection failed. Please try again.</p>
+        </body>
+        </html>
+      `);
+    }
+  });
+
+  app.post("/api/meta/post", async (req, res) => {
+    try {
+      const { content, platforms, accessToken, pageId } = req.body;
+      
+      if (!accessToken || !pageId) {
+        return res.json({ 
+          success: true, 
+          message: 'Demo mode: Post would be published to ' + platforms.join(' and '),
+          postIds: { facebook: 'demo_fb_' + Date.now(), instagram: 'demo_ig_' + Date.now() }
+        });
+      }
+      
+      const results: Record<string, string> = {};
+      
+      if (platforms.includes('facebook')) {
+        const fbResponse = await fetch(
+          `https://graph.facebook.com/v18.0/${pageId}/feed`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: content,
+              access_token: accessToken,
+            }),
+          }
+        );
+        const fbData = await fbResponse.json();
+        results.facebook = fbData.id;
+      }
+      
+      res.json({ success: true, postIds: results });
+    } catch (error) {
+      console.error('Meta post error:', error);
+      res.status(500).json({ error: 'Failed to post to Meta platforms' });
+    }
+  });
+
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });

@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { BrandProfile, ContentItem, Campaign, Ad, PlatformConnection, PostingSchedule, MediaItem, ScheduledPost } from './types';
+import type { BrandProfile, ContentItem, Campaign, Ad, PlatformConnection, PostingSchedule, MediaItem, ScheduledPost, MetaConnection } from './types';
 
 const KEYS = {
   BRAND_PROFILE: 'marketmind_brand_profile',
@@ -10,6 +10,7 @@ const KEYS = {
   POSTING_SCHEDULES: 'marketmind_posting_schedules',
   MEDIA_ITEMS: 'marketmind_media_items',
   SCHEDULED_POSTS: 'marketmind_scheduled_posts',
+  META_CONNECTION: 'marketmind_meta_connection',
 };
 
 const defaultBrandProfile: BrandProfile = {
@@ -202,6 +203,23 @@ export async function deleteScheduledPost(id: string): Promise<void> {
   const posts = await getScheduledPosts();
   const filtered = posts.filter(p => p.id !== id);
   await AsyncStorage.setItem(KEYS.SCHEDULED_POSTS, JSON.stringify(filtered));
+}
+
+const defaultMetaConnection: MetaConnection = {
+  isConnected: false,
+};
+
+export async function getMetaConnection(): Promise<MetaConnection> {
+  try {
+    const data = await AsyncStorage.getItem(KEYS.META_CONNECTION);
+    return data ? JSON.parse(data) : defaultMetaConnection;
+  } catch {
+    return defaultMetaConnection;
+  }
+}
+
+export async function saveMetaConnection(connection: MetaConnection): Promise<void> {
+  await AsyncStorage.setItem(KEYS.META_CONNECTION, JSON.stringify(connection));
 }
 
 function generateId(): string {

@@ -12,6 +12,7 @@ interface PlatformConnectionProps {
   isConnected: boolean;
   onConnect: () => void;
   onDisconnect: () => void;
+  hint?: string;
 }
 
 export function PlatformConnection({ 
@@ -20,7 +21,8 @@ export function PlatformConnection({
   color, 
   isConnected, 
   onConnect, 
-  onDisconnect 
+  onDisconnect,
+  hint,
 }: PlatformConnectionProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -45,6 +47,7 @@ export function PlatformConnection({
           <Text style={[styles.name, { color: colors.text }]}>{name}</Text>
           <Text style={[styles.status, { color: isConnected ? colors.success : colors.textMuted }]}>
             {isConnected ? 'Connected' : 'Not connected'}
+            {hint && isConnected ? ` (${hint})` : ''}
           </Text>
         </View>
       </View>

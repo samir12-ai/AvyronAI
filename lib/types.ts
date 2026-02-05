@@ -106,3 +106,13 @@ export interface ScheduledPost {
   status: 'pending' | 'published' | 'failed';
   createdAt: string;
 }
+
+export interface MetaConnection {
+  isConnected: boolean;
+  accessToken?: string;
+  pageId?: string;
+  pageName?: string;
+  instagramAccountId?: string;
+  connectedAt?: string;
+  expiresAt?: string;
+}

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
-import type { BrandProfile, ContentItem, Campaign, Ad, AnalyticsData, DailyMetric, PlatformConnection, PostingSchedule, MediaItem, ScheduledPost } from '@/lib/types';
+import type { BrandProfile, ContentItem, Campaign, Ad, AnalyticsData, DailyMetric, PlatformConnection, PostingSchedule, MediaItem, ScheduledPost, MetaConnection } from '@/lib/types';
 import * as storage from '@/lib/storage';
 
 interface AppContextValue {
@@ -29,6 +29,8 @@ interface AppContextValue {
   addScheduledPost: (post: ScheduledPost) => Promise<void>;
   updateScheduledPost: (post: ScheduledPost) => Promise<void>;
   removeScheduledPost: (id: string) => Promise<void>;
+  metaConnection: MetaConnection;
+  setMetaConnection: (connection: MetaConnection) => Promise<void>;
   analytics: AnalyticsData;
   weeklyMetrics: DailyMetric[];
   isLoading: boolean;
@@ -91,13 +93,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [postingSchedules, setPostingSchedules] = useState<PostingSchedule[]>([]);
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [scheduledPosts, setScheduledPosts] = useState<ScheduledPost[]>([]);
+  const [metaConnection, setMetaConnectionState] = useState<MetaConnection>({ isConnected: false });
   const [isLoading, setIsLoading] = useState(true);
   const [weeklyMetrics] = useState<DailyMetric[]>(generateMockWeeklyMetrics());
 
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [profile, items, campaignList, adList, connections, schedules, media, scheduled] = await Promise.all([
+      const [profile, items, campaignList, adList, connections, schedules, media, scheduled, meta] = await Promise.all([
         storage.getBrandProfile(),
         storage.getContentItems(),
         storage.getCampaigns(),
@@ -106,6 +109,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         storage.getPostingSchedules(),
         storage.getMediaItems(),
         storage.getScheduledPosts(),
+        storage.getMetaConnection(),
       ]);
       setBrandProfileState(profile);
       setContentItems(items);
@@ -115,6 +119,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setPostingSchedules(schedules);
       setMediaItems(media);
       setScheduledPosts(scheduled);
+      setMetaConnectionState(meta);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -222,6 +227,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await storage.deleteScheduledPost(id);
   };
 
+  const setMetaConnection = async (connection: MetaConnection) => {
+    setMetaConnectionState(connection);
+    await storage.saveMetaConnection(connection);
+  };
+
   const analytics = useMemo(() => generateMockAnalytics(campaigns, ads), [campaigns, ads]);
 
   const value = useMemo(() => ({
@@ -251,11 +261,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addScheduledPost,
     updateScheduledPost,
     removeScheduledPost,
+    metaConnection,
+    setMetaConnection,
     analytics,
     weeklyMetrics,
     isLoading,
     refreshData: loadData,
-  }), [brandProfile, contentItems, campaigns, ads, platformConnections, postingSchedules, mediaItems, scheduledPosts, analytics, weeklyMetrics, isLoading]);
+  }), [brandProfile, contentItems, campaigns, ads, platformConnections, postingSchedules, mediaItems, scheduledPosts, metaConnection, analytics, weeklyMetrics, isLoading]);
 
   return (
     <AppContext.Provider value={value}>
