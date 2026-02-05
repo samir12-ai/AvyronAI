@@ -20,6 +20,10 @@ function NativeTabLayout() {
         <Icon sf={{ default: "sparkles", selected: "sparkles" }} />
         <Label>Create</Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="studio">
+        <Icon sf={{ default: "film", selected: "film.fill" }} />
+        <Label>Studio</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="calendar">
         <Icon sf={{ default: "calendar", selected: "calendar" }} />
         <Label>Calendar</Label>
@@ -90,6 +94,15 @@ function ClassicTabLayout() {
           title: "Create",
           tabBarIcon: ({ color }) => (
             <Ionicons name="sparkles" size={22} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="studio"
+        options={{
+          title: "Studio",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "film" : "film-outline"} size={22} color={color} />
           ),
         }}
       />

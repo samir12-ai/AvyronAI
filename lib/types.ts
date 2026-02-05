@@ -81,3 +81,28 @@ export interface PostingSchedule {
   times: string[];
   days: string[];
 }
+
+export interface MediaItem {
+  id: string;
+  type: 'video' | 'image' | 'poster';
+  title: string;
+  uri: string;
+  thumbnail?: string;
+  platform: string;
+  scheduledDate?: string;
+  scheduledTime?: string;
+  status: 'draft' | 'scheduled' | 'published';
+  createdAt: string;
+}
+
+export interface ScheduledPost {
+  id: string;
+  type: 'post' | 'reel' | 'story' | 'video';
+  content: string;
+  mediaId?: string;
+  platform: string;
+  scheduledDate: string;
+  scheduledTime: string;
+  status: 'pending' | 'published' | 'failed';
+  createdAt: string;
+}

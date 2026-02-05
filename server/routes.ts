@@ -126,6 +126,43 @@ Make sure the content works well across all the specified platforms.`;
     }
   });
 
+  app.post("/api/generate-poster", async (req, res) => {
+    try {
+      const { topic, style, text, brandName, industry } = req.body;
+
+      const systemPrompt = `You are a creative director who describes marketing poster designs. Create a detailed description of a ${style} style marketing poster.
+
+Brand: ${brandName || 'the brand'}
+Industry: ${industry || 'business'}
+
+Describe the visual elements, colors, layout, and mood in a way that captures the essence of the ${style} design style.`;
+
+      const userPrompt = `Design a marketing poster about: ${topic}
+${text ? `Include this text on the poster: "${text}"` : ''}
+
+Provide a detailed visual description of the poster design.`;
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.1",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        max_completion_tokens: 300,
+      });
+
+      const description = response.choices[0]?.message?.content || "";
+
+      res.json({ 
+        imageUrl: 'generated',
+        description 
+      });
+    } catch (error) {
+      console.error("Error generating poster:", error);
+      res.status(500).json({ error: "Failed to generate poster" });
+    }
+  });
+
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });

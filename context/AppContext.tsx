@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
-import type { BrandProfile, ContentItem, Campaign, Ad, AnalyticsData, DailyMetric, PlatformConnection, PostingSchedule } from '@/lib/types';
+import type { BrandProfile, ContentItem, Campaign, Ad, AnalyticsData, DailyMetric, PlatformConnection, PostingSchedule, MediaItem, ScheduledPost } from '@/lib/types';
 import * as storage from '@/lib/storage';
 
 interface AppContextValue {
@@ -21,6 +21,14 @@ interface AppContextValue {
   updatePlatformConnection: (id: string, isConnected: boolean) => Promise<void>;
   postingSchedules: PostingSchedule[];
   updatePostingSchedule: (schedule: PostingSchedule) => Promise<void>;
+  mediaItems: MediaItem[];
+  addMediaItem: (item: MediaItem) => Promise<void>;
+  updateMediaItem: (item: MediaItem) => Promise<void>;
+  removeMediaItem: (id: string) => Promise<void>;
+  scheduledPosts: ScheduledPost[];
+  addScheduledPost: (post: ScheduledPost) => Promise<void>;
+  updateScheduledPost: (post: ScheduledPost) => Promise<void>;
+  removeScheduledPost: (id: string) => Promise<void>;
   analytics: AnalyticsData;
   weeklyMetrics: DailyMetric[];
   isLoading: boolean;
@@ -81,19 +89,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [ads, setAds] = useState<Ad[]>([]);
   const [platformConnections, setPlatformConnections] = useState<PlatformConnection[]>([]);
   const [postingSchedules, setPostingSchedules] = useState<PostingSchedule[]>([]);
+  const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
+  const [scheduledPosts, setScheduledPosts] = useState<ScheduledPost[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [weeklyMetrics] = useState<DailyMetric[]>(generateMockWeeklyMetrics());
 
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [profile, items, campaignList, adList, connections, schedules] = await Promise.all([
+      const [profile, items, campaignList, adList, connections, schedules, media, scheduled] = await Promise.all([
         storage.getBrandProfile(),
         storage.getContentItems(),
         storage.getCampaigns(),
         storage.getAds(),
         storage.getPlatformConnections(),
         storage.getPostingSchedules(),
+        storage.getMediaItems(),
+        storage.getScheduledPosts(),
       ]);
       setBrandProfileState(profile);
       setContentItems(items);
@@ -101,6 +113,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setAds(adList);
       setPlatformConnections(connections);
       setPostingSchedules(schedules);
+      setMediaItems(media);
+      setScheduledPosts(scheduled);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -178,6 +192,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await storage.savePostingSchedules(updated);
   };
 
+  const addMediaItem = async (item: MediaItem) => {
+    setMediaItems(prev => [item, ...prev]);
+    await storage.saveMediaItem(item);
+  };
+
+  const updateMediaItem = async (item: MediaItem) => {
+    setMediaItems(prev => prev.map(i => i.id === item.id ? item : i));
+    await storage.saveMediaItem(item);
+  };
+
+  const removeMediaItem = async (id: string) => {
+    setMediaItems(prev => prev.filter(i => i.id !== id));
+    await storage.deleteMediaItem(id);
+  };
+
+  const addScheduledPost = async (post: ScheduledPost) => {
+    setScheduledPosts(prev => [post, ...prev]);
+    await storage.saveScheduledPost(post);
+  };
+
+  const updateScheduledPost = async (post: ScheduledPost) => {
+    setScheduledPosts(prev => prev.map(p => p.id === post.id ? post : p));
+    await storage.saveScheduledPost(post);
+  };
+
+  const removeScheduledPost = async (id: string) => {
+    setScheduledPosts(prev => prev.filter(p => p.id !== id));
+    await storage.deleteScheduledPost(id);
+  };
+
   const analytics = useMemo(() => generateMockAnalytics(campaigns, ads), [campaigns, ads]);
 
   const value = useMemo(() => ({
@@ -199,11 +243,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     updatePlatformConnection,
     postingSchedules,
     updatePostingSchedule,
+    mediaItems,
+    addMediaItem,
+    updateMediaItem,
+    removeMediaItem,
+    scheduledPosts,
+    addScheduledPost,
+    updateScheduledPost,
+    removeScheduledPost,
     analytics,
     weeklyMetrics,
     isLoading,
     refreshData: loadData,
-  }), [brandProfile, contentItems, campaigns, ads, platformConnections, postingSchedules, analytics, weeklyMetrics, isLoading]);
+  }), [brandProfile, contentItems, campaigns, ads, platformConnections, postingSchedules, mediaItems, scheduledPosts, analytics, weeklyMetrics, isLoading]);
 
   return (
     <AppContext.Provider value={value}>

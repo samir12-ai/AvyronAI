@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { BrandProfile, ContentItem, Campaign, Ad, PlatformConnection, PostingSchedule } from './types';
+import type { BrandProfile, ContentItem, Campaign, Ad, PlatformConnection, PostingSchedule, MediaItem, ScheduledPost } from './types';
 
 const KEYS = {
   BRAND_PROFILE: 'marketmind_brand_profile',
@@ -8,6 +8,8 @@ const KEYS = {
   ADS: 'marketmind_ads',
   PLATFORM_CONNECTIONS: 'marketmind_platform_connections',
   POSTING_SCHEDULES: 'marketmind_posting_schedules',
+  MEDIA_ITEMS: 'marketmind_media_items',
+  SCHEDULED_POSTS: 'marketmind_scheduled_posts',
 };
 
 const defaultBrandProfile: BrandProfile = {
@@ -148,6 +150,58 @@ export async function getPostingSchedules(): Promise<PostingSchedule[]> {
 
 export async function savePostingSchedules(schedules: PostingSchedule[]): Promise<void> {
   await AsyncStorage.setItem(KEYS.POSTING_SCHEDULES, JSON.stringify(schedules));
+}
+
+export async function getMediaItems(): Promise<MediaItem[]> {
+  try {
+    const data = await AsyncStorage.getItem(KEYS.MEDIA_ITEMS);
+    return data ? JSON.parse(data) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveMediaItem(item: MediaItem): Promise<void> {
+  const items = await getMediaItems();
+  const existingIndex = items.findIndex(i => i.id === item.id);
+  if (existingIndex >= 0) {
+    items[existingIndex] = item;
+  } else {
+    items.unshift(item);
+  }
+  await AsyncStorage.setItem(KEYS.MEDIA_ITEMS, JSON.stringify(items));
+}
+
+export async function deleteMediaItem(id: string): Promise<void> {
+  const items = await getMediaItems();
+  const filtered = items.filter(i => i.id !== id);
+  await AsyncStorage.setItem(KEYS.MEDIA_ITEMS, JSON.stringify(filtered));
+}
+
+export async function getScheduledPosts(): Promise<ScheduledPost[]> {
+  try {
+    const data = await AsyncStorage.getItem(KEYS.SCHEDULED_POSTS);
+    return data ? JSON.parse(data) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveScheduledPost(post: ScheduledPost): Promise<void> {
+  const posts = await getScheduledPosts();
+  const existingIndex = posts.findIndex(p => p.id === post.id);
+  if (existingIndex >= 0) {
+    posts[existingIndex] = post;
+  } else {
+    posts.unshift(post);
+  }
+  await AsyncStorage.setItem(KEYS.SCHEDULED_POSTS, JSON.stringify(posts));
+}
+
+export async function deleteScheduledPost(id: string): Promise<void> {
+  const posts = await getScheduledPosts();
+  const filtered = posts.filter(p => p.id !== id);
+  await AsyncStorage.setItem(KEYS.SCHEDULED_POSTS, JSON.stringify(filtered));
 }
 
 function generateId(): string {
