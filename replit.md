@@ -53,6 +53,13 @@ Preferred communication style: Simple, everyday language.
 - **Environment Variable**: `DATABASE_URL` for database connection
 - **ORM**: Drizzle with Drizzle Kit for migrations (`migrations/` directory)
 
+### User Authentication
+- **Login Options**: Facebook and Instagram OAuth login via Meta APIs
+- **Backend Endpoints**: `/api/auth/facebook`, `/api/auth/facebook/callback`, `/api/auth/instagram`, `/api/auth/instagram/callback`
+- **Demo Mode**: Works without META_APP_ID/SECRET (simulated login)
+- **Auth Context**: `context/AuthContext.tsx` manages user state with AsyncStorage persistence
+- **Login Screen**: `/login` route with social login buttons and guest access option
+
 ### Meta Business Suite Integration
 - **OAuth Flow**: Backend endpoints `/api/meta/auth`, `/api/meta/callback`, `/api/meta/post`
 - **Features**: Auto-post to Facebook & Instagram, unified ads management
