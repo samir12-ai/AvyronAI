@@ -53,9 +53,16 @@ Preferred communication style: Simple, everyday language.
 - **Environment Variable**: `DATABASE_URL` for database connection
 - **ORM**: Drizzle with Drizzle Kit for migrations (`migrations/` directory)
 
-### Social Platforms (Planned Integrations)
-- Instagram, Facebook, Twitter, LinkedIn, TikTok connections managed through settings
-- Platform connections stored locally, actual API integrations not yet implemented
+### Meta Business Suite Integration
+- **OAuth Flow**: Backend endpoints `/api/meta/auth`, `/api/meta/callback`, `/api/meta/post`
+- **Features**: Auto-post to Facebook & Instagram, unified ads management
+- **Demo Mode**: Works without credentials (simulated connection)
+- **Production Mode**: Requires `META_APP_ID` and `META_APP_SECRET` environment variables
+- **Scopes**: pages_manage_posts, instagram_content_publish, ads_management, business_management
+
+### Social Platforms
+- Instagram, Facebook: Managed through Meta Business Suite connection
+- Twitter, LinkedIn, TikTok: Connections managed through settings, API integrations not yet implemented
 
 ### Key npm Dependencies
 - `expo-router`: File-based navigation
