@@ -18,8 +18,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/context/AuthContext';
 import { PlatformConnection } from '@/components/PlatformConnection';
 import { getApiUrl } from '@/lib/query-client';
+import { router } from 'expo-router';
 
 const toneOptions = ['Professional', 'Casual', 'Friendly', 'Authoritative', 'Playful', 'Inspirational'];
 
@@ -46,6 +48,7 @@ export default function SettingsScreen() {
     metaConnection,
     setMetaConnection,
   } = useApp();
+  const { user, logout } = useAuth();
 
   const [name, setName] = useState(brandProfile.name);
   const [industry, setIndustry] = useState(brandProfile.industry);
@@ -100,6 +103,25 @@ export default function SettingsScreen() {
     if (schedule) {
       updatePostingSchedule({ ...schedule, enabled });
     }
+  };
+
+  const handleLogout = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Sign Out', 
+          style: 'destructive',
+          onPress: async () => {
+            await logout();
+            router.replace('/login');
+          }
+        },
+      ]
+    );
   };
 
   const handleConnectMeta = async () => {
@@ -162,6 +184,36 @@ export default function SettingsScreen() {
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
           Configure your brand and platform connections
         </Text>
+
+        {user && (
+          <View style={[styles.userCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <View style={styles.userInfo}>
+              <View style={[styles.userAvatar, { backgroundColor: user.provider === 'facebook' ? '#1877F2' : '#E1306C' }]}>
+                <Ionicons 
+                  name={user.provider === 'facebook' ? 'logo-facebook' : 'logo-instagram'} 
+                  size={24} 
+                  color="#fff" 
+                />
+              </View>
+              <View style={styles.userDetails}>
+                <Text style={[styles.userName, { color: colors.text }]}>{user.name}</Text>
+                <Text style={[styles.userProvider, { color: colors.textMuted }]}>
+                  Signed in with {user.provider === 'facebook' ? 'Facebook' : 'Instagram'}
+                </Text>
+              </View>
+            </View>
+            <Pressable
+              onPress={handleLogout}
+              style={({ pressed }) => [
+                styles.logoutButton,
+                { backgroundColor: colors.error + '15', opacity: pressed ? 0.7 : 1 }
+              ]}
+            >
+              <Ionicons name="log-out-outline" size={18} color={colors.error} />
+              <Text style={[styles.logoutText, { color: colors.error }]}>Sign Out</Text>
+            </Pressable>
+          </View>
+        )}
 
         <View style={[styles.metaCard, { backgroundColor: isDark ? '#1E3A5F' : '#E7F3FF', borderColor: '#1877F2' }]}>
           <View style={styles.metaHeader}>
@@ -434,6 +486,50 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Inter_400Regular',
     marginBottom: 24,
+  },
+  userCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  userInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  userAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userDetails: {
+    gap: 2,
+  },
+  userName: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  userProvider: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 6,
+  },
+  logoutText: {
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
   },
   metaCard: {
     borderRadius: 20,

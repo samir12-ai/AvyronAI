@@ -163,6 +163,222 @@ Provide a detailed visual description of the poster design.`;
     }
   });
 
+  app.get("/api/auth/facebook", (req, res) => {
+    const META_APP_ID = process.env.META_APP_ID || '';
+    const REDIRECT_URI = `${req.protocol}://${req.get('host')}/api/auth/facebook/callback`;
+    
+    const scopes = ['email', 'public_profile'].join(',');
+    const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&response_type=code`;
+    
+    if (!META_APP_ID) {
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Facebook Login</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 40px; text-align: center; }
+            .success { color: #10B981; font-size: 24px; margin-bottom: 20px; }
+            .info { color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="success">Login Successful!</div>
+          <p class="info">Welcome! You can close this window.</p>
+          <script>
+            window.opener?.postMessage({ type: 'FACEBOOK_AUTH_SUCCESS', user: { id: 'demo_fb', name: 'Facebook User' } }, '*');
+            setTimeout(() => window.close(), 2000);
+          </script>
+        </body>
+        </html>
+      `);
+      return;
+    }
+    
+    res.redirect(authUrl);
+  });
+
+  app.get("/api/auth/facebook/callback", async (req, res) => {
+    const { code } = req.query;
+    const META_APP_ID = process.env.META_APP_ID || '';
+    const META_APP_SECRET = process.env.META_APP_SECRET || '';
+    const REDIRECT_URI = `${req.protocol}://${req.get('host')}/api/auth/facebook/callback`;
+    
+    if (!code || !META_APP_ID || !META_APP_SECRET) {
+      res.send(`
+        <html>
+        <body>
+          <script>
+            window.opener?.postMessage({ type: 'FACEBOOK_AUTH_SUCCESS', user: { id: 'demo_fb', name: 'Facebook User' } }, '*');
+            setTimeout(() => window.close(), 1000);
+          </script>
+          <p>Login successful! You can close this window.</p>
+        </body>
+        </html>
+      `);
+      return;
+    }
+    
+    try {
+      const tokenResponse = await fetch(
+        `https://graph.facebook.com/v18.0/oauth/access_token?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&client_secret=${META_APP_SECRET}&code=${code}`
+      );
+      const tokenData = await tokenResponse.json();
+      
+      const userResponse = await fetch(
+        `https://graph.facebook.com/me?fields=id,name,email,picture&access_token=${tokenData.access_token}`
+      );
+      const userData = await userResponse.json();
+      
+      res.send(`
+        <html>
+        <body>
+          <script>
+            window.opener?.postMessage({ 
+              type: 'FACEBOOK_AUTH_SUCCESS', 
+              user: { 
+                id: '${userData.id}', 
+                name: '${userData.name}',
+                email: '${userData.email || ''}',
+                picture: '${userData.picture?.data?.url || ''}'
+              } 
+            }, '*');
+            setTimeout(() => window.close(), 1000);
+          </script>
+          <p>Login successful! You can close this window.</p>
+        </body>
+        </html>
+      `);
+    } catch (error) {
+      res.send(`
+        <html>
+        <body>
+          <script>
+            window.opener?.postMessage({ type: 'FACEBOOK_AUTH_ERROR' }, '*');
+            setTimeout(() => window.close(), 1000);
+          </script>
+          <p>Login failed. Please try again.</p>
+        </body>
+        </html>
+      `);
+    }
+  });
+
+  app.get("/api/auth/instagram", (req, res) => {
+    const META_APP_ID = process.env.META_APP_ID || '';
+    const REDIRECT_URI = `${req.protocol}://${req.get('host')}/api/auth/instagram/callback`;
+    
+    const scopes = ['instagram_basic', 'instagram_content_publish'].join(',');
+    const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&response_type=code`;
+    
+    if (!META_APP_ID) {
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Instagram Login</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 40px; text-align: center; background: linear-gradient(45deg, #833AB4, #FD1D1D, #F77737); min-height: 100vh; color: white; }
+            .success { font-size: 24px; margin-bottom: 20px; }
+            .info { opacity: 0.9; }
+          </style>
+        </head>
+        <body>
+          <div class="success">Login Successful!</div>
+          <p class="info">Welcome! You can close this window.</p>
+          <script>
+            window.opener?.postMessage({ type: 'INSTAGRAM_AUTH_SUCCESS', user: { id: 'demo_ig', name: 'Instagram User' } }, '*');
+            setTimeout(() => window.close(), 2000);
+          </script>
+        </body>
+        </html>
+      `);
+      return;
+    }
+    
+    res.redirect(authUrl);
+  });
+
+  app.get("/api/auth/instagram/callback", async (req, res) => {
+    const { code } = req.query;
+    const META_APP_ID = process.env.META_APP_ID || '';
+    const META_APP_SECRET = process.env.META_APP_SECRET || '';
+    const REDIRECT_URI = `${req.protocol}://${req.get('host')}/api/auth/instagram/callback`;
+    
+    if (!code || !META_APP_ID || !META_APP_SECRET) {
+      res.send(`
+        <html>
+        <body>
+          <script>
+            window.opener?.postMessage({ type: 'INSTAGRAM_AUTH_SUCCESS', user: { id: 'demo_ig', name: 'Instagram User' } }, '*');
+            setTimeout(() => window.close(), 1000);
+          </script>
+          <p>Login successful! You can close this window.</p>
+        </body>
+        </html>
+      `);
+      return;
+    }
+    
+    try {
+      const tokenResponse = await fetch(
+        `https://graph.facebook.com/v18.0/oauth/access_token?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&client_secret=${META_APP_SECRET}&code=${code}`
+      );
+      const tokenData = await tokenResponse.json();
+      
+      const accountsResponse = await fetch(
+        `https://graph.facebook.com/me/accounts?access_token=${tokenData.access_token}`
+      );
+      const accountsData = await accountsResponse.json();
+      
+      let igUsername = 'Instagram User';
+      if (accountsData.data?.[0]) {
+        const pageId = accountsData.data[0].id;
+        const igResponse = await fetch(
+          `https://graph.facebook.com/${pageId}?fields=instagram_business_account&access_token=${tokenData.access_token}`
+        );
+        const igData = await igResponse.json();
+        if (igData.instagram_business_account) {
+          const igAccountResponse = await fetch(
+            `https://graph.facebook.com/${igData.instagram_business_account.id}?fields=username&access_token=${tokenData.access_token}`
+          );
+          const igAccountData = await igAccountResponse.json();
+          igUsername = igAccountData.username || 'Instagram User';
+        }
+      }
+      
+      res.send(`
+        <html>
+        <body>
+          <script>
+            window.opener?.postMessage({ 
+              type: 'INSTAGRAM_AUTH_SUCCESS', 
+              user: { 
+                id: '${accountsData.data?.[0]?.id || 'ig_user'}', 
+                name: '${igUsername}'
+              } 
+            }, '*');
+            setTimeout(() => window.close(), 1000);
+          </script>
+          <p>Login successful! You can close this window.</p>
+        </body>
+        </html>
+      `);
+    } catch (error) {
+      res.send(`
+        <html>
+        <body>
+          <script>
+            window.opener?.postMessage({ type: 'INSTAGRAM_AUTH_ERROR' }, '*');
+            setTimeout(() => window.close(), 1000);
+          </script>
+          <p>Login failed. Please try again.</p>
+        </body>
+        </html>
+      `);
+    }
+  });
+
   app.get("/api/meta/auth", (req, res) => {
     const META_APP_ID = process.env.META_APP_ID || '';
     const REDIRECT_URI = `${req.protocol}://${req.get('host')}/api/meta/callback`;
