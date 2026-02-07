@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -12,9 +12,22 @@ import {
   KeyboardAvoidingView,
   Image,
   ActivityIndicator,
+  Dimensions,
+  Modal,
 } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  withSequence,
+  Easing,
+  FadeIn,
+  FadeInDown,
+  FadeOut,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -26,6 +39,8 @@ import { generateId } from '@/lib/storage';
 import { apiRequest, getApiUrl } from '@/lib/query-client';
 import type { ContentItem, MediaItem } from '@/lib/types';
 
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
 const contentTypes = [
   { id: 'post', label: 'Post', icon: 'document-text-outline' as const },
   { id: 'caption', label: 'Caption', icon: 'text-outline' as const },
@@ -33,13 +48,156 @@ const contentTypes = [
   { id: 'story', label: 'Story', icon: 'layers-outline' as const },
 ];
 
-const posterStyles = [
-  { id: 'modern', label: 'Modern', color: '#6366F1' },
-  { id: 'minimal', label: 'Minimal', color: '#10B981' },
-  { id: 'bold', label: 'Bold', color: '#F59E0B' },
-  { id: 'elegant', label: 'Elegant', color: '#EC4899' },
-  { id: 'vibrant', label: 'Vibrant', color: '#8B5CF6' },
+type GenerationMode = 'text-to-image' | 'image-to-image' | 'image-edit';
+
+const generationModes = [
+  { id: 'text-to-image' as GenerationMode, label: 'Create', icon: 'sparkles' as const, description: 'From text prompt' },
+  { id: 'image-to-image' as GenerationMode, label: 'Transform', icon: 'color-wand' as const, description: 'Reimagine a photo' },
+  { id: 'image-edit' as GenerationMode, label: 'Edit', icon: 'crop' as const, description: 'Modify an image' },
 ];
+
+const visualStyles = [
+  { id: 'cinematic', label: 'Cinematic', gradient: ['#1a1a2e', '#16213e', '#0f3460'] as const, icon: 'film-outline' as const },
+  { id: 'professional', label: 'Professional', gradient: ['#2c3e50', '#3498db', '#2980b9'] as const, icon: 'briefcase-outline' as const },
+  { id: 'commercial', label: 'Commercial', gradient: ['#e74c3c', '#c0392b', '#e74c3c'] as const, icon: 'storefront-outline' as const },
+  { id: 'indie', label: 'Indie', gradient: ['#f39c12', '#e67e22', '#d35400'] as const, icon: 'leaf-outline' as const },
+  { id: 'minimal', label: 'Minimal', gradient: ['#ecf0f1', '#bdc3c7', '#95a5a6'] as const, icon: 'remove-outline' as const },
+  { id: 'vibrant', label: 'Vibrant', gradient: ['#8e44ad', '#9b59b6', '#e91e63'] as const, icon: 'color-palette-outline' as const },
+];
+
+const aspectRatios = [
+  { id: '1:1', label: 'Square', width: 1, height: 1, icon: 'square-outline' as const },
+  { id: '4:5', label: 'Portrait', width: 4, height: 5, icon: 'phone-portrait-outline' as const },
+  { id: '16:9', label: 'Landscape', width: 16, height: 9, icon: 'tablet-landscape-outline' as const },
+  { id: '9:16', label: 'Story', width: 9, height: 16, icon: 'phone-portrait-outline' as const },
+];
+
+const moodOptions = [
+  { id: 'energetic', label: 'Energetic' },
+  { id: 'calm', label: 'Calm' },
+  { id: 'dramatic', label: 'Dramatic' },
+  { id: 'playful', label: 'Playful' },
+  { id: 'luxurious', label: 'Luxurious' },
+  { id: 'warm', label: 'Warm' },
+];
+
+interface GeneratedImage {
+  id: string;
+  imageUrl: string;
+  prompt: string;
+  style: string;
+  createdAt: string;
+}
+
+function DesignerLoadingOverlay({ isVisible }: { isVisible: boolean }) {
+  const pulse = useSharedValue(0.6);
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const colors = isDark ? Colors.dark : Colors.light;
+
+  React.useEffect(() => {
+    if (isVisible) {
+      pulse.value = withRepeat(
+        withSequence(
+          withTiming(1, { duration: 800, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.6, { duration: 800, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        false
+      );
+    }
+  }, [isVisible]);
+
+  const pulseStyle = useAnimatedStyle(() => ({
+    opacity: pulse.value,
+    transform: [{ scale: 0.95 + pulse.value * 0.05 }],
+  }));
+
+  if (!isVisible) return null;
+
+  return (
+    <Animated.View entering={FadeIn.duration(200)} style={[styles.loadingOverlay, { backgroundColor: isDark ? 'rgba(15,23,42,0.95)' : 'rgba(248,250,252,0.95)' }]}>
+      <Animated.View style={[styles.loadingContent, pulseStyle]}>
+        <View style={[styles.loadingIconRing, { borderColor: colors.accent + '30' }]}>
+          <LinearGradient
+            colors={['#14B8A6', '#06B6D4', '#8B5CF6']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.loadingIconInner}
+          >
+            <Ionicons name="brush" size={28} color="#fff" />
+          </LinearGradient>
+        </View>
+        <Text style={[styles.loadingTitle, { color: colors.text }]}>Creating your design</Text>
+        <Text style={[styles.loadingSubtitle, { color: colors.textMuted }]}>
+          Nano Banana AI is crafting your vision...
+        </Text>
+        <View style={styles.loadingDots}>
+          <LoadingSpinner size={16} color={colors.accent} />
+        </View>
+      </Animated.View>
+    </Animated.View>
+  );
+}
+
+function StyleCard({ style, isSelected, onSelect, colors }: {
+  style: typeof visualStyles[0];
+  isSelected: boolean;
+  onSelect: () => void;
+  colors: any;
+}) {
+  return (
+    <Pressable onPress={onSelect} style={styles.styleCardWrapper}>
+      <LinearGradient
+        colors={[...style.gradient] as [string, string, ...string[]]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[
+          styles.styleCard,
+          isSelected && { borderWidth: 2.5, borderColor: colors.accent },
+        ]}
+      >
+        <Ionicons name={style.icon} size={20} color="#fff" />
+        {isSelected && (
+          <View style={styles.styleCardCheck}>
+            <Ionicons name="checkmark-circle" size={16} color="#fff" />
+          </View>
+        )}
+      </LinearGradient>
+      <Text style={[styles.styleCardLabel, { color: isSelected ? colors.accent : colors.textSecondary }]}>
+        {style.label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function ReferencePhotoSlot({ photo, index, onPick, onRemove, colors }: {
+  photo: ImagePicker.ImagePickerAsset | null;
+  index: number;
+  onPick: () => void;
+  onRemove: () => void;
+  colors: any;
+}) {
+  if (photo) {
+    return (
+      <View style={styles.refPhotoFilled}>
+        <Image source={{ uri: photo.uri }} style={styles.refPhotoImage} resizeMode="cover" />
+        <Pressable onPress={onRemove} style={styles.refPhotoRemoveBtn}>
+          <Ionicons name="close-circle" size={22} color="#fff" />
+        </Pressable>
+      </View>
+    );
+  }
+
+  return (
+    <Pressable
+      onPress={onPick}
+      style={[styles.refPhotoEmpty, { borderColor: colors.accent + '30', backgroundColor: colors.inputBackground }]}
+    >
+      <Ionicons name="add" size={22} color={colors.accent} />
+    </Pressable>
+  );
+}
 
 export default function CreateScreen() {
   const colorScheme = useColorScheme();
@@ -56,12 +214,18 @@ export default function CreateScreen() {
   const [generatedContent, setGeneratedContent] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
 
+  const [genMode, setGenMode] = useState<GenerationMode>('text-to-image');
   const [posterTopic, setPosterTopic] = useState('');
-  const [posterStyle, setPosterStyle] = useState('modern');
+  const [posterStyle, setPosterStyle] = useState('cinematic');
   const [posterText, setPosterText] = useState('');
+  const [aspectRatio, setAspectRatio] = useState('1:1');
+  const [mood, setMood] = useState('energetic');
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [generatedPoster, setGeneratedPoster] = useState<string | null>(null);
   const [isGeneratingPoster, setIsGeneratingPoster] = useState(false);
-  const [selectedPhoto, setSelectedPhoto] = useState<ImagePicker.ImagePickerAsset | null>(null);
+  const [referencePhotos, setReferencePhotos] = useState<(ImagePicker.ImagePickerAsset | null)[]>([null, null, null]);
+  const [generationHistory, setGenerationHistory] = useState<GeneratedImage[]>([]);
+  const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
 
   const handleGenerate = async () => {
     if (!topic.trim()) {
@@ -120,7 +284,7 @@ export default function CreateScreen() {
     Alert.alert('Saved!', `Content saved as ${status}.`);
   };
 
-  const pickPhoto = async () => {
+  const pickPhoto = async (index: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -137,18 +301,33 @@ export default function CreateScreen() {
     });
 
     if (!result.canceled && result.assets[0]) {
-      setSelectedPhoto(result.assets[0]);
+      const newPhotos = [...referencePhotos];
+      newPhotos[index] = result.assets[0];
+      setReferencePhotos(newPhotos);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
   };
 
+  const removePhoto = (index: number) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const newPhotos = [...referencePhotos];
+    newPhotos[index] = null;
+    setReferencePhotos(newPhotos);
+  };
+
   const handleGeneratePoster = async () => {
-    if (!posterTopic.trim()) {
-      Alert.alert('Missing Topic', 'Please describe what you want on the poster.');
+    if (!posterTopic.trim() && genMode === 'text-to-image') {
+      Alert.alert('Missing Description', 'Please describe what you want to create.');
       return;
     }
 
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const hasPhotos = referencePhotos.some(p => p !== null);
+    if ((genMode === 'image-to-image' || genMode === 'image-edit') && !hasPhotos) {
+      Alert.alert('Missing Image', 'Please upload at least one reference image for this mode.');
+      return;
+    }
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     setIsGeneratingPoster(true);
 
     try {
@@ -157,26 +336,30 @@ export default function CreateScreen() {
       formData.append('topic', posterTopic);
       formData.append('style', posterStyle);
       formData.append('text', posterText);
+      formData.append('aspectRatio', aspectRatio);
+      formData.append('mood', mood);
+      formData.append('mode', genMode);
       formData.append('brandName', brandProfile.name || 'Brand');
       formData.append('industry', brandProfile.industry || 'business');
 
-      if (selectedPhoto) {
-        if (Platform.OS === 'web' && selectedPhoto.base64) {
-          const byteString = atob(selectedPhoto.base64);
+      const firstPhoto = referencePhotos.find(p => p !== null);
+      if (firstPhoto) {
+        if (Platform.OS === 'web' && firstPhoto.base64) {
+          const byteString = atob(firstPhoto.base64);
           const ab = new ArrayBuffer(byteString.length);
           const ia = new Uint8Array(ab);
           for (let i = 0; i < byteString.length; i++) {
             ia[i] = byteString.charCodeAt(i);
           }
-          const blob = new Blob([ab], { type: selectedPhoto.mimeType || 'image/jpeg' });
+          const blob = new Blob([ab], { type: firstPhoto.mimeType || 'image/jpeg' });
           formData.append('photo', blob, 'photo.jpg');
         } else {
-          const photoUri = selectedPhoto.uri;
+          const photoUri = firstPhoto.uri;
           const photoName = photoUri.split('/').pop() || 'photo.jpg';
           formData.append('photo', {
             uri: photoUri,
             name: photoName,
-            type: selectedPhoto.mimeType || 'image/jpeg',
+            type: firstPhoto.mimeType || 'image/jpeg',
           } as any);
         }
       }
@@ -188,15 +371,25 @@ export default function CreateScreen() {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to generate poster');
+        throw new Error(errorData.error || 'Failed to generate design');
       }
 
       const data = await response.json();
       setGeneratedPoster(data.imageUrl);
+
+      const historyItem: GeneratedImage = {
+        id: generateId(),
+        imageUrl: data.imageUrl,
+        prompt: posterTopic,
+        style: posterStyle,
+        createdAt: new Date().toISOString(),
+      };
+      setGenerationHistory(prev => [historyItem, ...prev].slice(0, 12));
+
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error: any) {
-      console.error('Poster generation error:', error);
-      Alert.alert('Generation Error', error.message || 'Failed to generate poster. Please try again.');
+      console.error('Design generation error:', error);
+      Alert.alert('Generation Error', error.message || 'Failed to generate design. Please try again.');
     } finally {
       setIsGeneratingPoster(false);
     }
@@ -204,7 +397,7 @@ export default function CreateScreen() {
 
   const handleSavePoster = async () => {
     if (!generatedPoster) {
-      Alert.alert('No Poster', 'Please generate a poster first.');
+      Alert.alert('No Design', 'Please generate a design first.');
       return;
     }
 
@@ -213,7 +406,7 @@ export default function CreateScreen() {
     const newMedia: MediaItem = {
       id: generateId(),
       type: 'poster',
-      title: posterTopic || 'Marketing Poster',
+      title: posterTopic || 'AI Design',
       uri: generatedPoster,
       platform: platform[0],
       status: 'draft',
@@ -225,10 +418,15 @@ export default function CreateScreen() {
     setPosterTopic('');
     setPosterText('');
     setGeneratedPoster(null);
-    setSelectedPhoto(null);
+    setReferencePhotos([null, null, null]);
     
-    Alert.alert('Saved!', 'Poster saved to your Studio library.');
+    Alert.alert('Saved!', 'Design saved to your Studio library.');
   };
+
+  const selectedRatio = aspectRatios.find(r => r.id === aspectRatio) || aspectRatios[0];
+  const canvasAspect = selectedRatio.width / selectedRatio.height;
+  const canvasWidth = SCREEN_WIDTH - 40;
+  const canvasHeight = Math.min(canvasWidth / canvasAspect, 500);
 
   return (
     <KeyboardAvoidingView 
@@ -402,184 +600,342 @@ export default function CreateScreen() {
             </>
           ) : (
             <>
-              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                <View style={styles.cardHeader}>
-                  <Ionicons name="color-palette" size={20} color={colors.accent} />
-                  <Text style={[styles.cardTitle, { color: colors.text, marginBottom: 0 }]}>Poster Style</Text>
-                </View>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <View style={styles.styleRow}>
-                    {posterStyles.map(style => (
-                      <Pressable
-                        key={style.id}
-                        onPress={() => {
-                          Haptics.selectionAsync();
-                          setPosterStyle(style.id);
-                        }}
-                        style={[
-                          styles.styleButton,
-                          { 
-                            backgroundColor: posterStyle === style.id ? style.color + '20' : colors.inputBackground,
-                            borderColor: posterStyle === style.id ? style.color : 'transparent',
-                          }
-                        ]}
-                      >
-                        <View style={[styles.styleIndicator, { backgroundColor: style.color }]} />
-                        <Text style={[
-                          styles.styleLabel,
-                          { color: posterStyle === style.id ? style.color : colors.textMuted }
-                        ]}>
-                          {style.label}
-                        </Text>
-                      </Pressable>
-                    ))}
+              {/* Generation Mode Selector */}
+              <View style={[styles.modeBar, { backgroundColor: isDark ? '#1a2332' : '#f1f5f9' }]}>
+                {generationModes.map(mode => (
+                  <Pressable
+                    key={mode.id}
+                    onPress={() => {
+                      Haptics.selectionAsync();
+                      setGenMode(mode.id);
+                    }}
+                    style={[
+                      styles.modeItem,
+                      genMode === mode.id && { backgroundColor: colors.accent + '20' },
+                    ]}
+                  >
+                    <Ionicons
+                      name={mode.icon}
+                      size={18}
+                      color={genMode === mode.id ? colors.accent : colors.textMuted}
+                    />
+                    <Text style={[
+                      styles.modeLabel,
+                      { color: genMode === mode.id ? colors.accent : colors.textMuted }
+                    ]}>
+                      {mode.label}
+                    </Text>
+                    <Text style={[styles.modeDesc, { color: colors.textMuted }]}>{mode.description}</Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              {/* Canvas / Preview Area */}
+              {generatedPoster ? (
+                <Pressable onPress={() => setFullScreenImage(generatedPoster)}>
+                  <View style={[styles.canvasArea, { backgroundColor: isDark ? '#111827' : '#e5e7eb', height: canvasHeight }]}>
+                    <Image
+                      source={{ uri: generatedPoster }}
+                      style={styles.canvasImage}
+                      resizeMode="contain"
+                    />
+                    <View style={styles.canvasOverlayBadge}>
+                      <Ionicons name="expand-outline" size={14} color="#fff" />
+                      <Text style={styles.canvasOverlayText}>Tap to expand</Text>
+                    </View>
                   </View>
+                </Pressable>
+              ) : (
+                <View style={[styles.canvasArea, styles.canvasEmpty, { backgroundColor: isDark ? '#111827' : '#e5e7eb', height: canvasHeight }]}>
+                  <LinearGradient
+                    colors={isDark ? ['#1e293b', '#0f172a'] : ['#f8fafc', '#e2e8f0']}
+                    style={styles.canvasPlaceholder}
+                  >
+                    <View style={[styles.canvasPlaceholderIcon, { backgroundColor: colors.accent + '15' }]}>
+                      <Ionicons name="image-outline" size={36} color={colors.accent} />
+                    </View>
+                    <Text style={[styles.canvasPlaceholderTitle, { color: colors.textSecondary }]}>
+                      Your design will appear here
+                    </Text>
+                    <Text style={[styles.canvasPlaceholderSub, { color: colors.textMuted }]}>
+                      {aspectRatio} {'\u00B7'} {visualStyles.find(s => s.id === posterStyle)?.label || 'Cinematic'} style
+                    </Text>
+                  </LinearGradient>
+                </View>
+              )}
+
+              {/* Quick Actions Bar for Generated Poster */}
+              {generatedPoster && (
+                <View style={styles.quickActionsBar}>
+                  <Pressable
+                    onPress={() => {
+                      setGeneratedPoster(null);
+                      handleGeneratePoster();
+                    }}
+                    style={[styles.quickAction, { backgroundColor: colors.inputBackground }]}
+                  >
+                    <Ionicons name="refresh" size={18} color={colors.text} />
+                    <Text style={[styles.quickActionLabel, { color: colors.text }]}>Redo</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setFullScreenImage(generatedPoster)}
+                    style={[styles.quickAction, { backgroundColor: colors.inputBackground }]}
+                  >
+                    <Ionicons name="expand" size={18} color={colors.text} />
+                    <Text style={[styles.quickActionLabel, { color: colors.text }]}>Preview</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={handleSavePoster}
+                    style={[styles.quickAction, { backgroundColor: colors.accent }]}
+                  >
+                    <Ionicons name="download-outline" size={18} color="#fff" />
+                    <Text style={[styles.quickActionLabel, { color: '#fff' }]}>Save</Text>
+                  </Pressable>
+                </View>
+              )}
+
+              {/* Visual Style Grid */}
+              <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <Text style={[styles.sectionLabel, { color: colors.text }]}>Style</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.styleGrid}>
+                  {visualStyles.map(style => (
+                    <StyleCard
+                      key={style.id}
+                      style={style}
+                      isSelected={posterStyle === style.id}
+                      onSelect={() => {
+                        Haptics.selectionAsync();
+                        setPosterStyle(style.id);
+                      }}
+                      colors={colors}
+                    />
+                  ))}
                 </ScrollView>
               </View>
 
-              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                <Text style={[styles.cardTitle, { color: colors.text }]}>Poster Description</Text>
+              {/* Aspect Ratio Picker */}
+              <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <Text style={[styles.sectionLabel, { color: colors.text }]}>Aspect Ratio</Text>
+                <View style={styles.ratioRow}>
+                  {aspectRatios.map(ratio => (
+                    <Pressable
+                      key={ratio.id}
+                      onPress={() => {
+                        Haptics.selectionAsync();
+                        setAspectRatio(ratio.id);
+                      }}
+                      style={[
+                        styles.ratioButton,
+                        {
+                          backgroundColor: aspectRatio === ratio.id ? colors.accent + '18' : colors.inputBackground,
+                          borderColor: aspectRatio === ratio.id ? colors.accent : 'transparent',
+                        }
+                      ]}
+                    >
+                      <View style={[
+                        styles.ratioPreview,
+                        {
+                          aspectRatio: ratio.width / ratio.height,
+                          borderColor: aspectRatio === ratio.id ? colors.accent : colors.textMuted + '40',
+                        }
+                      ]} />
+                      <Text style={[styles.ratioLabel, { color: aspectRatio === ratio.id ? colors.accent : colors.textMuted }]}>
+                        {ratio.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              {/* Prompt Input */}
+              <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <View style={styles.sectionHeader}>
+                  <Text style={[styles.sectionLabel, { color: colors.text }]}>
+                    {genMode === 'text-to-image' ? 'Describe your vision' : genMode === 'image-to-image' ? 'How to transform' : 'What to edit'}
+                  </Text>
+                </View>
                 <TextInput
-                  style={[styles.input, styles.textArea, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-                  placeholder="Describe the marketing poster you want to create..."
+                  style={[styles.promptInput, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
+                  placeholder={
+                    genMode === 'text-to-image'
+                      ? 'A stunning product photo with soft lighting, bokeh background, and elegant composition...'
+                      : genMode === 'image-to-image'
+                      ? 'Transform into a cinematic movie poster with dramatic lighting...'
+                      : 'Change the background to a tropical beach setting...'
+                  }
                   placeholderTextColor={colors.textMuted}
                   value={posterTopic}
                   onChangeText={setPosterTopic}
                   multiline
-                  numberOfLines={3}
+                  numberOfLines={4}
                   textAlignVertical="top"
                 />
               </View>
 
-              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                <View style={styles.cardHeader}>
-                  <Ionicons name="images-outline" size={20} color={colors.accent} />
-                  <Text style={[styles.cardTitle, { color: colors.text, marginBottom: 0 }]}>Reference Photo (optional)</Text>
+              {/* Reference Photos */}
+              <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <View style={styles.sectionHeader}>
+                  <Text style={[styles.sectionLabel, { color: colors.text }]}>
+                    Reference Images
+                  </Text>
+                  <Text style={[styles.sectionHint, { color: colors.textMuted }]}>Up to 3</Text>
                 </View>
-                <Text style={[styles.photoHint, { color: colors.textMuted }]}>
-                  Upload a photo from your gallery to use as design inspiration
-                </Text>
-                {selectedPhoto ? (
-                  <View style={styles.photoPreviewContainer}>
-                    <Image
-                      source={{ uri: selectedPhoto.uri }}
-                      style={styles.photoPreview}
-                      resizeMode="cover"
+                <View style={styles.refPhotoRow}>
+                  {referencePhotos.map((photo, i) => (
+                    <ReferencePhotoSlot
+                      key={i}
+                      photo={photo}
+                      index={i}
+                      onPick={() => pickPhoto(i)}
+                      onRemove={() => removePhoto(i)}
+                      colors={colors}
                     />
-                    <View style={styles.photoActions}>
-                      <Pressable
-                        onPress={pickPhoto}
-                        style={[styles.photoActionBtn, { backgroundColor: colors.inputBackground }]}
-                      >
-                        <Ionicons name="swap-horizontal" size={18} color={colors.text} />
-                        <Text style={[styles.photoActionText, { color: colors.text }]}>Change</Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => setSelectedPhoto(null)}
-                        style={[styles.photoActionBtn, { backgroundColor: colors.error + '15' }]}
-                      >
-                        <Ionicons name="trash-outline" size={18} color={colors.error} />
-                        <Text style={[styles.photoActionText, { color: colors.error }]}>Remove</Text>
-                      </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              {/* Advanced Options Toggle */}
+              <Pressable
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setShowAdvanced(!showAdvanced);
+                }}
+                style={[styles.advancedToggle, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
+              >
+                <Ionicons name="options-outline" size={18} color={colors.textSecondary} />
+                <Text style={[styles.advancedToggleText, { color: colors.textSecondary }]}>Advanced Options</Text>
+                <Ionicons name={showAdvanced ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
+              </Pressable>
+
+              {showAdvanced && (
+                <>
+                  {/* Mood Selector */}
+                  <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                    <Text style={[styles.sectionLabel, { color: colors.text }]}>Mood</Text>
+                    <View style={styles.chipRow}>
+                      {moodOptions.map(m => (
+                        <Pressable
+                          key={m.id}
+                          onPress={() => {
+                            Haptics.selectionAsync();
+                            setMood(m.id);
+                          }}
+                          style={[
+                            styles.chip,
+                            {
+                              backgroundColor: mood === m.id ? colors.accent + '20' : colors.inputBackground,
+                              borderColor: mood === m.id ? colors.accent : 'transparent',
+                            }
+                          ]}
+                        >
+                          <Text style={[styles.chipText, { color: mood === m.id ? colors.accent : colors.textMuted }]}>
+                            {m.label}
+                          </Text>
+                        </Pressable>
+                      ))}
                     </View>
                   </View>
-                ) : (
-                  <Pressable
-                    onPress={pickPhoto}
-                    style={[styles.photoUploadArea, { borderColor: colors.accent + '40', backgroundColor: colors.accent + '08' }]}
-                  >
-                    <Ionicons name="cloud-upload-outline" size={32} color={colors.accent} />
-                    <Text style={[styles.photoUploadText, { color: colors.accent }]}>
-                      Tap to select a photo
-                    </Text>
-                    <Text style={[styles.photoUploadSubtext, { color: colors.textMuted }]}>
-                      JPG, PNG up to 10MB
-                    </Text>
-                  </Pressable>
-                )}
-              </View>
 
-              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                <Text style={[styles.cardTitle, { color: colors.text }]}>Text on Poster (optional)</Text>
-                <TextInput
-                  style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-                  placeholder="e.g., 50% OFF - Limited Time!"
-                  placeholderTextColor={colors.textMuted}
-                  value={posterText}
-                  onChangeText={setPosterText}
-                />
-              </View>
+                  {/* Text Overlay */}
+                  <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                    <Text style={[styles.sectionLabel, { color: colors.text }]}>Text Overlay</Text>
+                    <TextInput
+                      style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
+                      placeholder="e.g., SUMMER SALE 50% OFF"
+                      placeholderTextColor={colors.textMuted}
+                      value={posterText}
+                      onChangeText={setPosterText}
+                    />
+                  </View>
+                </>
+              )}
 
+              {/* Generate Button */}
               <Pressable
                 onPress={handleGeneratePoster}
                 disabled={isGeneratingPoster}
                 style={({ pressed }) => [
-                  styles.generateButton,
-                  { opacity: pressed ? 0.8 : 1 }
+                  styles.generateDesignBtn,
+                  { opacity: pressed ? 0.85 : 1 }
                 ]}
               >
                 <LinearGradient
-                  colors={[colors.accent, '#0D9488'] as [string, string]}
+                  colors={['#14B8A6', '#06B6D4', '#8B5CF6']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
-                  style={styles.gradientButton}
+                  style={styles.generateDesignGradient}
                 >
                   {isGeneratingPoster ? (
-                    <LoadingSpinner size={20} color="#fff" />
+                    <ActivityIndicator size="small" color="#fff" />
                   ) : (
-                    <Ionicons name="brush" size={20} color="#fff" />
+                    <Ionicons name="flash" size={20} color="#fff" />
                   )}
-                  <Text style={styles.generateButtonText}>
-                    {isGeneratingPoster ? 'Designing...' : 'Generate Poster'}
+                  <Text style={styles.generateDesignText}>
+                    {isGeneratingPoster ? 'Creating...' : 'Generate Design'}
                   </Text>
                 </LinearGradient>
               </Pressable>
 
-              {generatedPoster ? (
-                <View style={[styles.posterPreview, { backgroundColor: colors.card, borderColor: colors.accent }]}>
-                  <View style={styles.resultHeader}>
-                    <Ionicons name="checkmark-circle" size={20} color={colors.success} />
-                    <Text style={[styles.resultTitle, { color: colors.text }]}>Generated Poster</Text>
-                  </View>
-                  <View style={[styles.posterContainer, { backgroundColor: colors.inputBackground }]}>
-                    <Image
-                      source={{ uri: generatedPoster }}
-                      style={styles.generatedPosterImage}
-                      resizeMode="contain"
-                    />
-                  </View>
-                  <View style={styles.posterButtonRow}>
-                    <Pressable
-                      onPress={() => {
-                        setGeneratedPoster(null);
-                        handleGeneratePoster();
-                      }}
-                      style={({ pressed }) => [
-                        styles.posterSecondaryBtn,
-                        { backgroundColor: colors.inputBackground, opacity: pressed ? 0.7 : 1 }
-                      ]}
-                    >
-                      <Ionicons name="refresh" size={18} color={colors.text} />
-                      <Text style={[styles.posterSecondaryText, { color: colors.text }]}>Regenerate</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={handleSavePoster}
-                      style={({ pressed }) => [
-                        styles.savePosterButton,
-                        { backgroundColor: colors.accent, opacity: pressed ? 0.8 : 1 }
-                      ]}
-                    >
-                      <Ionicons name="save" size={18} color="#fff" />
-                      <Text style={styles.savePosterText}>Save to Studio</Text>
-                    </Pressable>
-                  </View>
+              {/* Generation History */}
+              {generationHistory.length > 0 && (
+                <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                  <Text style={[styles.sectionLabel, { color: colors.text }]}>Recent Creations</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.historyRow}>
+                    {generationHistory.map(item => (
+                      <Pressable
+                        key={item.id}
+                        onPress={() => {
+                          setGeneratedPoster(item.imageUrl);
+                          Haptics.selectionAsync();
+                        }}
+                        style={styles.historyThumb}
+                      >
+                        <Image source={{ uri: item.imageUrl }} style={styles.historyImage} resizeMode="cover" />
+                        {generatedPoster === item.imageUrl && (
+                          <View style={[styles.historyActive, { borderColor: colors.accent }]}>
+                            <Ionicons name="checkmark-circle" size={16} color={colors.accent} />
+                          </View>
+                        )}
+                      </Pressable>
+                    ))}
+                  </ScrollView>
                 </View>
-              ) : null}
+              )}
+
+              {/* Powered by badge */}
+              <View style={styles.poweredBy}>
+                <Text style={[styles.poweredByText, { color: colors.textMuted }]}>
+                  Powered by Nano Banana AI
+                </Text>
+              </View>
             </>
           )}
 
           <View style={{ height: 120 }} />
         </ScrollView>
+
+        <DesignerLoadingOverlay isVisible={isGeneratingPoster} />
+
+        {/* Full Screen Image Modal */}
+        <Modal
+          visible={!!fullScreenImage}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setFullScreenImage(null)}
+        >
+          <View style={styles.fullScreenModal}>
+            <Pressable style={styles.fullScreenClose} onPress={() => setFullScreenImage(null)}>
+              <Ionicons name="close" size={28} color="#fff" />
+            </Pressable>
+            {fullScreenImage && (
+              <Image
+                source={{ uri: fullScreenImage }}
+                style={styles.fullScreenImage}
+                resizeMode="contain"
+              />
+            )}
+          </View>
+        </Modal>
       </View>
     </KeyboardAvoidingView>
   );
@@ -655,28 +1011,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: 'Inter_500Medium',
   },
-  styleRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  styleButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    gap: 8,
-  },
-  styleIndicator: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-  },
-  styleLabel: {
-    fontSize: 13,
-    fontFamily: 'Inter_500Medium',
-  },
   input: {
     borderWidth: 1,
     borderRadius: 12,
@@ -741,97 +1075,356 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Inter_600SemiBold',
   },
-  posterPreview: {
-    borderRadius: 20,
-    borderWidth: 2,
-    padding: 20,
-    gap: 16,
+
+  // === AI Designer Styles ===
+  modeBar: {
+    flexDirection: 'row',
+    borderRadius: 16,
+    padding: 4,
+    marginBottom: 16,
+    gap: 4,
   },
-  posterContainer: {
+  modeItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 6,
     borderRadius: 12,
-    overflow: 'hidden',
-    aspectRatio: 1,
+    gap: 3,
   },
-  generatedPosterImage: {
+  modeLabel: {
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  modeDesc: {
+    fontSize: 9,
+    fontFamily: 'Inter_400Regular',
+    textAlign: 'center',
+  },
+
+  canvasArea: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  canvasEmpty: {},
+  canvasImage: {
     width: '100%',
     height: '100%',
   },
-  photoHint: {
-    fontSize: 13,
-    fontFamily: 'Inter_400Regular',
-    marginBottom: 12,
-  },
-  photoUploadArea: {
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderRadius: 16,
-    paddingVertical: 28,
+  canvasPlaceholder: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: 10,
   },
-  photoUploadText: {
+  canvasPlaceholderIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  canvasPlaceholderTitle: {
     fontSize: 15,
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: 'Inter_500Medium',
   },
-  photoUploadSubtext: {
+  canvasPlaceholderSub: {
     fontSize: 12,
     fontFamily: 'Inter_400Regular',
   },
-  photoPreviewContainer: {
-    gap: 10,
-  },
-  photoPreview: {
-    width: '100%',
-    height: 180,
-    borderRadius: 12,
-  },
-  photoActions: {
+  canvasOverlayBadge: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
     flexDirection: 'row',
-    gap: 10,
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
   },
-  photoActionBtn: {
+  canvasOverlayText: {
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+    color: '#fff',
+  },
+
+  quickActionsBar: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  quickAction: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: 10,
+    paddingVertical: 12,
+    borderRadius: 12,
     gap: 6,
   },
-  photoActionText: {
+  quickActionLabel: {
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
+  },
+
+  sectionCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+    marginBottom: 12,
+  },
+  sectionLabel: {
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+    marginBottom: 12,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  sectionHint: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+    marginBottom: 12,
+  },
+
+  styleGrid: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingRight: 8,
+  },
+  styleCardWrapper: {
+    alignItems: 'center',
+    gap: 6,
+  },
+  styleCard: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  styleCardCheck: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+  },
+  styleCardLabel: {
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+  },
+
+  ratioRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  ratioButton: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    gap: 6,
+  },
+  ratioPreview: {
+    width: 24,
+    height: 24,
+    maxWidth: 24,
+    maxHeight: 24,
+    borderWidth: 1.5,
+    borderRadius: 4,
+  },
+  ratioLabel: {
+    fontSize: 10,
+    fontFamily: 'Inter_500Medium',
+  },
+
+  promptInput: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    minHeight: 100,
+    lineHeight: 20,
+  },
+
+  refPhotoRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  refPhotoEmpty: {
+    flex: 1,
+    aspectRatio: 1,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  refPhotoFilled: {
+    flex: 1,
+    aspectRatio: 1,
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  refPhotoImage: {
+    width: '100%',
+    height: '100%',
+  },
+  refPhotoRemoveBtn: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+  },
+
+  advancedToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  advancedToggleText: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+  },
+
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1.5,
+  },
+  chipText: {
     fontSize: 13,
     fontFamily: 'Inter_500Medium',
   },
-  posterButtonRow: {
+
+  generateDesignBtn: {
+    marginBottom: 16,
+  },
+  generateDesignGradient: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 18,
+    borderRadius: 16,
     gap: 10,
   },
-  posterSecondaryBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 12,
-    gap: 8,
-  },
-  posterSecondaryText: {
-    fontSize: 14,
-    fontFamily: 'Inter_600SemiBold',
-  },
-  savePosterButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 12,
-    gap: 8,
-  },
-  savePosterText: {
-    fontSize: 15,
-    fontFamily: 'Inter_600SemiBold',
+  generateDesignText: {
+    fontSize: 17,
+    fontFamily: 'Inter_700Bold',
     color: '#fff',
+    letterSpacing: 0.3,
+  },
+
+  historyRow: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingRight: 8,
+  },
+  historyThumb: {
+    width: 72,
+    height: 72,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  historyImage: {
+    width: '100%',
+    height: '100%',
+  },
+  historyActive: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 10,
+    padding: 2,
+  },
+
+  poweredBy: {
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  poweredByText: {
+    fontSize: 11,
+    fontFamily: 'Inter_400Regular',
+  },
+
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 100,
+  },
+  loadingContent: {
+    alignItems: 'center',
+    gap: 16,
+    padding: 40,
+  },
+  loadingIconRing: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingIconInner: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingTitle: {
+    fontSize: 18,
+    fontFamily: 'Inter_700Bold',
+  },
+  loadingSubtitle: {
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+    textAlign: 'center',
+  },
+  loadingDots: {
+    marginTop: 8,
+  },
+
+  fullScreenModal: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fullScreenClose: {
+    position: 'absolute',
+    top: 60,
+    right: 20,
+    zIndex: 10,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fullScreenImage: {
+    width: '92%',
+    height: '75%',
   },
 });
