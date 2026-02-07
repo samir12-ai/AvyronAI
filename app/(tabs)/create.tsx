@@ -28,6 +28,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
+import * as MediaLibrary from 'expo-media-library';
+import * as FileSystem from 'expo-file-system';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -395,6 +397,56 @@ export default function CreateScreen() {
     }
   };
 
+  const saveImageToGallery = async (imageUri: string) => {
+    try {
+      if (Platform.OS === 'web') {
+        const link = document.createElement('a');
+        link.href = imageUri;
+        link.download = `MarketMind_${Date.now()}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('Downloaded!', 'Design downloaded to your device.');
+        return;
+      }
+
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission Needed',
+          'Please allow access to your photo gallery to save designs.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            ...(Platform.OS !== 'web' ? [{ text: 'Open Settings', onPress: () => {
+              try { MediaLibrary.requestPermissionsAsync(); } catch {}
+            }}] : []),
+          ]
+        );
+        return;
+      }
+
+      const filename = `MarketMind_${Date.now()}.png`;
+      const fileUri = `${FileSystem.cacheDirectory}${filename}`;
+
+      if (imageUri.startsWith('data:image')) {
+        const base64Data = imageUri.split(',')[1];
+        await FileSystem.writeAsStringAsync(fileUri, base64Data, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      } else {
+        await FileSystem.downloadAsync(imageUri, fileUri);
+      }
+
+      await MediaLibrary.saveToLibraryAsync(fileUri);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('Saved to Gallery!', 'Your design has been saved to your photo gallery.');
+    } catch (error: any) {
+      console.error('Save to gallery error:', error);
+      Alert.alert('Save Failed', 'Could not save to gallery. Please try again.');
+    }
+  };
+
   const handleSavePoster = async () => {
     if (!generatedPoster) {
       Alert.alert('No Design', 'Please generate a design first.');
@@ -414,13 +466,12 @@ export default function CreateScreen() {
     };
 
     await addMediaItem(newMedia);
+    await saveImageToGallery(generatedPoster);
     
     setPosterTopic('');
     setPosterText('');
     setGeneratedPoster(null);
     setReferencePhotos([null, null, null]);
-    
-    Alert.alert('Saved!', 'Design saved to your Studio library.');
   };
 
   const selectedRatio = aspectRatios.find(r => r.id === aspectRatio) || aspectRatios[0];
@@ -888,9 +939,19 @@ export default function CreateScreen() {
                           setGeneratedPoster(item.imageUrl);
                           Haptics.selectionAsync();
                         }}
+                        onLongPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                          saveImageToGallery(item.imageUrl);
+                        }}
                         style={styles.historyThumb}
                       >
                         <Image source={{ uri: item.imageUrl }} style={styles.historyImage} resizeMode="cover" />
+                        <Pressable
+                          onPress={() => saveImageToGallery(item.imageUrl)}
+                          style={styles.historySaveBtn}
+                        >
+                          <Ionicons name="download-outline" size={14} color="#fff" />
+                        </Pressable>
                         {generatedPoster === item.imageUrl && (
                           <View style={[styles.historyActive, { borderColor: colors.accent }]}>
                             <Ionicons name="checkmark-circle" size={16} color={colors.accent} />
@@ -926,6 +987,14 @@ export default function CreateScreen() {
           <View style={styles.fullScreenModal}>
             <Pressable style={styles.fullScreenClose} onPress={() => setFullScreenImage(null)}>
               <Ionicons name="close" size={28} color="#fff" />
+            </Pressable>
+            <Pressable
+              style={styles.fullScreenSave}
+              onPress={() => {
+                if (fullScreenImage) saveImageToGallery(fullScreenImage);
+              }}
+            >
+              <Ionicons name="download-outline" size={24} color="#fff" />
             </Pressable>
             {fullScreenImage && (
               <Image
@@ -1358,6 +1427,17 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 2,
   },
+  historySaveBtn: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 10,
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   poweredBy: {
     alignItems: 'center',
@@ -1420,6 +1500,18 @@ const styles = StyleSheet.create({
     zIndex: 10,
     width: 44,
     height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fullScreenSave: {
+    position: 'absolute',
+    top: 60,
+    left: 20,
+    zIndex: 10,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
   },
