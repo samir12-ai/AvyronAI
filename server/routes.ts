@@ -43,7 +43,7 @@ Requirements:
 - Include a clear call-to-action if appropriate`;
 
       const response = await openai.chat.completions.create({
-        model: "gpt-5.1",
+        model: "gpt-5.2",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
