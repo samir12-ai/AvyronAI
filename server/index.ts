@@ -177,6 +177,13 @@ function configureExpoAndLanding(app: express.Application) {
       return next();
     }
 
+    if (req.path === "/data-deletion") {
+      const deletionPath = path.resolve(process.cwd(), "server", "templates", "data-deletion.html");
+      const deletionHtml = fs.readFileSync(deletionPath, "utf-8");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      return res.send(deletionHtml);
+    }
+
     if (req.path !== "/" && req.path !== "/manifest") {
       return next();
     }
