@@ -37,7 +37,17 @@ Preferred communication style: Simple, everyday language.
 
 ### Tab-Based Navigation Structure
 1. **Dashboard** (`index.tsx`): Analytics overview with metrics, charts, and quick actions
-2. **Create** (`create.tsx`): AI-powered content generation interface
+2. **Create** (`create.tsx`): AI-powered content generation with two modes:
+   - **AI Writer**: GPT-5.2 powered text content generation (posts, captions, ad copy, stories)
+   - **AI Designer**: Artlist-level image generation studio powered by Nano Banana (Gemini 2.5 Flash Image) with:
+     - Three generation modes: Create (text-to-image), Transform (image-to-image), Edit (image modification)
+     - 6 visual style presets: Cinematic, Professional, Commercial, Indie, Minimal, Vibrant
+     - Aspect ratio selection: Square (1:1), Portrait (4:5), Landscape (16:9), Story (9:16)
+     - Up to 3 reference image uploads from gallery
+     - Advanced options: mood control (Energetic, Calm, Dramatic, Playful, Luxurious, Warm) + text overlay
+     - Canvas workspace with full-screen preview modal
+     - Generation history gallery (session-based)
+     - Premium animated loading overlay
 3. **Calendar** (`calendar.tsx`): Content scheduling and calendar view
 4. **Campaigns** (`campaigns.tsx`): Campaign and ad management
 5. **Settings** (`settings.tsx`): Brand profile and platform connections
