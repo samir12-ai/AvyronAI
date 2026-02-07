@@ -467,11 +467,6 @@ export default function CreateScreen() {
 
     await addMediaItem(newMedia);
     await saveImageToGallery(generatedPoster);
-    
-    setPosterTopic('');
-    setPosterText('');
-    setGeneratedPoster(null);
-    setReferencePhotos([null, null, null]);
   };
 
   const selectedRatio = aspectRatios.find(r => r.id === aspectRatio) || aspectRatios[0];
