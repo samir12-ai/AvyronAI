@@ -11,17 +11,19 @@ import {
   Alert,
   KeyboardAvoidingView,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { generateId } from '@/lib/storage';
-import { apiRequest } from '@/lib/query-client';
+import { apiRequest, getApiUrl } from '@/lib/query-client';
 import type { ContentItem, MediaItem } from '@/lib/types';
 
 const contentTypes = [
@@ -59,6 +61,7 @@ export default function CreateScreen() {
   const [posterText, setPosterText] = useState('');
   const [generatedPoster, setGeneratedPoster] = useState<string | null>(null);
   const [isGeneratingPoster, setIsGeneratingPoster] = useState(false);
+  const [selectedPhoto, setSelectedPhoto] = useState<ImagePicker.ImagePickerAsset | null>(null);
 
   const handleGenerate = async () => {
     if (!topic.trim()) {
@@ -117,6 +120,28 @@ export default function CreateScreen() {
     Alert.alert('Saved!', `Content saved as ${status}.`);
   };
 
+  const pickPhoto = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Needed', 'Please allow access to your photo library to use this feature.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      quality: 0.8,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      setSelectedPhoto(result.assets[0]);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+  };
+
   const handleGeneratePoster = async () => {
     if (!posterTopic.trim()) {
       Alert.alert('Missing Topic', 'Please describe what you want on the poster.');
@@ -127,21 +152,51 @@ export default function CreateScreen() {
     setIsGeneratingPoster(true);
 
     try {
-      const response = await apiRequest('POST', '/api/generate-poster', {
-        topic: posterTopic,
-        style: posterStyle,
-        text: posterText,
-        brandName: brandProfile.name || 'Brand',
-        industry: brandProfile.industry || 'business',
+      const apiUrl = getApiUrl();
+      const formData = new FormData();
+      formData.append('topic', posterTopic);
+      formData.append('style', posterStyle);
+      formData.append('text', posterText);
+      formData.append('brandName', brandProfile.name || 'Brand');
+      formData.append('industry', brandProfile.industry || 'business');
+
+      if (selectedPhoto) {
+        if (Platform.OS === 'web' && selectedPhoto.base64) {
+          const byteString = atob(selectedPhoto.base64);
+          const ab = new ArrayBuffer(byteString.length);
+          const ia = new Uint8Array(ab);
+          for (let i = 0; i < byteString.length; i++) {
+            ia[i] = byteString.charCodeAt(i);
+          }
+          const blob = new Blob([ab], { type: selectedPhoto.mimeType || 'image/jpeg' });
+          formData.append('photo', blob, 'photo.jpg');
+        } else {
+          const photoUri = selectedPhoto.uri;
+          const photoName = photoUri.split('/').pop() || 'photo.jpg';
+          formData.append('photo', {
+            uri: photoUri,
+            name: photoName,
+            type: selectedPhoto.mimeType || 'image/jpeg',
+          } as any);
+        }
+      }
+
+      const response = await fetch(new URL('/api/generate-poster', apiUrl).toString(), {
+        method: 'POST',
+        body: formData,
       });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to generate poster');
+      }
 
       const data = await response.json();
       setGeneratedPoster(data.imageUrl);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Poster generation error:', error);
-      setGeneratedPoster('placeholder');
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('Generation Error', error.message || 'Failed to generate poster. Please try again.');
     } finally {
       setIsGeneratingPoster(false);
     }
@@ -170,6 +225,7 @@ export default function CreateScreen() {
     setPosterTopic('');
     setPosterText('');
     setGeneratedPoster(null);
+    setSelectedPhoto(null);
     
     Alert.alert('Saved!', 'Poster saved to your Studio library.');
   };
@@ -396,6 +452,54 @@ export default function CreateScreen() {
               </View>
 
               <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <View style={styles.cardHeader}>
+                  <Ionicons name="images-outline" size={20} color={colors.accent} />
+                  <Text style={[styles.cardTitle, { color: colors.text, marginBottom: 0 }]}>Reference Photo (optional)</Text>
+                </View>
+                <Text style={[styles.photoHint, { color: colors.textMuted }]}>
+                  Upload a photo from your gallery to use as design inspiration
+                </Text>
+                {selectedPhoto ? (
+                  <View style={styles.photoPreviewContainer}>
+                    <Image
+                      source={{ uri: selectedPhoto.uri }}
+                      style={styles.photoPreview}
+                      resizeMode="cover"
+                    />
+                    <View style={styles.photoActions}>
+                      <Pressable
+                        onPress={pickPhoto}
+                        style={[styles.photoActionBtn, { backgroundColor: colors.inputBackground }]}
+                      >
+                        <Ionicons name="swap-horizontal" size={18} color={colors.text} />
+                        <Text style={[styles.photoActionText, { color: colors.text }]}>Change</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => setSelectedPhoto(null)}
+                        style={[styles.photoActionBtn, { backgroundColor: colors.error + '15' }]}
+                      >
+                        <Ionicons name="trash-outline" size={18} color={colors.error} />
+                        <Text style={[styles.photoActionText, { color: colors.error }]}>Remove</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : (
+                  <Pressable
+                    onPress={pickPhoto}
+                    style={[styles.photoUploadArea, { borderColor: colors.accent + '40', backgroundColor: colors.accent + '08' }]}
+                  >
+                    <Ionicons name="cloud-upload-outline" size={32} color={colors.accent} />
+                    <Text style={[styles.photoUploadText, { color: colors.accent }]}>
+                      Tap to select a photo
+                    </Text>
+                    <Text style={[styles.photoUploadSubtext, { color: colors.textMuted }]}>
+                      JPG, PNG up to 10MB
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+
+              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
                 <Text style={[styles.cardTitle, { color: colors.text }]}>Text on Poster (optional)</Text>
                 <TextInput
                   style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
@@ -433,31 +537,42 @@ export default function CreateScreen() {
 
               {generatedPoster ? (
                 <View style={[styles.posterPreview, { backgroundColor: colors.card, borderColor: colors.accent }]}>
-                  <Text style={[styles.resultTitle, { color: colors.text }]}>Generated Poster</Text>
-                  <View style={[styles.posterContainer, { backgroundColor: colors.inputBackground }]}>
-                    <LinearGradient
-                      colors={[posterStyles.find(s => s.id === posterStyle)?.color || colors.primary, colors.primaryDark]}
-                      style={styles.posterPlaceholder}
-                    >
-                      <Ionicons name="image" size={48} color="rgba(255,255,255,0.5)" />
-                      <Text style={styles.posterPlaceholderText}>
-                        {posterText || posterTopic || 'Your Poster'}
-                      </Text>
-                      <Text style={styles.posterBrand}>
-                        {brandProfile.name || 'Your Brand'}
-                      </Text>
-                    </LinearGradient>
+                  <View style={styles.resultHeader}>
+                    <Ionicons name="checkmark-circle" size={20} color={colors.success} />
+                    <Text style={[styles.resultTitle, { color: colors.text }]}>Generated Poster</Text>
                   </View>
-                  <Pressable
-                    onPress={handleSavePoster}
-                    style={({ pressed }) => [
-                      styles.savePosterButton,
-                      { backgroundColor: colors.accent, opacity: pressed ? 0.8 : 1 }
-                    ]}
-                  >
-                    <Ionicons name="save" size={18} color="#fff" />
-                    <Text style={styles.savePosterText}>Save to Studio</Text>
-                  </Pressable>
+                  <View style={[styles.posterContainer, { backgroundColor: colors.inputBackground }]}>
+                    <Image
+                      source={{ uri: generatedPoster }}
+                      style={styles.generatedPosterImage}
+                      resizeMode="contain"
+                    />
+                  </View>
+                  <View style={styles.posterButtonRow}>
+                    <Pressable
+                      onPress={() => {
+                        setGeneratedPoster(null);
+                        handleGeneratePoster();
+                      }}
+                      style={({ pressed }) => [
+                        styles.posterSecondaryBtn,
+                        { backgroundColor: colors.inputBackground, opacity: pressed ? 0.7 : 1 }
+                      ]}
+                    >
+                      <Ionicons name="refresh" size={18} color={colors.text} />
+                      <Text style={[styles.posterSecondaryText, { color: colors.text }]}>Regenerate</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={handleSavePoster}
+                      style={({ pressed }) => [
+                        styles.savePosterButton,
+                        { backgroundColor: colors.accent, opacity: pressed ? 0.8 : 1 }
+                      ]}
+                    >
+                      <Ionicons name="save" size={18} color="#fff" />
+                      <Text style={styles.savePosterText}>Save to Studio</Text>
+                    </Pressable>
+                  </View>
                 </View>
               ) : null}
             </>
@@ -637,25 +752,76 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     aspectRatio: 1,
   },
-  posterPlaceholder: {
-    flex: 1,
+  generatedPosterImage: {
+    width: '100%',
+    height: '100%',
+  },
+  photoHint: {
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+    marginBottom: 12,
+  },
+  photoUploadArea: {
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderRadius: 16,
+    paddingVertical: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
-    padding: 20,
+    gap: 8,
   },
-  posterPlaceholderText: {
-    fontSize: 20,
-    fontFamily: 'Inter_700Bold',
-    color: '#fff',
-    textAlign: 'center',
+  photoUploadText: {
+    fontSize: 15,
+    fontFamily: 'Inter_600SemiBold',
   },
-  posterBrand: {
-    fontSize: 14,
+  photoUploadSubtext: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+  },
+  photoPreviewContainer: {
+    gap: 10,
+  },
+  photoPreview: {
+    width: '100%',
+    height: 180,
+    borderRadius: 12,
+  },
+  photoActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  photoActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 10,
+    gap: 6,
+  },
+  photoActionText: {
+    fontSize: 13,
     fontFamily: 'Inter_500Medium',
-    color: 'rgba(255,255,255,0.7)',
+  },
+  posterButtonRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  posterSecondaryBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 8,
+  },
+  posterSecondaryText: {
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
   },
   savePosterButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
