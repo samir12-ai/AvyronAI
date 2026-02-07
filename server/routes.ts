@@ -140,31 +140,87 @@ Make sure the content works well across all the specified platforms.`;
 
   app.post("/api/generate-poster", upload.single('photo'), async (req, res) => {
     try {
-      const { topic, style, text, brandName, industry } = req.body;
+      const { topic, style, text, brandName, industry, aspectRatio, mood, mode } = req.body;
 
-      if (!topic) {
-        return res.status(400).json({ error: "Topic is required" });
+      const hasPhoto = !!req.file;
+      if (!topic && !hasPhoto) {
+        return res.status(400).json({ error: "Please provide a description or upload an image." });
       }
 
-      const promptParts: string[] = [
-        `Create a professional ${style || 'modern'} style marketing poster design.`,
-        `Brand: ${brandName || 'Brand'}`,
-        `Industry: ${industry || 'business'}`,
-        `Theme/Description: ${topic}`,
-      ];
+      const styleDescriptions: Record<string, string> = {
+        cinematic: 'cinematic with dramatic lighting, film-grain texture, deep shadows and rich color grading like a movie scene',
+        professional: 'clean professional corporate style with modern typography, structured layout, and business-appropriate color palette',
+        commercial: 'bold commercial advertising style with high contrast, eye-catching colors, and strong call-to-action visual hierarchy',
+        indie: 'warm indie aesthetic with natural tones, organic textures, handcrafted feel, and artistic imperfection',
+        minimal: 'minimalist design with ample white space, subtle typography, restrained color palette, and elegant simplicity',
+        vibrant: 'vibrant and energetic with saturated colors, dynamic composition, bold graphic elements, and high visual impact',
+      };
+
+      const moodDescriptions: Record<string, string> = {
+        energetic: 'energetic and dynamic with movement and excitement',
+        calm: 'calm and serene with peaceful atmosphere and soft tones',
+        dramatic: 'dramatic and intense with strong contrasts and powerful imagery',
+        playful: 'playful and fun with whimsical elements and bright accents',
+        luxurious: 'luxurious and premium with rich textures, gold accents, and sophisticated elegance',
+        warm: 'warm and inviting with golden tones and cozy atmosphere',
+      };
+
+      const aspectDesc: Record<string, string> = {
+        '1:1': 'square (1:1) format perfect for Instagram feed',
+        '4:5': 'portrait (4:5) format ideal for Instagram and social media',
+        '16:9': 'widescreen landscape (16:9) format great for presentations and banners',
+        '9:16': 'vertical story (9:16) format designed for Instagram/TikTok stories',
+      };
+
+      const currentStyle = styleDescriptions[style] || styleDescriptions['cinematic'];
+      const currentMood = moodDescriptions[mood] || '';
+      const currentAspect = aspectDesc[aspectRatio] || aspectDesc['1:1'];
+
+      const promptParts: string[] = [];
+
+      if (mode === 'image-to-image' && hasPhoto) {
+        promptParts.push(
+          `Transform and reimagine this uploaded image into a stunning ${currentStyle} design.`,
+          topic ? `Creative direction: ${topic}` : '',
+          `Output as ${currentAspect}.`,
+        );
+      } else if (mode === 'image-edit' && hasPhoto) {
+        promptParts.push(
+          `Edit and enhance this uploaded image based on the following instructions.`,
+          topic ? `Editing instructions: ${topic}` : 'Enhance the image quality and visual appeal.',
+          `Keep the core subject intact while applying: ${currentStyle} treatment.`,
+          `Output as ${currentAspect}.`,
+        );
+      } else {
+        promptParts.push(
+          `Create an exceptional, studio-quality ${currentStyle} marketing design.`,
+          `Brand: ${brandName || 'Brand'}`,
+          `Industry: ${industry || 'business'}`,
+          `Creative brief: ${topic}`,
+          `Format: ${currentAspect}.`,
+        );
+        if (hasPhoto) {
+          promptParts.push(`Use the provided reference image as visual inspiration for composition, color palette, or subject matter.`);
+        }
+      }
+
+      if (currentMood) {
+        promptParts.push(`Mood and atmosphere: ${currentMood}.`);
+      }
 
       if (text) {
-        promptParts.push(`Include this text prominently on the poster: "${text}"`);
+        promptParts.push(`Include this text prominently with beautiful typography: "${text}"`);
       }
 
       promptParts.push(
-        'Make it visually striking, professional, and suitable for social media marketing.',
-        'Use bold colors, clean typography, and compelling visual hierarchy.',
-        'The design should be high quality and ready for digital marketing use.'
+        'The output must be production-ready, visually striking, with exceptional composition and color harmony.',
+        'Apply professional-grade retouching and finishing. No watermarks, no placeholder text.',
       );
 
+      const filteredParts = promptParts.filter(p => p.length > 0);
+
       const contents: any[] = [];
-      const parts: any[] = [{ text: promptParts.join('\n') }];
+      const parts: any[] = [{ text: filteredParts.join('\n') }];
 
       if (req.file) {
         const base64Image = req.file.buffer.toString('base64');
@@ -196,7 +252,7 @@ Make sure the content works well across all the specified platforms.`;
       );
 
       if (!imagePart?.inlineData?.data) {
-        return res.status(500).json({ error: "No image was generated. Please try a different description." });
+        return res.status(500).json({ error: "No image was generated. Please try a different description or style." });
       }
 
       const mimeType = imagePart.inlineData.mimeType || "image/png";
@@ -205,10 +261,13 @@ Make sure the content works well across all the specified platforms.`;
       res.json({
         imageUrl: imageDataUrl,
         description: textPart?.text || '',
+        style,
+        aspectRatio,
+        mood,
       });
     } catch (error) {
-      console.error("Error generating poster:", error);
-      res.status(500).json({ error: "Failed to generate poster. Please try again." });
+      console.error("Error generating design:", error);
+      res.status(500).json({ error: "Failed to generate design. Please try again." });
     }
   });
 
