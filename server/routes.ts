@@ -1,11 +1,23 @@
 import type { Express } from "express";
 import { createServer, type Server } from "node:http";
 import OpenAI from "openai";
+import { GoogleGenAI, Modality } from "@google/genai";
+import multer from "multer";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
+
+const geminiAi = new GoogleGenAI({
+  apiKey: process.env.AI_INTEGRATIONS_GEMINI_API_KEY,
+  httpOptions: {
+    apiVersion: "",
+    baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL,
+  },
+});
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/generate-content", async (req, res) => {
@@ -126,40 +138,77 @@ Make sure the content works well across all the specified platforms.`;
     }
   });
 
-  app.post("/api/generate-poster", async (req, res) => {
+  app.post("/api/generate-poster", upload.single('photo'), async (req, res) => {
     try {
       const { topic, style, text, brandName, industry } = req.body;
 
-      const systemPrompt = `You are a creative director who describes marketing poster designs. Create a detailed description of a ${style} style marketing poster.
+      if (!topic) {
+        return res.status(400).json({ error: "Topic is required" });
+      }
 
-Brand: ${brandName || 'the brand'}
-Industry: ${industry || 'business'}
+      const promptParts: string[] = [
+        `Create a professional ${style || 'modern'} style marketing poster design.`,
+        `Brand: ${brandName || 'Brand'}`,
+        `Industry: ${industry || 'business'}`,
+        `Theme/Description: ${topic}`,
+      ];
 
-Describe the visual elements, colors, layout, and mood in a way that captures the essence of the ${style} design style.`;
+      if (text) {
+        promptParts.push(`Include this text prominently on the poster: "${text}"`);
+      }
 
-      const userPrompt = `Design a marketing poster about: ${topic}
-${text ? `Include this text on the poster: "${text}"` : ''}
+      promptParts.push(
+        'Make it visually striking, professional, and suitable for social media marketing.',
+        'Use bold colors, clean typography, and compelling visual hierarchy.',
+        'The design should be high quality and ready for digital marketing use.'
+      );
 
-Provide a detailed visual description of the poster design.`;
+      const contents: any[] = [];
+      const parts: any[] = [{ text: promptParts.join('\n') }];
 
-      const response = await openai.chat.completions.create({
-        model: "gpt-5.1",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        max_completion_tokens: 300,
+      if (req.file) {
+        const base64Image = req.file.buffer.toString('base64');
+        const mimeType = req.file.mimetype || 'image/jpeg';
+        parts.push({
+          inlineData: {
+            data: base64Image,
+            mimeType,
+          },
+        });
+      }
+
+      contents.push({ role: 'user', parts });
+
+      const response = await geminiAi.models.generateContent({
+        model: "gemini-2.5-flash-image",
+        contents,
+        config: {
+          responseModalities: [Modality.TEXT, Modality.IMAGE],
+        },
       });
 
-      const description = response.choices[0]?.message?.content || "";
+      const candidate = response.candidates?.[0];
+      const imagePart = candidate?.content?.parts?.find(
+        (part: any) => part.inlineData
+      );
+      const textPart = candidate?.content?.parts?.find(
+        (part: any) => part.text
+      );
 
-      res.json({ 
-        imageUrl: 'generated',
-        description 
+      if (!imagePart?.inlineData?.data) {
+        return res.status(500).json({ error: "No image was generated. Please try a different description." });
+      }
+
+      const mimeType = imagePart.inlineData.mimeType || "image/png";
+      const imageDataUrl = `data:${mimeType};base64,${imagePart.inlineData.data}`;
+
+      res.json({
+        imageUrl: imageDataUrl,
+        description: textPart?.text || '',
       });
     } catch (error) {
       console.error("Error generating poster:", error);
-      res.status(500).json({ error: "Failed to generate poster" });
+      res.status(500).json({ error: "Failed to generate poster. Please try again." });
     }
   });
 
