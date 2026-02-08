@@ -236,7 +236,7 @@ Make sure the content works well across all the specified platforms.`;
       contents.push({ role: 'user', parts });
 
       const response = await geminiAi.models.generateContent({
-        model: "gemini-2.5-flash-image",
+        model: "gemini-3-pro-image-preview",
         contents,
         config: {
           responseModalities: [Modality.TEXT, Modality.IMAGE],

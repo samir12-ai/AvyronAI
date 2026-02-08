@@ -39,7 +39,7 @@ Preferred communication style: Simple, everyday language.
 1. **Dashboard** (`index.tsx`): Analytics overview with metrics, charts, and quick actions
 2. **Create** (`create.tsx`): AI-powered content generation with two modes:
    - **AI Writer**: GPT-5.2 powered text content generation (posts, captions, ad copy, stories)
-   - **AI Designer**: Artlist-level image generation studio powered by Nano Banana (Gemini 2.5 Flash Image) with:
+   - **AI Designer**: Artlist-level image generation studio powered by Nano Banana Pro (Gemini 3 Pro Image) with:
      - Three generation modes: Create (text-to-image), Transform (image-to-image), Edit (image modification)
      - 6 visual style presets: Cinematic, Professional, Commercial, Indie, Minimal, Vibrant
      - Aspect ratio selection: Square (1:1), Portrait (4:5), Landscape (16:9), Story (9:16)

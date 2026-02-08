@@ -132,7 +132,7 @@ function DesignerLoadingOverlay({ isVisible }: { isVisible: boolean }) {
         </View>
         <Text style={[styles.loadingTitle, { color: colors.text }]}>Creating your design</Text>
         <Text style={[styles.loadingSubtitle, { color: colors.textMuted }]}>
-          Nano Banana AI is crafting your vision...
+          Nano Banana Pro is crafting your vision...
         </Text>
         <View style={styles.loadingDots}>
           <LoadingSpinner size={16} color={colors.accent} />
@@ -961,7 +961,7 @@ export default function CreateScreen() {
               {/* Powered by badge */}
               <View style={styles.poweredBy}>
                 <Text style={[styles.poweredByText, { color: colors.textMuted }]}>
-                  Powered by Nano Banana AI
+                  Powered by Nano Banana Pro
                 </Text>
               </View>
             </>
