@@ -753,6 +753,81 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
     }
   });
 
+  app.post("/api/generate-calendar", async (req, res) => {
+    try {
+      const { brandName, industry, tone, targetAudience, platforms, goals, products, month, year } = req.body;
+
+      if (!goals) {
+        return res.status(400).json({ error: "Goals are required" });
+      }
+
+      const platformList = (platforms && platforms.length > 0) ? platforms.join(', ') : 'Instagram, Facebook';
+
+      const systemPrompt = `You are an elite social media strategist and content calendar planner who builds month-long content calendars that drive real business growth. You understand platform algorithms, audience psychology, and content mix strategy deeply.
+
+BRAND CONTEXT:
+- Brand: ${brandName || 'the brand'}
+- Industry: ${industry || 'general business'}
+- Voice/Tone: ${tone || 'Professional'}
+- Target Audience: ${targetAudience || 'general audience'}
+- Active Platforms: ${platformList}
+
+CALENDAR STRATEGY RULES:
+1. Mix content types strategically: 40% value/educational, 30% engaging/entertaining, 20% promotional, 10% community/UGC
+2. Post frequency: 1-2 posts per day across platforms for growth
+3. Alternate content types to keep the feed fresh
+4. Use platform-specific best practices (Reels for IG growth, Stories for engagement, Posts for authority)
+5. Schedule posts at optimal times for engagement
+6. Build narrative arcs throughout the month (launch sequences, awareness campaigns)
+7. Include trending content formats and seasonal relevance
+8. Every post should serve a purpose: attract, engage, convert, or retain`;
+
+      const userPrompt = `Build a complete content calendar for ${month || 'this month'} ${year || new Date().getFullYear()}.
+
+MONTHLY GOALS: ${goals}
+
+PRODUCTS/SERVICES TO PROMOTE: ${products || 'General brand content'}
+
+Generate a strategic content calendar. Return ONLY a valid JSON array of scheduled posts. Each post must have:
+{
+  "day": (number 1-31),
+  "time": "HH:MM" (24h format, optimal posting time),
+  "type": "post" | "reel" | "story",
+  "platform": "${platforms?.[0] || 'Instagram'}",
+  "content": "The actual caption/content text with hashtags (ready to post)",
+  "strategy_note": "Brief note on why this post and its role in the monthly strategy"
+}
+
+Generate 20-30 posts spread across the month. Vary the times, types, and platforms. Make the content specific to the brand's products and goals - not generic. Each caption should be complete and ready to copy-paste.`;
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.2",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        max_completion_tokens: 4000,
+      });
+
+      const content = response.choices[0]?.message?.content || "";
+
+      try {
+        const jsonMatch = content.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          res.json({ calendar: parsed });
+        } else {
+          res.status(500).json({ error: "Failed to parse calendar data. Please try again." });
+        }
+      } catch {
+        res.status(500).json({ error: "Failed to parse calendar data. Please try again." });
+      }
+    } catch (error) {
+      console.error("Error generating calendar:", error);
+      res.status(500).json({ error: "Failed to generate calendar. Please try again." });
+    }
+  });
+
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
