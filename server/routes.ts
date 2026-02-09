@@ -138,6 +138,122 @@ Make sure the content works well across all the specified platforms.`;
     }
   });
 
+  app.post("/api/generate-reel-script", async (req, res) => {
+    try {
+      const { topic, platform, brandName, tone, targetAudience, industry, reelDuration, reelGoal } = req.body;
+
+      if (!topic) {
+        return res.status(400).json({ error: "Topic is required" });
+      }
+
+      const duration = reelDuration || '30-60 seconds';
+      const goal = reelGoal || 'engagement';
+
+      const systemPrompt = `You are an elite social media content strategist and Reels director who has deep expertise in the Meta (Instagram/Facebook) algorithm. You create viral-worthy Reels scripts that are engineered for maximum reach, engagement, and retention.
+
+BRAND CONTEXT:
+- Brand: ${brandName || 'the brand'}
+- Industry: ${industry || 'general business'}
+- Voice/Tone: ${tone || 'Professional yet relatable'}
+- Target Audience: ${targetAudience || 'general audience'}
+- Platform: ${platform || 'Instagram'}
+- Reel Duration: ${duration}
+- Primary Goal: ${goal}
+
+YOUR META ALGORITHM MASTERY:
+You understand that Meta's algorithm prioritizes:
+1. Watch time & completion rate (most critical ranking signal)
+2. Shares > Saves > Comments > Likes (engagement hierarchy)
+3. First 0.5-1.5 seconds = make or break (the hook window)
+4. Pattern interrupts every 3-5 seconds to maintain attention
+5. Audio trends and original audio boost distribution
+6. Reels shared to Stories get 2x distribution
+7. Caption engagement (questions, polls, controversial takes) extends dwell time
+8. Posting consistency signals creator reliability to the algorithm
+9. Watch-through loops (seamless endings that replay) hack watch time
+10. Vertical 9:16 native format gets priority over repurposed content
+
+SCRIPT STRUCTURE RULES:
+- Hook must trigger curiosity, controversy, or pattern interrupt in under 1.5 seconds
+- Every scene must have a visual transition or movement (static = scroll-away)
+- Include B-roll suggestions that are achievable with a smartphone
+- End with a loop point or strong CTA that drives the algorithm-favored action (share/save)
+- Audio direction should suggest trending sounds or original voiceover style`;
+
+      const userPrompt = `Create a complete, production-ready Reel script about: "${topic}"
+
+Return your response in this EXACT JSON format:
+{
+  "title": "Working title for the reel",
+  "hook": {
+    "visual": "Exact visual description of what appears on screen in the first 1.5 seconds — the pattern interrupt that stops the scroll",
+    "text_overlay": "The bold text overlay shown on screen during the hook (keep under 8 words, high contrast)",
+    "voiceover": "What is said aloud during the hook (punchy, curiosity-driven)"
+  },
+  "scenes": [
+    {
+      "scene_number": 1,
+      "duration": "3-5s",
+      "visual_direction": "Detailed camera angle, movement, lighting, and what's shown on screen. Be specific enough for a photographer/videographer to execute.",
+      "text_overlay": "On-screen text for this scene",
+      "voiceover": "Script line for voiceover or dialogue",
+      "transition": "How this scene transitions to the next (cut, zoom, swipe, morph, etc.)",
+      "b_roll_suggestion": "Alternative or supplementary footage idea"
+    }
+  ],
+  "closing": {
+    "visual": "Final visual description",
+    "cta_text": "Call-to-action text overlay",
+    "cta_voiceover": "Spoken CTA",
+    "loop_trick": "How the ending connects back to the beginning for seamless replay"
+  },
+  "production_notes": {
+    "estimated_duration": "Total estimated duration",
+    "audio_direction": "Music style, trending sound suggestion, or voiceover tone guidance",
+    "lighting": "Lighting setup recommendation",
+    "props_needed": "List of props or setup needed",
+    "best_posting_time": "Optimal posting window for the target audience",
+    "hashtag_strategy": "5-8 hashtags mixing broad reach and niche targeting"
+  },
+  "algorithm_optimization": {
+    "retention_hooks": ["List of micro-hooks placed throughout to maintain watch time"],
+    "share_trigger": "Why someone would share this reel (emotion, relatability, utility)",
+    "save_trigger": "Why someone would save this reel (reference value, tutorial, inspiration)",
+    "engagement_prompt": "Caption question or poll to boost comments",
+    "repost_strategy": "How to repurpose this reel for Stories, Feed, and Facebook Reels"
+  }
+}
+
+Generate exactly 4-6 scenes. Make the photography/videography directions specific and actionable — as if you're briefing a professional content creator. The visual hook must be genuinely scroll-stopping, not generic.`;
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.2",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        max_completion_tokens: 2000,
+      });
+
+      const content = response.choices[0]?.message?.content || "";
+
+      try {
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          res.json({ script: parsed });
+        } else {
+          res.json({ script: null, rawContent: content });
+        }
+      } catch {
+        res.json({ script: null, rawContent: content });
+      }
+    } catch (error) {
+      console.error("Error generating reel script:", error);
+      res.status(500).json({ error: "Failed to generate reel script" });
+    }
+  });
+
   app.post("/api/generate-poster", upload.single('photo'), async (req, res) => {
     try {
       const { topic, style, text, brandName, industry, aspectRatio, mood, mode } = req.body;
