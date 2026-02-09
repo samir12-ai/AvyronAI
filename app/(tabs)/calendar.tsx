@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -10,11 +10,16 @@ import {
   Modal,
   TextInput,
   Alert,
+  ActivityIndicator,
+  FlatList,
+  Animated as RNAnimated,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import Animated, { FadeIn, FadeInDown, FadeInUp } from 'react-native-reanimated';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
@@ -22,6 +27,7 @@ import { CalendarDay } from '@/components/CalendarDay';
 import { ContentCard } from '@/components/ContentCard';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import { generateId } from '@/lib/storage';
+import { getApiUrl } from '@/lib/query-client';
 import type { ScheduledPost } from '@/lib/types';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -40,12 +46,38 @@ const timeSlots = [
   '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'
 ];
 
+interface AICalendarPost {
+  day: number;
+  time: string;
+  type: 'post' | 'reel' | 'story';
+  platform: string;
+  content: string;
+  strategy_note: string;
+}
+
+function AIPulse({ color }: { color: string }) {
+  const pulseAnim = useRef(new RNAnimated.Value(0.4)).current;
+  useEffect(() => {
+    const pulse = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
+        RNAnimated.timing(pulseAnim, { toValue: 0.4, duration: 1000, useNativeDriver: true }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, []);
+  return (
+    <RNAnimated.View style={[styles.aiPulseDot, { backgroundColor: color, opacity: pulseAnim }]} />
+  );
+}
+
 export default function CalendarScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
-  const { contentItems, removeContentItem, scheduledPosts, addScheduledPost, removeScheduledPost, mediaItems } = useApp();
+  const { contentItems, removeContentItem, scheduledPosts, addScheduledPost, removeScheduledPost, mediaItems, brandProfile } = useApp();
   const { t } = useLanguage();
 
   const postTypes = postTypesDef.map(pt => ({ ...pt, label: t(pt.labelKey) }));
@@ -57,6 +89,7 @@ export default function CalendarScreen() {
   const [currentMonth] = useState(today.getMonth());
   const [currentYear] = useState(today.getFullYear());
   const [showModal, setShowModal] = useState(false);
+  const [showAIAssistant, setShowAIAssistant] = useState(false);
 
   const [postType, setPostType] = useState<string>('post');
   const [postContent, setPostContent] = useState('');
@@ -64,18 +97,27 @@ export default function CalendarScreen() {
   const [postPlatform, setPostPlatform] = useState<string[]>(['Instagram']);
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
 
+  const [aiStep, setAiStep] = useState(0);
+  const [aiGoals, setAiGoals] = useState('');
+  const [aiProducts, setAiProducts] = useState('');
+  const [aiPlatforms, setAiPlatforms] = useState<string[]>(['Instagram']);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiCalendar, setAiCalendar] = useState<AICalendarPost[]>([]);
+  const [aiError, setAiError] = useState('');
+  const [showPreview, setShowPreview] = useState(false);
+
   const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
   const firstDayOfMonth = new Date(currentYear, currentMonth, 1).getDay();
 
   const calendarDays = useMemo(() => {
-    const days = [];
+    const daysArr = [];
     for (let i = 0; i < firstDayOfMonth; i++) {
-      days.push({ date: 0, key: `empty-${i}` });
+      daysArr.push({ date: 0, key: `empty-${i}` });
     }
     for (let i = 1; i <= daysInMonth; i++) {
-      days.push({ date: i, key: `day-${i}` });
+      daysArr.push({ date: i, key: `day-${i}` });
     }
-    return days;
+    return daysArr;
   }, [firstDayOfMonth, daysInMonth]);
 
   const scheduledDates = useMemo(() => {
@@ -156,12 +198,106 @@ export default function CalendarScreen() {
 
     await addScheduledPost(newPost);
     setShowModal(false);
-    Alert.alert(t('calendar.scheduled'), `Your ${postType} is scheduled for ${months[currentMonth]} ${selectedDate} at ${postTime}`);
+    Alert.alert(t('calendar.scheduled'), `${months[currentMonth]} ${selectedDate} - ${postTime}`);
   };
 
   const handleDeleteScheduled = async (id: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     await removeScheduledPost(id);
+  };
+
+  const handleOpenAIAssistant = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setShowAIAssistant(true);
+    setAiStep(0);
+    setAiGoals('');
+    setAiProducts('');
+    setAiPlatforms(brandProfile.platforms.length > 0 ? brandProfile.platforms : ['Instagram']);
+    setAiCalendar([]);
+    setAiError('');
+    setShowPreview(false);
+  };
+
+  const handleAINext = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (aiStep === 0 && !aiGoals.trim()) return;
+    if (aiStep === 1 && !aiProducts.trim()) return;
+    setAiStep(prev => prev + 1);
+  };
+
+  const handleAIBack = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setAiStep(prev => prev - 1);
+  };
+
+  const handleBuildCalendar = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    setAiLoading(true);
+    setAiError('');
+
+    try {
+      const baseUrl = getApiUrl();
+      const url = new URL('/api/generate-calendar', baseUrl);
+      const response = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          brandName: brandProfile.name,
+          industry: brandProfile.industry,
+          tone: brandProfile.tone,
+          targetAudience: brandProfile.targetAudience,
+          platforms: aiPlatforms,
+          goals: aiGoals,
+          products: aiProducts,
+          month: MONTHS[currentMonth],
+          year: currentYear,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate');
+      }
+
+      const data = await response.json();
+      if (data.calendar && Array.isArray(data.calendar)) {
+        setAiCalendar(data.calendar);
+        setAiStep(3);
+      } else {
+        throw new Error('Invalid response');
+      }
+    } catch (error) {
+      setAiError(t('calendar.generationFailed'));
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleAddAllToCalendar = async () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    
+    for (const post of aiCalendar) {
+      const day = Math.min(Math.max(post.day, 1), daysInMonth);
+      const scheduledDate = new Date(currentYear, currentMonth, day);
+      const validType = ['post', 'reel', 'story'].includes(post.type) ? post.type : 'post';
+      
+      const newPost: ScheduledPost = {
+        id: generateId(),
+        type: validType as ScheduledPost['type'],
+        content: post.content,
+        platform: post.platform || aiPlatforms[0],
+        scheduledDate: scheduledDate.toISOString(),
+        scheduledTime: post.time || '09:00',
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+      };
+      await addScheduledPost(newPost);
+    }
+
+    setShowAIAssistant(false);
+    Alert.alert(
+      t('calendar.addedToCalendar'),
+      `${aiCalendar.length} ${t('calendar.addedToCalendarDesc')}`
+    );
   };
 
   const getPostTypeIcon = (type: string): keyof typeof Ionicons.glyphMap => {
@@ -171,6 +307,305 @@ export default function CalendarScreen() {
       case 'video': return 'play-circle';
       default: return 'document-text';
     }
+  };
+
+  const renderAIStep = () => {
+    if (aiLoading) {
+      return (
+        <View style={styles.aiLoadingContainer}>
+          <LinearGradient
+            colors={colors.primaryGradient as [string, string]}
+            style={styles.aiLoadingCircle}
+          >
+            <ActivityIndicator size="large" color="#fff" />
+          </LinearGradient>
+          <Text style={[styles.aiLoadingTitle, { color: colors.text }]}>
+            {t('calendar.building')}
+          </Text>
+          <Text style={[styles.aiLoadingDesc, { color: colors.textSecondary }]}>
+            {t('calendar.buildingDesc')}
+          </Text>
+          <View style={styles.aiLoadingDots}>
+            <AIPulse color={colors.primary} />
+            <AIPulse color={colors.accent} />
+            <AIPulse color={colors.primary} />
+          </View>
+        </View>
+      );
+    }
+
+    if (aiStep === 3 && aiCalendar.length > 0) {
+      return (
+        <View style={styles.aiResultContainer}>
+          <View style={styles.aiResultHeader}>
+            <LinearGradient
+              colors={[colors.success + '20', colors.success + '05']}
+              style={styles.aiResultBadge}
+            >
+              <Ionicons name="checkmark-circle" size={32} color={colors.success} />
+            </LinearGradient>
+            <Text style={[styles.aiResultTitle, { color: colors.text }]}>
+              {t('calendar.calendarReady')}
+            </Text>
+            <Text style={[styles.aiResultDesc, { color: colors.textSecondary }]}>
+              {aiCalendar.length} {t('calendar.calendarReadyDesc')}
+            </Text>
+          </View>
+
+          <View style={styles.aiPreviewStats}>
+            {['post', 'reel', 'story'].map(type => {
+              const count = aiCalendar.filter(p => p.type === type).length;
+              if (count === 0) return null;
+              return (
+                <View key={type} style={[styles.aiStatChip, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                  <Ionicons name={getPostTypeIcon(type)} size={16} color={colors.primary} />
+                  <Text style={[styles.aiStatText, { color: colors.text }]}>
+                    {count} {type === 'post' ? t('calendar.post') : type === 'reel' ? t('calendar.reel') : t('calendar.storyType')}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+
+          <Pressable
+            onPress={() => setShowPreview(!showPreview)}
+            style={[styles.aiPreviewToggle, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
+          >
+            <Ionicons name={showPreview ? 'chevron-up' : 'eye-outline'} size={20} color={colors.primary} />
+            <Text style={[styles.aiPreviewToggleText, { color: colors.primary }]}>
+              {t('calendar.viewPreview')}
+            </Text>
+          </Pressable>
+
+          {showPreview && (
+            <FlatList
+              data={aiCalendar.sort((a, b) => a.day - b.day)}
+              keyExtractor={(_, i) => `ai-${i}`}
+              style={styles.aiPreviewList}
+              showsVerticalScrollIndicator={false}
+              renderItem={({ item }) => (
+                <View style={[styles.aiPreviewCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                  <View style={styles.aiPreviewCardHeader}>
+                    <View style={[styles.aiPreviewDay, { backgroundColor: colors.primary + '15' }]}>
+                      <Text style={[styles.aiPreviewDayNum, { color: colors.primary }]}>{item.day}</Text>
+                    </View>
+                    <View style={styles.aiPreviewMeta}>
+                      <View style={styles.aiPreviewMetaRow}>
+                        <Ionicons name={getPostTypeIcon(item.type)} size={14} color={colors.textMuted} />
+                        <Text style={[styles.aiPreviewType, { color: colors.textSecondary }]}>
+                          {item.type.charAt(0).toUpperCase() + item.type.slice(1)}
+                        </Text>
+                        <Text style={[styles.aiPreviewTime, { color: colors.textMuted }]}>{item.time}</Text>
+                        <Text style={[styles.aiPreviewPlatform, { color: colors.textMuted }]}>{item.platform}</Text>
+                      </View>
+                    </View>
+                  </View>
+                  <Text style={[styles.aiPreviewContent, { color: colors.text }]} numberOfLines={3}>
+                    {item.content}
+                  </Text>
+                  {item.strategy_note && (
+                    <View style={[styles.aiStrategyNote, { backgroundColor: colors.accent + '10' }]}>
+                      <Ionicons name="bulb-outline" size={12} color={colors.accent} />
+                      <Text style={[styles.aiStrategyText, { color: colors.accent }]} numberOfLines={1}>
+                        {item.strategy_note}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              )}
+            />
+          )}
+
+          <View style={styles.aiResultActions}>
+            <Pressable
+              onPress={handleAddAllToCalendar}
+              style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1, flex: 1 }]}
+            >
+              <LinearGradient
+                colors={colors.primaryGradient as [string, string]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.aiAddAllButton}
+              >
+                <Ionicons name="calendar" size={20} color="#fff" />
+                <Text style={styles.aiAddAllText}>{t('calendar.addToCalendar')}</Text>
+              </LinearGradient>
+            </Pressable>
+          </View>
+
+          <Pressable
+            onPress={() => { setAiStep(0); setAiCalendar([]); setShowPreview(false); }}
+            style={styles.aiStartOverBtn}
+          >
+            <Text style={[styles.aiStartOverText, { color: colors.textMuted }]}>
+              {t('calendar.startOver')}
+            </Text>
+          </Pressable>
+        </View>
+      );
+    }
+
+    return (
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.aiStepContainer}
+        keyboardVerticalOffset={100}
+      >
+        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <View style={styles.aiGreetingRow}>
+            <LinearGradient
+              colors={colors.primaryGradient as [string, string]}
+              style={styles.aiAvatar}
+            >
+              <Ionicons name="sparkles" size={20} color="#fff" />
+            </LinearGradient>
+            <View style={[styles.aiGreetingBubble, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+              <Text style={[styles.aiGreetingText, { color: colors.text }]}>
+                {aiStep === 0
+                  ? t('calendar.aiGreeting')
+                  : aiStep === 1
+                  ? t('calendar.questionProducts')
+                  : t('calendar.questionPlatforms')
+                }
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.aiStepIndicator}>
+            {[0, 1, 2].map(s => (
+              <View 
+                key={s}
+                style={[
+                  styles.aiStepDot,
+                  { backgroundColor: s <= aiStep ? colors.primary : colors.inputBackground }
+                ]}
+              />
+            ))}
+            <Text style={[styles.aiStepLabel, { color: colors.textMuted }]}>
+              {t('calendar.step')} {aiStep + 1} {t('calendar.of')} 3
+            </Text>
+          </View>
+
+          {aiStep === 0 && (
+            <View style={styles.aiInputSection}>
+              <Text style={[styles.aiInputLabel, { color: colors.text }]}>
+                {t('calendar.questionGoals')}
+              </Text>
+              <TextInput
+                style={[styles.aiTextInput, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
+                placeholder={t('calendar.goalsPlaceholder')}
+                placeholderTextColor={colors.textMuted}
+                value={aiGoals}
+                onChangeText={setAiGoals}
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+              />
+            </View>
+          )}
+
+          {aiStep === 1 && (
+            <View style={styles.aiInputSection}>
+              <Text style={[styles.aiInputLabel, { color: colors.text }]}>
+                {t('calendar.questionProducts')}
+              </Text>
+              <TextInput
+                style={[styles.aiTextInput, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
+                placeholder={t('calendar.productsPlaceholder')}
+                placeholderTextColor={colors.textMuted}
+                value={aiProducts}
+                onChangeText={setAiProducts}
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+              />
+            </View>
+          )}
+
+          {aiStep === 2 && (
+            <View style={styles.aiInputSection}>
+              <Text style={[styles.aiInputLabel, { color: colors.text }]}>
+                {t('calendar.questionPlatforms')}
+              </Text>
+              <PlatformPicker selected={aiPlatforms} onChange={setAiPlatforms} />
+              
+              <View style={[styles.aiSummaryCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <View style={styles.aiSummaryRow}>
+                  <Ionicons name="flag-outline" size={16} color={colors.primary} />
+                  <Text style={[styles.aiSummaryLabel, { color: colors.textSecondary }]} numberOfLines={2}>
+                    {aiGoals}
+                  </Text>
+                </View>
+                <View style={styles.aiSummaryRow}>
+                  <Ionicons name="cube-outline" size={16} color={colors.accent} />
+                  <Text style={[styles.aiSummaryLabel, { color: colors.textSecondary }]} numberOfLines={2}>
+                    {aiProducts}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {aiError ? (
+            <View style={[styles.aiErrorBox, { backgroundColor: colors.error + '15' }]}>
+              <Ionicons name="alert-circle" size={18} color={colors.error} />
+              <Text style={[styles.aiErrorText, { color: colors.error }]}>{aiError}</Text>
+            </View>
+          ) : null}
+        </ScrollView>
+
+        <View style={styles.aiNavRow}>
+          {aiStep > 0 ? (
+            <Pressable
+              onPress={handleAIBack}
+              style={[styles.aiBackBtn, { borderColor: colors.cardBorder }]}
+            >
+              <Ionicons name="chevron-back" size={20} color={colors.text} />
+              <Text style={[styles.aiBackText, { color: colors.text }]}>{t('calendar.back')}</Text>
+            </Pressable>
+          ) : (
+            <View />
+          )}
+
+          {aiStep < 2 ? (
+            <Pressable
+              onPress={handleAINext}
+              style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}
+              disabled={(aiStep === 0 && !aiGoals.trim()) || (aiStep === 1 && !aiProducts.trim())}
+            >
+              <LinearGradient
+                colors={
+                  ((aiStep === 0 && !aiGoals.trim()) || (aiStep === 1 && !aiProducts.trim()))
+                    ? [colors.textMuted, colors.textMuted]
+                    : colors.primaryGradient as [string, string]
+                }
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.aiNextBtn}
+              >
+                <Text style={styles.aiNextText}>{t('calendar.next')}</Text>
+                <Ionicons name="chevron-forward" size={20} color="#fff" />
+              </LinearGradient>
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={handleBuildCalendar}
+              style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}
+            >
+              <LinearGradient
+                colors={colors.primaryGradient as [string, string]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.aiNextBtn}
+              >
+                <Ionicons name="sparkles" size={18} color="#fff" />
+                <Text style={styles.aiNextText}>{t('calendar.buildCalendar')}</Text>
+              </LinearGradient>
+            </Pressable>
+          )}
+        </View>
+      </KeyboardAvoidingView>
+    );
   };
 
   return (
@@ -196,6 +631,26 @@ export default function CalendarScreen() {
             <Ionicons name="add" size={24} color="#fff" />
           </Pressable>
         </View>
+
+        <Pressable onPress={handleOpenAIAssistant} testID="ai-assistant-card">
+          <LinearGradient
+            colors={colors.primaryGradient as [string, string]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.aiCard}
+          >
+            <View style={styles.aiCardContent}>
+              <View style={styles.aiCardIcon}>
+                <Ionicons name="sparkles" size={24} color="#fff" />
+              </View>
+              <View style={styles.aiCardText}>
+                <Text style={styles.aiCardTitle}>{t('calendar.aiAssistant')}</Text>
+                <Text style={styles.aiCardDesc}>{t('calendar.aiAssistantDesc')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />
+            </View>
+          </LinearGradient>
+        </Pressable>
 
         <View style={[styles.calendarCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <View style={styles.monthHeader}>
@@ -319,6 +774,35 @@ export default function CalendarScreen() {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      <Modal
+        visible={showAIAssistant}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowAIAssistant(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.aiModalContent, { backgroundColor: colors.background }]}>
+            <View style={styles.modalHeader}>
+              <View style={styles.aiModalTitleRow}>
+                <LinearGradient
+                  colors={colors.primaryGradient as [string, string]}
+                  style={styles.aiModalIcon}
+                >
+                  <Ionicons name="sparkles" size={14} color="#fff" />
+                </LinearGradient>
+                <Text style={[styles.modalTitle, { color: colors.text }]}>
+                  {t('calendar.aiAssistant')}
+                </Text>
+              </View>
+              <Pressable onPress={() => setShowAIAssistant(false)}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </Pressable>
+            </View>
+            {renderAIStep()}
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={showModal}
@@ -491,6 +975,40 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  aiCard: {
+    borderRadius: 20,
+    marginBottom: 20,
+    overflow: 'hidden',
+  },
+  aiCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+    gap: 14,
+  },
+  aiCardIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aiCardText: {
+    flex: 1,
+  },
+  aiCardTitle: {
+    fontSize: 17,
+    fontFamily: 'Inter_700Bold',
+    color: '#fff',
+    marginBottom: 2,
+  },
+  aiCardDesc: {
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+    color: 'rgba(255,255,255,0.8)',
+  },
   calendarCard: {
     borderRadius: 20,
     borderWidth: 1,
@@ -643,6 +1161,28 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     maxHeight: '85%',
   },
+  aiModalContent: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 40,
+    maxHeight: '92%',
+    flex: 1,
+    marginTop: 60,
+  },
+  aiModalTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  aiModalIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -737,5 +1277,313 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
     color: '#fff',
+  },
+  aiStepContainer: {
+    flex: 1,
+  },
+  aiGreetingRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 20,
+  },
+  aiAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aiGreetingBubble: {
+    flex: 1,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 14,
+    borderTopLeftRadius: 4,
+  },
+  aiGreetingText: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    lineHeight: 20,
+  },
+  aiStepIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 20,
+  },
+  aiStepDot: {
+    width: 24,
+    height: 4,
+    borderRadius: 2,
+  },
+  aiStepLabel: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+    marginLeft: 8,
+  },
+  aiInputSection: {
+    marginBottom: 16,
+  },
+  aiInputLabel: {
+    fontSize: 15,
+    fontFamily: 'Inter_600SemiBold',
+    marginBottom: 12,
+  },
+  aiTextInput: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 16,
+    fontSize: 15,
+    fontFamily: 'Inter_400Regular',
+    minHeight: 110,
+    textAlignVertical: 'top',
+  },
+  aiNavRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 16,
+  },
+  aiBackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 4,
+  },
+  aiBackText: {
+    fontSize: 15,
+    fontFamily: 'Inter_500Medium',
+  },
+  aiNextBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 14,
+    gap: 8,
+  },
+  aiNextText: {
+    fontSize: 15,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#fff',
+  },
+  aiSummaryCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+    marginTop: 20,
+    gap: 12,
+  },
+  aiSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  aiSummaryLabel: {
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+    flex: 1,
+    lineHeight: 18,
+  },
+  aiLoadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  aiLoadingCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  aiLoadingTitle: {
+    fontSize: 20,
+    fontFamily: 'Inter_700Bold',
+    marginBottom: 8,
+  },
+  aiLoadingDesc: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    textAlign: 'center',
+    paddingHorizontal: 40,
+    marginBottom: 24,
+  },
+  aiLoadingDots: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  aiPulseDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  aiResultContainer: {
+    flex: 1,
+  },
+  aiResultHeader: {
+    alignItems: 'center',
+    paddingVertical: 20,
+    gap: 8,
+  },
+  aiResultBadge: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  aiResultTitle: {
+    fontSize: 22,
+    fontFamily: 'Inter_700Bold',
+  },
+  aiResultDesc: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+  },
+  aiPreviewStats: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  aiStatChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    gap: 6,
+  },
+  aiStatText: {
+    fontSize: 13,
+    fontFamily: 'Inter_500Medium',
+  },
+  aiPreviewToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 8,
+    marginBottom: 12,
+  },
+  aiPreviewToggleText: {
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+  },
+  aiPreviewList: {
+    maxHeight: 300,
+    marginBottom: 16,
+  },
+  aiPreviewCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 8,
+  },
+  aiPreviewCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+  },
+  aiPreviewDay: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aiPreviewDayNum: {
+    fontSize: 18,
+    fontFamily: 'Inter_700Bold',
+  },
+  aiPreviewMeta: {
+    flex: 1,
+  },
+  aiPreviewMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  aiPreviewType: {
+    fontSize: 13,
+    fontFamily: 'Inter_500Medium',
+  },
+  aiPreviewTime: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+  },
+  aiPreviewPlatform: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+  },
+  aiPreviewContent: {
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+    lineHeight: 18,
+  },
+  aiStrategyNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  aiStrategyText: {
+    fontSize: 11,
+    fontFamily: 'Inter_400Regular',
+    flex: 1,
+  },
+  aiResultActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  aiAddAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 14,
+    gap: 10,
+  },
+  aiAddAllText: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#fff',
+  },
+  aiStartOverBtn: {
+    alignItems: 'center',
+    paddingVertical: 14,
+  },
+  aiStartOverText: {
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+  },
+  aiErrorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 14,
+    borderRadius: 12,
+    marginTop: 12,
+  },
+  aiErrorText: {
+    fontSize: 13,
+    fontFamily: 'Inter_500Medium',
+    flex: 1,
   },
 });
