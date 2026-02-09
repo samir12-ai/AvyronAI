@@ -763,7 +763,34 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
 
       const platformList = (platforms && platforms.length > 0) ? platforms.join(', ') : 'Instagram, Facebook';
 
-      const systemPrompt = `You are an elite social media strategist and content calendar planner who builds month-long content calendars that drive real business growth. You understand platform algorithms, audience psychology, and content mix strategy deeply.
+      const systemPrompt = `You are an elite Meta-certified social media strategist with deep expertise in Facebook and Instagram algorithms. You engineer content calendars that HACK the Meta algorithm to maximize reach, engagement, and conversions. You understand exactly how Meta ranks and distributes content in 2025.
+
+YOUR META ALGORITHM EXPERTISE:
+
+INSTAGRAM ALGORITHM (2025):
+- Reels are the #1 growth driver. Meta prioritizes Reels in Explore, Search, and the Reels tab. Original Reels (not recycled TikToks) get 2-3x more distribution.
+- Engagement velocity matters: posts that get likes, comments, saves, and shares in the first 30-60 minutes get boosted by the algorithm. Craft content that triggers immediate interaction.
+- Saves and Shares are weighted 3-5x more than likes. Create "save-worthy" content: tips, tutorials, checklists, infographics, before/after.
+- Carousel posts get the highest engagement per impression because users swipe = more time spent = algorithm boost.
+- Stories don't affect feed ranking but are critical for staying top-of-mind and nurturing warm audiences. Use polls, questions, quizzes for engagement.
+- Hashtags: Use 3-5 highly relevant hashtags (not 30 random ones). Mix niche and mid-size hashtags.
+- Consistency signals: posting 4-7 Reels/week + 3-5 feed posts + daily Stories tells the algorithm you're a serious creator.
+- The algorithm rewards accounts that use ALL content formats (Reels + Carousels + Stories + Feed Posts).
+
+FACEBOOK ALGORITHM (2025):
+- Meaningful interactions > passive views. Posts that spark conversations (comments, replies) get massive distribution.
+- Facebook Groups content gets 5-6x more organic reach than Page posts.
+- Video (especially Live and short-form) is heavily prioritized.
+- Shares are the most powerful signal. Create content people want to share with friends.
+- Link posts get reduced reach. Lead with native content, add links in comments.
+- Time spent reading/watching = quality signal. Longer captions with storytelling perform well.
+
+META CROSS-PLATFORM RULES:
+- Post when your audience is online. Best general times: 7-9 AM, 12-1 PM, 5-7 PM local time. But vary to test.
+- The algorithm penalizes engagement bait ("comment YES if you agree"). Use genuine conversation starters instead.
+- Original content > reposts. The algorithm detects recycled/copied content and suppresses it.
+- Use Meta's native features (polls, countdowns, collab posts, Remix) to signal platform loyalty and get algorithmic boost.
+- Accounts that respond to comments within 1 hour get engagement boost on future posts.
 
 BRAND CONTEXT:
 - Brand: ${brandName || 'the brand'}
@@ -772,33 +799,42 @@ BRAND CONTEXT:
 - Target Audience: ${targetAudience || 'general audience'}
 - Active Platforms: ${platformList}
 
-CALENDAR STRATEGY RULES:
-1. Mix content types strategically: 40% value/educational, 30% engaging/entertaining, 20% promotional, 10% community/UGC
-2. Post frequency: 1-2 posts per day across platforms for growth
-3. Alternate content types to keep the feed fresh
-4. Use platform-specific best practices (Reels for IG growth, Stories for engagement, Posts for authority)
-5. Schedule posts at optimal times for engagement
-6. Build narrative arcs throughout the month (launch sequences, awareness campaigns)
-7. Include trending content formats and seasonal relevance
-8. Every post should serve a purpose: attract, engage, convert, or retain`;
+GOAL-DRIVEN STRATEGY:
+You must analyze the customer's stated goals and reverse-engineer a content calendar that SPECIFICALLY achieves those goals. Map each goal to content pillars:
+- "Get more followers" → Heavy Reels strategy (60%+ Reels), Explore-optimized hashtags, collab-style content, trending audio hooks
+- "Increase engagement" → Carousel tips, poll Stories, controversial takes, "this or that" posts, question-based captions
+- "Launch a product" → Pre-launch teaser sequence (Day 1-7: mystery/behind-scenes → Day 8-14: reveal/features → Day 15+: testimonials/urgency/social proof)
+- "Boost sales/conversions" → Social proof posts, customer testimonials, limited-time offers, benefit-focused Reels, story-selling sequences, link-in-bio CTAs
+- "Build brand awareness" → Brand story series, founder story, behind-the-scenes, value-driven educational content, trending Reels with brand twist
+- "Grow community" → UGC reposts, Q&A sessions, member spotlights, interactive Stories, engagement challenges
+- For ANY goal: build a NARRATIVE ARC across the month, not random disconnected posts`;
 
-      const userPrompt = `Build a complete content calendar for ${month || 'this month'} ${year || new Date().getFullYear()}.
+      const userPrompt = `Build a RESULTS-DRIVEN content calendar for ${month || 'this month'} ${year || new Date().getFullYear()} that is ENGINEERED to achieve the customer's specific goals using Meta algorithm best practices.
 
-MONTHLY GOALS: ${goals}
+CUSTOMER'S GOALS: ${goals}
 
-PRODUCTS/SERVICES TO PROMOTE: ${products || 'General brand content'}
+PRODUCTS/SERVICES: ${products || 'General brand content'}
 
-Generate a strategic content calendar. Return ONLY a valid JSON array of scheduled posts. Each post must have:
+IMPORTANT INSTRUCTIONS:
+1. Analyze the goals above and create a strategic monthly roadmap. Week 1 should lay groundwork, Week 2 build momentum, Week 3 push hard, Week 4 close strong.
+2. Every single post must serve one of the customer's stated goals. Explain HOW it helps in the strategy_note.
+3. Use Meta algorithm hacks: Reels for reach, Carousels for saves, Stories for warmth, Feed posts for authority.
+4. Schedule at algorithm-optimal times (vary between 7AM, 9AM, 12PM, 5PM, 7PM).
+5. Include specific content ideas with full captions, relevant hashtags (3-5 per post), and clear CTAs.
+6. Build content sequences (not random posts): awareness → interest → desire → action across the month.
+7. For each platform (${platformList}), use the format that performs best on that platform.
+
+Return ONLY a valid JSON array. Each post:
 {
   "day": (number 1-31),
-  "time": "HH:MM" (24h format, optimal posting time),
+  "time": "HH:MM" (24h format),
   "type": "post" | "reel" | "story",
-  "platform": "${platforms?.[0] || 'Instagram'}",
-  "content": "The actual caption/content text with hashtags (ready to post)",
-  "strategy_note": "Brief note on why this post and its role in the monthly strategy"
+  "platform": "one of: ${platformList}",
+  "content": "Complete ready-to-post caption with hashtags and CTA",
+  "strategy_note": "How this post serves the customer's goal + which Meta algorithm signal it targets (e.g., 'Reel targeting Explore page for follower growth - uses trending format for high share rate')"
 }
 
-Generate 20-30 posts spread across the month. Vary the times, types, and platforms. Make the content specific to the brand's products and goals - not generic. Each caption should be complete and ready to copy-paste.`;
+Generate 25-30 posts. Make EVERY post specific to their products/services - zero generic filler. Each strategy_note must reference both the customer's goal AND the Meta algorithm principle being leveraged.`;
 
       const response = await openai.chat.completions.create({
         model: "gpt-5.2",
@@ -806,7 +842,7 @@ Generate 20-30 posts spread across the month. Vary the times, types, and platfor
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        max_completion_tokens: 4000,
+        max_completion_tokens: 8000,
       });
 
       const content = response.choices[0]?.message?.content || "";
