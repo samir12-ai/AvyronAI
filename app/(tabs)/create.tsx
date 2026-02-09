@@ -48,6 +48,21 @@ const contentTypes = [
   { id: 'caption', label: 'Caption', icon: 'text-outline' as const },
   { id: 'ad', label: 'Ad Copy', icon: 'megaphone-outline' as const },
   { id: 'story', label: 'Story', icon: 'layers-outline' as const },
+  { id: 'reel', label: 'Reels', icon: 'videocam-outline' as const },
+];
+
+const reelDurations = [
+  { id: '15-30 seconds', label: '15-30s' },
+  { id: '30-60 seconds', label: '30-60s' },
+  { id: '60-90 seconds', label: '60-90s' },
+];
+
+const reelGoals = [
+  { id: 'engagement', label: 'Engagement', icon: 'heart-outline' as const },
+  { id: 'awareness', label: 'Awareness', icon: 'eye-outline' as const },
+  { id: 'sales', label: 'Sales', icon: 'cart-outline' as const },
+  { id: 'education', label: 'Education', icon: 'school-outline' as const },
+  { id: 'viral', label: 'Go Viral', icon: 'trending-up-outline' as const },
 ];
 
 type GenerationMode = 'text-to-image' | 'image-to-image' | 'image-edit';
@@ -215,6 +230,10 @@ export default function CreateScreen() {
   const [topic, setTopic] = useState('');
   const [generatedContent, setGeneratedContent] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [reelDuration, setReelDuration] = useState('30-60 seconds');
+  const [reelGoal, setReelGoal] = useState('engagement');
+  const [reelScript, setReelScript] = useState<any>(null);
+  const [expandedScene, setExpandedScene] = useState<number | null>(null);
 
   const [genMode, setGenMode] = useState<GenerationMode>('text-to-image');
   const [posterTopic, setPosterTopic] = useState('');
@@ -238,20 +257,39 @@ export default function CreateScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsGenerating(true);
     setGeneratedContent('');
+    setReelScript(null);
 
     try {
-      const response = await apiRequest('POST', '/api/generate-content', {
-        topic,
-        contentType,
-        platform: platform[0],
-        brandName: brandProfile.name || 'our brand',
-        tone: brandProfile.tone || 'Professional',
-        targetAudience: brandProfile.targetAudience || 'general audience',
-        industry: brandProfile.industry || 'business',
-      });
-
-      const data = await response.json();
-      setGeneratedContent(data.content);
+      if (contentType === 'reel') {
+        const response = await apiRequest('POST', '/api/generate-reel-script', {
+          topic,
+          platform: platform[0],
+          brandName: brandProfile.name || 'our brand',
+          tone: brandProfile.tone || 'Professional',
+          targetAudience: brandProfile.targetAudience || 'general audience',
+          industry: brandProfile.industry || 'business',
+          reelDuration,
+          reelGoal,
+        });
+        const data = await response.json();
+        if (data.script) {
+          setReelScript(data.script);
+        } else if (data.rawContent) {
+          setGeneratedContent(data.rawContent);
+        }
+      } else {
+        const response = await apiRequest('POST', '/api/generate-content', {
+          topic,
+          contentType,
+          platform: platform[0],
+          brandName: brandProfile.name || 'our brand',
+          tone: brandProfile.tone || 'Professional',
+          targetAudience: brandProfile.targetAudience || 'general audience',
+          industry: brandProfile.industry || 'business',
+        });
+        const data = await response.json();
+        setGeneratedContent(data.content);
+      }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       console.error('Generation error:', error);
@@ -580,10 +618,14 @@ export default function CreateScreen() {
               </View>
 
               <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                <Text style={[styles.cardTitle, { color: colors.text }]}>Topic or Idea</Text>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>
+                  {contentType === 'reel' ? 'Reel Concept' : 'Topic or Idea'}
+                </Text>
                 <TextInput
                   style={[styles.input, styles.textArea, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-                  placeholder="Describe what you want to create..."
+                  placeholder={contentType === 'reel' 
+                    ? "Describe your reel idea... (e.g., 'Behind the scenes of our coffee roasting process')" 
+                    : "Describe what you want to create..."}
                   placeholderTextColor={colors.textMuted}
                   value={topic}
                   onChangeText={setTopic}
@@ -592,6 +634,54 @@ export default function CreateScreen() {
                   textAlignVertical="top"
                 />
               </View>
+
+              {contentType === 'reel' && (
+                <>
+                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                    <Text style={[styles.cardTitle, { color: colors.text }]}>Duration</Text>
+                    <View style={styles.reelOptionRow}>
+                      {reelDurations.map(d => (
+                        <Pressable
+                          key={d.id}
+                          onPress={() => { Haptics.selectionAsync(); setReelDuration(d.id); }}
+                          style={[
+                            styles.reelChip,
+                            { 
+                              backgroundColor: reelDuration === d.id ? colors.primary + '20' : colors.inputBackground,
+                              borderColor: reelDuration === d.id ? colors.primary : 'transparent',
+                            }
+                          ]}
+                        >
+                          <Ionicons name="time-outline" size={14} color={reelDuration === d.id ? colors.primary : colors.textMuted} />
+                          <Text style={[styles.reelChipText, { color: reelDuration === d.id ? colors.primary : colors.textMuted }]}>{d.label}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+
+                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                    <Text style={[styles.cardTitle, { color: colors.text }]}>Goal</Text>
+                    <View style={styles.reelOptionRow}>
+                      {reelGoals.map(g => (
+                        <Pressable
+                          key={g.id}
+                          onPress={() => { Haptics.selectionAsync(); setReelGoal(g.id); }}
+                          style={[
+                            styles.reelChip,
+                            { 
+                              backgroundColor: reelGoal === g.id ? colors.accent + '20' : colors.inputBackground,
+                              borderColor: reelGoal === g.id ? colors.accent : 'transparent',
+                            }
+                          ]}
+                        >
+                          <Ionicons name={g.icon} size={14} color={reelGoal === g.id ? colors.accent : colors.textMuted} />
+                          <Text style={[styles.reelChipText, { color: reelGoal === g.id ? colors.accent : colors.textMuted }]}>{g.label}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                </>
+              )}
 
               <Pressable
                 onPress={handleGenerate}
@@ -602,7 +692,7 @@ export default function CreateScreen() {
                 ]}
               >
                 <LinearGradient
-                  colors={colors.primaryGradient as [string, string]}
+                  colors={contentType === 'reel' ? ['#E1306C', '#833AB4'] as [string, string] : colors.primaryGradient as [string, string]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.gradientButton}
@@ -610,10 +700,10 @@ export default function CreateScreen() {
                   {isGenerating ? (
                     <LoadingSpinner size={20} color="#fff" />
                   ) : (
-                    <Ionicons name="sparkles" size={20} color="#fff" />
+                    <Ionicons name={contentType === 'reel' ? 'videocam' : 'sparkles'} size={20} color="#fff" />
                   )}
                   <Text style={styles.generateButtonText}>
-                    {isGenerating ? 'Generating...' : 'Generate Content'}
+                    {isGenerating ? 'Generating...' : contentType === 'reel' ? 'Generate Reel Script' : 'Generate Content'}
                   </Text>
                 </LinearGradient>
               </Pressable>
@@ -643,6 +733,267 @@ export default function CreateScreen() {
                   </View>
                 </View>
               ) : null}
+
+              {reelScript && (
+                <Animated.View entering={FadeInDown.duration(400)} style={[styles.reelScriptContainer, { backgroundColor: colors.card, borderColor: colors.accent }]}>
+                  {/* Title */}
+                  <LinearGradient colors={['#E1306C', '#833AB4']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.reelTitleBanner}>
+                    <Ionicons name="videocam" size={20} color="#fff" />
+                    <Text style={styles.reelTitleText}>{reelScript.title || 'Reel Script'}</Text>
+                  </LinearGradient>
+
+                  {/* Hook Section */}
+                  {reelScript.hook && (
+                    <View style={[styles.reelSection, { borderColor: colors.cardBorder }]}>
+                      <View style={styles.reelSectionHeader}>
+                        <View style={[styles.reelBadge, { backgroundColor: '#E1306C' }]}>
+                          <Ionicons name="flash" size={12} color="#fff" />
+                          <Text style={styles.reelBadgeText}>HOOK</Text>
+                        </View>
+                        <Text style={[styles.reelSectionNote, { color: colors.textMuted }]}>First 1.5 seconds</Text>
+                      </View>
+                      <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
+                        <Ionicons name="eye-outline" size={16} color={colors.accent} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Visual Hook</Text>
+                          <Text style={[styles.reelDetailValue, { color: colors.text }]}>{reelScript.hook.visual}</Text>
+                        </View>
+                      </View>
+                      <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
+                        <Ionicons name="text-outline" size={16} color="#E1306C" />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Text Overlay</Text>
+                          <Text style={[styles.reelHookOverlay, { color: colors.text }]}>{reelScript.hook.text_overlay}</Text>
+                        </View>
+                      </View>
+                      <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
+                        <Ionicons name="mic-outline" size={16} color="#833AB4" />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Voiceover</Text>
+                          <Text style={[styles.reelDetailValue, { color: colors.text }]}>"{reelScript.hook.voiceover}"</Text>
+                        </View>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Scenes */}
+                  {reelScript.scenes?.map((scene: any, idx: number) => (
+                    <Pressable
+                      key={idx}
+                      onPress={() => { Haptics.selectionAsync(); setExpandedScene(expandedScene === idx ? null : idx); }}
+                      style={[styles.reelSection, { borderColor: colors.cardBorder }]}
+                    >
+                      <View style={styles.reelSectionHeader}>
+                        <View style={[styles.reelBadge, { backgroundColor: colors.primary }]}>
+                          <Text style={styles.reelBadgeText}>SCENE {scene.scene_number || idx + 1}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Text style={[styles.reelSectionNote, { color: colors.textMuted }]}>{scene.duration}</Text>
+                          <Ionicons name={expandedScene === idx ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} />
+                        </View>
+                      </View>
+                      <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
+                        <Ionicons name="camera-outline" size={16} color={colors.accent} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Visual Direction</Text>
+                          <Text style={[styles.reelDetailValue, { color: colors.text }]}>{scene.visual_direction}</Text>
+                        </View>
+                      </View>
+                      {expandedScene === idx && (
+                        <>
+                          {scene.text_overlay && (
+                            <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
+                              <Ionicons name="text-outline" size={16} color="#E1306C" />
+                              <View style={{ flex: 1 }}>
+                                <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Text Overlay</Text>
+                                <Text style={[styles.reelDetailValue, { color: colors.text }]}>{scene.text_overlay}</Text>
+                              </View>
+                            </View>
+                          )}
+                          {scene.voiceover && (
+                            <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
+                              <Ionicons name="mic-outline" size={16} color="#833AB4" />
+                              <View style={{ flex: 1 }}>
+                                <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Voiceover</Text>
+                                <Text style={[styles.reelDetailValue, { color: colors.text }]}>"{scene.voiceover}"</Text>
+                              </View>
+                            </View>
+                          )}
+                          {scene.transition && (
+                            <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
+                              <Ionicons name="swap-horizontal-outline" size={16} color={colors.primary} />
+                              <View style={{ flex: 1 }}>
+                                <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Transition</Text>
+                                <Text style={[styles.reelDetailValue, { color: colors.text }]}>{scene.transition}</Text>
+                              </View>
+                            </View>
+                          )}
+                          {scene.b_roll_suggestion && (
+                            <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
+                              <Ionicons name="film-outline" size={16} color={colors.textMuted} />
+                              <View style={{ flex: 1 }}>
+                                <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>B-Roll</Text>
+                                <Text style={[styles.reelDetailValue, { color: colors.text }]}>{scene.b_roll_suggestion}</Text>
+                              </View>
+                            </View>
+                          )}
+                        </>
+                      )}
+                    </Pressable>
+                  ))}
+
+                  {/* Closing */}
+                  {reelScript.closing && (
+                    <View style={[styles.reelSection, { borderColor: colors.cardBorder }]}>
+                      <View style={styles.reelSectionHeader}>
+                        <View style={[styles.reelBadge, { backgroundColor: '#2ec4b6' }]}>
+                          <Ionicons name="flag" size={12} color="#fff" />
+                          <Text style={styles.reelBadgeText}>CLOSING</Text>
+                        </View>
+                      </View>
+                      <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
+                        <Ionicons name="camera-outline" size={16} color={colors.accent} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Visual</Text>
+                          <Text style={[styles.reelDetailValue, { color: colors.text }]}>{reelScript.closing.visual}</Text>
+                        </View>
+                      </View>
+                      <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
+                        <Ionicons name="megaphone-outline" size={16} color="#E1306C" />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>CTA</Text>
+                          <Text style={[styles.reelHookOverlay, { color: colors.text }]}>{reelScript.closing.cta_text}</Text>
+                          <Text style={[styles.reelDetailValue, { color: colors.textMuted }]}>"{reelScript.closing.cta_voiceover}"</Text>
+                        </View>
+                      </View>
+                      {reelScript.closing.loop_trick && (
+                        <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
+                          <Ionicons name="repeat-outline" size={16} color="#833AB4" />
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Loop Trick</Text>
+                            <Text style={[styles.reelDetailValue, { color: colors.text }]}>{reelScript.closing.loop_trick}</Text>
+                          </View>
+                        </View>
+                      )}
+                    </View>
+                  )}
+
+                  {/* Production Notes */}
+                  {reelScript.production_notes && (
+                    <View style={[styles.reelSection, { borderColor: colors.cardBorder }]}>
+                      <View style={styles.reelSectionHeader}>
+                        <View style={[styles.reelBadge, { backgroundColor: '#555' }]}>
+                          <Ionicons name="construct" size={12} color="#fff" />
+                          <Text style={styles.reelBadgeText}>PRODUCTION</Text>
+                        </View>
+                      </View>
+                      {reelScript.production_notes.estimated_duration && (
+                        <View style={styles.reelProdRow}>
+                          <Ionicons name="time-outline" size={14} color={colors.textMuted} />
+                          <Text style={[styles.reelProdLabel, { color: colors.textMuted }]}>Duration:</Text>
+                          <Text style={[styles.reelProdValue, { color: colors.text }]}>{reelScript.production_notes.estimated_duration}</Text>
+                        </View>
+                      )}
+                      {reelScript.production_notes.audio_direction && (
+                        <View style={styles.reelProdRow}>
+                          <Ionicons name="musical-notes-outline" size={14} color={colors.textMuted} />
+                          <Text style={[styles.reelProdLabel, { color: colors.textMuted }]}>Audio:</Text>
+                          <Text style={[styles.reelProdValue, { color: colors.text }]}>{reelScript.production_notes.audio_direction}</Text>
+                        </View>
+                      )}
+                      {reelScript.production_notes.lighting && (
+                        <View style={styles.reelProdRow}>
+                          <Ionicons name="sunny-outline" size={14} color={colors.textMuted} />
+                          <Text style={[styles.reelProdLabel, { color: colors.textMuted }]}>Lighting:</Text>
+                          <Text style={[styles.reelProdValue, { color: colors.text }]}>{reelScript.production_notes.lighting}</Text>
+                        </View>
+                      )}
+                      {reelScript.production_notes.props_needed && (
+                        <View style={styles.reelProdRow}>
+                          <Ionicons name="cube-outline" size={14} color={colors.textMuted} />
+                          <Text style={[styles.reelProdLabel, { color: colors.textMuted }]}>Props:</Text>
+                          <Text style={[styles.reelProdValue, { color: colors.text }]}>{reelScript.production_notes.props_needed}</Text>
+                        </View>
+                      )}
+                      {reelScript.production_notes.best_posting_time && (
+                        <View style={styles.reelProdRow}>
+                          <Ionicons name="calendar-outline" size={14} color={colors.textMuted} />
+                          <Text style={[styles.reelProdLabel, { color: colors.textMuted }]}>Best Time:</Text>
+                          <Text style={[styles.reelProdValue, { color: colors.text }]}>{reelScript.production_notes.best_posting_time}</Text>
+                        </View>
+                      )}
+                      {reelScript.production_notes.hashtag_strategy && (
+                        <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
+                          <Ionicons name="pricetag-outline" size={14} color={colors.accent} />
+                          <Text style={[styles.reelDetailValue, { color: colors.accent }]}>{reelScript.production_notes.hashtag_strategy}</Text>
+                        </View>
+                      )}
+                    </View>
+                  )}
+
+                  {/* Algorithm Optimization */}
+                  {reelScript.algorithm_optimization && (
+                    <View style={[styles.reelSection, { borderColor: colors.cardBorder }]}>
+                      <View style={styles.reelSectionHeader}>
+                        <LinearGradient colors={['#E1306C', '#833AB4']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.reelBadge, { borderWidth: 0 }]}>
+                          <Ionicons name="analytics" size={12} color="#fff" />
+                          <Text style={styles.reelBadgeText}>META ALGORITHM</Text>
+                        </LinearGradient>
+                      </View>
+                      {reelScript.algorithm_optimization.share_trigger && (
+                        <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
+                          <Ionicons name="share-social-outline" size={16} color="#E1306C" />
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Share Trigger</Text>
+                            <Text style={[styles.reelDetailValue, { color: colors.text }]}>{reelScript.algorithm_optimization.share_trigger}</Text>
+                          </View>
+                        </View>
+                      )}
+                      {reelScript.algorithm_optimization.save_trigger && (
+                        <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
+                          <Ionicons name="bookmark-outline" size={16} color="#833AB4" />
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Save Trigger</Text>
+                            <Text style={[styles.reelDetailValue, { color: colors.text }]}>{reelScript.algorithm_optimization.save_trigger}</Text>
+                          </View>
+                        </View>
+                      )}
+                      {reelScript.algorithm_optimization.engagement_prompt && (
+                        <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
+                          <Ionicons name="chatbubble-outline" size={16} color="#2ec4b6" />
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Engagement Prompt</Text>
+                            <Text style={[styles.reelDetailValue, { color: colors.text }]}>{reelScript.algorithm_optimization.engagement_prompt}</Text>
+                          </View>
+                        </View>
+                      )}
+                      {reelScript.algorithm_optimization.repost_strategy && (
+                        <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
+                          <Ionicons name="layers-outline" size={16} color={colors.primary} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Repost Strategy</Text>
+                            <Text style={[styles.reelDetailValue, { color: colors.text }]}>{reelScript.algorithm_optimization.repost_strategy}</Text>
+                          </View>
+                        </View>
+                      )}
+                      {reelScript.algorithm_optimization.retention_hooks?.length > 0 && (
+                        <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground, flexDirection: 'column', alignItems: 'flex-start' }]}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                            <Ionicons name="pulse-outline" size={16} color="#E1306C" />
+                            <Text style={[styles.reelDetailLabel, { color: colors.textMuted, marginBottom: 0 }]}>Retention Hooks</Text>
+                          </View>
+                          {reelScript.algorithm_optimization.retention_hooks.map((hook: string, i: number) => (
+                            <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, paddingLeft: 4, marginBottom: 4 }}>
+                              <Text style={{ color: colors.accent, fontSize: 12 }}>{i + 1}.</Text>
+                              <Text style={[styles.reelDetailValue, { color: colors.text, flex: 1 }]}>{hook}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  )}
+                </Animated.View>
+              )}
             </>
           ) : (
             <>
@@ -1074,6 +1425,112 @@ const styles = StyleSheet.create({
   contentTypeLabel: {
     fontSize: 13,
     fontFamily: 'Inter_500Medium',
+  },
+  reelOptionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  reelChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1.5,
+  },
+  reelChipText: {
+    fontSize: 13,
+    fontFamily: 'Inter_500Medium',
+  },
+  reelScriptContainer: {
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  reelTitleBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  reelTitleText: {
+    fontSize: 17,
+    fontFamily: 'Inter_700Bold',
+    color: '#fff',
+    flex: 1,
+  },
+  reelSection: {
+    padding: 14,
+    borderBottomWidth: 1,
+    gap: 8,
+  },
+  reelSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  reelBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  reelBadgeText: {
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+    color: '#fff',
+    letterSpacing: 0.5,
+  },
+  reelSectionNote: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+  },
+  reelDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    padding: 12,
+    borderRadius: 10,
+  },
+  reelDetailLabel: {
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+    marginBottom: 3,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.3,
+  },
+  reelDetailValue: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    lineHeight: 20,
+  },
+  reelHookOverlay: {
+    fontSize: 16,
+    fontFamily: 'Inter_700Bold',
+    lineHeight: 22,
+  },
+  reelProdRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    flexWrap: 'wrap',
+  },
+  reelProdLabel: {
+    fontSize: 13,
+    fontFamily: 'Inter_500Medium',
+  },
+  reelProdValue: {
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+    flex: 1,
   },
   input: {
     borderWidth: 1,
