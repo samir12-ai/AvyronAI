@@ -8,39 +8,42 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 
 import Colors from "@/constants/colors";
+import { useLanguage } from "@/context/LanguageContext";
 
 function NativeTabLayout() {
+  const { t } = useLanguage();
   return (
     <NativeTabs>
       <NativeTabs.Trigger name="index">
         <Icon sf={{ default: "chart.bar", selected: "chart.bar.fill" }} />
-        <Label>Dashboard</Label>
+        <Label>{t('tabs.dashboard')}</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="create">
         <Icon sf={{ default: "sparkles", selected: "sparkles" }} />
-        <Label>Create</Label>
+        <Label>{t('tabs.create')}</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="studio">
         <Icon sf={{ default: "film", selected: "film.fill" }} />
-        <Label>Studio</Label>
+        <Label>{t('tabs.studio')}</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="calendar">
         <Icon sf={{ default: "calendar", selected: "calendar" }} />
-        <Label>Calendar</Label>
+        <Label>{t('tabs.calendar')}</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="campaigns">
         <Icon sf={{ default: "megaphone", selected: "megaphone.fill" }} />
-        <Label>Campaigns</Label>
+        <Label>{t('tabs.campaigns')}</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="settings">
         <Icon sf={{ default: "gearshape", selected: "gearshape.fill" }} />
-        <Label>Settings</Label>
+        <Label>{t('tabs.settings')}</Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
 }
 
 function ClassicTabLayout() {
+  const { t } = useLanguage();
   const colorScheme = useColorScheme();
   const safeAreaInsets = useSafeAreaInsets();
   const isDark = colorScheme === "dark";
@@ -82,7 +85,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Dashboard",
+          title: t('tabs.dashboard'),
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "stats-chart" : "stats-chart-outline"} size={22} color={color} />
           ),
@@ -91,7 +94,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="create"
         options={{
-          title: "Create",
+          title: t('tabs.create'),
           tabBarIcon: ({ color }) => (
             <Ionicons name="sparkles" size={22} color={color} />
           ),
@@ -100,7 +103,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="studio"
         options={{
-          title: "Studio",
+          title: t('tabs.studio'),
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "film" : "film-outline"} size={22} color={color} />
           ),
@@ -109,7 +112,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="calendar"
         options={{
-          title: "Calendar",
+          title: t('tabs.calendar'),
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "calendar" : "calendar-outline"} size={22} color={color} />
           ),
@@ -118,7 +121,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="campaigns"
         options={{
-          title: "Campaigns",
+          title: t('tabs.campaigns'),
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "megaphone" : "megaphone-outline"} size={22} color={color} />
           ),
@@ -127,7 +130,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="settings"
         options={{
-          title: "Settings",
+          title: t('tabs.settings'),
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "settings" : "settings-outline"} size={22} color={color} />
           ),

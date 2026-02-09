@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { CampaignCard } from '@/components/CampaignCard';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import { AdPreview } from '@/components/AdPreview';
@@ -25,7 +26,7 @@ import { generateId } from '@/lib/storage';
 import { apiRequest } from '@/lib/query-client';
 import type { Campaign, Ad } from '@/lib/types';
 
-const ctaOptions = ['Learn More', 'Shop Now', 'Sign Up', 'Get Started', 'Book Now', 'Contact Us', 'Download'];
+const ctaOptionKeys = ['campaigns.learnMore', 'campaigns.shopNow', 'campaigns.signUp', 'campaigns.getStarted', 'campaigns.bookNow', 'campaigns.contactUs', 'campaigns.download'];
 
 export default function CampaignsScreen() {
   const colorScheme = useColorScheme();
@@ -33,6 +34,9 @@ export default function CampaignsScreen() {
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
   const { campaigns, addCampaign, updateCampaign, ads, addAd, brandProfile } = useApp();
+  const { t } = useLanguage();
+
+  const ctaOptions = ctaOptionKeys.map(key => t(key));
 
   const [activeTab, setActiveTab] = useState<'campaigns' | 'ads'>('campaigns');
   const [showCampaignModal, setShowCampaignModal] = useState(false);
@@ -51,11 +55,11 @@ export default function CampaignsScreen() {
 
   const handleCreateCampaign = async () => {
     if (!name.trim()) {
-      Alert.alert('Missing Name', 'Please enter a campaign name.');
+      Alert.alert(t('campaigns.missingName'), t('campaigns.enterCampaignName'));
       return;
     }
     if (!budget.trim() || isNaN(Number(budget))) {
-      Alert.alert('Invalid Budget', 'Please enter a valid budget amount.');
+      Alert.alert(t('campaigns.invalidBudget'), t('campaigns.enterValidBudget'));
       return;
     }
 
@@ -101,7 +105,7 @@ export default function CampaignsScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       console.error('Ad generation error:', error);
-      Alert.alert('Error', 'Failed to generate ad copy. Please try again.');
+      Alert.alert(t('campaigns.error'), t('campaigns.generateAdError'));
     } finally {
       setIsGenerating(false);
     }
@@ -109,11 +113,11 @@ export default function CampaignsScreen() {
 
   const handleCreateAd = async () => {
     if (!adHeadline.trim() || !adBody.trim()) {
-      Alert.alert('Missing Content', 'Please add headline and body text.');
+      Alert.alert(t('campaigns.missingContent'), t('campaigns.addHeadlineBody'));
       return;
     }
     if (!adBudget.trim() || isNaN(Number(adBudget))) {
-      Alert.alert('Invalid Budget', 'Please enter a valid budget amount.');
+      Alert.alert(t('campaigns.invalidBudget'), t('campaigns.enterValidBudget'));
       return;
     }
 
@@ -142,7 +146,7 @@ export default function CampaignsScreen() {
     setAdCta('Learn More');
     setAdPlatforms(['Instagram', 'Facebook']);
     setAdBudget('');
-    Alert.alert('Success', `Ad created and will be published across ${adPlatforms.length} platform${adPlatforms.length > 1 ? 's' : ''}.`);
+    Alert.alert(t('campaigns.success'), t('campaigns.adCreatedSuccess'));
   };
 
   const handleToggle = async (campaign: Campaign) => {
@@ -174,9 +178,9 @@ export default function CampaignsScreen() {
       >
         <View style={styles.header}>
           <View>
-            <Text style={[styles.title, { color: colors.text }]}>Ads Manager</Text>
+            <Text style={[styles.title, { color: colors.text }]}>{t('campaigns.title')}</Text>
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-              Manage campaigns & cross-platform ads
+              {t('campaigns.subtitle')}
             </Text>
           </View>
         </View>
@@ -200,7 +204,7 @@ export default function CampaignsScreen() {
               styles.tabText,
               { color: activeTab === 'campaigns' ? '#fff' : colors.textMuted }
             ]}>
-              Campaigns
+              {t('campaigns.campaignsTab')}
             </Text>
           </Pressable>
           <Pressable
@@ -221,7 +225,7 @@ export default function CampaignsScreen() {
               styles.tabText,
               { color: activeTab === 'ads' ? '#fff' : colors.textMuted }
             ]}>
-              Cross-Platform Ads
+              {t('campaigns.crossPlatformAds')}
             </Text>
           </Pressable>
         </View>
@@ -245,13 +249,13 @@ export default function CampaignsScreen() {
                 style={styles.gradientButton}
               >
                 <Ionicons name="add" size={20} color="#fff" />
-                <Text style={styles.createButtonText}>New Campaign</Text>
+                <Text style={styles.createButtonText}>{t('campaigns.newCampaign')}</Text>
               </LinearGradient>
             </Pressable>
 
             {activeCampaigns.length > 0 && (
               <View style={styles.section}>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Active Campaigns</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('campaigns.activeCampaigns')}</Text>
                 <View style={styles.campaignList}>
                   {activeCampaigns.map(campaign => (
                     <CampaignCard
@@ -268,7 +272,7 @@ export default function CampaignsScreen() {
             {otherCampaigns.length > 0 && (
               <View style={styles.section}>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                  {activeCampaigns.length > 0 ? 'Other Campaigns' : 'All Campaigns'}
+                  {activeCampaigns.length > 0 ? t('campaigns.otherCampaigns') : t('campaigns.allCampaigns')}
                 </Text>
                 <View style={styles.campaignList}>
                   {otherCampaigns.map(campaign => (
@@ -286,9 +290,9 @@ export default function CampaignsScreen() {
             {campaigns.length === 0 && (
               <View style={[styles.emptyState, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
                 <Ionicons name="megaphone-outline" size={48} color={colors.textMuted} />
-                <Text style={[styles.emptyTitle, { color: colors.text }]}>No campaigns yet</Text>
+                <Text style={[styles.emptyTitle, { color: colors.text }]}>{t('campaigns.noCampaigns')}</Text>
                 <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
-                  Create your first campaign to start advertising
+                  {t('campaigns.noCampaignsDesc')}
                 </Text>
               </View>
             )}
@@ -312,13 +316,13 @@ export default function CampaignsScreen() {
                 style={styles.gradientButton}
               >
                 <Ionicons name="sparkles" size={20} color="#fff" />
-                <Text style={styles.createButtonText}>Create Cross-Platform Ad</Text>
+                <Text style={styles.createButtonText}>{t('campaigns.createCrossPlatformAd')}</Text>
               </LinearGradient>
             </Pressable>
 
             {ads.length > 0 ? (
               <View style={styles.section}>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Your Ads</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('campaigns.yourAds')}</Text>
                 <View style={styles.adsList}>
                   {ads.map(ad => (
                     <View 
@@ -354,15 +358,15 @@ export default function CampaignsScreen() {
                       <View style={styles.adMetrics}>
                         <View style={styles.adMetric}>
                           <Text style={[styles.adMetricValue, { color: colors.text }]}>{ad.impressions.toLocaleString()}</Text>
-                          <Text style={[styles.adMetricLabel, { color: colors.textMuted }]}>Impressions</Text>
+                          <Text style={[styles.adMetricLabel, { color: colors.textMuted }]}>{t('campaigns.impressions')}</Text>
                         </View>
                         <View style={styles.adMetric}>
                           <Text style={[styles.adMetricValue, { color: colors.text }]}>{ad.clicks.toLocaleString()}</Text>
-                          <Text style={[styles.adMetricLabel, { color: colors.textMuted }]}>Clicks</Text>
+                          <Text style={[styles.adMetricLabel, { color: colors.textMuted }]}>{t('campaigns.clicks')}</Text>
                         </View>
                         <View style={styles.adMetric}>
                           <Text style={[styles.adMetricValue, { color: colors.text }]}>${ad.spent}</Text>
-                          <Text style={[styles.adMetricLabel, { color: colors.textMuted }]}>Spent</Text>
+                          <Text style={[styles.adMetricLabel, { color: colors.textMuted }]}>{t('campaigns.spent')}</Text>
                         </View>
                       </View>
                     </View>
@@ -372,9 +376,9 @@ export default function CampaignsScreen() {
             ) : (
               <View style={[styles.emptyState, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
                 <Ionicons name="layers-outline" size={48} color={colors.textMuted} />
-                <Text style={[styles.emptyTitle, { color: colors.text }]}>No cross-platform ads</Text>
+                <Text style={[styles.emptyTitle, { color: colors.text }]}>{t('campaigns.noAds')}</Text>
                 <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
-                  Create one ad and publish it across all your platforms
+                  {t('campaigns.noAdsDesc')}
                 </Text>
               </View>
             )}
@@ -393,7 +397,7 @@ export default function CampaignsScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.background }]}>
             <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>New Campaign</Text>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>{t('campaigns.newCampaign')}</Text>
               <Pressable onPress={() => setShowCampaignModal(false)}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </Pressable>
@@ -401,7 +405,7 @@ export default function CampaignsScreen() {
 
             <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
               <View style={styles.inputGroup}>
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Campaign Name</Text>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>{t('campaigns.campaignName')}</Text>
                 <TextInput
                   style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
                   placeholder="e.g., Summer Sale 2025"
@@ -412,7 +416,7 @@ export default function CampaignsScreen() {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Budget ($)</Text>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>{t('campaigns.budget')}</Text>
                 <TextInput
                   style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
                   placeholder="e.g., 1000"
@@ -424,7 +428,7 @@ export default function CampaignsScreen() {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Platform</Text>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>{t('create.platform')}</Text>
                 <PlatformPicker selected={platform} onChange={setPlatform} single />
               </View>
             </ScrollView>
@@ -439,7 +443,7 @@ export default function CampaignsScreen() {
                 end={{ x: 1, y: 0 }}
                 style={styles.gradientButton}
               >
-                <Text style={styles.createButtonText}>Create Campaign</Text>
+                <Text style={styles.createButtonText}>{t('campaigns.createCampaign')}</Text>
               </LinearGradient>
             </Pressable>
           </View>
@@ -455,7 +459,7 @@ export default function CampaignsScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, styles.adModal, { backgroundColor: colors.background }]}>
             <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Create Cross-Platform Ad</Text>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>{t('campaigns.createCrossPlatformAd')}</Text>
               <Pressable onPress={() => setShowAdModal(false)}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </Pressable>
@@ -463,7 +467,7 @@ export default function CampaignsScreen() {
 
             <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
               <View style={styles.inputGroup}>
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Target Platforms</Text>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>{t('campaigns.targetPlatforms')}</Text>
                 <PlatformPicker selected={adPlatforms} onChange={setAdPlatforms} />
               </View>
 
@@ -478,12 +482,12 @@ export default function CampaignsScreen() {
                   <Ionicons name="sparkles" size={18} color={colors.accent} />
                 )}
                 <Text style={[styles.generateBtnText, { color: colors.accent }]}>
-                  {isGenerating ? 'Generating...' : 'Generate with AI'}
+                  {isGenerating ? t('create.generating') : t('campaigns.generateWithAI')}
                 </Text>
               </Pressable>
 
               <View style={styles.inputGroup}>
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Headline</Text>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>{t('campaigns.headline')}</Text>
                 <TextInput
                   style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
                   placeholder="Catchy headline for your ad"
@@ -494,7 +498,7 @@ export default function CampaignsScreen() {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Ad Copy</Text>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>{t('campaigns.adCopyLabel')}</Text>
                 <TextInput
                   style={[styles.input, styles.textArea, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
                   placeholder="Compelling description for your ad..."
@@ -508,7 +512,7 @@ export default function CampaignsScreen() {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Call to Action</Text>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>{t('campaigns.callToAction')}</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                   <View style={styles.ctaRow}>
                     {ctaOptions.map(cta => (
@@ -536,7 +540,7 @@ export default function CampaignsScreen() {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Daily Budget ($)</Text>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>{t('campaigns.dailyBudget')}</Text>
                 <TextInput
                   style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
                   placeholder="e.g., 50"
@@ -568,7 +572,7 @@ export default function CampaignsScreen() {
                 style={styles.gradientButton}
               >
                 <Ionicons name="rocket" size={18} color="#fff" />
-                <Text style={styles.createButtonText}>Launch on {adPlatforms.length} Platform{adPlatforms.length > 1 ? 's' : ''}</Text>
+                <Text style={styles.createButtonText}>{t('campaigns.createAd')}</Text>
               </LinearGradient>
             </Pressable>
           </View>

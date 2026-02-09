@@ -35,6 +35,7 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { generateId } from '@/lib/storage';
@@ -43,12 +44,12 @@ import type { ContentItem, MediaItem } from '@/lib/types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-const contentTypes = [
-  { id: 'post', label: 'Post', icon: 'document-text-outline' as const },
-  { id: 'caption', label: 'Caption', icon: 'text-outline' as const },
-  { id: 'ad', label: 'Ad Copy', icon: 'megaphone-outline' as const },
-  { id: 'story', label: 'Story', icon: 'layers-outline' as const },
-  { id: 'reel', label: 'Reels', icon: 'videocam-outline' as const },
+const contentTypesDef = [
+  { id: 'post', labelKey: 'create.post', icon: 'document-text-outline' as const },
+  { id: 'caption', labelKey: 'create.caption', icon: 'text-outline' as const },
+  { id: 'ad', labelKey: 'create.adCopy', icon: 'megaphone-outline' as const },
+  { id: 'story', labelKey: 'create.story', icon: 'layers-outline' as const },
+  { id: 'reel', labelKey: 'create.reels', icon: 'videocam-outline' as const },
 ];
 
 const reelDurations = [
@@ -57,45 +58,45 @@ const reelDurations = [
   { id: '60-90 seconds', label: '60-90s' },
 ];
 
-const reelGoals = [
-  { id: 'engagement', label: 'Engagement', icon: 'heart-outline' as const },
-  { id: 'awareness', label: 'Awareness', icon: 'eye-outline' as const },
-  { id: 'sales', label: 'Sales', icon: 'cart-outline' as const },
-  { id: 'education', label: 'Education', icon: 'school-outline' as const },
-  { id: 'viral', label: 'Go Viral', icon: 'trending-up-outline' as const },
+const reelGoalsDef = [
+  { id: 'engagement', labelKey: 'create.engagement', icon: 'heart-outline' as const },
+  { id: 'awareness', labelKey: 'create.awareness', icon: 'eye-outline' as const },
+  { id: 'sales', labelKey: 'create.sales', icon: 'cart-outline' as const },
+  { id: 'education', labelKey: 'create.education', icon: 'school-outline' as const },
+  { id: 'viral', labelKey: 'create.viral', icon: 'trending-up-outline' as const },
 ];
 
 type GenerationMode = 'text-to-image' | 'image-to-image' | 'image-edit';
 
-const generationModes = [
-  { id: 'text-to-image' as GenerationMode, label: 'Create', icon: 'sparkles' as const, description: 'From text prompt' },
-  { id: 'image-to-image' as GenerationMode, label: 'Transform', icon: 'color-wand' as const, description: 'Reimagine a photo' },
-  { id: 'image-edit' as GenerationMode, label: 'Edit', icon: 'crop' as const, description: 'Modify an image' },
+const generationModesDef = [
+  { id: 'text-to-image' as GenerationMode, labelKey: 'create.createMode', icon: 'sparkles' as const, descKey: 'create.fromTextPrompt' },
+  { id: 'image-to-image' as GenerationMode, labelKey: 'create.transformMode', icon: 'color-wand' as const, descKey: 'create.reimaginePhoto' },
+  { id: 'image-edit' as GenerationMode, labelKey: 'create.editMode', icon: 'crop' as const, descKey: 'create.modifyImage' },
 ];
 
-const visualStyles = [
-  { id: 'cinematic', label: 'Cinematic', gradient: ['#1a1a2e', '#16213e', '#0f3460'] as const, icon: 'film-outline' as const },
-  { id: 'professional', label: 'Professional', gradient: ['#2c3e50', '#3498db', '#2980b9'] as const, icon: 'briefcase-outline' as const },
-  { id: 'commercial', label: 'Commercial', gradient: ['#e74c3c', '#c0392b', '#e74c3c'] as const, icon: 'storefront-outline' as const },
-  { id: 'indie', label: 'Indie', gradient: ['#f39c12', '#e67e22', '#d35400'] as const, icon: 'leaf-outline' as const },
-  { id: 'minimal', label: 'Minimal', gradient: ['#ecf0f1', '#bdc3c7', '#95a5a6'] as const, icon: 'remove-outline' as const },
-  { id: 'vibrant', label: 'Vibrant', gradient: ['#8e44ad', '#9b59b6', '#e91e63'] as const, icon: 'color-palette-outline' as const },
+const visualStylesDef = [
+  { id: 'cinematic', labelKey: 'create.cinematic', gradient: ['#1a1a2e', '#16213e', '#0f3460'] as const, icon: 'film-outline' as const },
+  { id: 'professional', labelKey: 'create.professional', gradient: ['#2c3e50', '#3498db', '#2980b9'] as const, icon: 'briefcase-outline' as const },
+  { id: 'commercial', labelKey: 'create.commercial', gradient: ['#e74c3c', '#c0392b', '#e74c3c'] as const, icon: 'storefront-outline' as const },
+  { id: 'indie', labelKey: 'create.indie', gradient: ['#f39c12', '#e67e22', '#d35400'] as const, icon: 'leaf-outline' as const },
+  { id: 'minimal', labelKey: 'create.minimal', gradient: ['#ecf0f1', '#bdc3c7', '#95a5a6'] as const, icon: 'remove-outline' as const },
+  { id: 'vibrant', labelKey: 'create.vibrant', gradient: ['#8e44ad', '#9b59b6', '#e91e63'] as const, icon: 'color-palette-outline' as const },
 ];
 
-const aspectRatios = [
-  { id: '1:1', label: 'Square', width: 1, height: 1, icon: 'square-outline' as const },
-  { id: '4:5', label: 'Portrait', width: 4, height: 5, icon: 'phone-portrait-outline' as const },
-  { id: '16:9', label: 'Landscape', width: 16, height: 9, icon: 'tablet-landscape-outline' as const },
-  { id: '9:16', label: 'Story', width: 9, height: 16, icon: 'phone-portrait-outline' as const },
+const aspectRatiosDef = [
+  { id: '1:1', labelKey: 'create.square', width: 1, height: 1, icon: 'square-outline' as const },
+  { id: '4:5', labelKey: 'create.portrait', width: 4, height: 5, icon: 'phone-portrait-outline' as const },
+  { id: '16:9', labelKey: 'create.landscape', width: 16, height: 9, icon: 'tablet-landscape-outline' as const },
+  { id: '9:16', labelKey: 'create.storyRatio', width: 9, height: 16, icon: 'phone-portrait-outline' as const },
 ];
 
-const moodOptions = [
-  { id: 'energetic', label: 'Energetic' },
-  { id: 'calm', label: 'Calm' },
-  { id: 'dramatic', label: 'Dramatic' },
-  { id: 'playful', label: 'Playful' },
-  { id: 'luxurious', label: 'Luxurious' },
-  { id: 'warm', label: 'Warm' },
+const moodOptionsDef = [
+  { id: 'energetic', labelKey: 'create.energetic' },
+  { id: 'calm', labelKey: 'create.calm' },
+  { id: 'dramatic', labelKey: 'create.dramatic' },
+  { id: 'playful', labelKey: 'create.playful' },
+  { id: 'luxurious', labelKey: 'create.luxurious' },
+  { id: 'warm', labelKey: 'create.warm' },
 ];
 
 interface GeneratedImage {
@@ -157,11 +158,12 @@ function DesignerLoadingOverlay({ isVisible }: { isVisible: boolean }) {
   );
 }
 
-function StyleCard({ style, isSelected, onSelect, colors }: {
-  style: typeof visualStyles[0];
+function StyleCard({ style, isSelected, onSelect, colors, label }: {
+  style: typeof visualStylesDef[0];
   isSelected: boolean;
   onSelect: () => void;
   colors: any;
+  label: string;
 }) {
   return (
     <Pressable onPress={onSelect} style={styles.styleCardWrapper}>
@@ -182,7 +184,7 @@ function StyleCard({ style, isSelected, onSelect, colors }: {
         )}
       </LinearGradient>
       <Text style={[styles.styleCardLabel, { color: isSelected ? colors.accent : colors.textSecondary }]}>
-        {style.label}
+        {label}
       </Text>
     </Pressable>
   );
@@ -222,6 +224,14 @@ export default function CreateScreen() {
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
   const { brandProfile, addContentItem, addMediaItem } = useApp();
+  const { t } = useLanguage();
+
+  const contentTypes = contentTypesDef.map(ct => ({ ...ct, label: t(ct.labelKey) }));
+  const reelGoals = reelGoalsDef.map(g => ({ ...g, label: t(g.labelKey) }));
+  const generationModes = generationModesDef.map(m => ({ ...m, label: t(m.labelKey), description: t(m.descKey) }));
+  const visualStyles = visualStylesDef.map(s => ({ ...s, label: t(s.labelKey) }));
+  const aspectRatios = aspectRatiosDef.map(r => ({ ...r, label: t(r.labelKey) }));
+  const moodOptions = moodOptionsDef.map(m => ({ ...m, label: t(m.labelKey) }));
 
   const [activeTab, setActiveTab] = useState<'content' | 'designer'>('content');
   
@@ -250,7 +260,7 @@ export default function CreateScreen() {
 
   const handleGenerate = async () => {
     if (!topic.trim()) {
-      Alert.alert('Missing Topic', 'Please enter a topic or idea for your content.');
+      Alert.alert(t('create.errorTitle'), t('create.topicPlaceholder'));
       return;
     }
 
@@ -293,7 +303,7 @@ export default function CreateScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       console.error('Generation error:', error);
-      Alert.alert('Error', 'Failed to generate content. Please try again.');
+      Alert.alert(t('create.errorTitle'), t('create.errorGenerate'));
     } finally {
       setIsGenerating(false);
     }
@@ -301,7 +311,7 @@ export default function CreateScreen() {
 
   const handleSave = async (status: 'draft' | 'scheduled') => {
     if (!generatedContent.trim()) {
-      Alert.alert('No Content', 'Please generate content first.');
+      Alert.alert(t('create.noContent'), t('create.generateFirst'));
       return;
     }
 
@@ -321,7 +331,7 @@ export default function CreateScreen() {
     setTopic('');
     setGeneratedContent('');
     
-    Alert.alert('Saved!', `Content saved as ${status}.`);
+    Alert.alert(t('create.savedToGallery'), `Content saved as ${status}.`);
   };
 
   const pickPhoto = async (index: number) => {
@@ -526,9 +536,9 @@ export default function CreateScreen() {
           ]}
           keyboardShouldPersistTaps="handled"
         >
-          <Text style={[styles.title, { color: colors.text }]}>Content Studio</Text>
+          <Text style={[styles.title, { color: colors.text }]}>{t('create.title')}</Text>
           <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-            Create AI-powered content and designs
+            {t('create.subtitle')}
           </Text>
 
           <View style={styles.tabBar}>
@@ -550,7 +560,7 @@ export default function CreateScreen() {
                 styles.tabText,
                 { color: activeTab === 'content' ? '#fff' : colors.textMuted }
               ]}>
-                AI Writer
+                {t('create.aiWriter')}
               </Text>
             </Pressable>
             <Pressable
@@ -571,7 +581,7 @@ export default function CreateScreen() {
                 styles.tabText,
                 { color: activeTab === 'designer' ? '#fff' : colors.textMuted }
               ]}>
-                AI Designer
+                {t('create.aiDesigner')}
               </Text>
             </Pressable>
           </View>
@@ -579,7 +589,7 @@ export default function CreateScreen() {
           {activeTab === 'content' ? (
             <>
               <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                <Text style={[styles.cardTitle, { color: colors.text }]}>Content Type</Text>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>{t('create.contentType')}</Text>
                 <View style={styles.contentTypeGrid}>
                   {contentTypes.map(type => (
                     <Pressable
@@ -613,19 +623,19 @@ export default function CreateScreen() {
               </View>
 
               <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                <Text style={[styles.cardTitle, { color: colors.text }]}>Platform</Text>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>{t('create.platform')}</Text>
                 <PlatformPicker selected={platform} onChange={setPlatform} single />
               </View>
 
               <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
                 <Text style={[styles.cardTitle, { color: colors.text }]}>
-                  {contentType === 'reel' ? 'Reel Concept' : 'Topic or Idea'}
+                  {contentType === 'reel' ? t('create.reelConcept') : t('create.topicOrIdea')}
                 </Text>
                 <TextInput
                   style={[styles.input, styles.textArea, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
                   placeholder={contentType === 'reel' 
-                    ? "Describe your reel idea... (e.g., 'Behind the scenes of our coffee roasting process')" 
-                    : "Describe what you want to create..."}
+                    ? t('create.reelPlaceholder') 
+                    : t('create.topicPlaceholder')}
                   placeholderTextColor={colors.textMuted}
                   value={topic}
                   onChangeText={setTopic}
@@ -638,7 +648,7 @@ export default function CreateScreen() {
               {contentType === 'reel' && (
                 <>
                   <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                    <Text style={[styles.cardTitle, { color: colors.text }]}>Duration</Text>
+                    <Text style={[styles.cardTitle, { color: colors.text }]}>{t('create.duration')}</Text>
                     <View style={styles.reelOptionRow}>
                       {reelDurations.map(d => (
                         <Pressable
@@ -660,7 +670,7 @@ export default function CreateScreen() {
                   </View>
 
                   <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                    <Text style={[styles.cardTitle, { color: colors.text }]}>Goal</Text>
+                    <Text style={[styles.cardTitle, { color: colors.text }]}>{t('create.goal')}</Text>
                     <View style={styles.reelOptionRow}>
                       {reelGoals.map(g => (
                         <Pressable
@@ -703,7 +713,7 @@ export default function CreateScreen() {
                     <Ionicons name={contentType === 'reel' ? 'videocam' : 'sparkles'} size={20} color="#fff" />
                   )}
                   <Text style={styles.generateButtonText}>
-                    {isGenerating ? 'Generating...' : contentType === 'reel' ? 'Generate Reel Script' : 'Generate Content'}
+                    {isGenerating ? t('create.generating') : contentType === 'reel' ? t('create.generateReelScript') : t('create.generateContent')}
                   </Text>
                 </LinearGradient>
               </Pressable>
@@ -712,7 +722,7 @@ export default function CreateScreen() {
                 <View style={[styles.resultCard, { backgroundColor: colors.card, borderColor: colors.primary }]}>
                   <View style={styles.resultHeader}>
                     <Ionicons name="checkmark-circle" size={20} color={colors.success} />
-                    <Text style={[styles.resultTitle, { color: colors.text }]}>Generated Content</Text>
+                    <Text style={[styles.resultTitle, { color: colors.text }]}>{t('create.generatedContent')}</Text>
                   </View>
                   <Text style={[styles.resultContent, { color: colors.text }]}>{generatedContent}</Text>
                   <View style={styles.resultActions}>
@@ -721,7 +731,7 @@ export default function CreateScreen() {
                       style={[styles.saveButton, { backgroundColor: colors.inputBackground }]}
                     >
                       <Ionicons name="bookmark-outline" size={18} color={colors.text} />
-                      <Text style={[styles.saveButtonText, { color: colors.text }]}>Save Draft</Text>
+                      <Text style={[styles.saveButtonText, { color: colors.text }]}>{t('create.saveDraft')}</Text>
                     </Pressable>
                     <Pressable
                       onPress={() => handleSave('scheduled')}
@@ -748,28 +758,28 @@ export default function CreateScreen() {
                       <View style={styles.reelSectionHeader}>
                         <View style={[styles.reelBadge, { backgroundColor: '#E1306C' }]}>
                           <Ionicons name="flash" size={12} color="#fff" />
-                          <Text style={styles.reelBadgeText}>HOOK</Text>
+                          <Text style={styles.reelBadgeText}>{t('create.hookSection')}</Text>
                         </View>
-                        <Text style={[styles.reelSectionNote, { color: colors.textMuted }]}>First 1.5 seconds</Text>
+                        <Text style={[styles.reelSectionNote, { color: colors.textMuted }]}>{t('create.firstSeconds')}</Text>
                       </View>
                       <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
                         <Ionicons name="eye-outline" size={16} color={colors.accent} />
                         <View style={{ flex: 1 }}>
-                          <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Visual Hook</Text>
+                          <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>{t('create.visualHook')}</Text>
                           <Text style={[styles.reelDetailValue, { color: colors.text }]}>{reelScript.hook.visual}</Text>
                         </View>
                       </View>
                       <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
                         <Ionicons name="text-outline" size={16} color="#E1306C" />
                         <View style={{ flex: 1 }}>
-                          <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Text Overlay</Text>
+                          <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>{t('create.textOverlay')}</Text>
                           <Text style={[styles.reelHookOverlay, { color: colors.text }]}>{reelScript.hook.text_overlay}</Text>
                         </View>
                       </View>
                       <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
                         <Ionicons name="mic-outline" size={16} color="#833AB4" />
                         <View style={{ flex: 1 }}>
-                          <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Voiceover</Text>
+                          <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>{t('create.voiceover')}</Text>
                           <Text style={[styles.reelDetailValue, { color: colors.text }]}>"{reelScript.hook.voiceover}"</Text>
                         </View>
                       </View>
@@ -785,7 +795,7 @@ export default function CreateScreen() {
                     >
                       <View style={styles.reelSectionHeader}>
                         <View style={[styles.reelBadge, { backgroundColor: colors.primary }]}>
-                          <Text style={styles.reelBadgeText}>SCENE {scene.scene_number || idx + 1}</Text>
+                          <Text style={styles.reelBadgeText}>{t('create.scene')} {scene.scene_number || idx + 1}</Text>
                         </View>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                           <Text style={[styles.reelSectionNote, { color: colors.textMuted }]}>{scene.duration}</Text>
@@ -795,7 +805,7 @@ export default function CreateScreen() {
                       <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
                         <Ionicons name="camera-outline" size={16} color={colors.accent} />
                         <View style={{ flex: 1 }}>
-                          <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Visual Direction</Text>
+                          <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>{t('create.visualDirection')}</Text>
                           <Text style={[styles.reelDetailValue, { color: colors.text }]}>{scene.visual_direction}</Text>
                         </View>
                       </View>
@@ -805,7 +815,7 @@ export default function CreateScreen() {
                             <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
                               <Ionicons name="text-outline" size={16} color="#E1306C" />
                               <View style={{ flex: 1 }}>
-                                <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Text Overlay</Text>
+                                <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>{t('create.textOverlay')}</Text>
                                 <Text style={[styles.reelDetailValue, { color: colors.text }]}>{scene.text_overlay}</Text>
                               </View>
                             </View>
@@ -814,7 +824,7 @@ export default function CreateScreen() {
                             <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
                               <Ionicons name="mic-outline" size={16} color="#833AB4" />
                               <View style={{ flex: 1 }}>
-                                <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Voiceover</Text>
+                                <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>{t('create.voiceover')}</Text>
                                 <Text style={[styles.reelDetailValue, { color: colors.text }]}>"{scene.voiceover}"</Text>
                               </View>
                             </View>
@@ -823,7 +833,7 @@ export default function CreateScreen() {
                             <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
                               <Ionicons name="swap-horizontal-outline" size={16} color={colors.primary} />
                               <View style={{ flex: 1 }}>
-                                <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Transition</Text>
+                                <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>{t('create.transition')}</Text>
                                 <Text style={[styles.reelDetailValue, { color: colors.text }]}>{scene.transition}</Text>
                               </View>
                             </View>
@@ -832,7 +842,7 @@ export default function CreateScreen() {
                             <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
                               <Ionicons name="film-outline" size={16} color={colors.textMuted} />
                               <View style={{ flex: 1 }}>
-                                <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>B-Roll</Text>
+                                <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>{t('create.bRoll')}</Text>
                                 <Text style={[styles.reelDetailValue, { color: colors.text }]}>{scene.b_roll_suggestion}</Text>
                               </View>
                             </View>
@@ -848,20 +858,20 @@ export default function CreateScreen() {
                       <View style={styles.reelSectionHeader}>
                         <View style={[styles.reelBadge, { backgroundColor: '#2ec4b6' }]}>
                           <Ionicons name="flag" size={12} color="#fff" />
-                          <Text style={styles.reelBadgeText}>CLOSING</Text>
+                          <Text style={styles.reelBadgeText}>{t('create.closingSection')}</Text>
                         </View>
                       </View>
                       <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
                         <Ionicons name="camera-outline" size={16} color={colors.accent} />
                         <View style={{ flex: 1 }}>
-                          <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Visual</Text>
+                          <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>{t('create.visual')}</Text>
                           <Text style={[styles.reelDetailValue, { color: colors.text }]}>{reelScript.closing.visual}</Text>
                         </View>
                       </View>
                       <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
                         <Ionicons name="megaphone-outline" size={16} color="#E1306C" />
                         <View style={{ flex: 1 }}>
-                          <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>CTA</Text>
+                          <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>{t('create.cta')}</Text>
                           <Text style={[styles.reelHookOverlay, { color: colors.text }]}>{reelScript.closing.cta_text}</Text>
                           <Text style={[styles.reelDetailValue, { color: colors.textMuted }]}>"{reelScript.closing.cta_voiceover}"</Text>
                         </View>
@@ -870,7 +880,7 @@ export default function CreateScreen() {
                         <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
                           <Ionicons name="repeat-outline" size={16} color="#833AB4" />
                           <View style={{ flex: 1 }}>
-                            <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Loop Trick</Text>
+                            <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>{t('create.loopTrick')}</Text>
                             <Text style={[styles.reelDetailValue, { color: colors.text }]}>{reelScript.closing.loop_trick}</Text>
                           </View>
                         </View>
@@ -884,41 +894,41 @@ export default function CreateScreen() {
                       <View style={styles.reelSectionHeader}>
                         <View style={[styles.reelBadge, { backgroundColor: '#555' }]}>
                           <Ionicons name="construct" size={12} color="#fff" />
-                          <Text style={styles.reelBadgeText}>PRODUCTION</Text>
+                          <Text style={styles.reelBadgeText}>{t('create.productionSection')}</Text>
                         </View>
                       </View>
                       {reelScript.production_notes.estimated_duration && (
                         <View style={styles.reelProdRow}>
                           <Ionicons name="time-outline" size={14} color={colors.textMuted} />
-                          <Text style={[styles.reelProdLabel, { color: colors.textMuted }]}>Duration:</Text>
+                          <Text style={[styles.reelProdLabel, { color: colors.textMuted }]}>{t('create.durationLabel')}</Text>
                           <Text style={[styles.reelProdValue, { color: colors.text }]}>{reelScript.production_notes.estimated_duration}</Text>
                         </View>
                       )}
                       {reelScript.production_notes.audio_direction && (
                         <View style={styles.reelProdRow}>
                           <Ionicons name="musical-notes-outline" size={14} color={colors.textMuted} />
-                          <Text style={[styles.reelProdLabel, { color: colors.textMuted }]}>Audio:</Text>
+                          <Text style={[styles.reelProdLabel, { color: colors.textMuted }]}>{t('create.audio')}</Text>
                           <Text style={[styles.reelProdValue, { color: colors.text }]}>{reelScript.production_notes.audio_direction}</Text>
                         </View>
                       )}
                       {reelScript.production_notes.lighting && (
                         <View style={styles.reelProdRow}>
                           <Ionicons name="sunny-outline" size={14} color={colors.textMuted} />
-                          <Text style={[styles.reelProdLabel, { color: colors.textMuted }]}>Lighting:</Text>
+                          <Text style={[styles.reelProdLabel, { color: colors.textMuted }]}>{t('create.lighting')}</Text>
                           <Text style={[styles.reelProdValue, { color: colors.text }]}>{reelScript.production_notes.lighting}</Text>
                         </View>
                       )}
                       {reelScript.production_notes.props_needed && (
                         <View style={styles.reelProdRow}>
                           <Ionicons name="cube-outline" size={14} color={colors.textMuted} />
-                          <Text style={[styles.reelProdLabel, { color: colors.textMuted }]}>Props:</Text>
+                          <Text style={[styles.reelProdLabel, { color: colors.textMuted }]}>{t('create.props')}</Text>
                           <Text style={[styles.reelProdValue, { color: colors.text }]}>{reelScript.production_notes.props_needed}</Text>
                         </View>
                       )}
                       {reelScript.production_notes.best_posting_time && (
                         <View style={styles.reelProdRow}>
                           <Ionicons name="calendar-outline" size={14} color={colors.textMuted} />
-                          <Text style={[styles.reelProdLabel, { color: colors.textMuted }]}>Best Time:</Text>
+                          <Text style={[styles.reelProdLabel, { color: colors.textMuted }]}>{t('create.bestTime')}</Text>
                           <Text style={[styles.reelProdValue, { color: colors.text }]}>{reelScript.production_notes.best_posting_time}</Text>
                         </View>
                       )}
@@ -937,14 +947,14 @@ export default function CreateScreen() {
                       <View style={styles.reelSectionHeader}>
                         <LinearGradient colors={['#E1306C', '#833AB4']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.reelBadge, { borderWidth: 0 }]}>
                           <Ionicons name="analytics" size={12} color="#fff" />
-                          <Text style={styles.reelBadgeText}>META ALGORITHM</Text>
+                          <Text style={styles.reelBadgeText}>{t('create.algorithmSection')}</Text>
                         </LinearGradient>
                       </View>
                       {reelScript.algorithm_optimization.share_trigger && (
                         <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
                           <Ionicons name="share-social-outline" size={16} color="#E1306C" />
                           <View style={{ flex: 1 }}>
-                            <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Share Trigger</Text>
+                            <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>{t('create.shareTrigger')}</Text>
                             <Text style={[styles.reelDetailValue, { color: colors.text }]}>{reelScript.algorithm_optimization.share_trigger}</Text>
                           </View>
                         </View>
@@ -953,7 +963,7 @@ export default function CreateScreen() {
                         <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
                           <Ionicons name="bookmark-outline" size={16} color="#833AB4" />
                           <View style={{ flex: 1 }}>
-                            <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Save Trigger</Text>
+                            <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>{t('create.saveTrigger')}</Text>
                             <Text style={[styles.reelDetailValue, { color: colors.text }]}>{reelScript.algorithm_optimization.save_trigger}</Text>
                           </View>
                         </View>
@@ -962,7 +972,7 @@ export default function CreateScreen() {
                         <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
                           <Ionicons name="chatbubble-outline" size={16} color="#2ec4b6" />
                           <View style={{ flex: 1 }}>
-                            <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Engagement Prompt</Text>
+                            <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>{t('create.engagementPrompt')}</Text>
                             <Text style={[styles.reelDetailValue, { color: colors.text }]}>{reelScript.algorithm_optimization.engagement_prompt}</Text>
                           </View>
                         </View>
@@ -971,7 +981,7 @@ export default function CreateScreen() {
                         <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground }]}>
                           <Ionicons name="layers-outline" size={16} color={colors.primary} />
                           <View style={{ flex: 1 }}>
-                            <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>Repost Strategy</Text>
+                            <Text style={[styles.reelDetailLabel, { color: colors.textMuted }]}>{t('create.repostStrategy')}</Text>
                             <Text style={[styles.reelDetailValue, { color: colors.text }]}>{reelScript.algorithm_optimization.repost_strategy}</Text>
                           </View>
                         </View>
@@ -980,7 +990,7 @@ export default function CreateScreen() {
                         <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground, flexDirection: 'column', alignItems: 'flex-start' }]}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                             <Ionicons name="pulse-outline" size={16} color="#E1306C" />
-                            <Text style={[styles.reelDetailLabel, { color: colors.textMuted, marginBottom: 0 }]}>Retention Hooks</Text>
+                            <Text style={[styles.reelDetailLabel, { color: colors.textMuted, marginBottom: 0 }]}>{t('create.retentionHooks')}</Text>
                           </View>
                           {reelScript.algorithm_optimization.retention_hooks.map((hook: string, i: number) => (
                             <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, paddingLeft: 4, marginBottom: 4 }}>
@@ -1052,7 +1062,7 @@ export default function CreateScreen() {
                       <Ionicons name="image-outline" size={36} color={colors.accent} />
                     </View>
                     <Text style={[styles.canvasPlaceholderTitle, { color: colors.textSecondary }]}>
-                      Your design will appear here
+                      {t('create.designPlaceholder')}
                     </Text>
                     <Text style={[styles.canvasPlaceholderSub, { color: colors.textMuted }]}>
                       {aspectRatio} {'\u00B7'} {visualStyles.find(s => s.id === posterStyle)?.label || 'Cinematic'} style
@@ -1093,7 +1103,7 @@ export default function CreateScreen() {
 
               {/* Visual Style Grid */}
               <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                <Text style={[styles.sectionLabel, { color: colors.text }]}>Style</Text>
+                <Text style={[styles.sectionLabel, { color: colors.text }]}>{t('create.style')}</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.styleGrid}>
                   {visualStyles.map(style => (
                     <StyleCard
@@ -1105,6 +1115,7 @@ export default function CreateScreen() {
                         setPosterStyle(style.id);
                       }}
                       colors={colors}
+                      label={style.label}
                     />
                   ))}
                 </ScrollView>
@@ -1112,7 +1123,7 @@ export default function CreateScreen() {
 
               {/* Aspect Ratio Picker */}
               <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                <Text style={[styles.sectionLabel, { color: colors.text }]}>Aspect Ratio</Text>
+                <Text style={[styles.sectionLabel, { color: colors.text }]}>{t('create.aspectRatio')}</Text>
                 <View style={styles.ratioRow}>
                   {aspectRatios.map(ratio => (
                     <Pressable
@@ -1148,7 +1159,7 @@ export default function CreateScreen() {
               <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
                 <View style={styles.sectionHeader}>
                   <Text style={[styles.sectionLabel, { color: colors.text }]}>
-                    {genMode === 'text-to-image' ? 'Describe your vision' : genMode === 'image-to-image' ? 'How to transform' : 'What to edit'}
+                    {genMode === 'text-to-image' ? t('create.describeVision') : genMode === 'image-to-image' ? 'How to transform' : 'What to edit'}
                   </Text>
                 </View>
                 <TextInput
@@ -1173,9 +1184,9 @@ export default function CreateScreen() {
               <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
                 <View style={styles.sectionHeader}>
                   <Text style={[styles.sectionLabel, { color: colors.text }]}>
-                    Reference Images
+                    {t('create.referenceImages')}
                   </Text>
-                  <Text style={[styles.sectionHint, { color: colors.textMuted }]}>Up to 3</Text>
+                  <Text style={[styles.sectionHint, { color: colors.textMuted }]}>{t('create.upTo3')}</Text>
                 </View>
                 <View style={styles.refPhotoRow}>
                   {referencePhotos.map((photo, i) => (
@@ -1200,7 +1211,7 @@ export default function CreateScreen() {
                 style={[styles.advancedToggle, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
               >
                 <Ionicons name="options-outline" size={18} color={colors.textSecondary} />
-                <Text style={[styles.advancedToggleText, { color: colors.textSecondary }]}>Advanced Options</Text>
+                <Text style={[styles.advancedToggleText, { color: colors.textSecondary }]}>{t('create.advancedOptions')}</Text>
                 <Ionicons name={showAdvanced ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
               </Pressable>
 
@@ -1208,7 +1219,7 @@ export default function CreateScreen() {
                 <>
                   {/* Mood Selector */}
                   <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                    <Text style={[styles.sectionLabel, { color: colors.text }]}>Mood</Text>
+                    <Text style={[styles.sectionLabel, { color: colors.text }]}>{t('create.mood')}</Text>
                     <View style={styles.chipRow}>
                       {moodOptions.map(m => (
                         <Pressable
@@ -1235,7 +1246,7 @@ export default function CreateScreen() {
 
                   {/* Text Overlay */}
                   <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                    <Text style={[styles.sectionLabel, { color: colors.text }]}>Text Overlay</Text>
+                    <Text style={[styles.sectionLabel, { color: colors.text }]}>{t('create.textOverlay')}</Text>
                     <TextInput
                       style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
                       placeholder="e.g., SUMMER SALE 50% OFF"
@@ -1268,7 +1279,7 @@ export default function CreateScreen() {
                     <Ionicons name="flash" size={20} color="#fff" />
                   )}
                   <Text style={styles.generateDesignText}>
-                    {isGeneratingPoster ? 'Creating...' : 'Generate Design'}
+                    {isGeneratingPoster ? t('create.generating') : t('create.generateDesign')}
                   </Text>
                 </LinearGradient>
               </Pressable>
@@ -1276,7 +1287,7 @@ export default function CreateScreen() {
               {/* Generation History */}
               {generationHistory.length > 0 && (
                 <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                  <Text style={[styles.sectionLabel, { color: colors.text }]}>Recent Creations</Text>
+                  <Text style={[styles.sectionLabel, { color: colors.text }]}>{t('create.recentCreations')}</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.historyRow}>
                     {generationHistory.map(item => (
                       <Pressable
@@ -1312,7 +1323,7 @@ export default function CreateScreen() {
               {/* Powered by badge */}
               <View style={styles.poweredBy}>
                 <Text style={[styles.poweredByText, { color: colors.textMuted }]}>
-                  Powered by Nano Banana Pro
+                  {t('create.poweredBy')}
                 </Text>
               </View>
             </>

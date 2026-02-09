@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { CalendarDay } from '@/components/CalendarDay';
 import { ContentCard } from '@/components/ContentCard';
 import { PlatformPicker } from '@/components/PlatformPicker';
@@ -27,11 +28,11 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 
                 'July', 'August', 'September', 'October', 'November', 'December'];
 
-const postTypes = [
-  { id: 'post', label: 'Post', icon: 'document-text-outline' as const },
-  { id: 'reel', label: 'Reel', icon: 'videocam-outline' as const },
-  { id: 'story', label: 'Story', icon: 'layers-outline' as const },
-  { id: 'video', label: 'Video', icon: 'play-circle-outline' as const },
+const postTypesDef = [
+  { id: 'post', labelKey: 'calendar.post', icon: 'document-text-outline' as const },
+  { id: 'reel', labelKey: 'calendar.reel', icon: 'videocam-outline' as const },
+  { id: 'story', labelKey: 'calendar.storyType', icon: 'layers-outline' as const },
+  { id: 'video', labelKey: 'calendar.video', icon: 'play-circle-outline' as const },
 ];
 
 const timeSlots = [
@@ -45,6 +46,11 @@ export default function CalendarScreen() {
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
   const { contentItems, removeContentItem, scheduledPosts, addScheduledPost, removeScheduledPost, mediaItems } = useApp();
+  const { t } = useLanguage();
+
+  const postTypes = postTypesDef.map(pt => ({ ...pt, label: t(pt.labelKey) }));
+  const days = Array.from({length: 7}, (_, i) => t(`calendar.days.${i}`));
+  const months = Array.from({length: 12}, (_, i) => t(`calendar.months.${i}`));
 
   const today = new Date();
   const [selectedDate, setSelectedDate] = useState(today.getDate());
@@ -128,7 +134,7 @@ export default function CalendarScreen() {
 
   const handleCreateSchedule = async () => {
     if (!postContent.trim() && postType !== 'video') {
-      Alert.alert('Missing Content', 'Please enter content for your post.');
+      Alert.alert(t('calendar.missingContent'), t('calendar.enterContent'));
       return;
     }
 
@@ -150,7 +156,7 @@ export default function CalendarScreen() {
 
     await addScheduledPost(newPost);
     setShowModal(false);
-    Alert.alert('Scheduled!', `Your ${postType} is scheduled for ${MONTHS[currentMonth]} ${selectedDate} at ${postTime}`);
+    Alert.alert(t('calendar.scheduled'), `Your ${postType} is scheduled for ${months[currentMonth]} ${selectedDate} at ${postTime}`);
   };
 
   const handleDeleteScheduled = async (id: string) => {
@@ -178,9 +184,9 @@ export default function CalendarScreen() {
       >
         <View style={styles.header}>
           <View>
-            <Text style={[styles.title, { color: colors.text }]}>Content Calendar</Text>
+            <Text style={[styles.title, { color: colors.text }]}>{t('calendar.title')}</Text>
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-              Schedule posts, reels, and videos
+              {t('calendar.subtitle')}
             </Text>
           </View>
           <Pressable
@@ -194,13 +200,13 @@ export default function CalendarScreen() {
         <View style={[styles.calendarCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <View style={styles.monthHeader}>
             <Text style={[styles.monthTitle, { color: colors.text }]}>
-              {MONTHS[currentMonth]} {currentYear}
+              {months[currentMonth]} {currentYear}
             </Text>
           </View>
 
           <View style={styles.weekDays}>
-            {DAYS.map(day => (
-              <Text key={day} style={[styles.weekDay, { color: colors.textMuted }]}>
+            {days.map((day, i) => (
+              <Text key={i} style={[styles.weekDay, { color: colors.textMuted }]}>
                 {day}
               </Text>
             ))}
@@ -228,14 +234,14 @@ export default function CalendarScreen() {
         <View style={styles.selectedSection}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              {MONTHS[currentMonth]} {selectedDate}
+              {months[currentMonth]} {selectedDate}
             </Text>
             <Pressable
               onPress={handleAddSchedule}
               style={[styles.smallAddButton, { backgroundColor: colors.primary + '20' }]}
             >
               <Ionicons name="add" size={18} color={colors.primary} />
-              <Text style={[styles.smallAddText, { color: colors.primary }]}>Add</Text>
+              <Text style={[styles.smallAddText, { color: colors.primary }]}>{t('calendar.add')}</Text>
             </Pressable>
           </View>
 
@@ -255,7 +261,7 @@ export default function CalendarScreen() {
                         {post.type.charAt(0).toUpperCase() + post.type.slice(1)}
                       </Text>
                       <Text style={[styles.scheduleContent, { color: colors.textSecondary }]} numberOfLines={1}>
-                        {post.content || 'Video content'}
+                        {post.content || t('calendar.videoContent')}
                       </Text>
                       <View style={styles.scheduleMetaRow}>
                         <Text style={[styles.scheduleMeta, { color: colors.textMuted }]}>
@@ -298,14 +304,14 @@ export default function CalendarScreen() {
             <View style={[styles.emptyState, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
               <Ionicons name="calendar-outline" size={40} color={colors.textMuted} />
               <Text style={[styles.emptyText, { color: colors.textMuted }]}>
-                No content scheduled for this day
+                {t('calendar.noContentScheduled')}
               </Text>
               <Pressable
                 onPress={handleAddSchedule}
                 style={[styles.emptyButton, { backgroundColor: colors.primary + '20' }]}
               >
                 <Ionicons name="add" size={16} color={colors.primary} />
-                <Text style={[styles.emptyButtonText, { color: colors.primary }]}>Schedule Content</Text>
+                <Text style={[styles.emptyButtonText, { color: colors.primary }]}>{t('calendar.scheduleContent')}</Text>
               </Pressable>
             </View>
           )}
@@ -324,7 +330,7 @@ export default function CalendarScreen() {
           <View style={[styles.modalContent, { backgroundColor: colors.background }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
-                Schedule for {MONTHS[currentMonth]} {selectedDate}
+                {t('calendar.scheduleFor')} {months[currentMonth]} {selectedDate}
               </Text>
               <Pressable onPress={() => setShowModal(false)}>
                 <Ionicons name="close" size={24} color={colors.text} />
@@ -332,7 +338,7 @@ export default function CalendarScreen() {
             </View>
 
             <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
-              <Text style={[styles.inputLabel, { color: colors.text }]}>Content Type</Text>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>{t('calendar.contentType')}</Text>
               <View style={styles.typeGrid}>
                 {postTypes.map(type => (
                   <Pressable
@@ -364,10 +370,10 @@ export default function CalendarScreen() {
                 ))}
               </View>
 
-              <Text style={[styles.inputLabel, { color: colors.text }]}>Platform</Text>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>{t('create.platform')}</Text>
               <PlatformPicker selected={postPlatform} onChange={setPostPlatform} single />
 
-              <Text style={[styles.inputLabel, { color: colors.text, marginTop: 16 }]}>Time</Text>
+              <Text style={[styles.inputLabel, { color: colors.text, marginTop: 16 }]}>{t('calendar.time')}</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                 <View style={styles.timeRow}>
                   {timeSlots.map(time => (
@@ -394,7 +400,7 @@ export default function CalendarScreen() {
 
               {postType === 'video' && availableVideos.length > 0 && (
                 <>
-                  <Text style={[styles.inputLabel, { color: colors.text, marginTop: 16 }]}>Select Video from Studio</Text>
+                  <Text style={[styles.inputLabel, { color: colors.text, marginTop: 16 }]}>{t('calendar.selectVideoFromStudio')}</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                     <View style={styles.videoRow}>
                       {availableVideos.map(video => (
@@ -421,11 +427,11 @@ export default function CalendarScreen() {
               )}
 
               <Text style={[styles.inputLabel, { color: colors.text, marginTop: 16 }]}>
-                {postType === 'video' ? 'Caption (optional)' : 'Content'}
+                {postType === 'video' ? t('calendar.captionOptional') : t('calendar.content')}
               </Text>
               <TextInput
                 style={[styles.input, styles.textArea, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-                placeholder={postType === 'video' ? 'Add a caption for your video...' : 'Enter your content...'}
+                placeholder={postType === 'video' ? t('calendar.captionPlaceholder') : t('calendar.contentPlaceholder')}
                 placeholderTextColor={colors.textMuted}
                 value={postContent}
                 onChangeText={setPostContent}
@@ -446,7 +452,7 @@ export default function CalendarScreen() {
                 style={styles.gradientButton}
               >
                 <Ionicons name="calendar" size={20} color="#fff" />
-                <Text style={styles.scheduleButtonText}>Schedule {postType.charAt(0).toUpperCase() + postType.slice(1)}</Text>
+                <Text style={styles.scheduleButtonText}>{t(`calendar.schedule${postType.charAt(0).toUpperCase() + postType.slice(1)}`)}</Text>
               </LinearGradient>
             </Pressable>
           </View>

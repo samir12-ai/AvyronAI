@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { MetricCard } from '@/components/MetricCard';
 import { MiniChart } from '@/components/MiniChart';
 import { QuickAction } from '@/components/QuickAction';
@@ -22,6 +23,7 @@ export default function DashboardScreen() {
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
+  const { t } = useLanguage();
   const { analytics, weeklyMetrics, contentItems, removeContentItem, isLoading, refreshData } = useApp();
 
   const recentContent = contentItems.slice(0, 3);
@@ -45,21 +47,21 @@ export default function DashboardScreen() {
         }
       >
         <View style={styles.header}>
-          <Text style={[styles.greeting, { color: colors.textSecondary }]}>Welcome back</Text>
-          <Text style={[styles.title, { color: colors.text }]}>Marketing Dashboard</Text>
+          <Text style={[styles.greeting, { color: colors.textSecondary }]}>{t('dashboard.welcomeBack')}</Text>
+          <Text style={[styles.title, { color: colors.text }]}>{t('dashboard.title')}</Text>
         </View>
 
         <View style={styles.metricsGrid}>
           <View style={styles.metricsRow}>
             <MetricCard
-              title="Total Reach"
+              title={t('dashboard.totalReach')}
               value={formatNumber(analytics.totalReach)}
               change={analytics.reachChange}
               icon="eye-outline"
               isGradient
             />
             <MetricCard
-              title="Engagement"
+              title={t('dashboard.engagement')}
               value={formatNumber(analytics.totalEngagement)}
               change={analytics.engagementChange}
               icon="heart-outline"
@@ -67,13 +69,13 @@ export default function DashboardScreen() {
           </View>
           <View style={styles.metricsRow}>
             <MetricCard
-              title="Conversions"
+              title={t('dashboard.conversions')}
               value={formatNumber(analytics.totalConversions)}
               change={analytics.conversionsChange}
               icon="checkmark-circle-outline"
             />
             <MetricCard
-              title="Ad Spend"
+              title={t('dashboard.adSpend')}
               value={'$' + formatNumber(analytics.totalSpent)}
               change={analytics.spentChange}
               icon="card-outline"
@@ -84,26 +86,26 @@ export default function DashboardScreen() {
         <MiniChart 
           data={weeklyMetrics} 
           metric="reach" 
-          title="Weekly Performance" 
+          title={t('dashboard.weeklyPerformance')} 
         />
 
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Quick Actions</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('dashboard.quickActions')}</Text>
           <View style={styles.actionsGrid}>
             <QuickAction 
               icon="create-outline" 
-              label="Create Content" 
+              label={t('dashboard.createContent')} 
               onPress={() => router.push('/(tabs)/create')}
             />
             <QuickAction 
               icon="megaphone-outline" 
-              label="New Campaign" 
+              label={t('dashboard.newCampaign')} 
               onPress={() => router.push('/(tabs)/campaigns')}
               color={Colors.light.accent}
             />
             <QuickAction 
               icon="calendar-outline" 
-              label="Schedule" 
+              label={t('dashboard.schedule')} 
               onPress={() => router.push('/(tabs)/calendar')}
               color={Colors.light.accentOrange}
             />
@@ -113,12 +115,12 @@ export default function DashboardScreen() {
         {recentContent.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent Content</Text>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('dashboard.recentContent')}</Text>
               <Text 
                 style={[styles.seeAll, { color: colors.primary }]}
                 onPress={() => router.push('/(tabs)/calendar')}
               >
-                See all
+                {t('dashboard.seeAll')}
               </Text>
             </View>
             <View style={styles.contentList}>

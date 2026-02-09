@@ -11,6 +11,7 @@ import {
   Alert,
   Switch,
   Linking,
+  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,11 +20,11 @@ import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/context/AuthContext';
+import { useLanguage } from '@/context/LanguageContext';
+import { SUPPORTED_LANGUAGES } from '@/lib/i18n';
 import { PlatformConnection } from '@/components/PlatformConnection';
 import { getApiUrl } from '@/lib/query-client';
 import { router } from 'expo-router';
-
-const toneOptions = ['Professional', 'Casual', 'Friendly', 'Authoritative', 'Playful', 'Inspirational'];
 
 const platformIcons: Record<string, { icon: keyof typeof Ionicons.glyphMap; color: string }> = {
   instagram: { icon: 'logo-instagram', color: '#E1306C' },
@@ -49,6 +50,7 @@ export default function SettingsScreen() {
     setMetaConnection,
   } = useApp();
   const { user, logout } = useAuth();
+  const { t, locale, setLocale, languages } = useLanguage();
 
   const [name, setName] = useState(brandProfile.name);
   const [industry, setIndustry] = useState(brandProfile.industry);
@@ -56,6 +58,18 @@ export default function SettingsScreen() {
   const [targetAudience, setTargetAudience] = useState(brandProfile.targetAudience);
   const [platforms, setPlatforms] = useState<string[]>(brandProfile.platforms);
   const [hasChanges, setHasChanges] = useState(false);
+  const [showLanguageModal, setShowLanguageModal] = useState(false);
+
+  const toneOptions = [
+    { key: 'Professional', label: t('settings.professional') },
+    { key: 'Casual', label: t('settings.casual') },
+    { key: 'Friendly', label: t('settings.friendly') },
+    { key: 'Authoritative', label: t('settings.authoritative') },
+    { key: 'Playful', label: t('settings.playfulTone') },
+    { key: 'Inspirational', label: t('settings.inspirational') },
+  ];
+
+  const currentLanguage = SUPPORTED_LANGUAGES.find(l => l.code === locale);
 
   useEffect(() => {
     setName(brandProfile.name);
@@ -85,7 +99,7 @@ export default function SettingsScreen() {
       platforms,
     });
     setHasChanges(false);
-    Alert.alert('Saved', 'Your brand profile has been updated.');
+    Alert.alert(t('settings.saved'), t('settings.profileUpdated'));
   };
 
   const handleConnect = (id: string) => {
@@ -109,19 +123,19 @@ export default function SettingsScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     
     if (Platform.OS === 'web') {
-      const confirmed = window.confirm('Are you sure you want to sign out?');
+      const confirmed = window.confirm(t('settings.signOutConfirm'));
       if (confirmed) {
         await logout();
         router.replace('/login');
       }
     } else {
       Alert.alert(
-        'Sign Out',
-        'Are you sure you want to sign out?',
+        t('settings.signOut'),
+        t('settings.signOutConfirm'),
         [
-          { text: 'Cancel', style: 'cancel' },
+          { text: t('settings.cancel'), style: 'cancel' },
           { 
-            text: 'Sign Out', 
+            text: t('settings.signOut'), 
             style: 'destructive',
             onPress: async () => {
               await logout();
@@ -157,13 +171,13 @@ export default function SettingsScreen() {
         updatePlatformConnection('instagram', true);
         
         Alert.alert(
-          'Meta Business Suite Connected!',
-          'Your Facebook and Instagram accounts are now linked. The AI can now auto-post content and manage ads on your behalf.'
+          t('settings.metaConnected'),
+          t('settings.metaConnectedDesc')
         );
       }, 1000);
     } catch (error) {
       console.error('Meta connection error:', error);
-      Alert.alert('Connection Error', 'Failed to connect to Meta Business Suite. Please try again.');
+      Alert.alert(t('settings.connectionError'), t('settings.connectionErrorDesc'));
     }
   };
 
@@ -174,7 +188,13 @@ export default function SettingsScreen() {
     updatePlatformConnection('facebook', false);
     updatePlatformConnection('instagram', false);
     
-    Alert.alert('Disconnected', 'Meta Business Suite has been disconnected.');
+    Alert.alert(t('settings.disconnected'), t('settings.metaDisconnected'));
+  };
+
+  const handleSelectLanguage = async (code: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    await setLocale(code as any);
+    setShowLanguageModal(false);
   };
 
   const connectedCount = platformConnections.filter(p => p.isConnected).length;
@@ -189,9 +209,9 @@ export default function SettingsScreen() {
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={[styles.title, { color: colors.text }]}>Settings</Text>
+        <Text style={[styles.title, { color: colors.text }]}>{t('settings.title')}</Text>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-          Configure your brand and platform connections
+          {t('settings.subtitle')}
         </Text>
 
         {user && (
@@ -207,7 +227,7 @@ export default function SettingsScreen() {
               <View style={styles.userDetails}>
                 <Text style={[styles.userName, { color: colors.text }]}>{user.name}</Text>
                 <Text style={[styles.userProvider, { color: colors.textMuted }]}>
-                  Signed in with {user.provider === 'facebook' ? 'Facebook' : 'Instagram'}
+                  {t('settings.signedInWith', { provider: user.provider === 'facebook' ? 'Facebook' : 'Instagram' })}
                 </Text>
               </View>
             </View>
@@ -219,10 +239,34 @@ export default function SettingsScreen() {
               ]}
             >
               <Ionicons name="log-out-outline" size={18} color={colors.error} />
-              <Text style={[styles.logoutText, { color: colors.error }]}>Sign Out</Text>
+              <Text style={[styles.logoutText, { color: colors.error }]}>{t('settings.signOut')}</Text>
             </Pressable>
           </View>
         )}
+
+        <Pressable
+          onPress={() => {
+            Haptics.selectionAsync();
+            setShowLanguageModal(true);
+          }}
+        >
+          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <View style={styles.cardHeader}>
+              <View style={styles.cardTitleRow}>
+                <Ionicons name="globe-outline" size={20} color={colors.primary} />
+                <Text style={[styles.cardTitle, { color: colors.text }]}>{t('settings.language')}</Text>
+              </View>
+              <View style={styles.languageSelector}>
+                <Text style={[styles.languageFlag, { color: colors.text }]}>{currentLanguage?.flag}</Text>
+                <Text style={[styles.languageName, { color: colors.textSecondary }]}>{currentLanguage?.nativeName}</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+              </View>
+            </View>
+            <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
+              {t('settings.languageDesc')}
+            </Text>
+          </View>
+        </Pressable>
 
         <View style={[styles.metaCard, { backgroundColor: isDark ? '#1E3A5F' : '#E7F3FF', borderColor: '#1877F2' }]}>
           <View style={styles.metaHeader}>
@@ -231,16 +275,16 @@ export default function SettingsScreen() {
                 <Ionicons name="logo-facebook" size={24} color="#fff" />
               </View>
               <View>
-                <Text style={[styles.metaTitle, { color: colors.text }]}>Meta Business Suite</Text>
+                <Text style={[styles.metaTitle, { color: colors.text }]}>{t('settings.metaBusinessSuite')}</Text>
                 <Text style={[styles.metaSubtitle, { color: colors.textSecondary }]}>
-                  Facebook & Instagram Integration
+                  {t('settings.facebookInstagram')}
                 </Text>
               </View>
             </View>
             {metaConnection.isConnected && (
               <View style={[styles.connectedBadge, { backgroundColor: colors.success + '20' }]}>
                 <Ionicons name="checkmark-circle" size={14} color={colors.success} />
-                <Text style={[styles.connectedText, { color: colors.success }]}>Connected</Text>
+                <Text style={[styles.connectedText, { color: colors.success }]}>{t('settings.connected')}</Text>
               </View>
             )}
           </View>
@@ -250,21 +294,21 @@ export default function SettingsScreen() {
               <View style={[styles.metaInfoRow, { backgroundColor: colors.card }]}>
                 <Ionicons name="business" size={18} color="#1877F2" />
                 <Text style={[styles.metaInfoText, { color: colors.text }]}>
-                  {metaConnection.pageName || 'Business Page Connected'}
+                  {metaConnection.pageName || t('settings.businessPageConnected')}
                 </Text>
               </View>
               <View style={styles.metaFeatures}>
                 <View style={styles.metaFeature}>
                   <Ionicons name="checkmark" size={16} color={colors.success} />
-                  <Text style={[styles.metaFeatureText, { color: colors.textSecondary }]}>Auto-post to Facebook</Text>
+                  <Text style={[styles.metaFeatureText, { color: colors.textSecondary }]}>{t('settings.autoPostFacebook')}</Text>
                 </View>
                 <View style={styles.metaFeature}>
                   <Ionicons name="checkmark" size={16} color={colors.success} />
-                  <Text style={[styles.metaFeatureText, { color: colors.textSecondary }]}>Auto-post to Instagram</Text>
+                  <Text style={[styles.metaFeatureText, { color: colors.textSecondary }]}>{t('settings.autoPostInstagram')}</Text>
                 </View>
                 <View style={styles.metaFeature}>
                   <Ionicons name="checkmark" size={16} color={colors.success} />
-                  <Text style={[styles.metaFeatureText, { color: colors.textSecondary }]}>Manage Ads</Text>
+                  <Text style={[styles.metaFeatureText, { color: colors.textSecondary }]}>{t('settings.manageAds')}</Text>
                 </View>
               </View>
               <Pressable
@@ -272,27 +316,26 @@ export default function SettingsScreen() {
                 style={[styles.disconnectButton, { backgroundColor: colors.error + '20' }]}
               >
                 <Ionicons name="unlink" size={16} color={colors.error} />
-                <Text style={[styles.disconnectText, { color: colors.error }]}>Disconnect</Text>
+                <Text style={[styles.disconnectText, { color: colors.error }]}>{t('settings.disconnect')}</Text>
               </Pressable>
             </View>
           ) : (
             <View style={styles.metaConnectSection}>
               <Text style={[styles.metaDescription, { color: colors.textSecondary }]}>
-                Connect your Meta Business Suite to enable AI auto-posting to Facebook and Instagram, 
-                and manage ads across both platforms with a single integration.
+                {t('settings.connectMetaDesc')}
               </Text>
               <View style={styles.metaBenefits}>
                 <View style={styles.metaBenefit}>
                   <Ionicons name="flash" size={16} color="#1877F2" />
-                  <Text style={[styles.metaBenefitText, { color: colors.text }]}>Auto-post at scheduled times</Text>
+                  <Text style={[styles.metaBenefitText, { color: colors.text }]}>{t('settings.autoPostScheduled')}</Text>
                 </View>
                 <View style={styles.metaBenefit}>
                   <Ionicons name="analytics" size={16} color="#1877F2" />
-                  <Text style={[styles.metaBenefitText, { color: colors.text }]}>Cross-platform ad management</Text>
+                  <Text style={[styles.metaBenefitText, { color: colors.text }]}>{t('settings.crossPlatformAdMgmt')}</Text>
                 </View>
                 <View style={styles.metaBenefit}>
                   <Ionicons name="sync" size={16} color="#1877F2" />
-                  <Text style={[styles.metaBenefitText, { color: colors.text }]}>Unified content publishing</Text>
+                  <Text style={[styles.metaBenefitText, { color: colors.text }]}>{t('settings.unifiedPublishing')}</Text>
                 </View>
               </View>
               <Pressable
@@ -306,7 +349,7 @@ export default function SettingsScreen() {
                   style={styles.metaGradient}
                 >
                   <Ionicons name="link" size={20} color="#fff" />
-                  <Text style={styles.metaConnectText}>Connect Meta Business Suite</Text>
+                  <Text style={styles.metaConnectText}>{t('settings.connectMetaButton')}</Text>
                 </LinearGradient>
               </Pressable>
             </View>
@@ -317,14 +360,14 @@ export default function SettingsScreen() {
           <View style={styles.cardHeader}>
             <View style={styles.cardTitleRow}>
               <Ionicons name="link" size={20} color={colors.primary} />
-              <Text style={[styles.cardTitle, { color: colors.text }]}>Connected Platforms</Text>
+              <Text style={[styles.cardTitle, { color: colors.text }]}>{t('settings.connectedPlatforms')}</Text>
             </View>
             <View style={[styles.badge, { backgroundColor: colors.primary + '20' }]}>
-              <Text style={[styles.badgeText, { color: colors.primary }]}>{connectedCount} active</Text>
+              <Text style={[styles.badgeText, { color: colors.primary }]}>{connectedCount} {t('settings.active')}</Text>
             </View>
           </View>
           <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
-            Connect your social media accounts to enable auto-publishing
+            {t('settings.connectSocialDesc')}
           </Text>
           <View style={styles.connectionsList}>
             {platformConnections.map(connection => {
@@ -339,7 +382,7 @@ export default function SettingsScreen() {
                   isConnected={connection.isConnected}
                   onConnect={() => isMetaPlatform && !metaConnection.isConnected ? handleConnectMeta() : handleConnect(connection.id)}
                   onDisconnect={() => isMetaPlatform ? handleDisconnectMeta() : handleDisconnect(connection.id)}
-                  hint={isMetaPlatform ? 'Via Meta Business Suite' : undefined}
+                  hint={isMetaPlatform ? t('settings.viaMetaBusiness') : undefined}
                 />
               );
             })}
@@ -349,10 +392,10 @@ export default function SettingsScreen() {
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <View style={styles.cardTitleRow}>
             <Ionicons name="time" size={20} color={colors.accent} />
-            <Text style={[styles.cardTitle, { color: colors.text }]}>Auto-Publish Schedule</Text>
+            <Text style={[styles.cardTitle, { color: colors.text }]}>{t('settings.autoPublishSchedule')}</Text>
           </View>
           <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
-            Enable automatic posting at optimal times
+            {t('settings.autoPublishDesc')}
           </Text>
           <View style={styles.scheduleList}>
             {postingSchedules.map(schedule => {
@@ -385,14 +428,14 @@ export default function SettingsScreen() {
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <View style={styles.cardTitleRow}>
             <Ionicons name="business" size={20} color={colors.accentOrange} />
-            <Text style={[styles.cardTitle, { color: colors.text }]}>Brand Profile</Text>
+            <Text style={[styles.cardTitle, { color: colors.text }]}>{t('settings.brandProfile')}</Text>
           </View>
           
           <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: colors.text }]}>Brand Name</Text>
+            <Text style={[styles.inputLabel, { color: colors.text }]}>{t('settings.brandName')}</Text>
             <TextInput
               style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-              placeholder="Your company or brand name"
+              placeholder={t('settings.brandNamePlaceholder')}
               placeholderTextColor={colors.textMuted}
               value={name}
               onChangeText={setName}
@@ -400,10 +443,10 @@ export default function SettingsScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: colors.text }]}>Industry</Text>
+            <Text style={[styles.inputLabel, { color: colors.text }]}>{t('settings.industry')}</Text>
             <TextInput
               style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-              placeholder="e.g., E-commerce, SaaS, Restaurant..."
+              placeholder={t('settings.industryPlaceholder')}
               placeholderTextColor={colors.textMuted}
               value={industry}
               onChangeText={setIndustry}
@@ -411,10 +454,10 @@ export default function SettingsScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: colors.text }]}>Target Audience</Text>
+            <Text style={[styles.inputLabel, { color: colors.text }]}>{t('settings.targetAudience')}</Text>
             <TextInput
               style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-              placeholder="e.g., Young professionals, small businesses..."
+              placeholder={t('settings.targetAudiencePlaceholder')}
               placeholderTextColor={colors.textMuted}
               value={targetAudience}
               onChangeText={setTargetAudience}
@@ -425,31 +468,31 @@ export default function SettingsScreen() {
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <Text style={[styles.cardTitle, { color: colors.text }]}>Brand Voice</Text>
+          <Text style={[styles.cardTitle, { color: colors.text }]}>{t('settings.brandVoice')}</Text>
           <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
-            Select the tone for your content
+            {t('settings.selectTone')}
           </Text>
           <View style={styles.toneGrid}>
             {toneOptions.map(option => (
               <Pressable
-                key={option}
+                key={option.key}
                 onPress={() => {
                   Haptics.selectionAsync();
-                  setTone(option);
+                  setTone(option.key);
                 }}
                 style={[
                   styles.toneButton,
                   { 
-                    backgroundColor: tone === option ? colors.primary + '20' : colors.inputBackground,
-                    borderColor: tone === option ? colors.primary : 'transparent',
+                    backgroundColor: tone === option.key ? colors.primary + '20' : colors.inputBackground,
+                    borderColor: tone === option.key ? colors.primary : 'transparent',
                   }
                 ]}
               >
                 <Text style={[
                   styles.toneLabel,
-                  { color: tone === option ? colors.primary : colors.textMuted }
+                  { color: tone === option.key ? colors.primary : colors.textMuted }
                 ]}>
-                  {option}
+                  {option.label}
                 </Text>
               </Pressable>
             ))}
@@ -468,13 +511,59 @@ export default function SettingsScreen() {
               style={styles.gradientButton}
             >
               <Ionicons name="checkmark" size={20} color="#fff" />
-              <Text style={styles.saveButtonText}>Save Changes</Text>
+              <Text style={styles.saveButtonText}>{t('settings.saveChanges')}</Text>
             </LinearGradient>
           </Pressable>
         )}
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      <Modal
+        visible={showLanguageModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowLanguageModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.background }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>{t('settings.language')}</Text>
+              <Pressable onPress={() => setShowLanguageModal(false)}>
+                <Ionicons name="close" size={24} color={colors.textMuted} />
+              </Pressable>
+            </View>
+            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+              {languages.map((lang) => (
+                <Pressable
+                  key={lang.code}
+                  onPress={() => handleSelectLanguage(lang.code)}
+                  style={({ pressed }) => [
+                    styles.languageItem,
+                    { 
+                      backgroundColor: lang.code === locale ? colors.primary + '15' : colors.card,
+                      borderColor: lang.code === locale ? colors.primary : colors.cardBorder,
+                      opacity: pressed ? 0.7 : 1,
+                    }
+                  ]}
+                >
+                  <View style={styles.languageItemLeft}>
+                    <Text style={styles.languageItemFlag}>{lang.flag}</Text>
+                    <View style={styles.languageItemText}>
+                      <Text style={[styles.languageItemNative, { color: colors.text }]}>{lang.nativeName}</Text>
+                      <Text style={[styles.languageItemEnglish, { color: colors.textMuted }]}>{lang.name}</Text>
+                    </View>
+                  </View>
+                  {lang.code === locale && (
+                    <Ionicons name="checkmark-circle" size={22} color={colors.primary} />
+                  )}
+                </Pressable>
+              ))}
+              <View style={{ height: 40 }} />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -539,6 +628,18 @@ const styles = StyleSheet.create({
   logoutText: {
     fontSize: 13,
     fontFamily: 'Inter_600SemiBold',
+  },
+  languageSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  languageFlag: {
+    fontSize: 16,
+  },
+  languageName: {
+    fontSize: 13,
+    fontFamily: 'Inter_500Medium',
   },
   metaCard: {
     borderRadius: 20,
@@ -765,5 +866,59 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
     color: '#fff',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 40,
+    maxHeight: '85%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  modalBody: {
+    marginBottom: 16,
+  },
+  languageItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  languageItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  languageItemFlag: {
+    fontSize: 20,
+  },
+  languageItemText: {
+    gap: 2,
+  },
+  languageItemNative: {
+    fontSize: 15,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  languageItemEnglish: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
   },
 });

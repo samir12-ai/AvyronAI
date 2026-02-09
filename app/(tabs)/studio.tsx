@@ -18,6 +18,7 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import { generateId } from '@/lib/storage';
 import type { MediaItem } from '@/lib/types';
@@ -34,6 +35,7 @@ export default function StudioScreen() {
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
   const { mediaItems, addMediaItem, removeMediaItem } = useApp();
+  const { t } = useLanguage();
 
   const [showModal, setShowModal] = useState(false);
   const [mediaTitle, setMediaTitle] = useState('');
@@ -75,7 +77,7 @@ export default function StudioScreen() {
 
   const handleSaveMedia = async () => {
     if (!mediaTitle.trim()) {
-      Alert.alert('Missing Title', 'Please enter a title for your media.');
+      Alert.alert(t('studio.missingTitle'), t('studio.enterTitle'));
       return;
     }
 
@@ -93,7 +95,8 @@ export default function StudioScreen() {
 
     await addMediaItem(newMedia);
     setShowModal(false);
-    Alert.alert('Added!', `${mediaType === 'video' ? 'Video' : 'Image'} added to your Studio library.`);
+    const typeLabel = mediaType === 'video' ? t('studio.videoType') : t('studio.imageType');
+    Alert.alert(t('studio.added'), t('studio.addedMessage').replace('{{type}}', typeLabel));
   };
 
   const handleDeleteMedia = async (id: string, title: string) => {
@@ -137,7 +140,7 @@ export default function StudioScreen() {
         </View>
         {item.scheduledDate && (
           <Text style={[styles.mediaSchedule, { color: colors.accent }]}>
-            Scheduled: {new Date(item.scheduledDate).toLocaleDateString()}
+            {t('studio.scheduledLabel')} {new Date(item.scheduledDate).toLocaleDateString()}
           </Text>
         )}
       </View>
@@ -161,9 +164,9 @@ export default function StudioScreen() {
       >
         <View style={styles.header}>
           <View>
-            <Text style={[styles.title, { color: colors.text }]}>Media Studio</Text>
+            <Text style={[styles.title, { color: colors.text }]}>{t('studio.title')}</Text>
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-              Upload videos and images for AI to share
+              {t('studio.subtitle')}
             </Text>
           </View>
           <Pressable
@@ -178,19 +181,19 @@ export default function StudioScreen() {
           <View style={styles.stat}>
             <Ionicons name="videocam" size={20} color={colors.primary} />
             <Text style={[styles.statValue, { color: colors.text }]}>{videos.length}</Text>
-            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Videos</Text>
+            <Text style={[styles.statLabel, { color: colors.textMuted }]}>{t('studio.videos')}</Text>
           </View>
           <View style={[styles.statDivider, { backgroundColor: colors.cardBorder }]} />
           <View style={styles.stat}>
             <Ionicons name="image" size={20} color={colors.accent} />
             <Text style={[styles.statValue, { color: colors.text }]}>{images.length}</Text>
-            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Images</Text>
+            <Text style={[styles.statLabel, { color: colors.textMuted }]}>{t('studio.images')}</Text>
           </View>
           <View style={[styles.statDivider, { backgroundColor: colors.cardBorder }]} />
           <View style={styles.stat}>
             <Ionicons name="easel" size={20} color={colors.accentOrange} />
             <Text style={[styles.statValue, { color: colors.text }]}>{posters.length}</Text>
-            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Posters</Text>
+            <Text style={[styles.statLabel, { color: colors.textMuted }]}>{t('studio.posters')}</Text>
           </View>
         </View>
 
@@ -198,7 +201,7 @@ export default function StudioScreen() {
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Ionicons name="videocam" size={20} color={colors.primary} />
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Videos</Text>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('studio.videos')}</Text>
             </View>
             <View style={styles.mediaList}>
               {videos.map(renderMediaCard)}
@@ -210,7 +213,7 @@ export default function StudioScreen() {
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Ionicons name="image" size={20} color={colors.accent} />
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Images</Text>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('studio.images')}</Text>
             </View>
             <View style={styles.mediaList}>
               {images.map(renderMediaCard)}
@@ -222,7 +225,7 @@ export default function StudioScreen() {
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Ionicons name="easel" size={20} color={colors.accentOrange} />
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>AI Posters</Text>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('studio.aiPosters')}</Text>
             </View>
             <View style={styles.mediaList}>
               {posters.map(renderMediaCard)}
@@ -233,9 +236,9 @@ export default function StudioScreen() {
         {mediaItems.length === 0 && (
           <View style={[styles.emptyState, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             <Ionicons name="film-outline" size={48} color={colors.textMuted} />
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>Your Studio is Empty</Text>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>{t('studio.emptyTitle')}</Text>
             <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
-              Upload videos and images that the AI will share at scheduled times
+              {t('studio.emptyDesc')}
             </Text>
             <Pressable
               onPress={handleAddMedia}
@@ -251,7 +254,7 @@ export default function StudioScreen() {
                 style={styles.gradientButton}
               >
                 <Ionicons name="cloud-upload" size={20} color="#fff" />
-                <Text style={styles.emptyButtonText}>Upload Media</Text>
+                <Text style={styles.emptyButtonText}>{t('studio.uploadMedia')}</Text>
               </LinearGradient>
             </Pressable>
           </View>
@@ -269,14 +272,14 @@ export default function StudioScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.background }]}>
             <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Add Media</Text>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>{t('studio.addMedia')}</Text>
               <Pressable onPress={() => setShowModal(false)}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </Pressable>
             </View>
 
             <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
-              <Text style={[styles.inputLabel, { color: colors.text }]}>Media Type</Text>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>{t('studio.mediaType')}</Text>
               <View style={styles.typeRow}>
                 <Pressable
                   onPress={() => {
@@ -300,7 +303,7 @@ export default function StudioScreen() {
                     styles.typeLabel,
                     { color: mediaType === 'video' ? colors.primary : colors.textMuted }
                   ]}>
-                    Video
+                    {t('studio.videoType')}
                   </Text>
                 </Pressable>
                 <Pressable
@@ -325,21 +328,21 @@ export default function StudioScreen() {
                     styles.typeLabel,
                     { color: mediaType === 'image' ? colors.accent : colors.textMuted }
                   ]}>
-                    Image
+                    {t('studio.imageType')}
                   </Text>
                 </Pressable>
               </View>
 
-              <Text style={[styles.inputLabel, { color: colors.text }]}>Title</Text>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>{t('studio.titleLabel')}</Text>
               <TextInput
                 style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-                placeholder="Give your media a name..."
+                placeholder={t('studio.titlePlaceholder')}
                 placeholderTextColor={colors.textMuted}
                 value={mediaTitle}
                 onChangeText={setMediaTitle}
               />
 
-              <Text style={[styles.inputLabel, { color: colors.text }]}>Platform</Text>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>{t('create.platform')}</Text>
               <PlatformPicker selected={mediaPlatform} onChange={setMediaPlatform} single />
 
               <Pressable
@@ -350,17 +353,17 @@ export default function StudioScreen() {
                   <View style={styles.uploadedState}>
                     <Ionicons name="checkmark-circle" size={32} color={colors.success} />
                     <Text style={[styles.uploadedText, { color: colors.success }]}>
-                      {mediaType === 'video' ? 'Video' : 'Image'} selected
+                      {t('studio.selected').replace('{{type}}', mediaType === 'video' ? t('studio.videoType') : t('studio.imageType'))}
                     </Text>
                   </View>
                 ) : (
                   <>
                     <Ionicons name="cloud-upload-outline" size={40} color={colors.textMuted} />
                     <Text style={[styles.uploadText, { color: colors.textMuted }]}>
-                      Tap to select {mediaType === 'video' ? 'video' : 'image'}
+                      Tap to select {mediaType === 'video' ? t('studio.videoType').toLowerCase() : t('studio.imageType').toLowerCase()}
                     </Text>
                     <Text style={[styles.uploadHint, { color: colors.textMuted }]}>
-                      from your device
+                      {t('studio.fromDevice')}
                     </Text>
                   </>
                 )}
@@ -378,7 +381,7 @@ export default function StudioScreen() {
                 style={styles.gradientButton}
               >
                 <Ionicons name="save" size={20} color="#fff" />
-                <Text style={styles.saveMediaText}>Add to Studio</Text>
+                <Text style={styles.saveMediaText}>{t('studio.addToStudio')}</Text>
               </LinearGradient>
             </Pressable>
           </View>

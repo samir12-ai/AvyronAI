@@ -17,6 +17,7 @@ import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/context/AuthContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { getApiUrl } from '@/lib/query-client';
 
 export default function LoginScreen() {
@@ -25,6 +26,7 @@ export default function LoginScreen() {
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
   const { login } = useAuth();
+  const { t } = useLanguage();
   const [isLoading, setIsLoading] = useState<'facebook' | 'instagram' | null>(null);
 
   const handleFacebookLogin = async () => {
@@ -75,7 +77,7 @@ export default function LoginScreen() {
       }
     } catch (error) {
       console.error('Facebook login error:', error);
-      Alert.alert('Login Failed', 'Unable to sign in with Facebook. Please try again.');
+      Alert.alert(t('login.loginFailed'), t('login.loginFailedFacebook'));
     } finally {
       setIsLoading(null);
     }
@@ -128,7 +130,7 @@ export default function LoginScreen() {
       }
     } catch (error) {
       console.error('Instagram login error:', error);
-      Alert.alert('Login Failed', 'Unable to sign in with Instagram. Please try again.');
+      Alert.alert(t('login.loginFailed'), t('login.loginFailedInstagram'));
     } finally {
       setIsLoading(null);
     }
@@ -149,12 +151,12 @@ export default function LoginScreen() {
             <Ionicons name="analytics" size={48} color="#fff" />
           </View>
           <Text style={styles.appName}>MarketMind AI</Text>
-          <Text style={styles.tagline}>Your AI-Powered Marketing Agency</Text>
+          <Text style={styles.tagline}>{t('login.tagline')}</Text>
         </View>
 
         <View style={styles.loginSection}>
-          <Text style={styles.welcomeText}>Welcome</Text>
-          <Text style={styles.signInText}>Sign in to continue</Text>
+          <Text style={styles.welcomeText}>{t('login.welcome')}</Text>
+          <Text style={styles.signInText}>{t('login.signIn')}</Text>
 
           <View style={styles.buttonContainer}>
             <Pressable
@@ -171,7 +173,7 @@ export default function LoginScreen() {
               ) : (
                 <>
                   <Ionicons name="logo-facebook" size={24} color="#fff" />
-                  <Text style={styles.loginButtonText}>Continue with Facebook</Text>
+                  <Text style={styles.loginButtonText}>{t('login.continueWithFacebook')}</Text>
                 </>
               )}
             </Pressable>
@@ -195,7 +197,7 @@ export default function LoginScreen() {
                 ) : (
                   <>
                     <Ionicons name="logo-instagram" size={24} color="#fff" />
-                    <Text style={styles.loginButtonText}>Continue with Instagram</Text>
+                    <Text style={styles.loginButtonText}>{t('login.continueWithInstagram')}</Text>
                   </>
                 )}
               </LinearGradient>
@@ -204,7 +206,7 @@ export default function LoginScreen() {
 
           <View style={styles.divider}>
             <View style={[styles.dividerLine, { backgroundColor: 'rgba(255,255,255,0.2)' }]} />
-            <Text style={styles.dividerText}>or</Text>
+            <Text style={styles.dividerText}>{t('login.or')}</Text>
             <View style={[styles.dividerLine, { backgroundColor: 'rgba(255,255,255,0.2)' }]} />
           </View>
 
@@ -215,12 +217,12 @@ export default function LoginScreen() {
               { opacity: pressed ? 0.7 : 1 }
             ]}
           >
-            <Text style={styles.guestButtonText}>Continue as Guest</Text>
+            <Text style={styles.guestButtonText}>{t('login.continueAsGuest')}</Text>
           </Pressable>
         </View>
 
         <Text style={styles.termsText}>
-          By signing in, you agree to our Terms of Service and Privacy Policy
+          {t('login.terms')}
         </Text>
       </View>
     </View>
