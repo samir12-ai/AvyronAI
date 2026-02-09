@@ -13,7 +13,8 @@ Preferred communication style: Simple, everyday language.
 ### Frontend Architecture
 - **Framework**: Expo SDK 54 with React Native 0.81, using the new architecture
 - **Navigation**: Expo Router v6 with file-based routing and typed routes
-- **State Management**: React Context API (`AppContext`) for global app state, TanStack React Query for server state
+- **State Management**: React Context API (`AppContext`, `AuthContext`, `LanguageContext`) for global app state, TanStack React Query for server state
+- **Internationalization**: i18n-js with expo-localization for 32 languages, LanguageContext for persistence via AsyncStorage
 - **UI Components**: Custom component library with platform-adaptive styling (light/dark mode support)
 - **Animations**: React Native Reanimated for smooth animations and transitions
 - **Styling**: StyleSheet API with dynamic theming via `useColorScheme`
