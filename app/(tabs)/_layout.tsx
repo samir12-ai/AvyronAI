@@ -34,6 +34,10 @@ function NativeTabLayout() {
         <Icon sf={{ default: "megaphone", selected: "megaphone.fill" }} />
         <Label>{t('tabs.campaigns')}</Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="ai-management">
+        <Icon sf={{ default: "brain", selected: "brain.fill" }} />
+        <Label>{t('tabs.aiManagement')}</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="settings">
         <Icon sf={{ default: "gearshape", selected: "gearshape.fill" }} />
         <Label>{t('tabs.settings')}</Label>
@@ -124,6 +128,15 @@ function ClassicTabLayout() {
           title: t('tabs.campaigns'),
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "megaphone" : "megaphone-outline"} size={22} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="ai-management"
+        options={{
+          title: t('tabs.aiManagement'),
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "hardware-chip" : "hardware-chip-outline"} size={22} color={color} />
           ),
         }}
       />
