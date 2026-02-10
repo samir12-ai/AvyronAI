@@ -7,117 +7,75 @@ import fs from "fs";
 import path from "path";
 import { exec } from "child_process";
 import { promisify } from "util";
-import { GoogleGenAI } from "@google/genai";
+import OpenAI from "openai";
 
 const execAsync = promisify(exec);
 
-const videoOutputDir = path.join(process.cwd(), "uploads", "video-output");
-const refImagesDir = path.join(process.cwd(), "uploads", "ref-images");
-if (!fs.existsSync(videoOutputDir)) fs.mkdirSync(videoOutputDir, { recursive: true });
-if (!fs.existsSync(refImagesDir)) fs.mkdirSync(refImagesDir, { recursive: true });
+const openai = new OpenAI({
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+});
 
-const refImageUpload = multer({
+const videoUploadsDir = path.join(process.cwd(), "uploads", "videos");
+const videoOutputDir = path.join(process.cwd(), "uploads", "video-output");
+if (!fs.existsSync(videoUploadsDir)) fs.mkdirSync(videoUploadsDir, { recursive: true });
+if (!fs.existsSync(videoOutputDir)) fs.mkdirSync(videoOutputDir, { recursive: true });
+
+const videoUpload = multer({
   storage: multer.diskStorage({
-    destination: refImagesDir,
+    destination: videoUploadsDir,
     filename: (req, file, cb) => {
       const uniqueName = Date.now() + '-' + Math.random().toString(36).substr(2, 9) + path.extname(file.originalname);
       cb(null, uniqueName);
     },
   }),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 200 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
+    const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.3gp'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (file.mimetype.startsWith('video/') || file.mimetype === 'application/octet-stream' || videoExtensions.includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error('Only image files are allowed'));
+      cb(new Error('Only video files are allowed'));
     }
   },
 });
 
-function getVeoClient(): GoogleGenAI | null {
-  const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
-  if (!apiKey) return null;
-  return new GoogleGenAI({ apiKey });
+async function getVideoDuration(filePath: string): Promise<number> {
+  try {
+    const { stdout } = await execAsync(
+      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`
+    );
+    return parseFloat(stdout.trim()) || 0;
+  } catch {
+    return 0;
+  }
 }
 
-function buildVeoPrompt(params: {
-  creativeBrief: string;
-  videoType: string;
-  targetAudience: string;
-  keyMessage: string;
-  style: string;
-  mood: string;
-  pace: string;
-  addText: boolean;
-  textOverlay: string;
-}): string {
-  const parts: string[] = [];
-
-  parts.push(params.creativeBrief);
-
-  const styleMap: Record<string, string> = {
-    cinematic: 'cinematic look with dramatic lighting and depth of field',
-    energetic: 'high-energy dynamic visuals with vibrant colors',
-    minimal: 'clean minimal aesthetic with subtle movements',
-    documentary: 'documentary-style natural footage',
-    social: 'trendy social media style optimized for engagement',
-    commercial: 'polished commercial-grade production quality',
-  };
-  if (styleMap[params.style]) {
-    parts.push(styleMap[params.style]);
+async function getVideoInfo(filePath: string): Promise<{ duration: number; width: number; height: number }> {
+  try {
+    const { stdout } = await execAsync(
+      `ffprobe -v error -select_streams v:0 -show_entries stream=width,height,duration -show_entries format=duration -of json "${filePath}"`
+    );
+    const info = JSON.parse(stdout);
+    const stream = info.streams?.[0] || {};
+    const duration = parseFloat(stream.duration || info.format?.duration || '0');
+    return { duration, width: stream.width || 1920, height: stream.height || 1080 };
+  } catch {
+    return { duration: 0, width: 1920, height: 1080 };
   }
-
-  const moodMap: Record<string, string> = {
-    energetic: 'energetic and exciting mood',
-    calm: 'calm and serene atmosphere',
-    dramatic: 'dramatic and intense feeling',
-    playful: 'playful and fun vibe',
-    luxurious: 'luxurious and premium feel',
-    warm: 'warm and inviting tone',
-  };
-  if (moodMap[params.mood]) {
-    parts.push(moodMap[params.mood]);
-  }
-
-  const paceMap: Record<string, string> = {
-    slow: 'slow deliberate camera movements',
-    medium: 'moderate pacing with balanced rhythm',
-    fast: 'fast-paced quick cuts and dynamic motion',
-  };
-  if (paceMap[params.pace]) {
-    parts.push(paceMap[params.pace]);
-  }
-
-  if (params.targetAudience) {
-    parts.push(`targeting ${params.targetAudience}`);
-  }
-
-  if (params.keyMessage) {
-    parts.push(`conveying the message: "${params.keyMessage}"`);
-  }
-
-  if (params.addText && params.textOverlay) {
-    parts.push(`include text overlay saying "${params.textOverlay}"`);
-  }
-
-  return parts.join('. ') + '.';
 }
 
 export function registerVideoRoutes(app: Express) {
-  app.use("/uploads/video-output", (req, res, next) => {
+  app.use("/uploads/videos", (req, res, next) => {
     res.setHeader("Accept-Ranges", "bytes");
     next();
   });
 
-  app.get("/api/video/veo-status", (req, res) => {
-    const hasKey = !!process.env.GOOGLE_GEMINI_API_KEY;
-    res.json({ configured: hasKey });
-  });
-
-  app.post("/api/video/upload-ref-images", (req, res, next) => {
-    refImageUpload.array("images", 3)(req, res, (err) => {
+  app.post("/api/video/upload-clips", (req, res, next) => {
+    videoUpload.array("clips", 20)(req, res, (err) => {
       if (err) {
-        console.error("Ref image upload error:", err.message);
+        console.error("Multer upload error:", err.message);
         return res.status(400).json({ error: `Upload error: ${err.message}` });
       }
       next();
@@ -125,253 +83,272 @@ export function registerVideoRoutes(app: Express) {
   }, async (req, res) => {
     try {
       const files = req.files as Express.Multer.File[];
+      console.log("Upload request received:", {
+        filesCount: files?.length || 0,
+        contentType: req.headers['content-type'],
+        bodyKeys: Object.keys(req.body || {}),
+      });
       if (!files || files.length === 0) {
-        return res.status(400).json({ error: "No images uploaded" });
+        return res.status(400).json({ error: "No video files uploaded" });
       }
 
-      const images = files.map((file) => ({
-        filename: file.filename,
-        originalName: file.originalname,
-        path: `/uploads/ref-images/${file.filename}`,
-        size: file.size,
-        mimetype: file.mimetype,
+      const clips = await Promise.all(files.map(async (file) => {
+        const filePath = path.join(videoUploadsDir, file.filename);
+        const info = await getVideoInfo(filePath);
+        return {
+          filename: file.filename,
+          originalName: file.originalname,
+          path: `/uploads/videos/${file.filename}`,
+          size: file.size,
+          duration: info.duration,
+          width: info.width,
+          height: info.height,
+        };
       }));
 
-      res.json({ images });
+      const [project] = await db.insert(videoProjects).values({
+        title: req.body.title || 'Untitled Project',
+        status: 'uploaded',
+        clipCount: clips.length,
+        style: req.body.style || 'cinematic',
+        mood: req.body.mood || 'energetic',
+      }).returning();
+
+      res.json({ project, clips });
     } catch (error) {
-      console.error("Ref image upload error:", error);
-      res.status(500).json({ error: "Failed to upload reference images" });
+      console.error("Video upload error:", error);
+      res.status(500).json({ error: "Failed to upload video clips" });
     }
   });
 
-  app.post("/api/video/generate", async (req, res) => {
+  app.post("/api/video/ai-edit", async (req, res) => {
     try {
-      const {
-        creativeBrief,
-        videoType,
-        targetAudience,
-        keyMessage,
-        style,
-        mood,
-        pace,
-        addText,
-        textOverlay,
-        duration,
-        aspectRatio,
-        referenceImages,
-      } = req.body;
+      const { projectId, clips, style, mood, pace, addMusic, addTransitions, addText, textOverlay, creativeBrief, videoType, targetAudience, keyMessage } = req.body;
 
-      if (!creativeBrief?.trim()) {
-        return res.status(400).json({ error: "Creative brief is required" });
+      if (!clips || clips.length === 0) {
+        return res.status(400).json({ error: "No clips provided" });
       }
 
-      const ai = getVeoClient();
-      if (!ai) {
-        return res.status(400).json({
-          error: "Google Gemini API key not configured. Please add your GOOGLE_GEMINI_API_KEY in the Secrets tab to use Veo 3 Pro video generation.",
-        });
+      await db.update(videoProjects)
+        .set({ status: 'processing', style, mood })
+        .where(eq(videoProjects.id, projectId));
+
+      const clipDetails = clips.map((c: any, i: number) =>
+        `Clip ${i + 1}: "${c.originalName}" (${c.duration?.toFixed(1)}s, ${c.width}x${c.height})`
+      ).join('\n');
+
+      const aiResponse = await openai.chat.completions.create({
+        model: "gpt-5.2",
+        messages: [
+          {
+            role: "system",
+            content: `You are GPT-5.2, an elite AI video editor and creative director. You create professional, broadcast-quality edit decisions for video projects. You deeply understand cinematic language, pacing, transitions, color grading, storytelling through visual media, and marketing psychology.
+
+Your job is to:
+1. Read the client's creative brief carefully to understand their vision
+2. Analyze the available video clips (their names, durations, resolutions)
+3. Create an optimal edit plan that fulfills the creative brief
+4. Decide the best clip order for narrative flow
+5. Set precise trim points (start/end times) to remove dead air and keep energy
+6. Choose transition types that match the mood and style
+7. Plan text overlay timing and placement if requested
+8. Suggest color grading that supports the overall feel
+
+IMPORTANT: Base your editing decisions primarily on the CREATIVE BRIEF provided by the user. The brief tells you what they want the video to achieve, who it's for, and what message it should convey. Use the style, mood, and pace settings to fine-tune your approach.
+
+Return a JSON object with this structure:
+{
+  "editPlan": {
+    "clipOrder": [0, 2, 1],
+    "clips": [
+      {
+        "index": 0,
+        "startTime": 0,
+        "endTime": 5.0,
+        "transition": "fade",
+        "transitionDuration": 0.5
+      }
+    ],
+    "textOverlays": [
+      {
+        "text": "Title Text",
+        "startTime": 0,
+        "duration": 3,
+        "position": "center",
+        "fontSize": 48
+      }
+    ],
+    "colorGrade": "warm",
+    "overallPace": "medium"
+  },
+  "creativeNotes": "Detailed description of your creative approach and why you made these editing decisions based on the brief"
+}`
+          },
+          {
+            role: "user",
+            content: `Create a professional edit plan for this video project.
+
+=== CREATIVE BRIEF ===
+${creativeBrief || 'Create a professional, engaging video edit.'}
+
+=== VIDEO TYPE ===
+${videoType || 'promo'}
+
+=== TARGET AUDIENCE ===
+${targetAudience || 'General audience'}
+
+=== KEY MESSAGE ===
+${keyMessage || 'Not specified'}
+
+=== EDIT PREFERENCES ===
+STYLE: ${style || 'cinematic'}
+MOOD: ${mood || 'energetic'}
+PACE: ${pace || 'medium'}
+ADD TRANSITIONS: ${addTransitions !== false ? 'Yes' : 'No'}
+ADD TEXT OVERLAY: ${addText ? 'Yes' : 'No'}
+TEXT TO OVERLAY: ${textOverlay || 'None specified'}
+
+=== AVAILABLE CLIPS ===
+${clipDetails}
+
+Based on the creative brief above, create an edit plan that fulfills the client's vision. Consider the video type, target audience, and key message when making your editing decisions. Determine the best clip order for storytelling, trim to keep the strongest moments, choose transitions that match the mood, and suggest appropriate color grading.`
+          }
+        ],
+        max_completion_tokens: 2500,
+      });
+
+      const aiContent = aiResponse.choices[0]?.message?.content || "";
+      let editPlan;
+      try {
+        const jsonMatch = aiContent.match(/\{[\s\S]*\}/);
+        editPlan = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+      } catch {
+        editPlan = null;
       }
 
-      const [project] = await db.insert(videoProjects).values({
-        title: keyMessage || creativeBrief.slice(0, 60),
-        status: 'processing',
-        style: style || 'cinematic',
-        mood: mood || 'energetic',
-      }).returning();
+      if (!editPlan) {
+        await db.update(videoProjects)
+          .set({ status: 'failed' })
+          .where(eq(videoProjects.id, projectId));
+        return res.status(500).json({ error: "AI failed to generate edit plan" });
+      }
 
-      const prompt = buildVeoPrompt({
-        creativeBrief,
-        videoType: videoType || 'promo',
-        targetAudience: targetAudience || '',
-        keyMessage: keyMessage || '',
-        style: style || 'cinematic',
-        mood: mood || 'energetic',
-        pace: pace || 'medium',
-        addText: addText || false,
-        textOverlay: textOverlay || '',
-      });
-
-      console.log("[Veo3] Starting video generation:", {
-        projectId: project.id,
-        prompt: prompt.slice(0, 200) + '...',
-        duration: duration || 8,
-        aspectRatio: aspectRatio || '16:9',
-        hasRefImages: !!referenceImages?.length,
-      });
+      const plan = editPlan.editPlan || editPlan;
+      const clipOrder = plan.clipOrder || clips.map((_: any, i: number) => i);
+      const outputFilename = `edited_${Date.now()}.mp4`;
+      const outputPath = path.join(videoOutputDir, outputFilename);
 
       try {
-        const generateConfig: any = {
-          aspectRatio: aspectRatio || "16:9",
-          numberOfVideos: 1,
-        };
+        const filterParts: string[] = [];
+        const concatInputs: string[] = [];
+        let inputArgs = '';
 
-        if (duration) {
-          generateConfig.durationSeconds = duration;
+        for (let i = 0; i < clipOrder.length; i++) {
+          const clipIdx = clipOrder[i];
+          const clip = clips[clipIdx];
+          if (!clip) continue;
+
+          const clipPath = path.join(videoUploadsDir, clip.filename);
+          if (!fs.existsSync(clipPath)) continue;
+
+          inputArgs += ` -i "${clipPath}"`;
+
+          const clipPlan = plan.clips?.find((c: any) => c.index === clipIdx);
+          const startTime = clipPlan?.startTime || 0;
+          const endTime = clipPlan?.endTime || clip.duration || 10;
+
+          filterParts.push(
+            `[${i}:v]trim=start=${startTime}:end=${endTime},setpts=PTS-STARTPTS,scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2[v${i}]`
+          );
+          filterParts.push(
+            `[${i}:a]atrim=start=${startTime}:end=${endTime},asetpts=PTS-STARTPTS[a${i}]`
+          );
+          concatInputs.push(`[v${i}][a${i}]`);
         }
 
-        let operation;
-
-        if (referenceImages?.length > 0) {
-          const refImageContents: any[] = [];
-          for (const img of referenceImages) {
-            const imgPath = path.join(refImagesDir, img.filename);
-            if (fs.existsSync(imgPath)) {
-              const imgData = fs.readFileSync(imgPath);
-              refImageContents.push({
-                inlineData: {
-                  data: imgData.toString('base64'),
-                  mimeType: img.mimetype || 'image/jpeg',
-                },
-              });
-            }
-          }
-
-          if (refImageContents.length > 0) {
-            operation = await ai.models.generateVideos({
-              model: "veo-3.0-generate-preview",
-              prompt: prompt,
-              image: refImageContents[0],
-              config: generateConfig,
-            });
-          } else {
-            operation = await ai.models.generateVideos({
-              model: "veo-3.0-generate-preview",
-              prompt: prompt,
-              config: generateConfig,
-            });
-          }
-        } else {
-          operation = await ai.models.generateVideos({
-            model: "veo-3.0-generate-preview",
-            prompt: prompt,
-            config: generateConfig,
-          });
-        }
-
-        console.log("[Veo3] Generation started, polling for result...");
-
-        let attempts = 0;
-        const maxAttempts = 120;
-        while (!operation.done && attempts < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 5000));
-          operation = await ai.operations.get({ operation: operation });
-          attempts++;
-          console.log(`[Veo3] Poll attempt ${attempts}/${maxAttempts}, done: ${operation.done}`);
-        }
-
-        if (!operation.done) {
+        if (concatInputs.length === 0) {
           await db.update(videoProjects)
             .set({ status: 'failed' })
-            .where(eq(videoProjects.id, project.id));
-          return res.status(504).json({ error: "Video generation timed out. Please try a shorter duration or simpler prompt." });
+            .where(eq(videoProjects.id, projectId));
+          return res.status(500).json({ error: "No valid clips to process" });
         }
 
-        const result = operation.response;
-        const generatedVideos = result?.generatedVideos;
+        const filterComplex = filterParts.join(';') + ';' + concatInputs.join('') + `concat=n=${concatInputs.length}:v=1:a=1[outv][outa]`;
 
-        if (!generatedVideos || generatedVideos.length === 0) {
-          console.error("[Veo3] No videos in result:", JSON.stringify(result));
-          await db.update(videoProjects)
-            .set({ status: 'failed' })
-            .where(eq(videoProjects.id, project.id));
-          return res.status(500).json({ error: "Veo 3 Pro did not return a video. The content may have been filtered. Try adjusting your prompt." });
-        }
+        const ffmpegCmd = `ffmpeg -y ${inputArgs} -filter_complex "${filterComplex}" -map "[outv]" -map "[outa]" -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -movflags +faststart "${outputPath}"`;
 
-        const video = generatedVideos[0];
-        const videoData = video.video;
+        await execAsync(ffmpegCmd, { timeout: 300000 });
 
-        if (!videoData) {
-          await db.update(videoProjects)
-            .set({ status: 'failed' })
-            .where(eq(videoProjects.id, project.id));
-          return res.status(500).json({ error: "Generated video data is empty" });
-        }
-
-        const outputFilename = `veo3_${Date.now()}.mp4`;
-        const outputPath = path.join(videoOutputDir, outputFilename);
-
-        let videoDuration = duration || 8;
-
-        if (videoData.uri) {
-          const https = await import('https');
-          const http = await import('http');
-          const downloadModule = videoData.uri.startsWith('https') ? https : http;
-
-          await new Promise<void>((resolve, reject) => {
-            const file = fs.createWriteStream(outputPath);
-            downloadModule.get(videoData.uri!, (response: any) => {
-              response.pipe(file);
-              file.on('finish', () => {
-                file.close();
-                resolve();
-              });
-            }).on('error', (err: any) => {
-              fs.unlink(outputPath, () => {});
-              reject(err);
-            });
-          });
-
-          try {
-            const { stdout } = await execAsync(
-              `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${outputPath}"`
-            );
-            videoDuration = Math.round(parseFloat(stdout.trim()) || duration || 8);
-          } catch {}
-        } else if (videoData.videoBytes) {
-          const videoBuffer = Buffer.from(videoData.videoBytes, 'base64');
-          fs.writeFileSync(outputPath, videoBuffer);
-
-          try {
-            const { stdout } = await execAsync(
-              `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${outputPath}"`
-            );
-            videoDuration = Math.round(parseFloat(stdout.trim()) || duration || 8);
-          } catch {}
-        } else {
-          await db.update(videoProjects)
-            .set({ status: 'failed' })
-            .where(eq(videoProjects.id, project.id));
-          return res.status(500).json({ error: "Could not extract video data from Veo 3 response" });
-        }
-
-        console.log("[Veo3] Video saved:", outputFilename, `${videoDuration}s`);
+        const outputDuration = await getVideoDuration(outputPath);
 
         await db.update(videoProjects).set({
           status: 'completed',
           outputUrl: `/uploads/video-output/${outputFilename}`,
-          duration: videoDuration,
+          duration: Math.round(outputDuration),
           updatedAt: new Date(),
-        }).where(eq(videoProjects.id, project.id));
+        }).where(eq(videoProjects.id, projectId));
 
         res.json({
           success: true,
-          projectId: project.id,
           outputUrl: `/uploads/video-output/${outputFilename}`,
-          duration: videoDuration,
-          creativeNotes: `Generated with Veo 3 Pro using ${style} style, ${mood} mood, and ${pace} pace. Aspect ratio: ${aspectRatio || '16:9'}. ${referenceImages?.length ? `Used ${referenceImages.length} reference image(s) for visual guidance.` : 'Text-to-video generation from creative brief.'}`,
+          duration: Math.round(outputDuration),
+          editPlan: plan,
+          creativeNotes: editPlan.creativeNotes,
         });
-      } catch (veoError: any) {
-        console.error("[Veo3] Generation error:", veoError?.message || veoError);
-        console.error("[Veo3] Error details:", JSON.stringify(veoError?.response?.data || veoError?.cause || ''));
+      } catch (ffmpegError: any) {
+        console.error("FFmpeg error:", ffmpegError.message);
 
-        await db.update(videoProjects)
-          .set({ status: 'failed' })
-          .where(eq(videoProjects.id, project.id));
+        const outputFilenameSimple = `simple_${Date.now()}.mp4`;
+        const outputPathSimple = path.join(videoOutputDir, outputFilenameSimple);
 
-        let errorMsg = veoError?.message || "Video generation failed";
-        if (errorMsg.includes("PERMISSION_DENIED") || errorMsg.includes("403")) {
-          errorMsg = "Your Google API key doesn't have access to Veo 3 Pro. Make sure you have a paid Google AI plan with Veo access enabled.";
-        } else if (errorMsg.includes("RESOURCE_EXHAUSTED") || errorMsg.includes("429")) {
-          errorMsg = "Rate limit reached. Please wait a minute and try again.";
-        } else if (errorMsg.includes("INVALID_ARGUMENT")) {
-          errorMsg = "Invalid request. Try simplifying your prompt or changing settings.";
+        try {
+          const validClips = clipOrder
+            .map((idx: number) => clips[idx])
+            .filter((c: any) => c && fs.existsSync(path.join(videoUploadsDir, c.filename)));
+
+          if (validClips.length === 0) throw new Error("No valid clips");
+
+          const listFile = path.join(videoOutputDir, `list_${Date.now()}.txt`);
+          const listContent = validClips.map((c: any) =>
+            `file '${path.join(videoUploadsDir, c.filename)}'`
+          ).join('\n');
+          fs.writeFileSync(listFile, listContent);
+
+          await execAsync(
+            `ffmpeg -y -f concat -safe 0 -i "${listFile}" -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -movflags +faststart "${outputPathSimple}"`,
+            { timeout: 300000 }
+          );
+
+          fs.unlinkSync(listFile);
+          const outputDuration = await getVideoDuration(outputPathSimple);
+
+          await db.update(videoProjects).set({
+            status: 'completed',
+            outputUrl: `/uploads/video-output/${outputFilenameSimple}`,
+            duration: Math.round(outputDuration),
+            updatedAt: new Date(),
+          }).where(eq(videoProjects.id, projectId));
+
+          res.json({
+            success: true,
+            outputUrl: `/uploads/video-output/${outputFilenameSimple}`,
+            duration: Math.round(outputDuration),
+            editPlan: plan,
+            creativeNotes: editPlan.creativeNotes,
+            note: "Used simplified concatenation mode",
+          });
+        } catch (fallbackError: any) {
+          console.error("Fallback FFmpeg error:", fallbackError.message);
+          await db.update(videoProjects)
+            .set({ status: 'failed' })
+            .where(eq(videoProjects.id, projectId));
+          res.status(500).json({ error: "Video processing failed" });
         }
-
-        res.status(500).json({ error: errorMsg });
       }
     } catch (error: any) {
-      console.error("[Veo3] Route error:", error?.message || error);
-      res.status(500).json({ error: error?.message || "Failed to generate video" });
+      console.error("AI edit error:", error?.message || error);
+      console.error("AI edit error stack:", error?.stack);
+      res.status(500).json({ error: error?.message || "Failed to process video edit" });
     }
   });
 
