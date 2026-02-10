@@ -864,6 +864,132 @@ Generate 25-30 posts. Make EVERY post specific to their products/services - zero
     }
   });
 
+  app.post("/api/generate-audience", async (req, res) => {
+    try {
+      const { campaignGoal, product, budget, brandName, industry, targetAudience } = req.body;
+
+      if (!campaignGoal) {
+        return res.status(400).json({ error: "Campaign goal is required" });
+      }
+
+      const systemPrompt = `You are a Meta Ads expert who builds highly targeted audiences for Facebook and Instagram campaigns. You understand Meta's detailed targeting options, Lookalike audiences, Custom audiences, and the Meta Advantage+ system.
+
+You know exactly how to configure Meta Ads Manager targeting for maximum ROAS (Return on Ad Spend). Your audience recommendations are based on real Meta targeting options that exist in Meta Ads Manager.
+
+BRAND CONTEXT:
+- Brand: ${brandName || 'the brand'}
+- Industry: ${industry || 'general business'}
+- Current Audience: ${targetAudience || 'general audience'}`;
+
+      const userPrompt = `Create 3 optimized Meta ad audiences for this campaign:
+
+CAMPAIGN GOAL: ${campaignGoal}
+PRODUCT/SERVICE: ${product || 'General offering'}
+BUDGET: ${budget || 'Not specified'}
+
+For each audience, provide:
+1. A clear name for the audience
+2. Detailed targeting breakdown (demographics, interests, behaviors)
+3. Estimated audience size range
+4. Why this audience will convert well for this specific goal
+5. Recommended ad placements (Feed, Stories, Reels, Explore)
+6. Suggested bid strategy
+
+Return ONLY a valid JSON array with exactly 3 audience objects:
+{
+  "name": "Audience name",
+  "description": "One-line description",
+  "age_min": 18,
+  "age_max": 65,
+  "gender": "all" | "male" | "female",
+  "locations": ["Country or region names"],
+  "interests": ["List of Meta interest targeting options"],
+  "behaviors": ["List of Meta behavior targeting options"],
+  "estimated_size": "500K - 1.2M",
+  "placements": ["Feed", "Stories", "Reels"],
+  "bid_strategy": "Lowest cost" | "Cost cap" | "Bid cap",
+  "daily_budget_suggestion": "$X",
+  "match_score": 85,
+  "reasoning": "Why this audience matches the campaign goal"
+}`;
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.2",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        max_completion_tokens: 4000,
+      });
+
+      const content = response.choices[0]?.message?.content || "";
+
+      try {
+        const jsonMatch = content.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          res.json({ audiences: parsed });
+        } else {
+          res.status(500).json({ error: "Failed to generate audiences." });
+        }
+      } catch {
+        res.status(500).json({ error: "Failed to parse audience data." });
+      }
+    } catch (error) {
+      console.error("Error generating audience:", error);
+      res.status(500).json({ error: "Failed to generate audiences." });
+    }
+  });
+
+  app.post("/api/auto-publish", async (req, res) => {
+    try {
+      const { posts, accessToken, pageId } = req.body;
+
+      if (!accessToken || !pageId) {
+        return res.json({
+          success: true,
+          demo: true,
+          message: 'Demo mode: Connect your Meta account to publish for real.',
+          results: (posts || []).map((p: any) => ({
+            postId: p.id,
+            status: 'demo_queued',
+            demoId: 'demo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+          })),
+        });
+      }
+
+      const results = [];
+      for (const post of posts || []) {
+        try {
+          if (post.platform === 'Facebook' || post.platform === 'facebook') {
+            const fbResponse = await fetch(
+              `https://graph.facebook.com/v18.0/${pageId}/feed`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  message: post.content,
+                  access_token: accessToken,
+                }),
+              }
+            );
+            const fbData = await fbResponse.json();
+            results.push({ postId: post.id, status: 'published', fbId: fbData.id });
+          } else {
+            results.push({ postId: post.id, status: 'queued', message: 'Instagram publishing requires additional setup' });
+          }
+        } catch (err) {
+          results.push({ postId: post.id, status: 'failed', error: 'Failed to publish' });
+        }
+      }
+
+      res.json({ success: true, results });
+    } catch (error) {
+      console.error("Auto-publish error:", error);
+      res.status(500).json({ error: "Failed to auto-publish." });
+    }
+  });
+
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
