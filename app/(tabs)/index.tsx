@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { 
   View, 
   Text, 
@@ -7,9 +7,12 @@ import {
   useColorScheme, 
   Platform,
   RefreshControl,
+  Pressable,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
@@ -17,6 +20,84 @@ import { MetricCard } from '@/components/MetricCard';
 import { MiniChart } from '@/components/MiniChart';
 import { QuickAction } from '@/components/QuickAction';
 import { ContentCard } from '@/components/ContentCard';
+
+function AIManagementSummary({ colors, isDark }: { colors: typeof Colors.light; isDark: boolean }) {
+  const { scheduledPosts, metaConnection, contentItems } = useApp();
+  const { t } = useLanguage();
+
+  const stats = useMemo(() => {
+    const published = scheduledPosts.filter(p => p.status === 'published').length;
+    const pending = scheduledPosts.filter(p => p.status === 'pending').length;
+    const failed = scheduledPosts.filter(p => p.status === 'failed').length;
+    const totalContent = contentItems.length;
+    return { published, pending, failed, totalContent };
+  }, [scheduledPosts, contentItems]);
+
+  return (
+    <Pressable 
+      onPress={() => router.push('/(tabs)/ai-management')}
+      style={({ pressed }) => [{ opacity: pressed ? 0.85 : 1 }]}
+    >
+      <LinearGradient
+        colors={isDark ? ['#1E293B', '#0F172A'] : ['#F0F4FF', '#E8EEFF']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.aiSummaryCard, { borderColor: isDark ? '#334155' : '#D1D9F0' }]}
+      >
+        <View style={styles.aiSummaryHeader}>
+          <View style={styles.aiSummaryTitleRow}>
+            <Ionicons name="hardware-chip" size={20} color={colors.primary} />
+            <Text style={[styles.aiSummaryTitle, { color: colors.text }]}>
+              {t('dashboard.aiManagementHub')}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </View>
+
+        <View style={styles.aiStatsRow}>
+          <View style={styles.aiStatItem}>
+            <View style={[styles.aiStatDot, { backgroundColor: colors.success }]} />
+            <Text style={[styles.aiStatValue, { color: colors.text }]}>{stats.published}</Text>
+            <Text style={[styles.aiStatLabel, { color: colors.textSecondary }]}>
+              {t('dashboard.published')}
+            </Text>
+          </View>
+          <View style={[styles.aiStatDivider, { backgroundColor: isDark ? '#334155' : '#D1D9F0' }]} />
+          <View style={styles.aiStatItem}>
+            <View style={[styles.aiStatDot, { backgroundColor: colors.accent }]} />
+            <Text style={[styles.aiStatValue, { color: colors.text }]}>{stats.pending}</Text>
+            <Text style={[styles.aiStatLabel, { color: colors.textSecondary }]}>
+              {t('dashboard.queued')}
+            </Text>
+          </View>
+          <View style={[styles.aiStatDivider, { backgroundColor: isDark ? '#334155' : '#D1D9F0' }]} />
+          <View style={styles.aiStatItem}>
+            <View style={[styles.aiStatDot, { backgroundColor: colors.primary }]} />
+            <Text style={[styles.aiStatValue, { color: colors.text }]}>{stats.totalContent}</Text>
+            <Text style={[styles.aiStatLabel, { color: colors.textSecondary }]}>
+              {t('dashboard.contentCreated')}
+            </Text>
+          </View>
+        </View>
+
+        <View style={[styles.metaStatusRow, { 
+          backgroundColor: metaConnection.isConnected ? colors.success + '12' : colors.accent + '12',
+          borderColor: metaConnection.isConnected ? colors.success + '25' : colors.accent + '25',
+        }]}>
+          <View style={[styles.metaStatusDot, { 
+            backgroundColor: metaConnection.isConnected ? colors.success : colors.accent 
+          }]} />
+          <Text style={[styles.metaStatusText, { color: colors.textSecondary }]}>
+            {metaConnection.isConnected 
+              ? `Meta: ${metaConnection.pageName || 'Connected'}` 
+              : t('dashboard.metaNotConnected')
+            }
+          </Text>
+        </View>
+      </LinearGradient>
+    </Pressable>
+  );
+}
 
 export default function DashboardScreen() {
   const colorScheme = useColorScheme();
@@ -89,6 +170,8 @@ export default function DashboardScreen() {
           title={t('dashboard.weeklyPerformance')} 
         />
 
+        <AIManagementSummary colors={colors} isDark={isDark} />
+
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('dashboard.quickActions')}</Text>
           <View style={styles.actionsGrid}>
@@ -98,9 +181,9 @@ export default function DashboardScreen() {
               onPress={() => router.push('/(tabs)/create')}
             />
             <QuickAction 
-              icon="megaphone-outline" 
-              label={t('dashboard.newCampaign')} 
-              onPress={() => router.push('/(tabs)/campaigns')}
+              icon="hardware-chip-outline" 
+              label={t('dashboard.aiManage')} 
+              onPress={() => router.push('/(tabs)/ai-management')}
               color={Colors.light.accent}
             />
             <QuickAction 
@@ -193,5 +276,74 @@ const styles = StyleSheet.create({
   },
   contentList: {
     gap: 12,
+  },
+  aiSummaryCard: {
+    marginTop: 24,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+  },
+  aiSummaryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  aiSummaryTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  aiSummaryTitle: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  aiStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    marginBottom: 14,
+  },
+  aiStatItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  aiStatDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginBottom: 6,
+  },
+  aiStatValue: {
+    fontSize: 22,
+    fontFamily: 'Inter_700Bold',
+    marginBottom: 2,
+  },
+  aiStatLabel: {
+    fontSize: 11,
+    fontFamily: 'Inter_400Regular',
+    textAlign: 'center' as const,
+  },
+  aiStatDivider: {
+    width: 1,
+    height: 36,
+  },
+  metaStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  metaStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  metaStatusText: {
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
   },
 });

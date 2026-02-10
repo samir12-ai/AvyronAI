@@ -30,10 +30,6 @@ function NativeTabLayout() {
         <Icon sf={{ default: "calendar", selected: "calendar" }} />
         <Label>{t('tabs.calendar')}</Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="campaigns">
-        <Icon sf={{ default: "megaphone", selected: "megaphone.fill" }} />
-        <Label>{t('tabs.campaigns')}</Label>
-      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="ai-management">
         <Icon sf={{ default: "brain", selected: "brain.fill" }} />
         <Label>{t('tabs.aiManagement')}</Label>
@@ -127,15 +123,6 @@ function ClassicTabLayout() {
           title: t('tabs.calendar'),
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "calendar" : "calendar-outline"} size={22} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="campaigns"
-        options={{
-          title: t('tabs.campaigns'),
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "megaphone" : "megaphone-outline"} size={22} color={color} />
           ),
         }}
       />
