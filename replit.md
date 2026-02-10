@@ -54,7 +54,17 @@ Preferred communication style: Simple, everyday language.
 5. **AI Management** (`ai-management.tsx`): AI-powered automation hub with two tabs:
    - **Auto-Publisher**: Batch publish scheduled posts to Meta platforms, auto-publish toggle, publish queue with multi-select, connection status with pulsing indicator, demo mode when Meta not connected
    - **AI Audience Manager**: Generate 3 optimized Meta ad audiences from campaign goals using GPT-5.2, with detailed targeting breakdown (demographics, interests, behaviors, placements, bid strategy, match scores), expandable audience cards, and campaign-based quick optimization
-6. **Settings** (`settings.tsx`): Brand profile and platform connections
+6. **Photography** (`photography.tsx`): Dubai-based photography marketplace with dual-role system:
+   - **Photographer View**: Profile creation (name, email, specialties, pricing, Instagram), portfolio management (image upload, categories: Wedding/Portrait/Event/Product/Fashion/Nature), reservation management with confirm/decline actions
+   - **Customer View**: Browse photographers by city, horizontal scroll cards, portfolio feed with like/share/reserve interactions, photographer detail modal with bio and portfolio grid, booking form with event type selection and date/time/location
+   - **Backend**: `server/photography-routes.ts` - CRUD for profiles, portfolio posts, interactions (like/unlike toggle), reservations with status management
+7. **Video Editor** (`video-editor.tsx`): AI-powered video editing with FFmpeg processing:
+   - **Upload**: Multi-clip upload (up to 20 clips, 200MB max each), automatic video info extraction via ffprobe
+   - **Configure**: 6 edit styles (Cinematic/Energetic/Minimal/Documentary/Social/Commercial), 6 moods, 3 pace options, transition toggle
+   - **AI Processing**: GPT-5.2 analyzes clips and creates professional edit plans (clip ordering, trim points, transitions, color grading)
+   - **FFmpeg Rendering**: Complex filter graph processing with fallback to simple concatenation, libx264 encoding
+   - **Backend**: `server/video-routes.ts` - clip upload, AI edit plan generation, FFmpeg processing, project management
+8. **Settings** (`settings.tsx`): Brand profile and platform connections
 
 ## External Dependencies
 
