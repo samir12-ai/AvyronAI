@@ -1,0 +1,348 @@
+import type { Express } from "express";
+import { db } from "./db";
+import { videoProjects } from "@shared/schema";
+import { eq, desc } from "drizzle-orm";
+import multer from "multer";
+import fs from "fs";
+import path from "path";
+import { exec } from "child_process";
+import { promisify } from "util";
+import OpenAI from "openai";
+
+const execAsync = promisify(exec);
+
+const openai = new OpenAI({
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+});
+
+const videoUploadsDir = path.join(process.cwd(), "uploads", "videos");
+const videoOutputDir = path.join(process.cwd(), "uploads", "video-output");
+if (!fs.existsSync(videoUploadsDir)) fs.mkdirSync(videoUploadsDir, { recursive: true });
+if (!fs.existsSync(videoOutputDir)) fs.mkdirSync(videoOutputDir, { recursive: true });
+
+const videoUpload = multer({
+  storage: multer.diskStorage({
+    destination: videoUploadsDir,
+    filename: (req, file, cb) => {
+      const uniqueName = Date.now() + '-' + Math.random().toString(36).substr(2, 9) + path.extname(file.originalname);
+      cb(null, uniqueName);
+    },
+  }),
+  limits: { fileSize: 200 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('video/')) cb(null, true);
+    else cb(new Error('Only video files are allowed'));
+  },
+});
+
+async function getVideoDuration(filePath: string): Promise<number> {
+  try {
+    const { stdout } = await execAsync(
+      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`
+    );
+    return parseFloat(stdout.trim()) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function getVideoInfo(filePath: string): Promise<{ duration: number; width: number; height: number }> {
+  try {
+    const { stdout } = await execAsync(
+      `ffprobe -v error -select_streams v:0 -show_entries stream=width,height,duration -show_entries format=duration -of json "${filePath}"`
+    );
+    const info = JSON.parse(stdout);
+    const stream = info.streams?.[0] || {};
+    const duration = parseFloat(stream.duration || info.format?.duration || '0');
+    return { duration, width: stream.width || 1920, height: stream.height || 1080 };
+  } catch {
+    return { duration: 0, width: 1920, height: 1080 };
+  }
+}
+
+export function registerVideoRoutes(app: Express) {
+  app.use("/uploads/videos", (req, res, next) => {
+    res.setHeader("Accept-Ranges", "bytes");
+    next();
+  });
+
+  app.post("/api/video/upload-clips", videoUpload.array("clips", 20), async (req, res) => {
+    try {
+      const files = req.files as Express.Multer.File[];
+      if (!files || files.length === 0) {
+        return res.status(400).json({ error: "No video files uploaded" });
+      }
+
+      const clips = await Promise.all(files.map(async (file) => {
+        const filePath = path.join(videoUploadsDir, file.filename);
+        const info = await getVideoInfo(filePath);
+        return {
+          filename: file.filename,
+          originalName: file.originalname,
+          path: `/uploads/videos/${file.filename}`,
+          size: file.size,
+          duration: info.duration,
+          width: info.width,
+          height: info.height,
+        };
+      }));
+
+      const [project] = await db.insert(videoProjects).values({
+        title: req.body.title || 'Untitled Project',
+        status: 'uploaded',
+        clipCount: clips.length,
+        style: req.body.style || 'cinematic',
+        mood: req.body.mood || 'energetic',
+      }).returning();
+
+      res.json({ project, clips });
+    } catch (error) {
+      console.error("Video upload error:", error);
+      res.status(500).json({ error: "Failed to upload video clips" });
+    }
+  });
+
+  app.post("/api/video/ai-edit", async (req, res) => {
+    try {
+      const { projectId, clips, style, mood, pace, addMusic, addTransitions, addText, textOverlay } = req.body;
+
+      if (!clips || clips.length === 0) {
+        return res.status(400).json({ error: "No clips provided" });
+      }
+
+      await db.update(videoProjects)
+        .set({ status: 'processing', style, mood })
+        .where(eq(videoProjects.id, projectId));
+
+      const clipDetails = clips.map((c: any, i: number) =>
+        `Clip ${i + 1}: "${c.originalName}" (${c.duration?.toFixed(1)}s, ${c.width}x${c.height})`
+      ).join('\n');
+
+      const aiResponse = await openai.chat.completions.create({
+        model: "gpt-5.2",
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert video editor AI. You create professional edit decisions for video projects. You understand pacing, transitions, color grading, and storytelling through video.
+
+Your job is to analyze video clips and create an optimal edit plan. You decide:
+1. The order clips should appear
+2. Trim points (start/end times for each clip)
+3. Transition types between clips
+4. Text overlay timing and placement
+5. Overall pacing and rhythm
+
+Return a JSON object with this structure:
+{
+  "editPlan": {
+    "clipOrder": [0, 2, 1],
+    "clips": [
+      {
+        "index": 0,
+        "startTime": 0,
+        "endTime": 5.0,
+        "transition": "fade",
+        "transitionDuration": 0.5
+      }
+    ],
+    "textOverlays": [
+      {
+        "text": "Title Text",
+        "startTime": 0,
+        "duration": 3,
+        "position": "center",
+        "fontSize": 48
+      }
+    ],
+    "colorGrade": "warm",
+    "overallPace": "medium"
+  },
+  "creativeNotes": "Brief description of the creative approach"
+}`
+          },
+          {
+            role: "user",
+            content: `Create a professional edit plan for this video project:
+
+STYLE: ${style || 'cinematic'}
+MOOD: ${mood || 'energetic'}
+PACE: ${pace || 'medium'}
+ADD TRANSITIONS: ${addTransitions !== false ? 'Yes' : 'No'}
+ADD TEXT: ${addText ? 'Yes' : 'No'}
+TEXT OVERLAY: ${textOverlay || 'None'}
+
+CLIPS:
+${clipDetails}
+
+Create an edit plan that tells a compelling visual story. Determine the best clip order, trim unnecessary parts, add smooth transitions, and suggest color grading.`
+          }
+        ],
+        max_completion_tokens: 2000,
+      });
+
+      const aiContent = aiResponse.choices[0]?.message?.content || "";
+      let editPlan;
+      try {
+        const jsonMatch = aiContent.match(/\{[\s\S]*\}/);
+        editPlan = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+      } catch {
+        editPlan = null;
+      }
+
+      if (!editPlan) {
+        await db.update(videoProjects)
+          .set({ status: 'failed' })
+          .where(eq(videoProjects.id, projectId));
+        return res.status(500).json({ error: "AI failed to generate edit plan" });
+      }
+
+      const plan = editPlan.editPlan || editPlan;
+      const clipOrder = plan.clipOrder || clips.map((_: any, i: number) => i);
+      const outputFilename = `edited_${Date.now()}.mp4`;
+      const outputPath = path.join(videoOutputDir, outputFilename);
+
+      try {
+        const filterParts: string[] = [];
+        const concatInputs: string[] = [];
+        let inputArgs = '';
+
+        for (let i = 0; i < clipOrder.length; i++) {
+          const clipIdx = clipOrder[i];
+          const clip = clips[clipIdx];
+          if (!clip) continue;
+
+          const clipPath = path.join(videoUploadsDir, clip.filename);
+          if (!fs.existsSync(clipPath)) continue;
+
+          inputArgs += ` -i "${clipPath}"`;
+
+          const clipPlan = plan.clips?.find((c: any) => c.index === clipIdx);
+          const startTime = clipPlan?.startTime || 0;
+          const endTime = clipPlan?.endTime || clip.duration || 10;
+
+          filterParts.push(
+            `[${i}:v]trim=start=${startTime}:end=${endTime},setpts=PTS-STARTPTS,scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2[v${i}]`
+          );
+          filterParts.push(
+            `[${i}:a]atrim=start=${startTime}:end=${endTime},asetpts=PTS-STARTPTS[a${i}]`
+          );
+          concatInputs.push(`[v${i}][a${i}]`);
+        }
+
+        if (concatInputs.length === 0) {
+          await db.update(videoProjects)
+            .set({ status: 'failed' })
+            .where(eq(videoProjects.id, projectId));
+          return res.status(500).json({ error: "No valid clips to process" });
+        }
+
+        const filterComplex = filterParts.join(';') + ';' + concatInputs.join('') + `concat=n=${concatInputs.length}:v=1:a=1[outv][outa]`;
+
+        const ffmpegCmd = `ffmpeg -y ${inputArgs} -filter_complex "${filterComplex}" -map "[outv]" -map "[outa]" -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -movflags +faststart "${outputPath}"`;
+
+        await execAsync(ffmpegCmd, { timeout: 300000 });
+
+        const outputDuration = await getVideoDuration(outputPath);
+
+        await db.update(videoProjects).set({
+          status: 'completed',
+          outputUrl: `/uploads/video-output/${outputFilename}`,
+          duration: Math.round(outputDuration),
+          updatedAt: new Date(),
+        }).where(eq(videoProjects.id, projectId));
+
+        res.json({
+          success: true,
+          outputUrl: `/uploads/video-output/${outputFilename}`,
+          duration: Math.round(outputDuration),
+          editPlan: plan,
+          creativeNotes: editPlan.creativeNotes,
+        });
+      } catch (ffmpegError: any) {
+        console.error("FFmpeg error:", ffmpegError.message);
+
+        const outputFilenameSimple = `simple_${Date.now()}.mp4`;
+        const outputPathSimple = path.join(videoOutputDir, outputFilenameSimple);
+
+        try {
+          const validClips = clipOrder
+            .map((idx: number) => clips[idx])
+            .filter((c: any) => c && fs.existsSync(path.join(videoUploadsDir, c.filename)));
+
+          if (validClips.length === 0) throw new Error("No valid clips");
+
+          const listFile = path.join(videoOutputDir, `list_${Date.now()}.txt`);
+          const listContent = validClips.map((c: any) =>
+            `file '${path.join(videoUploadsDir, c.filename)}'`
+          ).join('\n');
+          fs.writeFileSync(listFile, listContent);
+
+          await execAsync(
+            `ffmpeg -y -f concat -safe 0 -i "${listFile}" -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -movflags +faststart "${outputPathSimple}"`,
+            { timeout: 300000 }
+          );
+
+          fs.unlinkSync(listFile);
+          const outputDuration = await getVideoDuration(outputPathSimple);
+
+          await db.update(videoProjects).set({
+            status: 'completed',
+            outputUrl: `/uploads/video-output/${outputFilenameSimple}`,
+            duration: Math.round(outputDuration),
+            updatedAt: new Date(),
+          }).where(eq(videoProjects.id, projectId));
+
+          res.json({
+            success: true,
+            outputUrl: `/uploads/video-output/${outputFilenameSimple}`,
+            duration: Math.round(outputDuration),
+            editPlan: plan,
+            creativeNotes: editPlan.creativeNotes,
+            note: "Used simplified concatenation mode",
+          });
+        } catch (fallbackError: any) {
+          console.error("Fallback FFmpeg error:", fallbackError.message);
+          await db.update(videoProjects)
+            .set({ status: 'failed' })
+            .where(eq(videoProjects.id, projectId));
+          res.status(500).json({ error: "Video processing failed" });
+        }
+      }
+    } catch (error) {
+      console.error("AI edit error:", error);
+      res.status(500).json({ error: "Failed to process video edit" });
+    }
+  });
+
+  app.get("/api/video/projects", async (req, res) => {
+    try {
+      const projects = await db.select().from(videoProjects).orderBy(desc(videoProjects.createdAt));
+      res.json(projects);
+    } catch (error) {
+      console.error("List projects error:", error);
+      res.status(500).json({ error: "Failed to load projects" });
+    }
+  });
+
+  app.get("/api/video/projects/:id", async (req, res) => {
+    try {
+      const [project] = await db.select().from(videoProjects).where(eq(videoProjects.id, req.params.id));
+      if (!project) return res.status(404).json({ error: "Project not found" });
+      res.json(project);
+    } catch (error) {
+      console.error("Get project error:", error);
+      res.status(500).json({ error: "Failed to load project" });
+    }
+  });
+
+  app.delete("/api/video/projects/:id", async (req, res) => {
+    try {
+      await db.delete(videoProjects).where(eq(videoProjects.id, req.params.id));
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete project error:", error);
+      res.status(500).json({ error: "Failed to delete project" });
+    }
+  });
+}
