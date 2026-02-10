@@ -49,9 +49,12 @@ Preferred communication style: Simple, everyday language.
      - Canvas workspace with full-screen preview modal
      - Generation history gallery (session-based)
      - Premium animated loading overlay
-3. **Calendar** (`calendar.tsx`): Content scheduling and calendar view
+3. **Calendar** (`calendar.tsx`): Content scheduling and calendar view with AI Calendar Assistant
 4. **Campaigns** (`campaigns.tsx`): Campaign and ad management
-5. **Settings** (`settings.tsx`): Brand profile and platform connections
+5. **AI Management** (`ai-management.tsx`): AI-powered automation hub with two tabs:
+   - **Auto-Publisher**: Batch publish scheduled posts to Meta platforms, auto-publish toggle, publish queue with multi-select, connection status with pulsing indicator, demo mode when Meta not connected
+   - **AI Audience Manager**: Generate 3 optimized Meta ad audiences from campaign goals using GPT-5.2, with detailed targeting breakdown (demographics, interests, behaviors, placements, bid strategy, match scores), expandable audience cards, and campaign-based quick optimization
+6. **Settings** (`settings.tsx`): Brand profile and platform connections
 
 ## External Dependencies
 
