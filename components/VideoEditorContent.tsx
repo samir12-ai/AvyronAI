@@ -8,6 +8,8 @@ import {
   Alert,
   Dimensions,
   Platform,
+  TextInput,
+  ScrollView,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -43,6 +45,7 @@ interface VideoProject {
 type EditStyle = 'cinematic' | 'energetic' | 'minimal' | 'documentary' | 'social' | 'commercial';
 type EditMood = 'energetic' | 'calm' | 'dramatic' | 'playful' | 'luxurious' | 'warm';
 type EditPace = 'slow' | 'medium' | 'fast';
+type VideoType = 'promo' | 'reel' | 'ad' | 'story' | 'recap' | 'tutorial';
 
 const STYLES: { id: EditStyle; icon: string; label: string }[] = [
   { id: 'cinematic', icon: 'film-outline', label: 'Cinematic' },
@@ -62,6 +65,48 @@ const MOODS: { id: EditMood; label: string; color: string }[] = [
   { id: 'warm', label: 'Warm', color: '#F97316' },
 ];
 
+const VIDEO_TYPES: { id: VideoType; icon: string; label: string; desc: string }[] = [
+  { id: 'promo', icon: 'megaphone-outline', label: 'Promo Video', desc: 'Brand or product promotion' },
+  { id: 'reel', icon: 'phone-portrait-outline', label: 'Social Reel', desc: 'Short-form for Instagram/TikTok' },
+  { id: 'ad', icon: 'pricetag-outline', label: 'Video Ad', desc: 'Paid advertising creative' },
+  { id: 'story', icon: 'book-outline', label: 'Brand Story', desc: 'Tell your brand narrative' },
+  { id: 'recap', icon: 'calendar-outline', label: 'Event Recap', desc: 'Highlights from events' },
+  { id: 'tutorial', icon: 'school-outline', label: 'Tutorial/How-To', desc: 'Educational content' },
+];
+
+const QUICK_PROMPTS: { label: string; prompt: string; type: VideoType; style: EditStyle; mood: EditMood; pace: EditPace }[] = [
+  {
+    label: 'Product Launch Hype',
+    prompt: 'Create an exciting product launch video with fast cuts, bold text reveals, and high-energy transitions. Focus on building anticipation and ending with a strong call-to-action.',
+    type: 'promo', style: 'energetic', mood: 'energetic', pace: 'fast',
+  },
+  {
+    label: 'Cinematic Brand Film',
+    prompt: 'Create a cinematic brand story with smooth transitions, warm color grading, and deliberate pacing. Let each shot breathe and tell a visual narrative with emotional depth.',
+    type: 'story', style: 'cinematic', mood: 'warm', pace: 'slow',
+  },
+  {
+    label: 'Instagram Reel',
+    prompt: 'Create a punchy social media reel with trending-style edits, quick transitions, and text overlays. Keep it under 30 seconds, fast-paced, and visually engaging from the first frame.',
+    type: 'reel', style: 'social', mood: 'playful', pace: 'fast',
+  },
+  {
+    label: 'Luxury Showcase',
+    prompt: 'Create an elegant, premium-feel video with slow-motion reveals, sophisticated transitions, and refined color grading. Emphasize quality, craftsmanship, and exclusivity.',
+    type: 'promo', style: 'minimal', mood: 'luxurious', pace: 'slow',
+  },
+  {
+    label: 'Event Highlights',
+    prompt: 'Compile event footage into a dynamic highlight reel. Mix wide shots with close-ups, add energetic transitions between moments, and capture the atmosphere and excitement.',
+    type: 'recap', style: 'documentary', mood: 'energetic', pace: 'medium',
+  },
+  {
+    label: 'Ad Creative',
+    prompt: 'Create a conversion-focused video ad with attention-grabbing opening, clear product benefits, social proof moments, and a compelling end card with call-to-action.',
+    type: 'ad', style: 'commercial', mood: 'dramatic', pace: 'medium',
+  },
+];
+
 interface Props {
   colors: typeof Colors.light;
   isDark: boolean;
@@ -71,27 +116,48 @@ export function VideoEditorContent({ colors, isDark }: Props) {
   const { t } = useLanguage();
   const baseUrl = getApiUrl();
 
-  const [step, setStep] = useState<'upload' | 'configure' | 'processing' | 'result'>('upload');
+  const [step, setStep] = useState<'brief' | 'upload' | 'configure' | 'processing' | 'result'>('brief');
   const [clips, setClips] = useState<UploadedClip[]>([]);
   const [project, setProject] = useState<VideoProject | null>(null);
   const [uploading, setUploading] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [processingProgress, setProcessingProgress] = useState(0);
-  const [title, setTitle] = useState('');
 
+  const [videoType, setVideoType] = useState<VideoType>('promo');
+  const [creativeBrief, setCreativeBrief] = useState('');
+  const [targetAudience, setTargetAudience] = useState('');
+  const [keyMessage, setKeyMessage] = useState('');
   const [style, setStyle] = useState<EditStyle>('cinematic');
   const [mood, setMood] = useState<EditMood>('energetic');
   const [pace, setPace] = useState<EditPace>('medium');
   const [addTransitions, setAddTransitions] = useState(true);
   const [addText, setAddText] = useState(false);
+  const [textOverlay, setTextOverlay] = useState('');
 
   const [resultUrl, setResultUrl] = useState('');
   const [resultDuration, setResultDuration] = useState(0);
   const [creativeNotes, setCreativeNotes] = useState('');
-
   const [uploadStatus, setUploadStatus] = useState('');
   const [projects, setProjects] = useState<VideoProject[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+
+  const applyQuickPrompt = (qp: typeof QUICK_PROMPTS[0]) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setCreativeBrief(qp.prompt);
+    setVideoType(qp.type);
+    setStyle(qp.style);
+    setMood(qp.mood);
+    setPace(qp.pace);
+  };
+
+  const goToUpload = () => {
+    if (!creativeBrief.trim()) {
+      Alert.alert('Creative Brief Required', 'Please describe your video vision or pick a quick template to continue.');
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setStep('upload');
+  };
 
   const pickVideos = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -111,7 +177,7 @@ export function VideoEditorContent({ colors, isDark }: Props) {
         formData.append('clips', file);
       }
 
-      formData.append('title', title || 'My Video Project');
+      formData.append('title', keyMessage || creativeBrief.slice(0, 60));
       formData.append('style', style);
       formData.append('mood', mood);
 
@@ -165,6 +231,11 @@ export function VideoEditorContent({ colors, isDark }: Props) {
           pace,
           addTransitions,
           addText,
+          textOverlay,
+          creativeBrief,
+          videoType,
+          targetAudience,
+          keyMessage,
         }),
       });
 
@@ -204,14 +275,21 @@ export function VideoEditorContent({ colors, isDark }: Props) {
   }, [baseUrl]);
 
   const newProject = () => {
-    setStep('upload');
+    setStep('brief');
     setClips([]);
     setProject(null);
     setResultUrl('');
     setResultDuration(0);
     setCreativeNotes('');
     setProcessingProgress(0);
-    setTitle('');
+    setCreativeBrief('');
+    setTargetAudience('');
+    setKeyMessage('');
+    setTextOverlay('');
+    setVideoType('promo');
+    setStyle('cinematic');
+    setMood('energetic');
+    setPace('medium');
   };
 
   const formatBytes = (bytes: number) => {
@@ -228,102 +306,155 @@ export function VideoEditorContent({ colors, isDark }: Props) {
   return (
     <View>
       <View style={styles.veHeader}>
+        {step !== 'brief' && step !== 'processing' && (
+          <Pressable onPress={() => {
+            if (step === 'upload') setStep('brief');
+            else if (step === 'configure') setStep('upload');
+            else if (step === 'result') newProject();
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          }}>
+            <View style={[styles.headerBtn, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+              <Ionicons name="arrow-back" size={20} color={colors.text} />
+            </View>
+          </Pressable>
+        )}
+        <View style={{ flex: 1 }} />
         <Pressable onPress={() => { setShowHistory(!showHistory); if (!showHistory) loadProjects(); }}>
-          <View style={[styles.historyBtn, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={[styles.headerBtn, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             <Ionicons name="time-outline" size={20} color={colors.text} />
           </View>
         </Pressable>
       </View>
 
-      {step === 'upload' && !showHistory && (
+      {/* STEP 1: Creative Brief */}
+      {step === 'brief' && !showHistory && (
         <View>
-          <LinearGradient
-            colors={isDark ? ['#1a1a2e', '#16213e'] : ['#f0f4ff', '#e8effd']}
-            style={styles.uploadArea}
+          <View style={styles.briefHeader}>
+            <LinearGradient
+              colors={['#8B5CF6', '#6366F1', '#4F46E5']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.briefBadge}
+            >
+              <MaterialCommunityIcons name="robot-excited-outline" size={16} color="#fff" />
+              <Text style={styles.briefBadgeText}>GPT-5.2 Powered</Text>
+            </LinearGradient>
+            <Text style={[styles.briefTitle, { color: colors.text }]}>
+              {t('videoEditor.briefTitle')}
+            </Text>
+            <Text style={[styles.briefSubtitle, { color: colors.textSecondary }]}>
+              {t('videoEditor.briefSubtitle')}
+            </Text>
+          </View>
+
+          <Text style={[styles.sectionLabel, { color: colors.text }]}>
+            {t('videoEditor.quickTemplates')}
+          </Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.quickPromptScroll}
           >
-            <View style={[styles.uploadIconCircle, { backgroundColor: colors.accent + '20' }]}>
-              <MaterialCommunityIcons name="movie-open-plus-outline" size={40} color={colors.accent} />
-            </View>
-            <Text style={[styles.uploadTitle, { color: colors.text }]}>{t('videoEditor.uploadTitle')}</Text>
-            <Text style={[styles.uploadDesc, { color: colors.textSecondary }]}>{t('videoEditor.uploadDesc')}</Text>
-
-            <Pressable onPress={pickVideos} disabled={uploading}>
-              <LinearGradient colors={[colors.accent, '#0EA5E9']} style={[styles.uploadBtn, { opacity: uploading ? 0.7 : 1 }]}>
-                {uploading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Ionicons name="cloud-upload-outline" size={20} color="#fff" />
-                )}
-                <Text style={styles.uploadBtnText}>
-                  {uploading ? t('videoEditor.uploading') : t('videoEditor.selectClips')}
+            {QUICK_PROMPTS.map((qp, i) => (
+              <Pressable
+                key={i}
+                onPress={() => applyQuickPrompt(qp)}
+                style={[styles.quickPromptCard, {
+                  backgroundColor: creativeBrief === qp.prompt ? colors.accent + '15' : colors.card,
+                  borderColor: creativeBrief === qp.prompt ? colors.accent : colors.cardBorder,
+                }]}
+              >
+                <View style={[styles.quickPromptIcon, { backgroundColor: (creativeBrief === qp.prompt ? colors.accent : colors.textMuted) + '15' }]}>
+                  <Ionicons
+                    name={VIDEO_TYPES.find(v => v.id === qp.type)?.icon as any || 'sparkles-outline'}
+                    size={18}
+                    color={creativeBrief === qp.prompt ? colors.accent : colors.textMuted}
+                  />
+                </View>
+                <Text style={[styles.quickPromptLabel, {
+                  color: creativeBrief === qp.prompt ? colors.accent : colors.text,
+                }]} numberOfLines={2}>
+                  {qp.label}
                 </Text>
-              </LinearGradient>
-            </Pressable>
+              </Pressable>
+            ))}
+          </ScrollView>
 
-            {uploading && uploadStatus ? (
-              <Text style={[styles.uploadStatusText, { color: colors.accent }]}>
-                {uploadStatus}
-              </Text>
-            ) : null}
-
-            <View style={styles.uploadHints}>
-              <View style={styles.uploadHint}>
-                <Ionicons name="videocam-outline" size={14} color={colors.textMuted} />
-                <Text style={[styles.uploadHintText, { color: colors.textMuted }]}>{t('videoEditor.maxClips')}</Text>
-              </View>
-              <View style={styles.uploadHint}>
-                <Ionicons name="resize-outline" size={14} color={colors.textMuted} />
-                <Text style={[styles.uploadHintText, { color: colors.textMuted }]}>{t('videoEditor.maxSize')}</Text>
-              </View>
-            </View>
-          </LinearGradient>
-
-          <View style={styles.howItWorks}>
-            <Text style={[styles.howTitle, { color: colors.text }]}>{t('videoEditor.howItWorks')}</Text>
-            {[
-              { icon: 'cloud-upload-outline', title: t('videoEditor.step1Title'), desc: t('videoEditor.step1Desc') },
-              { icon: 'sparkles-outline', title: t('videoEditor.step2Title'), desc: t('videoEditor.step2Desc') },
-              { icon: 'film-outline', title: t('videoEditor.step3Title'), desc: t('videoEditor.step3Desc') },
-            ].map((item, i) => (
-              <View key={i} style={[styles.howStep, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                <View style={[styles.howStepNum, { backgroundColor: colors.accent + '15' }]}>
-                  <Text style={[styles.howStepNumText, { color: colors.accent }]}>{i + 1}</Text>
-                </View>
-                <View style={styles.howStepContent}>
-                  <Text style={[styles.howStepTitle, { color: colors.text }]}>{item.title}</Text>
-                  <Text style={[styles.howStepDesc, { color: colors.textSecondary }]}>{item.desc}</Text>
-                </View>
-              </View>
+          <Text style={[styles.sectionLabel, { color: colors.text }]}>
+            {t('videoEditor.videoTypeLabel')}
+          </Text>
+          <View style={styles.videoTypeGrid}>
+            {VIDEO_TYPES.map(vt => (
+              <Pressable
+                key={vt.id}
+                onPress={() => { setVideoType(vt.id); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                style={[styles.videoTypeCard, {
+                  backgroundColor: videoType === vt.id ? colors.accent + '12' : colors.card,
+                  borderColor: videoType === vt.id ? colors.accent : colors.cardBorder,
+                }]}
+              >
+                <Ionicons name={vt.icon as any} size={22} color={videoType === vt.id ? colors.accent : colors.textMuted} />
+                <Text style={[styles.videoTypeLabel, { color: videoType === vt.id ? colors.accent : colors.text }]}>
+                  {vt.label}
+                </Text>
+                <Text style={[styles.videoTypeDesc, { color: colors.textMuted }]} numberOfLines={1}>
+                  {vt.desc}
+                </Text>
+              </Pressable>
             ))}
           </View>
-        </View>
-      )}
 
-      {step === 'configure' && (
-        <View>
-          <View style={[styles.clipsSection, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <View style={styles.clipsSectionHeader}>
-              <Ionicons name="videocam" size={18} color={colors.accent} />
-              <Text style={[styles.clipsSectionTitle, { color: colors.text }]}>
-                {clips.length} {clips.length === 1 ? t('videoEditor.clip') : t('videoEditor.clips')}
-              </Text>
-              <Text style={[styles.clipsTotalDuration, { color: colors.textMuted }]}>
-                {formatDuration(clips.reduce((sum, c) => sum + c.duration, 0))} {t('videoEditor.total')}
+          <View style={[styles.inputCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <View style={styles.inputCardHeader}>
+              <MaterialCommunityIcons name="movie-open-star-outline" size={18} color={colors.accent} />
+              <Text style={[styles.inputCardTitle, { color: colors.text }]}>
+                {t('videoEditor.describeVision')}
               </Text>
             </View>
-            {clips.map((clip, i) => (
-              <View key={i} style={[styles.clipRow, { borderTopColor: colors.cardBorder }]}>
-                <View style={[styles.clipThumb, { backgroundColor: colors.accent + '10' }]}>
-                  <Ionicons name="film-outline" size={20} color={colors.accent} />
-                </View>
-                <View style={styles.clipInfo}>
-                  <Text style={[styles.clipName, { color: colors.text }]} numberOfLines={1}>{clip.originalName}</Text>
-                  <Text style={[styles.clipMeta, { color: colors.textMuted }]}>
-                    {formatDuration(clip.duration)} | {clip.width}x{clip.height} | {formatBytes(clip.size)}
-                  </Text>
-                </View>
-              </View>
-            ))}
+            <TextInput
+              style={[styles.briefInput, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
+              placeholder={t('videoEditor.briefPlaceholder')}
+              placeholderTextColor={colors.textMuted}
+              value={creativeBrief}
+              onChangeText={setCreativeBrief}
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+            />
+          </View>
+
+          <View style={[styles.inputCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <View style={styles.inputCardHeader}>
+              <Ionicons name="people-outline" size={18} color={colors.accent} />
+              <Text style={[styles.inputCardTitle, { color: colors.text }]}>
+                {t('videoEditor.targetAudienceLabel')}
+              </Text>
+              <Text style={[styles.optionalBadge, { color: colors.textMuted }]}>Optional</Text>
+            </View>
+            <TextInput
+              style={[styles.smallInput, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
+              placeholder={t('videoEditor.audiencePlaceholder')}
+              placeholderTextColor={colors.textMuted}
+              value={targetAudience}
+              onChangeText={setTargetAudience}
+            />
+          </View>
+
+          <View style={[styles.inputCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <View style={styles.inputCardHeader}>
+              <Ionicons name="chatbubble-outline" size={18} color={colors.accent} />
+              <Text style={[styles.inputCardTitle, { color: colors.text }]}>
+                {t('videoEditor.keyMessageLabel')}
+              </Text>
+              <Text style={[styles.optionalBadge, { color: colors.textMuted }]}>Optional</Text>
+            </View>
+            <TextInput
+              style={[styles.smallInput, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
+              placeholder={t('videoEditor.messagePlaceholder')}
+              placeholderTextColor={colors.textMuted}
+              value={keyMessage}
+              onChangeText={setKeyMessage}
+            />
           </View>
 
           <Text style={[styles.sectionLabel, { color: colors.text }]}>{t('videoEditor.editStyle')}</Text>
@@ -397,9 +528,186 @@ export function VideoEditorContent({ colors, isDark }: Props) {
                 <View style={[styles.toggleKnob, { transform: [{ translateX: addTransitions ? 18 : 0 }] }]} />
               </View>
             </Pressable>
+
+            <Pressable
+              onPress={() => setAddText(!addText)}
+              style={[styles.toggleRow, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
+            >
+              <View style={styles.toggleLeft}>
+                <Ionicons name="text-outline" size={20} color={colors.accent} />
+                <Text style={[styles.toggleLabel, { color: colors.text }]}>{t('videoEditor.addTextOverlay')}</Text>
+              </View>
+              <View style={[styles.toggleSwitch, { backgroundColor: addText ? colors.accent : colors.inputBorder }]}>
+                <View style={[styles.toggleKnob, { transform: [{ translateX: addText ? 18 : 0 }] }]} />
+              </View>
+            </Pressable>
           </View>
 
-          <Pressable onPress={startEditing} style={{ marginHorizontal: 20, marginTop: 24 }}>
+          {addText && (
+            <View style={[styles.inputCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+              <TextInput
+                style={[styles.smallInput, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
+                placeholder={t('videoEditor.textOverlayPlaceholder')}
+                placeholderTextColor={colors.textMuted}
+                value={textOverlay}
+                onChangeText={setTextOverlay}
+              />
+            </View>
+          )}
+
+          <Pressable onPress={goToUpload} style={{ marginHorizontal: 20, marginTop: 24, marginBottom: 40 }}>
+            <LinearGradient colors={['#8B5CF6', '#6366F1']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.continueBtn}>
+              <Text style={styles.continueBtnText}>{t('videoEditor.continueToUpload')}</Text>
+              <Ionicons name="arrow-forward" size={20} color="#fff" />
+            </LinearGradient>
+          </Pressable>
+        </View>
+      )}
+
+      {/* STEP 2: Upload Clips */}
+      {step === 'upload' && !showHistory && (
+        <View>
+          <View style={[styles.briefSummary, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <View style={styles.briefSummaryHeader}>
+              <MaterialCommunityIcons name="robot-excited-outline" size={18} color={colors.accent} />
+              <Text style={[styles.briefSummaryTitle, { color: colors.text }]}>{t('videoEditor.yourBrief')}</Text>
+            </View>
+            <Text style={[styles.briefSummaryText, { color: colors.textSecondary }]} numberOfLines={3}>
+              {creativeBrief}
+            </Text>
+            <View style={styles.briefTags}>
+              <View style={[styles.briefTag, { backgroundColor: colors.accent + '15' }]}>
+                <Text style={[styles.briefTagText, { color: colors.accent }]}>
+                  {VIDEO_TYPES.find(v => v.id === videoType)?.label}
+                </Text>
+              </View>
+              <View style={[styles.briefTag, { backgroundColor: colors.accent + '15' }]}>
+                <Text style={[styles.briefTagText, { color: colors.accent }]}>{style}</Text>
+              </View>
+              <View style={[styles.briefTag, { backgroundColor: colors.accent + '15' }]}>
+                <Text style={[styles.briefTagText, { color: colors.accent }]}>{mood}</Text>
+              </View>
+            </View>
+          </View>
+
+          <LinearGradient
+            colors={isDark ? ['#1a1a2e', '#16213e'] : ['#f0f4ff', '#e8effd']}
+            style={styles.uploadArea}
+          >
+            <View style={[styles.uploadIconCircle, { backgroundColor: colors.accent + '20' }]}>
+              <MaterialCommunityIcons name="movie-open-plus-outline" size={40} color={colors.accent} />
+            </View>
+            <Text style={[styles.uploadTitle, { color: colors.text }]}>{t('videoEditor.uploadTitle')}</Text>
+            <Text style={[styles.uploadDesc, { color: colors.textSecondary }]}>{t('videoEditor.uploadDesc')}</Text>
+
+            <Pressable onPress={pickVideos} disabled={uploading}>
+              <LinearGradient colors={[colors.accent, '#0EA5E9']} style={[styles.uploadBtn, { opacity: uploading ? 0.7 : 1 }]}>
+                {uploading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Ionicons name="cloud-upload-outline" size={20} color="#fff" />
+                )}
+                <Text style={styles.uploadBtnText}>
+                  {uploading ? t('videoEditor.uploading') : t('videoEditor.selectClips')}
+                </Text>
+              </LinearGradient>
+            </Pressable>
+
+            {uploading && uploadStatus ? (
+              <Text style={[styles.uploadStatusText, { color: colors.accent }]}>
+                {uploadStatus}
+              </Text>
+            ) : null}
+
+            <View style={styles.uploadHints}>
+              <View style={styles.uploadHint}>
+                <Ionicons name="videocam-outline" size={14} color={colors.textMuted} />
+                <Text style={[styles.uploadHintText, { color: colors.textMuted }]}>{t('videoEditor.maxClips')}</Text>
+              </View>
+              <View style={styles.uploadHint}>
+                <Ionicons name="resize-outline" size={14} color={colors.textMuted} />
+                <Text style={[styles.uploadHintText, { color: colors.textMuted }]}>{t('videoEditor.maxSize')}</Text>
+              </View>
+            </View>
+          </LinearGradient>
+        </View>
+      )}
+
+      {/* STEP 3: Review & Start */}
+      {step === 'configure' && (
+        <View>
+          <View style={[styles.clipsSection, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <View style={styles.clipsSectionHeader}>
+              <Ionicons name="videocam" size={18} color={colors.accent} />
+              <Text style={[styles.clipsSectionTitle, { color: colors.text }]}>
+                {clips.length} {clips.length === 1 ? t('videoEditor.clip') : t('videoEditor.clips')}
+              </Text>
+              <Text style={[styles.clipsTotalDuration, { color: colors.textMuted }]}>
+                {formatDuration(clips.reduce((sum, c) => sum + c.duration, 0))} {t('videoEditor.total')}
+              </Text>
+            </View>
+            {clips.map((clip, i) => (
+              <View key={i} style={[styles.clipRow, { borderTopColor: colors.cardBorder }]}>
+                <View style={[styles.clipThumb, { backgroundColor: colors.accent + '10' }]}>
+                  <Ionicons name="film-outline" size={20} color={colors.accent} />
+                </View>
+                <View style={styles.clipInfo}>
+                  <Text style={[styles.clipName, { color: colors.text }]} numberOfLines={1}>{clip.originalName}</Text>
+                  <Text style={[styles.clipMeta, { color: colors.textMuted }]}>
+                    {formatDuration(clip.duration)} | {clip.width}x{clip.height} | {formatBytes(clip.size)}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+
+          <View style={[styles.briefSummary, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <View style={styles.briefSummaryHeader}>
+              <MaterialCommunityIcons name="robot-excited-outline" size={18} color={colors.accent} />
+              <Text style={[styles.briefSummaryTitle, { color: colors.text }]}>{t('videoEditor.aiWillDo')}</Text>
+            </View>
+            <Text style={[styles.briefSummaryText, { color: colors.textSecondary }]} numberOfLines={4}>
+              {creativeBrief}
+            </Text>
+            <View style={styles.briefTags}>
+              <View style={[styles.briefTag, { backgroundColor: colors.accent + '15' }]}>
+                <Text style={[styles.briefTagText, { color: colors.accent }]}>
+                  {VIDEO_TYPES.find(v => v.id === videoType)?.label}
+                </Text>
+              </View>
+              <View style={[styles.briefTag, { backgroundColor: colors.accent + '15' }]}>
+                <Text style={[styles.briefTagText, { color: colors.accent }]}>{style}</Text>
+              </View>
+              <View style={[styles.briefTag, { backgroundColor: colors.accent + '15' }]}>
+                <Text style={[styles.briefTagText, { color: colors.accent }]}>{mood}</Text>
+              </View>
+              <View style={[styles.briefTag, { backgroundColor: colors.accent + '15' }]}>
+                <Text style={[styles.briefTagText, { color: colors.accent }]}>{pace} pace</Text>
+              </View>
+              {addTransitions && (
+                <View style={[styles.briefTag, { backgroundColor: '#10B981' + '15' }]}>
+                  <Text style={[styles.briefTagText, { color: '#10B981' }]}>Transitions</Text>
+                </View>
+              )}
+              {addText && textOverlay && (
+                <View style={[styles.briefTag, { backgroundColor: '#F59E0B' + '15' }]}>
+                  <Text style={[styles.briefTagText, { color: '#F59E0B' }]}>Text: {textOverlay}</Text>
+                </View>
+              )}
+            </View>
+            {targetAudience ? (
+              <Text style={[styles.briefMetaLine, { color: colors.textMuted }]}>
+                Audience: {targetAudience}
+              </Text>
+            ) : null}
+            {keyMessage ? (
+              <Text style={[styles.briefMetaLine, { color: colors.textMuted }]}>
+                Key message: {keyMessage}
+              </Text>
+            ) : null}
+          </View>
+
+          <Pressable onPress={startEditing} style={{ marginHorizontal: 20, marginTop: 24, marginBottom: 40 }}>
             <LinearGradient colors={['#8B5CF6', '#6366F1']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.startEditBtn}>
               <MaterialCommunityIcons name="movie-open-star-outline" size={22} color="#fff" />
               <Text style={styles.startEditText}>{t('videoEditor.startEditing')}</Text>
@@ -408,6 +716,7 @@ export function VideoEditorContent({ colors, isDark }: Props) {
         </View>
       )}
 
+      {/* STEP 4: Processing */}
       {step === 'processing' && (
         <View style={styles.processingContainer}>
           <LinearGradient
@@ -433,7 +742,8 @@ export function VideoEditorContent({ colors, isDark }: Props) {
             <View style={styles.processingSteps}>
               {[
                 { label: t('videoEditor.analyzingClips'), done: processingProgress > 15 },
-                { label: t('videoEditor.aiPlanning'), done: processingProgress > 35 },
+                { label: t('videoEditor.readingBrief'), done: processingProgress > 25 },
+                { label: t('videoEditor.aiPlanning'), done: processingProgress > 45 },
                 { label: t('videoEditor.rendering'), done: processingProgress > 65 },
                 { label: t('videoEditor.finalizing'), done: processingProgress > 90 },
               ].map((s, i) => (
@@ -441,7 +751,7 @@ export function VideoEditorContent({ colors, isDark }: Props) {
                   <Ionicons
                     name={s.done ? "checkmark-circle" : "ellipse-outline"}
                     size={18}
-                    color={s.done ? colors.success : colors.textMuted}
+                    color={s.done ? '#10B981' : colors.textMuted}
                   />
                   <Text style={[styles.processingStepText, { color: s.done ? colors.text : colors.textMuted }]}>
                     {s.label}
@@ -453,6 +763,7 @@ export function VideoEditorContent({ colors, isDark }: Props) {
         </View>
       )}
 
+      {/* STEP 5: Result */}
       {step === 'result' && (
         <View>
           <LinearGradient
@@ -524,7 +835,7 @@ export function VideoEditorContent({ colors, isDark }: Props) {
               <View key={p.id} style={[styles.historyCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
                 <View style={styles.historyCardLeft}>
                   <View style={[styles.historyStatusDot, {
-                    backgroundColor: p.status === 'completed' ? colors.success : p.status === 'failed' ? colors.error : colors.accent
+                    backgroundColor: p.status === 'completed' ? '#10B981' : p.status === 'failed' ? '#EF4444' : colors.accent
                   }]} />
                   <View>
                     <Text style={[styles.historyCardTitle, { color: colors.text }]}>{p.title}</Text>
@@ -543,36 +854,28 @@ export function VideoEditorContent({ colors, isDark }: Props) {
 }
 
 const styles = StyleSheet.create({
-  veHeader: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 20, marginBottom: 16 },
-  historyBtn: { width: 44, height: 44, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  uploadArea: { marginHorizontal: 20, borderRadius: 24, padding: 32, alignItems: 'center', gap: 14 },
-  uploadIconCircle: { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center' },
-  uploadTitle: { fontSize: 20, fontFamily: 'Inter_700Bold', textAlign: 'center' },
-  uploadDesc: { fontSize: 14, fontFamily: 'Inter_400Regular', textAlign: 'center', lineHeight: 20, paddingHorizontal: 10 },
-  uploadBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14, gap: 10 },
-  uploadBtnText: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: '#fff' },
-  uploadStatusText: { fontSize: 13, fontFamily: 'Inter_500Medium', textAlign: 'center' as const, marginTop: 8 },
-  uploadHints: { flexDirection: 'row', gap: 20, marginTop: 8 },
-  uploadHint: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  uploadHintText: { fontSize: 12, fontFamily: 'Inter_400Regular' },
-  howItWorks: { paddingHorizontal: 20, marginTop: 32 },
-  howTitle: { fontSize: 18, fontFamily: 'Inter_600SemiBold', marginBottom: 16 },
-  howStep: { flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 16, borderWidth: 1, marginBottom: 10, gap: 14 },
-  howStepNum: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  howStepNumText: { fontSize: 16, fontFamily: 'Inter_700Bold' },
-  howStepContent: { flex: 1 },
-  howStepTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold', marginBottom: 4 },
-  howStepDesc: { fontSize: 13, fontFamily: 'Inter_400Regular', lineHeight: 18 },
-  clipsSection: { marginHorizontal: 20, borderRadius: 20, borderWidth: 1, overflow: 'hidden', marginBottom: 24 },
-  clipsSectionHeader: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 8 },
-  clipsSectionTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold', flex: 1 },
-  clipsTotalDuration: { fontSize: 13, fontFamily: 'Inter_500Medium' },
-  clipRow: { flexDirection: 'row', alignItems: 'center', padding: 14, borderTopWidth: 1, gap: 12 },
-  clipThumb: { width: 48, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  clipInfo: { flex: 1 },
-  clipName: { fontSize: 14, fontFamily: 'Inter_500Medium', marginBottom: 4 },
-  clipMeta: { fontSize: 12, fontFamily: 'Inter_400Regular' },
+  veHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, marginBottom: 16 },
+  headerBtn: { width: 44, height: 44, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  briefHeader: { alignItems: 'center', paddingHorizontal: 20, marginBottom: 24 },
+  briefBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, gap: 6, marginBottom: 16 },
+  briefBadgeText: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: '#fff' },
+  briefTitle: { fontSize: 24, fontFamily: 'Inter_700Bold', textAlign: 'center', marginBottom: 8 },
+  briefSubtitle: { fontSize: 14, fontFamily: 'Inter_400Regular', textAlign: 'center', lineHeight: 20, paddingHorizontal: 20 },
   sectionLabel: { fontSize: 16, fontFamily: 'Inter_600SemiBold', paddingHorizontal: 20, marginBottom: 12 },
+  quickPromptScroll: { paddingHorizontal: 20, gap: 10, marginBottom: 24 },
+  quickPromptCard: { width: 120, padding: 14, borderRadius: 16, borderWidth: 1.5, alignItems: 'center', gap: 10 },
+  quickPromptIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  quickPromptLabel: { fontSize: 12, fontFamily: 'Inter_600SemiBold', textAlign: 'center' },
+  videoTypeGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, gap: 10, marginBottom: 24 },
+  videoTypeCard: { width: (SCREEN_WIDTH - 52 - 10) / 2, padding: 14, borderRadius: 16, borderWidth: 1.5, gap: 6 },
+  videoTypeLabel: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  videoTypeDesc: { fontSize: 11, fontFamily: 'Inter_400Regular' },
+  inputCard: { marginHorizontal: 20, borderRadius: 16, borderWidth: 1, padding: 16, marginBottom: 16 },
+  inputCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  inputCardTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold', flex: 1 },
+  optionalBadge: { fontSize: 11, fontFamily: 'Inter_400Regular' },
+  briefInput: { borderWidth: 1, borderRadius: 12, padding: 14, fontSize: 15, fontFamily: 'Inter_400Regular', minHeight: 100, lineHeight: 22 },
+  smallInput: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, fontFamily: 'Inter_400Regular' },
   styleGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, gap: 10, marginBottom: 24 },
   styleCard: { width: (SCREEN_WIDTH - 52 - 20) / 3, alignItems: 'center', paddingVertical: 16, borderRadius: 16, borderWidth: 1.5, gap: 8 },
   styleLabel: { fontSize: 12, fontFamily: 'Inter_500Medium' },
@@ -583,12 +886,41 @@ const styles = StyleSheet.create({
   paceSelector: { flexDirection: 'row', marginHorizontal: 20, borderRadius: 16, borderWidth: 1, padding: 4, marginBottom: 24 },
   paceOption: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 12, gap: 6 },
   paceLabel: { fontSize: 14, fontFamily: 'Inter_500Medium' },
-  togglesSection: { paddingHorizontal: 20 },
-  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderRadius: 16, borderWidth: 1, marginBottom: 10 },
+  togglesSection: { paddingHorizontal: 20, gap: 10 },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderRadius: 16, borderWidth: 1 },
   toggleLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   toggleLabel: { fontSize: 15, fontFamily: 'Inter_500Medium' },
   toggleSwitch: { width: 44, height: 26, borderRadius: 13, padding: 2 },
   toggleKnob: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff' },
+  continueBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 18, borderRadius: 16, gap: 10 },
+  continueBtnText: { fontSize: 17, fontFamily: 'Inter_700Bold', color: '#fff' },
+  briefSummary: { marginHorizontal: 20, borderRadius: 16, borderWidth: 1, padding: 16, marginBottom: 20 },
+  briefSummaryHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  briefSummaryTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold' },
+  briefSummaryText: { fontSize: 14, fontFamily: 'Inter_400Regular', lineHeight: 20, marginBottom: 10 },
+  briefTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  briefTag: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  briefTagText: { fontSize: 11, fontFamily: 'Inter_600SemiBold' },
+  briefMetaLine: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 8 },
+  uploadArea: { marginHorizontal: 20, borderRadius: 24, padding: 32, alignItems: 'center', gap: 14 },
+  uploadIconCircle: { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center' },
+  uploadTitle: { fontSize: 20, fontFamily: 'Inter_700Bold', textAlign: 'center' },
+  uploadDesc: { fontSize: 14, fontFamily: 'Inter_400Regular', textAlign: 'center', lineHeight: 20, paddingHorizontal: 10 },
+  uploadBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14, gap: 10 },
+  uploadBtnText: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: '#fff' },
+  uploadStatusText: { fontSize: 13, fontFamily: 'Inter_500Medium', textAlign: 'center' as const, marginTop: 8 },
+  uploadHints: { flexDirection: 'row', gap: 20, marginTop: 8 },
+  uploadHint: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  uploadHintText: { fontSize: 12, fontFamily: 'Inter_400Regular' },
+  clipsSection: { marginHorizontal: 20, borderRadius: 20, borderWidth: 1, overflow: 'hidden', marginBottom: 16 },
+  clipsSectionHeader: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 8 },
+  clipsSectionTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold', flex: 1 },
+  clipsTotalDuration: { fontSize: 13, fontFamily: 'Inter_500Medium' },
+  clipRow: { flexDirection: 'row', alignItems: 'center', padding: 14, borderTopWidth: 1, gap: 12 },
+  clipThumb: { width: 48, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  clipInfo: { flex: 1 },
+  clipName: { fontSize: 14, fontFamily: 'Inter_500Medium', marginBottom: 4 },
+  clipMeta: { fontSize: 12, fontFamily: 'Inter_400Regular' },
   startEditBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 18, borderRadius: 16, gap: 10 },
   startEditText: { fontSize: 17, fontFamily: 'Inter_700Bold', color: '#fff' },
   processingContainer: { paddingHorizontal: 20 },
@@ -615,7 +947,7 @@ const styles = StyleSheet.create({
   notesHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
   notesTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold' },
   notesText: { fontSize: 14, fontFamily: 'Inter_400Regular', lineHeight: 20 },
-  resultActions: { paddingHorizontal: 20, gap: 12 },
+  resultActions: { paddingHorizontal: 20, gap: 12, marginBottom: 40 },
   resultActionBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 14, gap: 10 },
   resultActionText: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: '#fff' },
   historySection: { paddingHorizontal: 20 },

@@ -123,7 +123,7 @@ export function registerVideoRoutes(app: Express) {
 
   app.post("/api/video/ai-edit", async (req, res) => {
     try {
-      const { projectId, clips, style, mood, pace, addMusic, addTransitions, addText, textOverlay } = req.body;
+      const { projectId, clips, style, mood, pace, addMusic, addTransitions, addText, textOverlay, creativeBrief, videoType, targetAudience, keyMessage } = req.body;
 
       if (!clips || clips.length === 0) {
         return res.status(400).json({ error: "No clips provided" });
@@ -142,14 +142,19 @@ export function registerVideoRoutes(app: Express) {
         messages: [
           {
             role: "system",
-            content: `You are an expert video editor AI. You create professional edit decisions for video projects. You understand pacing, transitions, color grading, and storytelling through video.
+            content: `You are GPT-5.2, an elite AI video editor and creative director. You create professional, broadcast-quality edit decisions for video projects. You deeply understand cinematic language, pacing, transitions, color grading, storytelling through visual media, and marketing psychology.
 
-Your job is to analyze video clips and create an optimal edit plan. You decide:
-1. The order clips should appear
-2. Trim points (start/end times for each clip)
-3. Transition types between clips
-4. Text overlay timing and placement
-5. Overall pacing and rhythm
+Your job is to:
+1. Read the client's creative brief carefully to understand their vision
+2. Analyze the available video clips (their names, durations, resolutions)
+3. Create an optimal edit plan that fulfills the creative brief
+4. Decide the best clip order for narrative flow
+5. Set precise trim points (start/end times) to remove dead air and keep energy
+6. Choose transition types that match the mood and style
+7. Plan text overlay timing and placement if requested
+8. Suggest color grading that supports the overall feel
+
+IMPORTANT: Base your editing decisions primarily on the CREATIVE BRIEF provided by the user. The brief tells you what they want the video to achieve, who it's for, and what message it should convey. Use the style, mood, and pace settings to fine-tune your approach.
 
 Return a JSON object with this structure:
 {
@@ -176,27 +181,40 @@ Return a JSON object with this structure:
     "colorGrade": "warm",
     "overallPace": "medium"
   },
-  "creativeNotes": "Brief description of the creative approach"
+  "creativeNotes": "Detailed description of your creative approach and why you made these editing decisions based on the brief"
 }`
           },
           {
             role: "user",
-            content: `Create a professional edit plan for this video project:
+            content: `Create a professional edit plan for this video project.
 
+=== CREATIVE BRIEF ===
+${creativeBrief || 'Create a professional, engaging video edit.'}
+
+=== VIDEO TYPE ===
+${videoType || 'promo'}
+
+=== TARGET AUDIENCE ===
+${targetAudience || 'General audience'}
+
+=== KEY MESSAGE ===
+${keyMessage || 'Not specified'}
+
+=== EDIT PREFERENCES ===
 STYLE: ${style || 'cinematic'}
 MOOD: ${mood || 'energetic'}
 PACE: ${pace || 'medium'}
 ADD TRANSITIONS: ${addTransitions !== false ? 'Yes' : 'No'}
-ADD TEXT: ${addText ? 'Yes' : 'No'}
-TEXT OVERLAY: ${textOverlay || 'None'}
+ADD TEXT OVERLAY: ${addText ? 'Yes' : 'No'}
+TEXT TO OVERLAY: ${textOverlay || 'None specified'}
 
-CLIPS:
+=== AVAILABLE CLIPS ===
 ${clipDetails}
 
-Create an edit plan that tells a compelling visual story. Determine the best clip order, trim unnecessary parts, add smooth transitions, and suggest color grading.`
+Based on the creative brief above, create an edit plan that fulfills the client's vision. Consider the video type, target audience, and key message when making your editing decisions. Determine the best clip order for storytelling, trim to keep the strongest moments, choose transitions that match the mood, and suggest appropriate color grading.`
           }
         ],
-        max_completion_tokens: 2000,
+        max_completion_tokens: 2500,
       });
 
       const aiContent = aiResponse.choices[0]?.message?.content || "";
