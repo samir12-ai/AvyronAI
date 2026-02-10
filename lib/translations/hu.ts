@@ -8,7 +8,6 @@ const lang: TranslationKeys = {
     calendar: 'Naptár',
     aiManagement: 'AI Kezelés',
     photography: 'Fotó',
-    videoEditor: 'Videó',
     settings: 'Beállítások',
   },
   login: {
@@ -252,6 +251,8 @@ const lang: TranslationKeys = {
   studio: {
     title: 'Média stúdió',
     subtitle: 'Töltsön fel videókat és képeket AI megosztáshoz',
+    mediaLibrary: 'Médiatár',
+    aiVideoEditor: 'AI Videószerkesztő',
     videos: 'Videók',
     images: 'Képek',
     posters: 'Poszterek',

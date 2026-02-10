@@ -8,7 +8,6 @@ const lang: TranslationKeys = {
     calendar: 'Kalenda',
     aiManagement: 'Usimamizi AI',
     photography: 'Picha',
-    videoEditor: 'Video',
     settings: 'Mipangilio',
   },
   login: {
@@ -252,6 +251,8 @@ const lang: TranslationKeys = {
   studio: {
     title: 'Studio ya Media',
     subtitle: 'Pakia video na picha kwa AI kushiriki',
+    mediaLibrary: 'Maktaba ya Midia',
+    aiVideoEditor: 'Kihariri cha Video AI',
     videos: 'Video',
     images: 'Picha',
     posters: 'Mabango',

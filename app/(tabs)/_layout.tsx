@@ -38,10 +38,6 @@ function NativeTabLayout() {
         <Icon sf={{ default: "camera", selected: "camera.fill" }} />
         <Label>{t('tabs.photography')}</Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="video-editor">
-        <Icon sf={{ default: "video", selected: "video.fill" }} />
-        <Label>{t('tabs.videoEditor')}</Label>
-      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="settings">
         <Icon sf={{ default: "gearshape", selected: "gearshape.fill" }} />
         <Label>{t('tabs.settings')}</Label>
@@ -141,15 +137,6 @@ function ClassicTabLayout() {
           title: t('tabs.photography'),
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "camera" : "camera-outline"} size={22} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="video-editor"
-        options={{
-          title: t('tabs.videoEditor'),
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "videocam" : "videocam-outline"} size={22} color={color} />
           ),
         }}
       />

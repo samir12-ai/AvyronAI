@@ -8,7 +8,6 @@ const lang: TranslationKeys = {
     calendar: 'Ημερολόγιο',
     aiManagement: 'AI Διαχείριση',
     photography: 'Φωτο',
-    videoEditor: 'Βίντεο',
     settings: 'Ρυθμίσεις',
   },
   login: {
@@ -252,6 +251,8 @@ const lang: TranslationKeys = {
   studio: {
     title: 'Στούντιο Πολυμέσων',
     subtitle: 'Ανεβάστε βίντεο και εικόνες για κοινοποίηση με AI',
+    mediaLibrary: 'Βιβλιοθήκη Μέσων',
+    aiVideoEditor: 'AI Επεξεργαστής Βίντεο',
     videos: 'Βίντεο',
     images: 'Εικόνες',
     posters: 'Αφίσες',

@@ -8,7 +8,6 @@ const zh: TranslationKeys = {
     calendar: '日历',
     aiManagement: 'AI管理',
     photography: '摄影',
-    videoEditor: '视频',
     settings: '设置',
   },
   login: {
@@ -252,6 +251,8 @@ const zh: TranslationKeys = {
   studio: {
     title: '媒体工作室',
     subtitle: '上传视频和图片供AI分享',
+    mediaLibrary: '媒体库',
+    aiVideoEditor: 'AI视频编辑器',
     videos: '视频',
     images: '图片',
     posters: '海报',

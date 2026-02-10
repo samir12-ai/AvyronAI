@@ -8,7 +8,6 @@ const ja: TranslationKeys = {
     calendar: 'カレンダー',
     aiManagement: 'AI管理',
     photography: '写真',
-    videoEditor: '動画',
     settings: '設定',
   },
   login: {
@@ -252,6 +251,8 @@ const ja: TranslationKeys = {
   studio: {
     title: 'メディアスタジオ',
     subtitle: 'AIが共有する動画と画像をアップロード',
+    mediaLibrary: 'メディアライブラリ',
+    aiVideoEditor: 'AI動画エディター',
     videos: '動画',
     images: '画像',
     posters: 'ポスター',

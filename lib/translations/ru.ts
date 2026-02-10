@@ -8,7 +8,6 @@ const ru: TranslationKeys = {
     calendar: 'Календарь',
     aiManagement: 'AI Управление',
     photography: 'Фото',
-    videoEditor: 'Видео',
     settings: 'Настройки',
   },
   login: {
@@ -252,6 +251,8 @@ const ru: TranslationKeys = {
   studio: {
     title: 'Медиастудия',
     subtitle: 'Загружайте видео и изображения для ИИ',
+    mediaLibrary: 'Медиатека',
+    aiVideoEditor: 'AI Видеоредактор',
     videos: 'Видео',
     images: 'Изображения',
     posters: 'Постеры',

@@ -8,7 +8,6 @@ const th: TranslationKeys = {
     calendar: 'ปฏิทิน',
     aiManagement: 'จัดการ AI',
     photography: 'ภาพถ่าย',
-    videoEditor: 'วิดีโอ',
     settings: 'ตั้งค่า',
   },
   login: {
@@ -252,6 +251,8 @@ const th: TranslationKeys = {
   studio: {
     title: 'สตูดิโอสื่อ',
     subtitle: 'อัปโหลดวิดีโอและรูปภาพเพื่อให้ AI แชร์',
+    mediaLibrary: 'ไลบรารีสื่อ',
+    aiVideoEditor: 'ตัดต่อวิดีโอ AI',
     videos: 'วิดีโอ',
     images: 'รูปภาพ',
     posters: 'โปสเตอร์',

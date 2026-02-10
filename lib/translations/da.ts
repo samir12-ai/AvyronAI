@@ -8,7 +8,6 @@ const lang: TranslationKeys = {
     calendar: 'Kalender',
     aiManagement: 'AI Styring',
     photography: 'Foto',
-    videoEditor: 'Video',
     settings: 'Indstillinger',
   },
   login: {
@@ -252,6 +251,8 @@ const lang: TranslationKeys = {
   studio: {
     title: 'Mediestudio',
     subtitle: 'Upload videoer og billeder til AI-deling',
+    mediaLibrary: 'Mediebibliotek',
+    aiVideoEditor: 'AI Videoredigering',
     videos: 'Videoer',
     images: 'Billeder',
     posters: 'Plakater',

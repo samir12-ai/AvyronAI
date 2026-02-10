@@ -6,7 +6,6 @@ const en = {
     calendar: 'Calendar',
     aiManagement: 'AI Manage',
     photography: 'Photo',
-    videoEditor: 'Video',
     settings: 'Settings',
   },
   login: {
@@ -250,6 +249,8 @@ const en = {
   studio: {
     title: 'Media Studio',
     subtitle: 'Upload videos and images for AI to share',
+    mediaLibrary: 'Media Library',
+    aiVideoEditor: 'AI Video Editor',
     videos: 'Videos',
     images: 'Images',
     posters: 'Posters',

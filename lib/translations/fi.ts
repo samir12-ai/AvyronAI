@@ -8,7 +8,6 @@ const lang: TranslationKeys = {
     calendar: 'Kalenteri',
     aiManagement: 'AI Hallinta',
     photography: 'Valokuva',
-    videoEditor: 'Video',
     settings: 'Asetukset',
   },
   login: {
@@ -252,6 +251,8 @@ const lang: TranslationKeys = {
   studio: {
     title: 'Mediastudio',
     subtitle: 'Lataa videoita ja kuvia AI:n jaettavaksi',
+    mediaLibrary: 'Mediakirjasto',
+    aiVideoEditor: 'AI-Videoeditori',
     videos: 'Videot',
     images: 'Kuvat',
     posters: 'Julisteet',

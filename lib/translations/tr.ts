@@ -8,7 +8,6 @@ const tr: TranslationKeys = {
     calendar: 'Takvim',
     aiManagement: 'AI Yönetim',
     photography: 'Fotoğraf',
-    videoEditor: 'Video',
     settings: 'Ayarlar',
   },
   login: {
@@ -252,6 +251,8 @@ const tr: TranslationKeys = {
   studio: {
     title: 'Medya Stüdyosu',
     subtitle: 'AI\'nın paylaşması için video ve görseller yükleyin',
+    mediaLibrary: 'Medya Kütüphanesi',
+    aiVideoEditor: 'AI Video Düzenleyici',
     videos: 'Videolar',
     images: 'Görseller',
     posters: 'Posterler',

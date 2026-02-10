@@ -8,7 +8,6 @@ const ms: TranslationKeys = {
     calendar: 'Kalendar',
     aiManagement: 'Urus AI',
     photography: 'Foto',
-    videoEditor: 'Video',
     settings: 'Tetapan',
   },
   login: {
@@ -252,6 +251,8 @@ const ms: TranslationKeys = {
   studio: {
     title: 'Studio Media',
     subtitle: 'Muat naik video dan imej untuk AI kongsi',
+    mediaLibrary: 'Perpustakaan Media',
+    aiVideoEditor: 'Editor Video AI',
     videos: 'Video',
     images: 'Imej',
     posters: 'Poster',

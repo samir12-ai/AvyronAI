@@ -20,8 +20,11 @@ import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { PlatformPicker } from '@/components/PlatformPicker';
+import { VideoEditorContent } from '@/components/VideoEditorContent';
 import { generateId } from '@/lib/storage';
 import type { MediaItem } from '@/lib/types';
+
+type StudioMode = 'library' | 'videoEditor';
 
 const mediaTypes = [
   { id: 'video', label: 'Video', icon: 'videocam-outline' as const },
@@ -37,6 +40,7 @@ export default function StudioScreen() {
   const { mediaItems, addMediaItem, removeMediaItem } = useApp();
   const { t } = useLanguage();
 
+  const [mode, setMode] = useState<StudioMode>('library');
   const [showModal, setShowModal] = useState(false);
   const [mediaTitle, setMediaTitle] = useState('');
   const [mediaType, setMediaType] = useState<'video' | 'image'>('video');
@@ -169,95 +173,146 @@ export default function StudioScreen() {
               {t('studio.subtitle')}
             </Text>
           </View>
+          {mode === 'library' && (
+            <Pressable
+              onPress={handleAddMedia}
+              style={[styles.addButton, { backgroundColor: colors.primary }]}
+            >
+              <Ionicons name="add" size={24} color="#fff" />
+            </Pressable>
+          )}
+        </View>
+
+        <View style={[styles.modeSelector, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <Pressable
-            onPress={handleAddMedia}
-            style={[styles.addButton, { backgroundColor: colors.primary }]}
+            onPress={() => { setMode('library'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+            style={[
+              styles.modeTab,
+              mode === 'library' && { backgroundColor: colors.primary + '15' },
+            ]}
           >
-            <Ionicons name="add" size={24} color="#fff" />
+            <Ionicons 
+              name="folder-open" 
+              size={18} 
+              color={mode === 'library' ? colors.primary : colors.textMuted} 
+            />
+            <Text style={[
+              styles.modeTabText,
+              { color: mode === 'library' ? colors.primary : colors.textMuted }
+            ]}>
+              {t('studio.mediaLibrary')}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => { setMode('videoEditor'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+            style={[
+              styles.modeTab,
+              mode === 'videoEditor' && { backgroundColor: colors.accent + '15' },
+            ]}
+          >
+            <Ionicons 
+              name="cut" 
+              size={18} 
+              color={mode === 'videoEditor' ? colors.accent : colors.textMuted} 
+            />
+            <Text style={[
+              styles.modeTabText,
+              { color: mode === 'videoEditor' ? colors.accent : colors.textMuted }
+            ]}>
+              {t('studio.aiVideoEditor')}
+            </Text>
           </Pressable>
         </View>
 
-        <View style={[styles.statsRow, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <View style={styles.stat}>
-            <Ionicons name="videocam" size={20} color={colors.primary} />
-            <Text style={[styles.statValue, { color: colors.text }]}>{videos.length}</Text>
-            <Text style={[styles.statLabel, { color: colors.textMuted }]}>{t('studio.videos')}</Text>
-          </View>
-          <View style={[styles.statDivider, { backgroundColor: colors.cardBorder }]} />
-          <View style={styles.stat}>
-            <Ionicons name="image" size={20} color={colors.accent} />
-            <Text style={[styles.statValue, { color: colors.text }]}>{images.length}</Text>
-            <Text style={[styles.statLabel, { color: colors.textMuted }]}>{t('studio.images')}</Text>
-          </View>
-          <View style={[styles.statDivider, { backgroundColor: colors.cardBorder }]} />
-          <View style={styles.stat}>
-            <Ionicons name="easel" size={20} color={colors.accentOrange} />
-            <Text style={[styles.statValue, { color: colors.text }]}>{posters.length}</Text>
-            <Text style={[styles.statLabel, { color: colors.textMuted }]}>{t('studio.posters')}</Text>
-          </View>
-        </View>
+        {mode === 'library' && (
+          <View>
+            <View style={[styles.statsRow, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+              <View style={styles.stat}>
+                <Ionicons name="videocam" size={20} color={colors.primary} />
+                <Text style={[styles.statValue, { color: colors.text }]}>{videos.length}</Text>
+                <Text style={[styles.statLabel, { color: colors.textMuted }]}>{t('studio.videos')}</Text>
+              </View>
+              <View style={[styles.statDivider, { backgroundColor: colors.cardBorder }]} />
+              <View style={styles.stat}>
+                <Ionicons name="image" size={20} color={colors.accent} />
+                <Text style={[styles.statValue, { color: colors.text }]}>{images.length}</Text>
+                <Text style={[styles.statLabel, { color: colors.textMuted }]}>{t('studio.images')}</Text>
+              </View>
+              <View style={[styles.statDivider, { backgroundColor: colors.cardBorder }]} />
+              <View style={styles.stat}>
+                <Ionicons name="easel" size={20} color={colors.accentOrange} />
+                <Text style={[styles.statValue, { color: colors.text }]}>{posters.length}</Text>
+                <Text style={[styles.statLabel, { color: colors.textMuted }]}>{t('studio.posters')}</Text>
+              </View>
+            </View>
 
-        {videos.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Ionicons name="videocam" size={20} color={colors.primary} />
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('studio.videos')}</Text>
-            </View>
-            <View style={styles.mediaList}>
-              {videos.map(renderMediaCard)}
-            </View>
+            {videos.length > 0 && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Ionicons name="videocam" size={20} color={colors.primary} />
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('studio.videos')}</Text>
+                </View>
+                <View style={styles.mediaList}>
+                  {videos.map(renderMediaCard)}
+                </View>
+              </View>
+            )}
+
+            {images.length > 0 && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Ionicons name="image" size={20} color={colors.accent} />
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('studio.images')}</Text>
+                </View>
+                <View style={styles.mediaList}>
+                  {images.map(renderMediaCard)}
+                </View>
+              </View>
+            )}
+
+            {posters.length > 0 && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Ionicons name="easel" size={20} color={colors.accentOrange} />
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('studio.aiPosters')}</Text>
+                </View>
+                <View style={styles.mediaList}>
+                  {posters.map(renderMediaCard)}
+                </View>
+              </View>
+            )}
+
+            {mediaItems.length === 0 && (
+              <View style={[styles.emptyState, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <Ionicons name="film-outline" size={48} color={colors.textMuted} />
+                <Text style={[styles.emptyTitle, { color: colors.text }]}>{t('studio.emptyTitle')}</Text>
+                <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
+                  {t('studio.emptyDesc')}
+                </Text>
+                <Pressable
+                  onPress={handleAddMedia}
+                  style={({ pressed }) => [
+                    styles.emptyButton,
+                    { opacity: pressed ? 0.8 : 1 }
+                  ]}
+                >
+                  <LinearGradient
+                    colors={colors.primaryGradient as [string, string]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.gradientButton}
+                  >
+                    <Ionicons name="cloud-upload" size={20} color="#fff" />
+                    <Text style={styles.emptyButtonText}>{t('studio.uploadMedia')}</Text>
+                  </LinearGradient>
+                </Pressable>
+              </View>
+            )}
           </View>
         )}
 
-        {images.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Ionicons name="image" size={20} color={colors.accent} />
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('studio.images')}</Text>
-            </View>
-            <View style={styles.mediaList}>
-              {images.map(renderMediaCard)}
-            </View>
-          </View>
-        )}
-
-        {posters.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Ionicons name="easel" size={20} color={colors.accentOrange} />
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('studio.aiPosters')}</Text>
-            </View>
-            <View style={styles.mediaList}>
-              {posters.map(renderMediaCard)}
-            </View>
-          </View>
-        )}
-
-        {mediaItems.length === 0 && (
-          <View style={[styles.emptyState, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <Ionicons name="film-outline" size={48} color={colors.textMuted} />
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>{t('studio.emptyTitle')}</Text>
-            <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
-              {t('studio.emptyDesc')}
-            </Text>
-            <Pressable
-              onPress={handleAddMedia}
-              style={({ pressed }) => [
-                styles.emptyButton,
-                { opacity: pressed ? 0.8 : 1 }
-              ]}
-            >
-              <LinearGradient
-                colors={colors.primaryGradient as [string, string]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.gradientButton}
-              >
-                <Ionicons name="cloud-upload" size={20} color="#fff" />
-                <Text style={styles.emptyButtonText}>{t('studio.uploadMedia')}</Text>
-              </LinearGradient>
-            </Pressable>
-          </View>
+        {mode === 'videoEditor' && (
+          <VideoEditorContent colors={colors} isDark={isDark} />
         )}
 
         <View style={{ height: 100 }} />
@@ -402,7 +457,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   title: {
     fontSize: 28,
@@ -419,6 +474,26 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  modeSelector: {
+    flexDirection: 'row',
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 4,
+    marginBottom: 20,
+  },
+  modeTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    gap: 8,
+  },
+  modeTabText: {
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
   },
   statsRow: {
     flexDirection: 'row',

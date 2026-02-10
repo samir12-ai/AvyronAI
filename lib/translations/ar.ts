@@ -8,7 +8,6 @@ const ar: TranslationKeys = {
     calendar: 'التقويم',
     aiManagement: 'إدارة AI',
     photography: 'صور',
-    videoEditor: 'فيديو',
     settings: 'الإعدادات',
   },
   login: {
@@ -252,6 +251,8 @@ const ar: TranslationKeys = {
   studio: {
     title: 'استوديو الوسائط',
     subtitle: 'ارفع مقاطع الفيديو والصور ليشاركها الذكاء الاصطناعي',
+    mediaLibrary: 'مكتبة الوسائط',
+    aiVideoEditor: 'محرر فيديو AI',
     videos: 'فيديوهات',
     images: 'صور',
     posters: 'ملصقات',

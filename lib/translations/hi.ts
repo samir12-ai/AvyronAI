@@ -8,7 +8,6 @@ const hi: TranslationKeys = {
     calendar: 'कैलेंडर',
     aiManagement: 'AI प्रबंधन',
     photography: 'फोटो',
-    videoEditor: 'वीडियो',
     settings: 'सेटिंग्स',
   },
   login: {
@@ -252,6 +251,8 @@ const hi: TranslationKeys = {
   studio: {
     title: 'मीडिया स्टूडियो',
     subtitle: 'AI द्वारा साझा करने के लिए वीडियो और छवियां अपलोड करें',
+    mediaLibrary: 'मीडिया लाइब्रेरी',
+    aiVideoEditor: 'AI वीडियो एडिटर',
     videos: 'वीडियो',
     images: 'छवियां',
     posters: 'पोस्टर',

@@ -8,7 +8,6 @@ const vi: TranslationKeys = {
     calendar: 'Lịch',
     aiManagement: 'Quản lý AI',
     photography: 'Ảnh',
-    videoEditor: 'Video',
     settings: 'Cài đặt',
   },
   login: {
@@ -252,6 +251,8 @@ const vi: TranslationKeys = {
   studio: {
     title: 'Studio phương tiện',
     subtitle: 'Tải lên video và hình ảnh để AI chia sẻ',
+    mediaLibrary: 'Thư viện Media',
+    aiVideoEditor: 'Trình chỉnh sửa Video AI',
     videos: 'Video',
     images: 'Hình ảnh',
     posters: 'Poster',

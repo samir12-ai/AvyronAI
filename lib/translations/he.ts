@@ -8,7 +8,6 @@ const lang: TranslationKeys = {
     calendar: 'לוח שנה',
     aiManagement: 'ניהול AI',
     photography: 'צילום',
-    videoEditor: 'וידאו',
     settings: 'הגדרות',
   },
   login: {
@@ -252,6 +251,8 @@ const lang: TranslationKeys = {
   studio: {
     title: 'סטודיו מדיה',
     subtitle: 'העלו סרטונים ותמונות לשיתוף AI',
+    mediaLibrary: 'ספריית מדיה',
+    aiVideoEditor: 'עורך וידאו AI',
     videos: 'סרטונים',
     images: 'תמונות',
     posters: 'כרזות',

@@ -8,7 +8,6 @@ const ro: TranslationKeys = {
     calendar: 'Calendar',
     aiManagement: 'Gestionare AI',
     photography: 'Foto',
-    videoEditor: 'Video',
     settings: 'Setări',
   },
   login: {
@@ -252,6 +251,8 @@ const ro: TranslationKeys = {
   studio: {
     title: 'Studio media',
     subtitle: 'Încarcă videoclipuri și imagini pentru AI',
+    mediaLibrary: 'Biblioteca Media',
+    aiVideoEditor: 'Editor Video AI',
     videos: 'Videoclipuri',
     images: 'Imagini',
     posters: 'Postere',

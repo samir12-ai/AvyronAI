@@ -8,7 +8,6 @@ const ko: TranslationKeys = {
     calendar: '캘린더',
     aiManagement: 'AI 관리',
     photography: '사진',
-    videoEditor: '동영상',
     settings: '설정',
   },
   login: {
@@ -252,6 +251,8 @@ const ko: TranslationKeys = {
   studio: {
     title: '미디어 스튜디오',
     subtitle: 'AI가 공유할 동영상과 이미지 업로드',
+    mediaLibrary: '미디어 라이브러리',
+    aiVideoEditor: 'AI 비디오 편집기',
     videos: '동영상',
     images: '이미지',
     posters: '포스터',
