@@ -31,8 +31,13 @@ const videoUpload = multer({
   }),
   limits: { fileSize: 200 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('video/')) cb(null, true);
-    else cb(new Error('Only video files are allowed'));
+    const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.3gp'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (file.mimetype.startsWith('video/') || file.mimetype === 'application/octet-stream' || videoExtensions.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only video files are allowed'));
+    }
   },
 });
 
@@ -67,9 +72,22 @@ export function registerVideoRoutes(app: Express) {
     next();
   });
 
-  app.post("/api/video/upload-clips", videoUpload.array("clips", 20), async (req, res) => {
+  app.post("/api/video/upload-clips", (req, res, next) => {
+    videoUpload.array("clips", 20)(req, res, (err) => {
+      if (err) {
+        console.error("Multer upload error:", err.message);
+        return res.status(400).json({ error: `Upload error: ${err.message}` });
+      }
+      next();
+    });
+  }, async (req, res) => {
     try {
       const files = req.files as Express.Multer.File[];
+      console.log("Upload request received:", {
+        filesCount: files?.length || 0,
+        contentType: req.headers['content-type'],
+        bodyKeys: Object.keys(req.body || {}),
+      });
       if (!files || files.length === 0) {
         return res.status(400).json({ error: "No video files uploaded" });
       }

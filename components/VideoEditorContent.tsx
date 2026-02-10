@@ -7,11 +7,14 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
+  Platform,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
+import { File } from 'expo-file-system';
+import { fetch as expoFetch } from 'expo/fetch';
 import Colors from '@/constants/colors';
 import { useLanguage } from '@/context/LanguageContext';
 import { getApiUrl } from '@/lib/query-client';
@@ -86,6 +89,7 @@ export function VideoEditorContent({ colors, isDark }: Props) {
   const [resultDuration, setResultDuration] = useState(0);
   const [creativeNotes, setCreativeNotes] = useState('');
 
+  const [uploadStatus, setUploadStatus] = useState('');
   const [projects, setProjects] = useState<VideoProject[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
@@ -98,22 +102,23 @@ export function VideoEditorContent({ colors, isDark }: Props) {
     if (result.canceled || !result.assets?.length) return;
 
     setUploading(true);
+    setUploadStatus(t('videoEditor.preparingUpload'));
     try {
       const formData = new FormData();
+
       for (const asset of result.assets) {
-        const filename = asset.uri.split('/').pop() || 'video.mp4';
-        formData.append('clips', {
-          uri: asset.uri,
-          name: filename,
-          type: asset.mimeType || 'video/mp4',
-        } as any);
+        const file = new File(asset.uri);
+        formData.append('clips', file);
       }
+
       formData.append('title', title || 'My Video Project');
       formData.append('style', style);
       formData.append('mood', mood);
 
+      setUploadStatus(t('videoEditor.uploadingClips').replace('{{count}}', String(result.assets.length)));
+
       const url = new URL('/api/video/upload-clips', baseUrl);
-      const response = await fetch(url.toString(), { method: 'POST', body: formData });
+      const response = await expoFetch(url.toString(), { method: 'POST', body: formData });
       if (!response.ok) {
         const err = await response.json().catch(() => null);
         throw new Error(err?.error || 'Upload failed');
@@ -122,8 +127,11 @@ export function VideoEditorContent({ colors, isDark }: Props) {
       setClips(data.clips);
       setProject(data.project);
       setStep('configure');
+      setUploadStatus('');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error: any) {
+      console.error('Video upload error:', error);
+      setUploadStatus('');
       Alert.alert(t('videoEditor.error'), error.message || t('videoEditor.uploadFailed'));
     } finally {
       setUploading(false);
@@ -240,7 +248,7 @@ export function VideoEditorContent({ colors, isDark }: Props) {
             <Text style={[styles.uploadDesc, { color: colors.textSecondary }]}>{t('videoEditor.uploadDesc')}</Text>
 
             <Pressable onPress={pickVideos} disabled={uploading}>
-              <LinearGradient colors={[colors.accent, '#0EA5E9']} style={styles.uploadBtn}>
+              <LinearGradient colors={[colors.accent, '#0EA5E9']} style={[styles.uploadBtn, { opacity: uploading ? 0.7 : 1 }]}>
                 {uploading ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
@@ -251,6 +259,12 @@ export function VideoEditorContent({ colors, isDark }: Props) {
                 </Text>
               </LinearGradient>
             </Pressable>
+
+            {uploading && uploadStatus ? (
+              <Text style={[styles.uploadStatusText, { color: colors.accent }]}>
+                {uploadStatus}
+              </Text>
+            ) : null}
 
             <View style={styles.uploadHints}>
               <View style={styles.uploadHint}>
@@ -537,6 +551,7 @@ const styles = StyleSheet.create({
   uploadDesc: { fontSize: 14, fontFamily: 'Inter_400Regular', textAlign: 'center', lineHeight: 20, paddingHorizontal: 10 },
   uploadBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14, gap: 10 },
   uploadBtnText: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: '#fff' },
+  uploadStatusText: { fontSize: 13, fontFamily: 'Inter_500Medium', textAlign: 'center' as const, marginTop: 8 },
   uploadHints: { flexDirection: 'row', gap: 20, marginTop: 8 },
   uploadHint: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   uploadHintText: { fontSize: 12, fontFamily: 'Inter_400Regular' },

@@ -473,6 +473,8 @@ const en = {
     uploadDesc: 'Select multiple clips and our AI will create a professional edit with transitions and color grading',
     selectClips: 'Select Video Clips',
     uploading: 'Uploading...',
+    preparingUpload: 'Preparing video files...',
+    uploadingClips: 'Uploading {{count}} clip(s) to server...',
     maxClips: 'Up to 20 clips',
     maxSize: '200MB max per clip',
     howItWorks: 'How It Works',
