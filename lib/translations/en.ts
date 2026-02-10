@@ -516,7 +516,14 @@ const en = {
     noProjects: 'No projects yet',
     error: 'Error',
     uploadFailed: 'Failed to upload video clips',
-    processingFailed: 'Video processing failed. Please try again.',
+    processingFailed: 'Processing Failed',
+    tryAgain: 'Try Again',
+    troubleshootTitle: 'What you can try',
+    troubleshoot1: 'Make sure your video clips are standard MP4 or MOV format',
+    troubleshoot2: 'Try uploading shorter clips (under 60 seconds each)',
+    troubleshoot3: 'Check your internet connection and try again',
+    noResultYet: 'No Video Yet',
+    noResultDesc: 'Upload your video clips and let AI create a professional edit based on your creative brief.',
   },
 };
 

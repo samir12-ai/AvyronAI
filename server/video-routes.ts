@@ -345,9 +345,10 @@ Based on the creative brief above, create an edit plan that fulfills the client'
           res.status(500).json({ error: "Video processing failed" });
         }
       }
-    } catch (error) {
-      console.error("AI edit error:", error);
-      res.status(500).json({ error: "Failed to process video edit" });
+    } catch (error: any) {
+      console.error("AI edit error:", error?.message || error);
+      console.error("AI edit error stack:", error?.stack);
+      res.status(500).json({ error: error?.message || "Failed to process video edit" });
     }
   });
 

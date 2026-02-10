@@ -140,6 +140,7 @@ export function VideoEditorContent({ colors, isDark }: Props) {
   const [uploadStatus, setUploadStatus] = useState('');
   const [projects, setProjects] = useState<VideoProject[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [processingError, setProcessingError] = useState('');
 
   const applyQuickPrompt = (qp: typeof QUICK_PROMPTS[0]) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -210,6 +211,7 @@ export function VideoEditorContent({ colors, isDark }: Props) {
     setStep('processing');
     setProcessing(true);
     setProcessingProgress(0);
+    setProcessingError('');
 
     const progressInterval = setInterval(() => {
       setProcessingProgress(prev => {
@@ -220,7 +222,16 @@ export function VideoEditorContent({ colors, isDark }: Props) {
 
     try {
       const url = new URL('/api/video/ai-edit', baseUrl);
-      const response = await fetch(url.toString(), {
+      console.log('[VideoEditor] Sending clips to AI:', {
+        url: url.toString(),
+        projectId: project.id,
+        clipCount: clips.length,
+        clipNames: clips.map(c => c.originalName),
+        style, mood, pace, videoType,
+        briefLength: creativeBrief.length,
+      });
+
+      const response = await expoFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -241,15 +252,31 @@ export function VideoEditorContent({ colors, isDark }: Props) {
 
       clearInterval(progressInterval);
 
+      console.log('[VideoEditor] AI response status:', response.status);
+
       if (!response.ok) {
-        const err = await response.json().catch(() => null);
-        throw new Error(err?.error || 'Processing failed');
+        const errText = await response.text().catch(() => '');
+        let errMsg = 'Processing failed';
+        try {
+          const errJson = JSON.parse(errText);
+          errMsg = errJson.error || errMsg;
+        } catch {
+          if (errText) errMsg = errText;
+        }
+        console.error('[VideoEditor] AI error response:', errMsg);
+        throw new Error(errMsg);
       }
 
       const data = await response.json();
+      console.log('[VideoEditor] AI edit success:', {
+        outputUrl: data.outputUrl,
+        duration: data.duration,
+        hasCreativeNotes: !!data.creativeNotes,
+      });
+
       setProcessingProgress(100);
-      setResultUrl(data.outputUrl);
-      setResultDuration(data.duration);
+      setResultUrl(data.outputUrl || '');
+      setResultDuration(data.duration || 0);
       setCreativeNotes(data.creativeNotes || '');
 
       setTimeout(() => {
@@ -258,10 +285,12 @@ export function VideoEditorContent({ colors, isDark }: Props) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }, 800);
     } catch (error: any) {
+      console.error('[VideoEditor] startEditing error:', error);
       clearInterval(progressInterval);
       setProcessing(false);
-      setStep('configure');
-      Alert.alert(t('videoEditor.error'), error.message || t('videoEditor.processingFailed'));
+      setProcessingError(error.message || 'Video processing failed. Please try again.');
+      setStep('result');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
   };
 
@@ -282,6 +311,7 @@ export function VideoEditorContent({ colors, isDark }: Props) {
     setResultDuration(0);
     setCreativeNotes('');
     setProcessingProgress(0);
+    setProcessingError('');
     setCreativeBrief('');
     setTargetAudience('');
     setKeyMessage('');
@@ -766,59 +796,139 @@ export function VideoEditorContent({ colors, isDark }: Props) {
       {/* STEP 5: Result */}
       {step === 'result' && (
         <View>
-          <LinearGradient
-            colors={['#10B981', '#059669']}
-            style={styles.resultBanner}
-          >
-            <Ionicons name="checkmark-circle" size={40} color="#fff" />
-            <Text style={styles.resultTitle}>{t('videoEditor.resultTitle')}</Text>
-            <Text style={styles.resultDesc}>{t('videoEditor.resultDesc')}</Text>
-          </LinearGradient>
+          {processingError ? (
+            <View>
+              <LinearGradient
+                colors={['#EF4444', '#DC2626']}
+                style={styles.resultBanner}
+              >
+                <Ionicons name="alert-circle" size={40} color="#fff" />
+                <Text style={styles.resultTitle}>{t('videoEditor.processingFailed')}</Text>
+                <Text style={styles.resultDesc}>{processingError}</Text>
+              </LinearGradient>
 
-          <View style={[styles.resultCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <View style={[styles.resultPreview, { backgroundColor: colors.inputBackground }]}>
-              <Ionicons name="play-circle" size={60} color={colors.accent} />
-              <Text style={[styles.resultPreviewText, { color: colors.textSecondary }]}>
-                {t('videoEditor.videoReady')}
-              </Text>
+              <View style={[styles.errorHelpCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <View style={styles.errorHelpRow}>
+                  <Ionicons name="information-circle-outline" size={20} color={colors.accent} />
+                  <Text style={[styles.errorHelpTitle, { color: colors.text }]}>
+                    {t('videoEditor.troubleshootTitle')}
+                  </Text>
+                </View>
+                <View style={styles.errorHelpList}>
+                  <View style={styles.errorHelpItem}>
+                    <View style={[styles.errorBullet, { backgroundColor: colors.accent }]} />
+                    <Text style={[styles.errorHelpText, { color: colors.textSecondary }]}>
+                      {t('videoEditor.troubleshoot1')}
+                    </Text>
+                  </View>
+                  <View style={styles.errorHelpItem}>
+                    <View style={[styles.errorBullet, { backgroundColor: colors.accent }]} />
+                    <Text style={[styles.errorHelpText, { color: colors.textSecondary }]}>
+                      {t('videoEditor.troubleshoot2')}
+                    </Text>
+                  </View>
+                  <View style={styles.errorHelpItem}>
+                    <View style={[styles.errorBullet, { backgroundColor: colors.accent }]} />
+                    <Text style={[styles.errorHelpText, { color: colors.textSecondary }]}>
+                      {t('videoEditor.troubleshoot3')}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.resultActions}>
+                <Pressable onPress={() => { setProcessingError(''); setStep('configure'); }}>
+                  <LinearGradient colors={['#8B5CF6', '#6366F1']} style={styles.resultActionBtn}>
+                    <Ionicons name="refresh" size={20} color="#fff" />
+                    <Text style={styles.resultActionText}>{t('videoEditor.tryAgain')}</Text>
+                  </LinearGradient>
+                </Pressable>
+                <Pressable onPress={newProject} style={[styles.secondaryActionBtn, { borderColor: colors.cardBorder }]}>
+                  <Ionicons name="add" size={20} color={colors.text} />
+                  <Text style={[styles.secondaryActionText, { color: colors.text }]}>{t('videoEditor.newProject')}</Text>
+                </Pressable>
+              </View>
             </View>
-
-            <View style={styles.resultMeta}>
-              <View style={styles.resultMetaItem}>
-                <Ionicons name="time-outline" size={16} color={colors.textMuted} />
-                <Text style={[styles.resultMetaText, { color: colors.text }]}>
-                  {formatDuration(resultDuration)}
+          ) : !resultUrl ? (
+            <View>
+              <View style={[styles.emptyResultCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <View style={[styles.emptyResultIcon, { backgroundColor: colors.accent + '15' }]}>
+                  <Ionicons name="film-outline" size={48} color={colors.accent} />
+                </View>
+                <Text style={[styles.emptyResultTitle, { color: colors.text }]}>
+                  {t('videoEditor.noResultYet')}
+                </Text>
+                <Text style={[styles.emptyResultDesc, { color: colors.textSecondary }]}>
+                  {t('videoEditor.noResultDesc')}
                 </Text>
               </View>
-              <View style={styles.resultMetaItem}>
-                <Ionicons name="film-outline" size={16} color={colors.textMuted} />
-                <Text style={[styles.resultMetaText, { color: colors.text }]}>{clips.length} clips</Text>
-              </View>
-              <View style={styles.resultMetaItem}>
-                <Ionicons name="color-palette-outline" size={16} color={colors.textMuted} />
-                <Text style={[styles.resultMetaText, { color: colors.text }]}>{style}</Text>
+
+              <View style={styles.resultActions}>
+                <Pressable onPress={newProject}>
+                  <LinearGradient colors={[colors.accent, '#0EA5E9']} style={styles.resultActionBtn}>
+                    <Ionicons name="add" size={20} color="#fff" />
+                    <Text style={styles.resultActionText}>{t('videoEditor.newProject')}</Text>
+                  </LinearGradient>
+                </Pressable>
               </View>
             </View>
-          </View>
+          ) : (
+            <View>
+              <LinearGradient
+                colors={['#10B981', '#059669']}
+                style={styles.resultBanner}
+              >
+                <Ionicons name="checkmark-circle" size={40} color="#fff" />
+                <Text style={styles.resultTitle}>{t('videoEditor.resultTitle')}</Text>
+                <Text style={styles.resultDesc}>{t('videoEditor.resultDesc')}</Text>
+              </LinearGradient>
 
-          {creativeNotes && (
-            <View style={[styles.notesCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-              <View style={styles.notesHeader}>
-                <MaterialCommunityIcons name="robot-excited-outline" size={20} color={colors.accent} />
-                <Text style={[styles.notesTitle, { color: colors.text }]}>{t('videoEditor.aiNotes')}</Text>
+              <View style={[styles.resultCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <View style={[styles.resultPreview, { backgroundColor: colors.inputBackground }]}>
+                  <Ionicons name="play-circle" size={60} color={colors.accent} />
+                  <Text style={[styles.resultPreviewText, { color: colors.textSecondary }]}>
+                    {t('videoEditor.videoReady')}
+                  </Text>
+                </View>
+
+                <View style={styles.resultMeta}>
+                  <View style={styles.resultMetaItem}>
+                    <Ionicons name="time-outline" size={16} color={colors.textMuted} />
+                    <Text style={[styles.resultMetaText, { color: colors.text }]}>
+                      {formatDuration(resultDuration)}
+                    </Text>
+                  </View>
+                  <View style={styles.resultMetaItem}>
+                    <Ionicons name="film-outline" size={16} color={colors.textMuted} />
+                    <Text style={[styles.resultMetaText, { color: colors.text }]}>{clips.length} clips</Text>
+                  </View>
+                  <View style={styles.resultMetaItem}>
+                    <Ionicons name="color-palette-outline" size={16} color={colors.textMuted} />
+                    <Text style={[styles.resultMetaText, { color: colors.text }]}>{style}</Text>
+                  </View>
+                </View>
               </View>
-              <Text style={[styles.notesText, { color: colors.textSecondary }]}>{creativeNotes}</Text>
+
+              {creativeNotes ? (
+                <View style={[styles.notesCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                  <View style={styles.notesHeader}>
+                    <MaterialCommunityIcons name="robot-excited-outline" size={20} color={colors.accent} />
+                    <Text style={[styles.notesTitle, { color: colors.text }]}>{t('videoEditor.aiNotes')}</Text>
+                  </View>
+                  <Text style={[styles.notesText, { color: colors.textSecondary }]}>{creativeNotes}</Text>
+                </View>
+              ) : null}
+
+              <View style={styles.resultActions}>
+                <Pressable onPress={newProject}>
+                  <LinearGradient colors={[colors.accent, '#0EA5E9']} style={styles.resultActionBtn}>
+                    <Ionicons name="add" size={20} color="#fff" />
+                    <Text style={styles.resultActionText}>{t('videoEditor.newProject')}</Text>
+                  </LinearGradient>
+                </Pressable>
+              </View>
             </View>
           )}
-
-          <View style={styles.resultActions}>
-            <Pressable onPress={newProject}>
-              <LinearGradient colors={[colors.accent, '#0EA5E9']} style={styles.resultActionBtn}>
-                <Ionicons name="add" size={20} color="#fff" />
-                <Text style={styles.resultActionText}>{t('videoEditor.newProject')}</Text>
-              </LinearGradient>
-            </Pressable>
-          </View>
         </View>
       )}
 
@@ -950,6 +1060,19 @@ const styles = StyleSheet.create({
   resultActions: { paddingHorizontal: 20, gap: 12, marginBottom: 40 },
   resultActionBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 14, gap: 10 },
   resultActionText: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: '#fff' },
+  secondaryActionBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 14, gap: 10, borderWidth: 1.5 },
+  secondaryActionText: { fontSize: 16, fontFamily: 'Inter_600SemiBold' },
+  errorHelpCard: { marginHorizontal: 20, borderRadius: 16, borderWidth: 1, padding: 16, marginBottom: 16 },
+  errorHelpRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  errorHelpTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold' },
+  errorHelpList: { gap: 10 },
+  errorHelpItem: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingLeft: 4 },
+  errorBullet: { width: 6, height: 6, borderRadius: 3, marginTop: 7 },
+  errorHelpText: { fontSize: 14, fontFamily: 'Inter_400Regular', lineHeight: 20, flex: 1 },
+  emptyResultCard: { marginHorizontal: 20, borderRadius: 24, borderWidth: 1, padding: 40, alignItems: 'center', gap: 16, marginBottom: 16 },
+  emptyResultIcon: { width: 88, height: 88, borderRadius: 44, alignItems: 'center', justifyContent: 'center' },
+  emptyResultTitle: { fontSize: 18, fontFamily: 'Inter_700Bold', textAlign: 'center' as const },
+  emptyResultDesc: { fontSize: 14, fontFamily: 'Inter_400Regular', textAlign: 'center' as const, lineHeight: 20, paddingHorizontal: 10 },
   historySection: { paddingHorizontal: 20 },
   historyTitle: { fontSize: 18, fontFamily: 'Inter_600SemiBold', marginBottom: 16 },
   historyEmpty: { alignItems: 'center', paddingVertical: 40, gap: 10 },
