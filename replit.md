@@ -55,12 +55,13 @@ Preferred communication style: Simple, everyday language.
    - **AI Audience Manager**: Generate 3 optimized Meta ad audiences from campaign goals using GPT-5.2, with detailed targeting breakdown (demographics, interests, behaviors, placements, bid strategy, match scores), expandable audience cards, and campaign-based quick optimization
 5. **Studio** (`studio.tsx`): Consolidated media hub with mode switcher between two views:
    - **Media Library**: Upload and manage videos, images, and posters with platform tagging and scheduling status
-   - **AI Video Editor** (via `components/VideoEditorContent.tsx`): AI-powered video editing with FFmpeg processing
-     - **Upload**: Multi-clip upload (up to 20 clips, 200MB max each), automatic video info extraction via ffprobe
-     - **Configure**: 6 edit styles (Cinematic/Energetic/Minimal/Documentary/Social/Commercial), 6 moods, 3 pace options, transition toggle
-     - **AI Processing**: GPT-5.2 analyzes clips and creates professional edit plans (clip ordering, trim points, transitions, color grading)
+   - **AI Video Editor** (via `components/VideoEditorContent.tsx`): AI-powered video editing with FFmpeg processing, guided creative brief flow
+     - **Creative Brief** (Step 1): Guided prompts asking users to describe their video vision, select video type (Promo/Reel/Ad/Story/Recap/Tutorial), target audience, key message. 6 quick templates (Product Launch Hype, Cinematic Brand Film, Instagram Reel, Luxury Showcase, Event Highlights, Ad Creative) auto-fill brief + settings. Style/mood/pace/transition/text overlay configuration.
+     - **Upload** (Step 2): Multi-clip upload (up to 20 clips, 200MB max each) using expo-file-system File class + expo/fetch, automatic video info extraction via ffprobe, brief summary card
+     - **Review & Start** (Step 3): Shows uploaded clips with metadata, full brief summary with tags, then triggers AI processing
+     - **AI Processing** (Step 4): GPT-5.2 reads creative brief + analyzes clips to create professional edit plans (clip ordering, trim points, transitions, color grading) tailored to the user's vision
      - **FFmpeg Rendering**: Complex filter graph processing with fallback to simple concatenation, libx264 encoding
-     - **Backend**: `server/video-routes.ts` - clip upload, AI edit plan generation, FFmpeg processing, project management
+     - **Backend**: `server/video-routes.ts` - clip upload, AI edit plan generation with creative brief context, FFmpeg processing, project management
 6. **Photography** (`photography.tsx`): Dubai-based photography marketplace with dual-role system:
    - **Photographer View**: Profile creation (name, email, specialties, pricing, Instagram), portfolio management (image upload, categories: Wedding/Portrait/Event/Product/Fashion/Nature), reservation management with confirm/decline actions
    - **Customer View**: Browse photographers by city, horizontal scroll cards, portfolio feed with like/share/reserve interactions, photographer detail modal with bio and portfolio grid, booking form with event type selection and date/time/location
