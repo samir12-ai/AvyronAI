@@ -37,7 +37,7 @@ Preferred communication style: Simple, everyday language.
 - **Platform Abstraction**: Components adapt to iOS, Android, and Web platforms
 
 ### Tab-Based Navigation Structure
-1. **Dashboard** (`index.tsx`): Analytics overview with metrics, charts, and quick actions
+1. **Dashboard** (`index.tsx`): Analytics overview with metrics, charts, quick actions, and AI Management Hub summary card showing Auto-Publisher stats (published/queued/content counts) and Meta connection status with direct link to AI Management tab
 2. **Create** (`create.tsx`): AI-powered content generation with two modes:
    - **AI Writer**: GPT-5.2 powered text content generation (posts, captions, ad copy, stories)
    - **AI Designer**: Artlist-level image generation studio powered by Nano Banana Pro (Gemini 3 Pro Image) with:
@@ -50,21 +50,20 @@ Preferred communication style: Simple, everyday language.
      - Generation history gallery (session-based)
      - Premium animated loading overlay
 3. **Calendar** (`calendar.tsx`): Content scheduling and calendar view with AI Calendar Assistant
-4. **Campaigns** (`campaigns.tsx`): Campaign and ad management
-5. **AI Management** (`ai-management.tsx`): AI-powered automation hub with two tabs:
+4. **AI Management** (`ai-management.tsx`): AI-powered automation hub with two tabs:
    - **Auto-Publisher**: Batch publish scheduled posts to Meta platforms, auto-publish toggle, publish queue with multi-select, connection status with pulsing indicator, demo mode when Meta not connected
    - **AI Audience Manager**: Generate 3 optimized Meta ad audiences from campaign goals using GPT-5.2, with detailed targeting breakdown (demographics, interests, behaviors, placements, bid strategy, match scores), expandable audience cards, and campaign-based quick optimization
-6. **Photography** (`photography.tsx`): Dubai-based photography marketplace with dual-role system:
+5. **Photography** (`photography.tsx`): Dubai-based photography marketplace with dual-role system:
    - **Photographer View**: Profile creation (name, email, specialties, pricing, Instagram), portfolio management (image upload, categories: Wedding/Portrait/Event/Product/Fashion/Nature), reservation management with confirm/decline actions
    - **Customer View**: Browse photographers by city, horizontal scroll cards, portfolio feed with like/share/reserve interactions, photographer detail modal with bio and portfolio grid, booking form with event type selection and date/time/location
    - **Backend**: `server/photography-routes.ts` - CRUD for profiles, portfolio posts, interactions (like/unlike toggle), reservations with status management
-7. **Video Editor** (`video-editor.tsx`): AI-powered video editing with FFmpeg processing:
+6. **Video Editor** (`video-editor.tsx`): AI-powered video editing with FFmpeg processing:
    - **Upload**: Multi-clip upload (up to 20 clips, 200MB max each), automatic video info extraction via ffprobe
    - **Configure**: 6 edit styles (Cinematic/Energetic/Minimal/Documentary/Social/Commercial), 6 moods, 3 pace options, transition toggle
    - **AI Processing**: GPT-5.2 analyzes clips and creates professional edit plans (clip ordering, trim points, transitions, color grading)
    - **FFmpeg Rendering**: Complex filter graph processing with fallback to simple concatenation, libx264 encoding
    - **Backend**: `server/video-routes.ts` - clip upload, AI edit plan generation, FFmpeg processing, project management
-8. **Settings** (`settings.tsx`): Brand profile and platform connections
+7. **Settings** (`settings.tsx`): Brand profile and platform connections
 
 ## External Dependencies
 
