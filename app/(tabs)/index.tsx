@@ -122,6 +122,8 @@ export default function DashboardScreen() {
   const [todayFocus, setTodayFocus] = useState('');
   const [riskLevel, setRiskLevel] = useState<'Low' | 'Medium' | 'High'>('Low');
   const [currentObjective, setCurrentObjective] = useState('');
+  const [confidenceScore, setConfidenceScore] = useState(100);
+  const [confidenceStatus, setConfidenceStatus] = useState<'Stable' | 'Caution' | 'Unstable'>('Stable');
 
   const headerFade = useRef(new RNAnimated.Value(0)).current;
   useEffect(() => {
@@ -139,6 +141,18 @@ export default function DashboardScreen() {
     const cpl = conversions > 0 ? spend / conversions : 0;
     return { spend, conversions, revenue, cpa, roas, cpl };
   }, [analytics]);
+
+  const fetchConfidence = useCallback(async () => {
+    try {
+      const res = await fetch(new URL('/api/autopilot/status', baseUrl).toString());
+      if (res.ok) {
+        const data = await res.json();
+        setConfidenceScore(data.confidenceScore ?? 100);
+        const status = data.confidenceStatus ?? 'Stable';
+        setConfidenceStatus(status as 'Stable' | 'Caution' | 'Unstable');
+      }
+    } catch {}
+  }, [baseUrl]);
 
   const fetchAIStatus = useCallback(async () => {
     try {
@@ -187,6 +201,7 @@ export default function DashboardScreen() {
 
   useEffect(() => {
     fetchAIStatus();
+    fetchConfidence();
   }, []);
 
   const formatNumber = (num: number): string => {
@@ -201,6 +216,7 @@ export default function DashboardScreen() {
   };
 
   const riskColor = riskLevel === 'Low' ? LUX.emerald : riskLevel === 'Medium' ? LUX.amber : LUX.ruby;
+  const confColor = confidenceStatus === 'Stable' ? LUX.emerald : confidenceStatus === 'Caution' ? LUX.amber : LUX.ruby;
 
   const pendingCount = scheduledPosts.filter(p => p.status === 'pending').length;
   const publishedCount = scheduledPosts.filter(p => p.status === 'published').length;
@@ -224,7 +240,7 @@ export default function DashboardScreen() {
         refreshControl={
           <RefreshControl 
             refreshing={isLoading} 
-            onRefresh={() => { refreshData(); fetchAIStatus(); }}
+            onRefresh={() => { refreshData(); fetchAIStatus(); fetchConfidence(); }}
             tintColor={goldAccent}
           />
         }
@@ -264,12 +280,23 @@ export default function DashboardScreen() {
                 </View>
               </View>
             </View>
-            {currentObjective ? (
-              <View style={[s.objectivePill, { backgroundColor: isDark ? LUX.graphite : '#E8E2D8' }]}>
-                <Ionicons name="flag" size={11} color={goldAccent} />
-                <Text style={[s.objectiveText, { color: textSecondary }]} numberOfLines={1}>{currentObjective}</Text>
+            <View style={s.autopilotRight}>
+              {currentObjective ? (
+                <View style={[s.objectivePill, { backgroundColor: isDark ? LUX.graphite : '#E8E2D8' }]}>
+                  <Ionicons name="flag" size={11} color={goldAccent} />
+                  <Text style={[s.objectiveText, { color: textSecondary }]} numberOfLines={1}>{currentObjective}</Text>
+                </View>
+              ) : null}
+              <View style={[s.confMeter, { backgroundColor: isDark ? LUX.graphite : '#EDE7DD' }]}>
+                <View style={s.confMeterInner}>
+                  <View style={[s.confBarBg, { backgroundColor: isDark ? LUX.obsidian : '#D8D2C8' }]}>
+                    <View style={[s.confBarFill, { width: `${confidenceScore}%`, backgroundColor: confColor }]} />
+                  </View>
+                  <Text style={[s.confLabel, { color: confColor }]}>{confidenceScore}%</Text>
+                </View>
+                <Text style={[s.confTitle, { color: textMuted }]}>AI Confidence</Text>
               </View>
-            ) : null}
+            </View>
           </View>
         </RNAnimated.View>
 
@@ -575,6 +602,40 @@ const s = StyleSheet.create({
     fontSize: 10,
     fontWeight: '500',
     flex: 1,
+  },
+  autopilotRight: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  confMeter: {
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    minWidth: 100,
+  },
+  confMeterInner: {
+    flexDirection: 'row' as const,
+    alignItems: 'center',
+    gap: 6,
+  },
+  confBarBg: {
+    height: 4,
+    borderRadius: 2,
+    flex: 1,
+    overflow: 'hidden' as const,
+  },
+  confBarFill: {
+    height: '100%' as any,
+    borderRadius: 2,
+  },
+  confLabel: {
+    fontSize: 11,
+    fontWeight: '700' as const,
+  },
+  confTitle: {
+    fontSize: 9,
+    fontWeight: '500' as const,
+    marginTop: 2,
   },
 
   revenueCard: {
