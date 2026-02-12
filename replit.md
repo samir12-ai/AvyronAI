@@ -50,9 +50,20 @@ Preferred communication style: Simple, everyday language.
      - Generation history gallery (session-based)
      - Premium animated loading overlay
 3. **Calendar** (`calendar.tsx`): Content scheduling and calendar view with AI Calendar Assistant
-4. **AI Management** (`ai-management.tsx`): AI-powered automation hub with two tabs:
+4. **AI Management** (`ai-management.tsx`): AI-powered automation hub with three tabs:
    - **Auto-Publisher**: Batch publish scheduled posts to Meta platforms, auto-publish toggle, publish queue with multi-select, connection status with pulsing indicator, demo mode when Meta not connected
    - **AI Audience Manager**: Generate 3 optimized Meta ad audiences from campaign goals using GPT-5.2, with detailed targeting breakdown (demographics, interests, behaviors, placements, bid strategy, match scores), expandable audience cards, and campaign-based quick optimization
+   - **Strategy Hub** (via `components/StrategyHub.tsx`): AI-powered Strategic Intelligence Engine with 7 sub-views:
+     - **Overview**: Performance metrics dashboard (avg reach, CTR, CPA, ROAS), sync Meta data or use demo mode, run AI analysis with executive summary
+     - **Patterns**: AI-detected content patterns with confidence scores, grouped by category (pattern, hook, format, audience, objection)
+     - **Decisions**: Rule-based decision engine with execute/reject actions, priority levels, budget adjustment recommendations
+     - **Memory**: Long-term memory bank tracking winners and losers (winning angles, hooks, formats, audience patterns, objections)
+     - **Growth**: 30-day AI-managed growth campaigns with 3 phases (Testing days 1-10, Optimization days 11-20, Authority days 21-30), progress tracking, daily advancement
+     - **Reports**: AI-generated weekly strategic reports with what worked/failed, root cause analysis, scaling recommendations, budget reallocation
+     - **Sniper**: Audience sniping tool - AI detects micro-segments, interest stacking strategies, lookalike audiences, exclusion groups, objection-handling content
+     - **Backend**: `server/strategy-routes.ts` - 15+ API endpoints for performance sync, AI analysis, decisions management, growth campaigns, weekly reports, audience sniping
+     - **Database**: 6 tables (performance_snapshots, strategy_insights, strategy_decisions, strategy_memory, growth_campaigns, weekly_reports)
+     - **Demo Mode**: Generates 30 synthetic performance records with realistic data when Meta API is unavailable
 5. **Studio** (`studio.tsx`): Consolidated media hub with mode switcher between two views:
    - **Media Library**: Upload and manage videos, images, and posters with platform tagging and scheduling status
    - **AI Video Editor** (via `components/VideoEditorContent.tsx`): AI-powered video editing with FFmpeg processing, guided creative brief flow
