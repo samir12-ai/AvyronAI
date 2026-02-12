@@ -4,7 +4,7 @@ const en = {
     create: 'Create',
     studio: 'Studio',
     calendar: 'Calendar',
-    aiManagement: 'AI Manage',
+    aiManagement: 'AI Control',
     photography: 'Photo',
     settings: 'Settings',
   },

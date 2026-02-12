@@ -31,7 +31,7 @@ function NativeTabLayout() {
         <Label>{t('tabs.calendar')}</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="ai-management">
-        <Icon sf={{ default: "brain", selected: "brain.fill" }} />
+        <Icon sf={{ default: "checkmark.shield", selected: "checkmark.shield.fill" }} />
         <Label>{t('tabs.aiManagement')}</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="photography">
@@ -91,7 +91,7 @@ function ClassicTabLayout() {
         options={{
           title: t('tabs.dashboard'),
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "stats-chart" : "stats-chart-outline"} size={22} color={color} />
+            <Ionicons name={focused ? "trending-up" : "trending-up"} size={22} color={color} />
           ),
         }}
       />
@@ -127,7 +127,7 @@ function ClassicTabLayout() {
         options={{
           title: t('tabs.aiManagement'),
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "hardware-chip" : "hardware-chip-outline"} size={22} color={color} />
+            <Ionicons name={focused ? "shield-checkmark" : "shield-checkmark-outline"} size={22} color={color} />
           ),
         }}
       />
