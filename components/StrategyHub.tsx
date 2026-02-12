@@ -20,7 +20,7 @@ import Colors from '@/constants/colors';
 import { useLanguage } from '@/context/LanguageContext';
 import { getApiUrl } from '@/lib/query-client';
 
-type StrategyView = 'overview' | 'insights' | 'decisions' | 'memory' | 'growth' | 'reports' | 'sniper';
+type StrategyView = 'overview' | 'insights' | 'decisions' | 'memory' | 'growth' | 'reports' | 'sniper' | 'moat';
 
 interface DashboardData {
   averages: any;
@@ -95,6 +95,12 @@ export default function StrategyHub() {
 
   const [expandedInsight, setExpandedInsight] = useState<number | null>(null);
   const [expandedDecision, setExpandedDecision] = useState<number | null>(null);
+
+  const [moatDashboard, setMoatDashboard] = useState<any>(null);
+  const [moatScanning, setMoatScanning] = useState(false);
+  const [moatScanResult, setMoatScanResult] = useState<any>(null);
+  const [convertingSeries, setConvertingSeries] = useState<string | null>(null);
+  const [expandedSeries, setExpandedSeries] = useState<string | null>(null);
 
   const baseUrl = getApiUrl();
 
@@ -195,12 +201,65 @@ export default function StrategyHub() {
     } catch {}
   };
 
+  const fetchMoatDashboard = async () => {
+    try {
+      const res = await fetch(new URL('/api/strategy/moat-dashboard', baseUrl).toString());
+      if (res.ok) setMoatDashboard(await res.json());
+    } catch {}
+  };
+
+  const handleMoatScan = async () => {
+    setMoatScanning(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    try {
+      const res = await fetch(new URL('/api/strategy/moat-scan', baseUrl).toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMoatScanResult(data);
+        fetchMoatDashboard();
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        Alert.alert('Scan Required', data.error || 'Run AI Analysis first to build memory before scanning for moats.');
+      }
+    } catch {
+      Alert.alert('Error', 'Moat scan failed.');
+    } finally {
+      setMoatScanning(false);
+    }
+  };
+
+  const handleConvertToSeries = async (candidateId: string) => {
+    setConvertingSeries(candidateId);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    try {
+      const res = await fetch(new URL('/api/strategy/signature-series', baseUrl).toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidateId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchMoatDashboard();
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('Series Created', `"${data.series.name}" is now a Signature Series.`);
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to create signature series.');
+    } finally {
+      setConvertingSeries(null);
+    }
+  };
+
   useEffect(() => {
     if (activeView === 'insights') fetchInsights();
     if (activeView === 'decisions') fetchDecisions();
     if (activeView === 'memory') fetchMemory();
     if (activeView === 'growth') fetchCampaigns();
     if (activeView === 'reports') fetchReports();
+    if (activeView === 'moat') fetchMoatDashboard();
   }, [activeView]);
 
   const handleCreateCampaign = async () => {
@@ -282,6 +341,7 @@ export default function StrategyHub() {
 
   const navItems: { key: StrategyView; icon: string; label: string }[] = [
     { key: 'overview', icon: 'analytics', label: 'Overview' },
+    { key: 'moat', icon: 'shield-checkmark', label: 'Moat' },
     { key: 'insights', icon: 'bulb', label: 'Patterns' },
     { key: 'decisions', icon: 'git-branch', label: 'Decisions' },
     { key: 'memory', icon: 'hardware-chip', label: 'Memory' },
@@ -380,6 +440,11 @@ export default function StrategyHub() {
                 <View style={s.summaryHeader}>
                   <Ionicons name="sparkles" size={18} color="#8B5CF6" />
                   <Text style={[s.summaryTitle, { color: colors.text }]}>AI Strategic Summary</Text>
+                  {analysisResult.systemMode && (
+                    <View style={{ backgroundColor: '#10B981' + '15', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, marginLeft: 'auto' as any }}>
+                      <Text style={{ fontSize: 9, fontFamily: 'Inter_700Bold', color: '#10B981', letterSpacing: 0.5 }}>{analysisResult.systemMode}</Text>
+                    </View>
+                  )}
                 </View>
                 <Text style={[s.summaryText, { color: colors.textSecondary }]}>
                   {analysisResult.executiveSummary}
@@ -395,6 +460,19 @@ export default function StrategyHub() {
                     <Text style={[s.summaryStatText, { color: '#F59E0B' }]}>{analysisResult.memoryUpdates?.length || 0} memories</Text>
                   </View>
                 </View>
+                {analysisResult.moatSignals?.length > 0 && (
+                  <View style={{ marginTop: 10, backgroundColor: '#0F172A' + '08', borderRadius: 10, padding: 10 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                      <Ionicons name="shield-checkmark" size={14} color="#10B981" />
+                      <Text style={{ fontSize: 11, fontFamily: 'Inter_600SemiBold', color: '#10B981' }}>MOAT SIGNALS</Text>
+                    </View>
+                    {analysisResult.moatSignals.map((sig: string, i: number) => (
+                      <Text key={i} style={{ fontSize: 12, fontFamily: 'Inter_400Regular', color: colors.textSecondary, lineHeight: 17, marginBottom: 3 }}>
+                        {sig}
+                      </Text>
+                    ))}
+                  </View>
+                )}
               </View>
             )}
 
@@ -881,9 +959,234 @@ export default function StrategyHub() {
     </View>
   );
 
+  const getMoatColor = (score: number) => {
+    if (score >= 75) return '#10B981';
+    if (score >= 50) return '#F59E0B';
+    return '#EF4444';
+  };
+
+  const renderMoat = () => {
+    const scores = moatDashboard?.scores;
+    const hasSeries = (moatDashboard?.series?.length || 0) > 0;
+    const hasCandidates = (moatDashboard?.candidates?.length || 0) > 0;
+
+    return (
+      <View>
+        <View style={[moatStyles.modeBar, { backgroundColor: '#0F172A' }]}>
+          <View style={moatStyles.modeBarLeft}>
+            <GlowDot color="#10B981" size={10} />
+            <Text style={moatStyles.modeText}>MOAT BUILDER MODE: ACTIVE</Text>
+          </View>
+          <Ionicons name="shield-checkmark" size={18} color="#10B981" />
+        </View>
+
+        {scores && (
+          <View style={moatStyles.scoresGrid}>
+            {[
+              { label: 'Authority', value: scores.authority, icon: 'ribbon' },
+              { label: 'Differentiation', value: scores.differentiation, icon: 'git-compare' },
+              { label: 'Moat Strength', value: scores.moatStrength, icon: 'shield-half' },
+              { label: 'Fatigue Risk', value: scores.fatigueRisk, icon: 'warning', invert: true },
+            ].map((item, i) => (
+              <View key={i} style={[moatStyles.scoreCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <Ionicons name={(item.icon + '-outline') as any} size={18} color={item.invert ? getMoatColor(100 - item.value) : getMoatColor(item.value)} />
+                <Text style={[moatStyles.scoreValue, { color: item.invert ? getMoatColor(100 - item.value) : getMoatColor(item.value) }]}>{item.value}%</Text>
+                <Text style={[moatStyles.scoreLabel, { color: colors.textMuted }]}>{item.label}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {scores && (
+          <View style={[moatStyles.ipCard, { backgroundColor: '#10B981' + '08', borderColor: '#10B981' + '20' }]}>
+            <View style={moatStyles.ipRow}>
+              <Ionicons name="diamond-outline" size={18} color="#10B981" />
+              <Text style={[moatStyles.ipLabel, { color: colors.text }]}>IP Contribution to Growth</Text>
+            </View>
+            <View style={[moatStyles.ipTrack, { backgroundColor: colors.inputBackground }]}>
+              <View style={[moatStyles.ipFill, { width: `${scores.ipContribution}%` }]} />
+            </View>
+            <Text style={[moatStyles.ipValue, { color: '#10B981' }]}>{scores.ipContribution}%</Text>
+          </View>
+        )}
+
+        <View style={moatStyles.statsRow}>
+          <View style={[moatStyles.statChip, { backgroundColor: '#8B5CF6' + '12', borderColor: '#8B5CF6' + '25' }]}>
+            <Text style={[moatStyles.statChipValue, { color: '#8B5CF6' }]}>{moatDashboard?.activeSeries || 0}</Text>
+            <Text style={[moatStyles.statChipLabel, { color: colors.textMuted }]}>Active Series</Text>
+          </View>
+          <View style={[moatStyles.statChip, { backgroundColor: '#F59E0B' + '12', borderColor: '#F59E0B' + '25' }]}>
+            <Text style={[moatStyles.statChipValue, { color: '#F59E0B' }]}>{moatDashboard?.pendingCandidates || 0}</Text>
+            <Text style={[moatStyles.statChipLabel, { color: colors.textMuted }]}>Candidates</Text>
+          </View>
+          <View style={[moatStyles.statChip, { backgroundColor: '#10B981' + '12', borderColor: '#10B981' + '25' }]}>
+            <Text style={[moatStyles.statChipValue, { color: '#10B981' }]}>{moatDashboard?.convertedCandidates || 0}</Text>
+            <Text style={[moatStyles.statChipLabel, { color: colors.textMuted }]}>Converted</Text>
+          </View>
+        </View>
+
+        <Pressable onPress={handleMoatScan} disabled={moatScanning} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
+          <LinearGradient colors={['#0F172A', '#1E293B']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={moatStyles.scanBtn}>
+            {moatScanning ? <ActivityIndicator color="#10B981" size="small" /> : <Ionicons name="scan" size={18} color="#10B981" />}
+            <Text style={moatStyles.scanBtnText}>{moatScanning ? 'Scanning for Moats...' : 'Scan for Moat Candidates'}</Text>
+          </LinearGradient>
+        </Pressable>
+
+        {moatScanResult && (
+          <View style={[moatStyles.scanResultCard, { backgroundColor: '#10B981' + '06', borderColor: '#10B981' + '18' }]}>
+            <View style={moatStyles.scanResultHeader}>
+              <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+              <Text style={[moatStyles.scanResultTitle, { color: colors.text }]}>Scan Complete</Text>
+            </View>
+            {moatScanResult.scanSummary && (
+              <Text style={[moatStyles.scanSummaryText, { color: colors.textSecondary }]}>{moatScanResult.scanSummary}</Text>
+            )}
+            {moatScanResult.topOpportunity && (
+              <View style={[moatStyles.topOppCard, { backgroundColor: '#F59E0B' + '10', borderColor: '#F59E0B' + '20' }]}>
+                <Ionicons name="star" size={14} color="#F59E0B" />
+                <Text style={[moatStyles.topOppText, { color: colors.text }]}>{moatScanResult.topOpportunity}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {hasCandidates && (
+          <View style={moatStyles.section}>
+            <Text style={[moatStyles.sectionTitle, { color: colors.text }]}>Moat Candidates</Text>
+            <Text style={[moatStyles.sectionSubtitle, { color: colors.textSecondary }]}>Convert top candidates into Signature Series</Text>
+            {(moatDashboard?.candidates || []).map((c: any) => (
+              <View key={c.id} style={[moatStyles.candidateCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <View style={moatStyles.candidateHeader}>
+                  <View style={moatStyles.candidateLeft}>
+                    <View style={[moatStyles.sourceTypeBadge, { backgroundColor: '#8B5CF6' + '12' }]}>
+                      <Text style={[moatStyles.sourceTypeText, { color: '#8B5CF6' }]}>{(c.sourceType || '').replace(/_/g, ' ')}</Text>
+                    </View>
+                    <View style={[moatStyles.moatScoreBadge, { backgroundColor: getMoatColor(Math.round((c.moatScore || 0) * 100)) + '15' }]}>
+                      <Text style={[moatStyles.moatScoreText, { color: getMoatColor(Math.round((c.moatScore || 0) * 100)) }]}>
+                        {Math.round((c.moatScore || 0) * 100)}%
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+                <Text style={[moatStyles.candidateName, { color: colors.text }]}>{c.label}</Text>
+                <Text style={[moatStyles.candidateDesc, { color: colors.textSecondary }]} numberOfLines={3}>{c.description}</Text>
+
+                <View style={moatStyles.candidateMetrics}>
+                  <View style={moatStyles.candidateMetric}>
+                    <Text style={[moatStyles.cmLabel, { color: colors.textMuted }]}>Stability</Text>
+                    <View style={[moatStyles.cmTrack, { backgroundColor: colors.inputBackground }]}>
+                      <View style={[moatStyles.cmFill, { width: `${(c.stability || 0) * 100}%`, backgroundColor: '#3B82F6' }]} />
+                    </View>
+                  </View>
+                  <View style={moatStyles.candidateMetric}>
+                    <Text style={[moatStyles.cmLabel, { color: colors.textMuted }]}>Resonance</Text>
+                    <View style={[moatStyles.cmTrack, { backgroundColor: colors.inputBackground }]}>
+                      <View style={[moatStyles.cmFill, { width: `${(c.resonance || 0) * 100}%`, backgroundColor: '#EC4899' }]} />
+                    </View>
+                  </View>
+                  <View style={moatStyles.candidateMetric}>
+                    <Text style={[moatStyles.cmLabel, { color: colors.textMuted }]}>Uniqueness</Text>
+                    <View style={[moatStyles.cmTrack, { backgroundColor: colors.inputBackground }]}>
+                      <View style={[moatStyles.cmFill, { width: `${(c.uniqueness || 0) * 100}%`, backgroundColor: '#10B981' }]} />
+                    </View>
+                  </View>
+                </View>
+
+                <Pressable
+                  onPress={() => handleConvertToSeries(c.id)}
+                  disabled={convertingSeries === c.id}
+                  style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1, marginTop: 12 }]}
+                >
+                  <LinearGradient colors={['#8B5CF6', '#6366F1']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={moatStyles.convertBtn}>
+                    {convertingSeries === c.id ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="sparkles" size={16} color="#fff" />}
+                    <Text style={moatStyles.convertBtnText}>{convertingSeries === c.id ? 'Creating Series...' : 'Convert to Signature Series'}</Text>
+                  </LinearGradient>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {hasSeries && (
+          <View style={moatStyles.section}>
+            <Text style={[moatStyles.sectionTitle, { color: colors.text }]}>Signature Series</Text>
+            <Text style={[moatStyles.sectionSubtitle, { color: colors.textSecondary }]}>Your branded, repeatable content systems</Text>
+            {(moatDashboard?.series || []).map((sr: any) => (
+              <Pressable key={sr.id} onPress={() => setExpandedSeries(expandedSeries === sr.id ? null : sr.id)}>
+                <View style={[moatStyles.seriesCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                  <View style={moatStyles.seriesHeader}>
+                    <View style={moatStyles.seriesLeft}>
+                      <Ionicons name="diamond" size={18} color="#8B5CF6" />
+                      <Text style={[moatStyles.seriesName, { color: colors.text }]}>{sr.name}</Text>
+                    </View>
+                    <Ionicons name={expandedSeries === sr.id ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
+                  </View>
+
+                  {sr.corePromise && (
+                    <Text style={[moatStyles.seriesPromise, { color: colors.textSecondary }]}>{sr.corePromise}</Text>
+                  )}
+
+                  <View style={moatStyles.seriesScores}>
+                    <View style={[moatStyles.seriesScore, { backgroundColor: '#10B981' + '10' }]}>
+                      <Text style={[moatStyles.seriesScoreValue, { color: '#10B981' }]}>{Math.round((sr.authorityScore || 0) * 100)}%</Text>
+                      <Text style={[moatStyles.seriesScoreLabel, { color: colors.textMuted }]}>Auth</Text>
+                    </View>
+                    <View style={[moatStyles.seriesScore, { backgroundColor: '#3B82F6' + '10' }]}>
+                      <Text style={[moatStyles.seriesScoreValue, { color: '#3B82F6' }]}>{Math.round((sr.differentiationScore || 0) * 100)}%</Text>
+                      <Text style={[moatStyles.seriesScoreLabel, { color: colors.textMuted }]}>Diff</Text>
+                    </View>
+                    <View style={[moatStyles.seriesScore, { backgroundColor: '#8B5CF6' + '10' }]}>
+                      <Text style={[moatStyles.seriesScoreValue, { color: '#8B5CF6' }]}>{Math.round((sr.moatStrength || 0) * 100)}%</Text>
+                      <Text style={[moatStyles.seriesScoreLabel, { color: colors.textMuted }]}>Moat</Text>
+                    </View>
+                    <View style={[moatStyles.seriesScore, { backgroundColor: '#F59E0B' + '10' }]}>
+                      <Text style={[moatStyles.seriesScoreValue, { color: '#F59E0B' }]}>{Math.round((sr.fatigueRisk || 0) * 100)}%</Text>
+                      <Text style={[moatStyles.seriesScoreLabel, { color: colors.textMuted }]}>Risk</Text>
+                    </View>
+                  </View>
+
+                  {expandedSeries === sr.id && (
+                    <View style={moatStyles.seriesExpanded}>
+                      {[
+                        { label: 'Episode Structure', value: sr.episodeStructure, icon: 'list', color: '#3B82F6' },
+                        { label: 'Hook Formula', value: sr.hookFormula, icon: 'flash', color: '#EC4899' },
+                        { label: 'CTA Framework', value: sr.ctaFramework, icon: 'megaphone', color: '#F59E0B' },
+                        { label: 'Posting Cadence', value: sr.postingCadence, icon: 'calendar', color: '#10B981' },
+                        { label: 'Expansion Roadmap', value: sr.expansionRoadmap, icon: 'map', color: '#8B5CF6' },
+                      ].filter(item => item.value).map((item, j) => (
+                        <View key={j} style={[moatStyles.seriesDetail, { borderLeftColor: item.color }]}>
+                          <View style={moatStyles.seriesDetailHeader}>
+                            <Ionicons name={(item.icon + '-outline') as any} size={14} color={item.color} />
+                            <Text style={[moatStyles.seriesDetailLabel, { color: item.color }]}>{item.label}</Text>
+                          </View>
+                          <Text style={[moatStyles.seriesDetailText, { color: colors.text }]}>{item.value}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              </Pressable>
+            ))}
+          </View>
+        )}
+
+        {!hasSeries && !hasCandidates && !moatScanResult && (
+          <View style={[s.emptyState, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <Ionicons name="shield-checkmark-outline" size={40} color={colors.textMuted} />
+            <Text style={[s.emptyTitle, { color: colors.text }]}>Build Your Brand Moat</Text>
+            <Text style={[s.emptyDesc, { color: colors.textSecondary }]}>
+              Scan your performance data to identify defensible brand advantages. The AI will find high-stability content angles, repeated winners, and blue ocean opportunities.
+            </Text>
+          </View>
+        )}
+      </View>
+    );
+  };
+
   const renderActiveView = () => {
     switch (activeView) {
       case 'overview': return renderOverview();
+      case 'moat': return renderMoat();
       case 'insights': return renderInsights();
       case 'decisions': return renderDecisions();
       case 'memory': return renderMemory();
@@ -1092,4 +1395,77 @@ const s = StyleSheet.create({
   modalTitle: { fontSize: 18, fontFamily: 'Inter_600SemiBold' },
   createBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: 12 },
   createBtnText: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: '#fff' },
+});
+
+const moatStyles = StyleSheet.create({
+  modeBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, marginBottom: 14 },
+  modeBarLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  modeText: { fontSize: 12, fontFamily: 'Inter_700Bold', color: '#10B981', letterSpacing: 1.5 },
+
+  scoresGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
+  scoreCard: { flex: 1, minWidth: '22%' as any, alignItems: 'center', paddingVertical: 12, paddingHorizontal: 6, borderRadius: 12, borderWidth: 1, gap: 4 },
+  scoreValue: { fontSize: 18, fontFamily: 'Inter_700Bold' },
+  scoreLabel: { fontSize: 9, fontFamily: 'Inter_500Medium', textTransform: 'uppercase' as const, letterSpacing: 0.5 },
+
+  ipCard: { borderRadius: 14, borderWidth: 1, padding: 14, marginBottom: 14 },
+  ipRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  ipLabel: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  ipTrack: { height: 8, borderRadius: 4, overflow: 'hidden' as const, marginBottom: 6 },
+  ipFill: { height: '100%', borderRadius: 4, backgroundColor: '#10B981' },
+  ipValue: { fontSize: 13, fontFamily: 'Inter_700Bold', textAlign: 'right' as const },
+
+  statsRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
+  statChip: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, borderWidth: 1 },
+  statChipValue: { fontSize: 20, fontFamily: 'Inter_700Bold' },
+  statChipLabel: { fontSize: 10, fontFamily: 'Inter_400Regular', marginTop: 2 },
+
+  scanBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 14, borderRadius: 12, marginBottom: 16 },
+  scanBtnText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: '#10B981' },
+
+  scanResultCard: { borderRadius: 14, borderWidth: 1, padding: 14, marginBottom: 16 },
+  scanResultHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  scanResultTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold' },
+  scanSummaryText: { fontSize: 13, fontFamily: 'Inter_400Regular', lineHeight: 19, marginBottom: 10 },
+  topOppCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderRadius: 10, borderWidth: 1, padding: 10 },
+  topOppText: { fontSize: 13, fontFamily: 'Inter_500Medium', flex: 1, lineHeight: 18 },
+
+  section: { marginBottom: 16 },
+  sectionTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold', marginBottom: 4 },
+  sectionSubtitle: { fontSize: 12, fontFamily: 'Inter_400Regular', marginBottom: 12 },
+
+  candidateCard: { borderRadius: 16, borderWidth: 1, padding: 16, marginBottom: 12 },
+  candidateHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  candidateLeft: { flexDirection: 'row', gap: 8 },
+  sourceTypeBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  sourceTypeText: { fontSize: 10, fontFamily: 'Inter_600SemiBold', textTransform: 'uppercase' as const },
+  moatScoreBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  moatScoreText: { fontSize: 11, fontFamily: 'Inter_700Bold' },
+  candidateName: { fontSize: 15, fontFamily: 'Inter_600SemiBold', marginBottom: 6 },
+  candidateDesc: { fontSize: 12, fontFamily: 'Inter_400Regular', lineHeight: 17, marginBottom: 12 },
+
+  candidateMetrics: { gap: 8 },
+  candidateMetric: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  cmLabel: { fontSize: 10, fontFamily: 'Inter_500Medium', width: 60 },
+  cmTrack: { flex: 1, height: 6, borderRadius: 3, overflow: 'hidden' as const },
+  cmFill: { height: '100%', borderRadius: 3 },
+
+  convertBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, borderRadius: 10 },
+  convertBtnText: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: '#fff' },
+
+  seriesCard: { borderRadius: 16, borderWidth: 1, padding: 16, marginBottom: 12 },
+  seriesHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  seriesLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  seriesName: { fontSize: 15, fontFamily: 'Inter_600SemiBold', flex: 1 },
+  seriesPromise: { fontSize: 12, fontFamily: 'Inter_400Regular', lineHeight: 17, marginBottom: 10 },
+
+  seriesScores: { flexDirection: 'row', gap: 6 },
+  seriesScore: { flex: 1, alignItems: 'center', paddingVertical: 6, borderRadius: 8 },
+  seriesScoreValue: { fontSize: 14, fontFamily: 'Inter_700Bold' },
+  seriesScoreLabel: { fontSize: 9, fontFamily: 'Inter_400Regular', marginTop: 2 },
+
+  seriesExpanded: { marginTop: 14 },
+  seriesDetail: { borderLeftWidth: 3, paddingLeft: 12, marginBottom: 12 },
+  seriesDetailHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  seriesDetailLabel: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
+  seriesDetailText: { fontSize: 13, fontFamily: 'Inter_400Regular', lineHeight: 18 },
 });
