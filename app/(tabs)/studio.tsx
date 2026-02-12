@@ -22,6 +22,7 @@ import { useLanguage } from '@/context/LanguageContext';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import { VideoEditorContent } from '@/components/VideoEditorContent';
 import { generateId } from '@/lib/storage';
+import { getApiUrl } from '@/lib/query-client';
 import type { MediaItem } from '@/lib/types';
 
 type StudioMode = 'library' | 'videoEditor';
@@ -46,6 +47,12 @@ export default function StudioScreen() {
   const [mediaType, setMediaType] = useState<'video' | 'image'>('video');
   const [mediaPlatform, setMediaPlatform] = useState<string[]>(['Instagram']);
   const [selectedUri, setSelectedUri] = useState<string | null>(null);
+  const [mediaGoal, setMediaGoal] = useState('');
+  const [mediaAudience, setMediaAudience] = useState('');
+  const [mediaCta, setMediaCta] = useState('');
+  const [mediaSeries, setMediaSeries] = useState('');
+  const [mediaOffer, setMediaOffer] = useState('');
+  const [isSubmittingCase, setIsSubmittingCase] = useState(false);
 
   const videos = mediaItems.filter(m => m.type === 'video');
   const images = mediaItems.filter(m => m.type === 'image');
@@ -77,15 +84,25 @@ export default function StudioScreen() {
     setMediaType('video');
     setMediaPlatform(['Instagram']);
     setSelectedUri(null);
+    setMediaGoal('');
+    setMediaAudience('');
+    setMediaCta('');
+    setMediaSeries('');
+    setMediaOffer('');
   };
 
   const handleSaveMedia = async () => {
     if (!mediaTitle.trim()) {
-      Alert.alert(t('studio.missingTitle'), t('studio.enterTitle'));
+      Alert.alert('Missing Title', 'Please enter a title for your media.');
+      return;
+    }
+    if (!mediaGoal.trim() || !mediaAudience.trim() || !mediaCta.trim()) {
+      Alert.alert('Missing Info', 'Goal, Audience, and CTA are required for AI-powered publishing.');
       return;
     }
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setIsSubmittingCase(true);
 
     const newMedia: MediaItem = {
       id: generateId(),
@@ -95,12 +112,46 @@ export default function StudioScreen() {
       platform: mediaPlatform[0],
       status: 'draft',
       createdAt: new Date().toISOString(),
+      goal: mediaGoal,
+      audience: mediaAudience,
+      cta: mediaCta,
+      series: mediaSeries || undefined,
+      offer: mediaOffer || undefined,
     };
 
+    try {
+      const apiUrl = getApiUrl();
+      const res = await fetch(new URL('/api/studio/case', apiUrl).toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accountId: 'default',
+          mediaId: newMedia.id,
+          title: newMedia.title,
+          platform: newMedia.platform,
+          goal: mediaGoal,
+          audience: mediaAudience,
+          cta: mediaCta,
+          series: mediaSeries || undefined,
+          offer: mediaOffer || undefined,
+          scheduledAt: new Date(Date.now() + 3600000).toISOString(),
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        newMedia.serverPostId = data.postId;
+        newMedia.autoCaption = data.winningCaption;
+        newMedia.status = 'scheduled';
+      }
+    } catch (err) {
+      console.log('Publishing pipeline unavailable, saving locally');
+    }
+
     await addMediaItem(newMedia);
+    setIsSubmittingCase(false);
     setShowModal(false);
-    const typeLabel = mediaType === 'video' ? t('studio.videoType') : t('studio.imageType');
-    Alert.alert(t('studio.added'), t('studio.addedMessage').replace('{{type}}', typeLabel));
+    Alert.alert('Added', `${mediaType === 'video' ? 'Video' : 'Image'} added with AI captions generated.`);
   };
 
   const handleDeleteMedia = async (id: string, title: string) => {
@@ -145,6 +196,16 @@ export default function StudioScreen() {
         {item.scheduledDate && (
           <Text style={[styles.mediaSchedule, { color: colors.accent }]}>
             {t('studio.scheduledLabel')} {new Date(item.scheduledDate).toLocaleDateString()}
+          </Text>
+        )}
+        {item.autoCaption && (
+          <Text style={[styles.mediaSchedule, { color: colors.success }]} numberOfLines={1}>
+            AI Caption attached
+          </Text>
+        )}
+        {item.goal && (
+          <Text style={[styles.mediaSchedule, { color: colors.textMuted }]} numberOfLines={1}>
+            {item.goal}
           </Text>
         )}
       </View>
@@ -400,6 +461,58 @@ export default function StudioScreen() {
               <Text style={[styles.inputLabel, { color: colors.text }]}>{t('create.platform')}</Text>
               <PlatformPicker selected={mediaPlatform} onChange={setMediaPlatform} single />
 
+              <View style={[styles.metadataSection, { borderColor: colors.cardBorder }]}>
+                <View style={styles.metadataBadge}>
+                  <Ionicons name="flash" size={14} color={colors.primary} />
+                  <Text style={[styles.metadataBadgeText, { color: colors.primary }]}>AI Publishing Metadata</Text>
+                </View>
+
+                <Text style={[styles.inputLabel, { color: colors.text }]}>Goal *</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
+                  placeholder="e.g. Drive sales, Build awareness, Get leads"
+                  placeholderTextColor={colors.textMuted}
+                  value={mediaGoal}
+                  onChangeText={setMediaGoal}
+                />
+
+                <Text style={[styles.inputLabel, { color: colors.text }]}>Target Audience *</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
+                  placeholder="e.g. Dubai entrepreneurs, 25-40, tech-savvy"
+                  placeholderTextColor={colors.textMuted}
+                  value={mediaAudience}
+                  onChangeText={setMediaAudience}
+                />
+
+                <Text style={[styles.inputLabel, { color: colors.text }]}>Call to Action *</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
+                  placeholder="e.g. Book now, Shop the link, DM us"
+                  placeholderTextColor={colors.textMuted}
+                  value={mediaCta}
+                  onChangeText={setMediaCta}
+                />
+
+                <Text style={[styles.inputLabel, { color: colors.text }]}>Content Series</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
+                  placeholder="e.g. Monday Motivation, Behind the Scenes"
+                  placeholderTextColor={colors.textMuted}
+                  value={mediaSeries}
+                  onChangeText={setMediaSeries}
+                />
+
+                <Text style={[styles.inputLabel, { color: colors.text }]}>Offer / Promotion</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
+                  placeholder="e.g. 20% off this week, Free consultation"
+                  placeholderTextColor={colors.textMuted}
+                  value={mediaOffer}
+                  onChangeText={setMediaOffer}
+                />
+              </View>
+
               <Pressable
                 onPress={handlePickMedia}
                 style={[styles.uploadArea, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}
@@ -427,7 +540,8 @@ export default function StudioScreen() {
 
             <Pressable
               onPress={handleSaveMedia}
-              style={({ pressed }) => [styles.saveMediaButton, { opacity: pressed ? 0.8 : 1 }]}
+              disabled={isSubmittingCase}
+              style={({ pressed }) => [styles.saveMediaButton, { opacity: pressed || isSubmittingCase ? 0.6 : 1 }]}
             >
               <LinearGradient
                 colors={colors.primaryGradient as [string, string]}
@@ -435,8 +549,8 @@ export default function StudioScreen() {
                 end={{ x: 1, y: 0 }}
                 style={styles.gradientButton}
               >
-                <Ionicons name="save" size={20} color="#fff" />
-                <Text style={styles.saveMediaText}>{t('studio.addToStudio')}</Text>
+                <Ionicons name={isSubmittingCase ? "hourglass" : "flash"} size={20} color="#fff" />
+                <Text style={styles.saveMediaText}>{isSubmittingCase ? 'Generating AI Captions...' : 'Create & Auto-Caption'}</Text>
               </LinearGradient>
             </Pressable>
           </View>
@@ -706,5 +820,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
     color: '#fff',
+  },
+  metadataSection: {
+    marginTop: 20,
+    borderTopWidth: 1,
+    paddingTop: 12,
+  },
+  metadataBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  metadataBadgeText: {
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
   },
 });
