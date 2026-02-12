@@ -1,0 +1,284 @@
+⸻
+
+REPLIT AI — AUTONOMOUS EXECUTION & GUARDRAIL INFRASTRUCTURE DIRECTIVE
+
+Objective
+
+Upgrade the system from AI-Assisted Strategy Engine
+to
+True Autonomous AI Agency Engine with real backend enforcement.
+
+This is NOT a UI update.
+This is a backend infrastructure upgrade.
+
+The system must move from:
+
+Prompt-based decision suggestions
+to
+Code-enforced monitoring + guardrails + autonomous execution.
+
+⸻
+
+PHASE 1 — SHADOW AUTOPILOT (Monitoring Layer First)
+
+1. Background Workers
+
+Implement a scheduled background job system.
+
+Requirements:
+	•	Cron job runs every 6 hours
+	•	Job triggers:
+	•	Load latest performance data
+	•	Compute fresh account averages
+	•	Load memory
+	•	Call GPT-5.2 analysis endpoint
+	•	Store insights and decisions
+
+Mark these decisions as:
+auto_generated = true
+auto_executable = pending
+
+No execution yet.
+
+This phase builds monitoring consistency.
+
+⸻
+
+PHASE 2 — CORE GUARDRAIL ENGINE (Mandatory Before Execution)
+
+Implement hard-coded backend guardrails.
+
+These must NOT rely on AI prompts.
+
+1. Daily Budget Hard Cap
+	•	Each account must have:
+	•	daily_budget_limit
+	•	monthly_budget_limit
+
+If spend >= limit:
+→ Block any scaling decision
+→ Trigger alert
+→ Log “budget_cap_triggered”
+
+This must be enforced at backend level.
+
+⸻
+
+2. CPA Guard
+
+Implement:
+
+If:
+	•	Current CPA > (rolling 7-day CPA × 1.25)
+
+Then:
+	•	Prevent scaling
+	•	Trigger throttle mode
+	•	Flag campaign as unstable
+
+This must run inside monitoring job.
+
+⸻
+
+3. ROAS Protection Floor
+
+If:
+	•	ROAS < predefined floor for 48 hours
+
+Then:
+	•	Disable scaling actions
+	•	Trigger stabilization mode
+	•	Log “roas_protection_triggered”
+
+⸻
+
+4. Volatility Index (Simple First Version)
+
+Create volatility index calculated as:
+
+Standard deviation of:
+	•	CPA
+	•	CTR
+	•	ROAS
+
+Over last 7 days.
+
+If volatility index > threshold:
+→ Set account_state = “unstable”
+→ Block aggressive scaling
+→ Force test-only mode
+
+Store volatility_index in DB.
+
+⸻
+
+5. Creative Fatigue Detection (Algorithmic)
+
+Detect fatigue when:
+	•	CTR declines for 3 consecutive periods
+	•	Frequency increases beyond threshold
+	•	Engagement decay > 20%
+
+If detected:
+→ Auto-generate creative_refresh decision
+→ Mark as low-risk auto-executable
+
+This must not rely on AI prompt judgment.
+
+⸻
+
+PHASE 3 — DECISION RISK CLASSIFICATION
+
+All AI-generated decisions must be categorized automatically:
+
+Low Risk:
+	•	Creative refresh
+	•	Hook regeneration
+	•	Minor budget adjustment (<15%)
+	•	Testing new audience
+
+Medium Risk:
+	•	Budget increase 15–30%
+	•	Duplicate ad sets
+
+High Risk:
+	•	Large budget scaling
+	•	Campaign pause
+	•	Objective change
+
+Store risk_level in strategy_decisions table.
+
+⸻
+
+PHASE 4 — PARTIAL AUTONOMOUS EXECUTION
+
+Implement auto-execution rules:
+
+If:
+	•	Autopilot ON
+	•	Risk level = Low
+	•	No guardrails triggered
+	•	Account_state != unstable
+
+Then:
+→ Auto-execute decision
+→ Log execution
+→ Store execution timestamp
+
+If risk level = Medium:
+→ Auto-execute only if volatility low
+
+If risk level = High:
+→ Require human approval
+
+⸻
+
+PHASE 5 — DECISION FEEDBACK LOOP (REAL ADAPTATION)
+
+Upgrade learning system.
+
+When a decision is marked as executed:
+
+Store:
+	•	Pre-decision metrics
+	•	Post-decision metrics after 48h
+	•	Outcome classification (success/neutral/failure)
+
+Create:
+
+decision_outcomes table
+
+On each analysis run:
+Load last 20 decision outcomes
+Pass them to GPT-5.2
+AND compute:
+
+Success rate per decision type.
+
+Store success_rate per rule type.
+
+Future scaling aggressiveness must depend on:
+	•	Historical success rate
+	•	Volatility state
+
+⸻
+
+PHASE 6 — ADAPTIVE BASELINES
+
+Implement rolling baselines:
+	•	Rolling 7-day CPA
+	•	Rolling 7-day ROAS
+	•	Rolling 7-day CTR
+
+Update daily via scheduled job.
+
+Store baseline_history table.
+
+Detect baseline drift:
+
+If rolling average shifts > 15% for 7 days:
+→ Mark baseline_drift = true
+→ Reduce scaling aggressiveness
+
+⸻
+
+PHASE 7 — REAL AUTOPILOT ENGINE
+
+Replace UI-only autopilot with backend-controlled flag.
+
+Autopilot state must:
+	•	Be stored in DB
+	•	Trigger background execution
+	•	Control auto-execution eligibility
+
+Emergency Stop must:
+	•	Immediately block:
+	•	All scaling
+	•	All budget increases
+	•	All automated changes
+
+Must override background worker.
+
+⸻
+
+PHASE 8 — SAFETY PRIORITIES
+
+Autonomous system must follow priority order:
+	1.	Budget safety
+	2.	CPA stability
+	3.	ROAS protection
+	4.	Volatility control
+	5.	Scaling optimization
+	6.	Growth acceleration
+
+Safety always overrides growth.
+
+⸻
+
+PHASE 9 — SYSTEM LOGGING
+
+Log everything:
+	•	Guardrail triggers
+	•	Volatility state changes
+	•	Auto-executed decisions
+	•	Blocked decisions
+	•	Drift detection events
+
+Create audit_log table.
+
+⸻
+
+FINAL ACCEPTANCE CONDITIONS
+
+System is considered fully autonomous only if:
+	•	Background job runs automatically
+	•	Guardrails are enforced via code
+	•	Low-risk decisions auto-execute
+	•	Scaling blocked when volatility high
+	•	Budget caps impossible to exceed
+	•	Emergency stop halts all execution
+	•	Decision outcomes influence future behavior
+
+No prompt-only enforcement allowed.
+
+End of directive.

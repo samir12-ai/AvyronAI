@@ -1,0 +1,217 @@
+REPLIT AI — BACKEND AUTONOMOUS EXECUTION UPGRADE (STRICT: NO UI CHANGES)
+
+CRITICAL INSTRUCTION
+
+This upgrade is strictly backend infrastructure only.
+
+DO NOT:
+	•	Modify Dashboard layout
+	•	Modify AI Control Center UI
+	•	Modify Calendar UI
+	•	Modify any React components
+	•	Modify AppContext
+	•	Modify styling
+	•	Modify tab structure
+	•	Modify visual design
+	•	Modify icons or labels
+
+Frontend must remain EXACTLY as it is.
+
+All changes must be:
+	•	Backend only
+	•	Server-side only
+	•	Database layer only
+	•	Background worker layer only
+
+The UI must continue functioning exactly the same visually.
+
+⸻
+
+OBJECTIVE
+
+Convert system from AI-assisted (manual execution)
+to
+True backend-enforced autonomous execution engine.
+
+WITHOUT altering UI presentation.
+
+⸻
+
+PHASE 1 — BACKGROUND MONITORING WORKER
+
+Implement scheduled backend job:
+	•	Runs every 6 hours
+	•	Loads performance data
+	•	Computes rolling averages
+	•	Computes volatility index
+	•	Calls GPT-5.2 analysis
+	•	Stores insights + decisions
+
+Do NOT change how Dashboard displays data.
+This runs silently in backend.
+
+⸻
+
+PHASE 2 — HARD GUARDRAILS (CODE ENFORCED)
+
+Implement backend-level enforcement:
+
+1. Daily Budget Cap
+
+If spend >= daily_limit:
+→ Block scaling decisions
+→ Log guardrail trigger
+
+Must not rely on AI prompt.
+Must not change UI.
+
+⸻
+
+2. CPA Guard
+
+If CPA > 1.25 × rolling_7_day_CPA:
+→ Block scaling
+→ Mark account unstable
+
+⸻
+
+3. ROAS Floor
+
+If ROAS < threshold for 48h:
+→ Block scaling
+→ Trigger stabilization state
+
+⸻
+
+4. Volatility Index
+
+Calculate standard deviation of:
+	•	CPA
+	•	CTR
+	•	ROAS (last 7 days)
+
+If volatility high:
+→ Restrict scaling
+→ Allow testing only
+
+Store volatility index in DB.
+Do not display unless already wired in UI.
+
+⸻
+
+5. Creative Fatigue Detection (Algorithmic)
+
+If:
+	•	CTR declining 3 periods
+	•	Frequency rising
+	•	Engagement drop > 20%
+
+→ Auto-create creative_refresh decision
+→ Mark as low-risk auto-executable
+
+Backend only.
+
+⸻
+
+PHASE 3 — RISK CLASSIFICATION ENGINE
+
+Automatically classify AI decisions:
+
+Low Risk
+Medium Risk
+High Risk
+
+Store risk_level in DB.
+No UI change required.
+
+⸻
+
+PHASE 4 — PARTIAL AUTO EXECUTION (NO UI CHANGE)
+
+If:
+	•	Autopilot flag (stored in DB) = true
+	•	Risk = Low
+	•	No guardrails triggered
+
+→ Auto-execute decision
+→ Log execution
+
+UI should reflect updated data automatically via existing endpoints.
+Do NOT change UI components.
+
+⸻
+
+PHASE 5 — DECISION FEEDBACK LOOP
+
+Create decision_outcomes table.
+
+After 48h of execution:
+	•	Compare before vs after metrics
+	•	Classify outcome
+	•	Store result
+
+On next analysis:
+Load decision outcomes
+Use them in strategy logic.
+
+Backend only.
+
+⸻
+
+PHASE 6 — ADAPTIVE BASELINES
+
+Create rolling 7-day baseline calculations:
+	•	CPA
+	•	ROAS
+	•	CTR
+
+Store in DB.
+
+Detect drift > 15% sustained.
+Adjust scaling aggressiveness internally.
+
+No UI modifications.
+
+⸻
+
+PHASE 7 — REAL AUTOPILOT FLAG
+
+Move autopilot state from frontend local state
+to persistent backend DB field.
+
+Frontend continues reading same status.
+No visual change.
+
+Emergency Stop must:
+	•	Override backend execution logic
+	•	Immediately stop auto-execution
+
+UI button remains unchanged.
+
+⸻
+
+LOGGING REQUIREMENT
+
+Create audit_log table storing:
+	•	Guardrail triggers
+	•	Volatility events
+	•	Auto-executions
+	•	Blocked actions
+	•	Drift detection
+
+No UI changes.
+
+⸻
+
+FINAL REQUIREMENT
+
+After implementation:
+	•	Dashboard must look identical.
+	•	AI Control Center must look identical.
+	•	Calendar must look identical.
+	•	Advanced toggle must behave exactly the same.
+	•	No visual regressions allowed.
+
+All autonomy improvements must operate invisibly under the hood.
+
+End of backend-only directive.

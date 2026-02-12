@@ -1,0 +1,167 @@
+We are implementing a real autonomous backend engine behind the existing UI.
+No visual changes. Backend-only work.
+
+1. Data Tracking Infrastructure
+
+Add new tables for:
+
+guardrail configuration
+
+baseline history (rolling averages)
+
+decision outcomes
+
+audit logs
+
+account state (autopilot + safe mode)
+
+Add required columns to decisions table:
+
+risk_level
+
+auto_executable
+
+pre_metrics
+
+post_metrics
+
+execution_status
+
+2. Performance Monitoring & Baselines
+
+Calculate rolling 7-day averages for CPA, ROAS, CTR.
+
+Store and update baseline history automatically.
+
+Detect sustained drift (>15% deviation for 3 cycles).
+
+Compute volatility index (stddev / mean).
+
+3. Guardrail Enforcement
+
+Enforce daily budget cap (hard block before execution).
+
+Enforce CPA threshold (block scaling if exceeded).
+
+Enforce ROAS floor (block scaling if below threshold).
+
+Limit budget increases per cycle (e.g., max 15%).
+
+Guardrails must override AI decisions when necessary.
+
+4. Risk Classification (Hybrid)
+
+AI suggests risk level for decisions.
+
+Backend validates and overrides based on guardrails.
+
+Execution tiers:
+
+LOW → auto-execute
+
+MEDIUM → require approval
+
+HIGH → block and log
+
+5. Safe Mode System
+
+Automatically activate SAFE_MODE if:
+
+High volatility
+
+Sustained baseline drift
+
+3+ guardrail triggers in 24h
+
+2 consecutive failed auto-executed decisions
+
+SAFE_MODE must:
+
+Disable scaling
+
+Disable new campaign launches
+
+Allow optimization only
+
+6. Autopilot Control
+
+Move autopilot state to database (account_state table).
+
+Implement backend-controlled ON/OFF.
+
+Emergency stop must immediately halt all automated execution.
+
+7. Automated Worker
+
+Implement production-safe job scheduler (not simple setInterval).
+
+Per-account locking.
+
+Idempotent execution.
+
+Run every defined cycle (e.g., 6 hours).
+
+Process accounts independently.
+
+8. Decision Outcome Learning
+
+Snapshot metrics before auto-execution.
+
+Snapshot metrics after evaluation window (e.g., 48h).
+
+Classify outcome (success / partial / fail).
+
+Track rolling success rate per decision type.
+
+Feed success ratios into next AI analysis run.
+
+9. System Logging & Transparency
+
+Log all:
+
+Guardrail triggers
+
+Drift events
+
+Safe mode activations
+
+Auto-executions
+
+Blocked decisions
+
+Autopilot state changes
+Each log must include account_id and timestamp.
+
+10. Integration, Testing & Documentation
+
+Test overspend prevention.
+
+Test CPA spike scenario.
+
+Test ROAS drop scenario.
+
+Test volatility block.
+
+Test safe mode activation.
+
+Test restart safety (no duplicate execution).
+
+Document system flow and guardrail logic.
+
+Final Objective
+
+Deliver a real autonomous execution engine:
+
+Guardrail-enforced
+
+Risk-aware
+
+Drift-detecting
+
+Multi-account safe
+
+Production-ready
+
+Running silently behind the current UI
+
+No cosmetic updates. Backend reliability and safety first.

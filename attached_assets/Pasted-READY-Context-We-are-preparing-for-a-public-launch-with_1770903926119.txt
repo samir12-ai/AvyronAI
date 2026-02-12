@@ -1,0 +1,228 @@
+READY)
+Context
+
+We are preparing for a public launch with unlimited accounts.
+The autonomous layer must be production-safe, multi-account aware, and resilient to restarts, scaling, and edge cases.
+
+The UI remains unchanged.
+All changes stay inside server/ and schema.
+
+1) Replace setInterval with a Production-Ready Job System
+
+Current plan uses setInterval every 6 hours.
+This is acceptable for development but not safe for public multi-account deployment.
+
+Upgrade requirement:
+
+Implement a job scheduler or queue-based worker system.
+
+Ensure jobs are idempotent (no duplicate execution).
+
+Ensure only one worker processes a given account at a time.
+
+Prevent double execution if server restarts.
+
+Log job start + completion in audit_log.
+
+This must support:
+
+Horizontal scaling
+
+Server restarts
+
+Future load growth
+
+2) Add Explicit Execution Classification Layer
+
+Do NOT rely solely on AI-generated risk_level.
+
+Implement a hybrid system:
+
+AI suggests risk_level → Guardrail engine validates or overrides.
+
+Decision execution rules must be:
+
+LOW risk:
+
+Auto-execute if guardrails pass.
+
+MEDIUM risk:
+
+Require manual approval.
+
+HIGH risk:
+
+Block and log.
+
+Generate alert entry in audit_log.
+
+Risk must be partially code-determined using:
+
+% budget change
+
+% CPA deviation
+
+Volatility level
+
+Drift state
+
+3) Add Safe Mode Fallback (Critical for Public Launch)
+
+If any of the following occurs:
+
+Volatility above threshold
+
+Sustained baseline drift (>15% for 3 intervals)
+
+3+ guardrail triggers in 24h
+
+2+ failed auto-executed decisions consecutively
+
+Then:
+
+Switch account_state to SAFE_MODE automatically.
+
+SAFE_MODE behavior:
+
+Disable scaling
+
+Disable new campaign launches
+
+Allow optimization only
+
+Notify via audit_log
+
+Autopilot remains ON but restricted.
+
+This prevents runaway spend and protects small accounts.
+
+4) Improve Volatility Index (Simple but Effective)
+
+Implement:
+
+Volatility Index =
+stddev(CPA last 7 days) / avg(CPA last 7 days)
+
+If above threshold:
+
+Block scaling
+
+Reduce decision aggressiveness
+
+Keep logic simple and explainable.
+
+5) Improve Fatigue Detection (Algorithmic, Not AI-Based)
+
+Fatigue triggered when:
+
+CTR drops >20% compared to 5-day rolling average
+AND
+
+Frequency > 2.5
+AND
+
+Impressions increasing
+
+When fatigue detected:
+
+Auto-classify creative refresh decisions as LOW risk.
+
+6) Add Sustained Drift Logic (Avoid Overreaction)
+
+Baseline drift should only trigger if:
+
+Metric deviates >15%
+AND
+Deviation sustained across 3 consecutive worker cycles.
+
+Do NOT react to single spikes.
+
+7) Strengthen Guardrail Enforcement
+
+Ensure hard enforcement (not tracking only):
+
+Daily spend cap cannot be exceeded.
+
+ROAS floor blocks scaling.
+
+CPA guard throttles budget increase.
+
+Budget reallocation cannot exceed configured % per cycle.
+
+Guardrails must block execution before it reaches external APIs.
+
+8) Add Decision Outcome Feedback Weighting
+
+After 48-hour outcome evaluation:
+
+Track success rate per decision type.
+
+Calculate rolling success ratio.
+
+Pass these ratios into the AI analysis prompt on next run.
+
+Reduce aggressiveness automatically if success rate drops.
+
+This adds real adaptive behavior without heavy ML.
+
+9) Add Multi-Account Isolation
+
+Ensure:
+
+Worker processes accounts independently.
+
+Failure in one account does not affect others.
+
+Each account has independent baseline_history, guardrail_config, volatility state.
+
+Log account_id on all audit events.
+
+10) Add Audit & Transparency Requirements
+
+Every autonomous action must log:
+
+Timestamp
+
+Account ID
+
+Decision ID
+
+Guardrail result
+
+Risk classification
+
+Execution status
+
+Pre-metrics snapshot
+
+Post-metrics snapshot (when available)
+
+This is essential for public trust and debugging.
+
+11) Final Safety Rule for Public Release
+
+Autopilot default configuration must be conservative:
+
+Low scaling increments (10–15%)
+
+Strict CPA guard
+
+Strict ROAS floor
+
+Strict volatility blocking
+
+Aggressive behavior may be unlocked in future “Advanced Autopilot” tier.
+
+End Goal
+
+We are building:
+
+A real autonomous engine
+with enforced guardrails
+safe for unlimited public accounts
+running silently behind the existing UI
+without visual changes.
+
+This must behave like a disciplined, risk-aware media buyer — not an experimental AI.
+
+End of instructions.
