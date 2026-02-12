@@ -88,6 +88,26 @@ Preferred communication style: Simple, everyday language.
    - **Backend**: `server/photography-routes.ts` - CRUD for profiles, portfolio posts, interactions (like/unlike toggle), reservations with status management
 7. **Settings** (`settings.tsx`): Brand profile and platform connections
 
+### Autonomous Backend Architecture (Production-Safe)
+The autonomous engine runs silently behind the UI with zero visual changes, executing marketing decisions with code-enforced guardrails.
+
+**Core Modules:**
+- **Guardrail Engine** (`server/guardrails.ts`): Code-enforced hard rules run before AI analysis — daily budget cap ($100), CPA guard (>1.25x rolling 7d blocks scaling), ROAS floor (<1.5 for 48h blocks), volatility index (coefficient of variation), creative fatigue detection (CTR drop >20% + frequency >2.5 + impressions rising auto-creates refresh decision)
+- **Adaptive Baselines** (`server/baselines.ts`): Rolling 7-day CPA/ROAS/CTR averages stored per cycle, sustained drift detection flags only if >15% deviation persists across 3 consecutive worker cycles
+- **Hybrid Risk Classifier** (`server/risk-classifier.ts`): AI suggests risk level, code validates/overrides — budget >30%=HIGH, 15-30%=MEDIUM, <15%=LOW; guardrail trigger forces min MEDIUM; UNSTABLE/SAFE_MODE floors at MEDIUM; high volatility bumps risk up one level
+- **Decision Feedback Loop** (`server/outcome-tracker.ts`): Pre-metrics snapshot at execution, 48h post-metrics evaluation (success/neutral/failure), rolling success_rate per decision type (last 20), blocks auto-execution if success_rate <40% for a type, feeds outcome history into AI prompts
+- **Audit System** (`server/audit.ts`): 15+ event types (GUARDRAIL_TRIGGER, AUTO_EXECUTION, BLOCKED_DECISION, DRIFT_DETECTED/CLEARED, SAFE_MODE_ACTIVATED/CLEARED, AUTOPILOT_TOGGLED, EMERGENCY_STOP, JOB_STARTED/COMPLETED/FAILED, VOLATILITY_CHANGE, OUTCOME_EVALUATED, FATIGUE_DETECTED)
+- **Autonomous Worker** (`server/autonomous-worker.ts`): DB-backed scheduler checks every 5 min for accounts due (>6h since last run), per-account locking with 30-min stale timeout, idempotent cycles: baselines → volatility → guardrails → drift check → SAFE_MODE check → AI analysis (GPT-5.2 with memory + outcomes) → hybrid risk classify → auto-execute LOW if autopilot ON + ACTIVE + guardrails clear
+- **Autopilot API** (`server/autopilot-routes.ts`): GET/PATCH `/api/autopilot/status`, POST `/api/autopilot/emergency-stop`, GET `/api/audit-log`, GET `/api/autopilot/guardrails`
+
+**Execution Tiers:** LOW auto-executes if eligible, MEDIUM requires approval, HIGH blocked + alert logged
+
+**SAFE_MODE Auto-Triggers:** Volatility >0.35, sustained drift (3 cycles), 3+ guardrail triggers in 24h, 2 consecutive failed auto-decisions
+
+**Database Tables (6 new):** guardrail_config, baseline_history, decision_outcomes, audit_log, account_state, job_queue — all keyed by account_id for multi-account isolation
+
+**Conservative Defaults:** Daily budget $100, monthly $2000, CPA multiplier 1.25, ROAS floor 1.5, volatility threshold 0.35, max scaling 15%
+
 ## External Dependencies
 
 ### AI Services
