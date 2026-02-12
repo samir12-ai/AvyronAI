@@ -9,6 +9,8 @@ import { registerPhotographyRoutes } from "./photography-routes";
 import { registerVideoRoutes } from "./video-routes";
 import { registerStrategyRoutes } from "./strategy-routes";
 import { registerAutopilotRoutes } from "./autopilot-routes";
+import { registerBrandConfigRoutes } from "./brand-config-routes";
+import { registerPublishPipelineRoutes } from "./publish-pipeline";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -1004,6 +1006,8 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerVideoRoutes(app);
   registerStrategyRoutes(app);
   registerAutopilotRoutes(app);
+  registerBrandConfigRoutes(app);
+  registerPublishPipelineRoutes(app);
 
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });

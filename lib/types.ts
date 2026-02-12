@@ -93,6 +93,13 @@ export interface MediaItem {
   scheduledTime?: string;
   status: 'draft' | 'scheduled' | 'published';
   createdAt: string;
+  goal?: string;
+  audience?: string;
+  cta?: string;
+  series?: string;
+  offer?: string;
+  serverPostId?: string;
+  autoCaption?: string;
 }
 
 export interface ScheduledPost {

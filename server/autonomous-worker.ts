@@ -6,6 +6,7 @@ import {
   strategyMemory,
   performanceSnapshots,
   guardrailConfig,
+  publishedPosts,
 } from "@shared/schema";
 import { eq, sql, desc, gte, lte } from "drizzle-orm";
 import { logAudit } from "./audit";
@@ -96,7 +97,7 @@ async function runStrategyAnalysis(
 }>> {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-  const [recentPerformance, memoryItems] = await Promise.all([
+  const [recentPerformance, memoryItems, recentPublished] = await Promise.all([
     db.select()
       .from(performanceSnapshots)
       .where(gte(performanceSnapshots.fetchedAt, sevenDaysAgo))
@@ -106,11 +107,24 @@ async function runStrategyAnalysis(
       .from(strategyMemory)
       .orderBy(desc(strategyMemory.updatedAt))
       .limit(20),
+    db.select()
+      .from(publishedPosts)
+      .where(
+        sql`${publishedPosts.accountId} = ${accountId} AND ${publishedPosts.status} = 'published' AND ${publishedPosts.publishedAt} >= ${sevenDaysAgo}`
+      )
+      .orderBy(desc(publishedPosts.publishedAt))
+      .limit(20),
   ]);
 
   const perfSummary = recentPerformance.length > 0
     ? `Recent performance (${recentPerformance.length} data points, 7d): Avg CPA $${baselines.rollingCpa.toFixed(2)}, Avg ROAS ${baselines.rollingRoas.toFixed(2)}, Avg CTR ${(baselines.rollingCtr * 100).toFixed(1)}%, Total Spend $${baselines.rollingSpend.toFixed(2)}`
     : "No recent performance data available.";
+
+  const publishedPostsSummary = recentPublished.length > 0
+    ? `Published Posts (${recentPublished.length} in 7d):\n${recentPublished.map(p => 
+        `- ${p.platform} | Impressions: ${p.impressions || 0} | Reach: ${p.reach || 0} | Engagement: ${p.engagement || 0} | Clicks: ${p.clicks || 0} | Goal: ${p.goal || 'N/A'}`
+      ).join("\n")}`
+    : "No published posts in the last 7 days.";
 
   const memorySummary = memoryItems.length > 0
     ? memoryItems.map(m => `${m.memoryType}: ${m.label} (${m.isWinner ? 'WINNER' : 'LOSER'}, score: ${m.score})`).join("\n")
@@ -137,6 +151,9 @@ RULES:
 
 CONTEXT:
 ${perfSummary}
+
+PUBLISHED CONTENT PERFORMANCE:
+${publishedPostsSummary}
 
 STRATEGY MEMORY:
 ${memorySummary}

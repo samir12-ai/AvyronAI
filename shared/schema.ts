@@ -414,6 +414,67 @@ export type PortfolioPost = typeof portfolioPosts.$inferSelect;
 export type InsertPortfolioPost = z.infer<typeof insertPortfolioPostSchema>;
 export type Reservation = typeof reservations.$inferSelect;
 export type InsertReservation = z.infer<typeof insertReservationSchema>;
+export const brandConfig = pgTable("brand_config", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  brandName: text("brand_name").default(""),
+  tone: text("tone").default("professional"),
+  forbiddenClaims: text("forbidden_claims").default(""),
+  ctaStyle: text("cta_style").default("direct"),
+  hashtagPolicy: text("hashtag_policy").default("branded"),
+  maxHashtags: integer("max_hashtags").default(5),
+  preferredEmojis: text("preferred_emojis").default(""),
+  languageStyle: text("language_style").default("formal"),
+  targetIndustry: text("target_industry").default(""),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const publishedPosts = pgTable("published_posts", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  mediaItemId: varchar("media_item_id"),
+  mediaType: text("media_type").default("image"),
+  mediaUri: text("media_uri"),
+  caption: text("caption").notNull(),
+  platform: text("platform").notNull(),
+  metaPostId: text("meta_post_id"),
+  scheduledDate: timestamp("scheduled_date"),
+  publishedAt: timestamp("published_at"),
+  status: text("status").default("scheduled"),
+  goal: text("goal"),
+  audience: text("audience"),
+  cta: text("cta"),
+  series: text("series"),
+  offer: text("offer"),
+  impressions: integer("impressions").default(0),
+  reach: integer("reach").default(0),
+  engagement: integer("engagement").default(0),
+  clicks: integer("clicks").default(0),
+  lastMetricsFetch: timestamp("last_metrics_fetch"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const captionVariants = pgTable("caption_variants", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  publishedPostId: varchar("published_post_id").notNull(),
+  captionText: text("caption_text").notNull(),
+  toneScore: doublePrecision("tone_score").default(0),
+  ctaScore: doublePrecision("cta_score").default(0),
+  structureScore: doublePrecision("structure_score").default(0),
+  lengthScore: doublePrecision("length_score").default(0),
+  totalScore: doublePrecision("total_score").default(0),
+  selected: boolean("selected").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export type VideoProject = typeof videoProjects.$inferSelect;
 export type PerformanceSnapshot = typeof performanceSnapshots.$inferSelect;
 export type StrategyInsight = typeof strategyInsights.$inferSelect;
@@ -421,3 +482,6 @@ export type StrategyDecision = typeof strategyDecisions.$inferSelect;
 export type StrategyMemory = typeof strategyMemory.$inferSelect;
 export type GrowthCampaign = typeof growthCampaigns.$inferSelect;
 export type WeeklyReport = typeof weeklyReports.$inferSelect;
+export type BrandConfig = typeof brandConfig.$inferSelect;
+export type PublishedPost = typeof publishedPosts.$inferSelect;
+export type CaptionVariant = typeof captionVariants.$inferSelect;
