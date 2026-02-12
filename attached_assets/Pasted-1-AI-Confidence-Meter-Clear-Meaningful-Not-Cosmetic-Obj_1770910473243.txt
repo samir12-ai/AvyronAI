@@ -1,0 +1,125 @@
+1️⃣ AI Confidence Meter — Clear, Meaningful, Not Cosmetic
+Objective
+
+Create a real AI Confidence score based on system stability and performance reliability.
+It must reflect real backend conditions — not AI opinion.
+
+AI Confidence Formula (Backend-Driven Only)
+
+AI Confidence Score (0–100) is calculated from:
+
+Volatility Level (30%)
+
+Decision Success Rate (30%)
+
+Drift Stability (20%)
+
+Guardrail Trigger Frequency (20%)
+
+Calculation Rules
+
+Start from 100.
+
+Subtract:
+
+High volatility → -20
+
+Medium volatility → -10
+
+Each guardrail trigger in last 24h → -5 (max -20)
+
+If in SAFE_MODE → cap confidence at 40
+
+If decision success rate < 50% → -20
+
+If sustained drift detected → -15
+
+Minimum floor: 10
+Maximum: 100
+
+Behavior Rules
+
+Confidence ≥ 80 → Normal scaling allowed
+
+Confidence 60–79 → Reduce scaling aggressiveness
+
+Confidence 40–59 → Restrict scaling
+
+Confidence < 40 → SAFE_MODE auto-trigger
+
+Confidence must update every worker cycle.
+
+UI Behavior
+
+Display only:
+
+AI Confidence: 82%
+Status: Stable / Caution / Unstable
+
+No extra charts.
+No explanation spam.
+Just the score + state.
+
+2️⃣ Safe Mode Recovery Protocol — Strict & Automatic
+Objective
+
+Define exactly how an account exits SAFE_MODE.
+
+No manual guessing.
+No AI interpretation.
+
+SAFE_MODE Exit Conditions
+
+Account may exit SAFE_MODE only if:
+
+Volatility below threshold for 2 consecutive cycles
+
+No guardrail triggers in last 24h
+
+No sustained drift detected
+
+Last 2 auto-evaluated decisions are not failures
+
+All 4 must be true.
+
+Recovery Flow
+
+When conditions met:
+
+Switch account_state from SAFE_MODE → RECOVERY_MODE
+
+In RECOVERY_MODE:
+
+Scaling capped at 10%
+
+No new campaigns
+
+Optimization only
+
+If stable for 2 additional cycles:
+
+Restore FULL_AUTOPILOT
+
+If instability returns during recovery:
+→ Immediately revert to SAFE_MODE.
+
+Non-Negotiables
+
+No instant full recovery.
+
+No AI override.
+
+No manual bypass without explicit admin action.
+
+All transitions logged in audit_log.
+
+Final Result
+
+This gives you:
+
+✔ Real measurable AI Confidence
+✔ Clear scaling behavior tied to system health
+✔ Strict Safe Mode
+✔ Controlled recovery
+✔ No cosmetic features
+✔ No fake AI magic
