@@ -37,7 +37,13 @@ Preferred communication style: Simple, everyday language.
 - **Platform Abstraction**: Components adapt to iOS, Android, and Web platforms
 
 ### Tab-Based Navigation Structure
-1. **Dashboard** (`index.tsx`): Analytics overview with metrics, charts, quick actions, and AI Management Hub summary card showing Auto-Publisher stats (published/queued/content counts) and Meta connection status with direct link to AI Management tab
+1. **Dashboard** (`index.tsx`): CEO-friendly revenue-first layout with "AI Agency Replacement" branding:
+   - **Autopilot Status Bar**: Green shield badge with "Autopilot Active" / "ACTIVE" indicator
+   - **Main Revenue KPI**: Large estimated revenue card as primary metric
+   - **3 Small KPIs**: Spend, ROAS, Results in compact row
+   - **AI Actions (Last 48h)**: Shows recent AI decisions/optimizations from strategy engine
+   - **Today's Focus**: AI-generated daily priority card
+   - **Collapsible Advanced Insights**: Weekly performance chart and detailed analytics hidden by default
 2. **Create** (`create.tsx`): AI-powered content generation with two modes:
    - **AI Writer**: GPT-5.2 powered text content generation (posts, captions, ad copy, stories)
    - **AI Designer**: Artlist-level image generation studio powered by Nano Banana Pro (Gemini 3 Pro Image) with:
@@ -50,6 +56,7 @@ Preferred communication style: Simple, everyday language.
      - Generation history gallery (session-based)
      - Premium animated loading overlay
 3. **Calendar** (`calendar.tsx`): Content scheduling and calendar view with AI Calendar Assistant
+   - **AI Content Plan Banner**: Green shield "AI Content Plan Active" status bar with link to AI planner
 4. **AI Management** (`ai-management.tsx`): AI-powered automation hub with three tabs:
    - **Auto-Publisher**: Batch publish scheduled posts to Meta platforms, auto-publish toggle, publish queue with multi-select, connection status with pulsing indicator, demo mode when Meta not connected
    - **AI Audience Manager**: Generate 3 optimized Meta ad audiences from campaign goals using GPT-5.2, with detailed targeting breakdown (demographics, interests, behaviors, placements, bid strategy, match scores), expandable audience cards, and campaign-based quick optimization
