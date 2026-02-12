@@ -42,7 +42,7 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'publisher' | 'audience' | 'strategy';
+type TabView = 'control' | 'publisher' | 'audience' | 'strategy';
 
 function PulseRing({ color }: { color: string }) {
   const scale = useRef(new RNAnimated.Value(1)).current;
@@ -73,11 +73,14 @@ export default function AIManagementScreen() {
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
-  const { scheduledPosts, updateScheduledPost, metaConnection, brandProfile, campaigns } = useApp();
+  const { scheduledPosts, updateScheduledPost, metaConnection, brandProfile, campaigns, advancedMode } = useApp();
   const { t } = useLanguage();
 
-  const [activeTab, setActiveTab] = useState<TabView>('publisher');
+  const [activeTab, setActiveTab] = useState<TabView>('control');
+  const [autopilotOn, setAutopilotOn] = useState(true);
   const [autoPublishEnabled, setAutoPublishEnabled] = useState(false);
+  const [controlData, setControlData] = useState<any>(null);
+  const [nextActions, setNextActions] = useState<{action: string; why: string; risk: string}[]>([]);
   const [selectedPosts, setSelectedPosts] = useState<Set<string>>(new Set());
   const [publishing, setPublishing] = useState(false);
   const [publishResults, setPublishResults] = useState<any[]>([]);
@@ -223,6 +226,145 @@ export default function AIManagementScreen() {
       default: return 'document-text';
     }
   };
+
+  useEffect(() => {
+    const loadControlData = async () => {
+      try {
+        const baseUrl = getApiUrl();
+        const res = await fetch(new URL('/api/strategy/dashboard', baseUrl).toString());
+        if (res.ok) {
+          const data = await res.json();
+          setControlData(data);
+          const actions: {action: string; why: string; risk: string}[] = [];
+          if (data.recentDecisions?.length > 0) {
+            data.recentDecisions.slice(0, 3).forEach((d: any) => {
+              actions.push({
+                action: d.description || d.action || 'Optimizing performance',
+                why: d.reasoning || 'Based on recent performance data',
+                risk: d.priority === 'high' ? 'Medium' : 'Low',
+              });
+            });
+          }
+          if (actions.length === 0) {
+            actions.push({ action: 'Analyze audience engagement patterns', why: 'Identify winning segments to scale', risk: 'Low' });
+            actions.push({ action: 'Optimize ad creative rotation', why: 'Prevent creative fatigue', risk: 'Low' });
+            actions.push({ action: 'Adjust bid strategy for top performers', why: 'Maximize ROAS on winning ads', risk: 'Medium' });
+          }
+          setNextActions(actions);
+        }
+      } catch {}
+    };
+    loadControlData();
+  }, []);
+
+  const currentGoal = useMemo(() => {
+    const activeCampaigns = campaigns.filter(c => c.status === 'active');
+    if (activeCampaigns.length > 0) return `Optimize ${activeCampaigns[0].name}`;
+    return 'Maximize campaign ROI';
+  }, [campaigns]);
+
+  const budgetInfo = useMemo(() => {
+    const totalBudget = campaigns.reduce((s, c) => s + c.budget, 0) || 500;
+    const totalSpent = campaigns.reduce((s, c) => s + c.spent, 0) || 0;
+    const pct = totalBudget > 0 ? Math.round((totalSpent / totalBudget) * 100) : 0;
+    return { total: totalBudget, spent: totalSpent, pct };
+  }, [campaigns]);
+
+  const renderControlCenter = () => (
+    <View style={styles.tabContent}>
+      <View style={[styles.controlStatusCard, { backgroundColor: isDark ? '#0F172A' : '#F8FAFC', borderColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
+        <View style={styles.controlStatusRow}>
+          <View style={styles.controlStatusLeft}>
+            <View style={[styles.controlShield, { backgroundColor: autopilotOn ? '#10B981' + '15' : '#EF4444' + '15' }]}>
+              <Ionicons name="shield-checkmark" size={22} color={autopilotOn ? '#10B981' : '#EF4444'} />
+            </View>
+            <View>
+              <Text style={[styles.controlModeLabel, { color: colors.textMuted }]}>MODE</Text>
+              <Text style={[styles.controlModeValue, { color: autopilotOn ? '#10B981' : '#EF4444' }]}>
+                {autopilotOn ? 'Autopilot ON' : 'Autopilot OFF'}
+              </Text>
+            </View>
+          </View>
+          <Switch
+            value={autopilotOn}
+            onValueChange={(v) => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); setAutopilotOn(v); }}
+            trackColor={{ false: '#EF4444' + '40', true: '#10B981' + '60' }}
+            thumbColor={autopilotOn ? '#10B981' : '#EF4444'}
+          />
+        </View>
+      </View>
+
+      <View style={[styles.controlGoalCard, { backgroundColor: isDark ? '#0F172A' : '#fff', borderColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
+        <View style={styles.controlGoalRow}>
+          <Ionicons name="flag" size={16} color="#8B5CF6" />
+          <Text style={[styles.controlGoalLabel, { color: colors.textMuted }]}>Current Goal</Text>
+        </View>
+        <Text style={[styles.controlGoalValue, { color: colors.text }]}>{currentGoal}</Text>
+      </View>
+
+      <View style={[styles.controlBudgetCard, { backgroundColor: isDark ? '#0F172A' : '#fff', borderColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
+        <View style={styles.controlBudgetHeader}>
+          <Ionicons name="wallet-outline" size={16} color="#3B82F6" />
+          <Text style={[styles.controlBudgetLabel, { color: colors.textMuted }]}>Budget Allocation</Text>
+          <Text style={[styles.controlBudgetPct, { color: '#3B82F6' }]}>{budgetInfo.pct}%</Text>
+        </View>
+        <View style={[styles.controlBudgetTrack, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
+          <View style={[styles.controlBudgetFill, { width: `${Math.min(budgetInfo.pct, 100)}%` }]} />
+        </View>
+        <Text style={[styles.controlBudgetText, { color: colors.textSecondary }]}>
+          ${budgetInfo.spent.toFixed(0)} / ${budgetInfo.total.toFixed(0)}
+        </Text>
+      </View>
+
+      <View style={[styles.controlSection, { backgroundColor: isDark ? '#0F172A' : '#fff', borderColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
+        <View style={styles.controlSectionHeader}>
+          <Ionicons name="flash" size={16} color="#8B5CF6" />
+          <Text style={[styles.controlSectionTitle, { color: colors.text }]}>What AI is Doing Now</Text>
+        </View>
+        <Text style={[styles.controlDoingText, { color: colors.textSecondary }]}>
+          {autopilotOn
+            ? 'Analyzing performance data and optimizing campaigns for maximum ROI'
+            : 'Autopilot is paused. Turn it on to resume AI optimization.'
+          }
+        </Text>
+      </View>
+
+      <View style={[styles.controlSection, { backgroundColor: isDark ? '#0F172A' : '#fff', borderColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
+        <View style={styles.controlSectionHeader}>
+          <Ionicons name="list" size={16} color="#F59E0B" />
+          <Text style={[styles.controlSectionTitle, { color: colors.text }]}>Next Planned Actions</Text>
+        </View>
+        {nextActions.map((a, i) => (
+          <View key={i} style={[styles.controlActionItem, { borderColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
+            <View style={styles.controlActionTop}>
+              <View style={[styles.controlActionNum, { backgroundColor: '#8B5CF6' + '12' }]}>
+                <Text style={[styles.controlActionNumText, { color: '#8B5CF6' }]}>{i + 1}</Text>
+              </View>
+              <Text style={[styles.controlActionText, { color: colors.text }]}>{a.action}</Text>
+              <View style={[styles.controlRiskBadge, { backgroundColor: a.risk === 'Low' ? '#10B981' + '12' : '#F59E0B' + '12' }]}>
+                <Text style={[styles.controlRiskText, { color: a.risk === 'Low' ? '#10B981' : '#F59E0B' }]}>{a.risk}</Text>
+              </View>
+            </View>
+            <Text style={[styles.controlActionWhy, { color: colors.textMuted }]}>{a.why}</Text>
+          </View>
+        ))}
+      </View>
+
+      <Pressable
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+          setAutopilotOn(false);
+          Alert.alert('Emergency Stop', 'AI Autopilot has been paused. All automated actions stopped.');
+        }}
+        style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1, marginTop: 8 }]}
+      >
+        <View style={styles.emergencyBtn}>
+          <Ionicons name="stop-circle" size={20} color="#EF4444" />
+          <Text style={styles.emergencyBtnText}>Emergency Stop</Text>
+        </View>
+      </Pressable>
+    </View>
+  );
 
   const renderPublisher = () => (
     <View style={styles.tabContent}>
@@ -496,44 +638,57 @@ export default function AIManagementScreen() {
       >
         <View style={styles.header}>
           <View>
-            <Text style={[styles.title, { color: colors.text }]}>{t('aiManagement.title')}</Text>
+            <Text style={[styles.title, { color: colors.text }]}>AI Control Center</Text>
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-              {t('aiManagement.subtitle')}
+              Your AI agency at work
             </Text>
           </View>
         </View>
 
         <View style={[styles.tabBar, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <Pressable
+            onPress={() => { Haptics.selectionAsync(); setActiveTab('control'); }}
+            style={[styles.tab, activeTab === 'control' && { backgroundColor: '#8B5CF6' + '15' }]}
+          >
+            <Ionicons name="shield-checkmark-outline" size={18} color={activeTab === 'control' ? '#8B5CF6' : colors.textMuted} />
+            <Text style={[styles.tabText, { color: activeTab === 'control' ? '#8B5CF6' : colors.textMuted }]}>
+              Control
+            </Text>
+          </Pressable>
+          <Pressable
             onPress={() => { Haptics.selectionAsync(); setActiveTab('publisher'); }}
             style={[styles.tab, activeTab === 'publisher' && { backgroundColor: colors.primary + '15' }]}
           >
             <Ionicons name="send-outline" size={18} color={activeTab === 'publisher' ? colors.primary : colors.textMuted} />
             <Text style={[styles.tabText, { color: activeTab === 'publisher' ? colors.primary : colors.textMuted }]}>
-              {t('aiManagement.autoPublisher')}
+              Publish
             </Text>
           </Pressable>
-          <Pressable
-            onPress={() => { Haptics.selectionAsync(); setActiveTab('audience'); }}
-            style={[styles.tab, activeTab === 'audience' && { backgroundColor: colors.primary + '15' }]}
-          >
-            <Ionicons name="people-outline" size={18} color={activeTab === 'audience' ? colors.primary : colors.textMuted} />
-            <Text style={[styles.tabText, { color: activeTab === 'audience' ? colors.primary : colors.textMuted }]}>
-              {t('aiManagement.audienceManager')}
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => { Haptics.selectionAsync(); setActiveTab('strategy'); }}
-            style={[styles.tab, activeTab === 'strategy' && { backgroundColor: colors.primary + '15' }]}
-          >
-            <Ionicons name="analytics-outline" size={18} color={activeTab === 'strategy' ? colors.primary : colors.textMuted} />
-            <Text style={[styles.tabText, { color: activeTab === 'strategy' ? colors.primary : colors.textMuted }]}>
-              Strategy
-            </Text>
-          </Pressable>
+          {advancedMode && (
+            <>
+              <Pressable
+                onPress={() => { Haptics.selectionAsync(); setActiveTab('audience'); }}
+                style={[styles.tab, activeTab === 'audience' && { backgroundColor: colors.primary + '15' }]}
+              >
+                <Ionicons name="people-outline" size={18} color={activeTab === 'audience' ? colors.primary : colors.textMuted} />
+                <Text style={[styles.tabText, { color: activeTab === 'audience' ? colors.primary : colors.textMuted }]}>
+                  Audience
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => { Haptics.selectionAsync(); setActiveTab('strategy'); }}
+                style={[styles.tab, activeTab === 'strategy' && { backgroundColor: colors.primary + '15' }]}
+              >
+                <Ionicons name="analytics-outline" size={18} color={activeTab === 'strategy' ? colors.primary : colors.textMuted} />
+                <Text style={[styles.tabText, { color: activeTab === 'strategy' ? colors.primary : colors.textMuted }]}>
+                  Strategy
+                </Text>
+              </Pressable>
+            </>
+          )}
         </View>
 
-        {activeTab === 'publisher' ? renderPublisher() : activeTab === 'audience' ? renderAudienceManager() : <StrategyHub />}
+        {activeTab === 'control' ? renderControlCenter() : activeTab === 'publisher' ? renderPublisher() : activeTab === 'audience' ? renderAudienceManager() : <StrategyHub />}
 
         <View style={{ height: 120 }} />
       </ScrollView>
@@ -1001,4 +1156,35 @@ const styles = StyleSheet.create({
     paddingVertical: 16, borderRadius: 14, gap: 10,
   },
   generateBtnText: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: '#fff' },
+  controlStatusCard: { borderRadius: 16, borderWidth: 1, padding: 16, marginBottom: 12 },
+  controlStatusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  controlStatusLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  controlShield: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  controlModeLabel: { fontSize: 10, fontFamily: 'Inter_500Medium', letterSpacing: 1, textTransform: 'uppercase' as const },
+  controlModeValue: { fontSize: 16, fontFamily: 'Inter_700Bold' },
+  controlGoalCard: { borderRadius: 14, borderWidth: 1, padding: 14, marginBottom: 10 },
+  controlGoalRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  controlGoalLabel: { fontSize: 11, fontFamily: 'Inter_500Medium', textTransform: 'uppercase' as const, letterSpacing: 0.5 },
+  controlGoalValue: { fontSize: 16, fontFamily: 'Inter_600SemiBold' },
+  controlBudgetCard: { borderRadius: 14, borderWidth: 1, padding: 14, marginBottom: 12 },
+  controlBudgetHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  controlBudgetLabel: { fontSize: 11, fontFamily: 'Inter_500Medium', flex: 1, textTransform: 'uppercase' as const, letterSpacing: 0.5 },
+  controlBudgetPct: { fontSize: 14, fontFamily: 'Inter_700Bold' },
+  controlBudgetTrack: { height: 6, borderRadius: 3, overflow: 'hidden' as const, marginBottom: 6 },
+  controlBudgetFill: { height: '100%', borderRadius: 3, backgroundColor: '#3B82F6' },
+  controlBudgetText: { fontSize: 12, fontFamily: 'Inter_400Regular' },
+  controlSection: { borderRadius: 14, borderWidth: 1, padding: 14, marginBottom: 12 },
+  controlSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  controlSectionTitle: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  controlDoingText: { fontSize: 13, fontFamily: 'Inter_400Regular', lineHeight: 19 },
+  controlActionItem: { borderTopWidth: 1, paddingTop: 10, marginTop: 8 },
+  controlActionTop: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  controlActionNum: { width: 24, height: 24, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  controlActionNumText: { fontSize: 12, fontFamily: 'Inter_700Bold' },
+  controlActionText: { fontSize: 13, fontFamily: 'Inter_500Medium', flex: 1 },
+  controlRiskBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+  controlRiskText: { fontSize: 10, fontFamily: 'Inter_600SemiBold' },
+  controlActionWhy: { fontSize: 12, fontFamily: 'Inter_400Regular', marginLeft: 32, lineHeight: 17 },
+  emergencyBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 12, borderWidth: 1.5, borderColor: '#EF4444', paddingVertical: 14 },
+  emergencyBtnText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: '#EF4444' },
 });

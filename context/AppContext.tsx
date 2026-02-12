@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { BrandProfile, ContentItem, Campaign, Ad, AnalyticsData, DailyMetric, PlatformConnection, PostingSchedule, MediaItem, ScheduledPost, MetaConnection } from '@/lib/types';
 import * as storage from '@/lib/storage';
 
@@ -35,6 +36,8 @@ interface AppContextValue {
   weeklyMetrics: DailyMetric[];
   isLoading: boolean;
   refreshData: () => Promise<void>;
+  advancedMode: boolean;
+  setAdvancedMode: (mode: boolean) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -96,6 +99,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [metaConnection, setMetaConnectionState] = useState<MetaConnection>({ isConnected: false });
   const [isLoading, setIsLoading] = useState(true);
   const [weeklyMetrics] = useState<DailyMetric[]>(generateMockWeeklyMetrics());
+  const [advancedMode, setAdvancedModeState] = useState(false);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -120,6 +124,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setMediaItems(media);
       setScheduledPosts(scheduled);
       setMetaConnectionState(meta);
+      const savedMode = await AsyncStorage.getItem('advancedMode');
+      if (savedMode === 'true') setAdvancedModeState(true);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -232,6 +238,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await storage.saveMetaConnection(connection);
   };
 
+  const setAdvancedMode = async (mode: boolean) => {
+    setAdvancedModeState(mode);
+    await AsyncStorage.setItem('advancedMode', mode ? 'true' : 'false');
+  };
+
   const analytics = useMemo(() => generateMockAnalytics(campaigns, ads), [campaigns, ads]);
 
   const value = useMemo(() => ({
@@ -267,7 +278,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     weeklyMetrics,
     isLoading,
     refreshData: loadData,
-  }), [brandProfile, contentItems, campaigns, ads, platformConnections, postingSchedules, mediaItems, scheduledPosts, metaConnection, analytics, weeklyMetrics, isLoading]);
+    advancedMode,
+    setAdvancedMode,
+  }), [brandProfile, contentItems, campaigns, ads, platformConnections, postingSchedules, mediaItems, scheduledPosts, metaConnection, analytics, weeklyMetrics, isLoading, advancedMode]);
 
   return (
     <AppContext.Provider value={value}>

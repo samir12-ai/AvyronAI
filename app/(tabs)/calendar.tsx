@@ -632,6 +632,16 @@ export default function CalendarScreen() {
           </Pressable>
         </View>
 
+        <View style={[styles.aiPlanBanner, { backgroundColor: isDark ? '#10B981' + '10' : '#10B981' + '08', borderColor: '#10B981' + '25' }]}>
+          <View style={styles.aiPlanBannerLeft}>
+            <Ionicons name="shield-checkmark" size={16} color="#10B981" />
+            <Text style={[styles.aiPlanBannerText, { color: '#10B981' }]}>AI Content Plan Active</Text>
+          </View>
+          <Pressable onPress={handleOpenAIAssistant}>
+            <Text style={[styles.aiPlanBannerAction, { color: '#10B981' }]}>Generate</Text>
+          </Pressable>
+        </View>
+
         <Pressable onPress={handleOpenAIAssistant} testID="ai-assistant-card">
           <LinearGradient
             colors={colors.primaryGradient as [string, string]}
@@ -644,8 +654,8 @@ export default function CalendarScreen() {
                 <Ionicons name="sparkles" size={24} color="#fff" />
               </View>
               <View style={styles.aiCardText}>
-                <Text style={styles.aiCardTitle}>{t('calendar.aiAssistant')}</Text>
-                <Text style={styles.aiCardDesc}>{t('calendar.aiAssistantDesc')}</Text>
+                <Text style={styles.aiCardTitle}>AI Calendar Planner</Text>
+                <Text style={styles.aiCardDesc}>Let AI build your monthly content plan</Text>
               </View>
               <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />
             </View>
@@ -953,6 +963,10 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
   },
+  aiPlanBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 10, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14 },
+  aiPlanBannerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  aiPlanBannerText: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  aiPlanBannerAction: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
