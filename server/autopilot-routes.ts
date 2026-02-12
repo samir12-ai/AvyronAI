@@ -44,6 +44,8 @@ router.get("/api/autopilot/status", async (req, res) => {
       consecutiveFailures: state.consecutiveFailures,
       guardrailTriggers24h: state.guardrailTriggers24h,
       lastWorkerRun: state.lastWorkerRun,
+      confidenceScore: state.confidenceScore ?? 100,
+      confidenceStatus: state.confidenceStatus ?? "Stable",
     });
   } catch (error) {
     console.error("[Autopilot] Error getting status:", error);
@@ -78,6 +80,8 @@ router.patch("/api/autopilot/status", async (req, res) => {
       state: updated[0]?.state,
       volatilityIndex: updated[0]?.volatilityIndex,
       driftFlag: updated[0]?.driftFlag,
+      confidenceScore: updated[0]?.confidenceScore ?? 100,
+      confidenceStatus: updated[0]?.confidenceStatus ?? "Stable",
     });
   } catch (error) {
     console.error("[Autopilot] Error updating status:", error);
