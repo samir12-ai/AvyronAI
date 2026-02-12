@@ -17,7 +17,9 @@ export type AuditEventType =
   | "VOLATILITY_CHANGE"
   | "OUTCOME_EVALUATED"
   | "FATIGUE_DETECTED"
-  | "STATE_CHANGE";
+  | "STATE_CHANGE"
+  | "CONFIDENCE_UPDATED"
+  | "STATE_TRANSITION";
 
 export async function logAudit(
   accountId: string,

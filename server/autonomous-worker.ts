@@ -5,6 +5,7 @@ import {
   strategyDecisions,
   strategyMemory,
   performanceSnapshots,
+  guardrailConfig,
 } from "@shared/schema";
 import { eq, sql, desc, gte, lte } from "drizzle-orm";
 import { logAudit } from "./audit";
@@ -12,6 +13,7 @@ import { computeRollingBaselines } from "./baselines";
 import { runAllGuardrails, checkSafeModeConditions } from "./guardrails";
 import { classifyDecisionRisk } from "./risk-classifier";
 import { snapshotPreMetrics, evaluatePendingOutcomes, getRecentOutcomesForPrompt, computeSuccessRates } from "./outcome-tracker";
+import { calculateConfidence, computeDecisionSuccessRate, getLast2Outcomes, checkSafeModeExitConditions } from "./confidence";
 import OpenAI from "openai";
 
 const WORKER_INTERVAL_MS = 5 * 60 * 1000;
@@ -182,6 +184,33 @@ Return ONLY the JSON array, no other text.`;
   return [];
 }
 
+async function getVolatilityThreshold(accountId: string): Promise<number> {
+  const config = await db.select().from(guardrailConfig)
+    .where(eq(guardrailConfig.accountId, accountId))
+    .limit(1);
+  return (config[0] as any)?.volatilityThreshold || 0.35;
+}
+
+function enforceRecoveryModeLimits(decision: any): { blocked: boolean; reason: string } {
+  const action = (decision.action || "").toLowerCase();
+  const budgetAdj = decision.budgetAdjustment || "";
+
+  const isNewCampaign = action.includes("launch") || action.includes("new campaign") || action.includes("create campaign");
+  if (isNewCampaign) {
+    return { blocked: true, reason: "RECOVERY_MODE: New campaign launches are blocked" };
+  }
+
+  const percentMatch = budgetAdj.match(/[+]?\s*(\d+(?:\.\d+)?)\s*%/);
+  if (percentMatch) {
+    const pct = parseFloat(percentMatch[1]);
+    if (pct > 10) {
+      return { blocked: true, reason: `RECOVERY_MODE: Scaling ${pct}% exceeds 10% hard cap` };
+    }
+  }
+
+  return { blocked: false, reason: "" };
+}
+
 async function processAccount(accountId: string) {
   const jobId = await acquireLock(accountId);
   if (!jobId) {
@@ -205,35 +234,202 @@ async function processAccount(accountId: string) {
 
     const baselines = await computeRollingBaselines(accountId);
     const guardrailResult = await runAllGuardrails(accountId);
+    await evaluatePendingOutcomes(accountId);
+
+    const volThreshold = await getVolatilityThreshold(accountId);
+    const { successRate: decSuccessRate, total: decTotal } = await computeDecisionSuccessRate(accountId);
+    const last2Outcomes = await getLast2Outcomes(accountId);
+
+    const currentAcct = await db.select().from(accountState)
+      .where(eq(accountState.accountId, accountId))
+      .limit(1);
+    const acctState = currentAcct[0] || state[0];
+    const currentMode = acctState.state || "ACTIVE";
+    let prevRecoveryCycles = acctState.recoveryCyclesStable || 0;
+
+    const confidenceResult = calculateConfidence({
+      volatilityIndex: acctState.volatilityIndex || 0,
+      volatilityThreshold: volThreshold,
+      decisionSuccessRate: decSuccessRate,
+      totalDecisions: decTotal,
+      driftFlag: acctState.driftFlag || false,
+      guardrailTriggers24h: acctState.guardrailTriggers24h || 0,
+      currentState: currentMode,
+    });
+
+    await db.update(accountState)
+      .set({
+        confidenceScore: confidenceResult.score,
+        confidenceStatus: confidenceResult.status,
+        updatedAt: new Date(),
+      })
+      .where(eq(accountState.accountId, accountId));
+
+    await logAudit(accountId, "CONFIDENCE_UPDATED", {
+      details: {
+        score: confidenceResult.score,
+        status: confidenceResult.status,
+        inputs: confidenceResult.inputs,
+        mode: currentMode,
+      },
+    });
+
+    let newMode = currentMode;
 
     const safeModeCheck = await checkSafeModeConditions(accountId);
-    if (safeModeCheck.shouldActivate && state[0].state !== "SAFE_MODE") {
-      await db.update(accountState)
-        .set({ state: "SAFE_MODE", updatedAt: new Date() })
-        .where(eq(accountState.accountId, accountId));
 
-      await logAudit(accountId, "SAFE_MODE_ACTIVATED", {
-        details: { reasons: safeModeCheck.reasons },
+    if (currentMode === "SAFE_MODE") {
+      const exitCheck = checkSafeModeExitConditions({
+        volatilityIndex: acctState.volatilityIndex || 0,
+        volatilityThreshold: volThreshold,
+        guardrailTriggers24h: acctState.guardrailTriggers24h || 0,
+        driftFlag: acctState.driftFlag || false,
+        last2Outcomes,
       });
-    } else if (!safeModeCheck.shouldActivate && state[0].state === "SAFE_MODE") {
-      await db.update(accountState)
-        .set({ state: "ACTIVE", updatedAt: new Date() })
-        .where(eq(accountState.accountId, accountId));
 
-      await logAudit(accountId, "SAFE_MODE_CLEARED", {
-        details: { message: "All SAFE_MODE conditions resolved" },
-      });
+      if (exitCheck.canExit) {
+        const newCount = prevRecoveryCycles + 1;
+        if (newCount >= 2) {
+          newMode = "RECOVERY_MODE";
+          await db.update(accountState)
+            .set({ state: "RECOVERY_MODE", recoveryCyclesStable: 0, updatedAt: new Date() })
+            .where(eq(accountState.accountId, accountId));
+
+          await logAudit(accountId, "STATE_TRANSITION", {
+            details: {
+              from: "SAFE_MODE",
+              to: "RECOVERY_MODE",
+              reason: "2 consecutive stable cycles — all exit conditions met",
+              exitConditions: "volatility below threshold, no guardrail triggers 24h, no drift, last 2 outcomes not failures",
+            },
+          });
+          prevRecoveryCycles = 0;
+        } else {
+          await db.update(accountState)
+            .set({ recoveryCyclesStable: newCount, updatedAt: new Date() })
+            .where(eq(accountState.accountId, accountId));
+          prevRecoveryCycles = newCount;
+        }
+      } else {
+        if (prevRecoveryCycles > 0) {
+          await db.update(accountState)
+            .set({ recoveryCyclesStable: 0, updatedAt: new Date() })
+            .where(eq(accountState.accountId, accountId));
+        }
+        prevRecoveryCycles = 0;
+      }
+    } else if (currentMode === "RECOVERY_MODE") {
+      if (safeModeCheck.shouldActivate || confidenceResult.score < 40) {
+        newMode = "SAFE_MODE";
+        await db.update(accountState)
+          .set({ state: "SAFE_MODE", recoveryCyclesStable: 0, updatedAt: new Date() })
+          .where(eq(accountState.accountId, accountId));
+
+        await logAudit(accountId, "STATE_TRANSITION", {
+          details: {
+            from: "RECOVERY_MODE",
+            to: "SAFE_MODE",
+            reason: "Instability detected during recovery — reverted immediately",
+            triggers: safeModeCheck.reasons,
+            confidence: confidenceResult.score,
+          },
+        });
+        prevRecoveryCycles = 0;
+      } else {
+        const exitCheck = checkSafeModeExitConditions({
+          volatilityIndex: acctState.volatilityIndex || 0,
+          volatilityThreshold: volThreshold,
+          guardrailTriggers24h: acctState.guardrailTriggers24h || 0,
+          driftFlag: acctState.driftFlag || false,
+          last2Outcomes,
+        });
+
+        if (exitCheck.canExit) {
+          const newCount = prevRecoveryCycles + 1;
+          if (newCount >= 2) {
+            newMode = "FULL_AUTOPILOT";
+            await db.update(accountState)
+              .set({ state: "FULL_AUTOPILOT", recoveryCyclesStable: 0, updatedAt: new Date() })
+              .where(eq(accountState.accountId, accountId));
+
+            await logAudit(accountId, "STATE_TRANSITION", {
+              details: {
+                from: "RECOVERY_MODE",
+                to: "FULL_AUTOPILOT",
+                reason: "2 additional stable cycles in recovery — full autopilot restored",
+                confidence: confidenceResult.score,
+              },
+            });
+            prevRecoveryCycles = 0;
+          } else {
+            await db.update(accountState)
+              .set({ recoveryCyclesStable: newCount, updatedAt: new Date() })
+              .where(eq(accountState.accountId, accountId));
+            prevRecoveryCycles = newCount;
+          }
+        } else {
+          newMode = "SAFE_MODE";
+          await db.update(accountState)
+            .set({ state: "SAFE_MODE", recoveryCyclesStable: 0, updatedAt: new Date() })
+            .where(eq(accountState.accountId, accountId));
+
+          await logAudit(accountId, "STATE_TRANSITION", {
+            details: {
+              from: "RECOVERY_MODE",
+              to: "SAFE_MODE",
+              reason: "Recovery conditions no longer met — reverted",
+              failedConditions: exitCheck.reasons,
+            },
+          });
+          prevRecoveryCycles = 0;
+        }
+      }
+    } else {
+      if (safeModeCheck.shouldActivate || confidenceResult.score < 40) {
+        newMode = "SAFE_MODE";
+        await db.update(accountState)
+          .set({ state: "SAFE_MODE", recoveryCyclesStable: 0, updatedAt: new Date() })
+          .where(eq(accountState.accountId, accountId));
+
+        const reason = confidenceResult.score < 40
+          ? `Confidence ${confidenceResult.score} dropped below 40 — auto-triggered SAFE_MODE`
+          : "SAFE_MODE conditions detected";
+
+        await logAudit(accountId, "STATE_TRANSITION", {
+          details: {
+            from: currentMode,
+            to: "SAFE_MODE",
+            reason,
+            triggers: safeModeCheck.reasons,
+            confidence: confidenceResult.score,
+          },
+        });
+      }
     }
-
-    await evaluatePendingOutcomes(accountId);
 
     const outcomeContext = await getRecentOutcomesForPrompt(accountId);
     const successRates = await computeSuccessRates(accountId);
 
-    const currentState = await db.select().from(accountState)
+    const refreshedState = await db.select().from(accountState)
       .where(eq(accountState.accountId, accountId))
       .limit(1);
-    const acctState = currentState[0] || state[0];
+    const finalState = refreshedState[0] || acctState;
+    const activeMode = finalState.state || "ACTIVE";
+    const finalConfidence = finalState.confidenceScore || confidenceResult.score;
+
+    const canAutoExecute = activeMode === "ACTIVE" || activeMode === "FULL_AUTOPILOT" || activeMode === "RECOVERY_MODE";
+    const isRecovery = activeMode === "RECOVERY_MODE";
+
+    if (activeMode === "SAFE_MODE") {
+      await db.update(accountState)
+        .set({ lastWorkerRun: new Date(), updatedAt: new Date() })
+        .where(eq(accountState.accountId, accountId));
+      await releaseLock(jobId, "completed");
+      await logAudit(accountId, "JOB_COMPLETED", {
+        details: { jobId, mode: "SAFE_MODE", decisionsGenerated: 0, confidence: finalConfidence },
+      });
+      return;
+    }
 
     const aiDecisions = await runStrategyAnalysis(accountId, baselines, guardrailResult, outcomeContext);
 
@@ -247,9 +443,9 @@ async function processAccount(accountId: string) {
         },
         guardrailResult,
         {
-          state: acctState.state || "ACTIVE",
-          volatilityIndex: acctState.volatilityIndex || 0,
-          driftFlag: acctState.driftFlag || false,
+          state: activeMode,
+          volatilityIndex: finalState.volatilityIndex || 0,
+          driftFlag: finalState.driftFlag || false,
         }
       );
 
@@ -264,6 +460,35 @@ async function processAccount(accountId: string) {
         riskResult.autoExecutable = false;
       }
 
+      if (isRecovery && !blocked) {
+        const recoveryCheck = enforceRecoveryModeLimits(decision);
+        if (recoveryCheck.blocked) {
+          blocked = true;
+          blockReason = recoveryCheck.reason;
+          riskResult.autoExecutable = false;
+        }
+      }
+
+      if (!blocked && finalConfidence >= 60 && finalConfidence < 80) {
+        const budgetAdj = decision.budgetAdjustment || "";
+        const pctMatch = budgetAdj.match(/[+]?\s*(\d+(?:\.\d+)?)\s*%/);
+        if (pctMatch) {
+          const pct = parseFloat(pctMatch[1]);
+          if (pct > 10) {
+            decision.budgetAdjustment = `+10%`;
+          }
+        }
+      } else if (!blocked && finalConfidence >= 40 && finalConfidence < 60) {
+        const budgetAdj = decision.budgetAdjustment || "";
+        const pctMatch = budgetAdj.match(/[+]?\s*(\d+(?:\.\d+)?)\s*%/);
+        if (pctMatch) {
+          const pct = parseFloat(pctMatch[1]);
+          if (pct > 5) {
+            decision.budgetAdjustment = `+5%`;
+          }
+        }
+      }
+
       const inserted = await db.insert(strategyDecisions).values({
         accountId,
         trigger: decision.trigger,
@@ -272,17 +497,18 @@ async function processAccount(accountId: string) {
         objective: decision.objective || null,
         budgetAdjustment: decision.budgetAdjustment || null,
         priority: decision.priority || "medium",
-        status: blocked ? "blocked" : (riskResult.autoExecutable ? "pending" : "pending"),
+        status: blocked ? "blocked" : "pending",
         riskLevel: riskResult.riskLevel,
         autoGenerated: true,
         autoExecutable: riskResult.autoExecutable && !blocked,
       }).returning();
 
       const decisionId = inserted[0]?.id;
-
       if (!decisionId) continue;
 
-      if (riskResult.autoExecutable && !blocked && acctState.autopilotOn && acctState.state === "ACTIVE") {
+      const canExec = riskResult.autoExecutable && !blocked && finalState.autopilotOn && canAutoExecute;
+
+      if (canExec) {
         await db.update(strategyDecisions)
           .set({ status: "executed", executedAt: new Date() })
           .where(eq(strategyDecisions.id, decisionId));
@@ -296,6 +522,8 @@ async function processAccount(accountId: string) {
             action: decision.action,
             budgetAdjustment: decision.budgetAdjustment,
             reason: riskResult.reason,
+            mode: activeMode,
+            confidence: finalConfidence,
           },
         });
 
@@ -313,8 +541,27 @@ async function processAccount(accountId: string) {
           details: {
             action: decision.action,
             reason: blocked ? blockReason : riskResult.reason,
+            mode: activeMode,
           },
         });
+
+        if (isRecovery && blocked) {
+          const recoveryCheck = enforceRecoveryModeLimits(decision);
+          if (recoveryCheck.blocked) {
+            await db.update(accountState)
+              .set({ state: "SAFE_MODE", recoveryCyclesStable: 0, updatedAt: new Date() })
+              .where(eq(accountState.accountId, accountId));
+
+            await logAudit(accountId, "STATE_TRANSITION", {
+              details: {
+                from: "RECOVERY_MODE",
+                to: "SAFE_MODE",
+                reason: `Recovery violation: ${recoveryCheck.reason}`,
+              },
+            });
+            break;
+          }
+        }
       }
     }
 
@@ -329,7 +576,9 @@ async function processAccount(accountId: string) {
         jobId,
         decisionsGenerated: aiDecisions.length,
         guardrailsTriggered: guardrailResult.triggeredCount,
-        safeModeActive: safeModeCheck.shouldActivate,
+        mode: activeMode,
+        confidence: finalConfidence,
+        confidenceStatus: confidenceResult.status,
       },
     });
 
