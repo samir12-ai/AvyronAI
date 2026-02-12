@@ -7,6 +7,8 @@ import {
   strategyMemory,
   growthCampaigns,
   weeklyReports,
+  moatCandidates,
+  signatureSeries,
 } from "@shared/schema";
 import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
 import OpenAI from "openai";
@@ -169,9 +171,18 @@ export function registerStrategyRoutes(app: Express) {
         messages: [
           {
             role: "system",
-            content: `You are a Chief Marketing Officer, Performance Media Buyer, Creative Director, and Growth Hacker combined into one strategic AI engine.
+            content: `You are a Chief Marketing Officer, Performance Media Buyer, Creative Director, Growth Hacker, and Brand Strategy Architect combined into one strategic AI engine.
+
+SYSTEM MODE: MOAT BUILDER MODE ACTIVE
 
 You analyze social media performance data and make data-driven strategic decisions. You NEVER generate random ideas. Every insight and decision must be backed by the data provided.
+
+CRITICAL STRATEGIC PRIORITY SHIFT: Your primary objective is no longer "optimize next post" but "build long-term brand advantage." All strategy generation must ask:
+1. Does this build authority?
+2. Does this create differentiation?
+3. Is this repeatable as a system?
+4. Does this increase brand defensibility?
+If not, deprioritize.
 
 Your analysis must include:
 
@@ -181,6 +192,7 @@ Your analysis must include:
 - Which formats convert best
 - Which audience segments respond most
 - What objections appear in comments
+- Which patterns show STABILITY (consistent performance, not one-hit wonders)
 
 2. STRATEGIC DECISIONS (rule-based):
 - If retention is high → Duplicate angle, generate variations, suggest budget scaling
@@ -188,16 +200,26 @@ Your analysis must include:
 - If CPA increases over time → Pause campaign, request new creative direction
 - If saves high but conversions low → Add stronger call-to-action
 - Each decision needs: reason, action, objective, budget adjustment
+- MOAT DECISIONS: Prioritize decisions that build long-term authority over short-term optimization
 
-3. COMPETITIVE AWARENESS:
-- Avoid generic content suggestions
-- Focus on differentiation
-- Strategy must drive measurable growth, not vanity metrics
+3. COMPETITIVE DEFENSE:
+- When competitor overlap is detected → Increase uniqueness layer
+- Strengthen terminology ownership
+- Add deeper proof or proprietary angle
+- Do not allow easy imitation
+- Focus on differentiation, not just performance
 
 4. MEMORY UPDATES:
 - Identify winning angles, hooks, formats to remember
 - Identify losing ones to avoid
 - Note audience patterns
+- Flag potential MOAT CANDIDATES (high stability + high resonance + hard to copy)
+
+5. SYSTEMS THINKING (NEW):
+- Stop producing isolated post ideas
+- Stop trend chasing without positioning
+- Instead produce: Named frameworks, repeatable branded series ideas, expandable content ecosystems
+- Every major strategy must answer: "How does this make the brand harder to replace?"
 
 ACCOUNT AVERAGES:
 ${JSON.stringify(averages, null, 2)}
@@ -236,7 +258,9 @@ Return ONLY valid JSON with this structure:
       "isWinner": true
     }
   ],
-  "executiveSummary": "2-3 sentence strategic overview"
+  "executiveSummary": "2-3 sentence strategic overview",
+  "moatSignals": ["Potential moat opportunity 1", "Potential moat opportunity 2"],
+  "systemMode": "MOAT BUILDER"
 }`
           },
           {
@@ -305,6 +329,8 @@ Return ONLY valid JSON with this structure:
         decisions: analysis.decisions || [],
         memoryUpdates: analysis.memoryUpdates || [],
         executiveSummary: analysis.executiveSummary || "",
+        moatSignals: analysis.moatSignals || [],
+        systemMode: "MOAT BUILDER",
         dataPointsAnalyzed: allData.length,
       });
     } catch (error: any) {
@@ -658,6 +684,265 @@ Return JSON:
     } catch (error: any) {
       console.error("[Strategy] Audience snipe error:", error.message);
       res.status(500).json({ error: error.message || "Audience sniping failed" });
+    }
+  });
+
+  app.post("/api/strategy/moat-scan", async (req, res) => {
+    try {
+      const memories = await db.select().from(strategyMemory).orderBy(desc(strategyMemory.updatedAt)).limit(30);
+      const insights = await db.select().from(strategyInsights).where(eq(strategyInsights.isActive, true)).orderBy(desc(strategyInsights.createdAt)).limit(20);
+      const allPerf = await db.select().from(performanceSnapshots).orderBy(desc(performanceSnapshots.fetchedAt)).limit(50);
+      const averages = await getAccountAverages();
+
+      if (memories.length === 0 && insights.length === 0) {
+        return res.status(400).json({ error: "Run AI Analysis first to populate memory and patterns before scanning for moat candidates." });
+      }
+
+      const aiResponse = await openai.chat.completions.create({
+        model: "gpt-5.2",
+        messages: [
+          {
+            role: "system",
+            content: `You are a Brand Strategy Architect. Your mission is to identify long-term defensible brand advantages ("moats") from performance data and strategic memory.
+
+MOAT BUILDER MODE is now active. You must think like a long-term brand architect, NOT a short-term performance optimizer.
+
+Scan the memory bank and pattern insights to identify:
+1. HIGH STABILITY ANGLES - Content angles that consistently perform well over time (not one-hit wonders)
+2. REPEATED WINNERS - Patterns that win again and again
+3. BLUE OCEAN OPPORTUNITIES - Spaces with high resonance but low competition
+4. HIGH AUDIENCE RESONANCE - Content that creates deep engagement (saves, shares, comments with intent)
+
+For each candidate, evaluate:
+- Stability (0-1): How consistently does this perform? Higher = more stable
+- Resonance (0-1): How deeply does the audience engage? Higher = deeper connection
+- Uniqueness (0-1): How hard is this to copy? Higher = more defensible
+- Moat Score (0-1): Overall defensibility rating = (stability * 0.3 + resonance * 0.3 + uniqueness * 0.4)
+
+Every candidate must answer: "Does this make the brand harder to replace?"
+
+MEMORY BANK: ${JSON.stringify(memories.map(m => ({ type: m.memoryType, label: m.label, score: m.score, winner: m.isWinner, details: m.details })))}
+
+PATTERN INSIGHTS: ${JSON.stringify(insights.map(i => ({ category: i.category, insight: i.insight, confidence: i.confidence, metric: i.relatedMetric, value: i.metricValue })))}
+
+PERFORMANCE AVERAGES: ${JSON.stringify(averages)}
+
+Return ONLY valid JSON:
+{
+  "candidates": [
+    {
+      "sourceType": "winning_angle|audience_pattern|content_format|hook_system|brand_positioning",
+      "label": "Short descriptive name",
+      "description": "Why this is a moat candidate - data-backed reasoning",
+      "stability": 0.85,
+      "resonance": 0.78,
+      "uniqueness": 0.92,
+      "moatScore": 0.86,
+      "dataEvidence": "Specific metrics and patterns that support this"
+    }
+  ],
+  "scanSummary": "Executive overview of moat landscape",
+  "topOpportunity": "The single best moat opportunity and why"
+}`
+          },
+          {
+            role: "user",
+            content: `Scan for moat candidates. Recent top-performing content:\n${JSON.stringify(allPerf.filter(p => (p.saves || 0) > 20 || (p.roas || 0) > 3).slice(0, 15).map(p => ({ angle: p.contentAngle, hook: p.hookStyle, format: p.format, saves: p.saves, shares: p.shares, roas: p.roas, ctr: p.ctr, retention: p.retentionRate })))}`
+          }
+        ],
+        max_completion_tokens: 3000,
+      });
+
+      const content = aiResponse.choices[0]?.message?.content || "";
+      let result;
+      try {
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        result = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+      } catch { result = null; }
+
+      if (!result?.candidates?.length) {
+        return res.status(500).json({ error: "Moat scan did not produce valid candidates" });
+      }
+
+      const saved = [];
+      for (const c of result.candidates) {
+        const [record] = await db.insert(moatCandidates).values({
+          sourceType: c.sourceType || "winning_angle",
+          label: c.label,
+          description: c.description,
+          stability: c.stability || 0,
+          resonance: c.resonance || 0,
+          uniqueness: c.uniqueness || 0,
+          moatScore: c.moatScore || 0,
+          dataEvidence: c.dataEvidence,
+          status: "candidate",
+        }).returning();
+        saved.push(record);
+      }
+
+      res.json({
+        success: true,
+        candidates: saved,
+        scanSummary: result.scanSummary,
+        topOpportunity: result.topOpportunity,
+      });
+    } catch (error: any) {
+      console.error("[Moat] Scan error:", error.message);
+      res.status(500).json({ error: error.message || "Moat scan failed" });
+    }
+  });
+
+  app.get("/api/strategy/moat-candidates", async (req, res) => {
+    try {
+      const candidates = await db.select().from(moatCandidates).orderBy(desc(moatCandidates.moatScore)).limit(20);
+      res.json(candidates);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch moat candidates" });
+    }
+  });
+
+  app.post("/api/strategy/signature-series", async (req, res) => {
+    try {
+      const { candidateId } = req.body;
+      const [candidate] = await db.select().from(moatCandidates).where(eq(moatCandidates.id, candidateId));
+      if (!candidate) return res.status(404).json({ error: "Moat candidate not found" });
+
+      const memories = await db.select().from(strategyMemory).orderBy(desc(strategyMemory.updatedAt)).limit(15);
+      const averages = await getAccountAverages();
+
+      const aiResponse = await openai.chat.completions.create({
+        model: "gpt-5.2",
+        messages: [
+          {
+            role: "system",
+            content: `You are a Brand Content Architect. Convert a moat candidate into a full Signature Series - a repeatable, branded content system that builds long-term authority.
+
+The series must be:
+- REPEATABLE: Clear episode structure that can run indefinitely
+- BRANDED: Unique naming and terminology that becomes associated with the brand
+- DEFENSIBLE: Hard to copy because it's built on proprietary insights and style
+- SCALABLE: Can expand into sub-series, spin-offs, and cross-platform adaptations
+
+MOAT CANDIDATE:
+Label: ${candidate.label}
+Description: ${candidate.description}
+Stability: ${candidate.stability}
+Resonance: ${candidate.resonance}
+Uniqueness: ${candidate.uniqueness}
+Evidence: ${candidate.dataEvidence}
+
+BRAND MEMORY: ${JSON.stringify(memories.filter(m => m.isWinner).map(m => ({ type: m.memoryType, label: m.label })))}
+AVERAGES: ${JSON.stringify(averages)}
+
+Return ONLY valid JSON:
+{
+  "name": "Branded series name (unique, memorable, ownable)",
+  "corePromise": "The value proposition for the audience in one sentence",
+  "episodeStructure": "Detailed repeatable episode format: intro hook, body structure, CTA pattern",
+  "hookFormula": "The specific hook formula that opens each episode",
+  "ctaFramework": "CTA strategy that evolves across episodes (awareness > engagement > conversion)",
+  "postingCadence": "Recommended frequency and best days/times",
+  "expansionRoadmap": "How this series can expand: sub-series, collaborations, products, cross-platform",
+  "authorityScore": 0.75,
+  "differentiationScore": 0.85,
+  "moatStrength": 0.80,
+  "fatigueRisk": 0.20
+}`
+          },
+          {
+            role: "user",
+            content: `Convert this moat candidate into a Signature Series: "${candidate.label}" - ${candidate.description}`
+          }
+        ],
+        max_completion_tokens: 3000,
+      });
+
+      const content = aiResponse.choices[0]?.message?.content || "";
+      let seriesData;
+      try {
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        seriesData = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+      } catch { seriesData = null; }
+
+      if (!seriesData) {
+        return res.status(500).json({ error: "Failed to generate signature series" });
+      }
+
+      const [series] = await db.insert(signatureSeries).values({
+        name: seriesData.name,
+        corePromise: seriesData.corePromise,
+        episodeStructure: seriesData.episodeStructure,
+        hookFormula: seriesData.hookFormula,
+        ctaFramework: seriesData.ctaFramework,
+        postingCadence: seriesData.postingCadence,
+        expansionRoadmap: seriesData.expansionRoadmap,
+        authorityScore: seriesData.authorityScore || 0,
+        differentiationScore: seriesData.differentiationScore || 0,
+        moatStrength: seriesData.moatStrength || 0,
+        fatigueRisk: seriesData.fatigueRisk || 0,
+        moatCandidateId: candidateId,
+      }).returning();
+
+      await db.update(moatCandidates).set({
+        status: "converted",
+        convertedToSeriesId: series.id,
+        updatedAt: new Date(),
+      }).where(eq(moatCandidates.id, candidateId));
+
+      res.json({ success: true, series });
+    } catch (error: any) {
+      console.error("[Moat] Signature series error:", error.message);
+      res.status(500).json({ error: error.message || "Failed to create signature series" });
+    }
+  });
+
+  app.get("/api/strategy/signature-series", async (req, res) => {
+    try {
+      const series = await db.select().from(signatureSeries).where(eq(signatureSeries.isActive, true)).orderBy(desc(signatureSeries.createdAt));
+      res.json(series);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch signature series" });
+    }
+  });
+
+  app.get("/api/strategy/moat-dashboard", async (req, res) => {
+    try {
+      const [candidates, series, memories, averages] = await Promise.all([
+        db.select().from(moatCandidates).orderBy(desc(moatCandidates.moatScore)).limit(10),
+        db.select().from(signatureSeries).where(eq(signatureSeries.isActive, true)).orderBy(desc(signatureSeries.createdAt)),
+        db.select().from(strategyMemory).orderBy(desc(strategyMemory.updatedAt)).limit(20),
+        getAccountAverages(),
+      ]);
+
+      const activeSeries = series.length;
+      const avgAuthority = activeSeries > 0 ? series.reduce((sum, s) => sum + (s.authorityScore || 0), 0) / activeSeries : 0;
+      const avgDifferentiation = activeSeries > 0 ? series.reduce((sum, s) => sum + (s.differentiationScore || 0), 0) / activeSeries : 0;
+      const avgMoatStrength = activeSeries > 0 ? series.reduce((sum, s) => sum + (s.moatStrength || 0), 0) / activeSeries : 0;
+      const avgFatigueRisk = activeSeries > 0 ? series.reduce((sum, s) => sum + (s.fatigueRisk || 0), 0) / activeSeries : 0;
+
+      const pendingCandidates = candidates.filter(c => c.status === "candidate");
+      const convertedCandidates = candidates.filter(c => c.status === "converted");
+
+      const ipContribution = activeSeries > 0 ? Math.min(100, Math.round(activeSeries * 20 + avgMoatStrength * 30)) : 0;
+
+      res.json({
+        mode: "MOAT BUILDER",
+        scores: {
+          authority: Math.round(avgAuthority * 100),
+          differentiation: Math.round(avgDifferentiation * 100),
+          moatStrength: Math.round(avgMoatStrength * 100),
+          fatigueRisk: Math.round(avgFatigueRisk * 100),
+          ipContribution,
+        },
+        activeSeries,
+        pendingCandidates: pendingCandidates.length,
+        convertedCandidates: convertedCandidates.length,
+        candidates: pendingCandidates,
+        series,
+      });
+    } catch (error) {
+      console.error("[Moat] Dashboard error:", error);
+      res.status(500).json({ error: "Failed to load moat dashboard" });
     }
   });
 
