@@ -349,6 +349,9 @@ export const accountState = pgTable("account_state", {
   guardrailTriggers24h: integer("guardrail_triggers_24h").default(0),
   lastGuardrailReset: timestamp("last_guardrail_reset").defaultNow(),
   lastWorkerRun: timestamp("last_worker_run"),
+  confidenceScore: integer("confidence_score").default(100),
+  confidenceStatus: text("confidence_status").default("Stable"),
+  recoveryCyclesStable: integer("recovery_cycles_stable").default(0),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
