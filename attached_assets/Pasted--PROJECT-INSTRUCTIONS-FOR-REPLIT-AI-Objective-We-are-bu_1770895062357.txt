@@ -1,0 +1,227 @@
+⸻
+
+PROJECT INSTRUCTIONS FOR REPLIT AI
+
+🎯 Objective
+
+We are building an AI-powered Social Media Agency Application.
+
+Meta API integration is already completed.
+Design generation is handled by Nano Banana Pro.
+Publishing system is already connected.
+
+ChatGPT 5.2 must act as a Strategic Intelligence Engine only.
+
+It must:
+	•	Analyze performance data
+	•	Detect patterns
+	•	Make strategic decisions
+	•	Improve growth over time
+	•	Compete with human-level agency strategy
+
+This is NOT a content generator.
+This is a performance-driven AI strategist.
+
+⸻
+
+PHASE 1: Build Strategic Architecture
+
+Create an internal AI Engine composed of 4 intelligence layers:
+	1.	Performance Analyst
+	2.	Strategic Planner
+	3.	Decision Engine
+	4.	Long-Term Memory System
+
+These must work together automatically.
+
+⸻
+
+PHASE 2: Data Intelligence Layer
+
+Connect the AI to Meta performance data including:
+	•	Reach
+	•	Impressions
+	•	Saves
+	•	Shares
+	•	Watch time
+	•	Retention rate
+	•	CTR
+	•	CPM
+	•	CPC
+	•	CPA
+	•	ROAS
+	•	Audience demographics
+	•	Comments
+
+The AI must:
+	•	Compare each post against account averages
+	•	Detect outperforming content
+	•	Detect underperforming content
+	•	Identify patterns in hooks, angles, formats, and topics
+
+All performance must be stored historically.
+The system must remember past results.
+
+⸻
+
+PHASE 3: Pattern Recognition System
+
+The AI must detect:
+	•	Which content angles generate the highest saves
+	•	Which hooks generate the highest retention
+	•	Which formats convert best
+	•	Which audience segments respond most
+	•	What objections appear repeatedly in comments
+
+It must generate insights such as:
+	•	“Problem-solution reels outperform storytelling format.”
+	•	“Direct hooks outperform curiosity hooks.”
+	•	“Audience 25–34 responds more to authority content.”
+
+These insights must influence future strategy automatically.
+
+⸻
+
+PHASE 4: Strategic Decision Engine (Critical)
+
+Create a rule-based intelligence system.
+
+The AI must automatically:
+
+If retention is high:
+→ Duplicate the angle
+→ Generate variations
+→ Suggest budget scaling
+
+If CTR is low:
+→ Regenerate hooks only
+
+If CPA increases for multiple days:
+→ Pause campaign
+→ Request new creative direction
+
+If saves are high but conversions low:
+→ Add stronger call-to-action
+
+Each decision must include:
+	•	Reason
+	•	Action
+	•	Strategic objective
+	•	Budget adjustment suggestion
+
+The system must act like a human media buyer.
+
+⸻
+
+PHASE 5: Growth Mode System (30-Day Competitive Strategy)
+
+When activated, the AI must operate in 3 stages:
+
+Stage 1: Testing Phase
+	•	Test multiple content angles
+	•	Test multiple hook styles
+	•	Test multiple formats
+
+Stage 2: Optimization Phase
+	•	Kill bottom 40%
+	•	Scale top 20%
+	•	Focus on winning audience segment
+
+Stage 3: Authority Phase
+	•	Retarget engaged users
+	•	Create authority-building content
+	•	Strengthen brand positioning
+
+The AI must automatically transition between stages.
+
+⸻
+
+PHASE 6: Audience Sniping System
+
+Using Meta audience insights, the AI must:
+	•	Detect micro-segments
+	•	Suggest interest stacking
+	•	Suggest lookalike audiences
+	•	Detect exclusion groups
+	•	Analyze comment intent
+	•	Create objection-handling content
+
+The AI must think like a high-level media buyer.
+
+⸻
+
+PHASE 7: Long-Term Memory Intelligence
+
+The system must remember:
+	•	Winning angles
+	•	Losing angles
+	•	Successful hooks
+	•	Failed experiments
+	•	Audience objections
+	•	Best-performing formats
+	•	Seasonal performance changes
+
+Future strategy must always reference past results.
+
+The AI must become smarter every week.
+
+⸻
+
+PHASE 8: Weekly Strategic Report Generator
+
+Every 7 days generate:
+	•	What worked
+	•	What failed
+	•	Why it happened
+	•	What to scale
+	•	What to stop
+	•	Next week focus
+	•	Budget reallocation logic
+
+The report must sound like a senior strategist.
+
+⸻
+
+PHASE 9: Competitive Market Awareness
+
+The AI must assume it operates in a saturated market.
+
+It must:
+	•	Avoid generic content
+	•	Avoid repetitive angles
+	•	Constantly search for differentiation
+	•	Suggest bold positioning when needed
+
+Strategy must focus on measurable growth, not vanity metrics.
+
+⸻
+
+PHASE 10: Continuous Self-Improvement Loop
+
+Every week:
+	•	Recalculate baseline metrics
+	•	Adjust decision thresholds
+	•	Remove weak content categories
+	•	Refine hook strategies
+	•	Update audience targeting logic
+
+The AI must evolve automatically.
+
+⸻
+
+FINAL BEHAVIOR REQUIREMENT
+
+ChatGPT must behave as:
+	•	Chief Marketing Officer
+	•	Performance Media Buyer
+	•	Creative Director
+	•	Growth Hacker
+
+It must not generate random ideas.
+It must make decisions based on data.
+It must justify every action.
+It must aim for growth, conversions, and competitive advantage.
+
+End of Instructions.
+
+⸻

@@ -7,6 +7,7 @@ import multer from "multer";
 import path from "path";
 import { registerPhotographyRoutes } from "./photography-routes";
 import { registerVideoRoutes } from "./video-routes";
+import { registerStrategyRoutes } from "./strategy-routes";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -1000,6 +1001,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
 
   registerPhotographyRoutes(app);
   registerVideoRoutes(app);
+  registerStrategyRoutes(app);
 
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
