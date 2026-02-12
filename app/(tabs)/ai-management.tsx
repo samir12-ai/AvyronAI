@@ -23,6 +23,7 @@ import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { getApiUrl } from '@/lib/query-client';
+import StrategyHub from '@/components/StrategyHub';
 
 interface AIAudience {
   name: string;
@@ -41,7 +42,7 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'publisher' | 'audience';
+type TabView = 'publisher' | 'audience' | 'strategy';
 
 function PulseRing({ color }: { color: string }) {
   const scale = useRef(new RNAnimated.Value(1)).current;
@@ -521,9 +522,18 @@ export default function AIManagementScreen() {
               {t('aiManagement.audienceManager')}
             </Text>
           </Pressable>
+          <Pressable
+            onPress={() => { Haptics.selectionAsync(); setActiveTab('strategy'); }}
+            style={[styles.tab, activeTab === 'strategy' && { backgroundColor: colors.primary + '15' }]}
+          >
+            <Ionicons name="analytics-outline" size={18} color={activeTab === 'strategy' ? colors.primary : colors.textMuted} />
+            <Text style={[styles.tabText, { color: activeTab === 'strategy' ? colors.primary : colors.textMuted }]}>
+              Strategy
+            </Text>
+          </Pressable>
         </View>
 
-        {activeTab === 'publisher' ? renderPublisher() : renderAudienceManager()}
+        {activeTab === 'publisher' ? renderPublisher() : activeTab === 'audience' ? renderAudienceManager() : <StrategyHub />}
 
         <View style={{ height: 120 }} />
       </ScrollView>
