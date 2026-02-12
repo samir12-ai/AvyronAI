@@ -215,6 +215,51 @@ export const weeklyReports = pgTable("weekly_reports", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const moatCandidates = pgTable("moat_candidates", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  sourceType: text("source_type").notNull(),
+  label: text("label").notNull(),
+  description: text("description"),
+  stability: doublePrecision("stability").default(0),
+  resonance: doublePrecision("resonance").default(0),
+  uniqueness: doublePrecision("uniqueness").default(0),
+  moatScore: doublePrecision("moat_score").default(0),
+  dataEvidence: text("data_evidence"),
+  status: text("status").default("candidate"),
+  convertedToSeriesId: varchar("converted_to_series_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const signatureSeries = pgTable("signature_series", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  corePromise: text("core_promise"),
+  episodeStructure: text("episode_structure"),
+  hookFormula: text("hook_formula"),
+  ctaFramework: text("cta_framework"),
+  postingCadence: text("posting_cadence"),
+  expansionRoadmap: text("expansion_roadmap"),
+  authorityScore: doublePrecision("authority_score").default(0),
+  differentiationScore: doublePrecision("differentiation_score").default(0),
+  moatStrength: doublePrecision("moat_strength").default(0),
+  fatigueRisk: doublePrecision("fatigue_risk").default(0),
+  episodeCount: integer("episode_count").default(0),
+  totalReach: integer("total_reach").default(0),
+  avgEngagement: doublePrecision("avg_engagement").default(0),
+  isActive: boolean("is_active").default(true),
+  moatCandidateId: varchar("moat_candidate_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type MoatCandidate = typeof moatCandidates.$inferSelect;
+export type SignatureSeries = typeof signatureSeries.$inferSelect;
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
