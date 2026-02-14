@@ -1,10 +1,96 @@
 import { db } from "./db";
 import { publishedPosts, accountState } from "@shared/schema";
-import { eq, sql, lte, and } from "drizzle-orm";
+import { eq, sql, and } from "drizzle-orm";
 import { logAudit } from "./audit";
+import * as crypto from "crypto";
 
 const PUBLISH_CHECK_INTERVAL_MS = 2 * 60 * 1000;
+const MAX_RETRY_ATTEMPTS = 3;
+const BASE_BACKOFF_MS = 2000;
 let publishTimer: ReturnType<typeof setInterval> | null = null;
+let isShuttingDown = false;
+let activePublishCount = 0;
+
+function generateLockToken(): string {
+  return crypto.randomBytes(16).toString("hex");
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function publishToMetaWithRetry(
+  post: any,
+  accessToken: string,
+  pageId: string,
+  accountId: string
+): Promise<{ success: boolean; postId?: string; error?: string; attempts: number }> {
+  let lastError = "";
+
+  for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
+    if (isShuttingDown) {
+      return { success: false, error: "Worker shutting down", attempts: attempt };
+    }
+
+    try {
+      const result = await publishToMeta(post, accessToken, pageId);
+
+      if (result.success) {
+        return { ...result, attempts: attempt };
+      }
+
+      lastError = result.error || "Unknown error";
+
+      if (isNonRetryableError(lastError)) {
+        await logAudit(accountId, "META_API_ERROR", {
+          details: {
+            postId: post.id,
+            error: lastError,
+            attempt,
+            retryable: false,
+          },
+        });
+        return { success: false, error: lastError, attempts: attempt };
+      }
+
+      if (attempt < MAX_RETRY_ATTEMPTS) {
+        const backoff = BASE_BACKOFF_MS * Math.pow(2, attempt - 1) + Math.random() * 1000;
+        console.log(`[PublishWorker] Retry ${attempt}/${MAX_RETRY_ATTEMPTS} for post ${post.id} in ${Math.round(backoff)}ms`);
+        await sleep(backoff);
+      }
+    } catch (error) {
+      lastError = String(error);
+      if (attempt < MAX_RETRY_ATTEMPTS) {
+        const backoff = BASE_BACKOFF_MS * Math.pow(2, attempt - 1) + Math.random() * 1000;
+        await sleep(backoff);
+      }
+    }
+  }
+
+  await logAudit(accountId, "PUBLISH_RETRY_FAILED", {
+    details: {
+      postId: post.id,
+      platform: post.platform,
+      totalAttempts: MAX_RETRY_ATTEMPTS,
+      lastError,
+    },
+  });
+
+  return { success: false, error: `Failed after ${MAX_RETRY_ATTEMPTS} attempts: ${lastError}`, attempts: MAX_RETRY_ATTEMPTS };
+}
+
+function isNonRetryableError(error: string): boolean {
+  const nonRetryable = [
+    "Invalid OAuth",
+    "expired",
+    "permissions",
+    "not authorized",
+    "duplicate",
+    "already published",
+    "No media URI",
+  ];
+  return nonRetryable.some((e) => error.toLowerCase().includes(e.toLowerCase()));
+}
 
 async function publishToMeta(post: any, accessToken: string, pageId: string): Promise<{ success: boolean; postId?: string; error?: string }> {
   try {
@@ -76,97 +162,178 @@ async function publishToMeta(post: any, accessToken: string, pageId: string): Pr
   }
 }
 
+async function acquireLock(postId: string): Promise<string | null> {
+  const lockToken = generateLockToken();
+  try {
+    const result = await db.update(publishedPosts)
+      .set({
+        publishLockToken: lockToken,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(publishedPosts.id, postId),
+          sql`(${publishedPosts.publishLockToken} IS NULL OR ${publishedPosts.publishLockToken} = '')`
+        )
+      )
+      .returning({ id: publishedPosts.id });
+
+    return result.length > 0 ? lockToken : null;
+  } catch {
+    return null;
+  }
+}
+
+async function releaseLock(postId: string, lockToken: string): Promise<void> {
+  await db.update(publishedPosts)
+    .set({
+      publishLockToken: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(publishedPosts.id, postId),
+        eq(publishedPosts.publishLockToken, lockToken)
+      )
+    );
+}
+
+function determinePublishMode(): "DEMO" | "REAL" {
+  const META_APP_ID = process.env.META_APP_ID || "";
+  const META_APP_SECRET = process.env.META_APP_SECRET || "";
+  return META_APP_ID && META_APP_SECRET ? "REAL" : "DEMO";
+}
+
 async function checkAndPublishDuePosts() {
+  if (isShuttingDown) return;
+
   try {
     const now = new Date();
     const duePosts = await db.select().from(publishedPosts)
       .where(
-        sql`${publishedPosts.status} = 'scheduled' AND ${publishedPosts.scheduledDate} <= ${now}`
+        sql`${publishedPosts.status} = 'scheduled' AND ${publishedPosts.scheduledDate} <= ${now} AND (${publishedPosts.publishLockToken} IS NULL OR ${publishedPosts.publishLockToken} = '')`
       )
       .limit(20);
 
     if (duePosts.length === 0) return;
 
+    const publishMode = determinePublishMode();
+
     for (const post of duePosts) {
+      if (isShuttingDown) break;
+
       const accountId = post.accountId || "default";
-
-      const state = await db.select().from(accountState)
-        .where(eq(accountState.accountId, accountId))
-        .limit(1);
-
-      const acctState = state[0];
-      if (!acctState?.autopilotOn) {
+      const lockToken = await acquireLock(post.id);
+      if (!lockToken) {
+        console.log(`[PublishWorker] Skipping post ${post.id} — already locked`);
         continue;
       }
 
-      if (acctState.state === "SAFE_MODE") {
-        continue;
-      }
+      activePublishCount++;
+      try {
+        const state = await db.select().from(accountState)
+          .where(eq(accountState.accountId, accountId))
+          .limit(1);
 
-      const META_APP_ID = process.env.META_APP_ID || "";
-      const META_APP_SECRET = process.env.META_APP_SECRET || "";
-      const hasMetaCredentials = META_APP_ID && META_APP_SECRET;
+        const acctState = state[0];
+        if (!acctState?.autopilotOn) {
+          await releaseLock(post.id, lockToken);
+          continue;
+        }
 
-      let result: { success: boolean; postId?: string; error?: string };
+        if (acctState.state === "SAFE_MODE") {
+          await releaseLock(post.id, lockToken);
+          continue;
+        }
 
-      if (!hasMetaCredentials) {
-        result = {
-          success: true,
-          postId: "demo_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
-        };
-      } else {
-        const accessToken = (acctState as any).metaAccessToken || "";
-        const pageId = (acctState as any).metaPageId || "";
+        let result: { success: boolean; postId?: string; error?: string; attempts: number };
 
-        if (!accessToken || !pageId) {
+        if (publishMode === "DEMO") {
           result = {
             success: true,
-            postId: "demo_notoken_" + Date.now(),
+            postId: "demo_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+            attempts: 1,
           };
         } else {
-          result = await publishToMeta(post, accessToken, pageId);
+          const accessToken = (acctState as any).metaAccessToken || "";
+          const pageId = (acctState as any).metaPageId || "";
+
+          if (!accessToken || !pageId) {
+            result = {
+              success: true,
+              postId: "demo_notoken_" + Date.now(),
+              attempts: 1,
+            };
+          } else {
+            result = await publishToMetaWithRetry(post, accessToken, pageId, accountId);
+          }
         }
-      }
 
-      if (result.success) {
-        await db.update(publishedPosts)
-          .set({
-            status: "published",
-            metaPostId: result.postId || null,
-            publishedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(publishedPosts.id, post.id));
+        if (result.success) {
+          await db.update(publishedPosts)
+            .set({
+              status: "published",
+              metaPostId: result.postId || null,
+              publishedAt: new Date(),
+              publishMode,
+              publishAttempts: result.attempts,
+              publishLockToken: null,
+              lastPublishError: null,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(publishedPosts.id, post.id),
+                eq(publishedPosts.publishLockToken, lockToken)
+              )
+            );
 
-        await logAudit(accountId, "AUTO_EXECUTION", {
-          details: {
-            action: "auto_published",
-            postId: post.id,
-            metaPostId: result.postId,
-            platform: post.platform,
-            caption: post.caption?.substring(0, 100) + "...",
-          },
-        });
+          await logAudit(accountId, "PUBLISH_SUCCESS", {
+            details: {
+              postId: post.id,
+              metaPostId: result.postId,
+              platform: post.platform,
+              publishMode,
+              attempts: result.attempts,
+              caption: post.caption?.substring(0, 100),
+            },
+          });
 
-        console.log(`[PublishWorker] Published post ${post.id} to ${post.platform} (postId: ${result.postId})`);
-      } else {
-        await db.update(publishedPosts)
-          .set({
-            status: "failed",
-            updatedAt: new Date(),
-          })
-          .where(eq(publishedPosts.id, post.id));
+          console.log(`[PublishWorker] [${publishMode}] Published post ${post.id} to ${post.platform} (attempts: ${result.attempts})`);
+        } else {
+          const currentAttempts = (post.publishAttempts || 0) + result.attempts;
 
-        await logAudit(accountId, "BLOCKED_DECISION", {
-          details: {
-            action: "publish_failed",
-            postId: post.id,
-            platform: post.platform,
-            error: result.error,
-          },
-        });
+          await db.update(publishedPosts)
+            .set({
+              status: currentAttempts >= MAX_RETRY_ATTEMPTS * 2 ? "failed" : "scheduled",
+              publishAttempts: currentAttempts,
+              lastPublishError: result.error || null,
+              publishLockToken: null,
+              publishMode,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(publishedPosts.id, post.id),
+                eq(publishedPosts.publishLockToken, lockToken)
+              )
+            );
 
-        console.error(`[PublishWorker] Failed to publish post ${post.id}: ${result.error}`);
+          const finalStatus = currentAttempts >= MAX_RETRY_ATTEMPTS * 2 ? "PUBLISH_FAILED" : "META_API_ERROR";
+          await logAudit(accountId, finalStatus as any, {
+            details: {
+              postId: post.id,
+              platform: post.platform,
+              error: result.error,
+              publishMode,
+              totalAttempts: currentAttempts,
+            },
+          });
+
+          console.error(`[PublishWorker] [${publishMode}] Failed post ${post.id}: ${result.error} (total attempts: ${currentAttempts})`);
+        }
+      } finally {
+        activePublishCount--;
       }
     }
   } catch (error) {
@@ -175,6 +342,8 @@ async function checkAndPublishDuePosts() {
 }
 
 async function fetchPostMetrics() {
+  if (isShuttingDown) return;
+
   try {
     const META_APP_ID = process.env.META_APP_ID || "";
     const published = await db.select().from(publishedPosts)
@@ -186,6 +355,8 @@ async function fetchPostMetrics() {
     if (published.length === 0) return;
 
     for (const post of published) {
+      if (isShuttingDown) break;
+
       if (!META_APP_ID || !post.metaPostId || post.metaPostId.startsWith("demo_")) {
         const daysSincePublish = post.publishedAt
           ? (Date.now() - new Date(post.publishedAt).getTime()) / (1000 * 60 * 60 * 24)
@@ -252,24 +423,55 @@ async function fetchPostMetrics() {
 
 export function startPublishWorker() {
   if (publishTimer) return;
+  isShuttingDown = false;
 
-  console.log("[PublishWorker] Starting publish worker (2-min interval)");
+  const publishMode = determinePublishMode();
+  console.log(`[PublishWorker] Starting publish worker (2-min interval, mode: ${publishMode})`);
+
+  logAudit("system", "WORKER_STARTUP", {
+    details: {
+      worker: "publish-worker",
+      publishMode,
+      retryConfig: { maxAttempts: MAX_RETRY_ATTEMPTS, baseBackoffMs: BASE_BACKOFF_MS },
+    },
+  }).catch(() => {});
 
   publishTimer = setInterval(async () => {
-    await checkAndPublishDuePosts();
-    await fetchPostMetrics();
+    if (!isShuttingDown) {
+      await checkAndPublishDuePosts();
+      await fetchPostMetrics();
+    }
   }, PUBLISH_CHECK_INTERVAL_MS);
 
   setTimeout(async () => {
-    await checkAndPublishDuePosts();
-    await fetchPostMetrics();
+    if (!isShuttingDown) {
+      await checkAndPublishDuePosts();
+      await fetchPostMetrics();
+    }
   }, 10000);
 }
 
-export function stopPublishWorker() {
+export async function stopPublishWorker(): Promise<void> {
+  isShuttingDown = true;
+
   if (publishTimer) {
     clearInterval(publishTimer);
     publishTimer = null;
-    console.log("[PublishWorker] Stopped");
   }
+
+  const maxWait = 30000;
+  const start = Date.now();
+  while (activePublishCount > 0 && Date.now() - start < maxWait) {
+    await sleep(500);
+  }
+
+  await logAudit("system", "WORKER_SHUTDOWN", {
+    details: {
+      worker: "publish-worker",
+      graceful: activePublishCount === 0,
+      pendingPublishes: activePublishCount,
+    },
+  }).catch(() => {});
+
+  console.log(`[PublishWorker] Stopped (graceful: ${activePublishCount === 0})`);
 }

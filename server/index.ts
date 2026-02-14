@@ -1,8 +1,8 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
-import { startAutonomousWorker } from "./autonomous-worker";
-import { startPublishWorker } from "./publish-worker";
+import { startAutonomousWorker, stopAutonomousWorker } from "./autonomous-worker";
+import { startPublishWorker, stopPublishWorker } from "./publish-worker";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -258,4 +258,21 @@ function setupErrorHandler(app: express.Application) {
       startPublishWorker();
     },
   );
+
+  async function gracefulShutdown(signal: string) {
+    log(`[Server] ${signal} received — shutting down gracefully...`);
+    stopAutonomousWorker();
+    await stopPublishWorker();
+    server.close(() => {
+      log("[Server] HTTP server closed");
+      process.exit(0);
+    });
+    setTimeout(() => {
+      log("[Server] Force exit after timeout");
+      process.exit(1);
+    }, 15000);
+  }
+
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 })();
