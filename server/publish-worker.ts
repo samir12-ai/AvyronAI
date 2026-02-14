@@ -7,6 +7,7 @@ import * as crypto from "crypto";
 const PUBLISH_CHECK_INTERVAL_MS = 2 * 60 * 1000;
 const MAX_RETRY_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 2000;
+const STALE_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
 let publishTimer: ReturnType<typeof setInterval> | null = null;
 let isShuttingDown = false;
 let activePublishCount = 0;
@@ -168,12 +169,15 @@ async function acquireLock(postId: string): Promise<string | null> {
     const result = await db.update(publishedPosts)
       .set({
         publishLockToken: lockToken,
+        publishLockedAt: new Date(),
+        status: "publishing",
         updatedAt: new Date(),
       })
       .where(
         and(
           eq(publishedPosts.id, postId),
-          sql`(${publishedPosts.publishLockToken} IS NULL OR ${publishedPosts.publishLockToken} = '')`
+          sql`(${publishedPosts.publishLockToken} IS NULL OR ${publishedPosts.publishLockToken} = '')`,
+          sql`${publishedPosts.status} = 'scheduled'`
         )
       )
       .returning({ id: publishedPosts.id });
@@ -188,6 +192,8 @@ async function releaseLock(postId: string, lockToken: string): Promise<void> {
   await db.update(publishedPosts)
     .set({
       publishLockToken: null,
+      publishLockedAt: null,
+      status: "scheduled",
       updatedAt: new Date(),
     })
     .where(
@@ -196,6 +202,40 @@ async function releaseLock(postId: string, lockToken: string): Promise<void> {
         eq(publishedPosts.publishLockToken, lockToken)
       )
     );
+}
+
+async function cleanupStaleLocks(): Promise<number> {
+  const cutoff = new Date(Date.now() - STALE_LOCK_TIMEOUT_MS);
+  const stale = await db.update(publishedPosts)
+    .set({
+      publishLockToken: null,
+      publishLockedAt: null,
+      status: "scheduled",
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        sql`${publishedPosts.publishLockToken} IS NOT NULL`,
+        sql`${publishedPosts.status} = 'publishing'`,
+        sql`${publishedPosts.publishLockedAt} < ${cutoff}`
+      )
+    )
+    .returning({ id: publishedPosts.id });
+
+  if (stale.length > 0) {
+    console.log(`[PublishWorker] Cleaned up ${stale.length} stale lock(s): ${stale.map(s => s.id).join(", ")}`);
+    for (const s of stale) {
+      await logAudit("system", "GUARDRAIL_TRIGGER", {
+        details: {
+          action: "stale_lock_cleanup",
+          postId: s.id,
+          lockTimeoutMs: STALE_LOCK_TIMEOUT_MS,
+        },
+      });
+    }
+  }
+
+  return stale.length;
 }
 
 function determinePublishMode(): "DEMO" | "REAL" {
@@ -208,6 +248,8 @@ async function checkAndPublishDuePosts() {
   if (isShuttingDown) return;
 
   try {
+    await cleanupStaleLocks();
+
     const now = new Date();
     const duePosts = await db.select().from(publishedPosts)
       .where(
@@ -278,6 +320,7 @@ async function checkAndPublishDuePosts() {
               publishMode,
               publishAttempts: result.attempts,
               publishLockToken: null,
+              publishLockedAt: null,
               lastPublishError: null,
               updatedAt: new Date(),
             })
@@ -309,6 +352,7 @@ async function checkAndPublishDuePosts() {
               publishAttempts: currentAttempts,
               lastPublishError: result.error || null,
               publishLockToken: null,
+              publishLockedAt: null,
               publishMode,
               updatedAt: new Date(),
             })
@@ -450,6 +494,8 @@ export function startPublishWorker() {
     }
   }, 10000);
 }
+
+export { cleanupStaleLocks, acquireLock, releaseLock, isNonRetryableError, STALE_LOCK_TIMEOUT_MS, MAX_RETRY_ATTEMPTS };
 
 export async function stopPublishWorker(): Promise<void> {
   isShuttingDown = true;

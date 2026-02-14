@@ -457,6 +457,7 @@ export const publishedPosts = pgTable("published_posts", {
   clicks: integer("clicks").default(0),
   lastMetricsFetch: timestamp("last_metrics_fetch"),
   publishLockToken: varchar("publish_lock_token"),
+  publishLockedAt: timestamp("publish_locked_at"),
   publishMode: text("publish_mode").default("DEMO"),
   publishAttempts: integer("publish_attempts").default(0),
   lastPublishError: text("last_publish_error"),
