@@ -395,9 +395,22 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
     }
   });
 
+  function getPublicBaseUrl(req: any): string {
+    const forwardedHost = req.get('x-forwarded-host') || req.get('host');
+    const forwardedProto = req.get('x-forwarded-proto') || req.protocol;
+    if (forwardedHost && !forwardedHost.includes('localhost')) {
+      return `https://${forwardedHost}`;
+    }
+    const replitDomain = process.env.REPLIT_DEV_DOMAIN;
+    if (replitDomain) {
+      return `https://${replitDomain}`;
+    }
+    return `${forwardedProto}://${forwardedHost || req.get('host')}`;
+  }
+
   app.get("/api/auth/facebook", (req, res) => {
     const META_APP_ID = process.env.META_APP_ID || '';
-    const REDIRECT_URI = `${req.protocol}://${req.get('host')}/api/auth/facebook/callback`;
+    const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/auth/facebook/callback`;
     
     const scopes = ['email', 'public_profile'].join(',');
     const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&response_type=code`;
@@ -434,7 +447,7 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
     const { code } = req.query;
     const META_APP_ID = process.env.META_APP_ID || '';
     const META_APP_SECRET = process.env.META_APP_SECRET || '';
-    const REDIRECT_URI = `${req.protocol}://${req.get('host')}/api/auth/facebook/callback`;
+    const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/auth/facebook/callback`;
     
     if (!code || !META_APP_ID || !META_APP_SECRET) {
       res.send(`
@@ -498,7 +511,7 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
 
   app.get("/api/auth/instagram", (req, res) => {
     const META_APP_ID = process.env.META_APP_ID || '';
-    const REDIRECT_URI = `${req.protocol}://${req.get('host')}/api/auth/instagram/callback`;
+    const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/auth/instagram/callback`;
     
     const scopes = ['instagram_basic', 'instagram_content_publish'].join(',');
     const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&response_type=code`;
@@ -535,7 +548,7 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
     const { code } = req.query;
     const META_APP_ID = process.env.META_APP_ID || '';
     const META_APP_SECRET = process.env.META_APP_SECRET || '';
-    const REDIRECT_URI = `${req.protocol}://${req.get('host')}/api/auth/instagram/callback`;
+    const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/auth/instagram/callback`;
     
     if (!code || !META_APP_ID || !META_APP_SECRET) {
       res.send(`
@@ -613,7 +626,7 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
 
   app.get("/api/meta/auth", (req, res) => {
     const META_APP_ID = process.env.META_APP_ID || '';
-    const REDIRECT_URI = `${req.protocol}://${req.get('host')}/api/meta/callback`;
+    const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/meta/callback`;
     
     const scopes = [
       'pages_show_list',
@@ -675,7 +688,7 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
     const { code } = req.query;
     const META_APP_ID = process.env.META_APP_ID || '';
     const META_APP_SECRET = process.env.META_APP_SECRET || '';
-    const REDIRECT_URI = `${req.protocol}://${req.get('host')}/api/meta/callback`;
+    const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/meta/callback`;
     
     if (!code || !META_APP_ID || !META_APP_SECRET) {
       res.send(`
