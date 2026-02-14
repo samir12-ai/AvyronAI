@@ -19,7 +19,14 @@ export type AuditEventType =
   | "FATIGUE_DETECTED"
   | "STATE_CHANGE"
   | "CONFIDENCE_UPDATED"
-  | "STATE_TRANSITION";
+  | "STATE_TRANSITION"
+  | "MONTHLY_CAP_BLOCKED"
+  | "PUBLISH_RETRY_FAILED"
+  | "META_API_ERROR"
+  | "PUBLISH_SUCCESS"
+  | "PUBLISH_FAILED"
+  | "WORKER_SHUTDOWN"
+  | "WORKER_STARTUP";
 
 export async function logAudit(
   accountId: string,

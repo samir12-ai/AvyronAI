@@ -1,0 +1,123 @@
+
+REQUIRED (Production Hardening)
+
+
+Before public release, we must close the following critical gaps.
+These are mandatory for a system that controls real ad budgets.
+
+Please confirm implementation for each:
+
+
+
+
+1️⃣ Enforce Monthly Budget Cap (Hard Block)
+
+
+	•	Implement real enforcement of monthly_budget_limit in guardrails.ts
+	•	Block any execution once monthly spend reaches the configured cap
+	•	Log event: MONTHLY_CAP_BLOCKED
+	•	Must behave exactly like daily cap (hard pre-execution block)
+
+
+
+
+
+2️⃣ Add Retry + Exponential Backoff for Meta API
+
+
+For publishing worker:
+
+	•	Implement retry logic for Meta API failures (5xx, timeout)
+	•	Use exponential backoff (e.g., 3 attempts max)
+	•	If all retries fail: 
+	◦	Mark post as failed
+	◦	Log PUBLISH_RETRY_FAILED
+	•	
+	•	Must prevent silent publish failure
+
+
+
+
+
+3️⃣ Add Explicit Idempotency Protection
+
+
+	•	Add unique publish execution ID per scheduled post
+	•	Prevent duplicate publishing even if: 
+	◦	Worker restarts mid-execution
+	◦	Lock expires incorrectly
+	•	
+	•	Add field: publish_lock_token or similar
+	•	Ensure publish can only occur once per scheduled post
+
+
+
+
+
+4️⃣ Improve Worker Reliability
+
+
+Current worker uses setInterval.
+
+Add:
+
+	•	Graceful shutdown handling
+	•	Safe restart handling
+	•	Ensure no duplicate processing on server restart
+	•	Prepare architecture for future queue-based upgrade
+
+
+
+
+
+5️⃣ Add Automated Integrity Tests
+
+
+Implement test scenarios for:
+
+	•	Overspend prevention (daily + monthly)
+	•	CPA spike
+	•	ROAS drop
+	•	Volatility spike
+	•	SAFE_MODE activation
+	•	Recovery flow
+	•	Worker restart simulation
+	•	Duplicate publish simulation
+	•	Meta API failure simulation
+
+
+System must pass these before public release.
+
+
+
+
+6️⃣ Improve Logging Transparency
+
+
+	•	Add explicit publish_mode field: DEMO or REAL
+	•	Add META_API_ERROR event log type
+	•	Ensure all API failures are logged clearly
+
+
+
+
+
+Goal
+
+
+Before public launch, the system must be:
+
+	•	Budget-safe
+	•	Failure-resilient
+	•	Idempotent
+	•	Restart-safe
+	•	Fully logged
+	•	Tested under stress scenarios
+
+
+No assumptions. Confirm implementation per item.
+
+
+
+هاي الرسالة بتخلي Replit يشتغل على مستوى Production SaaS حقيقي،
+مش بس AI demo system �

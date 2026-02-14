@@ -134,6 +134,7 @@ async function runStrategyAnalysis(
     ? "All guardrails passed — full operational capacity."
     : `GUARDRAIL ALERTS: ${[
         !guardrailResult.budgetCap.passed ? guardrailResult.budgetCap.reason : null,
+        !guardrailResult.monthlyBudgetCap.passed ? guardrailResult.monthlyBudgetCap.reason : null,
         !guardrailResult.cpaGuard.passed ? guardrailResult.cpaGuard.reason : null,
         !guardrailResult.roasFloor.passed ? guardrailResult.roasFloor.reason : null,
         !guardrailResult.volatility.passed ? guardrailResult.volatility.reason : null,

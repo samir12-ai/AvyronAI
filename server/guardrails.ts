@@ -11,6 +11,7 @@ import { logAudit } from "./audit";
 
 export interface GuardrailCheckResult {
   budgetCap: { passed: boolean; reason?: string };
+  monthlyBudgetCap: { passed: boolean; reason?: string; monthlySpend?: number; limit?: number };
   cpaGuard: { passed: boolean; reason?: string; currentCpa?: number; thresholdCpa?: number };
   roasFloor: { passed: boolean; reason?: string; currentRoas?: number; floor?: number };
   volatility: { passed: boolean; reason?: string; index?: number; threshold?: number };
@@ -49,6 +50,32 @@ async function checkDailyBudgetCap(accountId: string, config: any): Promise<{ pa
     return { passed: false, reason: `Daily spend $${todaySpend.toFixed(2)} >= limit $${limit}` };
   }
   return { passed: true };
+}
+
+async function checkMonthlyBudgetCap(accountId: string, config: any): Promise<{ passed: boolean; reason?: string; monthlySpend?: number; limit?: number }> {
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+
+  const spendResult = await db.select({
+    totalSpend: sql<number>`coalesce(sum(${performanceSnapshots.spend}), 0)`,
+  }).from(performanceSnapshots)
+    .where(gte(performanceSnapshots.fetchedAt, monthStart));
+
+  const monthlySpend = Number(spendResult[0]?.totalSpend) || 0;
+  const limit = config?.monthlyBudgetLimit || 2000;
+
+  if (monthlySpend >= limit) {
+    await logAudit(accountId, "MONTHLY_CAP_BLOCKED", {
+      details: {
+        monthlySpend: monthlySpend.toFixed(2),
+        limit,
+        month: monthStart.toISOString().slice(0, 7),
+      },
+    });
+    return { passed: false, reason: `Monthly spend $${monthlySpend.toFixed(2)} >= limit $${limit}`, monthlySpend, limit };
+  }
+  return { passed: true, monthlySpend, limit };
 }
 
 async function checkCpaGuard(accountId: string, config: any): Promise<{ passed: boolean; reason?: string; currentCpa?: number; thresholdCpa?: number }> {
@@ -243,8 +270,9 @@ export async function checkSafeModeConditions(accountId: string): Promise<{
 export async function runAllGuardrails(accountId: string): Promise<GuardrailCheckResult> {
   const config = await getConfig(accountId);
 
-  const [budgetCap, cpaGuard, roasFloor, volatility, fatigue] = await Promise.all([
+  const [budgetCap, monthlyBudgetCap, cpaGuard, roasFloor, volatility, fatigue] = await Promise.all([
     checkDailyBudgetCap(accountId, config),
+    checkMonthlyBudgetCap(accountId, config),
     checkCpaGuard(accountId, config),
     checkRoasFloor(accountId, config),
     computeVolatilityIndex(accountId, config),
@@ -253,12 +281,13 @@ export async function runAllGuardrails(accountId: string): Promise<GuardrailChec
 
   const triggeredCount = [
     !budgetCap.passed,
+    !monthlyBudgetCap.passed,
     !cpaGuard.passed,
     !roasFloor.passed,
     !volatility.passed,
   ].filter(Boolean).length;
 
-  const overallEligible = budgetCap.passed && cpaGuard.passed && roasFloor.passed && volatility.passed;
+  const overallEligible = budgetCap.passed && monthlyBudgetCap.passed && cpaGuard.passed && roasFloor.passed && volatility.passed;
 
   if (triggeredCount > 0) {
     await db.update(accountState)
@@ -270,6 +299,7 @@ export async function runAllGuardrails(accountId: string): Promise<GuardrailChec
 
     const triggeredRules: string[] = [];
     if (!budgetCap.passed) triggeredRules.push("BUDGET_CAP");
+    if (!monthlyBudgetCap.passed) triggeredRules.push("MONTHLY_BUDGET_CAP");
     if (!cpaGuard.passed) triggeredRules.push("CPA_GUARD");
     if (!roasFloor.passed) triggeredRules.push("ROAS_FLOOR");
     if (!volatility.passed) triggeredRules.push("VOLATILITY");
@@ -278,6 +308,7 @@ export async function runAllGuardrails(accountId: string): Promise<GuardrailChec
       details: {
         triggeredRules,
         budgetCap: budgetCap.reason,
+        monthlyBudgetCap: monthlyBudgetCap.reason,
         cpaGuard: cpaGuard.reason,
         roasFloor: roasFloor.reason,
         volatility: volatility.reason,
@@ -312,6 +343,7 @@ export async function runAllGuardrails(accountId: string): Promise<GuardrailChec
 
   return {
     budgetCap,
+    monthlyBudgetCap,
     cpaGuard,
     roasFloor,
     volatility,
