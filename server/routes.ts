@@ -513,7 +513,7 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
     const META_APP_ID = process.env.META_APP_ID || '';
     const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/auth/instagram/callback`;
     
-    const scopes = ['instagram_basic', 'instagram_content_publish'].join(',');
+    const scopes = ['public_profile', 'email'].join(',');
     const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&response_type=code`;
     
     if (!META_APP_ID) {
@@ -628,15 +628,7 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
     const META_APP_ID = process.env.META_APP_ID || '';
     const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/meta/callback`;
     
-    const scopes = [
-      'pages_show_list',
-      'pages_read_engagement',
-      'pages_manage_posts',
-      'instagram_basic',
-      'instagram_content_publish',
-      'ads_management',
-      'business_management',
-    ].join(',');
+    const scopes = ['public_profile', 'email'].join(',');
     
     const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&response_type=code`;
     
