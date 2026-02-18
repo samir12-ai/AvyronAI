@@ -30,7 +30,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/generate-content", async (req, res) => {
     try {
-      const { topic, contentType, platform, brandName, tone, targetAudience, industry } = req.body;
+      const { topic, contentType, platform, brandName, tone, targetAudience, industry, aiEngine } = req.body;
 
       if (!topic) {
         return res.status(400).json({ error: "Topic is required" });
@@ -62,27 +62,52 @@ Requirements:
 - Optimize for the platform's best practices
 - Include a clear call-to-action if appropriate`;
 
-      const response = await openai.chat.completions.create({
-        model: "gpt-5.2",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        max_completion_tokens: 500,
-      });
+      let content = "";
 
-      const content = response.choices[0]?.message?.content || "";
+      if (aiEngine === 'gemini') {
+        const geminiResponse = await geminiAi.models.generateContent({
+          model: "gemini-3-pro-preview",
+          contents: [
+            { role: "user", parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] },
+          ],
+          config: { maxOutputTokens: 2048 },
+        });
+        content = geminiResponse.text || "";
+      } else {
+        const response = await openai.chat.completions.create({
+          model: "gpt-5.2",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_completion_tokens: 2048,
+        });
+        content = response.choices[0]?.message?.content || "";
+      }
 
-      res.json({ content });
+      res.json({ content, engine: aiEngine === 'gemini' ? 'Gemini 3 Pro' : 'GPT-5.2' });
     } catch (error) {
       console.error("Error generating content:", error);
       res.status(500).json({ error: "Failed to generate content" });
     }
   });
 
+  app.get("/api/ai-engines", (_req, res) => {
+    res.json({
+      engines: [
+        { id: 'openai', name: 'GPT-5.2', provider: 'OpenAI', capabilities: ['content', 'ads', 'strategy', 'video', 'captions'], tier: 'ChatGPT Plus' },
+        { id: 'gemini', name: 'Gemini 3 Pro', provider: 'Google', capabilities: ['content', 'ads', 'strategy', 'images'], tier: 'Gemini Pro' },
+      ],
+      imageEngines: [
+        { id: 'openai-image', name: 'GPT Image 1', provider: 'OpenAI', tier: 'ChatGPT Plus' },
+        { id: 'gemini-image', name: 'Nano Banana Pro', provider: 'Google', model: 'gemini-3-pro-image-preview', tier: 'Gemini Pro' },
+      ],
+    });
+  });
+
   app.post("/api/generate-ad", async (req, res) => {
     try {
-      const { brandName, industry, tone, targetAudience, platforms } = req.body;
+      const { brandName, industry, tone, targetAudience, platforms, aiEngine } = req.body;
 
       const platformList = platforms?.join(', ') || 'social media';
 
@@ -112,22 +137,34 @@ Return your response in this exact JSON format:
 
 Make sure the content works well across all the specified platforms.`;
 
-      const response = await openai.chat.completions.create({
-        model: "gpt-5.2",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        max_completion_tokens: 300,
-      });
+      let rawContent = "";
 
-      const content = response.choices[0]?.message?.content || "";
-      
+      if (aiEngine === 'gemini') {
+        const geminiResponse = await geminiAi.models.generateContent({
+          model: "gemini-3-pro-preview",
+          contents: [
+            { role: "user", parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] },
+          ],
+          config: { maxOutputTokens: 1024 },
+        });
+        rawContent = geminiResponse.text || "";
+      } else {
+        const response = await openai.chat.completions.create({
+          model: "gpt-5.2",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_completion_tokens: 1024,
+        });
+        rawContent = response.choices[0]?.message?.content || "";
+      }
+
       try {
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);
-          res.json(parsed);
+          res.json({ ...parsed, engine: aiEngine === 'gemini' ? 'Gemini 3 Pro' : 'GPT-5.2' });
         } else {
           res.json({ 
             headline: "Discover Something Amazing Today",

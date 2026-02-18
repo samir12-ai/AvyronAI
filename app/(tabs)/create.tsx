@@ -234,6 +234,7 @@ export default function CreateScreen() {
   const moodOptions = moodOptionsDef.map(m => ({ ...m, label: t(m.labelKey) }));
 
   const [activeTab, setActiveTab] = useState<'content' | 'designer'>('content');
+  const [aiEngine, setAiEngine] = useState<'openai' | 'gemini'>('openai');
   
   const [contentType, setContentType] = useState<string>('post');
   const [platform, setPlatform] = useState<string[]>(['Instagram']);
@@ -296,6 +297,7 @@ export default function CreateScreen() {
           tone: brandProfile.tone || 'Professional',
           targetAudience: brandProfile.targetAudience || 'general audience',
           industry: brandProfile.industry || 'business',
+          aiEngine,
         });
         const data = await response.json();
         setGeneratedContent(data.content);
@@ -588,6 +590,29 @@ export default function CreateScreen() {
 
           {activeTab === 'content' ? (
             <>
+              <View style={[styles.engineToggle, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <Pressable
+                  onPress={() => { Haptics.selectionAsync(); setAiEngine('openai'); }}
+                  style={[
+                    styles.engineBtn,
+                    { backgroundColor: aiEngine === 'openai' ? '#10A37F' : colors.inputBackground }
+                  ]}
+                >
+                  <Ionicons name="flash" size={14} color={aiEngine === 'openai' ? '#fff' : colors.textMuted} />
+                  <Text style={[styles.engineBtnText, { color: aiEngine === 'openai' ? '#fff' : colors.textMuted }]}>GPT-5.2</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => { Haptics.selectionAsync(); setAiEngine('gemini'); }}
+                  style={[
+                    styles.engineBtn,
+                    { backgroundColor: aiEngine === 'gemini' ? '#4285F4' : colors.inputBackground }
+                  ]}
+                >
+                  <Ionicons name="diamond" size={14} color={aiEngine === 'gemini' ? '#fff' : colors.textMuted} />
+                  <Text style={[styles.engineBtnText, { color: aiEngine === 'gemini' ? '#fff' : colors.textMuted }]}>Gemini 3 Pro</Text>
+                </Pressable>
+              </View>
+
               <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
                 <Text style={[styles.cardTitle, { color: colors.text }]}>{t('create.contentType')}</Text>
                 <View style={styles.contentTypeGrid}>
@@ -1383,6 +1408,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Inter_400Regular',
     marginBottom: 20,
+  },
+  engineToggle: {
+    flexDirection: 'row' as const,
+    gap: 8,
+    marginBottom: 12,
+    padding: 4,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  engineBtn: {
+    flex: 1,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    paddingVertical: 8,
+    borderRadius: 10,
+    gap: 6,
+  },
+  engineBtnText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
   },
   tabBar: {
     flexDirection: 'row',
