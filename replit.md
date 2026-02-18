@@ -2,7 +2,7 @@
 
 ## Overview
 
-MarketMind AI is a cross-platform marketing automation application built with Expo (React Native). It provides AI-powered content generation for social media marketing, campaign management, content scheduling, and analytics dashboards. The app enables marketers to create posts, ads, and captions using OpenAI integration while managing their brand presence across multiple social platforms.
+MarketMind AI is a cross-platform marketing automation application that leverages AI to generate content for social media, manage campaigns, schedule posts, and provide analytics. Built with Expo (React Native), it aims to empower marketers by streamlining their workflow and enhancing their brand's presence across various social platforms through AI-powered content creation and strategic insights. The project's vision is to offer an "AI Agency Replacement" with a strong focus on revenue generation and autonomous marketing capabilities.
 
 ## User Preferences
 
@@ -10,137 +10,66 @@ Preferred communication style: Simple, everyday language.
 
 ## System Architecture
 
-### Frontend Architecture
-- **Framework**: Expo SDK 54 with React Native 0.81, using the new architecture
-- **Navigation**: Expo Router v6 with file-based routing and typed routes
-- **State Management**: React Context API (`AppContext`, `AuthContext`, `LanguageContext`) for global app state, TanStack React Query for server state
-- **Internationalization**: i18n-js with expo-localization for 32 languages, LanguageContext for persistence via AsyncStorage
-- **UI Components**: Custom component library with platform-adaptive styling (light/dark mode support)
-- **Animations**: React Native Reanimated for smooth animations and transitions
-- **Styling**: StyleSheet API with dynamic theming via `useColorScheme`
+### Core Design Principles
+- **Monorepo Structure**: Shared codebase between client and server.
+- **Type Safety**: Full TypeScript with strict mode for robust development.
+- **Platform Abstraction**: Components designed for iOS, Android, and Web compatibility.
+- **Dynamic Theming**: Support for light and dark modes with platform-adaptive styling.
 
-### Backend Architecture
-- **Server**: Express.js running on Node.js with TypeScript
-- **API Design**: RESTful endpoints under `/api/*` prefix
-- **AI Integration**: OpenAI API via Replit AI Integrations for content generation, image generation, and voice features
-- **CORS**: Dynamic origin handling for Replit domains and localhost development
+### Frontend
+- **Framework**: Expo SDK 54 with React Native 0.81 (new architecture).
+- **Navigation**: Expo Router v6 with file-based routing.
+- **State Management**: React Context API for global state, TanStack React Query for server state.
+- **Internationalization**: i18n-js for 32 languages, with persistence via AsyncStorage.
+- **UI/UX**: Custom component library, React Native Reanimated for animations.
+
+### Backend
+- **Server**: Express.js with Node.js and TypeScript.
+- **API Design**: RESTful endpoints.
+- **AI Integration**: Dual-AI engine architecture utilizing OpenAI GPT-5.2 and Google Gemini 3 Pro for content generation and strategy analysis. Nano Banana Pro (Gemini 3 Pro Image) and GPT Image 1 for AI image/design generation.
+- **Autonomous Engine**: Production-safe, silent backend system with code-enforced guardrails for marketing decisions. Includes modules for Guardrail Engine, Adaptive Baselines, Hybrid Risk Classifier, Decision Feedback Loop, and an Audit System. Autopilot functionality allows for automated execution of low-risk decisions, with higher risk decisions requiring approval or being blocked.
 
 ### Data Storage
-- **Client-side**: AsyncStorage for persisting brand profiles, content items, campaigns, ads, platform connections, and posting schedules
-- **Server-side**: PostgreSQL with Drizzle ORM for user data and chat conversations
-- **Schema Location**: `shared/schema.ts` contains database models shared between client and server
+- **Client-side**: AsyncStorage for local data persistence (brand profiles, content, campaigns, schedules).
+- **Server-side**: PostgreSQL with Drizzle ORM for user data and chat conversations.
 
-### Key Design Patterns
-- **Monorepo Structure**: Shared code between client and server in `shared/` directory
-- **Type Safety**: Full TypeScript with strict mode, shared types in `lib/types.ts`
-- **Error Handling**: ErrorBoundary component wraps the app for graceful error recovery
-- **Platform Abstraction**: Components adapt to iOS, Android, and Web platforms
-
-### Tab-Based Navigation Structure
-1. **Dashboard** (`index.tsx`): CEO-friendly revenue-first layout with "AI Agency Replacement" branding:
-   - **Autopilot Status Bar**: Green shield badge with "Autopilot Active" / "ACTIVE" indicator
-   - **Main Revenue KPI**: Large estimated revenue card as primary metric
-   - **3 Small KPIs**: Spend, ROAS, Results in compact row
-   - **AI Actions (Last 48h)**: Shows recent AI decisions/optimizations from strategy engine
-   - **Today's Focus**: AI-generated daily priority card
-   - **Collapsible Advanced Insights**: Weekly performance chart and detailed analytics hidden by default
-2. **Create** (`create.tsx`): AI-powered content generation with two modes:
-   - **AI Writer**: GPT-5.2 powered text content generation (posts, captions, ad copy, stories)
-   - **AI Designer**: Artlist-level image generation studio powered by Nano Banana Pro (Gemini 3 Pro Image) with:
-     - Three generation modes: Create (text-to-image), Transform (image-to-image), Edit (image modification)
-     - 6 visual style presets: Cinematic, Professional, Commercial, Indie, Minimal, Vibrant
-     - Aspect ratio selection: Square (1:1), Portrait (4:5), Landscape (16:9), Story (9:16)
-     - Up to 3 reference image uploads from gallery
-     - Advanced options: mood control (Energetic, Calm, Dramatic, Playful, Luxurious, Warm) + text overlay
-     - Canvas workspace with full-screen preview modal
-     - Generation history gallery (session-based)
-     - Premium animated loading overlay
-3. **Calendar** (`calendar.tsx`): Content scheduling and calendar view with AI Calendar Assistant
-   - **AI Content Plan Banner**: Green shield "AI Content Plan Active" status bar with link to AI planner
-4. **AI Management** (`ai-management.tsx`): AI-powered automation hub with three tabs:
-   - **Auto-Publisher**: Batch publish scheduled posts to Meta platforms, auto-publish toggle, publish queue with multi-select, connection status with pulsing indicator, demo mode when Meta not connected
-   - **AI Audience Manager**: Generate 3 optimized Meta ad audiences from campaign goals using GPT-5.2, with detailed targeting breakdown (demographics, interests, behaviors, placements, bid strategy, match scores), expandable audience cards, and campaign-based quick optimization
-   - **Strategy Hub** (via `components/StrategyHub.tsx`): AI-powered Strategic Intelligence Engine with MOAT BUILDER MODE, 8 sub-views:
-     - **Overview**: Performance metrics dashboard (avg reach, CTR, CPA, ROAS), sync Meta data or use demo mode, run AI analysis with executive summary + moat signals
-     - **Moat**: Brand defensibility system with 4-score dashboard (Authority, Differentiation, Moat Strength, Fatigue Risk), IP contribution tracking, moat candidate scanning from memory/patterns, convert candidates to Signature Series (episode structure, hook formula, CTA framework, posting cadence, expansion roadmap), scoring system (Stability 0-1, Resonance 0-1, Uniqueness 0-1, weighted Moat Score)
-     - **Patterns**: AI-detected content patterns with confidence scores, grouped by category (pattern, hook, format, audience, objection)
-     - **Decisions**: Rule-based decision engine with execute/reject actions, priority levels, budget adjustment recommendations
-     - **Memory**: Long-term memory bank tracking winners and losers (winning angles, hooks, formats, audience patterns, objections)
-     - **Growth**: 30-day AI-managed growth campaigns with 3 phases (Testing days 1-10, Optimization days 11-20, Authority days 21-30), progress tracking, daily advancement
-     - **Reports**: AI-generated weekly strategic reports with what worked/failed, root cause analysis, scaling recommendations, budget reallocation
-     - **Sniper**: Audience sniping tool - AI detects micro-segments, interest stacking strategies, lookalike audiences, exclusion groups, objection-handling content
-     - **Backend**: `server/strategy-routes.ts` - 19+ API endpoints for performance sync, AI analysis (MOAT BUILDER mode), decisions management, growth campaigns, weekly reports, audience sniping, moat scanning, signature series creation, moat dashboard
-     - **Database**: 8 tables (performance_snapshots, strategy_insights, strategy_decisions, strategy_memory, growth_campaigns, weekly_reports, moat_candidates, signature_series)
-     - **Demo Mode**: Generates 30 synthetic performance records with realistic data when Meta API is unavailable
-     - **AI Prompting**: MOAT BUILDER MODE system prompt prioritizes brand defensibility, authority building, differentiation, and competitive defense over short-term optimization
-5. **Studio** (`studio.tsx`): Consolidated media hub with mode switcher between two views:
-   - **Media Library**: Upload and manage videos, images, and posters with platform tagging and scheduling status
-   - **AI Video Editor** (via `components/VideoEditorContent.tsx`): AI-powered video editing with FFmpeg processing, guided creative brief flow
-     - **Creative Brief** (Step 1): Guided prompts asking users to describe their video vision, select video type (Promo/Reel/Ad/Story/Recap/Tutorial), target audience, key message. 6 quick templates (Product Launch Hype, Cinematic Brand Film, Instagram Reel, Luxury Showcase, Event Highlights, Ad Creative) auto-fill brief + settings. Style/mood/pace/transition/text overlay configuration.
-     - **Upload** (Step 2): Multi-clip upload (up to 20 clips, 200MB max each) using expo-file-system File class + expo/fetch, automatic video info extraction via ffprobe, brief summary card
-     - **Review & Start** (Step 3): Shows uploaded clips with metadata, full brief summary with tags, then triggers AI processing
-     - **AI Processing** (Step 4): GPT-5.2 reads creative brief + analyzes clips to create professional edit plans (clip ordering, trim points, transitions, color grading) tailored to the user's vision
-     - **FFmpeg Rendering**: Complex filter graph processing with fallback to simple concatenation, libx264 encoding
-     - **Backend**: `server/video-routes.ts` - clip upload, AI edit plan generation with creative brief context, FFmpeg processing, project management
-6. **Photography** (`photography.tsx`): Dubai-based photography marketplace with dual-role system:
-   - **Photographer View**: Profile creation (name, email, specialties, pricing, Instagram), portfolio management (image upload, categories: Wedding/Portrait/Event/Product/Fashion/Nature), reservation management with confirm/decline actions
-   - **Customer View**: Browse photographers by city, horizontal scroll cards, portfolio feed with like/share/reserve interactions, photographer detail modal with bio and portfolio grid, booking form with event type selection and date/time/location
-   - **Backend**: `server/photography-routes.ts` - CRUD for profiles, portfolio posts, interactions (like/unlike toggle), reservations with status management
-7. **Settings** (`settings.tsx`): Brand profile and platform connections
-
-### Autonomous Backend Architecture (Production-Safe)
-The autonomous engine runs silently behind the UI with zero visual changes, executing marketing decisions with code-enforced guardrails.
-
-**Core Modules:**
-- **Guardrail Engine** (`server/guardrails.ts`): Code-enforced hard rules run before AI analysis — daily budget cap ($100), CPA guard (>1.25x rolling 7d blocks scaling), ROAS floor (<1.5 for 48h blocks), volatility index (coefficient of variation), creative fatigue detection (CTR drop >20% + frequency >2.5 + impressions rising auto-creates refresh decision)
-- **Adaptive Baselines** (`server/baselines.ts`): Rolling 7-day CPA/ROAS/CTR averages stored per cycle, sustained drift detection flags only if >15% deviation persists across 3 consecutive worker cycles
-- **Hybrid Risk Classifier** (`server/risk-classifier.ts`): AI suggests risk level, code validates/overrides — budget >30%=HIGH, 15-30%=MEDIUM, <15%=LOW; guardrail trigger forces min MEDIUM; UNSTABLE/SAFE_MODE floors at MEDIUM; high volatility bumps risk up one level
-- **Decision Feedback Loop** (`server/outcome-tracker.ts`): Pre-metrics snapshot at execution, 48h post-metrics evaluation (success/neutral/failure), rolling success_rate per decision type (last 20), blocks auto-execution if success_rate <40% for a type, feeds outcome history into AI prompts
-- **Audit System** (`server/audit.ts`): 15+ event types (GUARDRAIL_TRIGGER, AUTO_EXECUTION, BLOCKED_DECISION, DRIFT_DETECTED/CLEARED, SAFE_MODE_ACTIVATED/CLEARED, AUTOPILOT_TOGGLED, EMERGENCY_STOP, JOB_STARTED/COMPLETED/FAILED, VOLATILITY_CHANGE, OUTCOME_EVALUATED, FATIGUE_DETECTED)
-- **Autonomous Worker** (`server/autonomous-worker.ts`): DB-backed scheduler checks every 5 min for accounts due (>6h since last run), per-account locking with 30-min stale timeout, idempotent cycles: baselines → volatility → guardrails → drift check → SAFE_MODE check → AI analysis (GPT-5.2 with memory + outcomes) → hybrid risk classify → auto-execute LOW if autopilot ON + ACTIVE + guardrails clear
-- **Autopilot API** (`server/autopilot-routes.ts`): GET/PATCH `/api/autopilot/status`, POST `/api/autopilot/emergency-stop`, GET `/api/audit-log`, GET `/api/autopilot/guardrails`
-
-**Execution Tiers:** LOW auto-executes if eligible, MEDIUM requires approval, HIGH blocked + alert logged
-
-**SAFE_MODE Auto-Triggers:** Volatility >0.35, sustained drift (3 cycles), 3+ guardrail triggers in 24h, 2 consecutive failed auto-decisions
-
-**Database Tables (6 new):** guardrail_config, baseline_history, decision_outcomes, audit_log, account_state, job_queue — all keyed by account_id for multi-account isolation
-
-**Conservative Defaults:** Daily budget $100, monthly $2000, CPA multiplier 1.25, ROAS floor 1.5, volatility threshold 0.35, max scaling 15%
+### Key Features
+- **Dashboard**: Revenue-focused layout with KPIs, AI action summaries, and daily priorities.
+- **Create**: AI Writer for text content (posts, captions, ads) and AI Designer for image generation (text-to-image, image-to-image, editing) with style presets, aspect ratio controls, and advanced mood configuration.
+- **Calendar**: Content scheduling with an AI Calendar Assistant for planning.
+- **AI Management**:
+    - **Auto-Publisher**: Batch publishing to Meta platforms.
+    - **AI Audience Manager**: Generates optimized Meta ad audiences.
+    - **Strategy Hub**: AI-powered strategic intelligence engine with MOAT BUILDER MODE for brand defensibility, pattern detection, decision management, memory tracking, growth campaigns, and AI-generated reports.
+- **Studio**: Media library and an AI Video Editor with guided creative briefs, multi-clip uploads, AI-generated edit plans, and FFmpeg rendering.
+- **Photography**: A Dubai-based photography marketplace with dual roles for photographers (profile, portfolio, reservation management) and customers (browsing, booking).
+- **Settings**: Brand profile and platform connections management.
 
 ## External Dependencies
 
 ### AI Services
-- **OpenAI API**: Content generation, image creation, voice transcription via Replit AI Integrations
-- **Environment Variables**: `AI_INTEGRATIONS_OPENAI_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL`
+- **OpenAI API**: Used for various AI capabilities, integrated via Replit AI Integrations.
+- **Google Gemini 3 Pro**: Utilized for content generation and strategic analysis.
 
 ### Database
-- **PostgreSQL**: Required for server-side data persistence
-- **Environment Variable**: `DATABASE_URL` for database connection
-- **ORM**: Drizzle with Drizzle Kit for migrations (`migrations/` directory)
+- **PostgreSQL**: Primary database for server-side data, managed with Drizzle ORM.
 
 ### User Authentication
-- **Login Options**: Facebook and Instagram OAuth login via Meta APIs
-- **Backend Endpoints**: `/api/auth/facebook`, `/api/auth/facebook/callback`, `/api/auth/instagram`, `/api/auth/instagram/callback`
-- **Demo Mode**: Works without META_APP_ID/SECRET (simulated login)
-- **Auth Context**: `context/AuthContext.tsx` manages user state with AsyncStorage persistence
-- **Login Screen**: `/login` route with social login buttons and guest access option
+- **Meta OAuth**: Login options via Facebook and Instagram.
+- **Demo Mode**: Available for simulated login without Meta credentials.
 
 ### Meta Business Suite Integration
-- **OAuth Flow**: Backend endpoints `/api/meta/auth`, `/api/meta/callback`, `/api/meta/post`
-- **Features**: Auto-post to Facebook & Instagram, unified ads management
-- **Demo Mode**: Works without credentials (simulated connection)
-- **Production Mode**: Requires `META_APP_ID` and `META_APP_SECRET` environment variables
-- **Scopes**: pages_manage_posts, instagram_content_publish, ads_management, business_management
+- **OAuth Flow**: For connecting to Facebook and Instagram.
+- **Features**: Enables auto-posting and unified ads management.
+- **Scopes**: Requires permissions like `pages_manage_posts`, `instagram_content_publish`, `ads_management`, `business_management`.
 
 ### Social Platforms
-- Instagram, Facebook: Managed through Meta Business Suite connection
-- Twitter, LinkedIn, TikTok: Connections managed through settings, API integrations not yet implemented
+- **Instagram, Facebook**: Managed through Meta Business Suite connection.
+- **Twitter, LinkedIn, TikTok**: Connection management in settings, API integrations planned.
 
-### Key npm Dependencies
-- `expo-router`: File-based navigation
-- `drizzle-orm` + `pg`: Database ORM and PostgreSQL driver
-- `openai`: AI API client
-- `@tanstack/react-query`: Server state management
-- `expo-linear-gradient`, `expo-blur`, `expo-haptics`: Native UI enhancements
-- `react-native-reanimated`: Animation library
+### Key npm Packages
+- `expo-router`: For navigation.
+- `drizzle-orm` + `pg`: For database interaction.
+- `openai`: OpenAI API client.
+- `@tanstack/react-query`: For server state management.
+- `react-native-reanimated`: For animations.
