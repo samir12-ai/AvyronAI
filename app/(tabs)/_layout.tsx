@@ -63,9 +63,9 @@ function ClassicTabLayout() {
         headerShown: false,
         tabBarStyle: {
           position: "absolute",
-          backgroundColor: isIOS ? "transparent" : isDark ? "#0F172A" : "#fff",
+          backgroundColor: isIOS ? "transparent" : isDark ? "#080C10" : "#F4F7F5",
           borderTopWidth: isWeb ? 1 : 0,
-          borderTopColor: isDark ? "#334155" : "#E5E7EB",
+          borderTopColor: isDark ? "#1A2030" : "#E2E8E4",
           elevation: 0,
           paddingBottom: isWeb ? 0 : safeAreaInsets.bottom,
           ...(isWeb ? { height: 84 } : {}),
@@ -78,7 +78,7 @@ function ClassicTabLayout() {
               style={StyleSheet.absoluteFill}
             />
           ) : isWeb ? (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: isDark ? "#0F172A" : "#fff" }]} />
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: isDark ? "#080C10" : "#F4F7F5" }]} />
           ) : null,
         tabBarLabelStyle: {
           fontFamily: "Inter_500Medium",

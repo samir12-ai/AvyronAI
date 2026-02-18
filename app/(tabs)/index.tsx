@@ -26,37 +26,42 @@ import { getApiUrl } from '@/lib/query-client';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
-const LUX = {
-  gold: '#C9A84C',
-  goldLight: '#E8D48B',
-  goldDim: '#A68A3E',
-  champagne: '#F5E6C8',
-  obsidian: '#0A0A0F',
-  charcoal: '#141419',
-  slate: '#1C1C24',
-  graphite: '#26262F',
-  silver: '#8E8E9A',
-  platinum: '#C4C4CC',
-  emerald: '#34D399',
-  ruby: '#F87171',
-  amber: '#FBBF24',
-  sapphire: '#60A5FA',
-  cardDark: '#16161E',
-  cardLight: '#FFFFFF',
-  bgLight: '#F7F5F0',
-  textLight: '#2D2A26',
-  textLightSec: '#6B6560',
-  textLightMuted: '#A09A92',
-  cardBorderLight: '#E8E2D8',
+const P = {
+  mint: '#00D09C',
+  mintDark: '#00B386',
+  neon: '#39FF14',
+  money: '#85BB65',
+  gold: '#FFD700',
+  goldMuted: '#C9A84C',
+  deepGreen: '#064E3B',
+  darkBg: '#080C10',
+  darkCard: '#0F1419',
+  darkCardBorder: '#1A2030',
+  darkSurface: '#151B24',
+  lightBg: '#F4F7F5',
+  lightCard: '#FFFFFF',
+  lightCardBorder: '#E2E8E4',
+  lightSurface: '#EDF2EE',
+  coral: '#FF6B6B',
+  blue: '#4C9AFF',
+  purple: '#A78BFA',
+  orange: '#FFB347',
+  silver: '#8892A4',
+  textDarkPrimary: '#E8EDF2',
+  textDarkSec: '#8892A4',
+  textDarkMuted: '#4A5568',
+  textLightPrimary: '#1A2332',
+  textLightSec: '#546478',
+  textLightMuted: '#8A96A8',
 };
 
-function GlowDot({ color, size = 8 }: { color: string; size?: number }) {
-  const pulse = useRef(new RNAnimated.Value(0.4)).current;
+function PulsingDot({ color, size = 8 }: { color: string; size?: number }) {
+  const pulse = useRef(new RNAnimated.Value(0.3)).current;
   useEffect(() => {
     const anim = RNAnimated.loop(
       RNAnimated.sequence([
-        RNAnimated.timing(pulse, { toValue: 1, duration: 1500, useNativeDriver: true }),
-        RNAnimated.timing(pulse, { toValue: 0.4, duration: 1500, useNativeDriver: true }),
+        RNAnimated.timing(pulse, { toValue: 1, duration: 1200, useNativeDriver: true }),
+        RNAnimated.timing(pulse, { toValue: 0.3, duration: 1200, useNativeDriver: true }),
       ])
     );
     anim.start();
@@ -65,10 +70,10 @@ function GlowDot({ color, size = 8 }: { color: string; size?: number }) {
   return (
     <View style={{ alignItems: 'center', justifyContent: 'center' }}>
       <RNAnimated.View style={{
-        width: size + 8,
-        height: size + 8,
-        borderRadius: (size + 8) / 2,
-        backgroundColor: color + '20',
+        width: size + 10,
+        height: size + 10,
+        borderRadius: (size + 10) / 2,
+        backgroundColor: color + '25',
         position: 'absolute',
         opacity: pulse,
       }} />
@@ -82,30 +87,22 @@ function GlowDot({ color, size = 8 }: { color: string; size?: number }) {
   );
 }
 
-function LuxKpiCard({ label, value, valueColor, icon, iconColor, onPress, isDark }: {
-  label: string;
-  value: string;
-  valueColor?: string;
-  icon: string;
-  iconColor: string;
-  onPress?: () => void;
-  isDark: boolean;
-}) {
-  const Wrapper = onPress ? Pressable : View;
+function MiniBarChart({ isDark }: { isDark: boolean }) {
+  const bars = [0.4, 0.6, 0.35, 0.8, 0.55, 0.9, 0.7];
   return (
-    <Wrapper 
-      style={[s.luxKpi, { 
-        backgroundColor: isDark ? LUX.cardDark : LUX.cardLight,
-        borderColor: isDark ? LUX.graphite : LUX.cardBorderLight,
-      }]}
-      {...(onPress ? { onPress } : {})}
-    >
-      <View style={[s.luxKpiIconWrap, { backgroundColor: iconColor + '12' }]}>
-        <Ionicons name={icon as any} size={16} color={iconColor} />
-      </View>
-      <Text style={[s.luxKpiValue, { color: valueColor || (isDark ? LUX.platinum : LUX.textLight) }]}>{value}</Text>
-      <Text style={[s.luxKpiLabel, { color: isDark ? LUX.silver : LUX.textLightMuted }]}>{label}</Text>
-    </Wrapper>
+    <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 3, height: 32 }}>
+      {bars.map((h, i) => (
+        <View
+          key={i}
+          style={{
+            width: 4,
+            height: 32 * h,
+            borderRadius: 2,
+            backgroundColor: i === bars.length - 1 ? P.mint : (isDark ? P.mint + '30' : P.mint + '25'),
+          }}
+        />
+      ))}
+    </View>
   );
 }
 
@@ -126,8 +123,12 @@ export default function DashboardScreen() {
   const [confidenceStatus, setConfidenceStatus] = useState<'Stable' | 'Caution' | 'Unstable'>('Stable');
 
   const headerFade = useRef(new RNAnimated.Value(0)).current;
+  const cardSlide = useRef(new RNAnimated.Value(30)).current;
   useEffect(() => {
-    RNAnimated.timing(headerFade, { toValue: 1, duration: 800, useNativeDriver: true }).start();
+    RNAnimated.parallel([
+      RNAnimated.timing(headerFade, { toValue: 1, duration: 600, useNativeDriver: true }),
+      RNAnimated.timing(cardSlide, { toValue: 0, duration: 500, useNativeDriver: true }),
+    ]).start();
   }, []);
 
   const baseUrl = getApiUrl();
@@ -215,19 +216,18 @@ export default function DashboardScreen() {
     return '$' + num.toFixed(2);
   };
 
-  const riskColor = riskLevel === 'Low' ? LUX.emerald : riskLevel === 'Medium' ? LUX.amber : LUX.ruby;
-  const confColor = confidenceStatus === 'Stable' ? LUX.emerald : confidenceStatus === 'Caution' ? LUX.amber : LUX.ruby;
+  const riskColor = riskLevel === 'Low' ? P.mint : riskLevel === 'Medium' ? P.orange : P.coral;
+  const confColor = confidenceStatus === 'Stable' ? P.mint : confidenceStatus === 'Caution' ? P.orange : P.coral;
 
   const pendingCount = scheduledPosts.filter(p => p.status === 'pending').length;
   const publishedCount = scheduledPosts.filter(p => p.status === 'published').length;
 
-  const bg = isDark ? LUX.obsidian : LUX.bgLight;
-  const textPrimary = isDark ? '#F0ECE3' : LUX.textLight;
-  const textSecondary = isDark ? LUX.silver : LUX.textLightSec;
-  const textMuted = isDark ? '#5A5A66' : LUX.textLightMuted;
-  const cardBg = isDark ? LUX.cardDark : LUX.cardLight;
-  const cardBorder = isDark ? LUX.graphite : LUX.cardBorderLight;
-  const goldAccent = isDark ? LUX.gold : LUX.goldDim;
+  const bg = isDark ? P.darkBg : P.lightBg;
+  const textPrimary = isDark ? P.textDarkPrimary : P.textLightPrimary;
+  const textSecondary = isDark ? P.textDarkSec : P.textLightSec;
+  const textMuted = isDark ? P.textDarkMuted : P.textLightMuted;
+  const cardBg = isDark ? P.darkCard : P.lightCard;
+  const cardBorder = isDark ? P.darkCardBorder : P.lightCardBorder;
 
   return (
     <View style={[s.container, { backgroundColor: bg }]}>
@@ -241,206 +241,230 @@ export default function DashboardScreen() {
           <RefreshControl 
             refreshing={isLoading} 
             onRefresh={() => { refreshData(); fetchAIStatus(); fetchConfidence(); }}
-            tintColor={goldAccent}
+            tintColor={P.mint}
           />
         }
       >
         <RNAnimated.View style={{ opacity: headerFade }}>
           <View style={s.headerRow}>
-            <View>
-              <Text style={[s.brandName, { color: textPrimary }]}>MarketMind</Text>
-              <Text style={[s.brandSub, { color: goldAccent }]}>AI AGENCY</Text>
+            <View style={s.headerLeft}>
+              <View style={[s.logoMark, { backgroundColor: P.mint }]}>
+                <Ionicons name="trending-up" size={16} color="#fff" />
+              </View>
+              <View>
+                <Text style={[s.brandName, { color: textPrimary }]}>MarketMind</Text>
+                <Text style={[s.brandSub, { color: P.mint }]}>AI MARKETING</Text>
+              </View>
             </View>
             <Pressable 
               onPress={() => router.push('/(tabs)/ai-management')}
-              style={[s.headerBtn, { backgroundColor: isDark ? LUX.slate : '#F0EBE1' }]}
+              style={[s.headerBtn, { backgroundColor: isDark ? P.darkSurface : P.lightSurface }]}
             >
               <Feather name="sliders" size={18} color={textSecondary} />
             </Pressable>
           </View>
-
-          <View style={[s.autopilotBar, { 
-            backgroundColor: isDark ? LUX.slate + 'CC' : '#F0EBE1',
-            borderColor: isDark ? goldAccent + '30' : goldAccent + '25',
-          }]}>
-            <View style={s.autopilotLeft}>
-              <View style={[s.shieldWrap, { backgroundColor: LUX.emerald + '15' }]}>
-                <Ionicons name="shield-checkmark" size={18} color={LUX.emerald} />
-              </View>
-              <View>
-                <Text style={[s.autopilotTitle, { color: textPrimary }]}>Autopilot</Text>
-                <View style={s.autopilotMeta}>
-                  <GlowDot color={LUX.emerald} size={6} />
-                  <Text style={[s.autopilotStatus, { color: LUX.emerald }]}>ACTIVE</Text>
-                  <View style={s.dividerDot} />
-                  <View style={[s.riskPill, { backgroundColor: riskColor + '15' }]}>
-                    <View style={[s.riskDotInner, { backgroundColor: riskColor }]} />
-                    <Text style={[s.riskLabel, { color: riskColor }]}>{riskLevel}</Text>
-                  </View>
-                </View>
-              </View>
-            </View>
-            <View style={s.autopilotRight}>
-              {currentObjective ? (
-                <View style={[s.objectivePill, { backgroundColor: isDark ? LUX.graphite : '#E8E2D8' }]}>
-                  <Ionicons name="flag" size={11} color={goldAccent} />
-                  <Text style={[s.objectiveText, { color: textSecondary }]} numberOfLines={1}>{currentObjective}</Text>
-                </View>
-              ) : null}
-              <View style={[s.confMeter, { backgroundColor: isDark ? LUX.graphite : '#EDE7DD' }]}>
-                <View style={s.confMeterInner}>
-                  <View style={[s.confBarBg, { backgroundColor: isDark ? LUX.obsidian : '#D8D2C8' }]}>
-                    <View style={[s.confBarFill, { width: `${confidenceScore}%`, backgroundColor: confColor }]} />
-                  </View>
-                  <Text style={[s.confLabel, { color: confColor }]}>{confidenceScore}%</Text>
-                </View>
-                <Text style={[s.confTitle, { color: textMuted }]}>AI Confidence</Text>
-              </View>
-            </View>
-          </View>
         </RNAnimated.View>
 
-        <LinearGradient
-          colors={isDark ? [LUX.charcoal, LUX.slate + '80'] : ['#FEFCF8', '#F5F0E6']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[s.revenueCard, { borderColor: isDark ? goldAccent + '20' : goldAccent + '18' }]}
-        >
-          <View style={s.revenueTop}>
-            <View style={[s.revenueIconWrap, { backgroundColor: goldAccent + '15' }]}>
-              <MaterialCommunityIcons name="chart-timeline-variant-shimmer" size={20} color={goldAccent} />
+        <RNAnimated.View style={{ opacity: headerFade, transform: [{ translateY: cardSlide }] }}>
+          <LinearGradient
+            colors={isDark ? ['#0A2F1F', '#0C1A14', '#0F1419'] : ['#E8F5E9', '#F1F8E9', '#FFFFFF']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[s.heroCard, { borderColor: isDark ? P.mint + '18' : P.mint + '20' }]}
+          >
+            <View style={s.heroTop}>
+              <View>
+                <Text style={[s.heroLabel, { color: isDark ? P.mint : P.mintDark }]}>TOTAL REVENUE</Text>
+                <Text style={[s.heroValue, { color: textPrimary }]}>{formatCurrency(derivedMetrics.revenue)}</Text>
+              </View>
+              <View style={[s.heroGrowth, { backgroundColor: P.mint + '15' }]}>
+                <Ionicons name="arrow-up" size={14} color={P.mint} />
+                <Text style={[s.heroGrowthText, { color: P.mint }]}>
+                  {derivedMetrics.roas > 0 ? `${derivedMetrics.roas.toFixed(1)}x` : '0x'}
+                </Text>
+                <Text style={[s.heroGrowthLabel, { color: textMuted }]}>ROAS</Text>
+              </View>
             </View>
-            <Text style={[s.revenueLabel, { color: textSecondary }]}>ESTIMATED REVENUE</Text>
-          </View>
-          <Text style={[s.revenueValue, { color: textPrimary }]}>{formatCurrency(derivedMetrics.revenue)}</Text>
-          <View style={s.revenueDivider}>
-            <View style={[s.dividerLine, { backgroundColor: isDark ? LUX.graphite : '#E8E2D8' }]} />
-          </View>
-          <View style={s.revenueBottom}>
-            <View style={s.revenueSubItem}>
-              <Text style={[s.revenueSubLabel, { color: textMuted }]}>Cost / Result</Text>
-              <Text style={[s.revenueSubValue, { color: derivedMetrics.cpa < 15 ? LUX.emerald : LUX.amber }]}>
-                {formatCurrency(derivedMetrics.cpa)}
-              </Text>
-            </View>
-            <View style={[s.revenueSubDivider, { backgroundColor: isDark ? LUX.graphite : '#E0DAD0' }]} />
-            <View style={s.revenueSubItem}>
-              <Text style={[s.revenueSubLabel, { color: textMuted }]}>ROAS</Text>
-              <Text style={[s.revenueSubValue, { color: derivedMetrics.roas >= 2 ? LUX.emerald : LUX.amber }]}>
-                {derivedMetrics.roas.toFixed(1)}x
-              </Text>
-            </View>
-          </View>
-        </LinearGradient>
 
-        <View style={s.kpiRow}>
-          <LuxKpiCard 
-            label="Spend" 
-            value={formatCurrency(derivedMetrics.spend)} 
-            icon="trending-down-outline"
-            iconColor={LUX.sapphire}
-            isDark={isDark}
-          />
-          <LuxKpiCard 
-            label="Results" 
-            value={formatNumber(derivedMetrics.conversions)} 
-            icon="pulse-outline"
-            iconColor={LUX.emerald}
-            isDark={isDark}
-          />
-          <LuxKpiCard 
-            label="Content" 
-            value={String(contentItems.length)} 
-            icon="sparkles-outline"
-            iconColor={goldAccent}
+            <View style={[s.heroDivider, { backgroundColor: isDark ? P.mint + '12' : P.mint + '15' }]} />
+
+            <View style={s.heroStats}>
+              <View style={s.heroStat}>
+                <View style={[s.heroStatIcon, { backgroundColor: P.blue + '15' }]}>
+                  <Ionicons name="wallet-outline" size={14} color={P.blue} />
+                </View>
+                <Text style={[s.heroStatValue, { color: textPrimary }]}>{formatCurrency(derivedMetrics.spend)}</Text>
+                <Text style={[s.heroStatLabel, { color: textMuted }]}>Spent</Text>
+              </View>
+              <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
+              <View style={s.heroStat}>
+                <View style={[s.heroStatIcon, { backgroundColor: P.mint + '15' }]}>
+                  <Ionicons name="flash-outline" size={14} color={P.mint} />
+                </View>
+                <Text style={[s.heroStatValue, { color: textPrimary }]}>{formatNumber(derivedMetrics.conversions)}</Text>
+                <Text style={[s.heroStatLabel, { color: textMuted }]}>Results</Text>
+              </View>
+              <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
+              <View style={s.heroStat}>
+                <View style={[s.heroStatIcon, { backgroundColor: P.orange + '15' }]}>
+                  <Ionicons name="pricetag-outline" size={14} color={P.orange} />
+                </View>
+                <Text style={[s.heroStatValue, { color: derivedMetrics.cpa < 15 ? P.mint : P.orange }]}>{formatCurrency(derivedMetrics.cpa)}</Text>
+                <Text style={[s.heroStatLabel, { color: textMuted }]}>CPA</Text>
+              </View>
+            </View>
+          </LinearGradient>
+        </RNAnimated.View>
+
+        <View style={[s.autopilotStrip, { 
+          backgroundColor: isDark ? P.darkCard : P.lightCard,
+          borderColor: cardBorder,
+        }]}>
+          <View style={s.autopilotInner}>
+            <View style={[s.autopilotDot, { backgroundColor: P.mint + '15' }]}>
+              <PulsingDot color={P.mint} size={8} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={s.autopilotTopRow}>
+                <Text style={[s.autopilotTitle, { color: textPrimary }]}>Autopilot Active</Text>
+                <View style={[s.riskPill, { backgroundColor: riskColor + '12' }]}>
+                  <View style={[s.riskDot, { backgroundColor: riskColor }]} />
+                  <Text style={[s.riskText, { color: riskColor }]}>{riskLevel} Risk</Text>
+                </View>
+              </View>
+              {currentObjective ? (
+                <Text style={[s.autopilotObj, { color: textMuted }]} numberOfLines={1}>
+                  {currentObjective}
+                </Text>
+              ) : null}
+            </View>
+            <View style={s.confBlock}>
+              <Text style={[s.confValue, { color: confColor }]}>{confidenceScore}%</Text>
+              <View style={[s.confBar, { backgroundColor: isDark ? '#1A2030' : '#E5EBE7' }]}>
+                <View style={[s.confFill, { width: `${confidenceScore}%`, backgroundColor: confColor }]} />
+              </View>
+            </View>
+          </View>
+        </View>
+
+        <View style={s.quickGrid}>
+          <Pressable 
+            style={[s.quickCard, { backgroundColor: cardBg, borderColor: cardBorder }]}
             onPress={() => router.push('/(tabs)/create')}
-            isDark={isDark}
-          />
+          >
+            <LinearGradient
+              colors={[P.purple + '18', P.purple + '05']}
+              style={s.quickCardGradient}
+            >
+              <View style={[s.quickIcon, { backgroundColor: P.purple + '18' }]}>
+                <Ionicons name="sparkles" size={18} color={P.purple} />
+              </View>
+              <Text style={[s.quickValue, { color: textPrimary }]}>{contentItems.length}</Text>
+              <Text style={[s.quickLabel, { color: textMuted }]}>Content</Text>
+            </LinearGradient>
+          </Pressable>
+          <Pressable 
+            style={[s.quickCard, { backgroundColor: cardBg, borderColor: cardBorder }]}
+            onPress={() => router.push('/(tabs)/calendar')}
+          >
+            <LinearGradient
+              colors={[P.blue + '18', P.blue + '05']}
+              style={s.quickCardGradient}
+            >
+              <View style={[s.quickIcon, { backgroundColor: P.blue + '18' }]}>
+                <Ionicons name="calendar-outline" size={18} color={P.blue} />
+              </View>
+              <Text style={[s.quickValue, { color: textPrimary }]}>{pendingCount}</Text>
+              <Text style={[s.quickLabel, { color: textMuted }]}>Queued</Text>
+            </LinearGradient>
+          </Pressable>
+          <Pressable 
+            style={[s.quickCard, { backgroundColor: cardBg, borderColor: cardBorder }]}
+            onPress={() => router.push('/(tabs)/ai-management')}
+          >
+            <LinearGradient
+              colors={[P.mint + '18', P.mint + '05']}
+              style={s.quickCardGradient}
+            >
+              <View style={[s.quickIcon, { backgroundColor: P.mint + '18' }]}>
+                <Ionicons name="checkmark-done" size={18} color={P.mint} />
+              </View>
+              <Text style={[s.quickValue, { color: textPrimary }]}>{publishedCount}</Text>
+              <Text style={[s.quickLabel, { color: textMuted }]}>Published</Text>
+            </LinearGradient>
+          </Pressable>
         </View>
 
         {todayFocus ? (
           <View style={[s.focusCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-            <View style={s.focusHeader}>
-              <View style={[s.focusIconWrap, { backgroundColor: LUX.amber + '12' }]}>
-                <Feather name="target" size={14} color={LUX.amber} />
+            <View style={s.focusRow}>
+              <View style={[s.focusIcon, { backgroundColor: P.orange + '12' }]}>
+                <Feather name="target" size={15} color={P.orange} />
               </View>
-              <Text style={[s.focusTitle, { color: textPrimary }]}>Today's Priority</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.focusTitle, { color: textPrimary }]}>Today's Focus</Text>
+                <Text style={[s.focusText, { color: textSecondary }]}>{todayFocus}</Text>
+              </View>
             </View>
-            <Text style={[s.focusText, { color: textSecondary }]}>{todayFocus}</Text>
           </View>
         ) : null}
 
-        <View style={[s.actionsCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-          <View style={s.actionsHeader}>
-            <View style={s.actionsLeft}>
-              <View style={[s.actionsIconWrap, { backgroundColor: isDark ? '#8B5CF6' + '12' : '#8B5CF6' + '08' }]}>
-                <Ionicons name="flash" size={14} color="#8B5CF6" />
+        <View style={[s.aiCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+          <View style={s.aiCardHeader}>
+            <View style={s.aiCardLeft}>
+              <View style={[s.aiCardIcon, { backgroundColor: isDark ? '#1F1135' : '#F3EEFF' }]}>
+                <Ionicons name="flash" size={15} color={P.purple} />
               </View>
-              <Text style={[s.actionsTitle, { color: textPrimary }]}>AI Actions</Text>
-              <Text style={[s.actions48h, { color: textMuted }]}>48h</Text>
+              <Text style={[s.aiCardTitle, { color: textPrimary }]}>AI Actions</Text>
             </View>
-            <View style={[s.actionBadge, { backgroundColor: '#8B5CF6' + '12' }]}>
-              <Text style={[s.actionBadgeText, { color: '#8B5CF6' }]}>{aiActions.length}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <MiniBarChart isDark={isDark} />
+              <View style={[s.actionCount, { backgroundColor: P.purple + '12' }]}>
+                <Text style={[s.actionCountText, { color: P.purple }]}>{aiActions.length}</Text>
+              </View>
             </View>
           </View>
           {aiActions.map((action, i) => (
-            <View key={i} style={[s.actionItem, i < aiActions.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: isDark ? LUX.graphite : '#F0EBE1' }]}>
-              <View style={[s.actionDot, { backgroundColor: LUX.emerald }]} />
-              <Text style={[s.actionText, { color: textSecondary }]}>{action}</Text>
+            <View key={i} style={[s.aiAction, i < aiActions.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: isDark ? '#1A2030' : '#F0F3F1' }]}>
+              <View style={[s.aiActionDot, { backgroundColor: P.mint }]} />
+              <Text style={[s.aiActionText, { color: textSecondary }]}>{action}</Text>
             </View>
           ))}
         </View>
 
-        <View style={s.quickNav}>
-          <Pressable 
-            style={[s.quickNavItem, { backgroundColor: cardBg, borderColor: cardBorder }]} 
-            onPress={() => router.push('/(tabs)/calendar')}
-          >
-            <View style={[s.quickNavIcon, { backgroundColor: LUX.sapphire + '12' }]}>
-              <Ionicons name="calendar-outline" size={18} color={LUX.sapphire} />
-            </View>
-            <View>
-              <Text style={[s.quickNavValue, { color: textPrimary }]}>{pendingCount}</Text>
-              <Text style={[s.quickNavLabel, { color: textMuted }]}>Queued</Text>
-            </View>
-          </Pressable>
-          <Pressable 
-            style={[s.quickNavItem, { backgroundColor: cardBg, borderColor: cardBorder }]} 
-            onPress={() => router.push('/(tabs)/ai-management')}
-          >
-            <View style={[s.quickNavIcon, { backgroundColor: LUX.emerald + '12' }]}>
-              <Ionicons name="checkmark-done-outline" size={18} color={LUX.emerald} />
-            </View>
-            <View>
-              <Text style={[s.quickNavValue, { color: textPrimary }]}>{publishedCount}</Text>
-              <Text style={[s.quickNavLabel, { color: textMuted }]}>Published</Text>
-            </View>
-          </Pressable>
-        </View>
-
         <View style={[s.metaStrip, { 
           backgroundColor: metaConnection.isConnected 
-            ? (isDark ? LUX.emerald + '08' : LUX.emerald + '06')
-            : (isDark ? LUX.amber + '08' : LUX.amber + '06'),
-          borderColor: metaConnection.isConnected 
-            ? LUX.emerald + '18'
-            : LUX.amber + '18',
+            ? (isDark ? P.mint + '08' : P.mint + '06')
+            : (isDark ? P.orange + '08' : P.orange + '06'),
+          borderColor: metaConnection.isConnected ? P.mint + '15' : P.orange + '15',
         }]}>
-          <GlowDot color={metaConnection.isConnected ? LUX.emerald : LUX.amber} size={6} />
+          <View style={[s.metaIcon, { backgroundColor: metaConnection.isConnected ? P.mint + '15' : P.orange + '15' }]}>
+            <Ionicons name={metaConnection.isConnected ? "logo-facebook" : "link-outline"} size={14} color={metaConnection.isConnected ? P.mint : P.orange} />
+          </View>
           <Text style={[s.metaText, { color: textSecondary }]}>
-            {metaConnection.isConnected ? `Meta Connected  \u00B7  ${metaConnection.pageName || 'Active'}` : 'Meta  \u00B7  Not connected'}
+            {metaConnection.isConnected ? `Meta Connected  ·  ${metaConnection.pageName || 'Active'}` : 'Meta  ·  Not connected'}
           </Text>
+          {!metaConnection.isConnected && (
+            <Pressable 
+              onPress={() => router.push('/(tabs)/settings')}
+              style={[s.metaConnectBtn, { backgroundColor: P.orange + '15' }]}
+            >
+              <Text style={[s.metaConnectText, { color: P.orange }]}>Connect</Text>
+            </Pressable>
+          )}
         </View>
 
         <Pressable 
           onPress={() => { setShowInsights(!showInsights); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} 
           style={[s.insightsToggle, { 
             backgroundColor: cardBg, 
-            borderColor: showInsights ? goldAccent + '30' : cardBorder 
+            borderColor: showInsights ? P.mint + '30' : cardBorder,
           }]}
         >
           <View style={s.insightsToggleLeft}>
-            <Feather name="bar-chart-2" size={15} color={goldAccent} />
+            <View style={[s.insightsIcon, { backgroundColor: isDark ? '#0F2518' : '#E8F5E9' }]}>
+              <Feather name="bar-chart-2" size={14} color={P.mint} />
+            </View>
             <Text style={[s.insightsToggleText, { color: textSecondary }]}>Advanced Insights</Text>
           </View>
           <Ionicons 
@@ -479,16 +503,16 @@ export default function DashboardScreen() {
 
         <View style={[s.modeRow, { borderColor: cardBorder }]}>
           <View style={s.modeLeft}>
-            <View style={[s.modeIcon, { backgroundColor: isDark ? '#8B5CF6' + '10' : '#8B5CF6' + '08' }]}>
-              <Ionicons name="options-outline" size={14} color="#8B5CF6" />
+            <View style={[s.modeIcon, { backgroundColor: isDark ? P.purple + '10' : P.purple + '08' }]}>
+              <Ionicons name="options-outline" size={14} color={P.purple} />
             </View>
             <Text style={[s.modeLabel, { color: textSecondary }]}>Advanced Mode</Text>
           </View>
           <Switch
             value={advancedMode}
             onValueChange={(v) => { setAdvancedMode(v); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-            trackColor={{ false: isDark ? '#2A2A35' : '#D8D2C8', true: goldAccent + '50' }}
-            thumbColor={advancedMode ? goldAccent : isDark ? '#5A5A66' : '#B0AAA0'}
+            trackColor={{ false: isDark ? '#1A2030' : '#D8DDD9', true: P.mint + '50' }}
+            thumbColor={advancedMode ? P.mint : isDark ? '#4A5568' : '#B0B8B2'}
           />
         </View>
 
@@ -500,23 +524,35 @@ export default function DashboardScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1 },
-  scrollContent: { paddingHorizontal: 20 },
+  scrollContent: { paddingHorizontal: 18 },
 
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 18,
     paddingHorizontal: 2,
   },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  logoMark: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   brandName: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '700',
     letterSpacing: -0.5,
   },
   brandSub: {
-    fontSize: 10,
-    fontWeight: '600',
+    fontSize: 9,
+    fontWeight: '700',
     letterSpacing: 3,
     marginTop: 1,
   },
@@ -528,49 +564,110 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  autopilotBar: {
+  heroCard: {
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: 22,
+    marginBottom: 14,
+    overflow: 'hidden',
+  },
+  heroTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 18,
+  },
+  heroLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+    marginBottom: 6,
+  },
+  heroValue: {
+    fontSize: 40,
+    fontWeight: '800',
+    letterSpacing: -1.5,
+  },
+  heroGrowth: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
+  heroGrowthText: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  heroGrowthLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    marginLeft: 2,
+  },
+  heroDivider: {
+    height: 1,
+    marginBottom: 16,
+  },
+  heroStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  heroStat: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 5,
+  },
+  heroStatIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroStatValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+  },
+  heroStatLabel: {
+    fontSize: 10,
+    fontWeight: '500',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  heroStatDivider: {
+    width: 1,
+    height: 32,
+  },
+
+  autopilotStrip: {
     borderRadius: 16,
     borderWidth: 1,
     padding: 14,
-    marginBottom: 16,
+    marginBottom: 14,
   },
-  autopilotLeft: {
+  autopilotInner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
-  shieldWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 11,
+  autopilotDot: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  autopilotTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    letterSpacing: -0.2,
-  },
-  autopilotMeta: {
+  autopilotTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginTop: 3,
+    gap: 8,
   },
-  autopilotStatus: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1.5,
-  },
-  dividerDot: {
-    width: 3,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: '#5A5A66',
-    marginHorizontal: 2,
+  autopilotTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: -0.2,
   },
   riskPill: {
     flexDirection: 'row',
@@ -580,156 +677,73 @@ const s = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 6,
   },
-  riskDotInner: {
+  riskDot: {
     width: 5,
     height: 5,
     borderRadius: 3,
   },
-  riskLabel: {
+  riskText: {
     fontSize: 10,
     fontWeight: '600',
   },
-  objectivePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 8,
-    maxWidth: 130,
+  autopilotObj: {
+    fontSize: 12,
+    marginTop: 2,
   },
-  objectiveText: {
-    fontSize: 10,
-    fontWeight: '500',
-    flex: 1,
-  },
-  autopilotRight: {
+  confBlock: {
     alignItems: 'flex-end',
-    gap: 6,
+    gap: 4,
+    minWidth: 54,
   },
-  confMeter: {
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    minWidth: 100,
+  confValue: {
+    fontSize: 14,
+    fontWeight: '800',
   },
-  confMeterInner: {
-    flexDirection: 'row' as const,
-    alignItems: 'center',
-    gap: 6,
-  },
-  confBarBg: {
-    height: 4,
+  confBar: {
+    height: 3,
     borderRadius: 2,
-    flex: 1,
-    overflow: 'hidden' as const,
+    width: 54,
+    overflow: 'hidden',
   },
-  confBarFill: {
+  confFill: {
     height: '100%' as any,
     borderRadius: 2,
   },
-  confLabel: {
-    fontSize: 11,
-    fontWeight: '700' as const,
-  },
-  confTitle: {
-    fontSize: 9,
-    fontWeight: '500' as const,
-    marginTop: 2,
-  },
 
-  revenueCard: {
-    borderRadius: 20,
-    borderWidth: 1,
-    padding: 22,
+  quickGrid: {
+    flexDirection: 'row',
+    gap: 10,
     marginBottom: 14,
   },
-  revenueTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 12,
+  quickCard: {
+    flex: 1,
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: 'hidden',
   },
-  revenueIconWrap: {
+  quickCardGradient: {
+    padding: 14,
+    alignItems: 'center',
+    gap: 6,
+  },
+  quickIcon: {
     width: 34,
     height: 34,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  revenueLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 2,
-  },
-  revenueValue: {
-    fontSize: 42,
-    fontWeight: '700',
-    letterSpacing: -1.5,
-    marginBottom: 14,
-  },
-  revenueDivider: {
-    marginBottom: 14,
-  },
-  dividerLine: {
-    height: StyleSheet.hairlineWidth,
-  },
-  revenueBottom: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  revenueSubItem: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 3,
-  },
-  revenueSubLabel: {
-    fontSize: 10,
-    fontWeight: '500',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase' as const,
-  },
-  revenueSubValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    letterSpacing: -0.3,
-  },
-  revenueSubDivider: {
-    width: 1,
-    height: 28,
-  },
-
-  kpiRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 14,
-  },
-  luxKpi: {
-    flex: 1,
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 14,
-    alignItems: 'center',
-    gap: 6,
-  },
-  luxKpiIconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
     marginBottom: 2,
   },
-  luxKpiValue: {
-    fontSize: 18,
+  quickValue: {
+    fontSize: 20,
     fontWeight: '700',
     letterSpacing: -0.3,
   },
-  luxKpiLabel: {
+  quickLabel: {
     fontSize: 10,
     fontWeight: '500',
     letterSpacing: 0.5,
-    textTransform: 'uppercase' as const,
+    textTransform: 'uppercase',
   },
 
   focusCard: {
@@ -738,123 +752,84 @@ const s = StyleSheet.create({
     padding: 16,
     marginBottom: 12,
   },
-  focusHeader: {
+  focusRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 8,
+    alignItems: 'flex-start',
+    gap: 12,
   },
-  focusIconWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
+  focusIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 2,
   },
   focusTitle: {
     fontSize: 14,
     fontWeight: '600',
     letterSpacing: -0.2,
+    marginBottom: 3,
   },
   focusText: {
-    fontSize: 14,
-    fontWeight: '400',
-    lineHeight: 20,
-    paddingLeft: 38,
+    fontSize: 13,
+    lineHeight: 19,
   },
 
-  actionsCard: {
+  aiCard: {
     borderRadius: 16,
     borderWidth: 1,
     padding: 16,
     marginBottom: 14,
   },
-  actionsHeader: {
+  aiCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 14,
+    marginBottom: 12,
   },
-  actionsLeft: {
+  aiCardLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  actionsIconWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
+  aiCardIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  actionsTitle: {
+  aiCardTitle: {
     fontSize: 14,
     fontWeight: '600',
     letterSpacing: -0.2,
   },
-  actions48h: {
-    fontSize: 11,
-    fontWeight: '500',
-  },
-  actionBadge: {
+  actionCount: {
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 8,
+    borderRadius: 7,
   },
-  actionBadgeText: {
+  actionCountText: {
     fontSize: 12,
     fontWeight: '700',
   },
-  actionItem: {
+  aiAction: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 10,
     paddingVertical: 9,
   },
-  actionDot: {
+  aiActionDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
     marginTop: 5,
   },
-  actionText: {
+  aiActionText: {
     fontSize: 13,
-    fontWeight: '400',
     flex: 1,
     lineHeight: 18,
-  },
-
-  quickNav: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 12,
-  },
-  quickNavItem: {
-    flex: 1,
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  quickNavIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  quickNavValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    letterSpacing: -0.3,
-  },
-  quickNavLabel: {
-    fontSize: 10,
-    fontWeight: '500',
-    letterSpacing: 0.3,
-    marginTop: 1,
   },
 
   metaStrip: {
@@ -863,13 +838,30 @@ const s = StyleSheet.create({
     gap: 10,
     borderRadius: 12,
     borderWidth: 1,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 10,
     marginBottom: 14,
+  },
+  metaIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   metaText: {
     fontSize: 12,
     fontWeight: '500',
+    flex: 1,
+  },
+  metaConnectBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  metaConnectText: {
+    fontSize: 11,
+    fontWeight: '600',
   },
 
   insightsToggle: {
@@ -878,14 +870,21 @@ const s = StyleSheet.create({
     justifyContent: 'space-between',
     borderRadius: 14,
     borderWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 13,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     marginBottom: 12,
   },
   insightsToggleLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+  },
+  insightsIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   insightsToggleText: {
     fontSize: 13,
