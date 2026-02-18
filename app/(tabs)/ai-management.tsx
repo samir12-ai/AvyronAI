@@ -272,15 +272,15 @@ export default function AIManagementScreen() {
 
   const renderControlCenter = () => (
     <View style={styles.tabContent}>
-      <View style={[styles.controlStatusCard, { backgroundColor: isDark ? '#0F172A' : '#F8FAFC', borderColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
+      <View style={[styles.controlStatusCard, { backgroundColor: isDark ? '#0F1419' : '#F4F7F5', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
         <View style={styles.controlStatusRow}>
           <View style={styles.controlStatusLeft}>
-            <View style={[styles.controlShield, { backgroundColor: autopilotOn ? '#10B981' + '15' : '#EF4444' + '15' }]}>
-              <Ionicons name="shield-checkmark" size={22} color={autopilotOn ? '#10B981' : '#EF4444'} />
+            <View style={[styles.controlShield, { backgroundColor: autopilotOn ? '#00D09C' + '15' : '#FF6B6B' + '15' }]}>
+              <Ionicons name="shield-checkmark" size={22} color={autopilotOn ? '#00D09C' : '#FF6B6B'} />
             </View>
             <View>
               <Text style={[styles.controlModeLabel, { color: colors.textMuted }]}>MODE</Text>
-              <Text style={[styles.controlModeValue, { color: autopilotOn ? '#10B981' : '#EF4444' }]}>
+              <Text style={[styles.controlModeValue, { color: autopilotOn ? '#00D09C' : '#FF6B6B' }]}>
                 {autopilotOn ? 'Autopilot ON' : 'Autopilot OFF'}
               </Text>
             </View>
@@ -288,27 +288,27 @@ export default function AIManagementScreen() {
           <Switch
             value={autopilotOn}
             onValueChange={(v) => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); setAutopilotOn(v); }}
-            trackColor={{ false: '#EF4444' + '40', true: '#10B981' + '60' }}
-            thumbColor={autopilotOn ? '#10B981' : '#EF4444'}
+            trackColor={{ false: '#FF6B6B' + '40', true: '#00D09C' + '60' }}
+            thumbColor={autopilotOn ? '#00D09C' : '#FF6B6B'}
           />
         </View>
       </View>
 
-      <View style={[styles.controlGoalCard, { backgroundColor: isDark ? '#0F172A' : '#fff', borderColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
+      <View style={[styles.controlGoalCard, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
         <View style={styles.controlGoalRow}>
-          <Ionicons name="flag" size={16} color="#8B5CF6" />
+          <Ionicons name="flag" size={16} color="#A78BFA" />
           <Text style={[styles.controlGoalLabel, { color: colors.textMuted }]}>Current Goal</Text>
         </View>
         <Text style={[styles.controlGoalValue, { color: colors.text }]}>{currentGoal}</Text>
       </View>
 
-      <View style={[styles.controlBudgetCard, { backgroundColor: isDark ? '#0F172A' : '#fff', borderColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
+      <View style={[styles.controlBudgetCard, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
         <View style={styles.controlBudgetHeader}>
-          <Ionicons name="wallet-outline" size={16} color="#3B82F6" />
+          <Ionicons name="wallet-outline" size={16} color="#4C9AFF" />
           <Text style={[styles.controlBudgetLabel, { color: colors.textMuted }]}>Budget Allocation</Text>
-          <Text style={[styles.controlBudgetPct, { color: '#3B82F6' }]}>{budgetInfo.pct}%</Text>
+          <Text style={[styles.controlBudgetPct, { color: '#4C9AFF' }]}>{budgetInfo.pct}%</Text>
         </View>
-        <View style={[styles.controlBudgetTrack, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
+        <View style={[styles.controlBudgetTrack, { backgroundColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
           <View style={[styles.controlBudgetFill, { width: `${Math.min(budgetInfo.pct, 100)}%` }]} />
         </View>
         <Text style={[styles.controlBudgetText, { color: colors.textSecondary }]}>
@@ -316,9 +316,9 @@ export default function AIManagementScreen() {
         </Text>
       </View>
 
-      <View style={[styles.controlSection, { backgroundColor: isDark ? '#0F172A' : '#fff', borderColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
+      <View style={[styles.controlSection, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
         <View style={styles.controlSectionHeader}>
-          <Ionicons name="flash" size={16} color="#8B5CF6" />
+          <Ionicons name="flash" size={16} color="#A78BFA" />
           <Text style={[styles.controlSectionTitle, { color: colors.text }]}>What AI is Doing Now</Text>
         </View>
         <Text style={[styles.controlDoingText, { color: colors.textSecondary }]}>
@@ -329,20 +329,20 @@ export default function AIManagementScreen() {
         </Text>
       </View>
 
-      <View style={[styles.controlSection, { backgroundColor: isDark ? '#0F172A' : '#fff', borderColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
+      <View style={[styles.controlSection, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
         <View style={styles.controlSectionHeader}>
-          <Ionicons name="list" size={16} color="#F59E0B" />
+          <Ionicons name="list" size={16} color="#FFB347" />
           <Text style={[styles.controlSectionTitle, { color: colors.text }]}>Next Planned Actions</Text>
         </View>
         {nextActions.map((a, i) => (
-          <View key={i} style={[styles.controlActionItem, { borderColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
+          <View key={i} style={[styles.controlActionItem, { borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
             <View style={styles.controlActionTop}>
-              <View style={[styles.controlActionNum, { backgroundColor: '#8B5CF6' + '12' }]}>
-                <Text style={[styles.controlActionNumText, { color: '#8B5CF6' }]}>{i + 1}</Text>
+              <View style={[styles.controlActionNum, { backgroundColor: '#A78BFA' + '12' }]}>
+                <Text style={[styles.controlActionNumText, { color: '#A78BFA' }]}>{i + 1}</Text>
               </View>
               <Text style={[styles.controlActionText, { color: colors.text }]}>{a.action}</Text>
-              <View style={[styles.controlRiskBadge, { backgroundColor: a.risk === 'Low' ? '#10B981' + '12' : '#F59E0B' + '12' }]}>
-                <Text style={[styles.controlRiskText, { color: a.risk === 'Low' ? '#10B981' : '#F59E0B' }]}>{a.risk}</Text>
+              <View style={[styles.controlRiskBadge, { backgroundColor: a.risk === 'Low' ? '#00D09C' + '12' : '#FFB347' + '12' }]}>
+                <Text style={[styles.controlRiskText, { color: a.risk === 'Low' ? '#00D09C' : '#FFB347' }]}>{a.risk}</Text>
               </View>
             </View>
             <Text style={[styles.controlActionWhy, { color: colors.textMuted }]}>{a.why}</Text>

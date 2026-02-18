@@ -98,7 +98,7 @@ function RoleSelector({ onSelect, colors, t }: { onSelect: (role: UserRole) => v
       </Pressable>
 
       <Pressable onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); onSelect('customer'); }}>
-        <LinearGradient colors={['#8B5CF6', '#6366F1']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={roleStyles.roleCard}>
+        <LinearGradient colors={['#00D09C', '#00B386']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={roleStyles.roleCard}>
           <View style={roleStyles.roleIcon}>
             <Ionicons name="person" size={28} color="#fff" />
           </View>

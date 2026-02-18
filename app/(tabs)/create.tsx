@@ -138,7 +138,7 @@ function DesignerLoadingOverlay({ isVisible }: { isVisible: boolean }) {
       <Animated.View style={[styles.loadingContent, pulseStyle]}>
         <View style={[styles.loadingIconRing, { borderColor: colors.accent + '30' }]}>
           <LinearGradient
-            colors={['#14B8A6', '#06B6D4', '#8B5CF6']}
+            colors={['#00D09C', '#00B386', '#34D399']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.loadingIconInner}
@@ -1293,7 +1293,7 @@ export default function CreateScreen() {
                 ]}
               >
                 <LinearGradient
-                  colors={['#14B8A6', '#06B6D4', '#8B5CF6']}
+                  colors={['#00D09C', '#00B386', '#34D399']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.generateDesignGradient}
