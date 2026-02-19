@@ -53,6 +53,7 @@ const contentTypesDef = [
 ];
 
 const reelDurations = [
+  { id: '5-9 seconds', label: '5-9s' },
   { id: '15-30 seconds', label: '15-30s' },
   { id: '30-60 seconds', label: '30-60s' },
   { id: '60-90 seconds', label: '60-90s' },
