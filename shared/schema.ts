@@ -480,6 +480,255 @@ export const captionVariants = pgTable("caption_variants", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// =============================================
+// FEATURE FLAGS SYSTEM
+// =============================================
+export const featureFlags = pgTable("feature_flags", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  flagName: text("flag_name").notNull(),
+  enabled: boolean("enabled").default(false),
+  updatedBy: varchar("updated_by"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const featureFlagAudit = pgTable("feature_flag_audit", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  userId: varchar("user_id"),
+  flagName: text("flag_name").notNull(),
+  fromValue: boolean("from_value"),
+  toValue: boolean("to_value").notNull(),
+  reason: text("reason"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// =============================================
+// LEAD ENGINE: Lead Capture Module
+// =============================================
+export const leads = pgTable("leads", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  name: text("name"),
+  email: text("email"),
+  phone: text("phone"),
+  customFields: text("custom_fields"),
+  sourceType: text("source_type"),
+  sourcePostId: varchar("source_post_id"),
+  sourceCampaign: text("source_campaign"),
+  sourceCtaVariantId: varchar("source_cta_variant_id"),
+  sourceTrackingId: varchar("source_tracking_id"),
+  sourceLandingPageId: varchar("source_landing_page_id"),
+  sourceLeadMagnetId: varchar("source_lead_magnet_id"),
+  funnelStage: text("funnel_stage").default("lead"),
+  status: text("status").default("new"),
+  revenue: doublePrecision("revenue").default(0),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const leadForms = pgTable("lead_forms", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  name: text("name").notNull(),
+  fields: text("fields").notNull(),
+  thankYouMessage: text("thank_you_message").default("Thank you for your submission!"),
+  redirectUrl: text("redirect_url"),
+  isActive: boolean("is_active").default(true),
+  submissions: integer("submissions").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const trackingLinks = pgTable("tracking_links", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  trackingId: varchar("tracking_id").notNull().unique(),
+  destinationUrl: text("destination_url").notNull(),
+  linkType: text("link_type").default("cta"),
+  postId: varchar("post_id"),
+  campaignId: varchar("campaign_id"),
+  ctaVariantId: varchar("cta_variant_id"),
+  whatsappNumber: text("whatsapp_number"),
+  whatsappMessage: text("whatsapp_message"),
+  clicks: integer("clicks").default(0),
+  conversions: integer("conversions").default(0),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// =============================================
+// LEAD ENGINE: CTA Engine Module
+// =============================================
+export const ctaVariants = pgTable("cta_variants", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  postId: varchar("post_id"),
+  campaignId: varchar("campaign_id"),
+  ctaText: text("cta_text").notNull(),
+  ctaType: text("cta_type").default("link"),
+  destinationUrl: text("destination_url"),
+  impressions: integer("impressions").default(0),
+  clicks: integer("clicks").default(0),
+  conversions: integer("conversions").default(0),
+  conversionRate: doublePrecision("conversion_rate").default(0),
+  isWinner: boolean("is_winner").default(false),
+  isActive: boolean("is_active").default(true),
+  abGroup: text("ab_group"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// =============================================
+// LEAD ENGINE: Conversion Tracking Module
+// =============================================
+export const conversionEvents = pgTable("conversion_events", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  eventType: text("event_type").notNull(),
+  trackingId: varchar("tracking_id"),
+  leadId: varchar("lead_id"),
+  postId: varchar("post_id"),
+  ctaVariantId: varchar("cta_variant_id"),
+  campaignId: varchar("campaign_id"),
+  landingPageId: varchar("landing_page_id"),
+  leadMagnetId: varchar("lead_magnet_id"),
+  metadata: text("metadata"),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  referrer: text("referrer"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// =============================================
+// LEAD ENGINE: Funnel Logic Module
+// =============================================
+export const funnelDefinitions = pgTable("funnel_definitions", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  name: text("name").notNull(),
+  stages: text("stages").notNull(),
+  isDefault: boolean("is_default").default(false),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const funnelContentMap = pgTable("funnel_content_map", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  funnelId: varchar("funnel_id").notNull(),
+  stage: text("stage").notNull(),
+  postId: varchar("post_id"),
+  contentType: text("content_type"),
+  performance: text("performance"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// =============================================
+// LEAD ENGINE: Lead Magnet Module
+// =============================================
+export const leadMagnets = pgTable("lead_magnets", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  name: text("name").notNull(),
+  magnetType: text("magnet_type").notNull(),
+  content: text("content"),
+  deliveryMethod: text("delivery_method").default("email"),
+  downloadUrl: text("download_url"),
+  discountCode: text("discount_code"),
+  offerDetails: text("offer_details"),
+  downloads: integer("downloads").default(0),
+  leadsGenerated: integer("leads_generated").default(0),
+  conversionRate: doublePrecision("conversion_rate").default(0),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// =============================================
+// LEAD ENGINE: Landing Page Module
+// =============================================
+export const landingPages = pgTable("landing_pages", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  title: text("title").notNull(),
+  slug: varchar("slug").notNull().unique(),
+  headline: text("headline"),
+  subheadline: text("subheadline"),
+  bodyContent: text("body_content"),
+  ctaText: text("cta_text"),
+  ctaUrl: text("cta_url"),
+  formId: varchar("form_id"),
+  leadMagnetId: varchar("lead_magnet_id"),
+  ctaVariantId: varchar("cta_variant_id"),
+  backgroundImage: text("background_image"),
+  colorScheme: text("color_scheme").default("default"),
+  views: integer("views").default(0),
+  conversions: integer("conversions").default(0),
+  conversionRate: doublePrecision("conversion_rate").default(0),
+  isPublished: boolean("is_published").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// =============================================
+// LEAD ENGINE: Revenue Attribution Module
+// =============================================
+export const revenueEntries = pgTable("revenue_entries", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  leadId: varchar("lead_id"),
+  amount: doublePrecision("amount").notNull().default(0),
+  source: text("source"),
+  postId: varchar("post_id"),
+  campaignId: varchar("campaign_id"),
+  ctaVariantId: varchar("cta_variant_id"),
+  funnelStage: text("funnel_stage"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const adSpendEntries = pgTable("ad_spend_entries", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  amount: doublePrecision("amount").notNull().default(0),
+  platform: text("platform"),
+  campaignId: varchar("campaign_id"),
+  period: text("period"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export type VideoProject = typeof videoProjects.$inferSelect;
 export type PerformanceSnapshot = typeof performanceSnapshots.$inferSelect;
 export type StrategyInsight = typeof strategyInsights.$inferSelect;
@@ -490,3 +739,16 @@ export type WeeklyReport = typeof weeklyReports.$inferSelect;
 export type BrandConfig = typeof brandConfig.$inferSelect;
 export type PublishedPost = typeof publishedPosts.$inferSelect;
 export type CaptionVariant = typeof captionVariants.$inferSelect;
+export type FeatureFlag = typeof featureFlags.$inferSelect;
+export type FeatureFlagAuditEntry = typeof featureFlagAudit.$inferSelect;
+export type Lead = typeof leads.$inferSelect;
+export type LeadForm = typeof leadForms.$inferSelect;
+export type TrackingLink = typeof trackingLinks.$inferSelect;
+export type CtaVariant = typeof ctaVariants.$inferSelect;
+export type ConversionEvent = typeof conversionEvents.$inferSelect;
+export type FunnelDefinition = typeof funnelDefinitions.$inferSelect;
+export type FunnelContentMap = typeof funnelContentMap.$inferSelect;
+export type LeadMagnet = typeof leadMagnets.$inferSelect;
+export type LandingPage = typeof landingPages.$inferSelect;
+export type RevenueEntry = typeof revenueEntries.$inferSelect;
+export type AdSpendEntry = typeof adSpendEntries.$inferSelect;
