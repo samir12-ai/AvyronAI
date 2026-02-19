@@ -271,6 +271,7 @@ export default function CreateScreen() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [videoError, setVideoError] = useState<string | null>(null);
   const [videoPolling, setVideoPolling] = useState(false);
+  const [videoRefImage, setVideoRefImage] = useState<ImagePicker.ImagePickerAsset | null>(null);
 
   const handleGenerate = async () => {
     if (!topic.trim()) {
@@ -532,6 +533,21 @@ export default function CreateScreen() {
     await saveImageToGallery(generatedPoster);
   };
 
+  const handlePickVideoRefImage = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8,
+      });
+      if (!result.canceled && result.assets[0]) {
+        setVideoRefImage(result.assets[0]);
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+    }
+  };
+
   const handleGenerateVideo = async () => {
     if (!videoPrompt.trim()) {
       Alert.alert('Missing Prompt', 'Describe the video you want to create.');
@@ -546,16 +562,41 @@ export default function CreateScreen() {
 
     try {
       const apiUrl = getApiUrl();
+      const body: any = {
+        prompt: videoPrompt,
+        aspectRatio: videoAspect,
+        duration: videoDuration,
+        model: videoModel,
+        loop: videoLoop,
+      };
+
+      if (videoRefImage?.uri) {
+        setVideoStatus('uploading image...');
+        const formData = new FormData();
+        const uri = videoRefImage.uri;
+        const filename = uri.split('/').pop() || 'photo.jpg';
+        const match = /\.(\w+)$/.exec(filename);
+        const type = match ? `image/${match[1]}` : 'image/jpeg';
+        formData.append('image', { uri, name: filename, type } as any);
+
+        const uploadRes = await fetch(new URL('/api/luma/upload-image', apiUrl).toString(), {
+          method: 'POST',
+          body: formData,
+        });
+        const uploadData = await uploadRes.json();
+        if (!uploadRes.ok) {
+          setVideoError(uploadData.error || 'Failed to upload reference image');
+          setIsGeneratingVideo(false);
+          return;
+        }
+        body.imageUrl = uploadData.imageUrl;
+        setVideoStatus('dreaming');
+      }
+
       const res = await fetch(new URL('/api/luma/generate', apiUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: videoPrompt,
-          aspectRatio: videoAspect,
-          duration: videoDuration,
-          model: videoModel,
-          loop: videoLoop,
-        }),
+        body: JSON.stringify(body),
       });
 
       const data = await res.json();
@@ -1529,6 +1570,48 @@ export default function CreateScreen() {
                   numberOfLines={4}
                   textAlignVertical="top"
                 />
+              </View>
+
+              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Reference Image (Optional)</Text>
+                <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginBottom: 12 }}>
+                  Add an image as the starting frame for your video
+                </Text>
+                {videoRefImage ? (
+                  <View style={{ borderRadius: 14, overflow: 'hidden', marginBottom: 8 }}>
+                    <Image
+                      source={{ uri: videoRefImage.uri }}
+                      style={{ width: '100%', height: 180, borderRadius: 14 }}
+                      resizeMode="cover"
+                    />
+                    <Pressable
+                      onPress={() => setVideoRefImage(null)}
+                      style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 14, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      <Ionicons name="close" size={18} color="#fff" />
+                    </Pressable>
+                  </View>
+                ) : (
+                  <Pressable
+                    onPress={handlePickVideoRefImage}
+                    style={[{
+                      borderWidth: 1.5,
+                      borderStyle: 'dashed' as const,
+                      borderColor: '#7C3AED40',
+                      borderRadius: 14,
+                      padding: 24,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      backgroundColor: colors.inputBackground,
+                      gap: 8,
+                    }]}
+                  >
+                    <Ionicons name="image-outline" size={32} color="#7C3AED" />
+                    <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>
+                      Choose Image
+                    </Text>
+                  </Pressable>
+                )}
               </View>
 
               <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
