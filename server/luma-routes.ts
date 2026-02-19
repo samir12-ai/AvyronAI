@@ -3,6 +3,8 @@ import LumaAI from "lumaai";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import FormData from "form-data";
+import https from "https";
 
 const upload = multer({
   dest: "/tmp/luma-uploads",
@@ -17,6 +19,44 @@ const upload = multer({
     }
   },
 });
+
+const FREEIMAGE_API_KEY = "6d207e02198a847aa98d0a2a901485a5";
+
+function uploadToPublicHost(filePath: string, originalName: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append("source", fs.createReadStream(filePath), { filename: originalName });
+    form.append("type", "file");
+    form.append("action", "upload");
+
+    const options = {
+      hostname: "freeimage.host",
+      path: `/api/1/upload?key=${FREEIMAGE_API_KEY}`,
+      method: "POST",
+      headers: form.getHeaders(),
+    };
+
+    const request = https.request(options, (response) => {
+      let data = "";
+      response.on("data", (chunk) => { data += chunk; });
+      response.on("end", () => {
+        try {
+          const result = JSON.parse(data);
+          if (result.status_code === 200 && result.image?.image?.url) {
+            resolve(result.image.image.url);
+          } else {
+            reject(new Error(`Image host upload failed: ${result.error?.message || "Unknown error"}`));
+          }
+        } catch (e) {
+          reject(new Error("Failed to parse image host response"));
+        }
+      });
+    });
+
+    request.on("error", (err) => reject(err));
+    form.pipe(request);
+  });
+}
 
 let lumaClient: LumaAI | null = null;
 
@@ -50,14 +90,11 @@ export function registerLumaRoutes(app: Express) {
       if (!req.file) {
         return res.status(400).json({ error: "No image file provided" });
       }
-      const ext = path.extname(req.file.originalname || ".jpg").toLowerCase() || ".jpg";
-      const uniqueName = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}${ext}`;
-      const destPath = path.join(uploadsDir, uniqueName);
-      fs.renameSync(req.file.path, destPath);
 
-      const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
-      const host = req.headers["x-forwarded-host"] || req.headers.host || req.hostname;
-      const publicUrl = `${protocol}://${host}/api/luma/files/${uniqueName}`;
+      const filePath = req.file.path;
+      const publicUrl = await uploadToPublicHost(filePath, req.file.originalname || "image.jpg");
+
+      try { fs.unlinkSync(filePath); } catch {}
 
       res.json({ imageUrl: publicUrl });
     } catch (error: any) {
