@@ -43,7 +43,17 @@ Preferred communication style: Simple, everyday language.
     - **Strategy Hub**: AI-powered strategic intelligence engine with MOAT BUILDER MODE for brand defensibility, pattern detection, decision management, memory tracking, growth campaigns, and AI-generated reports.
 - **Studio**: Media library and an AI Video Editor with guided creative briefs, multi-clip uploads, AI-generated edit plans, and FFmpeg rendering.
 - **Photography**: A Dubai-based photography marketplace with dual roles for photographers (profile, portfolio, reservation management) and customers (browsing, booking).
+- **Lead Engine**: Modular lead generation system with 8 independent modules (Lead Capture, Conversion Tracking, CTA Engine, Funnel Logic, Lead Magnets, Landing Pages, Revenue Attribution, AI Lead Optimization). Each module has feature flags, dependency guards, safe mode, and a global kill switch. Accessible via the "Leads" tab in AI Management (Advanced Mode).
 - **Settings**: Brand profile and platform connections management.
+
+### Lead Engine Architecture
+- **Feature Flags**: `server/feature-flags.ts` - Per-module ON/OFF with dependency guards, global kill switch, audit trail. All flags default OFF.
+- **Modules**: `server/lead-engine/` - 8 isolated route files, each checking flags before processing.
+- **Dependencies**: CTA Engine requires Conversion Tracking; Funnel Logic requires Lead Capture + Conversion Tracking; Lead Magnets/Landing Pages require Lead Capture; Revenue Attribution requires Conversion Tracking; AI Optimization requires Lead Capture + Conversion Tracking.
+- **Safe Mode**: Modules with unmet dependencies operate in limited capacity (e.g., CTA Engine generates but won't auto-rotate).
+- **Frontend Hook**: `hooks/useFeatureFlags.ts` - 5-min TTL cache, app-open refresh, toggle/kill/resume methods.
+- **UI**: `components/LeadControlPanel.tsx` - Module toggle grid with dependency status, stats dashboard, kill switch banner.
+- **Database Tables**: leads, conversion_events, cta_variants, funnels, funnel_stages, lead_magnets, landing_pages, revenue_attributions, lead_scores, feature_flags, feature_flag_audit.
 
 ## External Dependencies
 
