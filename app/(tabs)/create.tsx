@@ -233,7 +233,7 @@ export default function CreateScreen() {
   const aspectRatios = aspectRatiosDef.map(r => ({ ...r, label: t(r.labelKey) }));
   const moodOptions = moodOptionsDef.map(m => ({ ...m, label: t(m.labelKey) }));
 
-  const [activeTab, setActiveTab] = useState<'content' | 'designer'>('content');
+  const [activeTab, setActiveTab] = useState<'content' | 'designer' | 'video'>('content');
   const [aiEngine, setAiEngine] = useState<'openai' | 'gemini'>('openai');
   
   const [contentType, setContentType] = useState<string>('post');
@@ -258,6 +258,18 @@ export default function CreateScreen() {
   const [referencePhotos, setReferencePhotos] = useState<(ImagePicker.ImagePickerAsset | null)[]>([null, null, null]);
   const [generationHistory, setGenerationHistory] = useState<GeneratedImage[]>([]);
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
+
+  const [videoPrompt, setVideoPrompt] = useState('');
+  const [videoAspect, setVideoAspect] = useState('16:9');
+  const [videoDuration, setVideoDuration] = useState('5s');
+  const [videoModel, setVideoModel] = useState('ray-flash-2');
+  const [videoLoop, setVideoLoop] = useState(false);
+  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
+  const [videoGenId, setVideoGenId] = useState<string | null>(null);
+  const [videoStatus, setVideoStatus] = useState<string | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const [videoPolling, setVideoPolling] = useState(false);
 
   const handleGenerate = async () => {
     if (!topic.trim()) {
@@ -519,10 +531,116 @@ export default function CreateScreen() {
     await saveImageToGallery(generatedPoster);
   };
 
+  const handleGenerateVideo = async () => {
+    if (!videoPrompt.trim()) {
+      Alert.alert('Missing Prompt', 'Describe the video you want to create.');
+      return;
+    }
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setIsGeneratingVideo(true);
+    setVideoUrl(null);
+    setVideoError(null);
+    setVideoStatus('dreaming');
+
+    try {
+      const apiUrl = getApiUrl();
+      const res = await fetch(new URL('/api/luma/generate', apiUrl).toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: videoPrompt,
+          aspectRatio: videoAspect,
+          duration: videoDuration,
+          model: videoModel,
+          loop: videoLoop,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setVideoError(data.error || 'Failed to start generation');
+        setIsGeneratingVideo(false);
+        return;
+      }
+
+      setVideoGenId(data.id);
+      setVideoStatus('queued');
+      pollVideoStatus(data.id);
+    } catch (err: any) {
+      setVideoError(err.message || 'Network error');
+      setIsGeneratingVideo(false);
+    }
+  };
+
+  const pollVideoStatus = async (genId: string) => {
+    setVideoPolling(true);
+    const apiUrl = getApiUrl();
+    let attempts = 0;
+    const maxAttempts = 120;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(new URL(`/api/luma/status/${genId}`, apiUrl).toString());
+        const data = await res.json();
+
+        setVideoStatus(data.state);
+
+        if (data.state === 'completed' && data.videoUrl) {
+          setVideoUrl(data.videoUrl);
+          setIsGeneratingVideo(false);
+          setVideoPolling(false);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          return;
+        }
+
+        if (data.state === 'failed') {
+          setVideoError(data.failure_reason || 'Video generation failed');
+          setIsGeneratingVideo(false);
+          setVideoPolling(false);
+          return;
+        }
+
+        attempts++;
+        if (attempts < maxAttempts) {
+          setTimeout(poll, 5000);
+        } else {
+          setVideoError('Generation timed out. Check back later.');
+          setIsGeneratingVideo(false);
+          setVideoPolling(false);
+        }
+      } catch (err) {
+        attempts++;
+        if (attempts < maxAttempts) {
+          setTimeout(poll, 5000);
+        }
+      }
+    };
+
+    poll();
+  };
+
   const selectedRatio = aspectRatios.find(r => r.id === aspectRatio) || aspectRatios[0];
   const canvasAspect = selectedRatio.width / selectedRatio.height;
   const canvasWidth = SCREEN_WIDTH - 40;
   const canvasHeight = Math.min(canvasWidth / canvasAspect, 500);
+
+  const videoAspectOptions = [
+    { id: '16:9', label: 'Landscape', icon: 'tablet-landscape-outline' as const },
+    { id: '9:16', label: 'Portrait', icon: 'phone-portrait-outline' as const },
+    { id: '1:1', label: 'Square', icon: 'square-outline' as const },
+    { id: '4:3', label: '4:3', icon: 'tablet-landscape-outline' as const },
+  ];
+
+  const videoDurationOptions = [
+    { id: '5s', label: '5 sec' },
+    { id: '9s', label: '9 sec' },
+  ];
+
+  const videoModelOptions = [
+    { id: 'ray-flash-2', label: 'Ray 2 Flash', desc: 'Fast' },
+    { id: 'ray-2', label: 'Ray 2', desc: 'Best quality' },
+  ];
 
   return (
     <KeyboardAvoidingView 
@@ -586,9 +704,30 @@ export default function CreateScreen() {
                 {t('create.aiDesigner')}
               </Text>
             </Pressable>
+            <Pressable
+              onPress={() => setActiveTab('video')}
+              style={[
+                styles.tab,
+                { 
+                  backgroundColor: activeTab === 'video' ? '#7C3AED' : colors.inputBackground,
+                }
+              ]}
+            >
+              <Ionicons 
+                name="videocam" 
+                size={18} 
+                color={activeTab === 'video' ? '#fff' : colors.textMuted} 
+              />
+              <Text style={[
+                styles.tabText,
+                { color: activeTab === 'video' ? '#fff' : colors.textMuted }
+              ]}>
+                AI Video
+              </Text>
+            </Pressable>
           </View>
 
-          {activeTab === 'content' ? (
+          {activeTab === 'content' && (
             <>
               <View style={[styles.engineToggle, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
                 <Pressable
@@ -1030,7 +1169,9 @@ export default function CreateScreen() {
                 </Animated.View>
               )}
             </>
-          ) : (
+          )}
+
+          {activeTab === 'designer' && (
             <>
               {/* Generation Mode Selector */}
               <View style={[styles.modeBar, { backgroundColor: isDark ? '#1a2332' : '#f1f5f9' }]}>
@@ -1349,6 +1490,241 @@ export default function CreateScreen() {
               <View style={styles.poweredBy}>
                 <Text style={[styles.poweredByText, { color: colors.textMuted }]}>
                   {t('create.poweredBy')}
+                </Text>
+              </View>
+            </>
+          )}
+
+          {activeTab === 'video' && (
+            <>
+              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <View style={styles.cardHeader}>
+                  <LinearGradient
+                    colors={['#7C3AED', '#A855F7', '#7C3AED']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={{ width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <Ionicons name="videocam" size={20} color="#fff" />
+                  </LinearGradient>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.cardTitle, { color: colors.text, marginBottom: 0 }]}>Luma AI Video</Text>
+                    <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginTop: 2 }}>
+                      Powered by Ray 2 Dream Machine
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Describe your video</Text>
+                <TextInput
+                  style={[styles.promptInput, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
+                  placeholder="A cinematic drone shot over a modern city at sunset, golden hour lighting..."
+                  placeholderTextColor={colors.textMuted}
+                  value={videoPrompt}
+                  onChangeText={setVideoPrompt}
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                />
+              </View>
+
+              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Model</Text>
+                <View style={styles.reelOptionRow}>
+                  {videoModelOptions.map(m => (
+                    <Pressable
+                      key={m.id}
+                      onPress={() => { Haptics.selectionAsync(); setVideoModel(m.id); }}
+                      style={[
+                        styles.reelChip,
+                        {
+                          backgroundColor: videoModel === m.id ? '#7C3AED20' : colors.inputBackground,
+                          borderColor: videoModel === m.id ? '#7C3AED' : 'transparent',
+                        }
+                      ]}
+                    >
+                      <Text style={[styles.reelChipText, { color: videoModel === m.id ? '#7C3AED' : colors.textMuted }]}>
+                        {m.label}
+                      </Text>
+                      <Text style={{ fontSize: 10, color: colors.textMuted, fontFamily: 'Inter_400Regular' }}>
+                        {m.desc}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Aspect Ratio</Text>
+                <View style={styles.reelOptionRow}>
+                  {videoAspectOptions.map(a => (
+                    <Pressable
+                      key={a.id}
+                      onPress={() => { Haptics.selectionAsync(); setVideoAspect(a.id); }}
+                      style={[
+                        styles.reelChip,
+                        {
+                          backgroundColor: videoAspect === a.id ? '#7C3AED20' : colors.inputBackground,
+                          borderColor: videoAspect === a.id ? '#7C3AED' : 'transparent',
+                        }
+                      ]}
+                    >
+                      <Ionicons name={a.icon} size={16} color={videoAspect === a.id ? '#7C3AED' : colors.textMuted} />
+                      <Text style={[styles.reelChipText, { color: videoAspect === a.id ? '#7C3AED' : colors.textMuted }]}>
+                        {a.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Duration</Text>
+                <View style={styles.reelOptionRow}>
+                  {videoDurationOptions.map(d => (
+                    <Pressable
+                      key={d.id}
+                      onPress={() => { Haptics.selectionAsync(); setVideoDuration(d.id); }}
+                      style={[
+                        styles.reelChip,
+                        {
+                          backgroundColor: videoDuration === d.id ? '#7C3AED20' : colors.inputBackground,
+                          borderColor: videoDuration === d.id ? '#7C3AED' : 'transparent',
+                        }
+                      ]}
+                    >
+                      <Text style={[styles.reelChipText, { color: videoDuration === d.id ? '#7C3AED' : colors.textMuted }]}>
+                        {d.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 10 }}>
+                  <Pressable
+                    onPress={() => setVideoLoop(!videoLoop)}
+                    style={[
+                      styles.reelChip,
+                      {
+                        backgroundColor: videoLoop ? '#7C3AED20' : colors.inputBackground,
+                        borderColor: videoLoop ? '#7C3AED' : 'transparent',
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                      }
+                    ]}
+                  >
+                    <Ionicons name={videoLoop ? 'checkbox' : 'square-outline'} size={18} color={videoLoop ? '#7C3AED' : colors.textMuted} />
+                    <Text style={[styles.reelChipText, { color: videoLoop ? '#7C3AED' : colors.textMuted }]}>
+                      Loop video
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              <Pressable
+                onPress={handleGenerateVideo}
+                disabled={isGeneratingVideo || !videoPrompt.trim()}
+                style={[styles.generateDesignBtn, { opacity: (isGeneratingVideo || !videoPrompt.trim()) ? 0.5 : 1 }]}
+              >
+                <LinearGradient
+                  colors={['#7C3AED', '#A855F7', '#7C3AED']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.generateDesignGradient}
+                >
+                  {isGeneratingVideo ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Ionicons name="sparkles" size={20} color="#fff" />
+                  )}
+                  <Text style={styles.generateDesignText}>
+                    {isGeneratingVideo ? 'Generating...' : 'Generate Video'}
+                  </Text>
+                </LinearGradient>
+              </Pressable>
+
+              {isGeneratingVideo && videoStatus && (
+                <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 30 }]}>
+                  <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: '#7C3AED15', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+                    <ActivityIndicator size="large" color="#7C3AED" />
+                  </View>
+                  <Text style={[{ fontSize: 16, fontFamily: 'Inter_600SemiBold', color: colors.text, marginBottom: 4 }]}>
+                    {videoStatus === 'dreaming' ? 'Starting...' :
+                     videoStatus === 'queued' ? 'Queued' :
+                     videoStatus === 'processing' ? 'Rendering video...' :
+                     'Processing...'}
+                  </Text>
+                  <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', textAlign: 'center' }}>
+                    This usually takes 1-3 minutes. You can wait here.
+                  </Text>
+                </View>
+              )}
+
+              {videoError && (
+                <View style={[styles.card, { backgroundColor: colors.card, borderColor: '#EF444440' }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Ionicons name="alert-circle" size={20} color="#EF4444" />
+                    <Text style={{ fontSize: 14, color: '#EF4444', fontFamily: 'Inter_500Medium', flex: 1 }}>
+                      {videoError}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {videoUrl && (
+                <View style={[styles.card, { backgroundColor: colors.card, borderColor: '#7C3AED40' }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <Ionicons name="checkmark-circle" size={20} color="#7C3AED" />
+                    <Text style={{ fontSize: 16, fontFamily: 'Inter_600SemiBold', color: colors.text }}>
+                      Video Ready
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={() => {
+                      if (Platform.OS === 'web') {
+                        const link = document.createElement('a');
+                        link.href = videoUrl;
+                        link.target = '_blank';
+                        link.click();
+                      } else {
+                        Alert.alert('Video URL', videoUrl);
+                      }
+                    }}
+                    style={[{
+                      backgroundColor: '#7C3AED15',
+                      borderRadius: 12,
+                      padding: 16,
+                      alignItems: 'center',
+                      gap: 8,
+                    }]}
+                  >
+                    <Ionicons name="play-circle" size={48} color="#7C3AED" />
+                    <Text style={{ fontSize: 14, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>
+                      Open Video
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      setVideoUrl(null);
+                      setVideoPrompt('');
+                      setVideoGenId(null);
+                      setVideoStatus(null);
+                    }}
+                    style={{ marginTop: 12, alignItems: 'center', paddingVertical: 10 }}
+                  >
+                    <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: colors.textMuted }}>
+                      Generate another video
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
+
+              <View style={styles.poweredBy}>
+                <Text style={[styles.poweredByText, { color: colors.textMuted }]}>
+                  Powered by Luma AI Dream Machine
                 </Text>
               </View>
             </>
