@@ -555,7 +555,7 @@ export default function CreateScreen() {
   const pickLumaImage = async (setter: (img: ImagePicker.ImagePickerAsset | null) => void) => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'] as ImagePicker.MediaType[],
         allowsEditing: true,
         quality: 0.8,
       });
@@ -575,7 +575,15 @@ export default function CreateScreen() {
       const filename = uri.split('/').pop() || 'photo.jpg';
       const match = /\.(\w+)$/.exec(filename);
       const type = match ? `image/${match[1]}` : 'image/jpeg';
-      formData.append('image', { uri, name: filename, type } as any);
+
+      if (Platform.OS === 'web') {
+        const response = await fetch(uri);
+        const blob = await response.blob();
+        formData.append('image', blob, filename);
+      } else {
+        formData.append('image', { uri, name: filename, type } as any);
+      }
+
       const res = await fetch(new URL('/api/luma/upload-image', apiUrl).toString(), {
         method: 'POST',
         body: formData,
@@ -583,7 +591,8 @@ export default function CreateScreen() {
       const data = await res.json();
       if (!res.ok) return null;
       return data.imageUrl;
-    } catch {
+    } catch (err) {
+      console.error('Upload image error:', err);
       return null;
     }
   };
