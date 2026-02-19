@@ -432,6 +432,8 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
     }
   });
 
+  const FB_API_VERSION = 'v21.0';
+
   function getPublicBaseUrl(req: any): string {
     const forwardedHost = req.get('x-forwarded-host') || req.get('host');
     const forwardedProto = req.get('x-forwarded-proto') || req.protocol;
@@ -450,7 +452,7 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
     const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/auth/facebook/callback`;
     
     const scopes = ['email', 'public_profile'].join(',');
-    const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&response_type=code`;
+    const authUrl = `https://www.facebook.com/${FB_API_VERSION}/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&response_type=code`;
     
     if (!META_APP_ID) {
       res.send(`
@@ -503,7 +505,7 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
     
     try {
       const tokenResponse = await fetch(
-        `https://graph.facebook.com/v18.0/oauth/access_token?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&client_secret=${META_APP_SECRET}&code=${code}`
+        `https://graph.facebook.com/${FB_API_VERSION}/oauth/access_token?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&client_secret=${META_APP_SECRET}&code=${code}`
       );
       const tokenData = await tokenResponse.json();
       
@@ -551,7 +553,7 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
     const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/auth/instagram/callback`;
     
     const scopes = ['public_profile', 'email'].join(',');
-    const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&response_type=code`;
+    const authUrl = `https://www.facebook.com/${FB_API_VERSION}/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&response_type=code`;
     
     if (!META_APP_ID) {
       res.send(`
@@ -604,7 +606,7 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
     
     try {
       const tokenResponse = await fetch(
-        `https://graph.facebook.com/v18.0/oauth/access_token?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&client_secret=${META_APP_SECRET}&code=${code}`
+        `https://graph.facebook.com/${FB_API_VERSION}/oauth/access_token?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&client_secret=${META_APP_SECRET}&code=${code}`
       );
       const tokenData = await tokenResponse.json();
       
@@ -661,13 +663,34 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
     }
   });
 
+  app.get("/api/meta/debug", (req, res) => {
+    const META_APP_ID = process.env.META_APP_ID || '';
+    const META_APP_SECRET = process.env.META_APP_SECRET || '';
+    const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/meta/callback`;
+    const hasId = META_APP_ID.length > 0;
+    const hasSecret = META_APP_SECRET.length > 0;
+    const idPreview = hasId ? META_APP_ID.substring(0, 4) + '...' + META_APP_ID.substring(META_APP_ID.length - 4) : 'NOT SET';
+    console.log(`[Meta Debug] APP_ID set: ${hasId} (${idPreview}), SECRET set: ${hasSecret}, Redirect: ${REDIRECT_URI}`);
+    res.json({
+      appIdSet: hasId,
+      appIdPreview: idPreview,
+      appIdLength: META_APP_ID.length,
+      secretSet: hasSecret,
+      secretLength: META_APP_SECRET.length,
+      redirectUri: REDIRECT_URI,
+      apiVersion: FB_API_VERSION,
+    });
+  });
+
   app.get("/api/meta/auth", (req, res) => {
     const META_APP_ID = process.env.META_APP_ID || '';
     const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/meta/callback`;
     
     const scopes = ['public_profile', 'email'].join(',');
     
-    const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&response_type=code`;
+    const authUrl = `https://www.facebook.com/${FB_API_VERSION}/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&response_type=code`;
+
+    console.log(`[Meta OAuth] Initiating auth, APP_ID: ${META_APP_ID ? META_APP_ID.substring(0, 4) + '...' : 'NOT SET'}, Redirect: ${REDIRECT_URI}`);
     
     if (!META_APP_ID) {
       res.send(`
@@ -714,10 +737,35 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
   });
 
   app.get("/api/meta/callback", async (req, res) => {
-    const { code } = req.query;
+    const { code, error: fbError, error_description } = req.query;
     const META_APP_ID = process.env.META_APP_ID || '';
     const META_APP_SECRET = process.env.META_APP_SECRET || '';
     const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/meta/callback`;
+
+    if (fbError) {
+      console.error(`[Meta OAuth] Facebook returned error: ${fbError} - ${error_description}`);
+      res.send(`
+        <html>
+        <head><style>body{font-family:-apple-system,sans-serif;padding:40px;max-width:500px;margin:0 auto;text-align:center;} .err{color:#FF6B6B;font-size:20px;margin-bottom:12px;} .desc{color:#666;margin-bottom:20px;} .hint{background:#FFF3CD;padding:16px;border-radius:10px;color:#856404;text-align:left;font-size:14px;}</style></head>
+        <body>
+          <div class="err">Connection Failed</div>
+          <p class="desc">${error_description || fbError}</p>
+          <div class="hint">
+            <strong>Common fixes:</strong><br/>
+            1. Make sure your Meta app is set to <strong>Live</strong> mode (not Development)<br/>
+            2. In your Meta app settings, add this domain to <strong>Valid OAuth Redirect URIs</strong>:<br/>
+            <code>${REDIRECT_URI}</code><br/>
+            3. Make sure "Facebook Login" product is added to your Meta app<br/>
+            4. Check that the App ID and App Secret match your Meta app
+          </div>
+          <script>
+            setTimeout(() => { window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: '${fbError}' }, '*'); }, 3000);
+          </script>
+        </body>
+        </html>
+      `);
+      return;
+    }
     
     if (!code || !META_APP_ID || !META_APP_SECRET) {
       res.send(`
@@ -735,11 +783,30 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
     }
     
     try {
+      console.log(`[Meta OAuth] Exchanging code for token, redirect_uri: ${REDIRECT_URI}`);
       const tokenResponse = await fetch(
-        `https://graph.facebook.com/v18.0/oauth/access_token?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&client_secret=${META_APP_SECRET}&code=${code}`
+        `https://graph.facebook.com/${FB_API_VERSION}/oauth/access_token?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&client_secret=${META_APP_SECRET}&code=${code}`
       );
       const tokenData = await tokenResponse.json();
       
+      if (tokenData.error) {
+        console.error(`[Meta OAuth] Token exchange error:`, tokenData.error);
+        res.send(`
+          <html>
+          <head><style>body{font-family:-apple-system,sans-serif;padding:40px;max-width:500px;margin:0 auto;text-align:center;} .err{color:#FF6B6B;font-size:20px;margin-bottom:12px;} .desc{color:#666;}</style></head>
+          <body>
+            <div class="err">Authentication Error</div>
+            <p class="desc">${tokenData.error.message || 'Failed to get access token'}</p>
+            <script>
+              setTimeout(() => { window.opener?.postMessage({ type: 'META_AUTH_ERROR' }, '*'); window.close(); }, 4000);
+            </script>
+          </body>
+          </html>
+        `);
+        return;
+      }
+
+      console.log(`[Meta OAuth] Successfully obtained access token`);
       res.send(`
         <html>
         <body>
@@ -752,6 +819,7 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
         </html>
       `);
     } catch (error) {
+      console.error(`[Meta OAuth] Unexpected error:`, error);
       res.send(`
         <html>
         <body>
@@ -782,7 +850,7 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
       
       if (platforms.includes('facebook')) {
         const fbResponse = await fetch(
-          `https://graph.facebook.com/v18.0/${pageId}/feed`,
+          `https://graph.facebook.com/${FB_API_VERSION}/${pageId}/feed`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1013,7 +1081,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
         try {
           if (post.platform === 'Facebook' || post.platform === 'facebook') {
             const fbResponse = await fetch(
-              `https://graph.facebook.com/v18.0/${pageId}/feed`,
+              `https://graph.facebook.com/${FB_API_VERSION}/${pageId}/feed`,
               {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
