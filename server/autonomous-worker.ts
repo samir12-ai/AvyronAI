@@ -10,6 +10,7 @@ import {
 } from "@shared/schema";
 import { eq, sql, desc, gte, lte } from "drizzle-orm";
 import { logAudit } from "./audit";
+import { FeatureFlagService } from "./feature-flags";
 import { computeRollingBaselines } from "./baselines";
 import { runAllGuardrails, checkSafeModeConditions } from "./guardrails";
 import { classifyDecisionRisk } from "./risk-classifier";
@@ -583,6 +584,22 @@ async function processAccount(accountId: string) {
       }
     }
 
+    let leadEngineProcessed = false;
+    try {
+      const flagService = new FeatureFlagService();
+      const flags = await flagService.getAllFlags(accountId);
+      if (!flags.lead_engine_global_off) {
+        if (flags.ai_lead_optimization_enabled && flags.lead_capture_enabled && flags.conversion_tracking_enabled) {
+          await logAudit(accountId, "LEAD_ENGINE_CYCLE", {
+            details: { jobId, modules: Object.entries(flags).filter(([k, v]) => v && k !== 'lead_engine_global_off').map(([k]) => k) },
+          });
+          leadEngineProcessed = true;
+        }
+      }
+    } catch (leadErr) {
+      console.error(`[Worker] Lead engine processing error for ${accountId}:`, leadErr);
+    }
+
     await db.update(accountState)
       .set({ lastWorkerRun: new Date(), updatedAt: new Date() })
       .where(eq(accountState.accountId, accountId));
@@ -597,6 +614,7 @@ async function processAccount(accountId: string) {
         mode: activeMode,
         confidence: finalConfidence,
         confidenceStatus: confidenceResult.status,
+        leadEngineProcessed,
       },
     });
 

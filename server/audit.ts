@@ -39,7 +39,8 @@ export type AuditEventType =
   | "LEAD_MAGNET_GENERATED"
   | "LANDING_PAGE_PUBLISHED"
   | "REVENUE_ATTRIBUTED"
-  | "AI_LEAD_OPTIMIZATION_RUN";
+  | "AI_LEAD_OPTIMIZATION_RUN"
+  | "LEAD_ENGINE_CYCLE";
 
 export async function logAudit(
   accountId: string,

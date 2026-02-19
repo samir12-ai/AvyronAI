@@ -24,6 +24,7 @@ import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { getApiUrl } from '@/lib/query-client';
 import StrategyHub from '@/components/StrategyHub';
+import LeadControlPanel from '@/components/LeadControlPanel';
 
 interface AIAudience {
   name: string;
@@ -42,7 +43,7 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'control' | 'publisher' | 'audience' | 'strategy';
+type TabView = 'control' | 'publisher' | 'audience' | 'strategy' | 'leads';
 
 function PulseRing({ color }: { color: string }) {
   const scale = useRef(new RNAnimated.Value(1)).current;
@@ -684,11 +685,20 @@ export default function AIManagementScreen() {
                   Strategy
                 </Text>
               </Pressable>
+              <Pressable
+                onPress={() => { Haptics.selectionAsync(); setActiveTab('leads'); }}
+                style={[styles.tab, activeTab === 'leads' && { backgroundColor: '#00D09C' + '15' }]}
+              >
+                <Ionicons name="magnet-outline" size={18} color={activeTab === 'leads' ? '#00D09C' : colors.textMuted} />
+                <Text style={[styles.tabText, { color: activeTab === 'leads' ? '#00D09C' : colors.textMuted }]}>
+                  Leads
+                </Text>
+              </Pressable>
             </>
           )}
         </View>
 
-        {activeTab === 'control' ? renderControlCenter() : activeTab === 'publisher' ? renderPublisher() : activeTab === 'audience' ? renderAudienceManager() : <StrategyHub />}
+        {activeTab === 'control' ? renderControlCenter() : activeTab === 'publisher' ? renderPublisher() : activeTab === 'audience' ? renderAudienceManager() : activeTab === 'leads' ? <LeadControlPanel /> : <StrategyHub />}
 
         <View style={{ height: 120 }} />
       </ScrollView>
