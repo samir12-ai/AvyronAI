@@ -1,0 +1,132 @@
+
+⸻
+
+🚀 Subject: Build Full Lead Engine Layer on Top of Current System
+
+I want to upgrade the platform from a content & engagement engine into a true Lead Generation Engine.
+
+We need to build a strong, conversion-focused Lead System integrated with the existing AI architecture.
+
+Please implement the following components:
+
+⸻
+
+1️⃣ Lead Capture Infrastructure
+	•	Built-in form builder (name, phone, email, custom fields)
+	•	WhatsApp click-to-chat generator with tracking
+	•	Instagram DM trigger tracking (if possible via API limits)
+	•	Custom CTA link generator with unique tracking IDs per post
+
+⸻
+
+2️⃣ Lead Database & Attribution
+	•	Dedicated leads table
+	•	Store:
+	•	Lead info
+	•	Source post ID
+	•	Campaign
+	•	CTA variant
+	•	Timestamp
+	•	Source attribution: track which content generated each lead
+	•	Lead status (new, contacted, converted, lost)
+
+⸻
+
+3️⃣ CTA Optimization Engine
+	•	AI-generated CTA variants per post
+	•	A/B rotation system
+	•	Track conversion per CTA
+	•	Auto-promote highest converting CTA
+	•	Replace underperforming CTAs
+
+⸻
+
+4️⃣ Conversion Event Tracking
+	•	Track:
+	•	Link clicks
+	•	Form submissions
+	•	WhatsApp clicks
+	•	Landing page visits
+	•	Dashboard metrics:
+	•	Leads This Month
+	•	Conversion Rate
+	•	Cost per Lead (manual ad spend input for now)
+	•	Best converting content
+
+⸻
+
+5️⃣ Funnel Logic Layer
+	•	Define stages:
+	•	Awareness
+	•	Engagement
+	•	Lead
+	•	Customer
+	•	Map content to funnel stages
+	•	AI should generate content based on funnel gaps
+	•	Detect funnel bottlenecks
+
+⸻
+
+6️⃣ Lead Magnet Generator
+	•	AI-generated:
+	•	Free guide PDFs
+	•	Discount codes
+	•	Free consultation offers
+	•	Auto-delivery via email or WhatsApp template
+	•	Track magnet performance
+
+⸻
+
+7️⃣ Landing Page System
+
+Option A: Simple internal page builder
+Option B: Integration with external landing page tools
+Must support:
+	•	Conversion tracking
+	•	CTA variant tracking
+
+⸻
+
+8️⃣ Lead-Optimized AI Loop
+	•	Feed conversion data into AI
+	•	AI should optimize for leads, not engagement
+	•	Detect which content types drive actual leads
+	•	Adjust strategy accordingly
+
+⸻
+
+9️⃣ Revenue Attribution
+	•	Connect leads to:
+	•	Content
+	•	Campaign
+	•	CTA
+	•	Display:
+	•	Revenue per content cluster
+	•	Revenue per funnel stage
+
+⸻
+
+10️⃣ Dashboard Upgrade
+
+Add a Lead Control Panel:
+	•	Total Leads
+	•	Conversion Rate
+	•	Cost per Lead
+	•	Best Performing CTA
+	•	Funnel Health Indicator
+
+⸻
+
+Important:
+
+This must integrate into the existing autonomous worker, guardrails, confidence system, and audit logging.
+
+The goal is to transform the platform into a true AI Lead Engine, not just a content automation system.
+
+Please provide:
+	•	Implementation roadmap
+	•	Required schema changes
+	•	Estimated timeline
+	•	Phase-based deployment plan
+
+No simplification — we want a strong and scalable conversion layer.
