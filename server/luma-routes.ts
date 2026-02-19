@@ -52,6 +52,79 @@ export function registerLumaRoutes(app: Express) {
     }
   });
 
+  app.post("/api/luma/generate-video", async (req, res) => {
+    try {
+      const client = getLumaClient();
+      if (!client) {
+        return res.status(400).json({ error: "Luma AI API key not configured. Add LUMA_API_KEY in secrets." });
+      }
+
+      const { prompt, aspectRatio, duration, loop, model, resolution, startImageUrl, endImageUrl, extendGenerationId, reverseExtend, concepts } = req.body;
+
+      if (!prompt) {
+        return res.status(400).json({ error: "Prompt is required" });
+      }
+
+      const generationParams: any = {
+        prompt,
+        model: model || "ray-flash-2",
+        aspect_ratio: aspectRatio || "16:9",
+        duration: duration || "5s",
+        loop: loop || false,
+      };
+
+      if (resolution) {
+        generationParams.resolution = resolution;
+      }
+
+      if (concepts && concepts.length > 0) {
+        generationParams.concepts = concepts.map((c: string) => ({ key: c }));
+      }
+
+      const keyframes: any = {};
+      let hasKeyframes = false;
+
+      if (extendGenerationId) {
+        if (reverseExtend) {
+          keyframes.frame1 = { type: "generation", id: extendGenerationId };
+        } else {
+          keyframes.frame0 = { type: "generation", id: extendGenerationId };
+        }
+        hasKeyframes = true;
+
+        if (startImageUrl && reverseExtend) {
+          keyframes.frame0 = { type: "image", url: startImageUrl };
+        }
+        if (endImageUrl && !reverseExtend) {
+          keyframes.frame1 = { type: "image", url: endImageUrl };
+        }
+      } else {
+        if (startImageUrl) {
+          keyframes.frame0 = { type: "image", url: startImageUrl };
+          hasKeyframes = true;
+        }
+        if (endImageUrl) {
+          keyframes.frame1 = { type: "image", url: endImageUrl };
+          hasKeyframes = true;
+        }
+      }
+
+      if (hasKeyframes) {
+        generationParams.keyframes = keyframes;
+      }
+
+      const generation = await client.generations.create(generationParams);
+
+      res.json({
+        id: generation.id,
+        state: generation.state,
+      });
+    } catch (error: any) {
+      console.error("Luma AI video generation error:", error);
+      res.status(500).json({ error: error.message || "Failed to start video generation" });
+    }
+  });
+
   app.post("/api/luma/generate", async (req, res) => {
     try {
       const client = getLumaClient();
@@ -95,6 +168,67 @@ export function registerLumaRoutes(app: Express) {
     }
   });
 
+  app.post("/api/luma/generate-image", async (req, res) => {
+    try {
+      const client = getLumaClient();
+      if (!client) {
+        return res.status(400).json({ error: "Luma AI API key not configured. Add LUMA_API_KEY in secrets." });
+      }
+
+      const { prompt, aspectRatio, model, imageRef, styleRef, characterRef, modifyImageRef } = req.body;
+
+      if (!prompt) {
+        return res.status(400).json({ error: "Prompt is required" });
+      }
+
+      const params: any = {
+        prompt,
+        aspect_ratio: aspectRatio || "16:9",
+        model: model || "photon-1",
+      };
+
+      if (imageRef && imageRef.length > 0) {
+        params.image_ref = imageRef.map((ref: any) => ({
+          url: ref.url,
+          weight: ref.weight ?? 0.85,
+        }));
+      }
+
+      if (styleRef && styleRef.length > 0) {
+        params.style_ref = styleRef.map((ref: any) => ({
+          url: ref.url,
+          weight: ref.weight ?? 0.8,
+        }));
+      }
+
+      if (characterRef && characterRef.images && characterRef.images.length > 0) {
+        params.character_ref = {
+          identity0: {
+            images: characterRef.images,
+          },
+        };
+      }
+
+      if (modifyImageRef) {
+        params.modify_image_ref = {
+          url: modifyImageRef.url,
+          weight: modifyImageRef.weight ?? 1.0,
+        };
+      }
+
+      const generation = await (client.generations as any).image.create(params);
+
+      res.json({
+        id: generation.id,
+        state: generation.state,
+        type: "image",
+      });
+    } catch (error: any) {
+      console.error("Luma AI image generation error:", error);
+      res.status(500).json({ error: error.message || "Failed to start image generation" });
+    }
+  });
+
   app.get("/api/luma/status/:id", async (req, res) => {
     try {
       const client = getLumaClient();
@@ -107,13 +241,48 @@ export function registerLumaRoutes(app: Express) {
       res.json({
         id: generation.id,
         state: generation.state,
+        type: (generation as any).type || "video",
         videoUrl: generation.assets?.video || null,
+        imageUrl: (generation.assets as any)?.image || null,
         thumbnailUrl: (generation.assets as any)?.thumbnail || null,
         failure_reason: (generation as any).failure_reason || null,
       });
     } catch (error: any) {
       console.error("Luma AI status error:", error);
       res.status(500).json({ error: error.message || "Failed to get generation status" });
+    }
+  });
+
+  app.get("/api/luma/generations", async (req, res) => {
+    try {
+      const client = getLumaClient();
+      if (!client) {
+        return res.status(400).json({ error: "Luma AI API key not configured." });
+      }
+
+      const limit = parseInt(req.query.limit as string) || 20;
+      const offset = parseInt(req.query.offset as string) || 0;
+
+      const generations = await client.generations.list({ limit, offset });
+      res.json({ generations });
+    } catch (error: any) {
+      console.error("Luma AI list error:", error);
+      res.status(500).json({ error: error.message || "Failed to list generations" });
+    }
+  });
+
+  app.delete("/api/luma/generations/:id", async (req, res) => {
+    try {
+      const client = getLumaClient();
+      if (!client) {
+        return res.status(400).json({ error: "Luma AI API key not configured." });
+      }
+
+      await client.generations.delete(req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Luma AI delete error:", error);
+      res.status(500).json({ error: error.message || "Failed to delete generation" });
     }
   });
 
@@ -129,6 +298,33 @@ export function registerLumaRoutes(app: Express) {
     } catch (error: any) {
       console.error("Luma AI concepts error:", error);
       res.status(500).json({ error: error.message || "Failed to get concepts" });
+    }
+  });
+
+  app.get("/api/luma/camera-motions", async (req, res) => {
+    try {
+      const client = getLumaClient();
+      if (!client) {
+        return res.status(400).json({ error: "Luma AI API key not configured." });
+      }
+
+      const motions = await (client.generations as any).cameraMotion.list();
+      res.json({ motions });
+    } catch (error: any) {
+      console.error("Luma AI camera motions error:", error);
+      const fallbackMotions = [
+        "camera orbit left", "camera orbit right",
+        "camera pan left", "camera pan right",
+        "camera pan up", "camera pan down",
+        "camera push in", "camera pull out",
+        "camera zoom in", "camera zoom out",
+        "camera tilt up", "camera tilt down",
+        "camera dolly in", "camera dolly out",
+        "camera crane up", "camera crane down",
+        "camera tracking shot left", "camera tracking shot right",
+        "camera static shot", "camera handheld shot",
+      ];
+      res.json({ motions: fallbackMotions });
     }
   });
 }
