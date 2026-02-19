@@ -31,21 +31,35 @@ function getLumaClient(): LumaAI | null {
 }
 
 export function registerLumaRoutes(app: Express) {
-  if (!fs.existsSync("/tmp/luma-uploads")) {
-    fs.mkdirSync("/tmp/luma-uploads", { recursive: true });
+  const uploadsDir = "/tmp/luma-uploads";
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
   }
+
+  app.use("/api/luma/files", (req, res, next) => {
+    const filePath = path.join(uploadsDir, path.basename(req.path));
+    if (fs.existsSync(filePath)) {
+      res.sendFile(filePath);
+    } else {
+      res.status(404).json({ error: "File not found" });
+    }
+  });
 
   app.post("/api/luma/upload-image", upload.single("image"), async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No image file provided" });
       }
-      const fileBuffer = fs.readFileSync(req.file.path);
-      const base64 = fileBuffer.toString("base64");
-      const mimeType = req.file.mimetype || "image/jpeg";
-      const dataUrl = `data:${mimeType};base64,${base64}`;
-      fs.unlinkSync(req.file.path);
-      res.json({ imageUrl: dataUrl });
+      const ext = path.extname(req.file.originalname || ".jpg").toLowerCase() || ".jpg";
+      const uniqueName = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}${ext}`;
+      const destPath = path.join(uploadsDir, uniqueName);
+      fs.renameSync(req.file.path, destPath);
+
+      const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
+      const host = req.headers["x-forwarded-host"] || req.headers.host || req.hostname;
+      const publicUrl = `${protocol}://${host}/api/luma/files/${uniqueName}`;
+
+      res.json({ imageUrl: publicUrl });
     } catch (error: any) {
       console.error("Image upload error:", error);
       res.status(500).json({ error: error.message || "Failed to upload image" });
