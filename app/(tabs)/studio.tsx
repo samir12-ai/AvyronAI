@@ -20,12 +20,9 @@ import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { PlatformPicker } from '@/components/PlatformPicker';
-import { VideoEditorContent } from '@/components/VideoEditorContent';
 import { generateId } from '@/lib/storage';
 import { getApiUrl } from '@/lib/query-client';
 import type { MediaItem } from '@/lib/types';
-
-type StudioMode = 'library' | 'videoEditor';
 
 const mediaTypes = [
   { id: 'video', label: 'Video', icon: 'videocam-outline' as const },
@@ -41,7 +38,6 @@ export default function StudioScreen() {
   const { mediaItems, addMediaItem, removeMediaItem } = useApp();
   const { t } = useLanguage();
 
-  const [mode, setMode] = useState<StudioMode>('library');
   const [showModal, setShowModal] = useState(false);
   const [mediaTitle, setMediaTitle] = useState('');
   const [mediaType, setMediaType] = useState<'video' | 'image'>('video');
@@ -234,59 +230,15 @@ export default function StudioScreen() {
               {t('studio.subtitle')}
             </Text>
           </View>
-          {mode === 'library' && (
-            <Pressable
-              onPress={handleAddMedia}
-              style={[styles.addButton, { backgroundColor: colors.primary }]}
-            >
-              <Ionicons name="add" size={24} color="#fff" />
-            </Pressable>
-          )}
-        </View>
-
-        <View style={[styles.modeSelector, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <Pressable
-            onPress={() => { setMode('library'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-            style={[
-              styles.modeTab,
-              mode === 'library' && { backgroundColor: colors.primary + '15' },
-            ]}
+            onPress={handleAddMedia}
+            style={[styles.addButton, { backgroundColor: colors.primary }]}
           >
-            <Ionicons 
-              name="folder-open" 
-              size={18} 
-              color={mode === 'library' ? colors.primary : colors.textMuted} 
-            />
-            <Text style={[
-              styles.modeTabText,
-              { color: mode === 'library' ? colors.primary : colors.textMuted }
-            ]}>
-              {t('studio.mediaLibrary')}
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => { setMode('videoEditor'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-            style={[
-              styles.modeTab,
-              mode === 'videoEditor' && { backgroundColor: colors.accent + '15' },
-            ]}
-          >
-            <Ionicons 
-              name="cut" 
-              size={18} 
-              color={mode === 'videoEditor' ? colors.accent : colors.textMuted} 
-            />
-            <Text style={[
-              styles.modeTabText,
-              { color: mode === 'videoEditor' ? colors.accent : colors.textMuted }
-            ]}>
-              {t('studio.aiVideoEditor')}
-            </Text>
+            <Ionicons name="add" size={24} color="#fff" />
           </Pressable>
         </View>
 
-        {mode === 'library' && (
-          <View>
+        <View>
             <View style={[styles.statsRow, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
               <View style={styles.stat}>
                 <Ionicons name="videocam" size={20} color={colors.primary} />
@@ -370,11 +322,7 @@ export default function StudioScreen() {
               </View>
             )}
           </View>
-        )}
-
-        {mode === 'videoEditor' && (
-          <VideoEditorContent colors={colors} isDark={isDark} />
-        )}
+        </View>
 
         <View style={{ height: 100 }} />
       </ScrollView>
