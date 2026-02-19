@@ -321,7 +321,6 @@ export default function StudioScreen() {
                 </Pressable>
               </View>
             )}
-          </View>
         </View>
 
         <View style={{ height: 100 }} />
