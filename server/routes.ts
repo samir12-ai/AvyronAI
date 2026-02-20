@@ -14,6 +14,7 @@ import { registerPublishPipelineRoutes } from "./publish-pipeline";
 import { registerLumaRoutes } from "./luma-routes";
 import { registerLeadEngineRoutes } from "./lead-engine";
 import { registerCompetitiveIntelligenceRoutes } from "./competitive-intelligence";
+import { registerCampaignRoutes, requireCampaign } from "./campaign-routes";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -1122,6 +1123,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerBrandConfigRoutes(app);
   registerPublishPipelineRoutes(app);
   registerLumaRoutes(app);
+  registerCampaignRoutes(app);
   registerLeadEngineRoutes(app);
   registerCompetitiveIntelligenceRoutes(app);
 
