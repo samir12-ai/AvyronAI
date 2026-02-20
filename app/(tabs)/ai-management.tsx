@@ -647,66 +647,37 @@ export default function AIManagementScreen() {
           </View>
         </View>
 
-        <View style={[styles.tabBar, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <Pressable
-            onPress={() => { Haptics.selectionAsync(); setActiveTab('control'); }}
-            style={[styles.tab, activeTab === 'control' && { backgroundColor: '#8B5CF6' + '15' }]}
-          >
-            <Ionicons name="shield-checkmark-outline" size={18} color={activeTab === 'control' ? '#8B5CF6' : colors.textMuted} />
-            <Text style={[styles.tabText, { color: activeTab === 'control' ? '#8B5CF6' : colors.textMuted }]}>
-              Control
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => { Haptics.selectionAsync(); setActiveTab('publisher'); }}
-            style={[styles.tab, activeTab === 'publisher' && { backgroundColor: colors.primary + '15' }]}
-          >
-            <Ionicons name="send-outline" size={18} color={activeTab === 'publisher' ? colors.primary : colors.textMuted} />
-            <Text style={[styles.tabText, { color: activeTab === 'publisher' ? colors.primary : colors.textMuted }]}>
-              Publish
-            </Text>
-          </Pressable>
-          {advancedMode && (
-            <>
-              <Pressable
-                onPress={() => { Haptics.selectionAsync(); setActiveTab('audience'); }}
-                style={[styles.tab, activeTab === 'audience' && { backgroundColor: colors.primary + '15' }]}
-              >
-                <Ionicons name="people-outline" size={18} color={activeTab === 'audience' ? colors.primary : colors.textMuted} />
-                <Text style={[styles.tabText, { color: activeTab === 'audience' ? colors.primary : colors.textMuted }]}>
-                  Audience
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => { Haptics.selectionAsync(); setActiveTab('strategy'); }}
-                style={[styles.tab, activeTab === 'strategy' && { backgroundColor: colors.primary + '15' }]}
-              >
-                <Ionicons name="analytics-outline" size={18} color={activeTab === 'strategy' ? colors.primary : colors.textMuted} />
-                <Text style={[styles.tabText, { color: activeTab === 'strategy' ? colors.primary : colors.textMuted }]}>
-                  Strategy
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => { Haptics.selectionAsync(); setActiveTab('leads'); }}
-                style={[styles.tab, activeTab === 'leads' && { backgroundColor: '#00D09C' + '15' }]}
-              >
-                <Ionicons name="magnet-outline" size={18} color={activeTab === 'leads' ? '#00D09C' : colors.textMuted} />
-                <Text style={[styles.tabText, { color: activeTab === 'leads' ? '#00D09C' : colors.textMuted }]}>
-                  Leads
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => { Haptics.selectionAsync(); setActiveTab('intel'); }}
-                style={[styles.tab, activeTab === 'intel' && { backgroundColor: '#8B5CF6' + '15' }]}
-              >
-                <Ionicons name="telescope-outline" size={18} color={activeTab === 'intel' ? '#8B5CF6' : colors.textMuted} />
-                <Text style={[styles.tabText, { color: activeTab === 'intel' ? '#8B5CF6' : colors.textMuted }]}>
-                  Intel
-                </Text>
-              </Pressable>
-            </>
-          )}
-        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={[styles.tabBar, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
+          contentContainerStyle={styles.tabBarContent}
+        >
+          {([
+            { key: 'control' as TabView, icon: 'shield-checkmark-outline' as const, label: 'Control', color: '#8B5CF6', advanced: false },
+            { key: 'publisher' as TabView, icon: 'send-outline' as const, label: 'Publish', color: colors.primary, advanced: false },
+            { key: 'audience' as TabView, icon: 'people-outline' as const, label: 'Audience', color: colors.primary, advanced: true },
+            { key: 'strategy' as TabView, icon: 'analytics-outline' as const, label: 'Strategy', color: colors.primary, advanced: true },
+            { key: 'leads' as TabView, icon: 'magnet-outline' as const, label: 'Leads', color: '#00D09C', advanced: true },
+            { key: 'intel' as TabView, icon: 'telescope-outline' as const, label: 'Intel', color: '#8B5CF6', advanced: true },
+          ] as const)
+            .filter(t => !t.advanced || advancedMode)
+            .map(t => {
+              const isActive = activeTab === t.key;
+              return (
+                <Pressable
+                  key={t.key}
+                  onPress={() => { Haptics.selectionAsync(); setActiveTab(t.key); }}
+                  style={[styles.tab, isActive && { backgroundColor: t.color + '14', borderColor: t.color + '30' }]}
+                >
+                  <Ionicons name={t.icon} size={17} color={isActive ? t.color : colors.textMuted} />
+                  <Text style={[styles.tabText, { color: isActive ? t.color : colors.textMuted }]}>
+                    {t.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+        </ScrollView>
 
         {activeTab === 'control' ? renderControlCenter() : activeTab === 'publisher' ? renderPublisher() : activeTab === 'audience' ? renderAudienceManager() : activeTab === 'leads' ? <LeadControlPanel /> : activeTab === 'intel' ? <CompetitiveIntelligence /> : <StrategyHub />}
 
@@ -959,22 +930,28 @@ const styles = StyleSheet.create({
   title: { fontSize: 28, fontFamily: 'Inter_700Bold', marginBottom: 4 },
   subtitle: { fontSize: 14, fontFamily: 'Inter_400Regular' },
   tabBar: {
-    flexDirection: 'row',
     borderRadius: 16,
     borderWidth: 1,
-    padding: 4,
+    padding: 5,
     marginBottom: 20,
   },
+  tabBarContent: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 2,
+  },
   tab: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 12,
-    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 11,
+    gap: 7,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
-  tabText: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  tabText: { fontSize: 13, fontFamily: 'Inter_600SemiBold', letterSpacing: 0.1 },
   tabContent: {},
   connectionBanner: {
     flexDirection: 'row',
