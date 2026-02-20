@@ -864,6 +864,22 @@ export const ciStrategyDecisions = pgTable("ci_strategy_decisions", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const campaignSelections = pgTable("campaign_selections", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  selectedCampaignId: varchar("selected_campaign_id").notNull(),
+  selectedCampaignName: text("selected_campaign_name").notNull(),
+  selectedPlatform: text("selected_platform").default("meta"),
+  campaignGoalType: text("campaign_goal_type").notNull(),
+  campaignStatus: text("campaign_status").notNull().default("active"),
+  selectedAt: timestamp("selected_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type CampaignSelection = typeof campaignSelections.$inferSelect;
+
 export type CiCompetitor = typeof ciCompetitors.$inferSelect;
 export type CiSnapshot = typeof ciSnapshots.$inferSelect;
 export type CiMarketAnalysis = typeof ciMarketAnalyses.$inferSelect;
