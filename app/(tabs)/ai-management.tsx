@@ -22,10 +22,12 @@ import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
+import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl } from '@/lib/query-client';
 import StrategyHub from '@/components/StrategyHub';
 import LeadControlPanel from '@/components/LeadControlPanel';
 import CompetitiveIntelligence from '@/components/CompetitiveIntelligence';
+import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
 
 interface AIAudience {
   name: string;
@@ -647,6 +649,8 @@ export default function AIManagementScreen() {
           </View>
         </View>
 
+        <CampaignBar />
+
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -679,7 +683,12 @@ export default function AIManagementScreen() {
             })}
         </ScrollView>
 
-        {activeTab === 'control' ? renderControlCenter() : activeTab === 'publisher' ? renderPublisher() : activeTab === 'audience' ? renderAudienceManager() : activeTab === 'leads' ? <LeadControlPanel /> : activeTab === 'intel' ? <CompetitiveIntelligence /> : <StrategyHub />}
+        {activeTab === 'control' ? renderControlCenter()
+          : activeTab === 'publisher' ? renderPublisher()
+          : activeTab === 'audience' ? <CampaignGuard>{renderAudienceManager()}</CampaignGuard>
+          : activeTab === 'leads' ? <CampaignGuard><LeadControlPanel /></CampaignGuard>
+          : activeTab === 'intel' ? <CampaignGuard><CompetitiveIntelligence /></CampaignGuard>
+          : <CampaignGuard><StrategyHub /></CampaignGuard>}
 
         <View style={{ height: 120 }} />
       </ScrollView>

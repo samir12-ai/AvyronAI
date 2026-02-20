@@ -20,8 +20,10 @@ import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
+import { useCampaign } from '@/context/CampaignContext';
 import { MetricCard } from '@/components/MetricCard';
 import { MiniChart } from '@/components/MiniChart';
+import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
 import { getApiUrl } from '@/lib/query-client';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -264,6 +266,8 @@ export default function DashboardScreen() {
             </Pressable>
           </View>
         </RNAnimated.View>
+
+        <CampaignBar />
 
         <RNAnimated.View style={{ opacity: headerFade, transform: [{ translateY: cardSlide }] }}>
           <LinearGradient

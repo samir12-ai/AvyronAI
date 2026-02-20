@@ -16,6 +16,7 @@ import { queryClient } from "@/lib/query-client";
 import { AppProvider } from "@/context/AppContext";
 import { AuthProvider } from "@/context/AuthContext";
 import { LanguageProvider } from "@/context/LanguageContext";
+import { CampaignProvider } from "@/context/CampaignContext";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -52,11 +53,13 @@ export default function RootLayout() {
         <LanguageProvider>
           <AuthProvider>
             <AppProvider>
+            <CampaignProvider>
             <GestureHandlerRootView>
               <KeyboardProvider>
                 <RootLayoutNav />
               </KeyboardProvider>
             </GestureHandlerRootView>
+            </CampaignProvider>
             </AppProvider>
           </AuthProvider>
         </LanguageProvider>
