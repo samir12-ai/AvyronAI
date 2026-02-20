@@ -679,11 +679,71 @@ async function ensureDefaultConfig() {
   }
 }
 
+const CI_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+let ciTimer: ReturnType<typeof setInterval> | null = null;
+
+async function runMonthlyCompetitiveIntelligence() {
+  try {
+    const flagService = new FeatureFlagService();
+    const accounts = await db.select().from(accountState);
+    
+    for (const account of accounts) {
+      const accountId = account.accountId;
+      const enabled = await flagService.isEnabled("competitive_intelligence_enabled", accountId);
+      if (!enabled) continue;
+
+      const { ciMarketAnalyses } = await import("@shared/schema");
+      const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+      
+      const existing = await db.select().from(ciMarketAnalyses)
+        .where(sql`${ciMarketAnalyses.accountId} = ${accountId} AND ${ciMarketAnalyses.analysisMonth} = ${currentMonth} AND ${ciMarketAnalyses.isDemo} = false`);
+      
+      if (existing.length > 0) continue;
+
+      const lastAnalysis = await db.select().from(ciMarketAnalyses)
+        .where(eq(ciMarketAnalyses.accountId, accountId))
+        .orderBy(desc(ciMarketAnalyses.createdAt))
+        .limit(1);
+      
+      if (lastAnalysis.length > 0) {
+        const lastDate = lastAnalysis[0].createdAt;
+        if (lastDate && (Date.now() - lastDate.getTime()) < 25 * 24 * 60 * 60 * 1000) {
+          continue;
+        }
+      }
+
+      console.log(`[CI Worker] Monthly re-analysis due for account: ${accountId}`);
+      
+      try {
+        const response = await fetch(`http://localhost:5000/api/ci/analyze`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accountId }),
+        });
+        const result = await response.json();
+        if (response.ok) {
+          console.log(`[CI Worker] Monthly analysis completed for ${accountId}: ${result.recommendations?.length || 0} recommendations`);
+        } else {
+          console.log(`[CI Worker] Analysis skipped for ${accountId}: ${result.error || result.message}`);
+        }
+      } catch (err) {
+        console.error(`[CI Worker] Error running analysis for ${accountId}:`, err);
+      }
+    }
+  } catch (error) {
+    console.error("[CI Worker] Monthly check error:", error);
+  }
+}
+
 export function startAutonomousWorker() {
   console.log("[Worker] Starting autonomous worker (5-min interval, 6h cycle threshold)");
   ensureDefaultConfig().catch(err => console.error("[Worker] Failed to seed defaults:", err));
   workerTick();
   workerTimer = setInterval(workerTick, WORKER_INTERVAL_MS);
+  
+  setTimeout(() => runMonthlyCompetitiveIntelligence(), 30000);
+  ciTimer = setInterval(runMonthlyCompetitiveIntelligence, CI_CHECK_INTERVAL_MS);
+  console.log("[CI Worker] Monthly competitive intelligence checker started (daily check, 30-day cycle)");
 }
 
 export function stopAutonomousWorker() {
@@ -691,5 +751,10 @@ export function stopAutonomousWorker() {
     clearInterval(workerTimer);
     workerTimer = null;
     console.log("[Worker] Autonomous worker stopped");
+  }
+  if (ciTimer) {
+    clearInterval(ciTimer);
+    ciTimer = null;
+    console.log("[CI Worker] Competitive intelligence checker stopped");
   }
 }

@@ -5,6 +5,7 @@ const VALID_FLAGS: LeadEngineModule[] = [
   "lead_capture_enabled", "cta_engine_enabled", "conversion_tracking_enabled",
   "funnel_logic_enabled", "lead_magnet_enabled", "landing_pages_enabled",
   "revenue_attribution_enabled", "ai_lead_optimization_enabled", "lead_engine_global_off",
+  "competitive_intelligence_enabled",
 ];
 
 export function registerFeatureFlagRoutes(app: Express) {

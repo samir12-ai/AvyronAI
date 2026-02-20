@@ -752,3 +752,120 @@ export type LeadMagnet = typeof leadMagnets.$inferSelect;
 export type LandingPage = typeof landingPages.$inferSelect;
 export type RevenueEntry = typeof revenueEntries.$inferSelect;
 export type AdSpendEntry = typeof adSpendEntries.$inferSelect;
+
+// =============================================
+// COMPETITIVE INTELLIGENCE MODULE
+// =============================================
+export const ciCompetitors = pgTable("ci_competitors", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  name: text("name").notNull(),
+  platform: text("platform").notNull().default("instagram"),
+  profileLink: text("profile_link").notNull(),
+  businessType: text("business_type").notNull(),
+  primaryObjective: text("primary_objective").notNull(),
+  postingFrequency: integer("posting_frequency"),
+  contentTypeRatio: text("content_type_ratio"),
+  engagementRatio: doublePrecision("engagement_ratio"),
+  ctaPatterns: text("cta_patterns"),
+  discountFrequency: text("discount_frequency"),
+  hookStyles: text("hook_styles"),
+  messagingTone: text("messaging_tone"),
+  socialProofPresence: text("social_proof_presence"),
+  screenshotUrls: text("screenshot_urls"),
+  notes: text("notes"),
+  isDemo: boolean("is_demo").default(false),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const ciSnapshots = pgTable("ci_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  competitorId: varchar("competitor_id").notNull(),
+  snapshotMonth: text("snapshot_month").notNull(),
+  postingFrequency: integer("posting_frequency"),
+  contentTypeRatio: text("content_type_ratio"),
+  engagementRatio: doublePrecision("engagement_ratio"),
+  ctaPatterns: text("cta_patterns"),
+  discountFrequency: text("discount_frequency"),
+  hookStyles: text("hook_styles"),
+  messagingTone: text("messaging_tone"),
+  socialProofPresence: text("social_proof_presence"),
+  rawData: text("raw_data"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const ciMarketAnalyses = pgTable("ci_market_analyses", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  analysisMonth: text("analysis_month").notNull(),
+  marketOverview: text("market_overview"),
+  competitorBreakdown: text("competitor_breakdown"),
+  strategicGaps: text("strategic_gaps"),
+  saturationPatterns: text("saturation_patterns"),
+  differentiationGaps: text("differentiation_gaps"),
+  offerPositioningGaps: text("offer_positioning_gaps"),
+  pricingNarrativePatterns: text("pricing_narrative_patterns"),
+  funnelWeaknesses: text("funnel_weaknesses"),
+  ctaTrends: text("cta_trends"),
+  authorityGaps: text("authority_gaps"),
+  monthDiff: text("month_diff"),
+  clientPerformanceShift: text("client_performance_shift"),
+  evidenceSummary: text("evidence_summary"),
+  dataCompleteness: doublePrecision("data_completeness").default(0),
+  status: text("status").default("pending"),
+  isDemo: boolean("is_demo").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const ciRecommendations = pgTable("ci_recommendations", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  analysisId: varchar("analysis_id").notNull(),
+  category: text("category").notNull(),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  actionType: text("action_type").notNull(),
+  actionTarget: text("action_target").notNull(),
+  actionDetails: text("action_details"),
+  evidenceCitations: text("evidence_citations"),
+  whyChanged: text("why_changed"),
+  confidenceScore: doublePrecision("confidence_score").default(0),
+  riskLevel: text("risk_level").default("low"),
+  impactRangeLow: doublePrecision("impact_range_low").default(0),
+  impactRangeHigh: doublePrecision("impact_range_high").default(0),
+  timeframe: text("timeframe").default("30_days"),
+  status: text("status").default("pending"),
+  isDemo: boolean("is_demo").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const ciStrategyDecisions = pgTable("ci_strategy_decisions", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  recommendationId: varchar("recommendation_id").notNull(),
+  analysisId: varchar("analysis_id").notNull(),
+  decision: text("decision").notNull(),
+  reason: text("reason"),
+  appliedChanges: text("applied_changes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type CiCompetitor = typeof ciCompetitors.$inferSelect;
+export type CiSnapshot = typeof ciSnapshots.$inferSelect;
+export type CiMarketAnalysis = typeof ciMarketAnalyses.$inferSelect;
+export type CiRecommendation = typeof ciRecommendations.$inferSelect;
+export type CiStrategyDecision = typeof ciStrategyDecisions.$inferSelect;
