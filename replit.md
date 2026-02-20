@@ -44,6 +44,7 @@ Preferred communication style: Simple, everyday language.
 - **Studio**: Media library and an AI Video Editor with guided creative briefs, multi-clip uploads, AI-generated edit plans, and FFmpeg rendering.
 - **Photography**: A Dubai-based photography marketplace with dual roles for photographers (profile, portfolio, reservation management) and customers (browsing, booking).
 - **Lead Engine**: Modular lead generation system with 8 independent modules (Lead Capture, Conversion Tracking, CTA Engine, Funnel Logic, Lead Magnets, Landing Pages, Revenue Attribution, AI Lead Optimization). Each module has feature flags, dependency guards, safe mode, and a global kill switch. Accessible via the "Leads" tab in AI Management (Advanced Mode).
+- **Competitive Intelligence**: AI Chief Strategy Officer in Soft Advisory Mode. Tracks up to 5 competitors with evidence-based data collection (5 required fields + optional enrichment). Generates AI-powered market analysis with gap detection, competitor breakdowns, and strategic recommendations. Features Apply/Reject decision flow with draft+confirm modal, evidence citation tags, confidence/risk/impact scoring, and full audit logging. Monthly automated re-analysis with snapshot diffing. Demo mode with 3 pre-loaded sample competitors. Accessible via the "Intel" tab in AI Management (Advanced Mode).
 - **Settings**: Brand profile and platform connections management.
 
 ### Lead Engine Architecture
@@ -54,6 +55,19 @@ Preferred communication style: Simple, everyday language.
 - **Frontend Hook**: `hooks/useFeatureFlags.ts` - 5-min TTL cache, app-open refresh, toggle/kill/resume methods.
 - **UI**: `components/LeadControlPanel.tsx` - Module toggle grid with dependency status, stats dashboard, kill switch banner.
 - **Database Tables**: leads, conversion_events, cta_variants, funnels, funnel_stages, lead_magnets, landing_pages, revenue_attributions, lead_scores, feature_flags, feature_flag_audit.
+
+### Competitive Intelligence Architecture
+- **Feature Flag**: `competitive_intelligence_enabled` - Independent flag with no dependencies.
+- **Backend**: `server/competitive-intelligence/` - 3 route files (competitor-routes, analysis-routes, demo-routes) + index.
+- **AI Engine**: GPT-4o-powered analysis with evidence-only processing, INSUFFICIENT DATA guards (min 2 complete competitors), JSON-structured output with citations.
+- **Required Evidence Fields**: profileLink, postingFrequency, contentTypeRatio, engagementRatio, ctaPatterns.
+- **Optional Fields**: discountFrequency, hookStyles, messagingTone, socialProofPresence, screenshotUrls.
+- **Recommendation Action Types**: content_clusters, calendar_cadence, cta_library, funnel_mapping, offer_positioning.
+- **Audit Events**: INTELLIGENCE_RUN, STRATEGY_RECOMMENDED, STRATEGY_APPLIED, STRATEGY_REJECTED.
+- **Monthly Worker**: 30-day cycle, daily check via autonomous-worker.ts, respects feature flag + kill switch.
+- **Database Tables**: ci_competitors, ci_snapshots, ci_market_analyses, ci_recommendations, ci_strategy_decisions.
+- **Frontend Component**: `components/CompetitiveIntelligence.tsx` - 4 sub-views (Overview, Competitors, Actions, History).
+- **Demo Mode**: Button-triggered, loads 3 sample competitors (FreshBites, LuxeStyle, DigitalPro) with DEMO badges.
 
 ## External Dependencies
 
