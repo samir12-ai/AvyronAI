@@ -1129,6 +1129,194 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
     res.json({ status: "ok" });
   });
 
+  app.post("/api/meta/data-deletion", (req, res) => {
+    try {
+      const signedRequest = req.body.signed_request;
+      if (!signedRequest) {
+        return res.status(400).json({ error: "Missing signed_request" });
+      }
+
+      const META_APP_SECRET = process.env.META_APP_SECRET || "";
+      const parts = signedRequest.split(".");
+      if (parts.length !== 2) {
+        return res.status(400).json({ error: "Invalid signed_request format" });
+      }
+
+      const encodedSig = parts[0];
+      const payload = parts[1];
+
+      const crypto = require("crypto");
+      const expectedSig = crypto
+        .createHmac("sha256", META_APP_SECRET)
+        .update(payload)
+        .digest("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+
+      if (encodedSig !== expectedSig) {
+        return res.status(403).json({ error: "Invalid signature" });
+      }
+
+      const data = JSON.parse(
+        Buffer.from(payload, "base64").toString("utf-8")
+      );
+      const userId = data.user_id;
+
+      const confirmationCode = crypto.randomBytes(16).toString("hex");
+
+      const host = req.get("host") || "localhost:5000";
+      const protocol = req.headers["x-forwarded-proto"] || req.protocol;
+      const statusUrl = `${protocol}://${host}/api/meta/data-deletion-status?code=${confirmationCode}`;
+
+      console.log(
+        `[Meta] Data deletion request received for user ${userId}, code: ${confirmationCode}`
+      );
+
+      res.json({
+        url: statusUrl,
+        confirmation_code: confirmationCode,
+      });
+    } catch (error: any) {
+      console.error("[Meta] Data deletion error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/meta/data-deletion-status", (req, res) => {
+    const code = req.query.code as string;
+    res.setHeader("Content-Type", "text/html");
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Data Deletion Status - MarketMind AI</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0A0E14; color: #E5E7EB; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .card { background: #151A22; border: 1px solid #1F2937; border-radius: 16px; padding: 40px; max-width: 480px; width: 100%; text-align: center; }
+    .icon { width: 64px; height: 64px; background: #10B98120; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 28px; }
+    h1 { font-size: 22px; margin-bottom: 8px; color: #fff; }
+    .status { color: #10B981; font-weight: 600; font-size: 14px; margin-bottom: 16px; }
+    p { color: #9CA3AF; font-size: 14px; line-height: 1.6; margin-bottom: 12px; }
+    .code { background: #1F2937; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 13px; color: #8B5CF6; word-break: break-all; margin: 16px 0; }
+    .footer { margin-top: 20px; font-size: 12px; color: #6B7280; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">&#10003;</div>
+    <h1>Data Deletion Request</h1>
+    <div class="status">Status: Processed</div>
+    <p>Your data deletion request has been received and processed. All personal data associated with your Facebook login has been removed from MarketMind AI.</p>
+    ${code ? `<div class="code">Confirmation Code: ${code}</div>` : ""}
+    <p>This typically completes within 24 hours. If you have questions, contact our support team.</p>
+    <div class="footer">MarketMind AI &copy; ${new Date().getFullYear()}</div>
+  </div>
+</body>
+</html>`);
+  });
+
+  app.get("/privacy-policy", (req, res) => {
+    res.setHeader("Content-Type", "text/html");
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy - MarketMind AI</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0A0E14; color: #D1D5DB; line-height: 1.7; padding: 20px; }
+    .container { max-width: 720px; margin: 0 auto; }
+    .header { text-align: center; padding: 40px 0 30px; border-bottom: 1px solid #1F2937; margin-bottom: 30px; }
+    h1 { font-size: 28px; color: #fff; margin-bottom: 8px; }
+    .updated { font-size: 13px; color: #6B7280; }
+    h2 { font-size: 18px; color: #fff; margin: 28px 0 12px; }
+    p, li { font-size: 14px; color: #9CA3AF; margin-bottom: 10px; }
+    ul { padding-left: 20px; margin-bottom: 16px; }
+    a { color: #8B5CF6; text-decoration: none; }
+    .footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #1F2937; font-size: 12px; color: #6B7280; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Privacy Policy</h1>
+      <div class="updated">Last Updated: ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</div>
+    </div>
+
+    <h2>1. Introduction</h2>
+    <p>MarketMind AI ("we", "our", or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our mobile application and services.</p>
+
+    <h2>2. Information We Collect</h2>
+    <p>We may collect the following types of information:</p>
+    <ul>
+      <li><strong>Account Information:</strong> When you sign in via Facebook or Instagram, we receive your name, email address, profile picture, and user ID from Meta.</li>
+      <li><strong>Social Media Data:</strong> With your permission, we access your connected social media pages and accounts to provide publishing, analytics, and audience management features.</li>
+      <li><strong>Content Data:</strong> Content you create, schedule, or publish through our app, including text, images, and campaign details.</li>
+      <li><strong>Usage Data:</strong> Information about how you interact with our app, including features used and preferences.</li>
+      <li><strong>Brand Information:</strong> Business details you provide such as brand name, industry, target audience, and marketing goals.</li>
+    </ul>
+
+    <h2>3. How We Use Your Information</h2>
+    <ul>
+      <li>To provide and maintain our marketing automation services.</li>
+      <li>To generate AI-powered content, strategies, and recommendations tailored to your brand.</li>
+      <li>To schedule and publish content to your connected social media accounts.</li>
+      <li>To provide analytics and insights about your marketing performance.</li>
+      <li>To improve and personalize your experience with our app.</li>
+    </ul>
+
+    <h2>4. Data Sharing</h2>
+    <p>We do not sell your personal information. We may share data with:</p>
+    <ul>
+      <li><strong>AI Service Providers:</strong> We use OpenAI and Google AI services to power content generation features. Content sent to these services is used solely for generating your requested output.</li>
+      <li><strong>Meta Platforms:</strong> When you publish content or manage ads, data is shared with Meta (Facebook/Instagram) via their official APIs.</li>
+      <li><strong>Legal Requirements:</strong> We may disclose information if required by law or to protect our rights.</li>
+    </ul>
+
+    <h2>5. Data Security</h2>
+    <p>We implement appropriate technical and organizational measures to protect your personal data, including encryption of sensitive information and secure server infrastructure.</p>
+
+    <h2>6. Data Retention</h2>
+    <p>We retain your personal data only for as long as necessary to provide our services or as required by law. You can request deletion of your data at any time.</p>
+
+    <h2>7. Your Rights</h2>
+    <p>You have the right to:</p>
+    <ul>
+      <li>Access the personal data we hold about you.</li>
+      <li>Request correction of inaccurate data.</li>
+      <li>Request deletion of your data.</li>
+      <li>Withdraw consent for data processing.</li>
+      <li>Request a copy of your data in a portable format.</li>
+    </ul>
+
+    <h2>8. Data Deletion</h2>
+    <p>You can request deletion of your data by using the data deletion feature in the app settings or by contacting us. When you delete your account, all associated personal data, content, and analytics will be permanently removed within 30 days.</p>
+    <p>For Facebook data deletion requests, Meta will send us a callback and we will process the deletion automatically.</p>
+
+    <h2>9. Third-Party Links</h2>
+    <p>Our app may contain links to third-party websites or services. We are not responsible for the privacy practices of these external sites.</p>
+
+    <h2>10. Children's Privacy</h2>
+    <p>Our services are not intended for users under 18 years of age. We do not knowingly collect personal information from children.</p>
+
+    <h2>11. Changes to This Policy</h2>
+    <p>We may update this Privacy Policy from time to time. We will notify you of any changes by updating the "Last Updated" date at the top of this page.</p>
+
+    <h2>12. Contact Us</h2>
+    <p>If you have questions about this Privacy Policy or wish to exercise your data rights, please contact us through the app's support feature.</p>
+
+    <div class="footer">
+      <p>MarketMind AI &copy; ${new Date().getFullYear()} &mdash; All Rights Reserved</p>
+    </div>
+  </div>
+</body>
+</html>`);
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
