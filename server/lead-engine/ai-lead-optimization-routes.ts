@@ -4,6 +4,7 @@ import { leads, conversionEvents, ctaVariants, performanceSnapshots, publishedPo
 import { eq, desc, sql, gte } from "drizzle-orm";
 import { featureFlagService } from "../feature-flags";
 import { logAudit } from "../audit";
+import { requireCampaign } from "../campaign-routes";
 import OpenAI from "openai";
 
 const openai = new OpenAI({
@@ -12,7 +13,7 @@ const openai = new OpenAI({
 });
 
 export function registerAiLeadOptimizationRoutes(app: Express) {
-  app.post("/api/lead-optimization/analyze", async (req, res) => {
+  app.post("/api/lead-optimization/analyze", requireCampaign, async (req, res) => {
     try {
       const accountId = req.body.accountId || "default";
       const check = await featureFlagService.checkWithDependencies("ai_lead_optimization_enabled", accountId);

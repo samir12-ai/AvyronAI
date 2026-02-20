@@ -4,6 +4,7 @@ import { conversionEvents, trackingLinks, leads } from "@shared/schema";
 import { eq, and, sql, desc, gte } from "drizzle-orm";
 import { featureFlagService } from "../feature-flags";
 import { logAudit } from "../audit";
+import { requireCampaign } from "../campaign-routes";
 
 export function registerConversionTrackingRoutes(app: Express) {
   app.get("/api/track/:trackingId", async (req, res) => {
@@ -132,7 +133,7 @@ export function registerConversionTrackingRoutes(app: Express) {
     }
   });
 
-  app.get("/api/conversion-events/stats", async (req, res) => {
+  app.get("/api/conversion-events/stats", requireCampaign, async (req, res) => {
     try {
       const accountId = (req.query.accountId as string) || "default";
       if (!(await featureFlagService.isEnabled("conversion_tracking_enabled", accountId))) {

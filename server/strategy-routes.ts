@@ -13,6 +13,7 @@ import {
 import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
 import OpenAI from "openai";
 import { GoogleGenAI } from "@google/genai";
+import { requireCampaign } from "./campaign-routes";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -50,7 +51,7 @@ async function getAccountAverages() {
 
 export function registerStrategyRoutes(app: Express) {
 
-  app.post("/api/strategy/sync-performance", async (req, res) => {
+  app.post("/api/strategy/sync-performance", requireCampaign, async (req, res) => {
     try {
       const { accessToken, pageId } = req.body;
 
@@ -123,7 +124,7 @@ export function registerStrategyRoutes(app: Express) {
     }
   });
 
-  app.get("/api/strategy/performance", async (req, res) => {
+  app.get("/api/strategy/performance", requireCampaign, async (req, res) => {
     try {
       const data = await db.select().from(performanceSnapshots).orderBy(desc(performanceSnapshots.fetchedAt)).limit(100);
       const averages = await getAccountAverages();
@@ -134,7 +135,7 @@ export function registerStrategyRoutes(app: Express) {
     }
   });
 
-  app.post("/api/strategy/analyze", async (req, res) => {
+  app.post("/api/strategy/analyze", requireCampaign, async (req, res) => {
     try {
       const allData = await db.select().from(performanceSnapshots).orderBy(desc(performanceSnapshots.fetchedAt)).limit(50);
       const averages = await getAccountAverages();
@@ -348,7 +349,7 @@ Return ONLY valid JSON with this structure:
     }
   });
 
-  app.get("/api/strategy/insights", async (req, res) => {
+  app.get("/api/strategy/insights", requireCampaign, async (req, res) => {
     try {
       const insights = await db.select().from(strategyInsights)
         .where(eq(strategyInsights.isActive, true))
@@ -360,7 +361,7 @@ Return ONLY valid JSON with this structure:
     }
   });
 
-  app.get("/api/strategy/decisions", async (req, res) => {
+  app.get("/api/strategy/decisions", requireCampaign, async (req, res) => {
     try {
       const decisions = await db.select().from(strategyDecisions)
         .orderBy(desc(strategyDecisions.createdAt))
@@ -394,7 +395,7 @@ Return ONLY valid JSON with this structure:
     }
   });
 
-  app.post("/api/strategy/growth-campaign", async (req, res) => {
+  app.post("/api/strategy/growth-campaign", requireCampaign, async (req, res) => {
     try {
       const { name, budget, testingAngles } = req.body;
       const [campaign] = await db.insert(growthCampaigns).values({
@@ -498,7 +499,7 @@ Return JSON:
     }
   });
 
-  app.post("/api/strategy/weekly-report", async (req, res) => {
+  app.post("/api/strategy/weekly-report", requireCampaign, async (req, res) => {
     try {
       const now = new Date();
       const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -621,7 +622,7 @@ Return JSON:
     }
   });
 
-  app.post("/api/strategy/audience-snipe", async (req, res) => {
+  app.post("/api/strategy/audience-snipe", requireCampaign, async (req, res) => {
     try {
       const { campaignGoal, product, budget } = req.body;
       const memories = await db.select().from(strategyMemory)
@@ -696,7 +697,7 @@ Return JSON:
     }
   });
 
-  app.post("/api/strategy/moat-scan", async (req, res) => {
+  app.post("/api/strategy/moat-scan", requireCampaign, async (req, res) => {
     try {
       const memories = await db.select().from(strategyMemory).orderBy(desc(strategyMemory.updatedAt)).limit(30);
       const insights = await db.select().from(strategyInsights).where(eq(strategyInsights.isActive, true)).orderBy(desc(strategyInsights.createdAt)).limit(20);
@@ -914,7 +915,7 @@ Return ONLY valid JSON:
     }
   });
 
-  app.get("/api/strategy/moat-dashboard", async (req, res) => {
+  app.get("/api/strategy/moat-dashboard", requireCampaign, async (req, res) => {
     try {
       const [candidates, series, memories, averages] = await Promise.all([
         db.select().from(moatCandidates).orderBy(desc(moatCandidates.moatScore)).limit(10),
@@ -955,7 +956,7 @@ Return ONLY valid JSON:
     }
   });
 
-  app.get("/api/strategy/dashboard", async (req, res) => {
+  app.get("/api/strategy/dashboard", requireCampaign, async (req, res) => {
     try {
       const [averages, recentInsights, recentDecisions, memoryItems, activeCampaigns, latestReport] = await Promise.all([
         getAccountAverages(),

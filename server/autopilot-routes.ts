@@ -3,6 +3,7 @@ import { db } from "./db";
 import { accountState, auditLog, jobQueue, guardrailConfig, strategyDecisions } from "@shared/schema";
 import { eq, desc, sql } from "drizzle-orm";
 import { logAudit } from "./audit";
+import { requireCampaign } from "./campaign-routes";
 
 const router = Router();
 
@@ -31,7 +32,7 @@ async function ensureGuardrailConfig(accountId: string) {
   }
 }
 
-router.get("/api/autopilot/status", async (req, res) => {
+router.get("/api/autopilot/status", requireCampaign, async (req, res) => {
   try {
     const accountId = (req.query.accountId as string) || "default";
     const state = await ensureAccountState(accountId);
@@ -53,7 +54,7 @@ router.get("/api/autopilot/status", async (req, res) => {
   }
 });
 
-router.patch("/api/autopilot/status", async (req, res) => {
+router.patch("/api/autopilot/status", requireCampaign, async (req, res) => {
   try {
     const accountId = (req.body.accountId as string) || "default";
     const { autopilotOn } = req.body;
@@ -164,7 +165,7 @@ router.get("/api/audit-log", async (req, res) => {
   }
 });
 
-router.get("/api/autopilot/guardrails", async (req, res) => {
+router.get("/api/autopilot/guardrails", requireCampaign, async (req, res) => {
   try {
     const accountId = (req.query.accountId as string) || "default";
     await ensureGuardrailConfig(accountId);

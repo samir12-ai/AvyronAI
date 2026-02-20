@@ -4,6 +4,7 @@ import { leads, leadForms, trackingLinks, conversionEvents } from "@shared/schem
 import { eq, and, sql, desc } from "drizzle-orm";
 import { featureFlagService } from "../feature-flags";
 import { logAudit } from "../audit";
+import { requireCampaign } from "../campaign-routes";
 
 function generateTrackingId(): string {
   return `trk_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 10)}`;
@@ -240,7 +241,7 @@ export function registerLeadCaptureRoutes(app: Express) {
     }
   });
 
-  app.get("/api/leads/stats", async (req, res) => {
+  app.get("/api/leads/stats", requireCampaign, async (req, res) => {
     try {
       const accountId = (req.query.accountId as string) || "default";
       if (!(await featureFlagService.isEnabled("lead_capture_enabled", accountId))) {

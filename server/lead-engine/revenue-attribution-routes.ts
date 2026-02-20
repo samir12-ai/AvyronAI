@@ -4,9 +4,10 @@ import { revenueEntries, adSpendEntries, leads, conversionEvents } from "@shared
 import { eq, desc, sql, gte } from "drizzle-orm";
 import { featureFlagService } from "../feature-flags";
 import { logAudit } from "../audit";
+import { requireCampaign } from "../campaign-routes";
 
 export function registerRevenueAttributionRoutes(app: Express) {
-  app.get("/api/revenue", async (req, res) => {
+  app.get("/api/revenue", requireCampaign, async (req, res) => {
     try {
       const accountId = (req.query.accountId as string) || "default";
       const check = await featureFlagService.checkWithDependencies("revenue_attribution_enabled", accountId);
@@ -61,7 +62,7 @@ export function registerRevenueAttributionRoutes(app: Express) {
     }
   });
 
-  app.post("/api/ad-spend", async (req, res) => {
+  app.post("/api/ad-spend", requireCampaign, async (req, res) => {
     try {
       const accountId = req.body.accountId || "default";
       if (!(await featureFlagService.isEnabled("revenue_attribution_enabled", accountId))) {
@@ -80,7 +81,7 @@ export function registerRevenueAttributionRoutes(app: Express) {
     }
   });
 
-  app.get("/api/ad-spend", async (req, res) => {
+  app.get("/api/ad-spend", requireCampaign, async (req, res) => {
     try {
       const accountId = (req.query.accountId as string) || "default";
       if (!(await featureFlagService.isEnabled("revenue_attribution_enabled", accountId))) {
@@ -95,7 +96,7 @@ export function registerRevenueAttributionRoutes(app: Express) {
     }
   });
 
-  app.get("/api/revenue/stats", async (req, res) => {
+  app.get("/api/revenue/stats", requireCampaign, async (req, res) => {
     try {
       const accountId = (req.query.accountId as string) || "default";
       const check = await featureFlagService.checkWithDependencies("revenue_attribution_enabled", accountId);
