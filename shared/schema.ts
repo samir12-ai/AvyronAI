@@ -354,6 +354,11 @@ export const accountState = pgTable("account_state", {
   confidenceScore: integer("confidence_score").default(100),
   confidenceStatus: text("confidence_status").default("Stable"),
   recoveryCyclesStable: integer("recovery_cycles_stable").default(0),
+  metaMode: text("meta_mode").default("DISCONNECTED"),
+  metaGrantedScopes: text("meta_granted_scopes"),
+  metaMissingScopes: text("meta_missing_scopes"),
+  metaLastVerifiedAt: timestamp("meta_last_verified_at"),
+  metaDemoModeEnabled: boolean("meta_demo_mode_enabled").default(false),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
@@ -867,6 +872,28 @@ export const ciStrategyDecisions = pgTable("ci_strategy_decisions", {
   appliedChanges: text("applied_changes"),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+export const metaCredentials = pgTable("meta_credentials", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default").unique(),
+  encryptedUserToken: text("encrypted_user_token"),
+  ivUser: text("iv_user"),
+  encryptedPageToken: text("encrypted_page_token"),
+  ivPage: text("iv_page"),
+  encryptionKeyVersion: integer("encryption_key_version").default(1),
+  userTokenExpiresAt: timestamp("user_token_expires_at"),
+  pageId: text("page_id"),
+  pageName: text("page_name"),
+  igBusinessId: text("ig_business_id"),
+  igUsername: text("ig_username"),
+  lastHealthCheckAt: timestamp("last_health_check_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type MetaCredentials = typeof metaCredentials.$inferSelect;
 
 export const campaignSelections = pgTable("campaign_selections", {
   id: varchar("id")
