@@ -131,11 +131,12 @@ export function registerOrchestratorRoutes(app: Express) {
 
       const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
       if (!blueprint) {
-        return res.status(404).json({ error: "Blueprint not found" });
+        return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", message: "Blueprint not found" });
       }
 
       if (blueprint.status !== "VALIDATED") {
         return res.status(400).json({
+          success: false,
           error: "STATUS_GATE",
           message: "Blueprint must be VALIDATED first. No confirmed + validated → no Orchestrator.",
           currentStatus: blueprint.status,
@@ -144,11 +145,12 @@ export function registerOrchestratorRoutes(app: Express) {
 
       const confirmedBlueprint = blueprint.confirmedBlueprint ? JSON.parse(blueprint.confirmedBlueprint) : null;
       if (!confirmedBlueprint) {
-        return res.status(400).json({ error: "No confirmed blueprint. Confirmed blueprint is the only source of truth." });
+        return res.status(400).json({ success: false, error: "NO_CONFIRMED_BLUEPRINT", message: "No confirmed blueprint. Confirmed blueprint is the only source of truth." });
       }
 
       if (confirmedBlueprint.blueprintVersion !== blueprint.blueprintVersion) {
         return res.status(400).json({
+          success: false,
           error: "VERSION_MISMATCH",
           message: "Confirmed blueprint version does not match current blueprint version. Re-confirm required.",
           confirmedVersion: confirmedBlueprint.blueprintVersion,
@@ -159,6 +161,7 @@ export function registerOrchestratorRoutes(app: Express) {
       const { valid, missingFields } = validateBlueprintCompleteness(confirmedBlueprint);
       if (!valid) {
         return res.status(400).json({
+          success: false,
           error: "INCOMPLETE_BLUEPRINT",
           missingFields,
           message: `Cannot generate execution plans. Missing critical fields: ${missingFields.join(", ")}. No generic fallback plans allowed.`,
@@ -168,6 +171,7 @@ export function registerOrchestratorRoutes(app: Express) {
       const campaignContext = blueprint.campaignContext ? JSON.parse(blueprint.campaignContext) : null;
       if (!campaignContext) {
         return res.status(400).json({
+          success: false,
           error: "CAMPAIGN_CONTEXT_REQUIRED",
           message: "No campaign context — Orchestrator cannot run without campaign context.",
         });
@@ -218,10 +222,23 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
         if (jsonMatch) {
           orchestratorPlan = JSON.parse(jsonMatch[0]);
         } else {
-          throw new Error("No JSON");
+          throw new Error("No JSON object found in model response");
         }
-      } catch {
-        return res.status(500).json({ error: "Orchestrator returned invalid format. Please retry." });
+      } catch (parseErr: any) {
+        return res.status(500).json({
+          success: false,
+          error: "ORCHESTRATOR_PARSE_FAILED",
+          message: `Orchestrator returned invalid format: ${parseErr.message}. Please retry.`,
+          finishReason: response.choices[0]?.finish_reason || "unknown",
+        });
+      }
+
+      if (!orchestratorPlan || Object.keys(orchestratorPlan).length === 0) {
+        return res.status(500).json({
+          success: false,
+          error: "ORCHESTRATOR_EMPTY_PLAN",
+          message: "Orchestrator generated an empty execution plan. Please retry.",
+        });
       }
 
       orchestratorPlan.blueprintVersion = blueprint.blueprintVersion;
@@ -253,7 +270,11 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
       });
     } catch (error: any) {
       console.error("[StrategicCore] Orchestrator error:", error.message);
-      res.status(500).json({ error: "Failed to generate execution plans" });
+      res.status(500).json({
+        success: false,
+        error: "ORCHESTRATOR_INTERNAL_ERROR",
+        message: `Failed to generate execution plans: ${error.message}`,
+      });
     }
   });
 }
