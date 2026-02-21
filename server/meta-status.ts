@@ -226,7 +226,23 @@ export function registerMetaStatusRoutes(app: Express) {
     }
   });
 
+  function requireAdminAccess(req: Request, res: Response): boolean {
+    const adminSecret = process.env.ADMIN_SECRET;
+    if (!adminSecret) {
+      if (process.env.NODE_ENV === "development") return true;
+      res.status(403).json({ error: "Diagnostics endpoints are not available in this environment" });
+      return false;
+    }
+    const provided = (req.query.admin_secret as string) || req.headers["x-admin-secret"];
+    if (provided !== adminSecret) {
+      res.status(403).json({ error: "Unauthorized — admin access required" });
+      return false;
+    }
+    return true;
+  }
+
   app.get("/api/meta/diagnostics", async (req: Request, res: Response) => {
+    if (!requireAdminAccess(req, res)) return;
     try {
       const accountId = (req.query.accountId as string) || "default";
       const metrics = getMetaMetrics(accountId);
@@ -245,7 +261,8 @@ export function registerMetaStatusRoutes(app: Express) {
     }
   });
 
-  app.get("/api/meta/diagnostics/all", async (_req: Request, res: Response) => {
+  app.get("/api/meta/diagnostics/all", async (req: Request, res: Response) => {
+    if (!requireAdminAccess(req, res)) return;
     try {
       const allMetrics = getAllMetrics();
       res.json({

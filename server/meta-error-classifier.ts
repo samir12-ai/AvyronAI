@@ -179,6 +179,7 @@ const backoffStates = new Map<string, BackoffState>();
 const BASE_BACKOFF_MS = 5000;
 const MAX_BACKOFF_MS = 5 * 60 * 1000;
 const MAX_CONSECUTIVE_RETRIES = 10;
+const COOLDOWN_MS = 30 * 60 * 1000;
 
 export function getBackoffState(accountId: string): BackoffState {
   let state = backoffStates.get(accountId);
@@ -233,7 +234,16 @@ export function isInBackoff(accountId: string): boolean {
   const state = backoffStates.get(accountId);
   if (!state || state.consecutiveTemporaryErrors === 0) return false;
 
-  if (state.consecutiveTemporaryErrors > MAX_CONSECUTIVE_RETRIES) return true;
+  if (state.consecutiveTemporaryErrors > MAX_CONSECUTIVE_RETRIES) {
+    const elapsed = Date.now() - state.lastBackoffAt;
+    if (elapsed >= COOLDOWN_MS) {
+      state.consecutiveTemporaryErrors = 0;
+      state.currentBackoffMs = 0;
+      state.lastBackoffAt = 0;
+      return false;
+    }
+    return true;
+  }
 
   const elapsed = Date.now() - state.lastBackoffAt;
   return elapsed < state.currentBackoffMs;
@@ -244,12 +254,21 @@ export function getBackoffDiagnostics(accountId: string): {
   currentBackoffMs: number;
   isPaused: boolean;
   maxRetriesExceeded: boolean;
+  cooldownRemainingMs: number | null;
 } {
   const state = getBackoffState(accountId);
+  const paused = isInBackoff(accountId);
+  const exceeded = state.consecutiveTemporaryErrors > MAX_CONSECUTIVE_RETRIES;
+  let cooldownRemainingMs: number | null = null;
+  if (exceeded && paused) {
+    const elapsed = Date.now() - state.lastBackoffAt;
+    cooldownRemainingMs = Math.max(0, COOLDOWN_MS - elapsed);
+  }
   return {
     consecutiveErrors: state.consecutiveTemporaryErrors,
     currentBackoffMs: state.currentBackoffMs,
-    isPaused: isInBackoff(accountId),
-    maxRetriesExceeded: state.consecutiveTemporaryErrors > MAX_CONSECUTIVE_RETRIES,
+    isPaused: paused,
+    maxRetriesExceeded: exceeded,
+    cooldownRemainingMs,
   };
 }

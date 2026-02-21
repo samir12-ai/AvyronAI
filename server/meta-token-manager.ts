@@ -253,6 +253,10 @@ export async function storeTokensAfterOAuth(
   }
 }
 
+// NOTE: runHealthCheck is intentionally independent of publish backoff (isInBackoff).
+// Publish backoff only pauses publishToMetaWithRetry in the publish worker.
+// Health checks always run on schedule regardless of backoff state, ensuring
+// token validity and permissions are verified even when publishing is paused.
 export async function runHealthCheck(accountId: string): Promise<{
   healthy: boolean;
   action?: string;
