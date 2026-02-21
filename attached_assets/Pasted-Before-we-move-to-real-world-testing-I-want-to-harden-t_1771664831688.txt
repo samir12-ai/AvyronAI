@@ -1,0 +1,45 @@
+Before we move to real-world testing, I want to harden the system to production-grade stability. We are very close, but I want everything tightened before launch.
+
+Please implement the following improvements:
+	1.	Advanced Revenue Attribution (Upgrade from Single-Source Model)
+Currently, conversions are unified from conversionEvents, which is correct.
+Now improve attribution logic to support:
+
+	•	Lead-to-customer mapping with timestamp linking
+	•	Revenue per content cluster
+	•	Revenue per CTA variant
+	•	Revenue per campaign
+Make sure revenue attribution flows cleanly into getRevenueSummary() and is available for future strategic layers.
+
+	2.	Signal Robustness Enhancement
+Improve detectPerformanceSignals() so it:
+
+	•	Compares metrics against rolling 7-day campaign baseline (not just static thresholds)
+	•	Includes delta percentage in the signal output (e.g., CTR +32%, CPA -18%)
+	•	Returns structured reasoning (why it triggered SCALE or REVIEW)
+
+Signals must feel analytical, not mechanical.
+	3.	Signal Quality Control
+Add a guard to prevent duplicate or repetitive signals within the same 24-hour window unless performance materially changes (e.g., >10% delta shift).
+	4.	Distribution Readiness Hook (No Auto-Execution Yet)
+Add a placeholder “expansion suggestion” object to SCALE_CANDIDATE signals:
+
+	•	Suggested budget increase %
+	•	Suggested audience expansion type (lookalike / interest expansion / retargeting depth)
+This is advisory only — no automation yet.
+
+	5.	Data Integrity Monitoring
+Add a silent integrity check:
+If campaign-scoped queries return inconsistent totals (e.g., spend exists but zero snapshots and zero conversions), log an internal integrity warning event.
+	6.	Performance Logging
+Add internal debug logs for:
+
+	•	Which safeguards passed (2-of-3 breakdown)
+	•	Time span calculation source used (snapshots/spend/events)
+	•	Conversion source confirmation (conversionEvents only)
+
+No UI changes needed.
+No new feature sections.
+Just strengthen internal logic and signal intelligence before testing.
+
+Once these are implemented, confirm readiness for real spend testing.
