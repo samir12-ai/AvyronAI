@@ -861,7 +861,10 @@ export default function BuildThePlan() {
     );
   };
 
-  const renderPhase3 = () => (
+  const renderPhase3 = () => {
+    const fallbackUsed = blueprint?.draftBlueprint?.extractionFallbackUsed;
+
+    return (
     <View style={s.phaseContent}>
       {renderCampaignBadge()}
       <View style={[s.phaseCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
@@ -876,6 +879,15 @@ export default function BuildThePlan() {
             </Text>
           </View>
         </View>
+
+        {fallbackUsed && (
+          <View style={[s.statusBanner, { backgroundColor: '#F59E0B15', borderWidth: 1, borderColor: '#F59E0B30' }]}>
+            <Ionicons name="warning" size={16} color="#F59E0B" />
+            <Text style={[s.statusBannerText, { color: '#F59E0B' }]}>
+              AI extraction used fallback — analysis may be less accurate. Consider retrying extraction in Phase 2.
+            </Text>
+          </View>
+        )}
 
         {blueprint?.marketMap ? renderMarketMap() : null}
 
@@ -904,7 +916,8 @@ export default function BuildThePlan() {
         )}
       </View>
     </View>
-  );
+    );
+  };
 
   const renderMarketMap = () => {
     const map = blueprint?.marketMap;
@@ -993,6 +1006,7 @@ export default function BuildThePlan() {
   const renderPhase4 = () => {
     const val = blueprint?.validationResult;
     const hasAnalysis = !!blueprint?.marketMap;
+    const fallbackUsedP4 = blueprint?.draftBlueprint?.extractionFallbackUsed;
 
     if (!val) {
       return (
@@ -1010,6 +1024,15 @@ export default function BuildThePlan() {
                 </Text>
               </View>
             </View>
+
+            {fallbackUsedP4 && (
+              <View style={[s.statusBanner, { backgroundColor: '#F59E0B15', borderWidth: 1, borderColor: '#F59E0B30' }]}>
+                <Ionicons name="warning" size={16} color="#F59E0B" />
+                <Text style={[s.statusBannerText, { color: '#F59E0B' }]}>
+                  AI extraction used fallback — validation results may be less reliable. Consider retrying extraction in Phase 2.
+                </Text>
+              </View>
+            )}
 
             {!hasAnalysis && (
               <View style={[s.statusBanner, { backgroundColor: '#F59E0B15' }]}>
@@ -1072,6 +1095,15 @@ export default function BuildThePlan() {
               </Text>
             </View>
           </View>
+
+          {fallbackUsedP4 && (
+            <View style={[s.statusBanner, { backgroundColor: '#F59E0B15', borderWidth: 1, borderColor: '#F59E0B30' }]}>
+              <Ionicons name="warning" size={16} color="#F59E0B" />
+              <Text style={[s.statusBannerText, { color: '#F59E0B' }]}>
+                These results are based on fallback data. Consider retrying extraction for more accurate validation.
+              </Text>
+            </View>
+          )}
 
           <View style={s.valGrid}>
             <View style={[s.valMetric, { backgroundColor: colors.background }]}>
