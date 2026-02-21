@@ -22,11 +22,46 @@ import { getApiUrl } from '@/lib/query-client';
 type Phase = 0 | 1 | 2 | 3 | 4 | 5;
 type BlueprintStatus = 'DRAFT' | 'GATE_PASSED' | 'EXTRACTION_COMPLETE' | 'CONFIRMED' | 'ANALYSIS_COMPLETE' | 'VALIDATED' | 'ORCHESTRATED';
 
+interface FieldWithConfidence {
+  value: string;
+  confidence: number;
+}
+
+interface DraftBlueprint {
+  detectedLanguage?: string;
+  transcribedText?: string | null;
+  ocrText?: string | null;
+  detectedOffer?: FieldWithConfidence;
+  detectedPositioning?: FieldWithConfidence;
+  detectedCTA?: FieldWithConfidence;
+  detectedAudienceGuess?: FieldWithConfidence;
+  detectedFunnelStage?: FieldWithConfidence;
+  detectedPriceIfVisible?: FieldWithConfidence;
+}
+
+interface CampaignContext {
+  campaignId: string;
+  campaignName: string;
+  objective: string;
+  location: string | null;
+  platform: string;
+  isDemo: boolean;
+}
+
+interface ClarificationPrompt {
+  field: string;
+  label: string;
+  currentValue: string;
+  questions: string[];
+}
+
 interface Blueprint {
   id: string;
   status: BlueprintStatus;
   competitorUrls: string[];
   averageSellingPrice: number;
+  campaignContext: CampaignContext | null;
+  draftBlueprint: DraftBlueprint | null;
   creativeAnalysis: any;
   confirmedBlueprint: any;
   marketMap: any;
@@ -47,6 +82,19 @@ const STATUS_TO_PHASE: Record<BlueprintStatus, Phase> = {
 const PHASE_LABELS = ['Gate', 'Extract', 'Confirm', 'Analyze', 'Validate', 'Execute'];
 const PHASE_ICONS: any[] = ['lock-closed', 'scan', 'checkmark-circle', 'analytics', 'shield-checkmark', 'rocket'];
 
+function getConfidenceColor(confidence: number): string {
+  if (confidence >= 80) return '#10B981';
+  if (confidence >= 60) return '#F59E0B';
+  return '#EF4444';
+}
+
+function getConfidenceLabel(confidence: number): string {
+  if (confidence >= 80) return 'High';
+  if (confidence >= 60) return 'Medium';
+  if (confidence > 0) return 'Low';
+  return 'Missing';
+}
+
 export default function BuildThePlan() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -56,6 +104,7 @@ export default function BuildThePlan() {
   const [currentPhase, setCurrentPhase] = useState<Phase>(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [clarifications, setClarifications] = useState<ClarificationPrompt[]>([]);
 
   const [competitorUrls, setCompetitorUrls] = useState<string[]>(['', '']);
   const [avgPrice, setAvgPrice] = useState('');
@@ -114,6 +163,7 @@ export default function BuildThePlan() {
         body: JSON.stringify({
           competitorUrls: validUrls,
           averageSellingPrice: parseFloat(avgPrice),
+          metaConnected: false,
         }),
       });
       const data = await res.json();
@@ -169,9 +219,12 @@ export default function BuildThePlan() {
 
       setBlueprint(prev => prev ? {
         ...prev,
-        status: 'EXTRACTION_COMPLETE',
-        creativeAnalysis: data.creativeAnalysis,
+        status: 'EXTRACTION_COMPLETE' as BlueprintStatus,
+        draftBlueprint: data.draftBlueprint,
+        creativeAnalysis: data.draftBlueprint,
+        confirmedBlueprint: null,
       } : null);
+      setClarifications([]);
       setCurrentPhase(2);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch (err: any) {
@@ -194,7 +247,8 @@ export default function BuildThePlan() {
       const data = await res.json();
 
       if (data.needsClarification) {
-        setError('Some fields need your input. Edit low-confidence fields before confirming.');
+        setClarifications(data.clarificationPrompts || []);
+        setError('Some fields need your input before confirming. See the highlighted fields below.');
         return;
       }
       if (!data.success) {
@@ -204,9 +258,10 @@ export default function BuildThePlan() {
 
       setBlueprint(prev => prev ? {
         ...prev,
-        status: 'CONFIRMED',
+        status: 'CONFIRMED' as BlueprintStatus,
         confirmedBlueprint: data.confirmedBlueprint,
       } : null);
+      setClarifications([]);
       setCurrentPhase(3);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch (err: any) {
@@ -229,10 +284,30 @@ export default function BuildThePlan() {
       });
       const data = await res.json();
       if (data.success) {
-        setBlueprint(prev => prev ? {
-          ...prev,
-          creativeAnalysis: data.creativeAnalysis,
-        } : null);
+        if (data.statusReset) {
+          setBlueprint(prev => prev ? {
+            ...prev,
+            status: 'EXTRACTION_COMPLETE' as BlueprintStatus,
+            draftBlueprint: data.draftBlueprint,
+            creativeAnalysis: data.draftBlueprint,
+            confirmedBlueprint: null,
+            marketMap: null,
+            validationResult: null,
+            orchestratorPlan: null,
+          } : null);
+          setCurrentPhase(2);
+          Alert.alert(
+            'Blueprint Reset',
+            'Editing after confirmation resets all downstream analysis. Please re-confirm and re-validate.',
+          );
+        } else {
+          setBlueprint(prev => prev ? {
+            ...prev,
+            draftBlueprint: data.draftBlueprint,
+            creativeAnalysis: data.draftBlueprint,
+          } : null);
+        }
+        setClarifications(data.pendingClarifications || []);
         setEditingField(null);
         setEditValue('');
       }
@@ -261,7 +336,7 @@ export default function BuildThePlan() {
 
       setBlueprint(prev => prev ? {
         ...prev,
-        status: 'ANALYSIS_COMPLETE',
+        status: 'ANALYSIS_COMPLETE' as BlueprintStatus,
         marketMap: data.marketMap,
       } : null);
       setCurrentPhase(4);
@@ -291,7 +366,7 @@ export default function BuildThePlan() {
 
       setBlueprint(prev => prev ? {
         ...prev,
-        status: 'VALIDATED',
+        status: 'VALIDATED' as BlueprintStatus,
         validationResult: data.validationResult,
       } : null);
       setCurrentPhase(5);
@@ -321,7 +396,7 @@ export default function BuildThePlan() {
 
       setBlueprint(prev => prev ? {
         ...prev,
-        status: 'ORCHESTRATED',
+        status: 'ORCHESTRATED' as BlueprintStatus,
         orchestratorPlan: data.orchestratorPlan,
       } : null);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -331,6 +406,25 @@ export default function BuildThePlan() {
       setLoading(false);
     }
   }, [blueprint]);
+
+  const renderCampaignBadge = () => {
+    const ctx = blueprint?.campaignContext;
+    if (!ctx) return null;
+
+    return (
+      <View style={[s.campaignBadge, { backgroundColor: ctx.isDemo ? '#F59E0B15' : '#10B98115', borderColor: ctx.isDemo ? '#F59E0B30' : '#10B98130' }]}>
+        <Ionicons name={ctx.isDemo ? 'flask' : 'megaphone'} size={14} color={ctx.isDemo ? '#F59E0B' : '#10B981'} />
+        <View style={{ flex: 1 }}>
+          <Text style={[s.campaignBadgeName, { color: ctx.isDemo ? '#F59E0B' : '#10B981' }]} numberOfLines={1}>
+            {ctx.isDemo ? 'DEMO MODE' : ctx.campaignName}
+          </Text>
+          <Text style={[s.campaignBadgeDetail, { color: colors.textMuted }]}>
+            {ctx.objective}{ctx.location ? ` · ${ctx.location}` : ''}
+          </Text>
+        </View>
+      </View>
+    );
+  };
 
   const renderPhaseIndicator = () => (
     <View style={[s.phaseBar, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
@@ -431,6 +525,7 @@ export default function BuildThePlan() {
 
   const renderPhase1 = () => (
     <View style={s.phaseContent}>
+      {renderCampaignBadge()}
       <View style={[s.phaseCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
         <View style={s.phaseHeader}>
           <View style={[s.phaseIconWrap, { backgroundColor: '#0EA5E920' }]}>
@@ -439,7 +534,7 @@ export default function BuildThePlan() {
           <View style={s.phaseHeaderText}>
             <Text style={[s.phaseTitle, { color: colors.text }]}>Phase 1: Creative Analysis</Text>
             <Text style={[s.phaseDesc, { color: colors.textSecondary }]}>
-              Upload a campaign creative — AI will extract offer, positioning, CTA, and audience
+              Upload a campaign creative — AI will extract offer, positioning, CTA, and audience with per-field confidence
             </Text>
           </View>
         </View>
@@ -469,22 +564,40 @@ export default function BuildThePlan() {
     </View>
   );
 
-  const renderExtractionField = (label: string, fieldKey: string, value: any, icon: string) => {
+  const renderExtractionField = (label: string, fieldKey: string, fieldData: FieldWithConfidence | any, icon: string) => {
     const isEditing = editingField === fieldKey;
-    const displayValue = value === null || value === undefined ? 'Not detected' : String(value);
-    const isEmpty = !value || value === 'null';
+    const hasClarification = clarifications.some(c => c.field === fieldKey);
+
+    let displayValue: string;
+    let confidence: number;
+    let isInsufficient = false;
+
+    if (fieldData && typeof fieldData === 'object' && 'value' in fieldData) {
+      displayValue = fieldData.value === 'INSUFFICIENT_DATA' ? '' : String(fieldData.value ?? '');
+      confidence = typeof fieldData.confidence === 'number' ? fieldData.confidence : 0;
+      isInsufficient = fieldData.value === 'INSUFFICIENT_DATA';
+    } else {
+      displayValue = fieldData === null || fieldData === undefined ? '' : String(fieldData);
+      confidence = displayValue ? 50 : 0;
+      isInsufficient = !displayValue;
+    }
+
+    const confColor = getConfidenceColor(confidence);
+    const confLabel = getConfidenceLabel(confidence);
+    const needsAttention = isInsufficient || confidence < 60 || hasClarification;
+    const clarification = clarifications.find(c => c.field === fieldKey);
 
     return (
-      <View style={[s.fieldCard, { backgroundColor: colors.card, borderColor: isEmpty ? '#F59E0B40' : colors.cardBorder }]}>
+      <View style={[s.fieldCard, { backgroundColor: colors.card, borderColor: needsAttention ? '#F59E0B50' : colors.cardBorder }]}>
         <View style={s.fieldHeader}>
           <View style={s.fieldLabelRow}>
-            <Ionicons name={icon as any} size={16} color={isEmpty ? '#F59E0B' : colors.accent} />
+            <Ionicons name={icon as any} size={16} color={needsAttention ? '#F59E0B' : colors.accent} />
             <Text style={[s.fieldLabel, { color: colors.text }]}>{label}</Text>
-            {isEmpty && (
-              <View style={[s.badge, { backgroundColor: '#F59E0B20' }]}>
-                <Text style={[s.badgeText, { color: '#F59E0B' }]}>Low</Text>
-              </View>
-            )}
+            <View style={[s.badge, { backgroundColor: confColor + '20' }]}>
+              <Text style={[s.badgeText, { color: confColor }]}>
+                {isInsufficient ? 'Missing' : `${confidence}% ${confLabel}`}
+              </Text>
+            </View>
           </View>
           <Pressable
             onPress={() => {
@@ -492,7 +605,7 @@ export default function BuildThePlan() {
                 saveFieldEdit();
               } else {
                 setEditingField(fieldKey);
-                setEditValue(displayValue === 'Not detected' ? '' : displayValue);
+                setEditValue(displayValue);
               }
             }}
           >
@@ -509,20 +622,35 @@ export default function BuildThePlan() {
             multiline
           />
         ) : (
-          <Text style={[s.fieldValue, { color: isEmpty ? colors.textMuted : colors.text }]}>
-            {displayValue}
+          <Text style={[s.fieldValue, { color: isInsufficient ? '#EF4444' : colors.text }]}>
+            {isInsufficient ? 'INSUFFICIENT DATA — Tap pencil to provide input' : displayValue || 'Not detected'}
           </Text>
+        )}
+
+        {clarification && !isEditing && (
+          <View style={[s.clarificationBox, { backgroundColor: '#F59E0B10', borderColor: '#F59E0B30' }]}>
+            <Ionicons name="help-circle" size={14} color="#F59E0B" />
+            <View style={{ flex: 1 }}>
+              {clarification.questions.map((q, i) => (
+                <Text key={i} style={[s.clarificationText, { color: colors.textSecondary }]}>{q}</Text>
+              ))}
+            </View>
+          </View>
         )}
       </View>
     );
   };
 
   const renderPhase2 = () => {
-    const analysis = blueprint?.creativeAnalysis;
-    if (!analysis) return null;
+    const draft = blueprint?.draftBlueprint;
+    if (!draft) return null;
+
+    const isConfirmed = blueprint?.status === 'CONFIRMED';
 
     return (
       <View style={s.phaseContent}>
+        {renderCampaignBadge()}
+
         <View style={[s.phaseCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <View style={s.phaseHeader}>
             <View style={[s.phaseIconWrap, { backgroundColor: '#10B98120' }]}>
@@ -531,51 +659,62 @@ export default function BuildThePlan() {
             <View style={s.phaseHeaderText}>
               <Text style={[s.phaseTitle, { color: colors.text }]}>Phase 2: Review & Confirm</Text>
               <Text style={[s.phaseDesc, { color: colors.textSecondary }]}>
-                Review AI extraction. Edit any fields, then confirm to proceed.
+                {isConfirmed
+                  ? 'Blueprint confirmed. Editing any field will reset downstream analysis.'
+                  : 'Review AI extraction results. Edit fields with low confidence, then confirm.'}
               </Text>
             </View>
           </View>
 
-          <View style={[s.confidenceBanner, {
-            backgroundColor: (analysis.confidenceScore >= 70 ? '#10B981' : analysis.confidenceScore >= 50 ? '#F59E0B' : '#EF4444') + '15',
-          }]}>
-            <Text style={[s.confidenceText, {
-              color: analysis.confidenceScore >= 70 ? '#10B981' : analysis.confidenceScore >= 50 ? '#F59E0B' : '#EF4444',
-            }]}>
-              AI Confidence: {analysis.confidenceScore}%
-            </Text>
-          </View>
+          {isConfirmed && (
+            <View style={[s.statusBanner, { backgroundColor: '#10B98115' }]}>
+              <Ionicons name="checkmark-done" size={16} color="#10B981" />
+              <Text style={[s.statusBannerText, { color: '#10B981' }]}>Confirmed — Source of truth for all downstream phases</Text>
+            </View>
+          )}
+
+          {!isConfirmed && clarifications.length > 0 && (
+            <View style={[s.statusBanner, { backgroundColor: '#F59E0B15' }]}>
+              <Ionicons name="alert-circle" size={16} color="#F59E0B" />
+              <Text style={[s.statusBannerText, { color: '#F59E0B' }]}>
+                {clarifications.length} field{clarifications.length > 1 ? 's' : ''} need{clarifications.length === 1 ? 's' : ''} your input before confirming
+              </Text>
+            </View>
+          )}
         </View>
 
-        {renderExtractionField('Detected Offer', 'detectedOffer', analysis.detectedOffer, 'pricetag')}
-        {renderExtractionField('Positioning', 'detectedPositioning', analysis.detectedPositioning, 'trending-up')}
-        {renderExtractionField('Call to Action', 'detectedCTA', analysis.detectedCTA, 'megaphone')}
-        {renderExtractionField('Target Audience', 'detectedAudienceGuess', analysis.detectedAudienceGuess, 'people')}
-        {renderExtractionField('Funnel Stage', 'detectedFunnelStage', analysis.detectedFunnelStage, 'funnel')}
-        {renderExtractionField('Detected Price', 'detectedPriceIfVisible', analysis.detectedPriceIfVisible, 'cash')}
+        {renderExtractionField('Detected Offer', 'detectedOffer', draft.detectedOffer, 'pricetag')}
+        {renderExtractionField('Positioning', 'detectedPositioning', draft.detectedPositioning, 'trending-up')}
+        {renderExtractionField('Call to Action', 'detectedCTA', draft.detectedCTA, 'megaphone')}
+        {renderExtractionField('Target Audience', 'detectedAudienceGuess', draft.detectedAudienceGuess, 'people')}
+        {renderExtractionField('Funnel Stage', 'detectedFunnelStage', draft.detectedFunnelStage, 'funnel')}
+        {renderExtractionField('Detected Price', 'detectedPriceIfVisible', draft.detectedPriceIfVisible, 'cash')}
 
         {error ? <Text style={s.errorText}>{error}</Text> : null}
 
-        <Pressable
-          onPress={confirmBlueprint}
-          disabled={loading}
-          style={[s.actionBtn, { opacity: loading ? 0.6 : 1 }]}
-        >
-          <LinearGradient colors={['#10B981', '#059669']} style={s.actionBtnGrad}>
-            {loading ? <ActivityIndicator color="#fff" size="small" /> : (
-              <>
-                <Ionicons name="checkmark-done" size={18} color="#fff" />
-                <Text style={s.actionBtnText}>Confirm Blueprint</Text>
-              </>
-            )}
-          </LinearGradient>
-        </Pressable>
+        {!isConfirmed && (
+          <Pressable
+            onPress={confirmBlueprint}
+            disabled={loading}
+            style={[s.actionBtn, { opacity: loading ? 0.6 : 1 }]}
+          >
+            <LinearGradient colors={['#10B981', '#059669']} style={s.actionBtnGrad}>
+              {loading ? <ActivityIndicator color="#fff" size="small" /> : (
+                <>
+                  <Ionicons name="checkmark-done" size={18} color="#fff" />
+                  <Text style={s.actionBtnText}>Confirm Blueprint</Text>
+                </>
+              )}
+            </LinearGradient>
+          </Pressable>
+        )}
       </View>
     );
   };
 
   const renderPhase3 = () => (
     <View style={s.phaseContent}>
+      {renderCampaignBadge()}
       <View style={[s.phaseCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
         <View style={s.phaseHeader}>
           <View style={[s.phaseIconWrap, { backgroundColor: '#6366F120' }]}>
@@ -584,7 +723,7 @@ export default function BuildThePlan() {
           <View style={s.phaseHeaderText}>
             <Text style={[s.phaseTitle, { color: colors.text }]}>Phase 3: Market Analysis</Text>
             <Text style={[s.phaseDesc, { color: colors.textSecondary }]}>
-              AI maps competitors, pricing bands, and gap opportunities
+              AI maps competitors, pricing bands, and gap opportunities using your confirmed blueprint
             </Text>
           </View>
         </View>
@@ -708,6 +847,7 @@ export default function BuildThePlan() {
 
     return (
       <View style={s.phaseContent}>
+        {renderCampaignBadge()}
         <View style={[s.phaseCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <View style={s.phaseHeader}>
             <View style={[s.phaseIconWrap, { backgroundColor: '#F59E0B20' }]}>
@@ -716,7 +856,7 @@ export default function BuildThePlan() {
             <View style={s.phaseHeaderText}>
               <Text style={[s.phaseTitle, { color: colors.text }]}>Phase 4: Validation Results</Text>
               <Text style={[s.phaseDesc, { color: colors.textSecondary }]}>
-                Strategy coherence check complete
+                Strategy coherence check against confirmed blueprint
               </Text>
             </View>
           </View>
@@ -757,6 +897,15 @@ export default function BuildThePlan() {
                   <Text style={[s.warnText, { color: colors.text }]}>{c.description}</Text>
                 </View>
               ))}
+            </View>
+          )}
+
+          {val.campaignAlignment && !val.campaignAlignment.aligned && (
+            <View style={[s.warnSection, { borderColor: '#EF444430' }]}>
+              <Text style={[s.warnTitle, { color: '#EF4444' }]}>Campaign Alignment Issue</Text>
+              <Text style={[s.warnText, { color: colors.text }]}>
+                Objective: {val.campaignAlignment.objective} — {val.campaignAlignment.details}
+              </Text>
             </View>
           )}
 
@@ -815,6 +964,7 @@ export default function BuildThePlan() {
 
     return (
       <View style={s.phaseContent}>
+        {renderCampaignBadge()}
         <View style={[s.phaseCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <View style={s.phaseHeader}>
             <View style={[s.phaseIconWrap, { backgroundColor: '#10B98120' }]}>
@@ -954,6 +1104,49 @@ export default function BuildThePlan() {
 }
 
 const s = StyleSheet.create({
+  campaignBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 10,
+  },
+  campaignBadgeName: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  campaignBadgeDetail: {
+    fontSize: 11,
+    marginTop: 1,
+  },
+  statusBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    gap: 8,
+  },
+  statusBannerText: {
+    fontSize: 12,
+    fontWeight: '600',
+    flex: 1,
+  },
+  clarificationBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 8,
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  clarificationText: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 2,
+  },
   phaseBar: {
     flexDirection: 'row',
     paddingHorizontal: 12,
@@ -1091,6 +1284,7 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    flex: 1,
   },
   fieldLabel: {
     fontSize: 13,
@@ -1253,12 +1447,11 @@ const s = StyleSheet.create({
   execItemDesc: {
     fontSize: 12,
     marginTop: 3,
-    lineHeight: 17,
   },
   budgetTotal: {
     fontSize: 15,
     fontWeight: '700',
-    marginBottom: 4,
+    marginBottom: 8,
   },
   budgetRow: {
     flexDirection: 'row',
