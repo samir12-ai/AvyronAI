@@ -10,7 +10,7 @@ const router = Router();
 router.post("/api/studio/case", async (req, res) => {
   try {
     const accountId = (req.body.accountId as string) || "default";
-    const { goal, audience, cta, series, offer, mediaType, mediaUri, mediaItemId, platform, scheduledDate } = req.body;
+    const { goal, audience, cta, series, offer, mediaType, mediaUri, mediaItemId, platform, scheduledDate, campaignId } = req.body;
 
     const validation = validateCaseMetadata({ goal, audience, cta });
     if (!validation.valid) {
@@ -37,6 +37,7 @@ router.post("/api/studio/case", async (req, res) => {
       cta,
       series: series || null,
       offer: offer || null,
+      campaignId: campaignId || null,
     }).returning();
 
     const postId = inserted[0]?.id;

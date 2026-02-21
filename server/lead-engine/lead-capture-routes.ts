@@ -37,12 +37,13 @@ export function registerLeadCaptureRoutes(app: Express) {
       if (!(await featureFlagService.isEnabled("lead_capture_enabled", accountId))) {
         return res.status(403).json({ error: "Lead capture is not enabled" });
       }
-      const { name, email, phone, customFields, sourceType, sourcePostId, sourceCampaign, sourceCtaVariantId, sourceTrackingId, sourceLandingPageId, sourceLeadMagnetId } = req.body;
+      const { name, email, phone, customFields, sourceType, sourcePostId, sourceCampaign, sourceCtaVariantId, sourceTrackingId, sourceLandingPageId, sourceLeadMagnetId, campaignId } = req.body;
       const inserted = await db.insert(leads).values({
         accountId, name, email, phone,
         customFields: customFields ? JSON.stringify(customFields) : null,
         sourceType, sourcePostId, sourceCampaign, sourceCtaVariantId,
         sourceTrackingId, sourceLandingPageId, sourceLeadMagnetId,
+        campaignId: campaignId || null,
       }).returning();
 
       await logAudit(accountId, "LEAD_CAPTURED", {
@@ -157,12 +158,13 @@ export function registerLeadCaptureRoutes(app: Express) {
         return res.status(403).json({ error: "Lead capture is not enabled" });
       }
 
-      const { name, email, phone, customFields, trackingId } = req.body;
+      const { name, email, phone, customFields, trackingId, campaignId } = req.body;
       const inserted = await db.insert(leads).values({
         accountId, name, email, phone,
         customFields: customFields ? JSON.stringify(customFields) : null,
         sourceType: "form",
         sourceTrackingId: trackingId || null,
+        campaignId: campaignId || null,
       }).returning();
 
       await db.update(leadForms).set({

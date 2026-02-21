@@ -173,6 +173,12 @@ function CampaignBar() {
                   {selectedCampaign.campaignGoalType}
                 </Text>
               </View>
+              {selectedCampaign.campaignLocation ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                  <Ionicons name="location-outline" size={10} color="#6B7280" />
+                  <Text style={styles.barPlatform}>{selectedCampaign.campaignLocation}</Text>
+                </View>
+              ) : null}
               <Text style={styles.barPlatform}>
                 {selectedCampaign.selectedPlatform?.toUpperCase()}
               </Text>

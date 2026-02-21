@@ -67,11 +67,51 @@ const MIN_SPEND_THRESHOLD = 50;
 const MIN_TIMESPAN_HOURS = 72;
 const MIN_CONVERSIONS_THRESHOLD = 3;
 
-function campaignSnapshotFilter(campaignId: string, accountId: string) {
+function snapshotFilter(campaignId: string, accountId: string) {
   return and(
-    eq(performanceSnapshots.campaignId, campaignId),
     eq(performanceSnapshots.accountId, accountId),
+    eq(performanceSnapshots.campaignId, campaignId),
     isNotNull(performanceSnapshots.campaignId)
+  );
+}
+
+function revenueFilter(campaignId: string, accountId: string) {
+  return and(
+    eq(revenueEntries.accountId, accountId),
+    eq(revenueEntries.campaignId, campaignId),
+    isNotNull(revenueEntries.campaignId)
+  );
+}
+
+function spendFilter(campaignId: string, accountId: string) {
+  return and(
+    eq(adSpendEntries.accountId, accountId),
+    eq(adSpendEntries.campaignId, campaignId),
+    isNotNull(adSpendEntries.campaignId)
+  );
+}
+
+function conversionFilter(campaignId: string, accountId: string) {
+  return and(
+    eq(conversionEvents.accountId, accountId),
+    eq(conversionEvents.campaignId, campaignId),
+    isNotNull(conversionEvents.campaignId)
+  );
+}
+
+function leadsFilter(campaignId: string, accountId: string) {
+  return and(
+    eq(leads.accountId, accountId),
+    eq(leads.campaignId, campaignId),
+    isNotNull(leads.campaignId)
+  );
+}
+
+function postsFilter(campaignId: string, accountId: string) {
+  return and(
+    eq(publishedPosts.accountId, accountId),
+    eq(publishedPosts.campaignId, campaignId),
+    isNotNull(publishedPosts.campaignId)
   );
 }
 
@@ -80,24 +120,24 @@ export async function getCampaignMetrics(campaignId: string, accountId: string =
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
   const perfData = await db.select().from(performanceSnapshots)
-    .where(campaignSnapshotFilter(campaignId, accountId))
+    .where(snapshotFilter(campaignId, accountId))
     .orderBy(desc(performanceSnapshots.fetchedAt))
     .limit(200);
 
   const allRevenue = await db.select().from(revenueEntries)
-    .where(and(eq(revenueEntries.accountId, accountId), eq(revenueEntries.campaignId, campaignId)));
+    .where(revenueFilter(campaignId, accountId));
 
   const allSpend = await db.select().from(adSpendEntries)
-    .where(and(eq(adSpendEntries.accountId, accountId), eq(adSpendEntries.campaignId, campaignId)));
+    .where(spendFilter(campaignId, accountId));
 
   const allConversions = await db.select().from(conversionEvents)
-    .where(and(eq(conversionEvents.accountId, accountId), eq(conversionEvents.campaignId, campaignId)));
+    .where(conversionFilter(campaignId, accountId));
 
   const allLeads = await db.select().from(leads)
-    .where(eq(leads.accountId, accountId));
+    .where(leadsFilter(campaignId, accountId));
 
   const posts = await db.select().from(publishedPosts)
-    .where(eq(publishedPosts.accountId, accountId));
+    .where(postsFilter(campaignId, accountId));
 
   const totalSpend = allSpend.reduce((s, e) => s + (e.amount || 0), 0);
   const totalRevenue = allRevenue.reduce((s, e) => s + (e.amount || 0), 0);
@@ -153,11 +193,11 @@ export async function getRevenueSummary(campaignId: string, accountId: string = 
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
   const allRevenue = await db.select().from(revenueEntries)
-    .where(and(eq(revenueEntries.accountId, accountId), eq(revenueEntries.campaignId, campaignId)));
+    .where(revenueFilter(campaignId, accountId));
   const monthRevEntries = allRevenue.filter(r => r.createdAt && r.createdAt >= monthStart);
 
   const allSpend = await db.select().from(adSpendEntries)
-    .where(and(eq(adSpendEntries.accountId, accountId), eq(adSpendEntries.campaignId, campaignId)));
+    .where(spendFilter(campaignId, accountId));
   const monthSpendEntries = allSpend.filter(s => s.createdAt && s.createdAt >= monthStart);
 
   const totalRevenue = allRevenue.reduce((s, e) => s + (e.amount || 0), 0);
@@ -179,7 +219,7 @@ export async function getRevenueSummary(campaignId: string, accountId: string = 
     .sort((a, b) => b.revenue - a.revenue);
 
   const posts = await db.select().from(publishedPosts)
-    .where(eq(publishedPosts.accountId, accountId));
+    .where(postsFilter(campaignId, accountId));
   const postMap = new Map(posts.map(p => [p.id, p]));
 
   const topRevenueContent = revenueByContent.slice(0, 10).map(item => ({
@@ -189,7 +229,7 @@ export async function getRevenueSummary(campaignId: string, accountId: string = 
   }));
 
   const allLeads = await db.select().from(leads)
-    .where(eq(leads.accountId, accountId));
+    .where(leadsFilter(campaignId, accountId));
   const monthLeads = allLeads.filter(l => l.createdAt && l.createdAt >= monthStart);
   const convertedLeads = allLeads.filter(l => l.status === "converted");
 
@@ -215,19 +255,19 @@ async function computeDataTimeSpanHours(campaignId: string, accountId: string): 
     minTs: min(performanceSnapshots.fetchedAt),
     maxTs: max(performanceSnapshots.fetchedAt),
   }).from(performanceSnapshots)
-    .where(campaignSnapshotFilter(campaignId, accountId));
+    .where(snapshotFilter(campaignId, accountId));
 
   const spendSpan = await db.select({
     minTs: min(adSpendEntries.createdAt),
     maxTs: max(adSpendEntries.createdAt),
   }).from(adSpendEntries)
-    .where(and(eq(adSpendEntries.accountId, accountId), eq(adSpendEntries.campaignId, campaignId)));
+    .where(spendFilter(campaignId, accountId));
 
   const eventSpan = await db.select({
     minTs: min(conversionEvents.createdAt),
     maxTs: max(conversionEvents.createdAt),
   }).from(conversionEvents)
-    .where(and(eq(conversionEvents.accountId, accountId), eq(conversionEvents.campaignId, campaignId)));
+    .where(conversionFilter(campaignId, accountId));
 
   const spans: number[] = [];
   for (const result of [snapshotSpan[0], spendSpan[0], eventSpan[0]]) {
@@ -244,7 +284,7 @@ export async function detectPerformanceSignals(campaignId: string, accountId: st
   const signals: PerformanceSignal[] = [];
 
   const perfData = await db.select().from(performanceSnapshots)
-    .where(campaignSnapshotFilter(campaignId, accountId))
+    .where(snapshotFilter(campaignId, accountId))
     .orderBy(desc(performanceSnapshots.fetchedAt))
     .limit(100);
 
@@ -260,11 +300,11 @@ export async function detectPerformanceSignals(campaignId: string, accountId: st
   }
 
   const allSpend = await db.select().from(adSpendEntries)
-    .where(and(eq(adSpendEntries.accountId, accountId), eq(adSpendEntries.campaignId, campaignId)));
+    .where(spendFilter(campaignId, accountId));
   const totalSpend = allSpend.reduce((s, e) => s + (e.amount || 0), 0);
 
   const allConversions = await db.select().from(conversionEvents)
-    .where(and(eq(conversionEvents.accountId, accountId), eq(conversionEvents.campaignId, campaignId)));
+    .where(conversionFilter(campaignId, accountId));
   const totalConversions = allConversions.length;
 
   const timeSpanHours = await computeDataTimeSpanHours(campaignId, accountId);
