@@ -40,6 +40,8 @@ interface MetaStatus {
   igBusinessId: string | null;
   igUsername: string | null;
   tokenExpiresAt: string | null;
+  tokenExpiringSoon: boolean;
+  tokenDaysRemaining: number | null;
   lastVerifiedAt: string | null;
   lastHealthCheckAt: string | null;
   demoModeEnabled: boolean;
@@ -474,8 +476,17 @@ export default function SettingsScreen() {
                     </View>
                   )}
 
+                  {metaStatus.tokenExpiringSoon && metaStatus.tokenDaysRemaining !== null && (
+                    <View style={[styles.metaInfoRow, { backgroundColor: '#FFB34720', borderWidth: 1, borderColor: '#FFB347', borderRadius: 8 }]}>
+                      <Ionicons name="warning" size={18} color="#FFB347" />
+                      <Text style={[styles.metaInfoText, { color: '#FFB347', fontWeight: '600' }]}>
+                        Token expires in {metaStatus.tokenDaysRemaining} day{metaStatus.tokenDaysRemaining !== 1 ? 's' : ''} — auto-extension will be attempted
+                      </Text>
+                    </View>
+                  )}
+
                   {metaStatus.tokenExpiresAt && (() => {
-                    const daysLeft = getTokenDaysRemaining();
+                    const daysLeft = metaStatus.tokenDaysRemaining ?? getTokenDaysRemaining();
                     const isWarning = daysLeft !== null && daysLeft < 14;
                     return (
                       <View style={[styles.metaInfoRow, { backgroundColor: isWarning ? (colors.error + '10') : colors.card }]}>

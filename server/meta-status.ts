@@ -4,6 +4,8 @@ import { accountState, metaCredentials } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { logAudit } from "./audit";
 import { decryptToken, redactToken, isEncryptionConfigured } from "./meta-crypto";
+import { getMetaMetrics, getAllMetrics } from "./meta-metrics";
+import { getBackoffDiagnostics } from "./meta-error-classifier";
 
 export type MetaMode = "DISCONNECTED" | "PENDING_APPROVAL" | "PERMISSION_MISSING" | "TOKEN_EXPIRED" | "REVOKED" | "DEMO" | "REAL";
 
@@ -22,6 +24,8 @@ const ALL_REQUESTED_SCOPES = [
   "email",
 ];
 
+const SOFT_EXPIRY_WARNING_DAYS = 7;
+
 export interface MetaStatus {
   metaMode: MetaMode;
   fbPublishingEnabled: boolean;
@@ -34,6 +38,8 @@ export interface MetaStatus {
   igBusinessId: string | null;
   igUsername: string | null;
   tokenExpiresAt: string | null;
+  tokenExpiringSoon: boolean;
+  tokenDaysRemaining: number | null;
   lastVerifiedAt: string | null;
   lastHealthCheckAt: string | null;
   demoModeEnabled: boolean;
@@ -129,6 +135,17 @@ export async function getMetaStatus(accountId: string): Promise<MetaStatus> {
   const demoAllowed = process.env.ALLOW_DEMO_MODE === "true";
   const demoEnabled = demoAllowed && (state?.metaDemoModeEnabled || false);
 
+  let tokenExpiringSoon = false;
+  let tokenDaysRemaining: number | null = null;
+  if (creds?.userTokenExpiresAt) {
+    const expiresAt = new Date(creds.userTokenExpiresAt);
+    const now = new Date();
+    if (expiresAt > now) {
+      tokenDaysRemaining = Math.round((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      tokenExpiringSoon = tokenDaysRemaining <= SOFT_EXPIRY_WARNING_DAYS;
+    }
+  }
+
   return {
     metaMode: metaMode,
     fbPublishingEnabled: metaMode === "REAL" ? capabilities.fbPublishingEnabled : (demoEnabled && metaMode === "DEMO"),
@@ -141,6 +158,8 @@ export async function getMetaStatus(accountId: string): Promise<MetaStatus> {
     igBusinessId: creds?.igBusinessId || null,
     igUsername: creds?.igUsername || null,
     tokenExpiresAt: creds?.userTokenExpiresAt?.toISOString() || null,
+    tokenExpiringSoon,
+    tokenDaysRemaining,
     lastVerifiedAt: state?.metaLastVerifiedAt?.toISOString() || null,
     lastHealthCheckAt: creds?.lastHealthCheckAt?.toISOString() || null,
     demoModeEnabled: demoEnabled,
@@ -204,6 +223,41 @@ export function registerMetaStatusRoutes(app: Express) {
     } catch (error: any) {
       console.error("[MetaStatus] Reconnect error:", error.message);
       res.status(500).json({ error: "Failed to initiate reconnect" });
+    }
+  });
+
+  app.get("/api/meta/diagnostics", async (req: Request, res: Response) => {
+    try {
+      const accountId = (req.query.accountId as string) || "default";
+      const metrics = getMetaMetrics(accountId);
+      const backoff = getBackoffDiagnostics(accountId);
+      res.json({
+        success: true,
+        diagnostics: {
+          metrics,
+          backoff,
+          serverTime: new Date().toISOString(),
+        },
+      });
+    } catch (error: any) {
+      console.error("[MetaStatus] Error fetching diagnostics:", error.message);
+      res.status(500).json({ error: "Failed to fetch diagnostics" });
+    }
+  });
+
+  app.get("/api/meta/diagnostics/all", async (_req: Request, res: Response) => {
+    try {
+      const allMetrics = getAllMetrics();
+      res.json({
+        success: true,
+        diagnostics: {
+          accounts: allMetrics,
+          serverTime: new Date().toISOString(),
+        },
+      });
+    } catch (error: any) {
+      console.error("[MetaStatus] Error fetching all diagnostics:", error.message);
+      res.status(500).json({ error: "Failed to fetch diagnostics" });
     }
   });
 

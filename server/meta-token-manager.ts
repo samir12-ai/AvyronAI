@@ -4,6 +4,8 @@ import { eq } from "drizzle-orm";
 import { encryptToken, decryptToken, redactToken } from "./meta-crypto";
 import { transitionMetaMode, computeCapabilities, computeMissingScopes } from "./meta-status";
 import { logAudit } from "./audit";
+import { recordMetaApiCall } from "./meta-metrics";
+import { classifyMetaError, classifyNetworkError, recordTemporaryError, recordSuccess } from "./meta-error-classifier";
 
 const FB_API_VERSION = "v21.0";
 const TOKEN_EXTENSION_THRESHOLD_DAYS = 14;
@@ -290,10 +292,12 @@ export async function runHealthCheck(accountId: string): Promise<{
     let tokenExpiresAt: number | null = null;
 
     if (appId && appSecret) {
+      const debugStart = Date.now();
       try {
         const debugRes = await fetch(
           `https://graph.facebook.com/debug_token?input_token=${userToken}&access_token=${appId}|${appSecret}`
         );
+        const debugLatency = Date.now() - debugStart;
         const debugData = await debugRes.json();
 
         if (debugData.data) {
@@ -302,40 +306,78 @@ export async function runHealthCheck(accountId: string): Promise<{
 
           if (!tokenValid) {
             const errorSubcode = debugData.data.error?.subcode;
-            if (errorSubcode === 458 || errorSubcode === 460) {
-              await transitionMetaMode(accountId, "REVOKED", `Token revoked (subcode: ${errorSubcode})`);
-              await logAudit(accountId, "META_TOKEN_REVOKED", { details: { subcode: errorSubcode } });
-              return { healthy: false, action: "revoked" };
-            }
+            const errorCode = debugData.data.error?.code || null;
+            const classified = classifyMetaError(null, errorCode, errorSubcode, debugData.data.error?.message || null);
+            recordMetaApiCall(accountId, false, debugLatency, classified.category);
 
-            if (errorSubcode === 463) {
-              await transitionMetaMode(accountId, "TOKEN_EXPIRED", "Token expired (debug_token)");
-              await logAudit(accountId, "META_TOKEN_EXPIRED", { details: {} });
-              return { healthy: false, action: "expired" };
+            if (classified.classification === "PERMANENT" && classified.shouldTransitionMode) {
+              if (errorSubcode === 458 || errorSubcode === 460) {
+                await transitionMetaMode(accountId, "REVOKED", `Token revoked (subcode: ${errorSubcode})`);
+                await logAudit(accountId, "META_TOKEN_REVOKED", { details: { subcode: errorSubcode } });
+                return { healthy: false, action: "revoked" };
+              }
+              if (errorSubcode === 463) {
+                await transitionMetaMode(accountId, "TOKEN_EXPIRED", "Token expired (debug_token)");
+                await logAudit(accountId, "META_TOKEN_EXPIRED", { details: {} });
+                return { healthy: false, action: "expired" };
+              }
+              await transitionMetaMode(accountId, "TOKEN_EXPIRED", "Token invalid (unknown reason)");
+              return { healthy: false, action: "invalid" };
+            } else {
+              const backoff = recordTemporaryError(accountId);
+              await logAudit(accountId, "META_TEMPORARY_ERROR", {
+                details: { category: classified.category, backoff, errorSubcode, source: "health_check_debug_token" },
+              });
+              tokenValid = true;
             }
-
-            await transitionMetaMode(accountId, "TOKEN_EXPIRED", "Token invalid (unknown reason)");
-            return { healthy: false, action: "invalid" };
+          } else {
+            recordMetaApiCall(accountId, true, debugLatency);
+            recordSuccess(accountId);
           }
         }
       } catch (debugError) {
-        console.warn("[MetaTokenManager] debug_token API call failed (temporary?):", String(debugError));
+        const debugLatency = Date.now() - debugStart;
+        const classified = classifyNetworkError();
+        recordMetaApiCall(accountId, false, debugLatency, classified.category);
+        const backoff = recordTemporaryError(accountId);
+        await logAudit(accountId, "META_TEMPORARY_ERROR", {
+          details: { category: classified.category, backoff, error: String(debugError), source: "health_check_debug_token" },
+        });
+        console.warn("[MetaTokenManager] debug_token API call failed (temporary):", String(debugError));
         tokenValid = true;
       }
     } else {
+      const meStart = Date.now();
       try {
         const testRes = await fetch(`https://graph.facebook.com/${FB_API_VERSION}/me?access_token=${userToken}`);
+        const meLatency = Date.now() - meStart;
         const testData = await testRes.json();
         tokenValid = !testData.error;
         if (testData.error) {
           const code = testData.error.code;
-          if (code === 190) {
-            await transitionMetaMode(accountId, "TOKEN_EXPIRED", "Token expired (/me check)");
+          const subcode = testData.error.error_subcode || null;
+          const classified = classifyMetaError(null, code, subcode, testData.error.message || null);
+          recordMetaApiCall(accountId, false, meLatency, classified.category);
+
+          if (classified.classification === "PERMANENT" && classified.shouldTransitionMode) {
+            await transitionMetaMode(accountId, classified.suggestedMode as any || "TOKEN_EXPIRED", `Token issue (/me check, code=${code})`);
             await logAudit(accountId, "META_TOKEN_EXPIRED", { details: { errorCode: code } });
             return { healthy: false, action: "expired" };
+          } else {
+            const backoff = recordTemporaryError(accountId);
+            await logAudit(accountId, "META_TEMPORARY_ERROR", {
+              details: { category: classified.category, backoff, errorCode: code, source: "health_check_me" },
+            });
+            tokenValid = true;
           }
+        } else {
+          recordMetaApiCall(accountId, true, meLatency);
+          recordSuccess(accountId);
         }
-      } catch {
+      } catch (meError) {
+        const meLatency = Date.now() - meStart;
+        recordMetaApiCall(accountId, false, meLatency, "NETWORK_ERROR");
+        recordTemporaryError(accountId);
         tokenValid = true;
       }
     }

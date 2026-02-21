@@ -5,6 +5,8 @@ import { logAudit } from "./audit";
 import * as crypto from "crypto";
 import { decryptToken, redactToken } from "./meta-crypto";
 import type { MetaMode } from "./meta-status";
+import { recordMetaApiCall } from "./meta-metrics";
+import { classifyMetaError, classifyNetworkError, recordTemporaryError, recordSuccess, isInBackoff } from "./meta-error-classifier";
 
 const PUBLISH_CHECK_INTERVAL_MS = 2 * 60 * 1000;
 const MAX_RETRY_ATTEMPTS = 3;
@@ -27,8 +29,16 @@ async function publishToMetaWithRetry(
   accessToken: string,
   pageId: string,
   accountId: string
-): Promise<{ success: boolean; postId?: string; error?: string; attempts: number }> {
+): Promise<{ success: boolean; postId?: string; error?: string; attempts: number; classified?: string }> {
   let lastError = "";
+  let lastClassification = "";
+
+  if (isInBackoff(accountId)) {
+    await logAudit(accountId, "META_BACKOFF_APPLIED", {
+      details: { postId: post.id, reason: "Account in backoff — skipping publish attempt" },
+    });
+    return { success: false, error: "Account in temporary backoff due to repeated errors", attempts: 0, classified: "BACKOFF_ACTIVE" };
+  }
 
   for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
     if (isShuttingDown) {
@@ -36,7 +46,7 @@ async function publishToMetaWithRetry(
     }
 
     try {
-      const result = await publishToMeta(post, accessToken, pageId);
+      const result = await publishToMeta(post, accessToken, pageId, accountId);
 
       if (result.success) {
         return { ...result, attempts: attempt };
@@ -44,16 +54,52 @@ async function publishToMetaWithRetry(
 
       lastError = result.error || "Unknown error";
 
-      if (isNonRetryableError(lastError)) {
+      const classified = classifyMetaError(
+        result.httpStatus || null,
+        result.errorCode || null,
+        result.errorSubcode || null,
+        result.error || null
+      );
+      lastClassification = classified.category;
+
+      if (classified.classification === "PERMANENT") {
         await logAudit(accountId, "META_API_ERROR", {
           details: {
             postId: post.id,
             error: lastError,
             attempt,
             retryable: false,
+            classification: "PERMANENT",
+            category: classified.category,
           },
         });
-        return { success: false, error: lastError, attempts: attempt };
+        return { success: false, error: lastError, attempts: attempt, classified: classified.category };
+      }
+
+      if (classified.category === "RATE_LIMITED") {
+        const backoffResult = recordTemporaryError(accountId);
+        await logAudit(accountId, "META_RATE_LIMITED", {
+          details: {
+            postId: post.id,
+            attempt,
+            backoffMs: backoffResult.backoffMs,
+            totalErrors: backoffResult.totalErrors,
+          },
+        });
+        if (!backoffResult.shouldRetry) {
+          return { success: false, error: `Rate limited — max retries exceeded`, attempts: attempt, classified: "RATE_LIMITED" };
+        }
+        await sleep(backoffResult.backoffMs);
+        continue;
+      }
+
+      recordTemporaryError(accountId);
+
+      if (isNonRetryableError(lastError)) {
+        await logAudit(accountId, "META_API_ERROR", {
+          details: { postId: post.id, error: lastError, attempt, retryable: false },
+        });
+        return { success: false, error: lastError, attempts: attempt, classified: lastClassification };
       }
 
       if (attempt < MAX_RETRY_ATTEMPTS) {
@@ -63,6 +109,7 @@ async function publishToMetaWithRetry(
       }
     } catch (error) {
       lastError = String(error);
+      recordTemporaryError(accountId);
       if (attempt < MAX_RETRY_ATTEMPTS) {
         const backoff = BASE_BACKOFF_MS * Math.pow(2, attempt - 1) + Math.random() * 1000;
         await sleep(backoff);
@@ -76,10 +123,11 @@ async function publishToMetaWithRetry(
       platform: post.platform,
       totalAttempts: MAX_RETRY_ATTEMPTS,
       lastError,
+      lastClassification,
     },
   });
 
-  return { success: false, error: `Failed after ${MAX_RETRY_ATTEMPTS} attempts: ${lastError}`, attempts: MAX_RETRY_ATTEMPTS };
+  return { success: false, error: `Failed after ${MAX_RETRY_ATTEMPTS} attempts: ${lastError}`, attempts: MAX_RETRY_ATTEMPTS, classified: lastClassification };
 }
 
 function isNonRetryableError(error: string): boolean {
@@ -95,11 +143,22 @@ function isNonRetryableError(error: string): boolean {
   return nonRetryable.some((e) => error.toLowerCase().includes(e.toLowerCase()));
 }
 
-async function publishToMeta(post: any, accessToken: string, pageId: string): Promise<{ success: boolean; postId?: string; error?: string }> {
+interface PublishResult {
+  success: boolean;
+  postId?: string;
+  error?: string;
+  httpStatus?: number;
+  errorCode?: number;
+  errorSubcode?: number;
+}
+
+async function publishToMeta(post: any, accessToken: string, pageId: string, accountId?: string): Promise<PublishResult> {
+  const acctId = accountId || post.accountId || "default";
   try {
     const platform = (post.platform || "").toLowerCase();
 
     if (platform === "facebook" || platform.includes("facebook")) {
+      const start = Date.now();
       const fbResponse = await fetch(
         `https://graph.facebook.com/v18.0/${pageId}/feed`,
         {
@@ -111,15 +170,28 @@ async function publishToMeta(post: any, accessToken: string, pageId: string): Pr
           }),
         }
       );
+      const latency = Date.now() - start;
       const fbData = await fbResponse.json();
       if (fbData.id) {
+        recordMetaApiCall(acctId, true, latency);
+        recordSuccess(acctId);
         return { success: true, postId: fbData.id };
       }
-      return { success: false, error: fbData.error?.message || "Facebook API error" };
+      const errCode = fbData.error?.code || null;
+      const errSubcode = fbData.error?.error_subcode || null;
+      recordMetaApiCall(acctId, false, latency, `fb_publish_${errCode || 'unknown'}`);
+      return {
+        success: false,
+        error: fbData.error?.message || "Facebook API error",
+        httpStatus: fbResponse.status,
+        errorCode: errCode,
+        errorSubcode: errSubcode,
+      };
     }
 
     if (platform === "instagram" || platform.includes("instagram")) {
       if (post.mediaUri) {
+        const start = Date.now();
         const containerRes = await fetch(
           `https://graph.facebook.com/v18.0/${pageId}/media`,
           {
@@ -132,8 +204,11 @@ async function publishToMeta(post: any, accessToken: string, pageId: string): Pr
             }),
           }
         );
+        const containerLatency = Date.now() - start;
         const containerData = await containerRes.json();
         if (containerData.id) {
+          recordMetaApiCall(acctId, true, containerLatency);
+          const pubStart = Date.now();
           const publishRes = await fetch(
             `https://graph.facebook.com/v18.0/${pageId}/media_publish`,
             {
@@ -145,13 +220,32 @@ async function publishToMeta(post: any, accessToken: string, pageId: string): Pr
               }),
             }
           );
+          const pubLatency = Date.now() - pubStart;
           const publishData = await publishRes.json();
           if (publishData.id) {
+            recordMetaApiCall(acctId, true, pubLatency);
+            recordSuccess(acctId);
             return { success: true, postId: publishData.id };
           }
-          return { success: false, error: publishData.error?.message || "Instagram publish error" };
+          const pubErrCode = publishData.error?.code || null;
+          recordMetaApiCall(acctId, false, pubLatency, `ig_publish_${pubErrCode || 'unknown'}`);
+          return {
+            success: false,
+            error: publishData.error?.message || "Instagram publish error",
+            httpStatus: publishRes.status,
+            errorCode: pubErrCode,
+            errorSubcode: publishData.error?.error_subcode || null,
+          };
         }
-        return { success: false, error: containerData.error?.message || "Instagram container error" };
+        const cErrCode = containerData.error?.code || null;
+        recordMetaApiCall(acctId, false, containerLatency, `ig_container_${cErrCode || 'unknown'}`);
+        return {
+          success: false,
+          error: containerData.error?.message || "Instagram container error",
+          httpStatus: containerRes.status,
+          errorCode: cErrCode,
+          errorSubcode: containerData.error?.error_subcode || null,
+        };
       }
       return { success: false, error: "No media URI for Instagram post" };
     }
@@ -161,6 +255,7 @@ async function publishToMeta(post: any, accessToken: string, pageId: string): Pr
       error: `Unsupported platform: ${platform}. Only Facebook and Instagram are supported.`,
     };
   } catch (error) {
+    recordMetaApiCall(acctId, false, 0, "NETWORK_ERROR");
     return { success: false, error: String(error) };
   }
 }

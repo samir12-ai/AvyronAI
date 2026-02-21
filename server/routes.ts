@@ -18,6 +18,7 @@ import { registerCampaignRoutes, requireCampaign } from "./campaign-routes";
 import { registerMetaStatusRoutes, requireMetaReal, getDecryptedPageToken } from "./meta-status";
 import { storeTokensAfterOAuth, runAllHealthChecks } from "./meta-token-manager";
 import { redactToken } from "./meta-crypto";
+import { initMetaMetrics } from "./meta-metrics";
 import { db } from "./db";
 import { metaCredentials } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -1304,6 +1305,8 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerLeadEngineRoutes(app);
   registerCompetitiveIntelligenceRoutes(app);
   registerMetaStatusRoutes(app);
+
+  initMetaMetrics();
 
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
