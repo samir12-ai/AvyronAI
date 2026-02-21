@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import { db } from "../db";
 import { strategicBlueprints } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { logAuditEvent } from "./audit-logger";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -11,19 +12,22 @@ const openai = new OpenAI({
 
 const MARKET_MAP_PROMPT = `You are a strategic market analyst. Given a confirmed campaign blueprint, competitor data, and pricing information, generate a comprehensive Strategic Market Map.
 
+CRITICAL: All analysis MUST be geo-scoped to the specified LOCATION. Do NOT generate global or country-agnostic strategies.
+
 Your analysis must be 100% structured. No narrative. No free text. Only structured JSON output.
 
 You must analyze:
-1. Competitor positioning (where each competitor sits in the market)
-2. Price band estimation (low/mid/high for the market segment)
-3. Price vs market comparison (where the client's price sits)
-4. Market saturation level (low/medium/high/oversaturated)
-5. Gap angles (untapped opportunities)
-6. Risk exposure areas
-7. Strategic recommendations
+1. Competitor positioning (where each competitor sits in the LOCAL market for the specified location)
+2. Price band estimation (low/mid/high for the LOCAL market segment in the specified location)
+3. Price vs LOCAL market comparison
+4. LOCAL market saturation level
+5. Gap angles (untapped LOCAL opportunities)
+6. Risk exposure areas (LOCAL risks)
+7. Strategic recommendations (geo-specific)
 
 Respond with ONLY a valid JSON object:
 {
+  "location": "string (the geo-scope of this analysis)",
   "competitorPositioning": [
     {
       "url": "string",
@@ -93,7 +97,22 @@ export function registerThinkingRoutes(app: Express) {
       if (!campaignContext) {
         return res.status(400).json({
           error: "CAMPAIGN_CONTEXT_REQUIRED",
-          message: "No campaign context — Market Analysis cannot run without campaign context (objective + location).",
+          message: "No campaign context — Market Analysis cannot run without campaign context.",
+        });
+      }
+
+      if (!campaignContext.location) {
+        await logAuditEvent({
+          accountId: blueprint.accountId,
+          campaignId: blueprint.campaignId || undefined,
+          blueprintId: id,
+          blueprintVersion: blueprint.blueprintVersion,
+          event: "LOCATION_BLOCKED",
+          details: { phase: "MARKET_ANALYSIS", reason: "Location missing from campaign context" },
+        });
+        return res.status(400).json({
+          error: "LOCATION_REQUIRED",
+          message: "Market analysis requires a geo-location. No global assumptions allowed. Set location in campaign context.",
         });
       }
 
@@ -106,16 +125,19 @@ export function registerThinkingRoutes(app: Express) {
         return res.status(400).json({ error: "GATE_FAILED", message: "No price data — no price comparison." });
       }
 
-      const userPrompt = `Analyze this strategic data and generate a Market Map:
+      const userPrompt = `Analyze this strategic data and generate a Market Map.
+
+CRITICAL: This analysis is STRICTLY GEO-SCOPED to: ${campaignContext.location}
+All price bands, saturation levels, competitor analysis, and recommendations must be specific to this location.
 
 CAMPAIGN CONTEXT:
 - Campaign: ${campaignContext.campaignName}
 - Objective: ${campaignContext.objective}
-- Location: ${campaignContext.location || "Not specified"}
+- Location: ${campaignContext.location}
 - Platform: ${campaignContext.platform}
 - Mode: ${campaignContext.isDemo ? "DEMO (no live data)" : "PRODUCTION"}
 
-CONFIRMED BLUEPRINT (source of truth — do not override):
+CONFIRMED BLUEPRINT (v${blueprint.blueprintVersion} — source of truth — do not override):
 ${JSON.stringify(confirmedBlueprint, null, 2)}
 
 COMPETITOR URLS:
@@ -123,7 +145,7 @@ ${competitorUrls.map((u: string, i: number) => `${i + 1}. ${u}`).join("\n")}
 
 CLIENT AVERAGE SELLING PRICE: $${blueprint.averageSellingPrice}
 
-Generate the Strategic Market Map now.`;
+Generate the Strategic Market Map now. All analysis scoped to ${campaignContext.location}.`;
 
       const response = await openai.chat.completions.create({
         model: "gpt-5.2",
@@ -148,6 +170,9 @@ Generate the Strategic Market Map now.`;
         return res.status(500).json({ error: "Market analysis returned invalid format. Please retry." });
       }
 
+      marketMap.blueprintVersion = blueprint.blueprintVersion;
+      marketMap.location = marketMap.location || campaignContext.location;
+
       await db.update(strategicBlueprints)
         .set({
           status: "ANALYSIS_COMPLETE",
@@ -159,6 +184,7 @@ Generate the Strategic Market Map now.`;
       res.json({
         success: true,
         blueprintId: id,
+        blueprintVersion: blueprint.blueprintVersion,
         status: "ANALYSIS_COMPLETE",
         marketMap,
       });

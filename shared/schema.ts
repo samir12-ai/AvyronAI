@@ -928,6 +928,7 @@ export const strategicBlueprints = pgTable("strategic_blueprints", {
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id"),
   campaignContext: text("campaign_context"),
+  blueprintVersion: integer("blueprint_version").notNull().default(1),
   status: text("status").notNull().default("DRAFT"),
   competitorUrls: text("competitor_urls"),
   averageSellingPrice: doublePrecision("average_selling_price"),
@@ -958,5 +959,40 @@ export const blueprintCompetitors = pgTable("blueprint_competitors", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const blueprintVersions = pgTable("blueprint_versions", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  blueprintId: varchar("blueprint_id").notNull(),
+  version: integer("version").notNull().default(1),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id"),
+  campaignContext: text("campaign_context"),
+  confirmedBlueprint: text("confirmed_blueprint"),
+  draftBlueprint: text("draft_blueprint"),
+  competitorUrls: text("competitor_urls"),
+  averageSellingPrice: doublePrecision("average_selling_price"),
+  marketMap: text("market_map"),
+  validationResult: text("validation_result"),
+  orchestratorPlan: text("orchestrator_plan"),
+  previousVersionId: varchar("previous_version_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const strategicAuditLogs = pgTable("strategic_audit_logs", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id"),
+  blueprintId: varchar("blueprint_id"),
+  blueprintVersion: integer("blueprint_version"),
+  event: text("event").notNull(),
+  details: text("details"),
+  timestamp: timestamp("timestamp").defaultNow(),
+});
+
 export type StrategicBlueprint = typeof strategicBlueprints.$inferSelect;
 export type BlueprintCompetitor = typeof blueprintCompetitors.$inferSelect;
+export type BlueprintVersion = typeof blueprintVersions.$inferSelect;
+export type StrategicAuditLog = typeof strategicAuditLogs.$inferSelect;

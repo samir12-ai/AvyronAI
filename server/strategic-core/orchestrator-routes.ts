@@ -3,11 +3,32 @@ import OpenAI from "openai";
 import { db } from "../db";
 import { strategicBlueprints } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { logAuditEvent } from "./audit-logger";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
+
+const REQUIRED_BLUEPRINT_FIELDS: { key: string; label: string }[] = [
+  { key: "detectedOffer", label: "Offer" },
+  { key: "detectedCTA", label: "Call to Action" },
+  { key: "detectedAudienceGuess", label: "Target Audience" },
+  { key: "detectedPositioning", label: "Positioning" },
+];
+
+function validateBlueprintCompleteness(confirmedBlueprint: any): { valid: boolean; missingFields: string[] } {
+  const missingFields: string[] = [];
+
+  for (const { key, label } of REQUIRED_BLUEPRINT_FIELDS) {
+    const value = confirmedBlueprint[key];
+    if (!value || value === "INSUFFICIENT_DATA" || value === "null" || value === "") {
+      missingFields.push(label);
+    }
+  }
+
+  return { valid: missingFields.length === 0, missingFields };
+}
 
 const ORCHESTRATOR_PROMPT = `You are an execution orchestrator. You do NOT think. You do NOT reinterpret. You do NOT override the confirmed blueprint.
 
@@ -16,6 +37,8 @@ You organize execution STRICTLY from the validated, confirmed blueprint and mark
 CRITICAL: The confirmed blueprint is the ONLY source of truth. Never change positioning, offer, audience, CTA, or any confirmed field.
 
 You must generate exactly 6 structured execution plans. All output must be structured objects.
+
+All plans must be geo-scoped to the specified LOCATION. No global assumptions.
 
 Respond with ONLY a valid JSON object:
 {
@@ -124,6 +147,15 @@ export function registerOrchestratorRoutes(app: Express) {
         return res.status(400).json({ error: "No confirmed blueprint. Confirmed blueprint is the only source of truth." });
       }
 
+      const { valid, missingFields } = validateBlueprintCompleteness(confirmedBlueprint);
+      if (!valid) {
+        return res.status(400).json({
+          error: "INCOMPLETE_BLUEPRINT",
+          missingFields,
+          message: `Cannot generate execution plans. Missing critical fields: ${missingFields.join(", ")}. No generic fallback plans allowed.`,
+        });
+      }
+
       const campaignContext = blueprint.campaignContext ? JSON.parse(blueprint.campaignContext) : null;
       if (!campaignContext) {
         return res.status(400).json({
@@ -136,7 +168,9 @@ export function registerOrchestratorRoutes(app: Express) {
       const validationResult = blueprint.validationResult ? JSON.parse(blueprint.validationResult) : null;
       const competitorUrls = blueprint.competitorUrls ? JSON.parse(blueprint.competitorUrls) : [];
 
-      const userPrompt = `Generate execution plans from this validated blueprint. Do NOT reinterpret or override ANY confirmed data. The confirmed blueprint is the ONLY source of truth.
+      const userPrompt = `Generate execution plans from this validated blueprint (v${blueprint.blueprintVersion}). Do NOT reinterpret or override ANY confirmed data. The confirmed blueprint is the ONLY source of truth.
+
+All plans must be geo-scoped to: ${campaignContext.location || "Not specified"}
 
 CAMPAIGN CONTEXT:
 - Campaign: ${campaignContext.campaignName}
@@ -145,7 +179,7 @@ CAMPAIGN CONTEXT:
 - Platform: ${campaignContext.platform}
 - Mode: ${campaignContext.isDemo ? "DEMO" : "PRODUCTION"}
 
-CONFIRMED BLUEPRINT (source of truth — do NOT change any values):
+CONFIRMED BLUEPRINT (v${blueprint.blueprintVersion} — source of truth — do NOT change any values):
 ${JSON.stringify(confirmedBlueprint, null, 2)}
 
 AVERAGE SELLING PRICE: $${blueprint.averageSellingPrice}
@@ -156,7 +190,7 @@ ${marketMap ? `MARKET MAP:\n${JSON.stringify(marketMap, null, 2)}` : ""}
 
 ${validationResult ? `VALIDATION RESULT:\n${JSON.stringify(validationResult, null, 2)}` : ""}
 
-Generate all 6 execution plans now. Strictly from the confirmed, validated data. No reinterpretation.`;
+Generate all 6 execution plans now. Strictly from the confirmed, validated data. No reinterpretation. Geo-scoped to ${campaignContext.location || "specified location"}.`;
 
       const response = await openai.chat.completions.create({
         model: "gpt-5.2",
@@ -181,6 +215,8 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
         return res.status(500).json({ error: "Orchestrator returned invalid format. Please retry." });
       }
 
+      orchestratorPlan.blueprintVersion = blueprint.blueprintVersion;
+
       await db.update(strategicBlueprints)
         .set({
           status: "ORCHESTRATED",
@@ -190,9 +226,19 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
         })
         .where(eq(strategicBlueprints.id, id));
 
+      await logAuditEvent({
+        accountId: blueprint.accountId,
+        campaignId: blueprint.campaignId || undefined,
+        blueprintId: id,
+        blueprintVersion: blueprint.blueprintVersion,
+        event: "ORCHESTRATOR_GENERATED",
+        details: { planSections: Object.keys(orchestratorPlan).filter(k => k !== "blueprintVersion") },
+      });
+
       res.json({
         success: true,
         blueprintId: id,
+        blueprintVersion: blueprint.blueprintVersion,
         status: "ORCHESTRATED",
         orchestratorPlan,
       });

@@ -1,7 +1,8 @@
 import type { Express, Request, Response } from "express";
 import { db } from "../db";
-import { strategicBlueprints, blueprintCompetitors, campaignSelections } from "@shared/schema";
+import { strategicBlueprints, blueprintCompetitors, blueprintVersions, campaignSelections } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { logAuditEvent } from "./audit-logger";
 
 interface CampaignContextObject {
   campaignId: string;
@@ -16,7 +17,7 @@ const DEMO_CAMPAIGN_CONTEXT: CampaignContextObject = {
   campaignId: "DEMO_CAMPAIGN",
   campaignName: "Demo Campaign (Meta Not Connected)",
   objective: "general_marketing",
-  location: null,
+  location: "Dubai, UAE",
   platform: "demo",
   isDemo: true,
 };
@@ -25,6 +26,7 @@ async function resolveCampaignContext(
   accountId: string,
   campaignId?: string,
   metaConnected?: boolean,
+  demoLocation?: string,
 ): Promise<{ context: CampaignContextObject | null; error: string | null }> {
   if (metaConnected && campaignId) {
     const [campaign] = await db.select().from(campaignSelections)
@@ -54,8 +56,17 @@ async function resolveCampaignContext(
     return { context: null, error: "Meta is connected — you must select a campaign before building a plan." };
   }
 
-  return { context: DEMO_CAMPAIGN_CONTEXT, error: null };
+  return {
+    context: {
+      ...DEMO_CAMPAIGN_CONTEXT,
+      location: demoLocation || DEMO_CAMPAIGN_CONTEXT.location,
+    },
+    error: null,
+  };
 }
+
+export { resolveCampaignContext, DEMO_CAMPAIGN_CONTEXT };
+export type { CampaignContextObject };
 
 export function registerGateRoutes(app: Express) {
   app.post("/api/strategic/init", async (req: Request, res: Response) => {
@@ -66,6 +77,7 @@ export function registerGateRoutes(app: Express) {
         competitorUrls,
         averageSellingPrice,
         metaConnected = false,
+        demoLocation,
       } = req.body;
 
       if (!competitorUrls || !Array.isArray(competitorUrls) || competitorUrls.length < 2) {
@@ -99,7 +111,7 @@ export function registerGateRoutes(app: Express) {
       }
 
       const { context: campaignContext, error: campaignError } = await resolveCampaignContext(
-        accountId, campaignId, metaConnected,
+        accountId, campaignId, metaConnected, demoLocation,
       );
       if (campaignError) {
         return res.status(400).json({
@@ -112,6 +124,7 @@ export function registerGateRoutes(app: Express) {
         accountId,
         campaignId: campaignContext!.campaignId,
         campaignContext: JSON.stringify(campaignContext),
+        blueprintVersion: 1,
         status: "GATE_PASSED",
         competitorUrls: JSON.stringify(validUrls),
         averageSellingPrice: Number(averageSellingPrice),
@@ -124,9 +137,19 @@ export function registerGateRoutes(app: Express) {
       }));
       await db.insert(blueprintCompetitors).values(competitorInserts);
 
+      await logAuditEvent({
+        accountId,
+        campaignId: campaignContext!.campaignId,
+        blueprintId: blueprint.id,
+        blueprintVersion: 1,
+        event: "GATE_PASSED",
+        details: { competitorCount: validUrls.length, averageSellingPrice: Number(averageSellingPrice), isDemo: campaignContext!.isDemo },
+      });
+
       res.json({
         success: true,
         blueprintId: blueprint.id,
+        blueprintVersion: 1,
         status: blueprint.status,
         competitorCount: validUrls.length,
         averageSellingPrice: blueprint.averageSellingPrice,
@@ -149,6 +172,10 @@ export function registerGateRoutes(app: Express) {
 
       const competitors = await db.select().from(blueprintCompetitors).where(eq(blueprintCompetitors.blueprintId, id));
 
+      const versions = await db.select().from(blueprintVersions)
+        .where(eq(blueprintVersions.blueprintId, id))
+        .orderBy(desc(blueprintVersions.version));
+
       res.json({
         success: true,
         blueprint: {
@@ -163,6 +190,12 @@ export function registerGateRoutes(app: Express) {
           orchestratorPlan: blueprint.orchestratorPlan ? JSON.parse(blueprint.orchestratorPlan) : null,
         },
         competitors,
+        versionHistory: versions.map(v => ({
+          id: v.id,
+          version: v.version,
+          previousVersionId: v.previousVersionId,
+          createdAt: v.createdAt,
+        })),
       });
     } catch (error: any) {
       console.error("[StrategicCore] Blueprint fetch error:", error.message);
@@ -188,6 +221,34 @@ export function registerGateRoutes(app: Express) {
     } catch (error: any) {
       console.error("[StrategicCore] Blueprints list error:", error.message);
       res.status(500).json({ error: "Failed to list blueprints" });
+    }
+  });
+
+  app.get("/api/strategic/audit-log", async (req: Request, res: Response) => {
+    try {
+      const { accountId = "default", blueprintId, limit: queryLimit = "50" } = req.query as Record<string, string>;
+      const { strategicAuditLogs: auditTable } = await import("@shared/schema");
+
+      let query = db.select().from(auditTable);
+
+      if (blueprintId) {
+        query = query.where(eq(auditTable.blueprintId, blueprintId)) as any;
+      } else {
+        query = query.where(eq(auditTable.accountId, accountId)) as any;
+      }
+
+      const logs = await (query as any).orderBy(desc(auditTable.timestamp)).limit(parseInt(queryLimit));
+
+      res.json({
+        success: true,
+        logs: logs.map((l: any) => ({
+          ...l,
+          details: l.details ? JSON.parse(l.details) : null,
+        })),
+      });
+    } catch (error: any) {
+      console.error("[StrategicCore] Audit log fetch error:", error.message);
+      res.status(500).json({ error: "Failed to fetch audit logs" });
     }
   });
 }

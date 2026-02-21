@@ -1,7 +1,8 @@
 import type { Express, Request, Response } from "express";
 import { db } from "../db";
-import { strategicBlueprints } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { strategicBlueprints, blueprintVersions } from "@shared/schema";
+import { eq, and, desc } from "drizzle-orm";
+import { logAuditEvent } from "./audit-logger";
 
 const LOW_CONFIDENCE_THRESHOLD = 60;
 
@@ -72,6 +73,30 @@ function buildClarificationPrompts(draft: any): { field: string; label: string; 
   return prompts.slice(0, 3);
 }
 
+async function snapshotVersion(blueprint: any): Promise<string | null> {
+  try {
+    const currentVersion = blueprint.blueprintVersion || 1;
+    const [snapshot] = await db.insert(blueprintVersions).values({
+      blueprintId: blueprint.id,
+      version: currentVersion,
+      accountId: blueprint.accountId,
+      campaignId: blueprint.campaignId,
+      campaignContext: blueprint.campaignContext,
+      confirmedBlueprint: blueprint.confirmedBlueprint,
+      draftBlueprint: blueprint.draftBlueprint,
+      competitorUrls: blueprint.competitorUrls,
+      averageSellingPrice: blueprint.averageSellingPrice,
+      marketMap: blueprint.marketMap,
+      validationResult: blueprint.validationResult,
+      orchestratorPlan: blueprint.orchestratorPlan,
+    }).returning();
+    return snapshot.id;
+  } catch (err: any) {
+    console.error("[StrategicCore] Version snapshot error:", err.message);
+    return null;
+  }
+}
+
 export function registerConfirmRoutes(app: Express) {
   app.put("/api/strategic/blueprint/:id/edit", async (req: Request, res: Response) => {
     try {
@@ -88,16 +113,23 @@ export function registerConfirmRoutes(app: Express) {
       }
 
       const currentDraft = blueprint.draftBlueprint ? JSON.parse(blueprint.draftBlueprint) : {};
+      const previousValues: Record<string, any> = {};
 
       for (const [key, value] of Object.entries(fields)) {
-        if (currentDraft[key] && typeof currentDraft[key] === "object") {
-          currentDraft[key] = { value, confidence: 100 };
-        } else {
-          currentDraft[key] = { value, confidence: 100 };
-        }
+        const oldVal = currentDraft[key];
+        previousValues[key] = oldVal ? (typeof oldVal === "object" ? oldVal.value : oldVal) : null;
+        currentDraft[key] = { value, confidence: 100 };
       }
 
       const wasConfirmed = ["CONFIRMED", "ANALYSIS_COMPLETE", "VALIDATED"].includes(blueprint.status);
+
+      let newVersion = blueprint.blueprintVersion || 1;
+      let previousVersionId: string | null = null;
+
+      if (wasConfirmed) {
+        previousVersionId = await snapshotVersion(blueprint);
+        newVersion = (blueprint.blueprintVersion || 1) + 1;
+      }
 
       const updateData: any = {
         draftBlueprint: JSON.stringify(currentDraft),
@@ -114,21 +146,51 @@ export function registerConfirmRoutes(app: Express) {
         updateData.validatedAt = null;
         updateData.orchestratorPlan = null;
         updateData.orchestratedAt = null;
+        updateData.blueprintVersion = newVersion;
       }
 
       await db.update(strategicBlueprints)
         .set(updateData)
         .where(eq(strategicBlueprints.id, id));
 
+      for (const [fieldName, newValue] of Object.entries(fields)) {
+        await logAuditEvent({
+          accountId: blueprint.accountId,
+          campaignId: blueprint.campaignId || undefined,
+          blueprintId: id,
+          blueprintVersion: newVersion,
+          event: "FIELD_EDITED",
+          details: { field: fieldName, previousValue: previousValues[fieldName], newValue },
+        });
+      }
+
+      if (wasConfirmed) {
+        await logAuditEvent({
+          accountId: blueprint.accountId,
+          campaignId: blueprint.campaignId || undefined,
+          blueprintId: id,
+          blueprintVersion: newVersion,
+          event: "BLUEPRINT_RESET",
+          details: {
+            previousVersion: blueprint.blueprintVersion,
+            newVersion,
+            previousVersionSnapshotId: previousVersionId,
+            reason: "Edit after confirmation",
+          },
+        });
+      }
+
       const clarifications = buildClarificationPrompts(currentDraft);
 
       res.json({
         success: true,
         blueprintId: id,
+        blueprintVersion: newVersion,
         updatedFields: Object.keys(fields),
         draftBlueprint: currentDraft,
         statusReset: wasConfirmed,
         resetReason: wasConfirmed ? "Edit after confirmation resets to EXTRACTION_COMPLETE. Re-confirm and re-validate required." : null,
+        previousVersionId,
         pendingClarifications: clarifications,
       });
     } catch (error: any) {
@@ -182,8 +244,11 @@ export function registerConfirmRoutes(app: Express) {
         });
       }
 
+      const currentVersion = blueprint.blueprintVersion || 1;
+
       const confirmedData: any = {
         confirmedAt: new Date().toISOString(),
+        blueprintVersion: currentVersion,
         detectedLanguage: draft.detectedLanguage,
         transcribedText: draft.transcribedText,
         ocrText: draft.ocrText,
@@ -215,9 +280,19 @@ export function registerConfirmRoutes(app: Express) {
         })
         .where(eq(strategicBlueprints.id, id));
 
+      await logAuditEvent({
+        accountId: blueprint.accountId,
+        campaignId: blueprint.campaignId || undefined,
+        blueprintId: id,
+        blueprintVersion: currentVersion,
+        event: "BLUEPRINT_CONFIRMED",
+        details: { version: currentVersion },
+      });
+
       res.json({
         success: true,
         blueprintId: id,
+        blueprintVersion: currentVersion,
         status: "CONFIRMED",
         confirmedBlueprint: confirmedData,
       });

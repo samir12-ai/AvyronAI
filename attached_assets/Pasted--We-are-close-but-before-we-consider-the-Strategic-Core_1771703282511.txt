@@ -1,0 +1,128 @@
+
+⸻
+
+We are close — but before we consider the Strategic Core production-grade, we must implement the final 5 structural reinforcements.
+
+This is not optional polish.
+This is execution integrity.
+
+⸻
+
+	1.	Blueprint Versioning (Mandatory)
+
+Every confirmed blueprint must generate:
+	•	blueprint_version (incremental per campaign)
+	•	created_at
+	•	previous_version_reference (if exists)
+
+When a user edits after confirmation:
+	•	new version is created
+	•	old version remains immutable
+
+All downstream execution (orchestrator outputs, validation results, testing plans) must reference blueprint_version explicitly.
+
+No overwriting.
+No silent mutation.
+
+We need traceability.
+
+⸻
+
+	2.	Full Audit Logging for Strategic Flow
+
+Log the following events:
+	•	GATE_PASSED
+	•	EXTRACTION_COMPLETED
+	•	FIELD_EDITED (field name + previous value + new value)
+	•	BLUEPRINT_CONFIRMED (version number)
+	•	BLUEPRINT_RESET
+	•	VALIDATION_FAILED
+	•	ORCHESTRATOR_GENERATED
+
+Each log must include:
+	•	accountId
+	•	campaignId
+	•	blueprint_version (if exists)
+	•	timestamp
+
+We need full replay capability for debugging and optimization.
+
+⸻
+
+	3.	Orchestrator Hard Minimum Enforcement
+
+Orchestrator must refuse execution if any of these are missing:
+	•	confirmedBlueprint.offer
+	•	confirmedBlueprint.cta
+	•	confirmedBlueprint.audience
+	•	confirmedBlueprint.positioning
+
+If any are INSUFFICIENT_DATA or null:
+Return structured error:
+{
+error: “INCOMPLETE_BLUEPRINT”,
+missingFields: […]
+}
+
+No generic fallback plans allowed.
+
+⸻
+
+	4.	Strict Location Discipline
+
+Market analysis must be strictly geo-scoped.
+
+Rules:
+	•	If Meta connected → use campaign location
+	•	If DEMO_CAMPAIGN → use demo location (explicitly labeled)
+	•	If location missing → block Phase 3 with LOCATION_REQUIRED
+
+No global assumptions.
+No country-agnostic strategies.
+
+Location must flow into:
+	•	competitor comparison
+	•	price band estimation
+	•	saturation detection
+	•	risk assessment
+
+⸻
+
+	5.	End-to-End Demo Scenario Loader
+
+Add:
+
+POST /api/strategic/demo-load
+
+This should:
+	•	Create demo campaign context
+	•	Insert 2–3 demo competitors
+	•	Insert demo price
+	•	Insert demo creative blueprint
+	•	Auto-confirm blueprint
+	•	Trigger market map + validation + orchestrator
+
+Purpose:
+Allow full system demonstration without Meta permissions.
+
+Must be clearly labeled DEMO and isolated from real campaign data.
+
+⸻
+
+CRITICAL:
+
+None of these changes may:
+	•	Break campaign context gating
+	•	Break field-level confidence logic
+	•	Break confirmed_blueprint immutability
+	•	Reintroduce silent fallbacks
+
+We are building a deterministic strategic operator — not a content suggestion tool.
+
+Implement all 5 reinforcements cleanly and modularly.
+
+⸻
+
+🔥
+إذا سكّروا هالـ 5 نقاط… وقتها فيك تقول:
+“السيستم صار جاهز للطحن الحقيقي.

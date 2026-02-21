@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import { db } from "../db";
 import { strategicBlueprints } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { logAuditEvent } from "./audit-logger";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -102,7 +103,7 @@ export function registerValidationRoutes(app: Express) {
 
       const marketMap = blueprint.marketMap ? JSON.parse(blueprint.marketMap) : null;
 
-      const userPrompt = `Validate this campaign strategy. Use ONLY the confirmed blueprint as source of truth.
+      const userPrompt = `Validate this campaign strategy. Use ONLY the confirmed blueprint (v${blueprint.blueprintVersion}) as source of truth.
 
 CAMPAIGN CONTEXT:
 - Campaign: ${campaignContext.campaignName}
@@ -111,7 +112,7 @@ CAMPAIGN CONTEXT:
 - Platform: ${campaignContext.platform}
 - Mode: ${campaignContext.isDemo ? "DEMO" : "PRODUCTION"}
 
-CONFIRMED BLUEPRINT (source of truth):
+CONFIRMED BLUEPRINT (v${blueprint.blueprintVersion} — source of truth):
 ${JSON.stringify(confirmedBlueprint, null, 2)}
 
 AVERAGE SELLING PRICE: $${blueprint.averageSellingPrice || "unknown"}
@@ -143,6 +144,10 @@ Perform full validation now.`;
         return res.status(500).json({ error: "Validation engine returned invalid format. Please retry." });
       }
 
+      validationResult.blueprintVersion = blueprint.blueprintVersion;
+
+      const eventType = validationResult.canProceed ? "VALIDATION_COMPLETED" : "VALIDATION_FAILED";
+
       await db.update(strategicBlueprints)
         .set({
           status: "VALIDATED",
@@ -152,9 +157,24 @@ Perform full validation now.`;
         })
         .where(eq(strategicBlueprints.id, id));
 
+      await logAuditEvent({
+        accountId: blueprint.accountId,
+        campaignId: blueprint.campaignId || undefined,
+        blueprintId: id,
+        blueprintVersion: blueprint.blueprintVersion,
+        event: eventType as any,
+        details: {
+          overallAssessment: validationResult.overallAssessment,
+          riskScore: validationResult.riskScore,
+          canProceed: validationResult.canProceed,
+          contradictionCount: validationResult.contradictions?.length || 0,
+        },
+      });
+
       res.json({
         success: true,
         blueprintId: id,
+        blueprintVersion: blueprint.blueprintVersion,
         status: "VALIDATED",
         validationResult,
       });

@@ -5,6 +5,7 @@ import { registerConfirmRoutes } from "./confirm-routes";
 import { registerThinkingRoutes } from "./thinking-routes";
 import { registerValidationRoutes } from "./validation-routes";
 import { registerOrchestratorRoutes } from "./orchestrator-routes";
+import { registerDemoRoutes } from "./demo-routes";
 
 export function registerStrategicCoreRoutes(app: Express) {
   registerGateRoutes(app);
@@ -13,4 +14,5 @@ export function registerStrategicCoreRoutes(app: Express) {
   registerThinkingRoutes(app);
   registerValidationRoutes(app);
   registerOrchestratorRoutes(app);
+  registerDemoRoutes(app);
 }

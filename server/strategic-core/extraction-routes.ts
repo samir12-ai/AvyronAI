@@ -4,6 +4,7 @@ import multer from "multer";
 import { db } from "../db";
 import { strategicBlueprints } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { logAuditEvent } from "./audit-logger";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
@@ -151,9 +152,19 @@ export function registerExtractionRoutes(app: Express) {
         })
         .where(eq(strategicBlueprints.id, blueprintId));
 
+      await logAuditEvent({
+        accountId: blueprint.accountId,
+        campaignId: blueprint.campaignId || undefined,
+        blueprintId,
+        blueprintVersion: blueprint.blueprintVersion,
+        event: "EXTRACTION_COMPLETED",
+        details: { mediaType: isVideo ? "video" : "image" },
+      });
+
       res.json({
         success: true,
         blueprintId,
+        blueprintVersion: blueprint.blueprintVersion,
         status: "EXTRACTION_COMPLETE",
         draftBlueprint,
       });
