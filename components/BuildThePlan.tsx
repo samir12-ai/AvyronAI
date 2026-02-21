@@ -22,7 +22,7 @@ import { useApp } from '@/context/AppContext';
 import { useCampaign } from '@/context/CampaignContext';
 
 type Phase = 0 | 1 | 2 | 3 | 4 | 5;
-type BlueprintStatus = 'DRAFT' | 'GATE_PASSED' | 'EXTRACTION_COMPLETE' | 'CONFIRMED' | 'ANALYSIS_COMPLETE' | 'VALIDATED' | 'ORCHESTRATED';
+type BlueprintStatus = 'DRAFT' | 'GATE_PASSED' | 'EXTRACTION_COMPLETE' | 'EXTRACTION_FALLBACK' | 'CONFIRMED' | 'ANALYSIS_COMPLETE' | 'VALIDATED' | 'ORCHESTRATED';
 
 interface FieldWithConfidence {
   value: string;
@@ -39,6 +39,8 @@ interface DraftBlueprint {
   detectedAudienceGuess?: FieldWithConfidence;
   detectedFunnelStage?: FieldWithConfidence;
   detectedPriceIfVisible?: FieldWithConfidence;
+  extractionFallbackUsed?: boolean;
+  parseFailedReason?: string | null;
 }
 
 interface CampaignContext {
@@ -75,6 +77,7 @@ const STATUS_TO_PHASE: Record<BlueprintStatus, Phase> = {
   DRAFT: 0,
   GATE_PASSED: 1,
   EXTRACTION_COMPLETE: 2,
+  EXTRACTION_FALLBACK: 2,
   CONFIRMED: 3,
   ANALYSIS_COMPLETE: 4,
   VALIDATED: 5,
@@ -281,9 +284,10 @@ export default function BuildThePlan() {
         return;
       }
 
+      const extractionStatus = data.extractionFallbackUsed ? 'EXTRACTION_FALLBACK' : 'EXTRACTION_COMPLETE';
       setBlueprint(prev => prev ? {
         ...prev,
-        status: 'EXTRACTION_COMPLETE' as BlueprintStatus,
+        status: extractionStatus as BlueprintStatus,
         draftBlueprint: data.draftBlueprint,
         creativeAnalysis: data.draftBlueprint,
         confirmedBlueprint: null,
@@ -753,6 +757,16 @@ export default function BuildThePlan() {
     if (!draft) return null;
 
     const isConfirmed = blueprint?.status === 'CONFIRMED';
+    const isFallback = blueprint?.status === 'EXTRACTION_FALLBACK' || draft.extractionFallbackUsed;
+    const fallbackReasonLabel = draft.parseFailedReason === 'TRUNCATED'
+      ? 'AI response was cut off (too long)'
+      : draft.parseFailedReason === 'INVALID_JSON'
+        ? 'AI returned unparseable output'
+        : draft.parseFailedReason === 'EMPTY_RESPONSE'
+          ? 'AI returned an empty response'
+          : draft.parseFailedReason === 'EMPTY_FIELDS'
+            ? 'AI could not extract any fields'
+            : 'Unknown extraction issue';
 
     return (
       <View style={s.phaseContent}>
@@ -768,10 +782,38 @@ export default function BuildThePlan() {
               <Text style={[s.phaseDesc, { color: colors.textSecondary }]}>
                 {isConfirmed
                   ? 'Blueprint confirmed. Editing any field will reset downstream analysis.'
-                  : 'Review AI extraction results. Edit fields with low confidence, then confirm.'}
+                  : isFallback
+                    ? 'AI extraction failed. Fill in the fields manually, or retry the extraction.'
+                    : 'Review AI extraction results. Edit fields with low confidence, then confirm.'}
               </Text>
             </View>
           </View>
+
+          {isFallback && !isConfirmed && (
+            <View style={[s.statusBanner, { backgroundColor: '#EF444415', borderWidth: 1, borderColor: '#EF444430' }]}>
+              <Ionicons name="warning" size={16} color="#EF4444" />
+              <View style={{ flex: 1 }}>
+                <Text style={[s.statusBannerText, { color: '#EF4444', fontWeight: '700' }]}>
+                  AI extraction failed — switched to manual mode
+                </Text>
+                <Text style={[s.statusBannerText, { color: '#EF4444', fontSize: 12, marginTop: 2 }]}>
+                  Reason: {fallbackReasonLabel}
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {isFallback && !isConfirmed && (
+            <Pressable
+              onPress={() => { setCurrentPhase(1); }}
+              style={{ marginTop: 8, marginBottom: 4, alignSelf: 'flex-start' }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#3B82F615', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#3B82F630' }}>
+                <Ionicons name="refresh" size={16} color="#3B82F6" />
+                <Text style={{ color: '#3B82F6', fontWeight: '600', fontSize: 14, marginLeft: 6 }}>Retry Extraction</Text>
+              </View>
+            </Pressable>
+          )}
 
           {isConfirmed && (
             <View style={[s.statusBanner, { backgroundColor: '#10B98115' }]}>
