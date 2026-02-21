@@ -1,0 +1,140 @@
+
+⸻
+
+Enterprise Meta Integration Plan (Final, No Gaps)
+We will implement Meta integration as a capability system (Publishing/Insights/IG are separate capabilities), not just a login system.
+
+Phase 1 — Foundation (must be first)
+	1.	meta_credentials table (tokens only, encrypted)
+
+	•	accountId FK
+	•	user_access_token_long (encrypted)
+	•	user_token_expires_at (timestamp)
+	•	page_id
+	•	page_access_token (encrypted)
+	•	ig_business_id
+	•	encryption_key_version + iv per encrypted field
+	•	last_health_check_at (timestamp)
+	•	created_at / updated_at
+
+	2.	accountState stores status flags only (NO tokens)
+
+	•	meta_mode: DISCONNECTED | PENDING_APPROVAL | PERMISSION_MISSING | TOKEN_EXPIRED | REVOKED | DEMO | REAL
+	•	granted_scopes (array)
+	•	missing_scopes (array)
+	•	last_verified_at
+
+	3.	Encryption module
+
+	•	server/meta-crypto.ts using AES-256-GCM
+	•	Key from META_ENCRYPTION_KEY (not SESSION_SECRET)
+	•	Key versioning support
+	•	Never log tokens (redact everything)
+
+	4.	Status + Middleware
+
+	•	GET /api/meta/status (single source of truth)
+	•	POST /api/meta/reconnect
+	•	POST /api/meta/disconnect
+	•	requireMetaReal middleware that blocks Meta endpoints unless meta_mode === REAL
+	•	Audit-log all state transitions (old_mode → new_mode + reason)
+
+Phase 2 — OAuth + Verification (builds on Phase 1 storage)
+	1.	Fix all OAuth flows with full scopes
+pages_manage_posts, pages_read_engagement, read_insights, pages_show_list, instagram_basic, instagram_content_publish, business_management
+	2.	Token lifecycle creation
+
+	•	Exchange short-lived → long-lived immediately after callback
+	•	Store user_token_expires_at
+	•	Fetch /me/accounts to get Page tokens
+	•	Store selected page_id + page_access_token (encrypted)
+	•	Resolve ig_business_id from page
+	•	Never send long-lived/page tokens to client (client gets only “connected status”)
+
+	3.	Permission verification (must be real)
+
+	•	Verify permissions via /me/permissions OR /debug_token
+	•	Store granted_scopes + missing_scopes in DB
+	•	If missing required scopes: meta_mode = PERMISSION_MISSING
+	•	If user removed app/permissions: meta_mode = REVOKED
+
+Phase 3 — Token Lifecycle + Health Checker (builds on Phase 2 tokens)
+	1.	Daily health checker (throttled)
+
+	•	Skip if last_health_check_at < 24h ago
+	•	Re-verify:
+	•	token validity
+	•	permissions
+	•	page token access
+	•	ig_business_id link
+
+	2.	Auto-extension (avoid manual reconnect every 60 days)
+
+	•	If user_token_expires_at is within 14 days AND token still valid:
+	•	attempt re-exchange/extend silently
+	•	update token + expires_at
+	•	If token already expired OR exchange fails:
+	•	meta_mode = TOKEN_EXPIRED
+	•	require reconnect
+
+	3.	Failure detection (classify correctly)
+Health checker must detect and set meta_mode + audit reason for:
+
+	•	expired token
+	•	revoked app / removed permissions
+	•	password change / security reset / suspicious login invalidation
+	•	page admin removed / page access lost
+	•	wrong token type used (short-lived user token)
+	•	Meta app access changes causing scope loss
+
+Critical: Distinguish:
+	•	TEMPORARY_API_ERROR (rate limit, 5xx, network) → do NOT flip meta_mode to TOKEN_EXPIRED
+	•	PERMANENT_TOKEN_ERROR (OAuthException invalid token / permission denied) → update meta_mode accordingly
+
+Phase 4 — Capability Matrix + Publisher Hardening (builds on Phase 1 middleware)
+	1.	Capabilities computed, not manually trusted
+Compute capabilities from verified scopes + token health:
+
+	•	fb_publishing_enabled = pages_manage_posts + valid page token
+	•	insights_enabled = pages_read_engagement + read_insights + valid token
+	•	ig_publishing_enabled = instagram_content_publish + verified ig_business_id link
+
+Recompute on every verify/reconnect/health check.
+	2.	Kill silent demo fallbacks everywhere
+Remove silent demo behavior from:
+
+	•	publish-worker.ts
+	•	fetchPostMetrics
+	•	/api/meta/post
+	•	strategy-routes live fetch
+DEMO is allowed only if env/admin gate is enabled, and must show DEMO banner.
+
+	3.	Publish worker rules
+
+	•	Refuse to run unless meta_mode === REAL and capability is enabled
+	•	Keep idempotency + retries/backoff
+	•	Log META_API_ERROR with redacted payload
+	•	Surface failed posts in UI with clear reason (token expired, permission missing, invalid media URL, etc.)
+
+Phase 5 — UI (last)
+	1.	Settings Meta Integration Status card
+Must display:
+Connected (FB Publishing) / Connected (Insights) / Connected (IG Publishing)
+or exact blocked reason: Permission Missing, Token Expired, Revoked, Pending Approval, Demo Mode
+	2.	Meta section banners + locks
+When not REAL:
+
+	•	disable Meta actions only
+	•	show banner with required action (Reconnect / Request Permissions)
+Internal engines remain operational always.
+
+Acceptance Verification (must pass before real testing)
+	•	/api/meta/status always accurate (DB source of truth)
+	•	No tokens stored client-side
+	•	No silent demo fallback
+	•	Auto-extension attempted within 14 days of expiry
+	•	Temporary API errors do not flip meta_mode
+	•	Capability flags update only via verification results
+	•	Publishing works using page token only
+	•	IG enabled only when ig_business_id truly linked
+	•	All transitions audit-logged with reasons

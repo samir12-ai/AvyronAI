@@ -1,0 +1,231 @@
+We are moving to full production-level Meta integration.
+Before any real testing, the Meta layer must be fully hardened. No silent fallbacks, no demo pretending, no short-lived instability.
+
+Below is the final consolidated implementation spec. Please confirm and execute exactly as written.
+
+────────────────────────────
+META PRODUCTION HARDENING — FINAL SPEC
+────────────────────────────
+
+GOAL
+Clean separation between:
+• Meta-dependent features (publishing, insights, audience, ads)
+• Internal AI engines (content, strategy, signals, attribution, leads, intelligence)
+
+Meta failures must NEVER break internal engines.
+Meta-dependent features must be hard-locked unless fully verified.
+
+────────────────────────────
+PHASE 1 — META STATUS LAYER
+────────────────────────────
+	1.	Create /api/meta/status as the single source of truth.
+
+Return:
+	•	meta_mode
+	•	publishing_enabled
+	•	insights_enabled
+	•	missing_scopes
+	•	expires_at
+	•	connected_page_id
+	•	ig_business_id
+	•	last_verified_at
+
+meta_mode allowed states:
+DISCONNECTED
+PENDING_APPROVAL
+PERMISSION_MISSING
+TOKEN_EXPIRED
+REVOKED
+DEMO
+REAL
+
+Every state transition must be audit-logged:
+old_mode → new_mode + reason.
+	2.	requireMetaReal middleware
+
+All Meta-dependent endpoints must:
+	•	refuse execution unless meta_mode === REAL
+	•	return structured error:
+META_NOT_CONNECTED
+META_PERMISSION_MISSING
+META_TOKEN_EXPIRED
+META_REVOKED
+
+No silent demo fallback.
+	3.	DEMO mode
+
+	•	Explicit admin/dev-only toggle
+	•	Never exposed to normal users
+	•	Visible banner: “DEMO MODE — Not publishing to Meta”
+	•	Every demo event audit-logged as DEMO
+
+────────────────────────────
+PHASE 2 — OAUTH + PERMISSION CORRECTNESS
+────────────────────────────
+	4.	Correct OAuth scopes must include:
+
+pages_manage_posts
+pages_read_engagement
+read_insights
+pages_show_list
+instagram_basic
+instagram_content_publish
+business_management
+	5.	After token exchange:
+
+Call /debug_token or /me/permissions
+Verify granted permissions
+Store missing_scopes in DB
+If missing → meta_mode = PERMISSION_MISSING
+
+Re-verify:
+	•	On reconnect
+	•	Daily health check
+
+────────────────────────────
+PHASE 3 — TOKEN ARCHITECTURE
+────────────────────────────
+	6.	Dedicated meta_credentials table
+
+DO NOT store tokens in accountState.
+
+meta_credentials must store:
+	•	accountId (FK)
+	•	user_access_token_long
+	•	user_token_expires_at
+	•	page_id
+	•	page_access_token
+	•	ig_business_id
+	•	encryption_key_version
+	•	created_at
+	•	updated_at
+
+	7.	Encryption
+
+	•	AES-256-GCM
+	•	Server-side only
+	•	Key from META_ENCRYPTION_KEY
+	•	Store IV + key version
+	•	Never log tokens
+	•	Redact tokens from error logs
+
+	8.	Token flow
+
+short-lived → long-lived
+Then fetch /me/accounts
+Store page_access_token
+Publishing must use Page token ONLY
+Never use user token for publishing
+
+────────────────────────────
+PHASE 4 — AUTO-EXTENSION (NO 60-DAY MANUAL PAIN)
+────────────────────────────
+
+We must not force users to reconnect every 60 days.
+
+Implement:
+
+Daily health checker:
+	•	If expires_at < 14 days remaining
+Attempt long-lived re-exchange automatically
+If success → update token + expires_at silently
+If failure → set meta_mode = TOKEN_EXPIRED
+
+User only sees reconnect when:
+	•	extension fails
+	•	token revoked
+	•	security invalidation occurs
+
+────────────────────────────
+PHASE 5 — HEALTH CHECKER FAILURE DETECTION
+────────────────────────────
+
+Health checker must detect:
+	1.	Token expired
+	2.	User changed password
+	3.	User revoked app
+	4.	Permissions declined
+	5.	Page admin removed
+	6.	Security reset / suspicious login
+	7.	App access level changed
+	8.	Using wrong token type (short-lived instead of page token)
+	9.	Distinguish temporary API errors vs invalid token
+
+On detection:
+	•	Update meta_mode appropriately
+	•	Audit log reason
+	•	Lock Meta features only
+
+────────────────────────────
+PHASE 6 — CAPABILITY MATRIX
+────────────────────────────
+
+publishing_enabled = true only if:
+	•	pages_manage_posts granted
+	•	page_access_token valid
+
+insights_enabled = true only if:
+	•	pages_read_engagement + read_insights granted
+
+ig_publishing_enabled = true only if:
+	•	ig_business_id verified linked to page
+	•	instagram_content_publish granted
+
+Capabilities must work independently.
+
+────────────────────────────
+PHASE 7 — AUTO-PUBLISHER HARDENING
+────────────────────────────
+
+Publishing worker must:
+	•	refuse to run unless meta_mode === REAL
+	•	verify publishing_enabled before execution
+	•	maintain idempotency + retry/backoff
+	•	log META_API_ERROR with redacted payload
+	•	surface clear failure reason in UI
+
+Instagram publishing:
+	•	verify IG business account linked
+	•	verify media URL accessible
+	•	fail clearly if invalid
+
+No demo_ IDs unless DEMO mode enabled explicitly.
+
+────────────────────────────
+PHASE 8 — UI VISIBILITY
+────────────────────────────
+
+Add Meta Integration Status card in Settings:
+
+Connected (Publishing Enabled)
+Connected (Insights Only)
+Permission Missing
+Token Expired
+Pending Approval
+Demo Mode
+
+Add banners in Meta-dependent sections when not REAL.
+
+Only Meta features lock.
+All internal AI engines remain operational.
+
+────────────────────────────
+FINAL ACCEPTANCE CONDITIONS
+────────────────────────────
+
+Before production testing, confirm:
+
+✔ No silent demo fallback
+✔ Tokens encrypted server-side only
+✔ Page token used for publishing
+✔ Long-lived exchange implemented
+✔ Auto-extension before expiry
+✔ Health checker handles sudden failures
+✔ Proper meta_mode transitions
+✔ Capability matrix enforced
+✔ Idempotent publishing preserved
+✔ UI shows clear integration status
+
+Once all 10 are verified, we move to live testing.
+
+Confirm implementation plan and execution order before proceeding.

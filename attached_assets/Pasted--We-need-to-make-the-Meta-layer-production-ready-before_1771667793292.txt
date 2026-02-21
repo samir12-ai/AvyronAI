@@ -1,0 +1,160 @@
+
+⸻
+
+We need to make the Meta layer production-ready before any real testing. Current state has silent demo fallbacks, missing scopes, no Business Portfolio connection, no long-lived tokens, and tokens stored client-side. This will break Auto-Publishing + Insights in real usage and destroy trust.
+
+Goal
+
+Clean separation:
+	•	Internal engines (AI content/strategy/signals/attribution/leads/intel) keep working always.
+	•	Meta-dependent features are hard-locked until proper connection + permissions are verified.
+No silent demo pretending.
+
+⸻
+
+PHASE 1 — Meta Capability & Status Layer (must be first)
+
+1) MetaStatus model (DB + API)
+
+Create a DB-backed status per account:
+	•	meta_connected (boolean)
+	•	meta_mode: REAL | DEMO | PENDING_APPROVAL | DISCONNECTED | TOKEN_EXPIRED | PERMISSION_MISSING
+	•	granted_scopes (array)
+	•	last_verified_at
+	•	connected_page_id / ig_business_id
+	•	publishing_enabled (boolean)
+	•	insights_enabled (boolean)
+
+Add endpoints:
+	•	GET /api/meta/status
+	•	POST /api/meta/reconnect
+	•	POST /api/meta/disconnect
+
+2) Hard-lock all Meta features if not REAL
+
+Any endpoint that touches Meta must:
+	•	check status first
+	•	if not REAL → return a clear error code:
+	•	META_NOT_CONNECTED
+	•	META_PERMISSION_MISSING
+	•	META_TOKEN_EXPIRED
+	•	META_PENDING_APPROVAL
+No fake IDs, no fake publishes, no fake metrics unless the user explicitly enabled DEMO mode.
+
+3) Explicit DEMO mode (no silent fallback)
+	•	DEMO mode must be an explicit toggle (dev/testing only)
+	•	UI must show a visible banner: “DEMO MODE — Not publishing to Meta”
+	•	Logs must store DEMO/REAL mode on every event
+
+Critical: remove “silent demo fallback” behavior completely.
+
+⸻
+
+PHASE 2 — Correct OAuth Scopes + Business Portfolio Connection
+
+4) Fix OAuth scopes (publishing + insights)
+
+Update Meta OAuth request to include required scopes:
+	•	For Page publishing: pages_manage_posts
+	•	For Page insights: pages_read_engagement, read_insights
+	•	For Instagram publishing: instagram_content_publish (+ instagram_basic)
+
+Also confirm needed page access permissions such as pages_show_list (commonly required to list/select pages).
+
+5) Business Manager / Portfolio connection (Ads layer readiness)
+
+Even if we’re starting with publishing, build the base now:
+	•	Add business_management scope for Business Portfolio connection
+	•	Store selected Business / Ad Account IDs (future ads_read/ads_management)
+
+Avoid mistake: Facebook Login alone is not Business Manager integration.
+
+⸻
+
+PHASE 3 — Token Architecture (must be server-side, long-lived, safe)
+
+6) Server-side token storage only
+
+Stop storing tokens in browser (postMessage/local storage).
+Store tokens encrypted in DB:
+	•	user_access_token_short
+	•	user_access_token_long (60 days)
+	•	token_expires_at
+	•	page_access_token (preferred, can be long-lived)
+	•	selected_page_id
+	•	selected_ig_business_id
+
+Critical: never send long-lived/page tokens back to the client.
+
+7) Long-lived token exchange
+
+Implement exchange:
+	•	short-lived → long-lived
+	•	then fetch Page tokens via /me/accounts
+	•	store page token for selected page
+	•	for IG: resolve ig_business_account from the selected page
+
+8) Expiry detection + re-auth flow
+	•	On every Meta call: if token invalid/expired → set meta_mode = TOKEN_EXPIRED and lock features
+	•	Provide reconnect flow that re-runs OAuth cleanly
+	•	Add a lightweight background verifier (daily or on app open) to validate token health
+
+Avoid mistake: “it works for 1 hour then breaks”.
+
+⸻
+
+PHASE 4 — Auto-Publishing correctness (REAL only)
+
+9) Publishing worker rules
+
+Publishing worker must:
+	•	refuse to run if meta_mode != REAL
+	•	require verified scopes + selected page + (IG business id if IG publishing)
+	•	log failures clearly (META_API_ERROR) and surface them in UI
+	•	never generate demo_ post IDs unless DEMO is explicitly enabled
+
+10) Instagram media requirements
+
+IG publishing requires valid media URL / upload flow.
+Ensure:
+	•	media URL is accessible (public HTTPS)
+	•	correct sequence for IG publishing (container → publish)
+
+⸻
+
+PHASE 5 — UI/UX Visibility (no confusion)
+
+11) Integration status indicator (mandatory)
+
+Add a clear status card in Settings + top banner in Meta sections:
+	•	Connected (Publishing Enabled)
+	•	Connected (Insights Only)
+	•	Permission Missing (show which scopes missing)
+	•	Token Expired (Reconnect)
+	•	Pending Review (Meta approval)
+	•	Demo Mode (explicit)
+
+12) Disable Meta tabs/controls gracefully
+
+If Meta not ready:
+	•	hide/disable only Meta-dependent actions
+	•	keep internal tools working normally
+
+⸻
+
+Highest-risk mistakes to avoid (must not happen)
+	1.	Silent demo fallback (pretending publish worked)
+	2.	Client-side token storage
+	3.	Using short-lived tokens without exchange
+	4.	Not requesting correct publishing/insights scopes
+	5.	Not using page access token (and not selecting page)
+	6.	No visible status → users think the app is broken
+	7.	No hard-lock → background worker spams failing calls
+
+⸻
+
+Confirm the deliverable:
+	•	Auto Publishing works REAL end-to-end with correct scopes + page token
+	•	Insights fetch works REAL
+	•	If anything is missing/expired → UI shows exact reason and blocks safely
+	•	Internal engines continue to work regardless of Meta status

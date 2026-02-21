@@ -1,0 +1,51 @@
+Please implement the Meta Production Connection layer using the following checklist (no shortcuts, no silent demo):
+	1.	Create a dedicated secure storage table
+Create meta_credentials table (accountId FK) to store Meta tokens and IDs. Tokens must NOT be stored in accountState.
+	2.	Build encryption tool for secrets
+Implement server/meta-crypto.ts using AES-256-GCM + IV + key versioning (META_ENCRYPTION_KEY). Never log tokens.
+	3.	Connection status + control actions
+Add DB-backed Meta status fields in accountState (meta_mode + granted_scopes + missing_scopes + last_verified_at).
+Build endpoints:
+
+	•	GET /api/meta/status
+	•	POST /api/meta/reconnect
+	•	POST /api/meta/disconnect
+Audit-log all state transitions (old → new + reason).
+
+	4.	Fix OAuth and obtain long-lived tokens
+Update OAuth flows to request correct scopes, then exchange short-lived → long-lived token after callback. Store expires_at.
+	5.	Fetch and store Page token + IG business ID
+After OAuth, call /me/accounts, store selected page_id + page_access_token (encrypted). Resolve and store ig_business_id.
+Publishing must use page token only (never user token).
+	6.	Manage token lifespan (automatic extension)
+Daily health checker: if token expires in <14 days and still valid → re-exchange silently to extend.
+If extension fails or token expired → set meta_mode = TOKEN_EXPIRED and require reconnect (1-click).
+	7.	Verify scopes + capability availability
+Verify granted permissions via /me/permissions or /debug_token.
+Compute capabilities (do not trust manual booleans):
+
+	•	fb_publishing_enabled = pages_manage_posts + valid page token
+	•	insights_enabled = pages_read_engagement + read_insights
+	•	ig_publishing_enabled = instagram_content_publish + verified ig_business_id link
+Store missing scopes if any, set meta_mode = PERMISSION_MISSING.
+
+	8.	Remove fake demo fallback and strengthen posting
+Kill all silent demo publishing/metrics generation. DEMO mode must be admin/dev-only and visibly labeled.
+Publish worker must refuse unless meta_mode === REAL and capability enabled. Keep idempotency + retry/backoff. Log META_API_ERROR safely (redacted).
+	9.	Show connection status + control buttons in UI
+Add Settings “Meta Integration Status” card + banners inside Meta sections.
+Buttons: Connect / Reconnect / Disconnect.
+Show exact reason if blocked (missing scope, token expired, revoked, pending approval).
+	10.	Lock Meta features when not connected
+All Meta-dependent sections must be disabled/hidden when meta_mode != REAL.
+Internal engines must keep working normally.
+	11.	Verify end-to-end conditions
+Provide verification checklist that proves:
+
+	•	tokens are server-side encrypted
+	•	no silent demo fallback
+	•	page token publishing works
+	•	scopes verified correctly
+	•	health checker detects expiry/revoke
+	•	capabilities computed correctly
+	•	UI reflects real status
