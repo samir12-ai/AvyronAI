@@ -6,12 +6,8 @@ import {
   leads,
   conversionEvents,
   publishedPosts,
-  strategyInsights,
-  strategyDecisions,
-  strategyMemory,
-  baselineHistory,
 } from "@shared/schema";
-import { eq, desc, sql, gte, and } from "drizzle-orm";
+import { eq, desc, sql, and, isNotNull, min, max } from "drizzle-orm";
 
 export interface CampaignMetrics {
   campaignId: string;
@@ -54,7 +50,7 @@ export interface RevenueSummary {
 }
 
 export interface PerformanceSignal {
-  signalType: "SCALE_CANDIDATE" | "REVIEW_NEEDED";
+  signalType: "SCALE_CANDIDATE" | "REVIEW_NEEDED" | "INSUFFICIENT_DATA_FOR_SIGNALS";
   metric: string;
   currentValue: number;
   baselineValue: number;
@@ -67,19 +63,35 @@ export interface PerformanceSignal {
 const SCALE_THRESHOLD = 1.5;
 const REVIEW_THRESHOLD = 0.7;
 
+const MIN_SPEND_THRESHOLD = 50;
+const MIN_TIMESPAN_HOURS = 72;
+const MIN_CONVERSIONS_THRESHOLD = 3;
+
+function campaignSnapshotFilter(campaignId: string, accountId: string) {
+  return and(
+    eq(performanceSnapshots.campaignId, campaignId),
+    eq(performanceSnapshots.accountId, accountId),
+    isNotNull(performanceSnapshots.campaignId)
+  );
+}
+
 export async function getCampaignMetrics(campaignId: string, accountId: string = "default"): Promise<CampaignMetrics> {
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
   const perfData = await db.select().from(performanceSnapshots)
+    .where(campaignSnapshotFilter(campaignId, accountId))
     .orderBy(desc(performanceSnapshots.fetchedAt))
     .limit(200);
 
   const allRevenue = await db.select().from(revenueEntries)
-    .where(eq(revenueEntries.accountId, accountId));
+    .where(and(eq(revenueEntries.accountId, accountId), eq(revenueEntries.campaignId, campaignId)));
 
   const allSpend = await db.select().from(adSpendEntries)
-    .where(eq(adSpendEntries.accountId, accountId));
+    .where(and(eq(adSpendEntries.accountId, accountId), eq(adSpendEntries.campaignId, campaignId)));
+
+  const allConversions = await db.select().from(conversionEvents)
+    .where(and(eq(conversionEvents.accountId, accountId), eq(conversionEvents.campaignId, campaignId)));
 
   const allLeads = await db.select().from(leads)
     .where(eq(leads.accountId, accountId));
@@ -89,7 +101,7 @@ export async function getCampaignMetrics(campaignId: string, accountId: string =
 
   const totalSpend = allSpend.reduce((s, e) => s + (e.amount || 0), 0);
   const totalRevenue = allRevenue.reduce((s, e) => s + (e.amount || 0), 0);
-  const totalConversions = perfData.reduce((s, p) => s + (p.conversions || 0), 0);
+  const totalConversions = allConversions.length;
   const totalImpressions = perfData.reduce((s, p) => s + (p.impressions || 0), 0);
   const totalReach = perfData.reduce((s, p) => s + (p.reach || 0), 0);
   const totalClicks = perfData.reduce((s, p) => s + (p.clicks || 0), 0);
@@ -101,9 +113,8 @@ export async function getCampaignMetrics(campaignId: string, accountId: string =
     .filter(s => s.createdAt && s.createdAt >= monthStart)
     .reduce((s, e) => s + (e.amount || 0), 0);
   const monthLeads = allLeads.filter(l => l.createdAt && l.createdAt >= monthStart).length;
-  const monthConversions = perfData
-    .filter(p => p.fetchedAt && p.fetchedAt >= monthStart)
-    .reduce((s, p) => s + (p.conversions || 0), 0);
+  const monthConversions = allConversions
+    .filter(c => c.createdAt && c.createdAt >= monthStart).length;
 
   const count = perfData.length || 1;
   const avgCtr = perfData.reduce((s, p) => s + (p.ctr || 0), 0) / count;
@@ -142,11 +153,11 @@ export async function getRevenueSummary(campaignId: string, accountId: string = 
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
   const allRevenue = await db.select().from(revenueEntries)
-    .where(eq(revenueEntries.accountId, accountId));
+    .where(and(eq(revenueEntries.accountId, accountId), eq(revenueEntries.campaignId, campaignId)));
   const monthRevEntries = allRevenue.filter(r => r.createdAt && r.createdAt >= monthStart);
 
   const allSpend = await db.select().from(adSpendEntries)
-    .where(eq(adSpendEntries.accountId, accountId));
+    .where(and(eq(adSpendEntries.accountId, accountId), eq(adSpendEntries.campaignId, campaignId)));
   const monthSpendEntries = allSpend.filter(s => s.createdAt && s.createdAt >= monthStart);
 
   const totalRevenue = allRevenue.reduce((s, e) => s + (e.amount || 0), 0);
@@ -199,14 +210,91 @@ export async function getRevenueSummary(campaignId: string, accountId: string = 
   };
 }
 
+async function computeDataTimeSpanHours(campaignId: string, accountId: string): Promise<number> {
+  const snapshotSpan = await db.select({
+    minTs: min(performanceSnapshots.fetchedAt),
+    maxTs: max(performanceSnapshots.fetchedAt),
+  }).from(performanceSnapshots)
+    .where(campaignSnapshotFilter(campaignId, accountId));
+
+  const spendSpan = await db.select({
+    minTs: min(adSpendEntries.createdAt),
+    maxTs: max(adSpendEntries.createdAt),
+  }).from(adSpendEntries)
+    .where(and(eq(adSpendEntries.accountId, accountId), eq(adSpendEntries.campaignId, campaignId)));
+
+  const eventSpan = await db.select({
+    minTs: min(conversionEvents.createdAt),
+    maxTs: max(conversionEvents.createdAt),
+  }).from(conversionEvents)
+    .where(and(eq(conversionEvents.accountId, accountId), eq(conversionEvents.campaignId, campaignId)));
+
+  const spans: number[] = [];
+  for (const result of [snapshotSpan[0], spendSpan[0], eventSpan[0]]) {
+    if (result?.minTs && result?.maxTs) {
+      const diffMs = new Date(result.maxTs).getTime() - new Date(result.minTs).getTime();
+      spans.push(diffMs / (1000 * 60 * 60));
+    }
+  }
+
+  return spans.length > 0 ? Math.max(...spans) : 0;
+}
+
 export async function detectPerformanceSignals(campaignId: string, accountId: string = "default"): Promise<PerformanceSignal[]> {
   const signals: PerformanceSignal[] = [];
 
   const perfData = await db.select().from(performanceSnapshots)
+    .where(campaignSnapshotFilter(campaignId, accountId))
     .orderBy(desc(performanceSnapshots.fetchedAt))
     .limit(100);
 
-  if (perfData.length < 5) return signals;
+  if (perfData.length < 5) {
+    return [{
+      signalType: "INSUFFICIENT_DATA_FOR_SIGNALS",
+      metric: "data_volume",
+      currentValue: perfData.length,
+      baselineValue: 5,
+      ratio: 0,
+      message: `Only ${perfData.length} snapshots available for campaign ${campaignId}. Minimum 5 required.`,
+    }];
+  }
+
+  const allSpend = await db.select().from(adSpendEntries)
+    .where(and(eq(adSpendEntries.accountId, accountId), eq(adSpendEntries.campaignId, campaignId)));
+  const totalSpend = allSpend.reduce((s, e) => s + (e.amount || 0), 0);
+
+  const allConversions = await db.select().from(conversionEvents)
+    .where(and(eq(conversionEvents.accountId, accountId), eq(conversionEvents.campaignId, campaignId)));
+  const totalConversions = allConversions.length;
+
+  const timeSpanHours = await computeDataTimeSpanHours(campaignId, accountId);
+
+  const spendMet = totalSpend >= MIN_SPEND_THRESHOLD;
+  const timeMet = timeSpanHours >= MIN_TIMESPAN_HOURS;
+  const convMet = totalConversions >= MIN_CONVERSIONS_THRESHOLD;
+  const safeguardsPassed = [spendMet, timeMet, convMet].filter(Boolean).length;
+
+  if (safeguardsPassed < 2) {
+    return [{
+      signalType: "INSUFFICIENT_DATA_FOR_SIGNALS",
+      metric: "minimum_data_safeguard",
+      currentValue: safeguardsPassed,
+      baselineValue: 2,
+      ratio: 0,
+      message: `Insufficient data for reliable signals. Spend: $${totalSpend.toFixed(2)}/${MIN_SPEND_THRESHOLD} (${spendMet ? 'met' : 'not met'}), TimeSpan: ${timeSpanHours.toFixed(0)}h/${MIN_TIMESPAN_HOURS}h (${timeMet ? 'met' : 'not met'}), Conversions: ${totalConversions}/${MIN_CONVERSIONS_THRESHOLD} (${convMet ? 'met' : 'not met'}). Need 2 of 3 thresholds.`,
+    }];
+  }
+
+  if (totalConversions === 0 && spendMet && timeMet) {
+    signals.push({
+      signalType: "REVIEW_NEEDED",
+      metric: "zero_conversions",
+      currentValue: 0,
+      baselineValue: MIN_CONVERSIONS_THRESHOLD,
+      ratio: 0,
+      message: `Zero conversions detected despite $${totalSpend.toFixed(2)} spend over ${timeSpanHours.toFixed(0)}h. Campaign may need creative/targeting overhaul.`,
+    });
+  }
 
   const count = perfData.length;
   const baselines = {
