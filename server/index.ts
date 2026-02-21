@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { startAutonomousWorker, stopAutonomousWorker } from "./autonomous-worker";
 import { startPublishWorker, stopPublishWorker } from "./publish-worker";
+import { runAllHealthChecks } from "./meta-token-manager";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -256,6 +257,15 @@ function setupErrorHandler(app: express.Application) {
       log(`express server serving on port ${port}`);
       startAutonomousWorker();
       startPublishWorker();
+
+      setTimeout(() => {
+        runAllHealthChecks().catch(err => console.error("[MetaHealth] Initial health check error:", err));
+      }, 30000);
+
+      const HEALTH_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+      setInterval(() => {
+        runAllHealthChecks().catch(err => console.error("[MetaHealth] Scheduled health check error:", err));
+      }, HEALTH_CHECK_INTERVAL_MS);
     },
   );
 

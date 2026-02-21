@@ -1,8 +1,10 @@
 import { db } from "./db";
-import { publishedPosts, accountState } from "@shared/schema";
+import { publishedPosts, accountState, metaCredentials } from "@shared/schema";
 import { eq, sql, and } from "drizzle-orm";
 import { logAudit } from "./audit";
 import * as crypto from "crypto";
+import { decryptToken, redactToken } from "./meta-crypto";
+import type { MetaMode } from "./meta-status";
 
 const PUBLISH_CHECK_INTERVAL_MS = 2 * 60 * 1000;
 const MAX_RETRY_ATTEMPTS = 3;
@@ -155,8 +157,8 @@ async function publishToMeta(post: any, accessToken: string, pageId: string): Pr
     }
 
     return {
-      success: true,
-      postId: "demo_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+      success: false,
+      error: `Unsupported platform: ${platform}. Only Facebook and Instagram are supported.`,
     };
   } catch (error) {
     return { success: false, error: String(error) };
@@ -238,10 +240,27 @@ async function cleanupStaleLocks(): Promise<number> {
   return stale.length;
 }
 
-function determinePublishMode(): "DEMO" | "REAL" {
-  const META_APP_ID = process.env.META_APP_ID || "";
-  const META_APP_SECRET = process.env.META_APP_SECRET || "";
-  return META_APP_ID && META_APP_SECRET ? "REAL" : "DEMO";
+async function getAccountMetaMode(accountId: string): Promise<MetaMode> {
+  const state = await db.select().from(accountState)
+    .where(eq(accountState.accountId, accountId))
+    .limit(1);
+  return (state[0]?.metaMode as MetaMode) || "DISCONNECTED";
+}
+
+async function getServerSidePageToken(accountId: string): Promise<{ token: string; pageId: string; igBusinessId: string | null } | null> {
+  const creds = await db.select().from(metaCredentials)
+    .where(eq(metaCredentials.accountId, accountId))
+    .limit(1);
+  const cred = creds[0];
+  if (!cred?.encryptedPageToken || !cred?.ivPage || !cred?.encryptionKeyVersion || !cred?.pageId) {
+    return null;
+  }
+  try {
+    const token = decryptToken(cred.encryptedPageToken, cred.ivPage, cred.encryptionKeyVersion);
+    return { token, pageId: cred.pageId, igBusinessId: cred.igBusinessId || null };
+  } catch {
+    return null;
+  }
 }
 
 async function checkAndPublishDuePosts() {
@@ -258,8 +277,6 @@ async function checkAndPublishDuePosts() {
       .limit(20);
 
     if (duePosts.length === 0) return;
-
-    const publishMode = determinePublishMode();
 
     for (const post of duePosts) {
       if (isShuttingDown) break;
@@ -288,27 +305,62 @@ async function checkAndPublishDuePosts() {
           continue;
         }
 
+        const metaMode = (acctState.metaMode as MetaMode) || "DISCONNECTED";
+        let publishMode: "REAL" | "DEMO" | "BLOCKED" = "BLOCKED";
         let result: { success: boolean; postId?: string; error?: string; attempts: number };
 
-        if (publishMode === "DEMO") {
+        if (metaMode === "REAL") {
+          const serverTokens = await getServerSidePageToken(accountId);
+          if (!serverTokens) {
+            await logAudit(accountId, "PUBLISH_FAILED", {
+              details: {
+                postId: post.id,
+                reason: "Server-side page token not available despite meta_mode=REAL",
+              },
+            });
+            await db.update(publishedPosts)
+              .set({
+                status: "failed",
+                lastPublishError: "Page token unavailable. Please reconnect Meta.",
+                publishLockToken: null,
+                publishLockedAt: null,
+                publishMode: "BLOCKED",
+                updatedAt: new Date(),
+              })
+              .where(and(eq(publishedPosts.id, post.id), eq(publishedPosts.publishLockToken, lockToken)));
+            activePublishCount--;
+            continue;
+          }
+
+          publishMode = "REAL";
+          result = await publishToMetaWithRetry(post, serverTokens.token, serverTokens.pageId, accountId);
+        } else if (metaMode === "DEMO" && acctState.metaDemoModeEnabled && process.env.ALLOW_DEMO_MODE === "true") {
+          publishMode = "DEMO";
           result = {
             success: true,
-            postId: "demo_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+            postId: undefined,
             attempts: 1,
           };
         } else {
-          const accessToken = (acctState as any).metaAccessToken || "";
-          const pageId = (acctState as any).metaPageId || "";
-
-          if (!accessToken || !pageId) {
-            result = {
-              success: true,
-              postId: "demo_notoken_" + Date.now(),
-              attempts: 1,
-            };
-          } else {
-            result = await publishToMetaWithRetry(post, accessToken, pageId, accountId);
-          }
+          await logAudit(accountId, "PUBLISH_FAILED", {
+            details: {
+              postId: post.id,
+              reason: `Cannot publish: meta_mode=${metaMode}`,
+              metaMode,
+            },
+          });
+          await db.update(publishedPosts)
+            .set({
+              status: "failed",
+              lastPublishError: `Meta not connected (mode: ${metaMode}). Connect Meta Business Suite to publish.`,
+              publishLockToken: null,
+              publishLockedAt: null,
+              publishMode: "BLOCKED",
+              updatedAt: new Date(),
+            })
+            .where(and(eq(publishedPosts.id, post.id), eq(publishedPosts.publishLockToken, lockToken)));
+          activePublishCount--;
+          continue;
         }
 
         if (result.success) {
@@ -389,7 +441,6 @@ async function fetchPostMetrics() {
   if (isShuttingDown) return;
 
   try {
-    const META_APP_ID = process.env.META_APP_ID || "";
     const published = await db.select().from(publishedPosts)
       .where(
         sql`${publishedPosts.status} = 'published' AND ${publishedPosts.metaPostId} IS NOT NULL AND (${publishedPosts.lastMetricsFetch} IS NULL OR ${publishedPosts.lastMetricsFetch} < NOW() - INTERVAL '6 hours')`
@@ -401,40 +452,18 @@ async function fetchPostMetrics() {
     for (const post of published) {
       if (isShuttingDown) break;
 
-      if (!META_APP_ID || !post.metaPostId || post.metaPostId.startsWith("demo_")) {
-        const daysSincePublish = post.publishedAt
-          ? (Date.now() - new Date(post.publishedAt).getTime()) / (1000 * 60 * 60 * 24)
-          : 1;
-        const baseFactor = Math.min(daysSincePublish, 7);
-        const impressions = Math.floor(200 * baseFactor + Math.random() * 300);
-        const reach = Math.floor(impressions * (0.6 + Math.random() * 0.3));
-        const engagement = Math.floor(reach * (0.02 + Math.random() * 0.08));
-        const clicks = Math.floor(engagement * (0.1 + Math.random() * 0.3));
-
-        await db.update(publishedPosts)
-          .set({
-            impressions: (post.impressions || 0) + impressions,
-            reach: (post.reach || 0) + reach,
-            engagement: (post.engagement || 0) + engagement,
-            clicks: (post.clicks || 0) + clicks,
-            lastMetricsFetch: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(publishedPosts.id, post.id));
-        continue;
-      }
+      if (!post.metaPostId) continue;
 
       try {
         const accountId = post.accountId || "default";
-        const state = await db.select().from(accountState)
-          .where(eq(accountState.accountId, accountId))
-          .limit(1);
-        const accessToken = (state[0] as any)?.metaAccessToken;
+        const metaMode = await getAccountMetaMode(accountId);
+        if (metaMode !== "REAL") continue;
 
-        if (!accessToken) continue;
+        const serverTokens = await getServerSidePageToken(accountId);
+        if (!serverTokens) continue;
 
         const metricsRes = await fetch(
-          `https://graph.facebook.com/v18.0/${post.metaPostId}/insights?metric=post_impressions,post_engaged_users,post_clicks&access_token=${accessToken}`
+          `https://graph.facebook.com/v21.0/${post.metaPostId}/insights?metric=post_impressions,post_engaged_users,post_clicks&access_token=${serverTokens.token}`
         );
         const metricsData = await metricsRes.json();
 
@@ -457,7 +486,8 @@ async function fetchPostMetrics() {
             })
             .where(eq(publishedPosts.id, post.id));
         }
-      } catch {
+      } catch (error) {
+        console.error(`[PublishWorker] Metrics fetch failed for post ${post.id}:`, String(error));
       }
     }
   } catch (error) {
@@ -469,13 +499,12 @@ export function startPublishWorker() {
   if (publishTimer) return;
   isShuttingDown = false;
 
-  const publishMode = determinePublishMode();
-  console.log(`[PublishWorker] Starting publish worker (2-min interval, mode: ${publishMode})`);
+  console.log(`[PublishWorker] Starting publish worker (2-min interval, server-side token mode)`);
 
   logAudit("system", "WORKER_STARTUP", {
     details: {
       worker: "publish-worker",
-      publishMode,
+      tokenMode: "server_side_encrypted",
       retryConfig: { maxAttempts: MAX_RETRY_ATTEMPTS, baseBackoffMs: BASE_BACKOFF_MS },
     },
   }).catch(() => {});

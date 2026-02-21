@@ -15,6 +15,12 @@ import { registerLumaRoutes } from "./luma-routes";
 import { registerLeadEngineRoutes } from "./lead-engine";
 import { registerCompetitiveIntelligenceRoutes } from "./competitive-intelligence";
 import { registerCampaignRoutes, requireCampaign } from "./campaign-routes";
+import { registerMetaStatusRoutes, requireMetaReal, getDecryptedPageToken } from "./meta-status";
+import { storeTokensAfterOAuth, runAllHealthChecks } from "./meta-token-manager";
+import { redactToken } from "./meta-crypto";
+import { db } from "./db";
+import { metaCredentials } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -689,13 +695,21 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
   app.get("/api/meta/auth", (req, res) => {
     const META_APP_ID = process.env.META_APP_ID || '';
     const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/meta/callback`;
-    
-    const scopes = ['public_profile', 'email'].join(',');
-    
-    const authUrl = `https://www.facebook.com/${FB_API_VERSION}/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&response_type=code`;
+
+    const scopes = [
+      'public_profile',
+      'email',
+      'pages_manage_posts',
+      'pages_read_engagement',
+      'read_insights',
+      'pages_show_list',
+      'instagram_basic',
+      'instagram_content_publish',
+      'business_management',
+    ].join(',');
 
     console.log(`[Meta OAuth] Initiating auth, APP_ID: ${META_APP_ID ? META_APP_ID.substring(0, 4) + '...' : 'NOT SET'}, Redirect: ${REDIRECT_URI}`);
-    
+
     if (!META_APP_ID) {
       res.send(`
         <!DOCTYPE html>
@@ -709,13 +723,12 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
             .steps { background: #f5f5f5; padding: 20px; border-radius: 12px; }
             .step { margin: 10px 0; }
             code { background: #eee; padding: 2px 6px; border-radius: 4px; }
-            .success { color: #10B981; font-weight: bold; }
           </style>
         </head>
         <body>
           <h1>Meta Business Suite Integration</h1>
           <div class="info">
-            <p>To enable real Facebook & Instagram posting, you need to set up a Meta Developer App:</p>
+            <p>To connect Meta Business Suite, you need to configure a Meta Developer App.</p>
           </div>
           <div class="steps">
             <div class="step">1. Go to <a href="https://developers.facebook.com" target="_blank">Meta for Developers</a></div>
@@ -724,10 +737,11 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
             <div class="step">4. Set these environment variables:</div>
             <div class="step"><code>META_APP_ID</code> - Your App ID</div>
             <div class="step"><code>META_APP_SECRET</code> - Your App Secret</div>
+            <div class="step"><code>META_ENCRYPTION_KEY</code> - A random string (16+ chars) for token encryption</div>
           </div>
-          <p class="success">For now, the app will simulate Meta connection for demo purposes.</p>
           <script>
             setTimeout(() => {
+              window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: 'APP_NOT_CONFIGURED' }, '*');
               window.close();
             }, 5000);
           </script>
@@ -736,8 +750,8 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
       `);
       return;
     }
-    
-    res.redirect(authUrl);
+
+    res.redirect(`https://www.facebook.com/${FB_API_VERSION}/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&response_type=code`);
   });
 
   app.get("/api/meta/callback", async (req, res) => {
@@ -745,6 +759,7 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
     const META_APP_ID = process.env.META_APP_ID || '';
     const META_APP_SECRET = process.env.META_APP_SECRET || '';
     const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/meta/callback`;
+    const accountId = (req.query.state as string) || "default";
 
     if (fbError) {
       console.error(`[Meta OAuth] Facebook returned error: ${fbError} - ${error_description}`);
@@ -763,38 +778,38 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
             4. Check that the App ID and App Secret match your Meta app
           </div>
           <script>
-            setTimeout(() => { window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: '${fbError}' }, '*'); }, 3000);
+            setTimeout(() => { window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: '${String(fbError).replace(/'/g, "\\'")}' }, '*'); }, 3000);
           </script>
         </body>
         </html>
       `);
       return;
     }
-    
+
     if (!code || !META_APP_ID || !META_APP_SECRET) {
       res.send(`
         <html>
         <body>
           <script>
-            window.opener?.postMessage({ type: 'META_AUTH_SUCCESS' }, '*');
-            window.close();
+            window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: 'MISSING_CREDENTIALS' }, '*');
+            setTimeout(() => window.close(), 2000);
           </script>
-          <p>Connection successful! You can close this window.</p>
+          <p>Configuration error. Please check META_APP_ID and META_APP_SECRET.</p>
         </body>
         </html>
       `);
       return;
     }
-    
+
     try {
       console.log(`[Meta OAuth] Exchanging code for token, redirect_uri: ${REDIRECT_URI}`);
       const tokenResponse = await fetch(
         `https://graph.facebook.com/${FB_API_VERSION}/oauth/access_token?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&client_secret=${META_APP_SECRET}&code=${code}`
       );
       const tokenData = await tokenResponse.json();
-      
+
       if (tokenData.error) {
-        console.error(`[Meta OAuth] Token exchange error:`, tokenData.error);
+        console.error(`[Meta OAuth] Token exchange error:`, tokenData.error.message);
         res.send(`
           <html>
           <head><style>body{font-family:-apple-system,sans-serif;padding:40px;max-width:500px;margin:0 auto;text-align:center;} .err{color:#FF6B6B;font-size:20px;margin-bottom:12px;} .desc{color:#666;}</style></head>
@@ -810,18 +825,52 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
         return;
       }
 
-      console.log(`[Meta OAuth] Successfully obtained access token`);
-      res.send(`
-        <html>
-        <body>
-          <script>
-            window.opener?.postMessage({ type: 'META_AUTH_SUCCESS', token: '${tokenData.access_token}' }, '*');
-            window.close();
-          </script>
-          <p>Connection successful! You can close this window.</p>
-        </body>
-        </html>
-      `);
+      if (!tokenData.access_token) {
+        res.send(`
+          <html><body>
+            <p>No access token received. Please try again.</p>
+            <script>
+              window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: 'NO_TOKEN' }, '*');
+              setTimeout(() => window.close(), 3000);
+            </script>
+          </body></html>
+        `);
+        return;
+      }
+
+      console.log(`[Meta OAuth] Short-lived token received, exchanging for long-lived + storing server-side`);
+      const storeResult = await storeTokensAfterOAuth(accountId, tokenData.access_token);
+
+      if (storeResult.success) {
+        res.send(`
+          <html>
+          <head><style>body{font-family:-apple-system,sans-serif;padding:40px;max-width:500px;margin:0 auto;text-align:center;} .ok{color:#10B981;font-size:20px;margin-bottom:12px;}</style></head>
+          <body>
+            <div class="ok">Meta Business Suite Connected</div>
+            <p>Tokens stored securely on the server. You can close this window.</p>
+            <script>
+              window.opener?.postMessage({ type: 'META_AUTH_SUCCESS', status: '${storeResult.status}' }, '*');
+              setTimeout(() => window.close(), 2000);
+            </script>
+          </body>
+          </html>
+        `);
+      } else {
+        console.error(`[Meta OAuth] Token storage failed: ${storeResult.error}`);
+        res.send(`
+          <html>
+          <head><style>body{font-family:-apple-system,sans-serif;padding:40px;max-width:500px;margin:0 auto;text-align:center;} .warn{color:#F59E0B;font-size:20px;margin-bottom:12px;}</style></head>
+          <body>
+            <div class="warn">Partial Connection</div>
+            <p>${storeResult.status === 'NO_PAGES' ? 'No Facebook Pages found. You need admin access to at least one Facebook Page.' : (storeResult.error || 'Token processing failed.')}</p>
+            <script>
+              window.opener?.postMessage({ type: 'META_AUTH_PARTIAL', status: '${storeResult.status}', error: '${(storeResult.error || '').replace(/'/g, "\\'")}' }, '*');
+              setTimeout(() => window.close(), 5000);
+            </script>
+          </body>
+          </html>
+        `);
+      }
     } catch (error) {
       console.error(`[Meta OAuth] Unexpected error:`, error);
       res.send(`
@@ -829,7 +878,7 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
         <body>
           <script>
             window.opener?.postMessage({ type: 'META_AUTH_ERROR' }, '*');
-            window.close();
+            setTimeout(() => window.close(), 2000);
           </script>
           <p>Connection failed. Please try again.</p>
         </body>
@@ -838,36 +887,95 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
     }
   });
 
-  app.post("/api/meta/post", async (req, res) => {
+  app.post("/api/meta/post", requireMetaReal, async (req: any, res) => {
     try {
-      const { content, platforms, accessToken, pageId } = req.body;
-      
-      if (!accessToken || !pageId) {
-        return res.json({ 
-          success: true, 
-          message: 'Demo mode: Post would be published to ' + platforms.join(' and '),
-          postIds: { facebook: 'demo_fb_' + Date.now(), instagram: 'demo_ig_' + Date.now() }
+      const { content, platforms, mediaUrl } = req.body;
+      const accountId = req.metaAccountId || "default";
+      const metaMode = req.metaMode;
+
+      if (metaMode === "DEMO") {
+        return res.json({
+          success: true,
+          demo: true,
+          message: 'DEMO MODE: Post simulated (not published to Meta).',
+          postIds: {},
         });
       }
-      
+
+      const pageToken = await getDecryptedPageToken(accountId);
+      if (!pageToken) {
+        return res.status(403).json({ error: "META_TOKEN_EXPIRED", message: "Page token not available. Please reconnect." });
+      }
+
+      const creds = await db.select().from(metaCredentials).where(eq(metaCredentials.accountId, accountId)).limit(1);
+      const cred = creds[0];
+      if (!cred?.pageId) {
+        return res.status(403).json({ error: "META_NOT_CONNECTED", message: "No Facebook Page configured." });
+      }
+
       const results: Record<string, string> = {};
-      
-      if (platforms.includes('facebook')) {
+
+      if (platforms?.includes('facebook')) {
         const fbResponse = await fetch(
-          `https://graph.facebook.com/${FB_API_VERSION}/${pageId}/feed`,
+          `https://graph.facebook.com/${FB_API_VERSION}/${cred.pageId}/feed`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               message: content,
-              access_token: accessToken,
+              access_token: pageToken,
             }),
           }
         );
         const fbData = await fbResponse.json();
+        if (fbData.error) {
+          console.error(`[Meta Post] FB error: ${fbData.error.message}`);
+          return res.status(400).json({ error: "META_API_ERROR", message: fbData.error.message });
+        }
         results.facebook = fbData.id;
       }
-      
+
+      if (platforms?.includes('instagram') && cred.igBusinessId) {
+        if (!mediaUrl) {
+          return res.status(400).json({ error: "MISSING_MEDIA", message: "Instagram posts require a media URL." });
+        }
+        const containerRes = await fetch(
+          `https://graph.facebook.com/${FB_API_VERSION}/${cred.igBusinessId}/media`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              image_url: mediaUrl,
+              caption: content,
+              access_token: pageToken,
+            }),
+          }
+        );
+        const containerData = await containerRes.json();
+        if (containerData.error) {
+          console.error(`[Meta Post] IG container error: ${containerData.error.message}`);
+          return res.status(400).json({ error: "META_API_ERROR", message: containerData.error.message });
+        }
+        if (containerData.id) {
+          const publishRes = await fetch(
+            `https://graph.facebook.com/${FB_API_VERSION}/${cred.igBusinessId}/media_publish`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                creation_id: containerData.id,
+                access_token: pageToken,
+              }),
+            }
+          );
+          const publishData = await publishRes.json();
+          if (publishData.error) {
+            return res.status(400).json({ error: "META_API_ERROR", message: publishData.error.message });
+          }
+          results.instagram = publishData.id;
+        }
+      }
+
       res.json({ success: true, postIds: results });
     } catch (error) {
       console.error('Meta post error:', error);
@@ -1080,42 +1188,94 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
     }
   });
 
-  app.post("/api/auto-publish", async (req, res) => {
+  app.post("/api/auto-publish", requireMetaReal, async (req: any, res) => {
     try {
-      const { posts, accessToken, pageId } = req.body;
+      const { posts } = req.body;
+      const accountId = req.metaAccountId || "default";
+      const metaMode = req.metaMode;
 
-      if (!accessToken || !pageId) {
+      if (metaMode === "DEMO") {
         return res.json({
           success: true,
           demo: true,
-          message: 'Demo mode: Connect your Meta account to publish for real.',
+          message: 'DEMO MODE: Posts simulated (not published to Meta).',
           results: (posts || []).map((p: any) => ({
             postId: p.id,
-            status: 'demo_queued',
-            demoId: 'demo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+            status: 'demo_simulated',
           })),
         });
+      }
+
+      const pageToken = await getDecryptedPageToken(accountId);
+      if (!pageToken) {
+        return res.status(403).json({ error: "META_TOKEN_EXPIRED", message: "Page token not available. Please reconnect." });
+      }
+
+      const creds = await db.select().from(metaCredentials).where(eq(metaCredentials.accountId, accountId)).limit(1);
+      const cred = creds[0];
+      if (!cred?.pageId) {
+        return res.status(403).json({ error: "META_NOT_CONNECTED", message: "No Facebook Page configured." });
       }
 
       const results = [];
       for (const post of posts || []) {
         try {
-          if (post.platform === 'Facebook' || post.platform === 'facebook') {
+          const platform = (post.platform || '').toLowerCase();
+          if (platform === 'facebook') {
             const fbResponse = await fetch(
-              `https://graph.facebook.com/${FB_API_VERSION}/${pageId}/feed`,
+              `https://graph.facebook.com/${FB_API_VERSION}/${cred.pageId}/feed`,
               {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   message: post.content,
-                  access_token: accessToken,
+                  access_token: pageToken,
                 }),
               }
             );
             const fbData = await fbResponse.json();
-            results.push({ postId: post.id, status: 'published', fbId: fbData.id });
+            if (fbData.error) {
+              results.push({ postId: post.id, status: 'failed', error: fbData.error.message });
+            } else {
+              results.push({ postId: post.id, status: 'published', fbId: fbData.id });
+            }
+          } else if (platform === 'instagram' && cred.igBusinessId && post.mediaUrl) {
+            const containerRes = await fetch(
+              `https://graph.facebook.com/${FB_API_VERSION}/${cred.igBusinessId}/media`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  image_url: post.mediaUrl,
+                  caption: post.content,
+                  access_token: pageToken,
+                }),
+              }
+            );
+            const containerData = await containerRes.json();
+            if (containerData.id) {
+              const publishRes = await fetch(
+                `https://graph.facebook.com/${FB_API_VERSION}/${cred.igBusinessId}/media_publish`,
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    creation_id: containerData.id,
+                    access_token: pageToken,
+                  }),
+                }
+              );
+              const publishData = await publishRes.json();
+              if (publishData.error) {
+                results.push({ postId: post.id, status: 'failed', error: publishData.error.message });
+              } else {
+                results.push({ postId: post.id, status: 'published', igId: publishData.id });
+              }
+            } else {
+              results.push({ postId: post.id, status: 'failed', error: containerData.error?.message || 'IG container failed' });
+            }
           } else {
-            results.push({ postId: post.id, status: 'queued', message: 'Instagram publishing requires additional setup' });
+            results.push({ postId: post.id, status: 'skipped', message: 'Platform not configured or missing media' });
           }
         } catch (err) {
           results.push({ postId: post.id, status: 'failed', error: 'Failed to publish' });
@@ -1143,6 +1303,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerCampaignRoutes(app);
   registerLeadEngineRoutes(app);
   registerCompetitiveIntelligenceRoutes(app);
+  registerMetaStatusRoutes(app);
 
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
