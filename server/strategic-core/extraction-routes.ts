@@ -117,22 +117,70 @@ export function registerExtractionRoutes(app: Express) {
       const response = await geminiAi.models.generateContent({
         model: "gemini-3-pro-preview",
         contents: [{ role: "user", parts }],
-        config: { maxOutputTokens: 2048 },
+        config: {
+          maxOutputTokens: 2048,
+          responseMimeType: "application/json",
+        },
       });
 
       const rawText = response.text || "";
+      console.log("[StrategicCore] Raw AI response length:", rawText.length);
       let rawAnalysis: any;
 
       try {
         const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          rawAnalysis = JSON.parse(jsonMatch[0]);
-        } else {
+        if (!jsonMatch) {
           throw new Error("No JSON found in response");
         }
-      } catch (parseErr) {
-        console.error("[StrategicCore] Failed to parse AI extraction:", parseErr);
-        return res.status(500).json({ error: "AI extraction returned invalid format. Please try again." });
+        let jsonStr = jsonMatch[0];
+        jsonStr = jsonStr.replace(/,\s*([\]}])/g, '$1');
+        jsonStr = jsonStr.replace(/[\x00-\x1F\x7F]/g, (ch: string) => {
+          if (ch === '\n' || ch === '\r' || ch === '\t') return ch;
+          return '';
+        });
+
+        try {
+          rawAnalysis = JSON.parse(jsonStr);
+        } catch {
+          jsonStr = jsonStr.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+          jsonStr = jsonStr.replace(/\/\/[^\n]*/g, '');
+          const retryMatch = jsonStr.match(/\{[\s\S]*\}/);
+          if (retryMatch) {
+            rawAnalysis = JSON.parse(retryMatch[0]);
+          } else {
+            throw new Error("Could not parse cleaned JSON");
+          }
+        }
+      } catch (parseErr: any) {
+        console.error("[StrategicCore] Failed to parse AI extraction:", parseErr.message);
+        console.error("[StrategicCore] Raw text (first 500 chars):", rawText.substring(0, 500));
+
+        try {
+          console.log("[StrategicCore] Retrying extraction with stricter prompt...");
+          const retryResponse = await geminiAi.models.generateContent({
+            model: "gemini-3-pro-preview",
+            contents: [{
+              role: "user",
+              parts: [
+                { text: EXTRACTION_PROMPT + "\n\nPREVIOUS ATTEMPT FAILED JSON PARSING. You MUST return ONLY a valid JSON object. No markdown code blocks. No trailing commas. No comments. Just the raw JSON object starting with { and ending with }." },
+                { inlineData: { data: base64Data, mimeType } },
+              ],
+            }],
+            config: { maxOutputTokens: 2048 },
+          });
+
+          const retryText = retryResponse.text || "";
+          const retryJsonMatch = retryText.match(/\{[\s\S]*\}/);
+          if (retryJsonMatch) {
+            let cleaned = retryJsonMatch[0].replace(/,\s*([\]}])/g, '$1');
+            rawAnalysis = JSON.parse(cleaned);
+          } else {
+            throw new Error("Retry also failed");
+          }
+        } catch (retryErr: any) {
+          console.error("[StrategicCore] Retry also failed:", retryErr.message);
+          return res.status(500).json({ error: "AI extraction returned invalid format. Please try again." });
+        }
       }
 
       const draftBlueprint = normalizeExtraction(rawAnalysis);
