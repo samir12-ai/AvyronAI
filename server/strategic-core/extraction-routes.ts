@@ -5,6 +5,8 @@ import { db } from "../db";
 import { strategicBlueprints } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
+import fs from "fs";
+import path from "path";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
@@ -15,6 +17,37 @@ const geminiAi = new GoogleGenAI({
     baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "",
   },
 });
+
+const AUDIT_DIR = path.join(process.cwd(), "logs", "extraction-audit");
+
+function ensureAuditDir() {
+  if (!fs.existsSync(AUDIT_DIR)) {
+    fs.mkdirSync(AUDIT_DIR, { recursive: true });
+  }
+}
+
+function storeRawAudit(blueprintId: string, attempts: { text: string; error?: string; model?: string; tokens?: any }[]) {
+  ensureAuditDir();
+  const filename = `${blueprintId}_${Date.now()}.json`;
+  const filepath = path.join(AUDIT_DIR, filename);
+  const payload = {
+    blueprintId,
+    timestamp: new Date().toISOString(),
+    attempts: attempts.slice(-3),
+  };
+  fs.writeFileSync(filepath, JSON.stringify(payload, null, 2));
+  console.log(`[StrategicCore] Audit log saved: ${filepath}`);
+
+  const files = fs.readdirSync(AUDIT_DIR)
+    .filter(f => f.endsWith(".json"))
+    .sort()
+    .reverse();
+  if (files.length > 100) {
+    for (const old of files.slice(100)) {
+      fs.unlinkSync(path.join(AUDIT_DIR, old));
+    }
+  }
+}
 
 const EXTRACTION_PROMPT = `You are a campaign creative analysis engine. Analyze the provided media (video or image) and extract structured marketing intelligence.
 
@@ -49,6 +82,39 @@ Response format (strict JSON only):
   "detectedPriceIfVisible": { "value": "number or null", "confidence": 0-100 }
 }`;
 
+export function cleanJsonString(raw: string): string {
+  let s = raw.trim();
+  s = s.replace(/^```(?:json)?\s*/i, '');
+  s = s.replace(/\s*```\s*$/i, '');
+  s = s.trim();
+  const jsonMatch = s.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new Error("No JSON object found in response");
+  }
+  s = jsonMatch[0];
+  s = s.replace(/\/\/[^\n]*/g, '');
+  s = s.replace(/,\s*([\]}])/g, '$1');
+  s = s.replace(/[\x00-\x1F\x7F]/g, (ch: string) => {
+    if (ch === '\n' || ch === '\r' || ch === '\t') return ch;
+    return '';
+  });
+  return s;
+}
+
+function buildFallbackExtraction(): any {
+  return {
+    detectedLanguage: "unknown",
+    transcribedText: null,
+    ocrText: null,
+    detectedOffer: { value: "INSUFFICIENT_DATA", confidence: 0 },
+    detectedPositioning: { value: "INSUFFICIENT_DATA", confidence: 0 },
+    detectedCTA: { value: "INSUFFICIENT_DATA", confidence: 0 },
+    detectedAudienceGuess: { value: "INSUFFICIENT_DATA", confidence: 0 },
+    detectedFunnelStage: { value: "INSUFFICIENT_DATA", confidence: 0 },
+    detectedPriceIfVisible: { value: null, confidence: 0 },
+  };
+}
+
 function normalizeExtraction(raw: any): any {
   const fields = ["detectedOffer", "detectedPositioning", "detectedCTA", "detectedAudienceGuess", "detectedFunnelStage", "detectedPriceIfVisible"];
   const result: any = {
@@ -76,6 +142,18 @@ function normalizeExtraction(raw: any): any {
   }
 
   return result;
+}
+
+function extractTokenUsage(response: any): { inputTokens?: number; outputTokens?: number; totalTokens?: number; truncated: boolean } {
+  const usage = response.usageMetadata || response.usage || {};
+  const inputTokens = usage.promptTokenCount || usage.promptTokens || usage.input_tokens;
+  const outputTokens = usage.candidatesTokenCount || usage.completionTokens || usage.output_tokens;
+  const totalTokens = usage.totalTokenCount || usage.totalTokens || usage.total_tokens;
+
+  const finishReason = response.candidates?.[0]?.finishReason || "";
+  const truncated = finishReason === "MAX_TOKENS" || finishReason === "STOP" && !response.text?.trim().endsWith("}");
+
+  return { inputTokens, outputTokens, totalTokens, truncated };
 }
 
 export function registerExtractionRoutes(app: Express) {
@@ -114,51 +192,42 @@ export function registerExtractionRoutes(app: Express) {
         { inlineData: { data: base64Data, mimeType } },
       ];
 
-      const response = await geminiAi.models.generateContent({
-        model: "gemini-3-pro-preview",
-        contents: [{ role: "user", parts }],
-        config: {
-          maxOutputTokens: 2048,
-          responseMimeType: "application/json",
-        },
-      });
-
-      const rawText = response.text || "";
-      console.log("[StrategicCore] Raw AI response length:", rawText.length);
-      let rawAnalysis: any;
+      const auditAttempts: { text: string; error?: string; model?: string; tokens?: any }[] = [];
+      let rawAnalysis: any = null;
+      const MODEL_NAME = "gemini-3-pro-preview";
 
       try {
-        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-          throw new Error("No JSON found in response");
-        }
-        let jsonStr = jsonMatch[0];
-        jsonStr = jsonStr.replace(/,\s*([\]}])/g, '$1');
-        jsonStr = jsonStr.replace(/[\x00-\x1F\x7F]/g, (ch: string) => {
-          if (ch === '\n' || ch === '\r' || ch === '\t') return ch;
-          return '';
+        const response = await geminiAi.models.generateContent({
+          model: MODEL_NAME,
+          contents: [{ role: "user", parts }],
+          config: {
+            maxOutputTokens: 4096,
+            responseMimeType: "application/json",
+          },
         });
 
-        try {
-          rawAnalysis = JSON.parse(jsonStr);
-        } catch {
-          jsonStr = jsonStr.replace(/```json\s*/g, '').replace(/```\s*/g, '');
-          jsonStr = jsonStr.replace(/\/\/[^\n]*/g, '');
-          const retryMatch = jsonStr.match(/\{[\s\S]*\}/);
-          if (retryMatch) {
-            rawAnalysis = JSON.parse(retryMatch[0]);
-          } else {
-            throw new Error("Could not parse cleaned JSON");
-          }
+        const rawText = response.text || "";
+        const tokenInfo = extractTokenUsage(response);
+        console.log(`[StrategicCore] Model: ${MODEL_NAME} | Tokens: in=${tokenInfo.inputTokens ?? "?"}, out=${tokenInfo.outputTokens ?? "?"}, total=${tokenInfo.totalTokens ?? "?"} | Truncated: ${tokenInfo.truncated}`);
+
+        auditAttempts.push({ text: rawText, model: MODEL_NAME, tokens: tokenInfo });
+
+        if (tokenInfo.truncated) {
+          console.warn(`[StrategicCore] WARNING: Response appears truncated (finishReason or missing closing brace)`);
         }
+
+        const cleaned = cleanJsonString(rawText);
+        rawAnalysis = JSON.parse(cleaned);
       } catch (parseErr: any) {
-        console.error("[StrategicCore] Failed to parse AI extraction:", parseErr.message);
-        console.error("[StrategicCore] Raw text (first 500 chars):", rawText.substring(0, 500));
+        console.error("[StrategicCore] Attempt 1 failed:", parseErr.message);
+        if (auditAttempts.length > 0) {
+          auditAttempts[auditAttempts.length - 1].error = parseErr.message;
+        }
 
         try {
           console.log("[StrategicCore] Retrying extraction with stricter prompt...");
           const retryResponse = await geminiAi.models.generateContent({
-            model: "gemini-3-pro-preview",
+            model: MODEL_NAME,
             contents: [{
               role: "user",
               parts: [
@@ -166,24 +235,42 @@ export function registerExtractionRoutes(app: Express) {
                 { inlineData: { data: base64Data, mimeType } },
               ],
             }],
-            config: { maxOutputTokens: 2048 },
+            config: {
+              maxOutputTokens: 4096,
+              responseMimeType: "application/json",
+            },
           });
 
           const retryText = retryResponse.text || "";
-          const retryJsonMatch = retryText.match(/\{[\s\S]*\}/);
-          if (retryJsonMatch) {
-            let cleaned = retryJsonMatch[0].replace(/,\s*([\]}])/g, '$1');
-            rawAnalysis = JSON.parse(cleaned);
-          } else {
-            throw new Error("Retry also failed");
-          }
+          const retryTokens = extractTokenUsage(retryResponse);
+          console.log(`[StrategicCore] Retry | Model: ${MODEL_NAME} | Tokens: in=${retryTokens.inputTokens ?? "?"}, out=${retryTokens.outputTokens ?? "?"} | Truncated: ${retryTokens.truncated}`);
+
+          auditAttempts.push({ text: retryText, model: MODEL_NAME, tokens: retryTokens });
+
+          const cleaned = cleanJsonString(retryText);
+          rawAnalysis = JSON.parse(cleaned);
         } catch (retryErr: any) {
-          console.error("[StrategicCore] Retry also failed:", retryErr.message);
-          return res.status(500).json({ error: "AI extraction returned invalid format. Please try again." });
+          console.error("[StrategicCore] Attempt 2 also failed:", retryErr.message);
+          if (auditAttempts.length > 0) {
+            auditAttempts[auditAttempts.length - 1].error = retryErr.message;
+          }
         }
       }
 
+      if (!rawAnalysis) {
+        console.warn("[StrategicCore] All parse attempts failed. Using INSUFFICIENT_DATA fallback for all fields.");
+        storeRawAudit(blueprintId, auditAttempts);
+        rawAnalysis = {};
+      }
+
       const draftBlueprint = normalizeExtraction(rawAnalysis);
+
+      const allInsufficient = ["detectedOffer", "detectedPositioning", "detectedCTA", "detectedAudienceGuess", "detectedFunnelStage"].every(
+        f => draftBlueprint[f]?.value === "INSUFFICIENT_DATA"
+      );
+      if (allInsufficient) {
+        storeRawAudit(blueprintId, auditAttempts);
+      }
 
       await db.update(strategicBlueprints)
         .set({
@@ -206,7 +293,11 @@ export function registerExtractionRoutes(app: Express) {
         blueprintId,
         blueprintVersion: blueprint.blueprintVersion,
         event: "EXTRACTION_COMPLETED",
-        details: { mediaType: isVideo ? "video" : "image" },
+        details: {
+          mediaType: isVideo ? "video" : "image",
+          allInsufficient,
+          attempts: auditAttempts.length,
+        },
       });
 
       res.json({
@@ -215,6 +306,10 @@ export function registerExtractionRoutes(app: Express) {
         blueprintVersion: blueprint.blueprintVersion,
         status: "EXTRACTION_COMPLETE",
         draftBlueprint,
+        _meta: {
+          attempts: auditAttempts.length,
+          allFieldsInsufficient: allInsufficient,
+        },
       });
     } catch (error: any) {
       console.error("[StrategicCore] Creative analysis error:", error.message);
