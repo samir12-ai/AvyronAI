@@ -255,14 +255,20 @@ export function registerCampaignRoutes(app: Express) {
       const signals = await detectPerformanceSignals(campaignContext.campaignId, accountId);
       const scaleSignals = signals.filter(s => s.signalType === "SCALE_CANDIDATE");
       const reviewSignals = signals.filter(s => s.signalType === "REVIEW_NEEDED");
+      const normalVariation = signals.filter(s => s.signalType === "NORMAL_VARIATION");
+      const lowConfidence = signals.filter(s => s.signalType === "LOW_CONFIDENCE");
+      const actionable = signals.filter(s => s.signalType === "SCALE_CANDIDATE" || s.signalType === "REVIEW_NEEDED");
       res.json({
         success: true,
         campaign: campaignContext,
         signals,
         summary: {
           totalSignals: signals.length,
+          actionableSignals: actionable.length,
           scaleOpportunities: scaleSignals.length,
           reviewNeeded: reviewSignals.length,
+          normalVariation: normalVariation.length,
+          lowConfidence: lowConfidence.length,
         },
       });
     } catch (error: any) {

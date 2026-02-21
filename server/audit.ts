@@ -44,7 +44,10 @@ export type AuditEventType =
   | "INTELLIGENCE_RUN"
   | "STRATEGY_RECOMMENDED"
   | "STRATEGY_APPLIED"
-  | "STRATEGY_REJECTED";
+  | "STRATEGY_REJECTED"
+  | "SIGNAL_SUPPRESSED"
+  | "SIGNAL_DOWNGRADED"
+  | "DATA_INTEGRITY_WARNING";
 
 export async function logAudit(
   accountId: string,
