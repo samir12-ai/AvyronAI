@@ -28,24 +28,54 @@ Your tasks:
 8. Infer the target audience
 9. Detect any visible price
 
-You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no free text.
-
-If you cannot determine a field with confidence, still include it but lower the confidenceScore.
-If a field is completely undetectable, use null for its value.
+CRITICAL RULES:
+- You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no free text.
+- Each field MUST have its own confidence score (0-100).
+- If you cannot determine a field, set its value to "INSUFFICIENT_DATA" and its confidence to 0.
+- NEVER guess or hallucinate. If unsure, mark as INSUFFICIENT_DATA.
+- A field with confidence below 60 means the AI is NOT confident — the user must confirm.
 
 Response format (strict JSON only):
 {
   "detectedLanguage": "string",
   "transcribedText": "string or null",
   "ocrText": "string or null",
-  "detectedOffer": "string or null",
-  "detectedPositioning": "premium | discount | authority | convenience | value",
-  "detectedCTA": "string or null",
-  "detectedAudienceGuess": "string or null",
-  "detectedFunnelStage": "awareness | consideration | conversion | retention",
-  "detectedPriceIfVisible": "number or null",
-  "confidenceScore": 0-100
+  "detectedOffer": { "value": "string or INSUFFICIENT_DATA", "confidence": 0-100 },
+  "detectedPositioning": { "value": "premium|discount|authority|convenience|value|INSUFFICIENT_DATA", "confidence": 0-100 },
+  "detectedCTA": { "value": "string or INSUFFICIENT_DATA", "confidence": 0-100 },
+  "detectedAudienceGuess": { "value": "string or INSUFFICIENT_DATA", "confidence": 0-100 },
+  "detectedFunnelStage": { "value": "awareness|consideration|conversion|retention|INSUFFICIENT_DATA", "confidence": 0-100 },
+  "detectedPriceIfVisible": { "value": "number or null", "confidence": 0-100 }
 }`;
+
+function normalizeExtraction(raw: any): any {
+  const fields = ["detectedOffer", "detectedPositioning", "detectedCTA", "detectedAudienceGuess", "detectedFunnelStage", "detectedPriceIfVisible"];
+  const result: any = {
+    detectedLanguage: raw.detectedLanguage || "unknown",
+    transcribedText: raw.transcribedText || null,
+    ocrText: raw.ocrText || null,
+  };
+
+  for (const field of fields) {
+    const val = raw[field];
+    if (val && typeof val === "object" && "value" in val && "confidence" in val) {
+      result[field] = {
+        value: val.value === null || val.value === undefined || val.value === "" ? "INSUFFICIENT_DATA" : val.value,
+        confidence: typeof val.confidence === "number" ? Math.max(0, Math.min(100, val.confidence)) : 0,
+      };
+    } else if (val !== null && val !== undefined && val !== "" && val !== "null") {
+      result[field] = { value: val, confidence: 50 };
+    } else {
+      result[field] = { value: "INSUFFICIENT_DATA", confidence: 0 };
+    }
+
+    if (result[field].value === "INSUFFICIENT_DATA") {
+      result[field].confidence = 0;
+    }
+  }
+
+  return result;
+}
 
 export function registerExtractionRoutes(app: Express) {
   app.post("/api/strategic/analyze-creative", upload.single("media"), async (req: Request, res: Response) => {
@@ -80,12 +110,7 @@ export function registerExtractionRoutes(app: Express) {
 
       const parts: any[] = [
         { text: EXTRACTION_PROMPT },
-        {
-          inlineData: {
-            data: base64Data,
-            mimeType,
-          },
-        },
+        { inlineData: { data: base64Data, mimeType } },
       ];
 
       const response = await geminiAi.models.generateContent({
@@ -95,12 +120,12 @@ export function registerExtractionRoutes(app: Express) {
       });
 
       const rawText = response.text || "";
-      let analysis: any;
+      let rawAnalysis: any;
 
       try {
         const jsonMatch = rawText.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
-          analysis = JSON.parse(jsonMatch[0]);
+          rawAnalysis = JSON.parse(jsonMatch[0]);
         } else {
           throw new Error("No JSON found in response");
         }
@@ -109,27 +134,18 @@ export function registerExtractionRoutes(app: Express) {
         return res.status(500).json({ error: "AI extraction returned invalid format. Please try again." });
       }
 
-      const requiredFields = [
-        "detectedOffer", "detectedPositioning", "detectedCTA",
-        "detectedAudienceGuess", "detectedFunnelStage", "detectedPriceIfVisible",
-        "confidenceScore",
-      ];
-
-      for (const field of requiredFields) {
-        if (!(field in analysis)) {
-          analysis[field] = null;
-        }
-      }
-
-      if (typeof analysis.confidenceScore !== "number") {
-        analysis.confidenceScore = 30;
-      }
+      const draftBlueprint = normalizeExtraction(rawAnalysis);
 
       await db.update(strategicBlueprints)
         .set({
           status: "EXTRACTION_COMPLETE",
           creativeMediaType: isVideo ? "video" : "image",
-          creativeAnalysis: JSON.stringify(analysis),
+          draftBlueprint: JSON.stringify(draftBlueprint),
+          creativeAnalysis: JSON.stringify(draftBlueprint),
+          confirmedBlueprint: null,
+          marketMap: null,
+          validationResult: null,
+          orchestratorPlan: null,
           analysisCompletedAt: new Date(),
           updatedAt: new Date(),
         })
@@ -139,7 +155,7 @@ export function registerExtractionRoutes(app: Express) {
         success: true,
         blueprintId,
         status: "EXTRACTION_COMPLETE",
-        creativeAnalysis: analysis,
+        draftBlueprint,
       });
     } catch (error: any) {
       console.error("[StrategicCore] Creative analysis error:", error.message);

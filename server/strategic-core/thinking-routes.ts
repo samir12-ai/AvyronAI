@@ -1,8 +1,8 @@
 import type { Express, Request, Response } from "express";
 import OpenAI from "openai";
 import { db } from "../db";
-import { strategicBlueprints, blueprintCompetitors, campaignSelections } from "@shared/schema";
-import { eq, and } from "drizzle-orm";
+import { strategicBlueprints } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -79,60 +79,49 @@ export function registerThinkingRoutes(app: Express) {
       if (blueprint.status !== "CONFIRMED") {
         return res.status(400).json({
           error: "STATUS_GATE",
-          message: "Blueprint must be CONFIRMED before market analysis. No engine may proceed without CONFIRMED status.",
+          message: "Blueprint must be CONFIRMED before market analysis.",
           currentStatus: blueprint.status,
         });
       }
 
       const confirmedBlueprint = blueprint.confirmedBlueprint ? JSON.parse(blueprint.confirmedBlueprint) : null;
       if (!confirmedBlueprint) {
-        return res.status(400).json({ error: "No confirmed blueprint data found" });
+        return res.status(400).json({ error: "No confirmed blueprint data found. Confirmed blueprint is the only source of truth for analysis." });
+      }
+
+      const campaignContext = blueprint.campaignContext ? JSON.parse(blueprint.campaignContext) : null;
+      if (!campaignContext) {
+        return res.status(400).json({
+          error: "CAMPAIGN_CONTEXT_REQUIRED",
+          message: "No campaign context — Market Analysis cannot run without campaign context (objective + location).",
+        });
       }
 
       const competitorUrls = blueprint.competitorUrls ? JSON.parse(blueprint.competitorUrls) : [];
       if (competitorUrls.length < 2) {
-        return res.status(400).json({
-          error: "GATE_FAILED",
-          message: "No competitor data — no Market Analysis.",
-        });
+        return res.status(400).json({ error: "GATE_FAILED", message: "No competitor data — no Market Analysis." });
       }
 
       if (!blueprint.averageSellingPrice) {
-        return res.status(400).json({
-          error: "GATE_FAILED",
-          message: "No price data — no price comparison.",
-        });
-      }
-
-      let campaignObjective = "general marketing";
-      if (blueprint.campaignId) {
-        const [campaign] = await db.select().from(campaignSelections)
-          .where(and(
-            eq(campaignSelections.selectedCampaignId, blueprint.campaignId),
-            eq(campaignSelections.accountId, blueprint.accountId),
-          )).limit(1);
-        if (campaign) {
-          campaignObjective = campaign.campaignGoalType;
-        }
+        return res.status(400).json({ error: "GATE_FAILED", message: "No price data — no price comparison." });
       }
 
       const userPrompt = `Analyze this strategic data and generate a Market Map:
 
-CONFIRMED BLUEPRINT:
+CAMPAIGN CONTEXT:
+- Campaign: ${campaignContext.campaignName}
+- Objective: ${campaignContext.objective}
+- Location: ${campaignContext.location || "Not specified"}
+- Platform: ${campaignContext.platform}
+- Mode: ${campaignContext.isDemo ? "DEMO (no live data)" : "PRODUCTION"}
+
+CONFIRMED BLUEPRINT (source of truth — do not override):
 ${JSON.stringify(confirmedBlueprint, null, 2)}
 
 COMPETITOR URLS:
 ${competitorUrls.map((u: string, i: number) => `${i + 1}. ${u}`).join("\n")}
 
 CLIENT AVERAGE SELLING PRICE: $${blueprint.averageSellingPrice}
-
-CAMPAIGN OBJECTIVE: ${campaignObjective}
-
-CLIENT POSITIONING: ${confirmedBlueprint.detectedPositioning || "unknown"}
-CLIENT OFFER: ${confirmedBlueprint.detectedOffer || "unknown"}
-CLIENT CTA: ${confirmedBlueprint.detectedCTA || "unknown"}
-CLIENT FUNNEL STAGE: ${confirmedBlueprint.detectedFunnelStage || "unknown"}
-CLIENT TARGET AUDIENCE: ${confirmedBlueprint.detectedAudienceGuess || "unknown"}
 
 Generate the Strategic Market Map now.`;
 

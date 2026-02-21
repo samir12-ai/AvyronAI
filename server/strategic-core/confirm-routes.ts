@@ -5,27 +5,72 @@ import { eq } from "drizzle-orm";
 
 const LOW_CONFIDENCE_THRESHOLD = 60;
 
-const CLARIFICATION_QUESTIONS: Record<string, string[]> = {
-  detectedOffer: [
-    "What specific offer or deal are you promoting in this campaign?",
-    "Is there a discount, free trial, or special promotion involved?",
-  ],
-  detectedPositioning: [
-    "How would you describe your brand's positioning — premium, value, discount, or authority?",
-    "What makes your product stand out from competitors?",
-  ],
-  detectedCTA: [
-    "What action do you want viewers to take after seeing this creative?",
-    "Where should interested customers go — website, DM, link in bio?",
-  ],
-  detectedAudienceGuess: [
-    "Who is the ideal customer for this campaign?",
-    "What age range and interests describe your target audience?",
-  ],
-  detectedFunnelStage: [
-    "Is this campaign for reaching new people, nurturing warm leads, or driving immediate sales?",
-  ],
+const CRITICAL_FIELDS = ["detectedOffer", "detectedCTA", "detectedPositioning", "detectedAudienceGuess"];
+
+const CLARIFICATION_QUESTIONS: Record<string, { label: string; questions: string[] }> = {
+  detectedOffer: {
+    label: "Offer",
+    questions: [
+      "What specific offer or deal are you promoting?",
+      "Is there a discount, free trial, or special promotion?",
+      "What does the customer get and at what terms?",
+    ],
+  },
+  detectedCTA: {
+    label: "Call to Action",
+    questions: [
+      "What action should viewers take after seeing this?",
+      "Where should interested customers go — website, DM, or link in bio?",
+      "What's the next step you want people to take?",
+    ],
+  },
+  detectedPositioning: {
+    label: "Positioning",
+    questions: [
+      "How would you describe your brand — premium, value, discount, or authority?",
+      "What makes your product stand out from competitors?",
+    ],
+  },
+  detectedAudienceGuess: {
+    label: "Target Audience",
+    questions: [
+      "Who is the ideal customer for this campaign?",
+      "What age range, interests, or demographics describe your target?",
+    ],
+  },
+  detectedFunnelStage: {
+    label: "Funnel Stage",
+    questions: [
+      "Is this for reaching new people, nurturing warm leads, or driving immediate sales?",
+    ],
+  },
 };
+
+function buildClarificationPrompts(draft: any): { field: string; label: string; currentValue: string; questions: string[] }[] {
+  const prompts: { field: string; label: string; currentValue: string; questions: string[] }[] = [];
+
+  for (const field of CRITICAL_FIELDS) {
+    const fieldData = draft[field];
+    if (!fieldData) continue;
+
+    const isInsufficient = fieldData.value === "INSUFFICIENT_DATA";
+    const isLowConfidence = typeof fieldData.confidence === "number" && fieldData.confidence < LOW_CONFIDENCE_THRESHOLD;
+
+    if (isInsufficient || isLowConfidence) {
+      const q = CLARIFICATION_QUESTIONS[field];
+      if (q) {
+        prompts.push({
+          field,
+          label: q.label,
+          currentValue: isInsufficient ? "" : String(fieldData.value),
+          questions: q.questions.slice(0, 3),
+        });
+      }
+    }
+  }
+
+  return prompts.slice(0, 3);
+}
 
 export function registerConfirmRoutes(app: Express) {
   app.put("/api/strategic/blueprint/:id/edit", async (req: Request, res: Response) => {
@@ -38,28 +83,53 @@ export function registerConfirmRoutes(app: Express) {
         return res.status(404).json({ error: "Blueprint not found" });
       }
 
-      if (!["EXTRACTION_COMPLETE", "ANALYSIS_COMPLETE"].includes(blueprint.status)) {
-        return res.status(400).json({ error: "Blueprint must be in extraction or analysis state to edit" });
+      if (!["EXTRACTION_COMPLETE", "CONFIRMED", "ANALYSIS_COMPLETE", "VALIDATED"].includes(blueprint.status)) {
+        return res.status(400).json({ error: "Blueprint must be in an editable state" });
       }
 
-      const currentAnalysis = blueprint.creativeAnalysis ? JSON.parse(blueprint.creativeAnalysis) : {};
-      const updatedAnalysis = { ...currentAnalysis, ...fields };
+      const currentDraft = blueprint.draftBlueprint ? JSON.parse(blueprint.draftBlueprint) : {};
+
+      for (const [key, value] of Object.entries(fields)) {
+        if (currentDraft[key] && typeof currentDraft[key] === "object") {
+          currentDraft[key] = { value, confidence: 100 };
+        } else {
+          currentDraft[key] = { value, confidence: 100 };
+        }
+      }
+
+      const wasConfirmed = ["CONFIRMED", "ANALYSIS_COMPLETE", "VALIDATED"].includes(blueprint.status);
+
+      const updateData: any = {
+        draftBlueprint: JSON.stringify(currentDraft),
+        creativeAnalysis: JSON.stringify(currentDraft),
+        updatedAt: new Date(),
+      };
+
+      if (wasConfirmed) {
+        updateData.status = "EXTRACTION_COMPLETE";
+        updateData.confirmedBlueprint = null;
+        updateData.confirmedAt = null;
+        updateData.marketMap = null;
+        updateData.validationResult = null;
+        updateData.validatedAt = null;
+        updateData.orchestratorPlan = null;
+        updateData.orchestratedAt = null;
+      }
 
       await db.update(strategicBlueprints)
-        .set({
-          creativeAnalysis: JSON.stringify(updatedAnalysis),
-          validationResult: null,
-          validatedAt: null,
-          updatedAt: new Date(),
-        })
+        .set(updateData)
         .where(eq(strategicBlueprints.id, id));
+
+      const clarifications = buildClarificationPrompts(currentDraft);
 
       res.json({
         success: true,
         blueprintId: id,
         updatedFields: Object.keys(fields),
-        creativeAnalysis: updatedAnalysis,
-        validationCleared: true,
+        draftBlueprint: currentDraft,
+        statusReset: wasConfirmed,
+        resetReason: wasConfirmed ? "Edit after confirmation resets to EXTRACTION_COMPLETE. Re-confirm and re-validate required." : null,
+        pendingClarifications: clarifications,
       });
     } catch (error: any) {
       console.error("[StrategicCore] Edit error:", error.message);
@@ -76,20 +146,20 @@ export function registerConfirmRoutes(app: Express) {
         return res.status(404).json({ error: "Blueprint not found" });
       }
 
-      if (!["EXTRACTION_COMPLETE", "ANALYSIS_COMPLETE"].includes(blueprint.status)) {
-        return res.status(400).json({ error: "Blueprint must complete extraction before confirmation" });
+      if (blueprint.status !== "EXTRACTION_COMPLETE") {
+        return res.status(400).json({ error: "Blueprint must be in EXTRACTION_COMPLETE state to confirm" });
       }
 
-      const analysis = blueprint.creativeAnalysis ? JSON.parse(blueprint.creativeAnalysis) : null;
-      if (!analysis) {
-        return res.status(400).json({ error: "No creative analysis found. Complete Phase 1 first." });
+      const draft = blueprint.draftBlueprint ? JSON.parse(blueprint.draftBlueprint) : null;
+      if (!draft) {
+        return res.status(400).json({ error: "No draft blueprint found. Complete Phase 1 first." });
       }
 
-      if (!blueprint.averageSellingPrice && !analysis.detectedPriceIfVisible) {
+      if (!blueprint.averageSellingPrice) {
         return res.status(400).json({
           error: "GATE_FAILED",
           field: "price",
-          message: "Price is required for confirmation. Either set average selling price or ensure price is visible in creative.",
+          message: "Price is required for confirmation.",
         });
       }
 
@@ -98,57 +168,49 @@ export function registerConfirmRoutes(app: Express) {
         return res.status(400).json({
           error: "GATE_FAILED",
           field: "competitorUrls",
-          message: "Minimum 2 competitor URLs required for confirmation.",
+          message: "Minimum 2 competitor URLs required.",
         });
       }
 
-      const lowConfidenceFields: string[] = [];
-      const clarificationPrompts: { field: string; questions: string[] }[] = [];
-
-      if (analysis.confidenceScore < LOW_CONFIDENCE_THRESHOLD) {
-        const fieldsToCheck = ["detectedOffer", "detectedPositioning", "detectedCTA", "detectedAudienceGuess", "detectedFunnelStage"];
-        for (const field of fieldsToCheck) {
-          if (!analysis[field] || analysis[field] === "null") {
-            lowConfidenceFields.push(field);
-            if (CLARIFICATION_QUESTIONS[field]) {
-              clarificationPrompts.push({
-                field,
-                questions: CLARIFICATION_QUESTIONS[field],
-              });
-            }
-          }
-        }
-
-        if (clarificationPrompts.length > 0) {
-          return res.json({
-            success: false,
-            needsClarification: true,
-            lowConfidenceFields,
-            clarificationPrompts: clarificationPrompts.slice(0, 3),
-            message: "Some fields need your input before confirmation.",
-          });
-        }
+      const clarifications = buildClarificationPrompts(draft);
+      if (clarifications.length > 0) {
+        return res.json({
+          success: false,
+          needsClarification: true,
+          clarificationPrompts: clarifications,
+          message: "Some critical fields have low confidence or insufficient data. Please provide input before confirming.",
+        });
       }
 
-      const confirmedData = {
-        detectedOffer: analysis.detectedOffer,
-        detectedPositioning: analysis.detectedPositioning,
-        detectedCTA: analysis.detectedCTA,
-        detectedAudienceGuess: analysis.detectedAudienceGuess,
-        detectedFunnelStage: analysis.detectedFunnelStage,
-        detectedPriceIfVisible: analysis.detectedPriceIfVisible,
-        confidenceScore: analysis.confidenceScore,
-        detectedLanguage: analysis.detectedLanguage,
-        transcribedText: analysis.transcribedText,
-        ocrText: analysis.ocrText,
+      const confirmedData: any = {
         confirmedAt: new Date().toISOString(),
+        detectedLanguage: draft.detectedLanguage,
+        transcribedText: draft.transcribedText,
+        ocrText: draft.ocrText,
       };
+
+      const extractionFields = ["detectedOffer", "detectedPositioning", "detectedCTA", "detectedAudienceGuess", "detectedFunnelStage", "detectedPriceIfVisible"];
+      for (const field of extractionFields) {
+        const fieldData = draft[field];
+        if (fieldData && typeof fieldData === "object" && "value" in fieldData) {
+          confirmedData[field] = fieldData.value;
+          confirmedData[field + "Confidence"] = fieldData.confidence;
+        } else {
+          confirmedData[field] = fieldData;
+          confirmedData[field + "Confidence"] = 50;
+        }
+      }
 
       await db.update(strategicBlueprints)
         .set({
           status: "CONFIRMED",
           confirmedBlueprint: JSON.stringify(confirmedData),
           confirmedAt: new Date(),
+          marketMap: null,
+          validationResult: null,
+          validatedAt: null,
+          orchestratorPlan: null,
+          orchestratedAt: null,
           updatedAt: new Date(),
         })
         .where(eq(strategicBlueprints.id, id));

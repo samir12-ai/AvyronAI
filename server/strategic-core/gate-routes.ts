@@ -1,12 +1,72 @@
 import type { Express, Request, Response } from "express";
 import { db } from "../db";
-import { strategicBlueprints, blueprintCompetitors } from "@shared/schema";
+import { strategicBlueprints, blueprintCompetitors, campaignSelections } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
+
+interface CampaignContextObject {
+  campaignId: string;
+  campaignName: string;
+  objective: string;
+  location: string | null;
+  platform: string;
+  isDemo: boolean;
+}
+
+const DEMO_CAMPAIGN_CONTEXT: CampaignContextObject = {
+  campaignId: "DEMO_CAMPAIGN",
+  campaignName: "Demo Campaign (Meta Not Connected)",
+  objective: "general_marketing",
+  location: null,
+  platform: "demo",
+  isDemo: true,
+};
+
+async function resolveCampaignContext(
+  accountId: string,
+  campaignId?: string,
+  metaConnected?: boolean,
+): Promise<{ context: CampaignContextObject | null; error: string | null }> {
+  if (metaConnected && campaignId) {
+    const [campaign] = await db.select().from(campaignSelections)
+      .where(and(
+        eq(campaignSelections.selectedCampaignId, campaignId),
+        eq(campaignSelections.accountId, accountId),
+      )).limit(1);
+
+    if (!campaign) {
+      return { context: null, error: "Selected campaign not found. Please select a valid campaign." };
+    }
+
+    return {
+      context: {
+        campaignId: campaign.selectedCampaignId,
+        campaignName: campaign.selectedCampaignName,
+        objective: campaign.campaignGoalType,
+        location: campaign.campaignLocation || null,
+        platform: campaign.selectedPlatform || "meta",
+        isDemo: false,
+      },
+      error: null,
+    };
+  }
+
+  if (metaConnected && !campaignId) {
+    return { context: null, error: "Meta is connected — you must select a campaign before building a plan." };
+  }
+
+  return { context: DEMO_CAMPAIGN_CONTEXT, error: null };
+}
 
 export function registerGateRoutes(app: Express) {
   app.post("/api/strategic/init", async (req: Request, res: Response) => {
     try {
-      const { accountId = "default", campaignId, competitorUrls, averageSellingPrice } = req.body;
+      const {
+        accountId = "default",
+        campaignId,
+        competitorUrls,
+        averageSellingPrice,
+        metaConnected = false,
+      } = req.body;
 
       if (!competitorUrls || !Array.isArray(competitorUrls) || competitorUrls.length < 2) {
         return res.status(400).json({
@@ -19,12 +79,7 @@ export function registerGateRoutes(app: Express) {
       }
 
       const validUrls = competitorUrls.filter((u: string) => {
-        try {
-          new URL(u);
-          return true;
-        } catch {
-          return false;
-        }
+        try { new URL(u); return true; } catch { return false; }
       });
       if (validUrls.length < 2) {
         return res.status(400).json({
@@ -43,9 +98,20 @@ export function registerGateRoutes(app: Express) {
         });
       }
 
+      const { context: campaignContext, error: campaignError } = await resolveCampaignContext(
+        accountId, campaignId, metaConnected,
+      );
+      if (campaignError) {
+        return res.status(400).json({
+          error: "CAMPAIGN_CONTEXT_REQUIRED",
+          message: campaignError,
+        });
+      }
+
       const [blueprint] = await db.insert(strategicBlueprints).values({
         accountId,
-        campaignId: campaignId || null,
+        campaignId: campaignContext!.campaignId,
+        campaignContext: JSON.stringify(campaignContext),
         status: "GATE_PASSED",
         competitorUrls: JSON.stringify(validUrls),
         averageSellingPrice: Number(averageSellingPrice),
@@ -64,6 +130,7 @@ export function registerGateRoutes(app: Express) {
         status: blueprint.status,
         competitorCount: validUrls.length,
         averageSellingPrice: blueprint.averageSellingPrice,
+        campaignContext,
       });
     } catch (error: any) {
       console.error("[StrategicCore] Gate init error:", error.message);
@@ -87,6 +154,8 @@ export function registerGateRoutes(app: Express) {
         blueprint: {
           ...blueprint,
           competitorUrls: blueprint.competitorUrls ? JSON.parse(blueprint.competitorUrls) : [],
+          campaignContext: blueprint.campaignContext ? JSON.parse(blueprint.campaignContext) : null,
+          draftBlueprint: blueprint.draftBlueprint ? JSON.parse(blueprint.draftBlueprint) : null,
           creativeAnalysis: blueprint.creativeAnalysis ? JSON.parse(blueprint.creativeAnalysis) : null,
           confirmedBlueprint: blueprint.confirmedBlueprint ? JSON.parse(blueprint.confirmedBlueprint) : null,
           marketMap: blueprint.marketMap ? JSON.parse(blueprint.marketMap) : null,
@@ -113,6 +182,7 @@ export function registerGateRoutes(app: Express) {
         blueprints: blueprints.map(b => ({
           ...b,
           competitorUrls: b.competitorUrls ? JSON.parse(b.competitorUrls) : [],
+          campaignContext: b.campaignContext ? JSON.parse(b.campaignContext) : null,
         })),
       });
     } catch (error: any) {

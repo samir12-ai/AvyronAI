@@ -11,6 +11,8 @@ const openai = new OpenAI({
 
 const VALIDATION_PROMPT = `You are a strategic validation engine. Your job is to detect contradictions, evaluate strategic coherence, and flag risks in a campaign blueprint.
 
+CRITICAL: You are validating the CONFIRMED BLUEPRINT only. This is the user-approved source of truth. Do not reference or consider any draft data.
+
 You must check for:
 1. CONTRADICTIONS: e.g., "premium" positioning + heavy discount, "awareness" funnel + hard-sell CTA, luxury tone + bargain pricing
 2. OFFER CLARITY: Is the offer specific, measurable, and compelling?
@@ -18,6 +20,7 @@ You must check for:
 4. AUDIENCE-OFFER FIT: Does the offer match the target audience?
 5. CTA-FUNNEL ALIGNMENT: Does the CTA match the funnel stage?
 6. COMPETITIVE VIABILITY: Based on market map, is the strategy defensible?
+7. CAMPAIGN-STRATEGY ALIGNMENT: Does the strategy align with the campaign objective?
 
 Respond with ONLY a valid JSON object:
 {
@@ -45,6 +48,11 @@ Respond with ONLY a valid JSON object:
   },
   "ctaFunnelAlignment": {
     "aligned": true|false,
+    "details": "string"
+  },
+  "campaignAlignment": {
+    "aligned": true|false,
+    "objective": "string",
     "details": "string"
   },
   "strategicWeaknesses": [
@@ -81,14 +89,29 @@ export function registerValidationRoutes(app: Express) {
 
       const confirmedBlueprint = blueprint.confirmedBlueprint ? JSON.parse(blueprint.confirmedBlueprint) : null;
       if (!confirmedBlueprint) {
-        return res.status(400).json({ error: "No confirmed blueprint data" });
+        return res.status(400).json({ error: "No confirmed blueprint data. Confirmed blueprint is the only source of truth." });
+      }
+
+      const campaignContext = blueprint.campaignContext ? JSON.parse(blueprint.campaignContext) : null;
+      if (!campaignContext) {
+        return res.status(400).json({
+          error: "CAMPAIGN_CONTEXT_REQUIRED",
+          message: "No campaign context — Validation cannot run without campaign context.",
+        });
       }
 
       const marketMap = blueprint.marketMap ? JSON.parse(blueprint.marketMap) : null;
 
-      const userPrompt = `Validate this campaign strategy:
+      const userPrompt = `Validate this campaign strategy. Use ONLY the confirmed blueprint as source of truth.
 
-CONFIRMED BLUEPRINT:
+CAMPAIGN CONTEXT:
+- Campaign: ${campaignContext.campaignName}
+- Objective: ${campaignContext.objective}
+- Location: ${campaignContext.location || "Not specified"}
+- Platform: ${campaignContext.platform}
+- Mode: ${campaignContext.isDemo ? "DEMO" : "PRODUCTION"}
+
+CONFIRMED BLUEPRINT (source of truth):
 ${JSON.stringify(confirmedBlueprint, null, 2)}
 
 AVERAGE SELLING PRICE: $${blueprint.averageSellingPrice || "unknown"}

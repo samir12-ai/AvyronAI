@@ -11,9 +11,11 @@ const openai = new OpenAI({
 
 const ORCHESTRATOR_PROMPT = `You are an execution orchestrator. You do NOT think. You do NOT reinterpret. You do NOT override the confirmed blueprint.
 
-You organize execution STRICTLY from the validated blueprint and market map.
+You organize execution STRICTLY from the validated, confirmed blueprint and market map.
 
-You must generate exactly 6 structured execution plans. All output must be structured objects. Never change positioning, offer, or any confirmed blueprint fields.
+CRITICAL: The confirmed blueprint is the ONLY source of truth. Never change positioning, offer, audience, CTA, or any confirmed field.
+
+You must generate exactly 6 structured execution plans. All output must be structured objects.
 
 Respond with ONLY a valid JSON object:
 {
@@ -112,24 +114,38 @@ export function registerOrchestratorRoutes(app: Express) {
       if (blueprint.status !== "VALIDATED") {
         return res.status(400).json({
           error: "STATUS_GATE",
-          message: "No Blueprint.confirmed + validated → no Orchestrator. Blueprint must be VALIDATED first.",
+          message: "Blueprint must be VALIDATED first. No confirmed + validated → no Orchestrator.",
           currentStatus: blueprint.status,
         });
       }
 
       const confirmedBlueprint = blueprint.confirmedBlueprint ? JSON.parse(blueprint.confirmedBlueprint) : null;
-      const marketMap = blueprint.marketMap ? JSON.parse(blueprint.marketMap) : null;
-      const validationResult = blueprint.validationResult ? JSON.parse(blueprint.validationResult) : null;
-
       if (!confirmedBlueprint) {
-        return res.status(400).json({ error: "No confirmed blueprint" });
+        return res.status(400).json({ error: "No confirmed blueprint. Confirmed blueprint is the only source of truth." });
       }
 
+      const campaignContext = blueprint.campaignContext ? JSON.parse(blueprint.campaignContext) : null;
+      if (!campaignContext) {
+        return res.status(400).json({
+          error: "CAMPAIGN_CONTEXT_REQUIRED",
+          message: "No campaign context — Orchestrator cannot run without campaign context.",
+        });
+      }
+
+      const marketMap = blueprint.marketMap ? JSON.parse(blueprint.marketMap) : null;
+      const validationResult = blueprint.validationResult ? JSON.parse(blueprint.validationResult) : null;
       const competitorUrls = blueprint.competitorUrls ? JSON.parse(blueprint.competitorUrls) : [];
 
-      const userPrompt = `Generate execution plans from this validated blueprint. Do NOT reinterpret or override ANY confirmed data.
+      const userPrompt = `Generate execution plans from this validated blueprint. Do NOT reinterpret or override ANY confirmed data. The confirmed blueprint is the ONLY source of truth.
 
-CONFIRMED BLUEPRINT:
+CAMPAIGN CONTEXT:
+- Campaign: ${campaignContext.campaignName}
+- Objective: ${campaignContext.objective}
+- Location: ${campaignContext.location || "Not specified"}
+- Platform: ${campaignContext.platform}
+- Mode: ${campaignContext.isDemo ? "DEMO" : "PRODUCTION"}
+
+CONFIRMED BLUEPRINT (source of truth — do NOT change any values):
 ${JSON.stringify(confirmedBlueprint, null, 2)}
 
 AVERAGE SELLING PRICE: $${blueprint.averageSellingPrice}
@@ -140,7 +156,7 @@ ${marketMap ? `MARKET MAP:\n${JSON.stringify(marketMap, null, 2)}` : ""}
 
 ${validationResult ? `VALIDATION RESULT:\n${JSON.stringify(validationResult, null, 2)}` : ""}
 
-Generate all 6 execution plans now. Strictly from the validated data. No reinterpretation.`;
+Generate all 6 execution plans now. Strictly from the confirmed, validated data. No reinterpretation.`;
 
       const response = await openai.chat.completions.create({
         model: "gpt-5.2",
