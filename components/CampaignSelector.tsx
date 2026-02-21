@@ -267,6 +267,12 @@ function CampaignListModal({
                             {item.goalType}
                           </Text>
                         </View>
+                        {item.location && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 6 }}>
+                            <Ionicons name="location-outline" size={11} color="#9CA3AF" style={{ marginRight: 2 }} />
+                            <Text style={styles.campaignBudget}>{item.location}</Text>
+                          </View>
+                        )}
                         {item.budget && (
                           <Text style={styles.campaignBudget}>{item.budget}</Text>
                         )}

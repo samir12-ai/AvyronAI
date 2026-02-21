@@ -12,6 +12,7 @@ interface CampaignInfo {
   budget?: string;
   startDate?: string;
   isDemo?: boolean;
+  location?: string;
 }
 
 interface CampaignSelection {
@@ -20,6 +21,7 @@ interface CampaignSelection {
   selectedPlatform: string;
   campaignGoalType: string;
   campaignStatus: string;
+  campaignLocation?: string;
 }
 
 interface CampaignWarning {
@@ -88,6 +90,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
           campaignName: campaign.name,
           platform: campaign.platform,
           goalType: campaign.goalType,
+          campaignLocation: campaign.location,
         }),
       });
 

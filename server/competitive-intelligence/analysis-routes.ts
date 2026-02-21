@@ -198,7 +198,7 @@ export function registerCiAnalysisRoutes(app: Express) {
     }
   });
 
-  app.get("/api/ci/analyses", async (req, res) => {
+  app.get("/api/ci/analyses", requireCampaign, async (req, res) => {
     try {
       const accountId = (req.query.accountId as string) || "default";
       const enabled = await featureFlagService.isEnabled("competitive_intelligence_enabled", accountId);
@@ -213,7 +213,7 @@ export function registerCiAnalysisRoutes(app: Express) {
     }
   });
 
-  app.get("/api/ci/analyses/:id", async (req, res) => {
+  app.get("/api/ci/analyses/:id", requireCampaign, async (req, res) => {
     try {
       const { id } = req.params;
       const accountId = (req.query.accountId as string) || "default";
@@ -234,7 +234,7 @@ export function registerCiAnalysisRoutes(app: Express) {
     }
   });
 
-  app.get("/api/ci/recommendations", async (req, res) => {
+  app.get("/api/ci/recommendations", requireCampaign, async (req, res) => {
     try {
       const accountId = (req.query.accountId as string) || "default";
       const status = req.query.status as string;
@@ -338,7 +338,7 @@ export function registerCiAnalysisRoutes(app: Express) {
     }
   });
 
-  app.get("/api/ci/strategy-timeline", async (req, res) => {
+  app.get("/api/ci/strategy-timeline", requireCampaign, async (req, res) => {
     try {
       const accountId = (req.query.accountId as string) || "default";
       const enabled = await featureFlagService.isEnabled("competitive_intelligence_enabled", accountId);
@@ -368,7 +368,7 @@ export function registerCiAnalysisRoutes(app: Express) {
     }
   });
 
-  app.get("/api/ci/month-diff/:month", async (req, res) => {
+  app.get("/api/ci/month-diff/:month", requireCampaign, async (req, res) => {
     try {
       const { month } = req.params;
       const accountId = (req.query.accountId as string) || "default";

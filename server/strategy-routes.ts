@@ -14,6 +14,7 @@ import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
 import OpenAI from "openai";
 import { GoogleGenAI } from "@google/genai";
 import { requireCampaign } from "./campaign-routes";
+import { getRevenueSummary, getCampaignMetrics } from "./campaign-data-layer";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -145,6 +146,10 @@ export function registerStrategyRoutes(app: Express) {
         return res.status(400).json({ error: "No performance data available. Sync your Meta data first." });
       }
 
+      const campaignContext = (req as any).campaignContext;
+      const revenueSummary = await getRevenueSummary(campaignContext.campaignId, "default");
+      const campaignMetrics = await getCampaignMetrics(campaignContext.campaignId, "default");
+
       const dataForAI = allData.map(d => ({
         postId: d.postId,
         type: d.contentType,
@@ -236,6 +241,18 @@ ${JSON.stringify(averages, null, 2)}
 
 PAST MEMORY (what the system already knows):
 ${JSON.stringify(memoryContext, null, 2)}
+
+CAMPAIGN CONTEXT:
+Campaign: ${campaignContext.campaignName} (Goal: ${campaignContext.goalType})
+Location: ${campaignContext.location || 'Not specified'}
+
+REVENUE DATA (injected from Revenue Attribution):
+${JSON.stringify({ totalRevenue: revenueSummary.totalRevenue, monthRevenue: revenueSummary.monthRevenue, roas: revenueSummary.roas, monthRoas: revenueSummary.monthRoas, topRevenueContent: revenueSummary.topRevenueContent, costPerLead: revenueSummary.costPerLead, leadToCustomerRate: revenueSummary.leadToCustomerRate })}
+
+CAMPAIGN METRICS:
+${JSON.stringify({ totalSpend: campaignMetrics.totalSpend, avgCpa: campaignMetrics.avgCpa, avgRoas: campaignMetrics.avgRoas, totalConversions: campaignMetrics.totalConversions, totalLeads: campaignMetrics.totalLeads })}
+
+CRITICAL: Your analysis must account for revenue data. Engagement-only optimization is NOT sufficient. Prioritize decisions that increase revenue, reduce CPA, and improve ROAS.
 
 Return ONLY valid JSON with this structure:
 {
@@ -372,7 +389,7 @@ Return ONLY valid JSON with this structure:
     }
   });
 
-  app.patch("/api/strategy/decisions/:id", async (req, res) => {
+  app.patch("/api/strategy/decisions/:id", requireCampaign, async (req, res) => {
     try {
       const { status, outcome } = req.body;
       await db.update(strategyDecisions)
@@ -384,7 +401,7 @@ Return ONLY valid JSON with this structure:
     }
   });
 
-  app.get("/api/strategy/memory", async (req, res) => {
+  app.get("/api/strategy/memory", requireCampaign, async (req, res) => {
     try {
       const memories = await db.select().from(strategyMemory)
         .orderBy(desc(strategyMemory.updatedAt))
@@ -411,7 +428,7 @@ Return ONLY valid JSON with this structure:
     }
   });
 
-  app.get("/api/strategy/growth-campaigns", async (req, res) => {
+  app.get("/api/strategy/growth-campaigns", requireCampaign, async (req, res) => {
     try {
       const campaigns = await db.select().from(growthCampaigns)
         .orderBy(desc(growthCampaigns.startedAt));
@@ -421,7 +438,7 @@ Return ONLY valid JSON with this structure:
     }
   });
 
-  app.post("/api/strategy/growth-campaign/:id/advance", async (req, res) => {
+  app.post("/api/strategy/growth-campaign/:id/advance", requireCampaign, async (req, res) => {
     try {
       const [campaign] = await db.select().from(growthCampaigns)
         .where(eq(growthCampaigns.id, req.params.id));
@@ -520,6 +537,9 @@ Return JSON:
 
       const averages = await getAccountAverages();
 
+      const campaignContext = (req as any).campaignContext;
+      const revenueSummary = await getRevenueSummary(campaignContext.campaignId, "default");
+
       const aiResponse = await openai.chat.completions.create({
         model: "gpt-5.2",
         messages: [
@@ -545,6 +565,15 @@ RECENT INSIGHTS: ${JSON.stringify(insights.map(i => ({ category: i.category, ins
 DECISIONS MADE: ${JSON.stringify(decisions.map(d => ({ trigger: d.trigger, action: d.action, status: d.status })))}
 
 MEMORY (past learnings): ${JSON.stringify(memories.map(m => ({ type: m.memoryType, label: m.label, winner: m.isWinner })))}
+
+REVENUE CONTEXT (from Revenue Attribution module):
+Total Revenue: $${revenueSummary.totalRevenue}, Month Revenue: $${revenueSummary.monthRevenue}
+ROAS: ${revenueSummary.roas}, Month ROAS: ${revenueSummary.monthRoas}
+Top Revenue Content: ${JSON.stringify(revenueSummary.topRevenueContent)}
+Cost Per Lead: $${revenueSummary.costPerLead}
+Lead-to-Customer Rate: ${revenueSummary.leadToCustomerRate}%
+
+Your report MUST include revenue analysis, not just engagement metrics.
 
 Return JSON:
 {
@@ -612,7 +641,7 @@ Return JSON:
     }
   });
 
-  app.get("/api/strategy/weekly-reports", async (req, res) => {
+  app.get("/api/strategy/weekly-reports", requireCampaign, async (req, res) => {
     try {
       const reports = await db.select().from(weeklyReports)
         .orderBy(desc(weeklyReports.createdAt)).limit(12);

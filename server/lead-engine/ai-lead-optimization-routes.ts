@@ -5,6 +5,7 @@ import { eq, desc, sql, gte } from "drizzle-orm";
 import { featureFlagService } from "../feature-flags";
 import { logAudit } from "../audit";
 import { requireCampaign } from "../campaign-routes";
+import { getRevenueSummary } from "../campaign-data-layer";
 import OpenAI from "openai";
 
 const openai = new OpenAI({
@@ -16,6 +17,7 @@ export function registerAiLeadOptimizationRoutes(app: Express) {
   app.post("/api/lead-optimization/analyze", requireCampaign, async (req, res) => {
     try {
       const accountId = req.body.accountId || "default";
+      const campaignContext = (req as any).campaignContext;
       const check = await featureFlagService.checkWithDependencies("ai_lead_optimization_enabled", accountId);
       if (!check.enabled) {
         return res.status(403).json({ error: "AI Lead Optimization is not enabled" });
@@ -77,6 +79,8 @@ export function registerAiLeadOptimizationRoutes(app: Express) {
         recentPostCount: posts.length,
       };
 
+      const revenueSummary = await getRevenueSummary(campaignContext.campaignId, accountId);
+
       const response = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
@@ -88,6 +92,16 @@ export function registerAiLeadOptimizationRoutes(app: Express) {
 3. Where the funnel is leaking
 4. Specific content strategy adjustments to increase conversion
 5. Lead quality insights
+6. Revenue attribution analysis - which content and CTAs actually generate revenue, not just leads
+7. Revenue-per-lead optimization - identify highest revenue-generating lead sources
+
+REVENUE DATA (from Revenue Attribution module):
+Total Revenue: $${revenueSummary.totalRevenue}, Month Revenue: $${revenueSummary.monthRevenue}
+ROAS: ${revenueSummary.roas}, Top Revenue Content: ${JSON.stringify(revenueSummary.topRevenueContent)}
+Cost Per Lead: $${revenueSummary.costPerLead}, Lead-to-Customer Rate: ${revenueSummary.leadToCustomerRate}%
+Revenue by Funnel Stage: ${JSON.stringify(revenueSummary.revenueByFunnelStage)}
+
+CRITICAL: Optimize for REVENUE, not just lead volume. A lead source with fewer leads but higher revenue-per-lead is more valuable.
 
 Return JSON with: "insights" (array of {category, finding, recommendation, impact_level}), "contentStrategy" (object with adjustments), "predictedImpact" (estimated improvement percentages).`,
           },
@@ -115,7 +129,7 @@ Return JSON with: "insights" (array of {category, finding, recommendation, impac
     }
   });
 
-  app.get("/api/lead-optimization/best-content", async (req, res) => {
+  app.get("/api/lead-optimization/best-content", requireCampaign, async (req, res) => {
     try {
       const accountId = (req.query.accountId as string) || "default";
       if (!(await featureFlagService.isEnabled("ai_lead_optimization_enabled", accountId))) {

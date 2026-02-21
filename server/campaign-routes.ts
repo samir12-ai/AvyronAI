@@ -2,6 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { db } from "./db";
 import { campaignSelections } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
+import { getCampaignMetrics, getRevenueSummary, detectPerformanceSignals } from "./campaign-data-layer";
 
 const VALID_GOAL_TYPES = ["LEADS", "AWARENESS", "RETARGETING", "SALES", "TESTING"] as const;
 
@@ -15,6 +16,7 @@ const DEMO_CAMPAIGNS = [
     budget: "$2,500/mo",
     startDate: "2026-01-15",
     isDemo: true,
+    location: "Dubai, UAE",
   },
   {
     id: "demo_awareness_001",
@@ -25,6 +27,7 @@ const DEMO_CAMPAIGNS = [
     budget: "$1,800/mo",
     startDate: "2026-02-01",
     isDemo: true,
+    location: "Dubai, UAE",
   },
   {
     id: "demo_retargeting_001",
@@ -35,6 +38,7 @@ const DEMO_CAMPAIGNS = [
     budget: "$900/mo",
     startDate: "2026-01-20",
     isDemo: true,
+    location: "Dubai, UAE",
   },
   {
     id: "demo_sales_001",
@@ -45,6 +49,7 @@ const DEMO_CAMPAIGNS = [
     budget: "$3,200/mo",
     startDate: "2025-11-01",
     isDemo: true,
+    location: "Abu Dhabi, UAE",
   },
   {
     id: "demo_testing_001",
@@ -55,6 +60,7 @@ const DEMO_CAMPAIGNS = [
     budget: "$500/mo",
     startDate: "2026-02-10",
     isDemo: true,
+    location: "Dubai, UAE",
   },
   {
     id: "demo_paused_001",
@@ -65,6 +71,7 @@ const DEMO_CAMPAIGNS = [
     budget: "$4,000/mo",
     startDate: "2025-12-01",
     isDemo: true,
+    location: "Dubai, UAE",
   },
 ];
 
@@ -92,7 +99,7 @@ export function registerCampaignRoutes(app: Express) {
 
   app.post("/api/campaigns/select", async (req, res) => {
     try {
-      const { campaignId, campaignName, platform, goalType, accountId: reqAccountId } = req.body;
+      const { campaignId, campaignName, platform, goalType, campaignLocation, accountId: reqAccountId } = req.body;
       const accountId = reqAccountId || "default";
 
       if (!campaignId || !campaignName || !goalType) {
@@ -129,6 +136,7 @@ export function registerCampaignRoutes(app: Express) {
             selectedPlatform: platform || "meta",
             campaignGoalType: goalType,
             campaignStatus: campaign?.status || "active",
+            campaignLocation: campaignLocation || campaign?.location || null,
             selectedAt: new Date(),
             updatedAt: new Date(),
           })
@@ -145,6 +153,7 @@ export function registerCampaignRoutes(app: Express) {
             selectedPlatform: platform || "meta",
             campaignGoalType: goalType,
             campaignStatus: campaign?.status || "active",
+            campaignLocation: campaignLocation || campaign?.location || null,
           })
           .returning();
         selection = inserted[0];
@@ -226,6 +235,53 @@ export function registerCampaignRoutes(app: Express) {
       res.status(500).json({ error: "Failed to clear campaign selection" });
     }
   });
+
+  app.get("/api/campaigns/metrics", requireCampaign, async (req, res) => {
+    try {
+      const campaignContext = (req as any).campaignContext;
+      const accountId = (req.query.accountId as string) || "default";
+      const metrics = await getCampaignMetrics(campaignContext.campaignId, accountId);
+      res.json({ success: true, metrics, campaign: campaignContext });
+    } catch (error: any) {
+      console.error("[Campaigns] Metrics error:", error);
+      res.status(500).json({ error: "Failed to fetch campaign metrics" });
+    }
+  });
+
+  app.get("/api/campaigns/signals", requireCampaign, async (req, res) => {
+    try {
+      const campaignContext = (req as any).campaignContext;
+      const accountId = (req.query.accountId as string) || "default";
+      const signals = await detectPerformanceSignals(campaignContext.campaignId, accountId);
+      const scaleSignals = signals.filter(s => s.signalType === "SCALE_CANDIDATE");
+      const reviewSignals = signals.filter(s => s.signalType === "REVIEW_NEEDED");
+      res.json({
+        success: true,
+        campaign: campaignContext,
+        signals,
+        summary: {
+          totalSignals: signals.length,
+          scaleOpportunities: scaleSignals.length,
+          reviewNeeded: reviewSignals.length,
+        },
+      });
+    } catch (error: any) {
+      console.error("[Campaigns] Signals error:", error);
+      res.status(500).json({ error: "Failed to detect performance signals" });
+    }
+  });
+
+  app.get("/api/campaigns/revenue-summary", requireCampaign, async (req, res) => {
+    try {
+      const campaignContext = (req as any).campaignContext;
+      const accountId = (req.query.accountId as string) || "default";
+      const summary = await getRevenueSummary(campaignContext.campaignId, accountId);
+      res.json({ success: true, summary, campaign: campaignContext });
+    } catch (error: any) {
+      console.error("[Campaigns] Revenue summary error:", error);
+      res.status(500).json({ error: "Failed to fetch revenue summary" });
+    }
+  });
 }
 
 export async function requireCampaign(req: Request, res: Response, next: NextFunction) {
@@ -261,6 +317,7 @@ export async function requireCampaign(req: Request, res: Response, next: NextFun
       campaignName: selection.selectedCampaignName,
       platform: selection.selectedPlatform,
       goalType: selection.campaignGoalType,
+      location: selection.campaignLocation || null,
     };
 
     next();

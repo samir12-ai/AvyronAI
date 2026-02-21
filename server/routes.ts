@@ -986,12 +986,21 @@ Generate 25-30 posts. Make EVERY post specific to their products/services - zero
     }
   });
 
-  app.post("/api/generate-audience", async (req, res) => {
+  app.post("/api/generate-audience", requireCampaign, async (req, res) => {
     try {
       const { campaignGoal, product, budget, brandName, industry, targetAudience } = req.body;
+      const campaignContext = (req as any).campaignContext;
 
       if (!campaignGoal) {
         return res.status(400).json({ error: "Campaign goal is required" });
+      }
+
+      const location = campaignContext?.location;
+      if (!location) {
+        return res.status(400).json({
+          error: "LOCATION_REQUIRED",
+          message: "Campaign location must be set before generating audiences. Update your campaign selection with a location.",
+        });
       }
 
       const systemPrompt = `You are a Meta Ads expert who builds highly targeted audiences for Facebook and Instagram campaigns. You understand Meta's detailed targeting options, Lookalike audiences, Custom audiences, and the Meta Advantage+ system.
@@ -1001,13 +1010,19 @@ You know exactly how to configure Meta Ads Manager targeting for maximum ROAS (R
 BRAND CONTEXT:
 - Brand: ${brandName || 'the brand'}
 - Industry: ${industry || 'general business'}
-- Current Audience: ${targetAudience || 'general audience'}`;
+- Current Audience: ${targetAudience || 'general audience'}
+
+CAMPAIGN CONTEXT:
+- Campaign: ${campaignContext.campaignName} (Goal: ${campaignContext.goalType})
+- Location: ${location}
+- All audiences MUST be geographically scoped to: ${location}. Do NOT generate broad/global audiences unless the location explicitly says "Global".`;
 
       const userPrompt = `Create 3 optimized Meta ad audiences for this campaign:
 
 CAMPAIGN GOAL: ${campaignGoal}
 PRODUCT/SERVICE: ${product || 'General offering'}
 BUDGET: ${budget || 'Not specified'}
+LOCATION (MANDATORY): ${location}
 
 For each audience, provide:
 1. A clear name for the audience
@@ -1017,6 +1032,8 @@ For each audience, provide:
 5. Recommended ad placements (Feed, Stories, Reels, Explore)
 6. Suggested bid strategy
 
+ALL audiences must be scoped to the campaign location: ${location}
+
 Return ONLY a valid JSON array with exactly 3 audience objects:
 {
   "name": "Audience name",
@@ -1024,7 +1041,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   "age_min": 18,
   "age_max": 65,
   "gender": "all" | "male" | "female",
-  "locations": ["Country or region names"],
+  "locations": ["${location}"],
   "interests": ["List of Meta interest targeting options"],
   "behaviors": ["List of Meta behavior targeting options"],
   "estimated_size": "500K - 1.2M",

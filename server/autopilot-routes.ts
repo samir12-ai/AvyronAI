@@ -90,7 +90,7 @@ router.patch("/api/autopilot/status", requireCampaign, async (req, res) => {
   }
 });
 
-router.post("/api/autopilot/emergency-stop", async (req, res) => {
+router.post("/api/autopilot/emergency-stop", requireCampaign, async (req, res) => {
   try {
     const accountId = (req.body.accountId as string) || "default";
 
@@ -136,7 +136,7 @@ router.post("/api/autopilot/emergency-stop", async (req, res) => {
   }
 });
 
-router.get("/api/audit-log", async (req, res) => {
+router.get("/api/audit-log", requireCampaign, async (req, res) => {
   try {
     const accountId = (req.query.accountId as string) || "default";
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);

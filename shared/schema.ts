@@ -874,6 +874,7 @@ export const campaignSelections = pgTable("campaign_selections", {
   selectedPlatform: text("selected_platform").default("meta"),
   campaignGoalType: text("campaign_goal_type").notNull(),
   campaignStatus: text("campaign_status").notNull().default("active"),
+  campaignLocation: text("campaign_location"),
   selectedAt: timestamp("selected_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

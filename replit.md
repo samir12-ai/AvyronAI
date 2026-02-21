@@ -69,6 +69,15 @@ Preferred communication style: Simple, everyday language.
 - **Frontend Component**: `components/CompetitiveIntelligence.tsx` - 4 sub-views (Overview, Competitors, Actions, History).
 - **Demo Mode**: Button-triggered, loads 3 sample competitors (FreshBites, LuxeStyle, DigitalPro) with DEMO badges.
 
+### Campaign Data Layer & Structural Integrity
+- **Unified Data Layer**: `server/campaign-data-layer.ts` — Single source of truth for `getCampaignMetrics()`, `getRevenueSummary()`, and `detectPerformanceSignals()`. All strategy, autopilot, lead engine, and CI modules call these functions for consistent data.
+- **Mandatory Campaign Selection**: All performance/analytics endpoints require `requireCampaign` middleware from `server/campaign-routes.ts`. Zero fallback to account-wide data.
+- **Campaign Location**: `campaignSelections.campaignLocation` column stores geo-scope. Audience generation enforces location discipline (rejects if no location set). AI prompts include location context.
+- **Revenue Feedback**: Revenue data from `getRevenueSummary()` is injected into strategy analysis and AI lead optimization prompts. AI decisions must optimize for revenue, not just engagement.
+- **Performance Signals**: Numeric threshold-based detection: `SCALE_THRESHOLD = 1.5` (1.5x baseline = SCALE_CANDIDATE), `REVIEW_THRESHOLD = 0.7` (0.7x baseline = REVIEW_NEEDED). Flags only, no auto-execution.
+- **Campaign Endpoints**: `/api/campaigns/metrics`, `/api/campaigns/signals`, `/api/campaigns/revenue-summary` — all require campaign selection.
+- **Guarded Routes**: ALL strategy, autopilot, lead engine, competitive intelligence, and audience generation routes require `requireCampaign` middleware.
+
 ## External Dependencies
 
 ### AI Services
