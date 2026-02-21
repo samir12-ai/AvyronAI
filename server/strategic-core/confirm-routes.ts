@@ -108,7 +108,7 @@ export function registerConfirmRoutes(app: Express) {
         return res.status(404).json({ error: "Blueprint not found" });
       }
 
-      if (!["GATE_PASSED", "EXTRACTION_COMPLETE", "CONFIRMED", "ANALYSIS_COMPLETE", "VALIDATED"].includes(blueprint.status)) {
+      if (!["GATE_PASSED", "EXTRACTION_COMPLETE", "EXTRACTION_FALLBACK", "CONFIRMED", "ANALYSIS_COMPLETE", "VALIDATED"].includes(blueprint.status)) {
         return res.status(400).json({ error: "Blueprint must be in an editable state" });
       }
 
@@ -208,8 +208,8 @@ export function registerConfirmRoutes(app: Express) {
         return res.status(404).json({ error: "Blueprint not found" });
       }
 
-      if (!["GATE_PASSED", "EXTRACTION_COMPLETE"].includes(blueprint.status)) {
-        return res.status(400).json({ error: "Blueprint must be in GATE_PASSED or EXTRACTION_COMPLETE state to confirm" });
+      if (!["GATE_PASSED", "EXTRACTION_COMPLETE", "EXTRACTION_FALLBACK"].includes(blueprint.status)) {
+        return res.status(400).json({ error: "Blueprint must be in GATE_PASSED, EXTRACTION_COMPLETE, or EXTRACTION_FALLBACK state to confirm" });
       }
 
       const draft = blueprint.draftBlueprint ? JSON.parse(blueprint.draftBlueprint) : null;

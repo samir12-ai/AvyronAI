@@ -170,7 +170,7 @@ export function registerExtractionRoutes(app: Express) {
         return res.status(404).json({ error: "Blueprint not found" });
       }
 
-      if (!["GATE_PASSED", "EXTRACTION_COMPLETE", "ANALYSIS_COMPLETE"].includes(blueprint.status)) {
+      if (!["GATE_PASSED", "EXTRACTION_COMPLETE", "EXTRACTION_FALLBACK", "ANALYSIS_COMPLETE"].includes(blueprint.status)) {
         return res.status(400).json({ error: "Blueprint must pass Phase 0 gate before creative analysis" });
       }
 
@@ -257,8 +257,20 @@ export function registerExtractionRoutes(app: Express) {
         }
       }
 
+      let extractionFallbackUsed = false;
+      let parseFailedReason: string | null = null;
+
       if (!rawAnalysis) {
-        console.warn("[StrategicCore] All parse attempts failed. Using INSUFFICIENT_DATA fallback for all fields.");
+        extractionFallbackUsed = true;
+        const lastAttempt = auditAttempts[auditAttempts.length - 1];
+        if (lastAttempt?.tokens?.truncated) {
+          parseFailedReason = "TRUNCATED";
+        } else if (lastAttempt?.text && lastAttempt.text.trim().length === 0) {
+          parseFailedReason = "EMPTY_RESPONSE";
+        } else {
+          parseFailedReason = "INVALID_JSON";
+        }
+        console.warn(`[StrategicCore] Extraction fallback triggered: ${parseFailedReason}`);
         storeRawAudit(blueprintId, auditAttempts);
         rawAnalysis = {};
       }
@@ -268,13 +280,20 @@ export function registerExtractionRoutes(app: Express) {
       const allInsufficient = ["detectedOffer", "detectedPositioning", "detectedCTA", "detectedAudienceGuess", "detectedFunnelStage"].every(
         f => draftBlueprint[f]?.value === "INSUFFICIENT_DATA"
       );
-      if (allInsufficient) {
+      if (allInsufficient && !extractionFallbackUsed) {
+        extractionFallbackUsed = true;
+        parseFailedReason = "EMPTY_FIELDS";
         storeRawAudit(blueprintId, auditAttempts);
       }
 
+      draftBlueprint.extractionFallbackUsed = extractionFallbackUsed;
+      draftBlueprint.parseFailedReason = parseFailedReason;
+
+      const finalStatus = extractionFallbackUsed ? "EXTRACTION_FALLBACK" : "EXTRACTION_COMPLETE";
+
       await db.update(strategicBlueprints)
         .set({
-          status: "EXTRACTION_COMPLETE",
+          status: finalStatus,
           creativeMediaType: isVideo ? "video" : "image",
           draftBlueprint: JSON.stringify(draftBlueprint),
           creativeAnalysis: JSON.stringify(draftBlueprint),
@@ -292,10 +311,12 @@ export function registerExtractionRoutes(app: Express) {
         campaignId: blueprint.campaignId || undefined,
         blueprintId,
         blueprintVersion: blueprint.blueprintVersion,
-        event: "EXTRACTION_COMPLETED",
+        event: extractionFallbackUsed ? "EXTRACTION_FALLBACK" : "EXTRACTION_COMPLETED",
         details: {
           mediaType: isVideo ? "video" : "image",
           allInsufficient,
+          extractionFallbackUsed,
+          parseFailedReason,
           attempts: auditAttempts.length,
         },
       });
@@ -304,8 +325,10 @@ export function registerExtractionRoutes(app: Express) {
         success: true,
         blueprintId,
         blueprintVersion: blueprint.blueprintVersion,
-        status: "EXTRACTION_COMPLETE",
+        status: finalStatus,
         draftBlueprint,
+        extractionFallbackUsed,
+        parseFailedReason,
         _meta: {
           attempts: auditAttempts.length,
           allFieldsInsufficient: allInsufficient,
