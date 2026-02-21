@@ -1,117 +1,77 @@
 # MarketMind AI
 
 ## Overview
-
-MarketMind AI is a cross-platform marketing automation application that leverages AI to generate content for social media, manage campaigns, schedule posts, and provide analytics. Built with Expo (React Native), it aims to empower marketers by streamlining their workflow and enhancing their brand's presence across various social platforms through AI-powered content creation and strategic insights. The project's vision is to offer an "AI Agency Replacement" with a strong focus on revenue generation and autonomous marketing capabilities.
+MarketMind AI is a cross-platform marketing automation application built with Expo (React Native) that uses AI to generate social media content, manage campaigns, schedule posts, and provide analytics. Its core purpose is to streamline marketing workflows, enhance brand presence through AI-powered content creation, and offer strategic insights. The project aims to function as an "AI Agency Replacement" focused on revenue generation and autonomous marketing capabilities.
 
 ## User Preferences
-
 Preferred communication style: Simple, everyday language.
 
 ## System Architecture
 
 ### Core Design Principles
-- **Monorepo Structure**: Shared codebase between client and server.
-- **Type Safety**: Full TypeScript with strict mode for robust development.
+- **Monorepo Structure**: Shared codebase for client and server.
+- **Type Safety**: Full TypeScript with strict mode.
 - **Platform Abstraction**: Components designed for iOS, Android, and Web compatibility.
-- **Dynamic Theming**: Support for light and dark modes with platform-adaptive styling.
+- **Dynamic Theming**: Support for light and dark modes.
 
 ### Frontend
 - **Framework**: Expo SDK 54 with React Native 0.81 (new architecture).
-- **Navigation**: Expo Router v6 with file-based routing.
+- **Navigation**: Expo Router v6 (file-based routing).
 - **State Management**: React Context API for global state, TanStack React Query for server state.
-- **Internationalization**: i18n-js for 32 languages, with persistence via AsyncStorage.
+- **Internationalization**: i18n-js for 32 languages.
 - **UI/UX**: Custom component library, React Native Reanimated for animations.
 
 ### Backend
 - **Server**: Express.js with Node.js and TypeScript.
 - **API Design**: RESTful endpoints.
-- **AI Integration**: Dual-AI engine architecture utilizing OpenAI GPT-5.2 and Google Gemini 3 Pro for content generation and strategy analysis. Nano Banana Pro (Gemini 3 Pro Image) and GPT Image 1 for AI image/design generation.
-- **Autonomous Engine**: Production-safe, silent backend system with code-enforced guardrails for marketing decisions. Includes modules for Guardrail Engine, Adaptive Baselines, Hybrid Risk Classifier, Decision Feedback Loop, and an Audit System. Autopilot functionality allows for automated execution of low-risk decisions, with higher risk decisions requiring approval or being blocked.
+- **AI Integration**: Dual-AI engine utilizing OpenAI GPT-5.2 and Google Gemini 3 Pro for content and strategy; Nano Banana Pro (Gemini 3 Pro Image) and GPT Image 1 for AI image/design.
+- **Autonomous Engine**: Production-safe backend with guardrails for marketing decisions (Guardrail Engine, Adaptive Baselines, Hybrid Risk Classifier, Decision Feedback Loop, Audit System). Supports autopilot for low-risk decisions.
 
 ### Data Storage
-- **Client-side**: AsyncStorage for local data persistence (brand profiles, content, campaigns, schedules).
+- **Client-side**: AsyncStorage for local data.
 - **Server-side**: PostgreSQL with Drizzle ORM for user data and chat conversations.
 
 ### Key Features
-- **Dashboard**: Revenue-focused layout with KPIs, AI action summaries, and daily priorities.
-- **Create**: AI Writer for text content (posts, captions, ads) and AI Designer for image generation (text-to-image, image-to-image, editing) with style presets, aspect ratio controls, and advanced mood configuration.
-- **Calendar**: Content scheduling with an AI Calendar Assistant for planning.
+- **Dashboard**: Revenue-focused KPIs and AI action summaries.
+- **Create**: AI Writer for text content and AI Designer for image generation with style presets and mood configuration.
+- **Calendar**: Content scheduling with AI Calendar Assistant.
 - **AI Management**:
     - **Auto-Publisher**: Batch publishing to Meta platforms.
     - **AI Audience Manager**: Generates optimized Meta ad audiences.
-    - **Strategy Hub**: AI-powered strategic intelligence engine with MOAT BUILDER MODE for brand defensibility, pattern detection, decision management, memory tracking, growth campaigns, and AI-generated reports.
-- **Studio**: Media library and an AI Video Editor with guided creative briefs, multi-clip uploads, AI-generated edit plans, and FFmpeg rendering.
-- **Photography**: A Dubai-based photography marketplace with dual roles for photographers (profile, portfolio, reservation management) and customers (browsing, booking).
-- **Lead Engine**: Modular lead generation system with 8 independent modules (Lead Capture, Conversion Tracking, CTA Engine, Funnel Logic, Lead Magnets, Landing Pages, Revenue Attribution, AI Lead Optimization). Each module has feature flags, dependency guards, safe mode, and a global kill switch. Accessible via the "Leads" tab in AI Management (Advanced Mode).
-- **Competitive Intelligence**: AI Chief Strategy Officer in Soft Advisory Mode. Tracks up to 5 competitors with evidence-based data collection (5 required fields + optional enrichment). Generates AI-powered market analysis with gap detection, competitor breakdowns, and strategic recommendations. Features Apply/Reject decision flow with draft+confirm modal, evidence citation tags, confidence/risk/impact scoring, and full audit logging. Monthly automated re-analysis with snapshot diffing. Demo mode with 3 pre-loaded sample competitors. Accessible via the "Intel" tab in AI Management (Advanced Mode).
+    - **Strategy Hub**: AI-powered strategic intelligence with MOAT BUILDER MODE for brand defensibility, pattern detection, and AI-generated reports.
+- **Studio**: Media library and AI Video Editor with guided creative briefs and FFmpeg rendering.
+- **Photography**: Dubai-based photography marketplace.
+- **Lead Engine**: Modular lead generation system with 8 independent modules (Lead Capture, Conversion Tracking, CTA Engine, Funnel Logic, Lead Magnets, Landing Pages, Revenue Attribution, AI Lead Optimization). Features flags, dependency guards, and a global kill switch.
+- **Competitive Intelligence**: AI Chief Strategy Officer tracking up to 5 competitors, providing AI-powered market analysis, gap detection, and strategic recommendations with audit logging.
 - **Settings**: Brand profile and platform connections management.
 
-### Lead Engine Architecture
-- **Feature Flags**: `server/feature-flags.ts` - Per-module ON/OFF with dependency guards, global kill switch, audit trail. All flags default OFF.
-- **Modules**: `server/lead-engine/` - 8 isolated route files, each checking flags before processing.
-- **Dependencies**: CTA Engine requires Conversion Tracking; Funnel Logic requires Lead Capture + Conversion Tracking; Lead Magnets/Landing Pages require Lead Capture; Revenue Attribution requires Conversion Tracking; AI Optimization requires Lead Capture + Conversion Tracking.
-- **Safe Mode**: Modules with unmet dependencies operate in limited capacity (e.g., CTA Engine generates but won't auto-rotate).
-- **Frontend Hook**: `hooks/useFeatureFlags.ts` - 5-min TTL cache, app-open refresh, toggle/kill/resume methods.
-- **UI**: `components/LeadControlPanel.tsx` - Module toggle grid with dependency status, stats dashboard, kill switch banner.
-- **Database Tables**: leads, conversion_events, cta_variants, funnels, funnel_stages, lead_magnets, landing_pages, revenue_attributions, lead_scores, feature_flags, feature_flag_audit.
-
-### Competitive Intelligence Architecture
-- **Feature Flag**: `competitive_intelligence_enabled` - Independent flag with no dependencies.
-- **Backend**: `server/competitive-intelligence/` - 3 route files (competitor-routes, analysis-routes, demo-routes) + index.
-- **AI Engine**: GPT-4o-powered analysis with evidence-only processing, INSUFFICIENT DATA guards (min 2 complete competitors), JSON-structured output with citations.
-- **Required Evidence Fields**: profileLink, postingFrequency, contentTypeRatio, engagementRatio, ctaPatterns.
-- **Optional Fields**: discountFrequency, hookStyles, messagingTone, socialProofPresence, screenshotUrls.
-- **Recommendation Action Types**: content_clusters, calendar_cadence, cta_library, funnel_mapping, offer_positioning.
-- **Audit Events**: INTELLIGENCE_RUN, STRATEGY_RECOMMENDED, STRATEGY_APPLIED, STRATEGY_REJECTED.
-- **Monthly Worker**: 30-day cycle, daily check via autonomous-worker.ts, respects feature flag + kill switch.
-- **Database Tables**: ci_competitors, ci_snapshots, ci_market_analyses, ci_recommendations, ci_strategy_decisions.
-- **Frontend Component**: `components/CompetitiveIntelligence.tsx` - 4 sub-views (Overview, Competitors, Actions, History).
-- **Demo Mode**: Button-triggered, loads 3 sample competitors (FreshBites, LuxeStyle, DigitalPro) with DEMO badges.
-
-### Campaign Data Layer & Structural Integrity
-- **Unified Data Layer**: `server/campaign-data-layer.ts` — Single source of truth for `getCampaignMetrics()`, `getRevenueSummary()`, and `detectPerformanceSignals()`. All strategy, autopilot, lead engine, and CI modules call these functions for consistent data.
-- **Full Campaign Isolation**: Every query in the data layer filters by `and(eq(accountId), eq(campaignId), isNotNull(campaignId))`. Tables with campaignId: performanceSnapshots, revenueEntries, adSpendEntries, conversionEvents, leads, publishedPosts. The `isNotNull(campaignId)` guard excludes legacy rows without campaignId (backfill safety).
-- **Mandatory Campaign Selection**: All performance/analytics endpoints require `requireCampaign` middleware from `server/campaign-routes.ts`. Zero fallback to account-wide data.
-- **Campaign Location**: `campaignSelections.campaignLocation` column stores geo-scope. CampaignBar displays location from DB. Audience generation enforces location discipline (rejects if no location set). AI prompts include location context.
-- **Revenue Feedback**: Revenue data from `getRevenueSummary()` is injected into strategy analysis and AI lead optimization prompts. AI decisions must optimize for revenue, not just engagement.
-- **Performance Signals**: Numeric threshold-based detection: `SCALE_THRESHOLD = 1.5` (1.5x baseline = SCALE_CANDIDATE), `REVIEW_THRESHOLD = 0.7` (0.7x baseline = REVIEW_NEEDED). Flags only, no auto-execution.
-- **Minimum-Data Safeguards**: spend >= $50, timeSpan >= 72h (max of snapshot/spend/event timestamp ranges), conversions >= 3. Require 2-of-3 or return `INSUFFICIENT_DATA_FOR_SIGNALS`. Zero-conversion edge case: if spend+time met but conversions == 0, emits `REVIEW_NEEDED` signal.
-- **Conversions Source**: Unified to `conversionEvents` table across all three data layer functions. No mixing with performanceSnapshots.conversions for aggregate counts.
-- **Campaign Endpoints**: `/api/campaigns/metrics`, `/api/campaigns/signals`, `/api/campaigns/revenue-summary` — all require campaign selection.
-- **Guarded Routes**: ALL strategy, autopilot, lead engine, competitive intelligence, and audience generation routes require `requireCampaign` middleware.
+### Strategic Core Architecture ("Build The Plan")
+- **System**: 6-phase sequential intelligence engine with hard gates.
+- **Phases**: Gate (min requirements) → Creative Analysis (AI extraction from media) → Confirm/Edit (user review) → Market Analysis (AI market mapping) → Validation (contradiction detection) → Orchestrator (execution plan generation).
+- **AI Models**: Gemini 3 Pro for creative extraction, GPT-5.2 for market analysis, validation, and orchestration.
 
 ## External Dependencies
 
 ### AI Services
-- **OpenAI API**: Used for various AI capabilities, integrated via Replit AI Integrations.
-- **Google Gemini 3 Pro**: Utilized for content generation and strategic analysis.
+- **OpenAI API**: For various AI capabilities.
+- **Google Gemini 3 Pro**: For content generation and strategic analysis.
 
 ### Database
-- **PostgreSQL**: Primary database for server-side data, managed with Drizzle ORM.
+- **PostgreSQL**: Primary database, managed with Drizzle ORM.
 
 ### User Authentication
-- **Meta OAuth**: Login options via Facebook and Instagram.
-- **Demo Mode**: Available for simulated login without Meta credentials.
+- **Meta OAuth**: Login via Facebook and Instagram.
+- **Demo Mode**: For simulated login.
 
-### Meta Business Suite Integration (Production-Grade)
-- **Token Security**: AES-256-GCM encrypted tokens stored server-side in `meta_credentials` table. Never sent to client. Key versioning via `META_ENCRYPTION_KEY` env var. Module: `server/meta-crypto.ts`.
-- **OAuth Flow**: Full-scope OAuth requesting `pages_manage_posts`, `pages_read_engagement`, `read_insights`, `pages_show_list`, `instagram_basic`, `instagram_content_publish`, `business_management`, `public_profile`, `email`. Short-lived tokens exchanged for long-lived (60-day) tokens server-side. Page tokens fetched via `/me/accounts`. Instagram Business IDs resolved via page-linked IG accounts.
-- **Meta Modes**: `DISCONNECTED` (default), `PENDING_APPROVAL`, `PERMISSION_MISSING`, `TOKEN_EXPIRED`, `REVOKED`, `DEMO` (admin-only with `ALLOW_DEMO_MODE` env), `REAL` (production). Audit-logged transitions via `server/meta-status.ts`.
-- **Capability Gates**: `fb_publishing_enabled` = `pages_manage_posts` + valid page token. `ig_publishing_enabled` = `instagram_content_publish` + verified `ig_business_id`. `insights_enabled` = `pages_read_engagement` + `read_insights`.
-- **Token Lifecycle**: Daily health checks via `/debug_token` (startup + every 6 hours). Auto-extension when <14 days remaining. Failure classification: revoked (subcodes 458/460/463) vs expired vs invalid. Module: `server/meta-token-manager.ts`.
-- **Publish Worker**: Uses `getServerSidePageToken()` — decrypts page tokens server-side only. Refuses to publish unless `meta_mode=REAL`. No silent demo fallbacks. No fake metric generation. Module: `server/publish-worker.ts`.
-- **requireMetaReal Middleware**: Guards all publishing/insights endpoints. Returns structured error codes (`META_NOT_CONNECTED`, `META_TOKEN_EXPIRED`, etc.) with actionable messages.
-- **Settings UI**: Production status card fetches `/api/meta/status` server-side data. Shows per-capability indicators, token expiry warnings, scope audit, connect/disconnect/reconnect flows with OAuth polling.
-- **Database Tables**: `meta_credentials` (encrypted tokens, page/IG IDs, health check timestamps), `account_state` (meta_mode, granted/missing scopes, last verified).
+### Meta Business Suite Integration
+- **Token Security**: AES-256-GCM encrypted tokens stored server-side.
+- **OAuth Flow**: Full-scope OAuth requesting necessary permissions, exchanging short-lived for long-lived tokens.
+- **Meta Modes**: DISCONNECTED, PENDING_APPROVAL, PERMISSION_MISSING, TOKEN_EXPIRED, REVOKED, DEMO, REAL.
+- **Capability Gates**: Publishing and insights capabilities are gated by specific Meta permissions.
+- **Token Lifecycle**: Daily health checks, auto-extension, and failure classification.
+- **Publish Worker**: Requires `meta_mode=REAL` for publishing, no silent demo fallbacks.
+- **Middleware**: `requireMetaReal` guards all publishing/insights endpoints.
 
 ### Social Platforms
-- **Instagram, Facebook**: Managed through Meta Business Suite connection.
-- **Twitter, LinkedIn, TikTok**: Connection management in settings, API integrations planned.
-
-### Key npm Packages
-- `expo-router`: For navigation.
-- `drizzle-orm` + `pg`: For database interaction.
-- `openai`: OpenAI API client.
-- `@tanstack/react-query`: For server state management.
-- `react-native-reanimated`: For animations.
+- **Instagram, Facebook**: Integrated via Meta Business Suite.
+- **Twitter, LinkedIn, TikTok**: Connection management in settings; API integrations planned.
