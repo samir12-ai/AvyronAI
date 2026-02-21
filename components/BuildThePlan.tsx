@@ -474,8 +474,14 @@ export default function BuildThePlan() {
         headers: { 'Content-Type': 'application/json' },
       });
       const data = await res.json();
-      if (!data.success) {
-        setError(data.message || data.error || 'Orchestrator failed');
+      if (!res.ok || !data.success) {
+        const statusPrefix = !res.ok ? `[HTTP ${res.status}] ` : '';
+        setError(statusPrefix + (data.message || data.error || 'Orchestrator failed'));
+        return;
+      }
+
+      if (!data.orchestratorPlan || typeof data.orchestratorPlan !== 'object') {
+        setError('Server returned an empty execution plan. Please retry.');
         return;
       }
 
@@ -486,7 +492,7 @@ export default function BuildThePlan() {
       } : null);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch (err: any) {
-      setError(err.message);
+      setError(`Network error: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -1195,7 +1201,85 @@ export default function BuildThePlan() {
 
   const renderPhase5 = () => {
     const plan = blueprint?.orchestratorPlan;
-    if (!plan) return null;
+
+    const renderPhase5Header = () => (
+      <View style={[s.phaseCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <View style={s.phaseHeader}>
+          <View style={[s.phaseIconWrap, { backgroundColor: '#10B98120' }]}>
+            <Ionicons name="rocket" size={20} color="#10B981" />
+          </View>
+          <View style={s.phaseHeaderText}>
+            <Text style={[s.phaseTitle, { color: colors.text }]}>Phase 5: Execution Plans</Text>
+            <Text style={[s.phaseDesc, { color: colors.textSecondary }]}>
+              {plan ? '6 structured plans ready for deployment' : 'Generate your AI execution plans'}
+            </Text>
+          </View>
+        </View>
+      </View>
+    );
+
+    if (loading) {
+      return (
+        <View style={s.phaseContent}>
+          {renderCampaignBadge()}
+          {renderPhase5Header()}
+          <View style={[s.phaseCard, { backgroundColor: colors.card, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 40 }]}>
+            <ActivityIndicator size="large" color="#10B981" />
+            <Text style={[s.phaseDesc, { color: colors.textSecondary, marginTop: 16 }]}>
+              Building execution plans...
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
+    if (error) {
+      return (
+        <View style={s.phaseContent}>
+          {renderCampaignBadge()}
+          {renderPhase5Header()}
+          <View style={[s.phaseCard, { backgroundColor: '#FEF2F2', borderColor: '#FCA5A5' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <Ionicons name="alert-circle" size={20} color="#EF4444" />
+              <Text style={{ color: '#EF4444', fontWeight: '700', fontSize: 14 }}>Execution Plan Failed</Text>
+            </View>
+            <Text style={{ color: '#991B1B', fontSize: 13, lineHeight: 18 }}>{error}</Text>
+          </View>
+          <Pressable onPress={runOrchestrator} style={[s.actionBtn, { marginTop: 12 }]}>
+            <LinearGradient colors={['#EF4444', '#DC2626']} style={s.actionBtnGrad}>
+              <Ionicons name="refresh" size={18} color="#fff" />
+              <Text style={s.actionBtnText}>Retry Execution Plan</Text>
+            </LinearGradient>
+          </Pressable>
+        </View>
+      );
+    }
+
+    if (!plan) {
+      return (
+        <View style={s.phaseContent}>
+          {renderCampaignBadge()}
+          {renderPhase5Header()}
+          <View style={[s.phaseCard, { backgroundColor: colors.card, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 32 }]}>
+            <Ionicons name="document-text-outline" size={40} color={colors.textSecondary} />
+            <Text style={[s.phaseTitle, { color: colors.text, marginTop: 12, textAlign: 'center' }]}>
+              Execution plan has not been generated yet.
+            </Text>
+            <Text style={[s.phaseDesc, { color: colors.textSecondary, marginTop: 4, textAlign: 'center' }]}>
+              Generate 6 structured execution plans from your validated blueprint.
+            </Text>
+          </View>
+          <Pressable onPress={runOrchestrator} disabled={blueprint?.status !== 'VALIDATED'} style={[s.actionBtn, { marginTop: 12, opacity: blueprint?.status !== 'VALIDATED' ? 0.6 : 1 }]}>
+            <LinearGradient colors={blueprint?.status === 'VALIDATED' ? ['#10B981', '#059669'] : ['#6B7280', '#4B5563']} style={s.actionBtnGrad}>
+              <Ionicons name="rocket" size={18} color="#fff" />
+              <Text style={s.actionBtnText}>
+                {blueprint?.status === 'VALIDATED' ? 'Generate Execution Plan' : 'Blueprint must be validated first'}
+              </Text>
+            </LinearGradient>
+          </Pressable>
+        </View>
+      );
+    }
 
     const sections = [
       { key: 'contentDistributionPlan', title: 'Content Distribution', icon: 'share-social', color: '#3B82F6' },
@@ -1206,26 +1290,26 @@ export default function BuildThePlan() {
       { key: 'riskMonitoringTriggers', title: 'Risk Triggers', icon: 'warning', color: '#EC4899' },
     ];
 
+    const populatedSections = sections.filter(sec => plan[sec.key]);
+
     return (
       <View style={s.phaseContent}>
         {renderCampaignBadge()}
-        <View style={[s.phaseCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <View style={s.phaseHeader}>
-            <View style={[s.phaseIconWrap, { backgroundColor: '#10B98120' }]}>
-              <Ionicons name="rocket" size={20} color="#10B981" />
-            </View>
-            <View style={s.phaseHeaderText}>
-              <Text style={[s.phaseTitle, { color: colors.text }]}>Phase 5: Execution Plans</Text>
-              <Text style={[s.phaseDesc, { color: colors.textSecondary }]}>
-                6 structured plans ready for deployment
+        {renderPhase5Header()}
+
+        {populatedSections.length === 0 && (
+          <View style={[s.phaseCard, { backgroundColor: '#FFFBEB', borderColor: '#FCD34D' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Ionicons name="warning" size={18} color="#F59E0B" />
+              <Text style={{ color: '#92400E', fontSize: 13, fontWeight: '600' }}>
+                Execution plan was generated but contains no structured sections. Consider retrying.
               </Text>
             </View>
           </View>
-        </View>
+        )}
 
-        {sections.map(sec => {
+        {populatedSections.map(sec => {
           const data = plan[sec.key];
-          if (!data) return null;
 
           return (
             <View key={sec.key} style={[s.execCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
