@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   View, 
   Text, 
@@ -12,6 +12,7 @@ import {
   Switch,
   Linking,
   Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,8 +24,47 @@ import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { SUPPORTED_LANGUAGES } from '@/lib/i18n';
 import { PlatformConnection } from '@/components/PlatformConnection';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, apiRequest } from '@/lib/query-client';
 import { router } from 'expo-router';
+import { fetch } from 'expo/fetch';
+
+interface MetaStatus {
+  metaMode: string;
+  fbPublishingEnabled: boolean;
+  insightsEnabled: boolean;
+  igPublishingEnabled: boolean;
+  grantedScopes: string[];
+  missingScopes: string[];
+  connectedPageId: string | null;
+  connectedPageName: string | null;
+  igBusinessId: string | null;
+  igUsername: string | null;
+  tokenExpiresAt: string | null;
+  lastVerifiedAt: string | null;
+  lastHealthCheckAt: string | null;
+  demoModeEnabled: boolean;
+  encryptionConfigured: boolean;
+}
+
+const META_MODE_COLORS: Record<string, string> = {
+  DISCONNECTED: '#8A96A8',
+  REAL: '#34D399',
+  TOKEN_EXPIRED: '#FF6B6B',
+  PERMISSION_MISSING: '#FFB347',
+  REVOKED: '#FF6B6B',
+  PENDING_APPROVAL: '#FBBF24',
+  DEMO: '#A78BFA',
+};
+
+const META_MODE_LABELS: Record<string, string> = {
+  DISCONNECTED: 'Disconnected',
+  REAL: 'Connected',
+  TOKEN_EXPIRED: 'Token Expired',
+  PERMISSION_MISSING: 'Missing Permissions',
+  REVOKED: 'Access Revoked',
+  PENDING_APPROVAL: 'Pending Approval',
+  DEMO: 'Demo Mode',
+};
 
 const platformIcons: Record<string, { icon: keyof typeof Ionicons.glyphMap; color: string }> = {
   instagram: { icon: 'logo-instagram', color: '#E1306C' },
@@ -59,6 +99,128 @@ export default function SettingsScreen() {
   const [platforms, setPlatforms] = useState<string[]>(brandProfile.platforms);
   const [hasChanges, setHasChanges] = useState(false);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
+
+  const [metaStatus, setMetaStatus] = useState<MetaStatus | null>(null);
+  const [metaLoading, setMetaLoading] = useState(true);
+  const [metaActionLoading, setMetaActionLoading] = useState(false);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchMetaStatus = useCallback(async () => {
+    try {
+      const apiUrl = getApiUrl();
+      const url = new URL('/api/meta/status?accountId=default', apiUrl);
+      const res = await fetch(url.toString(), { credentials: 'include' });
+      const data = await res.json();
+      if (data.success && data.status) {
+        setMetaStatus(data.status);
+      }
+    } catch (error) {
+      console.error('Failed to fetch meta status:', error);
+    } finally {
+      setMetaLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchMetaStatus();
+  }, [fetchMetaStatus]);
+
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => stopPolling();
+  }, [stopPolling]);
+
+  const startOAuthPolling = useCallback(() => {
+    stopPolling();
+    let elapsed = 0;
+    pollTimerRef.current = setInterval(async () => {
+      elapsed += 3000;
+      if (elapsed > 120000) {
+        stopPolling();
+        return;
+      }
+      try {
+        const apiUrl = getApiUrl();
+        const url = new URL('/api/meta/status?accountId=default', apiUrl);
+        const res = await fetch(url.toString(), { credentials: 'include' });
+        const data = await res.json();
+        if (data.success && data.status) {
+          setMetaStatus(data.status);
+          if (data.status.metaMode === 'REAL') {
+            stopPolling();
+            setMetaActionLoading(false);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          }
+        }
+      } catch {}
+    }, 3000);
+  }, [stopPolling]);
+
+  const handleConnectMeta = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setMetaActionLoading(true);
+    try {
+      const apiUrl = getApiUrl();
+      const authUrl = `${apiUrl}api/meta/auth`;
+      if (Platform.OS === 'web') {
+        window.open(authUrl, '_blank', 'width=600,height=700');
+      } else {
+        await Linking.openURL(authUrl);
+      }
+      startOAuthPolling();
+    } catch (error) {
+      console.error('Meta connection error:', error);
+      setMetaActionLoading(false);
+      Alert.alert('Connection Error', 'Failed to open Meta authorization. Please try again.');
+    }
+  }, [startOAuthPolling]);
+
+  const handleDisconnectMeta = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setMetaActionLoading(true);
+    try {
+      await apiRequest('POST', '/api/meta/disconnect', { accountId: 'default' });
+      await fetchMetaStatus();
+    } catch (error) {
+      console.error('Meta disconnect error:', error);
+      Alert.alert('Error', 'Failed to disconnect Meta integration.');
+    } finally {
+      setMetaActionLoading(false);
+    }
+  }, [fetchMetaStatus]);
+
+  const handleReconnectMeta = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setMetaActionLoading(true);
+    try {
+      await apiRequest('POST', '/api/meta/reconnect', { accountId: 'default' });
+      const apiUrl = getApiUrl();
+      const authUrl = `${apiUrl}api/meta/auth`;
+      if (Platform.OS === 'web') {
+        window.open(authUrl, '_blank', 'width=600,height=700');
+      } else {
+        await Linking.openURL(authUrl);
+      }
+      startOAuthPolling();
+    } catch (error) {
+      console.error('Meta reconnect error:', error);
+      setMetaActionLoading(false);
+      Alert.alert('Error', 'Failed to initiate reconnection. Please try again.');
+    }
+  }, [fetchMetaStatus, startOAuthPolling]);
+
+  const getTokenDaysRemaining = useCallback((): number | null => {
+    if (!metaStatus?.tokenExpiresAt) return null;
+    const expires = new Date(metaStatus.tokenExpiresAt);
+    const now = new Date();
+    return Math.ceil((expires.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  }, [metaStatus?.tokenExpiresAt]);
 
   const toneOptions = [
     { key: 'Professional', label: t('settings.professional') },
@@ -147,50 +309,6 @@ export default function SettingsScreen() {
     }
   };
 
-  const handleConnectMeta = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    
-    try {
-      const apiUrl = getApiUrl();
-      const authUrl = `${apiUrl}/api/meta/auth`;
-      
-      if (Platform.OS === 'web') {
-        window.open(authUrl, '_blank', 'width=600,height=700');
-      } else {
-        await Linking.openURL(authUrl);
-      }
-
-      setTimeout(async () => {
-        await setMetaConnection({
-          isConnected: true,
-          pageName: 'Your Business Page',
-          connectedAt: new Date().toISOString(),
-        });
-        
-        updatePlatformConnection('facebook', true);
-        updatePlatformConnection('instagram', true);
-        
-        Alert.alert(
-          t('settings.metaConnected'),
-          t('settings.metaConnectedDesc')
-        );
-      }, 1000);
-    } catch (error) {
-      console.error('Meta connection error:', error);
-      Alert.alert(t('settings.connectionError'), t('settings.connectionErrorDesc'));
-    }
-  };
-
-  const handleDisconnectMeta = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    
-    await setMetaConnection({ isConnected: false });
-    updatePlatformConnection('facebook', false);
-    updatePlatformConnection('instagram', false);
-    
-    Alert.alert(t('settings.disconnected'), t('settings.metaDisconnected'));
-  };
-
   const handleSelectLanguage = async (code: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     await setLocale(code as any);
@@ -269,6 +387,15 @@ export default function SettingsScreen() {
         </Pressable>
 
         <View style={[styles.metaCard, { backgroundColor: isDark ? '#1E3A5F' : '#E7F3FF', borderColor: '#1877F2' }]}>
+          {metaStatus && metaStatus.metaMode !== 'REAL' && !metaLoading && (
+            <View style={[styles.metaWarningBanner, { backgroundColor: (isDark ? '#332B00' : '#FFF8E1') }]}>
+              <Ionicons name="warning-outline" size={14} color="#F59E0B" />
+              <Text style={[styles.metaWarningText, { color: isDark ? '#FBBF24' : '#92400E' }]}>
+                Meta features are limited until you complete the connection
+              </Text>
+            </View>
+          )}
+
           <View style={styles.metaHeader}>
             <View style={styles.metaLogoRow}>
               <View style={[styles.metaLogo, { backgroundColor: '#1877F2' }]}>
@@ -281,79 +408,246 @@ export default function SettingsScreen() {
                 </Text>
               </View>
             </View>
-            {metaConnection.isConnected && (
-              <View style={[styles.connectedBadge, { backgroundColor: colors.success + '20' }]}>
-                <Ionicons name="checkmark-circle" size={14} color={colors.success} />
-                <Text style={[styles.connectedText, { color: colors.success }]}>{t('settings.connected')}</Text>
+            {metaStatus && (
+              <View style={[styles.connectedBadge, { backgroundColor: (META_MODE_COLORS[metaStatus.metaMode] || '#8A96A8') + '20' }]}>
+                <View style={[styles.statusDot, { backgroundColor: META_MODE_COLORS[metaStatus.metaMode] || '#8A96A8' }]} />
+                <Text style={[styles.connectedText, { color: META_MODE_COLORS[metaStatus.metaMode] || '#8A96A8' }]}>
+                  {META_MODE_LABELS[metaStatus.metaMode] || metaStatus.metaMode}
+                </Text>
               </View>
             )}
           </View>
 
-          {metaConnection.isConnected ? (
+          {metaLoading ? (
+            <View style={styles.metaLoadingContainer}>
+              <ActivityIndicator size="small" color="#1877F2" />
+              <Text style={[styles.metaLoadingText, { color: colors.textMuted }]}>Loading status...</Text>
+            </View>
+          ) : metaStatus ? (
             <View style={styles.metaConnectedInfo}>
-              <View style={[styles.metaInfoRow, { backgroundColor: colors.card }]}>
-                <Ionicons name="business" size={18} color="#1877F2" />
-                <Text style={[styles.metaInfoText, { color: colors.text }]}>
-                  {metaConnection.pageName || t('settings.businessPageConnected')}
-                </Text>
+              <View style={styles.metaCapabilities}>
+                <Text style={[styles.metaCapLabel, { color: colors.textSecondary }]}>Capabilities</Text>
+                <View style={styles.metaCapRow}>
+                  <View style={styles.metaCapItem}>
+                    <Ionicons
+                      name={metaStatus.fbPublishingEnabled ? 'checkmark-circle' : 'close-circle'}
+                      size={16}
+                      color={metaStatus.fbPublishingEnabled ? colors.success : colors.error}
+                    />
+                    <Text style={[styles.metaCapText, { color: colors.text }]}>FB Publishing</Text>
+                  </View>
+                  <View style={styles.metaCapItem}>
+                    <Ionicons
+                      name={metaStatus.igPublishingEnabled ? 'checkmark-circle' : 'close-circle'}
+                      size={16}
+                      color={metaStatus.igPublishingEnabled ? colors.success : colors.error}
+                    />
+                    <Text style={[styles.metaCapText, { color: colors.text }]}>IG Publishing</Text>
+                  </View>
+                  <View style={styles.metaCapItem}>
+                    <Ionicons
+                      name={metaStatus.insightsEnabled ? 'checkmark-circle' : 'close-circle'}
+                      size={16}
+                      color={metaStatus.insightsEnabled ? colors.success : colors.error}
+                    />
+                    <Text style={[styles.metaCapText, { color: colors.text }]}>Insights</Text>
+                  </View>
+                </View>
               </View>
-              <View style={styles.metaFeatures}>
-                <View style={styles.metaFeature}>
-                  <Ionicons name="checkmark" size={16} color={colors.success} />
-                  <Text style={[styles.metaFeatureText, { color: colors.textSecondary }]}>{t('settings.autoPostFacebook')}</Text>
+
+              {metaStatus.metaMode === 'REAL' && (
+                <View style={styles.metaRealInfo}>
+                  {metaStatus.connectedPageName && (
+                    <View style={[styles.metaInfoRow, { backgroundColor: colors.card }]}>
+                      <Ionicons name="business" size={18} color="#1877F2" />
+                      <Text style={[styles.metaInfoText, { color: colors.text }]}>
+                        {metaStatus.connectedPageName}
+                      </Text>
+                    </View>
+                  )}
+                  {metaStatus.igUsername && (
+                    <View style={[styles.metaInfoRow, { backgroundColor: colors.card }]}>
+                      <Ionicons name="logo-instagram" size={18} color="#E1306C" />
+                      <Text style={[styles.metaInfoText, { color: colors.text }]}>
+                        @{metaStatus.igUsername}
+                      </Text>
+                    </View>
+                  )}
+
+                  {metaStatus.tokenExpiresAt && (() => {
+                    const daysLeft = getTokenDaysRemaining();
+                    const isWarning = daysLeft !== null && daysLeft < 14;
+                    return (
+                      <View style={[styles.metaInfoRow, { backgroundColor: isWarning ? (colors.error + '10') : colors.card }]}>
+                        <Ionicons
+                          name={isWarning ? 'warning' : 'time-outline'}
+                          size={18}
+                          color={isWarning ? colors.error : colors.textMuted}
+                        />
+                        <Text style={[styles.metaInfoText, { color: isWarning ? colors.error : colors.text }]}>
+                          Token expires {new Date(metaStatus.tokenExpiresAt!).toLocaleDateString()}
+                          {isWarning && daysLeft !== null ? ` (${daysLeft}d left)` : ''}
+                        </Text>
+                      </View>
+                    );
+                  })()}
+
+                  {metaStatus.lastVerifiedAt && (
+                    <View style={[styles.metaInfoRow, { backgroundColor: colors.card }]}>
+                      <Ionicons name="shield-checkmark-outline" size={18} color={colors.success} />
+                      <Text style={[styles.metaInfoText, { color: colors.textMuted }]}>
+                        Verified {new Date(metaStatus.lastVerifiedAt).toLocaleString()}
+                      </Text>
+                    </View>
+                  )}
+
+                  <View style={[styles.metaInfoRow, { backgroundColor: colors.card }]}>
+                    <Ionicons name="key-outline" size={18} color={colors.textMuted} />
+                    <Text style={[styles.metaInfoText, { color: colors.textMuted }]}>
+                      {metaStatus.grantedScopes.length} scopes granted (9 required)
+                    </Text>
+                  </View>
+
+                  <Pressable
+                    onPress={handleDisconnectMeta}
+                    disabled={metaActionLoading}
+                    style={[styles.disconnectButton, { backgroundColor: colors.error + '20', opacity: metaActionLoading ? 0.5 : 1 }]}
+                  >
+                    {metaActionLoading ? (
+                      <ActivityIndicator size="small" color={colors.error} />
+                    ) : (
+                      <>
+                        <Ionicons name="unlink" size={16} color={colors.error} />
+                        <Text style={[styles.disconnectText, { color: colors.error }]}>{t('settings.disconnect')}</Text>
+                      </>
+                    )}
+                  </Pressable>
                 </View>
-                <View style={styles.metaFeature}>
-                  <Ionicons name="checkmark" size={16} color={colors.success} />
-                  <Text style={[styles.metaFeatureText, { color: colors.textSecondary }]}>{t('settings.autoPostInstagram')}</Text>
+              )}
+
+              {metaStatus.metaMode === 'PERMISSION_MISSING' && (
+                <View style={styles.metaConnectSection}>
+                  {metaStatus.missingScopes.length > 0 && (
+                    <View style={styles.metaMissingScopesSection}>
+                      <Text style={[styles.metaMissingScopesTitle, { color: colors.error }]}>Missing Scopes:</Text>
+                      {metaStatus.missingScopes.map((scope) => (
+                        <View key={scope} style={styles.metaScopeItem}>
+                          <Ionicons name="close-circle-outline" size={14} color={colors.error} />
+                          <Text style={[styles.metaScopeText, { color: colors.textSecondary }]}>{scope}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                  <Pressable
+                    onPress={handleReconnectMeta}
+                    disabled={metaActionLoading}
+                    style={({ pressed }) => [styles.metaConnectButton, { opacity: (pressed || metaActionLoading) ? 0.6 : 1 }]}
+                  >
+                    <LinearGradient
+                      colors={['#FFB347', '#FF9500']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={styles.metaGradient}
+                    >
+                      {metaActionLoading ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <>
+                          <Ionicons name="key" size={20} color="#fff" />
+                          <Text style={styles.metaConnectText}>Reconnect with Permissions</Text>
+                        </>
+                      )}
+                    </LinearGradient>
+                  </Pressable>
                 </View>
-                <View style={styles.metaFeature}>
-                  <Ionicons name="checkmark" size={16} color={colors.success} />
-                  <Text style={[styles.metaFeatureText, { color: colors.textSecondary }]}>{t('settings.manageAds')}</Text>
+              )}
+
+              {(metaStatus.metaMode === 'TOKEN_EXPIRED' || metaStatus.metaMode === 'REVOKED') && (
+                <View style={styles.metaConnectSection}>
+                  <Text style={[styles.metaDescription, { color: colors.textSecondary }]}>
+                    {metaStatus.metaMode === 'TOKEN_EXPIRED'
+                      ? 'Your access token has expired. Please reconnect to restore Meta features.'
+                      : 'Meta app access has been revoked. Please reconnect to restore access.'}
+                  </Text>
+                  {metaStatus.missingScopes.length > 0 && (
+                    <View style={styles.metaMissingScopesSection}>
+                      <Text style={[styles.metaMissingScopesTitle, { color: colors.error }]}>Missing Scopes:</Text>
+                      {metaStatus.missingScopes.map((scope) => (
+                        <View key={scope} style={styles.metaScopeItem}>
+                          <Ionicons name="close-circle-outline" size={14} color={colors.error} />
+                          <Text style={[styles.metaScopeText, { color: colors.textSecondary }]}>{scope}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                  <Pressable
+                    onPress={handleReconnectMeta}
+                    disabled={metaActionLoading}
+                    style={({ pressed }) => [styles.metaConnectButton, { opacity: (pressed || metaActionLoading) ? 0.6 : 1 }]}
+                  >
+                    <LinearGradient
+                      colors={['#FF6B6B', '#E53E3E']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={styles.metaGradient}
+                    >
+                      {metaActionLoading ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <>
+                          <Ionicons name="refresh" size={20} color="#fff" />
+                          <Text style={styles.metaConnectText}>Reconnect</Text>
+                        </>
+                      )}
+                    </LinearGradient>
+                  </Pressable>
                 </View>
-              </View>
-              <Pressable
-                onPress={handleDisconnectMeta}
-                style={[styles.disconnectButton, { backgroundColor: colors.error + '20' }]}
-              >
-                <Ionicons name="unlink" size={16} color={colors.error} />
-                <Text style={[styles.disconnectText, { color: colors.error }]}>{t('settings.disconnect')}</Text>
-              </Pressable>
+              )}
+
+              {(metaStatus.metaMode === 'DISCONNECTED' || metaStatus.metaMode === 'PENDING_APPROVAL' || metaStatus.metaMode === 'DEMO') && (
+                <View style={styles.metaConnectSection}>
+                  <Text style={[styles.metaDescription, { color: colors.textSecondary }]}>
+                    {t('settings.connectMetaDesc')}
+                  </Text>
+                  <View style={styles.metaBenefits}>
+                    <View style={styles.metaBenefit}>
+                      <Ionicons name="flash" size={16} color="#1877F2" />
+                      <Text style={[styles.metaBenefitText, { color: colors.text }]}>{t('settings.autoPostScheduled')}</Text>
+                    </View>
+                    <View style={styles.metaBenefit}>
+                      <Ionicons name="analytics" size={16} color="#1877F2" />
+                      <Text style={[styles.metaBenefitText, { color: colors.text }]}>{t('settings.crossPlatformAdMgmt')}</Text>
+                    </View>
+                    <View style={styles.metaBenefit}>
+                      <Ionicons name="sync" size={16} color="#1877F2" />
+                      <Text style={[styles.metaBenefitText, { color: colors.text }]}>{t('settings.unifiedPublishing')}</Text>
+                    </View>
+                  </View>
+                  <Pressable
+                    onPress={handleConnectMeta}
+                    disabled={metaActionLoading}
+                    style={({ pressed }) => [styles.metaConnectButton, { opacity: (pressed || metaActionLoading) ? 0.6 : 1 }]}
+                  >
+                    <LinearGradient
+                      colors={['#1877F2', '#0D65D9']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={styles.metaGradient}
+                    >
+                      {metaActionLoading ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <>
+                          <Ionicons name="link" size={20} color="#fff" />
+                          <Text style={styles.metaConnectText}>{t('settings.connectMetaButton')}</Text>
+                        </>
+                      )}
+                    </LinearGradient>
+                  </Pressable>
+                </View>
+              )}
             </View>
-          ) : (
-            <View style={styles.metaConnectSection}>
-              <Text style={[styles.metaDescription, { color: colors.textSecondary }]}>
-                {t('settings.connectMetaDesc')}
-              </Text>
-              <View style={styles.metaBenefits}>
-                <View style={styles.metaBenefit}>
-                  <Ionicons name="flash" size={16} color="#1877F2" />
-                  <Text style={[styles.metaBenefitText, { color: colors.text }]}>{t('settings.autoPostScheduled')}</Text>
-                </View>
-                <View style={styles.metaBenefit}>
-                  <Ionicons name="analytics" size={16} color="#1877F2" />
-                  <Text style={[styles.metaBenefitText, { color: colors.text }]}>{t('settings.crossPlatformAdMgmt')}</Text>
-                </View>
-                <View style={styles.metaBenefit}>
-                  <Ionicons name="sync" size={16} color="#1877F2" />
-                  <Text style={[styles.metaBenefitText, { color: colors.text }]}>{t('settings.unifiedPublishing')}</Text>
-                </View>
-              </View>
-              <Pressable
-                onPress={handleConnectMeta}
-                style={({ pressed }) => [styles.metaConnectButton, { opacity: pressed ? 0.8 : 1 }]}
-              >
-                <LinearGradient
-                  colors={['#1877F2', '#0D65D9']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.metaGradient}
-                >
-                  <Ionicons name="link" size={20} color="#fff" />
-                  <Text style={styles.metaConnectText}>{t('settings.connectMetaButton')}</Text>
-                </LinearGradient>
-              </Pressable>
-            </View>
-          )}
+          ) : null}
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
@@ -640,6 +934,80 @@ const styles = StyleSheet.create({
   languageName: {
     fontSize: 13,
     fontFamily: 'Inter_500Medium',
+  },
+  metaWarningBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+  metaWarningText: {
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    flex: 1,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  metaLoadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+    gap: 10,
+  },
+  metaLoadingText: {
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+  },
+  metaCapabilities: {
+    gap: 8,
+  },
+  metaCapLabel: {
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.5,
+  },
+  metaCapRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  metaCapItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  metaCapText: {
+    fontSize: 13,
+    fontFamily: 'Inter_500Medium',
+  },
+  metaRealInfo: {
+    gap: 8,
+    marginTop: 4,
+  },
+  metaMissingScopesSection: {
+    gap: 6,
+  },
+  metaMissingScopesTitle: {
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  metaScopeItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingLeft: 4,
+  },
+  metaScopeText: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
   },
   metaCard: {
     borderRadius: 20,
