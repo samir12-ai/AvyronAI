@@ -1,0 +1,61 @@
+⸻
+
+Replit — Phase 4 (Validate) Hardening is now REQUIRED (Frontend + Backend). Please implement exactly as below and confirm done with screenshots + endpoint responses.
+
+✅ Frontend (BuildThePlan.tsx) — Phase 4 UI/UX
+	1.	No more blank screen
+
+	•	If validation hasn’t run yet, Phase 4 must render normally:
+	•	Phase header
+	•	Info message: “Validation has not been run yet”
+	•	Button: “Run Validation”
+	•	Absolutely no empty container / hidden content states.
+
+	2.	Dependency enforcement
+
+	•	If Phase 3 (Market Analysis) isn’t complete:
+	•	“Run Validation” button disabled/greyed
+	•	Visible warning text:
+“Market analysis (Phase 3) must be completed before validation can run.”
+	•	This guard must be UI-level AND not bypassable.
+
+	3.	Full error surfacing
+
+	•	Any API failure must display in UI with:
+	•	HTTP status code
+	•	error message text
+	•	handle network errors + empty body + non-OK responses
+	•	Example UI error:
+“Validation failed (400): Market analysis must be completed”
+	•	No silent failures, no generic “something went wrong”.
+
+✅ Backend (validation-routes.ts) — Reliability + Guards
+	4.	Never return empty body
+
+	•	If AI output is unparseable OR fails schema:
+	•	Return a structured fallback validation response:
+	•	canProceed: false
+	•	warnings explaining parse failure
+	•	no 500 crash and no blank body
+
+	5.	Hard gate: market analysis required
+
+	•	Before running validation:
+	•	Check marketMap exists
+	•	If missing: return 400 with clear message
+“Market analysis must be completed before validation can run.”
+
+	6.	Token logging + truncation detection
+
+	•	Log:
+	•	model name
+	•	input/output/total tokens
+	•	finish_reason
+	•	If finish_reason === "length" (truncation):
+	•	log warning + include warning in response (optional but preferred)
+
+✅ Acceptance Criteria (must provide proof)
+	•	Screenshot: Phase 4 shows info UI (not blank) before first run
+	•	Screenshot: Validate disabled when Phase 3 not complete + warning visible
+	•	Screenshot: A forced 400 error shows exact status + message in UI
+	•	Curl/response: validation endpoint never returns empty body (even on parse failures)
