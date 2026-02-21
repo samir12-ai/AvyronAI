@@ -1,0 +1,89 @@
+We are about to begin real-world stress testing of the Strategic Core.
+
+Before testing, I need immediate confirmation and implementation of the following final structural safeguards. These are non-negotiable.
+	1.	Orchestrator Execution Guard Clarification
+Right now, confirmation and orchestrator minimum logic may be conflated.
+
+We need strict separation:
+	•	Blueprint confirmation logic (user approval)
+	•	Orchestrator execution eligibility logic
+
+Rules must be:
+	•	A blueprint can be confirmed.
+	•	Orchestrator MUST refuse execution if required strategic fields are missing or marked INSUFFICIENT_DATA.
+	•	Return structured error:
+{
+error: “INCOMPLETE_BLUEPRINT”,
+missingFields: […]
+}
+
+Do NOT silently block confirmation.
+Do NOT allow orchestrator fallback plans.
+
+Confirm this separation is enforced cleanly.
+
+⸻
+
+	2.	Blueprint Version Timeline Endpoint
+
+We need a new endpoint:
+
+GET /api/strategic/blueprint-versions?campaignId=
+
+Returns:
+	•	version number
+	•	created_at
+	•	confirmed_by
+	•	diff summary (changed fields vs previous version)
+
+No UI yet — backend first.
+
+We must be able to inspect evolution before stress testing.
+
+⸻
+
+	3.	Field-Level Diff Tracking
+
+When FIELD_EDITED occurs:
+	•	Store previous value
+	•	Store new value
+	•	Store blueprint_version
+	•	Store campaignId
+
+Diff must be queryable.
+
+We cannot stress test without seeing how strategy evolves.
+
+⸻
+
+	4.	Deterministic Market Map Check
+
+Confirm that:
+	•	Market Map generation consumes ONLY confirmed_blueprint
+	•	NEVER draft_blueprint
+	•	NEVER stale version
+	•	ALWAYS scoped by campaignContext.location
+
+No fallback to global defaults allowed.
+
+Explicitly confirm this in code.
+
+⸻
+
+	5.	Stress-Test Readiness Report
+
+Before we test scenarios, return:
+	•	Confirmation all 5 reinforcements are active
+	•	Confirmation no silent fallbacks exist
+	•	Confirmation orchestrator refuses incomplete strategic states
+	•	Confirmation demo loader is isolated from real campaign data
+
+I need a short structured report from you verifying these conditions.
+
+No assumptions.
+
+⸻
+
+We are now moving from feature building to structural stress testing.
+
+Reply with verification report before we begin scenario testing.

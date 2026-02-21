@@ -234,16 +234,6 @@ export function registerConfirmRoutes(app: Express) {
         });
       }
 
-      const clarifications = buildClarificationPrompts(draft);
-      if (clarifications.length > 0) {
-        return res.json({
-          success: false,
-          needsClarification: true,
-          clarificationPrompts: clarifications,
-          message: "Some critical fields have low confidence or insufficient data. Please provide input before confirming.",
-        });
-      }
-
       const currentVersion = blueprint.blueprintVersion || 1;
 
       const confirmedData: any = {
@@ -266,6 +256,8 @@ export function registerConfirmRoutes(app: Express) {
         }
       }
 
+      const clarifications = buildClarificationPrompts(draft);
+
       await db.update(strategicBlueprints)
         .set({
           status: "CONFIRMED",
@@ -286,7 +278,11 @@ export function registerConfirmRoutes(app: Express) {
         blueprintId: id,
         blueprintVersion: currentVersion,
         event: "BLUEPRINT_CONFIRMED",
-        details: { version: currentVersion },
+        details: {
+          version: currentVersion,
+          hasWeakFields: clarifications.length > 0,
+          weakFieldCount: clarifications.length,
+        },
       });
 
       res.json({
@@ -295,6 +291,10 @@ export function registerConfirmRoutes(app: Express) {
         blueprintVersion: currentVersion,
         status: "CONFIRMED",
         confirmedBlueprint: confirmedData,
+        warnings: clarifications.length > 0 ? {
+          message: "Blueprint confirmed with weak fields. Orchestrator will refuse execution if required fields are missing or INSUFFICIENT_DATA.",
+          weakFields: clarifications,
+        } : null,
       });
     } catch (error: any) {
       console.error("[StrategicCore] Confirm error:", error.message);
