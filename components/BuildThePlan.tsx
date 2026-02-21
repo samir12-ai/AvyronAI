@@ -414,17 +414,33 @@ export default function BuildThePlan() {
 
   const runValidation = useCallback(async () => {
     if (!blueprint) return;
+    if (!blueprint.marketMap) {
+      setError('Market analysis must be completed before validation. Please go back to Phase 3.');
+      return;
+    }
     setError('');
     setLoading(true);
 
     try {
-      const res = await fetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/validate`), {
+      const url = getApiUrl(`/api/strategic/blueprint/${blueprint.id}/validate`);
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      const data = await res.json();
-      if (!data.success) {
-        setError(data.message || data.error || 'Validation failed');
+
+      let data: any;
+      try {
+        data = await res.json();
+      } catch {
+        setError(`Validation failed: server returned status ${res.status} with no body`);
+        return;
+      }
+
+      if (!res.ok || !data.success) {
+        const code = res.status;
+        const msg = data.message || data.error || 'Unknown validation error';
+        setError(`Validation failed (${code}): ${msg}`);
+        console.warn(`[Validate] API error ${code}:`, JSON.stringify(data));
         return;
       }
 
@@ -436,7 +452,8 @@ export default function BuildThePlan() {
       setCurrentPhase(5);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch (err: any) {
-      setError(err.message);
+      setError(`Validation request failed: ${err.message}`);
+      console.error('[Validate] Network/fetch error:', err);
     } finally {
       setLoading(false);
     }
@@ -933,7 +950,70 @@ export default function BuildThePlan() {
 
   const renderPhase4 = () => {
     const val = blueprint?.validationResult;
-    if (!val) return null;
+    const hasAnalysis = !!blueprint?.marketMap;
+
+    if (!val) {
+      return (
+        <View style={s.phaseContent}>
+          {renderCampaignBadge()}
+          <View style={[s.phaseCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <View style={s.phaseHeader}>
+              <View style={[s.phaseIconWrap, { backgroundColor: '#F59E0B20' }]}>
+                <Ionicons name="shield-checkmark" size={20} color="#F59E0B" />
+              </View>
+              <View style={s.phaseHeaderText}>
+                <Text style={[s.phaseTitle, { color: colors.text }]}>Phase 4: Strategy Validation</Text>
+                <Text style={[s.phaseDesc, { color: colors.textSecondary }]}>
+                  AI checks your confirmed blueprint for contradictions, risks, and strategic coherence
+                </Text>
+              </View>
+            </View>
+
+            {!hasAnalysis && (
+              <View style={[s.statusBanner, { backgroundColor: '#F59E0B15' }]}>
+                <Ionicons name="lock-closed" size={16} color="#F59E0B" />
+                <Text style={[s.statusBannerText, { color: '#F59E0B' }]}>
+                  Market analysis (Phase 3) must be completed before validation can run.
+                </Text>
+              </View>
+            )}
+
+            {hasAnalysis && !loading && (
+              <View style={[s.statusBanner, { backgroundColor: '#6366F115' }]}>
+                <Ionicons name="information-circle" size={16} color="#6366F1" />
+                <Text style={[s.statusBannerText, { color: '#6366F1' }]}>
+                  Validation has not been run yet. Tap the button below to check your strategy for issues.
+                </Text>
+              </View>
+            )}
+
+            {error ? <Text style={s.errorText}>{error}</Text> : null}
+
+            <Pressable
+              onPress={runValidation}
+              disabled={loading || !hasAnalysis}
+              style={[s.actionBtn, { opacity: loading || !hasAnalysis ? 0.6 : 1 }]}
+            >
+              <LinearGradient colors={hasAnalysis ? ['#F59E0B', '#D97706'] : ['#6B7280', '#4B5563']} style={s.actionBtnGrad}>
+                {loading ? (
+                  <View style={s.loadingRow}>
+                    <ActivityIndicator color="#fff" size="small" />
+                    <Text style={s.actionBtnText}>Validating strategy...</Text>
+                  </View>
+                ) : (
+                  <>
+                    <Ionicons name="shield-checkmark" size={18} color="#fff" />
+                    <Text style={s.actionBtnText}>
+                      {hasAnalysis ? 'Run Validation' : 'Complete Analysis First'}
+                    </Text>
+                  </>
+                )}
+              </LinearGradient>
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
 
     return (
       <View style={s.phaseContent}>

@@ -4,11 +4,29 @@ import { db } from "../db";
 import { strategicBlueprints } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
+import { cleanJsonString } from "./extraction-routes";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
+
+function buildFallbackValidation(): any {
+  return {
+    contradictions: [],
+    offerClarity: { score: 0, issues: ["Validation could not be completed"], suggestions: ["Please retry validation"] },
+    pricePositioning: { alignment: "partially_aligned", details: "Could not determine", suggestion: "Retry validation" },
+    audienceOfferFit: { score: 0, issues: ["Validation incomplete"] },
+    ctaFunnelAlignment: { aligned: false, details: "Validation could not determine alignment" },
+    campaignAlignment: { aligned: false, objective: "unknown", details: "Validation incomplete" },
+    strategicWeaknesses: [],
+    riskScore: 50,
+    confidenceScore: 0,
+    overallAssessment: "weak",
+    canProceed: false,
+    warnings: ["Validation engine returned unparseable output. Results shown are defaults — please retry."],
+  };
+}
 
 const VALIDATION_PROMPT = `You are a strategic validation engine. Your job is to detect contradictions, evaluate strategic coherence, and flag risks in a campaign blueprint.
 
@@ -82,8 +100,18 @@ export function registerValidationRoutes(app: Express) {
 
       if (!["CONFIRMED", "ANALYSIS_COMPLETE", "VALIDATED"].includes(blueprint.status)) {
         return res.status(400).json({
+          success: false,
           error: "STATUS_GATE",
-          message: "Blueprint must be CONFIRMED before validation.",
+          message: "Blueprint must complete analysis (Phase 3) before validation can run.",
+          currentStatus: blueprint.status,
+        });
+      }
+
+      if (!blueprint.marketMap) {
+        return res.status(400).json({
+          success: false,
+          error: "ANALYSIS_REQUIRED",
+          message: "Market analysis (Phase 3) must be completed before validation. Please run analysis first.",
           currentStatus: blueprint.status,
         });
       }
@@ -140,17 +168,26 @@ Perform full validation now.`;
       });
 
       const rawText = response.choices[0]?.message?.content || "";
+      const finishReason = response.choices[0]?.finish_reason || "";
+      const usage = response.usage;
+      console.log(`[StrategicCore] Validation | Model: gpt-5.2 | Tokens: in=${usage?.prompt_tokens ?? "?"}, out=${usage?.completion_tokens ?? "?"}, total=${usage?.total_tokens ?? "?"} | Finish: ${finishReason}`);
+
+      if (finishReason === "length") {
+        console.warn("[StrategicCore] WARNING: Validation response was truncated (finish_reason=length)");
+      }
+
       let validationResult: any;
+      let usedFallback = false;
 
       try {
-        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          validationResult = JSON.parse(jsonMatch[0]);
-        } else {
-          throw new Error("No JSON");
-        }
-      } catch {
-        return res.status(500).json({ error: "Validation engine returned invalid format. Please retry." });
+        const cleaned = cleanJsonString(rawText);
+        validationResult = JSON.parse(cleaned);
+      } catch (parseErr: any) {
+        console.error("[StrategicCore] Validation parse failed:", parseErr.message);
+        console.error("[StrategicCore] Raw validation text (first 500):", rawText.substring(0, 500));
+        validationResult = buildFallbackValidation();
+        validationResult.warnings.push(`Parse error: ${parseErr.message}`);
+        usedFallback = true;
       }
 
       validationResult.blueprintVersion = blueprint.blueprintVersion;
@@ -186,10 +223,15 @@ Perform full validation now.`;
         blueprintVersion: blueprint.blueprintVersion,
         status: "VALIDATED",
         validationResult,
+        _meta: { usedFallback },
       });
     } catch (error: any) {
       console.error("[StrategicCore] Validation error:", error.message);
-      res.status(500).json({ error: "Failed to validate blueprint" });
+      res.status(500).json({
+        success: false,
+        error: "VALIDATION_ERROR",
+        message: `Validation failed: ${error.message}`,
+      });
     }
   });
 }
