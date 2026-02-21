@@ -102,7 +102,7 @@ export function registerCiAnalysisRoutes(app: Express) {
       const prompt = buildAnalysisPrompt(competitorData, prevData, prevAnalyses[0] || null);
 
       const aiResponse = await openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-5.2",
         messages: [
           { role: "system", content: getSystemPrompt() },
           { role: "user", content: prompt },

@@ -51,7 +51,7 @@ export function registerLeadMagnetRoutes(app: Express) {
       }
 
       const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: "gpt-5.2",
         messages: [
           { role: "system", content: "You are an expert lead generation strategist. Create compelling lead magnets that drive conversions. Always return valid JSON." },
           { role: "user", content: prompt },

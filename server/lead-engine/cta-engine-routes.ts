@@ -24,7 +24,7 @@ export function registerCtaEngineRoutes(app: Express) {
       const numVariants = Math.min(count || 4, 8);
 
       const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: "gpt-5.2",
         messages: [
           {
             role: "system",
