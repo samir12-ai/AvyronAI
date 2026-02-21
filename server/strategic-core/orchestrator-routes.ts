@@ -147,6 +147,15 @@ export function registerOrchestratorRoutes(app: Express) {
         return res.status(400).json({ error: "No confirmed blueprint. Confirmed blueprint is the only source of truth." });
       }
 
+      if (confirmedBlueprint.blueprintVersion !== blueprint.blueprintVersion) {
+        return res.status(400).json({
+          error: "VERSION_MISMATCH",
+          message: "Confirmed blueprint version does not match current blueprint version. Re-confirm required.",
+          confirmedVersion: confirmedBlueprint.blueprintVersion,
+          currentVersion: blueprint.blueprintVersion,
+        });
+      }
+
       const { valid, missingFields } = validateBlueprintCompleteness(confirmedBlueprint);
       if (!valid) {
         return res.status(400).json({

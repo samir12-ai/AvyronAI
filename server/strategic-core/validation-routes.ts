@@ -93,6 +93,15 @@ export function registerValidationRoutes(app: Express) {
         return res.status(400).json({ error: "No confirmed blueprint data. Confirmed blueprint is the only source of truth." });
       }
 
+      if (confirmedBlueprint.blueprintVersion !== blueprint.blueprintVersion) {
+        return res.status(400).json({
+          error: "VERSION_MISMATCH",
+          message: "Confirmed blueprint version does not match current blueprint version. Re-confirm required.",
+          confirmedVersion: confirmedBlueprint.blueprintVersion,
+          currentVersion: blueprint.blueprintVersion,
+        });
+      }
+
       const campaignContext = blueprint.campaignContext ? JSON.parse(blueprint.campaignContext) : null;
       if (!campaignContext) {
         return res.status(400).json({
