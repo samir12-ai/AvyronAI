@@ -56,7 +56,11 @@ export type AuditEventType =
   | "META_HEALTH_CHECK"
   | "META_AUTO_EXTENSION"
   | "META_DISCONNECTED"
-  | "META_CONNECTED";
+  | "META_CONNECTED"
+  | "METRICS_RESET"
+  | "META_TEMPORARY_ERROR"
+  | "META_RATE_LIMITED"
+  | "META_BACKOFF_APPLIED";
 
 export async function logAudit(
   accountId: string,
