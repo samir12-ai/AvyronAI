@@ -665,7 +665,7 @@ export default function AIManagementScreen() {
             { key: 'strategy' as TabView, icon: 'analytics-outline' as const, label: 'Strategy', color: colors.primary, advanced: true },
             { key: 'leads' as TabView, icon: 'magnet-outline' as const, label: 'Leads', color: '#00D09C', advanced: true },
             { key: 'intel' as TabView, icon: 'telescope-outline' as const, label: 'Intel', color: '#8B5CF6', advanced: true },
-            { key: 'strategic' as TabView, icon: 'bulb-outline' as const, label: 'Plan', color: '#EC4899', advanced: true },
+            { key: 'strategic' as TabView, icon: 'bulb-outline' as const, label: 'Plan', color: '#EC4899', advanced: false },
           ] as const)
             .filter(t => !t.advanced || advancedMode)
             .map(t => {
