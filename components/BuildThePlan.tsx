@@ -254,16 +254,26 @@ export default function BuildThePlan() {
       setLoading(true);
       const formData = new FormData();
       formData.append('blueprintId', blueprint.id);
-      formData.append('media', {
-        uri: file.uri,
-        name: file.name,
-        type: file.mimeType || 'image/jpeg',
-      } as any);
 
-      const res = await fetch(getApiUrl('/api/strategic/analyze-creative'), {
+      if (Platform.OS === 'web') {
+        const response = await globalThis.fetch(file.uri);
+        const blob = await response.blob();
+        formData.append('media', blob, file.name || 'creative.jpg');
+      } else {
+        formData.append('media', {
+          uri: file.uri,
+          name: file.name || 'creative.jpg',
+          type: file.mimeType || 'image/jpeg',
+        } as any);
+      }
+
+      const uploadUrl = getApiUrl('/api/strategic/analyze-creative');
+      console.log('[BuildThePlan] Upload URL:', uploadUrl, 'File:', file.name, 'Type:', file.mimeType);
+      const res = await globalThis.fetch(uploadUrl, {
         method: 'POST',
         body: formData,
       });
+      console.log('[BuildThePlan] Upload response status:', res.status);
       const data = await res.json();
 
       if (!data.success) {
