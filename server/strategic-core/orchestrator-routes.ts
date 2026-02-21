@@ -1,0 +1,188 @@
+import type { Express, Request, Response } from "express";
+import OpenAI from "openai";
+import { db } from "../db";
+import { strategicBlueprints } from "@shared/schema";
+import { eq } from "drizzle-orm";
+
+const openai = new OpenAI({
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+});
+
+const ORCHESTRATOR_PROMPT = `You are an execution orchestrator. You do NOT think. You do NOT reinterpret. You do NOT override the confirmed blueprint.
+
+You organize execution STRICTLY from the validated blueprint and market map.
+
+You must generate exactly 6 structured execution plans. All output must be structured objects. Never change positioning, offer, or any confirmed blueprint fields.
+
+Respond with ONLY a valid JSON object:
+{
+  "contentDistributionPlan": {
+    "platforms": [
+      {
+        "platform": "string",
+        "frequency": "string",
+        "contentTypes": ["string"],
+        "bestTimes": ["string"],
+        "priority": "primary|secondary|experimental"
+      }
+    ],
+    "weeklyCalendar": [
+      { "day": "string", "platform": "string", "contentType": "string", "theme": "string" }
+    ]
+  },
+  "creativeTestingMatrix": {
+    "tests": [
+      {
+        "testName": "string",
+        "variable": "string",
+        "variants": ["string"],
+        "metric": "string",
+        "duration": "string",
+        "budget": "string"
+      }
+    ],
+    "testingOrder": ["string"],
+    "minimumSampleSize": "string"
+  },
+  "budgetAllocationStructure": {
+    "totalRecommended": "string",
+    "breakdown": [
+      {
+        "category": "string",
+        "percentage": number,
+        "amount": "string",
+        "purpose": "string"
+      }
+    ],
+    "scalingTriggers": ["string"],
+    "cutTriggers": ["string"]
+  },
+  "kpiMonitoringPriority": {
+    "primaryKPIs": [
+      {
+        "kpi": "string",
+        "target": "string",
+        "frequency": "string",
+        "alertThreshold": "string"
+      }
+    ],
+    "secondaryKPIs": [
+      {
+        "kpi": "string",
+        "target": "string",
+        "frequency": "string"
+      }
+    ],
+    "reportingCadence": "string"
+  },
+  "competitiveWatchTargets": {
+    "targets": [
+      {
+        "competitor": "string",
+        "watchMetrics": ["string"],
+        "alertTriggers": ["string"],
+        "checkFrequency": "string"
+      }
+    ]
+  },
+  "riskMonitoringTriggers": {
+    "triggers": [
+      {
+        "trigger": "string",
+        "condition": "string",
+        "action": "string",
+        "severity": "low|medium|high|critical"
+      }
+    ],
+    "escalationPath": ["string"]
+  }
+}`;
+
+export function registerOrchestratorRoutes(app: Express) {
+  app.post("/api/strategic/blueprint/:id/orchestrate", async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
+      if (!blueprint) {
+        return res.status(404).json({ error: "Blueprint not found" });
+      }
+
+      if (blueprint.status !== "VALIDATED") {
+        return res.status(400).json({
+          error: "STATUS_GATE",
+          message: "No Blueprint.confirmed + validated → no Orchestrator. Blueprint must be VALIDATED first.",
+          currentStatus: blueprint.status,
+        });
+      }
+
+      const confirmedBlueprint = blueprint.confirmedBlueprint ? JSON.parse(blueprint.confirmedBlueprint) : null;
+      const marketMap = blueprint.marketMap ? JSON.parse(blueprint.marketMap) : null;
+      const validationResult = blueprint.validationResult ? JSON.parse(blueprint.validationResult) : null;
+
+      if (!confirmedBlueprint) {
+        return res.status(400).json({ error: "No confirmed blueprint" });
+      }
+
+      const competitorUrls = blueprint.competitorUrls ? JSON.parse(blueprint.competitorUrls) : [];
+
+      const userPrompt = `Generate execution plans from this validated blueprint. Do NOT reinterpret or override ANY confirmed data.
+
+CONFIRMED BLUEPRINT:
+${JSON.stringify(confirmedBlueprint, null, 2)}
+
+AVERAGE SELLING PRICE: $${blueprint.averageSellingPrice}
+
+COMPETITOR URLS: ${competitorUrls.join(", ")}
+
+${marketMap ? `MARKET MAP:\n${JSON.stringify(marketMap, null, 2)}` : ""}
+
+${validationResult ? `VALIDATION RESULT:\n${JSON.stringify(validationResult, null, 2)}` : ""}
+
+Generate all 6 execution plans now. Strictly from the validated data. No reinterpretation.`;
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.2",
+        messages: [
+          { role: "system", content: ORCHESTRATOR_PROMPT },
+          { role: "user", content: userPrompt },
+        ],
+        max_completion_tokens: 4000,
+      });
+
+      const rawText = response.choices[0]?.message?.content || "";
+      let orchestratorPlan: any;
+
+      try {
+        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          orchestratorPlan = JSON.parse(jsonMatch[0]);
+        } else {
+          throw new Error("No JSON");
+        }
+      } catch {
+        return res.status(500).json({ error: "Orchestrator returned invalid format. Please retry." });
+      }
+
+      await db.update(strategicBlueprints)
+        .set({
+          status: "ORCHESTRATED",
+          orchestratorPlan: JSON.stringify(orchestratorPlan),
+          orchestratedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(strategicBlueprints.id, id));
+
+      res.json({
+        success: true,
+        blueprintId: id,
+        status: "ORCHESTRATED",
+        orchestratorPlan,
+      });
+    } catch (error: any) {
+      console.error("[StrategicCore] Orchestrator error:", error.message);
+      res.status(500).json({ error: "Failed to generate execution plans" });
+    }
+  });
+}

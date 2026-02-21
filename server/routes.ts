@@ -14,6 +14,7 @@ import { registerPublishPipelineRoutes } from "./publish-pipeline";
 import { registerLumaRoutes } from "./luma-routes";
 import { registerLeadEngineRoutes } from "./lead-engine";
 import { registerCompetitiveIntelligenceRoutes } from "./competitive-intelligence";
+import { registerStrategicCoreRoutes } from "./strategic-core";
 import { registerCampaignRoutes, requireCampaign } from "./campaign-routes";
 import { registerMetaStatusRoutes, requireMetaReal, getDecryptedPageToken } from "./meta-status";
 import { storeTokensAfterOAuth, runAllHealthChecks } from "./meta-token-manager";
@@ -1304,6 +1305,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerCampaignRoutes(app);
   registerLeadEngineRoutes(app);
   registerCompetitiveIntelligenceRoutes(app);
+  registerStrategicCoreRoutes(app);
   registerMetaStatusRoutes(app);
 
   initMetaMetrics();
