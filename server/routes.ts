@@ -1311,7 +1311,12 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   initMetaMetrics();
 
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
+    res.json({
+      ok: true,
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      routes: ["/api/strategic/init", "/api/strategic/blueprint/:id", "/api/demo/seed-campaign"],
+    });
   });
 
   app.post("/api/meta/data-deletion", (req, res) => {

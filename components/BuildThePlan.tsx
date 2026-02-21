@@ -203,7 +203,9 @@ export default function BuildThePlan() {
 
     setLoading(true);
     try {
-      const res = await fetch(getApiUrl() + '/api/strategic/init', {
+      const initUrl = getApiUrl('/api/strategic/init');
+      console.log('[BuildThePlan] Gate request URL:', initUrl);
+      const res = await fetch(initUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -212,19 +214,25 @@ export default function BuildThePlan() {
           metaConnected: false,
         }),
       });
+      console.log('[BuildThePlan] Gate response status:', res.status);
       const data = await res.json();
       if (!data.success) {
         setError(data.message || data.error || 'Gate failed');
         return;
       }
 
-      const bpRes = await fetch(getApiUrl() + `/api/strategic/blueprint/${data.blueprintId}`);
+      const bpUrl = getApiUrl(`/api/strategic/blueprint/${data.blueprintId}`);
+      const bpRes = await fetch(bpUrl);
       const bpData = await bpRes.json();
       setBlueprint(bpData.blueprint);
       setCurrentPhase(1);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch (err: any) {
-      setError(err.message || 'Network error');
+      const failedUrl = getApiUrl('/api/strategic/init');
+      const domain = process.env.EXPO_PUBLIC_DOMAIN || 'NOT_SET';
+      const diagMsg = `${err.message || 'Network error'}\n\nDiagnostics:\nURL: ${failedUrl}\nDomain: ${domain}\nPlatform: ${Platform.OS}`;
+      console.error('[BuildThePlan] Gate fetch failed:', diagMsg);
+      setError(diagMsg);
     } finally {
       setLoading(false);
     }
@@ -252,7 +260,7 @@ export default function BuildThePlan() {
         type: file.mimeType || 'image/jpeg',
       } as any);
 
-      const res = await fetch(getApiUrl() + '/api/strategic/analyze-creative', {
+      const res = await fetch(getApiUrl('/api/strategic/analyze-creative'), {
         method: 'POST',
         body: formData,
       });
@@ -286,7 +294,7 @@ export default function BuildThePlan() {
     setLoading(true);
 
     try {
-      const res = await fetch(getApiUrl() + `/api/strategic/blueprint/${blueprint.id}/confirm`, {
+      const res = await fetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/confirm`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -323,7 +331,7 @@ export default function BuildThePlan() {
     setLoading(true);
 
     try {
-      const res = await fetch(getApiUrl() + `/api/strategic/blueprint/${blueprint.id}/edit`, {
+      const res = await fetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/edit`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields: { [editingField]: editValue } }),
@@ -370,7 +378,7 @@ export default function BuildThePlan() {
     setLoading(true);
 
     try {
-      const res = await fetch(getApiUrl() + `/api/strategic/blueprint/${blueprint.id}/analyze`, {
+      const res = await fetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/analyze`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -400,7 +408,7 @@ export default function BuildThePlan() {
     setLoading(true);
 
     try {
-      const res = await fetch(getApiUrl() + `/api/strategic/blueprint/${blueprint.id}/validate`, {
+      const res = await fetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/validate`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -430,7 +438,7 @@ export default function BuildThePlan() {
     setLoading(true);
 
     try {
-      const res = await fetch(getApiUrl() + `/api/strategic/blueprint/${blueprint.id}/orchestrate`, {
+      const res = await fetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/orchestrate`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });

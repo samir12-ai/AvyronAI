@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const API_BASE = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5000';
+import { fetch } from 'expo/fetch';
+import { getApiUrl } from '@/lib/query-client';
 
 interface CampaignInfo {
   id: string;
@@ -52,7 +52,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const refreshCampaigns = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/campaigns`);
+      const res = await fetch(getApiUrl('/api/campaigns'));
       if (res.ok) {
         const data = await res.json();
         setCampaigns(data.campaigns || []);
@@ -64,7 +64,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const refreshSelection = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/campaigns/selected`);
+      const res = await fetch(getApiUrl('/api/campaigns/selected'));
       if (res.ok) {
         const data = await res.json();
         if (data.selected && data.selection) {
@@ -82,7 +82,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const selectCampaign = useCallback(async (campaign: CampaignInfo) => {
     try {
-      const res = await fetch(`${API_BASE}/api/campaigns/select`, {
+      const res = await fetch(getApiUrl('/api/campaigns/select'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -110,7 +110,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const clearSelection = useCallback(async () => {
     try {
-      await fetch(`${API_BASE}/api/campaigns/selected`, { method: 'DELETE' });
+      await fetch(getApiUrl('/api/campaigns/selected'), { method: 'DELETE' });
       setSelectedCampaign(null);
       setWarning(null);
     } catch (err) {

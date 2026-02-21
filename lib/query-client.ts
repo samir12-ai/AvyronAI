@@ -1,20 +1,25 @@
 import { fetch } from "expo/fetch";
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
-/**
- * Gets the base URL for the Express API server (e.g., "http://localhost:3000")
- * @returns {string} The API base URL
- */
-export function getApiUrl(): string {
+export function getApiUrl(path?: string): string {
   let host = process.env.EXPO_PUBLIC_DOMAIN;
 
   if (!host) {
     throw new Error("EXPO_PUBLIC_DOMAIN is not set");
   }
 
-  let url = new URL(`https://${host}`);
+  if (host.includes(":")) {
+    host = host.split(":")[0];
+  }
 
-  return url.href;
+  const base = `https://${host}`;
+
+  if (path) {
+    const cleanPath = path.startsWith("/") ? path : `/${path}`;
+    return `${base}${cleanPath}`;
+  }
+
+  return base;
 }
 
 async function throwIfResNotOk(res: Response) {
@@ -29,10 +34,9 @@ export async function apiRequest(
   route: string,
   data?: unknown | undefined,
 ): Promise<Response> {
-  const baseUrl = getApiUrl();
-  const url = new URL(route, baseUrl);
+  const url = getApiUrl(route);
 
-  const res = await fetch(url.toString(), {
+  const res = await fetch(url, {
     method,
     headers: data ? { "Content-Type": "application/json" } : {},
     body: data ? JSON.stringify(data) : undefined,
@@ -49,10 +53,9 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const baseUrl = getApiUrl();
-    const url = new URL(queryKey.join("/") as string, baseUrl);
+    const url = getApiUrl(queryKey.join("/") as string);
 
-    const res = await fetch(url.toString(), {
+    const res = await fetch(url, {
       credentials: "include",
     });
 
