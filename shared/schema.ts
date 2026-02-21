@@ -992,7 +992,26 @@ export const strategicAuditLogs = pgTable("strategic_audit_logs", {
   timestamp: timestamp("timestamp").defaultNow(),
 });
 
+export const extractionMetrics = pgTable("extraction_metrics", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  campaignId: varchar("campaign_id"),
+  blueprintId: varchar("blueprint_id").notNull(),
+  modelName: text("model_name").notNull(),
+  parseFailedReason: text("parse_failed_reason").notNull(),
+  inputTokenCount: integer("input_token_count"),
+  outputTokenCount: integer("output_token_count"),
+  totalTokenCount: integer("total_token_count"),
+  finishReason: text("finish_reason"),
+  creativeType: text("creative_type").notNull(),
+  videoDuration: doublePrecision("video_duration"),
+  attemptCount: integer("attempt_count").notNull().default(1),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export type StrategicBlueprint = typeof strategicBlueprints.$inferSelect;
 export type BlueprintCompetitor = typeof blueprintCompetitors.$inferSelect;
 export type BlueprintVersion = typeof blueprintVersions.$inferSelect;
 export type StrategicAuditLog = typeof strategicAuditLogs.$inferSelect;
+export type ExtractionMetric = typeof extractionMetrics.$inferSelect;

@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { GoogleGenAI } from "@google/genai";
 import multer from "multer";
 import { db } from "../db";
-import { strategicBlueprints } from "@shared/schema";
+import { strategicBlueprints, extractionMetrics } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
 import fs from "fs";
@@ -288,6 +288,29 @@ export function registerExtractionRoutes(app: Express) {
 
       draftBlueprint.extractionFallbackUsed = extractionFallbackUsed;
       draftBlueprint.parseFailedReason = parseFailedReason;
+
+      if (extractionFallbackUsed) {
+        const lastAttempt = auditAttempts[auditAttempts.length - 1];
+        const tokens = lastAttempt?.tokens || {};
+        try {
+          await db.insert(extractionMetrics).values({
+            campaignId: blueprint.campaignId || null,
+            blueprintId,
+            modelName: lastAttempt?.model || MODEL_NAME,
+            parseFailedReason: parseFailedReason || "UNKNOWN",
+            inputTokenCount: tokens.inputTokens ?? null,
+            outputTokenCount: tokens.outputTokens ?? null,
+            totalTokenCount: tokens.totalTokens ?? null,
+            finishReason: tokens.truncated ? "MAX_TOKENS" : null,
+            creativeType: isVideo ? "video" : "image",
+            videoDuration: null,
+            attemptCount: auditAttempts.length,
+          });
+          console.log(`[ExtractionMetrics] Logged fallback: reason=${parseFailedReason}, model=${MODEL_NAME}, attempts=${auditAttempts.length}`);
+        } catch (metricErr: any) {
+          console.error("[ExtractionMetrics] Failed to log metric (non-blocking):", metricErr.message);
+        }
+      }
 
       const finalStatus = extractionFallbackUsed ? "EXTRACTION_FALLBACK" : "EXTRACTION_COMPLETE";
 
