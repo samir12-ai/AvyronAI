@@ -56,8 +56,11 @@ export function registerStrategyRoutes(app: Express) {
     try {
       const { accessToken, pageId } = req.body;
 
+      const campaignContext = (req as any).campaignContext;
+      const accountId = (req.query.accountId as string) || "default";
+
       if (!accessToken || !pageId) {
-        const demoData = generateDemoPerformanceData();
+        const demoData = generateDemoPerformanceData(campaignContext.campaignId, accountId);
         for (const item of demoData) {
           await db.insert(performanceSnapshots).values(item);
         }
@@ -100,6 +103,8 @@ export function registerStrategyRoutes(app: Express) {
             comments: 0,
             shares: 0,
             saves: 0,
+            campaignId: campaignContext.campaignId,
+            accountId,
             publishedAt: new Date(post.created_time),
           });
           synced++;
@@ -108,7 +113,7 @@ export function registerStrategyRoutes(app: Express) {
         res.json({ success: true, synced });
       } catch (apiErr: any) {
         console.error("[Strategy] Meta API error:", apiErr.message);
-        const demoData = generateDemoPerformanceData();
+        const demoData = generateDemoPerformanceData(campaignContext.campaignId, accountId);
         for (const item of demoData) {
           await db.insert(performanceSnapshots).values(item);
         }
@@ -1014,7 +1019,7 @@ Return ONLY valid JSON:
   });
 }
 
-function generateDemoPerformanceData() {
+function generateDemoPerformanceData(campaignId: string = "demo_lead_gen_001", accountId: string = "default") {
   const angles = ['problem-solution', 'storytelling', 'authority', 'behind-the-scenes', 'testimonial', 'educational', 'controversial-take', 'trend-jacking'];
   const hooks = ['direct', 'curiosity', 'statistic', 'question', 'bold-claim', 'story-opener'];
   const formats = ['reel', 'carousel', 'story', 'static-image', 'video-ad', 'live'];
@@ -1054,6 +1059,8 @@ function generateDemoPerformanceData() {
       audienceAge: ages[Math.floor(Math.random() * ages.length)],
       audienceGender: Math.random() > 0.5 ? 'female' : 'male',
       audienceLocation: Math.random() > 0.5 ? 'Dubai' : 'Abu Dhabi',
+      campaignId,
+      accountId,
       publishedAt: new Date(now - i * 24 * 60 * 60 * 1000),
     });
   }

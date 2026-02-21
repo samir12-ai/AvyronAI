@@ -126,6 +126,8 @@ export const performanceSnapshots = pgTable("performance_snapshots", {
   audienceGender: text("audience_gender"),
   audienceLocation: text("audience_location"),
   topComments: text("top_comments"),
+  campaignId: varchar("campaign_id"),
+  accountId: varchar("account_id").default("default"),
   publishedAt: timestamp("published_at"),
   fetchedAt: timestamp("fetched_at").defaultNow(),
 });
