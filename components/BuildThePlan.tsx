@@ -18,6 +18,8 @@ import * as Haptics from 'expo-haptics';
 import * as DocumentPicker from 'expo-document-picker';
 import Colors from '@/constants/colors';
 import { getApiUrl } from '@/lib/query-client';
+import { useApp } from '@/context/AppContext';
+import { useCampaign } from '@/context/CampaignContext';
 
 type Phase = 0 | 1 | 2 | 3 | 4 | 5;
 type BlueprintStatus = 'DRAFT' | 'GATE_PASSED' | 'EXTRACTION_COMPLETE' | 'CONFIRMED' | 'ANALYSIS_COMPLETE' | 'VALIDATED' | 'ORCHESTRATED';
@@ -99,6 +101,8 @@ export default function BuildThePlan() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
+  const { metaConnection } = useApp();
+  const { refreshCampaigns, refreshSelection } = useCampaign();
 
   const [blueprint, setBlueprint] = useState<Blueprint | null>(null);
   const [currentPhase, setCurrentPhase] = useState<Phase>(0);
@@ -111,6 +115,48 @@ export default function BuildThePlan() {
 
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+
+  const [seeding, setSeeding] = useState(false);
+  const [seedResult, setSeedResult] = useState<any>(null);
+
+  const isMetaReal = metaConnection?.isConnected === true;
+
+  const seedDemoCampaign = useCallback(async () => {
+    setSeeding(true);
+    setError('');
+    setSeedResult(null);
+    try {
+      const res = await fetch(getApiUrl('/api/demo/seed-campaign'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaignName: 'SWA',
+          window: 'last_30_days',
+          spend: 3.21,
+          reach: 88,
+          impressions: 114,
+          messagingConversations: 0,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSeedResult(data);
+        await refreshCampaigns();
+        await refreshSelection();
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert(
+          'Demo Campaign Seeded',
+          `"${data.campaignContext.name}" is now active with 30 days of seeded performance data.\n\nLocation: ${data.campaignContext.location}\nSpend: $${data.seededData.totalSpend}\nReach: ${data.seededData.totalReach}\nConversions: 0\n\nGate is ready — add competitors + price to proceed.`,
+        );
+      } else {
+        setError(data.error || 'Failed to seed demo campaign');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Seed failed');
+    } finally {
+      setSeeding(false);
+    }
+  }, [refreshCampaigns, refreshSelection]);
 
   const pulseAnim = useRef(new RNAnimated.Value(0)).current;
 
@@ -464,6 +510,32 @@ export default function BuildThePlan() {
             </Text>
           </View>
         </View>
+
+        {!isMetaReal && !seedResult && (
+          <Pressable
+            onPress={seedDemoCampaign}
+            disabled={seeding}
+            style={[s.seedBtn, { opacity: seeding ? 0.6 : 1 }]}
+          >
+            <LinearGradient colors={['#EC4899', '#F43F5E']} style={s.seedBtnGrad}>
+              {seeding ? <ActivityIndicator color="#fff" size="small" /> : (
+                <>
+                  <Ionicons name="flask" size={16} color="#fff" />
+                  <Text style={s.seedBtnText}>Seed Demo Campaign (Manual Metrics)</Text>
+                </>
+              )}
+            </LinearGradient>
+          </Pressable>
+        )}
+
+        {seedResult && (
+          <View style={[s.seedBadge, { backgroundColor: '#10B98115', borderColor: '#10B98130' }]}>
+            <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+            <Text style={[s.seedBadgeText, { color: '#10B981' }]}>
+              DEMO: "{seedResult.campaignContext.name}" seeded — {seedResult.seededData.performanceSnapshots} days of data
+            </Text>
+          </View>
+        )}
 
         <Text style={[s.sectionLabel, { color: colors.text }]}>Competitor URLs (min 2)</Text>
         {competitorUrls.map((url, index) => (
@@ -1461,5 +1533,38 @@ const s = StyleSheet.create({
   budgetPct: {
     fontSize: 14,
     fontWeight: '700',
+  },
+  seedBtn: {
+    marginBottom: 16,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  seedBtnGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    gap: 8,
+  },
+  seedBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  seedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  seedBadgeText: {
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
   },
 });
