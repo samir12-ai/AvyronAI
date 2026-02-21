@@ -917,3 +917,44 @@ export type CiSnapshot = typeof ciSnapshots.$inferSelect;
 export type CiMarketAnalysis = typeof ciMarketAnalyses.$inferSelect;
 export type CiRecommendation = typeof ciRecommendations.$inferSelect;
 export type CiStrategyDecision = typeof ciStrategyDecisions.$inferSelect;
+
+// =============================================
+// STRATEGIC CORE: BUILD THE PLAN
+// =============================================
+export const strategicBlueprints = pgTable("strategic_blueprints", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id"),
+  status: text("status").notNull().default("DRAFT"),
+  competitorUrls: text("competitor_urls"),
+  averageSellingPrice: doublePrecision("average_selling_price"),
+  creativeMediaType: text("creative_media_type"),
+  creativeMediaUrl: text("creative_media_url"),
+  creativeAnalysis: text("creative_analysis"),
+  confirmedBlueprint: text("confirmed_blueprint"),
+  marketMap: text("market_map"),
+  validationResult: text("validation_result"),
+  orchestratorPlan: text("orchestrator_plan"),
+  gatePassedAt: timestamp("gate_passed_at"),
+  analysisCompletedAt: timestamp("analysis_completed_at"),
+  confirmedAt: timestamp("confirmed_at"),
+  validatedAt: timestamp("validated_at"),
+  orchestratedAt: timestamp("orchestrated_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const blueprintCompetitors = pgTable("blueprint_competitors", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  blueprintId: varchar("blueprint_id").notNull(),
+  url: text("url").notNull(),
+  analysisData: text("analysis_data"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type StrategicBlueprint = typeof strategicBlueprints.$inferSelect;
+export type BlueprintCompetitor = typeof blueprintCompetitors.$inferSelect;

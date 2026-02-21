@@ -1,0 +1,193 @@
+
+⸻
+
+We are now building the Strategic Core: Build The Plan.
+This is not a feature. This is the central intelligence layer of the entire platform.
+
+From this point forward:
+	•	No campaign optimization
+	•	No signal detection
+	•	No scaling
+	•	No audience logic
+	•	No orchestration
+
+…may execute without a Confirmed Strategic Blueprint.
+
+If this layer is weak, the entire system becomes noise optimization.
+We are not building a media optimizer. We are building an AI strategic operator.
+
+⸻
+
+PHASE 0 — HARD GATE (NON-NEGOTIABLE)
+
+Before entering Build The Plan:
+	1.	Competitor Links — MANDATORY
+
+	•	Minimum: 2 competitor URLs
+	•	If fewer than 2 → block access
+	•	No fallback
+	•	No “skip for now”
+
+	2.	Price Input — REQUIRED
+Add a simple input:
+“What is your average selling price?”
+
+	•	Single numeric field
+	•	No complex form
+	•	If missing AND cannot be confidently extracted from video → block confirmation
+
+Rule:
+No competitors + no price = no Blueprint confirmation.
+
+⸻
+
+PHASE 1 — VIDEO-FIRST STRATEGIC EXTRACTION
+
+User uploads campaign creative.
+
+Creative Analysis Engine must:
+	•	Auto-detect language
+	•	Speech-to-text (multilingual)
+	•	OCR extraction
+	•	Detect offer
+	•	Detect CTA
+	•	Infer positioning (premium / discount / authority / convenience)
+	•	Infer funnel stage
+	•	Infer target audience
+	•	Output structured JSON object ONLY (no free text)
+
+Example:
+{
+detectedOffer,
+detectedPositioning,
+detectedCTA,
+detectedAudienceGuess,
+detectedFunnelStage,
+detectedPriceIfVisible,
+confidenceScore
+}
+
+No hallucinated fields.
+If low clarity → lower confidenceScore.
+
+⸻
+
+PHASE 2 — EXPLAIN → CONFIRM / EDIT (MANDATORY HUMAN CONTROL)
+
+System must display:
+
+“We detected the following from your campaign:”
+
+Each section must allow:
+	•	Done
+	•	Edit
+
+User edits override AI detection completely.
+
+If confidenceScore < threshold (e.g., 60%):
+Trigger 2–3 clarification prompts.
+No essays.
+No long questionnaires.
+
+Only after explicit confirmation:
+
+Blueprint.status = CONFIRMED
+
+No engine may proceed without CONFIRMED status.
+
+⸻
+
+PHASE 3 — STRATEGIC THINKING ENGINE
+
+Inputs:
+	•	Confirmed Creative Blueprint
+	•	Competitor links
+	•	Price
+	•	Campaign objective (auto-fetched)
+	•	Selected audience (from Advanced Mode)
+
+Tasks:
+	•	Analyze competitor positioning
+	•	Estimate competitor price bands
+	•	Compare price vs market
+	•	Detect saturation level
+	•	Identify gap angles
+	•	Identify risk exposure
+	•	Generate Strategic Market Map
+
+Output:
+Structured MarketMap object.
+
+No narrative output. Structured only.
+
+⸻
+
+PHASE 4 — VALIDATION ENGINE (CRITICAL)
+
+This layer must:
+	•	Detect contradictions (Premium + heavy discount, etc.)
+	•	Evaluate offer clarity
+	•	Evaluate price positioning
+	•	Assign riskScore
+	•	Assign confidenceScore
+	•	Flag strategic weaknesses
+
+Validation must re-run after ANY user edit.
+
+If riskScore above threshold:
+Flag warning but allow confirmation (advisory mode).
+
+⸻
+
+PHASE 5 — ORCHESTRATOR ENGINE (EXECUTION CONTROLLER)
+
+Orchestrator does NOT think.
+It organizes execution strictly from Validated Blueprint.
+
+It must generate:
+	1.	Content Distribution Plan
+	2.	Creative Testing Matrix
+	3.	Budget Allocation Structure
+	4.	KPI Monitoring Priority
+	5.	Competitive Watch Targets
+	6.	Risk Monitoring Triggers
+
+All output must be structured objects.
+
+Orchestrator must NEVER:
+	•	Reinterpret offer
+	•	Change positioning
+	•	Override confirmed Blueprint
+
+⸻
+
+CRITICAL SYSTEM RULES
+	1.	No Blueprint.confirmed → no Orchestrator.
+	2.	No competitor data → no Market Analysis.
+	3.	No price data → no price comparison.
+	4.	User edits override AI extraction.
+	5.	All engines consume structured objects only.
+	6.	No free-text dependencies between engines.
+	7.	Validation must re-run after edits.
+	8.	Modular, production-grade, testable.
+
+⸻
+
+IMPLEMENTATION ORDER (STRICT)
+	1.	Phase 0 Gate
+	2.	Phase 1 Extraction
+	3.	Phase 2 Confirm/Edit
+	4.	Phase 3 Thinking
+	5.	Phase 4 Validation
+	6.	Phase 5 Orchestrator
+
+No parallel shortcuts.
+No skipping phases.
+
+⸻
+
+We are building the intelligence backbone of the platform.
+
+This must be stable, deterministic, modular, and production-grade from day one.
+
+Begin immediately with Phase 0 and Phase 1.
