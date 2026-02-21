@@ -94,10 +94,16 @@ Preferred communication style: Simple, everyday language.
 - **Meta OAuth**: Login options via Facebook and Instagram.
 - **Demo Mode**: Available for simulated login without Meta credentials.
 
-### Meta Business Suite Integration
-- **OAuth Flow**: For connecting to Facebook and Instagram.
-- **Features**: Enables auto-posting and unified ads management.
-- **Scopes**: Requires permissions like `pages_manage_posts`, `instagram_content_publish`, `ads_management`, `business_management`.
+### Meta Business Suite Integration (Production-Grade)
+- **Token Security**: AES-256-GCM encrypted tokens stored server-side in `meta_credentials` table. Never sent to client. Key versioning via `META_ENCRYPTION_KEY` env var. Module: `server/meta-crypto.ts`.
+- **OAuth Flow**: Full-scope OAuth requesting `pages_manage_posts`, `pages_read_engagement`, `read_insights`, `pages_show_list`, `instagram_basic`, `instagram_content_publish`, `business_management`, `public_profile`, `email`. Short-lived tokens exchanged for long-lived (60-day) tokens server-side. Page tokens fetched via `/me/accounts`. Instagram Business IDs resolved via page-linked IG accounts.
+- **Meta Modes**: `DISCONNECTED` (default), `PENDING_APPROVAL`, `PERMISSION_MISSING`, `TOKEN_EXPIRED`, `REVOKED`, `DEMO` (admin-only with `ALLOW_DEMO_MODE` env), `REAL` (production). Audit-logged transitions via `server/meta-status.ts`.
+- **Capability Gates**: `fb_publishing_enabled` = `pages_manage_posts` + valid page token. `ig_publishing_enabled` = `instagram_content_publish` + verified `ig_business_id`. `insights_enabled` = `pages_read_engagement` + `read_insights`.
+- **Token Lifecycle**: Daily health checks via `/debug_token` (startup + every 6 hours). Auto-extension when <14 days remaining. Failure classification: revoked (subcodes 458/460/463) vs expired vs invalid. Module: `server/meta-token-manager.ts`.
+- **Publish Worker**: Uses `getServerSidePageToken()` — decrypts page tokens server-side only. Refuses to publish unless `meta_mode=REAL`. No silent demo fallbacks. No fake metric generation. Module: `server/publish-worker.ts`.
+- **requireMetaReal Middleware**: Guards all publishing/insights endpoints. Returns structured error codes (`META_NOT_CONNECTED`, `META_TOKEN_EXPIRED`, etc.) with actionable messages.
+- **Settings UI**: Production status card fetches `/api/meta/status` server-side data. Shows per-capability indicators, token expiry warnings, scope audit, connect/disconnect/reconnect flows with OAuth polling.
+- **Database Tables**: `meta_credentials` (encrypted tokens, page/IG IDs, health check timestamps), `account_state` (meta_mode, granted/missing scopes, last verified).
 
 ### Social Platforms
 - **Instagram, Facebook**: Managed through Meta Business Suite connection.
