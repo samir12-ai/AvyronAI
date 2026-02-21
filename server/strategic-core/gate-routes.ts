@@ -251,4 +251,173 @@ export function registerGateRoutes(app: Express) {
       res.status(500).json({ error: "Failed to fetch audit logs" });
     }
   });
+
+  app.get("/api/strategic/blueprint-versions", async (req: Request, res: Response) => {
+    try {
+      const { campaignId, blueprintId, accountId = "default" } = req.query as Record<string, string>;
+
+      if (!campaignId && !blueprintId) {
+        return res.status(400).json({ error: "Provide campaignId or blueprintId" });
+      }
+
+      let targetBlueprintIds: string[] = [];
+
+      if (blueprintId) {
+        targetBlueprintIds = [blueprintId];
+      } else {
+        const blueprints = await db.select({ id: strategicBlueprints.id })
+          .from(strategicBlueprints)
+          .where(and(
+            eq(strategicBlueprints.campaignId, campaignId),
+            eq(strategicBlueprints.accountId, accountId),
+          ));
+        targetBlueprintIds = blueprints.map(b => b.id);
+      }
+
+      if (targetBlueprintIds.length === 0) {
+        return res.json({ success: true, timeline: [] });
+      }
+
+      const { strategicAuditLogs: auditTable } = await import("@shared/schema");
+
+      const timeline: any[] = [];
+
+      for (const bpId of targetBlueprintIds) {
+        const versions = await db.select().from(blueprintVersions)
+          .where(eq(blueprintVersions.blueprintId, bpId))
+          .orderBy(desc(blueprintVersions.version));
+
+        const [currentBlueprint] = await db.select().from(strategicBlueprints)
+          .where(eq(strategicBlueprints.id, bpId)).limit(1);
+
+        const confirmEvents = await db.select().from(auditTable)
+          .where(and(
+            eq(auditTable.blueprintId, bpId),
+            eq(auditTable.event, "BLUEPRINT_CONFIRMED"),
+          ))
+          .orderBy(desc(auditTable.timestamp)) as any[];
+
+        const editEvents = await db.select().from(auditTable)
+          .where(and(
+            eq(auditTable.blueprintId, bpId),
+            eq(auditTable.event, "FIELD_EDITED"),
+          ))
+          .orderBy(desc(auditTable.timestamp)) as any[];
+
+        const currentVersion = currentBlueprint?.blueprintVersion || 1;
+
+        const currentEntry: any = {
+          blueprintId: bpId,
+          version: currentVersion,
+          isCurrent: true,
+          createdAt: currentBlueprint?.updatedAt || currentBlueprint?.createdAt,
+          confirmedAt: currentBlueprint?.confirmedAt || null,
+          status: currentBlueprint?.status,
+          changedFields: [],
+        };
+
+        const currentVersionEdits = editEvents
+          .filter((e: any) => e.blueprintVersion === currentVersion)
+          .map((e: any) => {
+            const details = e.details ? JSON.parse(e.details) : {};
+            return { field: details.field, previousValue: details.previousValue, newValue: details.newValue, timestamp: e.timestamp };
+          });
+        currentEntry.changedFields = currentVersionEdits;
+
+        timeline.push(currentEntry);
+
+        for (const snapshot of versions) {
+          const snapshotEdits = editEvents
+            .filter((e: any) => e.blueprintVersion === snapshot.version)
+            .map((e: any) => {
+              const details = e.details ? JSON.parse(e.details) : {};
+              return { field: details.field, previousValue: details.previousValue, newValue: details.newValue, timestamp: e.timestamp };
+            });
+
+          const confirmEvent = confirmEvents.find((e: any) => e.blueprintVersion === snapshot.version);
+
+          timeline.push({
+            blueprintId: bpId,
+            version: snapshot.version,
+            isCurrent: false,
+            snapshotId: snapshot.id,
+            createdAt: snapshot.createdAt,
+            confirmedBy: confirmEvent ? "user" : null,
+            confirmedAt: confirmEvent?.timestamp || null,
+            changedFields: snapshotEdits,
+          });
+        }
+      }
+
+      timeline.sort((a, b) => b.version - a.version);
+
+      res.json({ success: true, timeline });
+    } catch (error: any) {
+      console.error("[StrategicCore] Version timeline error:", error.message);
+      res.status(500).json({ error: "Failed to fetch version timeline" });
+    }
+  });
+
+  app.get("/api/strategic/field-diffs", async (req: Request, res: Response) => {
+    try {
+      const { blueprintId, campaignId, accountId = "default", limit: queryLimit = "100" } = req.query as Record<string, string>;
+
+      if (!blueprintId && !campaignId) {
+        return res.status(400).json({ error: "Provide blueprintId or campaignId" });
+      }
+
+      const { strategicAuditLogs: auditTable } = await import("@shared/schema");
+
+      let targetBlueprintIds: string[] = [];
+
+      if (blueprintId) {
+        targetBlueprintIds = [blueprintId];
+      } else {
+        const blueprints = await db.select({ id: strategicBlueprints.id })
+          .from(strategicBlueprints)
+          .where(and(
+            eq(strategicBlueprints.campaignId, campaignId),
+            eq(strategicBlueprints.accountId, accountId),
+          ));
+        targetBlueprintIds = blueprints.map(b => b.id);
+      }
+
+      if (targetBlueprintIds.length === 0) {
+        return res.json({ success: true, diffs: [] });
+      }
+
+      const allDiffs: any[] = [];
+
+      for (const bpId of targetBlueprintIds) {
+        const editLogs = await db.select().from(auditTable)
+          .where(and(
+            eq(auditTable.blueprintId, bpId),
+            eq(auditTable.event, "FIELD_EDITED"),
+          ))
+          .orderBy(desc(auditTable.timestamp))
+          .limit(parseInt(queryLimit)) as any[];
+
+        for (const log of editLogs) {
+          const details = log.details ? JSON.parse(log.details) : {};
+          allDiffs.push({
+            blueprintId: bpId,
+            campaignId: log.campaignId,
+            blueprintVersion: log.blueprintVersion,
+            field: details.field,
+            previousValue: details.previousValue,
+            newValue: details.newValue,
+            timestamp: log.timestamp,
+            accountId: log.accountId,
+          });
+        }
+      }
+
+      allDiffs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+      res.json({ success: true, diffs: allDiffs.slice(0, parseInt(queryLimit)) });
+    } catch (error: any) {
+      console.error("[StrategicCore] Field diffs error:", error.message);
+      res.status(500).json({ error: "Failed to fetch field diffs" });
+    }
+  });
 }
