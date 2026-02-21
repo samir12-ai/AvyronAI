@@ -1200,7 +1200,10 @@ export default function BuildThePlan() {
   };
 
   const renderPhase5 = () => {
-    const plan = blueprint?.orchestratorPlan;
+    let plan = blueprint?.orchestratorPlan;
+    if (typeof plan === 'string') {
+      try { plan = JSON.parse(plan); } catch { plan = null; }
+    }
 
     const renderPhase5Header = () => (
       <View style={[s.phaseCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
@@ -1320,28 +1323,40 @@ export default function BuildThePlan() {
                 <Text style={[s.execTitle, { color: colors.text }]}>{sec.title}</Text>
               </View>
 
-              {sec.key === 'contentDistributionPlan' && data.platforms?.map((p: any, i: number) => (
-                <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
-                  <View style={s.execItemHeader}>
-                    <Text style={[s.execItemTitle, { color: colors.text }]}>{p.platform}</Text>
-                    <View style={[s.badge, { backgroundColor: p.priority === 'primary' ? '#10B98120' : '#6366F120' }]}>
-                      <Text style={[s.badgeText, { color: p.priority === 'primary' ? '#10B981' : '#6366F1' }]}>{p.priority}</Text>
+              {sec.key === 'contentDistributionPlan' && (
+                data.platforms && data.platforms.length > 0 ? data.platforms.map((p: any, i: number) => (
+                  <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                    <View style={s.execItemHeader}>
+                      <Text style={[s.execItemTitle, { color: colors.text }]}>{p.platform}</Text>
+                      <View style={[s.badge, { backgroundColor: p.priority === 'primary' ? '#10B98120' : '#6366F120' }]}>
+                        <Text style={[s.badgeText, { color: p.priority === 'primary' ? '#10B981' : '#6366F1' }]}>{p.priority}</Text>
+                      </View>
                     </View>
+                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
+                      {p.frequency} · {Array.isArray(p.contentTypes) ? p.contentTypes.join(', ') : ''}
+                    </Text>
                   </View>
-                  <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
-                    {p.frequency} · {p.contentTypes?.join(', ')}
-                  </Text>
-                </View>
-              ))}
+                )) : (
+                  <View style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>No distribution platforms available.</Text>
+                  </View>
+                )
+              )}
 
-              {sec.key === 'creativeTestingMatrix' && data.tests?.map((t: any, i: number) => (
-                <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
-                  <Text style={[s.execItemTitle, { color: colors.text }]}>{t.testName}</Text>
-                  <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
-                    Variable: {t.variable} · {t.duration}
-                  </Text>
-                </View>
-              ))}
+              {sec.key === 'creativeTestingMatrix' && (
+                data.tests && data.tests.length > 0 ? data.tests.map((t: any, i: number) => (
+                  <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                    <Text style={[s.execItemTitle, { color: colors.text }]}>{t.testName}</Text>
+                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
+                      Variable: {t.variable} · {t.duration}
+                    </Text>
+                  </View>
+                )) : (
+                  <View style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>No creative tests available.</Text>
+                  </View>
+                )
+              )}
 
               {sec.key === 'budgetAllocationStructure' && (
                 <>
@@ -1360,43 +1375,61 @@ export default function BuildThePlan() {
                 </>
               )}
 
-              {sec.key === 'kpiMonitoringPriority' && data.primaryKPIs?.map((k: any, i: number) => (
-                <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
-                  <Text style={[s.execItemTitle, { color: colors.text }]}>{k.kpi}</Text>
-                  <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
-                    Target: {k.target} · Check: {k.frequency}
-                  </Text>
-                </View>
-              ))}
-
-              {sec.key === 'competitiveWatchTargets' && data.targets?.map((t: any, i: number) => (
-                <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
-                  <Text style={[s.execItemTitle, { color: colors.text }]}>{t.competitor}</Text>
-                  <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
-                    Watch: {t.watchMetrics?.join(', ')}
-                  </Text>
-                </View>
-              ))}
-
-              {sec.key === 'riskMonitoringTriggers' && data.triggers?.map((t: any, i: number) => (
-                <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
-                  <View style={s.execItemHeader}>
-                    <Text style={[s.execItemTitle, { color: colors.text }]}>{t.trigger}</Text>
-                    <View style={[s.badge, {
-                      backgroundColor: t.severity === 'critical' ? '#EF444420' : t.severity === 'high' ? '#F59E0B20' : '#10B98120',
-                    }]}>
-                      <Text style={[s.badgeText, {
-                        color: t.severity === 'critical' ? '#EF4444' : t.severity === 'high' ? '#F59E0B' : '#10B981',
-                      }]}>
-                        {t.severity}
-                      </Text>
-                    </View>
+              {sec.key === 'kpiMonitoringPriority' && (
+                data.primaryKPIs && data.primaryKPIs.length > 0 ? data.primaryKPIs.map((k: any, i: number) => (
+                  <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                    <Text style={[s.execItemTitle, { color: colors.text }]}>{k.kpi}</Text>
+                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
+                      Target: {k.target} · Check: {k.frequency}
+                    </Text>
                   </View>
-                  <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
-                    Action: {t.action}
-                  </Text>
-                </View>
-              ))}
+                )) : (
+                  <View style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>No KPIs available.</Text>
+                  </View>
+                )
+              )}
+
+              {sec.key === 'competitiveWatchTargets' && (
+                data.targets && data.targets.length > 0 ? data.targets.map((t: any, i: number) => (
+                  <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                    <Text style={[s.execItemTitle, { color: colors.text }]}>{t.competitor || 'Unknown competitor'}</Text>
+                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
+                      Watch: {Array.isArray(t.watchMetrics) ? t.watchMetrics.join(', ') : 'No metrics specified'}
+                    </Text>
+                  </View>
+                )) : (
+                  <View style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>No competitive watch targets available. Consider retrying generation.</Text>
+                  </View>
+                )
+              )}
+
+              {sec.key === 'riskMonitoringTriggers' && (
+                data.triggers && data.triggers.length > 0 ? data.triggers.map((t: any, i: number) => (
+                  <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                    <View style={s.execItemHeader}>
+                      <Text style={[s.execItemTitle, { color: colors.text }]}>{t.trigger}</Text>
+                      <View style={[s.badge, {
+                        backgroundColor: t.severity === 'critical' ? '#EF444420' : t.severity === 'high' ? '#F59E0B20' : '#10B98120',
+                      }]}>
+                        <Text style={[s.badgeText, {
+                          color: t.severity === 'critical' ? '#EF4444' : t.severity === 'high' ? '#F59E0B' : '#10B981',
+                        }]}>
+                          {t.severity}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
+                      Action: {t.action}
+                    </Text>
+                  </View>
+                )) : (
+                  <View style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>No risk triggers available.</Text>
+                  </View>
+                )
+              )}
             </View>
           );
         })}
