@@ -27,6 +27,7 @@ import { getApiUrl } from '@/lib/query-client';
 import StrategyHub from '@/components/StrategyHub';
 import LeadControlPanel from '@/components/LeadControlPanel';
 import CompetitiveIntelligence from '@/components/CompetitiveIntelligence';
+import BuildThePlan from '@/components/BuildThePlan';
 import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
 
 interface AIAudience {
@@ -46,7 +47,7 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'control' | 'publisher' | 'audience' | 'strategy' | 'leads' | 'intel';
+type TabView = 'control' | 'publisher' | 'audience' | 'strategy' | 'leads' | 'intel' | 'strategic';
 
 function PulseRing({ color }: { color: string }) {
   const scale = useRef(new RNAnimated.Value(1)).current;
@@ -664,6 +665,7 @@ export default function AIManagementScreen() {
             { key: 'strategy' as TabView, icon: 'analytics-outline' as const, label: 'Strategy', color: colors.primary, advanced: true },
             { key: 'leads' as TabView, icon: 'magnet-outline' as const, label: 'Leads', color: '#00D09C', advanced: true },
             { key: 'intel' as TabView, icon: 'telescope-outline' as const, label: 'Intel', color: '#8B5CF6', advanced: true },
+            { key: 'strategic' as TabView, icon: 'bulb-outline' as const, label: 'Plan', color: '#EC4899', advanced: true },
           ] as const)
             .filter(t => !t.advanced || advancedMode)
             .map(t => {
@@ -688,6 +690,7 @@ export default function AIManagementScreen() {
           : activeTab === 'audience' ? <CampaignGuard>{renderAudienceManager()}</CampaignGuard>
           : activeTab === 'leads' ? <CampaignGuard><LeadControlPanel /></CampaignGuard>
           : activeTab === 'intel' ? <CampaignGuard><CompetitiveIntelligence /></CampaignGuard>
+          : activeTab === 'strategic' ? <BuildThePlan />
           : <CampaignGuard><StrategyHub /></CampaignGuard>}
 
         <View style={{ height: 120 }} />
