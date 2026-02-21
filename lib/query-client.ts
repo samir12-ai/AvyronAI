@@ -8,10 +8,6 @@ export function getApiUrl(path?: string): string {
     throw new Error("EXPO_PUBLIC_DOMAIN is not set");
   }
 
-  if (host.includes(":")) {
-    host = host.split(":")[0];
-  }
-
   const base = `https://${host}`;
 
   if (path) {
