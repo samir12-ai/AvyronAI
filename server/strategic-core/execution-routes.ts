@@ -1,0 +1,823 @@
+import type { Express, Request, Response } from "express";
+import { db } from "../db";
+import {
+  strategicBlueprints,
+  strategicPlans,
+  planApprovals,
+  requiredWork,
+  calendarEntries,
+  studioItems,
+} from "@shared/schema";
+import { eq, and, sql } from "drizzle-orm";
+import { logAudit } from "../audit";
+import { logAuditEvent } from "./audit-logger";
+
+function requirePlanStatus(...allowedStatuses: string[]) {
+  return async (req: Request, res: Response, next: Function) => {
+    const planId = req.params.planId || req.params.id;
+    if (!planId) return res.status(400).json({ error: "MISSING_PLAN_ID" });
+
+    const [plan] = await db
+      .select()
+      .from(strategicPlans)
+      .where(eq(strategicPlans.id, planId))
+      .limit(1);
+
+    if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+    if (!allowedStatuses.includes(plan.status)) {
+      return res.status(409).json({
+        error: "STATUS_GATE",
+        message: `Plan status must be one of [${allowedStatuses.join(", ")}], currently: ${plan.status}`,
+        currentStatus: plan.status,
+      });
+    }
+    (req as any).plan = plan;
+    next();
+  };
+}
+
+function requireExecutionIdle() {
+  return async (req: Request, res: Response, next: Function) => {
+    const plan = (req as any).plan;
+    if (plan.executionStatus === "RUNNING") {
+      return res.status(409).json({
+        error: "EXECUTION_LOCKED",
+        message: "Another execution is currently running for this plan. Wait for it to finish or trigger emergency stop.",
+        executionStatus: plan.executionStatus,
+      });
+    }
+    next();
+  };
+}
+
+function calcTotals(distribution: any, periodDays: number): any {
+  const weeks = Math.ceil(periodDays / 7);
+  const days = periodDays;
+
+  const reelsPerWeek = parseInt(distribution?.reelsPerWeek) || 0;
+  const postsPerWeek = parseInt(distribution?.postsPerWeek) || 0;
+  const storiesPerDay = parseInt(distribution?.storiesPerDay) || 0;
+  const carouselsPerWeek = parseInt(distribution?.carouselsPerWeek) || 0;
+  const videosPerWeek = parseInt(distribution?.videosPerWeek) || 0;
+
+  const totalReels = reelsPerWeek * weeks;
+  const totalPosts = postsPerWeek * weeks;
+  const totalStories = storiesPerDay * days;
+  const totalCarousels = carouselsPerWeek * weeks;
+  const totalVideos = videosPerWeek * weeks;
+  const totalContentPieces = totalReels + totalPosts + totalStories + totalCarousels + totalVideos;
+
+  return {
+    reelsPerWeek,
+    postsPerWeek,
+    storiesPerDay,
+    carouselsPerWeek,
+    videosPerWeek,
+    totalReels,
+    totalPosts,
+    totalStories,
+    totalCarousels,
+    totalVideos,
+    totalContentPieces,
+  };
+}
+
+function generateCalendarSlots(
+  planId: string,
+  campaignId: string,
+  accountId: string,
+  work: any,
+  startDate: Date,
+  periodDays: number
+): any[] {
+  const slots: any[] = [];
+  const contentQueue: { type: string; count: number }[] = [];
+
+  if (work.totalReels > 0) contentQueue.push({ type: "reel", count: work.totalReels });
+  if (work.totalPosts > 0) contentQueue.push({ type: "post", count: work.totalPosts });
+  if (work.totalCarousels > 0) contentQueue.push({ type: "carousel", count: work.totalCarousels });
+  if (work.totalVideos > 0) contentQueue.push({ type: "video", count: work.totalVideos });
+  if (work.totalStories > 0) contentQueue.push({ type: "story", count: work.totalStories });
+
+  const allItems: { type: string; index: number }[] = [];
+  for (const q of contentQueue) {
+    for (let i = 0; i < q.count; i++) {
+      allItems.push({ type: q.type, index: i });
+    }
+  }
+
+  if (allItems.length === 0) return [];
+
+  const gap = periodDays / allItems.length;
+  const postTimes = ["09:00", "12:00", "15:00", "18:00", "20:00"];
+
+  for (let i = 0; i < allItems.length; i++) {
+    const dayOffset = Math.floor(i * gap);
+    const d = new Date(startDate);
+    d.setDate(d.getDate() + dayOffset);
+    const dateStr = d.toISOString().split("T")[0];
+    const time = postTimes[i % postTimes.length];
+
+    slots.push({
+      planId,
+      campaignId,
+      accountId,
+      contentType: allItems[i].type,
+      scheduledDate: dateStr,
+      scheduledTime: time,
+      title: `${allItems[i].type.charAt(0).toUpperCase() + allItems[i].type.slice(1)} #${allItems[i].index + 1}`,
+      status: "DRAFT",
+      sourceLabel: "auto-generated",
+    });
+  }
+
+  return slots;
+}
+
+export function registerExecutionRoutes(app: Express) {
+  app.post("/api/execution/plans/generate", async (req: Request, res: Response) => {
+    try {
+      const { blueprintId, campaignId, accountId = "default", periodDays = 30 } = req.body;
+
+      if (!blueprintId || !campaignId) {
+        return res.status(400).json({ error: "blueprintId and campaignId are required" });
+      }
+
+      const [blueprint] = await db
+        .select()
+        .from(strategicBlueprints)
+        .where(eq(strategicBlueprints.id, blueprintId))
+        .limit(1);
+
+      if (!blueprint) {
+        return res.status(404).json({ error: "BLUEPRINT_NOT_FOUND" });
+      }
+
+      if (!blueprint.orchestratorPlan) {
+        return res.status(400).json({
+          error: "NO_ORCHESTRATOR_PLAN",
+          message: "Blueprint must have a completed orchestrator plan before generating an execution plan.",
+        });
+      }
+
+      let planJson: any;
+      try {
+        planJson = JSON.parse(blueprint.orchestratorPlan);
+      } catch {
+        return res.status(500).json({ error: "INVALID_PLAN_JSON", message: "Orchestrator plan JSON is corrupt." });
+      }
+
+      const distribution = planJson.contentDistributionPlan || {};
+      const weeklyCalendar = distribution.weeklyCalendar || [];
+
+      const reelsPerWeek = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "reel").length || 3;
+      const postsPerWeek = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "post" || d.contentType?.toLowerCase() === "static post").length || 3;
+      const storiesPerDay = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "story").length > 0 ? 1 : 0;
+      const carouselsPerWeek = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "carousel").length || 1;
+      const videosPerWeek = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "video").length || 0;
+
+      const parsedDistribution = { reelsPerWeek, postsPerWeek, storiesPerDay, carouselsPerWeek, videosPerWeek };
+      const totals = calcTotals(parsedDistribution, periodDays);
+
+      const summary = [
+        planJson.contentDistributionPlan ? `Distribution: ${distribution.platforms?.length || 0} platforms` : null,
+        planJson.creativeTestingMatrix ? `Creative Tests: ${planJson.creativeTestingMatrix.tests?.length || 0}` : null,
+        planJson.budgetAllocationStructure ? `Budget: ${planJson.budgetAllocationStructure.totalRecommended || "TBD"}` : null,
+        `Total Content: ${totals.totalContentPieces} pieces over ${periodDays} days`,
+      ]
+        .filter(Boolean)
+        .join(" | ");
+
+      const [plan] = await db
+        .insert(strategicPlans)
+        .values({
+          accountId,
+          blueprintId,
+          campaignId,
+          planJson: JSON.stringify(planJson),
+          planSummary: summary,
+          status: "DRAFT",
+          executionStatus: "IDLE",
+        })
+        .returning();
+
+      await logAudit(accountId, "PLAN_GENERATED", {
+        details: { planId: plan.id, blueprintId, campaignId, summary, totalContent: totals.totalContentPieces },
+      });
+
+      res.json({
+        success: true,
+        plan,
+        parsedDistribution,
+        totals,
+      });
+    } catch (err: any) {
+      console.error("Plan generation error:", err);
+      res.status(500).json({ error: "PLAN_GENERATION_FAILED", message: err.message });
+    }
+  });
+
+  app.get("/api/execution/plans/:planId", async (req: Request, res: Response) => {
+    try {
+      const { planId } = req.params;
+      const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
+      if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+
+      const work = await db.select().from(requiredWork).where(eq(requiredWork.planId, planId));
+      const entries = await db.select().from(calendarEntries).where(eq(calendarEntries.planId, planId));
+      const items = await db.select().from(studioItems).where(eq(studioItems.planId, planId));
+      const approvals = await db.select().from(planApprovals).where(eq(planApprovals.planId, planId));
+
+      res.json({
+        success: true,
+        plan,
+        requiredWork: work[0] || null,
+        calendarEntries: entries,
+        studioItems: items,
+        approvals,
+        progress: {
+          totalRequired: work[0]?.totalContentPieces || 0,
+          calendarGenerated: entries.length,
+          studioCreated: items.length,
+          published: items.filter((i) => i.status === "PUBLISHED").length,
+          scheduled: items.filter((i) => i.status === "SCHEDULED").length,
+          ready: items.filter((i) => i.status === "READY").length,
+          failed: items.filter((i) => i.status === "FAILED").length,
+          draft: items.filter((i) => i.status === "DRAFT").length,
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/execution/plans", async (req: Request, res: Response) => {
+    try {
+      const accountId = (req.query.accountId as string) || "default";
+      const plans = await db
+        .select()
+        .from(strategicPlans)
+        .where(eq(strategicPlans.accountId, accountId))
+        .orderBy(sql`${strategicPlans.createdAt} DESC`);
+
+      res.json({ success: true, plans });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post(
+    "/api/execution/plans/:planId/approve",
+    requirePlanStatus("DRAFT", "READY_FOR_REVIEW"),
+    async (req: Request, res: Response) => {
+      try {
+        const plan = (req as any).plan;
+        const { reason, decidedBy = "client" } = req.body;
+
+        await db
+          .update(strategicPlans)
+          .set({ status: "APPROVED", updatedAt: new Date() })
+          .where(eq(strategicPlans.id, plan.id));
+
+        await db.insert(planApprovals).values({
+          planId: plan.id,
+          accountId: plan.accountId,
+          decision: "APPROVED",
+          reason: reason || "Approved by client",
+          decidedBy,
+        });
+
+        await logAudit(plan.accountId, "PLAN_APPROVED", {
+          details: { planId: plan.id, decidedBy },
+        });
+
+        res.json({ success: true, planId: plan.id, status: "APPROVED" });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  );
+
+  app.post(
+    "/api/execution/plans/:planId/reject",
+    requirePlanStatus("DRAFT", "READY_FOR_REVIEW"),
+    async (req: Request, res: Response) => {
+      try {
+        const plan = (req as any).plan;
+        const { reason, decidedBy = "client" } = req.body;
+
+        if (!reason) {
+          return res.status(400).json({ error: "Rejection reason is required" });
+        }
+
+        await db
+          .update(strategicPlans)
+          .set({ status: "REJECTED", updatedAt: new Date() })
+          .where(eq(strategicPlans.id, plan.id));
+
+        await db.insert(planApprovals).values({
+          planId: plan.id,
+          accountId: plan.accountId,
+          decision: "REJECTED",
+          reason,
+          decidedBy,
+        });
+
+        await logAudit(plan.accountId, "PLAN_REJECTED", {
+          details: { planId: plan.id, reason, decidedBy },
+        });
+
+        res.json({ success: true, planId: plan.id, status: "REJECTED" });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  );
+
+  app.post("/api/execution/plans/:planId/emergency-stop", async (req: Request, res: Response) => {
+    try {
+      const { planId } = req.params;
+      const { reason } = req.body;
+
+      const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
+      if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+
+      if (plan.emergencyStopped) {
+        return res.status(409).json({ error: "ALREADY_STOPPED", message: "Emergency stop already active." });
+      }
+
+      await db
+        .update(strategicPlans)
+        .set({
+          emergencyStopped: true,
+          emergencyStoppedAt: new Date(),
+          emergencyStoppedReason: reason || "Manual emergency stop",
+          executionStatus: "PAUSED",
+          updatedAt: new Date(),
+        })
+        .where(eq(strategicPlans.id, planId));
+
+      await logAudit(plan.accountId, "EMERGENCY_STOP_TRIGGERED", {
+        details: { planId, reason, previousExecutionStatus: plan.executionStatus },
+      });
+
+      res.json({ success: true, planId, emergencyStopped: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/execution/plans/:planId/resume", async (req: Request, res: Response) => {
+    try {
+      const { planId } = req.params;
+
+      const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
+      if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+
+      if (!plan.emergencyStopped) {
+        return res.status(409).json({ error: "NOT_STOPPED", message: "Plan is not in emergency stop state." });
+      }
+
+      await db
+        .update(strategicPlans)
+        .set({
+          emergencyStopped: false,
+          emergencyStoppedAt: null,
+          emergencyStoppedReason: null,
+          executionStatus: "IDLE",
+          updatedAt: new Date(),
+        })
+        .where(eq(strategicPlans.id, planId));
+
+      await logAudit(plan.accountId, "EXECUTION_RESUMED", {
+        details: { planId },
+      });
+
+      res.json({ success: true, planId, emergencyStopped: false, executionStatus: "IDLE" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post(
+    "/api/execution/plans/:planId/execute-calendar",
+    requirePlanStatus("APPROVED"),
+    requireExecutionIdle(),
+    async (req: Request, res: Response) => {
+      try {
+        const plan = (req as any).plan;
+        const { periodDays = 30, startDate } = req.body;
+
+        if (plan.emergencyStopped) {
+          return res.status(409).json({ error: "EMERGENCY_STOPPED", message: "Cannot execute while emergency stop is active." });
+        }
+
+        await db
+          .update(strategicPlans)
+          .set({ executionStatus: "RUNNING", updatedAt: new Date() })
+          .where(eq(strategicPlans.id, plan.id));
+
+        try {
+          let planJson: any;
+          try {
+            planJson = JSON.parse(plan.planJson);
+          } catch {
+            throw new Error("Plan JSON is corrupt");
+          }
+
+          const distribution = planJson.contentDistributionPlan || {};
+          const weeklyCalendar = distribution.weeklyCalendar || [];
+
+          const reelsPerWeek = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "reel").length || 3;
+          const postsPerWeek = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "post" || d.contentType?.toLowerCase() === "static post").length || 3;
+          const storiesPerDay = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "story").length > 0 ? 1 : 0;
+          const carouselsPerWeek = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "carousel").length || 1;
+          const videosPerWeek = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "video").length || 0;
+
+          const parsedDistribution = { reelsPerWeek, postsPerWeek, storiesPerDay, carouselsPerWeek, videosPerWeek };
+          const totals = calcTotals(parsedDistribution, periodDays);
+
+          const existingWork = await db
+            .select()
+            .from(requiredWork)
+            .where(and(eq(requiredWork.planId, plan.id), eq(requiredWork.campaignId, plan.campaignId)))
+            .limit(1);
+
+          let workRecord;
+          if (existingWork.length > 0) {
+            [workRecord] = await db
+              .update(requiredWork)
+              .set({ ...totals, ...parsedDistribution, periodDays, updatedAt: new Date() })
+              .where(eq(requiredWork.id, existingWork[0].id))
+              .returning();
+          } else {
+            [workRecord] = await db
+              .insert(requiredWork)
+              .values({
+                planId: plan.id,
+                campaignId: plan.campaignId,
+                accountId: plan.accountId,
+                periodDays,
+                ...parsedDistribution,
+                ...totals,
+              })
+              .returning();
+          }
+
+          await logAudit(plan.accountId, "REQUIRED_WORK_CALCULATED", {
+            details: { planId: plan.id, ...totals },
+          });
+
+          const existingEntries = await db
+            .select()
+            .from(calendarEntries)
+            .where(eq(calendarEntries.planId, plan.id));
+
+          if (existingEntries.length > 0) {
+            await db
+              .update(strategicPlans)
+              .set({
+                executionStatus: "COMPLETED",
+                generatedToCalendarAt: new Date(),
+                totalCalendarEntries: existingEntries.length,
+                updatedAt: new Date(),
+              })
+              .where(eq(strategicPlans.id, plan.id));
+
+            return res.json({
+              success: true,
+              idempotent: true,
+              message: "Calendar already generated for this plan. Skipped re-generation.",
+              calendarEntries: existingEntries.length,
+              requiredWork: workRecord,
+            });
+          }
+
+          const start = startDate ? new Date(startDate) : new Date();
+          const slots = generateCalendarSlots(plan.id, plan.campaignId, plan.accountId, totals, start, periodDays);
+
+          if (slots.length > 0) {
+            await db.insert(calendarEntries).values(slots);
+          }
+
+          await db
+            .update(strategicPlans)
+            .set({
+              executionStatus: "COMPLETED",
+              status: "GENERATED_TO_CALENDAR",
+              generatedToCalendarAt: new Date(),
+              totalCalendarEntries: slots.length,
+              updatedAt: new Date(),
+            })
+            .where(eq(strategicPlans.id, plan.id));
+
+          await logAudit(plan.accountId, "CALENDAR_ENTRIES_GENERATED", {
+            details: { planId: plan.id, entries: slots.length, periodDays },
+          });
+
+          res.json({
+            success: true,
+            calendarEntries: slots.length,
+            requiredWork: workRecord,
+            totals,
+          });
+        } catch (innerErr: any) {
+          await db
+            .update(strategicPlans)
+            .set({ executionStatus: "FAILED", updatedAt: new Date() })
+            .where(eq(strategicPlans.id, plan.id));
+
+          await logAudit(plan.accountId, "EXECUTION_FAILED", {
+            details: { planId: plan.id, error: innerErr.message },
+          });
+
+          throw innerErr;
+        }
+      } catch (err: any) {
+        console.error("Calendar execution error:", err);
+        res.status(500).json({ error: "CALENDAR_EXECUTION_FAILED", message: err.message });
+      }
+    }
+  );
+
+  app.post(
+    "/api/execution/plans/:planId/execute-creative",
+    requirePlanStatus("GENERATED_TO_CALENDAR"),
+    requireExecutionIdle(),
+    async (req: Request, res: Response) => {
+      try {
+        const plan = (req as any).plan;
+
+        if (plan.emergencyStopped) {
+          return res.status(409).json({ error: "EMERGENCY_STOPPED" });
+        }
+
+        const entries = await db
+          .select()
+          .from(calendarEntries)
+          .where(and(eq(calendarEntries.planId, plan.id), eq(calendarEntries.status, "DRAFT")));
+
+        if (entries.length === 0) {
+          return res.json({ success: true, message: "No draft calendar entries to process.", studioItems: 0 });
+        }
+
+        await db
+          .update(strategicPlans)
+          .set({ executionStatus: "RUNNING", aiExecutionStartedAt: new Date(), updatedAt: new Date() })
+          .where(eq(strategicPlans.id, plan.id));
+
+        const createdItems: any[] = [];
+        const failedItems: { entryId: string; error: string }[] = [];
+
+        for (const entry of entries) {
+          try {
+            const freshPlan = await db.select().from(strategicPlans).where(eq(strategicPlans.id, plan.id)).limit(1);
+            if (freshPlan[0]?.emergencyStopped) {
+              await logAudit(plan.accountId, "EMERGENCY_STOP_TRIGGERED", {
+                details: { planId: plan.id, stoppedDuringCreative: true, processedSoFar: createdItems.length },
+              });
+              break;
+            }
+
+            const [item] = await db
+              .insert(studioItems)
+              .values({
+                planId: plan.id,
+                campaignId: plan.campaignId,
+                calendarEntryId: entry.id,
+                accountId: plan.accountId,
+                contentType: entry.contentType,
+                title: entry.title,
+                caption: `AI-generated caption for ${entry.contentType} scheduled ${entry.scheduledDate}`,
+                creativeBrief: `Creative brief: ${entry.contentType} content for campaign`,
+                ctaCopy: "Learn More",
+                status: "DRAFT",
+              })
+              .returning();
+
+            await db
+              .update(calendarEntries)
+              .set({ studioItemId: item.id, status: "AI_GENERATED", aiGeneratedAt: new Date(), updatedAt: new Date() })
+              .where(eq(calendarEntries.id, entry.id));
+
+            createdItems.push(item);
+
+            await logAudit(plan.accountId, "AI_CREATIVE_GENERATED", {
+              details: { planId: plan.id, entryId: entry.id, studioItemId: item.id, contentType: entry.contentType },
+            });
+          } catch (itemErr: any) {
+            failedItems.push({ entryId: entry.id, error: itemErr.message });
+
+            await db
+              .update(calendarEntries)
+              .set({ status: "FAILED", errorReason: itemErr.message, updatedAt: new Date() })
+              .where(eq(calendarEntries.id, entry.id));
+
+            await logAudit(plan.accountId, "AI_CREATIVE_FAILED", {
+              details: { planId: plan.id, entryId: entry.id, error: itemErr.message },
+            });
+          }
+        }
+
+        const finalPlan = await db.select().from(strategicPlans).where(eq(strategicPlans.id, plan.id)).limit(1);
+        const wasStopped = finalPlan[0]?.emergencyStopped;
+
+        await db
+          .update(strategicPlans)
+          .set({
+            executionStatus: wasStopped ? "PAUSED" : failedItems.length > 0 && createdItems.length === 0 ? "FAILED" : "COMPLETED",
+            aiExecutionCompletedAt: wasStopped ? null : new Date(),
+            totalStudioItems: createdItems.length,
+            totalFailed: failedItems.length,
+            updatedAt: new Date(),
+          })
+          .where(eq(strategicPlans.id, plan.id));
+
+        if (!wasStopped) {
+          await logAudit(plan.accountId, "EXECUTION_COMPLETED", {
+            details: { planId: plan.id, created: createdItems.length, failed: failedItems.length },
+          });
+        }
+
+        res.json({
+          success: true,
+          studioItemsCreated: createdItems.length,
+          failedItems: failedItems.length,
+          failures: failedItems,
+          emergencyStopped: wasStopped || false,
+        });
+      } catch (err: any) {
+        console.error("Creative execution error:", err);
+        const plan = (req as any).plan;
+        if (plan) {
+          await db
+            .update(strategicPlans)
+            .set({ executionStatus: "FAILED", updatedAt: new Date() })
+            .where(eq(strategicPlans.id, plan.id));
+        }
+        res.status(500).json({ error: "CREATIVE_EXECUTION_FAILED", message: err.message });
+      }
+    }
+  );
+
+  app.get("/api/execution/plans/:planId/progress", async (req: Request, res: Response) => {
+    try {
+      const { planId } = req.params;
+
+      const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
+      if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+
+      const work = await db.select().from(requiredWork).where(eq(requiredWork.planId, planId));
+      const entries = await db.select().from(calendarEntries).where(eq(calendarEntries.planId, planId));
+      const items = await db.select().from(studioItems).where(eq(studioItems.planId, planId));
+
+      const totalRequired = work[0]?.totalContentPieces || 0;
+      const published = items.filter((i) => i.status === "PUBLISHED").length;
+      const scheduled = items.filter((i) => i.status === "SCHEDULED").length;
+      const ready = items.filter((i) => i.status === "READY").length;
+      const failed = items.filter((i) => i.status === "FAILED").length;
+      const draft = items.filter((i) => i.status === "DRAFT").length;
+
+      const progressPercent = totalRequired > 0 ? Math.round(((published + scheduled + ready) / totalRequired) * 100) : 0;
+
+      res.json({
+        success: true,
+        planId,
+        status: plan.status,
+        executionStatus: plan.executionStatus,
+        emergencyStopped: plan.emergencyStopped,
+        totalRequired,
+        calendarGenerated: entries.length,
+        studioTotal: items.length,
+        published,
+        scheduled,
+        ready,
+        draft,
+        failed,
+        progressPercent,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/execution/dashboard", async (req: Request, res: Response) => {
+    try {
+      const accountId = (req.query.accountId as string) || "default";
+
+      const plans = await db
+        .select()
+        .from(strategicPlans)
+        .where(eq(strategicPlans.accountId, accountId));
+
+      const allWork = await db
+        .select()
+        .from(requiredWork)
+        .where(eq(requiredWork.accountId, accountId));
+
+      const allItems = await db
+        .select()
+        .from(studioItems)
+        .where(eq(studioItems.accountId, accountId));
+
+      const totalPlans = plans.length;
+      const activePlans = plans.filter((p) => !["REJECTED", "DRAFT"].includes(p.status)).length;
+      const emergencyStoppedPlans = plans.filter((p) => p.emergencyStopped).length;
+
+      const totalRequired = allWork.reduce((sum, w) => sum + (w.totalContentPieces || 0), 0);
+      const totalPublished = allItems.filter((i) => i.status === "PUBLISHED").length;
+      const totalScheduled = allItems.filter((i) => i.status === "SCHEDULED").length;
+      const totalReady = allItems.filter((i) => i.status === "READY").length;
+      const totalFailed = allItems.filter((i) => i.status === "FAILED").length;
+      const totalDraft = allItems.filter((i) => i.status === "DRAFT").length;
+
+      const overallProgress = totalRequired > 0 ? Math.round(((totalPublished + totalScheduled + totalReady) / totalRequired) * 100) : 0;
+
+      res.json({
+        success: true,
+        account: {
+          totalPlans,
+          activePlans,
+          emergencyStoppedPlans,
+          totalRequired,
+          totalPublished,
+          totalScheduled,
+          totalReady,
+          totalDraft,
+          totalFailed,
+          overallProgress,
+        },
+        plans: plans.map((p) => ({
+          id: p.id,
+          status: p.status,
+          executionStatus: p.executionStatus,
+          emergencyStopped: p.emergencyStopped,
+          totalCalendarEntries: p.totalCalendarEntries,
+          totalStudioItems: p.totalStudioItems,
+          totalFailed: p.totalFailed,
+          createdAt: p.createdAt,
+        })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/execution/plans/:planId/calendar", async (req: Request, res: Response) => {
+    try {
+      const { planId } = req.params;
+      const entries = await db
+        .select()
+        .from(calendarEntries)
+        .where(eq(calendarEntries.planId, planId))
+        .orderBy(sql`${calendarEntries.scheduledDate} ASC, ${calendarEntries.scheduledTime} ASC`);
+
+      res.json({ success: true, entries });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/execution/plans/:planId/studio", async (req: Request, res: Response) => {
+    try {
+      const { planId } = req.params;
+      const items = await db
+        .select()
+        .from(studioItems)
+        .where(eq(studioItems.planId, planId))
+        .orderBy(sql`${studioItems.createdAt} DESC`);
+
+      res.json({ success: true, items });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/execution/studio-items/:itemId/status", async (req: Request, res: Response) => {
+    try {
+      const { itemId } = req.params;
+      const { status } = req.body;
+
+      const validStatuses = ["DRAFT", "READY", "SCHEDULED", "PUBLISHED", "FAILED"];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(", ")}` });
+      }
+
+      const [item] = await db.select().from(studioItems).where(eq(studioItems.id, itemId)).limit(1);
+      if (!item) return res.status(404).json({ error: "STUDIO_ITEM_NOT_FOUND" });
+
+      const updateData: any = { status, updatedAt: new Date() };
+      if (status === "PUBLISHED") updateData.publishedAt = new Date();
+
+      await db.update(studioItems).set(updateData).where(eq(studioItems.id, itemId));
+
+      await logAudit(item.accountId, "STUDIO_ITEM_STATUS_CHANGED", {
+        details: { itemId, previousStatus: item.status, newStatus: status },
+      });
+
+      res.json({ success: true, itemId, status });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+}
