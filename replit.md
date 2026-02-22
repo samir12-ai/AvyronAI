@@ -54,8 +54,9 @@ Preferred communication style: Simple, everyday language.
 - **Phase 4B (AI Creative)**: Captions, briefs, CTA copy, studio drafts. Respects PAUSED state. Failed items get FAILED status + errorReason.
 - **Dashboard**: Plan-level + account-level progress trackers with real data from database counts. Progress = (published + scheduled + ready) / total_required_work.
 - **Hard Rules**: Nothing executes until plan status = APPROVED. Nothing auto-publishes. No silent fallbacks. All state transitions audit logged (18 event types).
-- **Frontend**: ExecutionMachine.tsx with Simple/Advanced views, collapsible sections, real-time progress, Approve/Reject/Emergency Stop buttons.
+- **Frontend**: StrategicPipeline.tsx - 4-step linear pipeline view (Build Strategy → Approval → Execution Pipeline → Competitor Intelligence) with collapsible sections, step indicators, progress tracking, and contextual actions. Replaces the old scattered tab interface. ExecutionMachine.tsx retained as legacy component.
 - **Backend**: server/strategic-core/execution-routes.ts with 15+ endpoints, status-gated middleware.
+- **AI Management UX**: Consolidated from 9 tabs to Pipeline (default) + Control + Publish + advanced tools (Audience, Strategy, Leads). The Pipeline tab contains all strategic execution steps in a linear flow.
 
 ### Strategic Core Architecture ("Build The Plan")
 - **System**: 6-phase sequential intelligence engine with hard gates.
