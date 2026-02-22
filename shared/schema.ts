@@ -1015,17 +1015,50 @@ export const dominanceAnalyses = pgTable("dominance_analyses", {
     .primaryKey()
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id"),
+  location: text("location").default("Dubai, UAE"),
   blueprintId: varchar("blueprint_id"),
+  runId: varchar("run_id").default(sql`gen_random_uuid()`),
+  runVersion: integer("run_version").default(1),
+  inputsHash: text("inputs_hash"),
   competitorName: text("competitor_name").notNull(),
   competitorUrl: text("competitor_url").notNull(),
   topContent: text("top_content"),
+  contentEvidence: text("content_evidence"),
+  evidenceSource: text("evidence_source").default("manual"),
   contentDissection: text("content_dissection"),
   weaknessDetection: text("weakness_detection"),
   dominanceStrategy: text("dominance_strategy"),
-  planModifications: text("plan_modifications"),
+  dominanceDelta: text("dominance_delta"),
+  fallbackReason: text("fallback_reason"),
+  fallbackAcknowledged: boolean("fallback_acknowledged").default(false),
   modificationStatus: text("modification_status").default("pending"),
   modelUsed: text("model_used").default("gpt-5.2"),
   status: text("status").default("pending"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const dominanceModifications = pgTable("dominance_modifications", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  analysisId: varchar("analysis_id").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  basePlan: text("base_plan"),
+  adjustedPlan: text("adjusted_plan"),
+  diffSummary: text("diff_summary"),
+  adjustments: text("adjustments"),
+  overallImpact: text("overall_impact"),
+  competitorTargeted: text("competitor_targeted"),
+  lifecycleStatus: text("lifecycle_status").default("DRAFT"),
+  approvedBy: text("approved_by"),
+  approvedAt: timestamp("approved_at"),
+  rejectedReason: text("rejected_reason"),
+  previousBasePlan: text("previous_base_plan"),
+  rollbackAvailable: boolean("rollback_available").default(false),
+  fallbackUsed: boolean("fallback_used").default(false),
+  fallbackReason: text("fallback_reason"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1036,3 +1069,4 @@ export type BlueprintVersion = typeof blueprintVersions.$inferSelect;
 export type StrategicAuditLog = typeof strategicAuditLogs.$inferSelect;
 export type ExtractionMetric = typeof extractionMetrics.$inferSelect;
 export type DominanceAnalysis = typeof dominanceAnalyses.$inferSelect;
+export type DominanceModification = typeof dominanceModifications.$inferSelect;

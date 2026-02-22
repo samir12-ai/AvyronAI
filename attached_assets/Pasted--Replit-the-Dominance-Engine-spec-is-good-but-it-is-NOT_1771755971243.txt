@@ -1,0 +1,74 @@
+⸻
+
+Replit — the Dominance Engine spec is good, but it is NOT production-ready yet. Before we proceed, apply these critical upgrades so results don’t become generic or unreliable.
+	1.	Evidence + Ranking (Must be real, not guessed)
+
+	•	The engine MUST rank competitor content using measurable signals (views, engagement rate, saves/shares, comments velocity).
+	•	Every “Top 3–5” content pick must store:
+	•	selectionReason
+	•	metricsSnapshot (views/likes/comments/shares/save if available)
+	•	confidenceScore
+	•	If metrics are missing (video analysis only), mark: evidenceSource = “manual/video” and degrade confidence.
+
+	2.	Strict Output Schema + No “fluffy summaries”
+
+	•	Every AI response must follow strict JSON schema (no prose).
+	•	Each field must include: { value, confidence, evidenceRefs[] }.
+	•	If evidence is missing → value = “INSUFFICIENT_DATA” (not guessing).
+
+	3.	Dominance Output MUST be “better than competitor” (not “copy competitor”)
+
+	•	Add a mandatory “Dominance Delta” section per item:
+	•	competitorStrength
+	•	competitorGap
+	•	dominanceUpgrade (what we do better + why it wins)
+	•	implementationSteps (concrete edits in hook/CTA/proof/pacing)
+	•	The strategy generator must explicitly answer:
+“How is this superior, not similar?”
+
+	4.	Plan Modification Workflow — Add state machine + safeguards
+
+	•	Plan modifications must be a strict lifecycle:
+DRAFT → REVIEW_REQUIRED → APPROVED → APPLIED or REJECTED
+	•	“APPLIED” must only happen after explicit approval click.
+	•	Store: approvedBy, approvedAt, rejectedReason, diffSummary.
+	•	Add “rollback” ability (restore previous base plan version) — even if it’s v1 simple.
+
+	5.	Versioning + Audit (non-negotiable)
+
+	•	dominance_analyses must be versioned per run:
+	•	runId, createdAt, inputsHash
+	•	Every action must be audit logged:
+DOMINANCE_RUN, DOMINANCE_MOD_PROPOSED, DOMINANCE_MOD_APPROVED, DOMINANCE_MOD_REJECTED, DOMINANCE_MOD_APPLIED
+
+	6.	AI Failure Transparency (stronger than current)
+
+	•	If any fallback happens:
+	•	store fallbackReason
+	•	show a visible banner in UI
+	•	block “Plan Modifications” phase until user acknowledges fallback OR retries analysis
+	•	Add a “Retry run” button that reuses the same inputs.
+
+	7.	Location + Campaign Scope (must inherit our system discipline)
+
+	•	Dominance analysis MUST be campaign-scoped and geo-scoped:
+	•	requires campaignId + location
+	•	analysis prompt must be constrained to (Dubai, UAE) or campaignLocation
+	•	If campaign not selected → force DEMO campaign context (if Meta not connected), otherwise hard-block with CAMPAIGN_REQUIRED.
+
+	8.	Competitor Input Gate (must be enforced before Dominance runs)
+
+	•	Minimum 2 competitor URLs required (like Build a Plan gate).
+	•	Also require: competitor content evidence (either uploaded videos OR confirmed links) before running.
+	•	No run without those.
+
+Deliverables confirmation:
+	•	Update DB schema accordingly (dominance_analyses + dominance_modifications + version fields + audit events).
+	•	Update backend endpoints to enforce gates and store evidence + confidence + refs.
+	•	Update UI: 4 views remain, but add:
+	•	Evidence badges
+	•	Confidence badges
+	•	Fallback banner + acknowledge/retry
+	•	Side-by-side diff + approval state machine
+
+Once these are in, THEN we start tuning the engines for better output quality.
