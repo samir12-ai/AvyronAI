@@ -113,6 +113,7 @@ export default function CompetitiveIntelligence() {
   const [addStep, setAddStep] = useState<'input' | 'review'>('input');
   const [viralInsights, setViralInsights] = useState('');
   const [showManualFields, setShowManualFields] = useState(false);
+  const [profileAnalysis, setProfileAnalysis] = useState<any>(null);
 
   const [newComp, setNewComp] = useState({
     name: '', profileLink: '', businessType: '', primaryObjective: '',
@@ -168,6 +169,7 @@ export default function CompetitiveIntelligence() {
       setAddStep('input');
       setViralInsights('');
       setShowManualFields(false);
+      setProfileAnalysis(null);
       setNewComp({ name: '', profileLink: '', businessType: '', primaryObjective: '', platform: 'instagram', postingFrequency: '', contentTypeRatio: '', engagementRatio: '', ctaPatterns: '', discountFrequency: '', hookStyles: '', messagingTone: '', socialProofPresence: '' });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
@@ -176,7 +178,7 @@ export default function CompetitiveIntelligence() {
 
   const autoAnalyzeMutation = useMutation({
     mutationFn: async ({ name, profileLink }: { name: string; profileLink: string }) => {
-      const res = await fetch(new URL('/api/ci/competitors/auto-analyze', baseUrl).toString(), {
+      const res = await fetch(new URL('/api/ci/competitors/analyze-profile', baseUrl).toString(), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, profileLink }),
       });
@@ -184,22 +186,17 @@ export default function CompetitiveIntelligence() {
       return res.json();
     },
     onSuccess: (data) => {
-      const a = data.analysis;
+      setProfileAnalysis(data);
+      const m = data.measured;
+      const mix = m?.content_mix;
+      const mixStr = mix ? JSON.stringify({ reels: Math.round(mix.reels_ratio * 100), static: Math.round(mix.static_ratio * 100) }) : '';
       setNewComp(p => ({
         ...p,
-        businessType: a.businessType || p.businessType,
-        primaryObjective: a.primaryObjective || p.primaryObjective,
-        platform: a.platform || p.platform,
-        postingFrequency: a.postingFrequency || p.postingFrequency,
-        contentTypeRatio: a.contentTypeRatio || p.contentTypeRatio,
-        engagementRatio: a.engagementRatio || p.engagementRatio,
-        ctaPatterns: a.ctaPatterns || p.ctaPatterns,
-        discountFrequency: a.discountFrequency || p.discountFrequency,
-        hookStyles: a.hookStyles || p.hookStyles,
-        messagingTone: a.messagingTone || p.messagingTone,
-        socialProofPresence: a.socialProofPresence || p.socialProofPresence,
+        postingFrequency: m?.avg_posts_per_week_28d?.value?.toString() || m?.posts_last_7d?.value?.toString() || p.postingFrequency,
+        contentTypeRatio: mixStr || p.contentTypeRatio,
+        engagementRatio: m?.engagement_rate?.value?.toString() || p.engagementRatio,
       }));
-      setViralInsights(a.viralVideoInsights || '');
+      setViralInsights('');
       setAddStep('review');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
@@ -938,25 +935,138 @@ export default function CompetitiveIntelligence() {
                 </>
               ) : (
                 <>
-                  <View style={[s.aiResultHeader, { backgroundColor: '#10B981' + '12', borderColor: '#10B981' + '30' }]}>
-                    <Ionicons name="checkmark-circle" size={20} color="#10B981" />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[s.aiResultTitle, { color: colors.text }]}>AI Analysis Complete</Text>
-                      <Text style={[s.aiResultSub, { color: colors.textMuted }]}>
-                        Review and edit the results below, then save.
-                      </Text>
-                    </View>
-                  </View>
-
-                  {viralInsights ? (
-                    <View style={[s.insightsCard, { backgroundColor: '#8B5CF6' + '08', borderColor: '#8B5CF6' + '25' }]}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                        <Ionicons name="videocam" size={14} color="#8B5CF6" />
-                        <Text style={[s.insightsTitle, { color: '#8B5CF6' }]}>Viral Content Insights</Text>
+                  {profileAnalysis && (
+                    <>
+                      <View style={[s.aiResultHeader, {
+                        backgroundColor: profileAnalysis.status === 'VALID' ? '#10B981' + '12' : '#F59E0B' + '12',
+                        borderColor: profileAnalysis.status === 'VALID' ? '#10B981' + '30' : '#F59E0B' + '30',
+                      }]}>
+                        <Ionicons
+                          name={profileAnalysis.status === 'VALID' ? 'checkmark-circle' : 'alert-circle'}
+                          size={20}
+                          color={profileAnalysis.status === 'VALID' ? '#10B981' : '#F59E0B'}
+                        />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[s.aiResultTitle, { color: colors.text }]}>
+                            {profileAnalysis.status === 'VALID' ? 'Profile Verified' : 'Partial Data'}
+                          </Text>
+                          <Text style={[s.aiResultSub, { color: colors.textMuted }]}>
+                            {profileAnalysis.scannedPosts} posts scanned via {profileAnalysis.collection_method_used?.replace(/_/g, ' ').toLowerCase()}
+                          </Text>
+                        </View>
                       </View>
-                      <Text style={[s.insightsBody, { color: colors.textSecondary }]}>{viralInsights}</Text>
-                    </View>
-                  ) : null}
+
+                      {profileAnalysis.warnings?.length > 0 && (
+                        <View style={{ gap: 4, marginBottom: 8 }}>
+                          {profileAnalysis.warningDetails?.map((w: string, i: number) => (
+                            <View key={i} style={{ flexDirection: 'row', gap: 6, alignItems: 'flex-start', paddingHorizontal: 4 }}>
+                              <Ionicons name="warning-outline" size={13} color="#F59E0B" style={{ marginTop: 1 }} />
+                              <Text style={{ fontSize: 11, color: '#F59E0B', flex: 1, lineHeight: 16 }}>{w}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+
+                      <View style={[s.sectionDivider, { borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Ionicons name="shield-checkmark" size={14} color="#10B981" />
+                          <Text style={[s.sectionDividerText, { color: '#10B981' }]}>MEASURED (Verified)</Text>
+                        </View>
+                      </View>
+
+                      {profileAnalysis.measured?.followers && (
+                        <View style={s.measuredRow}>
+                          <Text style={[s.measuredLabel, { color: colors.textMuted }]}>Followers</Text>
+                          <Text style={[s.measuredValue, { color: colors.text }]}>{profileAnalysis.measured.followers.value.toLocaleString()}</Text>
+                          <Text style={[s.measuredMeta, { color: colors.textMuted }]}>source: {profileAnalysis.measured.followers.source}</Text>
+                        </View>
+                      )}
+
+                      {profileAnalysis.measured?.posts_last_7d && (
+                        <View style={s.measuredRow}>
+                          <Text style={[s.measuredLabel, { color: colors.textMuted }]}>Posts (last 7 days)</Text>
+                          <Text style={[s.measuredValue, { color: colors.text }]}>{profileAnalysis.measured.posts_last_7d.value}</Text>
+                          <Text style={[s.measuredMeta, { color: colors.textMuted }]}>from {profileAnalysis.measured.posts_last_7d.sampleSize} scanned posts</Text>
+                        </View>
+                      )}
+
+                      {profileAnalysis.measured?.reels_last_7d && (
+                        <View style={s.measuredRow}>
+                          <Text style={[s.measuredLabel, { color: colors.textMuted }]}>Reels (last 7 days)</Text>
+                          <Text style={[s.measuredValue, { color: colors.text }]}>{profileAnalysis.measured.reels_last_7d.value}</Text>
+                          <Text style={[s.measuredMeta, { color: colors.textMuted }]}>from {profileAnalysis.measured.reels_last_7d.sampleSize} scanned posts</Text>
+                        </View>
+                      )}
+
+                      {profileAnalysis.measured?.avg_posts_per_week_28d && (
+                        <View style={s.measuredRow}>
+                          <Text style={[s.measuredLabel, { color: colors.textMuted }]}>Avg posts/week (28d)</Text>
+                          <Text style={[s.measuredValue, { color: colors.text }]}>{profileAnalysis.measured.avg_posts_per_week_28d.value}</Text>
+                          <Text style={[s.measuredMeta, { color: colors.textMuted }]}>from {profileAnalysis.measured.avg_posts_per_week_28d.sampleSize} scanned posts</Text>
+                        </View>
+                      )}
+
+                      {profileAnalysis.measured?.content_mix && (
+                        <View style={s.measuredRow}>
+                          <Text style={[s.measuredLabel, { color: colors.textMuted }]}>Content Mix</Text>
+                          <Text style={[s.measuredValue, { color: colors.text }]}>
+                            Reels {Math.round(profileAnalysis.measured.content_mix.reels_ratio * 100)}% / Static {Math.round(profileAnalysis.measured.content_mix.static_ratio * 100)}%
+                          </Text>
+                          <Text style={[s.measuredMeta, { color: colors.textMuted }]}>from {profileAnalysis.measured.content_mix.sampleSize} posts</Text>
+                        </View>
+                      )}
+
+                      {profileAnalysis.measured?.engagement_rate && (
+                        <View style={s.measuredRow}>
+                          <Text style={[s.measuredLabel, { color: colors.textMuted }]}>Engagement Rate</Text>
+                          <Text style={[s.measuredValue, { color: colors.text }]}>{profileAnalysis.measured.engagement_rate.value}%</Text>
+                          <Text style={[s.measuredMeta, { color: colors.textMuted }]}>
+                            ({profileAnalysis.measured.engagement_rate.avgLikes} avg likes + {profileAnalysis.measured.engagement_rate.avgComments} avg comments) / {profileAnalysis.measured.engagement_rate.followers.toLocaleString()} followers
+                          </Text>
+                        </View>
+                      )}
+
+                      {profileAnalysis.inferred && profileAnalysis.inferred.insights?.length > 0 && (
+                        <>
+                          <View style={[s.sectionDivider, { borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Ionicons name="sparkles" size={14} color="#F59E0B" />
+                              <Text style={[s.sectionDividerText, { color: '#F59E0B' }]}>INFERRED (AI Insight)</Text>
+                            </View>
+                          </View>
+
+                          {profileAnalysis.inferred.insights.map((insight: any, i: number) => (
+                            <View key={i} style={[s.insightsCard, { backgroundColor: '#F59E0B' + '08', borderColor: '#F59E0B' + '20' }]}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                                <Ionicons name="sparkles" size={12} color="#F59E0B" />
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#F59E0B', letterSpacing: 0.5, textTransform: 'uppercase' }}>
+                                  {insight.category?.replace(/_/g, ' ')}
+                                </Text>
+                              </View>
+                              <Text style={[s.insightsBody, { color: colors.textSecondary }]}>{insight.finding}</Text>
+                              {insight.evidencePermalinks?.length > 0 && (
+                                <View style={{ marginTop: 4 }}>
+                                  <Text style={{ fontSize: 10, color: colors.textMuted }}>
+                                    Evidence: {insight.evidencePermalinks.length} reel{insight.evidencePermalinks.length > 1 ? 's' : ''} analyzed
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                          ))}
+                        </>
+                      )}
+
+                      <View style={{ marginTop: 8, padding: 8, borderRadius: 6, backgroundColor: isDark ? '#1A2030' + '60' : '#F5F7FA' }}>
+                        <Text style={{ fontSize: 10, color: colors.textMuted, lineHeight: 15 }}>
+                          Audit: {profileAnalysis.attempts?.join(' → ')} | Method: {profileAnalysis.collection_method_used} | Source: {profileAnalysis.source_type}
+                        </Text>
+                      </View>
+                    </>
+                  )}
+
+                  <View style={[s.sectionDivider, { borderColor: isDark ? '#1A2030' : '#E2E8E4', marginTop: 12 }]}>
+                    <Text style={[s.sectionDividerText, { color: '#8B5CF6' }]}>Competitor Details</Text>
+                  </View>
 
                   <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Company Name</Text>
                   <TextInput
@@ -966,95 +1076,27 @@ export default function CompetitiveIntelligence() {
                     placeholderTextColor={colors.textMuted}
                   />
 
-                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Business Type</Text>
+                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Business Type *</Text>
                   <TextInput
-                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
+                    style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
                     value={newComp.businessType}
                     onChangeText={v => setNewComp(p => ({ ...p, businessType: v }))}
+                    placeholder="E-commerce, Agency, F&B..."
                     placeholderTextColor={colors.textMuted}
                   />
 
-                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Primary Objective</Text>
+                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Primary Objective *</Text>
                   <TextInput
-                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
+                    style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
                     value={newComp.primaryObjective}
                     onChangeText={v => setNewComp(p => ({ ...p, primaryObjective: v }))}
-                    placeholderTextColor={colors.textMuted}
-                  />
-
-                  <View style={[s.sectionDivider, { borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-                    <Text style={[s.sectionDividerText, { color: '#8B5CF6' }]}>AI-Extracted Evidence</Text>
-                  </View>
-
-                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Posts/Week</Text>
-                  <TextInput
-                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
-                    value={newComp.postingFrequency}
-                    onChangeText={v => setNewComp(p => ({ ...p, postingFrequency: v }))}
-                    keyboardType="numeric"
-                    placeholderTextColor={colors.textMuted}
-                  />
-
-                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Content Type Ratio</Text>
-                  <TextInput
-                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
-                    value={newComp.contentTypeRatio}
-                    onChangeText={v => setNewComp(p => ({ ...p, contentTypeRatio: v }))}
-                    placeholderTextColor={colors.textMuted}
-                  />
-
-                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Engagement Ratio (%)</Text>
-                  <TextInput
-                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
-                    value={newComp.engagementRatio}
-                    onChangeText={v => setNewComp(p => ({ ...p, engagementRatio: v }))}
-                    keyboardType="decimal-pad"
-                    placeholderTextColor={colors.textMuted}
-                  />
-
-                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>CTA Patterns</Text>
-                  <TextInput
-                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
-                    value={newComp.ctaPatterns}
-                    onChangeText={v => setNewComp(p => ({ ...p, ctaPatterns: v }))}
-                    placeholderTextColor={colors.textMuted}
-                  />
-
-                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Discount Frequency</Text>
-                  <TextInput
-                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
-                    value={newComp.discountFrequency}
-                    onChangeText={v => setNewComp(p => ({ ...p, discountFrequency: v }))}
-                    placeholderTextColor={colors.textMuted}
-                  />
-
-                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Hook Styles</Text>
-                  <TextInput
-                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
-                    value={newComp.hookStyles}
-                    onChangeText={v => setNewComp(p => ({ ...p, hookStyles: v }))}
-                    placeholderTextColor={colors.textMuted}
-                  />
-
-                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Messaging Tone</Text>
-                  <TextInput
-                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
-                    value={newComp.messagingTone}
-                    onChangeText={v => setNewComp(p => ({ ...p, messagingTone: v }))}
-                    placeholderTextColor={colors.textMuted}
-                  />
-
-                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Social Proof</Text>
-                  <TextInput
-                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
-                    value={newComp.socialProofPresence}
-                    onChangeText={v => setNewComp(p => ({ ...p, socialProofPresence: v }))}
+                    placeholder="Sales, Leads, Brand awareness..."
                     placeholderTextColor={colors.textMuted}
                   />
 
                   <View style={s.reviewBtns}>
                     <Pressable
-                      onPress={() => { setAddStep('input'); setShowManualFields(false); }}
+                      onPress={() => { setAddStep('input'); setShowManualFields(false); setProfileAnalysis(null); }}
                       style={[s.backBtn, { borderColor: isDark ? '#333' : '#ddd' }]}
                     >
                       <Ionicons name="arrow-back" size={16} color={colors.textMuted} />
@@ -1267,6 +1309,10 @@ const s = StyleSheet.create({
   insightsTitle: { fontSize: 12, fontWeight: '700', letterSpacing: 0.3 },
   insightsBody: { fontSize: 12, lineHeight: 18 },
   aiFilledInput: { borderLeftWidth: 3, borderLeftColor: '#8B5CF6' },
+  measuredRow: { paddingVertical: 6, paddingHorizontal: 4, gap: 2 },
+  measuredLabel: { fontSize: 11, fontWeight: '600', letterSpacing: 0.3 },
+  measuredValue: { fontSize: 16, fontWeight: '700' },
+  measuredMeta: { fontSize: 10, lineHeight: 14 },
   reviewBtns: { flexDirection: 'row', gap: 10, marginTop: 16 },
   backBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 8, borderWidth: 1 },
   backBtnText: { fontSize: 14, fontWeight: '600' },

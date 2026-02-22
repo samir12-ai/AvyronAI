@@ -1,7 +1,23 @@
-// @ts-ignore - playwright types may not be available but runtime works
-import { chromium } from "playwright";
 type Browser = any;
 type Page = any;
+
+let playwrightChromium: any = null;
+async function getChromium(): Promise<any> {
+  if (playwrightChromium) return playwrightChromium;
+  try {
+    const pw = await import("playwright-chromium");
+    playwrightChromium = pw.chromium;
+    return playwrightChromium;
+  } catch {
+    try {
+      const pw = await import("playwright");
+      playwrightChromium = pw.chromium;
+      return playwrightChromium;
+    } catch {
+      return null;
+    }
+  }
+}
 
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH || "/nix/store/zi4f80l169xlmivz8vja8wlphq74qqk0-chromium-125.0.6422.141/bin/chromium";
 
@@ -161,9 +177,11 @@ async function attemptHtmlParse(profileUrl: string, handle: string): Promise<{ p
 }
 
 async function attemptHeadlessRender(profileUrl: string, handle: string): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null }> {
+  const chromiumModule = await getChromium();
+  if (!chromiumModule) throw new Error("Playwright not available");
   let browser: Browser | null = null;
   try {
-    browser = await chromium.launch({
+    browser = await chromiumModule.launch({
       executablePath: CHROMIUM_PATH,
       headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],

@@ -228,7 +228,7 @@ export default function DominanceEngine() {
   const generateModsMutation = useMutation({
     mutationFn: async (analysisId: string) => {
       const basePlan = {
-        contentDistribution: { channels: ['instagram', 'facebook'], frequency: 'daily', contentTypes: ['reels', 'carousels', 'stories'] },
+        contentDistribution: { channels: ['instagram', 'facebook'], frequency: 'daily', contentTypes: ['reels', 'carousels'] },
         creativeTestingFramework: { abTests: 3, variants: 2, minSampleSize: 500 },
         kpiMonitoring: { metrics: ['engagement_rate', 'reach', 'conversions'], reviewCycle: 'weekly' },
       };

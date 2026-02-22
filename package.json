@@ -60,6 +60,7 @@
     "p-limit": "^7.3.0",
     "p-retry": "^7.1.1",
     "pg": "^8.16.3",
+    "playwright-chromium": "^1.58.2",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
