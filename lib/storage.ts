@@ -14,11 +14,11 @@ const KEYS = {
 };
 
 const defaultBrandProfile: BrandProfile = {
-  name: '',
-  industry: '',
+  name: 'SWA Media',
+  industry: 'Social Media Marketing Agency',
   tone: 'Professional',
-  targetAudience: '',
-  platforms: ['Instagram', 'Facebook'],
+  targetAudience: 'Business owners, entrepreneurs, e-commerce brands, and startups in the UAE and GCC looking for social media management, content creation, and digital marketing services',
+  platforms: ['Instagram', 'Facebook', 'TikTok', 'LinkedIn'],
 };
 
 const defaultPlatformConnections: PlatformConnection[] = [

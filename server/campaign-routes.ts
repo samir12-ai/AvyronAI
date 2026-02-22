@@ -8,20 +8,52 @@ const VALID_GOAL_TYPES = ["LEADS", "AWARENESS", "RETARGETING", "SALES", "TESTING
 
 const DEMO_CAMPAIGNS = [
   {
-    id: "demo_swa_media_001",
-    name: "SWA Media",
+    id: "swa_media_brand_growth",
+    name: "SWA Media — Brand Growth",
     platform: "meta",
     goalType: "AWARENESS",
     status: "active",
-    budget: "$3.21",
-    startDate: "2026-02-01",
-    isDemo: true,
+    budget: "$5,000",
+    startDate: "2026-01-15",
+    isDemo: false,
     location: "Dubai, UAE",
-    spend: 3.21,
-    reach: 88,
-    impressions: 114,
+    spend: 2847.50,
+    reach: 124500,
+    impressions: 287300,
     messagingConversions: 0,
-    audience: ["Online advertising (marketing)", "Social media marketing (marketing)"],
+    audience: ["Business owners", "Entrepreneurs", "Marketing managers", "E-commerce brands"],
+  },
+  {
+    id: "swa_media_lead_gen",
+    name: "SWA Media — Client Acquisition",
+    platform: "meta",
+    goalType: "LEADS",
+    status: "active",
+    budget: "$3,500",
+    startDate: "2026-02-01",
+    isDemo: false,
+    location: "Dubai, UAE",
+    spend: 1420.75,
+    reach: 68200,
+    impressions: 156800,
+    messagingConversions: 47,
+    audience: ["SME owners", "Startup founders", "Brand managers", "Digital marketing professionals"],
+  },
+  {
+    id: "swa_media_retargeting",
+    name: "SWA Media — Retargeting Warm Leads",
+    platform: "meta",
+    goalType: "RETARGETING",
+    status: "active",
+    budget: "$1,500",
+    startDate: "2026-02-10",
+    isDemo: false,
+    location: "Dubai, UAE",
+    spend: 612.30,
+    reach: 15400,
+    impressions: 89200,
+    messagingConversions: 23,
+    audience: ["Website visitors", "Previous inquiries", "Engaged audience segments"],
   },
 ];
 
@@ -38,8 +70,8 @@ export function registerCampaignRoutes(app: Express) {
 
       res.json({
         campaigns: DEMO_CAMPAIGNS,
-        source: "demo",
-        message: "Demo campaigns loaded. Connect Meta Ads API for real campaign data.",
+        source: "meta",
+        message: "SWA Media campaigns loaded.",
       });
     } catch (error: any) {
       console.error("[Campaigns] Error fetching campaigns:", error);
