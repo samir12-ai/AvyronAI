@@ -1,0 +1,188 @@
+
+⸻
+
+🚨 Strategic Execution Refactor — Mandatory Structural Upgrade
+
+We are restructuring the full execution pipeline.
+No shortcuts. No auto-apply. No silent behavior.
+
+This must become a controlled loop:
+
+Blueprint → Plan → Client Approval → Calendar → AI Creative (Required Work) → Studio Drafts → Execution Progress Tracking
+
+⸻
+
+1️⃣ CLIENT APPROVAL GATE (Non-Negotiable)
+
+Nothing executes before client approval.
+
+Two stages:
+	1.	Approve Blueprint (understanding)
+	2.	Approve Plan (execution strategy)
+
+Buttons required:
+	•	✅ Approve Plan
+	•	❌ Reject Plan (with reason)
+	•	🛑 Emergency Stop (kills any automation jobs)
+
+If plan status ≠ APPROVED:
+	•	AI Creative locked
+	•	Calendar auto-generation locked
+	•	Required Work locked
+
+⸻
+
+2️⃣ PLAN GENERATION (Readable + Structured)
+
+Fix UI overload.
+
+Plan must render with:
+	•	Collapsible sections:
+	•	Distribution
+	•	Creative Testing
+	•	Budget
+	•	KPI Monitoring
+	•	Competitive Watch
+	•	Risk Triggers
+
+Each section must include:
+	•	Executive Summary (3–5 bullets)
+	•	Expandable detailed breakdown
+
+Add:
+	•	Simple View (client friendly)
+	•	Advanced View (full detail)
+
+NO blank screen allowed under any state.
+
+⸻
+
+3️⃣ DATABASE STRUCTURE (Execution Integrity)
+
+Add:
+
+strategic_plans
+	•	id
+	•	blueprintId
+	•	campaignId
+	•	planJson
+	•	planSummary
+	•	status: DRAFT | READY_FOR_REVIEW | APPROVED | REJECTED | GENERATED_TO_CALENDAR
+
+plan_approvals
+	•	planId
+	•	decision: APPROVED / REJECTED
+	•	reason
+	•	timestamp
+
+required_work
+	•	planId
+	•	calculated counts (reels, stories, posts, videos)
+	•	total period counts
+
+All calendar and studio items must reference:
+	•	planId
+	•	campaignId
+	•	calendarPostId
+
+⸻
+
+4️⃣ AFTER APPROVAL → AUTOMATIC EXECUTION
+
+Once client clicks Approve Plan:
+
+Step A — Calendar Auto Generation
+	•	Create evenly spaced posting schedule
+	•	Assign default times
+	•	Mark as “From Plan #X”
+	•	Status = DRAFT (pending creative)
+
+Step B — AI Creative Required Work (Inside AI Creative Engine)
+
+Required Work must NOT run independently.
+It activates ONLY after approval.
+
+AI Creative must:
+	•	Read approved plan distribution
+	•	Calculate required content quantities
+	•	Generate:
+	•	Captions
+	•	Creative briefs
+	•	CTA copy
+	•	Structure per item
+
+User only uploads:
+	•	Images
+	•	Business idea/context
+
+AI completes everything else.
+
+If AI fails:
+	•	Studio item created
+	•	Status = FAILED
+	•	Error reason stored
+	•	No silent drop
+
+⸻
+
+5️⃣ STUDIO INTEGRATION
+
+All generated items:
+	•	Sent to Studio as Draft
+	•	Linked to Calendar entry
+	•	Status = READY_FOR_REVIEW
+
+Lifecycle per item:
+DRAFT → READY → SCHEDULED → PUBLISHED
+or FAILED
+
+⸻
+
+6️⃣ EXECUTION PROGRESS DASHBOARD (NEW)
+
+Add per planId dashboard:
+
+Show:
+	•	Overall progress %
+	•	Generated content: X / total
+	•	Studio drafts ready
+	•	Scheduled
+	•	Published
+	•	Failed (with reasons)
+
+Auto updates on:
+	•	AI generation
+	•	Calendar linking
+	•	Studio status change
+	•	Publishing
+
+If plan not approved:
+	•	Show “Plan not approved yet”
+	•	No execution allowed
+
+Optional actions:
+	•	Generate remaining content
+	•	Retry failed items
+	•	Resync calendar
+
+⸻
+
+7️⃣ HARD RULES
+	•	No blank UI states anywhere.
+	•	All API failures must surface HTTP code + message.
+	•	No auto-execution before approval.
+	•	No implicit status assumptions.
+	•	Every transition audit logged:
+PLAN_GENERATED
+PLAN_APPROVED
+PLAN_REJECTED
+EXECUTION_CREATED
+CALENDAR_CREATED
+STUDIO_ITEMS_CREATED
+
+⸻
+
+This converts the system from “AI that suggests”
+into a controlled execution machine.
+
+Confirm implementation order before building.
