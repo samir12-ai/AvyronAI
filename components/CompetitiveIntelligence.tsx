@@ -280,9 +280,14 @@ export default function CompetitiveIntelligence() {
   const deleteCompetitorMutation = useMutation({
     mutationFn: async (id: string) => {
       const res = await fetch(new URL(`/api/ci/competitors/${id}?accountId=default`, baseUrl).toString(), { method: 'DELETE' });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Delete failed'); }
       return res.json();
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ci-competitors'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ci-competitors'] });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: (err: any) => Alert.alert('Error', err.message || 'Failed to remove competitor'),
   });
 
   const competitors: Competitor[] = competitorsData?.competitors || [];
@@ -541,14 +546,25 @@ export default function CompetitiveIntelligence() {
               ))}
               <Pressable
                 onPress={() => {
-                  Alert.alert('Remove Competitor', `Remove ${comp.name}?`, [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Remove', style: 'destructive', onPress: () => deleteCompetitorMutation.mutate(comp.id) },
-                  ]);
+                  if (Platform.OS === 'web') {
+                    if (confirm(`Remove ${comp.name}?`)) {
+                      deleteCompetitorMutation.mutate(comp.id);
+                    }
+                  } else {
+                    Alert.alert('Remove Competitor', `Remove ${comp.name}?`, [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Remove', style: 'destructive', onPress: () => deleteCompetitorMutation.mutate(comp.id) },
+                    ]);
+                  }
                 }}
                 style={s.removeBtn}
+                disabled={deleteCompetitorMutation.isPending}
               >
-                <Ionicons name="trash-outline" size={14} color="#EF4444" />
+                {deleteCompetitorMutation.isPending ? (
+                  <ActivityIndicator size="small" color="#EF4444" />
+                ) : (
+                  <Ionicons name="trash-outline" size={14} color="#EF4444" />
+                )}
                 <Text style={[s.removeBtnText, { color: '#EF4444' }]}>Remove</Text>
               </Pressable>
             </View>
