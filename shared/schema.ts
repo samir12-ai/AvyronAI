@@ -1063,6 +1063,119 @@ export const dominanceModifications = pgTable("dominance_modifications", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// =============================================
+// EXECUTION MACHINE: STRATEGIC PLANS + APPROVAL + REQUIRED WORK
+// =============================================
+export const strategicPlans = pgTable("strategic_plans", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  blueprintId: varchar("blueprint_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  planJson: text("plan_json").notNull(),
+  planSummary: text("plan_summary"),
+  status: text("status").notNull().default("DRAFT"),
+  executionStatus: text("execution_status").notNull().default("IDLE"),
+  emergencyStopped: boolean("emergency_stopped").default(false),
+  emergencyStoppedAt: timestamp("emergency_stopped_at"),
+  emergencyStoppedReason: text("emergency_stopped_reason"),
+  generatedToCalendarAt: timestamp("generated_to_calendar_at"),
+  aiExecutionStartedAt: timestamp("ai_execution_started_at"),
+  aiExecutionCompletedAt: timestamp("ai_execution_completed_at"),
+  totalCalendarEntries: integer("total_calendar_entries").default(0),
+  totalStudioItems: integer("total_studio_items").default(0),
+  totalPublished: integer("total_published").default(0),
+  totalFailed: integer("total_failed").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const planApprovals = pgTable("plan_approvals", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  planId: varchar("plan_id").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  decision: text("decision").notNull(),
+  reason: text("reason"),
+  decidedBy: text("decided_by").default("client"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const requiredWork = pgTable("required_work", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  planId: varchar("plan_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  periodDays: integer("period_days").notNull().default(30),
+  reelsPerWeek: integer("reels_per_week").default(0),
+  postsPerWeek: integer("posts_per_week").default(0),
+  storiesPerDay: integer("stories_per_day").default(0),
+  carouselsPerWeek: integer("carousels_per_week").default(0),
+  videosPerWeek: integer("videos_per_week").default(0),
+  totalReels: integer("total_reels").default(0),
+  totalPosts: integer("total_posts").default(0),
+  totalStories: integer("total_stories").default(0),
+  totalCarousels: integer("total_carousels").default(0),
+  totalVideos: integer("total_videos").default(0),
+  totalContentPieces: integer("total_content_pieces").default(0),
+  generatedCount: integer("generated_count").default(0),
+  readyCount: integer("ready_count").default(0),
+  scheduledCount: integer("scheduled_count").default(0),
+  publishedCount: integer("published_count").default(0),
+  failedCount: integer("failed_count").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const calendarEntries = pgTable("calendar_entries", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  planId: varchar("plan_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  contentType: text("content_type").notNull(),
+  scheduledDate: text("scheduled_date").notNull(),
+  scheduledTime: text("scheduled_time").notNull(),
+  title: text("title"),
+  caption: text("caption"),
+  creativeBrief: text("creative_brief"),
+  ctaCopy: text("cta_copy"),
+  status: text("status").notNull().default("DRAFT"),
+  studioItemId: varchar("studio_item_id"),
+  aiGeneratedAt: timestamp("ai_generated_at"),
+  errorReason: text("error_reason"),
+  sourceLabel: text("source_label"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const studioItems = pgTable("studio_items", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  planId: varchar("plan_id"),
+  campaignId: varchar("campaign_id"),
+  calendarEntryId: varchar("calendar_entry_id"),
+  accountId: varchar("account_id").notNull().default("default"),
+  contentType: text("content_type").notNull(),
+  title: text("title"),
+  caption: text("caption"),
+  creativeBrief: text("creative_brief"),
+  ctaCopy: text("cta_copy"),
+  mediaUrl: text("media_url"),
+  thumbnailUrl: text("thumbnail_url"),
+  status: text("status").notNull().default("DRAFT"),
+  errorReason: text("error_reason"),
+  publishedAt: timestamp("published_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export type StrategicBlueprint = typeof strategicBlueprints.$inferSelect;
 export type BlueprintCompetitor = typeof blueprintCompetitors.$inferSelect;
 export type BlueprintVersion = typeof blueprintVersions.$inferSelect;
@@ -1070,3 +1183,8 @@ export type StrategicAuditLog = typeof strategicAuditLogs.$inferSelect;
 export type ExtractionMetric = typeof extractionMetrics.$inferSelect;
 export type DominanceAnalysis = typeof dominanceAnalyses.$inferSelect;
 export type DominanceModification = typeof dominanceModifications.$inferSelect;
+export type StrategicPlan = typeof strategicPlans.$inferSelect;
+export type PlanApproval = typeof planApprovals.$inferSelect;
+export type RequiredWork = typeof requiredWork.$inferSelect;
+export type CalendarEntry = typeof calendarEntries.$inferSelect;
+export type StudioItem = typeof studioItems.$inferSelect;
