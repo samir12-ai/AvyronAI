@@ -1087,6 +1087,7 @@ export const strategicPlans = pgTable("strategic_plans", {
   totalStudioItems: integer("total_studio_items").default(0),
   totalPublished: integer("total_published").default(0),
   totalFailed: integer("total_failed").default(0),
+  totalCanceled: integer("total_canceled").default(0),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

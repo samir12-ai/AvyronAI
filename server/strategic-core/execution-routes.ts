@@ -8,9 +8,56 @@ import {
   calendarEntries,
   studioItems,
 } from "@shared/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, ne } from "drizzle-orm";
 import { logAudit } from "../audit";
 import { logAuditEvent } from "./audit-logger";
+import OpenAI from "openai";
+
+const openai = new OpenAI({
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+});
+
+async function generateCreativeContent(
+  contentType: string,
+  title: string | null,
+  scheduledDate: string,
+  planContext: string
+): Promise<{ caption: string; creativeBrief: string; ctaCopy: string }> {
+  const prompt = `You are an expert social media content creator. Generate content for a ${contentType} post.
+
+Title/Theme: ${title || "Brand content"}
+Scheduled Date: ${scheduledDate}
+Campaign Context: ${planContext}
+
+Return ONLY valid JSON with these exact keys:
+{
+  "caption": "An engaging social media caption (100-200 chars, include relevant hashtags)",
+  "creativeBrief": "A detailed creative brief for the visual/media (50-100 words describing what to create)",
+  "ctaCopy": "A compelling call-to-action (3-6 words)"
+}`;
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-5-nano",
+    messages: [{ role: "user", content: prompt }],
+    response_format: { type: "json_object" },
+    max_completion_tokens: 500,
+  });
+
+  const content = response.choices[0]?.message?.content;
+  if (!content) throw new Error("AI returned empty response");
+
+  const parsed = JSON.parse(content);
+  if (!parsed.caption || !parsed.creativeBrief || !parsed.ctaCopy) {
+    throw new Error("AI response missing required fields");
+  }
+
+  return {
+    caption: parsed.caption,
+    creativeBrief: parsed.creativeBrief,
+    ctaCopy: parsed.ctaCopy,
+  };
+}
 
 function requirePlanStatus(...allowedStatuses: string[]) {
   return async (req: Request, res: Response, next: Function) => {
@@ -549,7 +596,20 @@ export function registerExecutionRoutes(app: Express) {
         const plan = (req as any).plan;
 
         if (plan.emergencyStopped) {
-          return res.status(409).json({ error: "EMERGENCY_STOPPED" });
+          return res.status(409).json({ error: "EMERGENCY_STOPPED", message: "Cannot execute while emergency stop is active." });
+        }
+
+        const approvals = await db
+          .select()
+          .from(planApprovals)
+          .where(and(eq(planApprovals.planId, plan.id), eq(planApprovals.decision, "APPROVED")))
+          .limit(1);
+
+        if (approvals.length === 0) {
+          return res.status(403).json({
+            error: "APPROVAL_GATE_FAILED",
+            message: "Plan must have an explicit APPROVED approval record before creative execution can begin. No silent fallbacks.",
+          });
         }
 
         const entries = await db
@@ -558,6 +618,20 @@ export function registerExecutionRoutes(app: Express) {
           .where(and(eq(calendarEntries.planId, plan.id), eq(calendarEntries.status, "DRAFT")));
 
         if (entries.length === 0) {
+          const existingItems = await db
+            .select()
+            .from(studioItems)
+            .where(eq(studioItems.planId, plan.id));
+
+          if (existingItems.length > 0) {
+            return res.json({
+              success: true,
+              idempotent: true,
+              message: "All calendar entries already processed. Skipping re-execution.",
+              studioItemsCreated: 0,
+              existingItems: existingItems.length,
+            });
+          }
           return res.json({ success: true, message: "No draft calendar entries to process.", studioItems: 0 });
         }
 
@@ -566,17 +640,84 @@ export function registerExecutionRoutes(app: Express) {
           .set({ executionStatus: "RUNNING", aiExecutionStartedAt: new Date(), updatedAt: new Date() })
           .where(eq(strategicPlans.id, plan.id));
 
+        let planContext = "Marketing campaign content";
+        try {
+          const planJson = JSON.parse(plan.planJson || "{}");
+          const brand = planJson.brandIdentity?.brandName || planJson.brandName || "";
+          const industry = planJson.marketAnalysis?.industry || planJson.industry || "";
+          const tone = planJson.contentStrategy?.toneOfVoice || planJson.toneOfVoice || "";
+          planContext = `Brand: ${brand}. Industry: ${industry}. Tone: ${tone}.`.replace(/\.\s*\./g, ".");
+        } catch {}
+
         const createdItems: any[] = [];
+        const skippedItems: string[] = [];
         const failedItems: { entryId: string; error: string }[] = [];
+        const canceledEntries: string[] = [];
 
         for (const entry of entries) {
           try {
             const freshPlan = await db.select().from(strategicPlans).where(eq(strategicPlans.id, plan.id)).limit(1);
             if (freshPlan[0]?.emergencyStopped) {
-              await logAudit(plan.accountId, "EMERGENCY_STOP_TRIGGERED", {
-                details: { planId: plan.id, stoppedDuringCreative: true, processedSoFar: createdItems.length },
+              const remainingEntries = entries.slice(entries.indexOf(entry));
+              for (const remaining of remainingEntries) {
+                if (remaining.id === entry.id || createdItems.some(i => i.calendarEntryId === remaining.id)) continue;
+
+                const alreadyExists = await db
+                  .select()
+                  .from(studioItems)
+                  .where(eq(studioItems.calendarEntryId, remaining.id))
+                  .limit(1);
+
+                if (alreadyExists.length === 0) {
+                  await db
+                    .insert(studioItems)
+                    .values({
+                      planId: plan.id,
+                      campaignId: plan.campaignId,
+                      calendarEntryId: remaining.id,
+                      accountId: plan.accountId,
+                      contentType: remaining.contentType,
+                      title: remaining.title,
+                      status: "CANCELED",
+                      errorReason: "Emergency stop activated",
+                    });
+
+                  await db
+                    .update(calendarEntries)
+                    .set({ status: "CANCELED", errorReason: "Emergency stop activated", updatedAt: new Date() })
+                    .where(eq(calendarEntries.id, remaining.id));
+
+                  canceledEntries.push(remaining.id);
+                }
+              }
+
+              await logAudit(plan.accountId, "EMERGENCY_STOP_DURING_CREATIVE", {
+                details: { planId: plan.id, processedSoFar: createdItems.length, canceled: canceledEntries.length },
               });
               break;
+            }
+
+            const existingItem = await db
+              .select()
+              .from(studioItems)
+              .where(eq(studioItems.calendarEntryId, entry.id))
+              .limit(1);
+
+            if (existingItem.length > 0) {
+              skippedItems.push(entry.id);
+              continue;
+            }
+
+            let aiContent: { caption: string; creativeBrief: string; ctaCopy: string };
+            try {
+              aiContent = await generateCreativeContent(
+                entry.contentType,
+                entry.title,
+                entry.scheduledDate,
+                planContext
+              );
+            } catch (aiErr: any) {
+              throw new Error(`AI_GENERATION_FAILED: ${aiErr.message}`);
             }
 
             const [item] = await db
@@ -588,9 +729,9 @@ export function registerExecutionRoutes(app: Express) {
                 accountId: plan.accountId,
                 contentType: entry.contentType,
                 title: entry.title,
-                caption: `AI-generated caption for ${entry.contentType} scheduled ${entry.scheduledDate}`,
-                creativeBrief: `Creative brief: ${entry.contentType} content for campaign`,
-                ctaCopy: "Learn More",
+                caption: aiContent.caption,
+                creativeBrief: aiContent.creativeBrief,
+                ctaCopy: aiContent.ctaCopy,
                 status: "DRAFT",
               })
               .returning();
@@ -606,15 +747,30 @@ export function registerExecutionRoutes(app: Express) {
               details: { planId: plan.id, entryId: entry.id, studioItemId: item.id, contentType: entry.contentType },
             });
           } catch (itemErr: any) {
-            failedItems.push({ entryId: entry.id, error: itemErr.message });
+            const errorMsg = itemErr.message || "Unknown error";
+            failedItems.push({ entryId: entry.id, error: errorMsg });
 
             await db
               .update(calendarEntries)
-              .set({ status: "FAILED", errorReason: itemErr.message, updatedAt: new Date() })
+              .set({ status: "FAILED", errorReason: errorMsg, updatedAt: new Date() })
               .where(eq(calendarEntries.id, entry.id));
 
+            await db
+              .insert(studioItems)
+              .values({
+                planId: plan.id,
+                campaignId: plan.campaignId,
+                calendarEntryId: entry.id,
+                accountId: plan.accountId,
+                contentType: entry.contentType,
+                title: entry.title,
+                status: "FAILED",
+                errorReason: errorMsg,
+              })
+              .onConflictDoNothing({ target: studioItems.calendarEntryId });
+
             await logAudit(plan.accountId, "AI_CREATIVE_FAILED", {
-              details: { planId: plan.id, entryId: entry.id, error: itemErr.message },
+              details: { planId: plan.id, entryId: entry.id, error: errorMsg },
             });
           }
         }
@@ -622,27 +778,45 @@ export function registerExecutionRoutes(app: Express) {
         const finalPlan = await db.select().from(strategicPlans).where(eq(strategicPlans.id, plan.id)).limit(1);
         const wasStopped = finalPlan[0]?.emergencyStopped;
 
+        let executionStatus: string;
+        if (wasStopped) {
+          executionStatus = "PAUSED";
+        } else if (failedItems.length > 0 && createdItems.length === 0) {
+          executionStatus = "FAILED";
+        } else {
+          executionStatus = "COMPLETED";
+        }
+
         await db
           .update(strategicPlans)
           .set({
-            executionStatus: wasStopped ? "PAUSED" : failedItems.length > 0 && createdItems.length === 0 ? "FAILED" : "COMPLETED",
+            executionStatus,
             aiExecutionCompletedAt: wasStopped ? null : new Date(),
             totalStudioItems: createdItems.length,
             totalFailed: failedItems.length,
+            totalCanceled: canceledEntries.length,
             updatedAt: new Date(),
           })
           .where(eq(strategicPlans.id, plan.id));
 
         if (!wasStopped) {
           await logAudit(plan.accountId, "EXECUTION_COMPLETED", {
-            details: { planId: plan.id, created: createdItems.length, failed: failedItems.length },
+            details: {
+              planId: plan.id,
+              created: createdItems.length,
+              failed: failedItems.length,
+              skipped: skippedItems.length,
+              canceled: canceledEntries.length,
+            },
           });
         }
 
         res.json({
           success: true,
           studioItemsCreated: createdItems.length,
+          skippedItems: skippedItems.length,
           failedItems: failedItems.length,
+          canceledItems: canceledEntries.length,
           failures: failedItems,
           emergencyStopped: wasStopped || false,
         });
@@ -654,6 +828,10 @@ export function registerExecutionRoutes(app: Express) {
             .update(strategicPlans)
             .set({ executionStatus: "FAILED", updatedAt: new Date() })
             .where(eq(strategicPlans.id, plan.id));
+
+          await logAudit(plan.accountId, "EXECUTION_CATASTROPHIC_FAILURE", {
+            details: { planId: plan.id, error: err.message },
+          });
         }
         res.status(500).json({ error: "CREATIVE_EXECUTION_FAILED", message: err.message });
       }
@@ -677,6 +855,7 @@ export function registerExecutionRoutes(app: Express) {
       const ready = items.filter((i) => i.status === "READY").length;
       const failed = items.filter((i) => i.status === "FAILED").length;
       const draft = items.filter((i) => i.status === "DRAFT").length;
+      const canceled = items.filter((i) => i.status === "CANCELED").length;
 
       const progressPercent = totalRequired > 0 ? Math.round(((published + scheduled + ready) / totalRequired) * 100) : 0;
 
@@ -694,6 +873,7 @@ export function registerExecutionRoutes(app: Express) {
         ready,
         draft,
         failed,
+        canceled,
         progressPercent,
       });
     } catch (err: any) {
@@ -730,6 +910,7 @@ export function registerExecutionRoutes(app: Express) {
       const totalReady = allItems.filter((i) => i.status === "READY").length;
       const totalFailed = allItems.filter((i) => i.status === "FAILED").length;
       const totalDraft = allItems.filter((i) => i.status === "DRAFT").length;
+      const totalCanceled = allItems.filter((i) => i.status === "CANCELED").length;
 
       const overallProgress = totalRequired > 0 ? Math.round(((totalPublished + totalScheduled + totalReady) / totalRequired) * 100) : 0;
 
@@ -745,6 +926,7 @@ export function registerExecutionRoutes(app: Express) {
           totalReady,
           totalDraft,
           totalFailed,
+          totalCanceled,
           overallProgress,
         },
         plans: plans.map((p) => ({
@@ -755,6 +937,7 @@ export function registerExecutionRoutes(app: Express) {
           totalCalendarEntries: p.totalCalendarEntries,
           totalStudioItems: p.totalStudioItems,
           totalFailed: p.totalFailed,
+          totalCanceled: p.totalCanceled,
           createdAt: p.createdAt,
         })),
       });
@@ -798,7 +981,7 @@ export function registerExecutionRoutes(app: Express) {
       const { itemId } = req.params;
       const { status } = req.body;
 
-      const validStatuses = ["DRAFT", "READY", "SCHEDULED", "PUBLISHED", "FAILED"];
+      const validStatuses = ["DRAFT", "READY", "SCHEDULED", "PUBLISHED", "FAILED", "CANCELED"];
       if (!validStatuses.includes(status)) {
         return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(", ")}` });
       }
