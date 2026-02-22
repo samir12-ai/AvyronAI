@@ -1,0 +1,136 @@
+
+⸻
+
+🚨 Execution Machine — Structural Clarifications Before Build
+
+We are proceeding with the execution system, but there are critical structural corrections that must be applied before implementation.
+
+⸻
+
+🔧 1️⃣ Split Phase 4 into Two Clear Layers
+
+Phase 4 must NOT mix deterministic logic with AI generation.
+
+Phase 4A — Deterministic Infrastructure (No AI)
+
+This layer must be 100% rule-based and stable before any AI runs.
+
+Includes:
+	•	Calendar auto-generation (even spacing logic, time assignment)
+	•	Required Work calculation (pure numeric logic)
+	•	Linking planId + campaignId to all generated records
+	•	Full audit logging
+
+Required Work calculation must be deterministic.
+
+If the approved plan distribution says:
+	•	5 reels/week
+	•	3 posts/week
+	•	daily stories
+
+The system must:
+	•	Calculate totals for selected time period (e.g. 30 days)
+	•	Store calculated counts in required_work table
+	•	No AI involved in counting
+
+AI must NOT decide quantities.
+
+⸻
+
+Phase 4B — AI Creative Execution
+
+Only after Phase 4A completes successfully:
+
+AI Creative may:
+	•	Generate captions
+	•	Generate creative briefs
+	•	Generate CTA copy
+	•	Create Studio draft items
+
+AI never calculates structure or quantity.
+AI only fills content.
+
+If AI fails:
+	•	Studio item still created
+	•	Status = FAILED
+	•	Error reason stored
+	•	No silent drops
+
+⸻
+
+🛑 2️⃣ Emergency Stop Must Be Global
+
+Emergency Stop must immediately pause:
+	•	AI generation queue
+	•	Future calendar auto-creation
+	•	Studio draft creation
+	•	Any background execution job related to the plan
+
+It must NOT delete data.
+It must only freeze execution.
+
+Audit log required:
+EMERGENCY_STOP_TRIGGERED
+
+⸻
+
+📊 3️⃣ Execution Progress Dashboard — Two Levels
+
+We need two tracking layers:
+
+Plan-Level Tracker
+
+Per planId:
+	•	Overall progress %
+	•	Generated content X / total
+	•	Drafts ready
+	•	Scheduled
+	•	Published
+	•	Failed (with reasons)
+
+Account-Level Tracker (Global View)
+
+Across all plans:
+	•	Active plans
+	•	Total scheduled posts
+	•	Total published
+	•	Failure rate
+	•	AI generation status
+
+This prevents siloed execution and gives operational visibility.
+
+⸻
+
+🔒 4️⃣ Hard Gating Rules (Reconfirmed)
+	•	No AI generation before plan approval.
+	•	No calendar creation before plan approval.
+	•	No Required Work before approval.
+	•	No silent execution.
+	•	Every transition audit logged:
+PLAN_GENERATED
+PLAN_APPROVED
+PLAN_REJECTED
+EXECUTION_CREATED
+CALENDAR_CREATED
+STUDIO_ITEMS_CREATED
+EMERGENCY_STOP_TRIGGERED
+
+⸻
+
+🎯 Objective
+
+We are not building an AI suggestion tool.
+
+We are building a controlled, gated execution engine.
+
+Confirm implementation order:
+	1.	Phase 1 DB
+	2.	Phase 2 Plan lifecycle
+	3.	Phase 3 UI approval gate
+	4.	Phase 4A Deterministic infrastructure
+	5.	Phase 4B AI execution
+	6.	Phase 5 Dashboard
+
+No shortcuts.
+
+Confirm before build.

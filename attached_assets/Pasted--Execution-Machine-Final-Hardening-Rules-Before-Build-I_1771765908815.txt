@@ -1,0 +1,130 @@
+
+⸻
+
+✅ Execution Machine — Final Hardening Rules Before Build
+
+Implementation order is confirmed.
+
+Before building, enforce the following non-negotiable safeguards:
+
+⸻
+
+1️⃣ Idempotency Guard (Critical)
+
+All post-approval actions must be idempotent.
+
+Meaning:
+	•	If /execute is called twice →
+It must NOT duplicate calendar entries.
+	•	It must NOT duplicate required_work rows.
+	•	It must NOT duplicate studio drafts.
+
+Use:
+	•	planId + campaignId unique constraints
+	•	or execution_state flag (GENERATED_TO_CALENDAR)
+
+Execution must be safely re-callable without data corruption.
+
+⸻
+
+2️⃣ Execution Locking (Concurrency Safety)
+
+If user clicks “Approve Plan” twice quickly,
+or execution job runs in parallel:
+	•	Only one execution pipeline may run.
+	•	Use execution_status: IDLE | RUNNING | COMPLETED | FAILED
+	•	Lock on RUNNING.
+
+No race conditions allowed.
+
+⸻
+
+3️⃣ Emergency Stop Behavior Clarification
+
+Emergency Stop must:
+
+✔ Pause AI generation queue
+✔ Pause future calendar generation
+✔ Block studio draft creation
+
+But must NOT:
+✘ Delete drafts
+✘ Delete calendar entries
+✘ Change plan approval status
+
+It sets:
+
+execution_status = PAUSED
+
+Resuming must be manual.
+
+Audit log required:
+EMERGENCY_STOP_TRIGGERED
+EXECUTION_RESUMED
+
+⸻
+
+4️⃣ Deterministic Layer (Reconfirmed)
+
+Phase 4A must be pure logic.
+
+Calendar:
+	•	Even spacing algorithm
+	•	Default time rule
+	•	Adjustable later
+
+Required Work:
+	•	Pure math from plan distribution
+	•	No AI deciding quantities
+
+AI only fills content.
+
+⸻
+
+5️⃣ Dashboard Must Read Real Data
+
+Progress % must calculate from actual data:
+
+progress =
+(published + scheduled + ready) / total_required_work
+
+No fake progress flags.
+
+Plan-level tracker and account-level tracker must pull from actual tables.
+
+⸻
+
+6️⃣ Hard Rule
+
+Nothing auto-publishes.
+Nothing auto-executes without approval.
+No silent fallbacks.
+No implicit assumptions.
+
+⸻
+
+🚀 Build Order Locked
+	1.	Database
+	2.	Lifecycle API
+	3.	UI Approval Gate
+	4.	Phase 4A Deterministic Infrastructure
+	5.	Phase 4B AI Execution
+	6.	Dashboard
+
+Confirm safeguards applied before coding Phase 4A.
+
+⸻
+
+إذا بدك رأيي التقني؟
+
+إذا هيدا تنبنى صح،
+النظام بصير عنده هيكل Enterprise حقيقي،
+مش MVP.
+
+والأهم؟
+بتصير أنت تسيطر على التنفيذ،
+مش AI يجرّك.
+
+هل بدك نضيف Layer سابع بعدين:
+“Revenue Attribution tied to Execution Progress”
+ولا منثبت هالمرحلة أول
