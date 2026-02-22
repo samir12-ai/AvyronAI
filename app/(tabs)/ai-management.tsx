@@ -26,10 +26,7 @@ import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl } from '@/lib/query-client';
 import StrategyHub from '@/components/StrategyHub';
 import LeadControlPanel from '@/components/LeadControlPanel';
-import CompetitiveIntelligence from '@/components/CompetitiveIntelligence';
-import DominanceEngine from '@/components/DominanceEngine';
-import BuildThePlan from '@/components/BuildThePlan';
-import ExecutionMachine from '@/components/ExecutionMachine';
+import StrategicPipeline from '@/components/StrategicPipeline';
 import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
 
 interface AIAudience {
@@ -49,7 +46,7 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'control' | 'publisher' | 'audience' | 'strategy' | 'leads' | 'intel' | 'dominance' | 'strategic' | 'execute';
+type TabView = 'pipeline' | 'control' | 'publisher' | 'audience' | 'strategy' | 'leads';
 
 function PulseRing({ color }: { color: string }) {
   const scale = useRef(new RNAnimated.Value(1)).current;
@@ -83,7 +80,7 @@ export default function AIManagementScreen() {
   const { scheduledPosts, updateScheduledPost, metaConnection, brandProfile, campaigns, advancedMode } = useApp();
   const { t } = useLanguage();
 
-  const [activeTab, setActiveTab] = useState<TabView>('control');
+  const [activeTab, setActiveTab] = useState<TabView>('pipeline');
   const [autopilotOn, setAutopilotOn] = useState(true);
   const [autoPublishEnabled, setAutoPublishEnabled] = useState(false);
   const [controlData, setControlData] = useState<any>(null);
@@ -661,15 +658,12 @@ export default function AIManagementScreen() {
           contentContainerStyle={styles.tabBarContent}
         >
           {([
-            { key: 'control' as TabView, icon: 'shield-checkmark-outline' as const, label: 'Control', color: '#8B5CF6', advanced: false },
+            { key: 'pipeline' as TabView, icon: 'git-merge-outline' as const, label: 'Pipeline', color: '#8B5CF6', advanced: false },
+            { key: 'control' as TabView, icon: 'shield-checkmark-outline' as const, label: 'Control', color: '#00D09C', advanced: false },
             { key: 'publisher' as TabView, icon: 'send-outline' as const, label: 'Publish', color: colors.primary, advanced: false },
             { key: 'audience' as TabView, icon: 'people-outline' as const, label: 'Audience', color: colors.primary, advanced: true },
             { key: 'strategy' as TabView, icon: 'analytics-outline' as const, label: 'Strategy', color: colors.primary, advanced: true },
             { key: 'leads' as TabView, icon: 'magnet-outline' as const, label: 'Leads', color: '#00D09C', advanced: true },
-            { key: 'intel' as TabView, icon: 'telescope-outline' as const, label: 'Intel', color: '#8B5CF6', advanced: true },
-            { key: 'dominance' as TabView, icon: 'flash-outline' as const, label: 'Dominance', color: '#EF4444', advanced: true },
-            { key: 'strategic' as TabView, icon: 'bulb-outline' as const, label: 'Plan', color: '#EC4899', advanced: false },
-            { key: 'execute' as TabView, icon: 'rocket-outline' as const, label: 'Execute', color: '#8B5CF6', advanced: false },
           ] as const)
             .filter(t => !t.advanced || advancedMode)
             .map(t => {
@@ -689,14 +683,11 @@ export default function AIManagementScreen() {
             })}
         </ScrollView>
 
-        {activeTab === 'control' ? renderControlCenter()
+        {activeTab === 'pipeline' ? <StrategicPipeline />
+          : activeTab === 'control' ? renderControlCenter()
           : activeTab === 'publisher' ? renderPublisher()
           : activeTab === 'audience' ? <CampaignGuard>{renderAudienceManager()}</CampaignGuard>
           : activeTab === 'leads' ? <CampaignGuard><LeadControlPanel /></CampaignGuard>
-          : activeTab === 'intel' ? <CampaignGuard><CompetitiveIntelligence /></CampaignGuard>
-          : activeTab === 'dominance' ? <CampaignGuard><DominanceEngine /></CampaignGuard>
-          : activeTab === 'strategic' ? <BuildThePlan />
-          : activeTab === 'execute' ? <CampaignGuard><ExecutionMachine /></CampaignGuard>
           : <CampaignGuard><StrategyHub /></CampaignGuard>}
 
         <View style={{ height: 120 }} />
