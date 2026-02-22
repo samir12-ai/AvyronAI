@@ -1511,13 +1511,18 @@ const s = StyleSheet.create({
   phaseBar: {
     flexDirection: 'row',
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    height: 62,
     borderBottomWidth: 1,
     justifyContent: 'space-between',
+    alignItems: 'center',
+    overflow: 'hidden',
   },
   phaseStep: {
     alignItems: 'center',
-    flex: 1,
+    justifyContent: 'center',
+    width: 52,
+    height: 46,
+    gap: 3,
   },
   phaseCircle: {
     width: 26,
@@ -1525,11 +1530,11 @@ const s = StyleSheet.create({
     borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 4,
   },
   phaseLabel: {
     fontSize: 10,
     fontWeight: '600',
+    lineHeight: 12,
   },
   phaseContent: {
     padding: 16,
