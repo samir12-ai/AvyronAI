@@ -1,0 +1,120 @@
+Proceed with implementation based on the locked Competitor Intelligence contract.
+
+This replaces the old AI estimation-based competitor analysis entirely.
+
+========================
+EXECUTION CHECKLIST
+========================
+
+1) Tool Setup
+- Create a CompetitorIntel module/service.
+- Add Post Tracker with:
+  - public profile fetch (no login)
+  - normalization layer
+  - 24h caching
+  - rate limiting
+
+========================
+
+2) Public Post Collection (Deterministic Only)
+- Fetch Instagram public profile HTML.
+- Parse up to 30 recent posts.
+- Extract:
+  - post id
+  - permalink
+  - media type (REEL / VIDEO / IMAGE / CAROUSEL)
+  - timestamp
+  - caption (if available)
+  - likes/comments/views (if publicly visible)
+
+Fallback ladder:
+- Attempt A: HTML_PARSE
+- Attempt B: HEADLESS_RENDER
+- If both fail → SCRAPE_BLOCKED
+
+Response must include:
+- source_type = PUBLIC_HTML
+- collection_method_used
+- attempts[]
+
+========================
+
+3) Deterministic Metrics (No Estimation)
+Compute ONLY from real timestamps:
+
+- posts_last_7d
+- reels_last_7d
+- avg_posts_per_week_28d (only if sufficient timestamps in 28d)
+- content_mix (ratio from scanned posts)
+
+Rules:
+- Stories removed entirely (not parsed, not displayed).
+- engagement_rate must be null unless:
+    followers + likes/comments parsed AND formula explicitly used.
+- PARTIAL returns partial measured data when possible.
+- All-null measured only when SCRAPE_BLOCKED or timestamps unavailable.
+
+Every numeric field must include:
+- timeframe
+- sampleSize
+- source
+
+========================
+
+4) AI Qualitative Analysis (Evidence Required)
+- Select latest 4–5 reels/videos from scanned posts.
+- Send caption + permalink to AI.
+- Output inferred.insights[] where:
+    - each insight includes evidencePermalinks[]
+    - no free-floating generic text allowed.
+
+AI must NOT generate any numeric metrics.
+
+========================
+
+5) Status Logic + Warning Codes
+
+VALID if:
+- timestamps ≥ 12 posts
+- ≥1 reel/video found
+
+PARTIAL if:
+- <12 posts OR
+- no reels found OR
+- timestamps partially missing OR
+- scrape limited
+
+SCRAPE_BLOCKED when:
+- both HTML_PARSE and HEADLESS_RENDER fail
+
+UI must show warning banner with clear explanation.
+
+========================
+
+6) UI Requirements
+
+- MEASURED = Verified badge
+- INFERRED = AI Insight badge
+- Null fields show “Data unavailable” with reason
+- Remove all references to Stories from UI and prompts
+
+========================
+
+7) Required Test Deliverables
+
+Before completion, provide:
+- 1 VALID response sample
+- 1 PARTIAL (partial data) response sample
+- 1 SCRAPE_BLOCKED response sample
+- Screenshots of UI showing badges + warnings
+
+========================
+
+Definition of Done:
+- No fabricated numbers anywhere.
+- No Stories anywhere.
+- No AI estimation metrics.
+- All insights grounded with evidencePermalinks.
+- Old auto-analysis logic fully removed.
+
+Proceed.

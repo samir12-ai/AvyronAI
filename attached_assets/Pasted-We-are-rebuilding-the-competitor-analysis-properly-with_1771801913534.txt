@@ -1,0 +1,114 @@
+We are rebuilding the competitor analysis properly, without API access, and without fabricated numbers.
+
+You are NOT allowed to generate estimated metrics.
+Everything numeric must come from publicly visible data only.
+
+Here is exactly what you need to build:
+
+-----------------------------------
+STEP 1 — Public Data Collection
+-----------------------------------
+
+1) Fetch the public Instagram profile page HTML (no login).
+2) Extract visible post metadata:
+   - post ID
+   - permalink
+   - media type (reel/video/image/carousel)
+   - timestamp
+   - caption text (if available)
+3) Scan up to the latest 30 posts max.
+
+Do NOT attempt to detect Stories.
+Stories must not appear anywhere in the output.
+
+-----------------------------------
+STEP 2 — Deterministic Counts
+-----------------------------------
+
+From the extracted posts:
+
+A) Count how many posts were published in the last 7 days.
+B) Count how many of those were reels/videos.
+C) Optionally compute last 28 days average per week.
+
+These must be real counts based on timestamps.
+No extrapolation.
+No AI guessing.
+
+If timestamps are missing or parsing fails, return a warning.
+
+-----------------------------------
+STEP 3 — Content Mix
+-----------------------------------
+
+From the scanned posts (max 30):
+
+- Calculate reel_ratio = reels / total_scanned
+- Calculate static_ratio = (images + carousels) / total_scanned
+
+Only from scanned data.
+Include sample size used.
+
+-----------------------------------
+STEP 4 — Engagement
+-----------------------------------
+
+Only use publicly visible like/comment counts if they are actually available.
+
+If followers count cannot be reliably parsed:
+- engagement_rate must be null.
+
+Do NOT guess engagement %.
+
+-----------------------------------
+STEP 5 — Video Sample for AI Analysis
+-----------------------------------
+
+Select the latest 4–5 reels/videos from the scanned posts.
+
+For each one, send to the AI:
+- caption
+- timestamp
+- permalink
+
+The AI may analyze:
+- hook style
+- CTA patterns
+- tone
+- proof signals
+- funnel clarity
+
+BUT:
+The AI must NOT invent numbers.
+It must only interpret the provided sample.
+
+-----------------------------------
+STEP 6 — Output Rules
+-----------------------------------
+
+The output must be divided into two clear sections:
+
+1) MEASURED (deterministic, counted from real posts)
+2) INFERRED (AI insights based only on the 4–5 sampled videos)
+
+Each numeric metric must clearly state:
+- timeframe
+- number of posts scanned
+- source = public_html
+
+If something is unavailable:
+- return null
+- add a warning explaining why
+
+-----------------------------------
+ABSOLUTE RULES
+-----------------------------------
+
+- No Stories metrics.
+- No fabricated engagement rates.
+- No estimated posts/week.
+- No phrases like "typically" or "based on market knowledge".
+- No AI hallucinated numbers.
+
+If data cannot be measured from the public profile,
+it must not appear as a number in the report.
