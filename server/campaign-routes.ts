@@ -251,7 +251,7 @@ export function registerCampaignRoutes(app: Express) {
         messagingConversations = 0,
       } = req.body;
 
-      const demoCampaignId = `DEMO_SWA_${Date.now()}`;
+      const demoCampaignId = "demo_swa_media_001";
 
       const existing = await db.select().from(campaignSelections)
         .where(eq(campaignSelections.accountId, accountId)).limit(1);
