@@ -27,6 +27,9 @@ import { getApiUrl } from '@/lib/query-client';
 import StrategyHub from '@/components/StrategyHub';
 import LeadControlPanel from '@/components/LeadControlPanel';
 import StrategicPipeline from '@/components/StrategicPipeline';
+import BuildThePlan from '@/components/BuildThePlan';
+import CompetitiveIntelligence from '@/components/CompetitiveIntelligence';
+import DominanceEngine from '@/components/DominanceEngine';
 import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
 
 interface AIAudience {
@@ -46,7 +49,8 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'pipeline' | 'control' | 'publisher' | 'audience' | 'strategy' | 'leads';
+type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'control' | 'publisher' | 'audience' | 'strategy' | 'leads';
+type IntelSubTab = 'analysis' | 'dominance';
 
 function PulseRing({ color }: { color: string }) {
   const scale = useRef(new RNAnimated.Value(1)).current;
@@ -80,7 +84,8 @@ export default function AIManagementScreen() {
   const { scheduledPosts, updateScheduledPost, metaConnection, brandProfile, campaigns, advancedMode } = useApp();
   const { t } = useLanguage();
 
-  const [activeTab, setActiveTab] = useState<TabView>('pipeline');
+  const [activeTab, setActiveTab] = useState<TabView>('buildplan');
+  const [intelSubTab, setIntelSubTab] = useState<IntelSubTab>('analysis');
   const [autopilotOn, setAutopilotOn] = useState(true);
   const [autoPublishEnabled, setAutoPublishEnabled] = useState(false);
   const [controlData, setControlData] = useState<any>(null);
@@ -273,6 +278,34 @@ export default function AIManagementScreen() {
     const pct = totalBudget > 0 ? Math.round((totalSpent / totalBudget) * 100) : 0;
     return { total: totalBudget, spent: totalSpent, pct };
   }, [campaigns]);
+
+  const renderIntelligence = () => (
+    <View style={styles.tabContent}>
+      <View style={[styles.intelSubTabs, { backgroundColor: isDark ? '#0F1419' : '#F5F7FA', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+        <Pressable
+          style={[styles.intelSubTab, intelSubTab === 'analysis' && { backgroundColor: '#3B82F6' + '18' }]}
+          onPress={() => {
+            Haptics.selectionAsync();
+            setIntelSubTab('analysis');
+          }}
+        >
+          <Ionicons name="analytics-outline" size={16} color={intelSubTab === 'analysis' ? '#3B82F6' : colors.textMuted} />
+          <Text style={[styles.intelSubTabText, { color: intelSubTab === 'analysis' ? '#3B82F6' : colors.textMuted }]}>Analysis</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.intelSubTab, intelSubTab === 'dominance' && { backgroundColor: '#EF4444' + '18' }]}
+          onPress={() => {
+            Haptics.selectionAsync();
+            setIntelSubTab('dominance');
+          }}
+        >
+          <Ionicons name="flash-outline" size={16} color={intelSubTab === 'dominance' ? '#EF4444' : colors.textMuted} />
+          <Text style={[styles.intelSubTabText, { color: intelSubTab === 'dominance' ? '#EF4444' : colors.textMuted }]}>Dominance</Text>
+        </Pressable>
+      </View>
+      {intelSubTab === 'analysis' ? <CompetitiveIntelligence /> : <DominanceEngine />}
+    </View>
+  );
 
   const renderControlCenter = () => (
     <View style={styles.tabContent}>
@@ -658,7 +691,9 @@ export default function AIManagementScreen() {
           contentContainerStyle={styles.tabBarContent}
         >
           {([
+            { key: 'buildplan' as TabView, icon: 'construct-outline' as const, label: 'Build Plan', color: '#EC4899', advanced: false },
             { key: 'pipeline' as TabView, icon: 'git-merge-outline' as const, label: 'Pipeline', color: '#8B5CF6', advanced: false },
+            { key: 'intelligence' as TabView, icon: 'telescope-outline' as const, label: 'Intelligence', color: '#3B82F6', advanced: false },
             { key: 'control' as TabView, icon: 'shield-checkmark-outline' as const, label: 'Control', color: '#00D09C', advanced: false },
             { key: 'publisher' as TabView, icon: 'send-outline' as const, label: 'Publish', color: colors.primary, advanced: false },
             { key: 'audience' as TabView, icon: 'people-outline' as const, label: 'Audience', color: colors.primary, advanced: true },
@@ -683,7 +718,9 @@ export default function AIManagementScreen() {
             })}
         </ScrollView>
 
-        {activeTab === 'pipeline' ? <StrategicPipeline />
+        {activeTab === 'buildplan' ? <BuildThePlan />
+          : activeTab === 'pipeline' ? <StrategicPipeline />
+          : activeTab === 'intelligence' ? renderIntelligence()
           : activeTab === 'control' ? renderControlCenter()
           : activeTab === 'publisher' ? renderPublisher()
           : activeTab === 'audience' ? <CampaignGuard>{renderAudienceManager()}</CampaignGuard>
@@ -1193,4 +1230,24 @@ const styles = StyleSheet.create({
   controlActionWhy: { fontSize: 12, fontFamily: 'Inter_400Regular', marginLeft: 32, lineHeight: 17 },
   emergencyBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 12, borderWidth: 1.5, borderColor: '#EF4444', paddingVertical: 14 },
   emergencyBtnText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: '#EF4444' },
+  intelSubTabs: {
+    flexDirection: 'row',
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 4,
+    marginBottom: 12,
+  },
+  intelSubTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  intelSubTabText: {
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
+  },
 });

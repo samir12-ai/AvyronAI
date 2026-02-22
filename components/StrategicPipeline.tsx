@@ -15,9 +15,6 @@ import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { getApiUrl } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
-import BuildThePlan from '@/components/BuildThePlan';
-import CompetitiveIntelligence from '@/components/CompetitiveIntelligence';
-import DominanceEngine from '@/components/DominanceEngine';
 
 interface PlanData {
   id: string;
@@ -69,13 +66,10 @@ interface CalendarEntry {
 }
 
 type StepStatus = 'completed' | 'in_progress' | 'ready' | 'locked';
-type IntelTab = 'analysis' | 'dominance';
 
 const STEPS = [
-  { key: 'build', title: 'BUILD STRATEGY', subtitle: 'Create your strategic blueprint', icon: 'construct-outline' as const, gradient: ['#EC4899', '#8B5CF6'] as [string, string] },
   { key: 'approval', title: 'APPROVAL', subtitle: 'Review and approve execution plans', icon: 'checkmark-done-circle-outline' as const, gradient: ['#34D399', '#10B981'] as [string, string] },
   { key: 'execution', title: 'EXECUTION PIPELINE', subtitle: 'Calendar, creatives, and publishing', icon: 'rocket-outline' as const, gradient: ['#A78BFA', '#7C3AED'] as [string, string] },
-  { key: 'intel', title: 'COMPETITOR INTELLIGENCE', subtitle: 'Analysis and dominance strategy', icon: 'telescope-outline' as const, gradient: ['#3B82F6', '#1D4ED8'] as [string, string] },
 ];
 
 const EXECUTION_STAGES = ['Approved', 'Calendar', 'Creatives', 'Review', 'Scheduled', 'Published'];
@@ -114,7 +108,6 @@ export default function StrategicPipeline() {
   const [progress, setProgress] = useState<ProgressData | null>(null);
   const [calendarEntries, setCalendarEntries] = useState<CalendarEntry[]>([]);
   const [showCalendarEntries, setShowCalendarEntries] = useState(false);
-  const [intelTab, setIntelTab] = useState<IntelTab>('analysis');
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -163,15 +156,11 @@ export default function StrategicPipeline() {
   const getStepStatus = (index: number): StepStatus => {
     switch (index) {
       case 0:
-        return hasPlans ? 'completed' : 'ready';
-      case 1:
         if (!hasPlans) return 'locked';
         return hasApprovedOrBeyond ? 'completed' : 'in_progress';
-      case 2:
+      case 1:
         if (!hasApprovedOrBeyond) return 'locked';
         return (progress?.progressPercent ?? 0) >= 100 ? 'completed' : 'in_progress';
-      case 3:
-        return 'ready';
       default:
         return 'locked';
     }
@@ -645,40 +634,10 @@ export default function StrategicPipeline() {
     );
   };
 
-  const renderIntelContent = () => (
-    <View>
-      <View style={[s.intelTabs, { backgroundColor: isDark ? '#0F1419' : '#F5F7FA', borderColor: colors.cardBorder }]}>
-        <Pressable
-          style={[s.intelTab, intelTab === 'analysis' && { backgroundColor: '#3B82F6' + '18' }]}
-          onPress={() => {
-            Platform.OS !== 'web' && Haptics.selectionAsync();
-            setIntelTab('analysis');
-          }}
-        >
-          <Ionicons name="analytics-outline" size={16} color={intelTab === 'analysis' ? '#3B82F6' : colors.textMuted} />
-          <Text style={[s.intelTabText, { color: intelTab === 'analysis' ? '#3B82F6' : colors.textMuted }]}>Analysis</Text>
-        </Pressable>
-        <Pressable
-          style={[s.intelTab, intelTab === 'dominance' && { backgroundColor: '#EF4444' + '18' }]}
-          onPress={() => {
-            Platform.OS !== 'web' && Haptics.selectionAsync();
-            setIntelTab('dominance');
-          }}
-        >
-          <Ionicons name="flash-outline" size={16} color={intelTab === 'dominance' ? '#EF4444' : colors.textMuted} />
-          <Text style={[s.intelTabText, { color: intelTab === 'dominance' ? '#EF4444' : colors.textMuted }]}>Dominance</Text>
-        </Pressable>
-      </View>
-      {intelTab === 'analysis' ? <CompetitiveIntelligence /> : <DominanceEngine />}
-    </View>
-  );
-
   const renderStepContent = (index: number) => {
     switch (index) {
-      case 0: return <BuildThePlan />;
-      case 1: return renderApprovalContent();
-      case 2: return renderExecutionContent();
-      case 3: return renderIntelContent();
+      case 0: return renderApprovalContent();
+      case 1: return renderExecutionContent();
       default: return null;
     }
   };
@@ -1143,25 +1102,5 @@ const s = StyleSheet.create({
   calEntryMeta: {
     fontSize: 11,
     marginTop: 4,
-  },
-  intelTabs: {
-    flexDirection: 'row',
-    borderRadius: 10,
-    borderWidth: 1,
-    padding: 4,
-    marginBottom: 12,
-  },
-  intelTab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  intelTabText: {
-    fontSize: 13,
-    fontWeight: '700',
   },
 });
