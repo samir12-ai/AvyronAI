@@ -110,6 +110,9 @@ export default function CompetitiveIntelligence() {
   const [applyReason, setApplyReason] = useState('');
   const [expandedRec, setExpandedRec] = useState<string | null>(null);
   const [expandedCompetitor, setExpandedCompetitor] = useState<string | null>(null);
+  const [addStep, setAddStep] = useState<'input' | 'review'>('input');
+  const [viralInsights, setViralInsights] = useState('');
+  const [showManualFields, setShowManualFields] = useState(false);
 
   const [newComp, setNewComp] = useState({
     name: '', profileLink: '', businessType: '', primaryObjective: '',
@@ -162,10 +165,45 @@ export default function CompetitiveIntelligence() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ci-competitors'] });
       setShowAddCompetitor(false);
+      setAddStep('input');
+      setViralInsights('');
+      setShowManualFields(false);
       setNewComp({ name: '', profileLink: '', businessType: '', primaryObjective: '', platform: 'instagram', postingFrequency: '', contentTypeRatio: '', engagementRatio: '', ctaPatterns: '', discountFrequency: '', hookStyles: '', messagingTone: '', socialProofPresence: '' });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
     onError: (err: any) => Alert.alert('Error', err.message),
+  });
+
+  const autoAnalyzeMutation = useMutation({
+    mutationFn: async ({ name, profileLink }: { name: string; profileLink: string }) => {
+      const res = await fetch(new URL('/api/ci/competitors/auto-analyze', baseUrl).toString(), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, profileLink }),
+      });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      const a = data.analysis;
+      setNewComp(p => ({
+        ...p,
+        businessType: a.businessType || p.businessType,
+        primaryObjective: a.primaryObjective || p.primaryObjective,
+        platform: a.platform || p.platform,
+        postingFrequency: a.postingFrequency || p.postingFrequency,
+        contentTypeRatio: a.contentTypeRatio || p.contentTypeRatio,
+        engagementRatio: a.engagementRatio || p.engagementRatio,
+        ctaPatterns: a.ctaPatterns || p.ctaPatterns,
+        discountFrequency: a.discountFrequency || p.discountFrequency,
+        hookStyles: a.hookStyles || p.hookStyles,
+        messagingTone: a.messagingTone || p.messagingTone,
+        socialProofPresence: a.socialProofPresence || p.socialProofPresence,
+      }));
+      setViralInsights(a.viralVideoInsights || '');
+      setAddStep('review');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: (err: any) => Alert.alert('Analysis Failed', err.message + '\n\nYou can still add this competitor manually.'),
   });
 
   const analyzeMutation = useMutation({
@@ -719,147 +757,315 @@ export default function CompetitiveIntelligence() {
       {activeView === 'recommendations' && renderRecommendations()}
       {activeView === 'timeline' && renderTimeline()}
 
-      <Modal visible={showAddCompetitor} animationType="slide" transparent onRequestClose={() => setShowAddCompetitor(false)}>
+      <Modal visible={showAddCompetitor} animationType="slide" transparent onRequestClose={() => { setShowAddCompetitor(false); setAddStep('input'); setShowManualFields(false); }}>
         <View style={s.modalOverlay}>
           <View style={[s.modalContent, { backgroundColor: isDark ? '#0F1419' : '#fff' }]}>
             <View style={s.modalHeader}>
-              <Text style={[s.modalTitle, { color: colors.text }]}>Add Competitor</Text>
-              <Pressable onPress={() => setShowAddCompetitor(false)}>
+              <Text style={[s.modalTitle, { color: colors.text }]}>
+                {addStep === 'input' ? 'Add Competitor' : 'Review AI Analysis'}
+              </Text>
+              <Pressable onPress={() => { setShowAddCompetitor(false); setAddStep('input'); setShowManualFields(false); }}>
                 <Ionicons name="close" size={24} color={colors.textMuted} />
               </Pressable>
             </View>
 
             <ScrollView style={s.modalScroll} showsVerticalScrollIndicator={false}>
-              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Name *</Text>
-              <TextInput
-                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                value={newComp.name}
-                onChangeText={v => setNewComp(p => ({ ...p, name: v }))}
-                placeholder="Competitor name"
-                placeholderTextColor={colors.textMuted}
-              />
+              {addStep === 'input' ? (
+                <>
+                  <View style={[s.aiHintCard, { backgroundColor: '#8B5CF6' + '10', borderColor: '#8B5CF6' + '30' }]}>
+                    <Ionicons name="sparkles" size={18} color="#8B5CF6" />
+                    <Text style={[s.aiHintText, { color: colors.textSecondary }]}>
+                      Just enter the company name and profile URL. AI will auto-analyze their content strategy from their top viral posts.
+                    </Text>
+                  </View>
 
-              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Profile Link *</Text>
-              <TextInput
-                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                value={newComp.profileLink}
-                onChangeText={v => setNewComp(p => ({ ...p, profileLink: v }))}
-                placeholder="https://instagram.com/..."
-                placeholderTextColor={colors.textMuted}
-              />
+                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Company Name *</Text>
+                  <TextInput
+                    style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
+                    value={newComp.name}
+                    onChangeText={v => setNewComp(p => ({ ...p, name: v }))}
+                    placeholder="e.g. Socialeyez"
+                    placeholderTextColor={colors.textMuted}
+                  />
 
-              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Business Type *</Text>
-              <TextInput
-                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                value={newComp.businessType}
-                onChangeText={v => setNewComp(p => ({ ...p, businessType: v }))}
-                placeholder="E-commerce, Service, Local..."
-                placeholderTextColor={colors.textMuted}
-              />
+                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Profile URL *</Text>
+                  <TextInput
+                    style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
+                    value={newComp.profileLink}
+                    onChangeText={v => setNewComp(p => ({ ...p, profileLink: v }))}
+                    placeholder="https://instagram.com/socialeyez"
+                    placeholderTextColor={colors.textMuted}
+                    autoCapitalize="none"
+                    keyboardType="url"
+                  />
 
-              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Primary Objective *</Text>
-              <TextInput
-                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                value={newComp.primaryObjective}
-                onChangeText={v => setNewComp(p => ({ ...p, primaryObjective: v }))}
-                placeholder="Sales, Leads, Brand awareness..."
-                placeholderTextColor={colors.textMuted}
-              />
+                  <Pressable
+                    onPress={() => {
+                      if (!newComp.name || !newComp.profileLink) {
+                        Alert.alert('Required', 'Enter company name and profile URL');
+                        return;
+                      }
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                      autoAnalyzeMutation.mutate({ name: newComp.name, profileLink: newComp.profileLink });
+                    }}
+                    style={[s.autoAnalyzeBtn, { opacity: autoAnalyzeMutation.isPending ? 0.7 : 1 }]}
+                    disabled={autoAnalyzeMutation.isPending}
+                  >
+                    {autoAnalyzeMutation.isPending ? (
+                      <>
+                        <ActivityIndicator size="small" color="#fff" />
+                        <Text style={s.autoAnalyzeBtnText}>Analyzing viral content...</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Ionicons name="sparkles" size={18} color="#fff" />
+                        <Text style={s.autoAnalyzeBtnText}>Auto-Analyze with AI</Text>
+                      </>
+                    )}
+                  </Pressable>
 
-              <View style={[s.sectionDivider, { borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-                <Text style={[s.sectionDividerText, { color: '#8B5CF6' }]}>Evidence Fields</Text>
-              </View>
+                  {autoAnalyzeMutation.isPending && (
+                    <View style={s.analyzingSteps}>
+                      <Text style={[s.analyzingStep, { color: colors.textMuted }]}>
+                        <Ionicons name="checkmark-circle" size={13} color="#8B5CF6" /> Scanning profile...
+                      </Text>
+                      <Text style={[s.analyzingStep, { color: colors.textMuted }]}>
+                        <Ionicons name="videocam" size={13} color="#8B5CF6" /> Analyzing 3-5 viral posts...
+                      </Text>
+                      <Text style={[s.analyzingStep, { color: colors.textMuted }]}>
+                        <Ionicons name="analytics" size={13} color="#8B5CF6" /> Extracting patterns...
+                      </Text>
+                    </View>
+                  )}
 
-              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Posts/Week</Text>
-              <TextInput
-                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                value={newComp.postingFrequency}
-                onChangeText={v => setNewComp(p => ({ ...p, postingFrequency: v }))}
-                placeholder="e.g. 5"
-                keyboardType="numeric"
-                placeholderTextColor={colors.textMuted}
-              />
+                  <Pressable
+                    onPress={() => setShowManualFields(!showManualFields)}
+                    style={s.manualToggle}
+                  >
+                    <Ionicons name={showManualFields ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} />
+                    <Text style={[s.manualToggleText, { color: colors.textMuted }]}>
+                      {showManualFields ? 'Hide manual entry' : 'Or fill in manually'}
+                    </Text>
+                  </Pressable>
 
-              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Content Type Ratio</Text>
-              <TextInput
-                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                value={newComp.contentTypeRatio}
-                onChangeText={v => setNewComp(p => ({ ...p, contentTypeRatio: v }))}
-                placeholder='e.g. {"reels":60,"static":30,"stories":10}'
-                placeholderTextColor={colors.textMuted}
-              />
+                  {showManualFields && (
+                    <>
+                      <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Business Type *</Text>
+                      <TextInput
+                        style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
+                        value={newComp.businessType}
+                        onChangeText={v => setNewComp(p => ({ ...p, businessType: v }))}
+                        placeholder="E-commerce, Service, Local..."
+                        placeholderTextColor={colors.textMuted}
+                      />
 
-              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Engagement Ratio (%)</Text>
-              <TextInput
-                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                value={newComp.engagementRatio}
-                onChangeText={v => setNewComp(p => ({ ...p, engagementRatio: v }))}
-                placeholder="e.g. 3.5"
-                keyboardType="decimal-pad"
-                placeholderTextColor={colors.textMuted}
-              />
+                      <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Primary Objective *</Text>
+                      <TextInput
+                        style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
+                        value={newComp.primaryObjective}
+                        onChangeText={v => setNewComp(p => ({ ...p, primaryObjective: v }))}
+                        placeholder="Sales, Leads, Brand awareness..."
+                        placeholderTextColor={colors.textMuted}
+                      />
 
-              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>CTA Patterns</Text>
-              <TextInput
-                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                value={newComp.ctaPatterns}
-                onChangeText={v => setNewComp(p => ({ ...p, ctaPatterns: v }))}
-                placeholder="Book Now, Shop Now, DM to Order..."
-                placeholderTextColor={colors.textMuted}
-              />
+                      <View style={[s.sectionDivider, { borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                        <Text style={[s.sectionDividerText, { color: '#8B5CF6' }]}>Evidence Fields</Text>
+                      </View>
 
-              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Discount Frequency</Text>
-              <TextInput
-                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                value={newComp.discountFrequency}
-                onChangeText={v => setNewComp(p => ({ ...p, discountFrequency: v }))}
-                placeholder="Weekly deals, monthly sales..."
-                placeholderTextColor={colors.textMuted}
-              />
+                      <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Posts/Week</Text>
+                      <TextInput
+                        style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
+                        value={newComp.postingFrequency}
+                        onChangeText={v => setNewComp(p => ({ ...p, postingFrequency: v }))}
+                        placeholder="e.g. 5"
+                        keyboardType="numeric"
+                        placeholderTextColor={colors.textMuted}
+                      />
 
-              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Hook Styles</Text>
-              <TextInput
-                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                value={newComp.hookStyles}
-                onChangeText={v => setNewComp(p => ({ ...p, hookStyles: v }))}
-                placeholder="Behind-the-scenes, Case studies..."
-                placeholderTextColor={colors.textMuted}
-              />
+                      <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Engagement Ratio (%)</Text>
+                      <TextInput
+                        style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
+                        value={newComp.engagementRatio}
+                        onChangeText={v => setNewComp(p => ({ ...p, engagementRatio: v }))}
+                        placeholder="e.g. 3.5"
+                        keyboardType="decimal-pad"
+                        placeholderTextColor={colors.textMuted}
+                      />
 
-              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Messaging Tone</Text>
-              <TextInput
-                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                value={newComp.messagingTone}
-                onChangeText={v => setNewComp(p => ({ ...p, messagingTone: v }))}
-                placeholder="Professional, casual, aspirational..."
-                placeholderTextColor={colors.textMuted}
-              />
+                      <Text style={[s.fieldLabel, { color: colors.textMuted }]}>CTA Patterns</Text>
+                      <TextInput
+                        style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
+                        value={newComp.ctaPatterns}
+                        onChangeText={v => setNewComp(p => ({ ...p, ctaPatterns: v }))}
+                        placeholder="Book Now, Shop Now, DM to Order..."
+                        placeholderTextColor={colors.textMuted}
+                      />
 
-              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Social Proof</Text>
-              <TextInput
-                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                value={newComp.socialProofPresence}
-                onChangeText={v => setNewComp(p => ({ ...p, socialProofPresence: v }))}
-                placeholder="Reviews, testimonials, case studies..."
-                placeholderTextColor={colors.textMuted}
-              />
+                      <Pressable
+                        onPress={() => {
+                          if (!newComp.name || !newComp.profileLink || !newComp.businessType || !newComp.primaryObjective) {
+                            Alert.alert('Required Fields', 'Name, Profile Link, Business Type, and Primary Objective are required');
+                            return;
+                          }
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                          addCompetitorMutation.mutate(newComp);
+                        }}
+                        style={[s.submitBtn, { opacity: addCompetitorMutation.isPending ? 0.6 : 1 }]}
+                        disabled={addCompetitorMutation.isPending}
+                      >
+                        {addCompetitorMutation.isPending ? <ActivityIndicator size="small" color="#fff" /> :
+                          <Text style={s.submitBtnText}>Add Manually</Text>
+                        }
+                      </Pressable>
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  <View style={[s.aiResultHeader, { backgroundColor: '#10B981' + '12', borderColor: '#10B981' + '30' }]}>
+                    <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[s.aiResultTitle, { color: colors.text }]}>AI Analysis Complete</Text>
+                      <Text style={[s.aiResultSub, { color: colors.textMuted }]}>
+                        Review and edit the results below, then save.
+                      </Text>
+                    </View>
+                  </View>
 
-              <Pressable
-                onPress={() => {
-                  if (!newComp.name || !newComp.profileLink || !newComp.businessType || !newComp.primaryObjective) {
-                    Alert.alert('Required Fields', 'Name, Profile Link, Business Type, and Primary Objective are required');
-                    return;
-                  }
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                  addCompetitorMutation.mutate(newComp);
-                }}
-                style={[s.submitBtn, { opacity: addCompetitorMutation.isPending ? 0.6 : 1 }]}
-                disabled={addCompetitorMutation.isPending}
-              >
-                {addCompetitorMutation.isPending ? <ActivityIndicator size="small" color="#fff" /> :
-                  <Text style={s.submitBtnText}>Add Competitor</Text>
-                }
-              </Pressable>
+                  {viralInsights ? (
+                    <View style={[s.insightsCard, { backgroundColor: '#8B5CF6' + '08', borderColor: '#8B5CF6' + '25' }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                        <Ionicons name="videocam" size={14} color="#8B5CF6" />
+                        <Text style={[s.insightsTitle, { color: '#8B5CF6' }]}>Viral Content Insights</Text>
+                      </View>
+                      <Text style={[s.insightsBody, { color: colors.textSecondary }]}>{viralInsights}</Text>
+                    </View>
+                  ) : null}
+
+                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Company Name</Text>
+                  <TextInput
+                    style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
+                    value={newComp.name}
+                    onChangeText={v => setNewComp(p => ({ ...p, name: v }))}
+                    placeholderTextColor={colors.textMuted}
+                  />
+
+                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Business Type</Text>
+                  <TextInput
+                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
+                    value={newComp.businessType}
+                    onChangeText={v => setNewComp(p => ({ ...p, businessType: v }))}
+                    placeholderTextColor={colors.textMuted}
+                  />
+
+                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Primary Objective</Text>
+                  <TextInput
+                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
+                    value={newComp.primaryObjective}
+                    onChangeText={v => setNewComp(p => ({ ...p, primaryObjective: v }))}
+                    placeholderTextColor={colors.textMuted}
+                  />
+
+                  <View style={[s.sectionDivider, { borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                    <Text style={[s.sectionDividerText, { color: '#8B5CF6' }]}>AI-Extracted Evidence</Text>
+                  </View>
+
+                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Posts/Week</Text>
+                  <TextInput
+                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
+                    value={newComp.postingFrequency}
+                    onChangeText={v => setNewComp(p => ({ ...p, postingFrequency: v }))}
+                    keyboardType="numeric"
+                    placeholderTextColor={colors.textMuted}
+                  />
+
+                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Content Type Ratio</Text>
+                  <TextInput
+                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
+                    value={newComp.contentTypeRatio}
+                    onChangeText={v => setNewComp(p => ({ ...p, contentTypeRatio: v }))}
+                    placeholderTextColor={colors.textMuted}
+                  />
+
+                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Engagement Ratio (%)</Text>
+                  <TextInput
+                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
+                    value={newComp.engagementRatio}
+                    onChangeText={v => setNewComp(p => ({ ...p, engagementRatio: v }))}
+                    keyboardType="decimal-pad"
+                    placeholderTextColor={colors.textMuted}
+                  />
+
+                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>CTA Patterns</Text>
+                  <TextInput
+                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
+                    value={newComp.ctaPatterns}
+                    onChangeText={v => setNewComp(p => ({ ...p, ctaPatterns: v }))}
+                    placeholderTextColor={colors.textMuted}
+                  />
+
+                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Discount Frequency</Text>
+                  <TextInput
+                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
+                    value={newComp.discountFrequency}
+                    onChangeText={v => setNewComp(p => ({ ...p, discountFrequency: v }))}
+                    placeholderTextColor={colors.textMuted}
+                  />
+
+                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Hook Styles</Text>
+                  <TextInput
+                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
+                    value={newComp.hookStyles}
+                    onChangeText={v => setNewComp(p => ({ ...p, hookStyles: v }))}
+                    placeholderTextColor={colors.textMuted}
+                  />
+
+                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Messaging Tone</Text>
+                  <TextInput
+                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
+                    value={newComp.messagingTone}
+                    onChangeText={v => setNewComp(p => ({ ...p, messagingTone: v }))}
+                    placeholderTextColor={colors.textMuted}
+                  />
+
+                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Social Proof</Text>
+                  <TextInput
+                    style={[s.input, s.aiFilledInput, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: '#8B5CF6' + '40' }]}
+                    value={newComp.socialProofPresence}
+                    onChangeText={v => setNewComp(p => ({ ...p, socialProofPresence: v }))}
+                    placeholderTextColor={colors.textMuted}
+                  />
+
+                  <View style={s.reviewBtns}>
+                    <Pressable
+                      onPress={() => { setAddStep('input'); setShowManualFields(false); }}
+                      style={[s.backBtn, { borderColor: isDark ? '#333' : '#ddd' }]}
+                    >
+                      <Ionicons name="arrow-back" size={16} color={colors.textMuted} />
+                      <Text style={[s.backBtnText, { color: colors.textMuted }]}>Back</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => {
+                        if (!newComp.name || !newComp.profileLink || !newComp.businessType || !newComp.primaryObjective) {
+                          Alert.alert('Required Fields', 'Name, Profile Link, Business Type, and Primary Objective are required');
+                          return;
+                        }
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                        addCompetitorMutation.mutate(newComp);
+                      }}
+                      style={[s.saveBtn, { opacity: addCompetitorMutation.isPending ? 0.6 : 1 }]}
+                      disabled={addCompetitorMutation.isPending}
+                    >
+                      {addCompetitorMutation.isPending ? <ActivityIndicator size="small" color="#fff" /> : (
+                        <>
+                          <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                          <Text style={s.saveBtnText}>Save Competitor</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  </View>
+                </>
+              )}
               <View style={{ height: 40 }} />
             </ScrollView>
           </View>
@@ -1030,6 +1236,26 @@ const s = StyleSheet.create({
   sectionDividerText: { fontSize: 12, fontWeight: '700', letterSpacing: 0.5 },
   submitBtn: { backgroundColor: '#8B5CF6', alignItems: 'center', paddingVertical: 14, borderRadius: 10, marginTop: 16 },
   submitBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  aiHintCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 12 },
+  aiHintText: { fontSize: 13, lineHeight: 19, flex: 1 },
+  autoAnalyzeBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#8B5CF6', paddingVertical: 14, borderRadius: 10, marginTop: 16 },
+  autoAnalyzeBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  analyzingSteps: { gap: 6, marginTop: 14, paddingLeft: 4 },
+  analyzingStep: { fontSize: 12, lineHeight: 18 },
+  manualToggle: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center', marginTop: 20, paddingVertical: 8 },
+  manualToggleText: { fontSize: 13 },
+  aiResultHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 12 },
+  aiResultTitle: { fontSize: 14, fontWeight: '700' },
+  aiResultSub: { fontSize: 12, marginTop: 2 },
+  insightsCard: { padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 12 },
+  insightsTitle: { fontSize: 12, fontWeight: '700', letterSpacing: 0.3 },
+  insightsBody: { fontSize: 12, lineHeight: 18 },
+  aiFilledInput: { borderLeftWidth: 3, borderLeftColor: '#8B5CF6' },
+  reviewBtns: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  backBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 8, borderWidth: 1 },
+  backBtnText: { fontSize: 14, fontWeight: '600' },
+  saveBtn: { flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#10B981', paddingVertical: 12, borderRadius: 8 },
+  saveBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   confirmModal: { margin: 20, borderRadius: 16, padding: 24, alignItems: 'center' },
   confirmIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#8B5CF6' + '15', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   confirmTitle: { fontSize: 18, fontWeight: '700', marginBottom: 8 },
