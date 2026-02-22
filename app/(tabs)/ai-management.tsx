@@ -312,12 +312,12 @@ export default function AIManagementScreen() {
       <View style={[styles.controlStatusCard, { backgroundColor: isDark ? '#0F1419' : '#F4F7F5', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
         <View style={styles.controlStatusRow}>
           <View style={styles.controlStatusLeft}>
-            <View style={[styles.controlShield, { backgroundColor: autopilotOn ? '#00D09C' + '15' : '#FF6B6B' + '15' }]}>
-              <Ionicons name="shield-checkmark" size={22} color={autopilotOn ? '#00D09C' : '#FF6B6B'} />
+            <View style={[styles.controlShield, { backgroundColor: autopilotOn ? '#8B5CF6' + '15' : '#FF6B6B' + '15' }]}>
+              <Ionicons name="shield-checkmark" size={22} color={autopilotOn ? '#8B5CF6' : '#FF6B6B'} />
             </View>
             <View>
               <Text style={[styles.controlModeLabel, { color: colors.textMuted }]}>MODE</Text>
-              <Text style={[styles.controlModeValue, { color: autopilotOn ? '#00D09C' : '#FF6B6B' }]}>
+              <Text style={[styles.controlModeValue, { color: autopilotOn ? '#8B5CF6' : '#FF6B6B' }]}>
                 {autopilotOn ? 'Autopilot ON' : 'Autopilot OFF'}
               </Text>
             </View>
@@ -325,8 +325,8 @@ export default function AIManagementScreen() {
           <Switch
             value={autopilotOn}
             onValueChange={(v) => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); setAutopilotOn(v); }}
-            trackColor={{ false: '#FF6B6B' + '40', true: '#00D09C' + '60' }}
-            thumbColor={autopilotOn ? '#00D09C' : '#FF6B6B'}
+            trackColor={{ false: '#FF6B6B' + '40', true: '#8B5CF6' + '60' }}
+            thumbColor={autopilotOn ? '#8B5CF6' : '#FF6B6B'}
           />
         </View>
       </View>
@@ -378,8 +378,8 @@ export default function AIManagementScreen() {
                 <Text style={[styles.controlActionNumText, { color: '#A78BFA' }]}>{i + 1}</Text>
               </View>
               <Text style={[styles.controlActionText, { color: colors.text }]}>{a.action}</Text>
-              <View style={[styles.controlRiskBadge, { backgroundColor: a.risk === 'Low' ? '#00D09C' + '12' : '#FFB347' + '12' }]}>
-                <Text style={[styles.controlRiskText, { color: a.risk === 'Low' ? '#00D09C' : '#FFB347' }]}>{a.risk}</Text>
+              <View style={[styles.controlRiskBadge, { backgroundColor: a.risk === 'Low' ? '#8B5CF6' + '12' : '#FFB347' + '12' }]}>
+                <Text style={[styles.controlRiskText, { color: a.risk === 'Low' ? '#8B5CF6' : '#FFB347' }]}>{a.risk}</Text>
               </View>
             </View>
             <Text style={[styles.controlActionWhy, { color: colors.textMuted }]}>{a.why}</Text>
@@ -694,11 +694,11 @@ export default function AIManagementScreen() {
             { key: 'buildplan' as TabView, icon: 'construct-outline' as const, label: 'Build Plan', color: '#EC4899', advanced: false },
             { key: 'pipeline' as TabView, icon: 'git-merge-outline' as const, label: 'Pipeline', color: '#8B5CF6', advanced: false },
             { key: 'intelligence' as TabView, icon: 'telescope-outline' as const, label: 'Intelligence', color: '#3B82F6', advanced: false },
-            { key: 'control' as TabView, icon: 'shield-checkmark-outline' as const, label: 'Control', color: '#00D09C', advanced: false },
+            { key: 'control' as TabView, icon: 'shield-checkmark-outline' as const, label: 'Control', color: '#8B5CF6', advanced: false },
             { key: 'publisher' as TabView, icon: 'send-outline' as const, label: 'Publish', color: colors.primary, advanced: false },
             { key: 'audience' as TabView, icon: 'people-outline' as const, label: 'Audience', color: colors.primary, advanced: true },
             { key: 'strategy' as TabView, icon: 'analytics-outline' as const, label: 'Strategy', color: colors.primary, advanced: true },
-            { key: 'leads' as TabView, icon: 'magnet-outline' as const, label: 'Leads', color: '#00D09C', advanced: true },
+            { key: 'leads' as TabView, icon: 'magnet-outline' as const, label: 'Leads', color: '#8B5CF6', advanced: true },
           ] as const)
             .filter(t => !t.advanced || advancedMode)
             .map(t => {

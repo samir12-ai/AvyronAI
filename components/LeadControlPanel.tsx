@@ -35,7 +35,7 @@ const MODULES: ModuleConfig[] = [
     description: 'Forms, popups & contact collection',
     icon: 'person-add',
     iconFamily: 'ionicons',
-    color: '#00D09C',
+    color: '#8B5CF6',
   },
   {
     key: 'conversion_tracking_enabled',

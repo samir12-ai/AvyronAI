@@ -512,7 +512,7 @@ export default function StrategicPipeline() {
             {[
               { label: 'Required', value: progress.totalRequired, color: colors.text },
               { label: 'Calendar', value: progress.calendarGenerated, color: '#A78BFA' },
-              { label: 'Ready', value: progress.ready, color: '#00D09C' },
+              { label: 'Ready', value: progress.ready, color: '#8B5CF6' },
               { label: 'Published', value: progress.published, color: '#34D399' },
               { label: 'Failed', value: progress.failed, color: '#FF6B6B' },
             ].map((stat, i) => (

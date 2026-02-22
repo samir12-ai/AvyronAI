@@ -78,13 +78,13 @@ const STATUS_COLORS: Record<string, string> = {
   REJECTED: '#FF6B6B',
   GENERATED_TO_CALENDAR: '#A78BFA',
   IDLE: '#8A96A8',
-  RUNNING: '#00D09C',
+  RUNNING: '#8B5CF6',
   COMPLETED: '#34D399',
   FAILED: '#FF6B6B',
   PAUSED: '#FFB347',
   PUBLISHED: '#34D399',
   SCHEDULED: '#A78BFA',
-  READY: '#00D09C',
+  READY: '#8B5CF6',
   AI_GENERATED: '#60A5FA',
 };
 
@@ -405,7 +405,7 @@ export default function ExecutionMachine() {
     return (
       <>
         <View style={styles.metricsRow}>
-          <MetricBox label="Active Plans" value={dashboard.activePlans} icon="flash-outline" color="#00D09C" theme={theme} />
+          <MetricBox label="Active Plans" value={dashboard.activePlans} icon="flash-outline" color="#8B5CF6" theme={theme} />
           <MetricBox label="Total Content" value={dashboard.totalRequired} icon="documents-outline" color="#A78BFA" theme={theme} />
           <MetricBox label="Published" value={dashboard.totalPublished} icon="checkmark-circle-outline" color="#34D399" theme={theme} />
         </View>
@@ -426,7 +426,7 @@ export default function ExecutionMachine() {
               <Text style={[styles.legendText, { color: theme.textSecondary }]}>Scheduled: {dashboard.totalScheduled}</Text>
             </View>
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#00D09C' }]} />
+              <View style={[styles.legendDot, { backgroundColor: '#8B5CF6' }]} />
               <Text style={[styles.legendText, { color: theme.textSecondary }]}>Ready: {dashboard.totalReady}</Text>
             </View>
             <View style={styles.legendItem}>
@@ -576,7 +576,7 @@ export default function ExecutionMachine() {
                 <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Calendar</Text>
               </View>
               <View style={styles.statItem}>
-                <Text style={[styles.statValue, { color: '#00D09C' }]}>{progress.ready}</Text>
+                <Text style={[styles.statValue, { color: '#8B5CF6' }]}>{progress.ready}</Text>
                 <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Ready</Text>
               </View>
               <View style={styles.statItem}>
@@ -857,7 +857,7 @@ const styles = StyleSheet.create({
   rejectBtn: { backgroundColor: '#FF6B6B' },
   executeBtn: { backgroundColor: '#A78BFA' },
   creativeBtn: { backgroundColor: '#EC4899' },
-  resumeBtn: { backgroundColor: '#00D09C' },
+  resumeBtn: { backgroundColor: '#8B5CF6' },
   emergencyBtn: {
     flexDirection: 'row',
     alignItems: 'center',

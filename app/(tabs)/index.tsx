@@ -29,8 +29,8 @@ import { getApiUrl } from '@/lib/query-client';
 const { width: SCREEN_W } = Dimensions.get('window');
 
 const P = {
-  mint: '#00D09C',
-  mintDark: '#00B386',
+  mint: '#8B5CF6',
+  mintDark: '#7C3AED',
   neon: '#39FF14',
   money: '#85BB65',
   gold: '#FFD700',
