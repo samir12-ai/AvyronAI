@@ -1160,7 +1160,7 @@ export const studioItems = pgTable("studio_items", {
     .default(sql`gen_random_uuid()`),
   planId: varchar("plan_id"),
   campaignId: varchar("campaign_id"),
-  calendarEntryId: varchar("calendar_entry_id"),
+  calendarEntryId: varchar("calendar_entry_id").unique(),
   accountId: varchar("account_id").notNull().default("default"),
   contentType: text("content_type").notNull(),
   title: text("title"),
