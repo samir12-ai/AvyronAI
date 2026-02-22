@@ -45,6 +45,18 @@ Preferred communication style: Simple, everyday language.
 - **Competitive Intelligence**: AI Chief Strategy Officer tracking up to 5 competitors, providing AI-powered market analysis, gap detection, and strategic recommendations with audit logging.
 - **Settings**: Brand profile and platform connections management.
 
+### Strategic Execution Machine
+- **System**: Controlled execution pipeline transforming strategic blueprints into published content through hard approval gates.
+- **Pipeline**: Blueprint → Strategic Plan → Client Approval Gate → Calendar Auto-Generation (Phase 4A) → AI Creative Execution (Phase 4B) → Studio Drafts → Scheduled → Published.
+- **Database Tables**: `strategic_plans`, `plan_approvals`, `required_work`, `calendar_entries`, `studio_items` with full lifecycle tracking.
+- **Execution Safety**: Idempotency via unique constraints (planId + campaignId), concurrency locks (executionStatus = RUNNING prevents concurrent runs), emergency stop (PAUSED freezes all queues, deletes nothing), explicit failure tracking (FAILED + errorReason).
+- **Phase 4A (Deterministic)**: Calendar auto-generation with even spacing, required work calculation. Zero AI, pure deterministic logic.
+- **Phase 4B (AI Creative)**: Captions, briefs, CTA copy, studio drafts. Respects PAUSED state. Failed items get FAILED status + errorReason.
+- **Dashboard**: Plan-level + account-level progress trackers with real data from database counts. Progress = (published + scheduled + ready) / total_required_work.
+- **Hard Rules**: Nothing executes until plan status = APPROVED. Nothing auto-publishes. No silent fallbacks. All state transitions audit logged (18 event types).
+- **Frontend**: ExecutionMachine.tsx with Simple/Advanced views, collapsible sections, real-time progress, Approve/Reject/Emergency Stop buttons.
+- **Backend**: server/strategic-core/execution-routes.ts with 15+ endpoints, status-gated middleware.
+
 ### Strategic Core Architecture ("Build The Plan")
 - **System**: 6-phase sequential intelligence engine with hard gates.
 - **Phases**: Gate (min requirements) → Creative Analysis (AI extraction from media) → Confirm/Edit (user review) → Market Analysis (AI market mapping) → Validation (contradiction detection) → Orchestrator (execution plan generation).
