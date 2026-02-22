@@ -29,6 +29,7 @@ import LeadControlPanel from '@/components/LeadControlPanel';
 import CompetitiveIntelligence from '@/components/CompetitiveIntelligence';
 import DominanceEngine from '@/components/DominanceEngine';
 import BuildThePlan from '@/components/BuildThePlan';
+import ExecutionMachine from '@/components/ExecutionMachine';
 import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
 
 interface AIAudience {
@@ -48,7 +49,7 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'control' | 'publisher' | 'audience' | 'strategy' | 'leads' | 'intel' | 'dominance' | 'strategic';
+type TabView = 'control' | 'publisher' | 'audience' | 'strategy' | 'leads' | 'intel' | 'dominance' | 'strategic' | 'execute';
 
 function PulseRing({ color }: { color: string }) {
   const scale = useRef(new RNAnimated.Value(1)).current;
@@ -668,6 +669,7 @@ export default function AIManagementScreen() {
             { key: 'intel' as TabView, icon: 'telescope-outline' as const, label: 'Intel', color: '#8B5CF6', advanced: true },
             { key: 'dominance' as TabView, icon: 'flash-outline' as const, label: 'Dominance', color: '#EF4444', advanced: true },
             { key: 'strategic' as TabView, icon: 'bulb-outline' as const, label: 'Plan', color: '#EC4899', advanced: false },
+            { key: 'execute' as TabView, icon: 'rocket-outline' as const, label: 'Execute', color: '#8B5CF6', advanced: false },
           ] as const)
             .filter(t => !t.advanced || advancedMode)
             .map(t => {
@@ -694,6 +696,7 @@ export default function AIManagementScreen() {
           : activeTab === 'intel' ? <CampaignGuard><CompetitiveIntelligence /></CampaignGuard>
           : activeTab === 'dominance' ? <CampaignGuard><DominanceEngine /></CampaignGuard>
           : activeTab === 'strategic' ? <BuildThePlan />
+          : activeTab === 'execute' ? <CampaignGuard><ExecutionMachine /></CampaignGuard>
           : <CampaignGuard><StrategyHub /></CampaignGuard>}
 
         <View style={{ height: 120 }} />
