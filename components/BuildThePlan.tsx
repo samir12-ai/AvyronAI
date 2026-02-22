@@ -1451,15 +1451,9 @@ export default function BuildThePlan() {
   };
 
   return (
-    <View style={{ flex: 1 }}>
+    <View>
       {renderPhaseIndicator()}
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: 40 }}
-        showsVerticalScrollIndicator={false}
-      >
-        {renderCurrentPhase()}
-      </ScrollView>
+      {renderCurrentPhase()}
     </View>
   );
 }
