@@ -42,7 +42,7 @@ Preferred communication style: Simple, everyday language.
 - **Studio**: Media library and AI Video Editor with guided creative briefs and FFmpeg rendering.
 - **Photography**: Dubai-based photography marketplace.
 - **Lead Engine**: Modular lead generation system with 8 independent modules (Lead Capture, Conversion Tracking, CTA Engine, Funnel Logic, Lead Magnets, Landing Pages, Revenue Attribution, AI Lead Optimization). Features flags, dependency guards, and a global kill switch.
-- **Competitive Intelligence**: AI Chief Strategy Officer tracking up to 5 competitors, providing AI-powered market analysis, gap detection, and strategic recommendations with audit logging.
+- **Competitive Intelligence**: Real-data competitor analysis system. Uses 2-step scrape ladder (HTML parse → Playwright headless render) with 24h caching. Returns MEASURED metrics (deterministic: posts_last_7d, reels_last_7d, avg_posts_per_week_28d, content_mix, engagement_rate with formula/source/sampleSize) and INFERRED insights (qualitative AI analysis of 4-5 reels with evidencePermalinks citations). Status: VALID (≥12 posts + ≥1 reel), PARTIAL (insufficient data), SCRAPE_BLOCKED (both methods failed). Warning codes: SCRAPE_BLOCKED, TIMESTAMPS_MISSING, INSUFFICIENT_POSTS, NO_REELS_FOUND, FOLLOWERS_UNAVAILABLE, ENGAGEMENT_UNAVAILABLE. No Stories metrics. No fabricated numbers. All audit trail: collection_method_used, attempts[], source_type. Frontend shows green Verified badges for MEASURED, orange AI Insight badges for INFERRED. Endpoint: POST /api/ci/competitors/analyze-profile. Backend files: server/competitive-intelligence/profile-scraper.ts, profile-analyzer.ts.
 - **Settings**: Brand profile and platform connections management.
 
 ### Strategic Execution Machine
