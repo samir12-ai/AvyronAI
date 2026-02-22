@@ -1010,8 +1010,29 @@ export const extractionMetrics = pgTable("extraction_metrics", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const dominanceAnalyses = pgTable("dominance_analyses", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  blueprintId: varchar("blueprint_id"),
+  competitorName: text("competitor_name").notNull(),
+  competitorUrl: text("competitor_url").notNull(),
+  topContent: text("top_content"),
+  contentDissection: text("content_dissection"),
+  weaknessDetection: text("weakness_detection"),
+  dominanceStrategy: text("dominance_strategy"),
+  planModifications: text("plan_modifications"),
+  modificationStatus: text("modification_status").default("pending"),
+  modelUsed: text("model_used").default("gpt-5.2"),
+  status: text("status").default("pending"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export type StrategicBlueprint = typeof strategicBlueprints.$inferSelect;
 export type BlueprintCompetitor = typeof blueprintCompetitors.$inferSelect;
 export type BlueprintVersion = typeof blueprintVersions.$inferSelect;
 export type StrategicAuditLog = typeof strategicAuditLogs.$inferSelect;
 export type ExtractionMetric = typeof extractionMetrics.$inferSelect;
+export type DominanceAnalysis = typeof dominanceAnalyses.$inferSelect;

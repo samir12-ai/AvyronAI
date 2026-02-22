@@ -1,0 +1,59 @@
+We are upgrading the Competitive Engine to a performance-driven, dominance-oriented system. This is not a minor refinement — this is a structural intelligence upgrade.
+
+We will build Competitive Dominance Engine v2 with the following architecture:
+	1.	Performance-Based Content Selection
+For each competitor:
+
+	•	Automatically identify the top 3–5 highest-performing pieces of content (based on views, engagement, comments, shares).
+	•	Do NOT analyze random content.
+	•	Focus only on proven-performing material.
+
+	2.	Deep Content Dissection Layer
+For each selected content piece, extract and structure:
+
+	•	Hook type (question, promise, shock, number, authority)
+	•	Offer mechanics (price visibility, urgency, scarcity, social proof)
+	•	Psychological trigger (fear, authority, aspiration, result-driven, discount-driven)
+	•	CTA mechanics (WhatsApp, DM, form, soft CTA, hard CTA)
+	•	Creative structure (format, pacing, framing style)
+
+All outputs must follow a strict schema — no loose summaries.
+	3.	Competitive Weakness Detection
+For each high-performing content item:
+
+	•	Identify why it works.
+	•	Identify what it does NOT exploit (conversion weakness, differentiation gap, pricing opacity, weak CTA, positioning gap).
+	•	Output:
+	•	Strength exploited by competitor
+	•	Weakness not addressed
+	•	Opportunity vector
+
+	4.	Dominance Strategy Generator
+Instead of copying, the engine must generate an upgraded variant blueprint:
+
+	•	Improved hook logic
+	•	Stronger conversion mechanics
+	•	Refined positioning
+	•	Clear differentiation
+	•	CTA optimization
+	•	Structural upgrade suggestions (e.g., add proof at second 7, add price transparency test, shift framing angle)
+
+The goal is not imitation — the goal is controlled strategic superiority.
+	5.	Controlled Modification Flow
+The Competitive Engine must be influential but not autonomous:
+
+	•	It may propose strategic modifications to the Orchestrator plan.
+	•	Any modification must require explicit client approval before being applied.
+	•	The system must clearly display:
+	•	Base Plan
+	•	Dominance-Adjusted Plan
+	•	Differences between them
+
+No silent overrides.
+
+This engine must feed into the Orchestrator decision layer before execution plans are finalized.
+
+We are not building a competitor mirror tool.
+We are building a competitive exploitation engine.
+
+Begin implementation.
