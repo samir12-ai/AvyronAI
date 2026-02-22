@@ -908,7 +908,7 @@ export default function CompetitiveIntelligence() {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1 },
+  container: { padding: 0 },
   loadingWrap: { padding: 40, alignItems: 'center', gap: 12 },
   loadingText: { fontSize: 13 },
   subTabBar: { flexDirection: 'row', borderRadius: 10, padding: 3, marginBottom: 12, borderWidth: 1 },

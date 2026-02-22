@@ -1217,16 +1217,15 @@ export default function StrategyHub() {
         ))}
       </ScrollView>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.body}>
+      <View style={s.body}>
         {renderActiveView()}
-        <View style={{ height: 40 }} />
-      </ScrollView>
+      </View>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  root: { flex: 1 },
+  root: { padding: 0 },
   navBar: { flexGrow: 0, marginBottom: 12 },
   navContent: { paddingHorizontal: 0, gap: 6 },
   navItem: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },

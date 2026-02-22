@@ -3,14 +3,12 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   Pressable,
   Switch,
   ActivityIndicator,
   Alert,
   useColorScheme,
   Platform,
-  RefreshControl,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -231,13 +229,7 @@ export default function LeadControlPanel() {
   }
 
   return (
-    <ScrollView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
-      }
-    >
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       {isGlobalOff && (
         <LinearGradient
           colors={['#FF4444', '#CC0000']}
@@ -344,8 +336,7 @@ export default function LeadControlPanel() {
         })}
       </View>
 
-      <View style={{ height: 40 }} />
-    </ScrollView>
+    </View>
   );
 }
 
@@ -359,7 +350,7 @@ function StatCard({ label, value, color, isDark }: { label: string; value: strin
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: { padding: 0 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
   loadingText: { marginTop: 12, fontSize: 14 },
   killBanner: {

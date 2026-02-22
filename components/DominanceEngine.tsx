@@ -1214,7 +1214,7 @@ export default function DominanceEngine() {
   };
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: colors.background }]} showsVerticalScrollIndicator={false}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       {renderNavTabs()}
       {activeView === 'select' && renderCompetitorSelect()}
       {activeView === 'dissection' && renderDissection()}
@@ -1222,13 +1222,12 @@ export default function DominanceEngine() {
       {activeView === 'strategy' && renderStrategy()}
       {activeView === 'delta' && renderDelta()}
       {activeView === 'modifications' && renderModifications()}
-      <View style={{ height: 40 }} />
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16 },
+  container: { padding: 16 },
   navContainer: { flexDirection: 'row', marginBottom: 16, maxHeight: 40 },
   navTab: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: 'transparent', marginRight: 8, gap: 4 },
   navText: { fontSize: 12, fontWeight: '600' },

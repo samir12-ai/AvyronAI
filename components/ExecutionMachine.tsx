@@ -1,15 +1,13 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   Pressable,
   ActivityIndicator,
   Alert,
   useColorScheme,
   Platform,
-  Animated as RNAnimated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -157,12 +155,6 @@ export default function ExecutionMachine() {
     competitive: false,
     risk: false,
   });
-
-  const fadeAnim = useRef(new RNAnimated.Value(0)).current;
-
-  useEffect(() => {
-    RNAnimated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-  }, []);
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -782,37 +774,31 @@ export default function ExecutionMachine() {
   };
 
   return (
-    <RNAnimated.View style={[styles.container, { opacity: fadeAnim }]}>
-      <ScrollView
-        style={[styles.scrollView, { backgroundColor: theme.background }]}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.header}>
-          <LinearGradient colors={['#EC4899', '#8B5CF6']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.headerGradient}>
-            <Ionicons name="rocket" size={22} color="#fff" />
-          </LinearGradient>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.headerTitle, { color: theme.text }]}>Execution Machine</Text>
-            <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>
-              {viewMode === 'dashboard' ? 'Strategic plan execution pipeline' : 'Plan detail & controls'}
-            </Text>
-          </View>
-          {viewMode === 'dashboard' && (
-            <Pressable onPress={fetchDashboard} style={styles.refreshBtn}>
-              {loading ? <ActivityIndicator size="small" color={theme.primary} /> : <Ionicons name="refresh" size={20} color={theme.primary} />}
-            </Pressable>
-          )}
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <LinearGradient colors={['#EC4899', '#8B5CF6']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.headerGradient}>
+          <Ionicons name="rocket" size={22} color="#fff" />
+        </LinearGradient>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>Execution Machine</Text>
+          <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>
+            {viewMode === 'dashboard' ? 'Strategic plan execution pipeline' : 'Plan detail & controls'}
+          </Text>
         </View>
+        {viewMode === 'dashboard' && (
+          <Pressable onPress={fetchDashboard} style={styles.refreshBtn}>
+            {loading ? <ActivityIndicator size="small" color={theme.primary} /> : <Ionicons name="refresh" size={20} color={theme.primary} />}
+          </Pressable>
+        )}
+      </View>
 
-        {viewMode === 'dashboard' ? renderDashboard() : renderPlanDetail()}
-      </ScrollView>
-    </RNAnimated.View>
+      {viewMode === 'dashboard' ? renderDashboard() : renderPlanDetail()}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: { padding: 0 },
   scrollView: { flex: 1 },
   scrollContent: { padding: 16, paddingBottom: 40 },
   centerContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60 },
