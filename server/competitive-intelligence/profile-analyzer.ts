@@ -274,9 +274,16 @@ Return 4-6 insights covering different categories. evidenceReelIndexes are 0-bas
   }
 }
 
+function normalizeProfileUrl(rawUrl: string): string {
+  let url = rawUrl.trim().split("?")[0].split("#")[0].replace(/\/$/, "");
+  const match = url.match(/instagram\.com\/([^\/\?#]+)/);
+  const handle = match ? match[1].toLowerCase() : rawUrl.replace(/^@/, "").split("/")[0].toLowerCase();
+  return `https://www.instagram.com/${handle}/`;
+}
+
 export async function analyzeInstagramProfile(rawUrl: string, companyName: string): Promise<ProfileAnalysisResult> {
   const scrapeResult = await scrapeInstagramProfile(rawUrl);
-  const profileUrl = rawUrl.trim();
+  const profileUrl = normalizeProfileUrl(rawUrl);
 
   if (!scrapeResult.success || scrapeResult.posts.length === 0) {
     return {

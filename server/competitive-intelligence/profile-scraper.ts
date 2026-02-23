@@ -131,16 +131,18 @@ const RATE_LIMIT_MS = 10000;
 
 function normalizeInstagramUrl(url: string): string {
   let handle = url.trim();
+  handle = handle.split("?")[0].split("#")[0];
   handle = handle.replace(/\/$/, "");
-  const match = handle.match(/instagram\.com\/([^\/\?]+)/);
+  const match = handle.match(/instagram\.com\/([^\/\?#]+)/);
   if (match) handle = match[1];
-  handle = handle.replace(/^@/, "");
+  handle = handle.replace(/^@/, "").toLowerCase();
   return `https://www.instagram.com/${handle}/`;
 }
 
 function extractHandleFromUrl(url: string): string {
-  const match = url.match(/instagram\.com\/([^\/\?]+)/);
-  return match ? match[1] : url.replace(/^@/, "").split("/")[0];
+  let cleaned = url.trim().split("?")[0].split("#")[0];
+  const match = cleaned.match(/instagram\.com\/([^\/\?#]+)/);
+  return (match ? match[1] : url.replace(/^@/, "").split("/")[0]).toLowerCase();
 }
 
 function classifyMediaType(node: any): ScrapedPost["mediaType"] {

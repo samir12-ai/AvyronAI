@@ -189,12 +189,24 @@ export default function CompetitiveIntelligence() {
       setProfileAnalysis(data);
       const m = data.measured;
       const mix = m?.content_mix;
-      const mixStr = mix ? JSON.stringify({ reels: Math.round(mix.reels_ratio * 100), static: Math.round(mix.static_ratio * 100) }) : '';
+      const mixStr = mix ? `Reels ${Math.round(mix.reels_ratio * 100)}% / Static ${Math.round(mix.static_ratio * 100)}%` : '';
+      const ctaInsights = data.inferred?.insights?.filter((ins: any) => ins.category === 'cta_pattern') || [];
+      const ctaStr = ctaInsights.length > 0 ? ctaInsights.map((ins: any) => ins.finding).join('; ') : '';
+      const hookInsights = data.inferred?.insights?.filter((ins: any) => ins.category === 'hook_style') || [];
+      const hookStr = hookInsights.length > 0 ? hookInsights.map((ins: any) => ins.finding).join('; ') : '';
+      const toneInsights = data.inferred?.insights?.filter((ins: any) => ins.category === 'messaging_tone') || [];
+      const toneStr = toneInsights.length > 0 ? toneInsights.map((ins: any) => ins.finding).join('; ') : '';
+      const proofInsights = data.inferred?.insights?.filter((ins: any) => ins.category === 'social_proof') || [];
+      const proofStr = proofInsights.length > 0 ? proofInsights.map((ins: any) => ins.finding).join('; ') : '';
       setNewComp(p => ({
         ...p,
         postingFrequency: m?.avg_posts_per_week_28d?.value?.toString() || m?.posts_last_7d?.value?.toString() || p.postingFrequency,
         contentTypeRatio: mixStr || p.contentTypeRatio,
         engagementRatio: m?.engagement_rate?.value?.toString() || p.engagementRatio,
+        ctaPatterns: ctaStr || p.ctaPatterns,
+        hookStyles: hookStr || p.hookStyles,
+        messagingTone: toneStr || p.messagingTone,
+        socialProofPresence: proofStr || p.socialProofPresence,
       }));
       setViralInsights('');
       setAddStep('review');
@@ -528,7 +540,7 @@ export default function CompetitiveIntelligence() {
                 { label: 'Profile', value: comp.profileLink, icon: 'link-outline' as const },
                 { label: 'Posts/Week', value: comp.postingFrequency?.toString(), icon: 'calendar-outline' as const },
                 { label: 'Content Mix', value: comp.contentTypeRatio, icon: 'pie-chart-outline' as const },
-                { label: 'Engagement', value: comp.engagementRatio ? `${comp.engagementRatio}%` : null, icon: 'heart-outline' as const },
+                { label: 'Engagement (scanned posts)', value: comp.engagementRatio ? `${comp.engagementRatio}%` : null, icon: 'heart-outline' as const },
                 { label: 'CTA Patterns', value: comp.ctaPatterns, icon: 'megaphone-outline' as const },
                 { label: 'Discounts', value: comp.discountFrequency, icon: 'pricetag-outline' as const },
                 { label: 'Hook Styles', value: comp.hookStyles, icon: 'videocam-outline' as const },
@@ -1008,21 +1020,30 @@ export default function CompetitiveIntelligence() {
 
                       {profileAnalysis.measured?.content_mix && (
                         <View style={s.measuredRow}>
-                          <Text style={[s.measuredLabel, { color: colors.textMuted }]}>Content Mix</Text>
+                          <Text style={[s.measuredLabel, { color: colors.textMuted }]}>Content Mix (n={profileAnalysis.measured.content_mix.sampleSize} scanned posts)</Text>
                           <Text style={[s.measuredValue, { color: colors.text }]}>
                             Reels {Math.round(profileAnalysis.measured.content_mix.reels_ratio * 100)}% / Static {Math.round(profileAnalysis.measured.content_mix.static_ratio * 100)}%
                           </Text>
-                          <Text style={[s.measuredMeta, { color: colors.textMuted }]}>from {profileAnalysis.measured.content_mix.sampleSize} posts</Text>
+                          <Text style={[s.measuredMeta, { color: colors.textMuted }]}>based on all {profileAnalysis.measured.content_mix.sampleSize} scanned posts, not time-filtered</Text>
                         </View>
                       )}
 
                       {profileAnalysis.measured?.engagement_rate && (
                         <View style={s.measuredRow}>
-                          <Text style={[s.measuredLabel, { color: colors.textMuted }]}>Engagement Rate</Text>
-                          <Text style={[s.measuredValue, { color: colors.text }]}>{profileAnalysis.measured.engagement_rate.value}%</Text>
-                          <Text style={[s.measuredMeta, { color: colors.textMuted }]}>
-                            ({profileAnalysis.measured.engagement_rate.avgLikes} avg likes + {profileAnalysis.measured.engagement_rate.avgComments} avg comments) / {profileAnalysis.measured.engagement_rate.followers.toLocaleString()} followers
+                          <Text style={[s.measuredLabel, { color: colors.textMuted }]}>
+                            Engagement ({profileAnalysis.measured.engagement_rate.timeframe}, n={profileAnalysis.measured.engagement_rate.sampleSize})
                           </Text>
+                          <Text style={[s.measuredValue, { color: colors.text, opacity: profileAnalysis.measured?.posts_last_7d?.value === 0 ? 0.5 : 1 }]}>
+                            {profileAnalysis.measured.engagement_rate.value}%
+                          </Text>
+                          <Text style={[s.measuredMeta, { color: colors.textMuted }]}>
+                            ({profileAnalysis.measured.engagement_rate.avgLikes.toLocaleString()} avg likes + {profileAnalysis.measured.engagement_rate.avgComments.toLocaleString()} avg comments) / {profileAnalysis.measured.engagement_rate.followers.toLocaleString()} followers
+                          </Text>
+                          {profileAnalysis.measured?.posts_last_7d?.value === 0 && (
+                            <Text style={{ fontSize: 10, color: '#F59E0B', marginTop: 2, fontStyle: 'italic' }}>
+                              Note: 0 posts in last 7d — engagement is based on older posts in the scanned sample
+                            </Text>
+                          )}
                         </View>
                       )}
 
