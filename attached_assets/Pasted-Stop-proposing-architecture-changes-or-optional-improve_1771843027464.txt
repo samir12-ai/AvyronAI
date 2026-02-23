@@ -1,0 +1,174 @@
+Stop proposing architecture changes or optional improvements.
+
+We are implementing this in a strictly controlled scope to avoid additional cost.
+
+Follow the instructions exactly. No expansions. No additional features.
+
+========================================
+PHASE 1 – ADD INTELLIGENCE SCORES ONLY
+========================================
+
+Do NOT create new pipelines.
+Do NOT modify Creative Capture.
+Do NOT add new scraping.
+Do NOT add new API calls.
+
+Use ONLY existing stored outputs:
+- conversion signals
+- narrative signals
+- performance metrics
+- positioning insights
+- dominance scores (if any exist)
+
+----------------------------------------
+STEP 1 – Conversion Intelligence Score
+----------------------------------------
+
+Create a computed object:
+
+conversion_intelligence = {
+  cta_presence_score: 0–100,
+  offer_clarity_score: 0–100,
+  funnel_visibility_score: 0–100,
+  conversion_path_completeness: 0–100,
+  conversion_style: "direct" | "soft" | "none"
+}
+
+Rules:
+- If CTA detected → increase cta_presence_score
+- If offer signals detected → increase offer_clarity_score
+- If both CTA + offer → increase conversion_path_completeness
+- If no CTA → conversion_style = "none"
+
+Do NOT call AI for this.
+This is rule-based only.
+
+----------------------------------------
+STEP 2 – Narrative Intelligence Score
+----------------------------------------
+
+Create:
+
+narrative_intelligence = {
+  narrative_arc_detected: boolean,
+  emotional_intensity_score: 0–100,
+  identity_targeting_strength: 0–100,
+  persuasion_style: "story" | "educational" | "proof-led" | "status-led" | "hybrid",
+  narrative_dominance_index: 0–100
+}
+
+Use existing:
+- OCR text
+- transcript
+- caption
+- emotional keyword detection
+- structure markers
+
+No new model calls.
+Use deterministic logic + already generated AI interpretation.
+
+----------------------------------------
+STEP 3 – Performance Context Summary
+----------------------------------------
+
+Create:
+
+performance_context = {
+  share_velocity_index,
+  save_ratio_index,
+  engagement_quality_score,
+  dominant_format
+}
+
+Use existing stored metrics.
+No recalculation.
+No new queries.
+
+----------------------------------------
+STEP 4 – Market Archetype Classification
+----------------------------------------
+
+Create simple rule-based classifier:
+
+If:
+  narrative high + CTA low → "Authority Builder"
+  CTA high + offer clear → "Conversion Closer"
+  high saves + educational tone → "Viral Educator"
+  high proof + low CTA → "Silent Premium"
+  inconsistent patterns → "Trend Rider"
+
+Store result as:
+archetype
+
+No AI call.
+
+----------------------------------------
+STEP 5 – Dominance State Calculation
+----------------------------------------
+
+Compute weighted score:
+
+dominance_score =
+  0.25 * conversion_path_completeness +
+  0.25 * narrative_dominance_index +
+  0.25 * engagement_quality_score +
+  0.25 * positioning_strength_score (if exists, else 0)
+
+Map result:
+
+0–25 → WEAK
+26–50 → EXPOSED
+51–70 → EFFICIENT
+71–85 → STRUCTURALLY_STRONG
+86–100 → DOMINANT
+
+Store:
+dominance_state
+
+No AI call.
+
+========================================
+PHASE 2 – CREATIVE EXPANSION (CONTROLLED)
+========================================
+
+Limit to ONE GPT call total per competitor.
+
+Input:
+- dominance_state
+- conversion gaps
+- narrative gaps
+- archetype
+- performance context
+
+Output structure ONLY (no long text):
+
+creative_expansion = {
+  dominance_strategy_mode,
+  5_attack_angles[],
+  3_content_pillars[],
+  1_conversion_injection_idea,
+  1_narrative_disruption_idea
+}
+
+Do NOT generate scripts.
+Do NOT exceed 800 tokens.
+Do NOT add explanations outside structured object.
+
+========================================
+STRICT RULES
+========================================
+
+- No new scraping.
+- No new media processing.
+- No additional API calls.
+- No schema refactor.
+- No optional suggestions.
+- No UI redesign.
+- No further architecture discussion.
+
+Implement only these computed layers on top of existing data.
+
+Provide:
+1) Updated response JSON structure.
+2) Confirmation of number of GPT calls used (must be 1 max).
+3) Confirmation no new external calls were added.
