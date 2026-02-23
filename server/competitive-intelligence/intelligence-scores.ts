@@ -347,13 +347,14 @@ export function computeStorytellingIntelligence(
     for (const ins of inferred.insights) allText += " " + ins.finding;
   }
 
-  const storytelling_present = narrative.narrative_arc_detected;
-
   const transformHits = countMatches(allText, TRANSFORMATION_MARKERS);
   const founderHits = countMatches(allText, FOUNDER_STORY_MARKERS);
   const caseHits = countMatches(allText, CASE_STORY_MARKERS);
   const eduNarrHits = countMatches(allText, EDU_NARRATIVE_MARKERS);
   const statusStoryHits = countMatches(allText, STATUS_STORY_MARKERS);
+
+  const totalStoryHits = transformHits + founderHits + caseHits + eduNarrHits + statusStoryHits;
+  const storytelling_present = narrative.narrative_arc_detected || totalStoryHits >= 3;
 
   const typeScores = [
     { type: "transformation" as const, hits: transformHits },

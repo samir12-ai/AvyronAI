@@ -1,0 +1,60 @@
+Good. This is accepted.
+
+Before we close this milestone permanently, do ONLY these final lock checks (no new work, no extra ideas):
+
+========================================
+A) HARD ACCEPTANCE CHECKS (must pass)
+========================================
+
+1) GPT calls:
+- Confirm via logs that per competitor analysis run uses EXACTLY 1 GPT call total.
+- If any retry happens, it must still not exceed 1 call (fail fast instead).
+
+2) No CTA ≠ weakness:
+- Verify with 3 profiles where CTA is truly absent but storytelling is strong:
+  Expected:
+  - storytelling_present = true
+  - narrative_strategy_mode = "authority_building" or "identity_building"
+  - creative_strategy.subtle_conversion_layer is present
+  - NO aggressive CTA injection recommendation (no “DM now / book now” as primary action)
+
+3) CTA present profiles:
+- Verify with 3 profiles where CTA is strong:
+  Expected:
+  - conversion_style = "direct" or "soft"
+  - storytelling_intelligence can still be true/false independently (no forced coupling)
+  - creative_strategy mode can be conversion_hybrid, not forced authority_takeover
+
+4) Output contract stability:
+- Ensure response ALWAYS includes:
+  intelligence.storytelling_intelligence
+  creative_strategy
+- If unavailable, return UNAVAILABLE with reason — never missing fields.
+
+5) No scope creep:
+- Confirm no new scraping, no new media capture, no new external calls were added.
+- Confirm no schema refactor beyond adding two objects.
+
+========================================
+B) GOLDEN TEST FIXTURES (must provide)
+========================================
+
+Provide 3 stored JSON fixtures (and UI screenshots) showing:
+
+Fixture #1: Strong storytelling + no CTA
+Fixture #2: Strong CTA + weak storytelling
+Fixture #3: Hybrid strong CTA + strong storytelling
+
+Each fixture must show:
+- storytelling_intelligence values
+- creative_strategy values
+- creative_expansion values
+- dominance_state and archetype
+
+========================================
+C) STOP CONDITION
+========================================
+After providing the above 3 fixtures and confirming A) checks, do NOT touch this area again unless requested.
+No further “improvements” or refactors.
+
+Confirm completion with the 3 fixtures.
