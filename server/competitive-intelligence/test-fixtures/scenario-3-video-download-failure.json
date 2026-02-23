@@ -1,0 +1,85 @@
+{
+  "scenario": "Video download failure - thumbnail fallback",
+  "description": "Video URL returns 403. System falls back to thumbnail-only OCR. No audio transcript. Pinned comment available.",
+  "reelInput": {
+    "shortcode": "CxTestFail03",
+    "video_url": null,
+    "display_url": "https://example.com/thumb-fail.jpg",
+    "caption": "Check out our new arrivals",
+    "timestamp": 1708300800,
+    "likes": 450,
+    "comments": 22
+  },
+  "expectedEvidencePack": {
+    "status": "PARTIAL",
+    "sourcesAttempted": ["video_frames", "ocr", "audio_transcript", "pinned_comment"],
+    "sourcesSucceeded": ["ocr", "pinned_comment"],
+    "warnings": [
+      {
+        "source": "video_frames",
+        "code": "VIDEO_DOWNLOAD_FAILED",
+        "reason": "Video URL unavailable; using thumbnail for OCR"
+      },
+      {
+        "source": "audio_transcript",
+        "code": "AUDIO_UNAVAILABLE",
+        "reason": "Cannot extract audio without video file"
+      }
+    ],
+    "ocrTopLines": ["NEW ARRIVALS", "SHOP NOW"],
+    "ocrFullText": "NEW ARRIVALS SHOP NOW",
+    "transcript": null,
+    "transcriptConfidence": null,
+    "pinnedCommentText": "Shop link in bio! Free shipping over $50",
+    "deterministicSignals": {
+      "ctaKeywords": ["SHOP NOW", "Shop link in bio"],
+      "offerKeywords": ["Free shipping"],
+      "urgencyKeywords": []
+    }
+  },
+  "expectedInterpretation": {
+    "hookCandidates": [],
+    "ctaSignals": [
+      {
+        "text": "SHOP NOW",
+        "source": "ocr",
+        "label": "MEASURED"
+      },
+      {
+        "text": "Shop link in bio",
+        "source": "pinned_comment",
+        "label": "MEASURED"
+      }
+    ],
+    "offerSignals": [
+      {
+        "text": "Free shipping over $50",
+        "source": "pinned_comment",
+        "label": "MEASURED"
+      }
+    ],
+    "proofSignals": [],
+    "unavailable": [
+      {
+        "signal": "hook_analysis",
+        "reason": "No audio transcript available - cannot analyze verbal hook",
+        "label": "UNAVAILABLE"
+      },
+      {
+        "signal": "audio_transcript",
+        "reason": "Cannot extract audio without video file",
+        "label": "UNAVAILABLE"
+      }
+    ]
+  },
+  "assertionChecklist": [
+    "status is PARTIAL, not COMPLETE",
+    "warnings include VIDEO_DOWNLOAD_FAILED and AUDIO_UNAVAILABLE",
+    "transcript is null",
+    "transcriptConfidence is null",
+    "CTA still detected from OCR and pinned_comment despite video failure",
+    "unavailable includes hook_analysis with specific reason",
+    "No ESTIMATED labels appear anywhere in output",
+    "sourcesSucceeded does NOT include video_frames or audio_transcript"
+  ]
+}
