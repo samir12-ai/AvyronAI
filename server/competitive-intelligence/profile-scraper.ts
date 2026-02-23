@@ -72,13 +72,14 @@ export interface ScrapeResult {
   posts: ScrapedPost[];
   followers: number | null;
   profileName: string | null;
-  collectionMethodUsed: "HTML_PARSE" | "HEADLESS_RENDER" | "NONE";
+  collectionMethodUsed: "WEB_API" | "HTML_PARSE" | "HEADLESS_RENDER" | "NONE";
   attempts: string[];
   warnings: string[];
 }
 
 export interface ScrapeStats {
   totalRequests: number;
+  webApiSuccess: number;
   htmlParseSuccess: number;
   headlessRenderSuccess: number;
   scrapeBlocked: number;
@@ -88,6 +89,7 @@ export interface ScrapeStats {
 
 const scrapeStats: ScrapeStats = {
   totalRequests: 0,
+  webApiSuccess: 0,
   htmlParseSuccess: 0,
   headlessRenderSuccess: 0,
   scrapeBlocked: 0,
@@ -99,7 +101,7 @@ export function getScrapeStats(): ScrapeStats & { successRate: string; blockedRa
   const total = scrapeStats.totalRequests || 1;
   return {
     ...scrapeStats,
-    successRate: `${(((scrapeStats.htmlParseSuccess + scrapeStats.headlessRenderSuccess) / total) * 100).toFixed(1)}%`,
+    successRate: `${(((scrapeStats.webApiSuccess + scrapeStats.htmlParseSuccess + scrapeStats.headlessRenderSuccess) / total) * 100).toFixed(1)}%`,
     blockedRate: `${((scrapeStats.scrapeBlocked / total) * 100).toFixed(1)}%`,
     bandwidthMB: `${(scrapeStats.totalBytesEstimated / (1024 * 1024)).toFixed(2)} MB`,
   };
@@ -190,14 +192,14 @@ async function attemptWebProfileApi(handle: string): Promise<{ posts: ScrapedPos
     fetchOptions.dispatcher = dispatcher;
   }
 
-  console.log(`[CI Scraper] HTML_PARSE (web_profile_info API): Fetching profile for ${handle} ${dispatcher ? "via Bright Data proxy" : "direct"}`);
+  console.log(`[CI Scraper] WEB_API: Fetching web_profile_info for ${handle} ${dispatcher ? "via Bright Data proxy" : "direct"}`);
 
   const response = await fetch(apiUrl, fetchOptions);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const text = await response.text();
   const bytesReceived = Buffer.byteLength(text, "utf-8");
 
-  console.log(`[CI Scraper] HTML_PARSE: Received ${(bytesReceived / 1024).toFixed(1)} KB from web_profile_info for ${handle}`);
+  console.log(`[CI Scraper] WEB_API: Received ${(bytesReceived / 1024).toFixed(1)} KB for ${handle}`);
 
   const data = JSON.parse(text);
   const user = data?.data?.user;
@@ -212,7 +214,7 @@ async function attemptWebProfileApi(handle: string): Promise<{ posts: ScrapedPos
     posts.push(parsePostFromGraphQL(edge.node, handle));
   }
 
-  console.log(`[CI Scraper] HTML_PARSE: Extracted ${posts.length} posts, ${followers ?? "unknown"} followers for ${handle}`);
+  console.log(`[CI Scraper] WEB_API: Extracted ${posts.length} posts, ${followers ?? "unknown"} followers for ${handle}`);
 
   return { posts, followers, profileName, bytesReceived };
 }
@@ -231,7 +233,7 @@ async function attemptHtmlPageParse(profileUrl: string, handle: string): Promise
     fetchOptions.dispatcher = dispatcher;
   }
 
-  console.log(`[CI Scraper] HTML_PARSE (page fallback): Fetching ${profileUrl}`);
+  console.log(`[CI Scraper] HTML_PARSE: Fetching ${profileUrl}`);
 
   const response = await fetch(profileUrl, fetchOptions);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -458,7 +460,7 @@ export async function scrapeInstagramProfile(rawUrl: string): Promise<ScrapeResu
 
   await randomDelay();
 
-  attempts.push("HTML_PARSE");
+  attempts.push("WEB_API");
   try {
     const result = await attemptWebProfileApi(handle);
     posts = result.posts;
@@ -466,12 +468,13 @@ export async function scrapeInstagramProfile(rawUrl: string): Promise<ScrapeResu
     profileName = result.profileName;
     scrapeStats.totalBytesEstimated += result.bytesReceived;
     if (posts.length > 0) {
-      collectionMethodUsed = "HTML_PARSE";
-      scrapeStats.htmlParseSuccess++;
-      console.log(`[CI Scraper] HTML_PARSE SUCCESS (web API): ${posts.length} posts, ${followers ?? "unknown"} followers for ${handle}`);
+      collectionMethodUsed = "WEB_API";
+      scrapeStats.webApiSuccess++;
+      console.log(`[CI Scraper] WEB_API SUCCESS: ${posts.length} posts, ${followers ?? "unknown"} followers for ${handle}`);
     }
   } catch (err: any) {
-    console.log(`[CI Scraper] HTML_PARSE web API failed for ${handle}: ${err.message}, trying page parse...`);
+    console.log(`[CI Scraper] WEB_API failed for ${handle}: ${err.message}, trying HTML_PARSE...`);
+    attempts.push("HTML_PARSE");
     try {
       const result = await attemptHtmlPageParse(profileUrl, handle);
       posts = result.posts;
@@ -481,12 +484,12 @@ export async function scrapeInstagramProfile(rawUrl: string): Promise<ScrapeResu
       if (posts.length > 0) {
         collectionMethodUsed = "HTML_PARSE";
         scrapeStats.htmlParseSuccess++;
-        console.log(`[CI Scraper] HTML_PARSE SUCCESS (page parse): ${posts.length} posts for ${handle}`);
+        console.log(`[CI Scraper] HTML_PARSE SUCCESS: ${posts.length} posts for ${handle}`);
       } else {
         console.log(`[CI Scraper] HTML_PARSE: Page loaded but no post data extracted for ${handle}`);
       }
     } catch (err2: any) {
-      warnings.push(`HTML_PARSE failed: ${err.message} | page parse: ${err2.message}`);
+      warnings.push(`WEB_API failed: ${err.message} | HTML_PARSE failed: ${err2.message}`);
       console.log(`[CI Scraper] HTML_PARSE FAILED for ${handle}: ${err2.message}`);
     }
   }

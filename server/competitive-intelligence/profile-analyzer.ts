@@ -50,7 +50,7 @@ export interface ProfileAnalysisResult {
   warnings: WarningCode[];
   warningDetails: string[];
   source_type: "PUBLIC_HTML";
-  collection_method_used: "HTML_PARSE" | "HEADLESS_RENDER" | "NONE";
+  collection_method_used: "WEB_API" | "HTML_PARSE" | "HEADLESS_RENDER" | "NONE";
   attempts: string[];
   scannedPosts: number;
   profileName: string | null;
