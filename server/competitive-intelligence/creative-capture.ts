@@ -24,8 +24,83 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const FRAME_TIMESTAMPS = [0, 0.5, 1.5, 3, 5];
 const MAX_REELS_PER_COMPETITOR = 5;
 const RATE_LIMIT_MS = 60 * 1000;
+const PURGE_INTERVAL_MS = 15 * 60 * 1000;
+const MAX_PINNED_COMMENT_FETCHES_PER_WEEK = 100;
 
 let lastCompetitorTime = 0;
+let weeklyPinnedCommentFetches = 0;
+let pinnedCommentWeekStart = Date.now();
+let purgeIntervalHandle: ReturnType<typeof setInterval> | null = null;
+
+function startPurgeScheduler(): void {
+  if (purgeIntervalHandle) return;
+  purgeIntervalHandle = setInterval(() => {
+    enforceAssetPurge();
+  }, PURGE_INTERVAL_MS);
+  console.log(`[Creative Capture] Hard purge scheduler started (every ${PURGE_INTERVAL_MS / 60000}min)`);
+}
+
+function enforceAssetPurge(): { purgedFiles: number; purgedDirs: number; orphansRemoved: number } {
+  let purgedFiles = 0;
+  let purgedDirs = 0;
+  let orphansRemoved = 0;
+  if (!fs.existsSync(CACHE_DIR)) return { purgedFiles, purgedDirs, orphansRemoved };
+
+  const now = Date.now();
+  try {
+    const entries = fs.readdirSync(CACHE_DIR, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = path.join(CACHE_DIR, entry.name);
+      const stat = fs.statSync(entryPath);
+      const age = now - stat.mtimeMs;
+
+      if (age > CACHE_TTL_MS) {
+        if (entry.isDirectory()) {
+          const subFiles = fs.readdirSync(entryPath);
+          for (const sf of subFiles) {
+            try { fs.unlinkSync(path.join(entryPath, sf)); purgedFiles++; } catch {}
+          }
+          try { fs.rmdirSync(entryPath); purgedDirs++; } catch {}
+        } else {
+          try { fs.unlinkSync(entryPath); purgedFiles++; } catch {}
+        }
+      } else if (entry.isDirectory()) {
+        const subFiles = fs.readdirSync(entryPath);
+        for (const sf of subFiles) {
+          const sfPath = path.join(entryPath, sf);
+          try {
+            const sfStat = fs.statSync(sfPath);
+            if (now - sfStat.mtimeMs > CACHE_TTL_MS) {
+              fs.unlinkSync(sfPath);
+              orphansRemoved++;
+            }
+          } catch {}
+        }
+        const remaining = fs.readdirSync(entryPath);
+        if (remaining.length === 0) {
+          try { fs.rmdirSync(entryPath); purgedDirs++; } catch {}
+        }
+      }
+    }
+  } catch (err: any) {
+    console.log(`[Creative Capture] Purge error: ${err.message}`);
+  }
+
+  if (purgedFiles > 0 || purgedDirs > 0 || orphansRemoved > 0) {
+    console.log(`[Creative Capture] Hard purge: ${purgedFiles} files, ${purgedDirs} dirs, ${orphansRemoved} orphans removed`);
+  }
+  return { purgedFiles, purgedDirs, orphansRemoved };
+}
+
+export function getPurgeStatus(): { lastPurge: string; nextPurge: string; schedulerActive: boolean } {
+  return {
+    lastPurge: new Date().toISOString(),
+    nextPurge: new Date(Date.now() + PURGE_INTERVAL_MS).toISOString(),
+    schedulerActive: purgeIntervalHandle !== null,
+  };
+}
+
+startPurgeScheduler();
 
 function ensureCacheDir(): void {
   if (!fs.existsSync(CACHE_DIR)) {
@@ -83,6 +158,13 @@ export interface DeterministicSignals {
   urgencySignals: { text: string; source: string; language: string }[];
 }
 
+export interface ConfidenceBreakdown {
+  ocr_confidence: number | null;
+  transcript_confidence: number | null;
+  rule_confidence: number;
+  overall_data_quality: number;
+}
+
 export interface EvidencePack {
   reelPermalink: string;
   shortcode: string;
@@ -104,6 +186,11 @@ export interface EvidencePack {
 
   deterministicSignals: DeterministicSignals;
 
+  confidenceBreakdown: ConfidenceBreakdown;
+
+  asset_ttl_hours: number;
+  purge_scheduled_at: string;
+
   status: "COMPLETE" | "PARTIAL";
 }
 
@@ -122,13 +209,23 @@ export interface CreativeCaptureResult {
 }
 
 const CTA_PATTERNS_EN = /\b(dm\s*(us|me|now)?|comment\s*(below)?|book\s*(now|a\s*call|today)?|whatsapp|link\s*in\s*bio|tap|swipe\s*up|call\s*(us|now)|order\s*(now|today)?|sign\s*up|register|subscribe|shop\s*now|get\s*started|learn\s*more|apply\s*now|send\s*(a\s*)?message|click|grab)\b/gi;
-const CTA_PATTERNS_AR = /(احجز|تواصل|رسالة|اطلب|اضغط|سجل|اشترك|تسوق|ابدأ|اتصل|ارسل|اطلع)/g;
+const CTA_PATTERNS_AR = /(احجز|تواصل|رسالة|اطلب|اضغط|سجل|اشترك|تسوق|ابدا|اتصل|ارسل|اطلع)/g;
 
 const OFFER_PATTERNS_EN = /\b(AED|USD|SAR|\$|€|free|starting\s*from|starts?\s*at|audit|consultation|off|discount|deal|offer|bonus|save|promo|trial|sample|complimentary|no\s*cost)\b/gi;
-const OFFER_PATTERNS_AR = /(مجاني|خصم|عرض|يبدأ من|تدقيق|استشارة|تجربة|هدية|توفير|سعر)/g;
+const OFFER_PATTERNS_AR = /(مجاني|خصم|عرض|يبدا من|تدقيق|استشارة|تجربة|هدية|توفير|سعر)/g;
 
 const URGENCY_PATTERNS_EN = /\b(today|limited|deadline|spots?\s*left|last\s*chance|ends?\s*(soon|today)?|hurry|now\s*or\s*never|don'?t\s*miss|act\s*now|only\s*\d+|few\s*left|closing\s*soon|expires?|countdown|rush|asap)\b/gi;
-const URGENCY_PATTERNS_AR = /(اليوم|محدود|آخر فرصة|ينتهي|عجل|لا تفوت|باقي|قريبا|حصري|الآن)/g;
+const URGENCY_PATTERNS_AR = /(اليوم|محدود|اخر فرصة|ينتهي|عجل|لا تفوت|باقي|قريبا|حصري|الان)/g;
+
+function normalizeArabicText(text: string): string {
+  let normalized = text;
+  normalized = normalized.replace(/[\u064B-\u065F\u0670\u06D6-\u06DC\u06DF-\u06E4\u06E7\u06E8\u06EA-\u06ED]/g, "");
+  normalized = normalized.replace(/[أإآ]/g, "ا");
+  normalized = normalized.replace(/ى/g, "ي");
+  normalized = normalized.replace(/ة/g, "ه");
+  normalized = normalized.replace(/\u0640/g, "");
+  return normalized;
+}
 
 function extractDeterministicSignals(text: string, source: string): DeterministicSignals {
   const ctaSignals: DeterministicSignals["ctaSignals"] = [];
@@ -136,12 +233,13 @@ function extractDeterministicSignals(text: string, source: string): Deterministi
   const urgencySignals: DeterministicSignals["urgencySignals"] = [];
 
   const seen = new Set<string>();
+  const normalizedAr = normalizeArabicText(text);
 
   for (const match of text.matchAll(CTA_PATTERNS_EN)) {
     const key = `cta_en_${match[0].toLowerCase()}`;
     if (!seen.has(key)) { seen.add(key); ctaSignals.push({ text: match[0], source, language: "EN" }); }
   }
-  for (const match of text.matchAll(CTA_PATTERNS_AR)) {
+  for (const match of normalizedAr.matchAll(CTA_PATTERNS_AR)) {
     const key = `cta_ar_${match[0]}`;
     if (!seen.has(key)) { seen.add(key); ctaSignals.push({ text: match[0], source, language: "AR" }); }
   }
@@ -150,7 +248,7 @@ function extractDeterministicSignals(text: string, source: string): Deterministi
     const key = `offer_en_${match[0].toLowerCase()}`;
     if (!seen.has(key)) { seen.add(key); offerSignals.push({ text: match[0], source, language: "EN" }); }
   }
-  for (const match of text.matchAll(OFFER_PATTERNS_AR)) {
+  for (const match of normalizedAr.matchAll(OFFER_PATTERNS_AR)) {
     const key = `offer_ar_${match[0]}`;
     if (!seen.has(key)) { seen.add(key); offerSignals.push({ text: match[0], source, language: "AR" }); }
   }
@@ -159,7 +257,7 @@ function extractDeterministicSignals(text: string, source: string): Deterministi
     const key = `urg_en_${match[0].toLowerCase()}`;
     if (!seen.has(key)) { seen.add(key); urgencySignals.push({ text: match[0], source, language: "EN" }); }
   }
-  for (const match of text.matchAll(URGENCY_PATTERNS_AR)) {
+  for (const match of normalizedAr.matchAll(URGENCY_PATTERNS_AR)) {
     const key = `urg_ar_${match[0]}`;
     if (!seen.has(key)) { seen.add(key); urgencySignals.push({ text: match[0], source, language: "AR" }); }
   }
@@ -377,8 +475,13 @@ async function transcribeAudio(audioPath: string): Promise<{ transcript: string;
   }
 }
 
-async function fetchPinnedComment(shortcode: string): Promise<string | null> {
-  if (!shortcode) return null;
+interface PinnedCommentResult {
+  text: string | null;
+  warning: { source: string; code: string; reason: string } | null;
+}
+
+async function fetchPinnedComment(shortcode: string): Promise<PinnedCommentResult> {
+  if (!shortcode) return { text: null, warning: { source: "pinned_comment", code: "PINNED_COMMENT_UNAVAILABLE", reason: "No shortcode provided" } };
 
   const postUrl = `https://www.instagram.com/p/${shortcode}/`;
   const dispatcher = getProxyDispatcher();
@@ -393,53 +496,74 @@ async function fetchPinnedComment(shortcode: string): Promise<string | null> {
 
   try {
     const response = await fetch(postUrl, fetchOptions);
+    if (response.status === 429) {
+      console.log(`[Creative Capture] Pinned comment fetch 429 for ${shortcode}`);
+      return { text: null, warning: { source: "pinned_comment", code: "PINNED_COMMENT_FETCH_429", reason: "Rate limited by Instagram (HTTP 429) — retrying later" } };
+    }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const html = await response.text();
 
+    let parseMethodWorked = false;
+
     const sharedDataMatch = html.match(/window\._sharedData\s*=\s*({.+?});<\/script>/s);
     if (sharedDataMatch) {
-      const sharedData = JSON.parse(sharedDataMatch[1]);
-      const media = sharedData?.entry_data?.PostPage?.[0]?.graphql?.shortcode_media;
-      if (media) {
-        const comments = media.edge_media_to_parent_comment?.edges || [];
-        for (const edge of comments) {
-          if (edge.node?.is_pinned) {
-            return edge.node.text || null;
+      parseMethodWorked = true;
+      try {
+        const sharedData = JSON.parse(sharedDataMatch[1]);
+        const media = sharedData?.entry_data?.PostPage?.[0]?.graphql?.shortcode_media;
+        if (media) {
+          const comments = media.edge_media_to_parent_comment?.edges || [];
+          for (const edge of comments) {
+            if (edge.node?.is_pinned) {
+              return { text: edge.node.text || null, warning: null };
+            }
           }
         }
+      } catch {
+        return { text: null, warning: { source: "pinned_comment", code: "PINNED_COMMENT_PARSE_CHANGED", reason: "window._sharedData JSON structure changed — parser needs update" } };
       }
     }
 
     const additionalDataMatch = html.match(/window\.__additionalDataLoaded\s*\([^,]+,\s*({.+?})\s*\);<\/script>/s);
     if (additionalDataMatch) {
-      const data = JSON.parse(additionalDataMatch[1]);
-      const media = data?.graphql?.shortcode_media || data?.shortcode_media;
-      if (media) {
-        const comments = media.edge_media_to_parent_comment?.edges || [];
-        for (const edge of comments) {
-          if (edge.node?.is_pinned) {
-            return edge.node.text || null;
+      parseMethodWorked = true;
+      try {
+        const data = JSON.parse(additionalDataMatch[1]);
+        const media = data?.graphql?.shortcode_media || data?.shortcode_media;
+        if (media) {
+          const comments = media.edge_media_to_parent_comment?.edges || [];
+          for (const edge of comments) {
+            if (edge.node?.is_pinned) {
+              return { text: edge.node.text || null, warning: null };
+            }
           }
         }
+      } catch {
+        return { text: null, warning: { source: "pinned_comment", code: "PINNED_COMMENT_PARSE_CHANGED", reason: "window.__additionalDataLoaded JSON structure changed — parser needs update" } };
       }
     }
 
     const jsonMatches = html.matchAll(/"is_pinned"\s*:\s*true/g);
     for (const _ of jsonMatches) {
+      parseMethodWorked = true;
       const commentBlockMatch = html.match(/"text"\s*:\s*"([^"]{3,500})"\s*[,}][\s\S]{0,200}"is_pinned"\s*:\s*true/);
       if (commentBlockMatch) {
-        return commentBlockMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"');
+        return { text: commentBlockMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"'), warning: null };
       }
       const reverseMatch = html.match(/"is_pinned"\s*:\s*true[\s\S]{0,200}"text"\s*:\s*"([^"]{3,500})"/);
       if (reverseMatch) {
-        return reverseMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"');
+        return { text: reverseMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"'), warning: null };
       }
     }
 
-    return null;
+    if (!parseMethodWorked && html.length > 0 && !html.includes("edge_media_to_parent_comment") && !html.includes("is_pinned")) {
+      return { text: null, warning: { source: "pinned_comment", code: "PINNED_COMMENT_PARSE_CHANGED", reason: "Instagram HTML structure no longer contains expected comment data markers — parser may need update" } };
+    }
+
+    return { text: null, warning: null };
   } catch (err: any) {
     console.log(`[Creative Capture] Pinned comment fetch failed for ${shortcode}: ${err.message}`);
-    return null;
+    return { text: null, warning: { source: "pinned_comment", code: "PINNED_COMMENT_UNAVAILABLE", reason: `Fetch failed: ${err.message}` } };
   }
 }
 
@@ -478,16 +602,30 @@ async function buildEvidencePack(post: ScrapedPost): Promise<EvidencePack> {
   }
 
   sourcesAttempted.push("pinned_comment");
-  try {
-    pinnedCommentText = await fetchPinnedComment(post.shortcode);
-    if (pinnedCommentText) {
-      sourcesSucceeded.push("pinned_comment");
-      console.log(`[Creative Capture] Found pinned comment for ${post.shortcode}: "${pinnedCommentText.substring(0, 80)}..."`);
-    } else {
-      warnings.push({ source: "pinned_comment", code: "PINNED_COMMENT_UNAVAILABLE", reason: "No pinned comment found on this post" });
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  if (Date.now() - pinnedCommentWeekStart > weekMs) {
+    weeklyPinnedCommentFetches = 0;
+    pinnedCommentWeekStart = Date.now();
+  }
+  if (weeklyPinnedCommentFetches >= MAX_PINNED_COMMENT_FETCHES_PER_WEEK) {
+    warnings.push({ source: "pinned_comment", code: "PINNED_COMMENT_RATE_LIMITED", reason: `Weekly pinned comment fetch cap (${MAX_PINNED_COMMENT_FETCHES_PER_WEEK}) reached` });
+  } else {
+    weeklyPinnedCommentFetches++;
+    try {
+      const pcResult = await fetchPinnedComment(post.shortcode);
+      pinnedCommentText = pcResult.text;
+      if (pcResult.warning) {
+        warnings.push(pcResult.warning);
+      }
+      if (pinnedCommentText) {
+        sourcesSucceeded.push("pinned_comment");
+        console.log(`[Creative Capture] Found pinned comment for ${post.shortcode}: "${pinnedCommentText.substring(0, 80)}..."`);
+      } else if (!pcResult.warning) {
+        warnings.push({ source: "pinned_comment", code: "PINNED_COMMENT_UNAVAILABLE", reason: "No pinned comment found on this post" });
+      }
+    } catch (err: any) {
+      warnings.push({ source: "pinned_comment", code: "PINNED_COMMENT_UNAVAILABLE", reason: `Fetch failed: ${err.message}` });
     }
-  } catch (err: any) {
-    warnings.push({ source: "pinned_comment", code: "PINNED_COMMENT_UNAVAILABLE", reason: `Fetch failed: ${err.message}` });
   }
 
   let videoDownloaded = false;
@@ -562,6 +700,29 @@ async function buildEvidencePack(post: ScrapedPost): Promise<EvidencePack> {
   const hasAnyEvidence = fullCaption || ocrFullText || transcript || pinnedCommentText;
   const status: EvidencePack["status"] = sourcesSucceeded.includes("video") || (sourcesSucceeded.length >= 2) ? "COMPLETE" : "PARTIAL";
 
+  const avgOcrConfidence = ocrFrameResults.length > 0
+    ? ocrFrameResults.reduce((sum, r) => sum + r.confidence, 0) / ocrFrameResults.length
+    : null;
+  const totalDeterministicHits = deterministicSignals.ctaSignals.length + deterministicSignals.offerSignals.length + deterministicSignals.urgencySignals.length;
+  const ruleConfidence = totalDeterministicHits > 0 ? 1.0 : 0;
+  const qualityFactors = [
+    avgOcrConfidence !== null ? avgOcrConfidence : 0,
+    transcriptConfidence !== null ? transcriptConfidence : 0,
+    ruleConfidence,
+    fullCaption ? 1.0 : 0,
+    pinnedCommentText ? 1.0 : 0,
+  ];
+  const overallQuality = qualityFactors.reduce((a, b) => a + b, 0) / qualityFactors.length;
+
+  const confidenceBreakdown: ConfidenceBreakdown = {
+    ocr_confidence: avgOcrConfidence !== null ? Math.round(avgOcrConfidence * 1000) / 1000 : null,
+    transcript_confidence: transcriptConfidence !== null ? Math.round(transcriptConfidence * 1000) / 1000 : null,
+    rule_confidence: ruleConfidence,
+    overall_data_quality: Math.round(overallQuality * 1000) / 1000,
+  };
+
+  const purgeScheduledAt = new Date(Date.now() + CACHE_TTL_MS).toISOString();
+
   return {
     reelPermalink: post.permalink,
     shortcode: post.shortcode,
@@ -578,6 +739,9 @@ async function buildEvidencePack(post: ScrapedPost): Promise<EvidencePack> {
     transcript,
     transcriptConfidence,
     deterministicSignals,
+    confidenceBreakdown,
+    asset_ttl_hours: 24,
+    purge_scheduled_at: purgeScheduledAt,
     status,
   };
 }
@@ -871,6 +1035,9 @@ export function getCreativeCaptureStats() {
     cacheSizeMB: Math.round((cacheSize / (1024 * 1024)) * 100) / 100,
     cachedFiles,
     weekStartedAt: new Date(weekStartTime).toISOString(),
+    pinnedCommentFetchesThisWeek: weeklyPinnedCommentFetches,
+    pinnedCommentFetchCap: MAX_PINNED_COMMENT_FETCHES_PER_WEEK,
+    purge: getPurgeStatus(),
   };
 }
 

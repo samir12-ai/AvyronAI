@@ -113,6 +113,8 @@ export default function CompetitiveIntelligence() {
   const [addStep, setAddStep] = useState<'input' | 'review'>('input');
   const [viralInsights, setViralInsights] = useState('');
   const [showManualFields, setShowManualFields] = useState(false);
+  const [ccExpanded, setCcExpanded] = useState(false);
+  const [ccReelExpanded, setCcReelExpanded] = useState<Record<number, boolean>>({});
   const [profileAnalysis, setProfileAnalysis] = useState<any>(null);
 
   const [newComp, setNewComp] = useState({
@@ -1079,146 +1081,205 @@ export default function CompetitiveIntelligence() {
 
                       {profileAnalysis.creativeCapture && profileAnalysis.creativeCapture.length > 0 && (
                         <>
-                          <View style={[s.sectionDivider, { borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                          <Pressable
+                            onPress={() => setCcExpanded(!ccExpanded)}
+                            style={[s.sectionDivider, { borderColor: isDark ? '#1A2030' : '#E2E8E4', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
+                          >
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                               <Ionicons name="videocam" size={14} color="#8B5CF6" />
                               <Text style={[s.sectionDividerText, { color: '#8B5CF6' }]}>CREATIVE CAPTURE ({profileAnalysis.creativeCapture.length} reels)</Text>
                             </View>
-                          </View>
+                            <Ionicons name={ccExpanded ? 'chevron-up' : 'chevron-down'} size={16} color="#8B5CF6" />
+                          </Pressable>
 
-                          {profileAnalysis.creativeCapture.map((cc: any, ci: number) => (
-                            <View key={ci} style={[s.insightsCard, { backgroundColor: isDark ? '#1A1A2E' : '#F8F7FF', borderColor: '#8B5CF6' + '30', marginBottom: 8 }]}>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                                <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6' }}>Reel {ci + 1}</Text>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: cc.evidencePack?.status === 'COMPLETE' ? '#10B981' : '#F59E0B' }} />
-                                  <Text style={{ fontSize: 9, color: cc.evidencePack?.status === 'COMPLETE' ? '#10B981' : '#F59E0B', fontWeight: '600' }}>
-                                    {cc.evidencePack?.status}
-                                  </Text>
-                                </View>
-                              </View>
+                          {profileAnalysis.creativeCapture.map((cc: any, ci: number) => {
+                            const summaryParts: string[] = [];
+                            const sources = new Set<string>();
+                            if (cc.interpreted?.hookCandidates?.length > 0) {
+                              cc.interpreted.hookCandidates.forEach((h: any) => sources.add(h.source));
+                              summaryParts.push(`Hook: MEASURED (${[...sources].join(' + ')})`);
+                            }
+                            sources.clear();
+                            if (cc.interpreted?.ctaSignals?.length > 0) {
+                              cc.interpreted.ctaSignals.forEach((c: any) => sources.add(c.source));
+                              summaryParts.push(`CTA: MEASURED (${[...sources].join(' + ')})`);
+                            }
+                            sources.clear();
+                            if (cc.interpreted?.offerSignals?.length > 0) {
+                              cc.interpreted.offerSignals.forEach((o: any) => sources.add(o.source));
+                              summaryParts.push(`Offer: MEASURED (${[...sources].join(' + ')})`);
+                            }
+                            if (cc.interpreted?.unavailable?.length > 0) {
+                              summaryParts.push(`${cc.interpreted.unavailable.length} UNAVAILABLE`);
+                            }
+                            const summaryLine = summaryParts.length > 0 ? summaryParts.join(' | ') : 'No signals detected';
+                            const isReelExpanded = ccReelExpanded[ci] || false;
+                            const cb = cc.evidencePack?.confidenceBreakdown;
 
-                              <View style={{ marginBottom: 6 }}>
-                                <Text style={{ fontSize: 9, color: colors.textMuted }}>
-                                  Sources: {cc.evidencePack?.sourcesSucceeded?.join(', ') || 'none'} ({cc.evidencePack?.sourcesSucceeded?.length || 0}/{cc.evidencePack?.sourcesAttempted?.length || 0})
-                                </Text>
-                              </View>
-
-                              {cc.evidencePack?.warnings?.length > 0 && (
-                                <View style={{ marginBottom: 6 }}>
-                                  {cc.evidencePack.warnings.map((w: any, wi: number) => (
-                                    <Text key={wi} style={{ fontSize: 9, color: '#F59E0B', fontStyle: 'italic' }}>
-                                      {w.code}: {w.reason}
+                            return (
+                              <View key={ci} style={[s.insightsCard, { backgroundColor: isDark ? '#1A1A2E' : '#F8F7FF', borderColor: '#8B5CF6' + '30', marginBottom: 8 }]}>
+                                <Pressable
+                                  onPress={() => setCcReelExpanded(prev => ({ ...prev, [ci]: !prev[ci] }))}
+                                  style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}
+                                >
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6' }}>Reel {ci + 1}</Text>
+                                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: cc.evidencePack?.status === 'COMPLETE' ? '#10B981' : '#F59E0B' }} />
+                                    <Text style={{ fontSize: 9, color: cc.evidencePack?.status === 'COMPLETE' ? '#10B981' : '#F59E0B', fontWeight: '600' }}>
+                                      {cc.evidencePack?.status}
                                     </Text>
-                                  ))}
-                                </View>
-                              )}
+                                  </View>
+                                  <Ionicons name={isReelExpanded ? 'chevron-up' : 'chevron-down'} size={14} color="#8B5CF6" />
+                                </Pressable>
 
-                              {cc.interpreted?.hookCandidates?.length > 0 && (
-                                <View style={{ marginBottom: 4 }}>
-                                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#10B981', marginBottom: 2 }}>Hook Candidates</Text>
-                                  {cc.interpreted.hookCandidates.map((h: any, hi: number) => (
-                                    <View key={hi} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                                      <View style={{ backgroundColor: '#10B981' + '20', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
-                                        <Text style={{ fontSize: 8, color: '#10B981', fontWeight: '600' }}>MEASURED</Text>
-                                      </View>
-                                      <Text style={{ fontSize: 10, color: colors.text, flex: 1 }} numberOfLines={2}>{h.text}</Text>
-                                      <Text style={{ fontSize: 8, color: colors.textMuted }}>{h.source} ({Math.round(h.confidence * 100)}%)</Text>
-                                    </View>
-                                  ))}
-                                </View>
-                              )}
+                                <Text style={{ fontSize: 10, color: colors.text, lineHeight: 15 }} numberOfLines={2}>
+                                  {summaryLine}
+                                </Text>
 
-                              {cc.interpreted?.ctaSignals?.length > 0 && (
-                                <View style={{ marginBottom: 4 }}>
-                                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#3B82F6', marginBottom: 2 }}>CTA Signals</Text>
-                                  {cc.interpreted.ctaSignals.map((c: any, csi: number) => (
-                                    <View key={csi} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                                      <View style={{ backgroundColor: '#3B82F6' + '20', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
-                                        <Text style={{ fontSize: 8, color: '#3B82F6', fontWeight: '600' }}>MEASURED</Text>
-                                      </View>
-                                      <Text style={{ fontSize: 10, color: colors.text }}>{c.text}</Text>
-                                      <Text style={{ fontSize: 8, color: colors.textMuted }}>{c.source}</Text>
-                                    </View>
-                                  ))}
-                                </View>
-                              )}
+                                {cb && (
+                                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                                    {cb.ocr_confidence !== null && (
+                                      <Text style={{ fontSize: 8, color: colors.textMuted }}>OCR: {Math.round(cb.ocr_confidence * 100)}%</Text>
+                                    )}
+                                    {cb.transcript_confidence !== null && (
+                                      <Text style={{ fontSize: 8, color: colors.textMuted }}>Transcript: {Math.round(cb.transcript_confidence * 100)}%</Text>
+                                    )}
+                                    <Text style={{ fontSize: 8, color: colors.textMuted }}>Rules: {cb.rule_confidence === 1 ? '100%' : '0%'}</Text>
+                                    <Text style={{ fontSize: 8, color: colors.textMuted }}>Quality: {Math.round(cb.overall_data_quality * 100)}%</Text>
+                                  </View>
+                                )}
 
-                              {cc.interpreted?.offerSignals?.length > 0 && (
-                                <View style={{ marginBottom: 4 }}>
-                                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#F59E0B', marginBottom: 2 }}>Offer Signals</Text>
-                                  {cc.interpreted.offerSignals.map((o: any, oi: number) => (
-                                    <View key={oi} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                                      <View style={{ backgroundColor: '#F59E0B' + '20', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
-                                        <Text style={{ fontSize: 8, color: '#F59E0B', fontWeight: '600' }}>MEASURED</Text>
-                                      </View>
-                                      <Text style={{ fontSize: 10, color: colors.text }}>{o.text}</Text>
-                                      <Text style={{ fontSize: 8, color: colors.textMuted }}>{o.source}</Text>
-                                    </View>
-                                  ))}
-                                </View>
-                              )}
-
-                              {cc.interpreted?.proofSignals?.length > 0 && (
-                                <View style={{ marginBottom: 4 }}>
-                                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#EC4899', marginBottom: 2 }}>Proof Signals</Text>
-                                  {cc.interpreted.proofSignals.map((p: any, pi: number) => (
-                                    <View key={pi} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                                      <View style={{ backgroundColor: '#EC4899' + '20', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
-                                        <Text style={{ fontSize: 8, color: '#EC4899', fontWeight: '600' }}>MEASURED</Text>
-                                      </View>
-                                      <Text style={{ fontSize: 10, color: colors.text }}>{p.text}</Text>
-                                      <Text style={{ fontSize: 8, color: colors.textMuted }}>{p.source}</Text>
-                                    </View>
-                                  ))}
-                                </View>
-                              )}
-
-                              {cc.interpreted?.unavailable?.length > 0 && (
-                                <View style={{ marginTop: 4 }}>
-                                  {cc.interpreted.unavailable.map((u: any, ui: number) => (
-                                    <View key={ui} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                                      <View style={{ backgroundColor: '#6B7280' + '20', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
-                                        <Text style={{ fontSize: 8, color: '#6B7280', fontWeight: '600' }}>UNAVAILABLE</Text>
-                                      </View>
-                                      <Text style={{ fontSize: 9, color: colors.textMuted, flex: 1 }}>
-                                        {u.signal}: {u.reason}
+                                {(ccExpanded || isReelExpanded) && (
+                                  <View style={{ marginTop: 8 }}>
+                                    <View style={{ marginBottom: 6 }}>
+                                      <Text style={{ fontSize: 9, color: colors.textMuted }}>
+                                        Sources: {cc.evidencePack?.sourcesSucceeded?.join(', ') || 'none'} ({cc.evidencePack?.sourcesSucceeded?.length || 0}/{cc.evidencePack?.sourcesAttempted?.length || 0})
                                       </Text>
+                                      {cc.evidencePack?.asset_ttl_hours && (
+                                        <Text style={{ fontSize: 8, color: colors.textMuted, marginTop: 2 }}>
+                                          Asset TTL: {cc.evidencePack.asset_ttl_hours}h | Purge: {cc.evidencePack.purge_scheduled_at ? new Date(cc.evidencePack.purge_scheduled_at).toLocaleTimeString() : 'N/A'}
+                                        </Text>
+                                      )}
                                     </View>
-                                  ))}
-                                </View>
-                              )}
 
-                              {cc.evidencePack?.ocrTopLines?.length > 0 && (
-                                <View style={{ marginTop: 4, padding: 4, backgroundColor: isDark ? '#0D1117' : '#F0F0F0', borderRadius: 4 }}>
-                                  <Text style={{ fontSize: 9, fontWeight: '600', color: colors.textMuted, marginBottom: 2 }}>OCR Text (deduplicated)</Text>
-                                  <Text style={{ fontSize: 9, color: colors.text }} numberOfLines={3}>
-                                    {cc.evidencePack.ocrTopLines.slice(0, 5).join(' | ')}
-                                  </Text>
-                                </View>
-                              )}
+                                    {cc.evidencePack?.warnings?.length > 0 && (
+                                      <View style={{ marginBottom: 6 }}>
+                                        {cc.evidencePack.warnings.map((w: any, wi: number) => (
+                                          <Text key={wi} style={{ fontSize: 9, color: '#F59E0B', fontStyle: 'italic' }}>
+                                            {w.code}: {w.reason}
+                                          </Text>
+                                        ))}
+                                      </View>
+                                    )}
 
-                              {cc.evidencePack?.transcript && (
-                                <View style={{ marginTop: 4, padding: 4, backgroundColor: isDark ? '#0D1117' : '#F0F0F0', borderRadius: 4 }}>
-                                  <Text style={{ fontSize: 9, fontWeight: '600', color: colors.textMuted, marginBottom: 2 }}>
-                                    Transcript (confidence: {cc.evidencePack.transcriptConfidence ? Math.round(cc.evidencePack.transcriptConfidence * 100) + '%' : 'N/A'})
-                                  </Text>
-                                  <Text style={{ fontSize: 9, color: colors.text }} numberOfLines={3}>
-                                    {cc.evidencePack.transcript.substring(0, 200)}
-                                  </Text>
-                                </View>
-                              )}
+                                    {cc.interpreted?.hookCandidates?.length > 0 && (
+                                      <View style={{ marginBottom: 4 }}>
+                                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#10B981', marginBottom: 2 }}>Hook Candidates</Text>
+                                        {cc.interpreted.hookCandidates.map((h: any, hi: number) => (
+                                          <View key={hi} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                                            <View style={{ backgroundColor: '#10B981' + '20', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
+                                              <Text style={{ fontSize: 8, color: '#10B981', fontWeight: '600' }}>MEASURED</Text>
+                                            </View>
+                                            <Text style={{ fontSize: 10, color: colors.text, flex: 1 }} numberOfLines={2}>{h.text}</Text>
+                                            <Text style={{ fontSize: 8, color: colors.textMuted }}>{h.source} ({Math.round(h.confidence * 100)}%)</Text>
+                                          </View>
+                                        ))}
+                                      </View>
+                                    )}
 
-                              {cc.evidencePack?.pinnedCommentText && (
-                                <View style={{ marginTop: 4, padding: 4, backgroundColor: isDark ? '#0D1117' : '#F0F0F0', borderRadius: 4 }}>
-                                  <Text style={{ fontSize: 9, fontWeight: '600', color: colors.textMuted, marginBottom: 2 }}>Pinned Comment</Text>
-                                  <Text style={{ fontSize: 9, color: colors.text }} numberOfLines={2}>
-                                    {cc.evidencePack.pinnedCommentText.substring(0, 200)}
-                                  </Text>
-                                </View>
-                              )}
-                            </View>
-                          ))}
+                                    {cc.interpreted?.ctaSignals?.length > 0 && (
+                                      <View style={{ marginBottom: 4 }}>
+                                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#3B82F6', marginBottom: 2 }}>CTA Signals</Text>
+                                        {cc.interpreted.ctaSignals.map((c: any, csi: number) => (
+                                          <View key={csi} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                                            <View style={{ backgroundColor: '#3B82F6' + '20', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
+                                              <Text style={{ fontSize: 8, color: '#3B82F6', fontWeight: '600' }}>MEASURED</Text>
+                                            </View>
+                                            <Text style={{ fontSize: 10, color: colors.text }}>{c.text}</Text>
+                                            <Text style={{ fontSize: 8, color: colors.textMuted }}>{c.source}</Text>
+                                          </View>
+                                        ))}
+                                      </View>
+                                    )}
+
+                                    {cc.interpreted?.offerSignals?.length > 0 && (
+                                      <View style={{ marginBottom: 4 }}>
+                                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#F59E0B', marginBottom: 2 }}>Offer Signals</Text>
+                                        {cc.interpreted.offerSignals.map((o: any, oi: number) => (
+                                          <View key={oi} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                                            <View style={{ backgroundColor: '#F59E0B' + '20', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
+                                              <Text style={{ fontSize: 8, color: '#F59E0B', fontWeight: '600' }}>MEASURED</Text>
+                                            </View>
+                                            <Text style={{ fontSize: 10, color: colors.text }}>{o.text}</Text>
+                                            <Text style={{ fontSize: 8, color: colors.textMuted }}>{o.source}</Text>
+                                          </View>
+                                        ))}
+                                      </View>
+                                    )}
+
+                                    {cc.interpreted?.proofSignals?.length > 0 && (
+                                      <View style={{ marginBottom: 4 }}>
+                                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#EC4899', marginBottom: 2 }}>Proof Signals</Text>
+                                        {cc.interpreted.proofSignals.map((p: any, pi: number) => (
+                                          <View key={pi} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                                            <View style={{ backgroundColor: '#EC4899' + '20', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
+                                              <Text style={{ fontSize: 8, color: '#EC4899', fontWeight: '600' }}>MEASURED</Text>
+                                            </View>
+                                            <Text style={{ fontSize: 10, color: colors.text }}>{p.text}</Text>
+                                            <Text style={{ fontSize: 8, color: colors.textMuted }}>{p.source}</Text>
+                                          </View>
+                                        ))}
+                                      </View>
+                                    )}
+
+                                    {cc.interpreted?.unavailable?.length > 0 && (
+                                      <View style={{ marginTop: 4 }}>
+                                        {cc.interpreted.unavailable.map((u: any, ui: number) => (
+                                          <View key={ui} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                                            <View style={{ backgroundColor: '#6B7280' + '20', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
+                                              <Text style={{ fontSize: 8, color: '#6B7280', fontWeight: '600' }}>UNAVAILABLE</Text>
+                                            </View>
+                                            <Text style={{ fontSize: 9, color: colors.textMuted, flex: 1 }}>
+                                              {u.signal}: {u.reason}
+                                            </Text>
+                                          </View>
+                                        ))}
+                                      </View>
+                                    )}
+
+                                    {cc.evidencePack?.ocrTopLines?.length > 0 && (
+                                      <View style={{ marginTop: 4, padding: 4, backgroundColor: isDark ? '#0D1117' : '#F0F0F0', borderRadius: 4 }}>
+                                        <Text style={{ fontSize: 9, fontWeight: '600', color: colors.textMuted, marginBottom: 2 }}>OCR Text (deduplicated)</Text>
+                                        <Text style={{ fontSize: 9, color: colors.text }} numberOfLines={3}>
+                                          {cc.evidencePack.ocrTopLines.slice(0, 5).join(' | ')}
+                                        </Text>
+                                      </View>
+                                    )}
+
+                                    {cc.evidencePack?.transcript && (
+                                      <View style={{ marginTop: 4, padding: 4, backgroundColor: isDark ? '#0D1117' : '#F0F0F0', borderRadius: 4 }}>
+                                        <Text style={{ fontSize: 9, fontWeight: '600', color: colors.textMuted, marginBottom: 2 }}>
+                                          Transcript (confidence: {cc.evidencePack.transcriptConfidence ? Math.round(cc.evidencePack.transcriptConfidence * 100) + '%' : 'N/A'})
+                                        </Text>
+                                        <Text style={{ fontSize: 9, color: colors.text }} numberOfLines={3}>
+                                          {cc.evidencePack.transcript.substring(0, 200)}
+                                        </Text>
+                                      </View>
+                                    )}
+
+                                    {cc.evidencePack?.pinnedCommentText && (
+                                      <View style={{ marginTop: 4, padding: 4, backgroundColor: isDark ? '#0D1117' : '#F0F0F0', borderRadius: 4 }}>
+                                        <Text style={{ fontSize: 9, fontWeight: '600', color: colors.textMuted, marginBottom: 2 }}>Pinned Comment</Text>
+                                        <Text style={{ fontSize: 9, color: colors.text }} numberOfLines={2}>
+                                          {cc.evidencePack.pinnedCommentText.substring(0, 200)}
+                                        </Text>
+                                      </View>
+                                    )}
+                                  </View>
+                                )}
+                              </View>
+                            );
+                          })}
                         </>
                       )}
 

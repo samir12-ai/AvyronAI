@@ -30,7 +30,15 @@
       "ctaKeywords": ["SWIPE UP", "JOIN"],
       "offerKeywords": ["FREE TRIAL", "7 DAYS", "free 7 day trial"],
       "urgencyKeywords": ["now is the time"]
-    }
+    },
+    "confidenceBreakdown": {
+      "ocr_confidence": 0.87,
+      "transcript_confidence": 0.87,
+      "rule_confidence": 1.0,
+      "overall_data_quality": 0.748
+    },
+    "asset_ttl_hours": 24,
+    "purge_scheduled_at": "2024-02-21T12:00:00.000Z"
   },
   "expectedInterpretation": {
     "hookCandidates": [
@@ -81,6 +89,9 @@
     "ctaSignals includes at least one from ocr source",
     "offerSignals includes 'FREE TRIAL' from ocr",
     "unavailable includes pinned_comment_cta with reason",
-    "No ESTIMATED labels appear anywhere in output"
+    "No ESTIMATED labels appear anywhere in output",
+    "confidenceBreakdown has ocr_confidence, transcript_confidence, rule_confidence, overall_data_quality",
+    "asset_ttl_hours is 24",
+    "purge_scheduled_at is present"
   ]
 }

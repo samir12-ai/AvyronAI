@@ -35,7 +35,15 @@
       "ctaKeywords": ["SHOP NOW", "Shop link in bio"],
       "offerKeywords": ["Free shipping"],
       "urgencyKeywords": []
-    }
+    },
+    "confidenceBreakdown": {
+      "ocr_confidence": 0.8,
+      "transcript_confidence": null,
+      "rule_confidence": 1.0,
+      "overall_data_quality": 0.56
+    },
+    "asset_ttl_hours": 24,
+    "purge_scheduled_at": "2024-02-21T12:00:00.000Z"
   },
   "expectedInterpretation": {
     "hookCandidates": [],
@@ -80,6 +88,9 @@
     "CTA still detected from OCR and pinned_comment despite video failure",
     "unavailable includes hook_analysis with specific reason",
     "No ESTIMATED labels appear anywhere in output",
-    "sourcesSucceeded does NOT include video_frames or audio_transcript"
+    "sourcesSucceeded does NOT include video_frames or audio_transcript",
+    "confidenceBreakdown has ocr_confidence, transcript_confidence, rule_confidence, overall_data_quality",
+    "asset_ttl_hours is 24",
+    "purge_scheduled_at is present"
   ]
 }

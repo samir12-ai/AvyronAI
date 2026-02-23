@@ -24,7 +24,15 @@
       "ctaKeywords": ["DM us", "link in bio", "shop now", "book"],
       "offerKeywords": ["50% OFF", "50 percent off"],
       "urgencyKeywords": ["LIMITED TIME", "next 48 hours"]
-    }
+    },
+    "confidenceBreakdown": {
+      "ocr_confidence": 0.9,
+      "transcript_confidence": 0.91,
+      "rule_confidence": 1.0,
+      "overall_data_quality": 0.962
+    },
+    "asset_ttl_hours": 24,
+    "purge_scheduled_at": "2024-02-21T12:00:00.000Z"
   },
   "expectedInterpretation": {
     "hookCandidates": [
@@ -62,6 +70,9 @@
     "ctaSignals includes at least one from pinned_comment source",
     "deterministicSignals.ctaKeywords includes 'DM us'",
     "No ESTIMATED labels appear anywhere in output",
-    "All signals have source attribution"
+    "All signals have source attribution",
+    "confidenceBreakdown has ocr_confidence, transcript_confidence, rule_confidence, overall_data_quality",
+    "asset_ttl_hours is 24",
+    "purge_scheduled_at is present"
   ]
 }

@@ -45,6 +45,26 @@ function runScenario1(): QAResult {
     ),
   });
 
+  assertions.push({
+    check: 'confidenceBreakdown has structured fields (ocr_confidence, transcript_confidence, rule_confidence, overall_data_quality)',
+    passed:
+      ep.confidenceBreakdown &&
+      typeof ep.confidenceBreakdown.ocr_confidence === 'number' &&
+      typeof ep.confidenceBreakdown.transcript_confidence === 'number' &&
+      typeof ep.confidenceBreakdown.rule_confidence === 'number' &&
+      typeof ep.confidenceBreakdown.overall_data_quality === 'number',
+  });
+
+  assertions.push({
+    check: 'asset_ttl_hours is 24',
+    passed: ep.asset_ttl_hours === 24,
+  });
+
+  assertions.push({
+    check: 'purge_scheduled_at is a valid timestamp',
+    passed: typeof ep.purge_scheduled_at === 'string' && ep.purge_scheduled_at.length > 0,
+  });
+
   return {
     scenario: fixture.scenario,
     assertions,
@@ -93,6 +113,26 @@ function runScenario2(): QAResult {
   assertions.push({
     check: 'No ESTIMATED labels appear anywhere in output',
     passed: !json.includes('"ESTIMATED"') && !json.includes('"estimated"'),
+  });
+
+  assertions.push({
+    check: 'confidenceBreakdown has structured fields (ocr_confidence, transcript_confidence, rule_confidence, overall_data_quality)',
+    passed:
+      ep.confidenceBreakdown &&
+      typeof ep.confidenceBreakdown.ocr_confidence === 'number' &&
+      typeof ep.confidenceBreakdown.transcript_confidence === 'number' &&
+      typeof ep.confidenceBreakdown.rule_confidence === 'number' &&
+      typeof ep.confidenceBreakdown.overall_data_quality === 'number',
+  });
+
+  assertions.push({
+    check: 'asset_ttl_hours is 24',
+    passed: ep.asset_ttl_hours === 24,
+  });
+
+  assertions.push({
+    check: 'purge_scheduled_at is a valid timestamp',
+    passed: typeof ep.purge_scheduled_at === 'string' && ep.purge_scheduled_at.length > 0,
   });
 
   return {
@@ -157,6 +197,31 @@ function runScenario3(): QAResult {
     passed:
       !ep.sourcesSucceeded.includes('video_frames') &&
       !ep.sourcesSucceeded.includes('audio_transcript'),
+  });
+
+  assertions.push({
+    check: 'confidenceBreakdown has structured fields (ocr_confidence, transcript_confidence, rule_confidence, overall_data_quality)',
+    passed:
+      ep.confidenceBreakdown &&
+      typeof ep.confidenceBreakdown.ocr_confidence === 'number' &&
+      ep.confidenceBreakdown.transcript_confidence === null &&
+      typeof ep.confidenceBreakdown.rule_confidence === 'number' &&
+      typeof ep.confidenceBreakdown.overall_data_quality === 'number',
+  });
+
+  assertions.push({
+    check: 'asset_ttl_hours is 24',
+    passed: ep.asset_ttl_hours === 24,
+  });
+
+  assertions.push({
+    check: 'purge_scheduled_at is a valid timestamp',
+    passed: typeof ep.purge_scheduled_at === 'string' && ep.purge_scheduled_at.length > 0,
+  });
+
+  assertions.push({
+    check: 'transcript_confidence is null in confidenceBreakdown',
+    passed: ep.confidenceBreakdown.transcript_confidence === null,
   });
 
   return {
