@@ -1,4 +1,6 @@
+import * as path from "path";
 import { scrapeInstagramProfile, type ScrapedPost, type ScrapeResult } from "./profile-scraper";
+import { captureCompetitorCreatives, type CreativeCaptureResult, type EvidencePack, type InterpretedSignals } from "./creative-capture";
 import OpenAI from "openai";
 
 const openai = new OpenAI({
@@ -67,6 +69,7 @@ export interface ProfileAnalysisResult {
     insights: InferredInsight[];
     sampledReels: { permalink: string; caption: string | null }[];
   } | null;
+  creativeCapture: CreativeCaptureResult[] | null;
   scannedPostsList: {
     postId: string;
     permalink: string;
@@ -281,7 +284,7 @@ function normalizeProfileUrl(rawUrl: string): string {
   return `https://www.instagram.com/${handle}/`;
 }
 
-export async function analyzeInstagramProfile(rawUrl: string, companyName: string): Promise<ProfileAnalysisResult> {
+export async function analyzeInstagramProfile(rawUrl: string, companyName: string, options?: { enableCreativeCapture?: boolean; saveFixtures?: boolean }): Promise<ProfileAnalysisResult> {
   const scrapeResult = await scrapeInstagramProfile(rawUrl);
   const profileUrl = normalizeProfileUrl(rawUrl);
 
@@ -308,6 +311,7 @@ export async function analyzeInstagramProfile(rawUrl: string, companyName: strin
         followers: null,
       },
       inferred: null,
+      creativeCapture: null,
       scannedPostsList: [],
     };
   }
@@ -334,6 +338,25 @@ export async function analyzeInstagramProfile(rawUrl: string, companyName: strin
     };
   }
 
+  let creativeCapture: CreativeCaptureResult[] | null = null;
+  try {
+    const enableCC = options?.enableCreativeCapture !== false;
+    if (enableCC && scrapeResult.posts.length > 0) {
+      console.log(`[Profile Analyzer] Starting Creative Capture for ${companyName}`);
+      const fixtureDir = options?.saveFixtures
+        ? path.resolve(__dirname, "test-fixtures")
+        : undefined;
+      creativeCapture = await captureCompetitorCreatives(scrapeResult.posts, {
+        saveFixtures: !!options?.saveFixtures,
+        fixtureDir,
+      });
+      console.log(`[Profile Analyzer] Creative Capture complete: ${creativeCapture.length} reels analyzed`);
+    }
+  } catch (err: any) {
+    console.error(`[Profile Analyzer] Creative Capture failed (non-blocking): ${err.message}`);
+    allWarningDetails.push(`Creative capture failed: ${err.message}`);
+  }
+
   const postsWithTimestamps = scrapeResult.posts.filter(p => p.timestamp !== null);
   const isValid = postsWithTimestamps.length >= 12 && reelPosts.length >= 1;
 
@@ -356,6 +379,7 @@ export async function analyzeInstagramProfile(rawUrl: string, companyName: strin
       followers: metrics.followersMetric,
     },
     inferred,
+    creativeCapture,
     scannedPostsList: scrapeResult.posts.map(p => ({
       postId: p.postId,
       permalink: p.permalink,

@@ -179,7 +179,7 @@ export function registerCiCompetitorRoutes(app: Express) {
 
   app.post("/api/ci/competitors/analyze-profile", async (req, res) => {
     try {
-      const { name, profileLink } = req.body;
+      const { name, profileLink, enableCreativeCapture, saveFixtures } = req.body;
 
       if (!name || !profileLink) {
         return res.status(400).json({ error: "Company name and profile URL are required" });
@@ -189,7 +189,10 @@ export function registerCiCompetitorRoutes(app: Express) {
         return res.status(400).json({ error: "Currently only Instagram profiles are supported for deterministic analysis." });
       }
 
-      const result = await analyzeInstagramProfile(profileLink, name);
+      const result = await analyzeInstagramProfile(profileLink, name, {
+        enableCreativeCapture: enableCreativeCapture !== false,
+        saveFixtures: !!saveFixtures,
+      });
       res.json(result);
     } catch (error: any) {
       console.error("Profile analysis error:", error);
