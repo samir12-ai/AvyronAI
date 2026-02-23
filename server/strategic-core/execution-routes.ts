@@ -11,12 +11,7 @@ import {
 import { eq, and, sql, ne } from "drizzle-orm";
 import { logAudit } from "../audit";
 import { logAuditEvent } from "./audit-logger";
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+import { aiChat } from "../ai-client";
 
 async function generateCreativeContent(
   contentType: string,
@@ -37,11 +32,13 @@ Return ONLY valid JSON with these exact keys:
   "ctaCopy": "A compelling call-to-action (3-6 words)"
 }`;
 
-  const response = await openai.chat.completions.create({
+  const response = await aiChat({
     model: "gpt-5-nano",
     messages: [{ role: "user", content: prompt }],
     response_format: { type: "json_object" },
-    max_completion_tokens: 500,
+    max_tokens: 500,
+    accountId: "default",
+    endpoint: "strategic-execution",
   });
 
   const content = response.choices[0]?.message?.content;

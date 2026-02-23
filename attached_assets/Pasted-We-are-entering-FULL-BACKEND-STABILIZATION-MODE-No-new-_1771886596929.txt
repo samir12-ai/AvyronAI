@@ -1,0 +1,234 @@
+We are entering FULL BACKEND STABILIZATION MODE.
+
+No new features.
+No experiments.
+No scope expansion.
+We are restructuring, locking cost, locking safety, and stabilizing architecture.
+
+You will execute the following EXACTLY as specified.
+
+====================================================
+PHASE 1 — AI COST LOCK (MANDATORY – NO EXCEPTIONS)
+====================================================
+
+1) Create shared/ai-client.ts
+
+- Singleton OpenAI + Gemini client
+- Centralized config:
+  - max_tokens default: 800 (unless explicitly overridden)
+  - timeout: 25s hard timeout
+  - no retries by default
+  - fail-fast (throw structured error)
+
+2) Create ai-policy.ts
+
+- Enforce:
+  - Every GPT call MUST pass max_tokens explicitly
+  - No uncapped calls allowed anywhere
+  - If any call lacks max_tokens → throw error at runtime
+- Add per-account weekly AI budget:
+  - Track estimated token usage per call
+  - Store in ai_usage_log table
+  - If account exceeds weekly quota → return 402 AI_BUDGET_EXCEEDED
+- Log every AI call:
+  - account_id
+  - endpoint
+  - model
+  - max_tokens
+  - timestamp
+  - estimated_tokens
+  - success/failure
+
+3) Remove ALL direct `new OpenAI()` or `new Gemini()` from codebase.
+Everything must go through ai-client.ts.
+
+4) Add automated scan test:
+- If any file contains `new OpenAI(` outside ai-client.ts → fail test.
+
+====================================================
+PHASE 2 — DATABASE PERFORMANCE LOCK
+====================================================
+
+Add indexes for:
+
+- account_id (all major tables)
+- status (published_posts, strategic_plans, calendar_entries)
+- created_at (audit_log, ai_usage_log, strategy_decisions)
+- competitor_id
+- plan_id
+- campaign_id
+
+After adding indexes:
+- Run EXPLAIN on:
+  - competitor analysis query
+  - publish worker query
+  - strategic plan fetch
+Confirm no full table scans.
+
+====================================================
+PHASE 3 — JOB QUEUE CONVERSION
+====================================================
+
+Convert these endpoints to async job-based flow:
+
+- POST /api/ci/competitors/analyze-profile
+- POST /api/ci/dominance/run
+- POST /api/strategic/orchestrator/generate
+
+New flow:
+
+1) POST /start → create job in job_queue
+   - status = PENDING
+   - return { jobId }
+
+2) Worker picks job:
+   - status → RUNNING
+   - track progress %
+   - catch errors → status = FAILED + error_message
+
+3) GET /jobs/:id
+   - return:
+     - status
+     - progress
+     - result (if completed)
+
+Hard rules:
+- No long-running endpoint may exceed 5 seconds synchronous.
+- If job runs > 5 minutes → auto FAIL + audit log.
+- Max 3 concurrent CI jobs.
+- Max 2 concurrent strategic jobs.
+
+====================================================
+PHASE 4 — AUTONOMOUS WORKER CONTROL
+====================================================
+
+Modify autonomous-worker.ts:
+
+- Add skip-if-idle:
+  - If no performance change since last snapshot → do NOT call GPT.
+- Add max 1 AI decision per account per hour.
+- Add global circuit breaker:
+  - If AI budget exceeded → worker stops for that account.
+- Add audit event for every decision:
+  - reason
+  - risk_level
+  - confidence_score
+
+====================================================
+PHASE 5 — ROUTE MODULARIZATION
+====================================================
+
+Split without changing logic:
+
+routes.ts → 
+  - content-writer-routes.ts
+  - designer-routes.ts
+  - dashboard-routes.ts
+  - chat-routes.ts
+
+strategy-routes.ts →
+  - moat-routes.ts
+  - report-routes.ts
+  - insight-routes.ts
+
+dominance-routes.ts →
+  - dominance-analysis.ts
+  - dominance-scenarios.ts
+  - dominance-comparison.ts
+
+NO LOGIC CHANGES.
+Only file restructuring + import correction.
+All existing tests must pass.
+
+====================================================
+PHASE 6 — SAFETY GATE REGISTRY
+====================================================
+
+Create gates/registry.ts
+
+Centralize:
+
+- requireApprovedPlan
+- requireExecutionIdle
+- requireMetaReal
+- requireBudgetAvailable
+- requireFeatureFlag
+- requireNotPaused
+
+Each gate must:
+- Throw structured error with code
+- Log audit event
+- Never silently pass
+
+====================================================
+PHASE 7 — STRICT REQUEST/RESPONSE CONTRACTS
+====================================================
+
+Implement Zod schemas for:
+
+- analyze-profile request/response
+- generate-scripts request/response
+- orchestrator generate
+- execution start
+
+Middleware:
+- validateRequest(schema)
+- validateResponse(schema)
+
+If response violates schema → throw SERVER_CONTRACT_VIOLATION.
+
+====================================================
+PHASE 8 — TEST SCENARIOS (MANDATORY)
+====================================================
+
+You will implement these tests:
+
+SCENARIO 1 — AI Budget Cap
+- Simulate account with 90% budget used.
+- Trigger analyze-profile.
+- Must succeed if within budget.
+- Simulate 100% exceeded.
+- Must return AI_BUDGET_EXCEEDED.
+
+SCENARIO 2 — Long Job Timeout
+- Simulate dominance job > 5 minutes.
+- System must auto-fail job.
+- Must log audit entry.
+
+SCENARIO 3 — Autonomous Idle
+- No performance changes.
+- Worker must NOT call GPT.
+- Confirm no ai_usage_log entry created.
+
+SCENARIO 4 — Execution Safety
+- Plan status != APPROVED.
+- Execution must fail with APPROVAL_GATE_FAILED.
+
+SCENARIO 5 — No Uncapped GPT
+- Static scan test:
+  - If any GPT call lacks max_tokens → test fails.
+
+====================================================
+PHASE 9 — FINAL VALIDATION REPORT
+====================================================
+
+After completion, return:
+
+1) List of all AI endpoints with max_tokens.
+2) Weekly AI budget enforcement proof.
+3) EXPLAIN query results for indexed queries.
+4) Confirmation no uncapped GPT calls remain.
+5) Job queue concurrency limits proof.
+6) Autonomous worker idle test result.
+7) Confirmation no new external integrations added.
+
+Do NOT:
+- Add new features
+- Change business logic
+- Expand scope
+- Add silent fallbacks
+
+This is a stabilization mission.
+No shortcuts.
+No partial delivery.
+All safeguards must be active before completion.

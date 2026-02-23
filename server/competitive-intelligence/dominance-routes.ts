@@ -4,13 +4,8 @@ import { dominanceAnalyses, dominanceModifications, ciCompetitors } from "@share
 import { eq, and, desc } from "drizzle-orm";
 import { logAudit } from "../audit";
 import { requireCampaign } from "../campaign-routes";
-import OpenAI from "openai";
+import { aiChat } from "../ai-client";
 import crypto from "crypto";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
 
 function computeInputsHash(inputs: any): string {
   return crypto.createHash("sha256").update(JSON.stringify(inputs)).digest("hex").substring(0, 16);
@@ -769,8 +764,11 @@ function generateSimulatedTopContent(competitor: any): any[] {
 }
 
 async function runContentDissection(competitor: any, contentItems: any[], evidenceItems: any[], location: string): Promise<any> {
-  const response = await openai.chat.completions.create({
+  const response = await aiChat({
     model: "gpt-5.2",
+    max_tokens: 6000,
+    accountId: "default",
+    endpoint: "dominance-analysis",
     messages: [
       {
         role: "system",
@@ -856,7 +854,6 @@ For EACH content item, produce a dissection with this exact structure:
       },
     ],
     response_format: { type: "json_object" },
-    max_completion_tokens: 6000,
   });
 
   const raw = response.choices[0]?.message?.content || "{}";
@@ -864,8 +861,11 @@ For EACH content item, produce a dissection with this exact structure:
 }
 
 async function runWeaknessDetection(competitor: any, contentItems: any[], dissection: any, location: string): Promise<any> {
-  const response = await openai.chat.completions.create({
+  const response = await aiChat({
     model: "gpt-5.2",
+    max_tokens: 5000,
+    accountId: "default",
+    endpoint: "dominance-analysis",
     messages: [
       {
         role: "system",
@@ -925,7 +925,6 @@ Produce weakness analysis with this exact structure:
       },
     ],
     response_format: { type: "json_object" },
-    max_completion_tokens: 5000,
   });
 
   const raw = response.choices[0]?.message?.content || "{}";
@@ -933,8 +932,11 @@ Produce weakness analysis with this exact structure:
 }
 
 async function runDominanceStrategy(competitor: any, dissection: any, weaknesses: any, location: string): Promise<any> {
-  const response = await openai.chat.completions.create({
+  const response = await aiChat({
     model: "gpt-5.2",
+    max_tokens: 6000,
+    accountId: "default",
+    endpoint: "dominance-analysis",
     messages: [
       {
         role: "system",
@@ -1013,7 +1015,6 @@ Generate upgraded variant blueprints with this structure:
       },
     ],
     response_format: { type: "json_object" },
-    max_completion_tokens: 6000,
   });
 
   const raw = response.choices[0]?.message?.content || "{}";
@@ -1021,8 +1022,11 @@ Generate upgraded variant blueprints with this structure:
 }
 
 async function runDominanceDelta(competitor: any, dissection: any, strategy: any, location: string): Promise<any> {
-  const response = await openai.chat.completions.create({
+  const response = await aiChat({
     model: "gpt-5.2",
+    max_tokens: 4000,
+    accountId: "default",
+    endpoint: "dominance-analysis",
     messages: [
       {
         role: "system",
@@ -1061,7 +1065,6 @@ Generate this exact structure:
       },
     ],
     response_format: { type: "json_object" },
-    max_completion_tokens: 4000,
   });
 
   const raw = response.choices[0]?.message?.content || "{}";
@@ -1076,8 +1079,11 @@ async function runPlanModificationGeneration(
   competitorName: string,
   location: string
 ): Promise<any> {
-  const response = await openai.chat.completions.create({
+  const response = await aiChat({
     model: "gpt-5.2",
+    max_tokens: 5000,
+    accountId: "default",
+    endpoint: "dominance-analysis",
     messages: [
       {
         role: "system",
@@ -1129,7 +1135,6 @@ Generate a modification proposal:
       },
     ],
     response_format: { type: "json_object" },
-    max_completion_tokens: 5000,
   });
 
   const raw = response.choices[0]?.message?.content || "{}";

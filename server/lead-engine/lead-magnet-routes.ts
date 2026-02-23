@@ -4,12 +4,7 @@ import { leadMagnets } from "@shared/schema";
 import { eq, desc, sql } from "drizzle-orm";
 import { featureFlagService } from "../feature-flags";
 import { logAudit } from "../audit";
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+import { aiChat } from "../ai-client";
 
 export function registerLeadMagnetRoutes(app: Express) {
   app.get("/api/lead-magnets", async (req, res) => {
@@ -50,13 +45,16 @@ export function registerLeadMagnetRoutes(app: Express) {
         prompt = `Create a lead magnet for: "${topic}". Type: ${magnetType}. Return JSON with: "title", "description", "content", "ctaText".`;
       }
 
-      const response = await openai.chat.completions.create({
+      const response = await aiChat({
         model: "gpt-5.2",
         messages: [
           { role: "system", content: "You are an expert lead generation strategist. Create compelling lead magnets that drive conversions. Always return valid JSON." },
           { role: "user", content: prompt },
         ],
         response_format: { type: "json_object" },
+        max_tokens: 800,
+        accountId,
+        endpoint: "lead-magnet-gen",
       });
 
       const generated = JSON.parse(response.choices[0]?.message?.content || "{}");

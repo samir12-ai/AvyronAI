@@ -6,12 +6,7 @@ import { featureFlagService } from "../feature-flags";
 import { logAudit } from "../audit";
 import { requireCampaign } from "../campaign-routes";
 import { getRevenueSummary } from "../campaign-data-layer";
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+import { aiChat } from "../ai-client";
 
 export function registerAiLeadOptimizationRoutes(app: Express) {
   app.post("/api/lead-optimization/analyze", requireCampaign, async (req, res) => {
@@ -81,8 +76,11 @@ export function registerAiLeadOptimizationRoutes(app: Express) {
 
       const revenueSummary = await getRevenueSummary(campaignContext.campaignId, accountId);
 
-      const response = await openai.chat.completions.create({
+      const response = await aiChat({
         model: "gpt-5.2",
+        max_tokens: 800,
+        accountId: req.body.accountId || "default",
+        endpoint: "ai-lead-optimization",
         messages: [
           {
             role: "system",

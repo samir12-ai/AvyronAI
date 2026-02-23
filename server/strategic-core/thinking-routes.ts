@@ -1,14 +1,9 @@
 import type { Express, Request, Response } from "express";
-import OpenAI from "openai";
+import { aiChat } from "../ai-client";
 import { db } from "../db";
 import { strategicBlueprints } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
 
 const MARKET_MAP_PROMPT = `You are a strategic market analyst. Given a confirmed campaign blueprint, competitor data, and pricing information, generate a comprehensive Strategic Market Map.
 
@@ -156,13 +151,15 @@ CLIENT AVERAGE SELLING PRICE: $${blueprint.averageSellingPrice}
 
 Generate the Strategic Market Map now. All analysis scoped to ${campaignContext.location}.`;
 
-      const response = await openai.chat.completions.create({
+      const response = await aiChat({
         model: "gpt-5.2",
         messages: [
           { role: "system", content: MARKET_MAP_PROMPT },
           { role: "user", content: userPrompt },
         ],
-        max_completion_tokens: 3000,
+        max_tokens: 3000,
+        accountId: "default",
+        endpoint: "strategic-thinking",
       });
 
       const rawText = response.choices[0]?.message?.content || "";

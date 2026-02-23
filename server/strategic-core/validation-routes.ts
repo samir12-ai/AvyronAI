@@ -1,15 +1,10 @@
 import type { Express, Request, Response } from "express";
-import OpenAI from "openai";
+import { aiChat } from "../ai-client";
 import { db } from "../db";
 import { strategicBlueprints } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
 import { cleanJsonString } from "./extraction-routes";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
 
 function buildFallbackValidation(): any {
   return {
@@ -158,13 +153,15 @@ ${marketMap ? `MARKET MAP:\n${JSON.stringify(marketMap, null, 2)}` : "MARKET MAP
 
 Perform full validation now.`;
 
-      const response = await openai.chat.completions.create({
+      const response = await aiChat({
         model: "gpt-5.2",
         messages: [
           { role: "system", content: VALIDATION_PROMPT },
           { role: "user", content: userPrompt },
         ],
-        max_completion_tokens: 2500,
+        max_tokens: 2500,
+        accountId: "default",
+        endpoint: "strategic-validation",
       });
 
       const rawText = response.choices[0]?.message?.content || "";

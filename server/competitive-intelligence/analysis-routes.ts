@@ -5,12 +5,7 @@ import { eq, and, sql, desc } from "drizzle-orm";
 import { featureFlagService } from "../feature-flags";
 import { logAudit } from "../audit";
 import { requireCampaign } from "../campaign-routes";
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+import { aiChat } from "../ai-client";
 
 function getCurrentMonth(): string {
   const now = new Date();
@@ -101,14 +96,16 @@ export function registerCiAnalysisRoutes(app: Express) {
 
       const prompt = buildAnalysisPrompt(competitorData, prevData, prevAnalyses[0] || null);
 
-      const aiResponse = await openai.chat.completions.create({
+      const aiResponse = await aiChat({
         model: "gpt-5.2",
         messages: [
           { role: "system", content: getSystemPrompt() },
           { role: "user", content: prompt },
         ],
         response_format: { type: "json_object" },
-        max_completion_tokens: 4096,
+        max_tokens: 4096,
+        accountId,
+        endpoint: "ci-market-analysis",
       });
 
       const rawContent = aiResponse.choices[0]?.message?.content || "{}";

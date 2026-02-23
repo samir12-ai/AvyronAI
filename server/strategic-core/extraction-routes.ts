@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from "express";
-import { GoogleGenAI } from "@google/genai";
+import { aiGemini } from "../ai-client";
 import multer from "multer";
 import { db } from "../db";
 import { strategicBlueprints, extractionMetrics } from "@shared/schema";
@@ -9,14 +9,6 @@ import fs from "fs";
 import path from "path";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
-
-const geminiAi = new GoogleGenAI({
-  apiKey: process.env.AI_INTEGRATIONS_GEMINI_API_KEY || "",
-  httpOptions: {
-    apiVersion: "",
-    baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "",
-  },
-});
 
 const AUDIT_DIR = path.join(process.cwd(), "logs", "extraction-audit");
 
@@ -197,13 +189,15 @@ export function registerExtractionRoutes(app: Express) {
       const MODEL_NAME = "gemini-3-pro-preview";
 
       try {
-        const response = await geminiAi.models.generateContent({
+        const response = await aiGemini({
           model: MODEL_NAME,
           contents: [{ role: "user", parts }],
           config: {
             maxOutputTokens: 4096,
             responseMimeType: "application/json",
           },
+          accountId: "default",
+          endpoint: "strategic-extraction",
         });
 
         const rawText = response.text || "";
@@ -226,7 +220,7 @@ export function registerExtractionRoutes(app: Express) {
 
         try {
           console.log("[StrategicCore] Retrying extraction with stricter prompt...");
-          const retryResponse = await geminiAi.models.generateContent({
+          const retryResponse = await aiGemini({
             model: MODEL_NAME,
             contents: [{
               role: "user",
@@ -239,6 +233,8 @@ export function registerExtractionRoutes(app: Express) {
               maxOutputTokens: 4096,
               responseMimeType: "application/json",
             },
+            accountId: "default",
+            endpoint: "strategic-extraction-retry",
           });
 
           const retryText = retryResponse.text || "";

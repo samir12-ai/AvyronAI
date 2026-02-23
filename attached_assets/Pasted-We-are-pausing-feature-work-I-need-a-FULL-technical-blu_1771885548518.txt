@@ -1,0 +1,190 @@
+We are pausing feature work.
+
+I need a FULL technical blueprint of the entire application backend and architecture.
+
+This is not a summary.
+This is not a high-level explanation.
+I want a structured, detailed backend map of everything.
+
+Organize the explanation EXACTLY in the following structure:
+
+========================================
+1) SYSTEM ARCHITECTURE OVERVIEW
+========================================
+
+- Overall architecture type (monolith / modular / layered / hybrid)
+- Runtime environment
+- Main services
+- Where AI calls happen
+- Where external integrations happen
+- How environment variables are structured
+- How secrets are managed
+- How rate limiting is handled
+
+Provide a simple ASCII diagram of the system.
+
+========================================
+2) BACKEND STRUCTURE (FILES & MODULES)
+========================================
+
+Break down:
+
+- Folder structure
+- What each folder is responsible for
+- What each critical file does
+- Which files are core logic vs orchestration
+- Which files are API routes
+- Which files contain business logic
+- Which files contain AI calls
+- Which files contain database access
+
+Explain dependencies between modules.
+
+========================================
+3) DATABASE STRUCTURE
+========================================
+
+List all tables with:
+
+- Table name
+- Purpose
+- Key fields
+- Foreign keys
+- Relationships
+- Indexes
+- Constraints
+- Unique rules
+- Soft delete vs hard delete
+
+Also explain:
+
+- Execution-related tables
+- CI-related tables
+- Plan-related tables
+- Studio-related tables
+- Audit logs
+
+========================================
+4) REQUEST FLOW (END-TO-END)
+========================================
+
+For each major flow, explain step by step:
+
+A) Competitor analysis flow
+B) Creative Capture flow
+C) Intelligence scoring flow
+D) Script generation flow
+E) Plan generation flow
+F) Execution pipeline flow
+G) Meta integration flow
+
+For each:
+- Entry endpoint
+- Middleware
+- Validation
+- Business logic
+- AI call (if any)
+- DB writes
+- Response
+- Failure modes
+
+========================================
+5) AI USAGE MAP
+========================================
+
+List every GPT call in the system:
+
+- File location
+- Purpose
+- Model used
+- Token cap
+- Retry behavior
+- Fail behavior
+- Cost risk level
+
+Clarify:
+- Which flows are deterministic
+- Which flows use AI
+- Where we can reduce AI usage
+
+========================================
+6) CONTROL & SAFETY LAYERS
+========================================
+
+Explain:
+
+- Approval gates
+- Emergency stop
+- Idempotency
+- Execution locking
+- Rate limiting
+- Token limits
+- Scrape limits
+- Asset purge scheduler
+- Fail-fast logic
+- Golden fixture enforcement
+
+========================================
+7) COMPLEXITY HOTSPOTS
+========================================
+
+Identify:
+
+- Where logic is too coupled
+- Where data flows are redundant
+- Where technical debt exists
+- Where performance bottlenecks may occur
+- Where cost risks exist
+- Where race conditions may exist
+- Where refactor is recommended
+
+Be honest and critical.
+
+========================================
+8) FUTURE SCALABILITY ANALYSIS
+========================================
+
+If user count grows to:
+- 50 users
+- 200 users
+- 1,000 users
+
+Explain:
+- What breaks first
+- What needs scaling
+- DB stress points
+- AI cost risk
+- Scraping limits
+- Caching opportunities
+
+========================================
+9) RECOMMENDED REFACTOR PLAN
+========================================
+
+If you had to clean this backend:
+
+- What would you modularize?
+- What would you simplify?
+- What would you isolate?
+- What would you rewrite?
+- What would you leave untouched?
+
+========================================
+10) FINAL SYSTEM MAP
+========================================
+
+Provide:
+
+- Clean system flow diagram
+- Data flow diagram
+- AI flow diagram
+- Execution control diagram
+
+Keep it structured.
+Keep it precise.
+No fluff.
+No marketing language.
+No feature suggestions.
+No expansion proposals.
+
+This is a backend audit and blueprint exercise only.

@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import { aiChat } from "../ai-client";
 import type {
   IntelligenceScores,
   StorytellingIntelligence,
@@ -100,12 +100,13 @@ Return ONLY this JSON (no markdown, no explanation):
 }`;
 
   try {
-    const openai = new OpenAI({ apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY });
-    const response = await openai.chat.completions.create({
+    const response = await aiChat({
       model: "gpt-4o",
       messages: [{ role: "user", content: prompt }],
       max_tokens: 800,
       temperature: 0.7,
+      accountId: "default",
+      endpoint: "creative-expansion",
     });
 
     const content = response.choices[0]?.message?.content?.trim() || "";

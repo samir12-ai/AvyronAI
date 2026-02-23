@@ -1,8 +1,7 @@
 import type { Express } from "express";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import OpenAI from "openai";
-import { GoogleGenAI, Modality } from "@google/genai";
+import { aiChat, aiGemini, Modality } from "./ai-client";
 import multer from "multer";
 import path from "path";
 import { registerPhotographyRoutes } from "./photography-routes";
@@ -23,19 +22,6 @@ import { initMetaMetrics } from "./meta-metrics";
 import { db } from "./db";
 import { metaCredentials } from "@shared/schema";
 import { eq } from "drizzle-orm";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
-
-const geminiAi = new GoogleGenAI({
-  apiKey: process.env.AI_INTEGRATIONS_GEMINI_API_KEY,
-  httpOptions: {
-    apiVersion: "",
-    baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL,
-  },
-});
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -77,22 +63,26 @@ Requirements:
       let content = "";
 
       if (aiEngine === 'gemini') {
-        const geminiResponse = await geminiAi.models.generateContent({
+        const geminiResponse = await aiGemini({
           model: "gemini-3-pro-preview",
           contents: [
             { role: "user", parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] },
           ],
           config: { maxOutputTokens: 2048 },
+          accountId: "default",
+          endpoint: "ai-writer-gemini",
         });
         content = geminiResponse.text || "";
       } else {
-        const response = await openai.chat.completions.create({
+        const response = await aiChat({
           model: "gpt-5.2",
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt },
           ],
-          max_completion_tokens: 2048,
+          max_tokens: 2048,
+          accountId: "default",
+          endpoint: "ai-writer-gpt",
         });
         content = response.choices[0]?.message?.content || "";
       }
@@ -152,22 +142,26 @@ Make sure the content works well across all the specified platforms.`;
       let rawContent = "";
 
       if (aiEngine === 'gemini') {
-        const geminiResponse = await geminiAi.models.generateContent({
+        const geminiResponse = await aiGemini({
           model: "gemini-3-pro-preview",
           contents: [
             { role: "user", parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] },
           ],
           config: { maxOutputTokens: 1024 },
+          accountId: "default",
+          endpoint: "ai-designer-gemini",
         });
         rawContent = geminiResponse.text || "";
       } else {
-        const response = await openai.chat.completions.create({
+        const response = await aiChat({
           model: "gpt-5.2",
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt },
           ],
-          max_completion_tokens: 1024,
+          max_tokens: 1024,
+          accountId: "default",
+          endpoint: "ai-designer-gpt",
         });
         rawContent = response.choices[0]?.message?.content || "";
       }
@@ -283,13 +277,15 @@ Return your response in this EXACT JSON format:
 
 Generate exactly 4-6 scenes. Make the photography/videography directions specific and actionable — as if you're briefing a professional content creator. The visual hook must be genuinely scroll-stopping, not generic.`;
 
-      const response = await openai.chat.completions.create({
+      const response = await aiChat({
         model: "gpt-5.2",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        max_completion_tokens: 2000,
+        max_tokens: 2000,
+        accountId: "default",
+        endpoint: "calendar-assistant",
       });
 
       const content = response.choices[0]?.message?.content || "";
@@ -408,12 +404,15 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
 
       contents.push({ role: 'user', parts });
 
-      const response = await geminiAi.models.generateContent({
+      const response = await aiGemini({
         model: "gemini-3-pro-image-preview",
         contents,
         config: {
           responseModalities: [Modality.TEXT, Modality.IMAGE],
+          maxOutputTokens: 800,
         },
+        accountId: "default",
+        endpoint: "ai-image-gen",
       });
 
       const candidate = response.candidates?.[0];
@@ -1068,13 +1067,15 @@ Return ONLY a valid JSON array. Each post:
 
 Generate 25-30 posts. Make EVERY post specific to their products/services - zero generic filler. Each strategy_note must reference both the customer's goal AND the Meta algorithm principle being leveraged.`;
 
-      const response = await openai.chat.completions.create({
+      const response = await aiChat({
         model: "gpt-5.2",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        max_completion_tokens: 8000,
+        max_tokens: 8000,
+        accountId: "default",
+        endpoint: "generate-calendar",
       });
 
       const content = response.choices[0]?.message?.content || "";
@@ -1162,13 +1163,15 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   "reasoning": "Why this audience matches the campaign goal"
 }`;
 
-      const response = await openai.chat.completions.create({
+      const response = await aiChat({
         model: "gpt-5.2",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        max_completion_tokens: 4000,
+        max_tokens: 4000,
+        accountId: "default",
+        endpoint: "generate-audience",
       });
 
       const content = response.choices[0]?.message?.content || "";

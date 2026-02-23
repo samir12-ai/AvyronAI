@@ -1,14 +1,9 @@
 import type { Express, Request, Response } from "express";
-import OpenAI from "openai";
+import { aiChat } from "../ai-client";
 import { db } from "../db";
 import { strategicBlueprints } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
 
 const REQUIRED_BLUEPRINT_FIELDS: { key: string; label: string }[] = [
   { key: "detectedOffer", label: "Offer" },
@@ -205,13 +200,15 @@ ${validationResult ? `VALIDATION RESULT:\n${JSON.stringify(validationResult, nul
 
 Generate all 6 execution plans now. Strictly from the confirmed, validated data. No reinterpretation. Geo-scoped to ${campaignContext.location || "specified location"}.`;
 
-      const response = await openai.chat.completions.create({
+      const response = await aiChat({
         model: "gpt-5.2",
         messages: [
           { role: "system", content: ORCHESTRATOR_PROMPT },
           { role: "user", content: userPrompt },
         ],
-        max_completion_tokens: 4000,
+        max_tokens: 4000,
+        accountId: "default",
+        endpoint: "strategic-orchestrator",
       });
 
       const rawText = response.choices[0]?.message?.content || "";

@@ -7,14 +7,9 @@ import fs from "fs";
 import path from "path";
 import { exec } from "child_process";
 import { promisify } from "util";
-import OpenAI from "openai";
+import { aiChat } from "./ai-client";
 
 const execAsync = promisify(exec);
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
 
 const videoUploadsDir = path.join(process.cwd(), "uploads", "videos");
 const videoOutputDir = path.join(process.cwd(), "uploads", "video-output");
@@ -137,8 +132,11 @@ export function registerVideoRoutes(app: Express) {
         `Clip ${i + 1}: "${c.originalName}" (${c.duration?.toFixed(1)}s, ${c.width}x${c.height})`
       ).join('\n');
 
-      const aiResponse = await openai.chat.completions.create({
+      const aiResponse = await aiChat({
         model: "gpt-5.2",
+        max_tokens: 800,
+        accountId: "default",
+        endpoint: "video-brief",
         messages: [
           {
             role: "system",
@@ -214,7 +212,6 @@ ${clipDetails}
 Based on the creative brief above, create an edit plan that fulfills the client's vision. Consider the video type, target audience, and key message when making your editing decisions. Determine the best clip order for storytelling, trim to keep the strongest moments, choose transitions that match the mood, and suggest appropriate color grading.`
           }
         ],
-        max_completion_tokens: 2500,
       });
 
       const aiContent = aiResponse.choices[0]?.message?.content || "";

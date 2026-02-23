@@ -1,12 +1,7 @@
 import { db } from "./db";
 import { brandConfig, publishedPosts, captionVariants } from "@shared/schema";
 import { eq } from "drizzle-orm";
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+import { aiChat } from "./ai-client";
 
 interface CaseMetadata {
   goal: string;
@@ -200,11 +195,13 @@ export async function generateAndScoreCaptions(
 
   let captions: string[] = [];
   try {
-    const response = await openai.chat.completions.create({
+    const response = await aiChat({
       model: "gpt-5.2",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.8,
       max_tokens: 3000,
+      accountId: "default",
+      endpoint: "caption-engine",
     });
 
     const content = response.choices[0]?.message?.content || "[]";

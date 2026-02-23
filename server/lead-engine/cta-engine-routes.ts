@@ -4,12 +4,7 @@ import { ctaVariants, conversionEvents } from "@shared/schema";
 import { eq, and, sql, desc } from "drizzle-orm";
 import { featureFlagService } from "../feature-flags";
 import { logAudit } from "../audit";
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+import { aiChat } from "../ai-client";
 
 export function registerCtaEngineRoutes(app: Express) {
   app.post("/api/cta-variants/generate", async (req, res) => {
@@ -23,7 +18,7 @@ export function registerCtaEngineRoutes(app: Express) {
       const { postId, campaignId, contentContext, brandTone, count } = req.body;
       const numVariants = Math.min(count || 4, 8);
 
-      const response = await openai.chat.completions.create({
+      const response = await aiChat({
         model: "gpt-5.2",
         messages: [
           {
@@ -43,6 +38,9 @@ Return a JSON array of objects with fields: "text" (the CTA text), "type" (link/
         ],
         response_format: { type: "json_object" },
         temperature: 0.8,
+        max_tokens: 800,
+        accountId,
+        endpoint: "cta-generation",
       });
 
       const parsed = JSON.parse(response.choices[0]?.message?.content || "{}");

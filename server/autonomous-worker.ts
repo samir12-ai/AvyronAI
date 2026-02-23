@@ -16,17 +16,12 @@ import { runAllGuardrails, checkSafeModeConditions } from "./guardrails";
 import { classifyDecisionRisk } from "./risk-classifier";
 import { snapshotPreMetrics, evaluatePendingOutcomes, getRecentOutcomesForPrompt, computeSuccessRates } from "./outcome-tracker";
 import { calculateConfidence, computeDecisionSuccessRate, getLast2Outcomes, checkSafeModeExitConditions } from "./confidence";
-import OpenAI from "openai";
+import { aiChat } from "./ai-client";
 
 const WORKER_INTERVAL_MS = 5 * 60 * 1000;
 const CYCLE_THRESHOLD_MS = 6 * 60 * 60 * 1000;
 const STALE_LOCK_MS = 30 * 60 * 1000;
 let workerTimer: ReturnType<typeof setInterval> | null = null;
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
 
 async function acquireLock(accountId: string): Promise<string | null> {
   const now = new Date();
@@ -181,13 +176,15 @@ Return JSON array of decisions:
 Return ONLY the JSON array, no other text.`;
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await aiChat({
       model: "gpt-5.2",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      max_completion_tokens: 1500,
+      max_tokens: 1500,
+      accountId,
+      endpoint: "autonomous-worker",
     });
 
     const content = response.choices[0]?.message?.content || "[]";

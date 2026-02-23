@@ -1,12 +1,7 @@
 import * as path from "path";
 import { scrapeInstagramProfile, type ScrapedPost, type ScrapeResult } from "./profile-scraper";
 import { captureCompetitorCreatives, type CreativeCaptureResult, type EvidencePack, type InterpretedSignals } from "./creative-capture";
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+import { aiChat } from "../ai-client";
 
 type WarningCode =
   | "SCRAPE_BLOCKED"
@@ -248,12 +243,14 @@ Analyze these reels and return a JSON array of insights. Each insight must follo
 Return 4-6 insights covering different categories. evidenceReelIndexes are 0-based indexes into the reel list above. Return ONLY the JSON array, no markdown.`;
 
   try {
-    const completion = await openai.chat.completions.create({
+    const completion = await aiChat({
       model: "gpt-4o",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.5,
       max_tokens: 1200,
       response_format: { type: "json_object" },
+      accountId: "default",
+      endpoint: "profile-analysis",
     });
 
     const content = completion.choices[0]?.message?.content;

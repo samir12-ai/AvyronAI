@@ -1189,3 +1189,19 @@ export type PlanApproval = typeof planApprovals.$inferSelect;
 export type RequiredWork = typeof requiredWork.$inferSelect;
 export type CalendarEntry = typeof calendarEntries.$inferSelect;
 export type StudioItem = typeof studioItems.$inferSelect;
+
+export const aiUsageLog = pgTable("ai_usage_log", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  endpoint: text("endpoint").notNull(),
+  model: text("model").notNull(),
+  maxTokens: integer("max_tokens").notNull(),
+  estimatedTokens: integer("estimated_tokens").default(0),
+  success: boolean("success").default(true),
+  durationMs: integer("duration_ms").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type AIUsageLog = typeof aiUsageLog.$inferSelect;

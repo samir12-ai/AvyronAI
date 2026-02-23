@@ -11,23 +11,9 @@ import {
   signatureSeries,
 } from "@shared/schema";
 import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
-import OpenAI from "openai";
-import { GoogleGenAI } from "@google/genai";
+import { aiChat } from "./ai-client";
 import { requireCampaign } from "./campaign-routes";
 import { getRevenueSummary, getCampaignMetrics } from "./campaign-data-layer";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
-
-const geminiAi = new GoogleGenAI({
-  apiKey: process.env.AI_INTEGRATIONS_GEMINI_API_KEY,
-  httpOptions: {
-    apiVersion: "",
-    baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL,
-  },
-});
 
 async function getAccountAverages() {
   const result = await db.select({
@@ -186,7 +172,7 @@ export function registerStrategyRoutes(app: Express) {
         details: m.details,
       }));
 
-      const aiResponse = await openai.chat.completions.create({
+      const aiResponse = await aiChat({
         model: "gpt-5.2",
         messages: [
           {
@@ -300,7 +286,9 @@ Return ONLY valid JSON with this structure:
             content: `Analyze this performance data and provide strategic insights, decisions, and memory updates:\n\n${JSON.stringify(dataForAI, null, 2)}`
           }
         ],
-        max_completion_tokens: 4000,
+        max_tokens: 4000,
+        accountId: "default",
+        endpoint: "strategy-analysis",
       });
 
       const aiContent = aiResponse.choices[0]?.message?.content || "";
@@ -455,7 +443,7 @@ Return ONLY valid JSON with this structure:
       const memories = await db.select().from(strategyMemory).limit(20);
       const averages = await getAccountAverages();
 
-      const aiResponse = await openai.chat.completions.create({
+      const aiResponse = await aiChat({
         model: "gpt-5.2",
         messages: [
           {
@@ -493,7 +481,9 @@ Return JSON:
             content: `Advance the campaign. Recent performance data: ${JSON.stringify(allPerf.slice(0, 10).map(p => ({ type: p.contentType, angle: p.contentAngle, reach: p.reach, ctr: p.ctr, saves: p.saves, conversions: p.conversions })))}`
           }
         ],
-        max_completion_tokens: 2000,
+        max_tokens: 2000,
+        accountId: "default",
+        endpoint: "strategy-report",
       });
 
       const content = aiResponse.choices[0]?.message?.content || "";
@@ -545,7 +535,7 @@ Return JSON:
       const campaignContext = (req as any).campaignContext;
       const revenueSummary = await getRevenueSummary(campaignContext.campaignId, "default");
 
-      const aiResponse = await openai.chat.completions.create({
+      const aiResponse = await aiChat({
         model: "gpt-5.2",
         messages: [
           {
@@ -599,7 +589,9 @@ Return JSON:
             content: `Generate the weekly strategic report. This week's data (${weekData.length} posts):\n${JSON.stringify(weekData.map(d => ({ type: d.contentType, angle: d.contentAngle, reach: d.reach, saves: d.saves, ctr: d.ctr, cpa: d.cpa, roas: d.roas, conversions: d.conversions })))}`
           }
         ],
-        max_completion_tokens: 4000,
+        max_tokens: 4000,
+        accountId: "default",
+        endpoint: "strategy-weekly",
       });
 
       const content = aiResponse.choices[0]?.message?.content || "";
@@ -666,7 +658,7 @@ Return JSON:
         .orderBy(desc(strategyInsights.createdAt)).limit(15);
       const averages = await getAccountAverages();
 
-      const aiResponse = await openai.chat.completions.create({
+      const aiResponse = await aiChat({
         model: "gpt-5.2",
         messages: [
           {
@@ -710,7 +702,9 @@ Return JSON:
             content: `Create audience sniping strategy for:\nGoal: ${campaignGoal || 'maximize conversions'}\nProduct: ${product || 'not specified'}\nBudget: $${budget || 'flexible'}`
           }
         ],
-        max_completion_tokens: 3000,
+        max_tokens: 3000,
+        accountId: "default",
+        endpoint: "strategy-insight",
       });
 
       const content = aiResponse.choices[0]?.message?.content || "";
@@ -742,7 +736,7 @@ Return JSON:
         return res.status(400).json({ error: "Run AI Analysis first to populate memory and patterns before scanning for moat candidates." });
       }
 
-      const aiResponse = await openai.chat.completions.create({
+      const aiResponse = await aiChat({
         model: "gpt-5.2",
         messages: [
           {
@@ -794,7 +788,9 @@ Return ONLY valid JSON:
             content: `Scan for moat candidates. Recent top-performing content:\n${JSON.stringify(allPerf.filter(p => (p.saves || 0) > 20 || (p.roas || 0) > 3).slice(0, 15).map(p => ({ angle: p.contentAngle, hook: p.hookStyle, format: p.format, saves: p.saves, shares: p.shares, roas: p.roas, ctr: p.ctr, retention: p.retentionRate })))}`
           }
         ],
-        max_completion_tokens: 3000,
+        max_tokens: 3000,
+        accountId: "default",
+        endpoint: "strategy-moat",
       });
 
       const content = aiResponse.choices[0]?.message?.content || "";
@@ -854,7 +850,7 @@ Return ONLY valid JSON:
       const memories = await db.select().from(strategyMemory).orderBy(desc(strategyMemory.updatedAt)).limit(15);
       const averages = await getAccountAverages();
 
-      const aiResponse = await openai.chat.completions.create({
+      const aiResponse = await aiChat({
         model: "gpt-5.2",
         messages: [
           {
@@ -898,7 +894,9 @@ Return ONLY valid JSON:
             content: `Convert this moat candidate into a Signature Series: "${candidate.label}" - ${candidate.description}`
           }
         ],
-        max_completion_tokens: 3000,
+        max_tokens: 3000,
+        accountId: "default",
+        endpoint: "strategy-recommendations",
       });
 
       const content = aiResponse.choices[0]?.message?.content || "";

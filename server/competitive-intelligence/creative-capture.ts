@@ -3,21 +3,8 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { ProxyAgent } from "undici";
-import { GoogleGenAI } from "@google/genai";
-import OpenAI from "openai";
+import { aiChat, aiGemini } from "../ai-client";
 import type { ScrapedPost } from "./profile-scraper";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
-
-const geminiAi = new GoogleGenAI({
-  apiKey: process.env.AI_INTEGRATIONS_GEMINI_API_KEY || "",
-  httpOptions: {
-    baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "",
-  },
-});
 
 const CACHE_DIR = "/tmp/ci-creative-cache";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -363,7 +350,7 @@ async function runOcrOnFrames(framePaths: string[]): Promise<FrameOcrResult[]> {
       const imageBytes = fs.readFileSync(framePath);
       const base64 = imageBytes.toString("base64");
 
-      const response = await geminiAi.models.generateContent({
+      const response = await aiGemini({
         model: "gemini-2.0-flash",
         contents: [{
           role: "user",
@@ -389,6 +376,8 @@ Return ONLY the JSON object, no markdown.`,
             },
           ],
         }],
+        accountId: "default",
+        endpoint: "creative-capture-ocr",
       });
 
       const content = response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
@@ -813,7 +802,7 @@ DETERMINISTIC SIGNALS ALREADY DETECTED:
 - Offers: ${evidencePack.deterministicSignals.offerSignals.map(s => s.text).join(", ") || "[NONE]"}
 - Urgency: ${evidencePack.deterministicSignals.urgencySignals.map(s => s.text).join(", ") || "[NONE]"}`;
 
-    const completion = await openai.chat.completions.create({
+    const completion = await aiChat({
       model: "gpt-4o",
       messages: [{
         role: "system",
@@ -836,6 +825,8 @@ Return ONLY JSON, no markdown.`,
       temperature: 0.3,
       max_tokens: 800,
       response_format: { type: "json_object" },
+      accountId: "default",
+      endpoint: "creative-capture",
     });
 
     const aiContent = completion.choices[0]?.message?.content;

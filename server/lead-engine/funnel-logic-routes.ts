@@ -4,12 +4,7 @@ import { funnelDefinitions, funnelContentMap, leads, conversionEvents } from "@s
 import { eq, and, sql, desc } from "drizzle-orm";
 import { featureFlagService } from "../feature-flags";
 import { logAudit } from "../audit";
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+import { aiChat } from "../ai-client";
 
 const DEFAULT_FUNNEL_STAGES = JSON.stringify([
   { name: "awareness", label: "Awareness", order: 1, description: "First touchpoint - brand discovery" },
@@ -146,7 +141,7 @@ export function registerFunnelLogicRoutes(app: Express) {
 
       const { funnelHealth, brandContext } = req.body;
 
-      const response = await openai.chat.completions.create({
+      const response = await aiChat({
         model: "gpt-5.2",
         messages: [
           {
@@ -159,6 +154,9 @@ export function registerFunnelLogicRoutes(app: Express) {
           },
         ],
         response_format: { type: "json_object" },
+        max_tokens: 800,
+        accountId,
+        endpoint: "funnel-suggestions",
       });
 
       const parsed = JSON.parse(response.choices[0]?.message?.content || "{}");
