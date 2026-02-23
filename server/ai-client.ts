@@ -201,3 +201,21 @@ async function logAICall(entry: AILogEntry): Promise<void> {
 export function getWeeklyTokenBudget(): number {
   return WEEKLY_TOKEN_BUDGET;
 }
+
+export { WEEKLY_TOKEN_BUDGET };
+
+export async function getWeeklyTokenUsage(accountId: string): Promise<number> {
+  try {
+    const { db } = await import("./db");
+    const { sql } = await import("drizzle-orm");
+    const result = await db.execute(sql`
+      SELECT COALESCE(SUM(estimated_tokens), 0) as total_tokens
+      FROM ai_usage_log
+      WHERE account_id = ${accountId}
+        AND created_at > NOW() - INTERVAL '7 days'
+    `);
+    return Number(result.rows?.[0]?.total_tokens || 0);
+  } catch {
+    return 0;
+  }
+}

@@ -64,6 +64,14 @@ Preferred communication style: Simple, everyday language.
 - **Phases**: Gate (min requirements) → Creative Analysis (AI extraction from media) → Confirm/Edit (user review) → Market Analysis (AI market mapping) → Validation (contradiction detection) → Orchestrator (execution plan generation).
 - **AI Models**: Gemini 3 Pro for creative extraction, GPT-5.2 for market analysis, validation, and orchestration.
 
+### Backend Stabilization (Feb 2026)
+- **AI Cost Lock**: All 38 AI calls routed through centralized `server/ai-client.ts` singleton. No direct OpenAI/Gemini instantiation allowed. Enforcement test: `server/tests/ai-scan.test.ts`. Every call has explicit `max_tokens`, `accountId`, `endpoint` tracking. Usage logged to `ai_usage_log` table. Weekly token budget: 500k tokens/week with auto-rejection.
+- **Database Indexes**: 46 custom indexes added across all tables on `account_id`, `status`, `created_at`, `competitor_id`, `plan_id`, `blueprint_id`, `analysis_id` columns.
+- **Worker Hardening**: Autonomous worker has hourly decision cap (9/hour), circuit breaker (3 consecutive failures trips), idle account skip (7 days), consecutive failure tracking with auto-increment.
+- **Safety Gate Registry**: `server/gates/registry.ts` — centralized gate functions: `gateAutopilotEnabled`, `gateNotSafeMode`, `gateAIBudget`, `gateFeatureFlag`, `gateLeadEngineActive`, `gateConfidenceAbove`. Express middleware `requireGates()` for route protection.
+- **Validation Layer**: `server/gates/validate.ts` — Zod-based request validation middleware with `validateBody()` and `validateQuery()`. Pre-built schemas for common patterns.
+- **Test Suite**: `server/tests/stabilization.test.ts` — 6 automated tests covering health, database, AI budget, CI validation, autopilot, and AI scan enforcement.
+
 ## External Dependencies
 
 ### AI Services
