@@ -820,5 +820,78 @@ export async function captureCompetitorCreatives(
     }
   }
 
+  trackBandwidth(0, results.length);
+
   return results;
+}
+
+let weeklyBandwidthBytes = 0;
+let weeklyReelCount = 0;
+let weekStartTime = Date.now();
+const MAX_WEEKLY_BANDWIDTH_MB = 500;
+const MAX_WEEKLY_REELS = 50;
+
+export function getCreativeCaptureStats() {
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  if (Date.now() - weekStartTime > weekMs) {
+    weeklyBandwidthBytes = 0;
+    weeklyReelCount = 0;
+    weekStartTime = Date.now();
+  }
+
+  let cacheSize = 0;
+  let cachedFiles = 0;
+  if (fs.existsSync(CACHE_DIR)) {
+    try {
+      const entries = fs.readdirSync(CACHE_DIR, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const subDir = path.join(CACHE_DIR, entry.name);
+          const subFiles = fs.readdirSync(subDir);
+          for (const sf of subFiles) {
+            cacheSize += fs.statSync(path.join(subDir, sf)).size;
+            cachedFiles++;
+          }
+        } else {
+          cacheSize += fs.statSync(path.join(CACHE_DIR, entry.name)).size;
+          cachedFiles++;
+        }
+      }
+    } catch {}
+  }
+
+  return {
+    weeklyBandwidthMB: Math.round((weeklyBandwidthBytes / (1024 * 1024)) * 100) / 100,
+    weeklyBandwidthCapMB: MAX_WEEKLY_BANDWIDTH_MB,
+    weeklyReelsProcessed: weeklyReelCount,
+    weeklyReelsCap: MAX_WEEKLY_REELS,
+    maxReelsPerCompetitor: MAX_REELS_PER_COMPETITOR,
+    rateLimitSeconds: RATE_LIMIT_MS / 1000,
+    cacheTtlHours: CACHE_TTL_MS / (60 * 60 * 1000),
+    cacheSizeMB: Math.round((cacheSize / (1024 * 1024)) * 100) / 100,
+    cachedFiles,
+    weekStartedAt: new Date(weekStartTime).toISOString(),
+  };
+}
+
+export function checkWeeklyLimits(): { allowed: boolean; reason?: string } {
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  if (Date.now() - weekStartTime > weekMs) {
+    weeklyBandwidthBytes = 0;
+    weeklyReelCount = 0;
+    weekStartTime = Date.now();
+  }
+
+  if (weeklyBandwidthBytes > MAX_WEEKLY_BANDWIDTH_MB * 1024 * 1024) {
+    return { allowed: false, reason: `Weekly bandwidth cap (${MAX_WEEKLY_BANDWIDTH_MB}MB) exceeded` };
+  }
+  if (weeklyReelCount >= MAX_WEEKLY_REELS) {
+    return { allowed: false, reason: `Weekly reel cap (${MAX_WEEKLY_REELS}) exceeded` };
+  }
+  return { allowed: true };
+}
+
+export function trackBandwidth(bytes: number, reels: number) {
+  weeklyBandwidthBytes += bytes;
+  weeklyReelCount += reels;
 }

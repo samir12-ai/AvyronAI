@@ -5,6 +5,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { featureFlagService } from "../feature-flags";
 import { analyzeInstagramProfile } from "./profile-analyzer";
 import { getScrapeStats } from "./profile-scraper";
+import { getCreativeCaptureStats, checkWeeklyLimits } from "./creative-capture";
 
 const REQUIRED_EVIDENCE_FIELDS = [
   "profileLink",
@@ -203,7 +204,9 @@ export function registerCiCompetitorRoutes(app: Express) {
   app.get("/api/ci/scrape-stats", async (_req, res) => {
     try {
       const stats = getScrapeStats();
-      res.json(stats);
+      const ccStats = getCreativeCaptureStats();
+      const limits = checkWeeklyLimits();
+      res.json({ scraping: stats, creativeCapture: ccStats, weeklyLimits: limits });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
