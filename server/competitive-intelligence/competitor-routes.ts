@@ -8,6 +8,8 @@ import { getScrapeStats } from "./profile-scraper";
 import { getCreativeCaptureStats, checkWeeklyLimits } from "./creative-capture";
 import { computeAllIntelligenceScores } from "./intelligence-scores";
 import { generateCreativeExpansion } from "./creative-expansion";
+import { generateScriptsAndConcepts } from "./script-engine";
+import type { BlueprintInput } from "./script-engine";
 
 const REQUIRED_EVIDENCE_FIELDS = [
   "profileLink",
@@ -255,6 +257,29 @@ export function registerCiCompetitorRoutes(app: Express) {
     } catch (error: any) {
       console.error("Profile analysis error:", error);
       res.status(500).json({ error: "Profile analysis failed: " + (error.message || "Unknown error") });
+    }
+  });
+
+  app.post("/api/ci/generate-scripts", async (req, res) => {
+    try {
+      const { intelligence, creative_strategy, blueprint } = req.body;
+
+      if (!intelligence || !blueprint?.offer || !blueprint?.icp) {
+        return res.status(400).json({ error: "Missing required fields: intelligence, blueprint.offer, blueprint.icp" });
+      }
+
+      const blueprintInput: BlueprintInput = {
+        offer: blueprint.offer,
+        icp: blueprint.icp,
+        location: blueprint.location || "Dubai, UAE",
+        kpi_goal: blueprint.kpi_goal || "engagement",
+      };
+
+      const result = await generateScriptsAndConcepts(intelligence, creative_strategy || null, blueprintInput);
+      res.json(result);
+    } catch (error: any) {
+      console.error("[SSE+OCE] Route error:", error);
+      res.status(500).json({ status: "GENERATION_FAILED", reason: error.message || "Unknown error" });
     }
   });
 

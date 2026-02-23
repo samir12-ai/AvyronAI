@@ -1,0 +1,183 @@
+We are extending AI Creation with two constrained engines:
+1) Storytelling Script Engine (SSE)
+2) Out-of-the-Box Creative Engine (OCE)
+
+This is an execution-only task.
+No architecture discussion.
+No new scraping.
+No new media processing.
+No new external APIs.
+MAX 1 GPT call per content batch (not per script).
+Fail-fast, no retries.
+
+========================================
+PHASE 1 — STORYTELLING SCRIPT ENGINE (SSE)
+========================================
+
+Purpose:
+Generate high-performing narrative scripts aligned with:
+- storytelling_intelligence
+- creative_strategy
+- dominance_state
+- blueprint objectives
+
+Inputs (existing only):
+- intelligence.storytelling_intelligence
+- intelligence.conversion_intelligence
+- intelligence.performance_context
+- intelligence.archetype
+- creative_strategy
+- blueprint (offer, ICP, location = Dubai, KPI goal)
+- testing_matrix (if exists)
+
+Do NOT call any new APIs.
+
+----------------------------------------
+SSE OUTPUT STRUCTURE (STRICT JSON)
+----------------------------------------
+
+scripts_batch = {
+  mode_used: "authority_building" | "trust_nurture" | "direct_response" | "hybrid",
+  scripts: [
+    {
+      title,
+      hook_0_2s,
+      setup_2_6s,
+      tension_6_12s,
+      reveal_12_18s,
+      proof_line_optional,
+      soft_close_or_cta,
+      on_screen_text,
+      shot_suggestions[],
+      caption_short,
+      kpi_target: "engagement" | "leads" | "authority"
+    }
+  ]
+}
+
+Rules:
+- Max 5 scripts per batch.
+- Max 150 words per script body.
+- If storytelling_intelligence.narrative_strategy_mode != direct_response
+  → DO NOT generate aggressive CTA.
+- If dominance_state = DOMINANT
+  → Generate differentiation scripts (not imitation).
+- If dominance_state = WEAK
+  → Generate speed/volume-based disruptive hooks.
+- Always localize to Dubai context.
+- Never fabricate results or metrics.
+
+========================================
+PHASE 2 — OUT-OF-THE-BOX CREATIVE ENGINE (OCE)
+========================================
+
+Purpose:
+Generate unconventional creative concepts aligned with competitive gaps.
+
+Uses SAME GPT CALL as SSE.
+Both engines share ONE GPT call.
+Return both outputs in single response.
+
+----------------------------------------
+OCE OUTPUT STRUCTURE (STRICT JSON)
+----------------------------------------
+
+creative_concepts = {
+  strategic_mode,
+  concepts: [
+    {
+      concept_name,
+      disruptive_angle,
+      format: "reel" | "carousel" | "hybrid",
+      visual_metaphor,
+      emotional_trigger,
+      differentiation_factor,
+      execution_note
+    }
+  ],
+  subtle_conversion_layer,
+  risk_level: "low" | "moderate" | "bold"
+}
+
+Rules:
+- Max 5 concepts.
+- Must reference detected competitive gap.
+- If CTA absent but storytelling strong:
+  → Suggest layered soft conversion only.
+- No generic ideas like "share tips".
+- Each concept must include differentiation_factor.
+
+========================================
+GPT CALL RULES
+========================================
+
+- Single GPT-4o call per generation request.
+- Token cap: 1000 max.
+- temperature: 0.7
+- No retries.
+- If call fails → return structured fallback:
+  { status: "GENERATION_FAILED", reason }
+
+========================================
+PERFORMANCE RULES
+========================================
+
+- Batch generation only (never per script call).
+- No blocking synchronous loops.
+- Validate output schema before saving.
+- Reject output if:
+  - Missing required keys
+  - Over token limits
+  - CTA rule violated
+
+========================================
+SAFETY RULES
+========================================
+
+- No fabricated client results.
+- No false claims.
+- No compliance-sensitive promises.
+- No financial guarantees.
+- Respect Dubai cultural context.
+- Do not reference competitors by name.
+
+========================================
+TEST REQUIREMENTS (MANDATORY)
+========================================
+
+Create 5 test scenarios:
+
+1) Strong storytelling + no CTA competitor
+   → Scripts must be authority/trust style.
+
+2) Strong CTA competitor
+   → Scripts must include controlled CTA.
+
+3) Hybrid competitor
+   → Scripts must blend storytelling + subtle CTA.
+
+4) Dominant competitor
+   → Scripts must differentiate, not copy.
+
+5) Weak competitor
+   → Scripts must be aggressive disruptive.
+
+For each test:
+- Validate mode_used
+- Validate CTA logic compliance
+- Validate Dubai localization
+- Validate schema integrity
+
+========================================
+FINAL VALIDATION
+========================================
+
+Return:
+1) Updated JSON response example.
+2) Confirmation of GPT call count (must be 1).
+3) Confirmation no new external integrations.
+4) Test result summary (pass/fail per scenario).
+
+Do not add extra features.
+Do not modify other system areas.
+Implement exactly as specified.
