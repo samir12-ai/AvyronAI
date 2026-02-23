@@ -237,17 +237,19 @@ export function registerCiCompetitorRoutes(app: Express) {
       };
 
       const intelligenceScores = computeAllIntelligenceScores(result);
-      console.log(`[CI Intelligence] ${name} | Archetype: ${intelligenceScores.archetype} | Dominance: ${intelligenceScores.dominance.dominance_state} (${intelligenceScores.dominance.dominance_score}) | GPT calls: 1`);
+      const si = intelligenceScores.storytelling_intelligence;
+      console.log(`[CI Intelligence] ${name} | Archetype: ${intelligenceScores.archetype} | Dominance: ${intelligenceScores.dominance.dominance_state} (${intelligenceScores.dominance.dominance_score}) | Storytelling: ${si.storytelling_present ? si.storytelling_type : 'none'} | Strategy: ${si.narrative_strategy_mode} | GPT calls: 1`);
 
-      let creativeExpansion = null;
+      let creativeOutput = null;
       try {
-        creativeExpansion = await generateCreativeExpansion(intelligenceScores, name);
+        creativeOutput = await generateCreativeExpansion(intelligenceScores, name);
       } catch (err: any) {
-        console.error("[CI Intelligence] Creative expansion GPT call failed:", err.message);
+        console.error("[CI Intelligence] Creative GPT call failed:", err.message);
       }
 
       (result as any).intelligence = intelligenceScores;
-      (result as any).creative_expansion = creativeExpansion;
+      (result as any).creative_expansion = creativeOutput?.creative_expansion || null;
+      (result as any).creative_strategy = creativeOutput?.creative_strategy || null;
 
       res.json(result);
     } catch (error: any) {

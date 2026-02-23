@@ -1,0 +1,137 @@
+Stop all architectural discussion.
+
+We are adding TWO controlled engines inside Competitor Intelligence.
+No new scraping.
+No new media processing.
+No additional GPT calls beyond ONE total per competitor.
+
+Do exactly what is written below.
+
+========================================
+ENGINE 1 — STORYTELLING INTELLIGENCE ENGINE (SIE)
+========================================
+
+Purpose:
+Detect and classify storytelling strategy as a VALID strategic model,
+not as a weakness when CTA is absent.
+
+This engine must NOT penalize absence of CTA automatically.
+
+----------------------------------------
+Inputs (existing data only):
+----------------------------------------
+- narrative_intelligence object
+- conversion_intelligence object
+- performance_context
+- archetype
+- creativeCapture signals (already stored)
+- inferred insights (already stored)
+
+No new API calls.
+
+----------------------------------------
+Outputs:
+----------------------------------------
+
+storytelling_intelligence = {
+  storytelling_present: boolean,
+  storytelling_type: "transformation" | "founder_story" | "case_story" | "educational_narrative" | "status_story" | "none",
+  authority_building_score: 0–100,
+  emotional_resonance_score: 0–100,
+  soft_persuasion_strength: 0–100,
+  narrative_strategy_mode: "authority_building" | "identity_building" | "trust_nurture" | "direct_response" | "hybrid"
+}
+
+----------------------------------------
+Rules:
+----------------------------------------
+
+1) If narrative_arc_detected = true → storytelling_present = true
+2) If persuasion_style = story OR proof-led AND CTA low → narrative_strategy_mode = authority_building
+3) If CTA low BUT engagement_quality_score >= 55 → DO NOT classify as weakness
+4) If narrative_dominance_index > conversion_path_completeness → storytelling strategy prioritized
+
+All scoring must be rule-based.
+No GPT call here.
+
+========================================
+ENGINE 2 — CREATIVE STRATEGY ENGINE (CSE)
+========================================
+
+Purpose:
+Generate out-of-the-box strategic creative plays
+based on detected competitive structure.
+
+Limit: ONE GPT call total (shared with creative_expansion if exists).
+
+----------------------------------------
+Input to GPT:
+----------------------------------------
+- dominance_state
+- archetype
+- conversion gaps
+- narrative gaps
+- storytelling_intelligence object
+- performance_context
+- positioning gaps
+
+----------------------------------------
+Output structure ONLY:
+----------------------------------------
+
+creative_strategy = {
+  strategic_mode: "authority_takeover" | "narrative_domination" | "conversion_hybrid" | "positioning_disruption" | "trust_acceleration",
+  out_of_box_angles: [5 items max],
+  storytelling_series_concepts: [3 items max],
+  identity_positioning_play: 1 item,
+  subtle_conversion_layer: 1 item
+}
+
+----------------------------------------
+Critical Rule:
+----------------------------------------
+If competitor has no CTA BUT strong storytelling,
+CSE must NOT recommend aggressive CTA injection.
+Instead:
+Recommend layered subtle conversion strategy.
+
+========================================
+SAFEGUARDS
+========================================
+
+1) No new scraping.
+2) No new video processing.
+3) No additional external API calls.
+4) Total GPT calls per competitor: MAX 1.
+5) GPT token cap: 800 tokens max.
+6) No script writing.
+7) No long essays.
+8) No architectural changes.
+9) No schema refactor beyond adding storytelling_intelligence + creative_strategy objects.
+
+========================================
+SAFE MODES
+========================================
+
+If storytelling_present = false:
+  creative_strategy must focus on structural dominance.
+
+If dominance_state = DOMINANT:
+  creative_strategy must recommend differentiation, not imitation.
+
+If dominance_state = WEAK:
+  creative_strategy must recommend speed + volume play.
+
+========================================
+OUTPUT VALIDATION
+========================================
+
+Return:
+- Updated JSON schema.
+- Confirmation GPT call count.
+- Confirmation no new external calls added.
+- Confirmation absence of CTA is NOT auto-classified as weakness.
+
+Do not add extra features.
+Do not expand scope.
+Implement exactly this.

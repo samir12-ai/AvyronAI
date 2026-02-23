@@ -43,12 +43,22 @@ export interface DominanceState {
   dominance_state: DominanceLevel;
 }
 
+export interface StorytellingIntelligence {
+  storytelling_present: boolean;
+  storytelling_type: "transformation" | "founder_story" | "case_story" | "educational_narrative" | "status_story" | "none";
+  authority_building_score: number;
+  emotional_resonance_score: number;
+  soft_persuasion_strength: number;
+  narrative_strategy_mode: "authority_building" | "identity_building" | "trust_nurture" | "direct_response" | "hybrid";
+}
+
 export interface IntelligenceScores {
   conversion_intelligence: ConversionIntelligence;
   narrative_intelligence: NarrativeIntelligence;
   performance_context: PerformanceContext;
   archetype: MarketArchetype;
   dominance: DominanceState;
+  storytelling_intelligence: StorytellingIntelligence;
 }
 
 const EMOTIONAL_KEYWORDS_EN = /\b(transform|dream|imagine|believe|feel|love|hate|fear|excited|amazing|incredible|inspire|passion|struggle|overcome|journey|powerful|beautiful|heartbreak|proud|grateful|obsessed|mindblowing|life.?changing|game.?changer)\b/gi;
@@ -306,6 +316,105 @@ export function computeDominanceState(
   return { dominance_score, dominance_state };
 }
 
+const TRANSFORMATION_MARKERS = /\b(transform|changed\s+my|before\s+and\s+after|went\s+from|turned\s+into|became|evolution|breakthrough|rebirth|new\s+chapter)\b/gi;
+const FOUNDER_STORY_MARKERS = /\b(i\s+started|my\s+story|when\s+i\s+began|i\s+built|from\s+scratch|my\s+first|founding|co.?founded|entrepreneur|bootstrapped)\b/gi;
+const CASE_STORY_MARKERS = /\b(client|case\s+study|helped\s+(them|her|him)|delivered|project|worked\s+with|partnership|collaboration|engagement|campaign\s+for)\b/gi;
+const EDU_NARRATIVE_MARKERS = /\b(lesson|here'?s\s+what|what\s+i\s+learned|the\s+truth|myth|debunk|misconception|most\s+people\s+don'?t|nobody\s+tells|secret)\b/gi;
+const STATUS_STORY_MARKERS = /\b(exclusive|luxury|premium|elite|curated|bespoke|invitation\s+only|handpicked|rare|finest|world.?class)\b/gi;
+
+export function computeStorytellingIntelligence(
+  narrative: NarrativeIntelligence,
+  conversion: ConversionIntelligence,
+  performance: PerformanceContext,
+  creativeCapture: CreativeCaptureResult[] | null,
+  inferred: ProfileAnalysisResult["inferred"]
+): StorytellingIntelligence {
+  let allText = "";
+  if (creativeCapture) {
+    for (const cc of creativeCapture) {
+      if (cc.evidencePack.fullCaption) allText += " " + cc.evidencePack.fullCaption;
+      if (cc.evidencePack.ocrFullText) allText += " " + cc.evidencePack.ocrFullText;
+      if (cc.evidencePack.transcript) allText += " " + cc.evidencePack.transcript;
+      if (cc.evidencePack.pinnedCommentText) allText += " " + cc.evidencePack.pinnedCommentText;
+    }
+  }
+  if (inferred?.sampledReels) {
+    for (const r of inferred.sampledReels) {
+      if (r.caption) allText += " " + r.caption;
+    }
+  }
+  if (inferred?.insights) {
+    for (const ins of inferred.insights) allText += " " + ins.finding;
+  }
+
+  const storytelling_present = narrative.narrative_arc_detected;
+
+  const transformHits = countMatches(allText, TRANSFORMATION_MARKERS);
+  const founderHits = countMatches(allText, FOUNDER_STORY_MARKERS);
+  const caseHits = countMatches(allText, CASE_STORY_MARKERS);
+  const eduNarrHits = countMatches(allText, EDU_NARRATIVE_MARKERS);
+  const statusStoryHits = countMatches(allText, STATUS_STORY_MARKERS);
+
+  const typeScores = [
+    { type: "transformation" as const, hits: transformHits },
+    { type: "founder_story" as const, hits: founderHits },
+    { type: "case_story" as const, hits: caseHits },
+    { type: "educational_narrative" as const, hits: eduNarrHits },
+    { type: "status_story" as const, hits: statusStoryHits },
+  ].sort((a, b) => b.hits - a.hits);
+
+  const storytelling_type: StorytellingIntelligence["storytelling_type"] =
+    typeScores[0].hits > 0 ? typeScores[0].type : "none";
+
+  const authority_building_score = clamp(
+    (narrative.narrative_dominance_index > conversion.conversion_path_completeness ? 15 : 0) +
+    (caseHits * 8) +
+    (narrative.persuasion_style === "proof-led" ? 20 : 0) +
+    (narrative.persuasion_style === "story" ? 15 : 0) +
+    (narrative.narrative_arc_detected ? 15 : 0) +
+    Math.min(20, narrative.emotional_intensity_score * 0.2)
+  );
+
+  const emotional_resonance_score = clamp(
+    narrative.emotional_intensity_score * 0.6 +
+    (transformHits * 6) +
+    (narrative.narrative_arc_detected ? 15 : 0) +
+    (narrative.identity_targeting_strength * 0.15)
+  );
+
+  const ctaLow = conversion.cta_presence_score < 30;
+  const engagementOk = performance.engagement_quality_score >= 55;
+
+  const soft_persuasion_strength = clamp(
+    (ctaLow && engagementOk ? 25 : 0) +
+    authority_building_score * 0.3 +
+    emotional_resonance_score * 0.3 +
+    (narrative.narrative_dominance_index * 0.2)
+  );
+
+  let narrative_strategy_mode: StorytellingIntelligence["narrative_strategy_mode"];
+  if (conversion.conversion_style === "direct" && conversion.cta_presence_score >= 60) {
+    narrative_strategy_mode = "direct_response";
+  } else if ((narrative.persuasion_style === "story" || narrative.persuasion_style === "proof-led") && ctaLow) {
+    narrative_strategy_mode = "authority_building";
+  } else if (narrative.identity_targeting_strength >= 40) {
+    narrative_strategy_mode = "identity_building";
+  } else if (ctaLow && engagementOk) {
+    narrative_strategy_mode = "trust_nurture";
+  } else {
+    narrative_strategy_mode = "hybrid";
+  }
+
+  return {
+    storytelling_present,
+    storytelling_type,
+    authority_building_score,
+    emotional_resonance_score,
+    soft_persuasion_strength,
+    narrative_strategy_mode,
+  };
+}
+
 export function computeAllIntelligenceScores(
   result: ProfileAnalysisResult
 ): IntelligenceScores {
@@ -314,6 +423,7 @@ export function computeAllIntelligenceScores(
   const performance = computePerformanceContext(result.measured, result.creativeCapture);
   const archetype = classifyArchetype(conversion, narrative, performance);
   const dominance = computeDominanceState(conversion, narrative, performance);
+  const storytelling = computeStorytellingIntelligence(narrative, conversion, performance, result.creativeCapture, result.inferred);
 
   return {
     conversion_intelligence: conversion,
@@ -321,5 +431,6 @@ export function computeAllIntelligenceScores(
     performance_context: performance,
     archetype,
     dominance,
+    storytelling_intelligence: storytelling,
   };
 }
