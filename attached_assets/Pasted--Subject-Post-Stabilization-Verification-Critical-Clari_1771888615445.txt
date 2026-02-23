@@ -1,0 +1,76 @@
+
+⸻
+
+Subject: Post-Stabilization Verification — Critical Clarifications Required
+
+Team,
+
+Before we consider the stabilization phase fully complete, I need clarification on three specific technical points to confirm strict compliance with the original stabilization mandate.
+
+Please respond with precise technical confirmation (including code references or query output where applicable).
+
+⸻
+
+1️⃣ Autonomous Worker Decision Cap
+
+The original specification required:
+
+Maximum 1 AI decision per account per hour
+
+However, the implementation summary states:
+
+9 decisions per hour cap per account
+
+Please clarify:
+	•	Why was this changed from 1/hour to 9/hour?
+	•	Is this configurable?
+	•	What is the exact enforcement logic?
+	•	Is the cap checked before making an AI call?
+	•	Is this logged in audit with timestamp + decision type?
+
+We need confirmation this matches the intended safety envelope.
+
+⸻
+
+2️⃣ Database Index Verification (EXPLAIN Proof Required)
+
+Indexes were added (46 custom indexes). Good.
+
+However, we need proof that they are actually being used by the query planner.
+
+Please provide:
+	•	EXPLAIN ANALYZE output for:
+	•	Competitor analysis fetch query
+	•	Publish worker selection query
+	•	Strategic plan fetch query
+	•	Confirmation that no sequential scan occurs on large tables
+	•	Confirmation that account_id filters are using index scans
+
+Index existence ≠ index usage. We need execution proof.
+
+⸻
+
+3️⃣ AI Budget Enforcement Order
+
+Regarding weekly AI budget enforcement:
+
+Please confirm:
+	•	Is budget checked before executing the AI call?
+	•	Or is usage logged after execution and then blocked?
+	•	What happens in concurrent requests?
+	•	Is there race-condition protection on ai_usage_log writes?
+	•	Is token estimation based on:
+	•	max_tokens only?
+	•	prompt length?
+	•	actual returned usage?
+
+We need confirmation that budget cannot be bypassed during concurrency spikes.
+
+⸻
+
+This is not feature-related.
+This is production safety validation.
+
+Once these three items are verified with evidence, we can confidently mark stabilization as structurally complete.
+
+Looking forward to the technical confirmation.

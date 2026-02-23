@@ -89,7 +89,8 @@ export type AuditEventType =
   | "STUDIO_ITEM_STATUS_CHANGED"
   | "AI_CREATIVE_GENERATED"
   | "AI_CREATIVE_FAILED"
-  | "EMERGENCY_STOP_TRIGGERED";
+  | "EMERGENCY_STOP_TRIGGERED"
+  | "JOB_SKIPPED";
 
 export async function logAudit(
   accountId: string,
