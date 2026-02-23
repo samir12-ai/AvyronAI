@@ -264,8 +264,23 @@ export function registerCiCompetitorRoutes(app: Express) {
     try {
       const { intelligence, creative_strategy, blueprint } = req.body;
 
-      if (!intelligence || !blueprint?.offer || !blueprint?.icp) {
-        return res.status(400).json({ error: "Missing required fields: intelligence, blueprint.offer, blueprint.icp" });
+      const missing_fields: string[] = [];
+      if (!intelligence) missing_fields.push("intelligence");
+      else {
+        if (!intelligence.storytelling_intelligence) missing_fields.push("intelligence.storytelling_intelligence");
+        if (!intelligence.dominance) missing_fields.push("intelligence.dominance");
+        if (!intelligence.archetype) missing_fields.push("intelligence.archetype");
+        if (!intelligence.conversion_intelligence) missing_fields.push("intelligence.conversion_intelligence");
+        if (!intelligence.narrative_intelligence) missing_fields.push("intelligence.narrative_intelligence");
+        if (!intelligence.performance_context) missing_fields.push("intelligence.performance_context");
+      }
+      if (!blueprint) missing_fields.push("blueprint");
+      else {
+        if (!blueprint.offer) missing_fields.push("blueprint.offer");
+        if (!blueprint.icp) missing_fields.push("blueprint.icp");
+      }
+      if (missing_fields.length > 0) {
+        return res.status(400).json({ error: "Missing required fields", missing_fields });
       }
 
       const blueprintInput: BlueprintInput = {
