@@ -72,14 +72,14 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
 
   const { accountId = "default", endpoint = "unknown", ...rest } = options;
 
-  const budgetCheck = await checkAIBudget(accountId);
+  const budgetCheck = await checkAndReserveBudget(accountId, rest.max_tokens);
   if (!budgetCheck.allowed) {
     throw new AICallError(`AI budget exceeded for account ${accountId}: ${budgetCheck.reason}`, "AI_BUDGET_EXCEEDED");
   }
 
   const startTime = Date.now();
   let success = false;
-  let estimatedTokens = 0;
+  let actualTokens = 0;
 
   try {
     const openai = getOpenAI();
@@ -92,18 +92,18 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
     });
 
     success = true;
-    estimatedTokens = result.usage?.total_tokens || rest.max_tokens;
+    actualTokens = result.usage?.total_tokens || rest.max_tokens;
     return result;
   } catch (err: any) {
     if (err instanceof AICallError) throw err;
     throw new AICallError(err.message || "AI call failed", "AI_CALL_FAILED");
   } finally {
-    await logAICall({
+    await reconcileBudgetReservation({
       accountId,
       endpoint,
       model: rest.model,
       maxTokens: rest.max_tokens,
-      estimatedTokens,
+      actualTokens,
       success,
       durationMs: Date.now() - startTime,
     }).catch(() => {});
@@ -115,14 +115,14 @@ export async function aiGemini(options: AIGeminiOptions) {
 
   const maxTokens = config?.maxOutputTokens || DEFAULT_MAX_TOKENS;
 
-  const budgetCheck = await checkAIBudget(accountId);
+  const budgetCheck = await checkAndReserveBudget(accountId, maxTokens);
   if (!budgetCheck.allowed) {
     throw new AICallError(`AI budget exceeded for account ${accountId}: ${budgetCheck.reason}`, "AI_BUDGET_EXCEEDED");
   }
 
   const startTime = Date.now();
   let success = false;
-  let estimatedTokens = 0;
+  let actualTokens = 0;
 
   try {
     const gemini = getGemini();
@@ -136,18 +136,18 @@ export async function aiGemini(options: AIGeminiOptions) {
     });
 
     success = true;
-    estimatedTokens = maxTokens;
+    actualTokens = (result as any)?.usageMetadata?.totalTokenCount || maxTokens;
     return result;
   } catch (err: any) {
     if (err instanceof AICallError) throw err;
     throw new AICallError(err.message || "Gemini call failed", "AI_CALL_FAILED");
   } finally {
-    await logAICall({
+    await reconcileBudgetReservation({
       accountId,
       endpoint,
       model,
       maxTokens,
-      estimatedTokens,
+      actualTokens,
       success,
       durationMs: Date.now() - startTime,
     }).catch(() => {});
@@ -156,43 +156,70 @@ export async function aiGemini(options: AIGeminiOptions) {
 
 const WEEKLY_TOKEN_BUDGET = 500000;
 
-async function checkAIBudget(accountId: string): Promise<{ allowed: boolean; reason?: string }> {
+async function checkAndReserveBudget(accountId: string, maxTokens: number): Promise<{ allowed: boolean; reason?: string }> {
   try {
     const { db } = await import("./db");
     const { sql } = await import("drizzle-orm");
-    const result = await db.execute(sql`
-      SELECT COALESCE(SUM(estimated_tokens), 0) as total_tokens
-      FROM ai_usage_log
-      WHERE account_id = ${accountId}
-        AND created_at > NOW() - INTERVAL '7 days'
-    `);
-    const totalTokens = Number(result.rows?.[0]?.total_tokens || 0);
-    if (totalTokens >= WEEKLY_TOKEN_BUDGET) {
-      return { allowed: false, reason: `Weekly quota ${WEEKLY_TOKEN_BUDGET} tokens exceeded (used: ${totalTokens})` };
+    const lockKey = hashAccountId(accountId);
+    await db.execute(sql`SELECT pg_advisory_lock(${lockKey})`);
+    try {
+      const result = await db.execute(sql`
+        SELECT COALESCE(SUM(estimated_tokens), 0) as total_tokens
+        FROM ai_usage_log
+        WHERE account_id = ${accountId} AND created_at > NOW() - INTERVAL '7 days'
+      `);
+      const totalTokens = Number(result.rows?.[0]?.total_tokens || 0);
+      if (totalTokens + maxTokens > WEEKLY_TOKEN_BUDGET) {
+        return { allowed: false, reason: `Weekly quota ${WEEKLY_TOKEN_BUDGET} tokens exceeded (used: ${totalTokens}, requested: ${maxTokens})` };
+      }
+      await db.execute(sql`
+        INSERT INTO ai_usage_log (account_id, endpoint, model, max_tokens, estimated_tokens, success, duration_ms, created_at)
+        VALUES (${accountId}, 'budget_reservation', 'reservation', ${maxTokens}, ${maxTokens}, false, 0, NOW())
+      `);
+      return { allowed: true };
+    } finally {
+      await db.execute(sql`SELECT pg_advisory_unlock(${lockKey})`);
     }
-    return { allowed: true };
   } catch {
     return { allowed: true };
   }
 }
 
-interface AILogEntry {
+function hashAccountId(accountId: string): number {
+  let hash = 0;
+  for (let i = 0; i < accountId.length; i++) {
+    hash = ((hash << 5) - hash + accountId.charCodeAt(i)) | 0;
+  }
+  return hash & 0x7fffffff;
+}
+
+interface ReconcileEntry {
   accountId: string;
   endpoint: string;
   model: string;
   maxTokens: number;
-  estimatedTokens: number;
+  actualTokens: number;
   success: boolean;
   durationMs: number;
 }
 
-async function logAICall(entry: AILogEntry): Promise<void> {
+async function reconcileBudgetReservation(entry: ReconcileEntry): Promise<void> {
   try {
     const { db } = await import("./db");
     const { sql } = await import("drizzle-orm");
     await db.execute(sql`
+      DELETE FROM ai_usage_log 
+      WHERE id = (
+        SELECT id FROM ai_usage_log 
+        WHERE account_id = ${entry.accountId} 
+          AND endpoint = 'budget_reservation' 
+          AND model = 'reservation'
+        ORDER BY created_at DESC LIMIT 1
+      )
+    `);
+    await db.execute(sql`
       INSERT INTO ai_usage_log (account_id, endpoint, model, max_tokens, estimated_tokens, success, duration_ms, created_at)
-      VALUES (${entry.accountId}, ${entry.endpoint}, ${entry.model}, ${entry.maxTokens}, ${entry.estimatedTokens}, ${entry.success}, ${entry.durationMs}, NOW())
+      VALUES (${entry.accountId}, ${entry.endpoint}, ${entry.model}, ${entry.maxTokens}, ${entry.actualTokens}, ${entry.success}, ${entry.durationMs}, NOW())
     `);
   } catch {
   }
