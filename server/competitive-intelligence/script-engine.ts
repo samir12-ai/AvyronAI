@@ -234,7 +234,7 @@ Return ONLY this JSON (no markdown, no explanation):
 Generate 3 scripts and 3 concepts. Keep each script body under 150 words total.`;
 
   try {
-    const openai = new OpenAI();
+    const openai = new OpenAI({ apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY });
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [{ role: "user", content: prompt }],

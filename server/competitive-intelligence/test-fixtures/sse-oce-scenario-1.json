@@ -1,0 +1,49 @@
+{
+  "scenario": "1) Strong storytelling + no CTA",
+  "intelligence": {
+    "conversion_intelligence": {
+      "cta_presence_score": 0,
+      "offer_clarity_score": 0,
+      "funnel_visibility_score": 0,
+      "conversion_path_completeness": 0,
+      "conversion_style": "none"
+    },
+    "narrative_intelligence": {
+      "narrative_arc_detected": true,
+      "emotional_intensity_score": 20,
+      "identity_targeting_strength": 0,
+      "persuasion_style": "story",
+      "narrative_dominance_index": 56
+    },
+    "performance_context": {
+      "share_velocity_index": 31,
+      "save_ratio_index": 24,
+      "engagement_quality_score": 80,
+      "dominant_format": "reels"
+    },
+    "archetype": "Authority Builder",
+    "dominance": {
+      "dominance_score": 34,
+      "dominance_state": "EXPOSED"
+    },
+    "storytelling_intelligence": {
+      "storytelling_present": true,
+      "storytelling_type": "founder_story",
+      "authority_building_score": 49,
+      "emotional_resonance_score": 27,
+      "soft_persuasion_strength": 59,
+      "narrative_strategy_mode": "authority_building"
+    }
+  },
+  "blueprint": {
+    "offer": "Premium marketing consultancy",
+    "icp": "Business owners in Dubai",
+    "location": "Dubai, UAE",
+    "kpi_goal": "engagement"
+  },
+  "expected_mode": [
+    "authority_building",
+    "trust_nurture"
+  ],
+  "aggressive_cta_allowed": false
+}

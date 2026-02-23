@@ -1,0 +1,48 @@
+{
+  "scenario": "2) Strong CTA competitor",
+  "intelligence": {
+    "conversion_intelligence": {
+      "cta_presence_score": 95,
+      "offer_clarity_score": 90,
+      "funnel_visibility_score": 83,
+      "conversion_path_completeness": 90,
+      "conversion_style": "direct"
+    },
+    "narrative_intelligence": {
+      "narrative_arc_detected": false,
+      "emotional_intensity_score": 0,
+      "identity_targeting_strength": 0,
+      "persuasion_style": "hybrid",
+      "narrative_dominance_index": 0
+    },
+    "performance_context": {
+      "share_velocity_index": 18,
+      "save_ratio_index": 12,
+      "engagement_quality_score": 60,
+      "dominant_format": "reels"
+    },
+    "archetype": "Conversion Closer",
+    "dominance": {
+      "dominance_score": 38,
+      "dominance_state": "EXPOSED"
+    },
+    "storytelling_intelligence": {
+      "storytelling_present": false,
+      "storytelling_type": "none",
+      "authority_building_score": 0,
+      "emotional_resonance_score": 0,
+      "soft_persuasion_strength": 0,
+      "narrative_strategy_mode": "direct_response"
+    }
+  },
+  "blueprint": {
+    "offer": "Premium marketing consultancy",
+    "icp": "Business owners in Dubai",
+    "location": "Dubai, UAE",
+    "kpi_goal": "engagement"
+  },
+  "expected_mode": [
+    "direct_response"
+  ],
+  "aggressive_cta_allowed": true
+}

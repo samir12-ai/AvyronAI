@@ -100,7 +100,7 @@ Return ONLY this JSON (no markdown, no explanation):
 }`;
 
   try {
-    const openai = new OpenAI();
+    const openai = new OpenAI({ apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY });
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [{ role: "user", content: prompt }],
