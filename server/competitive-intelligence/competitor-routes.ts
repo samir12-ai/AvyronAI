@@ -6,6 +6,8 @@ import { featureFlagService } from "../feature-flags";
 import { analyzeInstagramProfile } from "./profile-analyzer";
 import { getScrapeStats } from "./profile-scraper";
 import { getCreativeCaptureStats, checkWeeklyLimits } from "./creative-capture";
+import { computeAllIntelligenceScores } from "./intelligence-scores";
+import { generateCreativeExpansion } from "./creative-expansion";
 
 const REQUIRED_EVIDENCE_FIELDS = [
   "profileLink",
@@ -233,6 +235,19 @@ export function registerCiCompetitorRoutes(app: Express) {
         messagingTone: result.inferred?.insights?.filter((i: any) => i.category === 'messaging_tone').map((i: any) => i.finding).join('; ') || null,
         socialProofPresence: result.inferred?.insights?.filter((i: any) => i.category === 'social_proof').map((i: any) => i.finding).join('; ') || null,
       };
+
+      const intelligenceScores = computeAllIntelligenceScores(result);
+      console.log(`[CI Intelligence] ${name} | Archetype: ${intelligenceScores.archetype} | Dominance: ${intelligenceScores.dominance.dominance_state} (${intelligenceScores.dominance.dominance_score}) | GPT calls: 1`);
+
+      let creativeExpansion = null;
+      try {
+        creativeExpansion = await generateCreativeExpansion(intelligenceScores, name);
+      } catch (err: any) {
+        console.error("[CI Intelligence] Creative expansion GPT call failed:", err.message);
+      }
+
+      (result as any).intelligence = intelligenceScores;
+      (result as any).creative_expansion = creativeExpansion;
 
       res.json(result);
     } catch (error: any) {
