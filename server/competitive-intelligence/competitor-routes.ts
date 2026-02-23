@@ -4,6 +4,7 @@ import { ciCompetitors } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { featureFlagService } from "../feature-flags";
 import { analyzeInstagramProfile } from "./profile-analyzer";
+import { getScrapeStats } from "./profile-scraper";
 
 const REQUIRED_EVIDENCE_FIELDS = [
   "profileLink",
@@ -193,6 +194,15 @@ export function registerCiCompetitorRoutes(app: Express) {
     } catch (error: any) {
       console.error("Profile analysis error:", error);
       res.status(500).json({ error: "Profile analysis failed: " + (error.message || "Unknown error") });
+    }
+  });
+
+  app.get("/api/ci/scrape-stats", async (_req, res) => {
+    try {
+      const stats = getScrapeStats();
+      res.json(stats);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
 }

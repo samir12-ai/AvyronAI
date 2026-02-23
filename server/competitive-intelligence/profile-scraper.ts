@@ -1,3 +1,5 @@
+import { ProxyAgent } from "undici";
+
 type Browser = any;
 type Page = any;
 
@@ -10,7 +12,7 @@ async function getChromium(): Promise<any> {
     return playwrightChromium;
   } catch {
     try {
-      const pw = await import("playwright");
+      const pw: any = await import("playwright");
       playwrightChromium = pw.chromium;
       return playwrightChromium;
     } catch {
@@ -20,6 +22,39 @@ async function getChromium(): Promise<any> {
 }
 
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH || "/nix/store/zi4f80l169xlmivz8vja8wlphq74qqk0-chromium-125.0.6422.141/bin/chromium";
+
+function getProxyConfig(): { url: string; host: string; port: string; username: string; password: string } | null {
+  const host = process.env.BRIGHT_DATA_PROXY_HOST;
+  const port = process.env.BRIGHT_DATA_PROXY_PORT;
+  const username = process.env.BRIGHT_DATA_PROXY_USERNAME;
+  const password = process.env.BRIGHT_DATA_PROXY_PASSWORD;
+  if (!host || !port || !username || !password) {
+    return null;
+  }
+  return {
+    url: `http://${username}:${password}@${host}:${port}`,
+    host,
+    port,
+    username,
+    password,
+  };
+}
+
+function getProxyDispatcher(): ProxyAgent | undefined {
+  const proxy = getProxyConfig();
+  if (!proxy) return undefined;
+  return new ProxyAgent({
+    uri: proxy.url,
+    requestTls: {
+      rejectUnauthorized: false,
+    },
+  });
+}
+
+function randomDelay(): Promise<void> {
+  const ms = 1000 + Math.random() * 2000;
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 export interface ScrapedPost {
   postId: string;
@@ -40,6 +75,51 @@ export interface ScrapeResult {
   collectionMethodUsed: "HTML_PARSE" | "HEADLESS_RENDER" | "NONE";
   attempts: string[];
   warnings: string[];
+}
+
+export interface ScrapeStats {
+  totalRequests: number;
+  htmlParseSuccess: number;
+  headlessRenderSuccess: number;
+  scrapeBlocked: number;
+  totalBytesEstimated: number;
+  lastReset: number;
+}
+
+const scrapeStats: ScrapeStats = {
+  totalRequests: 0,
+  htmlParseSuccess: 0,
+  headlessRenderSuccess: 0,
+  scrapeBlocked: 0,
+  totalBytesEstimated: 0,
+  lastReset: Date.now(),
+};
+
+export function getScrapeStats(): ScrapeStats & { successRate: string; blockedRate: string; bandwidthMB: string } {
+  const total = scrapeStats.totalRequests || 1;
+  return {
+    ...scrapeStats,
+    successRate: `${(((scrapeStats.htmlParseSuccess + scrapeStats.headlessRenderSuccess) / total) * 100).toFixed(1)}%`,
+    blockedRate: `${((scrapeStats.scrapeBlocked / total) * 100).toFixed(1)}%`,
+    bandwidthMB: `${(scrapeStats.totalBytesEstimated / (1024 * 1024)).toFixed(2)} MB`,
+  };
+}
+
+const MAX_BATCH_SIZE = 10;
+let currentBatchCount = 0;
+let batchResetTime = Date.now();
+const BATCH_WINDOW_MS = 60 * 60 * 1000;
+
+function checkBatchLimit(): boolean {
+  if (Date.now() - batchResetTime > BATCH_WINDOW_MS) {
+    currentBatchCount = 0;
+    batchResetTime = Date.now();
+  }
+  if (currentBatchCount >= MAX_BATCH_SIZE) {
+    return false;
+  }
+  currentBatchCount++;
+  return true;
 }
 
 const profileCache = new Map<string, { data: ScrapeResult; timestamp: number }>();
@@ -92,7 +172,52 @@ function parsePostFromGraphQL(node: any, handle: string): ScrapedPost {
   };
 }
 
-async function attemptHtmlParse(profileUrl: string, handle: string): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null }> {
+async function attemptWebProfileApi(handle: string): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number }> {
+  const apiUrl = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`;
+
+  const headers: Record<string, string> = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "X-IG-App-ID": "936619743392459",
+    "X-Requested-With": "XMLHttpRequest",
+    "Accept": "*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": `https://www.instagram.com/${handle}/`,
+  };
+
+  const dispatcher = getProxyDispatcher();
+  const fetchOptions: any = { headers, redirect: "follow" };
+  if (dispatcher) {
+    fetchOptions.dispatcher = dispatcher;
+  }
+
+  console.log(`[CI Scraper] HTML_PARSE (web_profile_info API): Fetching profile for ${handle} ${dispatcher ? "via Bright Data proxy" : "direct"}`);
+
+  const response = await fetch(apiUrl, fetchOptions);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const text = await response.text();
+  const bytesReceived = Buffer.byteLength(text, "utf-8");
+
+  console.log(`[CI Scraper] HTML_PARSE: Received ${(bytesReceived / 1024).toFixed(1)} KB from web_profile_info for ${handle}`);
+
+  const data = JSON.parse(text);
+  const user = data?.data?.user;
+  if (!user) throw new Error("No user data in API response");
+
+  const profileName = user.full_name || user.username || handle;
+  const followers = user.edge_followed_by?.count ?? null;
+
+  const edges = user.edge_owner_to_timeline_media?.edges || [];
+  const posts: ScrapedPost[] = [];
+  for (const edge of edges.slice(0, 30)) {
+    posts.push(parsePostFromGraphQL(edge.node, handle));
+  }
+
+  console.log(`[CI Scraper] HTML_PARSE: Extracted ${posts.length} posts, ${followers ?? "unknown"} followers for ${handle}`);
+
+  return { posts, followers, profileName, bytesReceived };
+}
+
+async function attemptHtmlPageParse(profileUrl: string, handle: string): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number }> {
   const headers: Record<string, string> = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -100,9 +225,18 @@ async function attemptHtmlParse(profileUrl: string, handle: string): Promise<{ p
     "Cache-Control": "no-cache",
   };
 
-  const response = await fetch(profileUrl, { headers, redirect: "follow" });
+  const dispatcher = getProxyDispatcher();
+  const fetchOptions: any = { headers, redirect: "follow" };
+  if (dispatcher) {
+    fetchOptions.dispatcher = dispatcher;
+  }
+
+  console.log(`[CI Scraper] HTML_PARSE (page fallback): Fetching ${profileUrl}`);
+
+  const response = await fetch(profileUrl, fetchOptions);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const html = await response.text();
+  const bytesReceived = Buffer.byteLength(html, "utf-8");
 
   const posts: ScrapedPost[] = [];
   let followers: number | null = null;
@@ -143,23 +277,6 @@ async function attemptHtmlParse(profileUrl: string, handle: string): Promise<{ p
   }
 
   if (posts.length === 0) {
-    const jsonLdMatches = html.matchAll(/<script type="application\/ld\+json">(.*?)<\/script>/gs);
-    for (const m of jsonLdMatches) {
-      try {
-        const ld = JSON.parse(m[1]);
-        if (ld?.mainEntity?.interactionStatistic) {
-          for (const stat of ld.mainEntity.interactionStatistic) {
-            if (stat.interactionType?.includes("Follow")) {
-              followers = stat.userInteractionCount ?? followers;
-            }
-          }
-        }
-        profileName = profileName || ld?.mainEntity?.name || ld?.name || null;
-      } catch {}
-    }
-  }
-
-  if (posts.length === 0) {
     const metaDesc = html.match(/<meta[^>]+property="og:description"[^>]+content="([^"]+)"/i);
     if (metaDesc) {
       const followerMatch = metaDesc[1].match(/([\d,.]+[KkMm]?)\s*Followers/i);
@@ -173,19 +290,40 @@ async function attemptHtmlParse(profileUrl: string, handle: string): Promise<{ p
     }
   }
 
-  return { posts, followers, profileName };
+  return { posts, followers, profileName, bytesReceived };
 }
 
-async function attemptHeadlessRender(profileUrl: string, handle: string): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null }> {
+async function attemptHeadlessRender(profileUrl: string, handle: string): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesEstimated: number }> {
   const chromiumModule = await getChromium();
   if (!chromiumModule) throw new Error("Playwright not available");
+
+  const proxy = getProxyConfig();
   let browser: Browser | null = null;
+
   try {
-    browser = await chromiumModule.launch({
+    const baseArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"];
+    if (proxy) {
+      baseArgs.push("--ignore-certificate-errors");
+    }
+
+    const launchOptions: any = {
       executablePath: CHROMIUM_PATH,
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-    });
+      args: baseArgs,
+    };
+
+    if (proxy) {
+      launchOptions.proxy = {
+        server: `http://${proxy.host}:${proxy.port}`,
+        username: proxy.username,
+        password: proxy.password,
+      };
+      console.log(`[CI Scraper] HEADLESS_RENDER: Launching with Bright Data proxy for ${handle}`);
+    } else {
+      console.log(`[CI Scraper] HEADLESS_RENDER: Launching direct (no proxy) for ${handle}`);
+    }
+
+    browser = await chromiumModule.launch(launchOptions);
 
     const context = await browser.newContext({
       userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -193,8 +331,8 @@ async function attemptHeadlessRender(profileUrl: string, handle: string): Promis
     });
 
     const page: Page = await context.newPage();
-    await page.goto(profileUrl, { waitUntil: "networkidle", timeout: 30000 });
-    await page.waitForTimeout(3000);
+    await page.goto(profileUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.waitForTimeout(5000);
 
     const data = await page.evaluate(() => {
       const posts: any[] = [];
@@ -205,9 +343,9 @@ async function attemptHeadlessRender(profileUrl: string, handle: string): Promis
       if (nameEl) profileName = nameEl.textContent?.trim() || null;
 
       const statEls = document.querySelectorAll("header ul li span, header section ul li span");
-      for (const el of statEls) {
+      for (let i = 0; i < statEls.length; i++) {
+        const el = statEls[i];
         const title = el.getAttribute("title");
-        const text = el.textContent || "";
         if (title && /\d/.test(title)) {
           const parent = el.closest("li");
           const parentText = parent?.textContent || "";
@@ -219,8 +357,9 @@ async function attemptHeadlessRender(profileUrl: string, handle: string): Promis
 
       const postLinks = document.querySelectorAll("article a[href*='/p/'], article a[href*='/reel/'], main a[href*='/p/'], main a[href*='/reel/']");
       const seen = new Set<string>();
-      for (const link of postLinks) {
-        const href = (link as HTMLAnchorElement).href;
+      for (let i = 0; i < postLinks.length; i++) {
+        const link = postLinks[i] as HTMLAnchorElement;
+        const href = link.href;
         if (seen.has(href)) continue;
         seen.add(href);
         const isReel = href.includes("/reel/");
@@ -258,10 +397,14 @@ async function attemptHeadlessRender(profileUrl: string, handle: string): Promis
       views: p.views,
     }));
 
+    const bytesEstimated = scrapedPosts.length * 500 + 50000;
+    console.log(`[CI Scraper] HEADLESS_RENDER: Found ${scrapedPosts.length} posts for ${handle}, ~${(bytesEstimated / 1024).toFixed(1)} KB estimated`);
+
     return {
       posts: scrapedPosts,
       followers: data.followers,
       profileName: data.profileName || handle,
+      bytesEstimated,
     };
   } finally {
     if (browser) await browser.close().catch(() => {});
@@ -274,6 +417,7 @@ export async function scrapeInstagramProfile(rawUrl: string): Promise<ScrapeResu
 
   const cached = profileCache.get(handle);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    console.log(`[CI Scraper] CACHE_HIT for ${handle}`);
     return { ...cached.data, attempts: [...cached.data.attempts, "CACHE_HIT"] };
   }
 
@@ -284,6 +428,22 @@ export async function scrapeInstagramProfile(rawUrl: string): Promise<ScrapeResu
   }
   rateLimitMap.set(handle, Date.now());
 
+  if (!checkBatchLimit()) {
+    console.log(`[CI Scraper] BATCH_LIMIT reached (${MAX_BATCH_SIZE} profiles/hour). Returning cached or blocked.`);
+    const cachedFallback = profileCache.get(handle);
+    if (cachedFallback) return { ...cachedFallback.data, attempts: ["BATCH_LIMIT", "CACHE_HIT"] };
+    return {
+      success: false,
+      posts: [],
+      followers: null,
+      profileName: handle,
+      collectionMethodUsed: "NONE",
+      attempts: ["BATCH_LIMIT"],
+      warnings: ["BATCH_LIMIT_EXCEEDED: Testing phase limits scraping to 10 profiles per hour."],
+    };
+  }
+
+  scrapeStats.totalRequests++;
   const attempts: string[] = [];
   const warnings: string[] = [];
   let posts: ScrapedPost[] = [];
@@ -291,38 +451,75 @@ export async function scrapeInstagramProfile(rawUrl: string): Promise<ScrapeResu
   let profileName: string | null = null;
   let collectionMethodUsed: ScrapeResult["collectionMethodUsed"] = "NONE";
 
+  const proxyAvailable = !!getProxyConfig();
+  if (!proxyAvailable) {
+    console.warn("[CI Scraper] WARNING: No Bright Data proxy configured. Scraping without proxy may trigger rate limits.");
+  }
+
+  await randomDelay();
+
   attempts.push("HTML_PARSE");
   try {
-    const result = await attemptHtmlParse(profileUrl, handle);
+    const result = await attemptWebProfileApi(handle);
     posts = result.posts;
     followers = result.followers;
     profileName = result.profileName;
+    scrapeStats.totalBytesEstimated += result.bytesReceived;
     if (posts.length > 0) {
       collectionMethodUsed = "HTML_PARSE";
+      scrapeStats.htmlParseSuccess++;
+      console.log(`[CI Scraper] HTML_PARSE SUCCESS (web API): ${posts.length} posts, ${followers ?? "unknown"} followers for ${handle}`);
     }
   } catch (err: any) {
-    warnings.push(`HTML_PARSE failed: ${err.message}`);
+    console.log(`[CI Scraper] HTML_PARSE web API failed for ${handle}: ${err.message}, trying page parse...`);
+    try {
+      const result = await attemptHtmlPageParse(profileUrl, handle);
+      posts = result.posts;
+      followers = result.followers;
+      profileName = result.profileName;
+      scrapeStats.totalBytesEstimated += result.bytesReceived;
+      if (posts.length > 0) {
+        collectionMethodUsed = "HTML_PARSE";
+        scrapeStats.htmlParseSuccess++;
+        console.log(`[CI Scraper] HTML_PARSE SUCCESS (page parse): ${posts.length} posts for ${handle}`);
+      } else {
+        console.log(`[CI Scraper] HTML_PARSE: Page loaded but no post data extracted for ${handle}`);
+      }
+    } catch (err2: any) {
+      warnings.push(`HTML_PARSE failed: ${err.message} | page parse: ${err2.message}`);
+      console.log(`[CI Scraper] HTML_PARSE FAILED for ${handle}: ${err2.message}`);
+    }
   }
 
   if (posts.length < 5) {
+    await randomDelay();
     attempts.push("HEADLESS_RENDER");
     try {
       const result = await attemptHeadlessRender(profileUrl, handle);
+      scrapeStats.totalBytesEstimated += result.bytesEstimated;
       if (result.posts.length > posts.length) {
         posts = result.posts;
         collectionMethodUsed = "HEADLESS_RENDER";
+        scrapeStats.headlessRenderSuccess++;
+        console.log(`[CI Scraper] HEADLESS_RENDER SUCCESS: ${posts.length} posts for ${handle}`);
       }
       if (!followers && result.followers) followers = result.followers;
       if (!profileName && result.profileName) profileName = result.profileName;
     } catch (err: any) {
       warnings.push(`HEADLESS_RENDER failed: ${err.message}`);
+      console.log(`[CI Scraper] HEADLESS_RENDER FAILED for ${handle}: ${err.message}`);
     }
   }
 
   if (posts.length === 0) {
     warnings.push("SCRAPE_BLOCKED");
     collectionMethodUsed = "NONE";
+    scrapeStats.scrapeBlocked++;
+    console.log(`[CI Scraper] SCRAPE_BLOCKED: All methods failed for ${handle}`);
   }
+
+  const stats = getScrapeStats();
+  console.log(`[CI Scraper] Stats: total=${stats.totalRequests}, success=${stats.successRate}, blocked=${stats.blockedRate}, bandwidth=${stats.bandwidthMB}`);
 
   const result: ScrapeResult = {
     success: posts.length > 0,
