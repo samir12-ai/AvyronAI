@@ -194,21 +194,44 @@ export default function CompetitiveIntelligence() {
       const mixStr = mix ? `Reels ${Math.round(mix.reels_ratio * 100)}% / Static ${Math.round(mix.static_ratio * 100)}%` : '';
       const ctaInsights = data.inferred?.insights?.filter((ins: any) => ins.category === 'cta_pattern') || [];
       const ctaStr = ctaInsights.length > 0 ? ctaInsights.map((ins: any) => ins.finding).join('; ') : '';
+      const ccCtaSignals: string[] = [];
+      if (data.creativeCapture?.length > 0) {
+        for (const cc of data.creativeCapture) {
+          if (cc.interpreted?.ctaSignals?.length > 0) {
+            for (const sig of cc.interpreted.ctaSignals) {
+              if (sig.text && !ccCtaSignals.includes(sig.text)) ccCtaSignals.push(sig.text);
+            }
+          }
+        }
+      }
+      const ccCtaStr = ccCtaSignals.length > 0 ? ccCtaSignals.join(', ') : '';
+      const combinedCta = [ctaStr, ccCtaStr].filter(Boolean).join('; ');
       const hookInsights = data.inferred?.insights?.filter((ins: any) => ins.category === 'hook_style') || [];
       const hookStr = hookInsights.length > 0 ? hookInsights.map((ins: any) => ins.finding).join('; ') : '';
       const toneInsights = data.inferred?.insights?.filter((ins: any) => ins.category === 'messaging_tone') || [];
       const toneStr = toneInsights.length > 0 ? toneInsights.map((ins: any) => ins.finding).join('; ') : '';
       const proofInsights = data.inferred?.insights?.filter((ins: any) => ins.category === 'social_proof') || [];
       const proofStr = proofInsights.length > 0 ? proofInsights.map((ins: any) => ins.finding).join('; ') : '';
+      const hf = data.hydratedFields;
+      const finalCta = hf?.ctaPatterns || combinedCta;
+      const finalHooks = hf?.hookStyles || hookStr;
+      const finalTone = hf?.messagingTone || toneStr;
+      const finalProof = hf?.socialProofPresence || proofStr;
+      const mappedCategories: string[] = [];
+      if (finalCta) mappedCategories.push('cta_pattern');
+      if (finalHooks) mappedCategories.push('hook_style');
+      if (finalTone) mappedCategories.push('messaging_tone');
+      if (finalProof) mappedCategories.push('social_proof');
+      console.log('[CI Hydration] Mapped insight categories:', mappedCategories.join(', ') || 'none');
       setNewComp(p => ({
         ...p,
         postingFrequency: m?.avg_posts_per_week_28d?.value?.toString() || m?.posts_last_7d?.value?.toString() || p.postingFrequency,
         contentTypeRatio: mixStr || p.contentTypeRatio,
         engagementRatio: m?.engagement_rate?.value?.toString() || p.engagementRatio,
-        ctaPatterns: ctaStr || p.ctaPatterns,
-        hookStyles: hookStr || p.hookStyles,
-        messagingTone: toneStr || p.messagingTone,
-        socialProofPresence: proofStr || p.socialProofPresence,
+        ctaPatterns: finalCta || p.ctaPatterns,
+        hookStyles: finalHooks || p.hookStyles,
+        messagingTone: finalTone || p.messagingTone,
+        socialProofPresence: finalProof || p.socialProofPresence,
       }));
       setViralInsights('');
       setAddStep('review');
@@ -527,11 +550,20 @@ export default function CompetitiveIntelligence() {
             </View>
           </Pressable>
 
-          {!comp.evidenceComplete && (
+          {!comp.evidenceComplete && comp.missingFields.length > 0 && (
             <View style={[s.missingBar, { backgroundColor: '#F59E0B' + '12' }]}>
               <Ionicons name="warning-outline" size={14} color="#F59E0B" />
               <Text style={[s.missingText, { color: '#F59E0B' }]}>
-                Missing: {comp.missingFields.join(', ')}
+                {comp.missingFields.map((f: string) => {
+                  const labels: Record<string, string> = {
+                    ctaPatterns: 'CTA Patterns: Unavailable (no CTA signals detected)',
+                    postingFrequency: 'Posting Frequency: Unavailable (insufficient data)',
+                    contentTypeRatio: 'Content Mix: Unavailable (insufficient data)',
+                    engagementRatio: 'Engagement Rate: Unavailable (insufficient data)',
+                    profileLink: 'Profile Link: Not provided',
+                  };
+                  return labels[f] || f;
+                }).join(' · ')}
               </Text>
             </View>
           )}
@@ -543,7 +575,7 @@ export default function CompetitiveIntelligence() {
                 { label: 'Posts/Week', value: comp.postingFrequency?.toString(), icon: 'calendar-outline' as const },
                 { label: 'Content Mix', value: comp.contentTypeRatio, icon: 'pie-chart-outline' as const },
                 { label: 'Engagement (scanned posts)', value: comp.engagementRatio ? `${comp.engagementRatio}%` : null, icon: 'heart-outline' as const },
-                { label: 'CTA Patterns', value: comp.ctaPatterns, icon: 'megaphone-outline' as const },
+                { label: 'CTA Patterns', value: comp.ctaPatterns || 'Unavailable (no CTA signals detected)', icon: 'megaphone-outline' as const },
                 { label: 'Discounts', value: comp.discountFrequency, icon: 'pricetag-outline' as const },
                 { label: 'Hook Styles', value: comp.hookStyles, icon: 'videocam-outline' as const },
                 { label: 'Tone', value: comp.messagingTone, icon: 'chatbubble-outline' as const },

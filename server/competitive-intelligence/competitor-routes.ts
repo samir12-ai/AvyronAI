@@ -194,6 +194,46 @@ export function registerCiCompetitorRoutes(app: Express) {
         enableCreativeCapture: enableCreativeCapture !== false,
         saveFixtures: !!saveFixtures,
       });
+
+      const mappedCategories: string[] = [];
+      const ctaParts: string[] = [];
+      if (result.inferred?.insights?.length) {
+        const ctaInsights = result.inferred.insights.filter((i: any) => i.category === 'cta_pattern');
+        if (ctaInsights.length > 0) {
+          ctaParts.push(ctaInsights.map((i: any) => i.finding).join('; '));
+          mappedCategories.push(`cta_pattern:inferred(${ctaInsights.length})`);
+        }
+        const hookCount = result.inferred.insights.filter((i: any) => i.category === 'hook_style').length;
+        const toneCount = result.inferred.insights.filter((i: any) => i.category === 'messaging_tone').length;
+        const proofCount = result.inferred.insights.filter((i: any) => i.category === 'social_proof').length;
+        if (hookCount) mappedCategories.push(`hook_style(${hookCount})`);
+        if (toneCount) mappedCategories.push(`messaging_tone(${toneCount})`);
+        if (proofCount) mappedCategories.push(`social_proof(${proofCount})`);
+      }
+      if (result.creativeCapture?.length) {
+        const ccCtas: string[] = [];
+        for (const cc of result.creativeCapture) {
+          if (cc.interpreted?.ctaSignals?.length) {
+            for (const sig of cc.interpreted.ctaSignals) {
+              if (sig.text && !ccCtas.includes(sig.text)) ccCtas.push(sig.text);
+            }
+          }
+        }
+        if (ccCtas.length > 0) {
+          ctaParts.push(ccCtas.join(', '));
+          mappedCategories.push(`cta_pattern:creative_capture(${ccCtas.length})`);
+        }
+      }
+      const hydratedCtaPatterns = ctaParts.filter(Boolean).join('; ') || null;
+      console.log(`[CI Hydration] Profile: ${name} | Categories mapped: ${mappedCategories.join(', ') || 'none'} | ctaPatterns: ${hydratedCtaPatterns ? 'populated' : 'empty'}`);
+
+      (result as any).hydratedFields = {
+        ctaPatterns: hydratedCtaPatterns,
+        hookStyles: result.inferred?.insights?.filter((i: any) => i.category === 'hook_style').map((i: any) => i.finding).join('; ') || null,
+        messagingTone: result.inferred?.insights?.filter((i: any) => i.category === 'messaging_tone').map((i: any) => i.finding).join('; ') || null,
+        socialProofPresence: result.inferred?.insights?.filter((i: any) => i.category === 'social_proof').map((i: any) => i.finding).join('; ') || null,
+      };
+
       res.json(result);
     } catch (error: any) {
       console.error("Profile analysis error:", error);
