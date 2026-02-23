@@ -65,6 +65,9 @@ export interface ScrapedPost {
   likes: number | null;
   comments: number | null;
   views: number | null;
+  videoUrl: string | null;
+  displayUrl: string | null;
+  shortcode: string;
 }
 
 export interface ScrapeResult {
@@ -173,6 +176,9 @@ function parsePostFromGraphQL(node: any, handle: string): ScrapedPost {
     likes: node.edge_media_preview_like?.count ?? node.like_count ?? null,
     comments: node.edge_media_to_comment?.count ?? node.comment_count ?? null,
     views: node.video_view_count ?? node.play_count ?? null,
+    videoUrl: node.video_url || null,
+    displayUrl: node.display_url || node.thumbnail_src || null,
+    shortcode,
   };
 }
 
@@ -380,6 +386,8 @@ async function attemptHeadlessRender(profileUrl: string, handle: string): Promis
           likes: null,
           comments: null,
           views: null,
+          videoUrl: null,
+          displayUrl: img?.getAttribute("src") || null,
         });
 
         if (posts.length >= 30) break;
@@ -399,6 +407,9 @@ async function attemptHeadlessRender(profileUrl: string, handle: string): Promis
       likes: p.likes,
       comments: p.comments,
       views: p.views,
+      videoUrl: null,
+      displayUrl: p.displayUrl || null,
+      shortcode: p.shortcode || "",
     }));
 
     const bytesEstimated = scrapedPosts.length * 500 + 50000;
