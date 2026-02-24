@@ -38,7 +38,7 @@ Preferred communication style: Simple, everyday language.
 - **AI Management**:
     - **Auto-Publisher**: Batch publishing to Meta platforms.
     - **AI Audience Manager**: Generates optimized Meta ad audiences.
-    - **Strategy Hub**: AI-powered strategic intelligence with MOAT BUILDER MODE for brand defensibility, pattern detection, and AI-generated reports.
+    - **Performance Intelligence Layer**: Embedded inside Build The Plan (Phase 5). Analyzes past performance data, generates insights/recommendations/memory/moat signals. Feeds signals into the BTP orchestrator. Does NOT create execution plans — purely a signal provider.
 - **Studio**: Media library and AI Video Editor with guided creative briefs and FFmpeg rendering.
 - **Photography**: Dubai-based photography marketplace.
 - **Lead Engine**: Modular lead generation system with 8 independent modules (Lead Capture, Conversion Tracking, CTA Engine, Funnel Logic, Lead Magnets, Landing Pages, Revenue Attribution, AI Lead Optimization). Features flags, dependency guards, and a global kill switch.
@@ -57,12 +57,21 @@ Preferred communication style: Simple, everyday language.
 - **Hard Rules**: Nothing executes until plan status = APPROVED. Nothing auto-publishes. No silent fallbacks. All state transitions audit logged (18 event types).
 - **Frontend**: StrategicPipeline.tsx - 4-step linear pipeline view (Build Strategy → Approval → Execution Pipeline → Competitor Intelligence) with collapsible sections, step indicators, progress tracking, and contextual actions. Replaces the old scattered tab interface. ExecutionMachine.tsx retained as legacy component.
 - **Backend**: server/strategic-core/execution-routes.ts with 15+ endpoints, status-gated middleware.
-- **AI Management UX**: Consolidated from 9 tabs to Pipeline (default) + Control + Publish + advanced tools (Audience, Strategy, Leads). The Pipeline tab contains all strategic execution steps in a linear flow.
+- **AI Management UX**: Consolidated from 9 tabs to Pipeline (default) + Control + Publish + advanced tools (Audience, Leads). Strategy tab removed — Performance Intelligence is now embedded inside Build The Plan. The Pipeline tab contains all strategic execution steps in a linear flow.
 
 ### Strategic Core Architecture ("Build The Plan")
 - **System**: 6-phase sequential intelligence engine with hard gates.
 - **Phases**: Gate (min requirements) → Creative Analysis (AI extraction from media) → Confirm/Edit (user review) → Market Analysis (AI market mapping) → Validation (contradiction detection) → Orchestrator (execution plan generation).
 - **AI Models**: Gemini 3 Pro for creative extraction, GPT-5.2 for market analysis, validation, and orchestration.
+- **Orchestrator Enhancement**: Optionally injects Performance Intelligence signals (strategy_memory, high-confidence insights ≥0.7, top moat candidates) into orchestrator prompt. Fail-safe: proceeds without signals if strategy tables are empty or query fails.
+
+### Execution Authority Matrix (Feb 2026 Consolidation)
+- **SINGLE EXECUTION TRACK**: Build The Plan is the SOLE execution authority.
+- **Build The Plan** OWNS: strategic_plans, required_work, calendar_entries, studio_items, plan_approvals. Creates, approves, executes, publishes.
+- **Performance Intelligence (formerly Strategy)** READS: performance_snapshots, strategy_insights, strategy_decisions, strategy_memory, moat_candidates, signature_series, weekly_reports. WRITES: only to its own signal tables. NEVER writes to execution tables.
+- **Audit Events**: PERFORMANCE_SIGNAL_PROPOSED, PERFORMANCE_SYNC_COMPLETED, MOAT_SCAN_COMPLETED, WEEKLY_REPORT_GENERATED — all logged with planId reference to active blueprint.
+- **UI**: Strategy tab removed from AI Management. Performance Intelligence embedded as collapsible section inside Build The Plan (Phase 5).
+- **Backend**: server/strategy-routes.ts (Performance Intelligence endpoints), server/strategic-core/orchestrator-routes.ts (orchestrator with PI signal injection).
 
 ### Backend Stabilization (Feb 2026)
 - **AI Cost Lock**: All 38 AI calls routed through centralized `server/ai-client.ts` singleton. No direct OpenAI/Gemini instantiation allowed. Enforcement test: `server/tests/ai-scan.test.ts`. Every call has explicit `max_tokens`, `accountId`, `endpoint` tracking. Usage logged to `ai_usage_log` table. Weekly token budget: 500k tokens/week with auto-rejection.
