@@ -214,37 +214,74 @@ export default function DominanceEngine() {
     onError: (err: any) => Alert.alert('Retry Failed', err.message),
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: async (analysisId: string) => {
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+
+  const doDelete = useCallback(async (analysisId: string) => {
+    try {
+      setDeletingId(analysisId);
       const res = await fetch(new URL(`/api/dominance/analyses/${analysisId}?accountId=default`, baseUrl).toString(), {
         method: 'DELETE',
       });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
-      return res.json();
-    },
-    onSuccess: () => {
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Delete failed' }));
+        Alert.alert('Delete Failed', err.error || 'Could not delete analysis');
+        return;
+      }
       queryClient.invalidateQueries({ queryKey: ['dominance-analyses'] });
-      if (selectedAnalysis) { setSelectedAnalysis(null); setActiveView('select'); }
+      if (selectedAnalysis?.id === analysisId) {
+        setSelectedAnalysis(null);
+        setActiveView('select');
+      }
       if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    },
-    onError: (err: any) => Alert.alert('Delete Failed', err.message),
-  });
+    } catch (err: any) {
+      Alert.alert('Delete Failed', err.message || 'Network error');
+    } finally {
+      setDeletingId(null);
+    }
+  }, [baseUrl, queryClient, selectedAnalysis, setSelectedAnalysis, setActiveView]);
 
   const handleDeleteAnalysis = useCallback((analysis: DominanceAnalysis) => {
-    Alert.alert(
-      'Delete Analysis',
-      `Delete the analysis for "${analysis.competitorName}"? This will also remove all related modifications and cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => deleteMutation.mutate(analysis.id) },
-      ]
-    );
-  }, [deleteMutation]);
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(`Delete the analysis for "${analysis.competitorName}"? This removes all related data and cannot be undone.`);
+      if (confirmed) {
+        doDelete(analysis.id);
+      }
+    } else {
+      Alert.alert(
+        'Delete Analysis',
+        `Delete the analysis for "${analysis.competitorName}"? This removes all related data and cannot be undone.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Delete', style: 'destructive', onPress: () => doDelete(analysis.id) },
+        ]
+      );
+    }
+  }, [doDelete]);
 
-  const handleRetryFromHistory = useCallback((analysis: DominanceAnalysis) => {
-    setSelectedAnalysis(analysis);
-    retryMutation.mutate(analysis.id);
-  }, [retryMutation]);
+  const handleRetryFromHistory = useCallback(async (analysis: DominanceAnalysis) => {
+    try {
+      setRetryingId(analysis.id);
+      setSelectedAnalysis(analysis);
+      const res = await fetch(new URL(`/api/dominance/${analysis.id}/retry`, baseUrl).toString(), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId: 'default' }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Retry failed' }));
+        Alert.alert('Retry Failed', err.error || 'Could not retry analysis');
+        return;
+      }
+      const data = await res.json();
+      if (data.analysis) setSelectedAnalysis(data.analysis);
+      queryClient.invalidateQueries({ queryKey: ['dominance-analyses'] });
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err: any) {
+      Alert.alert('Retry Failed', err.message || 'Network error');
+    } finally {
+      setRetryingId(null);
+    }
+  }, [baseUrl, queryClient, setSelectedAnalysis]);
 
   const acknowledgeFallbackMutation = useMutation({
     mutationFn: async (analysisId: string) => {
@@ -539,32 +576,36 @@ export default function DominanceEngine() {
                   <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
                 </View>
               </Pressable>
-              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.cardBorder }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.cardBorder }}>
                 {(a.status === 'partial' || a.status === 'failed') && (
                   <Pressable
+                    testID={`retry-${a.id}`}
                     onPress={() => handleRetryFromHistory(a)}
-                    disabled={retryMutation.isPending}
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#3B82F6' + '15', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 }}
+                    disabled={retryingId === a.id}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#3B82F6' + '18', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
                   >
-                    {retryMutation.isPending ? (
+                    {retryingId === a.id ? (
                       <ActivityIndicator size="small" color="#3B82F6" />
                     ) : (
-                      <Ionicons name="refresh" size={14} color="#3B82F6" />
+                      <Ionicons name="refresh" size={16} color="#3B82F6" />
                     )}
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#3B82F6' }}>Retry</Text>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: '#3B82F6' }}>Retry</Text>
                   </Pressable>
                 )}
                 <Pressable
+                  testID={`delete-${a.id}`}
                   onPress={() => handleDeleteAnalysis(a)}
-                  disabled={deleteMutation.isPending}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#EF4444' + '15', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 }}
+                  disabled={deletingId === a.id}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#EF4444' + '18', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
                 >
-                  {deleteMutation.isPending ? (
+                  {deletingId === a.id ? (
                     <ActivityIndicator size="small" color="#EF4444" />
                   ) : (
-                    <Ionicons name="trash-outline" size={14} color="#EF4444" />
+                    <Ionicons name="trash-outline" size={16} color="#EF4444" />
                   )}
-                  <Text style={{ fontSize: 11, fontWeight: '600', color: '#EF4444' }}>Delete</Text>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#EF4444' }}>Delete</Text>
                 </Pressable>
               </View>
             </View>
