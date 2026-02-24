@@ -431,6 +431,7 @@ export async function requireCampaign(req: Request, res: Response, next: NextFun
     }
 
     (req as any).campaignContext = {
+      accountId,
       campaignId: selection.selectedCampaignId,
       campaignName: selection.selectedCampaignName,
       platform: selection.selectedPlatform,

@@ -179,14 +179,18 @@ export function registerOrchestratorRoutes(app: Express) {
       let performanceIntelligenceBlock = "";
       let performanceSignalsInjected = false;
       try {
-        const signalAccountId = (req.query.accountId as string) || "default";
+        const signalAccountId = campaignContext.accountId || "default";
+        const signalCampaignId = campaignContext.campaignId;
+        if (!signalCampaignId) {
+          throw new Error("No campaignId in blueprint campaignContext — skipping signal injection");
+        }
         const [memories, highConfidenceInsights, topMoats] = await Promise.all([
-          db.select().from(strategyMemory).where(eq(strategyMemory.accountId, signalAccountId)).orderBy(desc(strategyMemory.updatedAt)).limit(15),
+          db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, signalAccountId), eq(strategyMemory.campaignId, signalCampaignId), sql`${strategyMemory.campaignId} != 'unscoped_legacy'`)).orderBy(desc(strategyMemory.updatedAt)).limit(15),
           db.select().from(strategyInsights)
-            .where(and(gte(strategyInsights.confidence, 0.7), eq(strategyInsights.accountId, signalAccountId)))
+            .where(and(gte(strategyInsights.confidence, 0.7), eq(strategyInsights.accountId, signalAccountId), eq(strategyInsights.campaignId, signalCampaignId), sql`${strategyInsights.campaignId} != 'unscoped_legacy'`))
             .orderBy(desc(strategyInsights.createdAt)).limit(10),
           db.select().from(moatCandidates)
-            .where(and(eq(moatCandidates.status, "candidate"), eq(moatCandidates.accountId, signalAccountId)))
+            .where(and(eq(moatCandidates.status, "candidate"), eq(moatCandidates.accountId, signalAccountId), eq(moatCandidates.campaignId, signalCampaignId), sql`${moatCandidates.campaignId} != 'unscoped_legacy'`))
             .orderBy(desc(moatCandidates.moatScore)).limit(5),
         ]);
 

@@ -136,8 +136,8 @@ export const strategyInsights = pgTable("strategy_insights", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  accountId: varchar("account_id").default("default"),
-  campaignId: varchar("campaign_id"),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
   category: text("category").notNull(),
   insight: text("insight").notNull(),
   confidence: doublePrecision("confidence").default(0),
@@ -175,8 +175,8 @@ export const strategyMemory = pgTable("strategy_memory", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  accountId: varchar("account_id").default("default"),
-  campaignId: varchar("campaign_id"),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
   memoryType: text("memory_type").notNull(),
   label: text("label").notNull(),
   details: text("details"),
@@ -230,8 +230,8 @@ export const moatCandidates = pgTable("moat_candidates", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  accountId: varchar("account_id").default("default"),
-  campaignId: varchar("campaign_id"),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
   sourceType: text("source_type").notNull(),
   label: text("label").notNull(),
   description: text("description"),

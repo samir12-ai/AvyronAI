@@ -1,0 +1,105 @@
+
+⸻
+
+Subject: FINAL HARDENING REQUIRED – Account Isolation Must Be Cryptographically Safe
+
+We have completed the initial memory scoping fix.
+However, this is not considered closed.
+
+We are now enforcing final structural hardening to guarantee that cross-account or cross-campaign contamination is mathematically impossible — not just “unlikely”.
+
+This is a zero-tolerance integrity gate.
+
+You must complete and prove the following:
+
+⸻
+
+1) REMOVE accountId FROM QUERY PARAMS (Non-Negotiable)
+
+No endpoint may read accountId from query parameters anymore.
+
+Account scoping must come exclusively from authenticated session / request context.
+
+If any endpoint still uses req.query.accountId, it must be removed.
+
+Acceptance Criteria:
+	•	Grep proof showing zero occurrences of req.query.accountId
+	•	Any request attempting to override accountId must return HTTP 400
+	•	All scoping must use server-trusted context only
+
+⸻
+
+2) ENFORCE DUAL SCOPE: accountId + campaignId
+
+All reads from:
+	•	strategy_memory
+	•	strategy_insights
+	•	moat_candidates
+
+must filter by BOTH:
+	•	accountId
+	•	campaignId
+
+No single-column scoping is allowed.
+
+Acceptance Criteria:
+	•	Every SELECT must include dual filtering
+	•	Provide file + line proof
+	•	Orchestrator injection must use both accountId and campaignId
+	•	No fallback to “default” or legacy values
+
+⸻
+
+3) DATABASE CONSTRAINT LOCK
+
+Database must enforce isolation — not just application code.
+
+You must:
+	•	Make account_id NOT NULL
+	•	Make campaign_id NOT NULL
+	•	Ensure composite index (account_id, campaign_id) exists
+	•	Prevent insertion of legacy placeholder values from entering orchestrator injection
+
+Acceptance Criteria:
+	•	Schema diff proof
+	•	Index listing proof
+	•	Insert attempt without scoping must fail at DB level
+
+⸻
+
+4) LEGACY DATA HARD BLOCK
+
+Legacy rows labeled as “unscoped_legacy” must never be eligible for orchestrator injection.
+
+Acceptance Criteria:
+	•	Explicit WHERE condition excluding legacy values
+	•	Proof that injection query cannot read legacy rows
+
+⸻
+
+5) REGRESSION TESTS (Mandatory)
+
+Add automated tests that fail if:
+	•	Any endpoint accepts accountId override
+	•	Any SELECT lacks dual scope
+	•	Any insert omits accountId or campaignId
+	•	Orchestrator injection reads legacy data
+
+This must be enforceable in CI.
+
+⸻
+
+Definition of Done
+
+This issue is considered CLOSED only when:
+	•	No scoping comes from user input
+	•	All reads are dual scoped
+	•	Database constraints prevent nulls
+	•	Legacy data cannot leak
+	•	Regression tests enforce future safety
+
+No summaries.
+No “should be fine.”
+Evidence required for each item.
+
+This is a structural integrity gate for the entire system.

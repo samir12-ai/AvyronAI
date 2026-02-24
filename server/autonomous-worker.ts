@@ -7,9 +7,10 @@ import {
   performanceSnapshots,
   guardrailConfig,
   publishedPosts,
+  campaignSelections,
 } from "@shared/schema";
 
-import { eq, sql, desc, gte, lte } from "drizzle-orm";
+import { eq, and, sql, desc, gte, lte } from "drizzle-orm";
 import { logAudit } from "./audit";
 import { FeatureFlagService } from "./feature-flags";
 import { computeRollingBaselines } from "./baselines";
@@ -81,6 +82,14 @@ async function getAccountsDueForProcessing(): Promise<string[]> {
   return accounts.map(a => a.accountId);
 }
 
+async function getActiveCampaignId(accountId: string): Promise<string | null> {
+  const [selection] = await db.select({ campaignId: campaignSelections.selectedCampaignId })
+    .from(campaignSelections)
+    .where(eq(campaignSelections.accountId, accountId))
+    .limit(1);
+  return selection?.campaignId || null;
+}
+
 async function runStrategyAnalysis(
   accountId: string,
   baselines: any,
@@ -96,6 +105,11 @@ async function runStrategyAnalysis(
   aiSuggestedRisk: string;
 }>> {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const activeCampaignId = await getActiveCampaignId(accountId);
+
+  const memoryWhereClause = activeCampaignId
+    ? and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, activeCampaignId))
+    : eq(strategyMemory.accountId, accountId);
 
   const [recentPerformance, memoryItems, recentPublished] = await Promise.all([
     db.select()
@@ -105,7 +119,7 @@ async function runStrategyAnalysis(
       .limit(30),
     db.select()
       .from(strategyMemory)
-      .where(eq(strategyMemory.accountId, accountId))
+      .where(memoryWhereClause)
       .orderBy(desc(strategyMemory.updatedAt))
       .limit(20),
     db.select()
