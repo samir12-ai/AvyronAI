@@ -68,7 +68,7 @@ Preferred communication style: Simple, everyday language.
 ### Execution Authority Matrix (Feb 2026 Consolidation)
 - **SINGLE EXECUTION TRACK**: Build The Plan is the SOLE execution authority.
 - **Build The Plan** OWNS: strategic_plans, required_work, calendar_entries, studio_items, plan_approvals. Creates, approves, executes, publishes.
-- **Performance Intelligence (formerly Strategy)** READS: performance_snapshots, strategy_insights, strategy_decisions, strategy_memory, moat_candidates, signature_series, weekly_reports. WRITES: only to its own signal tables. NEVER writes to execution tables.
+- **Performance Intelligence (formerly Strategy)** READS: performance_snapshots, strategy_insights, strategy_decisions, strategy_memory, moat_candidates, signature_series, weekly_reports. WRITES: only to its own signal tables. NEVER writes to execution tables. All signal tables scoped by `account_id` + `campaign_id` (Feb 2026 isolation fix).
 - **Audit Events**: PERFORMANCE_SIGNAL_PROPOSED, PERFORMANCE_SYNC_COMPLETED, MOAT_SCAN_COMPLETED, WEEKLY_REPORT_GENERATED — all logged with planId reference to active blueprint.
 - **UI**: Strategy tab removed from AI Management. Performance Intelligence embedded as collapsible section inside Build The Plan (Phase 5).
 - **Backend**: server/strategy-routes.ts (Performance Intelligence endpoints), server/strategic-core/orchestrator-routes.ts (orchestrator with PI signal injection).
