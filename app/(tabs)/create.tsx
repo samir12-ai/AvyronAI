@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -40,6 +40,7 @@ import { PlatformPicker } from '@/components/PlatformPicker';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { generateId } from '@/lib/storage';
 import { apiRequest, getApiUrl } from '@/lib/query-client';
+import { useCreativeContext } from '@/context/CreativeContext';
 import type { ContentItem, MediaItem } from '@/lib/types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -226,6 +227,9 @@ export default function CreateScreen() {
   const insets = useSafeAreaInsets();
   const { brandProfile, addContentItem, addMediaItem } = useApp();
   const { t } = useLanguage();
+  const { creativeContext, clearCreativeContext } = useCreativeContext();
+  const [ciScriptResult, setCiScriptResult] = useState<any>(null);
+  const [ciScriptError, setCiScriptError] = useState<string | null>(null);
 
   const contentTypes = contentTypesDef.map(ct => ({ ...ct, label: t(ct.labelKey) }));
   const reelGoals = reelGoalsDef.map(g => ({ ...g, label: t(g.labelKey) }));
@@ -292,8 +296,19 @@ export default function CreateScreen() {
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [isGeneratingPhoton, setIsGeneratingPhoton] = useState(false);
 
+  useEffect(() => {
+    if (creativeContext?.source === 'CI') {
+      setContentType('reel');
+      setActiveTab('content');
+      setCiScriptResult(null);
+      setCiScriptError(null);
+    }
+  }, [creativeContext]);
+
   const handleGenerate = async () => {
-    if (!topic.trim()) {
+    const hasCIContext = creativeContext?.source === 'CI' && contentType === 'reel';
+
+    if (!hasCIContext && !topic.trim()) {
       Alert.alert(t('create.errorTitle'), t('create.topicPlaceholder'));
       return;
     }
@@ -302,11 +317,13 @@ export default function CreateScreen() {
     setIsGenerating(true);
     setGeneratedContent('');
     setReelScript(null);
+    setCiScriptResult(null);
+    setCiScriptError(null);
 
     try {
       if (contentType === 'reel') {
-        const response = await apiRequest('POST', '/api/generate-reel-script', {
-          topic,
+        const payload: any = {
+          topic: topic || `Reel about ${brandProfile.industry || 'our brand'}`,
           platform: platform[0],
           brandName: brandProfile.name || 'our brand',
           tone: brandProfile.tone || 'Professional',
@@ -314,9 +331,28 @@ export default function CreateScreen() {
           industry: brandProfile.industry || 'business',
           reelDuration,
           reelGoal,
-        });
+        };
+
+        if (hasCIContext) {
+          payload.ciContext = {
+            snapshotId: creativeContext.snapshotId,
+            intelligence: creativeContext.intelligence,
+            creative_layers: creativeContext.creative_layers,
+            onboarding_context: creativeContext.onboarding_context,
+            blueprint_context: creativeContext.blueprint_context,
+          };
+        }
+
+        const response = await apiRequest('POST', '/api/generate-reel-script', payload);
         const data = await response.json();
-        if (data.script) {
+
+        if (data.missing_fields) {
+          setCiScriptError(`Missing fields: ${data.missing_fields.join(', ')}. Update your brand profile in Settings.`);
+        } else if (data.status === 'GENERATION_FAILED') {
+          setCiScriptError(data.error || data.reason || 'Generation failed');
+        } else if (data.mode === 'ci' && data.scripts_batch) {
+          setCiScriptResult(data);
+        } else if (data.script) {
           setReelScript(data.script);
         } else if (data.rawContent) {
           setGeneratedContent(data.rawContent);
@@ -1058,6 +1094,25 @@ export default function CreateScreen() {
                 />
               </View>
 
+              {contentType === 'reel' && creativeContext?.source === 'CI' && (
+                <View style={[styles.card, { backgroundColor: '#8B5CF6' + '10', borderColor: '#8B5CF6' + '30' }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                      <Ionicons name="analytics-outline" size={18} color="#8B5CF6" />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#8B5CF6' }}>CI Context Active</Text>
+                        <Text style={{ fontSize: 11, color: isDark ? '#A78BFA' : '#7C3AED', marginTop: 2 }}>
+                          Competitor: {creativeContext.competitorName} · Snapshot: {creativeContext.snapshotId.slice(0, 8)}…
+                        </Text>
+                      </View>
+                    </View>
+                    <Pressable onPress={() => clearCreativeContext()} style={{ padding: 4 }}>
+                      <Ionicons name="close-circle-outline" size={20} color="#8B5CF6" />
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
               {contentType === 'reel' && (
                 <>
                   <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
@@ -1411,6 +1466,93 @@ export default function CreateScreen() {
                               <Text style={[styles.reelDetailValue, { color: colors.text, flex: 1 }]}>{hook}</Text>
                             </View>
                           ))}
+                        </View>
+                      )}
+                    </View>
+                  )}
+                </Animated.View>
+              )}
+
+              {ciScriptError && (
+                <View style={[styles.card, { backgroundColor: '#EF4444' + '10', borderColor: '#EF4444' + '30' }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <Ionicons name="alert-circle" size={16} color="#EF4444" />
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#EF4444' }}>Generation Error</Text>
+                  </View>
+                  <Text style={{ fontSize: 12, color: '#EF4444' }}>{ciScriptError}</Text>
+                </View>
+              )}
+
+              {ciScriptResult && ciScriptResult.scripts_batch && (
+                <Animated.View entering={FadeInDown.duration(400)}>
+                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: '#8B5CF6' + '40' }]}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                      <Ionicons name="film-outline" size={20} color="#8B5CF6" />
+                      <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>CI-Powered Scripts</Text>
+                      <View style={{ backgroundColor: '#8B5CF6' + '20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#8B5CF6' }}>
+                          MODE: {ciScriptResult.scripts_batch.mode_used?.toUpperCase()}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {ciScriptResult.scripts_batch.scripts?.map((script: any, si: number) => (
+                      <View key={si} style={{ marginBottom: 14, paddingBottom: 14, borderBottomWidth: si < ciScriptResult.scripts_batch.scripts.length - 1 ? 1 : 0, borderBottomColor: isDark ? '#1A2030' : '#F0F0F0' }}>
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text, marginBottom: 6 }}>{si + 1}. {script.title}</Text>
+                        <View style={{ gap: 5 }}>
+                          {[
+                            { label: '0-2s Hook', value: script.hook_0_2s, color: '#EF4444' },
+                            { label: '2-6s Setup', value: script.setup_2_6s, color: '#F59E0B' },
+                            { label: '6-12s Tension', value: script.tension_6_12s, color: '#3B82F6' },
+                            { label: '12-18s Reveal', value: script.reveal_12_18s, color: '#10B981' },
+                            { label: 'Close/CTA', value: script.soft_close_or_cta, color: '#8B5CF6' },
+                          ].map((seg, idx) => (
+                            <View key={idx} style={{ flexDirection: 'row', gap: 6 }}>
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: seg.color, width: 80 }}>{seg.label}:</Text>
+                              <Text style={{ fontSize: 11, color: colors.textSecondary, flex: 1 }}>{seg.value}</Text>
+                            </View>
+                          ))}
+                        </View>
+                        <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 6 }}>Caption: {script.caption_short}</Text>
+                        <View style={{ backgroundColor: '#3B82F6' + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start', marginTop: 4 }}>
+                          <Text style={{ fontSize: 9, fontWeight: '700', color: '#3B82F6' }}>KPI: {script.kpi_target?.toUpperCase()}</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+
+                  {ciScriptResult.creative_concepts && (
+                    <View style={[styles.card, { backgroundColor: colors.card, borderColor: '#F59E0B' + '40' }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                        <Ionicons name="bulb-outline" size={20} color="#F59E0B" />
+                        <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>Creative Concepts</Text>
+                        <View style={{ backgroundColor: '#F59E0B' + '20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: '#F59E0B' }}>
+                            RISK: {ciScriptResult.creative_concepts.risk_level?.toUpperCase()}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {ciScriptResult.creative_concepts.concepts?.map((concept: any, ci: number) => (
+                        <View key={ci} style={{ marginBottom: 10, paddingBottom: 10, borderBottomWidth: ci < ciScriptResult.creative_concepts.concepts.length - 1 ? 1 : 0, borderBottomColor: isDark ? '#1A2030' : '#F0F0F0' }}>
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 4 }}>{concept.concept_name}</Text>
+                          <Text style={{ fontSize: 11, color: '#EC4899', marginBottom: 2 }}>{concept.disruptive_angle}</Text>
+                          <Text style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 2 }}>{concept.visual_metaphor}</Text>
+                          <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
+                            <View style={{ backgroundColor: '#6366F1' + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                              <Text style={{ fontSize: 9, fontWeight: '600', color: '#6366F1' }}>{concept.format?.toUpperCase()}</Text>
+                            </View>
+                            <View style={{ backgroundColor: '#EC4899' + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                              <Text style={{ fontSize: 9, fontWeight: '600', color: '#EC4899' }}>{concept.emotional_trigger}</Text>
+                            </View>
+                          </View>
+                        </View>
+                      ))}
+
+                      {ciScriptResult.creative_concepts.subtle_conversion_layer && (
+                        <View style={{ backgroundColor: '#10B981' + '10', padding: 8, borderRadius: 6, marginTop: 4 }}>
+                          <Text style={{ fontSize: 10, fontWeight: '600', color: '#10B981', marginBottom: 2 }}>Subtle Conversion Layer</Text>
+                          <Text style={{ fontSize: 11, color: colors.textSecondary }}>{ciScriptResult.creative_concepts.subtle_conversion_layer}</Text>
                         </View>
                       )}
                     </View>
