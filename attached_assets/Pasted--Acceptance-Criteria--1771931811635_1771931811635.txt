@@ -1,0 +1,244 @@
+أكيد — هاي نسخة أطول + ضغط أعلى + Acceptance Criteria صعب جدًا (حتى ما يقدر يلف ويدور). بدون أكواد، ومكتوبة كـ “تكليف نهائي”.
+
+⸻
+
+📩 Message to Replit — CONTROL TAB MUST BECOME REAL (Audit + Gates + AI Cost) — CRITICAL
+
+We are in Backend Stabilization / Integrity Mode.
+
+This is NOT a UI polish task.
+This is a structural integrity fix: the Control tab must stop being a fake dashboard and must become a real command center powered by existing backend truth.
+
+Right now:
+	•	We already log everything into DB (audit_log, ai_usage_log, account_state, job_queue, strategy_decisions, publish attempts).
+	•	But the Control tab still renders static placeholders and does not query those sources.
+	•	This creates a dangerous illusion: the system is doing things, but the user sees nothing reliable.
+
+✅ Goal: The Control tab must display real data, real gates, real costs, real failures — with strict states (Loading/Empty/Error/Success).
+❌ No silent failures. ❌ No empty UI. ❌ No “fake completed” status.
+
+⸻
+
+A) BACKEND — REQUIRED ENDPOINTS (Expose existing data only)
+
+You must create a backend “Control API surface” that exposes what we already store.
+
+1) Audit Feed API (must be filterable + paginated)
+
+Purpose: A live feed of everything happening in the system.
+
+Requirements:
+	•	Filter by:
+	•	event_type (single or multiple)
+	•	module (strategic-core / ci / leads / publishing / meta / worker / gates)
+	•	risk_level or severity
+	•	campaign_id, plan_id, blueprint_id, job_id
+	•	date range: from → to
+	•	Must support pagination:
+	•	limit (default 50, max 200)
+	•	cursor or page+offset
+	•	Must return latest-first (createdAt desc)
+	•	Must never return empty body. If no rows → return {items:[], total:0}.
+
+2) AI Usage Stats API (weekly budget + breakdown)
+
+Purpose: expose AI usage truth from ai_usage_log.
+
+Required output:
+	•	Weekly usage summary:
+	•	used_tokens, remaining_tokens, budget_tokens
+	•	burn_rate (tokens/day)
+	•	projected exhaustion date (simple estimate)
+	•	Per-model breakdown
+	•	Per-endpoint breakdown
+	•	Last 7 days trend array (day → tokens)
+	•	Must include the most recent AI call:
+	•	model, endpoint, tokens, duration, success/failure
+
+Hard rule:
+	•	Must show 402 budget exceeded events in the audit feed too (so user sees why things stopped).
+
+3) Safety Gate Status API (truth table)
+
+Purpose: Show what gates are currently blocking execution.
+
+Required gates status:
+	•	hasApprovedPlan (true/false + reason)
+	•	isPaused (true/false)
+	•	hasCampaignContext (true/false, demo vs real)
+	•	metaMode (DISCONNECTED/REAL/etc)
+	•	capabilities (fb_publishing_enabled, ig_publishing_enabled, insights_enabled)
+	•	aiBudgetAvailable (true/false)
+	•	executionIdle / executionLock (true/false)
+	•	feature flags relevant to current modules
+
+Must return:
+	•	gates: [{ gateName, status: PASS|FAIL|WARN, reason, lastCheckedAt }]
+
+4) Decision History API (autonomous decisions)
+
+Expose:
+	•	last N decisions (default 20)
+	•	decision type, reason, risk_level, confidence_score, createdAt
+	•	linked audit events (if possible by ID or time window)
+	•	must support filters by campaign/plan when available
+
+5) Publishing History API
+
+Expose:
+	•	last N publish attempts
+	•	status + timestamps + errorReason
+	•	include Meta error classification where available (temporary vs permanent)
+	•	must show retry count + backoff state if rate-limited
+
+6) Job Queue Status API
+
+Expose:
+	•	all RUNNING + last 20 completed/failed jobs
+	•	job type, progress %, startedAt, duration
+	•	hard timeout markers (if job auto-failed)
+	•	concurrency counters (CI jobs running, Strategic jobs running)
+
+⸻
+
+B) FRONTEND — CONTROL TAB MUST STOP BEING STATIC
+
+The Control tab must become 5 fixed panels (even if Advanced mode OFF):
+
+Panel 1 — Live Audit Feed (always visible)
+	•	Shows latest events with icons/badges
+	•	Filter chips: module + severity + event type
+	•	Must show empty state message (not blank):
+“No audit events yet — run a plan or start a job to generate activity.”
+
+Panel 2 — AI Budget & Usage
+	•	Weekly gauge + numbers
+	•	“Last AI call” row
+	•	“Budget exceeded” must show as red lock state + why
+
+Panel 3 — Gates Dashboard
+	•	Show each gate as a row with PASS/FAIL/WARN
+	•	Must show exact reason string from backend
+
+Panel 4 — Decisions Timeline
+	•	Show last decisions with reason/risk/confidence
+	•	If none: show empty state + suggestion
+
+Panel 5 — Publishing Health
+	•	Publish attempts list + error classification
+	•	Show backoff/rate-limit state if applicable
+
+⸻
+
+C) ADVANCED MODE (ONLY WHEN advancedMode=true)
+
+Add deeper sub-views:
+	1.	Full Audit Browser
+
+	•	date range filter
+	•	event type multi-select
+	•	export to JSON (download) OR copy-to-clipboard button (minimum)
+
+	2.	AI Cost Breakdown
+
+	•	charts optional, but must show:
+	•	per-model, per-endpoint, per-day stats
+	•	must show failure rate %
+
+	3.	Worker/Job Health Monitor
+
+	•	running jobs list (live refresh)
+	•	failed jobs with reasons
+
+⸻
+
+D) NON-NEGOTIABLE UI RULES
+	1.	No blank screen policy
+
+	•	Every panel MUST implement 4 states:
+	•	Loading
+	•	Empty
+	•	Error (with details)
+	•	Success
+
+	2.	Full error surfacing
+
+	•	If API fails: show:
+	•	HTTP status code
+	•	backend error message
+	•	No silent catch
+	•	No “load failed” without details.
+
+	3.	Deterministic rendering
+
+	•	Never render based on assumptions like “phase completed => data exists”.
+	•	Render based on actual presence of returned data.
+
+⸻
+
+E) HARD ACCEPTANCE CRITERIA (STRICT — MUST PASS ALL)
+
+✅ AC1 — No Placeholder Data Allowed
+	•	In Control tab, if the backend returns 0 items, it must show an explicit empty message.
+	•	Any hardcoded/static values are forbidden unless labeled “STATIC” and removed after.
+
+✅ AC2 — Every API Has a Contract
+	•	Every endpoint must return consistent JSON shape even on failure.
+	•	Failures must be structured: { success:false, code, message }
+	•	No empty bodies. No {}.
+
+✅ AC3 — Error Repro Test
+
+Simulate:
+	•	500 error on audit feed endpoint
+Expected:
+	•	UI shows: Audit Feed failed [HTTP 500]: <message>
+
+✅ AC4 — Gate Visibility Test
+
+Set plan status != APPROVED:
+	•	Gate API must show requireApprovedPlan: FAIL with reason
+	•	Control tab must show a visible red FAIL indicator
+
+✅ AC5 — Budget Lock Test
+
+If AI budget exceeded:
+	•	Budget panel must show LOCKED state
+	•	Audit feed must show the budget exceed event
+	•	Decisions panel must show no new decisions executed (or show “blocked by budget”)
+
+✅ AC6 — Job Queue Test
+
+Start a job:
+	•	Must appear in Job panel within 2 refresh cycles
+	•	Progress must update (even if coarse: 0/25/50/75/100)
+
+✅ AC7 — Performance Test (Basic)
+	•	Audit feed must load first 50 events in < 1.5s for typical data.
+	•	Must be paginated (no giant full-table fetch).
+
+✅ AC8 — “Never Blank” Screenshot Proof
+
+Provide evidence (screenshots or screen recording) of:
+	•	Loading state
+	•	Empty state
+	•	Error state
+	•	Success state
+For at least 3 panels (Audit, Gates, Budget).
+
+✅ AC9 — No Regression
+
+All existing tests must pass. No feature behavior changes. Only “expose and render”.
+
+⸻
+
+Deliverables
+	1.	Backend endpoints implemented and wired
+	2.	Control tab fully replaced with real panels
+	3.	Advanced mode extra views
+	4.	Acceptance Criteria proof checklist + screenshots
+
+Confirm once:
+	•	Control tab reads only real backend.
+	•	No phase/tab can render blank.
+	•	All failures surface clearly.

@@ -1,0 +1,187 @@
+Acceptance Criteria
+	•	Integration test:
+	•	Fetch page 1
+	•	Fetch page 2 using nextCursor
+	•	Assert:
+	•	No duplicates
+	•	No missing events
+	•	Strict descending order maintained
+
+⸻
+
+3️⃣ Performance Lock (Index Enforcement)
+
+All audit queries must:
+	•	Include LIMIT
+	•	Enforce max limit server-side
+	•	Never scan entire tables
+
+Indexes required (verified present):
+	•	audit_log (account_id, created_at DESC)
+	•	ai_usage_log (account_id, created_at DESC)
+	•	job_queue (account_id, status, created_at)
+	•	strategic_plans (account_id, status)
+
+Acceptance Criteria
+
+Provide EXPLAIN output (text format) for:
+	1.	Audit feed query
+	2.	AI usage weekly aggregation
+	3.	Publish history query
+	4.	Job monitor query
+
+Proof required:
+	•	Index Scan or Bitmap Index Scan used
+	•	No full table scan on growing tables
+
+⸻
+
+4️⃣ Budget Lock Integration (UI + Backend)
+
+If AI budget ≥ 100%:
+	•	/api/audit/gates must return:
+	•	budgetStatus: LOCKED
+	•	Control panel must render:
+	•	Red locked state
+	•	Clear explanation
+	•	Audit feed must show budget event
+
+Acceptance Criteria
+
+Simulated test:
+	•	Force account over 500k tokens
+	•	Budget panel turns red
+	•	Autopilot toggle disabled
+	•	Audit event recorded
+
+⸻
+
+5️⃣ Gate Truth Source (No Frontend Assumptions)
+
+/api/audit/gates must compute gates live from DB:
+	•	Approved plan → strategic_plans
+	•	Execution running → job_queue
+	•	Budget → ai_usage_log
+	•	Autopilot → account_state
+	•	Meta mode → account_state
+
+Frontend must NEVER infer gate states.
+
+Acceptance Criteria
+
+Simulate:
+	•	No approved plan
+	•	Running job
+	•	Budget exceeded
+	•	Autopilot off
+
+Each state must render correctly and independently.
+
+⸻
+
+6️⃣ Zero Blank Screen Policy (Control Tab)
+
+Each of the 5 panels must implement strict 4-state rendering:
+	•	Loading
+	•	Empty
+	•	Error (with HTTP code)
+	•	Success
+
+At no time may the Control tab render an empty container.
+
+Acceptance Criteria
+
+Playwright test:
+	•	Force backend 500 → Error state visible
+	•	Fresh account → Empty states visible
+	•	Slow network → Loading skeleton visible
+	•	Valid data → Success view visible
+
+⸻
+
+7️⃣ Real Action Wiring (No Local State)
+
+Autopilot toggle:
+	•	Must update account_state.autopilot_on
+	•	Must log AUTOPILOT_TOGGLED
+
+Emergency Stop:
+	•	Must change execution state
+	•	Must log EMERGENCY_STOP
+
+No frontend-only state allowed.
+
+Acceptance Criteria
+	•	Toggle autopilot
+	•	Refresh page
+	•	Value persists
+	•	Audit event visible
+
+⸻
+
+8️⃣ Concurrency Safety (Jobs Panel)
+
+Job panel must:
+	•	Show running jobs
+	•	Show failed jobs
+	•	Show progress %
+	•	Auto-refresh safely
+	•	Never double-trigger execution
+
+Acceptance Criteria
+	•	Start job
+	•	Verify job appears in running list
+	•	Force failure
+	•	Verify FAILED status + error message
+	•	Verify no duplicate execution started
+
+⸻
+
+9️⃣ No Regression Guarantee
+	•	No existing routes modified
+	•	No existing business logic changed
+	•	Only additive /api/audit/* routes
+	•	All existing tests pass
+
+Acceptance Criteria
+
+Run full test suite before merge.
+
+⸻
+
+🔟 Deployment Safety (Migration Plan)
+
+The static Control tab must NOT be removed until:
+	•	New panels confirmed rendering in staging
+	•	All endpoints responding correctly
+
+Deployment must be panel-by-panel replacement.
+
+At no point should users see:
+	•	Blank Control tab
+	•	Partial data
+	•	Broken layout
+
+⸻
+
+Final Confirmation Required
+
+Before merge, provide:
+	1.	EXPLAIN outputs
+	2.	Screenshot of each panel in 4 states
+	3.	Budget lock simulation proof
+	4.	Job lifecycle simulation proof
+	5.	Confirmation no uncapped AI calls exist
+	6.	Confirmation no new external integrations added
+
+⸻
+
+This is a stabilization milestone.
+
+Not experimental.
+Not cosmetic.
+Not theoretical.
+
+The Control Center becomes the operational brain of the system.
+
+Nothing merges until all acceptance criteria are satisfied.
