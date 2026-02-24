@@ -430,9 +430,17 @@ export async function requireCampaign(req: Request, res: Response, next: NextFun
       });
     }
 
+    const resolvedCampaignId = selection.selectedCampaignId;
+    if (!resolvedCampaignId || resolvedCampaignId === "unscoped_legacy") {
+      return res.status(400).json({
+        error: "CAMPAIGN_INVALID",
+        message: "Invalid campaign ID. Please select a valid campaign.",
+      });
+    }
+
     (req as any).campaignContext = {
       accountId,
-      campaignId: selection.selectedCampaignId,
+      campaignId: resolvedCampaignId,
       campaignName: selection.selectedCampaignName,
       platform: selection.selectedPlatform,
       goalType: selection.campaignGoalType,
