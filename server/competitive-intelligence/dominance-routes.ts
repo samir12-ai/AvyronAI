@@ -354,6 +354,32 @@ export function registerDominanceRoutes(app: Express) {
     }
   });
 
+  app.delete("/api/dominance/analyses/:id", requireCampaign, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const accountId = (req.query.accountId as string) || "default";
+
+      const [analysis] = await db.select().from(dominanceAnalyses)
+        .where(and(eq(dominanceAnalyses.id, id), eq(dominanceAnalyses.accountId, accountId)));
+
+      if (!analysis) return res.status(404).json({ success: false, error: "Analysis not found" });
+
+      await db.delete(dominanceModifications)
+        .where(eq(dominanceModifications.analysisId, id));
+
+      await db.delete(dominanceAnalyses)
+        .where(and(eq(dominanceAnalyses.id, id), eq(dominanceAnalyses.accountId, accountId)));
+
+      await logAudit(accountId, "DOMINANCE_DELETE", {
+        details: { analysisId: id, competitorName: analysis.competitorName },
+      });
+
+      res.json({ success: true, deleted: id });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   app.get("/api/dominance/:analysisId/modifications", requireCampaign, async (req, res) => {
     try {
       const { analysisId } = req.params;

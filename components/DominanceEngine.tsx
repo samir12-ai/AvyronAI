@@ -214,6 +214,38 @@ export default function DominanceEngine() {
     onError: (err: any) => Alert.alert('Retry Failed', err.message),
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: async (analysisId: string) => {
+      const res = await fetch(new URL(`/api/dominance/analyses/${analysisId}?accountId=default`, baseUrl).toString(), {
+        method: 'DELETE',
+      });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['dominance-analyses'] });
+      if (selectedAnalysis) { setSelectedAnalysis(null); setActiveView('select'); }
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: (err: any) => Alert.alert('Delete Failed', err.message),
+  });
+
+  const handleDeleteAnalysis = useCallback((analysis: DominanceAnalysis) => {
+    Alert.alert(
+      'Delete Analysis',
+      `Delete the analysis for "${analysis.competitorName}"? This will also remove all related modifications and cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => deleteMutation.mutate(analysis.id) },
+      ]
+    );
+  }, [deleteMutation]);
+
+  const handleRetryFromHistory = useCallback((analysis: DominanceAnalysis) => {
+    setSelectedAnalysis(analysis);
+    retryMutation.mutate(analysis.id);
+  }, [retryMutation]);
+
   const acknowledgeFallbackMutation = useMutation({
     mutationFn: async (analysisId: string) => {
       const res = await fetch(new URL(`/api/dominance/${analysisId}/acknowledge-fallback`, baseUrl).toString(), {
@@ -489,12 +521,8 @@ export default function DominanceEngine() {
         <View style={{ marginTop: 16 }}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Previous Analyses</Text>
           {analyses.map((a: DominanceAnalysis) => (
-            <Pressable
-              key={a.id}
-              style={[styles.analysisItem, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
-              onPress={() => handleSelectAnalysis(a)}
-            >
-              <View style={styles.compRow}>
+            <View key={a.id} style={[styles.analysisItem, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+              <Pressable onPress={() => handleSelectAnalysis(a)} style={styles.compRow}>
                 <Ionicons name="document-text" size={18} color={colors.primary} />
                 <View style={{ flex: 1, marginLeft: 10 }}>
                   <Text style={[styles.analysisName, { color: colors.text }]}>{a.competitorName}</Text>
@@ -510,8 +538,36 @@ export default function DominanceEngine() {
                   </View>
                   <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
                 </View>
+              </Pressable>
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.cardBorder }}>
+                {(a.status === 'partial' || a.status === 'failed') && (
+                  <Pressable
+                    onPress={() => handleRetryFromHistory(a)}
+                    disabled={retryMutation.isPending}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#3B82F6' + '15', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 }}
+                  >
+                    {retryMutation.isPending ? (
+                      <ActivityIndicator size="small" color="#3B82F6" />
+                    ) : (
+                      <Ionicons name="refresh" size={14} color="#3B82F6" />
+                    )}
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#3B82F6' }}>Retry</Text>
+                  </Pressable>
+                )}
+                <Pressable
+                  onPress={() => handleDeleteAnalysis(a)}
+                  disabled={deleteMutation.isPending}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#EF4444' + '15', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 }}
+                >
+                  {deleteMutation.isPending ? (
+                    <ActivityIndicator size="small" color="#EF4444" />
+                  ) : (
+                    <Ionicons name="trash-outline" size={14} color="#EF4444" />
+                  )}
+                  <Text style={{ fontSize: 11, fontWeight: '600', color: '#EF4444' }}>Delete</Text>
+                </Pressable>
               </View>
-            </Pressable>
+            </View>
           ))}
         </View>
       )}
