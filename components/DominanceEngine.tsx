@@ -140,8 +140,6 @@ export default function DominanceEngine() {
   const [selectedAnalysis, setSelectedAnalysis] = useState<DominanceAnalysis | null>(null);
   const [expandedItem, setExpandedItem] = useState<number | null>(null);
   const [gateError, setGateError] = useState<{ currentCount: number; requiredCount: number } | null>(null);
-  const [scriptResult, setScriptResult] = useState<any>(null);
-  const [scriptError, setScriptError] = useState<string | null>(null);
   const { brandProfile } = useApp();
 
 
@@ -317,66 +315,6 @@ export default function DominanceEngine() {
       refetchMods();
       queryClient.invalidateQueries({ queryKey: ['dominance-analyses'] });
       Alert.alert('Rolled Back', data.message || 'Plan restored to previous version.');
-    },
-  });
-
-  const generateScriptsMutation = useMutation({
-    mutationFn: async () => {
-      if (!selectedAnalysis) throw new Error('No analysis selected');
-
-      const intelligence = {
-        storytelling_intelligence: selectedAnalysis.contentDissection?.storytelling_intelligence || { storytelling_present: false, narrative_strategy_mode: 'none' },
-        dominance: selectedAnalysis.dominanceDelta || { dominance_state: 'NEUTRAL' },
-        archetype: selectedAnalysis.contentDissection?.archetype || { primary: 'unknown' },
-        conversion_intelligence: selectedAnalysis.contentDissection?.conversion_intelligence || { conversion_style: 'none' },
-        narrative_intelligence: selectedAnalysis.contentDissection?.narrative_intelligence || {},
-        performance_context: selectedAnalysis.contentDissection?.performance_context || {},
-      };
-
-      const offer = brandProfile?.industry
-        ? `${brandProfile.name || 'Our brand'} — ${brandProfile.industry}`
-        : brandProfile?.name || 'Marketing services';
-      const icp = brandProfile?.targetAudience || 'Target audience in Dubai';
-
-      const blueprint = {
-        offer,
-        icp,
-      };
-
-      console.log('[Script Gen] snapshot_id:', selectedAnalysis.id);
-      console.log('[Script Gen] mode_used:', intelligence.storytelling_intelligence?.narrative_strategy_mode);
-      console.log('[Script Gen] dominance_state:', intelligence.dominance?.dominance_state);
-
-      const res = await fetch(new URL('/api/ci/generate-scripts', baseUrl).toString(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ intelligence, blueprint }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        if (data.missing_fields) {
-          throw new Error(`Missing fields: ${data.missing_fields.join(', ')}`);
-        }
-        if (data.status === 'GENERATION_FAILED') {
-          throw new Error(`Generation failed: ${data.reason}`);
-        }
-        throw new Error(data.error || 'Script generation failed');
-      }
-
-      if (!data.scripts_batch) throw new Error('Response missing scripts_batch');
-      if (!data.creative_concepts) throw new Error('Response missing creative_concepts');
-
-      return data;
-    },
-    onSuccess: (data) => {
-      setScriptResult(data);
-      setScriptError(null);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    },
-    onError: (err: any) => {
-      setScriptError(err.message);
-      setScriptResult(null);
     },
   });
 

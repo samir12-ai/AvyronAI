@@ -191,7 +191,40 @@ Make sure the content works well across all the specified platforms.`;
 
   app.post("/api/generate-reel-script", async (req, res) => {
     try {
-      const { topic, platform, brandName, tone, targetAudience, industry, reelDuration, reelGoal } = req.body;
+      const { topic, platform, brandName, tone, targetAudience, industry, reelDuration, reelGoal, ciContext } = req.body;
+
+      if (ciContext) {
+        const { generateScriptsAndConcepts } = await import("./competitive-intelligence/script-engine");
+
+        const missing_fields: string[] = [];
+        if (!ciContext.intelligence) missing_fields.push("intelligence");
+        if (!ciContext.blueprint_context?.offer) missing_fields.push("blueprint_context.offer");
+        if (!ciContext.blueprint_context?.icp) missing_fields.push("blueprint_context.icp");
+        if (missing_fields.length > 0) {
+          return res.status(400).json({ error: "Missing required CI fields", missing_fields, mode: "ci" });
+        }
+
+        const blueprintInput = {
+          offer: ciContext.blueprint_context.offer,
+          icp: ciContext.blueprint_context.icp,
+          location: ciContext.onboarding_context?.location || "Dubai, UAE",
+          kpi_goal: reelGoal || "engagement",
+        };
+
+        console.log(`[Reels+CI] snapshotId: ${ciContext.snapshotId}, mode: ci, dominance: ${ciContext.intelligence.dominance?.dominance_state || 'N/A'}`);
+
+        const result = await generateScriptsAndConcepts(
+          ciContext.intelligence,
+          ciContext.creative_layers?.creative_strategy || null,
+          blueprintInput,
+        );
+
+        if ("status" in result && result.status === "GENERATION_FAILED") {
+          return res.status(500).json({ error: result.reason, status: "GENERATION_FAILED", mode: "ci" });
+        }
+
+        return res.json({ ...result, mode: "ci", snapshotId: ciContext.snapshotId });
+      }
 
       if (!topic) {
         return res.status(400).json({ error: "Topic is required" });
@@ -294,12 +327,12 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
         const jsonMatch = content.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);
-          res.json({ script: parsed });
+          res.json({ script: parsed, mode: "generic" });
         } else {
-          res.json({ script: null, rawContent: content });
+          res.json({ script: null, rawContent: content, mode: "generic" });
         }
       } catch {
-        res.json({ script: null, rawContent: content });
+        res.json({ script: null, rawContent: content, mode: "generic" });
       }
     } catch (error) {
       console.error("Error generating reel script:", error);

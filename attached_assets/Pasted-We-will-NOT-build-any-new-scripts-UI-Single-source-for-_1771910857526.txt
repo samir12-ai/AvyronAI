@@ -1,0 +1,126 @@
+We will NOT build any new scripts UI.
+Single source for scripting is AI Writer > Reels tab.
+
+Your task: Connect Competitor Intelligence → AI Writer/Reels scripting flow, and inject the new Storytelling + Creative layers into the Reels script generation there.
+
+DO THIS EXACTLY:
+
+====================================================
+A) FRONTEND FLOW: CI → AI WRITER → REELS (NO NEW TABS)
+====================================================
+
+1) Add a shared “CreativeContext” state (global store, not new UI):
+Fields:
+- source: "CI"
+- competitorId
+- snapshotId
+- snapshotCreatedAt
+- intelligence: { conversion_intelligence, narrative_intelligence, performance_context, storytelling_intelligence, dominance, archetype }
+- creative_layers: { creative_expansion, creative_strategy }  (if present in snapshot)
+- onboarding_context: { location, market_type, language, primary_objective }
+- blueprint_context: { offer, icp } (use existing saved blueprint/onboarding/brand config; do NOT create new inputs)
+
+2) In Competitor Intelligence screen:
+- Add ONE action that already exists conceptually (no new tab):
+  “Create Reels Scripts from this competitor”
+- On click:
+  a) Set CreativeContext in the global store with the LATEST snapshot (createdAt DESC).
+  b) Navigate user to AI Writer page and auto-select the “Reels” tab (same existing tab).
+
+IMPORTANT:
+- Do NOT build a new scripts page.
+- Do NOT duplicate any scripting UI.
+- The only UI change allowed here is adding a navigation action (or reusing an existing CTA) that routes to AI Writer/Reels.
+
+3) In AI Writer > Reels tab:
+- On tab load, check if CreativeContext.source === "CI"
+- If yes:
+  - Show a small non-intrusive banner (inside the same tab, not a new section):
+    “Using competitor intelligence context (snapshotId …)”
+  - Use that context automatically when generating scripts.
+
+If CreativeContext is missing or stale:
+- Fall back to normal Reels scripting (current behavior).
+- Never break existing Reels flow.
+
+====================================================
+B) BACKEND WIRING: REELS SCRIPTING MUST USE CI ENGINES
+====================================================
+
+4) Do NOT create a new engine.
+Reels scripting must call ONE backend generator, using the CI layers as input.
+
+Implementation requirement:
+- The Reels scripting endpoint (whatever AI Writer uses today) must either:
+  Option 1) Internally call POST /api/ci/generate-scripts with the merged payload
+  OR
+  Option 2) Move script generation to a shared function used by both AI Writer/Reels and /api/ci/generate-scripts
+
+Hard rule:
+- One script generation logic.
+- No duplicated prompts.
+- No “new scripts tab” prompt.
+
+5) Payload merge rules for Reels scripting:
+When CreativeContext.source="CI", include:
+- intelligence + storytelling_intelligence (mandatory)
+- creative_strategy + creative_expansion (mandatory if present; if absent, call the combined CI creative generator ONCE, not multiple calls)
+- onboarding_context (Dubai/location/language/objective)
+- blueprint_context (offer + icp)
+
+If offer/icp missing:
+- Return 400 missing_fields[] and the Reels tab must display it inline.
+- Do NOT ask user to fill them in a new UI. Link to existing place they are set.
+
+6) CTA strategic rule enforcement:
+If conversion_style="none" and storytelling_present=true:
+- Scripts MUST NOT force aggressive CTA.
+- Output should use “soft conversion layer” (profile visits, saves, trust nurture, DM only if subtle).
+This rule is already in CI engines — ensure the Reels scripting prompt respects it.
+
+====================================================
+C) SAFEGUARDS (MUST-HAVE)
+====================================================
+
+7) Exactly 1 GPT call per script generation request.
+- No retries.
+- Fail-fast: return GENERATION_FAILED with reason.
+
+8) No silent fallbacks:
+- If context missing → clearly run “generic mode”
+- If CI context present → show banner “CI Context Active”
+- If generation fails → show error reason in the same Reels tab
+
+9) Snapshot correctness:
+- CI→Reels must always use latest snapshot createdAt DESC
+- Add debug log (dev only): snapshotId, mode_used, dominance_state
+
+====================================================
+D) ACCEPTANCE TESTS (MANDATORY)
+====================================================
+
+Test 1: CI → Reels routing
+- From competitor detail, click “Create Reels Scripts…”
+- AI Writer opens on Reels tab
+- Banner shows CI context active + snapshotId
+- Generate scripts → succeeds
+
+Test 2: CI context injection
+- Ensure scripts output reflects:
+  - location/objective (Dubai + objective)
+  - storytelling mode when CTA absent
+  - creative out-of-box angles included
+
+Test 3: Missing offer/icp
+- Remove offer/icp from account state
+- Generate scripts from CI context
+- Must show missing_fields[] inline in Reels tab
+
+Test 4: No regression
+- Open AI Writer/Reels normally (no CI context)
+- Old scripting flow still works unchanged
+
+DELIVERABLES:
+- Short video/gif or screenshots showing CI→Reels flow end-to-end
+- Network proof: Reels scripting request includes intelligence + storytelling + creative layers
+- Proof: no new scripts tab exists anywhere

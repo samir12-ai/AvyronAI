@@ -17,6 +17,7 @@ import { AppProvider } from "@/context/AppContext";
 import { AuthProvider } from "@/context/AuthContext";
 import { LanguageProvider } from "@/context/LanguageContext";
 import { CampaignProvider } from "@/context/CampaignContext";
+import { CreativeContextProvider } from "@/context/CreativeContext";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -54,11 +55,13 @@ export default function RootLayout() {
           <AuthProvider>
             <AppProvider>
             <CampaignProvider>
+            <CreativeContextProvider>
             <GestureHandlerRootView>
               <KeyboardProvider>
                 <RootLayoutNav />
               </KeyboardProvider>
             </GestureHandlerRootView>
+            </CreativeContextProvider>
             </CampaignProvider>
             </AppProvider>
           </AuthProvider>
