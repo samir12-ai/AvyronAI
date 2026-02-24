@@ -1,8 +1,8 @@
 import type { Express, Request, Response } from "express";
 import { aiChat } from "../ai-client";
 import { db } from "../db";
-import { strategicBlueprints, strategyMemory, strategyInsights, moatCandidates } from "@shared/schema";
-import { eq, desc, gte, and } from "drizzle-orm";
+import { strategicBlueprints, strategyMemory, strategyInsights, moatCandidates, businessDataLayer } from "@shared/schema";
+import { eq, desc, gte, and, sql } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
 
 const REQUIRED_BLUEPRINT_FIELDS: { key: string; label: string }[] = [
@@ -27,9 +27,25 @@ function validateBlueprintCompleteness(confirmedBlueprint: any): { valid: boolea
 
 const ORCHESTRATOR_PROMPT = `You are an execution orchestrator. You do NOT think. You do NOT reinterpret. You do NOT override the confirmed blueprint.
 
-You organize execution STRICTLY from the validated, confirmed blueprint and market map.
+You organize execution STRICTLY from the validated, confirmed blueprint, market map, AND Business Data Layer.
 
-CRITICAL: The confirmed blueprint is the ONLY source of truth. Never change positioning, offer, audience, CTA, or any confirmed field.
+CRITICAL: The confirmed blueprint is the ONLY source of truth for positioning. The Business Data Layer is the ONLY source of truth for distribution parameters (business type, funnel objective, budget, conversion channel).
+
+DISTRIBUTION DERIVATION RULES — Content mix MUST be derived from the Business Data Layer:
+- Business type determines content format mix (e.g., visual businesses need more Reels/Videos, service businesses need more educational Posts/Carousels)
+- Funnel objective determines content purpose distribution:
+  - AWARENESS → heavy on Reels + Stories (high reach formats)
+  - LEADS → heavy on Carousels + Posts with lead magnets, plus Stories for engagement
+  - SALES → balanced Reels + Posts + Carousels with strong CTAs
+  - AUTHORITY → heavy on Carousels + long-form Posts, fewer Stories
+- Monthly budget determines total volume (lower budget = fewer pieces, higher budget = more pieces)
+- Primary conversion channel determines CTA placement:
+  - WHATSAPP → CTAs direct to WhatsApp in bio/DM
+  - WEBSITE → CTAs drive to website link
+  - DM → CTAs encourage DM engagement
+  - FORM → CTAs link to lead forms
+
+DO NOT use hardcoded defaults like "3 Reels/week, 3 Posts/week". Every distribution number must be justified by the business profile.
 
 You must generate exactly 6 structured execution plans. All output must be structured objects.
 
@@ -176,6 +192,25 @@ export function registerOrchestratorRoutes(app: Express) {
       const validationResult = blueprint.validationResult ? JSON.parse(blueprint.validationResult) : null;
       const competitorUrls = blueprint.competitorUrls ? JSON.parse(blueprint.competitorUrls) : [];
 
+      let businessData: any = null;
+      try {
+        const campaignIdForBiz = campaignContext.campaignId || blueprint.campaignId;
+        const accountIdForBiz = campaignContext.accountId || blueprint.accountId || "default";
+        if (campaignIdForBiz) {
+          const bizRows = await db.select().from(businessDataLayer)
+            .where(and(
+              eq(businessDataLayer.campaignId, campaignIdForBiz),
+              eq(businessDataLayer.accountId, accountIdForBiz)
+            ))
+            .limit(1);
+          if (bizRows.length > 0) {
+            businessData = bizRows[0];
+          }
+        }
+      } catch (err) {
+        console.log("[Orchestrator] Business data fetch skipped:", (err as Error).message);
+      }
+
       let performanceIntelligenceBlock = "";
       let performanceSignalsInjected = false;
       try {
@@ -216,7 +251,22 @@ NOTE: Performance signals were ${performanceSignalsInjected ? "INJECTED" : "NOT 
         console.log("[Orchestrator] Performance intelligence injection skipped:", (err as Error).message);
       }
 
-      const userPrompt = `Generate execution plans from this validated blueprint (v${blueprint.blueprintVersion}). Do NOT reinterpret or override ANY confirmed data. The confirmed blueprint is the ONLY source of truth.
+      const businessDataBlock = businessData ? `
+BUSINESS DATA LAYER (source of truth for distribution derivation):
+- Business Type: ${businessData.businessType}
+- Business Location: ${businessData.businessLocation}
+- Core Offer: ${businessData.coreOffer}
+- Price Range: ${businessData.priceRange}
+- Target Audience Age: ${businessData.targetAudienceAge}
+- Target Audience Segment: ${businessData.targetAudienceSegment}
+- Monthly Budget: ${businessData.monthlyBudget}
+- Funnel Objective: ${businessData.funnelObjective}
+- Primary Conversion Channel: ${businessData.primaryConversionChannel}
+
+CRITICAL: Derive ALL content distribution numbers (reels/week, posts/week, stories/day, carousels/week, videos/week) from the above business profile. Do NOT use generic defaults.` : `
+WARNING: No Business Data Layer found. Distribution may use generic defaults. This is a degraded state.`;
+
+      const userPrompt = `Generate execution plans from this validated blueprint (v${blueprint.blueprintVersion}). Do NOT reinterpret or override ANY confirmed data. The confirmed blueprint is the ONLY source of truth for positioning. The Business Data Layer is the ONLY source of truth for distribution parameters.
 
 All plans must be geo-scoped to: ${campaignContext.location || "Not specified"}
 
@@ -226,6 +276,7 @@ CAMPAIGN CONTEXT:
 - Location: ${campaignContext.location || "Not specified"}
 - Platform: ${campaignContext.platform}
 - Mode: ${campaignContext.isDemo ? "DEMO" : "PRODUCTION"}
+${businessDataBlock}
 
 CONFIRMED BLUEPRINT (v${blueprint.blueprintVersion} — source of truth — do NOT change any values):
 ${JSON.stringify(confirmedBlueprint, null, 2)}
@@ -239,7 +290,7 @@ ${marketMap ? `MARKET MAP:\n${JSON.stringify(marketMap, null, 2)}` : ""}
 ${validationResult ? `VALIDATION RESULT:\n${JSON.stringify(validationResult, null, 2)}` : ""}
 ${performanceIntelligenceBlock}
 
-Generate all 6 execution plans now. Strictly from the confirmed, validated data. No reinterpretation. Geo-scoped to ${campaignContext.location || "specified location"}.`;
+Generate all 6 execution plans now. Strictly from the confirmed, validated data. Distribution MUST be derived from the Business Data Layer fields (business type: ${businessData?.businessType || "unknown"}, funnel objective: ${businessData?.funnelObjective || "unknown"}, budget: ${businessData?.monthlyBudget || "unknown"}, conversion channel: ${businessData?.primaryConversionChannel || "unknown"}). No hardcoded defaults. Geo-scoped to ${campaignContext.location || "specified location"}.`;
 
       const response = await aiChat({
         model: "gpt-5.2",

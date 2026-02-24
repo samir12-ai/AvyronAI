@@ -7,11 +7,93 @@ import {
   conversionEvents,
   publishedPosts,
   ctaVariants,
+  accountState,
 } from "@shared/schema";
 import { eq, desc, sql, and, isNotNull, min, max, gte, lte } from "drizzle-orm";
 import { logAudit } from "./audit";
 
 const LOG_PREFIX = "[CampaignDataLayer]";
+
+export type DataMode = "REAL" | "DEMO" | "UNKNOWN";
+
+export async function resolveDataMode(accountId: string): Promise<DataMode> {
+  try {
+    const state = await db.select().from(accountState)
+      .where(eq(accountState.accountId, accountId))
+      .limit(1);
+    const metaMode = state[0]?.metaMode || "DISCONNECTED";
+    if (metaMode === "REAL") return "REAL";
+    if (metaMode === "DEMO" && state[0]?.metaDemoModeEnabled) return "DEMO";
+    return "UNKNOWN";
+  } catch {
+    return "UNKNOWN";
+  }
+}
+
+export interface DashboardMetricsResponse {
+  mode: DataMode;
+  campaignId: string;
+  metrics: {
+    revenue: number;
+    roas: number;
+    spent: number;
+    results: number;
+    cpa: number;
+    contentCount: number;
+    queuedCount: number;
+    publishedCount: number;
+  };
+  hasData: boolean;
+  noDataFlag: boolean;
+  isDemoData: boolean;
+}
+
+const DEMO_FIXTURE_METRICS = {
+  revenue: 4500,
+  roas: 3.2,
+  spent: 1406.25,
+  results: 100,
+  cpa: 14.06,
+  contentCount: 12,
+  queuedCount: 4,
+  publishedCount: 8,
+};
+
+export async function getDashboardMetrics(campaignId: string, accountId: string = "default"): Promise<DashboardMetricsResponse> {
+  const mode = await resolveDataMode(accountId);
+
+  if (mode === "DEMO") {
+    return {
+      mode: "DEMO",
+      campaignId,
+      metrics: { ...DEMO_FIXTURE_METRICS },
+      hasData: true,
+      noDataFlag: false,
+      isDemoData: true,
+    };
+  }
+
+  const realMetrics = await getCampaignMetrics(campaignId, accountId);
+  const hasAnyData = realMetrics.totalSpend > 0 || realMetrics.totalRevenue > 0 || realMetrics.totalConversions > 0 || realMetrics.contentCount > 0;
+
+  return {
+    mode: mode === "REAL" ? "REAL" : "UNKNOWN",
+    campaignId,
+    metrics: {
+      revenue: realMetrics.totalRevenue,
+      roas: realMetrics.avgRoas,
+      spent: realMetrics.totalSpend,
+      results: realMetrics.totalConversions,
+      cpa: realMetrics.avgCpa,
+      contentCount: realMetrics.contentCount,
+      queuedCount: 0,
+      publishedCount: realMetrics.publishedCount,
+    },
+    hasData: hasAnyData,
+    noDataFlag: !hasAnyData,
+    isDemoData: false,
+  };
+}
 
 export interface CampaignMetrics {
   campaignId: string;

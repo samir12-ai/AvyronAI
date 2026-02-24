@@ -36,7 +36,7 @@ export function registerCiCompetitorRoutes(app: Express) {
         return res.json({ disabled: true, competitors: [] });
       }
       const competitors = await db.select().from(ciCompetitors)
-        .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.isActive, true)))
+        .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.isActive, true), eq(ciCompetitors.isDemo, false)))
         .orderBy(sql`${ciCompetitors.createdAt} DESC`);
 
       const enriched = competitors.map(c => {

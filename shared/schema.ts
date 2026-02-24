@@ -1199,6 +1199,27 @@ export type RequiredWork = typeof requiredWork.$inferSelect;
 export type CalendarEntry = typeof calendarEntries.$inferSelect;
 export type StudioItem = typeof studioItems.$inferSelect;
 
+export const businessDataLayer = pgTable("business_data_layer", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  campaignId: varchar("campaign_id").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  businessLocation: text("business_location").notNull(),
+  businessType: text("business_type").notNull(),
+  coreOffer: text("core_offer").notNull(),
+  priceRange: text("price_range").notNull(),
+  targetAudienceAge: text("target_audience_age").notNull(),
+  targetAudienceSegment: text("target_audience_segment").notNull(),
+  monthlyBudget: text("monthly_budget").notNull(),
+  funnelObjective: text("funnel_objective").notNull(),
+  primaryConversionChannel: text("primary_conversion_channel").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type BusinessDataLayer = typeof businessDataLayer.$inferSelect;
+
 export const aiUsageLog = pgTable("ai_usage_log", {
   id: varchar("id")
     .primaryKey()

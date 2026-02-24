@@ -1,0 +1,252 @@
+
+⸻
+
+SUBJECT: FINAL SYSTEM LOCK — Single Track Authority, Campaign Truth, AI Evidence, Business Data Layer
+
+This is the final structural lock.
+
+No partial implementation.
+No cosmetic UI fixes.
+No fallback logic.
+No demo bleed.
+No generic AI output.
+
+After this update the system must operate as a single authoritative execution machine.
+
+If any requirement below is missing, the work is not accepted.
+
+⸻
+
+SECTION 1 — SINGLE EXECUTION TRACK (NON-NEGOTIABLE)
+
+The only valid execution flow in the system must be:
+
+Business Data Layer → Blueprint → Plan → APPROVED → Execution Machine → Calendar → Studio → Publish
+
+There must be:
+
+• Zero parallel execution paths
+• Zero content creation outside approved plan
+• Zero growth campaign lifecycle separate from plan
+• Zero strategy-generated artifacts bypassing approval
+
+Static scan must confirm:
+	•	No writes to strategic_plans, required_work, calendar_entries, studio_items, plan_approvals outside the execution machine.
+	•	No route creates execution artifacts without APPROVED status.
+
+Proof required.
+
+⸻
+
+SECTION 2 — BUSINESS DATA LAYER (MANDATORY BEFORE META)
+
+Before Meta approval, the system must operate fully using a structured Business Data Layer.
+
+User must explicitly input:
+	1.	Business location (city + country)
+	2.	Business type / specialization
+	3.	Core offer
+	4.	Price range
+	5.	Target audience (age range + segment)
+	6.	Monthly campaign budget
+	7.	Funnel objective (Awareness / Leads / Sales / Authority)
+	8.	Primary conversion channel (WhatsApp / Website / DM / Form)
+
+Rules:
+
+• All fields must be stored structurally (not blobs).
+• Linked strictly to campaignId.
+• Required before Plan orchestration.
+• No AI guessing of missing fields.
+• No implicit defaults.
+
+This data must directly feed:
+	•	Distribution logic
+	•	Orchestrator prompt
+	•	Required work calculation
+	•	AI Actions evidence layer
+
+If Meta is not connected:
+	•	System must still operate fully on Business Data Layer.
+	•	No fake revenue.
+	•	No demo performance metrics.
+
+When Meta connects later:
+	•	Real performance data replaces simulated signals.
+	•	No reset of plan state.
+	•	No data wipe.
+
+Proof required:
+	•	Create campaign without Meta.
+	•	Generate plan using only Business Data Layer.
+	•	Show distribution derived from structured input.
+	•	Show required_work generated from it.
+
+⸻
+
+SECTION 3 — DASHBOARD CAMPAIGN TRUTH ENFORCEMENT
+
+All dashboard metrics must be strictly scoped to:
+	•	Server-trusted accountId
+	•	Server-trusted selectedCampaignId
+
+Metrics:
+	•	Revenue
+	•	ROAS
+	•	Spent
+	•	Results
+	•	CPA
+	•	Content count
+	•	Queued count
+	•	Published count
+
+Hard rules:
+
+• If campaign changes → all numbers must change.
+• If no campaign → EMPTY STATE.
+• If no data → “No data yet”.
+• No account-wide aggregation unless explicitly selected.
+• No fallback numbers.
+• No placeholders in real mode.
+• 500 errors must render error state.
+
+Proof required:
+	•	Switch between 2 campaigns → metrics change live.
+	•	Break endpoint → show error state.
+	•	No static demo values appear in real mode.
+
+Provide mapping:
+Metric → Endpoint → Response fields → DB source.
+
+⸻
+
+SECTION 4 — AI ACTIONS & PRIORITY MUST BE EVIDENCE-BOUND
+
+AI Actions may only appear if:
+
+• There is an APPROVED plan.
+• Actions are backed by measurable evidence.
+
+Every AI Action must include:
+	•	Evidence metric + timeframe
+	•	Source tag (PERFORMANCE / PLAN / GATES / PUBLISH)
+	•	Clear execution instruction
+	•	Priority justification
+
+Forbidden:
+
+• Generic advice
+• Demo-like suggestions
+• Actions without data backing
+• Actions when plan not approved
+
+If plan ≠ APPROVED:
+	•	AI Actions panel must be gated.
+
+Proof required:
+	•	Change campaign → AI actions change.
+	•	Remove approval → AI actions disappear.
+	•	Each action shows metric source and timeframe.
+
+⸻
+
+SECTION 5 — DISTRIBUTION MUST BE PLAN-DERIVED
+
+Distribution cannot be static or shared template.
+
+It must derive from:
+	•	Business type
+	•	Funnel objective
+	•	Budget
+	•	Strategy mode
+	•	Conversion channel
+
+Distribution must generate:
+	•	Required_work rows
+	•	Calendar entries
+	•	Studio draft counts
+
+Proof required:
+	•	Two different businesses produce different distributions.
+	•	Distribution directly maps to required_work table.
+	•	Calendar reflects distribution math.
+
+No generic distribution allowed.
+
+⸻
+
+SECTION 6 — DEMO / REAL ISOLATION
+
+If DEMO mode:
+	•	Visible banner.
+	•	All metrics from demo fixtures only.
+
+If REAL mode:
+	•	Zero demo fixtures.
+	•	Zero fallback to demo on failure.
+
+Proof required:
+	•	Toggle demo/real.
+	•	Show no cross-contamination.
+
+⸻
+
+SECTION 7 — LEGACY & SCOPE INTEGRITY
+
+Signal tables (strategy_memory, strategy_insights, moat_candidates) must:
+
+• Be dual-scoped (accountId + campaignId).
+• Exclude unscoped_legacy rows.
+• Have NOT NULL + no defaults.
+• Have composite (account_id, campaign_id) indexes.
+
+Proof required:
+	•	Static scan of all SELECT queries.
+	•	DB schema proof.
+	•	Regression test output.
+
+⸻
+
+SECTION 8 — ERROR & STATE DISCIPLINE
+
+Every panel must implement:
+	•	Loading state
+	•	Empty state
+	•	Error state (with HTTP code)
+	•	Success state
+
+No blank panels.
+No silent fallbacks.
+No “magic data”.
+
+⸻
+
+SECTION 9 — REQUIRED DELIVERY PACKAGE
+
+Before marking complete, provide:
+	1.	Metric mapping document
+	2.	AI Action evidence mapping
+	3.	Distribution derivation explanation
+	4.	Screenshots proving:
+	•	Campaign switching integrity
+	•	Plan gating behavior
+	•	Demo isolation
+	•	Error rendering
+	5.	Static scan proof of single execution track
+	6.	Confirmation no hardcoded dashboard values remain
+
+If any item is missing, the task is incomplete.
+
+⸻
+
+After this implementation:
+
+• One execution authority
+• One campaign truth
+• One data layer
+• AI bound to evidence
+• Distribution bound to plan
+• No demo bleed
+• No parallel tracks
+
+System becomes coherent, deterministic, and launch-ready.

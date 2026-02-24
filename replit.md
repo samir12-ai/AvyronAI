@@ -1,7 +1,7 @@
 # MarketMind AI
 
 ## Overview
-MarketMind AI is a cross-platform marketing automation application built with Expo (React Native) that uses AI to generate social media content, manage campaigns, schedule posts, and provide analytics. Its core purpose is to streamline marketing workflows, enhance brand presence through AI-powered content creation, and offer strategic insights. The project aims to function as an "AI Agency Replacement" focused on revenue generation and autonomous marketing capabilities.
+MarketMind AI is a cross-platform marketing automation application using AI to generate social media content, manage campaigns, schedule posts, and provide analytics. Built with Expo (React Native), its primary goal is to streamline marketing workflows, enhance brand presence through AI-powered content creation, and offer strategic insights. The project aims to act as an "AI Agency Replacement" focused on revenue generation and autonomous marketing capabilities.
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
@@ -24,8 +24,8 @@ Preferred communication style: Simple, everyday language.
 ### Backend
 - **Server**: Express.js with Node.js and TypeScript.
 - **API Design**: RESTful endpoints.
-- **AI Integration**: Dual-AI engine utilizing OpenAI GPT-5.2 and Google Gemini 3 Pro for content and strategy; Nano Banana Pro (Gemini 3 Pro Image) and GPT Image 1 for AI image/design.
-- **Autonomous Engine**: Production-safe backend with guardrails for marketing decisions (Guardrail Engine, Adaptive Baselines, Hybrid Risk Classifier, Decision Feedback Loop, Audit System). Supports autopilot for low-risk decisions.
+- **AI Integration**: Dual-AI engine utilizing OpenAI GPT-5.2 and Google Gemini 3 Pro for content and strategy, with Nano Banana Pro (Gemini 3 Pro Image) and GPT Image 1 for AI image/design.
+- **Autonomous Engine**: Production-safe backend with guardrails for marketing decisions (Guardrail Engine, Adaptive Baselines, Hybrid Risk Classifier, Decision Feedback Loop, Audit System) supporting autopilot for low-risk decisions.
 
 ### Data Storage
 - **Client-side**: AsyncStorage for local data.
@@ -33,54 +33,44 @@ Preferred communication style: Simple, everyday language.
 
 ### Key Features
 - **Dashboard**: Revenue-focused KPIs and AI action summaries.
-- **Create**: AI Writer for text content and AI Designer for image generation with style presets and mood configuration.
+- **Create**: AI Writer for text and AI Designer for image generation with style presets.
 - **Calendar**: Content scheduling with AI Calendar Assistant.
-- **AI Management**:
-    - **Auto-Publisher**: Batch publishing to Meta platforms.
-    - **AI Audience Manager**: Generates optimized Meta ad audiences.
-    - **Performance Intelligence Layer**: Embedded inside Build The Plan (Phase 5). Analyzes past performance data, generates insights/recommendations/memory/moat signals. Feeds signals into the BTP orchestrator. Does NOT create execution plans — purely a signal provider.
-- **Studio**: Media library and AI Video Editor with guided creative briefs and FFmpeg rendering.
-- **Photography**: Dubai-based photography marketplace.
-- **Lead Engine**: Modular lead generation system with 8 independent modules (Lead Capture, Conversion Tracking, CTA Engine, Funnel Logic, Lead Magnets, Landing Pages, Revenue Attribution, AI Lead Optimization). Features flags, dependency guards, and a global kill switch.
-- **Competitive Intelligence**: Real-data competitor analysis system. Uses 2-step scrape ladder (HTML parse → Playwright headless render) with 24h caching. Returns MEASURED metrics (deterministic: posts_last_7d, reels_last_7d, avg_posts_per_week_28d, content_mix, engagement_rate with formula/source/sampleSize) and INFERRED insights (qualitative AI analysis of 4-5 reels with evidencePermalinks citations). Status: VALID (≥12 posts + ≥1 reel), PARTIAL (insufficient data), SCRAPE_BLOCKED (both methods failed). Warning codes: SCRAPE_BLOCKED, TIMESTAMPS_MISSING, INSUFFICIENT_POSTS, NO_REELS_FOUND, FOLLOWERS_UNAVAILABLE, ENGAGEMENT_UNAVAILABLE. No Stories metrics. No fabricated numbers. All audit trail: collection_method_used, attempts[], source_type. Frontend shows green Verified badges for MEASURED, orange AI Insight badges for INFERRED. Endpoint: POST /api/ci/competitors/analyze-profile. Backend files: server/competitive-intelligence/profile-scraper.ts, profile-analyzer.ts.
-- **Creative Capture Layer**: 8-component pipeline analyzing reels with real data (not AI estimation). Pipeline: asset download (Bright Data proxy) → frame extraction (FFmpeg, 6 frames) → pinned comment fetch → OCR (Gemini Vision) → deterministic signal parsing (EN/AR regex) → audio transcription (Whisper) → evidence pack assembly → AI interpretation (GPT-4, evidence-constrained). Evidence packs track sources_attempted/sources_succeeded with per-source warnings. Only MEASURED (source-labeled) or UNAVAILABLE (with reason) labels — no ESTIMATED anywhere. Cost controls: 5 reels/competitor, 60s rate limit, 24h cache, 500MB/50 reels weekly caps. Combined stats endpoint: GET /api/ci/scrape-stats. QA: 3 scenario fixtures in test-fixtures/ (pinned comment CTA, overlay CTA, video download failure). Backend: server/competitive-intelligence/creative-capture.ts.
-- **Settings**: Brand profile and platform connections management.
+- **AI Management**: Auto-Publisher for Meta platforms, AI Audience Manager for optimized Meta ad audiences, and a Performance Intelligence Layer for insights.
+- **Studio**: Media library and AI Video Editor with FFmpeg rendering.
+- **Lead Engine**: Modular lead generation system with 8 independent modules and AI Lead Optimization.
+- **Competitive Intelligence**: Real-data competitor analysis system using a 2-step scrape ladder for MEASURED metrics and INFERRED AI insights.
+- **Creative Capture Layer**: 8-component pipeline analyzing reels with real data for deterministic signals and AI interpretation.
 
 ### Strategic Execution Machine
 - **System**: Controlled execution pipeline transforming strategic blueprints into published content through hard approval gates.
-- **Pipeline**: Blueprint → Strategic Plan → Client Approval Gate → Calendar Auto-Generation (Phase 4A) → AI Creative Execution (Phase 4B) → Studio Drafts → Scheduled → Published.
-- **Database Tables**: `strategic_plans`, `plan_approvals`, `required_work`, `calendar_entries`, `studio_items` with full lifecycle tracking.
-- **Execution Safety**: Idempotency via unique constraints (planId + campaignId), concurrency locks (executionStatus = RUNNING prevents concurrent runs), emergency stop (PAUSED freezes all queues, deletes nothing), explicit failure tracking (FAILED + errorReason).
-- **Phase 4A (Deterministic)**: Calendar auto-generation with even spacing, required work calculation. Zero AI, pure deterministic logic.
-- **Phase 4B (AI Creative)**: Captions, briefs, CTA copy, studio drafts. Respects PAUSED state. Failed items get FAILED status + errorReason.
-- **Dashboard**: Plan-level + account-level progress trackers with real data from database counts. Progress = (published + scheduled + ready) / total_required_work.
-- **Hard Rules**: Nothing executes until plan status = APPROVED. Nothing auto-publishes. No silent fallbacks. All state transitions audit logged (18 event types).
-- **Frontend**: StrategicPipeline.tsx - 4-step linear pipeline view (Build Strategy → Approval → Execution Pipeline → Competitor Intelligence) with collapsible sections, step indicators, progress tracking, and contextual actions. Replaces the old scattered tab interface. ExecutionMachine.tsx retained as legacy component.
-- **Backend**: server/strategic-core/execution-routes.ts with 15+ endpoints, status-gated middleware.
-- **AI Management UX**: Consolidated from 9 tabs to Pipeline (default) + Control + Publish + advanced tools (Audience, Leads). Strategy tab removed — Performance Intelligence is now embedded inside Build The Plan. The Pipeline tab contains all strategic execution steps in a linear flow.
+- **Pipeline**: Blueprint → Strategic Plan → Client Approval Gate → Calendar Auto-Generation → AI Creative Execution → Studio Drafts → Scheduled → Published.
+- **Execution Safety**: Idempotency, concurrency locks, emergency stop, and explicit failure tracking.
+- **Hard Rules**: Nothing executes until plans are APPROVED; no auto-publishing; all state transitions are audit logged.
 
 ### Strategic Core Architecture ("Build The Plan")
-- **System**: 6-phase sequential intelligence engine with hard gates.
-- **Phases**: Gate (min requirements) → Creative Analysis (AI extraction from media) → Confirm/Edit (user review) → Market Analysis (AI market mapping) → Validation (contradiction detection) → Orchestrator (execution plan generation).
+- **System**: 6-phase sequential intelligence engine with hard gates (Gate, Creative Analysis, Confirm/Edit, Market Analysis, Validation, Orchestrator).
 - **AI Models**: Gemini 3 Pro for creative extraction, GPT-5.2 for market analysis, validation, and orchestration.
-- **Orchestrator Enhancement**: Optionally injects Performance Intelligence signals (strategy_memory, high-confidence insights ≥0.7, top moat candidates) into orchestrator prompt. Fail-safe: proceeds without signals if strategy tables are empty or query fails.
+- **Orchestrator Enhancement**: Optionally injects Performance Intelligence signals into the orchestrator prompt.
 
-### Execution Authority Matrix (Feb 2026 Consolidation)
-- **SINGLE EXECUTION TRACK**: Build The Plan is the SOLE execution authority.
-- **Build The Plan** OWNS: strategic_plans, required_work, calendar_entries, studio_items, plan_approvals. Creates, approves, executes, publishes.
-- **Performance Intelligence (formerly Strategy)** READS: performance_snapshots, strategy_insights, strategy_decisions, strategy_memory, moat_candidates, signature_series, weekly_reports. WRITES: only to its own signal tables. NEVER writes to execution tables. All signal tables scoped by `account_id` + `campaign_id` (Feb 2026 isolation fix).
-- **Audit Events**: PERFORMANCE_SIGNAL_PROPOSED, PERFORMANCE_SYNC_COMPLETED, MOAT_SCAN_COMPLETED, WEEKLY_REPORT_GENERATED — all logged with planId reference to active blueprint.
-- **UI**: Strategy tab removed from AI Management. Performance Intelligence embedded as collapsible section inside Build The Plan (Phase 5).
-- **Backend**: server/strategy-routes.ts (Performance Intelligence endpoints), server/strategic-core/orchestrator-routes.ts (orchestrator with PI signal injection).
+### Execution Authority Matrix
+- **SINGLE EXECUTION TRACK**: "Build The Plan" is the sole execution authority, owning strategic plans, required work, calendar entries, studio items, and plan approvals.
+- **Performance Intelligence**: Reads its own signal tables (e.g., performance snapshots, strategy insights) and writes only to these, never to execution tables. All signal tables are scoped by `account_id` and `campaign_id`.
 
-### Backend Stabilization (Feb 2026)
-- **AI Cost Lock**: All 38 AI calls routed through centralized `server/ai-client.ts` singleton. No direct OpenAI/Gemini instantiation allowed. Enforcement test: `server/tests/ai-scan.test.ts`. Every call has explicit `max_tokens`, `accountId`, `endpoint` tracking. Usage logged to `ai_usage_log` table. Weekly token budget: 500k tokens/week with auto-rejection.
-- **Database Indexes**: 46 custom indexes added across all tables on `account_id`, `status`, `created_at`, `competitor_id`, `plan_id`, `blueprint_id`, `analysis_id` columns.
-- **Worker Hardening**: Autonomous worker has hourly decision cap (9/hour), circuit breaker (3 consecutive failures trips), idle account skip (7 days), consecutive failure tracking with auto-increment.
-- **Safety Gate Registry**: `server/gates/registry.ts` — centralized gate functions: `gateAutopilotEnabled`, `gateNotSafeMode`, `gateAIBudget`, `gateFeatureFlag`, `gateLeadEngineActive`, `gateConfidenceAbove`. Express middleware `requireGates()` for route protection.
-- **Validation Layer**: `server/gates/validate.ts` — Zod-based request validation middleware with `validateBody()` and `validateQuery()`. Pre-built schemas for common patterns.
-- **Test Suite**: `server/tests/stabilization.test.ts` — 6 automated tests covering health, database, AI budget, CI validation, autopilot, and AI scan enforcement.
-- **Memory Scoping Hardening (Feb 2026)**: Mathematically provable account+campaign isolation on all signal tables (strategy_memory, strategy_insights, moat_candidates). Zero req.query.accountId in strategy-routes.ts — all scoping from server-trusted requireCampaign middleware. Database NOT NULL constraints on account_id + campaign_id with NO DEFAULT (dangerous 'default' default removed). Legacy data excluded via `ne(campaignId, 'unscoped_legacy')` on ALL 16 signal reads in strategy-routes.ts + 3 in orchestrator-routes.ts + 1 in autonomous-worker.ts. Write guard: requireCampaign middleware rejects empty/legacy campaignId before any INSERT. Composite indexes (account_id, campaign_id) on all 3 tables. Regression test: `server/tests/memory-scoping.test.ts` (8 checks).
+### Backend Stabilization
+- **AI Cost Lock**: All AI calls routed through a centralized singleton with explicit tracking, usage logging, and weekly token budgets.
+- **Database Indexes**: Extensive custom indexes across all tables.
+- **Worker Hardening**: Autonomous worker with hourly decision caps, circuit breakers, and idle account skipping.
+- **Safety Gate Registry**: Centralized gate functions for route protection (e.g., `gateAutopilotEnabled`, `gateAIBudget`).
+- **Validation Layer**: Zod-based request validation middleware.
+- **Memory Scoping Hardening**: Mathematically provable account+campaign isolation on all signal tables with database NOT NULL constraints and write guards.
+
+### Final System Lock
+- **Business Data Layer**: `business_data_layer` table with 9 structural columns (e.g., businessLocation, businessType, coreOffer), campaign-scoped and used for orchestration.
+- **Dashboard Campaign Truth**: All dashboard metrics derived from campaign-scoped DB queries; no hardcoded values.
+- **AI Actions Evidence-Bound**: AI actions carry evidence metadata (sourceTag, evidenceMetric, priority) and are gated by an APPROVED plan.
+- **Single Execution Track**: All writes to key execution tables are confined to a single execution route.
+- **Distribution Plan-Derived**: Orchestrator injects business data into AI prompts to derive content distribution strategies.
+- **Demo/Real Isolation**: Data mode resolution ensures strict separation between demo fixtures and real data.
 
 ## External Dependencies
 
@@ -97,18 +87,15 @@ Preferred communication style: Simple, everyday language.
 
 ### Meta Business Suite Integration
 - **Token Security**: AES-256-GCM encrypted tokens stored server-side.
-- **OAuth Flow**: Full-scope OAuth requesting necessary permissions, exchanging short-lived for long-lived tokens.
-- **Meta Modes**: DISCONNECTED, PENDING_APPROVAL, PERMISSION_MISSING, TOKEN_EXPIRED, REVOKED, DEMO, REAL.
-- **Capability Gates**: Publishing and insights capabilities are gated by specific Meta permissions.
-- **Token Lifecycle**: Daily health checks, auto-extension, and failure classification.
-- **Publish Worker**: Requires `meta_mode=REAL` for publishing, no silent demo fallbacks.
-- **Middleware**: `requireMetaReal` guards all publishing/insights endpoints.
+- **OAuth Flow**: Full-scope OAuth for managing permissions and token lifecycle.
+- **Meta Modes**: System handles various connection states (DISCONNECTED, REAL, PENDING_APPROVAL, etc.).
+- **Capability Gates**: Publishing and insights capabilities gated by Meta permissions.
+- **Publish Worker**: Requires `meta_mode=REAL` for publishing.
 
-### Audit & Control System (Feb 2026)
-- **Backend**: `server/audit-routes.ts` — 6 GET endpoints (feed, ai-usage, gates, decisions, publish-history, jobs) + 2 POST endpoints (autopilot toggle, emergency-stop). All endpoints return strict JSON contracts `{success, data}` / `{success:false, code, message}`. Keyset pagination on feed (cursor-based, no OFFSET). Performance guards with LIMIT enforcement and max caps (50-200). Registered in `server/routes.ts`.
-- **Frontend**: `components/ControlCenter.tsx` — 5-panel dashboard (System Gates, AI Token Budget, Recent Activity, Decisions, Worker/Jobs). Each panel implements strict 4-state rendering (Loading/Empty/Error/Success). Autopilot toggle and Emergency Stop wired to real POST endpoints with DB persistence. Advanced Mode (advancedMode gate) enables: module filters on audit feed, per-model token breakdown, worker/jobs panel.
-- **Database Indexes**: Verified EXPLAIN plans confirm index usage on audit_log (account_id, created_at), ai_usage_log (account_id, created_at), job_queue (status, account_id), strategic_plans (status, blueprint_id).
+### Audit & Control System
+- **Backend**: Provides endpoints for audit feeds, AI usage, gate status, decisions, publish history, and job management.
+- **Frontend**: 5-panel dashboard for System Gates, AI Token Budget, Recent Activity, Decisions, and Worker/Jobs.
 
 ### Social Platforms
 - **Instagram, Facebook**: Integrated via Meta Business Suite.
-- **Twitter, LinkedIn, TikTok**: Connection management in settings; API integrations planned.
+- **Twitter, LinkedIn, TikTok**: Connection management implemented, API integrations planned.

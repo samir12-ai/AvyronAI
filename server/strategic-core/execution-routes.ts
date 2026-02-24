@@ -7,11 +7,66 @@ import {
   requiredWork,
   calendarEntries,
   studioItems,
+  businessDataLayer,
 } from "@shared/schema";
 import { eq, and, sql, ne } from "drizzle-orm";
 import { logAudit } from "../audit";
 import { logAuditEvent } from "./audit-logger";
 import { aiChat } from "../ai-client";
+
+function deriveDistributionFromBusinessData(bizData: any): {
+  reelsPerWeek: number;
+  postsPerWeek: number;
+  storiesPerDay: number;
+  carouselsPerWeek: number;
+  videosPerWeek: number;
+} {
+  const objective = bizData?.funnelObjective || "AWARENESS";
+  const budgetStr = bizData?.monthlyBudget || "0";
+  const budget = parseInt(budgetStr.replace(/[^0-9]/g, "")) || 0;
+  const businessType = (bizData?.businessType || "").toLowerCase();
+
+  const isVisualBusiness = ["photography", "fashion", "beauty", "food", "restaurant", "fitness", "travel", "real estate", "interior design", "art", "design"].some(t => businessType.includes(t));
+  const isServiceBusiness = ["consulting", "coaching", "legal", "accounting", "saas", "tech", "software", "agency", "clinic", "medical", "dental"].some(t => businessType.includes(t));
+
+  let volumeMultiplier = 1;
+  if (budget >= 5000) volumeMultiplier = 1.5;
+  else if (budget >= 2000) volumeMultiplier = 1.2;
+  else if (budget <= 500) volumeMultiplier = 0.7;
+
+  let base = { reelsPerWeek: 2, postsPerWeek: 2, storiesPerDay: 1, carouselsPerWeek: 1, videosPerWeek: 0 };
+
+  switch (objective) {
+    case "AWARENESS":
+      base = isVisualBusiness
+        ? { reelsPerWeek: 4, postsPerWeek: 1, storiesPerDay: 2, carouselsPerWeek: 1, videosPerWeek: 1 }
+        : { reelsPerWeek: 3, postsPerWeek: 2, storiesPerDay: 1, carouselsPerWeek: 1, videosPerWeek: 0 };
+      break;
+    case "LEADS":
+      base = isServiceBusiness
+        ? { reelsPerWeek: 2, postsPerWeek: 3, storiesPerDay: 1, carouselsPerWeek: 2, videosPerWeek: 0 }
+        : { reelsPerWeek: 2, postsPerWeek: 2, storiesPerDay: 1, carouselsPerWeek: 2, videosPerWeek: 1 };
+      break;
+    case "SALES":
+      base = isVisualBusiness
+        ? { reelsPerWeek: 3, postsPerWeek: 2, storiesPerDay: 2, carouselsPerWeek: 2, videosPerWeek: 1 }
+        : { reelsPerWeek: 2, postsPerWeek: 3, storiesPerDay: 1, carouselsPerWeek: 2, videosPerWeek: 0 };
+      break;
+    case "AUTHORITY":
+      base = isServiceBusiness
+        ? { reelsPerWeek: 1, postsPerWeek: 3, storiesPerDay: 1, carouselsPerWeek: 3, videosPerWeek: 1 }
+        : { reelsPerWeek: 2, postsPerWeek: 2, storiesPerDay: 1, carouselsPerWeek: 2, videosPerWeek: 1 };
+      break;
+  }
+
+  return {
+    reelsPerWeek: Math.max(1, Math.round(base.reelsPerWeek * volumeMultiplier)),
+    postsPerWeek: Math.max(1, Math.round(base.postsPerWeek * volumeMultiplier)),
+    storiesPerDay: Math.max(0, Math.round(base.storiesPerDay * volumeMultiplier)),
+    carouselsPerWeek: Math.max(0, Math.round(base.carouselsPerWeek * volumeMultiplier)),
+    videosPerWeek: Math.max(0, Math.round(base.videosPerWeek * volumeMultiplier)),
+  };
+}
 
 async function generateCreativeContent(
   contentType: string,
@@ -178,6 +233,20 @@ function generateCalendarSlots(
   return slots;
 }
 
+export async function emergencyStopAllRunningPlans(accountId: string, reason: string): Promise<void> {
+  await db
+    .update(strategicPlans)
+    .set({
+      emergencyStopped: true,
+      emergencyStoppedAt: new Date(),
+      emergencyStoppedReason: reason,
+    })
+    .where(and(
+      eq(strategicPlans.accountId, accountId),
+      eq(strategicPlans.executionStatus, "RUNNING"),
+    ));
+}
+
 export function registerExecutionRoutes(app: Express) {
   app.post("/api/execution/plans/generate", async (req: Request, res: Response) => {
     try {
@@ -211,14 +280,35 @@ export function registerExecutionRoutes(app: Express) {
         return res.status(500).json({ error: "INVALID_PLAN_JSON", message: "Orchestrator plan JSON is corrupt." });
       }
 
+      let bizData: any = null;
+      try {
+        const bizRows = await db.select().from(businessDataLayer)
+          .where(and(
+            eq(businessDataLayer.campaignId, campaignId),
+            eq(businessDataLayer.accountId, accountId)
+          ))
+          .limit(1);
+        if (bizRows.length > 0) bizData = bizRows[0];
+      } catch (err) {
+        console.log("[Execution] Business data fetch skipped:", (err as Error).message);
+      }
+
       const distribution = planJson.contentDistributionPlan || {};
       const weeklyCalendar = distribution.weeklyCalendar || [];
 
-      const reelsPerWeek = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "reel").length || 3;
-      const postsPerWeek = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "post" || d.contentType?.toLowerCase() === "static post").length || 3;
-      const storiesPerDay = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "story").length > 0 ? 1 : 0;
-      const carouselsPerWeek = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "carousel").length || 1;
-      const videosPerWeek = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "video").length || 0;
+      const calendarReels = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "reel").length;
+      const calendarPosts = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "post" || d.contentType?.toLowerCase() === "static post").length;
+      const calendarStories = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "story").length;
+      const calendarCarousels = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "carousel").length;
+      const calendarVideos = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "video").length;
+
+      const bizDerived = deriveDistributionFromBusinessData(bizData);
+
+      const reelsPerWeek = calendarReels > 0 ? calendarReels : bizDerived.reelsPerWeek;
+      const postsPerWeek = calendarPosts > 0 ? calendarPosts : bizDerived.postsPerWeek;
+      const storiesPerDay = calendarStories > 0 ? 1 : bizDerived.storiesPerDay;
+      const carouselsPerWeek = calendarCarousels > 0 ? calendarCarousels : bizDerived.carouselsPerWeek;
+      const videosPerWeek = calendarVideos > 0 ? calendarVideos : bizDerived.videosPerWeek;
 
       const parsedDistribution = { reelsPerWeek, postsPerWeek, storiesPerDay, carouselsPerWeek, videosPerWeek };
       const totals = calcTotals(parsedDistribution, periodDays);
@@ -469,14 +559,35 @@ export function registerExecutionRoutes(app: Express) {
             throw new Error("Plan JSON is corrupt");
           }
 
+          let execBizData: any = null;
+          try {
+            const execBizRows = await db.select().from(businessDataLayer)
+              .where(and(
+                eq(businessDataLayer.campaignId, plan.campaignId),
+                eq(businessDataLayer.accountId, plan.accountId)
+              ))
+              .limit(1);
+            if (execBizRows.length > 0) execBizData = execBizRows[0];
+          } catch (err) {
+            console.log("[Execution] Business data fetch for calendar skipped:", (err as Error).message);
+          }
+
           const distribution = planJson.contentDistributionPlan || {};
           const weeklyCalendar = distribution.weeklyCalendar || [];
 
-          const reelsPerWeek = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "reel").length || 3;
-          const postsPerWeek = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "post" || d.contentType?.toLowerCase() === "static post").length || 3;
-          const storiesPerDay = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "story").length > 0 ? 1 : 0;
-          const carouselsPerWeek = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "carousel").length || 1;
-          const videosPerWeek = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "video").length || 0;
+          const calReels = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "reel").length;
+          const calPosts = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "post" || d.contentType?.toLowerCase() === "static post").length;
+          const calStories = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "story").length;
+          const calCarousels = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "carousel").length;
+          const calVideos = weeklyCalendar.filter((d: any) => d.contentType?.toLowerCase() === "video").length;
+
+          const execBizDerived = deriveDistributionFromBusinessData(execBizData);
+
+          const reelsPerWeek = calReels > 0 ? calReels : execBizDerived.reelsPerWeek;
+          const postsPerWeek = calPosts > 0 ? calPosts : execBizDerived.postsPerWeek;
+          const storiesPerDay = calStories > 0 ? 1 : execBizDerived.storiesPerDay;
+          const carouselsPerWeek = calCarousels > 0 ? calCarousels : execBizDerived.carouselsPerWeek;
+          const videosPerWeek = calVideos > 0 ? calVideos : execBizDerived.videosPerWeek;
 
           const parsedDistribution = { reelsPerWeek, postsPerWeek, storiesPerDay, carouselsPerWeek, videosPerWeek };
           const totals = calcTotals(parsedDistribution, periodDays);

@@ -4,6 +4,7 @@ import { auditLog, accountState, jobQueue, strategicPlans, featureFlags, aiUsage
 import { eq, sql, and, desc, lt, or, inArray, gte, lte } from "drizzle-orm";
 import { getWeeklyTokenUsage, WEEKLY_TOKEN_BUDGET } from "./ai-client";
 import { logAudit } from "./audit";
+import { emergencyStopAllRunningPlans } from "./strategic-core/execution-routes";
 
 const MODULE_EVENT_MAP: Record<string, string[]> = {
   "strategic-core": [
@@ -645,16 +646,7 @@ export function registerAuditRoutes(app: Express) {
         });
       }
 
-      await db.update(strategicPlans)
-        .set({
-          emergencyStopped: true,
-          emergencyStoppedAt: new Date(),
-          emergencyStoppedReason: reason,
-        })
-        .where(and(
-          eq(strategicPlans.accountId, accountId),
-          eq(strategicPlans.executionStatus, "RUNNING"),
-        ));
+      await emergencyStopAllRunningPlans(accountId, reason);
 
       await logAudit(accountId, "EMERGENCY_STOP", {
         details: { reason, timestamp: new Date().toISOString() },

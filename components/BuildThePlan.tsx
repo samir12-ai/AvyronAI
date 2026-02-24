@@ -20,6 +20,7 @@ import Colors from '@/constants/colors';
 import { getApiUrl } from '@/lib/query-client';
 import { useApp } from '@/context/AppContext';
 import { useCampaign } from '@/context/CampaignContext';
+import BusinessDataForm from '@/components/BusinessDataForm';
 
 type Phase = 0 | 1 | 2 | 3 | 4 | 5;
 type BlueprintStatus = 'DRAFT' | 'GATE_PASSED' | 'EXTRACTION_COMPLETE' | 'EXTRACTION_FALLBACK' | 'CONFIRMED' | 'ANALYSIS_COMPLETE' | 'VALIDATED' | 'ORCHESTRATED';
@@ -125,6 +126,8 @@ export default function BuildThePlan() {
   const [piData, setPiData] = useState<any>(null);
   const [piLoading, setPiLoading] = useState(false);
   const [piExpanded, setPiExpanded] = useState(false);
+
+  const [businessDataComplete, setBusinessDataComplete] = useState(false);
 
   const isMetaReal = metaConnection?.isConnected === true;
 
@@ -586,6 +589,17 @@ export default function BuildThePlan() {
           </View>
         )}
 
+        <BusinessDataForm onDataChange={setBusinessDataComplete} />
+
+        {!businessDataComplete && (
+          <View style={[s.gateWarning, { backgroundColor: '#F59E0B12', borderColor: '#F59E0B30' }]}>
+            <Ionicons name="lock-closed" size={14} color="#F59E0B" />
+            <Text style={[s.gateWarningText, { color: '#F59E0B' }]}>
+              Complete business profile above to unlock plan creation
+            </Text>
+          </View>
+        )}
+
         <Text style={[s.sectionLabel, { color: colors.text }]}>Competitor URLs (min 2)</Text>
         {competitorUrls.map((url, index) => (
           <View key={index} style={s.urlRow}>
@@ -628,14 +642,14 @@ export default function BuildThePlan() {
 
         <Pressable
           onPress={passGate}
-          disabled={loading}
-          style={[s.actionBtn, { opacity: loading ? 0.6 : 1 }]}
+          disabled={loading || !businessDataComplete}
+          style={[s.actionBtn, { opacity: (loading || !businessDataComplete) ? 0.5 : 1 }]}
         >
-          <LinearGradient colors={['#8B5CF6', '#6366F1']} style={s.actionBtnGrad}>
+          <LinearGradient colors={businessDataComplete ? ['#8B5CF6', '#6366F1'] : ['#6B7280', '#4B5563']} style={s.actionBtnGrad}>
             {loading ? <ActivityIndicator color="#fff" size="small" /> : (
               <>
-                <Ionicons name="lock-open" size={18} color="#fff" />
-                <Text style={s.actionBtnText}>Unlock Analysis</Text>
+                <Ionicons name={businessDataComplete ? 'lock-open' : 'lock-closed'} size={18} color="#fff" />
+                <Text style={s.actionBtnText}>{businessDataComplete ? 'Unlock Analysis' : 'Complete Business Profile First'}</Text>
               </>
             )}
           </LinearGradient>
@@ -1760,6 +1774,21 @@ const s = StyleSheet.create({
   addUrlText: {
     fontSize: 13,
     fontWeight: '600',
+  },
+  gateWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  gateWarningText: {
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
   },
   errorText: {
     color: '#EF4444',

@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { db } from "./db";
 import { campaignSelections, adSpendEntries, performanceSnapshots, conversionEvents } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
-import { getCampaignMetrics, getRevenueSummary, detectPerformanceSignals } from "./campaign-data-layer";
+import { getCampaignMetrics, getRevenueSummary, detectPerformanceSignals, getDashboardMetrics, resolveDataMode } from "./campaign-data-layer";
 
 const VALID_GOAL_TYPES = ["LEADS", "AWARENESS", "RETARGETING", "SALES", "TESTING"] as const;
 
@@ -215,6 +215,29 @@ export function registerCampaignRoutes(app: Express) {
     } catch (error: any) {
       console.error("[Campaigns] Error clearing selection:", error);
       res.status(500).json({ error: "Failed to clear campaign selection" });
+    }
+  });
+
+  app.get("/api/dashboard/metrics", requireCampaign, async (req, res) => {
+    try {
+      const campaignContext = (req as any).campaignContext;
+      const accountId = (req.query.accountId as string) || "default";
+      const dashboardMetrics = await getDashboardMetrics(campaignContext.campaignId, accountId);
+      res.json({ success: true, ...dashboardMetrics, campaign: campaignContext });
+    } catch (error: any) {
+      console.error("[Dashboard] Metrics error:", error);
+      res.status(500).json({ error: "Failed to fetch dashboard metrics", httpCode: 500 });
+    }
+  });
+
+  app.get("/api/dashboard/mode", async (req, res) => {
+    try {
+      const accountId = (req.query.accountId as string) || "default";
+      const mode = await resolveDataMode(accountId);
+      res.json({ success: true, mode });
+    } catch (error: any) {
+      console.error("[Dashboard] Mode check error:", error);
+      res.status(500).json({ error: "Failed to check mode" });
     }
   });
 

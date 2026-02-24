@@ -26,7 +26,7 @@ export function registerCiAnalysisRoutes(app: Express) {
       }
 
       const competitors = await db.select().from(ciCompetitors)
-        .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.isActive, true)));
+        .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.isActive, true), eq(ciCompetitors.isDemo, false)));
 
       const completeCompetitors = competitors.filter(validateCompetitorEvidence);
       if (completeCompetitors.length < 2) {
@@ -202,7 +202,7 @@ export function registerCiAnalysisRoutes(app: Express) {
       if (!enabled) return res.json({ disabled: true, analyses: [] });
 
       const analyses = await db.select().from(ciMarketAnalyses)
-        .where(eq(ciMarketAnalyses.accountId, accountId))
+        .where(and(eq(ciMarketAnalyses.accountId, accountId), eq(ciMarketAnalyses.isDemo, false)))
         .orderBy(desc(ciMarketAnalyses.createdAt));
       res.json({ analyses });
     } catch (error: any) {
@@ -239,7 +239,7 @@ export function registerCiAnalysisRoutes(app: Express) {
       if (!enabled) return res.json({ disabled: true, recommendations: [] });
 
       let query = db.select().from(ciRecommendations)
-        .where(eq(ciRecommendations.accountId, accountId))
+        .where(and(eq(ciRecommendations.accountId, accountId), eq(ciRecommendations.isDemo, false)))
         .orderBy(desc(ciRecommendations.createdAt));
 
       const recs = await query;

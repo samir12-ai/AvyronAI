@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -11,10 +11,11 @@ import {
   Switch,
   Animated as RNAnimated,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Ionicons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
+import { Ionicons, Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
@@ -22,8 +23,7 @@ import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { useCampaign } from '@/context/CampaignContext';
 import { MetricCard } from '@/components/MetricCard';
-import { MiniChart } from '@/components/MiniChart';
-import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
+import { CampaignBar } from '@/components/CampaignSelector';
 import { getApiUrl } from '@/lib/query-client';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -108,21 +108,56 @@ function MiniBarChart({ isDark }: { isDark: boolean }) {
   );
 }
 
+type DashboardMetrics = {
+  revenue: number;
+  roas: number;
+  spent: number;
+  results: number;
+  cpa: number;
+  contentCount: number;
+  queuedCount: number;
+  publishedCount: number;
+  reach: number;
+  engagement: number;
+};
+
+type AIAction = {
+  id: string;
+  action: string;
+  evidenceMetric: string;
+  evidenceTimeframe: string;
+  sourceTag: string;
+  priority: string;
+  priorityJustification: string;
+};
+
+type PanelState = 'loading' | 'empty' | 'error' | 'success' | 'no_data';
+
 export default function DashboardScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
-  const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
   const { t } = useLanguage();
-  const { analytics, weeklyMetrics, contentItems, campaigns, ads, scheduledPosts, metaConnection, isLoading, refreshData, advancedMode, setAdvancedMode } = useApp();
+  const { metaConnection, advancedMode, setAdvancedMode } = useApp();
+  const { selectedCampaignId } = useCampaign();
 
   const [showInsights, setShowInsights] = useState(false);
-  const [aiActions, setAiActions] = useState<string[]>([]);
-  const [todayFocus, setTodayFocus] = useState('');
-  const [riskLevel, setRiskLevel] = useState<'Low' | 'Medium' | 'High'>('Low');
-  const [currentObjective, setCurrentObjective] = useState('');
-  const [confidenceScore, setConfidenceScore] = useState(100);
+
+  const [metricsState, setMetricsState] = useState<PanelState>('loading');
+  const [metricsError, setMetricsError] = useState<number | null>(null);
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+
+  const [actionsState, setActionsState] = useState<PanelState>('loading');
+  const [actionsError, setActionsError] = useState<number | null>(null);
+  const [aiActions, setAiActions] = useState<AIAction[]>([]);
+  const [actionsGated, setActionsGated] = useState(false);
+
+  const [confidenceScore, setConfidenceScore] = useState(0);
   const [confidenceStatus, setConfidenceStatus] = useState<'Stable' | 'Caution' | 'Unstable'>('Stable');
+  const [confidenceLoaded, setConfidenceLoaded] = useState(false);
+
+  const [dataMode, setDataMode] = useState<'REAL' | 'DEMO' | 'UNKNOWN'>('UNKNOWN');
+  const [refreshing, setRefreshing] = useState(false);
 
   const headerFade = useRef(new RNAnimated.Value(0)).current;
   const cardSlide = useRef(new RNAnimated.Value(30)).current;
@@ -135,77 +170,100 @@ export default function DashboardScreen() {
 
   const baseUrl = getApiUrl();
 
-  const derivedMetrics = useMemo(() => {
-    const spend = analytics.totalSpent || 0;
-    const conversions = analytics.totalConversions || 0;
-    const revenue = conversions * 45;
-    const cpa = conversions > 0 ? spend / conversions : 0;
-    const roas = spend > 0 ? revenue / spend : 0;
-    const cpl = conversions > 0 ? spend / conversions : 0;
-    return { spend, conversions, revenue, cpa, roas, cpl };
-  }, [analytics]);
+  const fetchMetrics = useCallback(async () => {
+    if (!selectedCampaignId) {
+      setMetricsState('empty');
+      setMetrics(null);
+      return;
+    }
+    setMetricsState('loading');
+    try {
+      const res = await fetch(new URL('/api/dashboard/metrics?accountId=default', baseUrl).toString());
+      if (!res.ok) {
+        setMetricsState('error');
+        setMetricsError(res.status);
+        return;
+      }
+      const data = await res.json();
+      if (!data.success) {
+        setMetricsState('error');
+        setMetricsError(500);
+        return;
+      }
+      setMetrics(data.metrics);
+      setMetricsState(data.hasData ? 'success' : 'no_data');
+      setMetricsError(null);
+    } catch {
+      setMetricsState('error');
+      setMetricsError(0);
+    }
+  }, [baseUrl, selectedCampaignId]);
+
+  const fetchActions = useCallback(async () => {
+    if (!selectedCampaignId) {
+      setActionsState('empty');
+      setAiActions([]);
+      return;
+    }
+    setActionsState('loading');
+    try {
+      const res = await fetch(new URL('/api/dashboard/ai-actions?accountId=default', baseUrl).toString());
+      if (!res.ok) {
+        setActionsState('error');
+        setActionsError(res.status);
+        return;
+      }
+      const data = await res.json();
+      if (data.gated) {
+        setActionsGated(true);
+        setAiActions([]);
+        setActionsState('empty');
+        return;
+      }
+      setActionsGated(false);
+      setAiActions(data.actions || []);
+      setActionsState(data.actions?.length > 0 ? 'success' : 'no_data');
+      setActionsError(null);
+    } catch {
+      setActionsState('error');
+      setActionsError(0);
+    }
+  }, [baseUrl, selectedCampaignId]);
 
   const fetchConfidence = useCallback(async () => {
     try {
       const res = await fetch(new URL('/api/autopilot/status', baseUrl).toString());
       if (res.ok) {
         const data = await res.json();
-        setConfidenceScore(data.confidenceScore ?? 100);
-        const status = data.confidenceStatus ?? 'Stable';
-        setConfidenceStatus(status as 'Stable' | 'Caution' | 'Unstable');
+        setConfidenceScore(data.confidenceScore ?? 0);
+        setConfidenceStatus((data.confidenceStatus ?? 'Stable') as 'Stable' | 'Caution' | 'Unstable');
+        setConfidenceLoaded(true);
       }
     } catch {}
   }, [baseUrl]);
 
-  const fetchAIStatus = useCallback(async () => {
+  const fetchDataMode = useCallback(async () => {
     try {
-      const res = await fetch(new URL('/api/strategy/dashboard', baseUrl).toString());
+      const res = await fetch(new URL('/api/dashboard/mode', baseUrl).toString());
       if (res.ok) {
         const data = await res.json();
-        const actions: string[] = [];
-        if (data.recentDecisions?.length > 0) {
-          data.recentDecisions.slice(0, 3).forEach((d: any) => {
-            actions.push(d.description || d.action || 'Optimizing campaign performance');
-          });
-        }
-        if (actions.length === 0) {
-          actions.push('Monitoring campaign performance');
-          actions.push('Analyzing audience engagement patterns');
-          actions.push('Optimizing ad delivery schedule');
-        }
-        setAiActions(actions);
-
-        const avgCpa = data.averages?.avgCpa || derivedMetrics.cpa;
-        if (avgCpa > 20) {
-          setCurrentObjective('Lower CPA by 15%');
-          setRiskLevel('Medium');
-          setTodayFocus('Optimizing targeting to reduce cost per lead');
-        } else if (derivedMetrics.roas < 2) {
-          setCurrentObjective('Increase ROAS to 2x');
-          setRiskLevel('Medium');
-          setTodayFocus('Scaling winning audiences safely');
-        } else {
-          setCurrentObjective('Maintain profitable growth');
-          setRiskLevel('Low');
-          setTodayFocus('Expanding reach while maintaining efficiency');
-        }
+        setDataMode(data.mode || 'UNKNOWN');
       }
-    } catch {
-      setAiActions([
-        'Monitoring campaign performance',
-        'Analyzing audience engagement patterns', 
-        'Optimizing ad delivery schedule',
-      ]);
-      setCurrentObjective('Optimize campaign ROI');
-      setTodayFocus('Analyzing performance data for optimization');
-      setRiskLevel('Low');
-    }
-  }, [baseUrl, derivedMetrics]);
+    } catch {}
+  }, [baseUrl]);
 
   useEffect(() => {
-    fetchAIStatus();
+    fetchMetrics();
+    fetchActions();
     fetchConfidence();
-  }, []);
+    fetchDataMode();
+  }, [selectedCampaignId]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([fetchMetrics(), fetchActions(), fetchConfidence(), fetchDataMode()]);
+    setRefreshing(false);
+  }, [fetchMetrics, fetchActions, fetchConfidence, fetchDataMode]);
 
   const formatNumber = (num: number): string => {
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
@@ -218,11 +276,7 @@ export default function DashboardScreen() {
     return '$' + num.toFixed(2);
   };
 
-  const riskColor = riskLevel === 'Low' ? P.mint : riskLevel === 'Medium' ? P.orange : P.coral;
   const confColor = confidenceStatus === 'Stable' ? P.mint : confidenceStatus === 'Caution' ? P.orange : P.coral;
-
-  const pendingCount = scheduledPosts.filter(p => p.status === 'pending').length;
-  const publishedCount = scheduledPosts.filter(p => p.status === 'published').length;
 
   const bg = isDark ? P.darkBg : P.lightBg;
   const textPrimary = isDark ? P.textDarkPrimary : P.textLightPrimary;
@@ -230,6 +284,236 @@ export default function DashboardScreen() {
   const textMuted = isDark ? P.textDarkMuted : P.textLightMuted;
   const cardBg = isDark ? P.darkCard : P.lightCard;
   const cardBorder = isDark ? P.darkCardBorder : P.lightCardBorder;
+
+  const sourceTagColor = (tag: string) => {
+    switch (tag) {
+      case 'PERFORMANCE': return P.mint;
+      case 'PLAN': return P.blue;
+      case 'GATES': return P.orange;
+      case 'PUBLISH': return P.purple;
+      default: return P.silver;
+    }
+  };
+
+  const renderMetricsPanel = () => {
+    if (metricsState === 'loading') {
+      return (
+        <View style={[s.heroCard, { borderColor: cardBorder, backgroundColor: cardBg, padding: 40, alignItems: 'center' }]}>
+          <ActivityIndicator size="small" color={P.mint} />
+          <Text style={[{ fontSize: 12, color: textMuted, marginTop: 8 }]}>Loading metrics...</Text>
+        </View>
+      );
+    }
+    if (metricsState === 'empty') {
+      return (
+        <View style={[s.heroCard, { borderColor: cardBorder, backgroundColor: cardBg, padding: 30, alignItems: 'center' }]}>
+          <Ionicons name="analytics-outline" size={28} color={textMuted} />
+          <Text style={[{ fontSize: 14, fontWeight: '600', color: textPrimary, marginTop: 10 }]}>No campaign selected</Text>
+          <Text style={[{ fontSize: 12, color: textMuted, marginTop: 4, textAlign: 'center' }]}>Select a campaign to view performance metrics</Text>
+        </View>
+      );
+    }
+    if (metricsState === 'error') {
+      return (
+        <View style={[s.heroCard, { borderColor: P.coral + '30', backgroundColor: cardBg, padding: 30, alignItems: 'center' }]}>
+          <Ionicons name="warning-outline" size={28} color={P.coral} />
+          <Text style={[{ fontSize: 14, fontWeight: '600', color: P.coral, marginTop: 10 }]}>Failed to load metrics</Text>
+          <Text style={[{ fontSize: 11, color: textMuted, marginTop: 4 }]}>Error {metricsError || 'unknown'}</Text>
+          <Pressable onPress={fetchMetrics} style={{ marginTop: 10, paddingHorizontal: 16, paddingVertical: 6, backgroundColor: P.coral + '15', borderRadius: 8 }}>
+            <Text style={{ fontSize: 12, fontWeight: '600', color: P.coral }}>Retry</Text>
+          </Pressable>
+        </View>
+      );
+    }
+    if (metricsState === 'no_data') {
+      return (
+        <LinearGradient
+          colors={isDark ? ['#0A2F1F', '#0C1A14', '#0F1419'] : ['#E8F5E9', '#F1F8E9', '#FFFFFF']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[s.heroCard, { borderColor: isDark ? P.mint + '18' : P.mint + '20' }]}
+        >
+          <View style={s.heroTop}>
+            <View>
+              <Text style={[s.heroLabel, { color: isDark ? P.mint : P.mintDark }]}>TOTAL REVENUE</Text>
+              <Text style={[s.heroValue, { color: textMuted }]}>No data yet</Text>
+            </View>
+          </View>
+          <View style={[s.heroDivider, { backgroundColor: isDark ? P.mint + '12' : P.mint + '15' }]} />
+          <View style={s.heroStats}>
+            <View style={s.heroStat}>
+              <Text style={[s.heroStatValue, { color: textMuted }]}>--</Text>
+              <Text style={[s.heroStatLabel, { color: textMuted }]}>Spent</Text>
+            </View>
+            <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
+            <View style={s.heroStat}>
+              <Text style={[s.heroStatValue, { color: textMuted }]}>--</Text>
+              <Text style={[s.heroStatLabel, { color: textMuted }]}>Results</Text>
+            </View>
+            <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
+            <View style={s.heroStat}>
+              <Text style={[s.heroStatValue, { color: textMuted }]}>--</Text>
+              <Text style={[s.heroStatLabel, { color: textMuted }]}>CPA</Text>
+            </View>
+          </View>
+        </LinearGradient>
+      );
+    }
+
+    const m = metrics!;
+    return (
+      <LinearGradient
+        colors={isDark ? ['#0A2F1F', '#0C1A14', '#0F1419'] : ['#E8F5E9', '#F1F8E9', '#FFFFFF']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[s.heroCard, { borderColor: isDark ? P.mint + '18' : P.mint + '20' }]}
+      >
+        <View style={s.heroTop}>
+          <View>
+            <Text style={[s.heroLabel, { color: isDark ? P.mint : P.mintDark }]}>TOTAL REVENUE</Text>
+            <Text style={[s.heroValue, { color: textPrimary }]}>{formatCurrency(m.revenue)}</Text>
+          </View>
+          <View style={[s.heroGrowth, { backgroundColor: P.mint + '15' }]}>
+            <Ionicons name="arrow-up" size={14} color={P.mint} />
+            <Text style={[s.heroGrowthText, { color: P.mint }]}>
+              {m.roas > 0 ? `${m.roas.toFixed(1)}x` : '0x'}
+            </Text>
+            <Text style={[s.heroGrowthLabel, { color: textMuted }]}>ROAS</Text>
+          </View>
+        </View>
+        <View style={[s.heroDivider, { backgroundColor: isDark ? P.mint + '12' : P.mint + '15' }]} />
+        <View style={s.heroStats}>
+          <View style={s.heroStat}>
+            <View style={[s.heroStatIcon, { backgroundColor: P.blue + '15' }]}>
+              <Ionicons name="wallet-outline" size={14} color={P.blue} />
+            </View>
+            <Text style={[s.heroStatValue, { color: textPrimary }]}>{formatCurrency(m.spent)}</Text>
+            <Text style={[s.heroStatLabel, { color: textMuted }]}>Spent</Text>
+          </View>
+          <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
+          <View style={s.heroStat}>
+            <View style={[s.heroStatIcon, { backgroundColor: P.mint + '15' }]}>
+              <Ionicons name="flash-outline" size={14} color={P.mint} />
+            </View>
+            <Text style={[s.heroStatValue, { color: textPrimary }]}>{formatNumber(m.results)}</Text>
+            <Text style={[s.heroStatLabel, { color: textMuted }]}>Results</Text>
+          </View>
+          <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
+          <View style={s.heroStat}>
+            <View style={[s.heroStatIcon, { backgroundColor: P.orange + '15' }]}>
+              <Ionicons name="pricetag-outline" size={14} color={P.orange} />
+            </View>
+            <Text style={[s.heroStatValue, { color: m.cpa < 15 ? P.mint : P.orange }]}>{formatCurrency(m.cpa)}</Text>
+            <Text style={[s.heroStatLabel, { color: textMuted }]}>CPA</Text>
+          </View>
+        </View>
+      </LinearGradient>
+    );
+  };
+
+  const renderActionsPanel = () => {
+    if (actionsState === 'loading') {
+      return (
+        <View style={[s.aiCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+          <View style={s.aiCardHeader}>
+            <View style={s.aiCardLeft}>
+              <View style={[s.aiCardIcon, { backgroundColor: isDark ? '#1F1135' : '#F3EEFF' }]}>
+                <Ionicons name="flash" size={15} color={P.purple} />
+              </View>
+              <Text style={[s.aiCardTitle, { color: textPrimary }]}>AI Actions</Text>
+            </View>
+          </View>
+          <View style={{ paddingVertical: 12, alignItems: 'center' }}>
+            <ActivityIndicator size="small" color={P.purple} />
+          </View>
+        </View>
+      );
+    }
+    if (actionsState === 'error') {
+      return (
+        <View style={[s.aiCard, { backgroundColor: cardBg, borderColor: P.coral + '30' }]}>
+          <View style={s.aiCardHeader}>
+            <View style={s.aiCardLeft}>
+              <Ionicons name="warning-outline" size={15} color={P.coral} />
+              <Text style={[s.aiCardTitle, { color: P.coral }]}>AI Actions</Text>
+            </View>
+          </View>
+          <Text style={[{ fontSize: 12, color: textMuted }]}>Failed to load (Error {actionsError || 'unknown'})</Text>
+          <Pressable onPress={fetchActions} style={{ marginTop: 8, paddingHorizontal: 12, paddingVertical: 5, backgroundColor: P.coral + '15', borderRadius: 6, alignSelf: 'flex-start' }}>
+            <Text style={{ fontSize: 11, fontWeight: '600', color: P.coral }}>Retry</Text>
+          </Pressable>
+        </View>
+      );
+    }
+    if (actionsGated) {
+      return (
+        <View style={[s.aiCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+          <View style={s.aiCardHeader}>
+            <View style={s.aiCardLeft}>
+              <View style={[s.aiCardIcon, { backgroundColor: isDark ? '#1F1135' : '#F3EEFF' }]}>
+                <Ionicons name="lock-closed" size={15} color={P.silver} />
+              </View>
+              <Text style={[s.aiCardTitle, { color: textMuted }]}>AI Actions</Text>
+            </View>
+          </View>
+          <Text style={[{ fontSize: 12, color: textMuted, paddingVertical: 4 }]}>
+            Requires an approved plan. Build and approve a strategic plan to unlock AI-driven actions.
+          </Text>
+        </View>
+      );
+    }
+    if (actionsState === 'empty' || actionsState === 'no_data') {
+      return (
+        <View style={[s.aiCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+          <View style={s.aiCardHeader}>
+            <View style={s.aiCardLeft}>
+              <View style={[s.aiCardIcon, { backgroundColor: isDark ? '#1F1135' : '#F3EEFF' }]}>
+                <Ionicons name="flash" size={15} color={P.purple} />
+              </View>
+              <Text style={[s.aiCardTitle, { color: textPrimary }]}>AI Actions</Text>
+            </View>
+          </View>
+          <Text style={[{ fontSize: 12, color: textMuted, paddingVertical: 4 }]}>
+            {selectedCampaignId ? 'No actions available yet' : 'Select a campaign to view AI actions'}
+          </Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={[s.aiCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+        <View style={s.aiCardHeader}>
+          <View style={s.aiCardLeft}>
+            <View style={[s.aiCardIcon, { backgroundColor: isDark ? '#1F1135' : '#F3EEFF' }]}>
+              <Ionicons name="flash" size={15} color={P.purple} />
+            </View>
+            <Text style={[s.aiCardTitle, { color: textPrimary }]}>AI Actions</Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <MiniBarChart isDark={isDark} />
+            <View style={[s.actionCount, { backgroundColor: P.purple + '12' }]}>
+              <Text style={[s.actionCountText, { color: P.purple }]}>{aiActions.length}</Text>
+            </View>
+          </View>
+        </View>
+        {aiActions.map((action, i) => (
+          <View key={action.id} style={[s.aiAction, i < aiActions.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: isDark ? '#1A2030' : '#F0F3F1' }]}>
+            <View style={[s.aiActionDot, { backgroundColor: sourceTagColor(action.sourceTag) }]} />
+            <View style={{ flex: 1 }}>
+              <Text style={[s.aiActionText, { color: textSecondary }]}>{action.action}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
+                <View style={{ paddingHorizontal: 5, paddingVertical: 1, backgroundColor: sourceTagColor(action.sourceTag) + '15', borderRadius: 4 }}>
+                  <Text style={{ fontSize: 9, fontWeight: '600', color: sourceTagColor(action.sourceTag) }}>{action.sourceTag}</Text>
+                </View>
+                <Text style={{ fontSize: 10, color: textMuted }}>{action.evidenceMetric}</Text>
+                <Text style={{ fontSize: 10, color: textMuted }}>{action.evidenceTimeframe}</Text>
+              </View>
+            </View>
+          </View>
+        ))}
+      </View>
+    );
+  };
 
   return (
     <View style={[s.container, { backgroundColor: bg }]}>
@@ -241,12 +525,19 @@ export default function DashboardScreen() {
         ]}
         refreshControl={
           <RefreshControl 
-            refreshing={isLoading} 
-            onRefresh={() => { refreshData(); fetchAIStatus(); fetchConfidence(); }}
+            refreshing={refreshing} 
+            onRefresh={onRefresh}
             tintColor={P.mint}
           />
         }
       >
+        {dataMode === 'DEMO' && (
+          <View style={[s.demoBanner, { backgroundColor: P.orange + '18', borderColor: P.orange + '30' }]}>
+            <Ionicons name="flask-outline" size={16} color={P.orange} />
+            <Text style={[s.demoBannerText, { color: P.orange }]}>DEMO MODE — Data shown is simulated</Text>
+          </View>
+        )}
+
         <RNAnimated.View style={{ opacity: headerFade }}>
           <View style={s.headerRow}>
             <View style={s.headerLeft}>
@@ -270,171 +561,84 @@ export default function DashboardScreen() {
         <CampaignBar />
 
         <RNAnimated.View style={{ opacity: headerFade, transform: [{ translateY: cardSlide }] }}>
-          <LinearGradient
-            colors={isDark ? ['#0A2F1F', '#0C1A14', '#0F1419'] : ['#E8F5E9', '#F1F8E9', '#FFFFFF']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={[s.heroCard, { borderColor: isDark ? P.mint + '18' : P.mint + '20' }]}
-          >
-            <View style={s.heroTop}>
-              <View>
-                <Text style={[s.heroLabel, { color: isDark ? P.mint : P.mintDark }]}>TOTAL REVENUE</Text>
-                <Text style={[s.heroValue, { color: textPrimary }]}>{formatCurrency(derivedMetrics.revenue)}</Text>
-              </View>
-              <View style={[s.heroGrowth, { backgroundColor: P.mint + '15' }]}>
-                <Ionicons name="arrow-up" size={14} color={P.mint} />
-                <Text style={[s.heroGrowthText, { color: P.mint }]}>
-                  {derivedMetrics.roas > 0 ? `${derivedMetrics.roas.toFixed(1)}x` : '0x'}
-                </Text>
-                <Text style={[s.heroGrowthLabel, { color: textMuted }]}>ROAS</Text>
-              </View>
-            </View>
-
-            <View style={[s.heroDivider, { backgroundColor: isDark ? P.mint + '12' : P.mint + '15' }]} />
-
-            <View style={s.heroStats}>
-              <View style={s.heroStat}>
-                <View style={[s.heroStatIcon, { backgroundColor: P.blue + '15' }]}>
-                  <Ionicons name="wallet-outline" size={14} color={P.blue} />
-                </View>
-                <Text style={[s.heroStatValue, { color: textPrimary }]}>{formatCurrency(derivedMetrics.spend)}</Text>
-                <Text style={[s.heroStatLabel, { color: textMuted }]}>Spent</Text>
-              </View>
-              <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
-              <View style={s.heroStat}>
-                <View style={[s.heroStatIcon, { backgroundColor: P.mint + '15' }]}>
-                  <Ionicons name="flash-outline" size={14} color={P.mint} />
-                </View>
-                <Text style={[s.heroStatValue, { color: textPrimary }]}>{formatNumber(derivedMetrics.conversions)}</Text>
-                <Text style={[s.heroStatLabel, { color: textMuted }]}>Results</Text>
-              </View>
-              <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
-              <View style={s.heroStat}>
-                <View style={[s.heroStatIcon, { backgroundColor: P.orange + '15' }]}>
-                  <Ionicons name="pricetag-outline" size={14} color={P.orange} />
-                </View>
-                <Text style={[s.heroStatValue, { color: derivedMetrics.cpa < 15 ? P.mint : P.orange }]}>{formatCurrency(derivedMetrics.cpa)}</Text>
-                <Text style={[s.heroStatLabel, { color: textMuted }]}>CPA</Text>
-              </View>
-            </View>
-          </LinearGradient>
+          {renderMetricsPanel()}
         </RNAnimated.View>
 
-        <View style={[s.autopilotStrip, { 
-          backgroundColor: isDark ? P.darkCard : P.lightCard,
-          borderColor: cardBorder,
-        }]}>
-          <View style={s.autopilotInner}>
-            <View style={[s.autopilotDot, { backgroundColor: P.mint + '15' }]}>
-              <PulsingDot color={P.mint} size={8} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <View style={s.autopilotTopRow}>
-                <Text style={[s.autopilotTitle, { color: textPrimary }]}>Autopilot Active</Text>
-                <View style={[s.riskPill, { backgroundColor: riskColor + '12' }]}>
-                  <View style={[s.riskDot, { backgroundColor: riskColor }]} />
-                  <Text style={[s.riskText, { color: riskColor }]}>{riskLevel} Risk</Text>
-                </View>
-              </View>
-              {currentObjective ? (
-                <Text style={[s.autopilotObj, { color: textMuted }]} numberOfLines={1}>
-                  {currentObjective}
-                </Text>
-              ) : null}
-            </View>
-            <View style={s.confBlock}>
-              <Text style={[s.confValue, { color: confColor }]}>{confidenceScore}%</Text>
-              <View style={[s.confBar, { backgroundColor: isDark ? '#1A2030' : '#E5EBE7' }]}>
-                <View style={[s.confFill, { width: `${confidenceScore}%`, backgroundColor: confColor }]} />
-              </View>
-            </View>
-          </View>
-        </View>
-
-        <View style={s.quickGrid}>
-          <Pressable 
-            style={[s.quickCard, { backgroundColor: cardBg, borderColor: cardBorder }]}
-            onPress={() => router.push('/(tabs)/create')}
-          >
-            <LinearGradient
-              colors={[P.purple + '18', P.purple + '05']}
-              style={s.quickCardGradient}
-            >
-              <View style={[s.quickIcon, { backgroundColor: P.purple + '18' }]}>
-                <Ionicons name="sparkles" size={18} color={P.purple} />
-              </View>
-              <Text style={[s.quickValue, { color: textPrimary }]}>{contentItems.length}</Text>
-              <Text style={[s.quickLabel, { color: textMuted }]}>Content</Text>
-            </LinearGradient>
-          </Pressable>
-          <Pressable 
-            style={[s.quickCard, { backgroundColor: cardBg, borderColor: cardBorder }]}
-            onPress={() => router.push('/(tabs)/calendar')}
-          >
-            <LinearGradient
-              colors={[P.blue + '18', P.blue + '05']}
-              style={s.quickCardGradient}
-            >
-              <View style={[s.quickIcon, { backgroundColor: P.blue + '18' }]}>
-                <Ionicons name="calendar-outline" size={18} color={P.blue} />
-              </View>
-              <Text style={[s.quickValue, { color: textPrimary }]}>{pendingCount}</Text>
-              <Text style={[s.quickLabel, { color: textMuted }]}>Queued</Text>
-            </LinearGradient>
-          </Pressable>
-          <Pressable 
-            style={[s.quickCard, { backgroundColor: cardBg, borderColor: cardBorder }]}
-            onPress={() => router.push('/(tabs)/ai-management')}
-          >
-            <LinearGradient
-              colors={[P.mint + '18', P.mint + '05']}
-              style={s.quickCardGradient}
-            >
-              <View style={[s.quickIcon, { backgroundColor: P.mint + '18' }]}>
-                <Ionicons name="checkmark-done" size={18} color={P.mint} />
-              </View>
-              <Text style={[s.quickValue, { color: textPrimary }]}>{publishedCount}</Text>
-              <Text style={[s.quickLabel, { color: textMuted }]}>Published</Text>
-            </LinearGradient>
-          </Pressable>
-        </View>
-
-        {todayFocus ? (
-          <View style={[s.focusCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-            <View style={s.focusRow}>
-              <View style={[s.focusIcon, { backgroundColor: P.orange + '12' }]}>
-                <Feather name="target" size={15} color={P.orange} />
+        {confidenceLoaded && selectedCampaignId ? (
+          <View style={[s.autopilotStrip, { 
+            backgroundColor: isDark ? P.darkCard : P.lightCard,
+            borderColor: cardBorder,
+          }]}>
+            <View style={s.autopilotInner}>
+              <View style={[s.autopilotDot, { backgroundColor: P.mint + '15' }]}>
+                <PulsingDot color={P.mint} size={8} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[s.focusTitle, { color: textPrimary }]}>Today's Focus</Text>
-                <Text style={[s.focusText, { color: textSecondary }]}>{todayFocus}</Text>
+                <View style={s.autopilotTopRow}>
+                  <Text style={[s.autopilotTitle, { color: textPrimary }]}>Autopilot Active</Text>
+                </View>
+              </View>
+              <View style={s.confBlock}>
+                <Text style={[s.confValue, { color: confColor }]}>{confidenceScore}%</Text>
+                <View style={[s.confBar, { backgroundColor: isDark ? '#1A2030' : '#E5EBE7' }]}>
+                  <View style={[s.confFill, { width: `${confidenceScore}%`, backgroundColor: confColor }]} />
+                </View>
               </View>
             </View>
           </View>
         ) : null}
 
-        <View style={[s.aiCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-          <View style={s.aiCardHeader}>
-            <View style={s.aiCardLeft}>
-              <View style={[s.aiCardIcon, { backgroundColor: isDark ? '#1F1135' : '#F3EEFF' }]}>
-                <Ionicons name="flash" size={15} color={P.purple} />
-              </View>
-              <Text style={[s.aiCardTitle, { color: textPrimary }]}>AI Actions</Text>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <MiniBarChart isDark={isDark} />
-              <View style={[s.actionCount, { backgroundColor: P.purple + '12' }]}>
-                <Text style={[s.actionCountText, { color: P.purple }]}>{aiActions.length}</Text>
-              </View>
-            </View>
+        {metricsState === 'success' && metrics ? (
+          <View style={s.quickGrid}>
+            <Pressable 
+              style={[s.quickCard, { backgroundColor: cardBg, borderColor: cardBorder }]}
+              onPress={() => router.push('/(tabs)/create')}
+            >
+              <LinearGradient
+                colors={[P.purple + '18', P.purple + '05']}
+                style={s.quickCardGradient}
+              >
+                <View style={[s.quickIcon, { backgroundColor: P.purple + '18' }]}>
+                  <Ionicons name="sparkles" size={18} color={P.purple} />
+                </View>
+                <Text style={[s.quickValue, { color: textPrimary }]}>{metrics.contentCount}</Text>
+                <Text style={[s.quickLabel, { color: textMuted }]}>Content</Text>
+              </LinearGradient>
+            </Pressable>
+            <Pressable 
+              style={[s.quickCard, { backgroundColor: cardBg, borderColor: cardBorder }]}
+              onPress={() => router.push('/(tabs)/calendar')}
+            >
+              <LinearGradient
+                colors={[P.blue + '18', P.blue + '05']}
+                style={s.quickCardGradient}
+              >
+                <View style={[s.quickIcon, { backgroundColor: P.blue + '18' }]}>
+                  <Ionicons name="calendar-outline" size={18} color={P.blue} />
+                </View>
+                <Text style={[s.quickValue, { color: textPrimary }]}>{metrics.queuedCount}</Text>
+                <Text style={[s.quickLabel, { color: textMuted }]}>Queued</Text>
+              </LinearGradient>
+            </Pressable>
+            <Pressable 
+              style={[s.quickCard, { backgroundColor: cardBg, borderColor: cardBorder }]}
+              onPress={() => router.push('/(tabs)/ai-management')}
+            >
+              <LinearGradient
+                colors={[P.mint + '18', P.mint + '05']}
+                style={s.quickCardGradient}
+              >
+                <View style={[s.quickIcon, { backgroundColor: P.mint + '18' }]}>
+                  <Ionicons name="checkmark-done" size={18} color={P.mint} />
+                </View>
+                <Text style={[s.quickValue, { color: textPrimary }]}>{metrics.publishedCount}</Text>
+                <Text style={[s.quickLabel, { color: textMuted }]}>Published</Text>
+              </LinearGradient>
+            </Pressable>
           </View>
-          {aiActions.map((action, i) => (
-            <View key={i} style={[s.aiAction, i < aiActions.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: isDark ? '#1A2030' : '#F0F3F1' }]}>
-              <View style={[s.aiActionDot, { backgroundColor: P.mint }]} />
-              <Text style={[s.aiActionText, { color: textSecondary }]}>{action}</Text>
-            </View>
-          ))}
-        </View>
+        ) : null}
+
+        {renderActionsPanel()}
 
         <View style={[s.metaStrip, { 
           backgroundColor: metaConnection.isConnected 
@@ -458,52 +662,51 @@ export default function DashboardScreen() {
           )}
         </View>
 
-        <Pressable 
-          onPress={() => { setShowInsights(!showInsights); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} 
-          style={[s.insightsToggle, { 
-            backgroundColor: cardBg, 
-            borderColor: showInsights ? P.mint + '30' : cardBorder,
-          }]}
-        >
-          <View style={s.insightsToggleLeft}>
-            <View style={[s.insightsIcon, { backgroundColor: isDark ? '#0F2518' : '#E8F5E9' }]}>
-              <Feather name="bar-chart-2" size={14} color={P.mint} />
-            </View>
-            <Text style={[s.insightsToggleText, { color: textSecondary }]}>Advanced Insights</Text>
-          </View>
-          <Ionicons 
-            name={showInsights ? 'chevron-up' : 'chevron-down'} 
-            size={16} 
-            color={textMuted} 
-          />
-        </Pressable>
-
-        {showInsights && (
-          <View style={s.insightsSection}>
-            <View style={s.metricsGrid}>
-              <View style={s.metricsRow}>
-                <MetricCard
-                  title="Total Reach"
-                  value={formatNumber(analytics.totalReach)}
-                  change={analytics.reachChange}
-                  icon="eye-outline"
-                  isGradient
-                />
-                <MetricCard
-                  title="Engagement"
-                  value={formatNumber(analytics.totalEngagement)}
-                  change={analytics.engagementChange}
-                  icon="heart-outline"
-                />
+        {metricsState === 'success' && metrics ? (
+          <>
+            <Pressable 
+              onPress={() => { setShowInsights(!showInsights); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} 
+              style={[s.insightsToggle, { 
+                backgroundColor: cardBg, 
+                borderColor: showInsights ? P.mint + '30' : cardBorder,
+              }]}
+            >
+              <View style={s.insightsToggleLeft}>
+                <View style={[s.insightsIcon, { backgroundColor: isDark ? '#0F2518' : '#E8F5E9' }]}>
+                  <Feather name="bar-chart-2" size={14} color={P.mint} />
+                </View>
+                <Text style={[s.insightsToggleText, { color: textSecondary }]}>Advanced Insights</Text>
               </View>
-            </View>
-            <MiniChart 
-              data={weeklyMetrics} 
-              metric="reach" 
-              title="Weekly Performance" 
-            />
-          </View>
-        )}
+              <Ionicons 
+                name={showInsights ? 'chevron-up' : 'chevron-down'} 
+                size={16} 
+                color={textMuted} 
+              />
+            </Pressable>
+
+            {showInsights && (
+              <View style={s.insightsSection}>
+                <View style={s.metricsGrid}>
+                  <View style={s.metricsRow}>
+                    <MetricCard
+                      title="Total Reach"
+                      value={formatNumber(metrics.reach)}
+                      change={0}
+                      icon="eye-outline"
+                      isGradient
+                    />
+                    <MetricCard
+                      title="Engagement"
+                      value={formatNumber(metrics.engagement)}
+                      change={0}
+                      icon="heart-outline"
+                    />
+                  </View>
+                </View>
+              </View>
+            )}
+          </>
+        ) : null}
 
         <View style={[s.modeRow, { borderColor: cardBorder }]}>
           <View style={s.modeLeft}>
@@ -529,6 +732,22 @@ export default function DashboardScreen() {
 const s = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { paddingHorizontal: 18 },
+
+  demoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  demoBannerText: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
 
   headerRow: {
     flexDirection: 'row',
@@ -673,27 +892,6 @@ const s = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: -0.2,
   },
-  riskPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  riskDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-  },
-  riskText: {
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  autopilotObj: {
-    fontSize: 12,
-    marginTop: 2,
-  },
   confBlock: {
     alignItems: 'flex-end',
     gap: 4,
@@ -748,36 +946,6 @@ const s = StyleSheet.create({
     fontWeight: '500',
     letterSpacing: 0.5,
     textTransform: 'uppercase',
-  },
-
-  focusCard: {
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 16,
-    marginBottom: 12,
-  },
-  focusRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  focusIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-  },
-  focusTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    letterSpacing: -0.2,
-    marginBottom: 3,
-  },
-  focusText: {
-    fontSize: 13,
-    lineHeight: 19,
   },
 
   aiCard: {
