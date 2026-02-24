@@ -16,6 +16,7 @@ import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { getApiUrl } from '@/lib/query-client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useApp } from '@/context/AppContext';
 
 interface DominanceAnalysis {
   id: string;
@@ -58,7 +59,7 @@ interface DominanceModification {
   fallbackReason?: string;
 }
 
-type DominanceView = 'select' | 'dissection' | 'weaknesses' | 'strategy' | 'delta' | 'modifications' | 'scripts';
+type DominanceView = 'select' | 'dissection' | 'weaknesses' | 'strategy' | 'delta' | 'modifications';
 
 const HOOK_COLORS: Record<string, string> = {
   question: '#3B82F6', promise: '#10B981', shock: '#EF4444', number: '#F59E0B', authority: '#8B5CF6',
@@ -141,8 +142,7 @@ export default function DominanceEngine() {
   const [gateError, setGateError] = useState<{ currentCount: number; requiredCount: number } | null>(null);
   const [scriptResult, setScriptResult] = useState<any>(null);
   const [scriptError, setScriptError] = useState<string | null>(null);
-  const [blueprintOffer, setBlueprintOffer] = useState('');
-  const [blueprintIcp, setBlueprintIcp] = useState('');
+  const { brandProfile } = useApp();
 
 
   const { data: competitorsData, isLoading: loadingCompetitors } = useQuery({
@@ -333,9 +333,14 @@ export default function DominanceEngine() {
         performance_context: selectedAnalysis.contentDissection?.performance_context || {},
       };
 
+      const offer = brandProfile?.industry
+        ? `${brandProfile.name || 'Our brand'} — ${brandProfile.industry}`
+        : brandProfile?.name || 'Marketing services';
+      const icp = brandProfile?.targetAudience || 'Target audience in Dubai';
+
       const blueprint = {
-        offer: blueprintOffer,
-        icp: blueprintIcp,
+        offer,
+        icp,
       };
 
       console.log('[Script Gen] snapshot_id:', selectedAnalysis.id);
@@ -443,7 +448,6 @@ export default function DominanceEngine() {
       { key: 'strategy', label: 'Dominance', icon: 'rocket' },
       { key: 'delta', label: 'Delta', icon: 'trending-up' },
       { key: 'modifications', label: 'Plan Mods', icon: 'git-compare' },
-      { key: 'scripts', label: 'Scripts', icon: 'document-text-outline' },
     ];
     return (
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.navContainer}>
@@ -1275,171 +1279,6 @@ export default function DominanceEngine() {
     );
   };
 
-  const renderScripts = () => {
-    if (!selectedAnalysis) {
-      return (
-        <View style={styles.emptyCard}>
-          <Ionicons name="document-text-outline" size={40} color={colors.textMuted} />
-          <Text style={[styles.emptyText, { color: colors.textMuted }]}>Select an Analysis First</Text>
-          <Text style={[styles.emptySubtext, { color: colors.textMuted }]}>Choose a dominance analysis to generate scripts from</Text>
-        </View>
-      );
-    }
-
-    return (
-      <View>
-        <View style={[styles.patternCard, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <Ionicons name="create-outline" size={18} color="#8B5CF6" />
-            <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Script Generation (SSE+OCE)</Text>
-          </View>
-
-          <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 8 }}>
-            Using analysis: {selectedAnalysis.competitorName}
-          </Text>
-          <Text style={{ fontSize: 9, color: colors.textMuted, marginBottom: 12, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
-            snapshot_id: {selectedAnalysis.id} | dominance: {selectedAnalysis.dominanceDelta?.dominance_state || 'N/A'}
-          </Text>
-
-          <Text style={{ fontSize: 12, fontWeight: '600' as const, color: colors.text, marginBottom: 4 }}>Your Offer *</Text>
-          <TextInput
-            value={blueprintOffer}
-            onChangeText={setBlueprintOffer}
-            placeholder="e.g., Social media management for restaurants"
-            placeholderTextColor={colors.textMuted}
-            style={[styles.input, { color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4', backgroundColor: isDark ? '#1A1A2E' : '#F8F9FA' }]}
-          />
-
-          <Text style={{ fontSize: 12, fontWeight: '600' as const, color: colors.text, marginBottom: 4, marginTop: 8 }}>Ideal Client Profile *</Text>
-          <TextInput
-            value={blueprintIcp}
-            onChangeText={setBlueprintIcp}
-            placeholder="e.g., Restaurant owners in Dubai with 1k-50k followers"
-            placeholderTextColor={colors.textMuted}
-            style={[styles.input, { color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4', backgroundColor: isDark ? '#1A1A2E' : '#F8F9FA' }]}
-          />
-
-          <Pressable
-            onPress={() => {
-              if (!blueprintOffer.trim() || !blueprintIcp.trim()) {
-                Alert.alert('Required Fields', 'Both Offer and Ideal Client Profile are required.');
-                return;
-              }
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-              generateScriptsMutation.mutate();
-            }}
-            disabled={generateScriptsMutation.isPending}
-            style={[styles.genModsBtn, { backgroundColor: '#8B5CF6', opacity: generateScriptsMutation.isPending ? 0.6 : 1, marginTop: 12 }]}
-          >
-            {generateScriptsMutation.isPending ? (
-              <><ActivityIndicator size="small" color="#fff" /><Text style={styles.genModsBtnText}>Generating...</Text></>
-            ) : (
-              <><Ionicons name="sparkles" size={16} color="#fff" /><Text style={styles.genModsBtnText}>Generate Scripts</Text></>
-            )}
-          </Pressable>
-        </View>
-
-        {scriptError && (
-          <View style={[styles.patternCard, { backgroundColor: '#EF4444' + '10', borderColor: '#EF4444' + '30' }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-              <Ionicons name="alert-circle" size={16} color="#EF4444" />
-              <Text style={{ fontSize: 13, fontWeight: '700' as const, color: '#EF4444' }}>Generation Error</Text>
-            </View>
-            <Text style={{ fontSize: 12, color: '#EF4444' }}>{scriptError}</Text>
-          </View>
-        )}
-
-        {scriptResult && (
-          <>
-            <View style={[styles.patternCard, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                <Ionicons name="film-outline" size={18} color="#10B981" />
-                <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Generated Scripts</Text>
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                <View style={{ backgroundColor: '#8B5CF6' + '20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
-                  <Text style={{ fontSize: 10, fontWeight: '700' as const, color: '#8B5CF6' }}>
-                    MODE: {scriptResult.scripts_batch?.mode_used?.toUpperCase()}
-                  </Text>
-                </View>
-              </View>
-
-              {scriptResult.scripts_batch?.scripts?.map((script: any, si: number) => (
-                <View key={si} style={{ marginBottom: 12, paddingBottom: 12, borderBottomWidth: si < scriptResult.scripts_batch.scripts.length - 1 ? 1 : 0, borderBottomColor: isDark ? '#1A2030' : '#F0F0F0' }}>
-                  <Text style={{ fontSize: 14, fontWeight: '700' as const, color: colors.text, marginBottom: 6 }}>{si + 1}. {script.title}</Text>
-                  <View style={{ gap: 4 }}>
-                    <View style={{ flexDirection: 'row', gap: 4 }}>
-                      <Text style={{ fontSize: 10, fontWeight: '700' as const, color: '#EF4444', width: 70 }}>0-2s Hook:</Text>
-                      <Text style={{ fontSize: 11, color: colors.textSecondary, flex: 1 }}>{script.hook_0_2s}</Text>
-                    </View>
-                    <View style={{ flexDirection: 'row', gap: 4 }}>
-                      <Text style={{ fontSize: 10, fontWeight: '700' as const, color: '#F59E0B', width: 70 }}>2-6s Setup:</Text>
-                      <Text style={{ fontSize: 11, color: colors.textSecondary, flex: 1 }}>{script.setup_2_6s}</Text>
-                    </View>
-                    <View style={{ flexDirection: 'row', gap: 4 }}>
-                      <Text style={{ fontSize: 10, fontWeight: '700' as const, color: '#3B82F6', width: 70 }}>6-12s:</Text>
-                      <Text style={{ fontSize: 11, color: colors.textSecondary, flex: 1 }}>{script.tension_6_12s}</Text>
-                    </View>
-                    <View style={{ flexDirection: 'row', gap: 4 }}>
-                      <Text style={{ fontSize: 10, fontWeight: '700' as const, color: '#10B981', width: 70 }}>12-18s:</Text>
-                      <Text style={{ fontSize: 11, color: colors.textSecondary, flex: 1 }}>{script.reveal_12_18s}</Text>
-                    </View>
-                    <View style={{ flexDirection: 'row', gap: 4 }}>
-                      <Text style={{ fontSize: 10, fontWeight: '700' as const, color: '#8B5CF6', width: 70 }}>Close/CTA:</Text>
-                      <Text style={{ fontSize: 11, color: colors.textSecondary, flex: 1 }}>{script.soft_close_or_cta}</Text>
-                    </View>
-                  </View>
-                  <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 4 }}>Caption: {script.caption_short}</Text>
-                  <View style={{ backgroundColor: '#3B82F6' + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start', marginTop: 4 }}>
-                    <Text style={{ fontSize: 9, fontWeight: '700' as const, color: '#3B82F6' }}>KPI: {script.kpi_target?.toUpperCase()}</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-
-            {scriptResult.creative_concepts && (
-              <View style={[styles.patternCard, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                  <Ionicons name="bulb-outline" size={18} color="#F59E0B" />
-                  <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Creative Concepts</Text>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                  <View style={{ backgroundColor: '#F59E0B' + '20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
-                    <Text style={{ fontSize: 10, fontWeight: '700' as const, color: '#F59E0B' }}>
-                      RISK: {scriptResult.creative_concepts?.risk_level?.toUpperCase()}
-                    </Text>
-                  </View>
-                </View>
-
-                {scriptResult.creative_concepts?.concepts?.map((concept: any, ci: number) => (
-                  <View key={ci} style={{ marginBottom: 10, paddingBottom: 10, borderBottomWidth: ci < scriptResult.creative_concepts.concepts.length - 1 ? 1 : 0, borderBottomColor: isDark ? '#1A2030' : '#F0F0F0' }}>
-                    <Text style={{ fontSize: 13, fontWeight: '700' as const, color: colors.text, marginBottom: 4 }}>{concept.concept_name}</Text>
-                    <Text style={{ fontSize: 11, color: '#EC4899', marginBottom: 2 }}>{concept.disruptive_angle}</Text>
-                    <Text style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 2 }}>{concept.visual_metaphor}</Text>
-                    <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
-                      <View style={{ backgroundColor: '#6366F1' + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                        <Text style={{ fontSize: 9, fontWeight: '600' as const, color: '#6366F1' }}>{concept.format?.toUpperCase()}</Text>
-                      </View>
-                      <View style={{ backgroundColor: '#EC4899' + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                        <Text style={{ fontSize: 9, fontWeight: '600' as const, color: '#EC4899' }}>{concept.emotional_trigger}</Text>
-                      </View>
-                    </View>
-                  </View>
-                ))}
-
-                {scriptResult.creative_concepts?.subtle_conversion_layer && (
-                  <View style={{ backgroundColor: '#10B981' + '10', padding: 8, borderRadius: 6, marginTop: 4 }}>
-                    <Text style={{ fontSize: 10, fontWeight: '600' as const, color: '#10B981', marginBottom: 2 }}>Subtle Conversion Layer</Text>
-                    <Text style={{ fontSize: 11, color: colors.textSecondary }}>{scriptResult.creative_concepts.subtle_conversion_layer}</Text>
-                  </View>
-                )}
-              </View>
-            )}
-          </>
-        )}
-      </View>
-    );
-  };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -1450,7 +1289,6 @@ export default function DominanceEngine() {
       {activeView === 'strategy' && renderStrategy()}
       {activeView === 'delta' && renderDelta()}
       {activeView === 'modifications' && renderModifications()}
-      {activeView === 'scripts' && renderScripts()}
     </View>
   );
 }
