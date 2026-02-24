@@ -1,0 +1,122 @@
+We are closing two blocking issues now. No partial fixes. No assumptions.
+Fix both in one pass.
+
+====================================================
+ISSUE 1 — “Missing call to action” still appears
+====================================================
+
+This is NOT an engine issue anymore.
+This is a SOURCE-OF-TRUTH + SNAPSHOT TRACE bug.
+
+1) Locate exactly where “Missing call to action” is rendered.
+- Provide file name + line number.
+- Identify which field triggers it (ctaPatterns? ctaSignals? legacy boolean?)
+
+2) Replace ALL CTA labeling logic with ONE centralized function:
+
+function getCtaLabel(analysis) {
+
+  if (analysis.warnings includes CTA_DATA_UNAVAILABLE or SCRAPE_BLOCKED) {
+    return "CTA: Unavailable (data not accessible)";
+  }
+
+  if (analysis.intelligence.conversion_intelligence.conversion_style === "none") {
+    if (analysis.intelligence.storytelling_intelligence.storytelling_present === true) {
+      return "CTA: Not present (Narrative-first strategy: " + 
+        analysis.intelligence.storytelling_intelligence.narrative_strategy_mode + ")";
+    }
+    return "CTA: Not present";
+  }
+
+  return "CTA: Present";
+}
+
+Hard rule:
+- The word “Missing” must NEVER appear unless data is unavailable.
+- Absence of CTA ≠ missing data.
+- Narrative-first strategy must not be classified as weakness.
+
+3) Snapshot Trace Debug
+
+Add visible trace (dev mode or small gray footer) on competitor detail page:
+- snapshot_id
+- snapshot_created_at
+- conversion_style
+- storytelling_present
+- narrative_strategy_mode
+
+This ensures UI is reading the LATEST snapshot.
+
+4) Ensure latest snapshot is used:
+- Always sort snapshots by created_at DESC.
+- Use most recent snapshot only.
+- Invalidate cache after new analysis save.
+
+Acceptance tests:
+- storytelling_present=true + conversion_style=none → “Not present (Narrative-first…)”
+- conversion_style=direct → “CTA: Present”
+- scrape blocked → “CTA: Unavailable”
+- snapshot trace matches newest snapshot
+
+====================================================
+ISSUE 2 — Script Creation UI is completely broken
+====================================================
+
+Script generation used to work. Now it does not trigger.
+
+This is a UI → API wiring issue.
+
+1) Verify frontend request:
+- Confirm POST endpoint being called.
+- Log request payload in dev mode.
+- Ensure required fields exist:
+  storytelling_intelligence
+  dominance
+  archetype
+  conversion_intelligence
+  narrative_intelligence
+  performance_context
+  blueprint.offer
+  blueprint.icp
+
+2) Backend validation:
+- If missing_fields[] returned, show exact missing fields in UI.
+- Do NOT silently fail.
+- If GENERATION_FAILED, display error reason.
+
+3) Ensure loading state exists:
+- Button click must:
+  - Disable button
+  - Show spinner
+  - Handle success and failure explicitly
+
+4) Confirm response parsing:
+- scripts_batch must exist.
+- creative_concepts must exist.
+- If either missing, show structured error.
+
+5) Add console trace:
+On script generation:
+- log snapshot_id used
+- log mode_used
+- log dominance_state
+
+Acceptance tests:
+- Test 1: Valid intelligence + blueprint → scripts generated.
+- Test 2: Missing blueprint.offer → 400 with missing_fields shown in UI.
+- Test 3: GPT failure → GENERATION_FAILED visible to user.
+- Test 4: Loading spinner behaves correctly.
+
+====================================================
+DELIVERABLES REQUIRED
+====================================================
+
+- File + line number where legacy “Missing CTA” was removed.
+- Screenshot of competitor detail with snapshot trace visible.
+- Screenshot of successful script generation.
+- Screenshot of structured error when missing input.
+- Confirmation that no legacy CTA labeling remains in codebase (global search proof).
+
+Do not add features.
+Do not refactor unrelated modules.
+Close both issues completely in one commit.

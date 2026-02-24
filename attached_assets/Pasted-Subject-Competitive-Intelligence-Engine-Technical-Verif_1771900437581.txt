@@ -1,0 +1,87 @@
+Subject: Competitive Intelligence Engine — Technical Verification & Level Audit
+
+Team,
+
+Before we move forward, I need a structured technical verification of the current Competitive Intelligence + Dominance system.
+
+This is not about features.
+This is about confirming depth, architecture, and strategic superiority.
+
+Please answer the following precisely:
+
+⸻
+
+1️⃣ Strategy vs Content Pattern Recognition
+	•	Does the engine distinguish between:
+	•	Superficial content patterns (format, hooks, CTA placement)
+	•	Actual strategic patterns (funnel logic, positioning model, authority structure, offer psychology)?
+
+If yes:
+	•	Where in the code is this separation implemented?
+	•	Is there deterministic scoring supporting this, or is it pure AI reasoning?
+
+⸻
+
+2️⃣ Funnel Logic Understanding
+	•	Can the system detect:
+	•	What stage of funnel the competitor is targeting?
+	•	Whether they are running authority-first, offer-first, urgency-first, or trust-first strategies?
+	•	Is this rule-based, AI-based, or hybrid?
+
+⸻
+
+3️⃣ Weakness Exploitation Layer
+	•	Does the engine explicitly identify blind spots or structural weaknesses?
+	•	Is there a structured “gap extraction” step?
+	•	Where is asymmetry enforced (ensuring we do NOT replicate competitor strategy)?
+
+⸻
+
+4️⃣ Dominance Enforcement
+	•	When generating strategic output, is there a hard rule that prevents similarity?
+	•	Is there a comparison step that measures distance between competitor strategy and generated strategy?
+	•	Or is it prompt-based instruction only?
+
+⸻
+
+5️⃣ Deterministic Backbone
+	•	Which parts of Competitive Intelligence are:
+	•	Fully deterministic (rule-based, scoring models)
+	•	Hybrid
+	•	Pure AI reasoning
+
+Provide a breakdown.
+
+⸻
+
+6️⃣ Superiority Validation
+	•	How does the system validate that the generated strategy is actually stronger, not just different?
+	•	Is there a scoring delta?
+	•	Is there a dominance score comparison?
+	•	Or is superiority assumed?
+
+⸻
+
+7️⃣ Creative Layer Integration
+	•	How exactly is Competitive Intelligence linked to AI Creative?
+	•	Is the creative engine constrained by dominance outputs?
+	•	Or does it simply consume text from previous layers?
+
+⸻
+
+8️⃣ Current Level Assessment
+
+Based on the current implementation, classify the system:
+
+A) Advanced Analysis Tool
+B) Strategic Optimization Engine
+C) Competitive Dominance System
+D) Strategic Operating System
+
+Explain the classification technically.
+
+⸻
+
+This is a structural verification.
+No general answers.
+We need technical references and architectural confirmation.

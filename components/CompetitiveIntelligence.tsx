@@ -96,6 +96,22 @@ const RISK_COLORS: Record<string, string> = {
   high: '#EF4444',
 };
 
+function getCtaLabel(competitor: Competitor, analysis?: any): string {
+  if (analysis?.warnings?.includes('CTA_DATA_UNAVAILABLE') || analysis?.warnings?.includes('SCRAPE_BLOCKED')) {
+    return 'CTA: Unavailable (data not accessible)';
+  }
+
+  if (!competitor.ctaPatterns || competitor.ctaPatterns.trim() === '') {
+    if (analysis?.intelligence?.storytelling_intelligence?.storytelling_present === true) {
+      const mode = analysis?.intelligence?.storytelling_intelligence?.narrative_strategy_mode || 'narrative';
+      return `CTA: Not present (Narrative-first strategy: ${mode})`;
+    }
+    return 'CTA: Not present';
+  }
+
+  return 'CTA: Present';
+}
+
 export default function CompetitiveIntelligence() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -435,6 +451,14 @@ export default function CompetitiveIntelligence() {
           <Text style={[s.qualityText, { color: colors.textMuted }]}>{Math.round((latestAnalysis.dataCompleteness || 0) * 100)}% evidence completeness</Text>
         </View>
 
+        {latestAnalysis && (
+          <View style={{ paddingHorizontal: 12, paddingVertical: 6, marginTop: 4 }}>
+            <Text style={{ fontSize: 9, color: colors.textMuted, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
+              snapshot_id: {latestAnalysis.id} | created: {new Date(latestAnalysis.createdAt).toLocaleString()} | cta_trends: {latestAnalysis.ctaTrends || 'none'}
+            </Text>
+          </View>
+        )}
+
         {breakdown && Array.isArray(breakdown) && breakdown.length > 0 && (
           <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
             <View style={s.cardHeader}>
@@ -556,7 +580,6 @@ export default function CompetitiveIntelligence() {
               <Text style={[s.missingText, { color: '#F59E0B' }]}>
                 {comp.missingFields.map((f: string) => {
                   const labels: Record<string, string> = {
-                    ctaPatterns: 'CTA Patterns: Unavailable (no CTA signals detected)',
                     postingFrequency: 'Posting Frequency: Unavailable (insufficient data)',
                     contentTypeRatio: 'Content Mix: Unavailable (insufficient data)',
                     engagementRatio: 'Engagement Rate: Unavailable (insufficient data)',
@@ -575,7 +598,7 @@ export default function CompetitiveIntelligence() {
                 { label: 'Posts/Week', value: comp.postingFrequency?.toString(), icon: 'calendar-outline' as const },
                 { label: 'Content Mix', value: comp.contentTypeRatio, icon: 'pie-chart-outline' as const },
                 { label: 'Engagement (scanned posts)', value: comp.engagementRatio ? `${comp.engagementRatio}%` : null, icon: 'heart-outline' as const },
-                { label: 'CTA Patterns', value: comp.ctaPatterns || 'Unavailable (no CTA signals detected)', icon: 'megaphone-outline' as const },
+                { label: 'CTA Patterns', value: comp.ctaPatterns || getCtaLabel(comp), icon: 'megaphone-outline' as const },
                 { label: 'Discounts', value: comp.discountFrequency, icon: 'pricetag-outline' as const },
                 { label: 'Hook Styles', value: comp.hookStyles, icon: 'videocam-outline' as const },
                 { label: 'Tone', value: comp.messagingTone, icon: 'chatbubble-outline' as const },

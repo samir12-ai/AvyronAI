@@ -16,7 +16,6 @@ const REQUIRED_EVIDENCE_FIELDS = [
   "postingFrequency",
   "contentTypeRatio",
   "engagementRatio",
-  "ctaPatterns",
 ] as const;
 
 function validateEvidence(competitor: any): { complete: boolean; missing: string[] } {
@@ -25,7 +24,6 @@ function validateEvidence(competitor: any): { complete: boolean; missing: string
   if (competitor.postingFrequency == null || competitor.postingFrequency === "") missing.push("postingFrequency");
   if (!competitor.contentTypeRatio) missing.push("contentTypeRatio");
   if (competitor.engagementRatio == null || competitor.engagementRatio === "") missing.push("engagementRatio");
-  if (!competitor.ctaPatterns) missing.push("ctaPatterns");
   return { complete: missing.length === 0, missing };
 }
 
