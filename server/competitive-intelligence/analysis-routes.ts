@@ -414,7 +414,6 @@ function getMissingFields(c: any): string[] {
   if (c.postingFrequency == null) missing.push("postingFrequency");
   if (!c.contentTypeRatio) missing.push("contentTypeRatio");
   if (c.engagementRatio == null) missing.push("engagementRatio");
-  if (!c.ctaPatterns) missing.push("ctaPatterns");
   return missing;
 }
 
