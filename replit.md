@@ -80,6 +80,7 @@ Preferred communication style: Simple, everyday language.
 - **Safety Gate Registry**: `server/gates/registry.ts` — centralized gate functions: `gateAutopilotEnabled`, `gateNotSafeMode`, `gateAIBudget`, `gateFeatureFlag`, `gateLeadEngineActive`, `gateConfidenceAbove`. Express middleware `requireGates()` for route protection.
 - **Validation Layer**: `server/gates/validate.ts` — Zod-based request validation middleware with `validateBody()` and `validateQuery()`. Pre-built schemas for common patterns.
 - **Test Suite**: `server/tests/stabilization.test.ts` — 6 automated tests covering health, database, AI budget, CI validation, autopilot, and AI scan enforcement.
+- **Memory Scoping Hardening (Feb 2026)**: Mathematically provable account+campaign isolation on all signal tables (strategy_memory, strategy_insights, moat_candidates). Zero req.query.accountId in strategy-routes.ts — all scoping from server-trusted requireCampaign middleware. Database NOT NULL constraints on account_id + campaign_id. Legacy data excluded via 'unscoped_legacy' marker. Composite indexes (account_id, campaign_id) on all 3 tables. Regression test: `server/tests/memory-scoping.test.ts` (6 checks).
 
 ## External Dependencies
 
