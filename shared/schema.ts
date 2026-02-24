@@ -136,7 +136,7 @@ export const strategyInsights = pgTable("strategy_insights", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  accountId: varchar("account_id").notNull().default("default"),
+  accountId: varchar("account_id").notNull(),
   campaignId: varchar("campaign_id").notNull(),
   category: text("category").notNull(),
   insight: text("insight").notNull(),
@@ -175,7 +175,7 @@ export const strategyMemory = pgTable("strategy_memory", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  accountId: varchar("account_id").notNull().default("default"),
+  accountId: varchar("account_id").notNull(),
   campaignId: varchar("campaign_id").notNull(),
   memoryType: text("memory_type").notNull(),
   label: text("label").notNull(),
@@ -230,7 +230,7 @@ export const moatCandidates = pgTable("moat_candidates", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  accountId: varchar("account_id").notNull().default("default"),
+  accountId: varchar("account_id").notNull(),
   campaignId: varchar("campaign_id").notNull(),
   sourceType: text("source_type").notNull(),
   label: text("label").notNull(),
