@@ -30,6 +30,7 @@ import StrategicPipeline from '@/components/StrategicPipeline';
 import BuildThePlan from '@/components/BuildThePlan';
 import CompetitiveIntelligence from '@/components/CompetitiveIntelligence';
 import DominanceEngine from '@/components/DominanceEngine';
+import ControlCenter from '@/components/ControlCenter';
 import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
 
 interface AIAudience {
@@ -86,10 +87,7 @@ export default function AIManagementScreen() {
 
   const [activeTab, setActiveTab] = useState<TabView>('buildplan');
   const [intelSubTab, setIntelSubTab] = useState<IntelSubTab>('analysis');
-  const [autopilotOn, setAutopilotOn] = useState(true);
   const [autoPublishEnabled, setAutoPublishEnabled] = useState(false);
-  const [controlData, setControlData] = useState<any>(null);
-  const [nextActions, setNextActions] = useState<{action: string; why: string; risk: string}[]>([]);
   const [selectedPosts, setSelectedPosts] = useState<Set<string>>(new Set());
   const [publishing, setPublishing] = useState(false);
   const [publishResults, setPublishResults] = useState<any[]>([]);
@@ -266,19 +264,6 @@ export default function AIManagementScreen() {
     loadControlData();
   }, []);
 
-  const currentGoal = useMemo(() => {
-    const activeCampaigns = campaigns.filter(c => c.status === 'active');
-    if (activeCampaigns.length > 0) return `Optimize ${activeCampaigns[0].name}`;
-    return 'Maximize campaign ROI';
-  }, [campaigns]);
-
-  const budgetInfo = useMemo(() => {
-    const totalBudget = campaigns.reduce((s, c) => s + c.budget, 0) || 500;
-    const totalSpent = campaigns.reduce((s, c) => s + c.spent, 0) || 0;
-    const pct = totalBudget > 0 ? Math.round((totalSpent / totalBudget) * 100) : 0;
-    return { total: totalBudget, spent: totalSpent, pct };
-  }, [campaigns]);
-
   const renderIntelligence = () => (
     <View style={styles.tabContent}>
       <View style={[styles.intelSubTabs, { backgroundColor: isDark ? '#0F1419' : '#F5F7FA', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
@@ -309,97 +294,7 @@ export default function AIManagementScreen() {
 
   const renderControlCenter = () => (
     <View style={styles.tabContent}>
-      <View style={[styles.controlStatusCard, { backgroundColor: isDark ? '#0F1419' : '#F4F7F5', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-        <View style={styles.controlStatusRow}>
-          <View style={styles.controlStatusLeft}>
-            <View style={[styles.controlShield, { backgroundColor: autopilotOn ? '#8B5CF6' + '15' : '#FF6B6B' + '15' }]}>
-              <Ionicons name="shield-checkmark" size={22} color={autopilotOn ? '#8B5CF6' : '#FF6B6B'} />
-            </View>
-            <View>
-              <Text style={[styles.controlModeLabel, { color: colors.textMuted }]}>MODE</Text>
-              <Text style={[styles.controlModeValue, { color: autopilotOn ? '#8B5CF6' : '#FF6B6B' }]}>
-                {autopilotOn ? 'Autopilot ON' : 'Autopilot OFF'}
-              </Text>
-            </View>
-          </View>
-          <Switch
-            value={autopilotOn}
-            onValueChange={(v) => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); setAutopilotOn(v); }}
-            trackColor={{ false: '#FF6B6B' + '40', true: '#8B5CF6' + '60' }}
-            thumbColor={autopilotOn ? '#8B5CF6' : '#FF6B6B'}
-          />
-        </View>
-      </View>
-
-      <View style={[styles.controlGoalCard, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-        <View style={styles.controlGoalRow}>
-          <Ionicons name="flag" size={16} color="#A78BFA" />
-          <Text style={[styles.controlGoalLabel, { color: colors.textMuted }]}>Current Goal</Text>
-        </View>
-        <Text style={[styles.controlGoalValue, { color: colors.text }]}>{currentGoal}</Text>
-      </View>
-
-      <View style={[styles.controlBudgetCard, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-        <View style={styles.controlBudgetHeader}>
-          <Ionicons name="wallet-outline" size={16} color="#4C9AFF" />
-          <Text style={[styles.controlBudgetLabel, { color: colors.textMuted }]}>Budget Allocation</Text>
-          <Text style={[styles.controlBudgetPct, { color: '#4C9AFF' }]}>{budgetInfo.pct}%</Text>
-        </View>
-        <View style={[styles.controlBudgetTrack, { backgroundColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-          <View style={[styles.controlBudgetFill, { width: `${Math.min(budgetInfo.pct, 100)}%` }]} />
-        </View>
-        <Text style={[styles.controlBudgetText, { color: colors.textSecondary }]}>
-          ${budgetInfo.spent.toFixed(0)} / ${budgetInfo.total.toFixed(0)}
-        </Text>
-      </View>
-
-      <View style={[styles.controlSection, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-        <View style={styles.controlSectionHeader}>
-          <Ionicons name="flash" size={16} color="#A78BFA" />
-          <Text style={[styles.controlSectionTitle, { color: colors.text }]}>What AI is Doing Now</Text>
-        </View>
-        <Text style={[styles.controlDoingText, { color: colors.textSecondary }]}>
-          {autopilotOn
-            ? 'Analyzing performance data and optimizing campaigns for maximum ROI'
-            : 'Autopilot is paused. Turn it on to resume AI optimization.'
-          }
-        </Text>
-      </View>
-
-      <View style={[styles.controlSection, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-        <View style={styles.controlSectionHeader}>
-          <Ionicons name="list" size={16} color="#FFB347" />
-          <Text style={[styles.controlSectionTitle, { color: colors.text }]}>Next Planned Actions</Text>
-        </View>
-        {nextActions.map((a, i) => (
-          <View key={i} style={[styles.controlActionItem, { borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-            <View style={styles.controlActionTop}>
-              <View style={[styles.controlActionNum, { backgroundColor: '#A78BFA' + '12' }]}>
-                <Text style={[styles.controlActionNumText, { color: '#A78BFA' }]}>{i + 1}</Text>
-              </View>
-              <Text style={[styles.controlActionText, { color: colors.text }]}>{a.action}</Text>
-              <View style={[styles.controlRiskBadge, { backgroundColor: a.risk === 'Low' ? '#8B5CF6' + '12' : '#FFB347' + '12' }]}>
-                <Text style={[styles.controlRiskText, { color: a.risk === 'Low' ? '#8B5CF6' : '#FFB347' }]}>{a.risk}</Text>
-              </View>
-            </View>
-            <Text style={[styles.controlActionWhy, { color: colors.textMuted }]}>{a.why}</Text>
-          </View>
-        ))}
-      </View>
-
-      <Pressable
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-          setAutopilotOn(false);
-          Alert.alert('Emergency Stop', 'AI Autopilot has been paused. All automated actions stopped.');
-        }}
-        style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1, marginTop: 8 }]}
-      >
-        <View style={styles.emergencyBtn}>
-          <Ionicons name="stop-circle" size={20} color="#EF4444" />
-          <Text style={styles.emergencyBtnText}>Emergency Stop</Text>
-        </View>
-      </Pressable>
+      <ControlCenter />
     </View>
   );
 
