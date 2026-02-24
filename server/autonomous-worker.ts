@@ -105,6 +105,7 @@ async function runStrategyAnalysis(
       .limit(30),
     db.select()
       .from(strategyMemory)
+      .where(eq(strategyMemory.accountId, accountId))
       .orderBy(desc(strategyMemory.updatedAt))
       .limit(20),
     db.select()

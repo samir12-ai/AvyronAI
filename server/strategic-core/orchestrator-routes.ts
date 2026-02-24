@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { aiChat } from "../ai-client";
 import { db } from "../db";
 import { strategicBlueprints, strategyMemory, strategyInsights, moatCandidates } from "@shared/schema";
-import { eq, desc, gte } from "drizzle-orm";
+import { eq, desc, gte, and } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
 
 const REQUIRED_BLUEPRINT_FIELDS: { key: string; label: string }[] = [
@@ -179,13 +179,14 @@ export function registerOrchestratorRoutes(app: Express) {
       let performanceIntelligenceBlock = "";
       let performanceSignalsInjected = false;
       try {
+        const signalAccountId = (req.query.accountId as string) || "default";
         const [memories, highConfidenceInsights, topMoats] = await Promise.all([
-          db.select().from(strategyMemory).orderBy(desc(strategyMemory.updatedAt)).limit(15),
+          db.select().from(strategyMemory).where(eq(strategyMemory.accountId, signalAccountId)).orderBy(desc(strategyMemory.updatedAt)).limit(15),
           db.select().from(strategyInsights)
-            .where(gte(strategyInsights.confidence, 0.7))
+            .where(and(gte(strategyInsights.confidence, 0.7), eq(strategyInsights.accountId, signalAccountId)))
             .orderBy(desc(strategyInsights.createdAt)).limit(10),
           db.select().from(moatCandidates)
-            .where(eq(moatCandidates.status, "candidate"))
+            .where(and(eq(moatCandidates.status, "candidate"), eq(moatCandidates.accountId, signalAccountId)))
             .orderBy(desc(moatCandidates.moatScore)).limit(5),
         ]);
 

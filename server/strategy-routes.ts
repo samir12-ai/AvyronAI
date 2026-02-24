@@ -163,9 +163,10 @@ export function registerStrategyRoutes(app: Express) {
 
   app.post("/api/strategy/analyze", requireCampaign, async (req, res) => {
     try {
+      const accountId = (req.query.accountId as string) || "default";
       const allData = await db.select().from(performanceSnapshots).orderBy(desc(performanceSnapshots.fetchedAt)).limit(50);
       const averages = await getAccountAverages();
-      const memories = await db.select().from(strategyMemory).orderBy(desc(strategyMemory.updatedAt)).limit(20);
+      const memories = await db.select().from(strategyMemory).where(eq(strategyMemory.accountId, accountId)).orderBy(desc(strategyMemory.updatedAt)).limit(20);
 
       if (allData.length === 0) {
         return res.status(400).json({ error: "No performance data available. Sync your Meta data first." });
@@ -344,7 +345,6 @@ Return ONLY valid JSON with this structure:
         return res.status(500).json({ error: "AI analysis failed to produce valid results" });
       }
 
-      const accountId = (req.query.accountId as string) || "default";
       const cId = campaignContext.campaignId;
 
       if (analysis.insights?.length) {
@@ -429,8 +429,9 @@ Return ONLY valid JSON with this structure:
 
   app.get("/api/strategy/insights", requireCampaign, async (req, res) => {
     try {
+      const accountId = (req.query.accountId as string) || "default";
       const insights = await db.select().from(strategyInsights)
-        .where(eq(strategyInsights.isActive, true))
+        .where(and(eq(strategyInsights.isActive, true), eq(strategyInsights.accountId, accountId)))
         .orderBy(desc(strategyInsights.createdAt))
         .limit(30);
       res.json(insights);
@@ -464,7 +465,9 @@ Return ONLY valid JSON with this structure:
 
   app.get("/api/strategy/memory", requireCampaign, async (req, res) => {
     try {
+      const accountId = (req.query.accountId as string) || "default";
       const memories = await db.select().from(strategyMemory)
+        .where(eq(strategyMemory.accountId, accountId))
         .orderBy(desc(strategyMemory.updatedAt))
         .limit(50);
       res.json(memories);
@@ -482,14 +485,16 @@ Return ONLY valid JSON with this structure:
         .where(gte(performanceSnapshots.fetchedAt, weekAgo))
         .orderBy(desc(performanceSnapshots.fetchedAt));
 
+      const accountId = (req.query.accountId as string) || "default";
       const insights = await db.select().from(strategyInsights)
-        .where(gte(strategyInsights.createdAt, weekAgo))
+        .where(and(gte(strategyInsights.createdAt, weekAgo), eq(strategyInsights.accountId, accountId)))
         .orderBy(desc(strategyInsights.createdAt));
 
       const decisions = await db.select().from(strategyDecisions)
         .where(gte(strategyDecisions.createdAt, weekAgo));
 
       const memories = await db.select().from(strategyMemory)
+        .where(eq(strategyMemory.accountId, accountId))
         .orderBy(desc(strategyMemory.updatedAt)).limit(20);
 
       const averages = await getAccountAverages();
@@ -630,10 +635,12 @@ Return JSON:
   app.post("/api/strategy/audience-snipe", requireCampaign, async (req, res) => {
     try {
       const { campaignGoal, product, budget } = req.body;
+      const accountId = (req.query.accountId as string) || "default";
       const memories = await db.select().from(strategyMemory)
+        .where(eq(strategyMemory.accountId, accountId))
         .orderBy(desc(strategyMemory.updatedAt)).limit(20);
       const insights = await db.select().from(strategyInsights)
-        .where(eq(strategyInsights.isActive, true))
+        .where(and(eq(strategyInsights.isActive, true), eq(strategyInsights.accountId, accountId)))
         .orderBy(desc(strategyInsights.createdAt)).limit(15);
       const averages = await getAccountAverages();
 
@@ -706,8 +713,9 @@ Return JSON:
 
   app.post("/api/strategy/moat-scan", requireCampaign, async (req, res) => {
     try {
-      const memories = await db.select().from(strategyMemory).orderBy(desc(strategyMemory.updatedAt)).limit(30);
-      const insights = await db.select().from(strategyInsights).where(eq(strategyInsights.isActive, true)).orderBy(desc(strategyInsights.createdAt)).limit(20);
+      const accountId = (req.query.accountId as string) || "default";
+      const memories = await db.select().from(strategyMemory).where(eq(strategyMemory.accountId, accountId)).orderBy(desc(strategyMemory.updatedAt)).limit(30);
+      const insights = await db.select().from(strategyInsights).where(and(eq(strategyInsights.isActive, true), eq(strategyInsights.accountId, accountId))).orderBy(desc(strategyInsights.createdAt)).limit(20);
       const allPerf = await db.select().from(performanceSnapshots).orderBy(desc(performanceSnapshots.fetchedAt)).limit(50);
       const averages = await getAccountAverages();
 
@@ -831,7 +839,8 @@ Return ONLY valid JSON:
 
   app.get("/api/strategy/moat-candidates", async (req, res) => {
     try {
-      const candidates = await db.select().from(moatCandidates).orderBy(desc(moatCandidates.moatScore)).limit(20);
+      const accountId = (req.query.accountId as string) || "default";
+      const candidates = await db.select().from(moatCandidates).where(eq(moatCandidates.accountId, accountId)).orderBy(desc(moatCandidates.moatScore)).limit(20);
       res.json(candidates);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch moat candidates" });
@@ -841,10 +850,11 @@ Return ONLY valid JSON:
   app.post("/api/strategy/signature-series", async (req, res) => {
     try {
       const { candidateId } = req.body;
-      const [candidate] = await db.select().from(moatCandidates).where(eq(moatCandidates.id, candidateId));
+      const accountId = (req.query.accountId as string) || (req.body?.accountId as string) || "default";
+      const [candidate] = await db.select().from(moatCandidates).where(and(eq(moatCandidates.id, candidateId), eq(moatCandidates.accountId, accountId)));
       if (!candidate) return res.status(404).json({ error: "Moat candidate not found" });
 
-      const memories = await db.select().from(strategyMemory).orderBy(desc(strategyMemory.updatedAt)).limit(15);
+      const memories = await db.select().from(strategyMemory).where(eq(strategyMemory.accountId, accountId)).orderBy(desc(strategyMemory.updatedAt)).limit(15);
       const averages = await getAccountAverages();
 
       const aiResponse = await aiChat({
@@ -946,10 +956,11 @@ Return ONLY valid JSON:
 
   app.get("/api/strategy/moat-dashboard", requireCampaign, async (req, res) => {
     try {
+      const accountId = (req.query.accountId as string) || "default";
       const [candidates, series, memories, averages] = await Promise.all([
-        db.select().from(moatCandidates).orderBy(desc(moatCandidates.moatScore)).limit(10),
+        db.select().from(moatCandidates).where(eq(moatCandidates.accountId, accountId)).orderBy(desc(moatCandidates.moatScore)).limit(10),
         db.select().from(signatureSeries).where(eq(signatureSeries.isActive, true)).orderBy(desc(signatureSeries.createdAt)),
-        db.select().from(strategyMemory).orderBy(desc(strategyMemory.updatedAt)).limit(20),
+        db.select().from(strategyMemory).where(eq(strategyMemory.accountId, accountId)).orderBy(desc(strategyMemory.updatedAt)).limit(20),
         getAccountAverages(),
       ]);
 
@@ -988,12 +999,13 @@ Return ONLY valid JSON:
   app.get("/api/strategy/dashboard", requireCampaign, async (req, res) => {
     try {
       const activePlanId = await getActiveBlueprintId();
+      const accountId = (req.query.accountId as string) || "default";
 
       const [averages, recentInsights, recentDecisions, memoryItems, latestReport] = await Promise.all([
         getAccountAverages(),
-        db.select().from(strategyInsights).where(eq(strategyInsights.isActive, true)).orderBy(desc(strategyInsights.createdAt)).limit(5),
+        db.select().from(strategyInsights).where(and(eq(strategyInsights.isActive, true), eq(strategyInsights.accountId, accountId))).orderBy(desc(strategyInsights.createdAt)).limit(5),
         db.select().from(strategyDecisions).orderBy(desc(strategyDecisions.createdAt)).limit(5),
-        db.select().from(strategyMemory).orderBy(desc(strategyMemory.updatedAt)).limit(10),
+        db.select().from(strategyMemory).where(eq(strategyMemory.accountId, accountId)).orderBy(desc(strategyMemory.updatedAt)).limit(10),
         db.select().from(weeklyReports).orderBy(desc(weeklyReports.createdAt)).limit(1),
       ]);
 
