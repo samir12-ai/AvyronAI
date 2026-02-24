@@ -1,0 +1,205 @@
+SINGLE TRACK ENFORCEMENT (STRICT CONSOLIDATION)
+
+We are enforcing a non-negotiable architectural rule:
+
+There must be only ONE strategic track in the system.
+	•	One plan.
+	•	One execution pipeline.
+	•	One approval gate.
+	•	One orchestration flow.
+
+AI Control is already wired to Build The Plan.
+Strategy must now align with that same track.
+
+We are not deleting intelligence.
+We are eliminating parallel strategic flows.
+
+⸻
+
+CORE PRINCIPLE
+
+Build The Plan (BTP) is the ONLY execution authority.
+
+Everything else becomes intelligence support for that one plan.
+
+There must never exist:
+	•	A second campaign lifecycle
+	•	A second execution logic
+	•	A second plan model
+	•	A second strategic progression track
+
+All intelligence must flow into the same plan object.
+
+⸻
+
+PHASE 1 — SINGLE SOURCE OF TRUTH ENFORCEMENT
+	1.	Confirm Build The Plan is the only system that:
+	•	Creates strategic_plans
+	•	Creates required_work
+	•	Creates calendar_entries
+	•	Generates studio_items
+	•	Controls execution lifecycle
+	2.	Strategy must NEVER:
+	•	Create execution items
+	•	Create standalone campaign lifecycles
+	•	Operate as a separate plan engine
+
+Acceptance Criteria (Strict):
+	•	Static analysis proves no strategy_* endpoint writes to:
+	•	strategic_plans
+	•	required_work
+	•	calendar_entries
+	•	studio_items
+	•	No endpoint under /api/strategy/ triggers execution.
+	•	Growth campaign lifecycle cannot generate execution artifacts.
+
+⸻
+
+PHASE 2 — STRATEGY → PLAN SUPPORT LAYER
+
+Strategy becomes Performance Intelligence Layer.
+
+It may:
+	•	Analyze performance
+	•	Update memory
+	•	Generate insights
+	•	Suggest recommendations
+	•	Detect moat opportunities
+	•	Suggest audience refinements
+
+But it must output only:
+
+A) Insights
+B) Recommendations
+C) Performance signals
+
+These must feed the SAME plan.
+
+If a Strategy insight impacts execution:
+
+It must generate a Plan Modification Proposal,
+not a new plan.
+
+Acceptance Criteria:
+	•	All Strategy recommendations must reference an existing planId.
+	•	No Strategy feature may return a “plan” object.
+	•	Any actionable output must go through the plan approval gate.
+	•	Audit event “PERFORMANCE_SIGNAL_PROPOSED” must be logged.
+
+⸻
+
+PHASE 3 — PLAN-CENTRIC INTEGRATION
+
+When BTP runs:
+
+It must optionally ingest:
+	•	strategy_memory
+	•	high-confidence strategy_insights
+	•	moat signals
+
+But:
+
+BTP remains the orchestrator.
+Strategy remains a signal provider.
+
+Acceptance Criteria:
+	•	Orchestrator prompt explicitly documents whether performance signals were injected.
+	•	If performance signals are absent, BTP still runs cleanly.
+	•	Removing strategy data changes output deterministically (test required).
+
+⸻
+
+PHASE 4 — UI TRACK UNIFICATION
+
+There must be no visible parallel strategic flows.
+
+UI must reflect:
+
+Build The Plan
+├── Blueprint
+├── Market Analysis
+├── Validation
+├── Orchestration
+├── Execution
+└── Performance Intelligence (sub-layer)
+
+Strategy must not appear as a separate lifecycle tab.
+
+Acceptance Criteria:
+	•	No navigation path allows execution outside BTP.
+	•	Strategy insights are visible inside the active plan.
+	•	There is no second dashboard generating strategic actions.
+
+⸻
+
+PHASE 5 — TESTING & DOCUMENTATION (ENTERPRISE LEVEL)
+
+This phase is mandatory.
+	1.	Responsibility Matrix Documentation
+Provide a written table defining:
+
+Layer
+Owns What
+Cannot Do
+
+Strategy
+Performance learning
+Cannot create plans
+
+BTP
+Plan creation + execution
+Cannot mutate memory directly
+
+AI Control
+Execution governance
+Cannot create strategic direction
+	2.	Regression Tests
+
+	•	Confirm no duplicate plan objects can exist.
+	•	Confirm Strategy cannot create execution artifacts.
+	•	Confirm AI Control only references BTP planId.
+	•	Confirm emergency stop freezes the single track only.
+
+	3.	Integration Tests
+
+	•	Run BTP without Strategy data.
+	•	Run BTP with Strategy data.
+	•	Verify deterministic delta.
+
+	4.	Static Code Scan
+
+	•	Ensure no route under /api/strategy/ writes to execution tables.
+	•	Ensure no second lifecycle exists.
+
+	5.	Audit Traceability
+Every performance-driven influence must log:
+
+	•	Plan ID
+	•	Signal source
+	•	Confidence score
+	•	Timestamp
+
+⸻
+
+DEFINITION OF DONE
+
+We are done when:
+	•	There is only one strategic plan table driving execution.
+	•	There is no parallel campaign lifecycle.
+	•	Strategy does not create plans.
+	•	All execution routes depend on BTP planId.
+	•	All intelligence converges into one track.
+
+⸻
+
+This is not UI cleanup.
+
+This is track unification.
+
+We are moving from:
+Multiple parallel strategic engines
+
+To:
+One execution engine powered by layered intelligence.
+
+Implement with zero ambiguity.

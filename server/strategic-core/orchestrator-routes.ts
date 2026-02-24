@@ -1,8 +1,8 @@
 import type { Express, Request, Response } from "express";
 import { aiChat } from "../ai-client";
 import { db } from "../db";
-import { strategicBlueprints } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { strategicBlueprints, strategyMemory, strategyInsights, moatCandidates } from "@shared/schema";
+import { eq, desc, gte } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
 
 const REQUIRED_BLUEPRINT_FIELDS: { key: string; label: string }[] = [
@@ -176,6 +176,41 @@ export function registerOrchestratorRoutes(app: Express) {
       const validationResult = blueprint.validationResult ? JSON.parse(blueprint.validationResult) : null;
       const competitorUrls = blueprint.competitorUrls ? JSON.parse(blueprint.competitorUrls) : [];
 
+      let performanceIntelligenceBlock = "";
+      let performanceSignalsInjected = false;
+      try {
+        const [memories, highConfidenceInsights, topMoats] = await Promise.all([
+          db.select().from(strategyMemory).orderBy(desc(strategyMemory.updatedAt)).limit(15),
+          db.select().from(strategyInsights)
+            .where(gte(strategyInsights.confidence, 0.7))
+            .orderBy(desc(strategyInsights.createdAt)).limit(10),
+          db.select().from(moatCandidates)
+            .where(eq(moatCandidates.status, "candidate"))
+            .orderBy(desc(moatCandidates.moatScore)).limit(5),
+        ]);
+
+        if (memories.length > 0 || highConfidenceInsights.length > 0 || topMoats.length > 0) {
+          performanceSignalsInjected = true;
+          performanceIntelligenceBlock = `
+
+PERFORMANCE INTELLIGENCE LAYER (optional signal injection — do NOT override confirmed blueprint):
+These signals come from the Performance Intelligence system analyzing past performance data. Use them to INFORM execution priorities, NOT to override the confirmed blueprint.
+
+${memories.length > 0 ? `STRATEGIC MEMORY (${memories.length} learnings):
+${JSON.stringify(memories.map(m => ({ type: m.memoryType, label: m.label, score: m.score, winner: m.isWinner })))}` : "No strategic memory available."}
+
+${highConfidenceInsights.length > 0 ? `HIGH-CONFIDENCE INSIGHTS (${highConfidenceInsights.length} signals, confidence ≥ 0.7):
+${JSON.stringify(highConfidenceInsights.map(i => ({ category: i.category, insight: i.insight, confidence: i.confidence, metric: i.relatedMetric })))}` : "No high-confidence insights available."}
+
+${topMoats.length > 0 ? `MOAT SIGNALS (${topMoats.length} candidates):
+${JSON.stringify(topMoats.map(m => ({ label: m.label, moatScore: m.moatScore, sourceType: m.sourceType })))}` : "No moat signals available."}
+
+NOTE: Performance signals were ${performanceSignalsInjected ? "INJECTED" : "NOT AVAILABLE"}. The confirmed blueprint remains the ONLY source of truth.`;
+        }
+      } catch (err) {
+        console.log("[Orchestrator] Performance intelligence injection skipped:", (err as Error).message);
+      }
+
       const userPrompt = `Generate execution plans from this validated blueprint (v${blueprint.blueprintVersion}). Do NOT reinterpret or override ANY confirmed data. The confirmed blueprint is the ONLY source of truth.
 
 All plans must be geo-scoped to: ${campaignContext.location || "Not specified"}
@@ -197,6 +232,7 @@ COMPETITOR URLS: ${competitorUrls.join(", ")}
 ${marketMap ? `MARKET MAP:\n${JSON.stringify(marketMap, null, 2)}` : ""}
 
 ${validationResult ? `VALIDATION RESULT:\n${JSON.stringify(validationResult, null, 2)}` : ""}
+${performanceIntelligenceBlock}
 
 Generate all 6 execution plans now. Strictly from the confirmed, validated data. No reinterpretation. Geo-scoped to ${campaignContext.location || "specified location"}.`;
 
@@ -255,7 +291,10 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
         blueprintId: id,
         blueprintVersion: blueprint.blueprintVersion,
         event: "ORCHESTRATOR_GENERATED",
-        details: { planSections: Object.keys(orchestratorPlan).filter(k => k !== "blueprintVersion") },
+        details: {
+          planSections: Object.keys(orchestratorPlan).filter(k => k !== "blueprintVersion"),
+          performanceSignalsInjected,
+        },
       });
 
       res.json({

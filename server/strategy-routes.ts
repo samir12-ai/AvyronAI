@@ -5,15 +5,16 @@ import {
   strategyInsights,
   strategyDecisions,
   strategyMemory,
-  growthCampaigns,
   weeklyReports,
   moatCandidates,
   signatureSeries,
+  strategicBlueprints,
 } from "@shared/schema";
 import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
 import { aiChat } from "./ai-client";
 import { requireCampaign } from "./campaign-routes";
 import { getRevenueSummary, getCampaignMetrics } from "./campaign-data-layer";
+import { logAuditEvent } from "./strategic-core/audit-logger";
 
 async function getAccountAverages() {
   const result = await db.select({
@@ -36,6 +37,16 @@ async function getAccountAverages() {
   return result[0];
 }
 
+async function getActiveBlueprintId(): Promise<string | null> {
+  const [blueprint] = await db.select({ id: strategicBlueprints.id })
+    .from(strategicBlueprints)
+    .orderBy(desc(strategicBlueprints.updatedAt))
+    .limit(1);
+  return blueprint?.id || null;
+}
+
+export { getAccountAverages };
+
 export function registerStrategyRoutes(app: Express) {
 
   app.post("/api/strategy/sync-performance", requireCampaign, async (req, res) => {
@@ -50,6 +61,14 @@ export function registerStrategyRoutes(app: Express) {
         for (const item of demoData) {
           await db.insert(performanceSnapshots).values(item);
         }
+
+        await logAuditEvent({
+          accountId,
+          campaignId: campaignContext.campaignId,
+          event: "PERFORMANCE_SYNC_COMPLETED",
+          details: { synced: demoData.length, mode: "demo" },
+        });
+
         return res.json({
           success: true,
           demo: true,
@@ -96,6 +115,13 @@ export function registerStrategyRoutes(app: Express) {
           synced++;
         }
 
+        await logAuditEvent({
+          accountId,
+          campaignId: campaignContext.campaignId,
+          event: "PERFORMANCE_SYNC_COMPLETED",
+          details: { synced, mode: "meta_api" },
+        });
+
         res.json({ success: true, synced });
       } catch (apiErr: any) {
         console.error("[Strategy] Meta API error:", apiErr.message);
@@ -103,6 +129,14 @@ export function registerStrategyRoutes(app: Express) {
         for (const item of demoData) {
           await db.insert(performanceSnapshots).values(item);
         }
+
+        await logAuditEvent({
+          accountId,
+          campaignId: campaignContext.campaignId,
+          event: "PERFORMANCE_SYNC_COMPLETED",
+          details: { synced: demoData.length, mode: "demo_fallback", reason: apiErr.message },
+        });
+
         res.json({
           success: true,
           demo: true,
@@ -140,6 +174,8 @@ export function registerStrategyRoutes(app: Express) {
       const campaignContext = (req as any).campaignContext;
       const revenueSummary = await getRevenueSummary(campaignContext.campaignId, "default");
       const campaignMetrics = await getCampaignMetrics(campaignContext.campaignId, "default");
+
+      const activePlanId = await getActiveBlueprintId();
 
       const dataForAI = allData.map(d => ({
         postId: d.postId,
@@ -179,16 +215,22 @@ export function registerStrategyRoutes(app: Express) {
             role: "system",
             content: `You are a Chief Marketing Officer, Performance Media Buyer, Creative Director, Growth Hacker, and Brand Strategy Architect combined into one strategic AI engine.
 
-SYSTEM MODE: MOAT BUILDER MODE ACTIVE
+SYSTEM MODE: PERFORMANCE INTELLIGENCE LAYER
+ROLE: Signal provider for the active strategic plan. You do NOT create plans. You provide performance-backed recommendations that feed into the single execution track.
 
 You analyze social media performance data and make data-driven strategic decisions. You NEVER generate random ideas. Every insight and decision must be backed by the data provided.
 
-CRITICAL STRATEGIC PRIORITY SHIFT: Your primary objective is no longer "optimize next post" but "build long-term brand advantage." All strategy generation must ask:
-1. Does this build authority?
-2. Does this create differentiation?
-3. Is this repeatable as a system?
-4. Does this increase brand defensibility?
-If not, deprioritize.
+CRITICAL: You are a SUPPORT LAYER, not an execution authority. Your outputs are:
+- Insights (observations from data)
+- Recommendations (proposed actions for the active plan)
+- Memory updates (learned patterns)
+- Moat signals (brand defensibility opportunities)
+
+You do NOT:
+- Create execution plans
+- Generate campaign lifecycles
+- Produce calendar entries
+- Override the active strategic plan
 
 Your analysis must include:
 
@@ -200,19 +242,16 @@ Your analysis must include:
 - What objections appear in comments
 - Which patterns show STABILITY (consistent performance, not one-hit wonders)
 
-2. STRATEGIC DECISIONS (rule-based):
-- If retention is high → Duplicate angle, generate variations, suggest budget scaling
-- If CTR is low → Regenerate hooks only
-- If CPA increases over time → Pause campaign, request new creative direction
-- If saves high but conversions low → Add stronger call-to-action
-- Each decision needs: reason, action, objective, budget adjustment
-- MOAT DECISIONS: Prioritize decisions that build long-term authority over short-term optimization
+2. STRATEGIC RECOMMENDATIONS (signal-based):
+- If retention is high → Recommend scaling this angle in the active plan
+- If CTR is low → Recommend hook regeneration
+- If CPA increases over time → Recommend pausing and requesting new creative direction
+- If saves high but conversions low → Recommend stronger CTA
+- Each recommendation needs: reason, suggested action, objective, confidence score
 
 3. COMPETITIVE DEFENSE:
-- When competitor overlap is detected → Increase uniqueness layer
+- When competitor overlap is detected → Recommend increasing uniqueness layer
 - Strengthen terminology ownership
-- Add deeper proof or proprietary angle
-- Do not allow easy imitation
 - Focus on differentiation, not just performance
 
 4. MEMORY UPDATES:
@@ -221,11 +260,10 @@ Your analysis must include:
 - Note audience patterns
 - Flag potential MOAT CANDIDATES (high stability + high resonance + hard to copy)
 
-5. SYSTEMS THINKING (NEW):
+5. SYSTEMS THINKING:
 - Stop producing isolated post ideas
-- Stop trend chasing without positioning
-- Instead produce: Named frameworks, repeatable branded series ideas, expandable content ecosystems
-- Every major strategy must answer: "How does this make the brand harder to replace?"
+- Instead produce: Named frameworks, repeatable branded series ideas
+- Every major recommendation must answer: "How does this make the brand harder to replace?"
 
 ACCOUNT AVERAGES:
 ${JSON.stringify(averages, null, 2)}
@@ -236,6 +274,7 @@ ${JSON.stringify(memoryContext, null, 2)}
 CAMPAIGN CONTEXT:
 Campaign: ${campaignContext.campaignName} (Goal: ${campaignContext.goalType})
 Location: ${campaignContext.location || 'Not specified'}
+${activePlanId ? `ACTIVE PLAN ID: ${activePlanId} (all recommendations feed this plan)` : 'NO ACTIVE PLAN — recommendations will be queued for next plan'}
 
 REVENUE DATA (injected from Revenue Attribution):
 ${JSON.stringify({ totalRevenue: revenueSummary.totalRevenue, monthRevenue: revenueSummary.monthRevenue, roas: revenueSummary.roas, monthRoas: revenueSummary.monthRoas, topRevenueContent: revenueSummary.topRevenueContent, costPerLead: revenueSummary.costPerLead, leadToCustomerRate: revenueSummary.leadToCustomerRate })}
@@ -243,7 +282,7 @@ ${JSON.stringify({ totalRevenue: revenueSummary.totalRevenue, monthRevenue: reve
 CAMPAIGN METRICS:
 ${JSON.stringify({ totalSpend: campaignMetrics.totalSpend, avgCpa: campaignMetrics.avgCpa, avgRoas: campaignMetrics.avgRoas, totalConversions: campaignMetrics.totalConversions, totalLeads: campaignMetrics.totalLeads })}
 
-CRITICAL: Your analysis must account for revenue data. Engagement-only optimization is NOT sufficient. Prioritize decisions that increase revenue, reduce CPA, and improve ROAS.
+CRITICAL: Your analysis must account for revenue data. Engagement-only optimization is NOT sufficient. Prioritize recommendations that increase revenue, reduce CPA, and improve ROAS.
 
 Return ONLY valid JSON with this structure:
 {
@@ -257,14 +296,15 @@ Return ONLY valid JSON with this structure:
       "accountAverage": 30.0
     }
   ],
-  "decisions": [
+  "recommendations": [
     {
-      "trigger": "What triggered this decision",
-      "action": "Specific action to take",
+      "trigger": "What triggered this recommendation",
+      "action": "Specific action to take within the active plan",
       "reason": "Data-backed reasoning",
       "objective": "Strategic goal",
       "budgetAdjustment": "+20% to winning angle",
-      "priority": "high|medium|low"
+      "priority": "high|medium|low",
+      "confidence": 0.85
     }
   ],
   "memoryUpdates": [
@@ -278,12 +318,12 @@ Return ONLY valid JSON with this structure:
   ],
   "executiveSummary": "2-3 sentence strategic overview",
   "moatSignals": ["Potential moat opportunity 1", "Potential moat opportunity 2"],
-  "systemMode": "MOAT BUILDER"
+  "systemMode": "PERFORMANCE_INTELLIGENCE"
 }`
           },
           {
             role: "user",
-            content: `Analyze this performance data and provide strategic insights, decisions, and memory updates:\n\n${JSON.stringify(dataForAI, null, 2)}`
+            content: `Analyze this performance data and provide strategic insights, recommendations, and memory updates:\n\n${JSON.stringify(dataForAI, null, 2)}`
           }
         ],
         max_tokens: 4000,
@@ -318,8 +358,9 @@ Return ONLY valid JSON with this structure:
         }
       }
 
-      if (analysis.decisions?.length) {
-        for (const dec of analysis.decisions) {
+      const decisions = analysis.recommendations || analysis.decisions || [];
+      if (decisions.length) {
+        for (const dec of decisions) {
           await db.insert(strategyDecisions).values({
             trigger: dec.trigger,
             action: dec.action,
@@ -343,15 +384,34 @@ Return ONLY valid JSON with this structure:
         }
       }
 
+      await logAuditEvent({
+        accountId: "default",
+        campaignId: campaignContext.campaignId,
+        blueprintId: activePlanId || undefined,
+        event: "PERFORMANCE_SIGNAL_PROPOSED",
+        details: {
+          insightsCount: analysis.insights?.length || 0,
+          recommendationsCount: decisions.length,
+          memoryUpdatesCount: analysis.memoryUpdates?.length || 0,
+          moatSignalsCount: analysis.moatSignals?.length || 0,
+          planId: activePlanId,
+          signalSource: "performance_analysis",
+          confidenceAvg: analysis.insights?.length
+            ? analysis.insights.reduce((s: number, i: any) => s + (i.confidence || 0), 0) / analysis.insights.length
+            : 0,
+        },
+      });
+
       res.json({
         success: true,
         insights: analysis.insights || [],
-        decisions: analysis.decisions || [],
+        recommendations: decisions,
         memoryUpdates: analysis.memoryUpdates || [],
         executiveSummary: analysis.executiveSummary || "",
         moatSignals: analysis.moatSignals || [],
-        systemMode: "MOAT BUILDER",
+        systemMode: "PERFORMANCE_INTELLIGENCE",
         dataPointsAnalyzed: allData.length,
+        activePlanId,
       });
     } catch (error: any) {
       console.error("[Strategy] Analysis error:", error.message);
@@ -387,7 +447,7 @@ Return ONLY valid JSON with this structure:
       const { status, outcome } = req.body;
       await db.update(strategyDecisions)
         .set({ status, outcome, executedAt: status === 'executed' ? new Date() : undefined })
-        .where(eq(strategyDecisions.id, req.params.id));
+        .where(eq(strategyDecisions.id, req.params.id as string));
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to update decision" });
@@ -402,112 +462,6 @@ Return ONLY valid JSON with this structure:
       res.json(memories);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch memory" });
-    }
-  });
-
-  app.post("/api/strategy/growth-campaign", requireCampaign, async (req, res) => {
-    try {
-      const { name, budget, testingAngles } = req.body;
-      const [campaign] = await db.insert(growthCampaigns).values({
-        name: name || "30-Day Growth Campaign",
-        budget: budget || 0,
-        testingAngles: JSON.stringify(testingAngles || []),
-        stage: "testing",
-        dayNumber: 1,
-      }).returning();
-      res.json(campaign);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to create growth campaign" });
-    }
-  });
-
-  app.get("/api/strategy/growth-campaigns", requireCampaign, async (req, res) => {
-    try {
-      const campaigns = await db.select().from(growthCampaigns)
-        .orderBy(desc(growthCampaigns.startedAt));
-      res.json(campaigns);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch campaigns" });
-    }
-  });
-
-  app.post("/api/strategy/growth-campaign/:id/advance", requireCampaign, async (req, res) => {
-    try {
-      const [campaign] = await db.select().from(growthCampaigns)
-        .where(eq(growthCampaigns.id, req.params.id));
-
-      if (!campaign) return res.status(404).json({ error: "Campaign not found" });
-
-      const allPerf = await db.select().from(performanceSnapshots)
-        .orderBy(desc(performanceSnapshots.fetchedAt)).limit(30);
-      const memories = await db.select().from(strategyMemory).limit(20);
-      const averages = await getAccountAverages();
-
-      const aiResponse = await aiChat({
-        model: "gpt-5.2",
-        messages: [
-          {
-            role: "system",
-            content: `You are managing a 30-day Growth Campaign. Current stage: ${campaign.stage}. Day: ${campaign.dayNumber}/${campaign.totalDays}.
-
-STAGES:
-1. TESTING (Days 1-10): Test multiple content angles, hook styles, formats. Gather data.
-2. OPTIMIZATION (Days 11-20): Kill bottom 40%, scale top 20%, focus on winning audience segment.
-3. AUTHORITY (Days 21-30): Retarget engaged users, create authority content, strengthen brand positioning.
-
-Auto-transition between stages based on day number.
-
-CAMPAIGN DATA:
-Testing angles: ${campaign.testingAngles}
-Winning angles: ${campaign.winningAngles || 'None yet'}
-Killed angles: ${campaign.killedAngles || 'None yet'}
-Budget: $${campaign.budget}, Spent: $${campaign.spent}
-
-ACCOUNT AVERAGES: ${JSON.stringify(averages)}
-MEMORY: ${JSON.stringify(memories.map(m => ({ type: m.memoryType, label: m.label, score: m.score, winner: m.isWinner })))}
-
-Return JSON:
-{
-  "newStage": "testing|optimization|authority",
-  "newDay": number,
-  "actions": ["action1", "action2"],
-  "anglesUpdate": { "winning": ["angle1"], "killed": ["angle2"], "testing": ["angle3"] },
-  "budgetRecommendation": "Specific budget advice",
-  "summary": "What happened and what's next"
-}`
-          },
-          {
-            role: "user",
-            content: `Advance the campaign. Recent performance data: ${JSON.stringify(allPerf.slice(0, 10).map(p => ({ type: p.contentType, angle: p.contentAngle, reach: p.reach, ctr: p.ctr, saves: p.saves, conversions: p.conversions })))}`
-          }
-        ],
-        max_tokens: 2000,
-        accountId: "default",
-        endpoint: "strategy-report",
-      });
-
-      const content = aiResponse.choices[0]?.message?.content || "";
-      let result;
-      try {
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
-        result = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-      } catch { result = null; }
-
-      if (result) {
-        await db.update(growthCampaigns).set({
-          stage: result.newStage || campaign.stage,
-          dayNumber: result.newDay || (campaign.dayNumber || 1) + 1,
-          winningAngles: JSON.stringify(result.anglesUpdate?.winning || []),
-          killedAngles: JSON.stringify(result.anglesUpdate?.killed || []),
-          results: result.summary,
-          updatedAt: new Date(),
-        }).where(eq(growthCampaigns.id, req.params.id));
-      }
-
-      res.json({ success: true, ...result });
-    } catch (error: any) {
-      console.error("[Strategy] Growth advance error:", error.message);
-      res.status(500).json({ error: error.message || "Failed to advance campaign" });
     }
   });
 
@@ -534,13 +488,14 @@ Return JSON:
 
       const campaignContext = (req as any).campaignContext;
       const revenueSummary = await getRevenueSummary(campaignContext.campaignId, "default");
+      const activePlanId = await getActiveBlueprintId();
 
       const aiResponse = await aiChat({
         model: "gpt-5.2",
         messages: [
           {
             role: "system",
-            content: `You are a Senior Marketing Strategist writing a weekly performance report. You must sound authoritative, data-driven, and actionable.
+            content: `You are a Senior Marketing Strategist writing a weekly performance report. You are part of the PERFORMANCE INTELLIGENCE LAYER — your report feeds the single strategic plan.
 
 The report must include:
 1. What worked this week (with data)
@@ -552,6 +507,7 @@ The report must include:
 7. Budget reallocation logic
 
 Be specific. Reference actual metrics. No fluff. Think like a CMO presenting to a CEO.
+${activePlanId ? `\nACTIVE PLAN ID: ${activePlanId} — All recommendations feed this plan.` : ''}
 
 ACCOUNT AVERAGES: ${JSON.stringify(averages)}
 
@@ -631,7 +587,20 @@ Return JSON:
         }
       }
 
-      res.json({ success: true, report: { ...savedReport, ...report } });
+      await logAuditEvent({
+        accountId: "default",
+        campaignId: campaignContext.campaignId,
+        blueprintId: activePlanId || undefined,
+        event: "WEEKLY_REPORT_GENERATED",
+        details: {
+          reportId: savedReport.id,
+          dataPoints: weekData.length,
+          planId: activePlanId,
+          signalSource: "weekly_report",
+        },
+      });
+
+      res.json({ success: true, report: { ...savedReport, ...report }, activePlanId });
     } catch (error: any) {
       console.error("[Strategy] Report error:", error.message);
       res.status(500).json({ error: error.message || "Failed to generate weekly report" });
@@ -736,14 +705,16 @@ Return JSON:
         return res.status(400).json({ error: "Run AI Analysis first to populate memory and patterns before scanning for moat candidates." });
       }
 
+      const activePlanId = await getActiveBlueprintId();
+
       const aiResponse = await aiChat({
         model: "gpt-5.2",
         messages: [
           {
             role: "system",
-            content: `You are a Brand Strategy Architect. Your mission is to identify long-term defensible brand advantages ("moats") from performance data and strategic memory.
+            content: `You are a Brand Strategy Architect operating as the MOAT INTELLIGENCE MODULE within the Performance Intelligence Layer.
 
-MOAT BUILDER MODE is now active. You must think like a long-term brand architect, NOT a short-term performance optimizer.
+Your mission is to identify long-term defensible brand advantages ("moats") from performance data and strategic memory. Your output feeds the active strategic plan as moat signals.
 
 Scan the memory bank and pattern insights to identify:
 1. HIGH STABILITY ANGLES - Content angles that consistently perform well over time (not one-hit wonders)
@@ -820,11 +791,25 @@ Return ONLY valid JSON:
         saved.push(record);
       }
 
+      await logAuditEvent({
+        accountId: "default",
+        campaignId: (req as any).campaignContext?.campaignId,
+        blueprintId: activePlanId || undefined,
+        event: "MOAT_SCAN_COMPLETED",
+        details: {
+          candidatesFound: saved.length,
+          planId: activePlanId,
+          signalSource: "moat_scan",
+          topScore: Math.max(...saved.map(s => s.moatScore || 0)),
+        },
+      });
+
       res.json({
         success: true,
         candidates: saved,
         scanSummary: result.scanSummary,
         topOpportunity: result.topOpportunity,
+        activePlanId,
       });
     } catch (error: any) {
       console.error("[Moat] Scan error:", error.message);
@@ -968,7 +953,7 @@ Return ONLY valid JSON:
       const ipContribution = activeSeries > 0 ? Math.min(100, Math.round(activeSeries * 20 + avgMoatStrength * 30)) : 0;
 
       res.json({
-        mode: "MOAT BUILDER",
+        mode: "PERFORMANCE_INTELLIGENCE",
         scores: {
           authority: Math.round(avgAuthority * 100),
           differentiation: Math.round(avgDifferentiation * 100),
@@ -990,12 +975,13 @@ Return ONLY valid JSON:
 
   app.get("/api/strategy/dashboard", requireCampaign, async (req, res) => {
     try {
-      const [averages, recentInsights, recentDecisions, memoryItems, activeCampaigns, latestReport] = await Promise.all([
+      const activePlanId = await getActiveBlueprintId();
+
+      const [averages, recentInsights, recentDecisions, memoryItems, latestReport] = await Promise.all([
         getAccountAverages(),
         db.select().from(strategyInsights).where(eq(strategyInsights.isActive, true)).orderBy(desc(strategyInsights.createdAt)).limit(5),
         db.select().from(strategyDecisions).orderBy(desc(strategyDecisions.createdAt)).limit(5),
         db.select().from(strategyMemory).orderBy(desc(strategyMemory.updatedAt)).limit(10),
-        db.select().from(growthCampaigns).where(eq(growthCampaigns.isActive, true)),
         db.select().from(weeklyReports).orderBy(desc(weeklyReports.createdAt)).limit(1),
       ]);
 
@@ -1003,11 +989,12 @@ Return ONLY valid JSON:
       const losers = memoryItems.filter(m => !m.isWinner);
 
       res.json({
+        mode: "PERFORMANCE_INTELLIGENCE",
+        activePlanId,
         averages,
         recentInsights,
         recentDecisions,
         memory: { winners, losers, total: memoryItems.length },
-        activeCampaigns,
         latestReport: latestReport[0] || null,
       });
     } catch (error) {
@@ -1046,17 +1033,14 @@ function generateDemoPerformanceData(campaignId: string = "demo_lead_gen_001", a
       comments: Math.round((2 + Math.random() * 40) * base),
       clicks: Math.round((10 + Math.random() * 200) * base),
       watchTime: Math.round((5 + Math.random() * 45) * 10) / 10,
-      retentionRate: Math.round((20 + Math.random() * 70) * 10) / 10,
+      retentionRate: Math.round((20 + Math.random() * 60) * 10) / 10,
       ctr: Math.round((0.5 + Math.random() * 5) * 100) / 100,
       cpm: Math.round((3 + Math.random() * 15) * 100) / 100,
       cpc: Math.round((0.1 + Math.random() * 2) * 100) / 100,
       cpa: Math.round((5 + Math.random() * 40) * 100) / 100,
-      roas: Math.round((0.5 + Math.random() * 6) * 100) / 100,
-      spend: Math.round((10 + Math.random() * 200) * 100) / 100,
-      conversions: Math.round((0 + Math.random() * 15) * base),
+      roas: Math.round((0.5 + Math.random() * 8) * 100) / 100,
+      conversions: Math.round(Math.random() * 20 * base),
       audienceAge: ages[Math.floor(Math.random() * ages.length)],
-      audienceGender: Math.random() > 0.5 ? 'female' : 'male',
-      audienceLocation: Math.random() > 0.5 ? 'Dubai' : 'Abu Dhabi',
       campaignId,
       accountId,
       publishedAt: new Date(now - i * 24 * 60 * 60 * 1000),
