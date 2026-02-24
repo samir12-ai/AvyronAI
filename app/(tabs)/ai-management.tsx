@@ -24,7 +24,6 @@ import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl } from '@/lib/query-client';
-import StrategyHub from '@/components/StrategyHub';
 import LeadControlPanel from '@/components/LeadControlPanel';
 import StrategicPipeline from '@/components/StrategicPipeline';
 import BuildThePlan from '@/components/BuildThePlan';
@@ -50,7 +49,7 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'control' | 'publisher' | 'audience' | 'strategy' | 'leads';
+type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'control' | 'publisher' | 'audience' | 'leads';
 type IntelSubTab = 'analysis' | 'dominance';
 
 function PulseRing({ color }: { color: string }) {
@@ -592,7 +591,6 @@ export default function AIManagementScreen() {
             { key: 'control' as TabView, icon: 'shield-checkmark-outline' as const, label: 'Control', color: '#8B5CF6', advanced: false },
             { key: 'publisher' as TabView, icon: 'send-outline' as const, label: 'Publish', color: colors.primary, advanced: false },
             { key: 'audience' as TabView, icon: 'people-outline' as const, label: 'Audience', color: colors.primary, advanced: true },
-            { key: 'strategy' as TabView, icon: 'analytics-outline' as const, label: 'Strategy', color: colors.primary, advanced: true },
             { key: 'leads' as TabView, icon: 'magnet-outline' as const, label: 'Leads', color: '#8B5CF6', advanced: true },
           ] as const)
             .filter(t => !t.advanced || advancedMode)
@@ -619,8 +617,7 @@ export default function AIManagementScreen() {
           : activeTab === 'control' ? renderControlCenter()
           : activeTab === 'publisher' ? renderPublisher()
           : activeTab === 'audience' ? <CampaignGuard>{renderAudienceManager()}</CampaignGuard>
-          : activeTab === 'leads' ? <CampaignGuard><LeadControlPanel /></CampaignGuard>
-          : <CampaignGuard><StrategyHub /></CampaignGuard>}
+          : <CampaignGuard><LeadControlPanel /></CampaignGuard>}
 
         <View style={{ height: 120 }} />
       </ScrollView>

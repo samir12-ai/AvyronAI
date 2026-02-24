@@ -122,6 +122,10 @@ export default function BuildThePlan() {
   const [seeding, setSeeding] = useState(false);
   const [seedResult, setSeedResult] = useState<any>(null);
 
+  const [piData, setPiData] = useState<any>(null);
+  const [piLoading, setPiLoading] = useState(false);
+  const [piExpanded, setPiExpanded] = useState(false);
+
   const isMetaReal = metaConnection?.isConnected === true;
 
   const seedDemoCampaign = useCallback(async () => {
@@ -1433,6 +1437,162 @@ export default function BuildThePlan() {
             </View>
           );
         })}
+
+        {renderPerformanceIntelligence()}
+      </View>
+    );
+  };
+
+  const loadPerformanceIntelligence = async () => {
+    setPiLoading(true);
+    try {
+      const baseUrl = getApiUrl();
+      const res = await fetch(new URL('/api/strategy/dashboard', baseUrl).toString());
+      if (res.ok) {
+        const data = await res.json();
+        setPiData(data);
+      }
+    } catch (err) {
+      console.log('[PI] Load failed:', err);
+    } finally {
+      setPiLoading(false);
+    }
+  };
+
+  const renderPerformanceIntelligence = () => {
+    return (
+      <View style={{ marginTop: 16 }}>
+        <Pressable
+          onPress={() => {
+            Haptics.selectionAsync();
+            setPiExpanded(!piExpanded);
+            if (!piExpanded && !piData) loadPerformanceIntelligence();
+          }}
+          style={[s.execCard, { backgroundColor: colors.card, borderColor: '#6366F140' }]}
+        >
+          <View style={s.execHeader}>
+            <View style={[s.phaseIconWrap, { backgroundColor: '#6366F120' }]}>
+              <Ionicons name="pulse" size={18} color="#6366F1" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.execTitle, { color: colors.text }]}>Performance Intelligence</Text>
+              <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
+                Signal layer from past performance data
+              </Text>
+            </View>
+            <Ionicons
+              name={piExpanded ? 'chevron-up' : 'chevron-down'}
+              size={18}
+              color={colors.textSecondary}
+            />
+          </View>
+        </Pressable>
+
+        {piExpanded && (
+          <View style={{ gap: 10 }}>
+            {piLoading ? (
+              <View style={[s.execCard, { backgroundColor: colors.card, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 24 }]}>
+                <ActivityIndicator size="small" color="#6366F1" />
+                <Text style={[s.execItemDesc, { color: colors.textSecondary, marginTop: 8 }]}>Loading signals...</Text>
+              </View>
+            ) : piData ? (
+              <>
+                {piData.recentInsights?.length > 0 && (
+                  <View style={[s.execCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                    <View style={s.execHeader}>
+                      <Ionicons name="bulb" size={16} color="#F59E0B" />
+                      <Text style={[s.execTitle, { color: colors.text }]}>Recent Insights ({piData.recentInsights.length})</Text>
+                    </View>
+                    {piData.recentInsights.slice(0, 5).map((ins: any, i: number) => (
+                      <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <View style={[s.badge, { backgroundColor: '#F59E0B20' }]}>
+                            <Text style={[s.badgeText, { color: '#F59E0B' }]}>{ins.category}</Text>
+                          </View>
+                          {ins.confidence >= 0.7 && (
+                            <View style={[s.badge, { backgroundColor: '#10B98120' }]}>
+                              <Text style={[s.badgeText, { color: '#10B981' }]}>{Math.round(ins.confidence * 100)}%</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={[s.execItemDesc, { color: colors.textSecondary, marginTop: 4 }]}>{ins.insight}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {(piData.memory?.winners?.length > 0 || piData.memory?.losers?.length > 0) && (
+                  <View style={[s.execCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                    <View style={s.execHeader}>
+                      <Ionicons name="library" size={16} color="#8B5CF6" />
+                      <Text style={[s.execTitle, { color: colors.text }]}>Strategic Memory</Text>
+                    </View>
+                    {piData.memory.winners?.slice(0, 3).map((m: any, i: number) => (
+                      <View key={`w${i}`} style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+                          <Text style={[s.execItemTitle, { color: '#10B981' }]}>{m.label}</Text>
+                        </View>
+                        <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>{m.memoryType}</Text>
+                      </View>
+                    ))}
+                    {piData.memory.losers?.slice(0, 3).map((m: any, i: number) => (
+                      <View key={`l${i}`} style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Ionicons name="close-circle" size={14} color="#EF4444" />
+                          <Text style={[s.execItemTitle, { color: '#EF4444' }]}>{m.label}</Text>
+                        </View>
+                        <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>{m.memoryType}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {piData.recentDecisions?.length > 0 && (
+                  <View style={[s.execCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                    <View style={s.execHeader}>
+                      <Ionicons name="flash" size={16} color="#EC4899" />
+                      <Text style={[s.execTitle, { color: colors.text }]}>Recent Recommendations ({piData.recentDecisions.length})</Text>
+                    </View>
+                    {piData.recentDecisions.slice(0, 3).map((d: any, i: number) => (
+                      <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                        <Text style={[s.execItemTitle, { color: colors.text }]}>{d.action}</Text>
+                        <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>{d.reason}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {piData.activePlanId && (
+                  <View style={[s.execCard, { backgroundColor: '#6366F110', borderColor: '#6366F130' }]}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Ionicons name="link" size={14} color="#6366F1" />
+                      <Text style={{ color: '#6366F1', fontSize: 12, fontWeight: '600' }}>
+                        Signals feeding active plan
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+                {!piData.recentInsights?.length && !piData.memory?.total && !piData.recentDecisions?.length && (
+                  <View style={[s.execCard, { backgroundColor: colors.card, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 20 }]}>
+                    <Ionicons name="analytics-outline" size={32} color={colors.textMuted} />
+                    <Text style={[s.execItemDesc, { color: colors.textSecondary, marginTop: 8, textAlign: 'center' }]}>
+                      No performance signals yet. Sync performance data and run analysis to generate insights.
+                    </Text>
+                  </View>
+                )}
+              </>
+            ) : (
+              <View style={[s.execCard, { backgroundColor: colors.card, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 20 }]}>
+                <Ionicons name="analytics-outline" size={32} color={colors.textMuted} />
+                <Text style={[s.execItemDesc, { color: colors.textSecondary, marginTop: 8, textAlign: 'center' }]}>
+                  No performance data available.
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
       </View>
     );
   };
