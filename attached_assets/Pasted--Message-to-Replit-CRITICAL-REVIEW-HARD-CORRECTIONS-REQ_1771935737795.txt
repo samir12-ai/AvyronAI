@@ -1,0 +1,196 @@
+📩 Message to Replit — CRITICAL REVIEW & HARD CORRECTIONS REQUIRED
+
+We are not celebrating yet.
+
+The consolidation was implemented, but I need strict validation because silent architectural errors at this stage are catastrophic.
+
+I am listing critical risk points below.
+You must address each one explicitly with proof, not explanation.
+
+No assumptions. No “should work”. Only verified behavior.
+
+⸻
+
+1️⃣ SHADOW TRACK RISK (CRITICAL)
+
+Even though growth campaigns were removed, I need absolute confirmation that Strategy cannot create a parallel strategic flow in any form.
+
+Check and confirm:
+	•	No /api/strategy/* endpoint returns actionable execution objects (tasks, angles, calendar-ready items, campaign structures).
+	•	No endpoint returns a “plan-like” structure outside BTP.
+	•	No Strategy output can be executed without passing through BTP approval.
+
+If any endpoint returns structured action steps without referencing planId, this is still a parallel track.
+
+Required Proof:
+	•	List every POST endpoint under /api/strategy/.
+	•	Show their exact response structure.
+	•	Confirm which include planId.
+	•	Confirm none return execution artifacts.
+
+⸻
+
+2️⃣ ORCHESTRATOR INJECTION VALIDATION (NO FAKE INTEGRATION)
+
+You injected performance intelligence into the orchestrator.
+
+Now prove it works.
+
+I need:
+	1.	A deterministic comparison test:
+	•	Run orchestrator with strategy tables empty → capture output.
+	•	Insert high-confidence strategy signals → run again.
+	•	Show the structural delta in output.
+	2.	Explicit prompt logging:
+	•	Show the exact prompt sent to GPT when signals are present.
+	•	Show the prompt when absent.
+	•	Highlight the injected block.
+
+If injection does not materially change output, then the integration is cosmetic.
+
+No theoretical explanation. Show evidence.
+
+⸻
+
+3️⃣ MEMORY ISOLATION RISK
+
+strategy_memory must not become uncontrolled bias.
+
+Confirm:
+	•	Is memory scoped per campaign?
+	•	Is memory scoped per account?
+	•	Is memory ever mixed across plans?
+
+If memory is global and unscoped, this can contaminate new plans with irrelevant history.
+
+Required:
+	•	Clarify scoping model.
+	•	If global, propose containment mechanism immediately.
+
+⸻
+
+4️⃣ AUDIT TRAIL COMPLETENESS
+
+You added PERFORMANCE_SIGNAL_PROPOSED and others.
+
+Now confirm:
+	•	Every time Strategy affects BTP, an audit event is written.
+	•	The audit entry includes:
+	•	planId
+	•	signal source
+	•	confidence score
+	•	timestamp
+
+If there is any performance influence without audit trace, this violates system transparency.
+
+Show:
+	•	Example audit row after orchestrator generation with signals.
+
+⸻
+
+5️⃣ UI SINGLE TRACK ENFORCEMENT
+
+Strategy tab is removed.
+
+Now confirm:
+	•	No hidden navigation path exists to StrategyHub.
+	•	StrategyHub.tsx is not imported anywhere.
+	•	No deep link can open Strategy standalone.
+	•	No orphan component still calling strategy endpoints independently.
+
+Provide:
+	•	Static scan result showing StrategyHub not referenced.
+	•	Confirmation that only BuildThePlan displays performance intelligence.
+
+⸻
+
+6️⃣ EXECUTION AUTHORITY PROTECTION
+
+Confirm:
+	•	Only BTP creates strategic_plans.
+	•	Only BTP creates required_work.
+	•	Only BTP creates calendar_entries.
+	•	Only BTP generates studio_items.
+
+If any /api/strategy/ route touches these tables directly or indirectly, this violates single track enforcement.
+
+Provide:
+	•	Static scan result for references in strategy-routes.ts.
+
+⸻
+
+7️⃣ AI PROMPT COMPLEXITY CHECK
+
+By injecting performance intelligence into the orchestrator prompt, you increased prompt size and complexity.
+
+Confirm:
+	•	max_tokens remains within safe limits.
+	•	Prompt size does not exceed practical token boundaries.
+	•	Performance signals are bounded (e.g., top 3 insights only, not full memory dump).
+
+If signals are unbounded, this can cause:
+	•	Token overflow
+	•	Unpredictable model behavior
+	•	Cost spikes
+
+Provide:
+	•	Estimated token size of injected block.
+
+⸻
+
+8️⃣ DEAD CODE VERIFICATION
+
+You removed growth campaigns and the Strategy tab.
+
+Now confirm:
+	•	No orphan routes remain registered.
+	•	No unreachable endpoints exist.
+	•	No unused tables remain actively written to.
+
+List:
+	•	All remaining /api/strategy/* routes after cleanup.
+
+⸻
+
+9️⃣ REGRESSION PROTECTION
+
+Run full regression:
+	•	Build a plan from scratch.
+	•	Approve it.
+	•	Execute.
+	•	Generate required_work.
+	•	Generate studio items.
+	•	Trigger AI control.
+	•	Emergency stop.
+	•	Resume.
+
+Confirm:
+	•	No step breaks due to consolidation.
+	•	No missing dependency.
+
+Provide summary of execution test.
+
+⸻
+
+FINAL CONDITION
+
+We are only done when:
+	•	There is one execution authority.
+	•	No shadow track exists.
+	•	No performance intelligence can bypass approval.
+	•	No unscoped memory contaminates plans.
+	•	Every influence is audit logged.
+	•	Every injection is measurable.
+	•	No duplicate lifecycle exists.
+
+Do not respond with “architecture looks correct.”
+
+Respond with:
+	•	Evidence
+	•	Scan outputs
+	•	Before/after comparisons
+	•	Explicit confirmations
+
+This is structural governance validation.
+
+Not cosmetic review.
