@@ -83,13 +83,17 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
 
   try {
     const openai = getOpenAI();
+    const isGpt5 = rest.model.startsWith("gpt-5");
+    const tokenParam = isGpt5
+      ? { max_completion_tokens: rest.max_tokens }
+      : { max_tokens: rest.max_tokens };
     const result = await openai.chat.completions.create({
       model: rest.model,
       messages: rest.messages as any,
-      max_tokens: rest.max_tokens,
+      ...tokenParam,
       temperature: rest.temperature,
       response_format: rest.response_format,
-    });
+    } as any);
 
     success = true;
     actualTokens = result.usage?.total_tokens || rest.max_tokens;
