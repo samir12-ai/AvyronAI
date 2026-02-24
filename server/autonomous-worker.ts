@@ -10,7 +10,9 @@ import {
   campaignSelections,
 } from "@shared/schema";
 
-import { eq, and, sql, desc, gte, lte } from "drizzle-orm";
+import { eq, and, sql, desc, gte, lte, ne } from "drizzle-orm";
+
+const LEGACY_CAMPAIGN = "unscoped_legacy";
 import { logAudit } from "./audit";
 import { FeatureFlagService } from "./feature-flags";
 import { computeRollingBaselines } from "./baselines";
@@ -107,21 +109,23 @@ async function runStrategyAnalysis(
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const activeCampaignId = await getActiveCampaignId(accountId);
 
-  const memoryWhereClause = activeCampaignId
-    ? and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, activeCampaignId))
-    : eq(strategyMemory.accountId, accountId);
-
   const [recentPerformance, memoryItems, recentPublished] = await Promise.all([
     db.select()
       .from(performanceSnapshots)
       .where(gte(performanceSnapshots.fetchedAt, sevenDaysAgo))
       .orderBy(desc(performanceSnapshots.fetchedAt))
       .limit(30),
-    db.select()
-      .from(strategyMemory)
-      .where(memoryWhereClause)
-      .orderBy(desc(strategyMemory.updatedAt))
-      .limit(20),
+    activeCampaignId
+      ? db.select()
+          .from(strategyMemory)
+          .where(and(
+            eq(strategyMemory.accountId, accountId),
+            eq(strategyMemory.campaignId, activeCampaignId),
+            ne(strategyMemory.campaignId, LEGACY_CAMPAIGN)
+          ))
+          .orderBy(desc(strategyMemory.updatedAt))
+          .limit(20)
+      : Promise.resolve([]),
     db.select()
       .from(publishedPosts)
       .where(
