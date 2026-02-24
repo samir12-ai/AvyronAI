@@ -94,6 +94,11 @@ Preferred communication style: Simple, everyday language.
 - **Publish Worker**: Requires `meta_mode=REAL` for publishing, no silent demo fallbacks.
 - **Middleware**: `requireMetaReal` guards all publishing/insights endpoints.
 
+### Audit & Control System (Feb 2026)
+- **Backend**: `server/audit-routes.ts` — 6 GET endpoints (feed, ai-usage, gates, decisions, publish-history, jobs) + 2 POST endpoints (autopilot toggle, emergency-stop). All endpoints return strict JSON contracts `{success, data}` / `{success:false, code, message}`. Keyset pagination on feed (cursor-based, no OFFSET). Performance guards with LIMIT enforcement and max caps (50-200). Registered in `server/routes.ts`.
+- **Frontend**: `components/ControlCenter.tsx` — 5-panel dashboard (System Gates, AI Token Budget, Recent Activity, Decisions, Worker/Jobs). Each panel implements strict 4-state rendering (Loading/Empty/Error/Success). Autopilot toggle and Emergency Stop wired to real POST endpoints with DB persistence. Advanced Mode (advancedMode gate) enables: module filters on audit feed, per-model token breakdown, worker/jobs panel.
+- **Database Indexes**: Verified EXPLAIN plans confirm index usage on audit_log (account_id, created_at), ai_usage_log (account_id, created_at), job_queue (status, account_id), strategic_plans (status, blueprint_id).
+
 ### Social Platforms
 - **Instagram, Facebook**: Integrated via Meta Business Suite.
 - **Twitter, LinkedIn, TikTok**: Connection management in settings; API integrations planned.
