@@ -344,9 +344,14 @@ Return ONLY valid JSON with this structure:
         return res.status(500).json({ error: "AI analysis failed to produce valid results" });
       }
 
+      const accountId = (req.query.accountId as string) || "default";
+      const cId = campaignContext.campaignId;
+
       if (analysis.insights?.length) {
         for (const ins of analysis.insights) {
           await db.insert(strategyInsights).values({
+            accountId,
+            campaignId: cId,
             category: ins.category,
             insight: ins.insight,
             confidence: ins.confidence || 0,
@@ -362,6 +367,7 @@ Return ONLY valid JSON with this structure:
       if (decisions.length) {
         for (const dec of decisions) {
           await db.insert(strategyDecisions).values({
+            accountId,
             trigger: dec.trigger,
             action: dec.action,
             reason: dec.reason,
@@ -375,6 +381,8 @@ Return ONLY valid JSON with this structure:
       if (analysis.memoryUpdates?.length) {
         for (const mem of analysis.memoryUpdates) {
           await db.insert(strategyMemory).values({
+            accountId,
+            campaignId: cId,
             memoryType: mem.memoryType,
             label: mem.label,
             details: mem.details,
@@ -578,6 +586,8 @@ Return JSON:
       if (report.selfImprovements?.length) {
         for (const improvement of report.selfImprovements) {
           await db.insert(strategyMemory).values({
+            accountId: "default",
+            campaignId: campaignContext.campaignId,
             memoryType: "self_improvement",
             label: improvement,
             details: `Auto-generated improvement from weekly report on ${now.toISOString().split('T')[0]}`,
@@ -778,6 +788,8 @@ Return ONLY valid JSON:
       const saved = [];
       for (const c of result.candidates) {
         const [record] = await db.insert(moatCandidates).values({
+          accountId: "default",
+          campaignId: (req as any).campaignContext?.campaignId,
           sourceType: c.sourceType || "winning_angle",
           label: c.label,
           description: c.description,
