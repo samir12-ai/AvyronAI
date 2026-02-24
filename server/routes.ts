@@ -16,6 +16,7 @@ import { registerCompetitiveIntelligenceRoutes } from "./competitive-intelligenc
 import { registerStrategicCoreRoutes } from "./strategic-core";
 import { registerCampaignRoutes, requireCampaign } from "./campaign-routes";
 import { registerMetaStatusRoutes, requireMetaReal, getDecryptedPageToken } from "./meta-status";
+import { registerAuditRoutes } from "./audit-routes";
 import { storeTokensAfterOAuth, runAllHealthChecks } from "./meta-token-manager";
 import { redactToken } from "./meta-crypto";
 import { initMetaMetrics } from "./meta-metrics";
@@ -1343,6 +1344,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerCompetitiveIntelligenceRoutes(app);
   registerStrategicCoreRoutes(app);
   registerMetaStatusRoutes(app);
+  registerAuditRoutes(app);
 
   initMetaMetrics();
 
