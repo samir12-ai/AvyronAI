@@ -14,9 +14,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { getApiUrl } from '@/lib/query-client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useCreativeContext } from '@/context/CreativeContext';
+import { useApp } from '@/context/AppContext';
 
 interface Competitor {
   id: string;
@@ -118,6 +121,10 @@ export default function CompetitiveIntelligence() {
   const colors = isDark ? Colors.dark : Colors.light;
   const queryClient = useQueryClient();
   const baseUrl = getApiUrl();
+  const router = useRouter();
+  const { setCreativeContext } = useCreativeContext();
+  const { brandProfile } = useApp();
+  const [loadingReelsFor, setLoadingReelsFor] = useState<string | null>(null);
 
   const [activeView, setActiveView] = useState<CIView>('overview');
   const [showAddCompetitor, setShowAddCompetitor] = useState(false);
@@ -346,6 +353,64 @@ export default function CompetitiveIntelligence() {
   const latestAnalysis = analyses[0] || null;
   const pendingRecs = recommendations.filter(r => r.status === 'pending');
   const appliedRecs = recommendations.filter(r => r.status === 'applied');
+
+  const handleCreateReelsFromCI = useCallback(async (comp: Competitor) => {
+    setLoadingReelsFor(comp.id);
+    try {
+      const res = await fetch(new URL(`/api/dominance/analyses?accountId=default`, baseUrl).toString());
+      const data = await res.json();
+      const allAnalyses = data?.analyses || [];
+      const compAnalysis = allAnalyses
+        .filter((a: any) => a.competitorName === comp.name || a.competitorUrl === comp.profileLink)
+        .sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
+
+      if (!compAnalysis) {
+        Alert.alert('No Analysis Found', 'Run a Dominance Analysis for this competitor first (AI Management → Dominance Engine).');
+        return;
+      }
+
+      const offer = brandProfile?.industry
+        ? `${brandProfile.name || 'Our brand'} — ${brandProfile.industry}`
+        : brandProfile?.name || '';
+      const icp = brandProfile?.targetAudience || '';
+
+      if (!offer || !icp) {
+        Alert.alert('Missing Brand Info', 'Set your brand name/industry and target audience in Settings before generating scripts.');
+        return;
+      }
+
+      setCreativeContext({
+        source: 'CI',
+        competitorId: comp.id,
+        competitorName: comp.name,
+        snapshotId: compAnalysis.id,
+        snapshotCreatedAt: compAnalysis.createdAt || new Date().toISOString(),
+        intelligence: {
+          conversion_intelligence: compAnalysis.contentDissection?.conversion_intelligence || { conversion_style: 'none', cta_presence_score: 0 },
+          narrative_intelligence: compAnalysis.contentDissection?.narrative_intelligence || {},
+          performance_context: compAnalysis.contentDissection?.performance_context || { dominant_format: 'mixed', engagement_quality_score: 50 },
+          storytelling_intelligence: compAnalysis.contentDissection?.storytelling_intelligence || { storytelling_present: false, narrative_strategy_mode: 'none' },
+          dominance: compAnalysis.dominanceDelta || { dominance_state: 'NEUTRAL', dominance_score: 50 },
+          archetype: compAnalysis.contentDissection?.archetype || { primary: 'unknown' },
+        },
+        onboarding_context: {
+          location: 'Dubai, UAE',
+          market_type: brandProfile?.industry || 'general',
+          language: 'en',
+          primary_objective: comp.primaryObjective || 'engagement',
+        },
+        blueprint_context: { offer, icp },
+      });
+
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      router.push('/(tabs)/create');
+    } catch (err: any) {
+      console.error('[CI→Reels] Error:', err);
+      Alert.alert('Error', 'Failed to load analysis data.');
+    } finally {
+      setLoadingReelsFor(null);
+    }
+  }, [baseUrl, brandProfile, setCreativeContext, router]);
 
   const safeParseJSON = (str: string | null | undefined) => {
     if (!str) return null;
@@ -610,29 +675,43 @@ export default function CompetitiveIntelligence() {
                   <Text style={[s.detailValue, { color: colors.textSecondary }]} numberOfLines={2}>{item.value}</Text>
                 </View>
               ))}
-              <Pressable
-                onPress={() => {
-                  if (Platform.OS === 'web') {
-                    if (confirm(`Remove ${comp.name}?`)) {
-                      deleteCompetitorMutation.mutate(comp.id);
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                <Pressable
+                  onPress={() => handleCreateReelsFromCI(comp)}
+                  disabled={loadingReelsFor === comp.id}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#8B5CF6' + '15', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#8B5CF6' + '30', flex: 1 }}
+                >
+                  {loadingReelsFor === comp.id ? (
+                    <ActivityIndicator size="small" color="#8B5CF6" />
+                  ) : (
+                    <Ionicons name="videocam-outline" size={14} color="#8B5CF6" />
+                  )}
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: '#8B5CF6' }}>Create Reels Scripts</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    if (Platform.OS === 'web') {
+                      if (confirm(`Remove ${comp.name}?`)) {
+                        deleteCompetitorMutation.mutate(comp.id);
+                      }
+                    } else {
+                      Alert.alert('Remove Competitor', `Remove ${comp.name}?`, [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Remove', style: 'destructive', onPress: () => deleteCompetitorMutation.mutate(comp.id) },
+                      ]);
                     }
-                  } else {
-                    Alert.alert('Remove Competitor', `Remove ${comp.name}?`, [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Remove', style: 'destructive', onPress: () => deleteCompetitorMutation.mutate(comp.id) },
-                    ]);
-                  }
-                }}
-                style={s.removeBtn}
-                disabled={deleteCompetitorMutation.isPending}
-              >
-                {deleteCompetitorMutation.isPending ? (
-                  <ActivityIndicator size="small" color="#EF4444" />
-                ) : (
-                  <Ionicons name="trash-outline" size={14} color="#EF4444" />
-                )}
-                <Text style={[s.removeBtnText, { color: '#EF4444' }]}>Remove</Text>
-              </Pressable>
+                  }}
+                  style={s.removeBtn}
+                  disabled={deleteCompetitorMutation.isPending}
+                >
+                  {deleteCompetitorMutation.isPending ? (
+                    <ActivityIndicator size="small" color="#EF4444" />
+                  ) : (
+                    <Ionicons name="trash-outline" size={14} color="#EF4444" />
+                  )}
+                  <Text style={[s.removeBtnText, { color: '#EF4444' }]}>Remove</Text>
+                </Pressable>
+              </View>
             </View>
           )}
         </View>
