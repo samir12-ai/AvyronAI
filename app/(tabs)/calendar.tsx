@@ -155,11 +155,49 @@ export default function CalendarScreen() {
     }
   }, [fetchCalendarEntries]);
 
+  const [resettingFailed, setResettingFailed] = useState(false);
+
   const dbEntryStats = useMemo(() => {
     const total = dbCalendarEntries.length;
-    const generated = dbCalendarEntries.filter(e => e.status !== 'DRAFT').length;
-    return { total, generated, remaining: total - generated };
+    const generated = dbCalendarEntries.filter(e => !['DRAFT', 'FAILED'].includes(e.status)).length;
+    const failed = dbCalendarEntries.filter(e => e.status === 'FAILED').length;
+    return { total, generated, failed, remaining: total - generated - failed };
   }, [dbCalendarEntries]);
+
+  const handleResetAllFailed = useCallback(async () => {
+    if (!dbPlanId) return;
+    Alert.alert(
+      'Reset Failed Entries',
+      `This will reset ${dbEntryStats.failed} failed entries back to draft so you can retry generating them.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset All',
+          onPress: async () => {
+            setResettingFailed(true);
+            try {
+              const baseUrl = getApiUrl();
+              const res = await fetch(new URL(`/api/execution/plans/${dbPlanId}/reset-failed`, baseUrl).toString(), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+              });
+              const data = await res.json();
+              if (data.success) {
+                Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                fetchCalendarEntries();
+              } else {
+                Alert.alert('Error', data.message || 'Reset failed');
+              }
+            } catch (err: any) {
+              Alert.alert('Error', err.message);
+            } finally {
+              setResettingFailed(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [dbPlanId, dbEntryStats.failed, fetchCalendarEntries]);
 
   const postTypes = postTypesDef.map(pt => ({ ...pt, label: t(pt.labelKey) }));
   const days = Array.from({length: 7}, (_, i) => t(`calendar.days.${i}`));
@@ -830,15 +868,41 @@ export default function CalendarScreen() {
           {selectedDbEntries.length > 0 && (
             <View style={styles.scheduleList}>
               {dbPlanId && (
-                <View style={[styles.dbEntriesHeader, { backgroundColor: colors.primary + '08', borderColor: colors.primary + '20' }]}>
-                  <Ionicons name="git-branch-outline" size={14} color={colors.primary} />
-                  <Text style={[styles.dbEntriesHeaderText, { color: colors.primary }]}>
-                    Plan-driven content
-                  </Text>
-                  {dbEntryStats.total > 0 && (
-                    <Text style={[styles.dbEntriesCounter, { color: colors.textMuted }]}>
-                      {dbEntryStats.generated}/{dbEntryStats.total} generated
+                <View>
+                  <View style={[styles.dbEntriesHeader, { backgroundColor: colors.primary + '08', borderColor: colors.primary + '20' }]}>
+                    <Ionicons name="git-branch-outline" size={14} color={colors.primary} />
+                    <Text style={[styles.dbEntriesHeaderText, { color: colors.primary }]}>
+                      Plan-driven content
                     </Text>
+                    {dbEntryStats.total > 0 && (
+                      <Text style={[styles.dbEntriesCounter, { color: colors.textMuted }]}>
+                        {dbEntryStats.generated}/{dbEntryStats.total} generated
+                      </Text>
+                    )}
+                  </View>
+                  {dbEntryStats.failed > 0 && (
+                    <View style={[styles.failedResetBar, { backgroundColor: '#FF6B6B10', borderColor: '#FF6B6B30' }]}>
+                      <View style={styles.failedResetInfo}>
+                        <Ionicons name="warning" size={14} color="#FF6B6B" />
+                        <Text style={{ color: '#FF6B6B', fontSize: 12, fontWeight: '600' }}>
+                          {dbEntryStats.failed} failed
+                        </Text>
+                      </View>
+                      <Pressable
+                        onPress={handleResetAllFailed}
+                        disabled={resettingFailed}
+                        style={[styles.resetAllBtn, { opacity: resettingFailed ? 0.6 : 1 }]}
+                      >
+                        {resettingFailed ? (
+                          <ActivityIndicator size="small" color="#FF6B6B" />
+                        ) : (
+                          <>
+                            <Ionicons name="refresh" size={13} color="#FF6B6B" />
+                            <Text style={{ color: '#FF6B6B', fontSize: 12, fontWeight: '700' }}>Reset All Failed</Text>
+                          </>
+                        )}
+                      </Pressable>
+                    </View>
                   )}
                 </View>
               )}
@@ -1364,6 +1428,30 @@ const styles = StyleSheet.create({
   dbEntriesCounter: {
     fontSize: 11,
     fontFamily: 'Inter_500Medium',
+  },
+  failedResetBar: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 6,
+  },
+  failedResetInfo: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+  },
+  resetAllBtn: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#FF6B6B15',
   },
   generateEntryBtn: {
     flexDirection: 'row' as const,

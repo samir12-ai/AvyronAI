@@ -324,6 +324,41 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
     }
   }, [fetchDashboard, fetchProgress]);
 
+  const handleResetFailed = useCallback(async (planId: string) => {
+    Alert.alert(
+      'Reset Failed Entries',
+      'This will reset all failed entries back to draft so you can retry them from the Calendar.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset All Failed',
+          onPress: async () => {
+            setActionLoading('reset-failed');
+            try {
+              const res = await fetch(getApiUrl(`/api/execution/plans/${planId}/reset-failed`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+              });
+              const data = await res.json();
+              if (data.success) {
+                Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                Alert.alert('Reset Complete', `${data.resetCount} entries reset to draft. Go to Calendar to retry.`);
+                fetchDashboard();
+                fetchProgress(planId);
+              } else {
+                Alert.alert('Error', data.message || 'Reset failed');
+              }
+            } catch (err: any) {
+              Alert.alert('Error', err.message);
+            } finally {
+              setActionLoading(null);
+            }
+          },
+        },
+      ]
+    );
+  }, [fetchDashboard, fetchProgress]);
+
   const renderApprovalContent = () => {
     if (loading) {
       return (
@@ -513,6 +548,48 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
                 <Text style={[s.statLabel, { color: colors.textMuted }]}>{stat.label}</Text>
               </View>
             ))}
+          </View>
+        )}
+
+        {progress && progress.failed > 0 && (
+          <View style={[s.failedBanner, { backgroundColor: '#FF6B6B15', borderColor: '#FF6B6B40' }]}>
+            <View style={s.failedBannerHeader}>
+              <Ionicons name="warning" size={18} color="#FF6B6B" />
+              <Text style={[s.failedBannerTitle, { color: '#FF6B6B' }]}>
+                {progress.failed} Failed {progress.failed === 1 ? 'Entry' : 'Entries'}
+              </Text>
+            </View>
+            <Text style={[s.failedBannerDesc, { color: colors.textSecondary }]}>
+              Reset failed entries to draft, then retry them one by one from the Calendar tab.
+            </Text>
+            <View style={s.failedBannerActions}>
+              <Pressable
+                style={[s.resetFailedBtn, { opacity: actionLoading === 'reset-failed' ? 0.6 : 1 }]}
+                onPress={() => handleResetFailed(activePlan.id)}
+                disabled={!!actionLoading}
+              >
+                <LinearGradient colors={['#FF6B6B', '#EF4444']} style={s.resetFailedBtnGrad}>
+                  {actionLoading === 'reset-failed' ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons name="refresh" size={16} color="#fff" />
+                      <Text style={s.resetFailedBtnText}>Reset All Failed</Text>
+                    </>
+                  )}
+                </LinearGradient>
+              </Pressable>
+              <Pressable
+                style={s.goToCalBtn}
+                onPress={() => {
+                  Platform.OS !== 'web' && Haptics.selectionAsync();
+                  router.push('/(tabs)/calendar');
+                }}
+              >
+                <Ionicons name="calendar-outline" size={16} color="#A78BFA" />
+                <Text style={[s.goToCalBtnText, { color: '#A78BFA' }]}>Open Calendar</Text>
+              </Pressable>
+            </View>
           </View>
         )}
 
@@ -1116,5 +1193,61 @@ const s = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '700',
+  },
+  failedBanner: {
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 14,
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  failedBannerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  failedBannerTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  failedBannerDesc: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  failedBannerActions: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'center',
+  },
+  resetFailedBtn: {
+    borderRadius: 8,
+    overflow: 'hidden',
+    flex: 1,
+  },
+  resetFailedBtnGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  resetFailedBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  goToCalBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  goToCalBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

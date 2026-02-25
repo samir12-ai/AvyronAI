@@ -848,6 +848,49 @@ export function registerExecutionRoutes(app: Express) {
     }
   });
 
+  app.post("/api/execution/plans/:planId/reset-failed", async (req: Request, res: Response) => {
+    try {
+      const { planId } = req.params;
+
+      const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
+      if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+
+      const failedEntries = await db
+        .select()
+        .from(calendarEntries)
+        .where(and(eq(calendarEntries.planId, planId), eq(calendarEntries.status, "FAILED")));
+
+      if (failedEntries.length === 0) {
+        return res.json({ success: true, message: "No failed entries to reset.", resetCount: 0 });
+      }
+
+      await db
+        .update(calendarEntries)
+        .set({ status: "DRAFT", errorReason: null, updatedAt: new Date() })
+        .where(and(eq(calendarEntries.planId, planId), eq(calendarEntries.status, "FAILED")));
+
+      const failedItemIds = failedEntries.map(e => e.id);
+      for (const entryId of failedItemIds) {
+        await db
+          .delete(studioItems)
+          .where(and(eq(studioItems.calendarEntryId, entryId), eq(studioItems.status, "FAILED")));
+      }
+
+      await db
+        .update(strategicPlans)
+        .set({ executionStatus: "IDLE", totalFailed: 0, updatedAt: new Date() })
+        .where(eq(strategicPlans.id, planId));
+
+      await logAudit(plan.accountId, "FAILED_ENTRIES_RESET", {
+        details: { planId, resetCount: failedEntries.length },
+      });
+
+      res.json({ success: true, resetCount: failedEntries.length, message: `Reset ${failedEntries.length} failed entries to DRAFT.` });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/execution/plans/:planId/progress", async (req: Request, res: Response) => {
     try {
       const { planId } = req.params;
@@ -863,9 +906,13 @@ export function registerExecutionRoutes(app: Express) {
       const published = items.filter((i) => i.status === "PUBLISHED").length;
       const scheduled = items.filter((i) => i.status === "SCHEDULED").length;
       const ready = items.filter((i) => i.status === "READY").length;
-      const failed = items.filter((i) => i.status === "FAILED").length;
+      const studioFailed = items.filter((i) => i.status === "FAILED").length;
       const draft = items.filter((i) => i.status === "DRAFT").length;
       const canceled = items.filter((i) => i.status === "CANCELED").length;
+
+      const calendarFailed = entries.filter((e) => e.status === "FAILED").length;
+      const calendarDraft = entries.filter((e) => e.status === "DRAFT").length;
+      const failed = studioFailed + calendarFailed;
 
       const progressPercent = totalRequired > 0 ? Math.round(((published + scheduled + ready) / totalRequired) * 100) : 0;
 
@@ -877,6 +924,8 @@ export function registerExecutionRoutes(app: Express) {
         emergencyStopped: plan.emergencyStopped,
         totalRequired,
         calendarGenerated: entries.length,
+        calendarDraft,
+        calendarFailed,
         studioTotal: items.length,
         published,
         scheduled,
@@ -965,42 +1014,62 @@ export function registerExecutionRoutes(app: Express) {
         return res.status(400).json({ error: "campaignId query parameter is required" });
       }
 
-      const approvedPlans = await db
+      let matchingPlans = await db
         .select()
         .from(strategicPlans)
         .where(
           and(
             eq(strategicPlans.accountId, accountId),
             eq(strategicPlans.campaignId, campaignId),
-            sql`${strategicPlans.status} IN ('APPROVED', 'GENERATED_TO_CALENDAR')`
+            sql`${strategicPlans.status} IN ('APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'REVIEW', 'SCHEDULED', 'PUBLISHED')`
           )
         )
-        .orderBy(sql`${strategicPlans.createdAt} DESC`)
-        .limit(1);
+        .orderBy(sql`${strategicPlans.createdAt} DESC`);
 
-      if (approvedPlans.length === 0) {
+      if (matchingPlans.length === 0) {
+        matchingPlans = await db
+          .select()
+          .from(strategicPlans)
+          .where(
+            and(
+              eq(strategicPlans.accountId, accountId),
+              sql`${strategicPlans.status} IN ('APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'REVIEW', 'SCHEDULED', 'PUBLISHED')`
+            )
+          )
+          .orderBy(sql`${strategicPlans.createdAt} DESC`);
+      }
+
+      if (matchingPlans.length === 0) {
         return res.json({ success: true, entries: [], planId: null, message: "No approved plan found for this campaign." });
       }
 
-      const plan = approvedPlans[0];
+      let bestPlan = matchingPlans[0];
+      let entries: any[] = [];
 
-      const entries = await db
-        .select()
-        .from(calendarEntries)
-        .where(
-          and(
-            eq(calendarEntries.planId, plan.id),
-            eq(calendarEntries.accountId, accountId),
-            eq(calendarEntries.campaignId, campaignId)
+      for (const plan of matchingPlans) {
+        const planEntries = await db
+          .select()
+          .from(calendarEntries)
+          .where(
+            and(
+              eq(calendarEntries.planId, plan.id),
+              eq(calendarEntries.accountId, accountId)
+            )
           )
-        )
-        .orderBy(sql`${calendarEntries.scheduledDate} ASC, ${calendarEntries.scheduledTime} ASC`);
+          .orderBy(sql`${calendarEntries.scheduledDate} ASC, ${calendarEntries.scheduledTime} ASC`);
+
+        if (planEntries.length > 0) {
+          bestPlan = plan;
+          entries = planEntries;
+          break;
+        }
+      }
 
       res.json({
         success: true,
-        planId: plan.id,
-        planStatus: plan.status,
-        executionStatus: plan.executionStatus,
+        planId: bestPlan.id,
+        planStatus: bestPlan.status,
+        executionStatus: bestPlan.executionStatus,
         entries,
       });
     } catch (err: any) {
