@@ -177,7 +177,12 @@ export default function CalendarScreen() {
             setResettingFailed(true);
             try {
               const baseUrl = getApiUrl();
-              const res = await fetch(new URL(`/api/execution/plans/${dbPlanId}/reset-failed`, baseUrl).toString(), {
+              const resetUrl = new URL(`/api/execution/plans/${dbPlanId}/reset-failed`, baseUrl);
+              resetUrl.searchParams.set('accountId', 'default');
+              if (selectedCampaign?.selectedCampaignId) {
+                resetUrl.searchParams.set('campaignId', selectedCampaign.selectedCampaignId);
+              }
+              const res = await fetch(resetUrl.toString(), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
               });

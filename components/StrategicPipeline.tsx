@@ -335,7 +335,9 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
           onPress: async () => {
             setActionLoading('reset-failed');
             try {
-              const res = await fetch(getApiUrl(`/api/execution/plans/${planId}/reset-failed`), {
+              const campaignId = selectedCampaign?.selectedCampaignId || '';
+              const url = getApiUrl(`/api/execution/plans/${planId}/reset-failed?accountId=default&campaignId=${encodeURIComponent(campaignId)}`);
+              const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
               });
@@ -357,7 +359,7 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
         },
       ]
     );
-  }, [fetchDashboard, fetchProgress]);
+  }, [fetchDashboard, fetchProgress, selectedCampaign?.selectedCampaignId]);
 
   const renderApprovalContent = () => {
     if (loading) {

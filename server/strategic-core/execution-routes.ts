@@ -853,6 +853,7 @@ export function registerExecutionRoutes(app: Express) {
     try {
       const { planId } = req.params;
       const accountId = (req.query.accountId as string) || (req.body?.accountId as string) || "default";
+      const campaignId = (req.query.campaignId as string) || (req.body?.campaignId as string) || null;
 
       const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
       if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND", requestId });
@@ -861,12 +862,17 @@ export function registerExecutionRoutes(app: Express) {
         return res.status(403).json({ error: "ACCOUNT_MISMATCH", message: "Plan does not belong to this account.", requestId });
       }
 
-      const validStatuses = ["APPROVED", "GENERATED_TO_CALENDAR", "CREATIVE_GENERATED", "REVIEW", "SCHEDULED"];
-      if (!validStatuses.includes(plan.status)) {
+      if (campaignId && plan.campaignId !== campaignId) {
+        return res.status(403).json({ error: "CAMPAIGN_MISMATCH", message: "Plan does not belong to this campaign.", requestId });
+      }
+
+      const resettableStatuses = ["APPROVED", "GENERATED_TO_CALENDAR", "CREATIVE_GENERATED", "REVIEW"];
+      if (!resettableStatuses.includes(plan.status)) {
         return res.status(409).json({
-          error: "PLAN_NOT_APPROVED",
-          message: `Plan must be APPROVED or beyond to reset failed entries. Current status: ${plan.status}`,
+          error: "PLAN_NOT_RESETTABLE",
+          message: `Plan must be in an active execution state (APPROVED through REVIEW) to reset failed entries. Current status: ${plan.status}. SCHEDULED and PUBLISHED plans are locked.`,
           currentStatus: plan.status,
+          allowedStatuses: resettableStatuses,
           requestId,
         });
       }
@@ -880,28 +886,30 @@ export function registerExecutionRoutes(app: Express) {
         return res.json({ success: true, message: "No failed entries to reset.", resetCount: 0, studioDeleted: 0, requestId });
       }
 
-      await db
-        .update(calendarEntries)
-        .set({ status: "DRAFT", errorReason: null, updatedAt: new Date() })
-        .where(and(eq(calendarEntries.planId, planId), eq(calendarEntries.status, "FAILED")));
-
       let studioDeleted = 0;
-      const failedItemIds = failedEntries.map(e => e.id);
-      for (const entryId of failedItemIds) {
-        const deleted = await db
-          .delete(studioItems)
-          .where(and(eq(studioItems.calendarEntryId, entryId), eq(studioItems.status, "FAILED")))
-          .returning();
-        studioDeleted += deleted.length;
-      }
+      await db.transaction(async (tx) => {
+        await tx
+          .update(calendarEntries)
+          .set({ status: "DRAFT", errorReason: null, updatedAt: new Date() })
+          .where(and(eq(calendarEntries.planId, planId), eq(calendarEntries.status, "FAILED")));
 
-      await db
-        .update(strategicPlans)
-        .set({ executionStatus: "IDLE", totalFailed: 0, updatedAt: new Date() })
-        .where(eq(strategicPlans.id, planId));
+        const failedItemIds = failedEntries.map(e => e.id);
+        for (const entryId of failedItemIds) {
+          const deleted = await tx
+            .delete(studioItems)
+            .where(and(eq(studioItems.calendarEntryId, entryId), eq(studioItems.status, "FAILED")))
+            .returning();
+          studioDeleted += deleted.length;
+        }
+
+        await tx
+          .update(strategicPlans)
+          .set({ executionStatus: "IDLE", totalFailed: 0, updatedAt: new Date() })
+          .where(eq(strategicPlans.id, planId));
+      });
 
       await logAudit(plan.accountId, "FAILED_ENTRIES_RESET", {
-        details: { requestId, planId, entriesReset: failedEntries.length, studioDeleted, timestamp: new Date().toISOString() },
+        details: { requestId, planId, campaignId: plan.campaignId, entriesReset: failedEntries.length, studioDeleted, timestamp: new Date().toISOString() },
       });
 
       res.json({ success: true, resetCount: failedEntries.length, studioDeleted, requestId, message: `Reset ${failedEntries.length} failed entries to DRAFT.` });
