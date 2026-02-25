@@ -42,10 +42,12 @@ Preferred communication style: Simple, everyday language.
 - **Creative Capture Layer**: 8-component pipeline analyzing reels with real data for deterministic signals and AI interpretation.
 
 ### Strategic Execution Machine
-- **System**: Controlled execution pipeline transforming strategic blueprints into published content through hard approval gates.
-- **Pipeline**: Blueprint → Strategic Plan → Client Approval Gate → Calendar Auto-Generation → AI Creative Execution → Studio Drafts → Scheduled → Published.
+- **System**: Controlled single-track execution pipeline transforming strategic blueprints into published content through hard approval gates.
+- **Pipeline**: Blueprint → Strategic Plan → Client Approval Gate → Calendar Auto-Generation → Item-by-Item Creative Generation → Studio Drafts → Scheduled → Published.
+- **Single Calendar**: One canonical calendar source of truth (`calendar_entries` table). Main Calendar tab reads from DB. Pipeline shows summary only with "Open Calendar" CTA — no duplicate calendar rendering.
+- **Item-by-Item Generation**: `POST /api/execution/calendar-entries/:entryId/generate` generates content for exactly ONE calendar entry per request. No batch generation endpoints. Max 1 content unit per click.
 - **Execution Safety**: Idempotency, concurrency locks, emergency stop, and explicit failure tracking.
-- **Hard Rules**: Nothing executes until plans are APPROVED; no auto-publishing; all state transitions are audit logged.
+- **Hard Rules**: Nothing executes until plans are APPROVED; no auto-publishing; all state transitions are audit logged; no batch content generation.
 
 ### Strategic Core Architecture ("Build The Plan")
 - **System**: 6-phase sequential intelligence engine with hard gates (Gate, Creative Analysis, Confirm/Edit, Market Analysis, Validation, Orchestrator).

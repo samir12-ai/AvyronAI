@@ -695,256 +695,158 @@ export function registerExecutionRoutes(app: Express) {
     }
   );
 
-  app.post(
-    "/api/execution/plans/:planId/execute-creative",
-    requirePlanStatus("GENERATED_TO_CALENDAR"),
-    requireExecutionIdle(),
-    async (req: Request, res: Response) => {
+  app.post("/api/execution/calendar-entries/:entryId/generate", async (req: Request, res: Response) => {
+    try {
+      const { entryId } = req.params;
+
+      const [entry] = await db
+        .select()
+        .from(calendarEntries)
+        .where(eq(calendarEntries.id, entryId))
+        .limit(1);
+
+      if (!entry) {
+        return res.status(404).json({ error: "ENTRY_NOT_FOUND", message: "Calendar entry not found." });
+      }
+
+      if (entry.status !== "DRAFT" && entry.status !== "FAILED") {
+        return res.status(409).json({
+          error: "INVALID_ENTRY_STATUS",
+          message: `Calendar entry must be DRAFT or FAILED to generate content. Current status: ${entry.status}`,
+          currentStatus: entry.status,
+        });
+      }
+
+      const [plan] = await db
+        .select()
+        .from(strategicPlans)
+        .where(eq(strategicPlans.id, entry.planId))
+        .limit(1);
+
+      if (!plan) {
+        return res.status(404).json({ error: "PLAN_NOT_FOUND", message: "Associated plan not found." });
+      }
+
+      if (plan.emergencyStopped) {
+        return res.status(409).json({ error: "EMERGENCY_STOPPED", message: "Cannot generate while emergency stop is active." });
+      }
+
+      const approvals = await db
+        .select()
+        .from(planApprovals)
+        .where(and(eq(planApprovals.planId, plan.id), eq(planApprovals.decision, "APPROVED")))
+        .limit(1);
+
+      if (approvals.length === 0) {
+        return res.status(403).json({
+          error: "APPROVAL_GATE_FAILED",
+          message: "Plan must have an explicit APPROVED approval record before creative generation can begin.",
+        });
+      }
+
+      const existingItem = await db
+        .select()
+        .from(studioItems)
+        .where(eq(studioItems.calendarEntryId, entry.id))
+        .limit(1);
+
+      if (existingItem.length > 0 && existingItem[0].status !== "FAILED") {
+        return res.json({
+          success: true,
+          idempotent: true,
+          message: "Content already generated for this calendar entry.",
+          studioItem: existingItem[0],
+        });
+      }
+
+      const isRetry = existingItem.length > 0 && existingItem[0].status === "FAILED";
+
+      let planContext = "Marketing campaign content";
       try {
-        const plan = (req as any).plan;
+        const planJson = JSON.parse(plan.planJson || "{}");
+        const brand = planJson.brandIdentity?.brandName || planJson.brandName || "";
+        const industry = planJson.marketAnalysis?.industry || planJson.industry || "";
+        const tone = planJson.contentStrategy?.toneOfVoice || planJson.toneOfVoice || "";
+        planContext = `Brand: ${brand}. Industry: ${industry}. Tone: ${tone}.`.replace(/\.\s*\./g, ".");
+      } catch {}
 
-        if (plan.emergencyStopped) {
-          return res.status(409).json({ error: "EMERGENCY_STOPPED", message: "Cannot execute while emergency stop is active." });
-        }
-
-        const approvals = await db
-          .select()
-          .from(planApprovals)
-          .where(and(eq(planApprovals.planId, plan.id), eq(planApprovals.decision, "APPROVED")))
-          .limit(1);
-
-        if (approvals.length === 0) {
-          return res.status(403).json({
-            error: "APPROVAL_GATE_FAILED",
-            message: "Plan must have an explicit APPROVED approval record before creative execution can begin. No silent fallbacks.",
-          });
-        }
-
-        const entries = await db
-          .select()
-          .from(calendarEntries)
-          .where(and(eq(calendarEntries.planId, plan.id), eq(calendarEntries.status, "DRAFT")));
-
-        if (entries.length === 0) {
-          const existingItems = await db
-            .select()
-            .from(studioItems)
-            .where(eq(studioItems.planId, plan.id));
-
-          if (existingItems.length > 0) {
-            return res.json({
-              success: true,
-              idempotent: true,
-              message: "All calendar entries already processed. Skipping re-execution.",
-              studioItemsCreated: 0,
-              existingItems: existingItems.length,
-            });
-          }
-          return res.json({ success: true, message: "No draft calendar entries to process.", studioItems: 0 });
-        }
-
+      let aiContent: { caption: string; creativeBrief: string; ctaCopy: string };
+      try {
+        aiContent = await generateCreativeContent(
+          entry.contentType,
+          entry.title,
+          entry.scheduledDate,
+          planContext
+        );
+      } catch (aiErr: any) {
         await db
-          .update(strategicPlans)
-          .set({ executionStatus: "RUNNING", aiExecutionStartedAt: new Date(), updatedAt: new Date() })
-          .where(eq(strategicPlans.id, plan.id));
+          .update(calendarEntries)
+          .set({ status: "FAILED", errorReason: aiErr.message, updatedAt: new Date() })
+          .where(eq(calendarEntries.id, entry.id));
 
-        let planContext = "Marketing campaign content";
-        try {
-          const planJson = JSON.parse(plan.planJson || "{}");
-          const brand = planJson.brandIdentity?.brandName || planJson.brandName || "";
-          const industry = planJson.marketAnalysis?.industry || planJson.industry || "";
-          const tone = planJson.contentStrategy?.toneOfVoice || planJson.toneOfVoice || "";
-          planContext = `Brand: ${brand}. Industry: ${industry}. Tone: ${tone}.`.replace(/\.\s*\./g, ".");
-        } catch {}
+        await logAudit(plan.accountId, "AI_CREATIVE_FAILED", {
+          details: { planId: plan.id, entryId: entry.id, error: aiErr.message },
+        });
 
-        const createdItems: any[] = [];
-        const skippedItems: string[] = [];
-        const failedItems: { entryId: string; error: string }[] = [];
-        const canceledEntries: string[] = [];
+        return res.status(500).json({
+          error: "AI_GENERATION_FAILED",
+          message: aiErr.message,
+          entryId: entry.id,
+        });
+      }
 
-        for (const entry of entries) {
-          try {
-            const freshPlan = await db.select().from(strategicPlans).where(eq(strategicPlans.id, plan.id)).limit(1);
-            if (freshPlan[0]?.emergencyStopped) {
-              const remainingEntries = entries.slice(entries.indexOf(entry));
-              for (const remaining of remainingEntries) {
-                if (remaining.id === entry.id || createdItems.some(i => i.calendarEntryId === remaining.id)) continue;
-
-                const alreadyExists = await db
-                  .select()
-                  .from(studioItems)
-                  .where(eq(studioItems.calendarEntryId, remaining.id))
-                  .limit(1);
-
-                if (alreadyExists.length === 0) {
-                  await db
-                    .insert(studioItems)
-                    .values({
-                      planId: plan.id,
-                      campaignId: plan.campaignId,
-                      calendarEntryId: remaining.id,
-                      accountId: plan.accountId,
-                      contentType: remaining.contentType,
-                      title: remaining.title,
-                      status: "CANCELED",
-                      errorReason: "Emergency stop activated",
-                    });
-
-                  await db
-                    .update(calendarEntries)
-                    .set({ status: "CANCELED", errorReason: "Emergency stop activated", updatedAt: new Date() })
-                    .where(eq(calendarEntries.id, remaining.id));
-
-                  canceledEntries.push(remaining.id);
-                }
-              }
-
-              await logAudit(plan.accountId, "EMERGENCY_STOP_DURING_CREATIVE", {
-                details: { planId: plan.id, processedSoFar: createdItems.length, canceled: canceledEntries.length },
-              });
-              break;
-            }
-
-            const existingItem = await db
-              .select()
-              .from(studioItems)
-              .where(eq(studioItems.calendarEntryId, entry.id))
-              .limit(1);
-
-            if (existingItem.length > 0) {
-              skippedItems.push(entry.id);
-              continue;
-            }
-
-            let aiContent: { caption: string; creativeBrief: string; ctaCopy: string };
-            try {
-              aiContent = await generateCreativeContent(
-                entry.contentType,
-                entry.title,
-                entry.scheduledDate,
-                planContext
-              );
-            } catch (aiErr: any) {
-              throw new Error(`AI_GENERATION_FAILED: ${aiErr.message}`);
-            }
-
-            const [item] = await db
-              .insert(studioItems)
-              .values({
-                planId: plan.id,
-                campaignId: plan.campaignId,
-                calendarEntryId: entry.id,
-                accountId: plan.accountId,
-                contentType: entry.contentType,
-                title: entry.title,
-                caption: aiContent.caption,
-                creativeBrief: aiContent.creativeBrief,
-                ctaCopy: aiContent.ctaCopy,
-                status: "DRAFT",
-              })
-              .returning();
-
-            await db
-              .update(calendarEntries)
-              .set({ studioItemId: item.id, status: "AI_GENERATED", aiGeneratedAt: new Date(), updatedAt: new Date() })
-              .where(eq(calendarEntries.id, entry.id));
-
-            createdItems.push(item);
-
-            await logAudit(plan.accountId, "AI_CREATIVE_GENERATED", {
-              details: { planId: plan.id, entryId: entry.id, studioItemId: item.id, contentType: entry.contentType },
-            });
-          } catch (itemErr: any) {
-            const errorMsg = itemErr.message || "Unknown error";
-            failedItems.push({ entryId: entry.id, error: errorMsg });
-
-            await db
-              .update(calendarEntries)
-              .set({ status: "FAILED", errorReason: errorMsg, updatedAt: new Date() })
-              .where(eq(calendarEntries.id, entry.id));
-
-            await db
-              .insert(studioItems)
-              .values({
-                planId: plan.id,
-                campaignId: plan.campaignId,
-                calendarEntryId: entry.id,
-                accountId: plan.accountId,
-                contentType: entry.contentType,
-                title: entry.title,
-                status: "FAILED",
-                errorReason: errorMsg,
-              })
-              .onConflictDoNothing({ target: studioItems.calendarEntryId });
-
-            await logAudit(plan.accountId, "AI_CREATIVE_FAILED", {
-              details: { planId: plan.id, entryId: entry.id, error: errorMsg },
-            });
-          }
-        }
-
-        const finalPlan = await db.select().from(strategicPlans).where(eq(strategicPlans.id, plan.id)).limit(1);
-        const wasStopped = finalPlan[0]?.emergencyStopped;
-
-        let executionStatus: string;
-        if (wasStopped) {
-          executionStatus = "PAUSED";
-        } else if (failedItems.length > 0 && createdItems.length === 0) {
-          executionStatus = "FAILED";
-        } else {
-          executionStatus = "COMPLETED";
-        }
-
-        await db
-          .update(strategicPlans)
+      let item;
+      if (isRetry && existingItem[0]) {
+        [item] = await db
+          .update(studioItems)
           .set({
-            executionStatus,
-            aiExecutionCompletedAt: wasStopped ? null : new Date(),
-            totalStudioItems: createdItems.length,
-            totalFailed: failedItems.length,
-            totalCanceled: canceledEntries.length,
+            caption: aiContent.caption,
+            creativeBrief: aiContent.creativeBrief,
+            ctaCopy: aiContent.ctaCopy,
+            status: "DRAFT",
+            errorReason: null,
             updatedAt: new Date(),
           })
-          .where(eq(strategicPlans.id, plan.id));
-
-        if (!wasStopped) {
-          await logAudit(plan.accountId, "EXECUTION_COMPLETED", {
-            details: {
-              planId: plan.id,
-              created: createdItems.length,
-              failed: failedItems.length,
-              skipped: skippedItems.length,
-              canceled: canceledEntries.length,
-            },
-          });
-        }
-
-        res.json({
-          success: true,
-          studioItemsCreated: createdItems.length,
-          skippedItems: skippedItems.length,
-          failedItems: failedItems.length,
-          canceledItems: canceledEntries.length,
-          failures: failedItems,
-          emergencyStopped: wasStopped || false,
-        });
-      } catch (err: any) {
-        console.error("Creative execution error:", err);
-        const plan = (req as any).plan;
-        if (plan) {
-          await db
-            .update(strategicPlans)
-            .set({ executionStatus: "FAILED", updatedAt: new Date() })
-            .where(eq(strategicPlans.id, plan.id));
-
-          await logAudit(plan.accountId, "EXECUTION_CATASTROPHIC_FAILURE", {
-            details: { planId: plan.id, error: err.message },
-          });
-        }
-        res.status(500).json({ error: "CREATIVE_EXECUTION_FAILED", message: err.message });
+          .where(eq(studioItems.id, existingItem[0].id))
+          .returning();
+      } else {
+        [item] = await db
+          .insert(studioItems)
+          .values({
+            planId: plan.id,
+            campaignId: plan.campaignId,
+            calendarEntryId: entry.id,
+            accountId: plan.accountId,
+            contentType: entry.contentType,
+            title: entry.title,
+            caption: aiContent.caption,
+            creativeBrief: aiContent.creativeBrief,
+            ctaCopy: aiContent.ctaCopy,
+            status: "DRAFT",
+          })
+          .returning();
       }
+
+      await db
+        .update(calendarEntries)
+        .set({ studioItemId: item.id, status: "AI_GENERATED", aiGeneratedAt: new Date(), updatedAt: new Date() })
+        .where(eq(calendarEntries.id, entry.id));
+
+      await logAudit(plan.accountId, "AI_CREATIVE_GENERATED", {
+        details: { planId: plan.id, entryId: entry.id, studioItemId: item.id, contentType: entry.contentType },
+      });
+
+      res.json({
+        success: true,
+        studioItem: item,
+        calendarEntryId: entry.id,
+        contentType: entry.contentType,
+      });
+    } catch (err: any) {
+      console.error("Single entry generation error:", err);
+      res.status(500).json({ error: "GENERATION_FAILED", message: err.message });
     }
-  );
+  });
 
   app.get("/api/execution/plans/:planId/progress", async (req: Request, res: Response) => {
     try {
@@ -1051,6 +953,59 @@ export function registerExecutionRoutes(app: Express) {
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/execution/calendar-entries", async (req: Request, res: Response) => {
+    try {
+      const accountId = (req.query.accountId as string) || "default";
+      const campaignId = req.query.campaignId as string;
+
+      if (!campaignId) {
+        return res.status(400).json({ error: "campaignId query parameter is required" });
+      }
+
+      const approvedPlans = await db
+        .select()
+        .from(strategicPlans)
+        .where(
+          and(
+            eq(strategicPlans.accountId, accountId),
+            eq(strategicPlans.campaignId, campaignId),
+            sql`${strategicPlans.status} IN ('APPROVED', 'GENERATED_TO_CALENDAR')`
+          )
+        )
+        .orderBy(sql`${strategicPlans.createdAt} DESC`)
+        .limit(1);
+
+      if (approvedPlans.length === 0) {
+        return res.json({ success: true, entries: [], planId: null, message: "No approved plan found for this campaign." });
+      }
+
+      const plan = approvedPlans[0];
+
+      const entries = await db
+        .select()
+        .from(calendarEntries)
+        .where(
+          and(
+            eq(calendarEntries.planId, plan.id),
+            eq(calendarEntries.accountId, accountId),
+            eq(calendarEntries.campaignId, campaignId)
+          )
+        )
+        .orderBy(sql`${calendarEntries.scheduledDate} ASC, ${calendarEntries.scheduledTime} ASC`);
+
+      res.json({
+        success: true,
+        planId: plan.id,
+        planStatus: plan.status,
+        executionStatus: plan.executionStatus,
+        entries,
+      });
+    } catch (err: any) {
+      console.error("Calendar entries fetch error:", err);
+      res.status(500).json({ error: "FETCH_FAILED", message: err.message });
     }
   });
 

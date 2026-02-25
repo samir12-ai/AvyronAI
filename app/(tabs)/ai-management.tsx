@@ -16,6 +16,7 @@ import {
   Animated as RNAnimated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -100,6 +101,7 @@ export default function AIManagementScreen() {
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { scheduledPosts, updateScheduledPost, metaConnection, brandProfile, campaigns, advancedMode } = useApp();
   const { t } = useLanguage();
 
@@ -661,8 +663,8 @@ export default function AIManagementScreen() {
             })}
         </ScrollView>
 
-        {activeTab === 'buildplan' ? <BuildThePlan onNavigateToCI={() => { setActiveTab('intelligence'); setIntelSubTab('analysis'); updateState({ activeTab: 'intelligence', intelSubTab: 'analysis' }); }} />
-          : activeTab === 'pipeline' ? <StrategicPipeline />
+        {activeTab === 'buildplan' ? <BuildThePlan onNavigateToCI={() => { setActiveTab('intelligence'); setIntelSubTab('analysis'); updateState({ activeTab: 'intelligence', intelSubTab: 'analysis' }); }} onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />
+          : activeTab === 'pipeline' ? <StrategicPipeline onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />
           : activeTab === 'intelligence' ? renderIntelligence()
           : activeTab === 'control' ? renderControlCenter()
           : activeTab === 'publisher' ? renderPublisher()

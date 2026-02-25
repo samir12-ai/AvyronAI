@@ -114,9 +114,10 @@ interface CICompetitor {
 
 interface BuildThePlanProps {
   onNavigateToCI?: () => void;
+  onNavigateToCalendar?: () => void;
 }
 
-export default function BuildThePlan({ onNavigateToCI }: BuildThePlanProps) {
+export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar }: BuildThePlanProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
@@ -1632,10 +1633,19 @@ export default function BuildThePlan({ onNavigateToCI }: BuildThePlanProps) {
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: '#065F46', fontWeight: '700', fontSize: 14 }}>Plan Approved</Text>
                   <Text style={{ color: '#047857', fontSize: 12, marginTop: 2 }}>
-                    Pipeline is now unlocked. Switch to Pipeline tab to continue execution.
+                    Go to Calendar to view your scheduled content.
                   </Text>
                 </View>
               </View>
+              {onNavigateToCalendar && (
+                <Pressable
+                  onPress={onNavigateToCalendar}
+                  style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#10B981', borderRadius: 8, paddingVertical: 10, marginTop: 12 }}
+                >
+                  <Ionicons name="calendar" size={16} color="#fff" />
+                  <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>Go to Calendar</Text>
+                </Pressable>
+              )}
             </View>
           )}
 

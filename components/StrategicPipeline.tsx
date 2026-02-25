@@ -12,6 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { getApiUrl } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
@@ -94,11 +95,16 @@ function getStageIndex(status: string): number {
   }
 }
 
-export default function StrategicPipeline() {
+interface StrategicPipelineProps {
+  onNavigateToCalendar?: () => void;
+}
+
+export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPipelineProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
   const { selectedCampaign } = useCampaign();
+  const router = useRouter();
 
   const [expandedStep, setExpandedStep] = useState<number | null>(null);
   const [plans, setPlans] = useState<PlanData[]>([]);
@@ -107,7 +113,6 @@ export default function StrategicPipeline() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressData | null>(null);
   const [calendarEntries, setCalendarEntries] = useState<CalendarEntry[]>([]);
-  const [showCalendarEntries, setShowCalendarEntries] = useState(false);
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -267,28 +272,6 @@ export default function StrategicPipeline() {
     }
   }, [fetchDashboard, fetchProgress]);
 
-  const handleExecuteCreative = useCallback(async (planId: string) => {
-    setActionLoading('creative');
-    try {
-      const res = await fetch(getApiUrl(`/api/execution/plans/${planId}/execute-creative`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const data = await res.json();
-      if (data.success) {
-        Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        Alert.alert('Creative Execution', `Created ${data.studioItemsCreated || 0} studio items.`);
-        fetchDashboard();
-        fetchProgress(planId);
-      } else {
-        Alert.alert('Error', data.message || data.error || 'Creative execution failed');
-      }
-    } catch (err: any) {
-      Alert.alert('Error', err.message);
-    } finally {
-      setActionLoading(null);
-    }
-  }, [fetchDashboard, fetchProgress]);
 
   const handleEmergencyStop = useCallback(async (planId: string) => {
     Alert.alert('Emergency Stop', 'This will immediately pause all execution. Nothing will be deleted.', [
@@ -440,6 +423,15 @@ export default function StrategicPipeline() {
                   </View>
                   <View style={[s.statusDot, { backgroundColor: STATUS_COLORS[plan.status] || '#34D399' }]} />
                 </View>
+                {onNavigateToCalendar && (
+                  <Pressable
+                    onPress={onNavigateToCalendar}
+                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#34D399', borderRadius: 8, paddingVertical: 10, marginTop: 12 }}
+                  >
+                    <Ionicons name="calendar" size={16} color="#fff" />
+                    <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' as const }}>Go to Calendar</Text>
+                  </Pressable>
+                )}
               </View>
             ))}
           </View>
@@ -544,24 +536,6 @@ export default function StrategicPipeline() {
             </Pressable>
           )}
 
-          {activePlan.status === 'GENERATED_TO_CALENDAR' && (
-            <Pressable
-              style={[s.execBtn, { opacity: actionLoading === 'creative' ? 0.6 : 1 }]}
-              onPress={() => handleExecuteCreative(activePlan.id)}
-              disabled={!!actionLoading}
-            >
-              <LinearGradient colors={['#EC4899', '#8B5CF6']} style={s.execBtnGrad}>
-                {actionLoading === 'creative' ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <>
-                    <Ionicons name="color-palette-outline" size={16} color="#fff" />
-                    <Text style={s.execBtnText}>Generate Creatives</Text>
-                  </>
-                )}
-              </LinearGradient>
-            </Pressable>
-          )}
 
           {activePlan.emergencyStopped ? (
             <Pressable
@@ -600,34 +574,69 @@ export default function StrategicPipeline() {
           )}
         </View>
 
-        {calendarEntries.length > 0 && (
+        {hasApprovedOrBeyond && calendarEntries.length === 0 && (
           <View style={{ marginTop: 12 }}>
             <Pressable
+              style={s.openCalendarBtn}
               onPress={() => {
                 Platform.OS !== 'web' && Haptics.selectionAsync();
-                setShowCalendarEntries(!showCalendarEntries);
+                router.push('/(tabs)/calendar');
               }}
-              style={[s.calendarToggle, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: colors.cardBorder }]}
             >
-              <Ionicons name="calendar" size={16} color="#A78BFA" />
-              <Text style={[s.calendarToggleText, { color: colors.text }]}>
-                Calendar Entries ({calendarEntries.length})
-              </Text>
-              <Ionicons name={showCalendarEntries ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} />
+              <LinearGradient colors={['#A78BFA', '#7C3AED']} style={s.openCalendarBtnGrad}>
+                <Ionicons name="calendar-outline" size={18} color="#fff" />
+                <Text style={s.openCalendarBtnText}>Open Calendar</Text>
+              </LinearGradient>
             </Pressable>
-            {showCalendarEntries && calendarEntries.map(entry => (
-              <View key={entry.id} style={[s.calEntry, { backgroundColor: isDark ? '#0F1419' : '#F8FAFC', borderColor: colors.cardBorder }]}>
-                <View style={s.calEntryHeader}>
-                  <Text style={[s.calEntryTitle, { color: colors.text }]} numberOfLines={1}>{entry.title}</Text>
-                  <View style={[s.calEntryBadge, { backgroundColor: (STATUS_COLORS[entry.status] || '#8A96A8') + '20' }]}>
-                    <Text style={[s.calEntryStatus, { color: STATUS_COLORS[entry.status] || '#8A96A8' }]}>{entry.status}</Text>
-                  </View>
-                </View>
-                <Text style={[s.calEntryMeta, { color: colors.textMuted }]}>
-                  {entry.scheduledDate} {entry.scheduledTime} - {entry.contentType}
+          </View>
+        )}
+
+        {calendarEntries.length > 0 && (
+          <View style={{ marginTop: 12 }}>
+            <View style={[s.summaryCard, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: colors.cardBorder }]}>
+              <View style={s.summaryHeader}>
+                <Ionicons name="calendar" size={20} color="#A78BFA" />
+                <Text style={[s.summaryTitle, { color: colors.text }]}>
+                  {calendarEntries.length} calendar {calendarEntries.length === 1 ? 'entry' : 'entries'} scheduled
                 </Text>
               </View>
-            ))}
+              <View style={s.summaryStatsRow}>
+                {Object.entries(
+                  calendarEntries.reduce<Record<string, number>>((acc, e) => {
+                    acc[e.contentType] = (acc[e.contentType] || 0) + 1;
+                    return acc;
+                  }, {})
+                ).map(([type, count]) => (
+                  <View key={type} style={[s.summaryChip, { backgroundColor: '#A78BFA15' }]}>
+                    <Text style={[s.summaryChipText, { color: '#A78BFA' }]}>{type}: {count}</Text>
+                  </View>
+                ))}
+              </View>
+              <View style={s.summaryStatsRow}>
+                {Object.entries(
+                  calendarEntries.reduce<Record<string, number>>((acc, e) => {
+                    acc[e.status] = (acc[e.status] || 0) + 1;
+                    return acc;
+                  }, {})
+                ).map(([status, count]) => (
+                  <View key={status} style={[s.summaryChip, { backgroundColor: (STATUS_COLORS[status] || '#8A96A8') + '15' }]}>
+                    <Text style={[s.summaryChipText, { color: STATUS_COLORS[status] || '#8A96A8' }]}>{status}: {count}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+            <Pressable
+              style={s.openCalendarBtn}
+              onPress={() => {
+                Platform.OS !== 'web' && Haptics.selectionAsync();
+                router.push('/(tabs)/calendar');
+              }}
+            >
+              <LinearGradient colors={['#A78BFA', '#7C3AED']} style={s.openCalendarBtnGrad}>
+                <Ionicons name="calendar-outline" size={18} color="#fff" />
+                <Text style={s.openCalendarBtnText}>Open Calendar</Text>
+              </LinearGradient>
+            </Pressable>
           </View>
         )}
       </View>
@@ -1060,47 +1069,52 @@ const s = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  calendarToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    padding: 12,
+  summaryCard: {
     borderRadius: 10,
     borderWidth: 1,
+    padding: 14,
+    marginBottom: 10,
   },
-  calendarToggleText: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  calEntry: {
-    padding: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    marginTop: 6,
-  },
-  calEntryHeader: {
+  summaryHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     gap: 8,
+    marginBottom: 10,
   },
-  calEntryTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    flex: 1,
-  },
-  calEntryBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  calEntryStatus: {
-    fontSize: 9,
+  summaryTitle: {
+    fontSize: 15,
     fontWeight: '700',
   },
-  calEntryMeta: {
-    fontSize: 11,
+  summaryStatsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
     marginTop: 4,
+  },
+  summaryChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  summaryChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  openCalendarBtn: {
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  openCalendarBtnGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 10,
+  },
+  openCalendarBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
   },
 });

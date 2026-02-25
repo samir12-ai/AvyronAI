@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -22,6 +22,7 @@ import * as Haptics from 'expo-haptics';
 import Animated, { FadeIn, FadeInDown, FadeInUp } from 'react-native-reanimated';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
+import { useCampaign } from '@/context/CampaignContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { CalendarDay } from '@/components/CalendarDay';
 import { ContentCard } from '@/components/ContentCard';
@@ -29,6 +30,27 @@ import { PlatformPicker } from '@/components/PlatformPicker';
 import { generateId } from '@/lib/storage';
 import { getApiUrl } from '@/lib/query-client';
 import type { ScheduledPost } from '@/lib/types';
+
+interface DBCalendarEntry {
+  id: string;
+  planId: string;
+  campaignId: string;
+  accountId: string;
+  contentType: string;
+  scheduledDate: string;
+  scheduledTime: string;
+  title: string | null;
+  caption: string | null;
+  creativeBrief: string | null;
+  ctaCopy: string | null;
+  status: string;
+  studioItemId: string | null;
+  aiGeneratedAt: string | null;
+  errorReason: string | null;
+  sourceLabel: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 
@@ -78,7 +100,66 @@ export default function CalendarScreen() {
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
   const { contentItems, removeContentItem, scheduledPosts, addScheduledPost, removeScheduledPost, mediaItems, brandProfile } = useApp();
+  const { selectedCampaign } = useCampaign();
   const { t } = useLanguage();
+
+  const [dbCalendarEntries, setDbCalendarEntries] = useState<DBCalendarEntry[]>([]);
+  const [dbEntriesLoading, setDbEntriesLoading] = useState(false);
+  const [dbPlanId, setDbPlanId] = useState<string | null>(null);
+  const [generatingEntryId, setGeneratingEntryId] = useState<string | null>(null);
+
+  const fetchCalendarEntries = useCallback(async () => {
+    if (!selectedCampaign?.selectedCampaignId) return;
+    setDbEntriesLoading(true);
+    try {
+      const baseUrl = getApiUrl();
+      const url = new URL('/api/execution/calendar-entries', baseUrl);
+      url.searchParams.set('campaignId', selectedCampaign.selectedCampaignId);
+      url.searchParams.set('accountId', 'default');
+      const response = await fetch(url.toString());
+      if (response.ok) {
+        const data = await response.json();
+        setDbCalendarEntries(data.entries || []);
+        setDbPlanId(data.planId || null);
+      }
+    } catch (err) {
+      console.error('[Calendar] Failed to fetch DB entries:', err);
+    } finally {
+      setDbEntriesLoading(false);
+    }
+  }, [selectedCampaign?.selectedCampaignId]);
+
+  useEffect(() => {
+    fetchCalendarEntries();
+  }, [fetchCalendarEntries]);
+
+  const handleGenerateEntry = useCallback(async (entryId: string) => {
+    setGeneratingEntryId(entryId);
+    try {
+      const baseUrl = getApiUrl();
+      const res = await fetch(new URL(`/api/execution/calendar-entries/${entryId}/generate`, baseUrl).toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (data.success) {
+        Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        fetchCalendarEntries();
+      } else {
+        Alert.alert('Generation Failed', data.message || data.error || 'Could not generate content');
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Network error');
+    } finally {
+      setGeneratingEntryId(null);
+    }
+  }, [fetchCalendarEntries]);
+
+  const dbEntryStats = useMemo(() => {
+    const total = dbCalendarEntries.length;
+    const generated = dbCalendarEntries.filter(e => e.status !== 'DRAFT').length;
+    return { total, generated, remaining: total - generated };
+  }, [dbCalendarEntries]);
 
   const postTypes = postTypesDef.map(pt => ({ ...pt, label: t(pt.labelKey) }));
   const days = Array.from({length: 7}, (_, i) => t(`calendar.days.${i}`));
@@ -136,8 +217,19 @@ export default function CalendarScreen() {
         dates.add(date.getDate());
       }
     });
+    dbCalendarEntries.forEach(entry => {
+      const parts = entry.scheduledDate.split('-');
+      if (parts.length === 3) {
+        const month = parseInt(parts[1], 10) - 1;
+        const year = parseInt(parts[0], 10);
+        const day = parseInt(parts[2], 10);
+        if (month === currentMonth && year === currentYear) {
+          dates.add(day);
+        }
+      }
+    });
     return dates;
-  }, [contentItems, scheduledPosts, currentMonth, currentYear]);
+  }, [contentItems, scheduledPosts, dbCalendarEntries, currentMonth, currentYear]);
 
   const selectedContent = useMemo(() => {
     return contentItems.filter(item => {
@@ -159,6 +251,17 @@ export default function CalendarScreen() {
              date.getFullYear() === currentYear;
     });
   }, [scheduledPosts, selectedDate, currentMonth, currentYear]);
+
+  const selectedDbEntries = useMemo(() => {
+    return dbCalendarEntries.filter(entry => {
+      const parts = entry.scheduledDate.split('-');
+      if (parts.length !== 3) return false;
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      return day === selectedDate && month === currentMonth && year === currentYear;
+    });
+  }, [dbCalendarEntries, selectedDate, currentMonth, currentYear]);
 
   const availableVideos = useMemo(() => {
     return mediaItems.filter(m => m.type === 'video' && m.status === 'draft');
@@ -305,7 +408,21 @@ export default function CalendarScreen() {
       case 'reel': return 'videocam';
       case 'story': return 'layers';
       case 'video': return 'play-circle';
+      case 'carousel': return 'albums';
       default: return 'document-text';
+    }
+  };
+
+  const getDbStatusColor = (status: string) => {
+    switch (status) {
+      case 'DRAFT': return { bg: colors.accent + '20', text: colors.accent };
+      case 'AI_GENERATED': return { bg: colors.primary + '20', text: colors.primary };
+      case 'READY': return { bg: colors.success + '20', text: colors.success };
+      case 'PUBLISHED': return { bg: colors.success + '20', text: colors.success };
+      case 'SCHEDULED': return { bg: '#3B82F6' + '20', text: '#3B82F6' };
+      case 'FAILED': return { bg: colors.error + '20', text: colors.error };
+      case 'CANCELED': return { bg: colors.textMuted + '20', text: colors.textMuted };
+      default: return { bg: colors.textMuted + '20', text: colors.textMuted };
     }
   };
 
@@ -710,8 +827,95 @@ export default function CalendarScreen() {
             </Pressable>
           </View>
 
-          {selectedScheduled.length > 0 ? (
+          {selectedDbEntries.length > 0 && (
             <View style={styles.scheduleList}>
+              {dbPlanId && (
+                <View style={[styles.dbEntriesHeader, { backgroundColor: colors.primary + '08', borderColor: colors.primary + '20' }]}>
+                  <Ionicons name="git-branch-outline" size={14} color={colors.primary} />
+                  <Text style={[styles.dbEntriesHeaderText, { color: colors.primary }]}>
+                    Plan-driven content
+                  </Text>
+                  {dbEntryStats.total > 0 && (
+                    <Text style={[styles.dbEntriesCounter, { color: colors.textMuted }]}>
+                      {dbEntryStats.generated}/{dbEntryStats.total} generated
+                    </Text>
+                  )}
+                </View>
+              )}
+              {selectedDbEntries.map(entry => {
+                const statusColor = getDbStatusColor(entry.status);
+                const isGenerating = generatingEntryId === entry.id;
+                const isDraft = entry.status === 'DRAFT';
+                const isFailed = entry.status === 'FAILED';
+                return (
+                  <View
+                    key={entry.id}
+                    style={[styles.scheduleCard, { backgroundColor: colors.card, borderColor: isFailed ? '#FF6B6B40' : colors.cardBorder }]}
+                  >
+                    <View style={styles.scheduleLeft}>
+                      <View style={[styles.scheduleIcon, { backgroundColor: colors.primary + '15' }]}>
+                        <Ionicons name={getPostTypeIcon(entry.contentType)} size={20} color={colors.primary} />
+                      </View>
+                      <View style={[styles.scheduleInfo, { flex: 1 }]}>
+                        <Text style={[styles.scheduleType, { color: colors.text }]}>
+                          {entry.title || (entry.contentType.charAt(0).toUpperCase() + entry.contentType.slice(1))}
+                        </Text>
+                        {entry.caption ? (
+                          <Text style={[styles.scheduleContent, { color: colors.textSecondary }]} numberOfLines={2}>
+                            {entry.caption}
+                          </Text>
+                        ) : null}
+                        {isFailed && entry.errorReason ? (
+                          <Text style={{ color: '#FF6B6B', fontSize: 11, marginTop: 2 }} numberOfLines={1}>
+                            {entry.errorReason}
+                          </Text>
+                        ) : null}
+                        <View style={styles.scheduleMetaRow}>
+                          <Text style={[styles.scheduleMeta, { color: colors.textMuted }]}>
+                            {entry.scheduledTime} • {entry.contentType}
+                          </Text>
+                          <View style={[styles.statusBadge, { backgroundColor: statusColor.bg }]}>
+                            <Text style={[styles.statusText, { color: statusColor.text }]}>
+                              {entry.status}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                    </View>
+                    {(isDraft || isFailed) && (
+                      <Pressable
+                        onPress={() => handleGenerateEntry(entry.id)}
+                        disabled={!!generatingEntryId}
+                        style={[styles.generateEntryBtn, { opacity: isGenerating ? 0.6 : 1 }]}
+                      >
+                        {isGenerating ? (
+                          <ActivityIndicator size="small" color="#7C3AED" />
+                        ) : (
+                          <>
+                            <Ionicons name="sparkles" size={14} color="#7C3AED" />
+                            <Text style={styles.generateEntryBtnText}>
+                              {isFailed ? 'Retry' : 'Generate'}
+                            </Text>
+                          </>
+                        )}
+                      </Pressable>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
+          {selectedScheduled.length > 0 && (
+            <View style={[styles.scheduleList, selectedDbEntries.length > 0 ? { marginTop: 12 } : undefined]}>
+              {selectedDbEntries.length > 0 && (
+                <View style={[styles.dbEntriesHeader, { backgroundColor: colors.accent + '08', borderColor: colors.accent + '20' }]}>
+                  <Ionicons name="create-outline" size={14} color={colors.accent} />
+                  <Text style={[styles.dbEntriesHeaderText, { color: colors.accent }]}>
+                    Manually scheduled
+                  </Text>
+                </View>
+              )}
               {selectedScheduled.map(post => (
                 <View 
                   key={post.id}
@@ -755,7 +959,9 @@ export default function CalendarScreen() {
                 </View>
               ))}
             </View>
-          ) : selectedContent.length > 0 ? (
+          )}
+
+          {selectedScheduled.length === 0 && selectedDbEntries.length === 0 && selectedContent.length > 0 && (
             <View style={styles.contentList}>
               {selectedContent.map(item => (
                 <ContentCard
@@ -765,7 +971,9 @@ export default function CalendarScreen() {
                 />
               ))}
             </View>
-          ) : (
+          )}
+
+          {selectedScheduled.length === 0 && selectedDbEntries.length === 0 && selectedContent.length === 0 && (
             <View style={[styles.emptyState, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
               <Ionicons name="calendar-outline" size={40} color={colors.textMuted} />
               <Text style={[styles.emptyText, { color: colors.textMuted }]}>
@@ -1137,6 +1345,39 @@ const styles = StyleSheet.create({
   },
   contentList: {
     gap: 16,
+  },
+  dbEntriesHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 4,
+  },
+  dbEntriesHeaderText: {
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+    flex: 1,
+  },
+  dbEntriesCounter: {
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+  },
+  generateEntryBtn: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#7C3AED15',
+  },
+  generateEntryBtnText: {
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#7C3AED',
   },
   emptyState: {
     alignItems: 'center',

@@ -1,0 +1,117 @@
+
+⸻
+
+Message to Replit (Single Calendar + Single Track + No Batch Creation)
+
+Subject: P0 — Single Track Lock: Remove dual calendars + convert creation to item-by-item required work flow (no batch)
+
+Hey Replit,
+
+We are now in final “Single Track Lock” mode. Persistence is DONE and verified (Create/AI Management/Studio all persist state across tabs + campaign isolation via hydrationVersion). Now we must close the last architecture gaps with a single plan / single calendar / single generation track.
+
+1) Single Calendar Only (Remove “Pipeline Calendar” as a separate calendar)
+
+Problem: The Pipeline currently renders/uses a calendar that is not the main Calendar. This creates 2 calendars in the app (two tracks), which breaks our “single plan” principle.
+
+Requirement:
+	•	The Pipeline must NOT maintain its own calendar data model or its own calendar rendering as a separate source of truth.
+	•	The Pipeline “Calendar view” must become a view of the same main calendar entries (calendar_entries) for the currently active approved plan/campaign.
+	•	There must be one canonical calendar in the app.
+
+Acceptance Criteria (hard):
+	•	✅ There is exactly one DB source for calendar scheduling: calendar_entries tied to the active strategic_plan.
+	•	✅ Pipeline “calendar” shows the same items that appear in the main Calendar section (same IDs, same statuses, same timestamps).
+	•	✅ No duplicate calendar tables, no duplicate “pipeline calendar” datasets, no duplicated UI state that changes the calendar independently.
+	•	✅ Switching between Pipeline ↔ Calendar shows identical results for the same plan/campaign (including status changes).
+
+⸻
+
+2) Approve → Redirect user to Main Calendar section (not pipeline calendar)
+
+Requirement:
+	•	When a user clicks Approve & Activate Plan, we immediately route them to the main Calendar section (single source of truth).
+	•	Pipeline stays locked/unlocked based on plan status, but it should not become the “primary calendar experience.”
+
+Acceptance Criteria (hard):
+	•	✅ After approval, user CTA becomes “Go to Calendar” and navigates to the main Calendar tab/section.
+	•	✅ Pipeline remains accessible, but it never becomes a separate scheduling track.
+
+⸻
+
+3) Creation must be item-by-item from Required Work (No batch generation)
+
+Problem: “Create” sometimes tries to generate too many posts at once (e.g., 50). This is slow, expensive, and can break the system.
+
+New model:
+	•	Plan approval produces:
+	•	required_work items (e.g., 30 Stories, 10 Reels…)
+	•	corresponding calendar_entries (scheduled slots)
+	•	The Create Center must show Required Work list and let the user generate ONE item at a time (or small bounded chunk like 1–3 max, but default 1).
+
+Requirement:
+	•	Create Center must be driven by required_work + calendar_entries.
+	•	Each generation action targets a single work item:
+	•	Generate → Save Draft → “Save to Studio” → Done.
+
+Acceptance Criteria (hard):
+	•	✅ No endpoint/UI path can trigger “generate entire plan content in one call.”
+	•	✅ Max generation unit = 1 work item per click (unless explicitly configured later).
+	•	✅ Each generation writes:
+	•	studio_items for that calendar entry
+	•	status transitions are explicit (e.g., required_work: PENDING → GENERATED, calendar_entries: DRAFT/READY)
+	•	✅ UI clearly shows remaining required work count and per-item status.
+
+⸻
+
+4) “Save to Studio” must be direct and deterministic
+
+Requirement:
+	•	After generating a single item, user can click Save to Studio and it appears immediately in Studio as a draft (same IDs).
+
+Acceptance Criteria (hard):
+	•	✅ Studio shows the draft instantly after save (no hidden background dependency).
+	•	✅ Draft is linked 1:1 to calendar_entry_id (no duplicates, idempotent).
+
+⸻
+
+5) Autopublishing readiness (future-proof without enabling it)
+
+We are not enabling autopublishing now, but the structure must be compatible:
+	•	If autopublishing is later enabled, it should publish from the same studio_items + calendar_entries pipeline.
+	•	No new track introduced.
+
+Acceptance Criteria (hard):
+	•	✅ The publish worker (when enabled later) only reads from the same canonical scheduling objects.
+	•	✅ No alternative publishing queue created.
+
+⸻
+
+6) Testing & Proof (mandatory)
+
+Add/extend tests to guarantee single-track:
+
+Tests:
+	1.	“One calendar source” test:
+	•	Pipeline calendar view == main calendar view (same item IDs)
+	2.	“No batch generation” test:
+	•	Attempt to generate N>1 items in one request should be rejected (or not supported at all)
+	3.	“Approve redirect” test:
+	•	Approve action navigates to main Calendar
+	4.	Regression:
+	•	Persistence remains intact across Create/Studio/AI Management after these changes
+
+Acceptance Criteria (hard):
+	•	✅ All tests pass.
+	•	✅ A grep/static scan (or test) confirms no “pipeline calendar” separate state/store exists.
+
+⸻
+
+Non-negotiables
+	•	No new features.
+	•	No new parallel tracks.
+	•	No silent fallbacks.
+	•	Everything must align with single plan / single calendar / item-by-item creation.
+
+Deliver this as one cohesive change-set, not partial patches.
+
+Thanks.
