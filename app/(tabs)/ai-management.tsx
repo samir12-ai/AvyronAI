@@ -661,7 +661,7 @@ export default function AIManagementScreen() {
             })}
         </ScrollView>
 
-        {activeTab === 'buildplan' ? <BuildThePlan />
+        {activeTab === 'buildplan' ? <BuildThePlan onNavigateToCI={() => { setActiveTab('intelligence'); setIntelSubTab('analysis'); updateState({ activeTab: 'intelligence', intelSubTab: 'analysis' }); }} />
           : activeTab === 'pipeline' ? <StrategicPipeline />
           : activeTab === 'intelligence' ? renderIntelligence()
           : activeTab === 'control' ? renderControlCenter()

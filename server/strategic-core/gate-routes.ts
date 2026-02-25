@@ -80,24 +80,24 @@ export function registerGateRoutes(app: Express) {
         demoLocation,
       } = req.body;
 
-      if (!competitorUrls || !Array.isArray(competitorUrls) || competitorUrls.length < 2) {
+      if (!competitorUrls || !Array.isArray(competitorUrls) || competitorUrls.length < 1) {
         return res.status(400).json({
           error: "GATE_FAILED",
           field: "competitorUrls",
-          message: "Minimum 2 competitor URLs required. No fallback. No skip.",
-          required: 2,
+          message: "At least 1 competitor is required. Add competitors in Competitor Intelligence first.",
+          required: 1,
           provided: competitorUrls?.length || 0,
         });
       }
 
       const validUrls = competitorUrls.filter((u: string) => {
-        try { new URL(u); return true; } catch { return false; }
+        try { new URL(u); return true; } catch { return u.trim().length > 0; }
       });
-      if (validUrls.length < 2) {
+      if (validUrls.length < 1) {
         return res.status(400).json({
           error: "GATE_FAILED",
           field: "competitorUrls",
-          message: "At least 2 valid URLs required.",
+          message: "At least 1 valid competitor link required.",
           invalidUrls: competitorUrls.filter((u: string) => !validUrls.includes(u)),
         });
       }

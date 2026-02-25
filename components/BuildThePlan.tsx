@@ -101,7 +101,20 @@ function getConfidenceLabel(confidence: number): string {
   return 'Missing';
 }
 
-export default function BuildThePlan() {
+interface CICompetitor {
+  id: string;
+  name: string;
+  profileLink: string;
+  platform: string;
+  businessType: string;
+  engagementRatio?: number | null;
+}
+
+interface BuildThePlanProps {
+  onNavigateToCI?: () => void;
+}
+
+export default function BuildThePlan({ onNavigateToCI }: BuildThePlanProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
@@ -114,7 +127,9 @@ export default function BuildThePlan() {
   const [error, setError] = useState('');
   const [clarifications, setClarifications] = useState<ClarificationPrompt[]>([]);
 
-  const [competitorUrls, setCompetitorUrls] = useState<string[]>(['', '']);
+  const [ciCompetitors, setCiCompetitors] = useState<CICompetitor[]>([]);
+  const [selectedCompetitorIds, setSelectedCompetitorIds] = useState<Set<string>>(new Set());
+  const [ciLoading, setCiLoading] = useState(false);
   const [avgPrice, setAvgPrice] = useState('');
 
   const [editingField, setEditingField] = useState<string | null>(null);
@@ -179,31 +194,43 @@ export default function BuildThePlan() {
     ).start();
   }, []);
 
-  const addCompetitorUrl = useCallback(() => {
-    if (competitorUrls.length < 5) {
-      setCompetitorUrls(prev => [...prev, '']);
+  const fetchCICompetitors = useCallback(async () => {
+    setCiLoading(true);
+    try {
+      const res = await fetch(getApiUrl('/api/ci/competitors?accountId=default'));
+      const data = await res.json();
+      if (data.competitors && Array.isArray(data.competitors)) {
+        setCiCompetitors(data.competitors);
+        const allIds = new Set<string>(data.competitors.map((c: CICompetitor) => c.id));
+        setSelectedCompetitorIds(allIds);
+      }
+    } catch (err) {
+      console.error('[BuildThePlan] Failed to fetch CI competitors:', err);
+    } finally {
+      setCiLoading(false);
     }
-  }, [competitorUrls]);
+  }, []);
 
-  const updateCompetitorUrl = useCallback((index: number, value: string) => {
-    setCompetitorUrls(prev => {
-      const next = [...prev];
-      next[index] = value;
+  useEffect(() => {
+    fetchCICompetitors();
+  }, [fetchCICompetitors]);
+
+  const toggleCompetitor = useCallback((id: string) => {
+    Haptics.selectionAsync();
+    setSelectedCompetitorIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }, []);
 
-  const removeCompetitorUrl = useCallback((index: number) => {
-    if (competitorUrls.length > 2) {
-      setCompetitorUrls(prev => prev.filter((_, i) => i !== index));
-    }
-  }, [competitorUrls]);
-
   const passGate = useCallback(async () => {
     setError('');
-    const validUrls = competitorUrls.filter(u => u.trim().length > 0);
-    if (validUrls.length < 2) {
-      setError('Enter at least 2 competitor URLs');
+    const selected = ciCompetitors.filter(c => selectedCompetitorIds.has(c.id));
+    const validUrls = selected.map(c => c.profileLink).filter(u => u.trim().length > 0);
+    if (validUrls.length === 0) {
+      setError('Select at least one competitor from your Competitor Intelligence');
       return;
     }
     if (!avgPrice || parseFloat(avgPrice) <= 0) {
@@ -246,7 +273,7 @@ export default function BuildThePlan() {
     } finally {
       setLoading(false);
     }
-  }, [competitorUrls, avgPrice]);
+  }, [ciCompetitors, selectedCompetitorIds, avgPrice]);
 
   const analyzeCreative = useCallback(async () => {
     if (!blueprint) return;
@@ -600,32 +627,64 @@ export default function BuildThePlan() {
           </View>
         )}
 
-        <Text style={[s.sectionLabel, { color: colors.text }]}>Competitor URLs (min 2)</Text>
-        {competitorUrls.map((url, index) => (
-          <View key={index} style={s.urlRow}>
-            <TextInput
-              style={[s.input, { backgroundColor: colors.background, color: colors.text, borderColor: colors.cardBorder }]}
-              placeholder={`competitor${index + 1}.com`}
-              placeholderTextColor={colors.textMuted}
-              value={url}
-              onChangeText={(v) => updateCompetitorUrl(index, v)}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-            />
-            {competitorUrls.length > 2 && (
-              <Pressable onPress={() => removeCompetitorUrl(index)} style={s.removeBtn}>
-                <Ionicons name="close-circle" size={22} color={colors.error || '#EF4444'} />
+        <Text style={[s.sectionLabel, { color: colors.text }]}>Competitors</Text>
+        {ciLoading ? (
+          <View style={s.ciLoadingWrap}>
+            <ActivityIndicator size="small" color={colors.accent} />
+            <Text style={[s.ciLoadingText, { color: colors.textSecondary }]}>Loading competitors...</Text>
+          </View>
+        ) : ciCompetitors.length === 0 ? (
+          <View style={[s.ciEmptyWrap, { backgroundColor: isDark ? '#1A2030' : '#F8FAFC', borderColor: colors.cardBorder }]}>
+            <Ionicons name="telescope-outline" size={28} color={colors.textMuted} />
+            <Text style={[s.ciEmptyText, { color: colors.textSecondary }]}>
+              No competitors added yet. Add competitors in Competitor Intelligence first.
+            </Text>
+            {onNavigateToCI && (
+              <Pressable onPress={onNavigateToCI} style={[s.ciNavBtn, { borderColor: '#3B82F640' }]}>
+                <Ionicons name="arrow-forward" size={16} color="#3B82F6" />
+                <Text style={[s.ciNavBtnText, { color: '#3B82F6' }]}>Go to Competitor Intelligence</Text>
               </Pressable>
             )}
           </View>
-        ))}
-
-        {competitorUrls.length < 5 && (
-          <Pressable onPress={addCompetitorUrl} style={[s.addUrlBtn, { borderColor: colors.accent + '40' }]}>
-            <Ionicons name="add" size={18} color={colors.accent} />
-            <Text style={[s.addUrlText, { color: colors.accent }]}>Add competitor</Text>
-          </Pressable>
+        ) : (
+          <>
+            {ciCompetitors.map((comp) => {
+              const isSelected = selectedCompetitorIds.has(comp.id);
+              return (
+                <Pressable
+                  key={comp.id}
+                  onPress={() => toggleCompetitor(comp.id)}
+                  style={[s.ciCompRow, {
+                    backgroundColor: isSelected ? (isDark ? '#3B82F612' : '#3B82F608') : (isDark ? '#0F1419' : '#FAFAFA'),
+                    borderColor: isSelected ? '#3B82F650' : colors.cardBorder,
+                  }]}
+                >
+                  <Ionicons
+                    name={isSelected ? 'checkbox' : 'square-outline'}
+                    size={22}
+                    color={isSelected ? '#3B82F6' : colors.textMuted}
+                  />
+                  <View style={s.ciCompInfo}>
+                    <Text style={[s.ciCompName, { color: colors.text }]}>{comp.name}</Text>
+                    <Text style={[s.ciCompMeta, { color: colors.textSecondary }]} numberOfLines={1}>
+                      {comp.businessType}{comp.engagementRatio ? ` · ${(comp.engagementRatio * 100).toFixed(1)}% engagement` : ''}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+            <View style={s.ciFooter}>
+              <Text style={[s.ciFooterCount, { color: colors.textSecondary }]}>
+                {selectedCompetitorIds.size} of {ciCompetitors.length} selected
+              </Text>
+              {onNavigateToCI && (
+                <Pressable onPress={onNavigateToCI} style={s.ciFooterLink}>
+                  <Ionicons name="add-circle-outline" size={16} color="#3B82F6" />
+                  <Text style={[s.ciFooterLinkText, { color: '#3B82F6' }]}>Add more in CI</Text>
+                </Pressable>
+              )}
+            </View>
+          </>
         )}
 
         <Text style={[s.sectionLabel, { color: colors.text, marginTop: 16 }]}>Average Selling Price ($)</Text>
@@ -1744,11 +1803,6 @@ const s = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 8,
   },
-  urlRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
   input: {
     flex: 1,
     height: 44,
@@ -1757,22 +1811,81 @@ const s = StyleSheet.create({
     paddingHorizontal: 14,
     fontSize: 14,
   },
-  removeBtn: {
-    marginLeft: 8,
-    padding: 4,
-  },
-  addUrlBtn: {
+  ciLoadingWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+  },
+  ciLoadingText: {
+    fontSize: 13,
+  },
+  ciEmptyWrap: {
+    alignItems: 'center',
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 10,
+    marginBottom: 4,
+  },
+  ciEmptyText: {
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  ciNavBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 4,
+  },
+  ciNavBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  ciCompRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
     paddingVertical: 10,
+    paddingHorizontal: 12,
     borderRadius: 10,
     borderWidth: 1,
-    borderStyle: 'dashed',
-    gap: 6,
+    marginBottom: 6,
   },
-  addUrlText: {
-    fontSize: 13,
+  ciCompInfo: {
+    flex: 1,
+  },
+  ciCompName: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  ciCompMeta: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  ciFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 4,
+    paddingBottom: 2,
+  },
+  ciFooterCount: {
+    fontSize: 12,
+  },
+  ciFooterLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  ciFooterLinkText: {
+    fontSize: 12,
     fontWeight: '600',
   },
   gateWarning: {
