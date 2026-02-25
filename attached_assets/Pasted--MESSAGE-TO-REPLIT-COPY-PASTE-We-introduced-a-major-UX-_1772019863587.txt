@@ -1,0 +1,119 @@
+
+⸻
+
+MESSAGE TO REPLIT (COPY/PASTE):
+
+We introduced a major UX improvement: Build The Plan now pulls competitors directly from Competitive Intelligence (selectable list) instead of asking the user to re-enter competitor links, and we changed min competitors from 2 → 1 across FE+BE.
+
+Now we have a P0 blocker at the final step:
+
+P0 BUG
+
+Build Plan → Phase 5: Execution Plans fails with:
+	•	[HTTP 500] Failed to generate execution plans: Request timed out
+(see screenshot: “Execution Plan Failed”, DEMO MODE)
+
+This must be fixed without adding new product scope, only correctness + stability.
+
+⸻
+
+1) REQUIRED ROOT CAUSE ISOLATION (NO GUESSES)
+
+Add structured logging so we can pinpoint exactly where the timeout happens:
+	•	On the Phase 5 endpoint handler (the orchestrator / execution plan generation route), log:
+	•	requestId
+	•	accountId, campaignId, blueprintId
+	•	isDemoMode
+	•	competitorCount + competitor identifiers (ids/domains)
+	•	timestamps at: start → after DB reads → before AI call → after AI call → after DB writes → end
+	•	if it fails: error.code + error.message + durationMs
+
+We need proof in logs of where the timeout occurs.
+
+⸻
+
+2) FIX THE TIMEOUT PROPERLY (NO “JUST INCREASE TIMEOUT”)
+
+Phase 5 is a long-running AI step. It MUST NOT be a blocking synchronous request.
+Implement one of the following (preferred order):
+
+Option A (Preferred): Convert Phase 5 to async job flow
+	•	POST /start-orchestrate (or reuse existing) returns { jobId } within 1–2 seconds
+	•	Worker runs orchestration
+	•	GET /jobs/:id returns { status, progress, result }
+	•	If >5 minutes → auto FAIL + audit log
+This matches our stabilization rules (no long endpoints >5s sync).
+
+Option B (DEMO MODE ONLY): Return deterministic demo execution plan immediately
+
+If isDemoMode=true, Phase 5 must never call AI. It must return a fixture plan instantly (and label it demo).
+The screenshot shows DEMO MODE, so at minimum this must be done.
+
+Do not “fix” by increasing server timeout — that hides the real problem and breaks our stability rules.
+
+⸻
+
+3) VERIFY THE NEW COMPETITOR-LIST LINKING DID NOT BREAK BLUEPRINT INPUTS
+
+Since BuildThePlan no longer collects links directly, confirm the orchestrator still receives valid competitor data:
+	•	Ensure the blueprint stores either:
+	•	competitor IDs that can be resolved server-side → URLs/handles/content
+	•	or stores normalized competitor URLs at confirm time
+	•	Add a strict validation at Phase 5 start:
+	•	If competitor list resolves to 0 valid “complete competitors”, return 400 COMPETITOR_REQUIRED (not 500).
+	•	If competitor list exists but missing required fields, return 422 COMPETITOR_INCOMPLETE with details.
+
+No silent fallbacks. No empty competitor payload reaching AI.
+
+⸻
+
+4) HARD ACCEPTANCE CRITERIA (MUST PASS)
+
+Functional
+	1.	In DEMO MODE:
+
+	•	Phase 5 must succeed every time in <2 seconds (no AI call).
+
+	2.	In REAL mode:
+
+	•	Phase 5 must complete via async job OR return jobId immediately.
+	•	No more “request timed out”.
+
+Stability
+	3.	Zero HTTP 500 from Phase 5 for expected input errors:
+
+	•	Competitor missing/incomplete → 400/422 with clear error codes.
+
+	4.	Budget/caps respected:
+
+	•	If AI budget exceeded → return 402 AI_BUDGET_EXCEEDED (not timeout / not 500).
+
+	5.	Logs + audit:
+
+	•	Every Phase 5 attempt produces an audit event with requestId and outcome (success/failed/timeout).
+
+Regression
+	6.	Minimum competitors = 1 confirmed end-to-end:
+
+	•	Gate, Confirm, Analyze, Validate, Execute all accept 1 competitor and succeed.
+
+	7.	CI → BTP competitor selection works:
+
+	•	Selecting competitor(s) in CI then opening Build Plan shows them prefilled and Phase 5 uses them.
+
+Tests (mandatory)
+	•	Add an automated test that simulates Phase 5 in DEMO MODE and asserts:
+	•	200 OK
+	•	returns plan payload (non-empty)
+	•	duration <2s
+	•	Add a test that asserts invalid competitor payload returns 422 not 500.
+
+⸻
+
+Deliverable
+
+Reply with:
+	•	exact route/function where the timeout happened (log evidence)
+	•	chosen fix (async job or demo fixture for demo mode; ideally both)
+	•	proof tests passed (names + output)
+	•	confirmation Phase 5 no longer blocks synchronously

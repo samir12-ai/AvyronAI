@@ -51,6 +51,9 @@ Preferred communication style: Simple, everyday language.
 - **System**: 6-phase sequential intelligence engine with hard gates (Gate, Creative Analysis, Confirm/Edit, Market Analysis, Validation, Orchestrator).
 - **AI Models**: Gemini 3 Pro for creative extraction, GPT-5.2 for market analysis, validation, and orchestration.
 - **Orchestrator Enhancement**: Optionally injects Performance Intelligence signals into the orchestrator prompt.
+- **Phase 5 Demo Mode**: In demo mode, orchestrator returns deterministic fixture plan instantly (no AI call, <100ms). Structured logging with requestId traces every step.
+- **Competitor Linking**: Build The Plan pulls competitors from Competitive Intelligence (selectable list), minimum 1 competitor required (not 2). Strict validation at Phase 5: 400 COMPETITOR_REQUIRED for 0 competitors, 422 COMPETITOR_INCOMPLETE for invalid entries.
+- **Error Handling**: AI budget exceeded → 402 AI_BUDGET_EXCEEDED; AI timeout → 504 ORCHESTRATOR_TIMEOUT; parse failure → 500 with retry guidance. Every Phase 5 attempt produces an audit event.
 
 ### Execution Authority Matrix
 - **SINGLE EXECUTION TRACK**: "Build The Plan" is the sole execution authority, owning strategic plans, required work, calendar entries, studio items, and plan approvals.

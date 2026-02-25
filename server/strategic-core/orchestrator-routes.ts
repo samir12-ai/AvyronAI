@@ -1,9 +1,10 @@
 import type { Express, Request, Response } from "express";
-import { aiChat } from "../ai-client";
+import { aiChat, AICallError } from "../ai-client";
 import { db } from "../db";
 import { strategicBlueprints, strategyMemory, strategyInsights, moatCandidates, businessDataLayer } from "@shared/schema";
 import { eq, desc, gte, and, sql } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
+import * as crypto from "crypto";
 
 const REQUIRED_BLUEPRINT_FIELDS: { key: string; label: string }[] = [
   { key: "detectedOffer", label: "Offer" },
@@ -24,6 +25,90 @@ function validateBlueprintCompleteness(confirmedBlueprint: any): { valid: boolea
 
   return { valid: missingFields.length === 0, missingFields };
 }
+
+const DEMO_EXECUTION_PLAN = {
+  contentDistributionPlan: {
+    platforms: [
+      {
+        platform: "Instagram",
+        frequency: "5 posts/week",
+        contentTypes: [
+          { type: "Reels", percentage: "40%", weeklyCount: 2, rationale: "Highest reach format for awareness" },
+          { type: "Carousels", percentage: "30%", weeklyCount: 2, rationale: "Educational authority content" },
+          { type: "Stories", percentage: "20%", weeklyCount: 5, rationale: "Daily engagement touchpoints" },
+          { type: "Static Posts", percentage: "10%", weeklyCount: 1, rationale: "Brand presence anchoring" },
+        ],
+        bestPostingTimes: ["9:00 AM", "12:30 PM", "7:00 PM"],
+        hashtagStrategy: "Mix of niche (5-10k) and medium (50-100k) hashtags; 15-20 per post",
+      },
+    ],
+    contentPillars: [
+      { pillar: "Authority Content", percentage: "35%", examples: ["Case studies", "Expert tips", "Industry insights"] },
+      { pillar: "Engagement Content", percentage: "30%", examples: ["Behind-the-scenes", "Polls", "Q&A"] },
+      { pillar: "Social Proof", percentage: "20%", examples: ["Testimonials", "Results", "Client stories"] },
+      { pillar: "Promotional", percentage: "15%", examples: ["Offers", "CTAs", "Product highlights"] },
+    ],
+  },
+  engagementPlan: {
+    dailyActions: [
+      { action: "Respond to all comments within 2 hours", priority: "high" },
+      { action: "Engage with 10 target audience accounts", priority: "high" },
+      { action: "Post 3-5 Stories with interactive stickers", priority: "medium" },
+      { action: "Reply to all DMs within 1 hour during business hours", priority: "high" },
+    ],
+    weeklyActions: [
+      { action: "Host 1 Q&A or Live session", priority: "medium" },
+      { action: "Collaborate or cross-promote with 1 complementary account", priority: "low" },
+    ],
+    communityGrowthTactics: [
+      "Use question stickers in Stories for audience input",
+      "Create shareable carousel content for organic reach",
+      "Respond to competitor audience comments strategically",
+    ],
+  },
+  conversionPlan: {
+    funnelStages: [
+      { stage: "Awareness", content: "Reels + Stories", cta: "Follow for more", metric: "Reach & Impressions" },
+      { stage: "Interest", content: "Carousels + Educational Posts", cta: "Save this post", metric: "Saves & Shares" },
+      { stage: "Consideration", content: "Testimonials + Case Studies", cta: "DM us / Link in bio", metric: "Profile Visits & DMs" },
+      { stage: "Conversion", content: "Offer Posts + Stories", cta: "Shop now / Book now", metric: "Link Clicks & Sales" },
+    ],
+    ctaStrategy: "Every post has ONE clear CTA. Alternate between soft (save/share) and hard (buy/book) CTAs.",
+    leadCaptureMethod: "Link in bio to landing page with lead magnet; DM automation for qualified leads",
+  },
+  measurementPlan: {
+    primaryKPIs: [
+      { kpi: "Engagement Rate", target: ">3%", frequency: "Weekly", alertThreshold: "<1.5%" },
+      { kpi: "Reach Growth", target: "+15% MoM", frequency: "Monthly", alertThreshold: "<5% MoM" },
+      { kpi: "Profile Visits", target: "+20% MoM", frequency: "Monthly", alertThreshold: "Flat or declining" },
+    ],
+    secondaryKPIs: [
+      { kpi: "Story Completion Rate", target: ">70%", frequency: "Weekly" },
+      { kpi: "Save Rate", target: ">2%", frequency: "Weekly" },
+      { kpi: "DM Volume", target: "Track trend", frequency: "Weekly" },
+    ],
+    reportingCadence: "Weekly snapshot + Monthly deep-dive report",
+  },
+  competitiveWatchTargets: {
+    targets: [
+      {
+        competitor: "Top Competitor",
+        watchMetrics: ["Posting frequency", "Engagement rate", "Content format mix", "CTA patterns"],
+        alertTriggers: ["Engagement spike >2x average", "New content format adopted", "Campaign launch detected"],
+        checkFrequency: "Weekly",
+      },
+    ],
+  },
+  riskMonitoringTriggers: {
+    triggers: [
+      { trigger: "Engagement drop", condition: "Engagement rate drops below 1.5% for 2 consecutive weeks", action: "Review content mix and posting times", severity: "high" },
+      { trigger: "Reach plateau", condition: "Reach flat for 3 consecutive weeks", action: "Increase Reels frequency and test new hashtags", severity: "medium" },
+      { trigger: "Competitor surge", condition: "Competitor engagement exceeds ours by 2x", action: "Analyze their top-performing content and adapt strategy", severity: "medium" },
+      { trigger: "Budget overrun", condition: "Spend exceeds monthly budget by 10%", action: "Pause promotional content and focus on organic", severity: "high" },
+    ],
+    escalationPath: ["Marketing Lead", "Strategy Review", "Campaign Pivot"],
+  },
+};
 
 const ORCHESTRATOR_PROMPT = `You are an execution orchestrator. You do NOT think. You do NOT reinterpret. You do NOT override the confirmed blueprint.
 
@@ -58,43 +143,54 @@ Respond with ONLY a valid JSON object:
       {
         "platform": "string",
         "frequency": "string",
-        "contentTypes": ["string"],
-        "bestTimes": ["string"],
-        "priority": "primary|secondary|experimental"
+        "contentTypes": [
+          {
+            "type": "string",
+            "percentage": "string",
+            "weeklyCount": "number",
+            "rationale": "string"
+          }
+        ],
+        "bestPostingTimes": ["string"],
+        "hashtagStrategy": "string"
       }
     ],
-    "weeklyCalendar": [
-      { "day": "string", "platform": "string", "contentType": "string", "theme": "string" }
+    "contentPillars": [
+      {
+        "pillar": "string",
+        "percentage": "string",
+        "examples": ["string"]
+      }
     ]
   },
-  "creativeTestingMatrix": {
-    "tests": [
+  "engagementPlan": {
+    "dailyActions": [
       {
-        "testName": "string",
-        "variable": "string",
-        "variants": ["string"],
-        "metric": "string",
-        "duration": "string",
-        "budget": "string"
+        "action": "string",
+        "priority": "high|medium|low"
       }
     ],
-    "testingOrder": ["string"],
-    "minimumSampleSize": "string"
-  },
-  "budgetAllocationStructure": {
-    "totalRecommended": "string",
-    "breakdown": [
+    "weeklyActions": [
       {
-        "category": "string",
-        "percentage": number,
-        "amount": "string",
-        "purpose": "string"
+        "action": "string",
+        "priority": "high|medium|low"
       }
     ],
-    "scalingTriggers": ["string"],
-    "cutTriggers": ["string"]
+    "communityGrowthTactics": ["string"]
   },
-  "kpiMonitoringPriority": {
+  "conversionPlan": {
+    "funnelStages": [
+      {
+        "stage": "string",
+        "content": "string",
+        "cta": "string",
+        "metric": "string"
+      }
+    ],
+    "ctaStrategy": "string",
+    "leadCaptureMethod": "string"
+  },
+  "measurementPlan": {
     "primaryKPIs": [
       {
         "kpi": "string",
@@ -137,60 +233,171 @@ Respond with ONLY a valid JSON object:
 
 export function registerOrchestratorRoutes(app: Express) {
   app.post("/api/strategic/blueprint/:id/orchestrate", async (req: Request, res: Response) => {
+    const requestId = crypto.randomUUID();
+    const startMs = Date.now();
+    const { id } = req.params;
+    let accountId = "default";
+    let campaignId = "";
+    let isDemoMode = false;
+    let competitorCount = 0;
+
+    const log = (stage: string, extra?: Record<string, any>) => {
+      const elapsed = Date.now() - startMs;
+      console.log(`[Orchestrator] [${requestId}] ${stage} (+${elapsed}ms)`, extra ? JSON.stringify(extra) : "");
+    };
+
     try {
-      const { id } = req.params;
+      log("START", { blueprintId: id });
 
       const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
       if (!blueprint) {
-        return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", message: "Blueprint not found" });
+        log("ABORT: blueprint not found");
+        return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", message: "Blueprint not found", requestId });
       }
 
+      accountId = blueprint.accountId;
+      campaignId = blueprint.campaignId || "";
+      log("DB_READ_BLUEPRINT", { accountId, campaignId, status: blueprint.status });
+
       if (blueprint.status !== "VALIDATED") {
+        log("ABORT: status gate", { currentStatus: blueprint.status });
         return res.status(400).json({
           success: false,
           error: "STATUS_GATE",
           message: "Blueprint must be VALIDATED first. No confirmed + validated → no Orchestrator.",
           currentStatus: blueprint.status,
+          requestId,
         });
       }
 
       const confirmedBlueprint = blueprint.confirmedBlueprint ? JSON.parse(blueprint.confirmedBlueprint) : null;
       if (!confirmedBlueprint) {
-        return res.status(400).json({ success: false, error: "NO_CONFIRMED_BLUEPRINT", message: "No confirmed blueprint. Confirmed blueprint is the only source of truth." });
+        log("ABORT: no confirmed blueprint");
+        return res.status(400).json({ success: false, error: "NO_CONFIRMED_BLUEPRINT", message: "No confirmed blueprint. Confirmed blueprint is the only source of truth.", requestId });
       }
 
       if (confirmedBlueprint.blueprintVersion !== blueprint.blueprintVersion) {
+        log("ABORT: version mismatch", { confirmed: confirmedBlueprint.blueprintVersion, current: blueprint.blueprintVersion });
         return res.status(400).json({
           success: false,
           error: "VERSION_MISMATCH",
           message: "Confirmed blueprint version does not match current blueprint version. Re-confirm required.",
           confirmedVersion: confirmedBlueprint.blueprintVersion,
           currentVersion: blueprint.blueprintVersion,
+          requestId,
         });
       }
 
       const { valid, missingFields } = validateBlueprintCompleteness(confirmedBlueprint);
       if (!valid) {
+        log("ABORT: incomplete blueprint", { missingFields });
         return res.status(400).json({
           success: false,
           error: "INCOMPLETE_BLUEPRINT",
           missingFields,
           message: `Cannot generate execution plans. Missing critical fields: ${missingFields.join(", ")}. No generic fallback plans allowed.`,
+          requestId,
         });
       }
 
       const campaignContext = blueprint.campaignContext ? JSON.parse(blueprint.campaignContext) : null;
       if (!campaignContext) {
+        log("ABORT: no campaign context");
         return res.status(400).json({
           success: false,
           error: "CAMPAIGN_CONTEXT_REQUIRED",
           message: "No campaign context — Orchestrator cannot run without campaign context.",
+          requestId,
         });
       }
 
+      isDemoMode = !!campaignContext.isDemo;
+
+      const competitorUrls = blueprint.competitorUrls ? JSON.parse(blueprint.competitorUrls) : [];
+      competitorCount = competitorUrls.length;
+      if (competitorCount < 1) {
+        log("ABORT: no competitors", { competitorCount });
+        return res.status(400).json({
+          success: false,
+          error: "COMPETITOR_REQUIRED",
+          message: "At least 1 competitor is required. Add competitors in Competitor Intelligence first.",
+          competitorCount: 0,
+          requestId,
+        });
+      }
+
+      const invalidCompetitors = competitorUrls.filter((u: string) => !u || u.trim().length === 0);
+      if (invalidCompetitors.length > 0 && invalidCompetitors.length === competitorUrls.length) {
+        log("ABORT: all competitors incomplete", { invalidCompetitors });
+        return res.status(422).json({
+          success: false,
+          error: "COMPETITOR_INCOMPLETE",
+          message: "All competitor entries are empty or invalid. Competitors must have valid profile links.",
+          invalidCount: invalidCompetitors.length,
+          totalCount: competitorUrls.length,
+          requestId,
+        });
+      }
+
+      log("VALIDATION_PASSED", { isDemoMode, competitorCount, competitors: competitorUrls.slice(0, 5) });
+
       const marketMap = blueprint.marketMap ? JSON.parse(blueprint.marketMap) : null;
       const validationResult = blueprint.validationResult ? JSON.parse(blueprint.validationResult) : null;
-      const competitorUrls = blueprint.competitorUrls ? JSON.parse(blueprint.competitorUrls) : [];
+
+      if (isDemoMode) {
+        log("DEMO_MODE: returning fixture plan");
+
+        const demoPlan = {
+          ...DEMO_EXECUTION_PLAN,
+          blueprintVersion: blueprint.blueprintVersion,
+          _meta: { mode: "DEMO", generatedAt: new Date().toISOString(), requestId },
+        };
+
+        if (competitorUrls.length > 0) {
+          demoPlan.competitiveWatchTargets = {
+            targets: competitorUrls.slice(0, 3).map((url: string) => ({
+              competitor: url,
+              watchMetrics: ["Posting frequency", "Engagement rate", "Content format mix"],
+              alertTriggers: ["Engagement spike >2x average", "New campaign detected"],
+              checkFrequency: "Weekly",
+            })),
+          };
+        }
+
+        await db.update(strategicBlueprints)
+          .set({
+            status: "ORCHESTRATED",
+            orchestratorPlan: JSON.stringify(demoPlan),
+            orchestratedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(strategicBlueprints.id, id));
+
+        await logAuditEvent({
+          accountId,
+          campaignId: campaignId || undefined,
+          blueprintId: id,
+          blueprintVersion: blueprint.blueprintVersion,
+          event: "ORCHESTRATOR_GENERATED",
+          details: {
+            requestId,
+            mode: "DEMO",
+            planSections: Object.keys(demoPlan).filter(k => k !== "blueprintVersion" && k !== "_meta"),
+            durationMs: Date.now() - startMs,
+          },
+        });
+
+        log("DEMO_MODE_COMPLETE", { durationMs: Date.now() - startMs });
+
+        return res.json({
+          success: true,
+          blueprintId: id,
+          blueprintVersion: blueprint.blueprintVersion,
+          status: "ORCHESTRATED",
+          orchestratorPlan: demoPlan,
+          requestId,
+        });
+      }
 
       let businessData: any = null;
       try {
@@ -208,8 +415,10 @@ export function registerOrchestratorRoutes(app: Express) {
           }
         }
       } catch (err) {
-        console.log("[Orchestrator] Business data fetch skipped:", (err as Error).message);
+        log("BUSINESS_DATA_FETCH_SKIPPED", { error: (err as Error).message });
       }
+
+      log("DB_READS_COMPLETE");
 
       let performanceIntelligenceBlock = "";
       let performanceSignalsInjected = false;
@@ -248,7 +457,7 @@ ${JSON.stringify(topMoats.map(m => ({ label: m.label, moatScore: m.moatScore, so
 NOTE: Performance signals were ${performanceSignalsInjected ? "INJECTED" : "NOT AVAILABLE"}. The confirmed blueprint remains the ONLY source of truth.`;
         }
       } catch (err) {
-        console.log("[Orchestrator] Performance intelligence injection skipped:", (err as Error).message);
+        log("PERF_INTEL_SKIPPED", { error: (err as Error).message });
       }
 
       const businessDataBlock = businessData ? `
@@ -292,16 +501,61 @@ ${performanceIntelligenceBlock}
 
 Generate all 6 execution plans now. Strictly from the confirmed, validated data. Distribution MUST be derived from the Business Data Layer fields (business type: ${businessData?.businessType || "unknown"}, funnel objective: ${businessData?.funnelObjective || "unknown"}, budget: ${businessData?.monthlyBudget || "unknown"}, conversion channel: ${businessData?.primaryConversionChannel || "unknown"}). No hardcoded defaults. Geo-scoped to ${campaignContext.location || "specified location"}.`;
 
-      const response = await aiChat({
-        model: "gpt-5.2",
-        messages: [
-          { role: "system", content: ORCHESTRATOR_PROMPT },
-          { role: "user", content: userPrompt },
-        ],
-        max_tokens: 4000,
-        accountId: "default",
-        endpoint: "strategic-orchestrator",
-      });
+      log("BEFORE_AI_CALL", { model: "gpt-5.2", maxTokens: 4000 });
+
+      let response;
+      try {
+        response = await aiChat({
+          model: "gpt-5.2",
+          messages: [
+            { role: "system", content: ORCHESTRATOR_PROMPT },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: 4000,
+          accountId: "default",
+          endpoint: "strategic-orchestrator",
+        });
+      } catch (aiErr: any) {
+        const durationMs = Date.now() - startMs;
+        log("AI_CALL_FAILED", { code: aiErr.code, message: aiErr.message, durationMs });
+
+        await logAuditEvent({
+          accountId,
+          campaignId: campaignId || undefined,
+          blueprintId: id,
+          blueprintVersion: blueprint.blueprintVersion,
+          event: "ORCHESTRATOR_FAILED",
+          details: { requestId, error: aiErr.code || "AI_ERROR", message: aiErr.message, durationMs },
+        });
+
+        if (aiErr.code === "AI_BUDGET_EXCEEDED") {
+          return res.status(402).json({
+            success: false,
+            error: "AI_BUDGET_EXCEEDED",
+            message: aiErr.message,
+            requestId,
+          });
+        }
+
+        if (aiErr.message?.includes("timeout") || aiErr.message?.includes("timed out") || aiErr.code === "ETIMEDOUT") {
+          return res.status(504).json({
+            success: false,
+            error: "ORCHESTRATOR_TIMEOUT",
+            message: "AI generation timed out. This is a complex operation — please retry.",
+            durationMs,
+            requestId,
+          });
+        }
+
+        return res.status(500).json({
+          success: false,
+          error: "AI_CALL_FAILED",
+          message: `AI call failed: ${aiErr.message}`,
+          requestId,
+        });
+      }
+
+      log("AFTER_AI_CALL", { durationMs: Date.now() - startMs });
 
       const rawText = response.choices[0]?.message?.content || "";
       let orchestratorPlan: any;
@@ -314,23 +568,39 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
           throw new Error("No JSON object found in model response");
         }
       } catch (parseErr: any) {
+        log("PARSE_FAILED", { error: parseErr.message, finishReason: response.choices[0]?.finish_reason });
+
+        await logAuditEvent({
+          accountId,
+          campaignId: campaignId || undefined,
+          blueprintId: id,
+          blueprintVersion: blueprint.blueprintVersion,
+          event: "ORCHESTRATOR_FAILED",
+          details: { requestId, error: "PARSE_FAILED", message: parseErr.message, durationMs: Date.now() - startMs },
+        });
+
         return res.status(500).json({
           success: false,
           error: "ORCHESTRATOR_PARSE_FAILED",
           message: `Orchestrator returned invalid format: ${parseErr.message}. Please retry.`,
           finishReason: response.choices[0]?.finish_reason || "unknown",
+          requestId,
         });
       }
 
       if (!orchestratorPlan || Object.keys(orchestratorPlan).length === 0) {
+        log("EMPTY_PLAN");
         return res.status(500).json({
           success: false,
           error: "ORCHESTRATOR_EMPTY_PLAN",
           message: "Orchestrator generated an empty execution plan. Please retry.",
+          requestId,
         });
       }
 
       orchestratorPlan.blueprintVersion = blueprint.blueprintVersion;
+
+      log("BEFORE_DB_WRITE");
 
       await db.update(strategicBlueprints)
         .set({
@@ -341,17 +611,24 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
         })
         .where(eq(strategicBlueprints.id, id));
 
+      log("AFTER_DB_WRITE");
+
       await logAuditEvent({
-        accountId: blueprint.accountId,
-        campaignId: blueprint.campaignId || undefined,
+        accountId,
+        campaignId: campaignId || undefined,
         blueprintId: id,
         blueprintVersion: blueprint.blueprintVersion,
         event: "ORCHESTRATOR_GENERATED",
         details: {
+          requestId,
+          mode: "PRODUCTION",
           planSections: Object.keys(orchestratorPlan).filter(k => k !== "blueprintVersion"),
           performanceSignalsInjected,
+          durationMs: Date.now() - startMs,
         },
       });
+
+      log("COMPLETE", { durationMs: Date.now() - startMs });
 
       res.json({
         success: true,
@@ -359,13 +636,26 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
         blueprintVersion: blueprint.blueprintVersion,
         status: "ORCHESTRATED",
         orchestratorPlan,
+        requestId,
       });
     } catch (error: any) {
-      console.error("[StrategicCore] Orchestrator error:", error.message);
+      const durationMs = Date.now() - startMs;
+      log("UNHANDLED_ERROR", { code: error.code, message: error.message, durationMs });
+
+      await logAuditEvent({
+        accountId,
+        campaignId: campaignId || undefined,
+        blueprintId: id,
+        blueprintVersion: 0,
+        event: "ORCHESTRATOR_FAILED",
+        details: { requestId, error: error.code || "INTERNAL_ERROR", message: error.message, durationMs },
+      }).catch(() => {});
+
       res.status(500).json({
         success: false,
         error: "ORCHESTRATOR_INTERNAL_ERROR",
         message: `Failed to generate execution plans: ${error.message}`,
+        requestId,
       });
     }
   });
