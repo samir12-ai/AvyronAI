@@ -461,7 +461,7 @@ export default function CompetitiveIntelligence() {
           <Ionicons name="telescope-outline" size={48} color={colors.textMuted} />
           <Text style={[s.emptyTitle, { color: colors.text }]}>No Analysis Yet</Text>
           <Text style={[s.emptyDesc, { color: colors.textMuted }]}>
-            Add at least 2 competitors with complete evidence data, then run your first analysis.
+            Add competitors with complete evidence data, then run your first analysis.
           </Text>
           <Pressable
             onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); loadDemoMutation.mutate(); }}

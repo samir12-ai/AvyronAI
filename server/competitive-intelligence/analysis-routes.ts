@@ -29,10 +29,10 @@ export function registerCiAnalysisRoutes(app: Express) {
         .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.isActive, true), eq(ciCompetitors.isDemo, false)));
 
       const completeCompetitors = competitors.filter(validateCompetitorEvidence);
-      if (completeCompetitors.length < 2) {
+      if (completeCompetitors.length < 1) {
         return res.status(400).json({
           error: "INSUFFICIENT_DATA",
-          message: "At least 2 competitors must have complete core evidence fields (profileLink, postingFrequency, contentTypeRatio, engagementRatio, ctaPatterns)",
+          message: "At least 1 competitor must have complete core evidence fields (profileLink, postingFrequency, contentTypeRatio, engagementRatio, ctaPatterns)",
           totalCompetitors: competitors.length,
           completeCompetitors: completeCompetitors.length,
           incomplete: competitors.filter(c => !validateCompetitorEvidence(c)).map(c => ({

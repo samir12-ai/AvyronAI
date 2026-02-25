@@ -226,11 +226,11 @@ export function registerConfirmRoutes(app: Express) {
       }
 
       const competitorUrls = blueprint.competitorUrls ? JSON.parse(blueprint.competitorUrls) : [];
-      if (competitorUrls.length < 2) {
+      if (competitorUrls.length < 1) {
         return res.status(400).json({
           error: "GATE_FAILED",
           field: "competitorUrls",
-          message: "Minimum 2 competitor URLs required.",
+          message: "At least 1 competitor is required.",
         });
       }
 

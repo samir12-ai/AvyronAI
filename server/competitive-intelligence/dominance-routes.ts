@@ -40,13 +40,13 @@ export function registerDominanceRoutes(app: Express) {
       const competitorsWithEvidence = allCompetitors.filter(c => {
         return c.profileLink || c.name;
       });
-      if (competitorsWithEvidence.length < 2) {
+      if (competitorsWithEvidence.length < 1) {
         return res.status(400).json({
           success: false,
           error: "COMPETITOR_GATE_FAILED",
-          message: "Minimum 2 competitors with profile URLs required before running Dominance Engine. Add more competitors in the Intelligence tab.",
+          message: "At least 1 competitor with a profile URL is required before running Dominance Engine. Add competitors in the Intelligence tab.",
           currentCount: competitorsWithEvidence.length,
-          requiredCount: 2,
+          requiredCount: 1,
         });
       }
 
