@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -22,7 +22,32 @@ import { useLanguage } from '@/context/LanguageContext';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import { generateId } from '@/lib/storage';
 import { getApiUrl } from '@/lib/query-client';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import type { MediaItem } from '@/lib/types';
+
+interface StudioDraftState {
+  mediaTitle: string;
+  mediaType: 'video' | 'image';
+  mediaPlatform: string[];
+  mediaGoal: string;
+  mediaAudience: string;
+  mediaCta: string;
+  mediaSeries: string;
+  mediaOffer: string;
+  selectedUri: string | null;
+}
+
+const defaultStudioState: StudioDraftState = {
+  mediaTitle: '',
+  mediaType: 'video',
+  mediaPlatform: ['Instagram'],
+  mediaGoal: '',
+  mediaAudience: '',
+  mediaCta: '',
+  mediaSeries: '',
+  mediaOffer: '',
+  selectedUri: null,
+};
 
 const mediaTypes = [
   { id: 'video', label: 'Video', icon: 'videocam-outline' as const },
@@ -38,6 +63,8 @@ export default function StudioScreen() {
   const { mediaItems, addMediaItem, removeMediaItem } = useApp();
   const { t } = useLanguage();
 
+  const { state: ps, updateState, isLoading: psLoading, isSaving, saveError, resetState, hydrationVersion } = usePersistedState<StudioDraftState>('studio', defaultStudioState);
+
   const [showModal, setShowModal] = useState(false);
   const [mediaTitle, setMediaTitle] = useState('');
   const [mediaType, setMediaType] = useState<'video' | 'image'>('video');
@@ -49,6 +76,39 @@ export default function StudioScreen() {
   const [mediaSeries, setMediaSeries] = useState('');
   const [mediaOffer, setMediaOffer] = useState('');
   const [isSubmittingCase, setIsSubmittingCase] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const lastHydrationRef = useRef(0);
+
+  useEffect(() => {
+    if (hydrationVersion > 0 && hydrationVersion !== lastHydrationRef.current) {
+      const isFirstHydration = lastHydrationRef.current === 0;
+      lastHydrationRef.current = hydrationVersion;
+      const hasDraft = ps.mediaTitle !== '' || ps.mediaGoal !== '' || ps.mediaAudience !== '' || ps.mediaCta !== '' || ps.selectedUri !== null;
+      if (hasDraft) {
+        setMediaTitle(ps.mediaTitle);
+        setMediaType(ps.mediaType);
+        setMediaPlatform(ps.mediaPlatform);
+        setMediaGoal(ps.mediaGoal);
+        setMediaAudience(ps.mediaAudience);
+        setMediaCta(ps.mediaCta);
+        setMediaSeries(ps.mediaSeries);
+        setMediaOffer(ps.mediaOffer);
+        setSelectedUri(ps.selectedUri);
+        setDraftRestored(true);
+        setTimeout(() => setDraftRestored(false), 3000);
+      } else if (!isFirstHydration) {
+        setMediaTitle('');
+        setMediaType('video');
+        setMediaPlatform(['Instagram']);
+        setMediaGoal('');
+        setMediaAudience('');
+        setMediaCta('');
+        setMediaSeries('');
+        setMediaOffer('');
+        setSelectedUri(null);
+      }
+    }
+  }, [hydrationVersion, ps]);
 
   const videos = mediaItems.filter(m => m.type === 'video');
   const images = mediaItems.filter(m => m.type === 'image');
@@ -66,25 +126,30 @@ export default function StudioScreen() {
 
       if (!result.canceled && result.assets[0]) {
         setSelectedUri(result.assets[0].uri);
+        updateState({ selectedUri: result.assets[0].uri });
       }
     } catch (error) {
       console.error('Error picking media:', error);
       setSelectedUri('placeholder');
+      updateState({ selectedUri: 'placeholder' });
     }
   };
 
   const handleAddMedia = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const hasDraft = mediaTitle !== '' || mediaGoal !== '' || mediaAudience !== '' || mediaCta !== '' || selectedUri !== null;
+    if (!hasDraft) {
+      setMediaTitle('');
+      setMediaType('video');
+      setMediaPlatform(['Instagram']);
+      setSelectedUri(null);
+      setMediaGoal('');
+      setMediaAudience('');
+      setMediaCta('');
+      setMediaSeries('');
+      setMediaOffer('');
+    }
     setShowModal(true);
-    setMediaTitle('');
-    setMediaType('video');
-    setMediaPlatform(['Instagram']);
-    setSelectedUri(null);
-    setMediaGoal('');
-    setMediaAudience('');
-    setMediaCta('');
-    setMediaSeries('');
-    setMediaOffer('');
   };
 
   const handleSaveMedia = async () => {
@@ -145,6 +210,16 @@ export default function StudioScreen() {
     }
 
     await addMediaItem(newMedia);
+    resetState();
+    setMediaTitle('');
+    setMediaType('video');
+    setMediaPlatform(['Instagram']);
+    setSelectedUri(null);
+    setMediaGoal('');
+    setMediaAudience('');
+    setMediaCta('');
+    setMediaSeries('');
+    setMediaOffer('');
     setIsSubmittingCase(false);
     setShowModal(false);
     Alert.alert('Added', `${mediaType === 'video' ? 'Video' : 'Image'} added with AI captions generated.`);
@@ -223,6 +298,24 @@ export default function StudioScreen() {
           { paddingTop: Platform.OS === 'web' ? 67 + 16 : insets.top + 16 },
         ]}
       >
+        {draftRestored && (
+          <View style={[styles.draftBanner, { backgroundColor: colors.accent + '20' }]}>
+            <Ionicons name="document-text-outline" size={14} color={colors.accent} />
+            <Text style={[styles.draftBannerText, { color: colors.accent }]}>Unsaved draft restored</Text>
+          </View>
+        )}
+        {saveError && (
+          <View style={[styles.draftBanner, { backgroundColor: colors.error + '20' }]}>
+            <Ionicons name="warning-outline" size={14} color={colors.error} />
+            <Text style={[styles.draftBannerText, { color: colors.error }]}>{saveError}</Text>
+          </View>
+        )}
+        {isSaving && (
+          <View style={[styles.draftBanner, { backgroundColor: colors.textMuted + '10' }]}>
+            <Ionicons name="cloud-upload-outline" size={14} color={colors.textMuted} />
+            <Text style={[styles.draftBannerText, { color: colors.textMuted }]}>Saving draft...</Text>
+          </View>
+        )}
         <View style={styles.header}>
           <View>
             <Text style={[styles.title, { color: colors.text }]}>{t('studio.title')}</Text>
@@ -348,6 +441,7 @@ export default function StudioScreen() {
                   onPress={() => {
                     Haptics.selectionAsync();
                     setMediaType('video');
+                    updateState({ mediaType: 'video' });
                   }}
                   style={[
                     styles.typeButton,
@@ -373,6 +467,7 @@ export default function StudioScreen() {
                   onPress={() => {
                     Haptics.selectionAsync();
                     setMediaType('image');
+                    updateState({ mediaType: 'image' });
                   }}
                   style={[
                     styles.typeButton,
@@ -402,11 +497,11 @@ export default function StudioScreen() {
                 placeholder={t('studio.titlePlaceholder')}
                 placeholderTextColor={colors.textMuted}
                 value={mediaTitle}
-                onChangeText={setMediaTitle}
+                onChangeText={(v) => { setMediaTitle(v); updateState({ mediaTitle: v }); }}
               />
 
               <Text style={[styles.inputLabel, { color: colors.text }]}>{t('create.platform')}</Text>
-              <PlatformPicker selected={mediaPlatform} onChange={setMediaPlatform} single />
+              <PlatformPicker selected={mediaPlatform} onChange={(v) => { setMediaPlatform(v); updateState({ mediaPlatform: v }); }} single />
 
               <View style={[styles.metadataSection, { borderColor: colors.cardBorder }]}>
                 <View style={styles.metadataBadge}>
@@ -420,7 +515,7 @@ export default function StudioScreen() {
                   placeholder="e.g. Drive sales, Build awareness, Get leads"
                   placeholderTextColor={colors.textMuted}
                   value={mediaGoal}
-                  onChangeText={setMediaGoal}
+                  onChangeText={(v) => { setMediaGoal(v); updateState({ mediaGoal: v }); }}
                 />
 
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Target Audience *</Text>
@@ -429,7 +524,7 @@ export default function StudioScreen() {
                   placeholder="e.g. Dubai entrepreneurs, 25-40, tech-savvy"
                   placeholderTextColor={colors.textMuted}
                   value={mediaAudience}
-                  onChangeText={setMediaAudience}
+                  onChangeText={(v) => { setMediaAudience(v); updateState({ mediaAudience: v }); }}
                 />
 
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Call to Action *</Text>
@@ -438,7 +533,7 @@ export default function StudioScreen() {
                   placeholder="e.g. Book now, Shop the link, DM us"
                   placeholderTextColor={colors.textMuted}
                   value={mediaCta}
-                  onChangeText={setMediaCta}
+                  onChangeText={(v) => { setMediaCta(v); updateState({ mediaCta: v }); }}
                 />
 
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Content Series</Text>
@@ -447,7 +542,7 @@ export default function StudioScreen() {
                   placeholder="e.g. Monday Motivation, Behind the Scenes"
                   placeholderTextColor={colors.textMuted}
                   value={mediaSeries}
-                  onChangeText={setMediaSeries}
+                  onChangeText={(v) => { setMediaSeries(v); updateState({ mediaSeries: v }); }}
                 />
 
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Offer / Promotion</Text>
@@ -456,7 +551,7 @@ export default function StudioScreen() {
                   placeholder="e.g. 20% off this week, Free consultation"
                   placeholderTextColor={colors.textMuted}
                   value={mediaOffer}
-                  onChangeText={setMediaOffer}
+                  onChangeText={(v) => { setMediaOffer(v); updateState({ mediaOffer: v }); }}
                 />
               </View>
 
@@ -782,5 +877,18 @@ const styles = StyleSheet.create({
   metadataBadgeText: {
     fontSize: 13,
     fontFamily: 'Inter_600SemiBold',
+  },
+  draftBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+  draftBannerText: {
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
   },
 });

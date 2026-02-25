@@ -36,11 +36,13 @@ import * as ImagePicker from 'expo-image-picker';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
+import { useCampaign } from '@/context/CampaignContext';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { generateId } from '@/lib/storage';
 import { apiRequest, getApiUrl } from '@/lib/query-client';
 import { useCreativeContext } from '@/context/CreativeContext';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import type { ContentItem, MediaItem } from '@/lib/types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -108,6 +110,70 @@ interface GeneratedImage {
   style: string;
   createdAt: string;
 }
+
+interface CreatePersistedState {
+  activeTab: 'content' | 'designer' | 'video';
+  topic: string;
+  posterTopic: string;
+  videoPrompt: string;
+  photonPrompt: string;
+  posterText: string;
+  aiEngine: 'openai' | 'gemini';
+  contentType: string;
+  platform: string[];
+  reelDuration: string;
+  reelGoal: string;
+  genMode: GenerationMode;
+  posterStyle: string;
+  aspectRatio: string;
+  mood: string;
+  generatedContent: string;
+  reelScript: any;
+  generatedPoster: string | null;
+  videoUrl: string | null;
+  generatedImageUrl: string | null;
+  lumaMode: 'text-to-video' | 'image-to-video' | 'extend' | 'image-gen';
+  videoAspect: string;
+  videoDuration: string;
+  videoModel: string;
+  videoResolution: string;
+  videoLoop: boolean;
+  selectedCameraMotion: string | null;
+  photonModel: string;
+  photonAspect: string;
+}
+
+const defaultCreateState: CreatePersistedState = {
+  activeTab: 'content',
+  topic: '',
+  posterTopic: '',
+  videoPrompt: '',
+  photonPrompt: '',
+  posterText: '',
+  aiEngine: 'openai',
+  contentType: 'post',
+  platform: ['Instagram'],
+  reelDuration: '30-60 seconds',
+  reelGoal: 'engagement',
+  genMode: 'text-to-image',
+  posterStyle: 'cinematic',
+  aspectRatio: '1:1',
+  mood: 'energetic',
+  generatedContent: '',
+  reelScript: null,
+  generatedPoster: null,
+  videoUrl: null,
+  generatedImageUrl: null,
+  lumaMode: 'text-to-video',
+  videoAspect: '16:9',
+  videoDuration: '5s',
+  videoModel: 'ray-flash-2',
+  videoResolution: '720p',
+  videoLoop: false,
+  selectedCameraMotion: null,
+  photonModel: 'photon-1',
+  photonAspect: '16:9',
+};
 
 function DesignerLoadingOverlay({ isVisible }: { isVisible: boolean }) {
   const pulse = useSharedValue(0.6);
@@ -228,6 +294,7 @@ export default function CreateScreen() {
   const { brandProfile, addContentItem, addMediaItem } = useApp();
   const { t } = useLanguage();
   const { creativeContext, clearCreativeContext } = useCreativeContext();
+  const { state: ps, updateState, isLoading: psLoading, isSaving, saveError, hydrationVersion } = usePersistedState<CreatePersistedState>('create', defaultCreateState);
   const [ciScriptResult, setCiScriptResult] = useState<any>(null);
   const [ciScriptError, setCiScriptError] = useState<string | null>(null);
 
@@ -238,53 +305,53 @@ export default function CreateScreen() {
   const aspectRatios = aspectRatiosDef.map(r => ({ ...r, label: t(r.labelKey) }));
   const moodOptions = moodOptionsDef.map(m => ({ ...m, label: t(m.labelKey) }));
 
-  const [activeTab, setActiveTab] = useState<'content' | 'designer' | 'video'>('content');
-  const [aiEngine, setAiEngine] = useState<'openai' | 'gemini'>('openai');
+  const [activeTab, setActiveTab] = useState<'content' | 'designer' | 'video'>(ps.activeTab);
+  const [aiEngine, setAiEngine] = useState<'openai' | 'gemini'>(ps.aiEngine);
   
-  const [contentType, setContentType] = useState<string>('post');
-  const [platform, setPlatform] = useState<string[]>(['Instagram']);
-  const [topic, setTopic] = useState('');
-  const [generatedContent, setGeneratedContent] = useState('');
+  const [contentType, setContentType] = useState<string>(ps.contentType);
+  const [platform, setPlatform] = useState<string[]>(ps.platform);
+  const [topic, setTopic] = useState(ps.topic);
+  const [generatedContent, setGeneratedContent] = useState(ps.generatedContent);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [reelDuration, setReelDuration] = useState('30-60 seconds');
-  const [reelGoal, setReelGoal] = useState('engagement');
-  const [reelScript, setReelScript] = useState<any>(null);
+  const [reelDuration, setReelDuration] = useState(ps.reelDuration);
+  const [reelGoal, setReelGoal] = useState(ps.reelGoal);
+  const [reelScript, setReelScript] = useState<any>(ps.reelScript);
   const [expandedScene, setExpandedScene] = useState<number | null>(null);
 
-  const [genMode, setGenMode] = useState<GenerationMode>('text-to-image');
-  const [posterTopic, setPosterTopic] = useState('');
-  const [posterStyle, setPosterStyle] = useState('cinematic');
-  const [posterText, setPosterText] = useState('');
-  const [aspectRatio, setAspectRatio] = useState('1:1');
-  const [mood, setMood] = useState('energetic');
+  const [genMode, setGenMode] = useState<GenerationMode>(ps.genMode);
+  const [posterTopic, setPosterTopic] = useState(ps.posterTopic);
+  const [posterStyle, setPosterStyle] = useState(ps.posterStyle);
+  const [posterText, setPosterText] = useState(ps.posterText);
+  const [aspectRatio, setAspectRatio] = useState(ps.aspectRatio);
+  const [mood, setMood] = useState(ps.mood);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [generatedPoster, setGeneratedPoster] = useState<string | null>(null);
+  const [generatedPoster, setGeneratedPoster] = useState<string | null>(ps.generatedPoster);
   const [isGeneratingPoster, setIsGeneratingPoster] = useState(false);
   const [referencePhotos, setReferencePhotos] = useState<(ImagePicker.ImagePickerAsset | null)[]>([null, null, null]);
   const [generationHistory, setGenerationHistory] = useState<GeneratedImage[]>([]);
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
 
-  const [lumaMode, setLumaMode] = useState<'text-to-video' | 'image-to-video' | 'extend' | 'image-gen'>('text-to-video');
-  const [videoPrompt, setVideoPrompt] = useState('');
-  const [videoAspect, setVideoAspect] = useState('16:9');
-  const [videoDuration, setVideoDuration] = useState('5s');
-  const [videoModel, setVideoModel] = useState('ray-flash-2');
-  const [videoResolution, setVideoResolution] = useState('720p');
-  const [videoLoop, setVideoLoop] = useState(false);
+  const [lumaMode, setLumaMode] = useState<'text-to-video' | 'image-to-video' | 'extend' | 'image-gen'>(ps.lumaMode);
+  const [videoPrompt, setVideoPrompt] = useState(ps.videoPrompt);
+  const [videoAspect, setVideoAspect] = useState(ps.videoAspect);
+  const [videoDuration, setVideoDuration] = useState(ps.videoDuration);
+  const [videoModel, setVideoModel] = useState(ps.videoModel);
+  const [videoResolution, setVideoResolution] = useState(ps.videoResolution);
+  const [videoLoop, setVideoLoop] = useState(ps.videoLoop);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
   const [videoGenId, setVideoGenId] = useState<string | null>(null);
   const [videoStatus, setVideoStatus] = useState<string | null>(null);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(ps.videoUrl);
   const [videoError, setVideoError] = useState<string | null>(null);
   const [videoPolling, setVideoPolling] = useState(false);
   const [videoStartImage, setVideoStartImage] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [videoEndImage, setVideoEndImage] = useState<ImagePicker.ImagePickerAsset | null>(null);
-  const [selectedCameraMotion, setSelectedCameraMotion] = useState<string | null>(null);
+  const [selectedCameraMotion, setSelectedCameraMotion] = useState<string | null>(ps.selectedCameraMotion);
   const [extendGenId, setExtendGenId] = useState('');
   const [reverseExtend, setReverseExtend] = useState(false);
-  const [photonPrompt, setPhotonPrompt] = useState('');
-  const [photonModel, setPhotonModel] = useState('photon-1');
-  const [photonAspect, setPhotonAspect] = useState('16:9');
+  const [photonPrompt, setPhotonPrompt] = useState(ps.photonPrompt);
+  const [photonModel, setPhotonModel] = useState(ps.photonModel);
+  const [photonAspect, setPhotonAspect] = useState(ps.photonAspect);
   const [photonImageRef, setPhotonImageRef] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [photonImageRefWeight, setPhotonImageRefWeight] = useState(0.85);
   const [photonStyleRef, setPhotonStyleRef] = useState<ImagePicker.ImagePickerAsset | null>(null);
@@ -293,8 +360,67 @@ export default function CreateScreen() {
   const [photonModifyImage, setPhotonModifyImage] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [photonModifyWeight, setPhotonModifyWeight] = useState(1.0);
   const [photonRefMode, setPhotonRefMode] = useState<'none' | 'image-ref' | 'style-ref' | 'character-ref' | 'modify'>('none');
-  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
+  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(ps.generatedImageUrl);
   const [isGeneratingPhoton, setIsGeneratingPhoton] = useState(false);
+
+  const lastHydrationRef = useRef(0);
+  const skipSyncRef = useRef(false);
+
+  useEffect(() => {
+    if (hydrationVersion > 0 && hydrationVersion !== lastHydrationRef.current) {
+      lastHydrationRef.current = hydrationVersion;
+      skipSyncRef.current = true;
+      setActiveTab(ps.activeTab);
+      setAiEngine(ps.aiEngine);
+      setContentType(ps.contentType);
+      setPlatform(ps.platform);
+      setTopic(ps.topic);
+      setGeneratedContent(ps.generatedContent);
+      setReelDuration(ps.reelDuration);
+      setReelGoal(ps.reelGoal);
+      setReelScript(ps.reelScript);
+      setGenMode(ps.genMode);
+      setPosterTopic(ps.posterTopic);
+      setPosterStyle(ps.posterStyle);
+      setPosterText(ps.posterText);
+      setAspectRatio(ps.aspectRatio);
+      setMood(ps.mood);
+      setGeneratedPoster(ps.generatedPoster);
+      setLumaMode(ps.lumaMode);
+      setVideoPrompt(ps.videoPrompt);
+      setVideoAspect(ps.videoAspect);
+      setVideoDuration(ps.videoDuration);
+      setVideoModel(ps.videoModel);
+      setVideoResolution(ps.videoResolution);
+      setVideoLoop(ps.videoLoop);
+      setVideoUrl(ps.videoUrl);
+      setSelectedCameraMotion(ps.selectedCameraMotion);
+      setPhotonPrompt(ps.photonPrompt);
+      setPhotonModel(ps.photonModel);
+      setPhotonAspect(ps.photonAspect);
+      setGeneratedImageUrl(ps.generatedImageUrl);
+      setTimeout(() => { skipSyncRef.current = false; }, 100);
+    }
+  }, [hydrationVersion, ps]);
+
+  useEffect(() => {
+    if (lastHydrationRef.current === 0 || skipSyncRef.current) return;
+    updateState({
+      activeTab, topic, posterTopic, videoPrompt, photonPrompt, posterText,
+      aiEngine, contentType, platform, reelDuration, reelGoal, genMode,
+      posterStyle, aspectRatio, mood, generatedContent, reelScript,
+      generatedPoster, videoUrl, generatedImageUrl, lumaMode, videoAspect,
+      videoDuration, videoModel, videoResolution, videoLoop, selectedCameraMotion,
+      photonModel, photonAspect,
+    });
+  }, [
+    activeTab, topic, posterTopic, videoPrompt, photonPrompt, posterText,
+    aiEngine, contentType, platform, reelDuration, reelGoal, genMode,
+    posterStyle, aspectRatio, mood, generatedContent, reelScript,
+    generatedPoster, videoUrl, generatedImageUrl, lumaMode, videoAspect,
+    videoDuration, videoModel, videoResolution, videoLoop, selectedCameraMotion,
+    photonModel, photonAspect,
+  ]);
 
   useEffect(() => {
     if (creativeContext?.source === 'CI') {
@@ -942,9 +1068,23 @@ export default function CreateScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <Text style={[styles.title, { color: colors.text }]}>{t('create.title')}</Text>
-          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-            {t('create.subtitle')}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+              {t('create.subtitle')}
+            </Text>
+            {isSaving && (
+              <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(150)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <ActivityIndicator size="small" color={colors.accent} />
+                <Text style={{ fontSize: 11, color: colors.textMuted }}>Saving</Text>
+              </Animated.View>
+            )}
+            {saveError && !isSaving && (
+              <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(150)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Ionicons name="alert-circle" size={14} color="#ef4444" />
+                <Text style={{ fontSize: 11, color: '#ef4444' }}>Save error</Text>
+              </Animated.View>
+            )}
+          </View>
 
           <View style={styles.tabBar}>
             <Pressable

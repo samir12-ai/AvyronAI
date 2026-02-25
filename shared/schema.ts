@@ -1235,3 +1235,14 @@ export const aiUsageLog = pgTable("ai_usage_log", {
 });
 
 export type AIUsageLog = typeof aiUsageLog.$inferSelect;
+
+export const uiStateStore = pgTable("ui_state_store", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  accountId: varchar("account_id", { length: 255 }).notNull(),
+  campaignId: varchar("campaign_id", { length: 255 }).notNull(),
+  moduleKey: varchar("module_key", { length: 100 }).notNull(),
+  stateData: text("state_data").notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type UIStateStore = typeof uiStateStore.$inferSelect;

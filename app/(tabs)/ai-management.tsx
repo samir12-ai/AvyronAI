@@ -24,6 +24,7 @@ import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl } from '@/lib/query-client';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import LeadControlPanel from '@/components/LeadControlPanel';
 import StrategicPipeline from '@/components/StrategicPipeline';
 import BuildThePlan from '@/components/BuildThePlan';
@@ -51,6 +52,24 @@ interface AIAudience {
 
 type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'control' | 'publisher' | 'audience' | 'leads';
 type IntelSubTab = 'analysis' | 'dominance';
+
+interface AIMgmtPersistedState {
+  activeTab: TabView;
+  intelSubTab: IntelSubTab;
+  audienceGoal: string;
+  audienceProduct: string;
+  audienceBudget: string;
+  generatedAudiences: AIAudience[];
+}
+
+const defaultAIMgmtState: AIMgmtPersistedState = {
+  activeTab: 'buildplan',
+  intelSubTab: 'analysis',
+  audienceGoal: '',
+  audienceProduct: '',
+  audienceBudget: '',
+  generatedAudiences: [],
+};
 
 function PulseRing({ color }: { color: string }) {
   const scale = useRef(new RNAnimated.Value(1)).current;
@@ -84,21 +103,39 @@ export default function AIManagementScreen() {
   const { scheduledPosts, updateScheduledPost, metaConnection, brandProfile, campaigns, advancedMode } = useApp();
   const { t } = useLanguage();
 
-  const [activeTab, setActiveTab] = useState<TabView>('buildplan');
-  const [intelSubTab, setIntelSubTab] = useState<IntelSubTab>('analysis');
+  const { state: ps, updateState, isLoading: psLoading, isSaving, saveError, hydrationVersion } = usePersistedState('ai-management', defaultAIMgmtState);
+
+  const [activeTab, setActiveTab] = useState<TabView>(ps.activeTab);
+  const [intelSubTab, setIntelSubTab] = useState<IntelSubTab>(ps.intelSubTab);
   const [autoPublishEnabled, setAutoPublishEnabled] = useState(false);
   const [selectedPosts, setSelectedPosts] = useState<Set<string>>(new Set());
   const [publishing, setPublishing] = useState(false);
   const [publishResults, setPublishResults] = useState<any[]>([]);
 
   const [showAudienceModal, setShowAudienceModal] = useState(false);
-  const [audienceGoal, setAudienceGoal] = useState('');
-  const [audienceProduct, setAudienceProduct] = useState('');
-  const [audienceBudget, setAudienceBudget] = useState('');
+  const [audienceGoal, setAudienceGoal] = useState(ps.audienceGoal);
+  const [audienceProduct, setAudienceProduct] = useState(ps.audienceProduct);
+  const [audienceBudget, setAudienceBudget] = useState(ps.audienceBudget);
   const [generatingAudience, setGeneratingAudience] = useState(false);
-  const [audiences, setAudiences] = useState<AIAudience[]>([]);
+  const [audiences, setAudiences] = useState<AIAudience[]>(ps.generatedAudiences);
   const [audienceError, setAudienceError] = useState('');
   const [expandedAudience, setExpandedAudience] = useState<number | null>(null);
+
+  const lastHydrationRef = useRef(0);
+  const skipSyncRef = useRef(false);
+  useEffect(() => {
+    if (hydrationVersion > 0 && hydrationVersion !== lastHydrationRef.current) {
+      lastHydrationRef.current = hydrationVersion;
+      skipSyncRef.current = true;
+      setActiveTab(ps.activeTab);
+      setIntelSubTab(ps.intelSubTab);
+      setAudienceGoal(ps.audienceGoal);
+      setAudienceProduct(ps.audienceProduct);
+      setAudienceBudget(ps.audienceBudget);
+      setAudiences(ps.generatedAudiences);
+      setTimeout(() => { skipSyncRef.current = false; }, 100);
+    }
+  }, [hydrationVersion, ps]);
 
   const pendingPosts = useMemo(() => {
     return scheduledPosts
@@ -209,6 +246,7 @@ export default function AIManagementScreen() {
       const data = await response.json();
       if (data.audiences && Array.isArray(data.audiences)) {
         setAudiences(data.audiences);
+        updateState({ generatedAudiences: data.audiences });
       } else {
         throw new Error('Invalid response');
       }
@@ -271,6 +309,7 @@ export default function AIManagementScreen() {
           onPress={() => {
             Haptics.selectionAsync();
             setIntelSubTab('analysis');
+            updateState({ intelSubTab: 'analysis' });
           }}
         >
           <Ionicons name="analytics-outline" size={16} color={intelSubTab === 'analysis' ? '#3B82F6' : colors.textMuted} />
@@ -281,6 +320,7 @@ export default function AIManagementScreen() {
           onPress={() => {
             Haptics.selectionAsync();
             setIntelSubTab('dominance');
+            updateState({ intelSubTab: 'dominance' });
           }}
         >
           <Ionicons name="flash-outline" size={16} color={intelSubTab === 'dominance' ? '#EF4444' : colors.textMuted} />
@@ -574,6 +614,16 @@ export default function AIManagementScreen() {
               Your AI agency at work
             </Text>
           </View>
+          {isSaving && (
+            <View style={styles.saveIndicator}>
+              <ActivityIndicator size="small" color={colors.textMuted} />
+            </View>
+          )}
+          {saveError && !isSaving && (
+            <View style={styles.saveIndicator}>
+              <Ionicons name="cloud-offline-outline" size={16} color={colors.error} />
+            </View>
+          )}
         </View>
 
         <CampaignBar />
@@ -599,7 +649,7 @@ export default function AIManagementScreen() {
               return (
                 <Pressable
                   key={t.key}
-                  onPress={() => { Haptics.selectionAsync(); setActiveTab(t.key); }}
+                  onPress={() => { Haptics.selectionAsync(); setActiveTab(t.key); updateState({ activeTab: t.key }); }}
                   style={[styles.tab, isActive && { backgroundColor: t.color + '14', borderColor: t.color + '30' }]}
                 >
                   <Ionicons name={t.icon} size={17} color={isActive ? t.color : colors.textMuted} />
@@ -802,7 +852,7 @@ export default function AIManagementScreen() {
                   placeholder={t('aiManagement.campaignGoalPlaceholder')}
                   placeholderTextColor={colors.textMuted}
                   value={audienceGoal}
-                  onChangeText={setAudienceGoal}
+                  onChangeText={(v) => { setAudienceGoal(v); updateState({ audienceGoal: v }); }}
                   multiline
                   numberOfLines={3}
                   textAlignVertical="top"
@@ -816,7 +866,7 @@ export default function AIManagementScreen() {
                   placeholder={t('aiManagement.productPlaceholder')}
                   placeholderTextColor={colors.textMuted}
                   value={audienceProduct}
-                  onChangeText={setAudienceProduct}
+                  onChangeText={(v) => { setAudienceProduct(v); updateState({ audienceProduct: v }); }}
                 />
 
                 <Text style={[styles.inputLabel, { color: colors.text }]}>
@@ -827,7 +877,7 @@ export default function AIManagementScreen() {
                   placeholder="$500/month"
                   placeholderTextColor={colors.textMuted}
                   value={audienceBudget}
-                  onChangeText={setAudienceBudget}
+                  onChangeText={(v) => { setAudienceBudget(v); updateState({ audienceBudget: v }); }}
                 />
 
                 {audienceError ? (
@@ -864,7 +914,8 @@ export default function AIManagementScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { paddingHorizontal: 20 },
-  header: { marginBottom: 20 },
+  header: { marginBottom: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  saveIndicator: { paddingTop: 4 },
   title: { fontSize: 28, fontFamily: 'Inter_700Bold', marginBottom: 4 },
   subtitle: { fontSize: 14, fontFamily: 'Inter_400Regular' },
   tabBar: {

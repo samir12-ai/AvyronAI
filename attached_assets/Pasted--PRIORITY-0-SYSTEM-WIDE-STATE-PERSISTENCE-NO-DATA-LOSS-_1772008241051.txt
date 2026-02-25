@@ -1,0 +1,136 @@
+
+⸻
+
+📩 PRIORITY 0 — SYSTEM-WIDE STATE PERSISTENCE (NO DATA LOSS) — FINAL LOCK
+
+We are losing user-entered state when switching tabs/navigation.
+This is a P0 release-blocker. We will not continue features until this is locked.
+
+✅ Scope (MUST APPLY EVERYWHERE)
+
+This persistence rule must apply to:
+	1.	AI Control Center (Business Profile + pipeline tabs + approvals state)
+	2.	Create Center (AI Creation) (drafts, prompts, settings, generation params, chosen outputs)
+	3.	Studio (draft edits, captions, assets, statuses, queue actions)
+	4.	Dashboard is already stable — must not regress.
+
+⸻
+
+🔥 Hard Requirement
+
+No navigation / tab switch / component remount may reset or wipe state unless the user explicitly does it.
+
+User types once → system saves → state always returns exactly as it was.
+
+⸻
+
+🧠 Implementation Requirements (Non-Negotiable)
+
+A) One Source of Truth
+	•	The source of truth must be backend persisted state (campaign-scoped).
+	•	Local React state is allowed only as a temporary buffer, not the truth.
+
+B) Campaign Scoping (MANDATORY)
+
+All persisted state must be scoped by:
+	•	accountId + campaignId + moduleKey
+
+No cross-campaign contamination. No “default campaign” merges.
+
+C) Save Rules
+	•	Auto-save on change (debounce) OR onBlur, but MUST be reliable.
+	•	Must never overwrite stored values with defaults on mount.
+	•	Must have safe concurrency control (last-write-wins with updatedAt, or version).
+
+D) Load Rules
+	•	On mount: GET persisted state and hydrate UI.
+	•	During loading: show loading state but do not clear fields (no flicker-to-empty).
+	•	If no data exists: show empty placeholders ONLY once (first-time).
+
+E) Explicit Reset Only
+
+Add explicit “Reset” action if needed — otherwise NO resets.
+
+⸻
+
+🚫 Forbidden (Instant Rejection)
+	•	Resetting state on tab switch
+	•	Using local-only state that disappears on navigation
+	•	Reapplying default values after having saved data
+	•	Any “demo fallback” text/actions in REAL mode
+	•	Any silent failure where save fails without UI notice
+
+⸻
+
+✅ Acceptance Criteria (EXTREMELY STRICT)
+
+1) AI Control Center Persistence
+	•	Fill Business Profile (all fields)
+	•	Switch tabs 10 times (AI Control ↔ Create ↔ Studio ↔ Calendar ↔ Dashboard)
+	•	Return → data is 100% identical
+	•	Refresh → still identical
+	•	Close app / reopen → still identical
+	•	Change campaign → correct scoped data loads (no leakage)
+
+2) Create Center (AI Creation) Persistence
+	•	Start a creation draft (prompt + settings + format + goal + any selections)
+	•	Navigate away → back → draft is identical
+	•	Refresh → identical
+	•	Generated output persists AND selected variant persists
+	•	No forced regeneration, no lost selection
+
+3) Studio Persistence
+	•	Open a draft, edit caption/content
+	•	Navigate away/back → edit persists
+	•	Refresh → persists
+	•	Status changes persist
+	•	No duplicate drafts created by remount/reload
+	•	No empty flash / wipe while loading
+
+4) Dashboard Regression Check
+	•	Dashboard must remain stable and correct
+	•	No new “Select a campaign” loops introduced by persistence work
+
+⸻
+
+🧪 Required E2E Test Suite (MUST DELIVER)
+
+Provide automated tests (Playwright or equivalent) covering:
+
+Test A — Tab Switch Loop
+	•	Fill fields in each module
+	•	Switch tabs 10 times
+	•	Assert fields still equal expected values
+
+Test B — Refresh Loop
+	•	Fill fields
+	•	Refresh
+	•	Assert state persists
+
+Test C — Campaign Switch Isolation
+	•	Create state in Campaign A
+	•	Switch to Campaign B (empty)
+	•	Switch back to A
+	•	Assert A is intact, B is separate
+
+Test D — Save Failure Visibility
+	•	Simulate backend 500 on save
+	•	UI must show visible error + retry
+	•	Must NOT silently drop user input
+
+⸻
+
+📦 Proof Pack (MANDATORY DELIVERY)
+
+When done, deliver:
+	1.	Short video (or screenshots) proving tab-switch + refresh + reopen persistence
+	2.	List of modules + stored keys (moduleKey strategy)
+	3.	Confirmation of scoping (accountId+campaignId)
+	4.	E2E test results output
+
+⸻
+
+Timeline/Behavior
+
+This is one-shot: implement globally, not “per screen patching”.
+We want the whole app behaving the same: wherever you go, your state stays.
