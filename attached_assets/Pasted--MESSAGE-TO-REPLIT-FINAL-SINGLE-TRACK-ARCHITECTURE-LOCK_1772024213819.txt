@@ -1,0 +1,132 @@
+
+⸻
+
+📩 MESSAGE TO REPLIT — FINAL SINGLE-TRACK ARCHITECTURE LOCK
+
+We are enforcing final architecture alignment.
+
+There will be:
+	•	ONE plan
+	•	ONE calendar
+	•	ONE execution track
+	•	ZERO bulk generation
+	•	ZERO parallel systems
+
+⸻
+
+1️⃣ REMOVE PIPELINE CALENDAR COMPLETELY
+
+Pipeline must NOT render or own any separate calendar.
+
+There must be:
+	•	Only one calendar UI
+	•	Only one calendar_entries data source
+
+After plan approval:
+	•	System creates calendar_entries (deterministic, based on plan distribution)
+	•	Pipeline shows summary only
+	•	Primary CTA: “Open Calendar”
+	•	Clicking it navigates to the MAIN Calendar section
+
+No duplicate rendering.
+No temporary calendar structures.
+No “pipeline calendar”.
+
+Single source of truth = calendar_entries table.
+
+⸻
+
+2️⃣ CREATION MUST BE STRICTLY ITEM-BY-ITEM
+
+Current behavior is wrong:
+System attempts large multi-post generation causing long waits / timeouts.
+
+This is forbidden.
+
+New hard rule:
+
+Each calendar entry must have exactly:
+	•	One Required Work item
+	•	One Generate button
+	•	One Studio draft output
+
+Generation must:
+	•	Generate exactly ONE item
+	•	Never auto-run for multiple items
+	•	Never attempt plan-wide generation
+	•	Never exceed one content unit per request
+
+No batch mode.
+No “Generate All”.
+No hidden loops.
+
+⸻
+
+3️⃣ REQUIRED WORK STRUCTURE
+
+Required work must be normalized:
+
+Each calendar slot = one row in required_work.
+
+Example:
+If plan says 30 stories:
+→ create 30 required_work rows
+→ each linked to a calendar_entry
+→ each has status: pending / generated / edited / ready
+
+Generation updates only that row.
+
+Studio must link to required_work_id.
+
+⸻
+
+4️⃣ SAVE FLOW
+
+Generate →
+→ creates/updates studio_item
+→ user edits in Studio
+→ publishing worker reads from studio_item
+→ status flows back to calendar_entry
+
+Single direction chain:
+
+PLAN
+→ CALENDAR_ENTRIES
+→ REQUIRED_WORK
+→ STUDIO_ITEMS
+→ PUBLISH
+
+No bypassing.
+No alternate flows.
+
+⸻
+
+5️⃣ HARD ACCEPTANCE CRITERIA
+	•	No secondary calendar UI anywhere.
+	•	Approve → creates calendar_entries only once.
+	•	Pipeline shows summary, not embedded calendar.
+	•	Generate produces exactly one item.
+	•	No endpoint loops over multiple required_work rows.
+	•	No request exceeds 1 content unit generation.
+	•	No timeouts under normal usage.
+	•	All transitions audit logged.
+
+⸻
+
+6️⃣ PERFORMANCE GUARANTEE
+
+Each generate request must:
+	•	Return within timeout threshold
+	•	Have clear loading state
+	•	Return structured error if AI fails
+	•	Never silently hang
+
+⸻
+
+This is final architecture lock.
+No parallel systems.
+No shortcuts.
+No dual calendars.
+No mass generation.
+
+Single-track execution only.
