@@ -90,6 +90,8 @@ export type AuditEventType =
   | "AI_CREATIVE_GENERATED"
   | "AI_CREATIVE_FAILED"
   | "EMERGENCY_STOP_TRIGGERED"
+  | "FAILED_ENTRIES_RESET"
+  | "FAILED_RESET_ERROR"
   | "JOB_SKIPPED";
 
 export async function logAudit(

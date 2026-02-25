@@ -1,0 +1,74 @@
+Hi Replit team,
+
+We’re very close to launch and we need ONE final confirmation pass, with hard proof (not summaries). Please treat this as P0.
+
+## A) Confirm the “Reset All Failed” implementation is correct (and safe)
+You added:
+POST /api/execution/plans/:planId/reset-failed
+
+Please confirm the following (YES/NO + where/how you enforced it):
+
+1) Gates / Authorization
+- Reset is allowed ONLY if the plan is APPROVED.
+- Request is scoped by accountId + campaignId (no cross-account/campaign resets).
+- If campaign mismatch → return 403 CAMPAIGN_MISMATCH (or equivalent structured code).
+- If plan not APPROVED → return 409 PLAN_NOT_APPROVED (no 500).
+
+2) Idempotency / Safety
+- Reset only touches calendar_entries with status = FAILED.
+- It does NOT modify READY/SCHEDULED/PUBLISHED (or any non-FAILED) entries.
+- If user clicks twice, the second call is safe and returns success with “0 changed” (no side effects).
+
+3) Data integrity (single direction only)
+- It deletes ONLY the failed studio_items tied to those FAILED entries (or safely updates existing ones) without orphaning.
+- It does NOT create a new plan, does NOT change plan.status, does NOT regenerate orchestration.
+
+4) Auditability
+- It writes an audit event (e.g. PLAN_FAILURE_RESET) with:
+  - requestId
+  - planId
+  - counts reset (entriesReset, studioDeleted)
+  - timestamp
+- Any error path also writes an audit event with error code.
+
+## B) Critical: bypass detection + what to do if ANY bypass exists
+We must enforce ONE track:
+PLAN → CALENDAR_ENTRIES → REQUIRED_WORK → STUDIO_ITEMS → PUBLISH
+
+Please do a quick scan and answer:
+
+Question: Is there ANY endpoint/UI flow that can:
+- generate content in batch (50 posts etc),
+- create studio_items without a calendar_entry,
+- publish without passing through calendar_entries,
+- write execution artifacts from Strategy/CI tabs,
+- or render a “second calendar” in Pipeline?
+
+If the answer is NO: confirm and list the 3 strongest proofs (e.g. removed routes, grep patterns, tests).
+
+If the answer is YES: do the following immediately (no partials):
+1) Disable/Remove the bypass endpoint/handler (return 404 or hard-gate behind APPROVED + single-entry only).
+2) Replace any batch generation with single-entry generation only:
+   POST /api/execution/calendar-entries/:entryId/generate
+3) Ensure Pipeline never renders a calendar—only summary + “Open Calendar”.
+
+## C) Launch Checklist — reply YES/NO per item + evidence
+Please answer each line with: YES/NO + proof reference (file/function/test name or screenshot).
+
+1) Approve button visible after Phase 5 generates plan; pipeline unlocks only after APPROVED.
+2) Plan status source of truth = strategic_plans.status (no UI-only state).
+3) Single calendar source: Calendar tab reads from calendar_entries; Pipeline shows summary only.
+4) No batch generation endpoint exists (old batch route returns 404).
+5) Single-entry generation works and is idempotent (retry updates same studio_item, no duplicates).
+6) Reset All Failed meets section A conditions (gated + scoped + audit + idempotent).
+7) AI Actions / AI Priority are evidence-bound (no demo/filler actions). Each action includes sourceTag + evidenceMetric + timeframe + priority justification.
+8) Dashboard metrics are campaign-scoped and never show hardcoded/demo numbers in REAL mode.
+9) Business Data required layer: user must fill location/specialty/campaign info before orchestration; state persists.
+10) Persistence: Create Center + AI Control Center + Studio keep state across tab switches (and campaign isolation works).
+11) DEMO/REAL isolation: DEMO uses fixtures, REAL never returns fixtures.
+12) Error discipline: expected states return structured 4xx/409/402/504 codes, no random 500s.
+
+Once you reply with the YES/NO + proofs, we will greenlight launch.
+
+Thanks.
+Samir

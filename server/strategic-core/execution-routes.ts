@@ -849,11 +849,27 @@ export function registerExecutionRoutes(app: Express) {
   });
 
   app.post("/api/execution/plans/:planId/reset-failed", async (req: Request, res: Response) => {
+    const requestId = `reset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
       const { planId } = req.params;
+      const accountId = (req.query.accountId as string) || (req.body?.accountId as string) || "default";
 
       const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
-      if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+      if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND", requestId });
+
+      if (plan.accountId !== accountId) {
+        return res.status(403).json({ error: "ACCOUNT_MISMATCH", message: "Plan does not belong to this account.", requestId });
+      }
+
+      const validStatuses = ["APPROVED", "GENERATED_TO_CALENDAR", "CREATIVE_GENERATED", "REVIEW", "SCHEDULED"];
+      if (!validStatuses.includes(plan.status)) {
+        return res.status(409).json({
+          error: "PLAN_NOT_APPROVED",
+          message: `Plan must be APPROVED or beyond to reset failed entries. Current status: ${plan.status}`,
+          currentStatus: plan.status,
+          requestId,
+        });
+      }
 
       const failedEntries = await db
         .select()
@@ -861,7 +877,7 @@ export function registerExecutionRoutes(app: Express) {
         .where(and(eq(calendarEntries.planId, planId), eq(calendarEntries.status, "FAILED")));
 
       if (failedEntries.length === 0) {
-        return res.json({ success: true, message: "No failed entries to reset.", resetCount: 0 });
+        return res.json({ success: true, message: "No failed entries to reset.", resetCount: 0, studioDeleted: 0, requestId });
       }
 
       await db
@@ -869,11 +885,14 @@ export function registerExecutionRoutes(app: Express) {
         .set({ status: "DRAFT", errorReason: null, updatedAt: new Date() })
         .where(and(eq(calendarEntries.planId, planId), eq(calendarEntries.status, "FAILED")));
 
+      let studioDeleted = 0;
       const failedItemIds = failedEntries.map(e => e.id);
       for (const entryId of failedItemIds) {
-        await db
+        const deleted = await db
           .delete(studioItems)
-          .where(and(eq(studioItems.calendarEntryId, entryId), eq(studioItems.status, "FAILED")));
+          .where(and(eq(studioItems.calendarEntryId, entryId), eq(studioItems.status, "FAILED")))
+          .returning();
+        studioDeleted += deleted.length;
       }
 
       await db
@@ -882,12 +901,15 @@ export function registerExecutionRoutes(app: Express) {
         .where(eq(strategicPlans.id, planId));
 
       await logAudit(plan.accountId, "FAILED_ENTRIES_RESET", {
-        details: { planId, resetCount: failedEntries.length },
+        details: { requestId, planId, entriesReset: failedEntries.length, studioDeleted, timestamp: new Date().toISOString() },
       });
 
-      res.json({ success: true, resetCount: failedEntries.length, message: `Reset ${failedEntries.length} failed entries to DRAFT.` });
+      res.json({ success: true, resetCount: failedEntries.length, studioDeleted, requestId, message: `Reset ${failedEntries.length} failed entries to DRAFT.` });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      await logAudit("default", "FAILED_RESET_ERROR", {
+        details: { requestId, error: err.message, planId: req.params.planId },
+      }).catch(() => {});
+      res.status(500).json({ error: "RESET_FAILED", message: err.message, requestId });
     }
   });
 
