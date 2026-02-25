@@ -1,0 +1,159 @@
+
+⸻
+
+📩 MESSAGE TO REPLIT — P0 / ZERO-DRIFT: Plan Approval Missing + Pipeline Locked After Full Completion
+
+We have a critical execution dead-end and we need a hard, zero-drift fix.
+
+Symptom (P0 Bug)
+	•	User completes Build The Plan fully (Gate→Extract→Confirm→Analyze→Validate→Execute).
+	•	Phase 5 generates execution plans successfully and displays them.
+	•	There is NO “Approve Plan” action.
+	•	Pipeline stays LOCKED even after full completion.
+	•	Result: system produces a plan but cannot activate it → single-track broken.
+
+This is unacceptable because we already enforced “one plan / one track”:
+No APPROVED plan = no pipeline = no autopilot execution.
+
+⸻
+
+REQUIRED FIX (STRICT STATE MACHINE + SINGLE SOURCE OF TRUTH)
+
+1) Canonical State Field (Single Source of Truth)
+
+There must be one authoritative field that controls execution access:
+	•	strategic_plans.status is the authority
+(or if you have another canonical table, pick ONE and delete any competing unlock logic.)
+
+Pipeline must be gated ONLY by:
+	•	plan.status === "APPROVED"
+
+No UI heuristics.
+No checking “phases complete”.
+No derived states.
+No “it generated so it’s approved”.
+
+⸻
+
+2) Explicit Approval Step (Mandatory)
+
+After Phase 5 success:
+
+UI must show:
+
+Primary CTA: Approve & Activate Plan
+Secondary CTA: Regenerate Plan
+
+Also show a visible status badge:
+	•	EXECUTION_GENERATED (not approved yet)
+	•	APPROVED (active)
+
+If status already APPROVED, button must not show.
+
+⸻
+
+3) Approval Endpoint (Hard Contract)
+
+Add endpoint (or use existing) to approve the current plan:
+
+Request must include:
+	•	blueprintId (or planId)
+	•	must resolve accountId + campaignId from trusted middleware (NOT from client query)
+
+Server must do atomically (single transaction):
+	1.	Verify plan exists + belongs to account/campaign
+	2.	Verify status is exactly EXECUTION_GENERATED (or VALIDATED depending on your model)
+	3.	Update strategic_plans.status = "APPROVED"
+	4.	Insert plan_approvals row (if table exists)
+	5.	Write audit_log event: PLAN_APPROVED
+include: requestId, planId, blueprintId, accountId, campaignId, timestamp
+
+Return:
+{ success: true, data: { planId, status: "APPROVED" } }
+
+⸻
+
+ZERO-DRIFT PIPELINE LOCK RULE (NO EXCEPTIONS)
+
+Pipeline tab must be locked if ANY of these are true:
+	•	no plan exists
+	•	plan.status !== “APPROVED”
+	•	plan belongs to different campaignId than currently selected
+	•	account is paused / emergency stop
+	•	budget gate fails (if enforced)
+
+Pipeline unlock must be true ONLY when:
+	•	plan.status === “APPROVED”
+	•	campaign match confirmed
+
+⸻
+
+HARD FAILURE CODES (NO 500)
+
+Approval endpoint must never throw generic 500 for expected states.
+
+Return exact errors:
+	•	404 PLAN_NOT_FOUND
+	•	409 PLAN_NOT_READY (if status not EXECUTION_GENERATED/VALIDATED)
+	•	409 PLAN_ALREADY_APPROVED
+	•	403 CAMPAIGN_MISMATCH
+	•	403 ACCOUNT_PAUSED
+	•	402 AI_BUDGET_EXCEEDED (if budget gate blocks approval-related AI, if any)
+
+⸻
+
+CRITICAL: REGENERATE MUST RELOCK
+
+If user regenerates execution plans after approval:
+	•	plan.status must revert to EXECUTION_GENERATED
+	•	pipeline must relock immediately
+	•	audit event: PLAN_REGENERATED (include previous status)
+
+No stale approvals allowed.
+
+⸻
+
+REQUIRED TESTS (MANDATORY)
+
+Test 1 — Approve unlocks pipeline
+	1.	Generate plan (Phase 5) → status EXECUTION_GENERATED
+	2.	Pipeline locked
+	3.	Approve → status becomes APPROVED
+	4.	Pipeline unlocked immediately
+	5.	Refresh → still unlocked
+
+Test 2 — No approve, no pipeline
+
+Complete all phases but do not approve:
+	•	pipeline must remain locked
+
+Test 3 — Regenerate relocks
+
+Approve, then regenerate:
+	•	status must revert
+	•	pipeline locked again until re-approve
+
+Test 4 — Campaign isolation
+
+Approve plan for Campaign A:
+	•	switch to Campaign B → pipeline must lock
+	•	switch back A → unlocked
+
+⸻
+
+DELIVERY PROOF REQUIRED (DO NOT CLAIM WITHOUT EVIDENCE)
+
+Reply back with:
+	1.	DB field used as single source of truth
+	2.	Endpoint path + request/response contract
+	3.	Audit event name + payload fields
+	4.	Screenshots:
+	•	Phase 5 showing Approve button (before approval)
+	•	After approval showing APPROVED badge
+	•	Pipeline unlocked view
+	5.	Test outputs (or logs) confirming all 4 tests passed
+
+⸻
+
+This is a state machine correction, not a UI tweak.
+Fix cleanly, no patch logic, no shortcuts.

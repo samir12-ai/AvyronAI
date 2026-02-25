@@ -72,6 +72,8 @@ interface Blueprint {
   marketMap: any;
   validationResult: any;
   orchestratorPlan: any;
+  planId?: string | null;
+  planStatus?: string | null;
 }
 
 const STATUS_TO_PHASE: Record<BlueprintStatus, Phase> = {
@@ -523,6 +525,8 @@ export default function BuildThePlan({ onNavigateToCI }: BuildThePlanProps) {
         ...prev,
         status: 'ORCHESTRATED' as BlueprintStatus,
         orchestratorPlan: data.orchestratorPlan,
+        planId: data.planId || null,
+        planStatus: data.planStatus || 'DRAFT',
       } : null);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch (err: any) {
@@ -530,6 +534,82 @@ export default function BuildThePlan({ onNavigateToCI }: BuildThePlanProps) {
     } finally {
       setLoading(false);
     }
+  }, [blueprint]);
+
+  const approvePlan = useCallback(async () => {
+    if (!blueprint) return;
+    setError('');
+    setLoading(true);
+
+    try {
+      const res = await fetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/approve-plan`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        const statusPrefix = !res.ok ? `[HTTP ${res.status}] ` : '';
+        setError(statusPrefix + (data.message || data.error || 'Approval failed'));
+        return;
+      }
+
+      setBlueprint(prev => prev ? {
+        ...prev,
+        planId: data.planId,
+        planStatus: 'APPROVED',
+      } : null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('Plan Approved', 'Your execution plan is now active. The Pipeline is unlocked.');
+    } catch (err: any) {
+      setError(`Network error: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [blueprint]);
+
+  const regeneratePlan = useCallback(async () => {
+    if (!blueprint) return;
+
+    Alert.alert(
+      'Regenerate Plan',
+      'This will clear the current execution plan and revert to VALIDATED status. Any existing approval will be revoked and the Pipeline will be locked.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Regenerate',
+          style: 'destructive',
+          onPress: async () => {
+            setError('');
+            setLoading(true);
+            try {
+              const res = await fetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/regenerate-plan`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+              });
+              const data = await res.json();
+              if (!res.ok || !data.success) {
+                setError((data.message || data.error || 'Regeneration failed'));
+                return;
+              }
+
+              setBlueprint(prev => prev ? {
+                ...prev,
+                status: 'VALIDATED' as BlueprintStatus,
+                orchestratorPlan: null,
+                planId: null,
+                planStatus: null,
+              } : null);
+              setCurrentPhase(5);
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            } catch (err: any) {
+              setError(`Network error: ${err.message}`);
+            } finally {
+              setLoading(false);
+            }
+          },
+        },
+      ]
+    );
   }, [blueprint]);
 
   const renderCampaignBadge = () => {
@@ -1282,16 +1362,38 @@ export default function BuildThePlan({ onNavigateToCI }: BuildThePlanProps) {
       try { plan = JSON.parse(plan); } catch { plan = null; }
     }
 
+    const pStatus = blueprint?.planStatus;
+    const isApproved = pStatus === 'APPROVED';
+
     const renderPhase5Header = () => (
       <View style={[s.phaseCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
         <View style={s.phaseHeader}>
           <View style={[s.phaseIconWrap, { backgroundColor: '#10B98120' }]}>
             <Ionicons name="rocket" size={20} color="#10B981" />
           </View>
-          <View style={s.phaseHeaderText}>
-            <Text style={[s.phaseTitle, { color: colors.text }]}>Phase 5: Execution Plans</Text>
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={[s.phaseTitle, { color: colors.text }]}>Phase 5: Execution Plans</Text>
+              {plan && (
+                <View style={{
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 6,
+                  backgroundColor: isApproved ? '#10B98120' : '#F59E0B20',
+                }}>
+                  <Text style={{
+                    fontSize: 10,
+                    fontWeight: '700',
+                    color: isApproved ? '#10B981' : '#F59E0B',
+                    textTransform: 'uppercase',
+                  }}>
+                    {isApproved ? 'APPROVED' : 'PENDING APPROVAL'}
+                  </Text>
+                </View>
+              )}
+            </View>
             <Text style={[s.phaseDesc, { color: colors.textSecondary }]}>
-              {plan ? '6 structured plans ready for deployment' : 'Generate your AI execution plans'}
+              {isApproved ? 'Plan approved — Pipeline unlocked' : plan ? 'Review and approve to unlock Pipeline' : 'Generate your AI execution plans'}
             </Text>
           </View>
         </View>
@@ -1510,6 +1612,40 @@ export default function BuildThePlan({ onNavigateToCI }: BuildThePlanProps) {
             </View>
           );
         })}
+
+        <View style={{ marginTop: 16, gap: 10 }}>
+          {!isApproved && (
+            <Pressable onPress={approvePlan} disabled={loading} style={[s.actionBtn]}>
+              <LinearGradient colors={['#10B981', '#059669']} style={s.actionBtnGrad}>
+                <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                <Text style={s.actionBtnText}>
+                  {loading ? 'Approving...' : 'Approve & Activate Plan'}
+                </Text>
+              </LinearGradient>
+            </Pressable>
+          )}
+
+          {isApproved && (
+            <View style={[s.phaseCard, { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="checkmark-done-circle" size={22} color="#10B981" />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: '#065F46', fontWeight: '700', fontSize: 14 }}>Plan Approved</Text>
+                  <Text style={{ color: '#047857', fontSize: 12, marginTop: 2 }}>
+                    Pipeline is now unlocked. Switch to Pipeline tab to continue execution.
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+
+          <Pressable onPress={regeneratePlan} disabled={loading} style={[s.actionBtn]}>
+            <LinearGradient colors={['#6B7280', '#4B5563']} style={s.actionBtnGrad}>
+              <Ionicons name="refresh" size={18} color="#fff" />
+              <Text style={s.actionBtnText}>Regenerate Plan</Text>
+            </LinearGradient>
+          </Pressable>
+        </View>
 
         {renderPerformanceIntelligence()}
       </View>

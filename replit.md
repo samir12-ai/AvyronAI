@@ -54,6 +54,8 @@ Preferred communication style: Simple, everyday language.
 - **Phase 5 Demo Mode**: In demo mode, orchestrator returns deterministic fixture plan instantly (no AI call, <100ms). Structured logging with requestId traces every step.
 - **Competitor Linking**: Build The Plan pulls competitors from Competitive Intelligence (selectable list), minimum 1 competitor required (not 2). Strict validation at Phase 5: 400 COMPETITOR_REQUIRED for 0 competitors, 422 COMPETITOR_INCOMPLETE for invalid entries.
 - **Error Handling**: AI budget exceeded → 402 AI_BUDGET_EXCEEDED; AI timeout → 504 ORCHESTRATOR_TIMEOUT; parse failure → 500 with retry guidance. Every Phase 5 attempt produces an audit event.
+- **Plan Approval Gate**: After Phase 5 generates execution plans, a `strategic_plan` row is auto-created (status: DRAFT). Explicit "Approve & Activate Plan" button required to set status to APPROVED. Pipeline is LOCKED until plan.status === APPROVED. Regeneration reverts to VALIDATED and SUPERSEDES old plans, relocking pipeline.
+- **Approval Endpoints**: `POST /api/strategic/blueprint/:id/approve-plan` (DRAFT→APPROVED with audit), `POST /api/strategic/blueprint/:id/regenerate-plan` (reverts to VALIDATED, supersedes plans), `GET /api/strategic/blueprint/:id/plan-status`.
 
 ### Execution Authority Matrix
 - **SINGLE EXECUTION TRACK**: "Build The Plan" is the sole execution authority, owning strategic plans, required work, calendar entries, studio items, and plan approvals.

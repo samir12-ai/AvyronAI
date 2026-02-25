@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { db } from "../db";
-import { strategicBlueprints, blueprintCompetitors, blueprintVersions, campaignSelections } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { strategicBlueprints, strategicPlans, blueprintCompetitors, blueprintVersions, campaignSelections } from "@shared/schema";
+import { eq, and, desc, ne } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
 
 interface CampaignContextObject {
@@ -176,6 +176,24 @@ export function registerGateRoutes(app: Express) {
         .where(eq(blueprintVersions.blueprintId, id))
         .orderBy(desc(blueprintVersions.version));
 
+      let planId: string | null = null;
+      let planStatus: string | null = null;
+      if (blueprint.status === "ORCHESTRATED") {
+        const plans = await db.select({ id: strategicPlans.id, status: strategicPlans.status })
+          .from(strategicPlans)
+          .where(and(
+            eq(strategicPlans.blueprintId, id),
+            eq(strategicPlans.accountId, blueprint.accountId),
+            ne(strategicPlans.status, "SUPERSEDED"),
+          ))
+          .orderBy(desc(strategicPlans.createdAt))
+          .limit(1);
+        if (plans.length > 0) {
+          planId = plans[0].id;
+          planStatus = plans[0].status;
+        }
+      }
+
       res.json({
         success: true,
         blueprint: {
@@ -188,6 +206,8 @@ export function registerGateRoutes(app: Express) {
           marketMap: blueprint.marketMap ? JSON.parse(blueprint.marketMap) : null,
           validationResult: blueprint.validationResult ? JSON.parse(blueprint.validationResult) : null,
           orchestratorPlan: blueprint.orchestratorPlan ? JSON.parse(blueprint.orchestratorPlan) : null,
+          planId,
+          planStatus,
         },
         competitors,
         versionHistory: versions.map(v => ({

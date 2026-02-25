@@ -1,9 +1,10 @@
 import type { Express, Request, Response } from "express";
 import { aiChat, AICallError } from "../ai-client";
 import { db } from "../db";
-import { strategicBlueprints, strategyMemory, strategyInsights, moatCandidates, businessDataLayer } from "@shared/schema";
-import { eq, desc, gte, and, sql } from "drizzle-orm";
+import { strategicBlueprints, strategicPlans, planApprovals, strategyMemory, strategyInsights, moatCandidates, businessDataLayer } from "@shared/schema";
+import { eq, desc, gte, and, sql, ne } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
+import { logAudit } from "../audit";
 import * as crypto from "crypto";
 
 const REQUIRED_BLUEPRINT_FIELDS: { key: string; label: string }[] = [
@@ -373,6 +374,16 @@ export function registerOrchestratorRoutes(app: Express) {
           })
           .where(eq(strategicBlueprints.id, id));
 
+        const [demoPlanRow] = await db.insert(strategicPlans).values({
+          accountId,
+          blueprintId: id,
+          campaignId: campaignId || campaignContext.campaignId || "default",
+          planJson: JSON.stringify(demoPlan),
+          planSummary: "Demo execution plan — 6 structured sections",
+          status: "DRAFT",
+          executionStatus: "IDLE",
+        }).returning();
+
         await logAuditEvent({
           accountId,
           campaignId: campaignId || undefined,
@@ -382,12 +393,13 @@ export function registerOrchestratorRoutes(app: Express) {
           details: {
             requestId,
             mode: "DEMO",
+            planId: demoPlanRow.id,
             planSections: Object.keys(demoPlan).filter(k => k !== "blueprintVersion" && k !== "_meta"),
             durationMs: Date.now() - startMs,
           },
         });
 
-        log("DEMO_MODE_COMPLETE", { durationMs: Date.now() - startMs });
+        log("DEMO_MODE_COMPLETE", { durationMs: Date.now() - startMs, planId: demoPlanRow.id });
 
         return res.json({
           success: true,
@@ -395,6 +407,8 @@ export function registerOrchestratorRoutes(app: Express) {
           blueprintVersion: blueprint.blueprintVersion,
           status: "ORCHESTRATED",
           orchestratorPlan: demoPlan,
+          planId: demoPlanRow.id,
+          planStatus: "DRAFT",
           requestId,
         });
       }
@@ -613,6 +627,18 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
 
       log("AFTER_DB_WRITE");
 
+      const planSections = Object.keys(orchestratorPlan).filter(k => k !== "blueprintVersion");
+      const summary = `Execution plan — ${planSections.length} structured sections`;
+      const [realPlanRow] = await db.insert(strategicPlans).values({
+        accountId,
+        blueprintId: id,
+        campaignId: campaignId || "default",
+        planJson: JSON.stringify(orchestratorPlan),
+        planSummary: summary,
+        status: "DRAFT",
+        executionStatus: "IDLE",
+      }).returning();
+
       await logAuditEvent({
         accountId,
         campaignId: campaignId || undefined,
@@ -622,13 +648,14 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
         details: {
           requestId,
           mode: "PRODUCTION",
-          planSections: Object.keys(orchestratorPlan).filter(k => k !== "blueprintVersion"),
+          planId: realPlanRow.id,
+          planSections,
           performanceSignalsInjected,
           durationMs: Date.now() - startMs,
         },
       });
 
-      log("COMPLETE", { durationMs: Date.now() - startMs });
+      log("COMPLETE", { durationMs: Date.now() - startMs, planId: realPlanRow.id });
 
       res.json({
         success: true,
@@ -636,6 +663,8 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
         blueprintVersion: blueprint.blueprintVersion,
         status: "ORCHESTRATED",
         orchestratorPlan,
+        planId: realPlanRow.id,
+        planStatus: "DRAFT",
         requestId,
       });
     } catch (error: any) {
@@ -657,6 +686,212 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
         message: `Failed to generate execution plans: ${error.message}`,
         requestId,
       });
+    }
+  });
+
+  app.post("/api/strategic/blueprint/:id/approve-plan", async (req: Request, res: Response) => {
+    const requestId = crypto.randomUUID();
+    try {
+      const { id } = req.params;
+
+      const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
+      if (!blueprint) {
+        return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", requestId });
+      }
+
+      if (blueprint.status !== "ORCHESTRATED") {
+        return res.status(409).json({
+          success: false,
+          error: "PLAN_NOT_READY",
+          message: `Blueprint must be ORCHESTRATED before approval. Current status: ${blueprint.status}`,
+          currentStatus: blueprint.status,
+          requestId,
+        });
+      }
+
+      const accountId = blueprint.accountId;
+      const campaignId = blueprint.campaignId || "";
+
+      const plans = await db.select().from(strategicPlans)
+        .where(and(
+          eq(strategicPlans.blueprintId, id),
+          eq(strategicPlans.accountId, accountId),
+        ))
+        .orderBy(desc(strategicPlans.createdAt))
+        .limit(1);
+
+      if (plans.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: "PLAN_NOT_FOUND",
+          message: "No execution plan found for this blueprint. Generate execution plans first.",
+          requestId,
+        });
+      }
+
+      const plan = plans[0];
+
+      if (plan.status === "APPROVED") {
+        return res.status(409).json({
+          success: false,
+          error: "PLAN_ALREADY_APPROVED",
+          message: "Plan is already approved.",
+          planId: plan.id,
+          requestId,
+        });
+      }
+
+      if (plan.status !== "DRAFT" && plan.status !== "READY_FOR_REVIEW") {
+        return res.status(409).json({
+          success: false,
+          error: "PLAN_NOT_READY",
+          message: `Plan must be in DRAFT or READY_FOR_REVIEW status. Current: ${plan.status}`,
+          currentStatus: plan.status,
+          requestId,
+        });
+      }
+
+      if (plan.campaignId !== campaignId && campaignId) {
+        return res.status(403).json({
+          success: false,
+          error: "CAMPAIGN_MISMATCH",
+          message: "Plan campaign does not match blueprint campaign.",
+          requestId,
+        });
+      }
+
+      await db.update(strategicPlans)
+        .set({ status: "APPROVED", updatedAt: new Date() })
+        .where(eq(strategicPlans.id, plan.id));
+
+      await db.insert(planApprovals).values({
+        planId: plan.id,
+        accountId,
+        decision: "APPROVED",
+        reason: "Approved via Build The Plan Phase 5",
+        decidedBy: "client",
+      });
+
+      await logAuditEvent({
+        accountId,
+        campaignId: campaignId || undefined,
+        blueprintId: id,
+        blueprintVersion: blueprint.blueprintVersion,
+        event: "PLAN_APPROVED",
+        details: { requestId, planId: plan.id, blueprintId: id, campaignId },
+      });
+
+      await logAudit(accountId, "PLAN_APPROVED", {
+        details: { planId: plan.id, blueprintId: id, decidedBy: "client" },
+      });
+
+      res.json({
+        success: true,
+        planId: plan.id,
+        status: "APPROVED",
+        requestId,
+      });
+    } catch (error: any) {
+      console.error("[Orchestrator] Approve error:", error.message);
+      res.status(500).json({ success: false, error: "APPROVAL_FAILED", message: error.message, requestId });
+    }
+  });
+
+  app.post("/api/strategic/blueprint/:id/regenerate-plan", async (req: Request, res: Response) => {
+    const requestId = crypto.randomUUID();
+    try {
+      const { id } = req.params;
+
+      const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
+      if (!blueprint) {
+        return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", requestId });
+      }
+
+      if (blueprint.status !== "ORCHESTRATED") {
+        return res.status(409).json({
+          success: false,
+          error: "NOT_ORCHESTRATED",
+          message: "Blueprint must be ORCHESTRATED to regenerate.",
+          requestId,
+        });
+      }
+
+      const accountId = blueprint.accountId;
+      const campaignId = blueprint.campaignId || "";
+
+      const existingPlans = await db.select().from(strategicPlans)
+        .where(and(
+          eq(strategicPlans.blueprintId, id),
+          eq(strategicPlans.accountId, accountId),
+        ));
+
+      let previousStatus = "NONE";
+      for (const p of existingPlans) {
+        previousStatus = p.status;
+        await db.update(strategicPlans)
+          .set({ status: "SUPERSEDED", updatedAt: new Date() })
+          .where(eq(strategicPlans.id, p.id));
+      }
+
+      await db.update(strategicBlueprints)
+        .set({
+          status: "VALIDATED",
+          orchestratorPlan: null,
+          orchestratedAt: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(strategicBlueprints.id, id));
+
+      await logAuditEvent({
+        accountId,
+        campaignId: campaignId || undefined,
+        blueprintId: id,
+        blueprintVersion: blueprint.blueprintVersion,
+        event: "PLAN_REGENERATED",
+        details: { requestId, blueprintId: id, previousStatus, supersededCount: existingPlans.length },
+      });
+
+      res.json({
+        success: true,
+        blueprintId: id,
+        status: "VALIDATED",
+        message: "Plan cleared. Blueprint reverted to VALIDATED. Ready to regenerate.",
+        requestId,
+      });
+    } catch (error: any) {
+      console.error("[Orchestrator] Regenerate error:", error.message);
+      res.status(500).json({ success: false, error: "REGENERATE_FAILED", message: error.message, requestId });
+    }
+  });
+
+  app.get("/api/strategic/blueprint/:id/plan-status", async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
+      if (!blueprint) {
+        return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND" });
+      }
+
+      const plans = await db.select().from(strategicPlans)
+        .where(and(
+          eq(strategicPlans.blueprintId, id),
+          eq(strategicPlans.accountId, blueprint.accountId),
+          ne(strategicPlans.status, "SUPERSEDED"),
+        ))
+        .orderBy(desc(strategicPlans.createdAt))
+        .limit(1);
+
+      const plan = plans[0] || null;
+
+      res.json({
+        success: true,
+        blueprintId: id,
+        blueprintStatus: blueprint.status,
+        plan: plan ? { id: plan.id, status: plan.status, campaignId: plan.campaignId } : null,
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 }
