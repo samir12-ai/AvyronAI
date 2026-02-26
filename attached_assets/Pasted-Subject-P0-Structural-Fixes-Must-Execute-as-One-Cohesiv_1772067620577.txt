@@ -1,0 +1,124 @@
+Subject: P0 Structural Fixes — Must Execute as One Cohesive Refactor (No Partial Patches)
+
+We are not doing incremental patches anymore.
+We are stabilizing the system properly.
+
+Below are mandatory structural corrections.
+Implement them as one cohesive change-set with strict testing and no regressions.
+
+⸻
+
+1) Campaign Switch Hanging (P0)
+
+Current issue: When switching campaigns, previous campaign state lingers until manual refresh.
+
+Required:
+	•	Full state reset on campaign switch
+	•	Cancel all pending saves
+	•	Clear local component state before hydration
+	•	Prevent race conditions between old and new campaign fetch
+	•	Show loading state during re-hydration
+
+Acceptance:
+	•	Switching campaigns never requires manual refresh
+	•	No cross-campaign data bleed
+	•	E2E test proving isolation
+
+⸻
+
+2) Required Work Segmentation
+
+Required Work must be structured by engine type:
+	•	DESIGN_REQUIRED_WORK
+	•	COPY_REQUIRED_WORK
+	•	VIDEO_REQUIRED_WORK
+
+Each must:
+	•	Have its own count
+	•	Be independently generatable
+	•	Be independently tracked
+
+No monolithic required work list.
+
+⸻
+
+3) AI Video Analyzer (Remove Manual Studio Burden)
+
+Studio must not require manual filling for video metadata.
+
+Implement:
+	•	AI video analysis layer
+	•	Auto-generate title, description, tags, hook, CTA
+	•	User reviews and edits (optional)
+
+No mandatory manual input fields for each video.
+
+⸻
+
+4) Auto-Generated Plan PDF (Stored in Pipeline)
+
+After orchestration:
+	•	Generate structured PDF version of plan
+	•	Store in DB (linked to strategic_plan)
+	•	Show download button in Pipeline
+	•	Must not rely on frontend rendering
+
+⸻
+
+5) Dashboard Must Reflect Approved Plan
+
+Dashboard cannot show empty metrics.
+
+It must read:
+	•	Active APPROVED plan
+	•	Required work progress
+	•	Calendar entries
+	•	Performance snapshots
+	•	Strategy insights
+
+AI Actions must be evidence-based and tied to real data.
+
+No filler actions. No demo bleed in REAL mode.
+
+⸻
+
+6) Single Profile Source (Remove Duplicate Business Data Forms)
+
+Remove duplicated business data forms in Settings and Build.
+
+Create one unified section:
+“Profile”
+
+Located globally (top corner persistent access).
+
+Profile must feed:
+	•	Build The Plan
+	•	Dashboard
+	•	Creation
+	•	CI
+	•	Strategy engines
+
+No duplicated business forms anywhere else.
+
+⸻
+
+7) Security & Stability Lock
+
+Before delivery:
+	•	Campaign isolation test
+	•	Account isolation test
+	•	No duplicate studio items test
+	•	No orphan calendar entries test
+	•	No plan duplication test
+	•	No cross-campaign bleed test
+	•	All reset-failed tests re-run
+	•	All persistence tests re-run
+
+Provide YES/NO proof for each.
+
+⸻
+
+We are stabilizing the core before expanding engines.
+
+Do not ship partial fixes.
+Deliver as one structural upgrade.
