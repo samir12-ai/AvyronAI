@@ -32,11 +32,11 @@ Preferred communication style: Simple, everyday language.
 - **Server-side**: PostgreSQL with Drizzle ORM for user data and chat conversations.
 
 ### Key Features
-- **Dashboard**: Revenue-focused KPIs and AI action summaries. Profile icon in header opens unified Business Profile modal.
-- **Create**: AI Writer for text and AI Designer for image generation with style presets. Shows Required Work by branch (Designer/Writer/Video) with counts.
+- **Dashboard**: Revenue-focused KPIs and AI action summaries. Profile icon in header opens unified Business Profile modal. Plan-driven fallback metrics (planned/generated/failed/pending/completion%) when no Meta data. "Meta not connected" badge. AI Actions always non-empty when plan exists.
+- **Create**: AI Writer for text and AI Designer for image generation with style presets. Shows Required Work by branch (Designer/Writer/Video) with counts. Branch ownership: Carousels→DESIGNER, Posts+Stories→WRITER, Reels+Videos→VIDEO. No double counting — branch totals sum exactly to totalContentPieces.
 - **Calendar**: Content scheduling with AI Calendar Assistant.
 - **AI Management**: Auto-Publisher for Meta platforms, AI Audience Manager for optimized Meta ad audiences, and a Performance Intelligence Layer for insights.
-- **Studio**: Media library and AI Video Editor with FFmpeg rendering. AI Video Analysis Assist auto-extracts hooks, captions, CTAs, angles, and keywords per video item.
+- **Studio**: Media library and AI Video Editor with FFmpeg rendering. AI Video Analysis Assist auto-extracts hooks, captions, CTAs, angles, and keywords per video item. "Apply to Draft" button with field toggles writes selected AI fields to draft (non-destructive, user edits survive).
 - **Lead Engine**: Modular lead generation system with 8 independent modules and AI Lead Optimization.
 - **Competitive Intelligence**: Real-data competitor analysis system using a 2-step scrape ladder for MEASURED metrics and INFERRED AI insights.
 - **Creative Capture Layer**: 8-component pipeline analyzing reels with real data for deterministic signals and AI interpretation.

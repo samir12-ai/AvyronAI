@@ -166,7 +166,7 @@ function calcTotals(distribution: any, periodDays: number): any {
   const totalVideos = videosPerWeek * weeks;
   const totalContentPieces = totalReels + totalPosts + totalStories + totalCarousels + totalVideos;
 
-  const designerItems = totalCarousels + totalPosts;
+  const designerItems = totalCarousels;
   const videoItems = totalReels + totalVideos;
   const writerItems = totalStories + totalPosts;
 

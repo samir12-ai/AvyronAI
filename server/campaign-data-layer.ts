@@ -8,9 +8,13 @@ import {
   publishedPosts,
   ctaVariants,
   accountState,
+  strategicPlans,
+  calendarEntries,
+  requiredWork,
 } from "@shared/schema";
-import { eq, desc, sql, and, isNotNull, min, max, gte, lte } from "drizzle-orm";
+import { eq, desc, sql, and, isNotNull, min, max, gte, lte, inArray } from "drizzle-orm";
 import { logAudit } from "./audit";
+import { ACTIVE_PLAN_STATUSES } from "./plan-constants";
 
 const LOG_PREFIX = "[CampaignDataLayer]";
 
@@ -30,6 +34,17 @@ export async function resolveDataMode(accountId: string): Promise<DataMode> {
   }
 }
 
+export interface PlanDrivenMetrics {
+  plannedPieces: number;
+  generatedPieces: number;
+  failedPieces: number;
+  pendingGeneration: number;
+  completionPct: number;
+  nextScheduledDate: string | null;
+  hasPlan: boolean;
+  planStatus: string | null;
+}
+
 export interface DashboardMetricsResponse {
   mode: DataMode;
   campaignId: string;
@@ -46,6 +61,8 @@ export interface DashboardMetricsResponse {
   hasData: boolean;
   noDataFlag: boolean;
   isDemoData: boolean;
+  dataSource: "META" | "PLAN" | "NONE";
+  planMetrics: PlanDrivenMetrics;
 }
 
 const DEMO_FIXTURE_METRICS = {
@@ -59,6 +76,58 @@ const DEMO_FIXTURE_METRICS = {
   publishedCount: 8,
 };
 
+async function getPlanDrivenMetrics(campaignId: string, accountId: string): Promise<PlanDrivenMetrics> {
+  try {
+    const activePlan = await db
+      .select()
+      .from(strategicPlans)
+      .where(
+        and(
+          eq(strategicPlans.campaignId, campaignId),
+          eq(strategicPlans.accountId, accountId),
+          inArray(strategicPlans.status, [...ACTIVE_PLAN_STATUSES])
+        )
+      )
+      .orderBy(desc(strategicPlans.createdAt))
+      .limit(1);
+
+    if (activePlan.length === 0) {
+      return { plannedPieces: 0, generatedPieces: 0, failedPieces: 0, pendingGeneration: 0, completionPct: 0, nextScheduledDate: null, hasPlan: false, planStatus: null };
+    }
+
+    const plan = activePlan[0];
+
+    const [work, totalCal, generatedCal, failedCal, nextSched] = await Promise.all([
+      db.select().from(requiredWork).where(and(eq(requiredWork.campaignId, campaignId), eq(requiredWork.accountId, accountId), eq(requiredWork.planId, plan.id))).limit(1),
+      db.select({ count: sql<number>`count(*)` }).from(calendarEntries).where(and(eq(calendarEntries.campaignId, campaignId), eq(calendarEntries.accountId, accountId))),
+      db.select({ count: sql<number>`count(*)` }).from(calendarEntries).where(and(eq(calendarEntries.campaignId, campaignId), eq(calendarEntries.accountId, accountId), inArray(calendarEntries.status, ["GENERATED", "SCHEDULED", "PUBLISHED"]))),
+      db.select({ count: sql<number>`count(*)` }).from(calendarEntries).where(and(eq(calendarEntries.campaignId, campaignId), eq(calendarEntries.accountId, accountId), eq(calendarEntries.status, "FAILED"))),
+      db.select({ scheduledDate: calendarEntries.scheduledDate }).from(calendarEntries).where(and(eq(calendarEntries.campaignId, campaignId), eq(calendarEntries.accountId, accountId), eq(calendarEntries.status, "SCHEDULED"), gte(calendarEntries.scheduledDate, new Date()))).orderBy(calendarEntries.scheduledDate).limit(1),
+    ]);
+
+    const plannedPieces = work.length > 0 ? (work[0].totalContentPieces || 0) : 0;
+    const totalCount = Number(totalCal[0]?.count || 0);
+    const generatedCount = Number(generatedCal[0]?.count || 0);
+    const failedCount = Number(failedCal[0]?.count || 0);
+    const pendingGeneration = Math.max(0, totalCount - generatedCount - failedCount);
+    const completionPct = plannedPieces > 0 ? Math.round((generatedCount / plannedPieces) * 100) : 0;
+
+    return {
+      plannedPieces,
+      generatedPieces: generatedCount,
+      failedPieces: failedCount,
+      pendingGeneration,
+      completionPct,
+      nextScheduledDate: nextSched[0]?.scheduledDate?.toISOString() || null,
+      hasPlan: true,
+      planStatus: plan.status,
+    };
+  } catch (err) {
+    console.error(`${LOG_PREFIX} Plan metrics error:`, err);
+    return { plannedPieces: 0, generatedPieces: 0, failedPieces: 0, pendingGeneration: 0, completionPct: 0, nextScheduledDate: null, hasPlan: false, planStatus: null };
+  }
+}
+
 export async function getDashboardMetrics(campaignId: string, accountId: string = "default"): Promise<DashboardMetricsResponse> {
   const mode = await resolveDataMode(accountId);
 
@@ -70,11 +139,20 @@ export async function getDashboardMetrics(campaignId: string, accountId: string 
       hasData: true,
       noDataFlag: false,
       isDemoData: true,
+      dataSource: "META",
+      planMetrics: { plannedPieces: 12, generatedPieces: 8, failedPieces: 0, pendingGeneration: 4, completionPct: 67, nextScheduledDate: null, hasPlan: true, planStatus: "APPROVED" },
     };
   }
 
-  const realMetrics = await getCampaignMetrics(campaignId, accountId);
-  const hasAnyData = realMetrics.totalSpend > 0 || realMetrics.totalRevenue > 0 || realMetrics.totalConversions > 0 || realMetrics.contentCount > 0;
+  const [realMetrics, planMetrics] = await Promise.all([
+    getCampaignMetrics(campaignId, accountId),
+    getPlanDrivenMetrics(campaignId, accountId),
+  ]);
+
+  const hasMetaData = realMetrics.totalSpend > 0 || realMetrics.totalRevenue > 0 || realMetrics.totalConversions > 0;
+  const hasContentData = realMetrics.contentCount > 0 || planMetrics.plannedPieces > 0 || planMetrics.generatedPieces > 0;
+  const hasAnyData = hasMetaData || hasContentData;
+  const dataSource: "META" | "PLAN" | "NONE" = hasMetaData ? "META" : planMetrics.hasPlan ? "PLAN" : "NONE";
 
   return {
     mode: mode === "REAL" ? "REAL" : "UNKNOWN",
@@ -92,6 +170,8 @@ export async function getDashboardMetrics(campaignId: string, accountId: string 
     hasData: hasAnyData,
     noDataFlag: !hasAnyData,
     isDemoData: false,
+    dataSource,
+    planMetrics,
   };
 }
 

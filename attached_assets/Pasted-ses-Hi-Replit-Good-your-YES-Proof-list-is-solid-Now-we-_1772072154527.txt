@@ -1,0 +1,90 @@
+ses)"} 
+Hi Replit,
+
+Good — your YES/Proof list is solid. Now we do a FINAL P0 lock to eliminate the last contradictions that are currently making Samir feel “everything is empty / broken” even when tests pass.
+
+Reply in ONE message with YES/NO + proof for each item. If NO, execute the directive immediately (no redesign, no scope expansion, no new tabs).
+
+---
+
+## A) Required Work Branching — FIX the double counting
+Problem: Your mapping counts POSTS in BOTH designerItems and writerItems. That creates inflation and confusion in Create/Progress.
+
+Question (YES/NO): Is each content piece assigned to exactly ONE required-work branch (Designer OR Writer OR Video) without double counting?  
+If YES: provide one sample plan where totals across branches sum exactly to totalContentPieces.  
+If NO — DO THIS NOW:
+1) Decide single-ownership rule:
+   - Carousels/Images → DESIGNER  
+   - Reels/Videos → VIDEO  
+   - Stories/Copy tasks → WRITER  
+   - Posts must be assigned to ONE branch only (pick WRITER or DESIGNER) OR represent as TWO separate tasks with explicit naming (writerUnits/designerUnits). No ambiguous “items”.
+2) Update API response + UI labels so counts are semantically correct (no hidden double counting).
+3) Add test: “branch totals = totalContentPieces” OR “explicit unit split is consistent”, whichever model is chosen.
+
+---
+
+## B) Dashboard “Empty” — must NEVER look broken
+Right now Samir sees a blank dashboard. Even if Meta isn’t approved yet, the product must show something real from plan/calendar/studio.
+
+Question (YES/NO): In REAL mode with an APPROVED plan but no Meta performance/revenue data, does Dashboard still show meaningful non-empty numbers derived from calendar_entries + studio_items + required_work (and show a clear badge like “Awaiting Meta data”)?  
+If NO — DO THIS NOW:
+1) Add a deterministic fallback metrics layer when performance/revenue tables are empty:
+   - Planned pieces, generated pieces, failed pieces, pending generation, next scheduled date, completion %
+2) AI Actions must also degrade to PLAN-based actions only (still evidence-bound), not empty.
+3) Add UI copy: “Meta not connected yet — these numbers are from your plan & studio.”
+
+Acceptance: Dashboard can never be “blank” unless literally no plan exists. If plan exists, show plan-driven metrics always.
+
+---
+
+## C) Autopilot plan-binding — verify UI uses the SAME resolver everywhere (no new links / no new screens)
+Samir saw “opened a new link and nothing worked”. That implies either:
+- navigation went to a route not registered, or
+- wrong campaign context, or
+- gating panel is pointing somewhere incorrect.
+
+Question (YES/NO): Does the Autopilot UI only use existing in-app navigation (no external links) and does every panel call the same /api/autopilot/status + /api/audit/gates and show consistent state?  
+If NO — DO THIS NOW:
+1) Remove any external link or “new link opened” behavior.
+2) Ensure “Open Calendar” / “Go to Pipeline” uses internal navigation only.
+3) Add test: clicking any CTA in ControlCenter never opens an external URL and always lands on an existing tab.
+
+---
+
+## D) Studio Video “Analyze” — must support “Apply” flow (confirm + edit)
+Current read-only panel is not enough. We need: analyze → user confirms → apply to draft fields.
+
+Question (YES/NO): After video analysis, can user click “Apply to Draft” (selective fields) and then edit before saving, without overwriting existing edits by default?  
+If NO — DO THIS NOW:
+1) Add “Apply to Draft” button with field toggles (hook/caption/cta/keywords/angle).
+2) Default behavior remains non-destructive; applying is explicit.
+3) Add tests:
+   - Analyze doesn’t overwrite
+   - Apply writes only selected fields
+   - Existing user edits survive analysis and survive tab switching
+
+---
+
+## E) Build Plan → PDF — must be visible + stored under Pipeline for that exact plan
+You said it’s stored per planId. Now prove it is actually visible in UI and persists.
+
+Question (YES/NO): After Phase 5, user sees “Download Plan” in Pipeline and it downloads the document for the CURRENT active plan version (regen → new PDF, old stays attached to superseded plan).  
+If NO — DO THIS NOW: fix UI wiring + ensure Pipeline fetches the doc by active planId.
+
+---
+
+## F) Campaign switching persistence — confirm no stale persisted-state hydration
+You claimed campaign isolation PASSED. Confirm there is no scenario where switching campaign shows old persisted create/studio state.
+
+Question (YES/NO): Does usePersistedState correctly re-hydrate on campaign change and force consumers to re-sync via hydrationVersion (no one-shot refs)?  
+If NO — DO THIS NOW: remove any remaining one-shot hydration refs; add E2E test A→B→A quick switch.
+
+---
+
+## Deliverables (MANDATORY)
+1) A short YES/NO table for A–F  
+2) For each YES: proof (endpoint response or screenshot)  
+3) For each NO: commit summary + test proof after fix  
+4) Updated launch checklist with only real blockers
+
+This is the last stabilization pass. No new features. No new navigation patterns. Single track only.

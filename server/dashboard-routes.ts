@@ -1,13 +1,12 @@
 import type { Express, Request, Response } from "express";
 import { db } from "./db";
 import { requireCampaign } from "./campaign-routes";
-import { getCampaignMetrics, resolveDataMode } from "./campaign-data-layer";
+import { resolveDataMode } from "./campaign-data-layer";
 import {
   strategicPlans,
   planApprovals,
   requiredWork,
   calendarEntries,
-  studioItems,
   strategyInsights,
   performanceSnapshots,
 } from "@shared/schema";
@@ -17,83 +16,6 @@ import { ACTIVE_PLAN_STATUSES } from "./plan-constants";
 const LOG_PREFIX = "[Dashboard]";
 
 export function registerDashboardRoutes(app: Express) {
-  app.get("/api/dashboard/metrics", requireCampaign, async (req: Request, res: Response) => {
-    try {
-      const { accountId, campaignId } = (req as any).campaignContext;
-
-      const metrics = await getCampaignMetrics(campaignId, accountId);
-
-      const queuedCount = await db
-        .select({ count: sql<number>`count(*)` })
-        .from(calendarEntries)
-        .where(
-          and(
-            eq(calendarEntries.campaignId, campaignId),
-            eq(calendarEntries.accountId, accountId),
-            eq(calendarEntries.status, "SCHEDULED")
-          )
-        );
-
-      const publishedCount = await db
-        .select({ count: sql<number>`count(*)` })
-        .from(studioItems)
-        .where(
-          and(
-            eq(studioItems.campaignId, campaignId),
-            eq(studioItems.accountId, accountId),
-            eq(studioItems.status, "PUBLISHED")
-          )
-        );
-
-      const contentCount = await db
-        .select({ count: sql<number>`count(*)` })
-        .from(studioItems)
-        .where(
-          and(
-            eq(studioItems.campaignId, campaignId),
-            eq(studioItems.accountId, accountId)
-          )
-        );
-
-      const hasData =
-        metrics.totalSpend > 0 ||
-        metrics.totalRevenue > 0 ||
-        metrics.totalConversions > 0 ||
-        Number(contentCount[0]?.count || 0) > 0;
-
-      res.json({
-        success: true,
-        hasData,
-        metrics: {
-          revenue: metrics.totalRevenue,
-          roas: metrics.avgRoas,
-          spent: metrics.totalSpend,
-          results: metrics.totalConversions,
-          cpa: metrics.avgCpa,
-          contentCount: Number(contentCount[0]?.count || 0),
-          queuedCount: Number(queuedCount[0]?.count || 0),
-          publishedCount: Number(publishedCount[0]?.count || 0),
-          reach: metrics.totalReach,
-          engagement: metrics.totalClicks,
-          impressions: metrics.totalImpressions,
-          ctr: metrics.avgCtr,
-          leads: metrics.totalLeads,
-        },
-        month: {
-          revenue: metrics.monthRevenue,
-          spent: metrics.monthSpend,
-          conversions: metrics.monthConversions,
-          leads: metrics.monthLeads,
-          roas: metrics.monthRoas,
-          costPerLead: metrics.costPerLead,
-        },
-      });
-    } catch (error: any) {
-      console.error(`${LOG_PREFIX} Metrics error:`, error);
-      res.status(500).json({ success: false, code: 500, message: "Failed to load dashboard metrics" });
-    }
-  });
-
   app.get("/api/dashboard/ai-actions", requireCampaign, async (req: Request, res: Response) => {
     try {
       const { accountId, campaignId } = (req as any).campaignContext;
@@ -232,6 +154,42 @@ export function registerDashboardRoutes(app: Express) {
             sourceTag: "PLAN",
             priority: "HIGH",
             priorityJustification: `${failed} items need attention to meet execution targets`,
+          });
+        }
+      }
+
+      if (actions.length === 0 && plan) {
+        const calendarCount = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(calendarEntries)
+          .where(
+            and(
+              eq(calendarEntries.campaignId, campaignId),
+              eq(calendarEntries.accountId, accountId),
+              eq(calendarEntries.planId, plan.id)
+            )
+          );
+        const calCount = Number(calendarCount[0]?.count || 0);
+
+        if (calCount > 0) {
+          actions.push({
+            id: `plan-calendar-${plan.id}`,
+            action: `${calCount} calendar entries ready — generate content item-by-item`,
+            evidenceMetric: `${calCount} entries in calendar`,
+            evidenceTimeframe: "Current plan",
+            sourceTag: "PLAN",
+            priority: "HIGH",
+            priorityJustification: "Calendar populated from approved plan, content generation can begin",
+          });
+        } else {
+          actions.push({
+            id: `plan-active-${plan.id}`,
+            action: "Plan approved — generate calendar to start content pipeline",
+            evidenceMetric: `Plan status: ${plan.status}`,
+            evidenceTimeframe: "Current plan",
+            sourceTag: "PLAN",
+            priority: "HIGH",
+            priorityJustification: "Approved plan ready for calendar generation",
           });
         }
       }

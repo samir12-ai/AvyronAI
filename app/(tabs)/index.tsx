@@ -147,6 +147,8 @@ export default function DashboardScreen() {
   const [metricsState, setMetricsState] = useState<PanelState>('loading');
   const [metricsError, setMetricsError] = useState<number | null>(null);
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+  const [dataSource, setDataSource] = useState<'META' | 'PLAN' | 'NONE'>('NONE');
+  const [planMetrics, setPlanMetrics] = useState<{ plannedPieces: number; generatedPieces: number; failedPieces: number; pendingGeneration: number; completionPct: number; nextScheduledDate: string | null; hasPlan: boolean; planStatus: string | null } | null>(null);
 
   const [actionsState, setActionsState] = useState<PanelState>('loading');
   const [actionsError, setActionsError] = useState<number | null>(null);
@@ -197,7 +199,9 @@ export default function DashboardScreen() {
         return;
       }
       setMetrics(data.metrics);
-      setMetricsState(data.hasData ? 'success' : 'no_data');
+      setDataSource(data.dataSource || 'NONE');
+      setPlanMetrics(data.planMetrics || null);
+      setMetricsState(data.hasData ? 'success' : (data.planMetrics?.hasPlan ? 'no_data' : 'no_data'));
       setMetricsError(null);
     } catch {
       setMetricsState('error');
@@ -271,6 +275,8 @@ export default function DashboardScreen() {
       setMetrics(null);
       setMetricsState('loading');
       setMetricsError(null);
+      setDataSource('NONE');
+      setPlanMetrics(null);
       setAiActions([]);
       setActionsState('loading');
       setActionsError(null);
@@ -357,6 +363,62 @@ export default function DashboardScreen() {
       );
     }
     if (metricsState === 'no_data') {
+      const pm = planMetrics;
+      if (pm && pm.hasPlan) {
+        return (
+          <View>
+            <LinearGradient
+              colors={isDark ? ['#0A2F1F', '#0C1A14', '#0F1419'] : ['#E8F5E9', '#F1F8E9', '#FFFFFF']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[s.heroCard, { borderColor: isDark ? P.mint + '18' : P.mint + '20' }]}
+            >
+              <View style={s.heroTop}>
+                <View>
+                  <Text style={[s.heroLabel, { color: isDark ? P.mint : P.mintDark }]}>PLAN PROGRESS</Text>
+                  <Text style={[s.heroValue, { color: textPrimary }]}>{pm.completionPct}%</Text>
+                </View>
+                <View style={[s.heroGrowth, { backgroundColor: P.blue + '15' }]}>
+                  <Ionicons name="document-text" size={14} color={P.blue} />
+                  <Text style={[s.heroGrowthText, { color: P.blue }]}>{pm.planStatus}</Text>
+                </View>
+              </View>
+              <View style={[s.heroDivider, { backgroundColor: isDark ? P.mint + '12' : P.mint + '15' }]} />
+              <View style={s.heroStats}>
+                <View style={s.heroStat}>
+                  <Text style={[s.heroStatValue, { color: P.mint }]}>{pm.plannedPieces}</Text>
+                  <Text style={[s.heroStatLabel, { color: textMuted }]}>Planned</Text>
+                </View>
+                <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
+                <View style={s.heroStat}>
+                  <Text style={[s.heroStatValue, { color: P.blue }]}>{pm.generatedPieces}</Text>
+                  <Text style={[s.heroStatLabel, { color: textMuted }]}>Generated</Text>
+                </View>
+                <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
+                <View style={s.heroStat}>
+                  <Text style={[s.heroStatValue, { color: pm.pendingGeneration > 0 ? P.orange : P.mint }]}>{pm.pendingGeneration}</Text>
+                  <Text style={[s.heroStatLabel, { color: textMuted }]}>Pending</Text>
+                </View>
+                {pm.failedPieces > 0 && (
+                  <>
+                    <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
+                    <View style={s.heroStat}>
+                      <Text style={[s.heroStatValue, { color: P.coral }]}>{pm.failedPieces}</Text>
+                      <Text style={[s.heroStatLabel, { color: textMuted }]}>Failed</Text>
+                    </View>
+                  </>
+                )}
+              </View>
+            </LinearGradient>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 4, marginTop: 6, marginBottom: 4 }}>
+              <Ionicons name="information-circle-outline" size={14} color={P.blue} />
+              <Text style={{ fontSize: 11, color: P.blue }}>
+                Meta not connected — numbers from your plan & studio
+              </Text>
+            </View>
+          </View>
+        );
+      }
       return (
         <LinearGradient
           colors={isDark ? ['#0A2F1F', '#0C1A14', '#0F1419'] : ['#E8F5E9', '#F1F8E9', '#FFFFFF']}
@@ -367,7 +429,7 @@ export default function DashboardScreen() {
           <View style={s.heroTop}>
             <View>
               <Text style={[s.heroLabel, { color: isDark ? P.mint : P.mintDark }]}>TOTAL REVENUE</Text>
-              <Text style={[s.heroValue, { color: textMuted }]}>No data yet</Text>
+              <Text style={[s.heroValue, { color: textMuted }]}>No plan yet</Text>
             </View>
           </View>
           <View style={[s.heroDivider, { backgroundColor: isDark ? P.mint + '12' : P.mint + '15' }]} />

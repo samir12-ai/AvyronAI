@@ -60,7 +60,7 @@ export default function StudioScreen() {
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
-  const { mediaItems, addMediaItem, removeMediaItem } = useApp();
+  const { mediaItems, addMediaItem, removeMediaItem, updateMediaItem } = useApp();
   const { t } = useLanguage();
 
   const { state: ps, updateState, isLoading: psLoading, isSaving, saveError, resetState, hydrationVersion } = usePersistedState<StudioDraftState>('studio', defaultStudioState);
@@ -79,6 +79,7 @@ export default function StudioScreen() {
   const [draftRestored, setDraftRestored] = useState(false);
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<{ [key: string]: any }>({});
+  const [applyToggles, setApplyToggles] = useState<{ [itemId: string]: { hook: boolean; caption: boolean; cta: boolean; angle: boolean; keywords: boolean } }>({});
   const lastHydrationRef = useRef(0);
 
   useEffect(() => {
@@ -263,12 +264,54 @@ export default function StudioScreen() {
 
       const data = await res.json();
       setAnalysisResult(prev => ({ ...prev, [item.id]: data }));
+      setApplyToggles(prev => ({
+        ...prev,
+        [item.id]: { hook: true, caption: true, cta: true, angle: true, keywords: true },
+      }));
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err) {
       Alert.alert('Error', 'Could not connect to analysis service.');
     } finally {
       setAnalyzingId(null);
     }
+  };
+
+  const toggleApplyField = (itemId: string, field: 'hook' | 'caption' | 'cta' | 'angle' | 'keywords') => {
+    setApplyToggles(prev => ({
+      ...prev,
+      [itemId]: { ...(prev[itemId] || { hook: true, caption: true, cta: true, angle: true, keywords: true }), [field]: !prev[itemId]?.[field] },
+    }));
+  };
+
+  const handleApplyAnalysis = async (item: MediaItem) => {
+    const analysis = analysisResult[item.id];
+    const toggles = applyToggles[item.id];
+    if (!analysis || !toggles) return;
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    const patch: Partial<MediaItem> = {};
+    if (toggles.hook && analysis.hookSuggestion) patch.title = `${analysis.hookSuggestion.slice(0, 60)}`;
+    if (toggles.caption && analysis.captionDraft) patch.autoCaption = analysis.captionDraft;
+    if (toggles.cta && analysis.ctaSuggestion) patch.cta = analysis.ctaSuggestion;
+    if (toggles.angle && analysis.contentAngle) patch.goal = analysis.contentAngle;
+    if (toggles.keywords && analysis.keywords?.length > 0) patch.series = analysis.keywords.join(', ');
+
+    const appliedCount = Object.keys(patch).length;
+    if (appliedCount === 0) {
+      Alert.alert('Nothing Selected', 'Toggle at least one field to apply.');
+      return;
+    }
+
+    const updatedItem: MediaItem = { ...item, ...patch };
+    await updateMediaItem(updatedItem);
+
+    setAnalysisResult(prev => ({
+      ...prev,
+      [item.id]: { ...prev[item.id], applied: true },
+    }));
+
+    Alert.alert('Applied', `${appliedCount} field${appliedCount > 1 ? 's' : ''} applied to "${item.title}".`);
   };
 
   const getStatusColor = (status: string) => {
@@ -344,55 +387,73 @@ export default function StudioScreen() {
         </Pressable>
       </View>
       </View>
-      {analysisResult[item.id] && (
+      {analysisResult[item.id] && (() => {
+        const toggles = applyToggles[item.id] || { hook: true, caption: true, cta: true, angle: true, keywords: true };
+        return (
         <View style={[styles.analysisPanel, { backgroundColor: colors.primary + '08', borderColor: colors.primary + '30' }]}>
           {analysisResult[item.id].hookSuggestion ? (
-            <View style={styles.analysisRow}>
-              <Ionicons name="flash-outline" size={14} color={colors.primary} />
+            <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'hook')}>
+              <Ionicons name={toggles.hook ? "checkbox" : "square-outline"} size={16} color={colors.primary} />
               <View style={styles.analysisContent}>
-                <Text style={[styles.analysisLabel, { color: colors.primary }]}>Hook</Text>
+                <Text style={[styles.analysisLabel, { color: colors.primary }]}>Hook → Title</Text>
                 <Text style={[styles.analysisValue, { color: colors.text }]}>{analysisResult[item.id].hookSuggestion}</Text>
               </View>
-            </View>
+            </Pressable>
           ) : null}
           {analysisResult[item.id].captionDraft ? (
-            <View style={styles.analysisRow}>
-              <Ionicons name="chatbubble-outline" size={14} color={colors.accent} />
+            <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'caption')}>
+              <Ionicons name={toggles.caption ? "checkbox" : "square-outline"} size={16} color={colors.accent} />
               <View style={styles.analysisContent}>
                 <Text style={[styles.analysisLabel, { color: colors.accent }]}>Caption</Text>
                 <Text style={[styles.analysisValue, { color: colors.text }]} numberOfLines={3}>{analysisResult[item.id].captionDraft}</Text>
               </View>
-            </View>
+            </Pressable>
           ) : null}
           {analysisResult[item.id].ctaSuggestion ? (
-            <View style={styles.analysisRow}>
-              <Ionicons name="megaphone-outline" size={14} color={colors.success} />
+            <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'cta')}>
+              <Ionicons name={toggles.cta ? "checkbox" : "square-outline"} size={16} color={colors.success} />
               <View style={styles.analysisContent}>
                 <Text style={[styles.analysisLabel, { color: colors.success }]}>CTA</Text>
                 <Text style={[styles.analysisValue, { color: colors.text }]}>{analysisResult[item.id].ctaSuggestion}</Text>
               </View>
-            </View>
+            </Pressable>
           ) : null}
           {analysisResult[item.id].contentAngle ? (
-            <View style={styles.analysisRow}>
-              <Ionicons name="compass-outline" size={14} color={colors.accentOrange} />
+            <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'angle')}>
+              <Ionicons name={toggles.angle ? "checkbox" : "square-outline"} size={16} color={colors.accentOrange} />
               <View style={styles.analysisContent}>
                 <Text style={[styles.analysisLabel, { color: colors.accentOrange }]}>Angle</Text>
                 <Text style={[styles.analysisValue, { color: colors.text }]}>{analysisResult[item.id].contentAngle}</Text>
               </View>
-            </View>
+            </Pressable>
           ) : null}
           {analysisResult[item.id].keywords?.length > 0 ? (
-            <View style={styles.analysisRow}>
-              <Ionicons name="pricetag-outline" size={14} color={colors.textSecondary} />
+            <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'keywords')}>
+              <Ionicons name={toggles.keywords ? "checkbox" : "square-outline"} size={16} color={colors.textSecondary} />
               <View style={styles.analysisContent}>
                 <Text style={[styles.analysisLabel, { color: colors.textSecondary }]}>Keywords</Text>
                 <Text style={[styles.analysisValue, { color: colors.textMuted }]}>{analysisResult[item.id].keywords.join(', ')}</Text>
               </View>
-            </View>
+            </Pressable>
           ) : null}
+          {!analysisResult[item.id].applied && (
+            <Pressable
+              onPress={() => handleApplyAnalysis(item)}
+              style={[styles.applyDraftBtn, { backgroundColor: colors.primary }]}
+            >
+              <Ionicons name="checkmark-circle" size={16} color="#fff" />
+              <Text style={styles.applyDraftBtnText}>Apply to Draft</Text>
+            </Pressable>
+          )}
+          {analysisResult[item.id].applied && (
+            <View style={[styles.applyDraftBtn, { backgroundColor: colors.success + '20' }]}>
+              <Ionicons name="checkmark-done" size={16} color={colors.success} />
+              <Text style={[styles.applyDraftBtnText, { color: colors.success }]}>Applied</Text>
+            </View>
+          )}
         </View>
-      )}
+        );
+      })()}
     </View>
   );
 
@@ -841,6 +902,21 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: 'Inter_400Regular',
     lineHeight: 18,
+  },
+  applyDraftBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  applyDraftBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
   },
   mediaThumbnail: {
     width: 60,
