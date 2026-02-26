@@ -584,6 +584,12 @@ export default function StudioScreen() {
                     <Text style={styles.emptyButtonText}>{t('studio.uploadMedia')}</Text>
                   </LinearGradient>
                 </Pressable>
+                <View style={{ marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: colors.primary + '10', borderRadius: 10, borderWidth: 1, borderColor: colors.primary + '20' }}>
+                  <Ionicons name="sparkles" size={16} color={colors.primary} />
+                  <Text style={{ fontSize: 12, color: colors.textMuted, flex: 1 }}>
+                    Upload videos to unlock AI Analysis — auto-extract hooks, captions, CTAs, and keywords
+                  </Text>
+                </View>
               </View>
             )}
         </View>

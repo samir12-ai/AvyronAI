@@ -420,36 +420,48 @@ export default function DashboardScreen() {
         );
       }
       return (
-        <LinearGradient
-          colors={isDark ? ['#0A2F1F', '#0C1A14', '#0F1419'] : ['#E8F5E9', '#F1F8E9', '#FFFFFF']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[s.heroCard, { borderColor: isDark ? P.mint + '18' : P.mint + '20' }]}
-        >
-          <View style={s.heroTop}>
-            <View>
-              <Text style={[s.heroLabel, { color: isDark ? P.mint : P.mintDark }]}>TOTAL REVENUE</Text>
-              <Text style={[s.heroValue, { color: textMuted }]}>No plan yet</Text>
+        <View>
+          <LinearGradient
+            colors={isDark ? ['#0A2F1F', '#0C1A14', '#0F1419'] : ['#E8F5E9', '#F1F8E9', '#FFFFFF']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[s.heroCard, { borderColor: isDark ? P.mint + '18' : P.mint + '20' }]}
+          >
+            <View style={s.heroTop}>
+              <View>
+                <Text style={[s.heroLabel, { color: isDark ? P.mint : P.mintDark }]}>PLAN PROGRESS</Text>
+                <Text style={[s.heroValue, { color: textPrimary }]}>0%</Text>
+              </View>
+              <View style={[s.heroGrowth, { backgroundColor: P.orange + '15' }]}>
+                <Ionicons name="alert-circle" size={14} color={P.orange} />
+                <Text style={[s.heroGrowthText, { color: P.orange }]}>No Plan</Text>
+              </View>
             </View>
+            <View style={[s.heroDivider, { backgroundColor: isDark ? P.mint + '12' : P.mint + '15' }]} />
+            <View style={s.heroStats}>
+              <View style={s.heroStat}>
+                <Text style={[s.heroStatValue, { color: textMuted }]}>0</Text>
+                <Text style={[s.heroStatLabel, { color: textMuted }]}>Planned</Text>
+              </View>
+              <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
+              <View style={s.heroStat}>
+                <Text style={[s.heroStatValue, { color: textMuted }]}>0</Text>
+                <Text style={[s.heroStatLabel, { color: textMuted }]}>Generated</Text>
+              </View>
+              <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
+              <View style={s.heroStat}>
+                <Text style={[s.heroStatValue, { color: textMuted }]}>0</Text>
+                <Text style={[s.heroStatLabel, { color: textMuted }]}>Pending</Text>
+              </View>
+            </View>
+          </LinearGradient>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 4, marginTop: 6, marginBottom: 4 }}>
+            <Ionicons name="rocket-outline" size={14} color={P.orange} />
+            <Text style={{ fontSize: 11, color: P.orange }}>
+              Go to AI Content &gt; Build The Plan to create your strategic plan
+            </Text>
           </View>
-          <View style={[s.heroDivider, { backgroundColor: isDark ? P.mint + '12' : P.mint + '15' }]} />
-          <View style={s.heroStats}>
-            <View style={s.heroStat}>
-              <Text style={[s.heroStatValue, { color: textMuted }]}>--</Text>
-              <Text style={[s.heroStatLabel, { color: textMuted }]}>Spent</Text>
-            </View>
-            <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
-            <View style={s.heroStat}>
-              <Text style={[s.heroStatValue, { color: textMuted }]}>--</Text>
-              <Text style={[s.heroStatLabel, { color: textMuted }]}>Results</Text>
-            </View>
-            <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
-            <View style={s.heroStat}>
-              <Text style={[s.heroStatValue, { color: textMuted }]}>--</Text>
-              <Text style={[s.heroStatLabel, { color: textMuted }]}>CPA</Text>
-            </View>
-          </View>
-        </LinearGradient>
+        </View>
       );
     }
 

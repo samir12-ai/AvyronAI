@@ -1097,55 +1097,61 @@ export default function CreateScreen() {
             )}
           </View>
 
-          {requiredWorkData?.requiredWork && (
-            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, marginBottom: 12 }]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                <Ionicons name="git-branch-outline" size={18} color={colors.accent} />
-                <Text style={{ fontSize: 15, fontWeight: '700' as const, color: colors.text }}>Required Work</Text>
-                <View style={{ flex: 1 }} />
-                <Text style={{ fontSize: 12, color: colors.textMuted }}>
-                  {requiredWorkData.requiredWork.totalContentPieces} total
+          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, marginBottom: 12 }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <Ionicons name="git-branch-outline" size={18} color={colors.accent} />
+              <Text style={{ fontSize: 15, fontWeight: '700' as const, color: colors.text }}>Required Work</Text>
+              <View style={{ flex: 1 }} />
+              <Text style={{ fontSize: 12, color: colors.textMuted }}>
+                {requiredWorkData?.requiredWork?.totalContentPieces || 0} total
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {([
+                { key: 'DESIGNER' as const, icon: 'brush-outline' as const, color: '#8B5CF6' },
+                { key: 'WRITER' as const, icon: 'create-outline' as const, color: '#10B981' },
+                { key: 'VIDEO' as const, icon: 'videocam-outline' as const, color: '#F59E0B' },
+              ] as const).map(branch => {
+                const branchData = requiredWorkData?.branches?.[branch.key];
+                const total = branchData?.total || 0;
+                return (
+                  <View key={branch.key} style={{
+                    flex: 1,
+                    backgroundColor: branch.color + '12',
+                    borderRadius: 12,
+                    padding: 12,
+                    alignItems: 'center' as const,
+                    borderWidth: 1,
+                    borderColor: branch.color + '25',
+                  }}>
+                    <View style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 18,
+                      backgroundColor: branch.color + '20',
+                      alignItems: 'center' as const,
+                      justifyContent: 'center' as const,
+                      marginBottom: 6,
+                    }}>
+                      <Ionicons name={branch.icon} size={18} color={branch.color} />
+                    </View>
+                    <Text style={{ fontSize: 18, fontWeight: '700' as const, color: colors.text }}>{total}</Text>
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
+                      {branchData?.label || branch.key}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+            {!requiredWorkData?.requiredWork && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.cardBorder }}>
+                <Ionicons name="rocket-outline" size={14} color={colors.accent} />
+                <Text style={{ fontSize: 11, color: colors.textMuted, flex: 1 }}>
+                  Build a strategic plan in AI Content to populate work items
                 </Text>
               </View>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                {([
-                  { key: 'DESIGNER' as const, icon: 'brush-outline' as const, color: '#8B5CF6' },
-                  { key: 'WRITER' as const, icon: 'create-outline' as const, color: '#10B981' },
-                  { key: 'VIDEO' as const, icon: 'videocam-outline' as const, color: '#F59E0B' },
-                ] as const).map(branch => {
-                  const branchData = requiredWorkData.branches[branch.key];
-                  const total = branchData?.total || 0;
-                  return (
-                    <View key={branch.key} style={{
-                      flex: 1,
-                      backgroundColor: branch.color + '12',
-                      borderRadius: 12,
-                      padding: 12,
-                      alignItems: 'center' as const,
-                      borderWidth: 1,
-                      borderColor: branch.color + '25',
-                    }}>
-                      <View style={{
-                        width: 36,
-                        height: 36,
-                        borderRadius: 18,
-                        backgroundColor: branch.color + '20',
-                        alignItems: 'center' as const,
-                        justifyContent: 'center' as const,
-                        marginBottom: 6,
-                      }}>
-                        <Ionicons name={branch.icon} size={18} color={branch.color} />
-                      </View>
-                      <Text style={{ fontSize: 18, fontWeight: '700' as const, color: colors.text }}>{total}</Text>
-                      <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
-                        {branchData?.label || branch.key}
-                      </Text>
-                    </View>
-                  );
-                })}
-              </View>
-            </View>
-          )}
+            )}
+          </View>
 
           <View style={styles.tabBar}>
             <Pressable
