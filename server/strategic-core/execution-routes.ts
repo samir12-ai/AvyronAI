@@ -9,7 +9,7 @@ import {
   studioItems,
   businessDataLayer,
 } from "@shared/schema";
-import { eq, and, sql, ne } from "drizzle-orm";
+import { eq, and, sql, ne, inArray } from "drizzle-orm";
 import { logAudit } from "../audit";
 import { logAuditEvent } from "./audit-logger";
 import { aiChat } from "../ai-client";
@@ -1179,8 +1179,7 @@ export function registerExecutionRoutes(app: Express) {
             sql`${strategicPlans.status} IN ('APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'REVIEW', 'SCHEDULED', 'PUBLISHED')`
           )
         )
-        .orderBy(sql`${strategicPlans.createdAt} DESC`)
-        .limit(1);
+        .orderBy(sql`${strategicPlans.createdAt} DESC`);
 
       if (matchingPlans.length === 0) {
         return res.json({
@@ -1191,18 +1190,22 @@ export function registerExecutionRoutes(app: Express) {
         });
       }
 
-      const plan = matchingPlans[0];
+      const activePlanIds = matchingPlans.map(p => p.id);
       const work = await db
         .select()
         .from(requiredWork)
-        .where(and(eq(requiredWork.planId, plan.id), eq(requiredWork.campaignId, campaignId)))
+        .where(and(
+          inArray(requiredWork.planId, activePlanIds),
+          eq(requiredWork.campaignId, campaignId)
+        ))
+        .orderBy(sql`${requiredWork.createdAt} DESC`)
         .limit(1);
 
       const workRec = work[0] || null;
 
       res.json({
         success: true,
-        planId: plan.id,
+        planId: workRec?.planId || activePlanIds[0],
         requiredWork: workRec,
         branches: {
           DESIGNER: { total: workRec?.designerItems || 0, label: "Designer" },

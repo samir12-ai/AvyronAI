@@ -201,7 +201,7 @@ export default function DashboardScreen() {
       setMetrics(data.metrics);
       setDataSource(data.dataSource || 'NONE');
       setPlanMetrics(data.planMetrics || null);
-      setMetricsState(data.hasData ? 'success' : (data.planMetrics?.hasPlan ? 'no_data' : 'no_data'));
+      setMetricsState(data.dataSource === 'PLAN' ? 'no_data' : (data.hasData ? 'success' : 'no_data'));
       setMetricsError(null);
     } catch {
       setMetricsState('error');

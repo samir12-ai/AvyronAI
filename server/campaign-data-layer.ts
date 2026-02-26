@@ -78,7 +78,7 @@ const DEMO_FIXTURE_METRICS = {
 
 async function getPlanDrivenMetrics(campaignId: string, accountId: string): Promise<PlanDrivenMetrics> {
   try {
-    const activePlan = await db
+    const activePlans = await db
       .select()
       .from(strategicPlans)
       .where(
@@ -88,17 +88,17 @@ async function getPlanDrivenMetrics(campaignId: string, accountId: string): Prom
           inArray(strategicPlans.status, [...ACTIVE_PLAN_STATUSES])
         )
       )
-      .orderBy(desc(strategicPlans.createdAt))
-      .limit(1);
+      .orderBy(desc(strategicPlans.createdAt));
 
-    if (activePlan.length === 0) {
+    if (activePlans.length === 0) {
       return { plannedPieces: 0, generatedPieces: 0, failedPieces: 0, pendingGeneration: 0, completionPct: 0, nextScheduledDate: null, hasPlan: false, planStatus: null };
     }
 
-    const plan = activePlan[0];
+    const plan = activePlans[0];
+    const activePlanIds = activePlans.map(p => p.id);
 
     const [work, totalCal, generatedCal, failedCal, nextSched] = await Promise.all([
-      db.select().from(requiredWork).where(and(eq(requiredWork.campaignId, campaignId), eq(requiredWork.accountId, accountId), eq(requiredWork.planId, plan.id))).limit(1),
+      db.select().from(requiredWork).where(and(eq(requiredWork.campaignId, campaignId), eq(requiredWork.accountId, accountId), inArray(requiredWork.planId, activePlanIds))).orderBy(desc(requiredWork.createdAt)).limit(1),
       db.select({ count: sql<number>`count(*)` }).from(calendarEntries).where(and(eq(calendarEntries.campaignId, campaignId), eq(calendarEntries.accountId, accountId))),
       db.select({ count: sql<number>`count(*)` }).from(calendarEntries).where(and(eq(calendarEntries.campaignId, campaignId), eq(calendarEntries.accountId, accountId), inArray(calendarEntries.status, ["GENERATED", "SCHEDULED", "PUBLISHED"]))),
       db.select({ count: sql<number>`count(*)` }).from(calendarEntries).where(and(eq(calendarEntries.campaignId, campaignId), eq(calendarEntries.accountId, accountId), eq(calendarEntries.status, "FAILED"))),
