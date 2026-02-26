@@ -123,6 +123,8 @@ export default function AIManagementScreen() {
   const [audiences, setAudiences] = useState<AIAudience[]>(ps.generatedAudiences);
   const [audienceError, setAudienceError] = useState('');
   const [expandedAudience, setExpandedAudience] = useState<number | null>(null);
+  const [controlData, setControlData] = useState<any>(null);
+  const [nextActions, setNextActions] = useState<{action: string; why: string; risk: string}[]>([]);
 
   const prevCampaignRef = useRef<string | null | undefined>(undefined);
   useEffect(() => {
