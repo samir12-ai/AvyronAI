@@ -1,0 +1,178 @@
+Autopilot Binding + Core Stability Lock (Single Track Enforcement)
+
+We are not patching anymore.
+We are stabilizing the core architecture properly.
+
+All items below are P0 unless explicitly stated.
+Deliver as one cohesive change-set. No partial fixes.
+
+⸻
+
+1) P0 — Autopilot Not Bound to Approved Plan (Critical Single-Track Break)
+
+Current issue:
+
+I have a generated plan and it is APPROVED, yet Autopilot is not connected to it.
+Autopilot behaves as if no active plan exists.
+
+This breaks the single-track architecture.
+
+Required:
+	•	Autopilot must resolve:
+Active Plan = latest strategic_plan where status = “APPROVED” for the selected campaign.
+	•	Autopilot must be hard-gated:
+	•	If NO approved plan → return:
+{ error: “BLOCKED_NO_APPROVED_PLAN” }
+and produce ZERO AI actions.
+	•	If APPROVED plan exists → Autopilot must read:
+	•	planId
+	•	required_work
+	•	calendar_entries
+	•	execution progress
+	•	performance snapshots
+	•	strategy insights
+	•	AI actions must reference:
+	•	planId
+	•	sourceTag
+	•	evidenceMetric
+	•	evidenceTimeframe
+	•	priority + justification
+
+UI Requirements:
+	•	Show:
+	•	Active Plan ID
+	•	Plan status
+	•	Autopilot state: CONNECTED / BLOCKED
+	•	Reason if blocked
+	•	No filler actions. No demo bleed.
+
+Acceptance:
+	•	Approved plan → Autopilot CONNECTED and actions reference real plan artifacts.
+	•	No approved plan → Autopilot BLOCKED and no actions returned.
+	•	Add automated test for both scenarios.
+
+⸻
+
+2) Campaign Switch Hanging (P0)
+
+Current issue:
+Switching campaigns causes previous campaign data to linger until manual refresh.
+
+Required:
+	•	Full state reset on campaign switch.
+	•	Cancel all pending saves.
+	•	Clear local state before hydration.
+	•	Prevent race conditions between old and new campaign fetch.
+	•	Loading guard while hydrating.
+
+Acceptance:
+	•	Switching campaigns NEVER requires manual refresh.
+	•	No cross-campaign bleed.
+	•	Add E2E isolation test.
+
+⸻
+
+3) Required Work Segmentation
+
+Required Work must be separated by engine:
+	•	DESIGN_REQUIRED_WORK
+	•	COPY_REQUIRED_WORK
+	•	VIDEO_REQUIRED_WORK
+
+Each:
+	•	Independently tracked
+	•	Independently generatable
+	•	Independently counted
+
+No monolithic list.
+
+⸻
+
+4) AI Video Analyzer (Remove Manual Studio Burden)
+
+Studio must not require manual filling for each video.
+
+Implement:
+	•	AI-based video analysis
+	•	Auto-generate:
+	•	Title
+	•	Description
+	•	Tags
+	•	Hook
+	•	CTA
+	•	User can edit before saving.
+
+No mandatory manual metadata fields.
+
+⸻
+
+5) Auto-Generated Plan PDF
+
+After orchestration:
+	•	Generate structured PDF version of the plan.
+	•	Store in DB linked to strategic_plan.
+	•	Show download button in Pipeline.
+	•	Must not depend on frontend rendering snapshot.
+
+⸻
+
+6) Dashboard Must Reflect Approved Plan
+
+Dashboard cannot be empty.
+
+It must read:
+	•	Active APPROVED plan
+	•	Required work progress
+	•	Calendar entries
+	•	Performance snapshots
+	•	Strategy insights
+
+AI Actions must be real and evidence-based.
+
+No hardcoded metrics.
+No demo bleed in REAL mode.
+
+⸻
+
+7) Unified Profile (Remove Duplicate Business Data Forms)
+
+Remove duplicated business forms from Settings and Build.
+
+Create one unified global section:
+“Profile”
+
+Profile must feed:
+	•	Build The Plan
+	•	Dashboard
+	•	Creation
+	•	CI
+	•	Strategy Engines
+
+No duplicate business forms anywhere else.
+
+⸻
+
+8) Security & Stability Lock (Mandatory Tests)
+
+Before delivery:
+	•	Campaign isolation test
+	•	Account isolation test
+	•	No duplicate studio items test
+	•	No orphan calendar entries test
+	•	No plan duplication test
+	•	No cross-campaign bleed test
+	•	Reset-failed tests re-run
+	•	Persistence tests re-run
+	•	Autopilot binding tests added
+
+Provide YES/NO + proof reference for each.
+
+⸻
+
+We are stabilizing the core before expanding engines.
+
+No partial patches.
+No silent fallbacks.
+No cosmetic fixes.
+
+Deliver as one structural upgrade.
