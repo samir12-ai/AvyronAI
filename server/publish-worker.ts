@@ -401,7 +401,7 @@ async function checkAndPublishDuePosts() {
         }
 
         const metaMode = (acctState.metaMode as MetaMode) || "DISCONNECTED";
-        let publishMode: "REAL" | "DEMO" | "BLOCKED" = "BLOCKED";
+        let publishMode: "REAL" | "BLOCKED" = "BLOCKED";
         let result: { success: boolean; postId?: string; error?: string; attempts: number };
 
         if (metaMode === "REAL") {
@@ -429,13 +429,6 @@ async function checkAndPublishDuePosts() {
 
           publishMode = "REAL";
           result = await publishToMetaWithRetry(post, serverTokens.token, serverTokens.pageId, accountId);
-        } else if (metaMode === "DEMO" && acctState.metaDemoModeEnabled && process.env.ALLOW_DEMO_MODE === "true") {
-          publishMode = "DEMO";
-          result = {
-            success: true,
-            postId: undefined,
-            attempts: 1,
-          };
         } else {
           await logAudit(accountId, "PUBLISH_FAILED", {
             details: {

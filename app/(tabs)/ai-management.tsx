@@ -214,22 +214,15 @@ export default function AIManagementScreen() {
       const data = await response.json();
       setPublishResults(data.results || []);
 
-      if (data.demo) {
-        Alert.alert(
-          t('aiManagement.demoMode'),
-          t('aiManagement.demoModeDesc')
-        );
-      } else {
-        for (const result of (data.results || [])) {
-          if (result.status === 'published') {
-            const post = scheduledPosts.find(p => p.id === result.postId);
-            if (post) {
-              await updateScheduledPost({ ...post, status: 'published' });
-            }
+      for (const result of (data.results || [])) {
+        if (result.status === 'published') {
+          const post = scheduledPosts.find(p => p.id === result.postId);
+          if (post) {
+            await updateScheduledPost({ ...post, status: 'published' });
           }
         }
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       Alert.alert(t('aiManagement.publishFailed'), t('aiManagement.publishFailedDesc'));
     } finally {
@@ -386,8 +379,8 @@ export default function AIManagementScreen() {
           </View>
         </View>
         {!metaConnection.isConnected && (
-          <View style={[styles.demoBadge, { backgroundColor: colors.accent }]}>
-            <Text style={styles.demoBadgeText}>DEMO</Text>
+          <View style={[styles.demoBadge, { backgroundColor: colors.textMuted }]}>
+            <Text style={styles.demoBadgeText}>Not Connected</Text>
           </View>
         )}
       </View>

@@ -105,8 +105,8 @@ async function testAuthorizedFilesExist() {
   }
 }
 
-async function testNoDirectWritesInDemoRoutes() {
-  console.log("\n=== Demo Routes Isolation Check ===\n");
+async function testDemoRoutesRemoved() {
+  console.log("\n=== Demo Routes Removal Check ===\n");
 
   const demoFiles = [
     path.resolve(__dirname, "../strategic-core/demo-routes.ts"),
@@ -114,29 +114,11 @@ async function testNoDirectWritesInDemoRoutes() {
   ];
 
   for (const filePath of demoFiles) {
-    if (!fs.existsSync(filePath)) {
-      console.log(`  [SKIP] ${path.basename(filePath)} not found`);
-      continue;
-    }
-
-    const content = fs.readFileSync(filePath, "utf-8");
-    const lines = content.split("\n");
-    const demoViolations: string[] = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      for (const pattern of WRITE_PATTERNS) {
-        if (pattern.test(lines[i])) {
-          demoViolations.push(`  Line ${i + 1}: ${lines[i].trim()}`);
-        }
-      }
-    }
-
-    if (demoViolations.length > 0) {
-      console.log(`  [FAIL] ${path.basename(filePath)} has writes to execution tables:`);
-      demoViolations.forEach((v) => console.log(`    ${v}`));
-      assert.fail(`Demo route ${path.basename(filePath)} writes to execution tables`);
+    if (fs.existsSync(filePath)) {
+      console.log(`  [FAIL] ${path.basename(filePath)} still exists — demo routes must be removed`);
+      assert.fail(`Demo route file ${path.basename(filePath)} must not exist`);
     } else {
-      console.log(`  [PASS] ${path.basename(filePath)} has zero writes to execution tables`);
+      console.log(`  [PASS] ${path.basename(filePath)} removed`);
     }
   }
 }
@@ -153,7 +135,7 @@ async function runAllTests() {
   const tests = [
     { name: "Authorized files exist", fn: testAuthorizedFilesExist },
     { name: "Single execution track enforcement", fn: testSingleExecutionTrack },
-    { name: "Demo routes isolation", fn: testNoDirectWritesInDemoRoutes },
+    { name: "Demo routes removed", fn: testDemoRoutesRemoved },
   ];
 
   for (const test of tests) {

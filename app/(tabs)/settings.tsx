@@ -20,6 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
+import { useCampaign } from '@/context/CampaignContext';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { SUPPORTED_LANGUAGES } from '@/lib/i18n';
@@ -45,8 +46,18 @@ interface MetaStatus {
   tokenDaysRemaining: number | null;
   lastVerifiedAt: string | null;
   lastHealthCheckAt: string | null;
-  demoModeEnabled: boolean;
   encryptionConfigured: boolean;
+}
+
+interface ManualMetrics {
+  spend: number;
+  revenue: number;
+  leads: number;
+  conversions: number;
+  impressions: number;
+  clicks: number;
+  cpa: number;
+  roas: number;
 }
 
 const META_MODE_COLORS: Record<string, string> = {
@@ -56,7 +67,6 @@ const META_MODE_COLORS: Record<string, string> = {
   PERMISSION_MISSING: '#FFB347',
   REVOKED: '#FF6B6B',
   PENDING_APPROVAL: '#FBBF24',
-  DEMO: '#A78BFA',
 };
 
 const META_MODE_LABELS: Record<string, string> = {
@@ -66,7 +76,6 @@ const META_MODE_LABELS: Record<string, string> = {
   PERMISSION_MISSING: 'Missing Permissions',
   REVOKED: 'Access Revoked',
   PENDING_APPROVAL: 'Pending Approval',
-  DEMO: 'Demo Mode',
 };
 
 const platformIcons: Record<string, { icon: keyof typeof Ionicons.glyphMap; color: string }> = {
@@ -93,6 +102,7 @@ export default function SettingsScreen() {
     setMetaConnection,
   } = useApp();
   const { user, logout } = useAuth();
+  const { selectedCampaignId } = useCampaign();
   const { t, locale, setLocale, languages } = useLanguage();
 
   const [name, setName] = useState(brandProfile.name);
@@ -108,6 +118,87 @@ export default function SettingsScreen() {
   const [metaLoading, setMetaLoading] = useState(true);
   const [metaActionLoading, setMetaActionLoading] = useState(false);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [manualSpend, setManualSpend] = useState('');
+  const [manualRevenue, setManualRevenue] = useState('');
+  const [manualLeads, setManualLeads] = useState('');
+  const [manualConversions, setManualConversions] = useState('');
+  const [manualImpressions, setManualImpressions] = useState('');
+  const [manualClicks, setManualClicks] = useState('');
+  const [manualSaving, setManualSaving] = useState(false);
+  const [manualDerived, setManualDerived] = useState({ cpa: 0, roas: 0 });
+  const isMetaConnected = metaStatus?.metaMode === 'REAL';
+
+  const fetchManualMetrics = useCallback(async () => {
+    if (!selectedCampaignId) return;
+    try {
+      const apiUrl = getApiUrl();
+      const url = new URL(`/api/campaigns/${selectedCampaignId}/manual-metrics`, apiUrl);
+      const res = await fetch(url.toString(), { credentials: 'include' });
+      const data = await res.json();
+      if (data.success && data.metrics) {
+        const m = data.metrics;
+        setManualSpend(m.spend > 0 ? String(m.spend) : '');
+        setManualRevenue(m.revenue > 0 ? String(m.revenue) : '');
+        setManualLeads(m.leads > 0 ? String(m.leads) : '');
+        setManualConversions(m.conversions > 0 ? String(m.conversions) : '');
+        setManualImpressions(m.impressions > 0 ? String(m.impressions) : '');
+        setManualClicks(m.clicks > 0 ? String(m.clicks) : '');
+        setManualDerived({ cpa: m.cpa || 0, roas: m.roas || 0 });
+      }
+    } catch (error) {
+      console.error('Failed to fetch manual metrics:', error);
+    }
+  }, [selectedCampaignId]);
+
+  useEffect(() => {
+    fetchManualMetrics();
+  }, [fetchManualMetrics]);
+
+  useEffect(() => {
+    const spend = parseFloat(manualSpend) || 0;
+    const revenue = parseFloat(manualRevenue) || 0;
+    const conversions = parseInt(manualConversions) || 0;
+    const cpa = conversions > 0 ? +(spend / conversions).toFixed(2) : 0;
+    const roas = spend > 0 ? +(revenue / spend).toFixed(2) : 0;
+    setManualDerived({ cpa, roas });
+  }, [manualSpend, manualRevenue, manualConversions]);
+
+  const handleSaveManualMetrics = async () => {
+    if (!selectedCampaignId) {
+      Alert.alert('No Campaign', 'Please select a campaign first.');
+      return;
+    }
+    setManualSaving(true);
+    try {
+      const apiUrl = getApiUrl();
+      const url = new URL(`/api/campaigns/${selectedCampaignId}/manual-metrics`, apiUrl);
+      const res = await fetch(url.toString(), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          spend: parseFloat(manualSpend) || 0,
+          revenue: parseFloat(manualRevenue) || 0,
+          leads: parseInt(manualLeads) || 0,
+          conversions: parseInt(manualConversions) || 0,
+          impressions: parseInt(manualImpressions) || 0,
+          clicks: parseInt(manualClicks) || 0,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('Saved', 'Campaign metrics updated. Dashboard will reflect these numbers.');
+      } else {
+        throw new Error(data.error || 'Save failed');
+      }
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to save metrics');
+    } finally {
+      setManualSaving(false);
+    }
+  };
 
   const fetchMetaStatus = useCallback(async () => {
     try {
@@ -617,7 +708,7 @@ export default function SettingsScreen() {
                 </View>
               )}
 
-              {(metaStatus.metaMode === 'DISCONNECTED' || metaStatus.metaMode === 'PENDING_APPROVAL' || metaStatus.metaMode === 'DEMO') && (
+              {(metaStatus.metaMode === 'DISCONNECTED' || metaStatus.metaMode === 'PENDING_APPROVAL') && (
                 <View style={styles.metaConnectSection}>
                   <Text style={[styles.metaDescription, { color: colors.textSecondary }]}>
                     {t('settings.connectMetaDesc')}
@@ -661,6 +752,144 @@ export default function SettingsScreen() {
               )}
             </View>
           ) : null}
+        </View>
+
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={styles.cardHeader}>
+            <View style={styles.cardTitleRow}>
+              <Ionicons name="stats-chart" size={20} color={colors.primary} />
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Campaign Metrics</Text>
+            </View>
+            <View style={[styles.badge, { backgroundColor: isMetaConnected ? (colors.success + '20') : (colors.accent + '20') }]}>
+              <Text style={[styles.badgeText, { color: isMetaConnected ? colors.success : colors.accent }]}>
+                {isMetaConnected ? 'Meta Active' : 'Manual Entry'}
+              </Text>
+            </View>
+          </View>
+          <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
+            {isMetaConnected
+              ? 'Meta is connected — live metrics are used. Manual data is archived.'
+              : 'Enter your campaign stats manually. These drive your dashboard, AI actions, and autopilot analysis.'}
+          </Text>
+
+          {!selectedCampaignId ? (
+            <View style={{ padding: 16, alignItems: 'center' }}>
+              <Text style={{ color: colors.textMuted, fontSize: 14 }}>Select a campaign first to enter metrics</Text>
+            </View>
+          ) : (
+            <View style={{ marginTop: 12, gap: 10 }}>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Spend ($)</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={manualSpend}
+                    onChangeText={setManualSpend}
+                    placeholder="0.00"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="decimal-pad"
+                    editable={!isMetaConnected}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Revenue ($)</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={manualRevenue}
+                    onChangeText={setManualRevenue}
+                    placeholder="0.00"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="decimal-pad"
+                    editable={!isMetaConnected}
+                  />
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Leads</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={manualLeads}
+                    onChangeText={setManualLeads}
+                    placeholder="0"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                    editable={!isMetaConnected}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Conversions</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={manualConversions}
+                    onChangeText={setManualConversions}
+                    placeholder="0"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                    editable={!isMetaConnected}
+                  />
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Impressions</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={manualImpressions}
+                    onChangeText={setManualImpressions}
+                    placeholder="0"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                    editable={!isMetaConnected}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Clicks</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={manualClicks}
+                    onChangeText={setManualClicks}
+                    placeholder="0"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                    editable={!isMetaConnected}
+                  />
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+                <View style={[styles.derivedMetric, { backgroundColor: colors.primary + '10', borderColor: colors.primary + '30' }]}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>CPA (derived)</Text>
+                  <Text style={{ color: colors.primary, fontSize: 18, fontWeight: '700' }}>${manualDerived.cpa.toFixed(2)}</Text>
+                </View>
+                <View style={[styles.derivedMetric, { backgroundColor: colors.success + '10', borderColor: colors.success + '30' }]}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>ROAS (derived)</Text>
+                  <Text style={{ color: colors.success, fontSize: 18, fontWeight: '700' }}>{manualDerived.roas.toFixed(2)}x</Text>
+                </View>
+              </View>
+
+              {!isMetaConnected && (
+                <Pressable
+                  onPress={handleSaveManualMetrics}
+                  disabled={manualSaving}
+                  style={({ pressed }) => [{
+                    backgroundColor: colors.primary,
+                    padding: 14,
+                    borderRadius: 10,
+                    alignItems: 'center' as const,
+                    marginTop: 6,
+                    opacity: (pressed || manualSaving) ? 0.7 : 1,
+                  }]}
+                >
+                  {manualSaving ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>Save Campaign Metrics</Text>
+                  )}
+                </Pressable>
+              )}
+            </View>
+          )}
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
@@ -1194,6 +1423,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Inter_500Medium',
     marginBottom: 8,
+  },
+  textInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    fontSize: 15,
+    fontFamily: 'Inter_400Regular',
+  },
+  derivedMetric: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center' as const,
   },
   input: {
     borderWidth: 1,

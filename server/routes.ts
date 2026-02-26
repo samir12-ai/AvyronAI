@@ -344,11 +344,13 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
     }
   });
 
-  app.post("/api/generate-poster", upload.single('photo'), async (req, res) => {
+  app.post("/api/generate-poster", upload.array('photos', 3), async (req, res) => {
     try {
       const { topic, style, text, brandName, industry, aspectRatio, mood, mode } = req.body;
 
-      const hasPhoto = !!req.file;
+      const images = (req.files as Express.Multer.File[]) || [];
+      console.log(`[AI Designer] Received ${images.length} image(s) for poster generation`);
+      const hasPhoto = images.length > 0;
       if (!topic && !hasPhoto) {
         return res.status(400).json({ error: "Please provide a description or upload an image." });
       }
@@ -386,15 +388,15 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
 
       if (mode === 'image-to-image' && hasPhoto) {
         promptParts.push(
-          `Transform and reimagine this uploaded image into a stunning ${currentStyle} design.`,
+          `Transform and reimagine the ${images.length} uploaded image(s) into a stunning ${currentStyle} design.`,
           topic ? `Creative direction: ${topic}` : '',
           `Output as ${currentAspect}.`,
         );
       } else if (mode === 'image-edit' && hasPhoto) {
         promptParts.push(
-          `Edit and enhance this uploaded image based on the following instructions.`,
+          `Edit and enhance the ${images.length} uploaded image(s) based on the following instructions.`,
           topic ? `Editing instructions: ${topic}` : 'Enhance the image quality and visual appeal.',
-          `Keep the core subject intact while applying: ${currentStyle} treatment.`,
+          `Keep the core subjects intact while applying: ${currentStyle} treatment.`,
           `Output as ${currentAspect}.`,
         );
       } else {
@@ -406,7 +408,7 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
           `Format: ${currentAspect}.`,
         );
         if (hasPhoto) {
-          promptParts.push(`Use the provided reference image as visual inspiration for composition, color palette, or subject matter.`);
+          promptParts.push(`Use the ${images.length} provided reference image(s) as visual inspiration for composition, color palette, or subject matter.`);
         }
       }
 
@@ -428,15 +430,18 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
       const contents: any[] = [];
       const parts: any[] = [{ text: filteredParts.join('\n') }];
 
-      if (req.file) {
-        const base64Image = req.file.buffer.toString('base64');
-        const mimeType = req.file.mimetype || 'image/jpeg';
+      for (const image of images) {
+        const base64Image = image.buffer.toString('base64');
+        const mimeType = image.mimetype || 'image/jpeg';
         parts.push({
           inlineData: {
             data: base64Image,
             mimeType,
           },
         });
+      }
+      if (images.length > 0) {
+        console.log(`[AI Designer] Passing ${images.length} image(s) as inlineData to Gemini`);
       }
 
       contents.push({ role: 'user', parts });
@@ -931,12 +936,11 @@ Generate exactly 4-6 scenes. Make the photography/videography directions specifi
       const accountId = req.metaAccountId || "default";
       const metaMode = req.metaMode;
 
-      if (metaMode === "DEMO") {
-        return res.json({
-          success: true,
-          demo: true,
-          message: 'DEMO MODE: Post simulated (not published to Meta).',
-          postIds: {},
+      if (metaMode !== "REAL") {
+        return res.status(403).json({
+          success: false,
+          error: "META_NOT_CONNECTED",
+          message: "Meta must be connected in REAL mode to publish posts. Connect Meta in Settings.",
         });
       }
 
@@ -1236,15 +1240,11 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
       const accountId = req.metaAccountId || "default";
       const metaMode = req.metaMode;
 
-      if (metaMode === "DEMO") {
-        return res.json({
-          success: true,
-          demo: true,
-          message: 'DEMO MODE: Posts simulated (not published to Meta).',
-          results: (posts || []).map((p: any) => ({
-            postId: p.id,
-            status: 'demo_simulated',
-          })),
+      if (metaMode !== "REAL") {
+        return res.status(403).json({
+          success: false,
+          error: "META_NOT_CONNECTED",
+          message: "Meta must be connected in REAL mode to auto-publish. Connect Meta in Settings.",
         });
       }
 

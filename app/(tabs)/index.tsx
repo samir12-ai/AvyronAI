@@ -162,7 +162,7 @@ export default function DashboardScreen() {
   const [planBindingId, setPlanBindingId] = useState<string | null>(null);
   const [planBindingReason, setPlanBindingReason] = useState<string | null>(null);
 
-  const [dataMode, setDataMode] = useState<'REAL' | 'DEMO' | 'UNKNOWN'>('UNKNOWN');
+  const [dataMode, setDataMode] = useState<'REAL' | 'MANUAL' | 'UNKNOWN'>('UNKNOWN');
   const [refreshing, setRefreshing] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const prevCampaignRef = useRef<string | null | undefined>(undefined);
@@ -636,10 +636,10 @@ export default function DashboardScreen() {
           />
         }
       >
-        {dataMode === 'DEMO' && (
-          <View style={[s.demoBanner, { backgroundColor: P.orange + '18', borderColor: P.orange + '30' }]}>
-            <Ionicons name="flask-outline" size={16} color={P.orange} />
-            <Text style={[s.demoBannerText, { color: P.orange }]}>DEMO MODE — Data shown is simulated</Text>
+        {dataMode === 'MANUAL' && (
+          <View style={[s.demoBanner, { backgroundColor: P.mint + '18', borderColor: P.mint + '30' }]}>
+            <Ionicons name="create-outline" size={16} color={P.mint} />
+            <Text style={[s.demoBannerText, { color: P.mint }]}>Manual Data — Enter metrics in Settings</Text>
           </View>
         )}
 

@@ -332,7 +332,7 @@ export function registerAuditRoutes(app: Express) {
 
       gates.push({
         gateName: "metaMode",
-        status: acct?.metaMode === "REAL" ? "PASS" : acct?.metaMode === "DEMO" ? "WARN" : "FAIL",
+        status: acct?.metaMode === "REAL" ? "PASS" : "FAIL",
         reason: `Meta mode: ${acct?.metaMode || "DISCONNECTED"}`,
         lastCheckedAt: now.toISOString(),
       });

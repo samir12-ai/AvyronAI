@@ -27,89 +27,6 @@ function validateBlueprintCompleteness(confirmedBlueprint: any): { valid: boolea
   return { valid: missingFields.length === 0, missingFields };
 }
 
-const DEMO_EXECUTION_PLAN = {
-  contentDistributionPlan: {
-    platforms: [
-      {
-        platform: "Instagram",
-        frequency: "5 posts/week",
-        contentTypes: [
-          { type: "Reels", percentage: "40%", weeklyCount: 2, rationale: "Highest reach format for awareness" },
-          { type: "Carousels", percentage: "30%", weeklyCount: 2, rationale: "Educational authority content" },
-          { type: "Stories", percentage: "20%", weeklyCount: 5, rationale: "Daily engagement touchpoints" },
-          { type: "Static Posts", percentage: "10%", weeklyCount: 1, rationale: "Brand presence anchoring" },
-        ],
-        bestPostingTimes: ["9:00 AM", "12:30 PM", "7:00 PM"],
-        hashtagStrategy: "Mix of niche (5-10k) and medium (50-100k) hashtags; 15-20 per post",
-      },
-    ],
-    contentPillars: [
-      { pillar: "Authority Content", percentage: "35%", examples: ["Case studies", "Expert tips", "Industry insights"] },
-      { pillar: "Engagement Content", percentage: "30%", examples: ["Behind-the-scenes", "Polls", "Q&A"] },
-      { pillar: "Social Proof", percentage: "20%", examples: ["Testimonials", "Results", "Client stories"] },
-      { pillar: "Promotional", percentage: "15%", examples: ["Offers", "CTAs", "Product highlights"] },
-    ],
-  },
-  engagementPlan: {
-    dailyActions: [
-      { action: "Respond to all comments within 2 hours", priority: "high" },
-      { action: "Engage with 10 target audience accounts", priority: "high" },
-      { action: "Post 3-5 Stories with interactive stickers", priority: "medium" },
-      { action: "Reply to all DMs within 1 hour during business hours", priority: "high" },
-    ],
-    weeklyActions: [
-      { action: "Host 1 Q&A or Live session", priority: "medium" },
-      { action: "Collaborate or cross-promote with 1 complementary account", priority: "low" },
-    ],
-    communityGrowthTactics: [
-      "Use question stickers in Stories for audience input",
-      "Create shareable carousel content for organic reach",
-      "Respond to competitor audience comments strategically",
-    ],
-  },
-  conversionPlan: {
-    funnelStages: [
-      { stage: "Awareness", content: "Reels + Stories", cta: "Follow for more", metric: "Reach & Impressions" },
-      { stage: "Interest", content: "Carousels + Educational Posts", cta: "Save this post", metric: "Saves & Shares" },
-      { stage: "Consideration", content: "Testimonials + Case Studies", cta: "DM us / Link in bio", metric: "Profile Visits & DMs" },
-      { stage: "Conversion", content: "Offer Posts + Stories", cta: "Shop now / Book now", metric: "Link Clicks & Sales" },
-    ],
-    ctaStrategy: "Every post has ONE clear CTA. Alternate between soft (save/share) and hard (buy/book) CTAs.",
-    leadCaptureMethod: "Link in bio to landing page with lead magnet; DM automation for qualified leads",
-  },
-  measurementPlan: {
-    primaryKPIs: [
-      { kpi: "Engagement Rate", target: ">3%", frequency: "Weekly", alertThreshold: "<1.5%" },
-      { kpi: "Reach Growth", target: "+15% MoM", frequency: "Monthly", alertThreshold: "<5% MoM" },
-      { kpi: "Profile Visits", target: "+20% MoM", frequency: "Monthly", alertThreshold: "Flat or declining" },
-    ],
-    secondaryKPIs: [
-      { kpi: "Story Completion Rate", target: ">70%", frequency: "Weekly" },
-      { kpi: "Save Rate", target: ">2%", frequency: "Weekly" },
-      { kpi: "DM Volume", target: "Track trend", frequency: "Weekly" },
-    ],
-    reportingCadence: "Weekly snapshot + Monthly deep-dive report",
-  },
-  competitiveWatchTargets: {
-    targets: [
-      {
-        competitor: "Top Competitor",
-        watchMetrics: ["Posting frequency", "Engagement rate", "Content format mix", "CTA patterns"],
-        alertTriggers: ["Engagement spike >2x average", "New content format adopted", "Campaign launch detected"],
-        checkFrequency: "Weekly",
-      },
-    ],
-  },
-  riskMonitoringTriggers: {
-    triggers: [
-      { trigger: "Engagement drop", condition: "Engagement rate drops below 1.5% for 2 consecutive weeks", action: "Review content mix and posting times", severity: "high" },
-      { trigger: "Reach plateau", condition: "Reach flat for 3 consecutive weeks", action: "Increase Reels frequency and test new hashtags", severity: "medium" },
-      { trigger: "Competitor surge", condition: "Competitor engagement exceeds ours by 2x", action: "Analyze their top-performing content and adapt strategy", severity: "medium" },
-      { trigger: "Budget overrun", condition: "Spend exceeds monthly budget by 10%", action: "Pause promotional content and focus on organic", severity: "high" },
-    ],
-    escalationPath: ["Marketing Lead", "Strategy Review", "Campaign Pivot"],
-  },
-};
 
 const ORCHESTRATOR_PROMPT = `You are an execution orchestrator. You do NOT think. You do NOT reinterpret. You do NOT override the confirmed blueprint.
 
@@ -387,7 +304,6 @@ export function registerOrchestratorRoutes(app: Express) {
     const { id } = req.params;
     let accountId = "default";
     let campaignId = "";
-    let isDemoMode = false;
     let competitorCount = 0;
 
     const log = (stage: string, extra?: Record<string, any>) => {
@@ -460,8 +376,6 @@ export function registerOrchestratorRoutes(app: Express) {
         });
       }
 
-      isDemoMode = !!campaignContext.isDemo;
-
       const competitorUrls = blueprint.competitorUrls ? JSON.parse(blueprint.competitorUrls) : [];
       competitorCount = competitorUrls.length;
       if (competitorCount < 1) {
@@ -488,78 +402,10 @@ export function registerOrchestratorRoutes(app: Express) {
         });
       }
 
-      log("VALIDATION_PASSED", { isDemoMode, competitorCount, competitors: competitorUrls.slice(0, 5) });
+      log("VALIDATION_PASSED", { competitorCount, competitors: competitorUrls.slice(0, 5) });
 
       const marketMap = blueprint.marketMap ? JSON.parse(blueprint.marketMap) : null;
       const validationResult = blueprint.validationResult ? JSON.parse(blueprint.validationResult) : null;
-
-      if (isDemoMode) {
-        log("DEMO_MODE: returning fixture plan");
-
-        const demoPlan = {
-          ...DEMO_EXECUTION_PLAN,
-          blueprintVersion: blueprint.blueprintVersion,
-          _meta: { mode: "DEMO", generatedAt: new Date().toISOString(), requestId },
-        };
-
-        if (competitorUrls.length > 0) {
-          demoPlan.competitiveWatchTargets = {
-            targets: competitorUrls.slice(0, 3).map((url: string) => ({
-              competitor: url,
-              watchMetrics: ["Posting frequency", "Engagement rate", "Content format mix"],
-              alertTriggers: ["Engagement spike >2x average", "New campaign detected"],
-              checkFrequency: "Weekly",
-            })),
-          };
-        }
-
-        await db.update(strategicBlueprints)
-          .set({
-            status: "ORCHESTRATED",
-            orchestratorPlan: JSON.stringify(demoPlan),
-            orchestratedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(strategicBlueprints.id, id));
-
-        const [demoPlanRow] = await db.insert(strategicPlans).values({
-          accountId,
-          blueprintId: id,
-          campaignId: campaignId || campaignContext.campaignId || "default",
-          planJson: JSON.stringify(demoPlan),
-          planSummary: "Demo execution plan — 6 structured sections",
-          status: "DRAFT",
-          executionStatus: "IDLE",
-        }).returning();
-
-        await logAuditEvent({
-          accountId,
-          campaignId: campaignId || undefined,
-          blueprintId: id,
-          blueprintVersion: blueprint.blueprintVersion,
-          event: "ORCHESTRATOR_GENERATED",
-          details: {
-            requestId,
-            mode: "DEMO",
-            planId: demoPlanRow.id,
-            planSections: Object.keys(demoPlan).filter(k => k !== "blueprintVersion" && k !== "_meta"),
-            durationMs: Date.now() - startMs,
-          },
-        });
-
-        log("DEMO_MODE_COMPLETE", { durationMs: Date.now() - startMs, planId: demoPlanRow.id });
-
-        return res.json({
-          success: true,
-          blueprintId: id,
-          blueprintVersion: blueprint.blueprintVersion,
-          status: "ORCHESTRATED",
-          orchestratorPlan: demoPlan,
-          planId: demoPlanRow.id,
-          planStatus: "DRAFT",
-          requestId,
-        });
-      }
 
       let businessData: any = null;
       try {
@@ -646,7 +492,7 @@ CAMPAIGN CONTEXT:
 - Objective: ${campaignContext.objective}
 - Location: ${campaignContext.location || "Not specified"}
 - Platform: ${campaignContext.platform}
-- Mode: ${campaignContext.isDemo ? "DEMO" : "PRODUCTION"}
+- Mode: PRODUCTION
 ${businessDataBlock}
 
 CONFIRMED BLUEPRINT (v${blueprint.blueprintVersion} — source of truth — do NOT change any values):

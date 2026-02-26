@@ -1,0 +1,122 @@
+
+⸻
+
+Subject: P0 — Immediate Structural Corrections (Manual Campaign Data, AI Designer Failure, Zero Demo Policy)
+
+Replit,
+
+We are stopping all secondary work.
+
+We have three structural issues that must be corrected immediately. These are not enhancements. These are launch blockers.
+
+⸻
+
+1) Replace Demo with Manual Campaign Data (No More Empty Dashboard)
+
+We are no longer using Demo mode. It must be fully removed.
+
+Until Meta approval is granted, the system must operate on manually entered campaign statistics.
+
+Implement immediately:
+	•	A Manual Campaign Data section inside Campaign Settings.
+	•	User must be able to enter:
+	•	Spend
+	•	Revenue
+	•	Leads / Conversions
+	•	Impressions
+	•	Clicks
+	•	Derived metrics (CPA, ROAS) must calculate from manual inputs.
+	•	Add clear state flag:
+	•	metaConnected: false
+	•	When Meta is not connected:
+	•	Dashboard MUST use manual campaign data.
+	•	Autopilot MUST analyze manual metrics.
+	•	AI Actions MUST derive from manual stats + plan progress.
+	•	When Meta is approved later:
+	•	Data source switches automatically.
+	•	Manual data becomes archived or locked.
+
+There must never be an “empty dashboard” when:
+	•	A plan exists
+	•	Manual campaign data exists
+
+Zero demo fallback.
+
+⸻
+
+2) AI Designer — Critical Functional Failure
+
+Two blocking bugs exist:
+
+A) Multi-Image Failure
+
+When 3 image slots are uploaded and “use all” is selected, all 3 must be passed to the generation engine.
+
+Currently only one image is used.
+
+Fix required:
+	•	Correct array handling.
+	•	Confirm full image array passed to generation pipeline.
+	•	Add validation log for images.length before processing.
+
+B) Save Error
+
+Designer Save action throws an error.
+
+Fix required:
+	•	Identify failing endpoint.
+	•	Validate request payload schema.
+	•	Ensure backend returns structured success/error responses.
+	•	Add proper success confirmation in UI.
+
+Acceptance:
+	•	Upload 3 images → Generate → all 3 used.
+	•	Save works with zero errors.
+	•	No silent failures.
+
+⸻
+
+3) Remove Demo Completely (Permanent Policy)
+
+Demo mode must be fully removed from runtime.
+
+That means:
+	•	No DEMO_CAMPAIGN.
+	•	No demo flags.
+	•	No fixture data.
+	•	No demo-based fallback logic.
+	•	No demo labels in UI.
+	•	No demo routes.
+
+System must operate strictly on:
+	•	Real campaign records.
+	•	Manual campaign data (until Meta approved).
+	•	Real DB tables only.
+
+Provide proof:
+	•	Runtime grep confirmation (no DEMO references in active routes).
+	•	Sample API responses from real campaign.
+	•	Confirmation that dashboard data is derived from campaignId + accountId only.
+
+⸻
+
+Delivery Requirements
+
+Respond with:
+	1.	Confirmation of implementation for each section.
+	2.	Sample API outputs.
+	3.	Short manual test checklist to verify:
+	•	Create campaign
+	•	Enter manual data
+	•	Approve plan
+	•	Dashboard shows real numbers
+	•	AI Designer uses all images
+	•	Save works
+	•	No demo anywhere
+
+No new features.
+No partial fixes.
+No claims without proof.
+
+We are stabilizing for launch.
+Fix these properly and completely.

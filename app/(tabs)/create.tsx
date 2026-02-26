@@ -600,24 +600,24 @@ export default function CreateScreen() {
       formData.append('brandName', brandProfile.name || 'Brand');
       formData.append('industry', brandProfile.industry || 'business');
 
-      const firstPhoto = referencePhotos.find(p => p !== null);
-      if (firstPhoto) {
-        if (Platform.OS === 'web' && firstPhoto.base64) {
-          const byteString = atob(firstPhoto.base64);
+      const validPhotos = referencePhotos.filter(p => p !== null) as ImagePicker.ImagePickerAsset[];
+      for (const photo of validPhotos) {
+        if (Platform.OS === 'web' && photo.base64) {
+          const byteString = atob(photo.base64);
           const ab = new ArrayBuffer(byteString.length);
           const ia = new Uint8Array(ab);
           for (let i = 0; i < byteString.length; i++) {
             ia[i] = byteString.charCodeAt(i);
           }
-          const blob = new Blob([ab], { type: firstPhoto.mimeType || 'image/jpeg' });
-          formData.append('photo', blob, 'photo.jpg');
+          const blob = new Blob([ab], { type: photo.mimeType || 'image/jpeg' });
+          formData.append('photos', blob, `photo_${validPhotos.indexOf(photo)}.jpg`);
         } else {
-          const photoUri = firstPhoto.uri;
+          const photoUri = photo.uri;
           const photoName = photoUri.split('/').pop() || 'photo.jpg';
-          formData.append('photo', {
+          formData.append('photos', {
             uri: photoUri,
             name: photoName,
-            type: firstPhoto.mimeType || 'image/jpeg',
+            type: photo.mimeType || 'image/jpeg',
           } as any);
         }
       }
@@ -709,20 +709,33 @@ export default function CreateScreen() {
       return;
     }
 
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-    const newMedia: MediaItem = {
-      id: generateId(),
-      type: 'poster',
-      title: posterTopic || 'AI Design',
-      uri: generatedPoster,
-      platform: platform[0],
-      status: 'draft',
-      createdAt: new Date().toISOString(),
-    };
+      const newMedia: MediaItem = {
+        id: generateId(),
+        type: 'poster',
+        title: posterTopic || 'AI Design',
+        uri: generatedPoster,
+        platform: platform[0],
+        status: 'draft',
+        createdAt: new Date().toISOString(),
+      };
 
-    await addMediaItem(newMedia);
-    await saveImageToGallery(generatedPoster);
+      await addMediaItem(newMedia);
+
+      try {
+        await saveImageToGallery(generatedPoster);
+      } catch (galleryError) {
+        console.warn('Gallery save skipped:', galleryError);
+      }
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('Saved', 'Design saved to your Studio library.');
+    } catch (error: any) {
+      console.error('Save design error:', error);
+      Alert.alert('Save Failed', error?.message || 'Could not save design. Please try again.');
+    }
   };
 
   const pickLumaImage = async (setter: (img: ImagePicker.ImagePickerAsset | null) => void) => {

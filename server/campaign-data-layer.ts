@@ -11,6 +11,7 @@ import {
   strategicPlans,
   calendarEntries,
   requiredWork,
+  manualCampaignMetrics,
 } from "@shared/schema";
 import { eq, desc, sql, and, isNotNull, min, max, gte, lte, inArray } from "drizzle-orm";
 import { logAudit } from "./audit";
@@ -18,7 +19,7 @@ import { ACTIVE_PLAN_STATUSES } from "./plan-constants";
 
 const LOG_PREFIX = "[CampaignDataLayer]";
 
-export type DataMode = "REAL" | "DEMO" | "UNKNOWN";
+export type DataMode = "REAL" | "MANUAL" | "UNKNOWN";
 
 export async function resolveDataMode(accountId: string): Promise<DataMode> {
   try {
@@ -27,10 +28,23 @@ export async function resolveDataMode(accountId: string): Promise<DataMode> {
       .limit(1);
     const metaMode = state[0]?.metaMode || "DISCONNECTED";
     if (metaMode === "REAL") return "REAL";
-    if (metaMode === "DEMO" && state[0]?.metaDemoModeEnabled) return "DEMO";
-    return "UNKNOWN";
+    return "MANUAL";
   } catch {
-    return "UNKNOWN";
+    return "MANUAL";
+  }
+}
+
+export async function getManualMetrics(campaignId: string, accountId: string = "default") {
+  try {
+    const rows = await db.select().from(manualCampaignMetrics)
+      .where(and(
+        eq(manualCampaignMetrics.campaignId, campaignId),
+        eq(manualCampaignMetrics.accountId, accountId)
+      ))
+      .limit(1);
+    return rows[0] || null;
+  } catch {
+    return null;
   }
 }
 
@@ -61,20 +75,9 @@ export interface DashboardMetricsResponse {
   hasData: boolean;
   noDataFlag: boolean;
   isDemoData: boolean;
-  dataSource: "META" | "PLAN" | "NONE";
+  dataSource: "META" | "MANUAL" | "PLAN" | "NONE";
   planMetrics: PlanDrivenMetrics;
 }
-
-const DEMO_FIXTURE_METRICS = {
-  revenue: 4500,
-  roas: 3.2,
-  spent: 1406.25,
-  results: 100,
-  cpa: 14.06,
-  contentCount: 12,
-  queuedCount: 4,
-  publishedCount: 8,
-};
 
 async function getPlanDrivenMetrics(campaignId: string, accountId: string): Promise<PlanDrivenMetrics> {
   try {
@@ -131,41 +134,81 @@ async function getPlanDrivenMetrics(campaignId: string, accountId: string): Prom
 export async function getDashboardMetrics(campaignId: string, accountId: string = "default"): Promise<DashboardMetricsResponse> {
   const mode = await resolveDataMode(accountId);
 
-  if (mode === "DEMO") {
-    return {
-      mode: "DEMO",
-      campaignId,
-      metrics: { ...DEMO_FIXTURE_METRICS },
-      hasData: true,
-      noDataFlag: false,
-      isDemoData: true,
-      dataSource: "META",
-      planMetrics: { plannedPieces: 12, generatedPieces: 8, failedPieces: 0, pendingGeneration: 4, completionPct: 67, nextScheduledDate: null, hasPlan: true, planStatus: "APPROVED" },
-    };
-  }
-
-  const [realMetrics, planMetrics] = await Promise.all([
+  const [realMetrics, planMetrics, manual] = await Promise.all([
     getCampaignMetrics(campaignId, accountId),
     getPlanDrivenMetrics(campaignId, accountId),
+    getManualMetrics(campaignId, accountId),
   ]);
 
   const hasMetaData = realMetrics.totalSpend > 0 || realMetrics.totalRevenue > 0 || realMetrics.totalConversions > 0;
+  const hasManualData = manual && (manual.spend > 0 || manual.revenue > 0 || manual.conversions > 0 || manual.impressions > 0);
   const hasContentData = realMetrics.contentCount > 0 || planMetrics.plannedPieces > 0 || planMetrics.generatedPieces > 0;
-  const hasAnyData = hasMetaData || hasContentData;
-  const dataSource: "META" | "PLAN" | "NONE" = hasMetaData ? "META" : planMetrics.hasPlan ? "PLAN" : "NONE";
+
+  if (mode === "REAL" && hasMetaData) {
+    return {
+      mode: "REAL",
+      campaignId,
+      metrics: {
+        revenue: realMetrics.totalRevenue,
+        roas: realMetrics.avgRoas,
+        spent: realMetrics.totalSpend,
+        results: realMetrics.totalConversions,
+        cpa: realMetrics.avgCpa,
+        contentCount: realMetrics.contentCount,
+        queuedCount: 0,
+        publishedCount: realMetrics.publishedCount,
+      },
+      hasData: true,
+      noDataFlag: false,
+      isDemoData: false,
+      dataSource: "META",
+      planMetrics,
+    };
+  }
+
+  if (hasManualData) {
+    const manualSpend = manual!.spend || 0;
+    const manualRevenue = manual!.revenue || 0;
+    const manualConversions = manual!.conversions || 0;
+    const manualCpa = manualConversions > 0 ? manualSpend / manualConversions : 0;
+    const manualRoas = manualSpend > 0 ? manualRevenue / manualSpend : 0;
+
+    return {
+      mode: "MANUAL",
+      campaignId,
+      metrics: {
+        revenue: manualRevenue,
+        roas: +manualRoas.toFixed(2),
+        spent: manualSpend,
+        results: manualConversions,
+        cpa: +manualCpa.toFixed(2),
+        contentCount: realMetrics.contentCount || 0,
+        queuedCount: 0,
+        publishedCount: realMetrics.publishedCount || 0,
+      },
+      hasData: true,
+      noDataFlag: false,
+      isDemoData: false,
+      dataSource: "MANUAL",
+      planMetrics,
+    };
+  }
+
+  const hasAnyData = hasContentData;
+  const dataSource: "META" | "MANUAL" | "PLAN" | "NONE" = planMetrics.hasPlan ? "PLAN" : "NONE";
 
   return {
-    mode: mode === "REAL" ? "REAL" : "UNKNOWN",
+    mode: mode === "REAL" ? "REAL" : "MANUAL",
     campaignId,
     metrics: {
-      revenue: realMetrics.totalRevenue,
-      roas: realMetrics.avgRoas,
-      spent: realMetrics.totalSpend,
-      results: realMetrics.totalConversions,
-      cpa: realMetrics.avgCpa,
-      contentCount: realMetrics.contentCount,
+      revenue: 0,
+      roas: 0,
+      spent: 0,
+      results: 0,
+      cpa: 0,
+      contentCount: realMetrics.contentCount || 0,
       queuedCount: 0,
-      publishedCount: realMetrics.publishedCount,
+      publishedCount: realMetrics.publishedCount || 0,
     },
     hasData: hasAnyData,
     noDataFlag: !hasAnyData,

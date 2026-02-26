@@ -475,7 +475,7 @@ export const publishedPosts = pgTable("published_posts", {
   publishLockToken: varchar("publish_lock_token"),
   publishLockedAt: timestamp("publish_locked_at"),
   campaignId: varchar("campaign_id"),
-  publishMode: text("publish_mode").default("DEMO"),
+  publishMode: text("publish_mode").default("BLOCKED"),
   publishAttempts: integer("publish_attempts").default(0),
   lastPublishError: text("last_publish_error"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -1265,3 +1265,19 @@ export const uiStateStore = pgTable("ui_state_store", {
 });
 
 export type UIStateStore = typeof uiStateStore.$inferSelect;
+
+export const manualCampaignMetrics = pgTable("manual_campaign_metrics", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  accountId: varchar("account_id", { length: 255 }).notNull().default("default"),
+  campaignId: varchar("campaign_id", { length: 255 }).notNull(),
+  spend: doublePrecision("spend").notNull().default(0),
+  revenue: doublePrecision("revenue").notNull().default(0),
+  leads: integer("leads").notNull().default(0),
+  conversions: integer("conversions").notNull().default(0),
+  impressions: integer("impressions").notNull().default(0),
+  clicks: integer("clicks").notNull().default(0),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type ManualCampaignMetrics = typeof manualCampaignMetrics.$inferSelect;

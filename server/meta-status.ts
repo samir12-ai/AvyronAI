@@ -7,7 +7,7 @@ import { decryptToken, redactToken, isEncryptionConfigured } from "./meta-crypto
 import { getMetaMetrics, getAllMetrics } from "./meta-metrics";
 import { getBackoffDiagnostics } from "./meta-error-classifier";
 
-export type MetaMode = "DISCONNECTED" | "PENDING_APPROVAL" | "PERMISSION_MISSING" | "TOKEN_EXPIRED" | "REVOKED" | "DEMO" | "REAL";
+export type MetaMode = "DISCONNECTED" | "PENDING_APPROVAL" | "PERMISSION_MISSING" | "TOKEN_EXPIRED" | "REVOKED" | "REAL";
 
 const REQUIRED_PUBLISHING_SCOPES = ["pages_manage_posts"];
 const REQUIRED_INSIGHTS_SCOPES = ["pages_read_engagement", "read_insights"];
@@ -42,7 +42,6 @@ export interface MetaStatus {
   tokenDaysRemaining: number | null;
   lastVerifiedAt: string | null;
   lastHealthCheckAt: string | null;
-  demoModeEnabled: boolean;
   encryptionConfigured: boolean;
 }
 
@@ -132,8 +131,6 @@ export async function getMetaStatus(accountId: string): Promise<MetaStatus> {
   }
 
   const capabilities = computeCapabilities(grantedScopes, hasValidPageToken, creds?.igBusinessId || null);
-  const demoAllowed = process.env.ALLOW_DEMO_MODE === "true";
-  const demoEnabled = demoAllowed && (state?.metaDemoModeEnabled || false);
 
   let tokenExpiringSoon = false;
   let tokenDaysRemaining: number | null = null;
@@ -148,7 +145,7 @@ export async function getMetaStatus(accountId: string): Promise<MetaStatus> {
 
   return {
     metaMode: metaMode,
-    fbPublishingEnabled: metaMode === "REAL" ? capabilities.fbPublishingEnabled : (demoEnabled && metaMode === "DEMO"),
+    fbPublishingEnabled: metaMode === "REAL" ? capabilities.fbPublishingEnabled : false,
     insightsEnabled: metaMode === "REAL" ? capabilities.insightsEnabled : false,
     igPublishingEnabled: metaMode === "REAL" ? capabilities.igPublishingEnabled : false,
     grantedScopes,
@@ -162,7 +159,6 @@ export async function getMetaStatus(accountId: string): Promise<MetaStatus> {
     tokenDaysRemaining,
     lastVerifiedAt: state?.metaLastVerifiedAt?.toISOString() || null,
     lastHealthCheckAt: creds?.lastHealthCheckAt?.toISOString() || null,
-    demoModeEnabled: demoEnabled,
     encryptionConfigured: isEncryptionConfigured(),
   };
 }
@@ -278,40 +274,6 @@ export function registerMetaStatusRoutes(app: Express) {
     }
   });
 
-  app.post("/api/meta/demo-toggle", async (req: Request, res: Response) => {
-    try {
-      if (process.env.ALLOW_DEMO_MODE !== "true") {
-        return res.status(403).json({ error: "Demo mode is not available in this environment" });
-      }
-
-      const accountId = req.body?.accountId || "default";
-      const enable = req.body?.enable === true;
-
-      const state = await getOrCreateAccountState(accountId);
-      const currentMode = (state?.metaMode as MetaMode) || "DISCONNECTED";
-
-      if (enable) {
-        await db.update(accountState)
-          .set({ metaDemoModeEnabled: true, metaMode: "DEMO", updatedAt: new Date() })
-          .where(eq(accountState.accountId, accountId));
-        await logAudit(accountId, "META_MODE_TRANSITION", {
-          details: { oldMode: currentMode, newMode: "DEMO", reason: "Admin enabled demo mode" },
-        });
-      } else {
-        await db.update(accountState)
-          .set({ metaDemoModeEnabled: false, metaMode: "DISCONNECTED", updatedAt: new Date() })
-          .where(eq(accountState.accountId, accountId));
-        await logAudit(accountId, "META_MODE_TRANSITION", {
-          details: { oldMode: "DEMO", newMode: "DISCONNECTED", reason: "Admin disabled demo mode" },
-        });
-      }
-
-      res.json({ success: true, demoEnabled: enable });
-    } catch (error: any) {
-      console.error("[MetaStatus] Demo toggle error:", error.message);
-      res.status(500).json({ error: "Failed to toggle demo mode" });
-    }
-  });
 }
 
 export type MetaErrorCode = "META_NOT_CONNECTED" | "META_PERMISSION_MISSING" | "META_TOKEN_EXPIRED" | "META_REVOKED" | "META_PENDING_APPROVAL" | "META_ENCRYPTION_NOT_CONFIGURED";
@@ -329,20 +291,12 @@ export async function requireMetaReal(req: Request, res: Response, next: NextFun
       return;
     }
 
-    if (metaMode === "DEMO" && state?.metaDemoModeEnabled && process.env.ALLOW_DEMO_MODE === "true") {
-      (req as any).metaMode = "DEMO";
-      (req as any).metaAccountId = accountId;
-      next();
-      return;
-    }
-
     const errorMap: Record<MetaMode, MetaErrorCode> = {
       DISCONNECTED: "META_NOT_CONNECTED",
       PENDING_APPROVAL: "META_PENDING_APPROVAL",
       PERMISSION_MISSING: "META_PERMISSION_MISSING",
       TOKEN_EXPIRED: "META_TOKEN_EXPIRED",
       REVOKED: "META_REVOKED",
-      DEMO: "META_NOT_CONNECTED",
       REAL: "META_NOT_CONNECTED",
     };
 

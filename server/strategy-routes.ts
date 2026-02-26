@@ -58,23 +58,10 @@ export function registerStrategyRoutes(app: Express) {
       const campaignContext = (req as any).campaignContext;
 
       if (!accessToken || !pageId) {
-        const demoData = generateDemoPerformanceData(campaignContext.campaignId, campaignContext.accountId);
-        for (const item of demoData) {
-          await db.insert(performanceSnapshots).values(item);
-        }
-
-        await logAuditEvent({
-          accountId: campaignContext.accountId,
-          campaignId: campaignContext.campaignId,
-          event: "PERFORMANCE_SYNC_COMPLETED",
-          details: { synced: demoData.length, mode: "demo" },
-        });
-
-        return res.json({
-          success: true,
-          demo: true,
-          synced: demoData.length,
-          message: "Demo performance data loaded for strategy analysis.",
+        return res.status(400).json({
+          success: false,
+          error: "META_NOT_CONNECTED",
+          message: "Meta access token and page ID are required to sync performance data. Connect Meta in Settings or enter manual metrics.",
         });
       }
 
@@ -126,23 +113,18 @@ export function registerStrategyRoutes(app: Express) {
         res.json({ success: true, synced });
       } catch (apiErr: any) {
         console.error("[Strategy] Meta API error:", apiErr.message);
-        const demoData = generateDemoPerformanceData(campaignContext.campaignId, campaignContext.accountId);
-        for (const item of demoData) {
-          await db.insert(performanceSnapshots).values(item);
-        }
 
         await logAuditEvent({
           accountId: campaignContext.accountId,
           campaignId: campaignContext.campaignId,
-          event: "PERFORMANCE_SYNC_COMPLETED",
-          details: { synced: demoData.length, mode: "demo_fallback", reason: apiErr.message },
+          event: "PERFORMANCE_SYNC_FAILED",
+          details: { mode: "meta_api_error", reason: apiErr.message },
         });
 
-        res.json({
-          success: true,
-          demo: true,
-          synced: demoData.length,
-          message: "Could not reach Meta API. Demo data loaded instead.",
+        res.status(502).json({
+          success: false,
+          error: "META_API_ERROR",
+          message: "Could not reach Meta API. Check your connection and try again.",
         });
       }
     } catch (error: any) {
@@ -1026,48 +1008,3 @@ Return ONLY valid JSON:
   });
 }
 
-function generateDemoPerformanceData(campaignId: string = "demo_lead_gen_001", accountId: string = "default") {
-  const angles = ['problem-solution', 'storytelling', 'authority', 'behind-the-scenes', 'testimonial', 'educational', 'controversial-take', 'trend-jacking'];
-  const hooks = ['direct', 'curiosity', 'statistic', 'question', 'bold-claim', 'story-opener'];
-  const formats = ['reel', 'carousel', 'story', 'static-image', 'video-ad', 'live'];
-  const types = ['organic', 'paid', 'boosted'];
-  const ages = ['18-24', '25-34', '35-44', '45-54'];
-
-  const data = [];
-  const now = Date.now();
-
-  for (let i = 0; i < 30; i++) {
-    const isHighPerformer = Math.random() > 0.6;
-    const base = isHighPerformer ? 2.5 : 1;
-
-    data.push({
-      postId: `demo_post_${i}`,
-      platform: Math.random() > 0.3 ? 'facebook' : 'instagram',
-      contentType: types[Math.floor(Math.random() * types.length)],
-      contentAngle: angles[Math.floor(Math.random() * angles.length)],
-      hookStyle: hooks[Math.floor(Math.random() * hooks.length)],
-      format: formats[Math.floor(Math.random() * formats.length)],
-      reach: Math.round((500 + Math.random() * 5000) * base),
-      impressions: Math.round((800 + Math.random() * 8000) * base),
-      saves: Math.round((5 + Math.random() * 80) * base),
-      shares: Math.round((3 + Math.random() * 50) * base),
-      likes: Math.round((20 + Math.random() * 300) * base),
-      comments: Math.round((2 + Math.random() * 40) * base),
-      clicks: Math.round((10 + Math.random() * 200) * base),
-      watchTime: Math.round((5 + Math.random() * 45) * 10) / 10,
-      retentionRate: Math.round((20 + Math.random() * 60) * 10) / 10,
-      ctr: Math.round((0.5 + Math.random() * 5) * 100) / 100,
-      cpm: Math.round((3 + Math.random() * 15) * 100) / 100,
-      cpc: Math.round((0.1 + Math.random() * 2) * 100) / 100,
-      cpa: Math.round((5 + Math.random() * 40) * 100) / 100,
-      roas: Math.round((0.5 + Math.random() * 8) * 100) / 100,
-      conversions: Math.round(Math.random() * 20 * base),
-      audienceAge: ages[Math.floor(Math.random() * ages.length)],
-      campaignId,
-      accountId,
-      publishedAt: new Date(now - i * 24 * 60 * 60 * 1000),
-    });
-  }
-
-  return data;
-}

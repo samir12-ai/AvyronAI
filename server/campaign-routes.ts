@@ -1,77 +1,35 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { db } from "./db";
-import { campaignSelections, adSpendEntries, performanceSnapshots, conversionEvents } from "@shared/schema";
-import { eq, and } from "drizzle-orm";
-import { getCampaignMetrics, getRevenueSummary, detectPerformanceSignals, getDashboardMetrics, resolveDataMode } from "./campaign-data-layer";
+import { campaignSelections, adSpendEntries, performanceSnapshots, conversionEvents, manualCampaignMetrics } from "@shared/schema";
+import { eq, and, desc } from "drizzle-orm";
+import { getCampaignMetrics, getRevenueSummary, detectPerformanceSignals, getDashboardMetrics, resolveDataMode, getManualMetrics } from "./campaign-data-layer";
 
 const VALID_GOAL_TYPES = ["LEADS", "AWARENESS", "RETARGETING", "SALES", "TESTING"] as const;
-
-const DEMO_CAMPAIGNS = [
-  {
-    id: "swa_media_brand_growth",
-    name: "SWA Media — Brand Growth",
-    platform: "meta",
-    goalType: "AWARENESS",
-    status: "active",
-    budget: "$5,000",
-    startDate: "2026-01-15",
-    isDemo: false,
-    location: "Dubai, UAE",
-    spend: 2847.50,
-    reach: 124500,
-    impressions: 287300,
-    messagingConversions: 0,
-    audience: ["Business owners", "Entrepreneurs", "Marketing managers", "E-commerce brands"],
-  },
-  {
-    id: "swa_media_lead_gen",
-    name: "SWA Media — Client Acquisition",
-    platform: "meta",
-    goalType: "LEADS",
-    status: "active",
-    budget: "$3,500",
-    startDate: "2026-02-01",
-    isDemo: false,
-    location: "Dubai, UAE",
-    spend: 1420.75,
-    reach: 68200,
-    impressions: 156800,
-    messagingConversions: 47,
-    audience: ["SME owners", "Startup founders", "Brand managers", "Digital marketing professionals"],
-  },
-  {
-    id: "swa_media_retargeting",
-    name: "SWA Media — Retargeting Warm Leads",
-    platform: "meta",
-    goalType: "RETARGETING",
-    status: "active",
-    budget: "$1,500",
-    startDate: "2026-02-10",
-    isDemo: false,
-    location: "Dubai, UAE",
-    spend: 612.30,
-    reach: 15400,
-    impressions: 89200,
-    messagingConversions: 23,
-    audience: ["Website visitors", "Previous inquiries", "Engaged audience segments"],
-  },
-];
-
-function isMetaAdsApiAvailable(): boolean {
-  const META_APP_ID = process.env.META_APP_ID || "";
-  const META_APP_SECRET = process.env.META_APP_SECRET || "";
-  return !!(META_APP_ID && META_APP_SECRET);
-}
 
 export function registerCampaignRoutes(app: Express) {
   app.get("/api/campaigns", async (req, res) => {
     try {
       const accountId = (req.query.accountId as string) || "default";
 
+      const selections = await db
+        .select()
+        .from(campaignSelections)
+        .where(eq(campaignSelections.accountId, accountId))
+        .orderBy(desc(campaignSelections.selectedAt));
+
+      const campaigns = selections.map((s) => ({
+        id: s.selectedCampaignId,
+        name: s.selectedCampaignName,
+        platform: s.selectedPlatform || "meta",
+        goalType: s.campaignGoalType,
+        status: s.campaignStatus || "active",
+        location: s.campaignLocation || null,
+      }));
+
       res.json({
-        campaigns: DEMO_CAMPAIGNS,
-        source: "meta",
-        message: "SWA Media campaigns loaded.",
+        campaigns,
+        source: "db",
+        message: campaigns.length > 0 ? "Campaigns loaded from database." : "No campaigns found. Select a campaign to get started.",
       });
     } catch (error: any) {
       console.error("[Campaigns] Error fetching campaigns:", error);
@@ -94,14 +52,6 @@ export function registerCampaignRoutes(app: Express) {
         });
       }
 
-      const campaign = DEMO_CAMPAIGNS.find((c) => c.id === campaignId);
-      if (campaign && campaign.status === "paused") {
-        return res.status(400).json({
-          error: "CAMPAIGN_PAUSED",
-          message: "Cannot select a paused campaign. Choose an active campaign.",
-        });
-      }
-
       const existing = await db
         .select()
         .from(campaignSelections)
@@ -117,8 +67,8 @@ export function registerCampaignRoutes(app: Express) {
             selectedCampaignName: campaignName,
             selectedPlatform: platform || "meta",
             campaignGoalType: goalType,
-            campaignStatus: campaign?.status || "active",
-            campaignLocation: campaignLocation || campaign?.location || null,
+            campaignStatus: "active",
+            campaignLocation: campaignLocation || null,
             selectedAt: new Date(),
             updatedAt: new Date(),
           })
@@ -134,8 +84,8 @@ export function registerCampaignRoutes(app: Express) {
             selectedCampaignName: campaignName,
             selectedPlatform: platform || "meta",
             campaignGoalType: goalType,
-            campaignStatus: campaign?.status || "active",
-            campaignLocation: campaignLocation || campaign?.location || null,
+            campaignStatus: "active",
+            campaignLocation: campaignLocation || null,
           })
           .returning();
         selection = inserted[0];
@@ -173,22 +123,14 @@ export function registerCampaignRoutes(app: Express) {
 
       const selection = selections[0];
 
-      const campaign = DEMO_CAMPAIGNS.find((c) => c.id === selection.selectedCampaignId);
       let warning = null;
+      const campaignStatus = selection.campaignStatus || "active";
 
-      if (campaign) {
-        if (campaign.status === "paused" || campaign.status === "removed") {
-          warning = {
-            type: "CAMPAIGN_INVALID",
-            message: `Campaign "${selection.selectedCampaignName}" is now ${campaign.status}. Please select a different campaign.`,
-            campaignStatus: campaign.status,
-          };
-        }
-      } else if (selection.selectedCampaignId && !selection.selectedCampaignId.startsWith("demo_")) {
+      if (campaignStatus === "paused" || campaignStatus === "removed") {
         warning = {
-          type: "CAMPAIGN_NOT_FOUND",
-          message: `Campaign "${selection.selectedCampaignName}" was not found. It may have been removed. Please select a different campaign.`,
-          campaignStatus: "removed",
+          type: "CAMPAIGN_INVALID",
+          message: `Campaign "${selection.selectedCampaignName}" is now ${campaignStatus}. Please select a different campaign.`,
+          campaignStatus,
         };
       }
 
@@ -294,135 +236,86 @@ export function registerCampaignRoutes(app: Express) {
     }
   });
 
-  app.post("/api/demo/seed-campaign", async (req: Request, res: Response) => {
+  app.get("/api/campaigns/:campaignId/manual-metrics", async (req: Request, res: Response) => {
     try {
-      const {
-        accountId = "default",
-        campaignName = "SWA",
-        window = "last_30_days",
-        spend = 3.21,
-        reach = 88,
-        impressions = 114,
-        messagingConversations = 0,
-      } = req.body;
+      const { campaignId } = req.params;
+      const accountId = (req.query.accountId as string) || "default";
+      const metrics = await getManualMetrics(campaignId, accountId);
+      if (!metrics) {
+        return res.json({ success: true, metrics: null, message: "No manual metrics entered yet" });
+      }
+      const cpa = metrics.conversions > 0 ? +(metrics.spend / metrics.conversions).toFixed(2) : 0;
+      const roas = metrics.spend > 0 ? +(metrics.revenue / metrics.spend).toFixed(2) : 0;
+      res.json({
+        success: true,
+        metrics: { ...metrics, cpa, roas },
+      });
+    } catch (error: any) {
+      console.error("[Campaigns] Manual metrics GET error:", error);
+      res.status(500).json({ error: "Failed to fetch manual metrics" });
+    }
+  });
 
-      const demoCampaignId = "demo_swa_media_001";
+  app.put("/api/campaigns/:campaignId/manual-metrics", async (req: Request, res: Response) => {
+    try {
+      const { campaignId } = req.params;
+      const accountId = req.body.accountId || "default";
+      const { spend, revenue, leads, conversions, impressions, clicks } = req.body;
 
-      const existing = await db.select().from(campaignSelections)
-        .where(eq(campaignSelections.accountId, accountId)).limit(1);
+      if (spend === undefined && revenue === undefined && leads === undefined && conversions === undefined && impressions === undefined && clicks === undefined) {
+        return res.status(400).json({ error: "At least one metric field is required" });
+      }
 
-      let selection;
-      const selectionData = {
-        selectedCampaignId: demoCampaignId,
-        selectedCampaignName: campaignName,
-        selectedPlatform: "meta",
-        campaignGoalType: "AWARENESS",
-        campaignStatus: "active",
-        campaignLocation: "Dubai, UAE",
-        selectedAt: new Date(),
+      const existing = await db.select().from(manualCampaignMetrics)
+        .where(and(
+          eq(manualCampaignMetrics.campaignId, campaignId),
+          eq(manualCampaignMetrics.accountId, accountId)
+        ))
+        .limit(1);
+
+      const data = {
+        spend: Number(spend) || 0,
+        revenue: Number(revenue) || 0,
+        leads: Number(leads) || 0,
+        conversions: Number(conversions) || 0,
+        impressions: Number(impressions) || 0,
+        clicks: Number(clicks) || 0,
         updatedAt: new Date(),
       };
 
+      let result;
       if (existing.length > 0) {
-        const updated = await db.update(campaignSelections)
-          .set(selectionData)
-          .where(eq(campaignSelections.accountId, accountId))
+        const updated = await db.update(manualCampaignMetrics)
+          .set(data)
+          .where(and(
+            eq(manualCampaignMetrics.campaignId, campaignId),
+            eq(manualCampaignMetrics.accountId, accountId)
+          ))
           .returning();
-        selection = updated[0];
+        result = updated[0];
       } else {
-        const inserted = await db.insert(campaignSelections)
-          .values({ accountId, ...selectionData })
+        const inserted = await db.insert(manualCampaignMetrics)
+          .values({ campaignId, accountId, ...data })
           .returning();
-        selection = inserted[0];
+        result = inserted[0];
       }
 
-      await db.insert(adSpendEntries).values({
-        accountId,
-        amount: Number(spend),
-        platform: "meta",
-        campaignId: demoCampaignId,
-        period: window,
-        notes: `DEMO seed — ${campaignName}`,
-      });
+      const cpa = result.conversions > 0 ? +(result.spend / result.conversions).toFixed(2) : 0;
+      const roas = result.spend > 0 ? +(result.revenue / result.spend).toFixed(2) : 0;
 
-      const now = new Date();
-      const snapshotInserts = [];
-      const totalDays = 30;
-      const dailySpend = Number(spend) / totalDays;
-      const dailyReach = Math.round(Number(reach) / totalDays);
-      const dailyImpressions = Math.round(Number(impressions) / totalDays);
-
-      for (let i = 0; i < totalDays; i++) {
-        const date = new Date(now);
-        date.setDate(date.getDate() - (totalDays - i));
-
-        const variance = 0.7 + Math.random() * 0.6;
-        const dayReach = Math.max(1, Math.round(dailyReach * variance));
-        const dayImpressions = Math.max(dayReach, Math.round(dailyImpressions * variance));
-        const daySpend = Math.max(0.01, +(dailySpend * variance).toFixed(2));
-
-        snapshotInserts.push({
-          postId: `demo_post_${demoCampaignId}_day${i + 1}`,
-          platform: "facebook",
-          contentType: "ad",
-          contentAngle: "awareness",
-          reach: dayReach,
-          impressions: dayImpressions,
-          saves: 0,
-          shares: 0,
-          likes: Math.round(dayReach * 0.05),
-          comments: 0,
-          clicks: Math.round(dayImpressions * 0.01),
-          spend: daySpend,
-          conversions: 0,
-          ctr: dayImpressions > 0 ? +((Math.round(dayImpressions * 0.01) / dayImpressions) * 100).toFixed(2) : 0,
-          cpm: dayImpressions > 0 ? +((daySpend / dayImpressions) * 1000).toFixed(2) : 0,
-          cpc: Math.round(dayImpressions * 0.01) > 0 ? +(daySpend / Math.round(dayImpressions * 0.01)).toFixed(2) : 0,
-          cpa: 0,
-          roas: 0,
-          audienceLocation: "Dubai, UAE",
-          campaignId: demoCampaignId,
-          accountId,
-          publishedAt: date,
-          fetchedAt: date,
-        });
-      }
-
-      if (snapshotInserts.length > 0) {
-        await db.insert(performanceSnapshots).values(snapshotInserts);
-      }
-
-      console.log(`[DemoSeed] Seeded campaign: ${campaignName} (${demoCampaignId}) with ${totalDays} snapshots, spend=$${spend}, reach=${reach}, impressions=${impressions}, conversions=0`);
+      console.log(`[Campaigns] Manual metrics saved for campaign ${campaignId}: spend=${result.spend}, revenue=${result.revenue}, conversions=${result.conversions}`);
 
       res.json({
         success: true,
-        demoCampaignId,
-        campaignContext: {
-          id: demoCampaignId,
-          name: campaignName,
-          location: "Dubai, UAE",
-          isDemo: true,
-          platform: "meta",
-          goalType: "AWARENESS",
-        },
-        seededData: {
-          adSpendEntries: 1,
-          performanceSnapshots: totalDays,
-          conversionEvents: 0,
-          window,
-          totalSpend: spend,
-          totalReach: reach,
-          totalImpressions: impressions,
-          messagingConversations,
-        },
-        selection,
-        message: `Demo campaign "${campaignName}" seeded and auto-selected. Gate is ready.`,
+        metrics: { ...result, cpa, roas },
+        message: "Manual campaign metrics saved successfully",
       });
     } catch (error: any) {
-      console.error("[DemoSeed] Error seeding campaign:", error);
-      res.status(500).json({ error: "Failed to seed demo campaign" });
+      console.error("[Campaigns] Manual metrics PUT error:", error);
+      res.status(500).json({ error: "Failed to save manual metrics" });
     }
   });
+
 }
 
 export async function requireCampaign(req: Request, res: Response, next: NextFunction) {
@@ -444,12 +337,12 @@ export async function requireCampaign(req: Request, res: Response, next: NextFun
 
     const selection = selections[0];
 
-    const campaign = DEMO_CAMPAIGNS.find((c) => c.id === selection.selectedCampaignId);
-    if (campaign && (campaign.status === "paused" || campaign.status === "removed")) {
+    const campaignStatus = selection.campaignStatus || "active";
+    if (campaignStatus === "paused" || campaignStatus === "removed") {
       return res.status(400).json({
         error: "CAMPAIGN_INVALID",
-        message: `Campaign "${selection.selectedCampaignName}" is ${campaign.status}. Please select an active campaign.`,
-        campaignStatus: campaign.status,
+        message: `Campaign "${selection.selectedCampaignName}" is ${campaignStatus}. Please select an active campaign.`,
+        campaignStatus,
       });
     }
 

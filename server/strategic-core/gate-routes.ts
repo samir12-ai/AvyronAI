@@ -13,22 +13,13 @@ interface CampaignContextObject {
   isDemo: boolean;
 }
 
-const DEMO_CAMPAIGN_CONTEXT: CampaignContextObject = {
-  campaignId: "DEMO_CAMPAIGN",
-  campaignName: "Demo Campaign (Meta Not Connected)",
-  objective: "general_marketing",
-  location: "Dubai, UAE",
-  platform: "demo",
-  isDemo: true,
-};
-
 async function resolveCampaignContext(
   accountId: string,
   campaignId?: string,
   metaConnected?: boolean,
   demoLocation?: string,
 ): Promise<{ context: CampaignContextObject | null; error: string | null }> {
-  if (metaConnected && campaignId) {
+  if (campaignId) {
     const [campaign] = await db.select().from(campaignSelections)
       .where(and(
         eq(campaignSelections.selectedCampaignId, campaignId),
@@ -52,20 +43,28 @@ async function resolveCampaignContext(
     };
   }
 
-  if (metaConnected && !campaignId) {
-    return { context: null, error: "Meta is connected — you must select a campaign before building a plan." };
+  const [selectedCampaign] = await db.select().from(campaignSelections)
+    .where(eq(campaignSelections.accountId, accountId))
+    .limit(1);
+
+  if (selectedCampaign) {
+    return {
+      context: {
+        campaignId: selectedCampaign.selectedCampaignId,
+        campaignName: selectedCampaign.selectedCampaignName,
+        objective: selectedCampaign.campaignGoalType,
+        location: selectedCampaign.campaignLocation || null,
+        platform: selectedCampaign.selectedPlatform || "meta",
+        isDemo: false,
+      },
+      error: null,
+    };
   }
 
-  return {
-    context: {
-      ...DEMO_CAMPAIGN_CONTEXT,
-      location: demoLocation || DEMO_CAMPAIGN_CONTEXT.location,
-    },
-    error: null,
-  };
+  return { context: null, error: "No campaign selected. Please select a campaign before building a plan." };
 }
 
-export { resolveCampaignContext, DEMO_CAMPAIGN_CONTEXT };
+export { resolveCampaignContext };
 export type { CampaignContextObject };
 
 export function registerGateRoutes(app: Express) {

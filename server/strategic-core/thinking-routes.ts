@@ -139,7 +139,7 @@ CAMPAIGN CONTEXT:
 - Objective: ${campaignContext.objective}
 - Location: ${campaignContext.location}
 - Platform: ${campaignContext.platform}
-- Mode: ${campaignContext.isDemo ? "DEMO (no live data)" : "PRODUCTION"}
+- Mode: PRODUCTION
 
 CONFIRMED BLUEPRINT (v${blueprint.blueprintVersion} — source of truth — do not override):
 ${JSON.stringify(confirmedBlueprint, null, 2)}
