@@ -72,7 +72,8 @@ Preferred communication style: Simple, everyday language.
 - **Active Plan Status Constant**: `ACTIVE_PLAN_STATUSES` in `server/plan-constants.ts` — single source of truth for APPROVED/GENERATED_TO_CALENDAR/CREATIVE_GENERATED/REVIEW/SCHEDULED. Used by gates, autopilot, dashboard, and worker.
 - **Validation Layer**: Zod-based request validation middleware.
 - **Memory Scoping Hardening**: Mathematically provable account+campaign isolation on all signal tables with database NOT NULL constraints and write guards.
-- **Campaign Switch Safety**: Hard reset of all campaign-scoped state on switch. Debounced saves cancelled. No cross-campaign write possible.
+- **Campaign Switch Safety**: Hard reset of all campaign-scoped state on switch. Debounced saves cancelled. No cross-campaign write possible. StrategicPipeline clears plans/account/progress/calendarEntries on campaign change and shows error state with retry on fetch failure.
+- **Execution Dashboard Campaign Scoping**: `/api/execution/dashboard` accepts optional `campaignId` query param to filter plans, required_work, and studio_items by campaign. StrategicPipeline passes `selectedCampaignId` to this endpoint.
 
 ### Final System Lock
 - **Business Data Layer**: `business_data_layer` table with 9 structural columns (e.g., businessLocation, businessType, coreOffer), campaign-scoped and used for orchestration. Unified Business Profile: single entry point via profile icon in dashboard header; BuildThePlan Phase 0 shows profile completeness gate, not duplicate form.

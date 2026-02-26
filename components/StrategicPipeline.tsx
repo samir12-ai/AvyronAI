@@ -111,24 +111,32 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
   const [plans, setPlans] = useState<PlanData[]>([]);
   const [account, setAccount] = useState<AccountData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressData | null>(null);
   const [calendarEntries, setCalendarEntries] = useState<CalendarEntry[]>([]);
 
   const fetchDashboard = useCallback(async () => {
     try {
-      const res = await fetch(getApiUrl('/api/execution/dashboard?accountId=default'));
+      setFetchError(false);
+      const campaignId = selectedCampaign?.selectedCampaignId;
+      let url = '/api/execution/dashboard?accountId=default';
+      if (campaignId) url += `&campaignId=${encodeURIComponent(campaignId)}`;
+      const res = await fetch(getApiUrl(url));
       const data = await res.json();
       if (data.success) {
         setPlans(data.plans || []);
         setAccount(data.account || null);
+      } else {
+        setFetchError(true);
       }
     } catch (err) {
       console.error('Dashboard fetch error:', err);
+      setFetchError(true);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedCampaign?.selectedCampaignId]);
 
   const fetchProgress = useCallback(async (planId: string) => {
     try {
@@ -145,6 +153,12 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
   }, []);
 
   useEffect(() => {
+    setPlans([]);
+    setAccount(null);
+    setProgress(null);
+    setCalendarEntries([]);
+    setFetchError(false);
+    setLoading(true);
     fetchDashboard();
   }, [fetchDashboard]);
 
@@ -153,6 +167,9 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
   useEffect(() => {
     if (activePlan) {
       fetchProgress(activePlan.id);
+    } else {
+      setProgress(null);
+      setCalendarEntries([]);
     }
   }, [activePlan?.id, fetchProgress]);
 
@@ -771,6 +788,18 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
       <View style={s.loadingWrap}>
         <ActivityIndicator size="large" color={colors.primary} />
         <Text style={[s.loadingText, { color: colors.textMuted }]}>Loading pipeline...</Text>
+      </View>
+    );
+  }
+
+  if (fetchError && plans.length === 0) {
+    return (
+      <View style={s.loadingWrap}>
+        <Ionicons name="cloud-offline-outline" size={32} color={colors.textMuted} />
+        <Text style={[s.loadingText, { color: colors.textMuted }]}>Could not load pipeline data</Text>
+        <Pressable onPress={fetchDashboard} style={{ marginTop: 12, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: colors.primary + '20', borderRadius: 8 }}>
+          <Text style={{ color: colors.primary, fontWeight: '600' }}>Retry</Text>
+        </Pressable>
       </View>
     );
   }

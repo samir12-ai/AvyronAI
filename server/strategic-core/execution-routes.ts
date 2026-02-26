@@ -995,21 +995,31 @@ export function registerExecutionRoutes(app: Express) {
   app.get("/api/execution/dashboard", async (req: Request, res: Response) => {
     try {
       const accountId = (req.query.accountId as string) || "default";
+      const campaignId = req.query.campaignId as string | undefined;
+
+      const planConditions = [eq(strategicPlans.accountId, accountId)];
+      if (campaignId) planConditions.push(eq(strategicPlans.campaignId, campaignId));
 
       const plans = await db
         .select()
         .from(strategicPlans)
-        .where(eq(strategicPlans.accountId, accountId));
+        .where(and(...planConditions));
+
+      const workConditions = [eq(requiredWork.accountId, accountId)];
+      if (campaignId) workConditions.push(eq(requiredWork.campaignId, campaignId));
 
       const allWork = await db
         .select()
         .from(requiredWork)
-        .where(eq(requiredWork.accountId, accountId));
+        .where(and(...workConditions));
+
+      const itemConditions = [eq(studioItems.accountId, accountId)];
+      if (campaignId) itemConditions.push(eq(studioItems.campaignId, campaignId));
 
       const allItems = await db
         .select()
         .from(studioItems)
-        .where(eq(studioItems.accountId, accountId));
+        .where(and(...itemConditions));
 
       const totalPlans = plans.length;
       const activePlans = plans.filter((p) => !["REJECTED", "DRAFT"].includes(p.status)).length;
