@@ -322,138 +322,142 @@ export default function StudioScreen() {
     }
   };
 
+  const renderAnalysisPanel = (item: MediaItem) => {
+    const analysis = analysisResult[item.id];
+    if (!analysis) return null;
+    const toggles = applyToggles[item.id] || { hook: true, caption: true, cta: true, angle: true, keywords: true };
+    return (
+      <View style={[styles.analysisPanel, { backgroundColor: colors.primary + '08', borderColor: colors.primary + '30' }]}>
+        {analysis.hookSuggestion ? (
+          <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'hook')}>
+            <Ionicons name={toggles.hook ? "checkbox" : "square-outline"} size={16} color={colors.primary} />
+            <View style={styles.analysisContent}>
+              <Text style={[styles.analysisLabel, { color: colors.primary }]}>Hook → Title</Text>
+              <Text style={[styles.analysisValue, { color: colors.text }]}>{analysis.hookSuggestion}</Text>
+            </View>
+          </Pressable>
+        ) : null}
+        {analysis.captionDraft ? (
+          <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'caption')}>
+            <Ionicons name={toggles.caption ? "checkbox" : "square-outline"} size={16} color={colors.accent} />
+            <View style={styles.analysisContent}>
+              <Text style={[styles.analysisLabel, { color: colors.accent }]}>Caption</Text>
+              <Text style={[styles.analysisValue, { color: colors.text }]} numberOfLines={3}>{analysis.captionDraft}</Text>
+            </View>
+          </Pressable>
+        ) : null}
+        {analysis.ctaSuggestion ? (
+          <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'cta')}>
+            <Ionicons name={toggles.cta ? "checkbox" : "square-outline"} size={16} color={colors.success} />
+            <View style={styles.analysisContent}>
+              <Text style={[styles.analysisLabel, { color: colors.success }]}>CTA</Text>
+              <Text style={[styles.analysisValue, { color: colors.text }]}>{analysis.ctaSuggestion}</Text>
+            </View>
+          </Pressable>
+        ) : null}
+        {analysis.contentAngle ? (
+          <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'angle')}>
+            <Ionicons name={toggles.angle ? "checkbox" : "square-outline"} size={16} color={colors.accentOrange} />
+            <View style={styles.analysisContent}>
+              <Text style={[styles.analysisLabel, { color: colors.accentOrange }]}>Angle</Text>
+              <Text style={[styles.analysisValue, { color: colors.text }]}>{analysis.contentAngle}</Text>
+            </View>
+          </Pressable>
+        ) : null}
+        {analysis.keywords?.length > 0 ? (
+          <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'keywords')}>
+            <Ionicons name={toggles.keywords ? "checkbox" : "square-outline"} size={16} color={colors.textSecondary} />
+            <View style={styles.analysisContent}>
+              <Text style={[styles.analysisLabel, { color: colors.textSecondary }]}>Keywords</Text>
+              <Text style={[styles.analysisValue, { color: colors.textMuted }]}>{analysis.keywords.join(', ')}</Text>
+            </View>
+          </Pressable>
+        ) : null}
+        {!analysis.applied && (
+          <Pressable
+            onPress={() => handleApplyAnalysis(item)}
+            style={[styles.applyDraftBtn, { backgroundColor: colors.primary }]}
+          >
+            <Ionicons name="checkmark-circle" size={16} color="#fff" />
+            <Text style={styles.applyDraftBtnText}>Apply to Draft</Text>
+          </Pressable>
+        )}
+        {analysis.applied && (
+          <View style={[styles.applyDraftBtn, { backgroundColor: colors.success + '20' }]}>
+            <Ionicons name="checkmark-done" size={16} color={colors.success} />
+            <Text style={[styles.applyDraftBtnText, { color: colors.success }]}>Applied</Text>
+          </View>
+        )}
+      </View>
+    );
+  };
+
   const renderMediaCard = (item: MediaItem) => (
     <View 
       key={item.id}
       style={[styles.mediaCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
     >
       <View style={styles.mediaCardRow}>
-      <View style={[styles.mediaThumbnail, { backgroundColor: colors.inputBackground }]}>
-        <Ionicons 
-          name={item.type === 'video' ? 'videocam' : item.type === 'poster' ? 'easel' : 'image'} 
-          size={32} 
-          color={colors.textMuted} 
-        />
-      </View>
-      <View style={styles.mediaInfo}>
-        <Text style={[styles.mediaTitle, { color: colors.text }]} numberOfLines={1}>
-          {item.title}
-        </Text>
-        <View style={styles.mediaMetaRow}>
-          <Text style={[styles.mediaPlatform, { color: colors.textSecondary }]}>
-            {item.platform}
+        <View style={[styles.mediaThumbnail, { backgroundColor: colors.inputBackground }]}>
+          <Ionicons 
+            name={item.type === 'video' ? 'videocam' : item.type === 'poster' ? 'easel' : 'image'} 
+            size={32} 
+            color={colors.textMuted} 
+          />
+        </View>
+        <View style={styles.mediaInfo}>
+          <Text style={[styles.mediaTitle, { color: colors.text }]} numberOfLines={1}>
+            {item.title}
           </Text>
-          <View style={[styles.mediaStatus, { backgroundColor: getStatusColor(item.status) + '20' }]}>
-            <Text style={[styles.mediaStatusText, { color: getStatusColor(item.status) }]}>
-              {item.status}
+          <View style={styles.mediaMetaRow}>
+            <Text style={[styles.mediaPlatform, { color: colors.textSecondary }]}>
+              {item.platform}
             </Text>
-          </View>
-        </View>
-        {item.scheduledDate && (
-          <Text style={[styles.mediaSchedule, { color: colors.accent }]}>
-            {t('studio.scheduledLabel')} {new Date(item.scheduledDate).toLocaleDateString()}
-          </Text>
-        )}
-        {item.autoCaption && (
-          <Text style={[styles.mediaSchedule, { color: colors.success }]} numberOfLines={1}>
-            AI Caption attached
-          </Text>
-        )}
-        {item.goal && (
-          <Text style={[styles.mediaSchedule, { color: colors.textMuted }]} numberOfLines={1}>
-            {item.goal}
-          </Text>
-        )}
-      </View>
-      <View style={styles.cardActions}>
-        {item.type === 'video' && (
-          <Pressable
-            onPress={() => handleAnalyzeVideo(item)}
-            disabled={analyzingId === item.id}
-            style={[styles.analyzeBtn, { backgroundColor: colors.primary + '15' }]}
-          >
-            <Ionicons
-              name={analyzingId === item.id ? "hourglass-outline" : "sparkles-outline"}
-              size={16}
-              color={colors.primary}
-            />
-          </Pressable>
-        )}
-        <Pressable
-          onPress={() => handleDeleteMedia(item.id, item.title)}
-          style={styles.deleteBtn}
-        >
-          <Ionicons name="trash-outline" size={18} color={colors.error} />
-        </Pressable>
-      </View>
-      </View>
-      {analysisResult[item.id] && (() => {
-        const toggles = applyToggles[item.id] || { hook: true, caption: true, cta: true, angle: true, keywords: true };
-        return (
-        <View style={[styles.analysisPanel, { backgroundColor: colors.primary + '08', borderColor: colors.primary + '30' }]}>
-          {analysisResult[item.id].hookSuggestion ? (
-            <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'hook')}>
-              <Ionicons name={toggles.hook ? "checkbox" : "square-outline"} size={16} color={colors.primary} />
-              <View style={styles.analysisContent}>
-                <Text style={[styles.analysisLabel, { color: colors.primary }]}>Hook → Title</Text>
-                <Text style={[styles.analysisValue, { color: colors.text }]}>{analysisResult[item.id].hookSuggestion}</Text>
-              </View>
-            </Pressable>
-          ) : null}
-          {analysisResult[item.id].captionDraft ? (
-            <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'caption')}>
-              <Ionicons name={toggles.caption ? "checkbox" : "square-outline"} size={16} color={colors.accent} />
-              <View style={styles.analysisContent}>
-                <Text style={[styles.analysisLabel, { color: colors.accent }]}>Caption</Text>
-                <Text style={[styles.analysisValue, { color: colors.text }]} numberOfLines={3}>{analysisResult[item.id].captionDraft}</Text>
-              </View>
-            </Pressable>
-          ) : null}
-          {analysisResult[item.id].ctaSuggestion ? (
-            <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'cta')}>
-              <Ionicons name={toggles.cta ? "checkbox" : "square-outline"} size={16} color={colors.success} />
-              <View style={styles.analysisContent}>
-                <Text style={[styles.analysisLabel, { color: colors.success }]}>CTA</Text>
-                <Text style={[styles.analysisValue, { color: colors.text }]}>{analysisResult[item.id].ctaSuggestion}</Text>
-              </View>
-            </Pressable>
-          ) : null}
-          {analysisResult[item.id].contentAngle ? (
-            <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'angle')}>
-              <Ionicons name={toggles.angle ? "checkbox" : "square-outline"} size={16} color={colors.accentOrange} />
-              <View style={styles.analysisContent}>
-                <Text style={[styles.analysisLabel, { color: colors.accentOrange }]}>Angle</Text>
-                <Text style={[styles.analysisValue, { color: colors.text }]}>{analysisResult[item.id].contentAngle}</Text>
-              </View>
-            </Pressable>
-          ) : null}
-          {analysisResult[item.id].keywords?.length > 0 ? (
-            <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'keywords')}>
-              <Ionicons name={toggles.keywords ? "checkbox" : "square-outline"} size={16} color={colors.textSecondary} />
-              <View style={styles.analysisContent}>
-                <Text style={[styles.analysisLabel, { color: colors.textSecondary }]}>Keywords</Text>
-                <Text style={[styles.analysisValue, { color: colors.textMuted }]}>{analysisResult[item.id].keywords.join(', ')}</Text>
-              </View>
-            </Pressable>
-          ) : null}
-          {!analysisResult[item.id].applied && (
-            <Pressable
-              onPress={() => handleApplyAnalysis(item)}
-              style={[styles.applyDraftBtn, { backgroundColor: colors.primary }]}
-            >
-              <Ionicons name="checkmark-circle" size={16} color="#fff" />
-              <Text style={styles.applyDraftBtnText}>Apply to Draft</Text>
-            </Pressable>
-          )}
-          {analysisResult[item.id].applied && (
-            <View style={[styles.applyDraftBtn, { backgroundColor: colors.success + '20' }]}>
-              <Ionicons name="checkmark-done" size={16} color={colors.success} />
-              <Text style={[styles.applyDraftBtnText, { color: colors.success }]}>Applied</Text>
+            <View style={[styles.mediaStatus, { backgroundColor: getStatusColor(item.status) + '20' }]}>
+              <Text style={[styles.mediaStatusText, { color: getStatusColor(item.status) }]}>
+                {item.status}
+              </Text>
             </View>
+          </View>
+          {item.scheduledDate && (
+            <Text style={[styles.mediaSchedule, { color: colors.accent }]}>
+              {t('studio.scheduledLabel')} {new Date(item.scheduledDate).toLocaleDateString()}
+            </Text>
+          )}
+          {item.autoCaption && (
+            <Text style={[styles.mediaSchedule, { color: colors.success }]} numberOfLines={1}>
+              AI Caption attached
+            </Text>
+          )}
+          {item.goal && (
+            <Text style={[styles.mediaSchedule, { color: colors.textMuted }]} numberOfLines={1}>
+              {item.goal}
+            </Text>
           )}
         </View>
-        );
-      })()}
+        <View style={styles.cardActions}>
+          {item.type === 'video' && (
+            <Pressable
+              onPress={() => handleAnalyzeVideo(item)}
+              disabled={analyzingId === item.id}
+              style={[styles.analyzeBtn, { backgroundColor: colors.primary + '15' }]}
+            >
+              <Ionicons
+                name={analyzingId === item.id ? "hourglass-outline" : "sparkles-outline"}
+                size={16}
+                color={colors.primary}
+              />
+            </Pressable>
+          )}
+          <Pressable
+            onPress={() => handleDeleteMedia(item.id, item.title)}
+            style={styles.deleteBtn}
+          >
+            <Ionicons name="trash-outline" size={18} color={colors.error} />
+          </Pressable>
+        </View>
+      </View>
+      {renderAnalysisPanel(item)}
     </View>
   );
 
