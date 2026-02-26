@@ -1,0 +1,124 @@
+subject=“P0 Verification + Immediate Fix Directives (Single-Track Lock)”}
+Hi Replit,
+
+We need a single-pass verification with hard evidence. Reply point-by-point with YES/NO + proof (file + line or endpoint response).
+If NO, apply the Immediate Fix Directive under the point (no alternative designs).
+
+⸻
+
+1) Campaign Switch — stale data / hang persists?
+
+Question: When switching Campaign A → Campaign B, do ALL tabs (Dashboard / Calendar / AI Management / Create / Studio) immediately reset to loading/empty BEFORE fetching, with zero flash of old data?
+Proof required: short screen recording OR console logs showing state reset + fetch, and the exact files/lines where selectedCampaignId change triggers reset.
+
+If NO — Immediate Fix Directive:
+	•	Add a shared useCampaignResetGuard(selectedCampaignId) utility used by each tab:
+	•	On campaignId change: setState('loading'), clear local lists, clear computed metrics, cancel inflight requests.
+	•	Ensure usePersistedState cancels debounced saves AND consumers re-sync via hydrationVersion.
+	•	Add an E2E test: switch campaigns twice quickly (A→B→A within 2s) and assert no stale UI remains.
+
+⸻
+
+2) Required Work Branches — truly wired and deterministic?
+
+Question: Is required_work now split into DESIGNER / WRITER / VIDEO as first-class branches and used everywhere (Create UI + execution + progress)?
+Proof required: schema diff + the exact execution logic mapping content types to branch + one API response showing counts per branch.
+
+If NO — Immediate Fix Directive:
+	•	Add/ensure branch columns exist and are populated deterministically from the plan output.
+	•	Make execution/progress read ONLY from required_work + calendar_entries (not derived client-side).
+
+⸻
+
+3) Studio Video — AI analysis assist + non-destructive behavior?
+
+Question: Does Studio provide “Analyze” for video items that pre-fills fields, and if AI fails it returns a structured error WITHOUT wiping existing user edits?
+Proof required: endpoint contract + UI behavior video.
+
+If NO — Immediate Fix Directive:
+	•	Add POST /api/studio/video-analyze with strict timeout (25s), usage logging, and idempotent merge behavior:
+	•	Never overwrite user-edited fields unless user confirms.
+	•	Failures: {success:false, code, message} and UI keeps current draft.
+
+⸻
+
+4) Plan PDF — correct versioning + stored for review?
+
+Question: After Phase 5, can the user generate/download a PDF that is attached to the specific plan version (new regenerate → new PDF)?
+Proof required: DB table/row example showing planId + documentId linkage + UI button evidence.
+
+If NO — Immediate Fix Directive:
+	•	Store PDFs per strategic_plan.id (not blueprint only).
+	•	Regenerate creates a new plan row (or supersedes old) and PDF must attach to the new plan.
+	•	Add “Download Plan PDF” in Pipeline and in Build Plan completion.
+
+⸻
+
+5) Dashboard — REAL mode metrics + AI actions not empty when they shouldn’t be?
+
+Question: In REAL mode with an APPROVED/ACTIVE plan + calendar entries, does dashboard show metrics and AI actions sourced from real tables (no demo filler)?
+Proof required: the exact queries used + one real response payload.
+
+If NO — Immediate Fix Directive:
+	•	Standardize plan lookup with one shared constant and one resolver:
+	•	ACTIVE_PLAN_STATUSES used by dashboard metrics + AI actions + autopilot + worker.
+	•	Dashboard must show:
+	•	Empty state ONLY when tables are truly empty.
+	•	Otherwise compute metrics from calendar_entries, studio_items, and (if available) performance_snapshots.
+
+⸻
+
+6) Unified Business Profile — remove duplication (Settings vs Build Plan)
+
+Question: Is there ONE single Business Profile source (DB table) and ONE modal entry point, and Build Plan Phase 0 only shows a gate + “Complete Profile” link (no duplicate form)?
+Proof required: where the modal is mounted + where Build Plan references it + confirmation Settings points to same modal.
+
+If NO — Immediate Fix Directive:
+	•	Delete/disable duplicate profile form in Settings OR Build Plan.
+	•	Keep one BusinessProfileModal that writes to one table and is referenced across all features.
+
+⸻
+
+7) Safety & performance — hard guarantees maintained?
+
+Question: Do all new/changed endpoints keep:
+	•	<5s synchronous rule,
+	•	structured error codes (no “random 500” for expected states),
+	•	AI calls capped with explicit max_tokens + 25s timeout,
+	•	budget logging present?
+Proof required: list of affected endpoints + example errors + AI call wrapper usage.
+
+If NO — Immediate Fix Directive:
+	•	Replace any long-running endpoint with job queue flow.
+	•	Enforce validateResponse + structured error mapping.
+
+⸻
+
+8) Autopilot ↔ Plan Binding — NO contradictions
+
+Question: Is it now impossible for UI to show “Plan Binding CONNECTED” while gates show hasApprovedPlan = FAIL (same campaign, same account)?
+Proof required: show the resolver used in both places + screenshot from same campaign.
+
+If NO — Immediate Fix Directive:
+	•	Create ONE shared resolveActivePlan() + shared ACTIVE_PLAN_STATUSES.
+	•	Make all:
+	•	gates,
+	•	autopilot status/actions,
+	•	dashboard autopilot strip,
+	•	worker gate
+call the same resolver, same statuses, same scoping (accountId + campaignId).
+
+⸻
+
+Deliverable format (MANDATORY)
+
+Reply with:
+	1.	A YES/NO table for points 1–8
+	2.	For each YES: proof links/snippets
+	3.	For each NO: confirm the fix applied + commit summary + test evidence
+	4.	Updated checklist showing what blocks launch vs what is cosmetic
+
+This is P0 stabilization. No redesign, no scope expansion. Only single-track correctness.
+
+Thanks.
+:::
