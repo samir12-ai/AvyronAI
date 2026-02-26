@@ -1359,7 +1359,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
       ok: true,
       status: "ok",
       timestamp: new Date().toISOString(),
-      routes: ["/api/strategic/init", "/api/strategic/blueprint/:id", "/api/demo/seed-campaign"],
+      routes: ["/api/strategic/init", "/api/strategic/blueprint/:id"],
     });
   });
 
