@@ -106,6 +106,15 @@ export default function ControlCenter() {
   const [autopilotToggling, setAutopilotToggling] = useState(false);
   const [emergencyStopping, setEmergencyStopping] = useState(false);
 
+  const [planBinding, setPlanBinding] = useState<{
+    state: 'CONNECTED' | 'BLOCKED';
+    planId: string | null;
+    planStatus: string | null;
+    reason: string | null;
+    lastDecisionAt: string | null;
+    executionProgress: any | null;
+  } | null>(null);
+
   const [aiUsage, setAiUsage] = useState<AIUsageData | null>(null);
   const [aiState, setAiState] = useState<PanelState>('loading');
   const [aiError, setAiError] = useState('');
@@ -127,6 +136,21 @@ export default function ControlCenter() {
 
   const cardBg = isDark ? '#0F1419' : '#fff';
   const cardBorder = isDark ? '#1A2030' : '#E2E8E4';
+
+  const loadPlanBinding = useCallback(async () => {
+    try {
+      const url = getApiUrl('/api/autopilot/status');
+      const res = await fetch(url, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.planBinding) {
+          setPlanBinding(data.planBinding);
+        }
+      }
+    } catch (e: any) {
+      console.error('[ControlCenter] Plan binding fetch error:', e.message);
+    }
+  }, []);
 
   const loadGates = useCallback(async () => {
     try {
@@ -203,8 +227,8 @@ export default function ControlCenter() {
   }, []);
 
   const loadAll = useCallback(async () => {
-    await Promise.all([loadGates(), loadAIUsage(), loadAudit(true), loadDecisions(), loadJobs()]);
-  }, [loadGates, loadAIUsage, loadAudit, loadDecisions, loadJobs]);
+    await Promise.all([loadGates(), loadAIUsage(), loadAudit(true), loadDecisions(), loadJobs(), loadPlanBinding()]);
+  }, [loadGates, loadAIUsage, loadAudit, loadDecisions, loadJobs, loadPlanBinding]);
 
   useEffect(() => {
     loadAll();
@@ -349,6 +373,67 @@ export default function ControlCenter() {
             <Ionicons name="warning" size={14} color="#EF4444" />
             <Text style={[s.safeModeText, { color: '#EF4444' }]}>Safe mode active — all execution paused</Text>
           </View>
+        )}
+      </View>
+
+      <View style={[s.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+        <View style={s.sectionHeader}>
+          <Ionicons name="link" size={16} color={planBinding?.state === 'CONNECTED' ? '#10B981' : '#F59E0B'} />
+          <Text style={[s.sectionTitle, { color: colors.text }]}>Plan Binding</Text>
+          <View style={[s.gateStatusBadge, { backgroundColor: (planBinding?.state === 'CONNECTED' ? '#10B981' : '#F59E0B') + '15' }]}>
+            <Text style={[s.gateStatusText, { color: planBinding?.state === 'CONNECTED' ? '#10B981' : '#F59E0B' }]}>
+              {planBinding?.state || 'LOADING'}
+            </Text>
+          </View>
+        </View>
+        {planBinding?.state === 'BLOCKED' ? (
+          <View style={[s.safeModeBar, { backgroundColor: '#F59E0B12', marginTop: 8 }]}>
+            <Ionicons name="alert-circle" size={16} color="#F59E0B" />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: '#F59E0B', fontSize: 13, fontWeight: '700' }}>
+                {planBinding.reason === 'NO_APPROVED_PLAN' ? 'No Approved Plan' : planBinding.reason || 'Blocked'}
+              </Text>
+              <Text style={{ color: '#92400E', fontSize: 11, marginTop: 2 }}>
+                Autopilot requires an approved strategic plan. Go to Build The Plan to create and approve one.
+              </Text>
+            </View>
+          </View>
+        ) : planBinding?.state === 'CONNECTED' ? (
+          <View style={{ marginTop: 8, gap: 8 }}>
+            <View style={[s.gateRow, { borderTopWidth: 0 }]}>
+              <Ionicons name="document-text" size={16} color="#10B981" />
+              <View style={{ flex: 1 }}>
+                <Text style={[s.gateName, { color: colors.text }]}>Active Plan</Text>
+                <Text style={[s.gateReason, { color: colors.textMuted }]}>{planBinding.planId?.slice(0, 12)}...</Text>
+              </View>
+              <View style={[s.gateStatusBadge, { backgroundColor: '#10B98115' }]}>
+                <Text style={[s.gateStatusText, { color: '#10B981' }]}>{planBinding.planStatus}</Text>
+              </View>
+            </View>
+            {planBinding.executionProgress && (
+              <View style={[s.gateRow, { borderTopWidth: 1, borderTopColor: cardBorder }]}>
+                <Ionicons name="bar-chart" size={16} color="#8B5CF6" />
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.gateName, { color: colors.text }]}>Execution Progress</Text>
+                  <Text style={[s.gateReason, { color: colors.textMuted }]}>
+                    {planBinding.executionProgress.generated}/{planBinding.executionProgress.totalRequired} generated, {planBinding.executionProgress.draft} draft, {planBinding.executionProgress.failed} failed
+                  </Text>
+                </View>
+                <Text style={{ color: '#8B5CF6', fontWeight: '800', fontSize: 16 }}>{planBinding.executionProgress.progressPercent}%</Text>
+              </View>
+            )}
+            {planBinding.lastDecisionAt && (
+              <View style={[s.gateRow, { borderTopWidth: 1, borderTopColor: cardBorder }]}>
+                <Ionicons name="time" size={16} color={colors.textMuted} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.gateName, { color: colors.text }]}>Last Decision</Text>
+                  <Text style={[s.gateReason, { color: colors.textMuted }]}>{timeAgo(planBinding.lastDecisionAt)}</Text>
+                </View>
+              </View>
+            )}
+          </View>
+        ) : (
+          renderPanelLoading()
         )}
       </View>
 

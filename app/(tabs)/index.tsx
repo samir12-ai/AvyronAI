@@ -155,6 +155,9 @@ export default function DashboardScreen() {
   const [confidenceScore, setConfidenceScore] = useState(0);
   const [confidenceStatus, setConfidenceStatus] = useState<'Stable' | 'Caution' | 'Unstable'>('Stable');
   const [confidenceLoaded, setConfidenceLoaded] = useState(false);
+  const [planBindingState, setPlanBindingState] = useState<'CONNECTED' | 'BLOCKED' | null>(null);
+  const [planBindingId, setPlanBindingId] = useState<string | null>(null);
+  const [planBindingReason, setPlanBindingReason] = useState<string | null>(null);
 
   const [dataMode, setDataMode] = useState<'REAL' | 'DEMO' | 'UNKNOWN'>('UNKNOWN');
   const [refreshing, setRefreshing] = useState(false);
@@ -238,6 +241,11 @@ export default function DashboardScreen() {
         setConfidenceScore(data.confidenceScore ?? 0);
         setConfidenceStatus((data.confidenceStatus ?? 'Stable') as 'Stable' | 'Caution' | 'Unstable');
         setConfidenceLoaded(true);
+        if (data.planBinding) {
+          setPlanBindingState(data.planBinding.state);
+          setPlanBindingId(data.planBinding.planId);
+          setPlanBindingReason(data.planBinding.reason);
+        }
       }
     } catch {}
   }, [baseUrl]);
@@ -567,23 +575,32 @@ export default function DashboardScreen() {
         {confidenceLoaded && selectedCampaignId ? (
           <View style={[s.autopilotStrip, { 
             backgroundColor: isDark ? P.darkCard : P.lightCard,
-            borderColor: cardBorder,
+            borderColor: planBindingState === 'BLOCKED' ? '#F59E0B40' : cardBorder,
           }]}>
             <View style={s.autopilotInner}>
-              <View style={[s.autopilotDot, { backgroundColor: P.mint + '15' }]}>
-                <PulsingDot color={P.mint} size={8} />
+              <View style={[s.autopilotDot, { backgroundColor: (planBindingState === 'BLOCKED' ? '#F59E0B' : P.mint) + '15' }]}>
+                <PulsingDot color={planBindingState === 'BLOCKED' ? '#F59E0B' : P.mint} size={8} />
               </View>
               <View style={{ flex: 1 }}>
                 <View style={s.autopilotTopRow}>
-                  <Text style={[s.autopilotTitle, { color: textPrimary }]}>Autopilot Active</Text>
+                  <Text style={[s.autopilotTitle, { color: textPrimary }]}>
+                    {planBindingState === 'BLOCKED' ? 'Autopilot Blocked' : 'Autopilot Connected'}
+                  </Text>
                 </View>
+                {planBindingState === 'BLOCKED' ? (
+                  <Text style={{ color: '#F59E0B', fontSize: 10, marginTop: 2 }}>No Approved Plan</Text>
+                ) : planBindingId ? (
+                  <Text style={{ color: P.mint, fontSize: 10, marginTop: 2 }}>Plan {planBindingId.slice(0, 8)}</Text>
+                ) : null}
               </View>
-              <View style={s.confBlock}>
-                <Text style={[s.confValue, { color: confColor }]}>{confidenceScore}%</Text>
-                <View style={[s.confBar, { backgroundColor: isDark ? '#1A2030' : '#E5EBE7' }]}>
-                  <View style={[s.confFill, { width: `${confidenceScore}%`, backgroundColor: confColor }]} />
+              {planBindingState !== 'BLOCKED' && (
+                <View style={s.confBlock}>
+                  <Text style={[s.confValue, { color: confColor }]}>{confidenceScore}%</Text>
+                  <View style={[s.confBar, { backgroundColor: isDark ? '#1A2030' : '#E5EBE7' }]}>
+                    <View style={[s.confFill, { width: `${confidenceScore}%`, backgroundColor: confColor }]} />
+                  </View>
                 </View>
-              </View>
+              )}
             </View>
           </View>
         ) : null}

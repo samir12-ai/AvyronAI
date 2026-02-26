@@ -8,6 +8,9 @@ import {
   guardrailConfig,
   publishedPosts,
   campaignSelections,
+  strategicPlans,
+  calendarEntries,
+  requiredWork,
 } from "@shared/schema";
 
 import { eq, and, sql, desc, gte, lte, ne } from "drizzle-orm";
@@ -96,7 +99,8 @@ async function runStrategyAnalysis(
   accountId: string,
   baselines: any,
   guardrailResult: any,
-  outcomeContext: string
+  outcomeContext: string,
+  planContext?: { planId: string; planSummary: string; calendarProgress: string } | null
 ): Promise<Array<{
   trigger: string;
   action: string;
@@ -159,6 +163,14 @@ async function runStrategyAnalysis(
         !guardrailResult.volatility.passed ? guardrailResult.volatility.reason : null,
       ].filter(Boolean).join("; ")}`;
 
+  const planContextBlock = planContext
+    ? `\nACTIVE PLAN BINDING:
+Plan ID: ${planContext.planId}
+Plan Summary: ${planContext.planSummary}
+Calendar Progress: ${planContext.calendarProgress}
+IMPORTANT: All decisions MUST reference this planId. Actions must be derived from plan artifacts only.`
+    : "\nNO ACTIVE PLAN — decisions are limited to monitoring and optimization only.";
+
   const systemPrompt = `You are a MOAT BUILDER AI Strategy Engine operating in AUTONOMOUS mode. You generate actionable marketing decisions based on performance data, memory, and guardrail state.
 
 RULES:
@@ -168,6 +180,8 @@ RULES:
 4. Each decision must have a clear, measurable objective
 5. Suggest risk level: "low", "medium", or "high" (code will validate and may override)
 6. Maximum 3 decisions per cycle
+7. Every decision must include a "planId" field referencing the active plan
+${planContextBlock}
 
 CONTEXT:
 ${perfSummary}
@@ -340,6 +354,71 @@ async function processAccount(accountId: string) {
 
     if (!state[0] || !state[0].autopilotOn) {
       await releaseLock(jobId, "completed");
+      return;
+    }
+
+    const activeCampaign = await getActiveCampaignId(accountId);
+    let activePlanContext: { planId: string; planSummary: string; calendarProgress: string } | null = null;
+
+    if (activeCampaign) {
+      let planQuery = await db
+        .select()
+        .from(strategicPlans)
+        .where(
+          and(
+            eq(strategicPlans.accountId, accountId),
+            eq(strategicPlans.campaignId, activeCampaign),
+            sql`${strategicPlans.status} IN ('APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'REVIEW', 'SCHEDULED')`
+          )
+        )
+        .orderBy(desc(strategicPlans.createdAt))
+        .limit(1);
+
+      if (planQuery.length === 0) {
+        planQuery = await db
+          .select()
+          .from(strategicPlans)
+          .where(
+            and(
+              eq(strategicPlans.accountId, accountId),
+              sql`${strategicPlans.status} IN ('APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'REVIEW', 'SCHEDULED')`
+            )
+          )
+          .orderBy(desc(strategicPlans.createdAt))
+          .limit(1);
+      }
+
+      if (planQuery.length === 0) {
+        console.log(`[Worker] Account ${accountId}: No approved plan found — autopilot BLOCKED`);
+        await releaseLock(jobId, "completed");
+        await logAudit(accountId, "AUTOPILOT_BLOCKED_NO_PLAN", {
+          details: { campaignId: activeCampaign, reason: "NO_APPROVED_PLAN" },
+        });
+        return;
+      }
+
+      const plan = planQuery[0];
+      const [planEntries, planWork] = await Promise.all([
+        db.select().from(calendarEntries).where(eq(calendarEntries.planId, plan.id)),
+        db.select().from(requiredWork).where(eq(requiredWork.planId, plan.id)).limit(1),
+      ]);
+
+      const totalReq = planWork[0]?.totalContentPieces || 0;
+      const draftCount = planEntries.filter(e => e.status === "DRAFT").length;
+      const generatedCount = planEntries.filter(e => e.status === "AI_GENERATED").length;
+      const failedCount = planEntries.filter(e => e.status === "FAILED").length;
+
+      activePlanContext = {
+        planId: plan.id,
+        planSummary: plan.planSummary || "Active execution plan",
+        calendarProgress: `Total required: ${totalReq}, Calendar entries: ${planEntries.length}, Draft: ${draftCount}, Generated: ${generatedCount}, Failed: ${failedCount}`,
+      };
+    } else {
+      console.log(`[Worker] Account ${accountId}: No active campaign — autopilot BLOCKED`);
+      await releaseLock(jobId, "completed");
+      await logAudit(accountId, "AUTOPILOT_BLOCKED_NO_PLAN", {
+        details: { reason: "NO_ACTIVE_CAMPAIGN" },
+      });
       return;
     }
 
@@ -542,7 +621,7 @@ async function processAccount(accountId: string) {
       return;
     }
 
-    const aiDecisions = await runStrategyAnalysis(accountId, baselines, guardrailResult, outcomeContext);
+    const aiDecisions = await runStrategyAnalysis(accountId, baselines, guardrailResult, outcomeContext, activePlanContext);
 
     for (const decision of aiDecisions) {
       const riskResult = classifyDecisionRisk(
