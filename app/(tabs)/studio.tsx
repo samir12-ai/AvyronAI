@@ -77,6 +77,8 @@ export default function StudioScreen() {
   const [mediaOffer, setMediaOffer] = useState('');
   const [isSubmittingCase, setIsSubmittingCase] = useState(false);
   const [draftRestored, setDraftRestored] = useState(false);
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<{ [key: string]: any }>({});
   const lastHydrationRef = useRef(0);
 
   useEffect(() => {
@@ -230,6 +232,45 @@ export default function StudioScreen() {
     await removeMediaItem(id);
   };
 
+  const handleAnalyzeVideo = async (item: MediaItem) => {
+    if (analyzingId) return;
+    setAnalyzingId(item.id);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    try {
+      const apiUrl = getApiUrl();
+      const res = await fetch(new URL('/api/studio/video-analyze', apiUrl).toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accountId: 'default',
+          title: item.title,
+          platform: item.platform,
+          goal: item.goal || '',
+          audience: item.audience || '',
+          cta: item.cta || '',
+          series: item.series || '',
+          offer: item.offer || '',
+          mediaType: item.type,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Analysis failed' }));
+        Alert.alert('Analysis Failed', err.error || 'Could not analyze video.');
+        return;
+      }
+
+      const data = await res.json();
+      setAnalysisResult(prev => ({ ...prev, [item.id]: data }));
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      Alert.alert('Error', 'Could not connect to analysis service.');
+    } finally {
+      setAnalyzingId(null);
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'scheduled': return colors.accent;
@@ -243,6 +284,7 @@ export default function StudioScreen() {
       key={item.id}
       style={[styles.mediaCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
     >
+      <View style={styles.mediaCardRow}>
       <View style={[styles.mediaThumbnail, { backgroundColor: colors.inputBackground }]}>
         <Ionicons 
           name={item.type === 'video' ? 'videocam' : item.type === 'poster' ? 'easel' : 'image'} 
@@ -280,12 +322,77 @@ export default function StudioScreen() {
           </Text>
         )}
       </View>
-      <Pressable
-        onPress={() => handleDeleteMedia(item.id, item.title)}
-        style={styles.deleteBtn}
-      >
-        <Ionicons name="trash-outline" size={18} color={colors.error} />
-      </Pressable>
+      <View style={styles.cardActions}>
+        {item.type === 'video' && (
+          <Pressable
+            onPress={() => handleAnalyzeVideo(item)}
+            disabled={analyzingId === item.id}
+            style={[styles.analyzeBtn, { backgroundColor: colors.primary + '15' }]}
+          >
+            <Ionicons
+              name={analyzingId === item.id ? "hourglass-outline" : "sparkles-outline"}
+              size={16}
+              color={colors.primary}
+            />
+          </Pressable>
+        )}
+        <Pressable
+          onPress={() => handleDeleteMedia(item.id, item.title)}
+          style={styles.deleteBtn}
+        >
+          <Ionicons name="trash-outline" size={18} color={colors.error} />
+        </Pressable>
+      </View>
+      </View>
+      {analysisResult[item.id] && (
+        <View style={[styles.analysisPanel, { backgroundColor: colors.primary + '08', borderColor: colors.primary + '30' }]}>
+          {analysisResult[item.id].hookSuggestion ? (
+            <View style={styles.analysisRow}>
+              <Ionicons name="flash-outline" size={14} color={colors.primary} />
+              <View style={styles.analysisContent}>
+                <Text style={[styles.analysisLabel, { color: colors.primary }]}>Hook</Text>
+                <Text style={[styles.analysisValue, { color: colors.text }]}>{analysisResult[item.id].hookSuggestion}</Text>
+              </View>
+            </View>
+          ) : null}
+          {analysisResult[item.id].captionDraft ? (
+            <View style={styles.analysisRow}>
+              <Ionicons name="chatbubble-outline" size={14} color={colors.accent} />
+              <View style={styles.analysisContent}>
+                <Text style={[styles.analysisLabel, { color: colors.accent }]}>Caption</Text>
+                <Text style={[styles.analysisValue, { color: colors.text }]} numberOfLines={3}>{analysisResult[item.id].captionDraft}</Text>
+              </View>
+            </View>
+          ) : null}
+          {analysisResult[item.id].ctaSuggestion ? (
+            <View style={styles.analysisRow}>
+              <Ionicons name="megaphone-outline" size={14} color={colors.success} />
+              <View style={styles.analysisContent}>
+                <Text style={[styles.analysisLabel, { color: colors.success }]}>CTA</Text>
+                <Text style={[styles.analysisValue, { color: colors.text }]}>{analysisResult[item.id].ctaSuggestion}</Text>
+              </View>
+            </View>
+          ) : null}
+          {analysisResult[item.id].contentAngle ? (
+            <View style={styles.analysisRow}>
+              <Ionicons name="compass-outline" size={14} color={colors.accentOrange} />
+              <View style={styles.analysisContent}>
+                <Text style={[styles.analysisLabel, { color: colors.accentOrange }]}>Angle</Text>
+                <Text style={[styles.analysisValue, { color: colors.text }]}>{analysisResult[item.id].contentAngle}</Text>
+              </View>
+            </View>
+          ) : null}
+          {analysisResult[item.id].keywords?.length > 0 ? (
+            <View style={styles.analysisRow}>
+              <Ionicons name="pricetag-outline" size={14} color={colors.textSecondary} />
+              <View style={styles.analysisContent}>
+                <Text style={[styles.analysisLabel, { color: colors.textSecondary }]}>Keywords</Text>
+                <Text style={[styles.analysisValue, { color: colors.textMuted }]}>{analysisResult[item.id].keywords.join(', ')}</Text>
+              </View>
+            </View>
+          ) : null}
+        </View>
+      )}
     </View>
   );
 
@@ -692,12 +799,48 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   mediaCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
     borderRadius: 16,
     borderWidth: 1,
     padding: 12,
+    gap: 8,
+  },
+  mediaCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 12,
+  },
+  cardActions: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  analyzeBtn: {
+    padding: 8,
+    borderRadius: 10,
+  },
+  analysisPanel: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 10,
+    gap: 8,
+    marginTop: 4,
+  },
+  analysisRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'flex-start',
+  },
+  analysisContent: {
+    flex: 1,
+    gap: 2,
+  },
+  analysisLabel: {
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  analysisValue: {
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+    lineHeight: 18,
   },
   mediaThumbnail: {
     width: 60,

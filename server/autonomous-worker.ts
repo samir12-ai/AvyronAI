@@ -12,6 +12,7 @@ import {
   calendarEntries,
   requiredWork,
 } from "@shared/schema";
+import { ACTIVE_PLAN_STATUSES_SQL } from "./plan-constants";
 
 import { eq, and, sql, desc, gte, lte, ne } from "drizzle-orm";
 
@@ -368,7 +369,7 @@ async function processAccount(accountId: string) {
           and(
             eq(strategicPlans.accountId, accountId),
             eq(strategicPlans.campaignId, activeCampaign),
-            sql`${strategicPlans.status} IN ('APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'REVIEW', 'SCHEDULED')`
+            sql`${strategicPlans.status} IN (${sql.raw(ACTIVE_PLAN_STATUSES_SQL)})`
           )
         )
         .orderBy(desc(strategicPlans.createdAt))
@@ -381,7 +382,7 @@ async function processAccount(accountId: string) {
           .where(
             and(
               eq(strategicPlans.accountId, accountId),
-              sql`${strategicPlans.status} IN ('APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'REVIEW', 'SCHEDULED')`
+              sql`${strategicPlans.status} IN (${sql.raw(ACTIVE_PLAN_STATUSES_SQL)})`
             )
           )
           .orderBy(desc(strategicPlans.createdAt))

@@ -105,6 +105,7 @@ export default function AIManagementScreen() {
   const { scheduledPosts, updateScheduledPost, metaConnection, brandProfile, campaigns, advancedMode } = useApp();
   const { t } = useLanguage();
 
+  const { selectedCampaignId } = useCampaign();
   const { state: ps, updateState, isLoading: psLoading, isSaving, saveError, hydrationVersion } = usePersistedState('ai-management', defaultAIMgmtState);
 
   const [activeTab, setActiveTab] = useState<TabView>(ps.activeTab);
@@ -122,6 +123,21 @@ export default function AIManagementScreen() {
   const [audiences, setAudiences] = useState<AIAudience[]>(ps.generatedAudiences);
   const [audienceError, setAudienceError] = useState('');
   const [expandedAudience, setExpandedAudience] = useState<number | null>(null);
+
+  const prevCampaignRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const isSwitch = prevCampaignRef.current !== undefined && prevCampaignRef.current !== selectedCampaignId;
+    prevCampaignRef.current = selectedCampaignId;
+    if (isSwitch) {
+      setSelectedPosts(new Set());
+      setPublishing(false);
+      setPublishResults([]);
+      setShowAudienceModal(false);
+      setGeneratingAudience(false);
+      setAudienceError('');
+      setExpandedAudience(null);
+    }
+  }, [selectedCampaignId]);
 
   const lastHydrationRef = useRef(0);
   const skipSyncRef = useRef(false);

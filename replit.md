@@ -32,14 +32,15 @@ Preferred communication style: Simple, everyday language.
 - **Server-side**: PostgreSQL with Drizzle ORM for user data and chat conversations.
 
 ### Key Features
-- **Dashboard**: Revenue-focused KPIs and AI action summaries.
-- **Create**: AI Writer for text and AI Designer for image generation with style presets.
+- **Dashboard**: Revenue-focused KPIs and AI action summaries. Profile icon in header opens unified Business Profile modal.
+- **Create**: AI Writer for text and AI Designer for image generation with style presets. Shows Required Work by branch (Designer/Writer/Video) with counts.
 - **Calendar**: Content scheduling with AI Calendar Assistant.
 - **AI Management**: Auto-Publisher for Meta platforms, AI Audience Manager for optimized Meta ad audiences, and a Performance Intelligence Layer for insights.
-- **Studio**: Media library and AI Video Editor with FFmpeg rendering.
+- **Studio**: Media library and AI Video Editor with FFmpeg rendering. AI Video Analysis Assist auto-extracts hooks, captions, CTAs, angles, and keywords per video item.
 - **Lead Engine**: Modular lead generation system with 8 independent modules and AI Lead Optimization.
 - **Competitive Intelligence**: Real-data competitor analysis system using a 2-step scrape ladder for MEASURED metrics and INFERRED AI insights.
 - **Creative Capture Layer**: 8-component pipeline analyzing reels with real data for deterministic signals and AI interpretation.
+- **Plan Documents**: Plan PDF/markdown generation and storage via `plan_documents` table. Download from Pipeline UI.
 
 ### Strategic Execution Machine
 - **System**: Controlled single-track execution pipeline transforming strategic blueprints into published content through hard approval gates.
@@ -66,13 +67,15 @@ Preferred communication style: Simple, everyday language.
 ### Backend Stabilization
 - **AI Cost Lock**: All AI calls routed through a centralized singleton with explicit tracking, usage logging, and weekly token budgets.
 - **Database Indexes**: Extensive custom indexes across all tables.
-- **Worker Hardening**: Autonomous worker with hourly decision caps, circuit breakers, and idle account skipping.
+- **Worker Hardening**: Autonomous worker with hourly decision caps, circuit breakers, and idle account skipping. Plan-gated: blocks cycle if no approved plan.
 - **Safety Gate Registry**: Centralized gate functions for route protection (e.g., `gateAutopilotEnabled`, `gateAIBudget`).
+- **Active Plan Status Constant**: `ACTIVE_PLAN_STATUSES` in `server/plan-constants.ts` — single source of truth for APPROVED/GENERATED_TO_CALENDAR/CREATIVE_GENERATED/REVIEW/SCHEDULED. Used by gates, autopilot, dashboard, and worker.
 - **Validation Layer**: Zod-based request validation middleware.
 - **Memory Scoping Hardening**: Mathematically provable account+campaign isolation on all signal tables with database NOT NULL constraints and write guards.
+- **Campaign Switch Safety**: Hard reset of all campaign-scoped state on switch. Debounced saves cancelled. No cross-campaign write possible.
 
 ### Final System Lock
-- **Business Data Layer**: `business_data_layer` table with 9 structural columns (e.g., businessLocation, businessType, coreOffer), campaign-scoped and used for orchestration.
+- **Business Data Layer**: `business_data_layer` table with 9 structural columns (e.g., businessLocation, businessType, coreOffer), campaign-scoped and used for orchestration. Unified Business Profile: single entry point via profile icon in dashboard header; BuildThePlan Phase 0 shows profile completeness gate, not duplicate form.
 - **Dashboard Campaign Truth**: All dashboard metrics derived from campaign-scoped DB queries; no hardcoded values.
 - **AI Actions Evidence-Bound**: AI actions carry evidence metadata (sourceTag, evidenceMetric, priority) and are gated by an APPROVED plan.
 - **Single Execution Track**: All writes to key execution tables are confined to a single execution route.

@@ -19,6 +19,7 @@ import { useCampaign } from '@/context/CampaignContext';
 
 interface PlanData {
   id: string;
+  blueprintId: string;
   status: string;
   executionStatus: string;
   emergencyStopped: boolean;
@@ -361,6 +362,27 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
     );
   }, [fetchDashboard, fetchProgress, selectedCampaign?.selectedCampaignId]);
 
+  const handleDownloadPlan = useCallback(async (blueprintId: string) => {
+    setActionLoading('download');
+    try {
+      const res = await fetch(getApiUrl(`/api/strategic/blueprint/${blueprintId}/plan-pdf`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (data.success) {
+        Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('Plan Generated', `${data.fileName}\n\nPlan document has been generated and saved.`);
+      } else {
+        Alert.alert('Error', data.message || data.error || 'Plan generation failed');
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message);
+    } finally {
+      setActionLoading(null);
+    }
+  }, []);
+
   const renderApprovalContent = () => {
     if (loading) {
       return (
@@ -469,6 +491,20 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
                     <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' as const }}>Go to Calendar</Text>
                   </Pressable>
                 )}
+                <Pressable
+                  onPress={() => handleDownloadPlan(plan.blueprintId)}
+                  disabled={actionLoading === 'download'}
+                  style={[s.downloadPlanBtn, { borderColor: colors.cardBorder, opacity: actionLoading === 'download' ? 0.6 : 1 }]}
+                >
+                  {actionLoading === 'download' ? (
+                    <ActivityIndicator size="small" color="#A78BFA" />
+                  ) : (
+                    <>
+                      <Ionicons name="document-text-outline" size={16} color="#A78BFA" />
+                      <Text style={s.downloadPlanBtnText}>Download Plan</Text>
+                    </>
+                  )}
+                </Pressable>
               </View>
             ))}
           </View>
@@ -1251,5 +1287,20 @@ const s = StyleSheet.create({
   goToCalBtnText: {
     fontSize: 13,
     fontWeight: '600',
+  },
+  downloadPlanBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 10,
+    marginTop: 8,
+  },
+  downloadPlanBtnText: {
+    color: '#A78BFA',
+    fontSize: 13,
+    fontWeight: '700' as const,
   },
 });

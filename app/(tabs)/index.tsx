@@ -25,6 +25,7 @@ import { useCampaign } from '@/context/CampaignContext';
 import { MetricCard } from '@/components/MetricCard';
 import { CampaignBar } from '@/components/CampaignSelector';
 import { getApiUrl } from '@/lib/query-client';
+import { BusinessProfileModal, ProfileButton } from '@/components/BusinessProfile';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -161,6 +162,8 @@ export default function DashboardScreen() {
 
   const [dataMode, setDataMode] = useState<'REAL' | 'DEMO' | 'UNKNOWN'>('UNKNOWN');
   const [refreshing, setRefreshing] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const prevCampaignRef = useRef<string | null | undefined>(undefined);
 
   const headerFade = useRef(new RNAnimated.Value(0)).current;
   const cardSlide = useRef(new RNAnimated.Value(30)).current;
@@ -261,6 +264,26 @@ export default function DashboardScreen() {
   }, [baseUrl]);
 
   useEffect(() => {
+    const isSwitch = prevCampaignRef.current !== undefined && prevCampaignRef.current !== selectedCampaignId;
+    prevCampaignRef.current = selectedCampaignId;
+
+    if (isSwitch) {
+      setMetrics(null);
+      setMetricsState('loading');
+      setMetricsError(null);
+      setAiActions([]);
+      setActionsState('loading');
+      setActionsError(null);
+      setActionsGated(false);
+      setConfidenceScore(0);
+      setConfidenceStatus('Stable');
+      setConfidenceLoaded(false);
+      setPlanBindingState(null);
+      setPlanBindingId(null);
+      setPlanBindingReason(null);
+      setDataMode('UNKNOWN');
+    }
+
     fetchMetrics();
     fetchActions();
     fetchConfidence();
@@ -557,12 +580,15 @@ export default function DashboardScreen() {
                 <Text style={[s.brandSub, { color: P.mint }]}>AI MARKETING</Text>
               </View>
             </View>
-            <Pressable 
-              onPress={() => router.push('/(tabs)/ai-management')}
-              style={[s.headerBtn, { backgroundColor: isDark ? P.darkSurface : P.lightSurface }]}
-            >
-              <Feather name="sliders" size={18} color={textSecondary} />
-            </Pressable>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <ProfileButton onPress={() => setShowProfile(true)} />
+              <Pressable 
+                onPress={() => router.push('/(tabs)/ai-management')}
+                style={[s.headerBtn, { backgroundColor: isDark ? P.darkSurface : P.lightSurface }]}
+              >
+                <Feather name="sliders" size={18} color={textSecondary} />
+              </Pressable>
+            </View>
           </View>
         </RNAnimated.View>
 
@@ -742,6 +768,11 @@ export default function DashboardScreen() {
 
         <View style={{ height: Platform.OS === 'web' ? 34 + 60 : 100 }} />
       </ScrollView>
+
+      <BusinessProfileModal
+        visible={showProfile}
+        onClose={() => setShowProfile(false)}
+      />
     </View>
   );
 }

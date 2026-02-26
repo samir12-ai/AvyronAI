@@ -1137,6 +1137,10 @@ export const requiredWork = pgTable("required_work", {
   scheduledCount: integer("scheduled_count").default(0),
   publishedCount: integer("published_count").default(0),
   failedCount: integer("failed_count").default(0),
+  branch: varchar("branch").notNull().default("WRITER"),
+  designerItems: integer("designer_items").default(0),
+  writerItems: integer("writer_items").default(0),
+  videoItems: integer("video_items").default(0),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1235,6 +1239,21 @@ export const aiUsageLog = pgTable("ai_usage_log", {
 });
 
 export type AIUsageLog = typeof aiUsageLog.$inferSelect;
+
+export const planDocuments = pgTable("plan_documents", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  planId: varchar("plan_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  fileName: text("file_name").notNull(),
+  content: text("content").notNull(),
+  format: text("format").notNull().default("markdown"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type PlanDocument = typeof planDocuments.$inferSelect;
 
 export const uiStateStore = pgTable("ui_state_store", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),

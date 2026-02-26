@@ -43,6 +43,7 @@ import { generateId } from '@/lib/storage';
 import { apiRequest, getApiUrl } from '@/lib/query-client';
 import { useCreativeContext } from '@/context/CreativeContext';
 import { usePersistedState } from '@/hooks/usePersistedState';
+import { useQuery } from '@tanstack/react-query';
 import type { ContentItem, MediaItem } from '@/lib/types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -297,6 +298,16 @@ export default function CreateScreen() {
   const { state: ps, updateState, isLoading: psLoading, isSaving, saveError, hydrationVersion } = usePersistedState<CreatePersistedState>('create', defaultCreateState);
   const [ciScriptResult, setCiScriptResult] = useState<any>(null);
   const [ciScriptError, setCiScriptError] = useState<string | null>(null);
+  const { selectedCampaignId } = useCampaign();
+
+  const { data: requiredWorkData } = useQuery<{
+    success: boolean;
+    requiredWork: any;
+    branches: { DESIGNER: { total: number; label: string }; WRITER: { total: number; label: string }; VIDEO: { total: number; label: string } };
+  }>({
+    queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`],
+    enabled: !!selectedCampaignId,
+  });
 
   const contentTypes = contentTypesDef.map(ct => ({ ...ct, label: t(ct.labelKey) }));
   const reelGoals = reelGoalsDef.map(g => ({ ...g, label: t(g.labelKey) }));
@@ -1085,6 +1096,56 @@ export default function CreateScreen() {
               </Animated.View>
             )}
           </View>
+
+          {requiredWorkData?.requiredWork && (
+            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, marginBottom: 12 }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                <Ionicons name="git-branch-outline" size={18} color={colors.accent} />
+                <Text style={{ fontSize: 15, fontWeight: '700' as const, color: colors.text }}>Required Work</Text>
+                <View style={{ flex: 1 }} />
+                <Text style={{ fontSize: 12, color: colors.textMuted }}>
+                  {requiredWorkData.requiredWork.totalContentPieces} total
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {([
+                  { key: 'DESIGNER' as const, icon: 'brush-outline' as const, color: '#8B5CF6' },
+                  { key: 'WRITER' as const, icon: 'create-outline' as const, color: '#10B981' },
+                  { key: 'VIDEO' as const, icon: 'videocam-outline' as const, color: '#F59E0B' },
+                ] as const).map(branch => {
+                  const branchData = requiredWorkData.branches[branch.key];
+                  const total = branchData?.total || 0;
+                  return (
+                    <View key={branch.key} style={{
+                      flex: 1,
+                      backgroundColor: branch.color + '12',
+                      borderRadius: 12,
+                      padding: 12,
+                      alignItems: 'center' as const,
+                      borderWidth: 1,
+                      borderColor: branch.color + '25',
+                    }}>
+                      <View style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 18,
+                        backgroundColor: branch.color + '20',
+                        alignItems: 'center' as const,
+                        justifyContent: 'center' as const,
+                        marginBottom: 6,
+                      }}>
+                        <Ionicons name={branch.icon} size={18} color={branch.color} />
+                      </View>
+                      <Text style={{ fontSize: 18, fontWeight: '700' as const, color: colors.text }}>{total}</Text>
+                      <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
+                        {branchData?.label || branch.key}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          )}
 
           <View style={styles.tabBar}>
             <Pressable

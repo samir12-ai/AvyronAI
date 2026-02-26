@@ -15,6 +15,7 @@ import {
 import { eq, and, desc, sql, gte } from "drizzle-orm";
 import { logAudit } from "./audit";
 import { requireCampaign } from "./campaign-routes";
+import { ACTIVE_PLAN_STATUSES_SQL } from "./plan-constants";
 
 const router = Router();
 
@@ -51,7 +52,7 @@ async function resolveActivePlan(accountId: string, campaignId: string) {
       and(
         eq(strategicPlans.accountId, accountId),
         eq(strategicPlans.campaignId, campaignId),
-        sql`${strategicPlans.status} IN ('APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'REVIEW', 'SCHEDULED')`
+        sql`${strategicPlans.status} IN (${sql.raw(ACTIVE_PLAN_STATUSES_SQL)})`
       )
     )
     .orderBy(desc(strategicPlans.createdAt))
@@ -64,7 +65,7 @@ async function resolveActivePlan(accountId: string, campaignId: string) {
       .where(
         and(
           eq(strategicPlans.accountId, accountId),
-          sql`${strategicPlans.status} IN ('APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'REVIEW', 'SCHEDULED')`
+          sql`${strategicPlans.status} IN (${sql.raw(ACTIVE_PLAN_STATUSES_SQL)})`
         )
       )
       .orderBy(desc(strategicPlans.createdAt))

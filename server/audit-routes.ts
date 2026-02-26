@@ -5,6 +5,7 @@ import { eq, sql, and, desc, lt, or, inArray, gte, lte } from "drizzle-orm";
 import { getWeeklyTokenUsage, WEEKLY_TOKEN_BUDGET } from "./ai-client";
 import { logAudit } from "./audit";
 import { emergencyStopAllRunningPlans } from "./strategic-core/execution-routes";
+import { ACTIVE_PLAN_STATUSES } from "./plan-constants";
 
 const MODULE_EVENT_MAP: Record<string, string[]> = {
   "strategic-core": [
@@ -272,7 +273,7 @@ export function registerAuditRoutes(app: Express) {
         .from(strategicPlans)
         .where(and(
           eq(strategicPlans.accountId, accountId),
-          eq(strategicPlans.status, "APPROVED")
+          inArray(strategicPlans.status, [...ACTIVE_PLAN_STATUSES])
         ))
         .limit(1);
 

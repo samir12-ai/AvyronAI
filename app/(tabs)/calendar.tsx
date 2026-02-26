@@ -109,7 +109,12 @@ export default function CalendarScreen() {
   const [generatingEntryId, setGeneratingEntryId] = useState<string | null>(null);
 
   const fetchCalendarEntries = useCallback(async () => {
-    if (!selectedCampaign?.selectedCampaignId) return;
+    if (!selectedCampaign?.selectedCampaignId) {
+      setDbCalendarEntries([]);
+      setDbPlanId(null);
+      setDbEntriesLoading(false);
+      return;
+    }
     setDbEntriesLoading(true);
     try {
       const baseUrl = getApiUrl();
@@ -130,6 +135,9 @@ export default function CalendarScreen() {
   }, [selectedCampaign?.selectedCampaignId]);
 
   useEffect(() => {
+    setDbCalendarEntries([]);
+    setDbPlanId(null);
+    setDbEntriesLoading(true);
     fetchCalendarEntries();
   }, [fetchCalendarEntries]);
 

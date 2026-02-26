@@ -11,7 +11,8 @@ import {
   strategyInsights,
   performanceSnapshots,
 } from "@shared/schema";
-import { eq, and, desc, gte, sql } from "drizzle-orm";
+import { eq, and, desc, gte, sql, inArray } from "drizzle-orm";
+import { ACTIVE_PLAN_STATUSES } from "./plan-constants";
 
 const LOG_PREFIX = "[Dashboard]";
 
@@ -104,18 +105,35 @@ export function registerDashboardRoutes(app: Express) {
           and(
             eq(strategicPlans.campaignId, campaignId),
             eq(strategicPlans.accountId, accountId),
-            eq(strategicPlans.status, "APPROVED")
+            inArray(strategicPlans.status, [...ACTIVE_PLAN_STATUSES])
           )
         )
+        .orderBy(desc(strategicPlans.createdAt))
         .limit(1);
 
       if (approvedPlans.length === 0) {
-        return res.json({
-          success: true,
-          gated: true,
-          gateReason: "NO_APPROVED_PLAN",
-          actions: [],
-        });
+        const fallbackPlans = await db
+          .select()
+          .from(strategicPlans)
+          .where(
+            and(
+              eq(strategicPlans.accountId, accountId),
+              inArray(strategicPlans.status, [...ACTIVE_PLAN_STATUSES])
+            )
+          )
+          .orderBy(desc(strategicPlans.createdAt))
+          .limit(1);
+
+        if (fallbackPlans.length === 0) {
+          return res.json({
+            success: true,
+            gated: true,
+            gateReason: "NO_APPROVED_PLAN",
+            actions: [],
+          });
+        }
+
+        approvedPlans.push(fallbackPlans[0]);
       }
 
       const plan = approvedPlans[0];

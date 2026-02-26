@@ -1,0 +1,170 @@
+
+⸻
+
+:::writing{id=“73942” variant=“email” subject=“P0: Single-Track Lock — Fix Campaign Hang, Required Work Split, Studio Video AI Assist, Plan PDF, Dashboard Data, Unified Business Profile, Autopilot Binding (One-shot, No Gaps)”}
+Team,
+
+This is a P0 single-track stabilization order. One cohesive changeset. No partial delivery. No “works on my machine”. No demo placeholders. Everything below must be implemented exactly, with hard acceptance criteria + tests.
+
+We currently have multiple user-facing breakages and track fragmentation. We are locking the product into ONE TRACK:
+Plan → Calendar → Required Work → Studio → Publish / Autopilot
+No duplicate calendars, no parallel flows, no silent fallbacks.
+
+⸻
+
+1) Campaign Switch “Hang” (State Leak Between Campaigns)
+
+Problem: When switching from Campaign A → Campaign B, UI still shows data from A until manual refresh.
+
+Required fix:
+	•	On campaign change, hard reset all campaign-scoped views and cached state immediately, then re-hydrate from persisted state and API.
+	•	Ensure: Create / AI Control / Studio / Calendar / Dashboard all re-fetch with the new campaign context without requiring refresh.
+	•	Cancel any pending debounced saves from the previous campaign (no cross-campaign write).
+
+Acceptance Criteria:
+	•	Switching campaigns never shows stale A data for more than one render frame.
+	•	No request is served using the previous campaign context after switch.
+	•	Add test: “Campaign switch updates UI without refresh” (simulate switch, assert old content disappears and new campaign loads).
+
+⸻
+
+2) Required Work Must Be Split By Creation Branch (Designer / Writer / Video)
+
+Problem: Required Work is missing as structured branches. Creation is not organized.
+
+Required fix:
+	•	Introduce Required Work “branches”:
+	•	Designer required work list
+	•	Writer required work list
+	•	Video required work list
+	•	Each required work item must have:
+	•	id, planId, campaignId, accountId
+	•	branch: DESIGNER | WRITER | VIDEO
+	•	contentType (reel/story/post/etc)
+	•	status: TODO | IN_PROGRESS | DONE
+	•	references to calendarEntryId (if applicable)
+	•	Build UI in Create Center: show 3 tabs/sections for these branches.
+
+Acceptance Criteria:
+	•	When plan generates calendar entries, required_work is created or derived in a deterministic way (no empty branches).
+	•	“Create” tab shows all required work by branch with correct counts.
+	•	Tests: required work generation produces items in all relevant branches (at least one item each where applicable).
+
+⸻
+
+3) Studio Video Flow Must Not Require Manual Metadata (Add AI Video Analysis Assist)
+
+Problem: Studio requires manual filling for every video — too heavy.
+
+Required fix:
+	•	Add AI-assisted video analysis for a single video item:
+	•	Auto-extract: hook suggestion, caption draft, CTA suggestion, content angle, keywords, and basic structure.
+	•	Then user can confirm/edit (AI is “assist”, not auto-final).
+	•	Must be per-item (single-entry) and follow our AI policy: explicit max_tokens, timeout 25s, usage logged.
+
+Acceptance Criteria:
+	•	User uploads/selects a video → clicks “Analyze” → gets prefilled fields in < 25s or returns structured timeout error.
+	•	No mandatory manual fields remain for baseline completion (only optional refinement).
+	•	Tests: if AI fails, UI shows a clear error and preserves the uploaded item without data loss.
+
+⸻
+
+4) Build A Plan → Generate Plan PDF and Store It for Review (Pipeline Accessory)
+
+Problem: After plan creation, no exportable artifact for review.
+
+Required fix:
+	•	After plan is generated (Phase 5 / Orchestrator), generate a PDF summary:
+	•	Plan overview, positioning, calendar summary, required work summary, key decisions.
+	•	Store reference in DB (plan_documents or similar):
+	•	planId, campaignId, url/path, createdAt
+	•	Show in Pipeline (or Plan screen): “Download Plan PDF”.
+
+Acceptance Criteria:
+	•	PDF exists for every generated plan (DEMO & REAL).
+	•	PDF generation must not block UI longer than 5 seconds; if heavy, generate async via job queue.
+	•	Tests: plan creation produces a PDF record and retrievable file.
+
+⸻
+
+5) Dashboard Still Empty + AI Actions Empty (Autopilot/Plan Data Wiring Broken)
+
+Problem: Dashboard numbers and AI actions not reflecting campaign reality. Likely broken binding between autopilot ↔ build plan.
+
+Required fix:
+	•	Dashboard must be strictly campaign-scoped and pull real values:
+	•	revenue, spent, results, CPA, ROAS
+	•	queued, published counts from calendar_entries + studio_items
+	•	AI Actions must be evidence-bound and derived from:
+	•	performance snapshots (if present)
+	•	plan + required work + calendar status
+	•	Remove any filler/demo actions in REAL mode.
+
+Acceptance Criteria:
+	•	If there is an approved/active plan, Dashboard must show non-empty counts that match DB.
+	•	If there is no data, UI must show a correct “No data yet” state (not zeros pretending to be data).
+	•	Tests: with seeded data, dashboard returns correct metrics and actions.
+
+⸻
+
+6) Business Profile Duplication Must Be Removed (Settings vs Build Plan)
+
+Problem: Business data form exists in Settings and Build Plan. We need one source of truth.
+
+Required fix:
+	•	Create a small global entry point called “Profile” (top corner / persistent entry).
+	•	All business questions live there (location, business type, offer, price range, audience, etc.).
+	•	Settings and Build Plan should not duplicate these forms.
+	•	All features must read from this single business profile layer.
+
+Acceptance Criteria:
+	•	Business profile exists once. Any other duplicate forms are removed or replaced by “Open Profile” link.
+	•	Build Plan gates depend on Profile completeness.
+	•	Tests: profile data used by orchestrator, dashboard actions, and creation branches; no null reads.
+
+⸻
+
+7) Safety + Stability Must Be Maintained (No Regression Allowed)
+
+Hard rules:
+	•	No new external integrations.
+	•	Preserve AI caps, logging, budget enforcement, job queue limits.
+	•	No endpoint should exceed 5s synchronous.
+	•	No silent fallbacks: every failure returns structured error codes.
+
+Acceptance Criteria:
+	•	All existing stabilization tests remain passing.
+	•	Add new tests for: campaign switch, required work branches, PDF generation, dashboard metrics, autopilot binding.
+
+⸻
+
+8) Autopilot Binding Must Be Correct (No Contradictions)
+
+Problem: UI shows Plan Binding CONNECTED but gates show hasApprovedPlan FAIL. This is unacceptable. We must unify the state machine.
+
+Required fix:
+	•	Define “approved/active plan” consistently across:
+	•	gates registry
+	•	autopilot status endpoint
+	•	dashboard
+	•	worker gating
+	•	Any status after APPROVED that represents active execution must count as “hasApprovedPlan = true”:
+APPROVED / GENERATED_TO_CALENDAR / CREATIVE_GENERATED / REVIEW / SCHEDULED (as per our rules).
+	•	Plan Binding + Gates must never contradict each other.
+
+Acceptance Criteria:
+	•	It must be impossible to display “CONNECTED” while hasApprovedPlan = FAIL for the same campaign.
+	•	Add test: for each allowed active status, gates return PASS and autopilot status returns CONNECTED.
+
+⸻
+
+Delivery Requirements (Non-negotiable)
+	1.	One PR/changeset that includes all items above.
+	2.	A written checklist response: mark each section as DONE with evidence (routes, UI, tests).
+	3.	Screenshots/videos: campaign switch proof + required work branches + PDF link + dashboard populated + autopilot gates consistent.
+	4.	Full test output attached.
+
+If any item is missing, contradictory, or relies on placeholders, we reject the delivery.
+
+Proceed now.
+:::

@@ -33,6 +33,7 @@ interface CampaignWarning {
 interface CampaignContextValue {
   campaigns: CampaignInfo[];
   selectedCampaign: CampaignSelection | null;
+  selectedCampaignId: string | null;
   warning: CampaignWarning | null;
   isLoading: boolean;
   isCampaignSelected: boolean;
@@ -128,12 +129,14 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   }, [refreshCampaigns, refreshSelection]);
 
   const isCampaignSelected = !!selectedCampaign && !warning;
+  const selectedCampaignId = selectedCampaign?.selectedCampaignId ?? null;
 
   return (
     <CampaignContext.Provider
       value={{
         campaigns,
         selectedCampaign,
+        selectedCampaignId,
         warning,
         isLoading,
         isCampaignSelected,

@@ -166,6 +166,10 @@ function calcTotals(distribution: any, periodDays: number): any {
   const totalVideos = videosPerWeek * weeks;
   const totalContentPieces = totalReels + totalPosts + totalStories + totalCarousels + totalVideos;
 
+  const designerItems = totalCarousels + totalPosts;
+  const videoItems = totalReels + totalVideos;
+  const writerItems = totalStories + totalPosts;
+
   return {
     reelsPerWeek,
     postsPerWeek,
@@ -178,6 +182,9 @@ function calcTotals(distribution: any, periodDays: number): any {
     totalCarousels,
     totalVideos,
     totalContentPieces,
+    designerItems,
+    writerItems,
+    videoItems,
   };
 }
 
@@ -362,15 +369,17 @@ export function registerExecutionRoutes(app: Express) {
       const items = await db.select().from(studioItems).where(eq(studioItems.planId, planId));
       const approvals = await db.select().from(planApprovals).where(eq(planApprovals.planId, planId));
 
+      const workRec = work[0] || null;
+
       res.json({
         success: true,
         plan,
-        requiredWork: work[0] || null,
+        requiredWork: workRec,
         calendarEntries: entries,
         studioItems: items,
         approvals,
         progress: {
-          totalRequired: work[0]?.totalContentPieces || 0,
+          totalRequired: workRec?.totalContentPieces || 0,
           calendarGenerated: entries.length,
           studioCreated: items.length,
           published: items.filter((i) => i.status === "PUBLISHED").length,
@@ -378,6 +387,11 @@ export function registerExecutionRoutes(app: Express) {
           ready: items.filter((i) => i.status === "READY").length,
           failed: items.filter((i) => i.status === "FAILED").length,
           draft: items.filter((i) => i.status === "DRAFT").length,
+        },
+        branches: {
+          DESIGNER: { total: workRec?.designerItems || 0, label: "Designer" },
+          WRITER: { total: workRec?.writerItems || 0, label: "Writer" },
+          VIDEO: { total: workRec?.videoItems || 0, label: "Video" },
         },
       });
     } catch (err: any) {
@@ -946,6 +960,13 @@ export function registerExecutionRoutes(app: Express) {
 
       const progressPercent = totalRequired > 0 ? Math.round(((published + scheduled + ready) / totalRequired) * 100) : 0;
 
+      const workRecord = work[0] || null;
+      const branches = {
+        DESIGNER: { total: workRecord?.designerItems || 0, label: "Designer" },
+        WRITER: { total: workRecord?.writerItems || 0, label: "Writer" },
+        VIDEO: { total: workRecord?.videoItems || 0, label: "Video" },
+      };
+
       res.json({
         success: true,
         planId,
@@ -964,6 +985,7 @@ export function registerExecutionRoutes(app: Express) {
         failed,
         canceled,
         progressPercent,
+        branches,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1133,6 +1155,61 @@ export function registerExecutionRoutes(app: Express) {
         .orderBy(sql`${studioItems.createdAt} DESC`);
 
       res.json({ success: true, items });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/execution/required-work", async (req: Request, res: Response) => {
+    try {
+      const accountId = (req.query.accountId as string) || "default";
+      const campaignId = req.query.campaignId as string;
+
+      if (!campaignId) {
+        return res.status(400).json({ error: "campaignId query parameter is required" });
+      }
+
+      const matchingPlans = await db
+        .select()
+        .from(strategicPlans)
+        .where(
+          and(
+            eq(strategicPlans.accountId, accountId),
+            eq(strategicPlans.campaignId, campaignId),
+            sql`${strategicPlans.status} IN ('APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'REVIEW', 'SCHEDULED', 'PUBLISHED')`
+          )
+        )
+        .orderBy(sql`${strategicPlans.createdAt} DESC`)
+        .limit(1);
+
+      if (matchingPlans.length === 0) {
+        return res.json({
+          success: true,
+          requiredWork: null,
+          branches: { DESIGNER: { total: 0, label: "Designer" }, WRITER: { total: 0, label: "Writer" }, VIDEO: { total: 0, label: "Video" } },
+          message: "No active plan found for this campaign.",
+        });
+      }
+
+      const plan = matchingPlans[0];
+      const work = await db
+        .select()
+        .from(requiredWork)
+        .where(and(eq(requiredWork.planId, plan.id), eq(requiredWork.campaignId, campaignId)))
+        .limit(1);
+
+      const workRec = work[0] || null;
+
+      res.json({
+        success: true,
+        planId: plan.id,
+        requiredWork: workRec,
+        branches: {
+          DESIGNER: { total: workRec?.designerItems || 0, label: "Designer" },
+          WRITER: { total: workRec?.writerItems || 0, label: "Writer" },
+          VIDEO: { total: workRec?.videoItems || 0, label: "Video" },
+        },
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

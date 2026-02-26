@@ -24,6 +24,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { SUPPORTED_LANGUAGES } from '@/lib/i18n';
 import { PlatformConnection } from '@/components/PlatformConnection';
+import { BusinessProfileModal } from '@/components/BusinessProfile';
 import { getApiUrl, apiRequest } from '@/lib/query-client';
 import { router } from 'expo-router';
 import { fetch } from 'expo/fetch';
@@ -101,6 +102,7 @@ export default function SettingsScreen() {
   const [platforms, setPlatforms] = useState<string[]>(brandProfile.platforms);
   const [hasChanges, setHasChanges] = useState(false);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
 
   const [metaStatus, setMetaStatus] = useState<MetaStatus | null>(null);
   const [metaLoading, setMetaLoading] = useState(true);
@@ -730,47 +732,28 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <View style={styles.cardTitleRow}>
-            <Ionicons name="business" size={20} color={colors.accentOrange} />
-            <Text style={[styles.cardTitle, { color: colors.text }]}>{t('settings.brandProfile')}</Text>
+        <Pressable
+          onPress={() => {
+            Haptics.selectionAsync();
+            setShowProfileModal(true);
+          }}
+        >
+          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <View style={styles.cardHeader}>
+              <View style={styles.cardTitleRow}>
+                <Ionicons name="person-circle" size={20} color="#6366F1" />
+                <Text style={[styles.cardTitle, { color: colors.text }]}>{t('settings.brandProfile')}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Text style={[{ fontSize: 13, color: colors.textMuted }]}>Edit</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+              </View>
+            </View>
+            <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
+              Manage your business profile, audience, pricing, and funnel settings
+            </Text>
           </View>
-          
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: colors.text }]}>{t('settings.brandName')}</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-              placeholder={t('settings.brandNamePlaceholder')}
-              placeholderTextColor={colors.textMuted}
-              value={name}
-              onChangeText={setName}
-            />
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: colors.text }]}>{t('settings.industry')}</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-              placeholder={t('settings.industryPlaceholder')}
-              placeholderTextColor={colors.textMuted}
-              value={industry}
-              onChangeText={setIndustry}
-            />
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, { color: colors.text }]}>{t('settings.targetAudience')}</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-              placeholder={t('settings.targetAudiencePlaceholder')}
-              placeholderTextColor={colors.textMuted}
-              value={targetAudience}
-              onChangeText={setTargetAudience}
-              multiline
-              numberOfLines={2}
-            />
-          </View>
-        </View>
+        </Pressable>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <Text style={[styles.cardTitle, { color: colors.text }]}>{t('settings.brandVoice')}</Text>
@@ -823,6 +806,11 @@ export default function SettingsScreen() {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      <BusinessProfileModal
+        visible={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+      />
 
       <Modal
         visible={showLanguageModal}

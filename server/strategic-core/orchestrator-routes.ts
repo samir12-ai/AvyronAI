@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { aiChat, AICallError } from "../ai-client";
 import { db } from "../db";
-import { strategicBlueprints, strategicPlans, planApprovals, strategyMemory, strategyInsights, moatCandidates, businessDataLayer } from "@shared/schema";
+import { strategicBlueprints, strategicPlans, planApprovals, strategyMemory, strategyInsights, moatCandidates, businessDataLayer, planDocuments, requiredWork, calendarEntries } from "@shared/schema";
 import { eq, desc, gte, and, sql, ne } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
 import { logAudit } from "../audit";
@@ -231,6 +231,154 @@ Respond with ONLY a valid JSON object:
     "escalationPath": ["string"]
   }
 }`;
+
+function generatePlanMarkdown(params: {
+  blueprint: any;
+  confirmedBlueprint: any;
+  plan: any;
+  planJson: any;
+  work: any;
+  calendarCount: number;
+}): string {
+  const { blueprint, confirmedBlueprint, plan, planJson, work, calendarCount } = params;
+  const lines: string[] = [];
+  const date = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
+  lines.push(`# Strategic Execution Plan`);
+  lines.push(`**Generated:** ${date}`);
+  lines.push(`**Plan ID:** ${plan.id}`);
+  lines.push(`**Status:** ${plan.status}`);
+  lines.push(`**Blueprint Version:** ${blueprint.blueprintVersion || "N/A"}`);
+  lines.push("");
+
+  if (confirmedBlueprint) {
+    lines.push(`## Blueprint Summary`);
+    if (confirmedBlueprint.detectedOffer) lines.push(`- **Offer:** ${confirmedBlueprint.detectedOffer}`);
+    if (confirmedBlueprint.detectedCTA) lines.push(`- **CTA:** ${confirmedBlueprint.detectedCTA}`);
+    if (confirmedBlueprint.detectedAudienceGuess) lines.push(`- **Target Audience:** ${confirmedBlueprint.detectedAudienceGuess}`);
+    if (confirmedBlueprint.detectedPositioning) lines.push(`- **Positioning:** ${confirmedBlueprint.detectedPositioning}`);
+    lines.push("");
+  }
+
+  if (work) {
+    lines.push(`## Required Work`);
+    lines.push(`| Type | Per Week | Total |`);
+    lines.push(`|------|----------|-------|`);
+    if (work.reelsPerWeek) lines.push(`| Reels | ${work.reelsPerWeek} | ${work.totalReels} |`);
+    if (work.postsPerWeek) lines.push(`| Posts | ${work.postsPerWeek} | ${work.totalPosts} |`);
+    if (work.storiesPerDay) lines.push(`| Stories | ${work.storiesPerDay}/day | ${work.totalStories} |`);
+    if (work.carouselsPerWeek) lines.push(`| Carousels | ${work.carouselsPerWeek} | ${work.totalCarousels} |`);
+    if (work.videosPerWeek) lines.push(`| Videos | ${work.videosPerWeek} | ${work.totalVideos} |`);
+    lines.push(`| **Total** | | **${work.totalContentPieces}** |`);
+    lines.push(`- **Period:** ${work.periodDays} days`);
+    lines.push("");
+  }
+
+  lines.push(`## Calendar`);
+  lines.push(`- **Entries Generated:** ${calendarCount}`);
+  lines.push("");
+
+  if (planJson.contentDistributionPlan) {
+    const cdp = planJson.contentDistributionPlan;
+    lines.push(`## Content Distribution Plan`);
+    if (cdp.platforms) {
+      for (const p of cdp.platforms) {
+        lines.push(`### ${p.platform} (${p.frequency})`);
+        if (p.contentTypes) {
+          lines.push(`| Type | % | Weekly | Rationale |`);
+          lines.push(`|------|---|--------|-----------|`);
+          for (const ct of p.contentTypes) {
+            lines.push(`| ${ct.type} | ${ct.percentage} | ${ct.weeklyCount} | ${ct.rationale} |`);
+          }
+        }
+        if (p.bestPostingTimes) lines.push(`**Best Posting Times:** ${p.bestPostingTimes.join(", ")}`);
+        if (p.hashtagStrategy) lines.push(`**Hashtag Strategy:** ${p.hashtagStrategy}`);
+        lines.push("");
+      }
+    }
+    if (cdp.contentPillars) {
+      lines.push(`### Content Pillars`);
+      for (const cp of cdp.contentPillars) {
+        lines.push(`- **${cp.pillar}** (${cp.percentage}): ${(cp.examples || []).join(", ")}`);
+      }
+      lines.push("");
+    }
+  }
+
+  if (planJson.engagementPlan) {
+    const ep = planJson.engagementPlan;
+    lines.push(`## Engagement Plan`);
+    if (ep.dailyActions) {
+      lines.push(`### Daily Actions`);
+      for (const a of ep.dailyActions) lines.push(`- [${a.priority}] ${a.action}`);
+    }
+    if (ep.weeklyActions) {
+      lines.push(`### Weekly Actions`);
+      for (const a of ep.weeklyActions) lines.push(`- [${a.priority}] ${a.action}`);
+    }
+    if (ep.communityGrowthTactics) {
+      lines.push(`### Community Growth`);
+      for (const t of ep.communityGrowthTactics) lines.push(`- ${t}`);
+    }
+    lines.push("");
+  }
+
+  if (planJson.conversionPlan) {
+    const cp = planJson.conversionPlan;
+    lines.push(`## Conversion Plan`);
+    if (cp.funnelStages) {
+      lines.push(`| Stage | Content | CTA | Metric |`);
+      lines.push(`|-------|---------|-----|--------|`);
+      for (const s of cp.funnelStages) lines.push(`| ${s.stage} | ${s.content} | ${s.cta} | ${s.metric} |`);
+    }
+    if (cp.ctaStrategy) lines.push(`**CTA Strategy:** ${cp.ctaStrategy}`);
+    if (cp.leadCaptureMethod) lines.push(`**Lead Capture:** ${cp.leadCaptureMethod}`);
+    lines.push("");
+  }
+
+  if (planJson.measurementPlan) {
+    const mp = planJson.measurementPlan;
+    lines.push(`## Measurement Plan`);
+    if (mp.primaryKPIs) {
+      lines.push(`### Primary KPIs`);
+      lines.push(`| KPI | Target | Frequency | Alert |`);
+      lines.push(`|-----|--------|-----------|-------|`);
+      for (const k of mp.primaryKPIs) lines.push(`| ${k.kpi} | ${k.target} | ${k.frequency} | ${k.alertThreshold || "-"} |`);
+    }
+    if (mp.secondaryKPIs) {
+      lines.push(`### Secondary KPIs`);
+      for (const k of mp.secondaryKPIs) lines.push(`- **${k.kpi}:** target ${k.target} (${k.frequency})`);
+    }
+    if (mp.reportingCadence) lines.push(`**Reporting:** ${mp.reportingCadence}`);
+    lines.push("");
+  }
+
+  if (planJson.competitiveWatchTargets?.targets) {
+    lines.push(`## Competitive Watch`);
+    for (const t of planJson.competitiveWatchTargets.targets) {
+      lines.push(`### ${t.competitor}`);
+      lines.push(`- **Watch:** ${(t.watchMetrics || []).join(", ")}`);
+      lines.push(`- **Alerts:** ${(t.alertTriggers || []).join(", ")}`);
+      lines.push(`- **Frequency:** ${t.checkFrequency}`);
+    }
+    lines.push("");
+  }
+
+  if (planJson.riskMonitoringTriggers?.triggers) {
+    lines.push(`## Risk Monitoring`);
+    lines.push(`| Trigger | Condition | Action | Severity |`);
+    lines.push(`|---------|-----------|--------|----------|`);
+    for (const t of planJson.riskMonitoringTriggers.triggers) {
+      lines.push(`| ${t.trigger} | ${t.condition} | ${t.action} | ${t.severity} |`);
+    }
+    lines.push("");
+  }
+
+  lines.push("---");
+  lines.push(`*Generated automatically from strategic plan ${plan.id}*`);
+
+  return lines.join("\n");
+}
 
 export function registerOrchestratorRoutes(app: Express) {
   app.post("/api/strategic/blueprint/:id/orchestrate", async (req: Request, res: Response) => {
@@ -861,6 +1009,133 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
     } catch (error: any) {
       console.error("[Orchestrator] Regenerate error:", error.message);
       res.status(500).json({ success: false, error: "REGENERATE_FAILED", message: error.message, requestId });
+    }
+  });
+
+  app.post("/api/strategic/blueprint/:blueprintId/plan-pdf", async (req: Request, res: Response) => {
+    const requestId = crypto.randomUUID();
+    try {
+      const { blueprintId } = req.params;
+
+      const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, blueprintId)).limit(1);
+      if (!blueprint) {
+        return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", requestId });
+      }
+
+      const accountId = blueprint.accountId;
+      const campaignId = blueprint.campaignId || "default";
+
+      const plans = await db.select().from(strategicPlans)
+        .where(and(
+          eq(strategicPlans.blueprintId, blueprintId),
+          eq(strategicPlans.accountId, accountId),
+          ne(strategicPlans.status, "SUPERSEDED"),
+        ))
+        .orderBy(desc(strategicPlans.createdAt))
+        .limit(1);
+
+      if (plans.length === 0) {
+        return res.status(404).json({ success: false, error: "PLAN_NOT_FOUND", message: "No plan found for this blueprint.", requestId });
+      }
+
+      const plan = plans[0];
+      let planJson: any = {};
+      try { planJson = JSON.parse(plan.planJson); } catch {}
+
+      const work = await db.select().from(requiredWork)
+        .where(and(eq(requiredWork.planId, plan.id), eq(requiredWork.accountId, accountId)))
+        .limit(1);
+
+      const calEntries = await db.select().from(calendarEntries)
+        .where(and(eq(calendarEntries.planId, plan.id), eq(calendarEntries.accountId, accountId)));
+
+      const confirmedBlueprint = blueprint.confirmedBlueprint ? JSON.parse(blueprint.confirmedBlueprint) : null;
+
+      const markdown = generatePlanMarkdown({
+        blueprint,
+        confirmedBlueprint,
+        plan,
+        planJson,
+        work: work[0] || null,
+        calendarCount: calEntries.length,
+      });
+
+      const fileName = `Plan_${plan.id.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.md`;
+
+      const [doc] = await db.insert(planDocuments).values({
+        planId: plan.id,
+        campaignId,
+        accountId,
+        fileName,
+        content: markdown,
+        format: "markdown",
+      }).returning();
+
+      await logAuditEvent({
+        accountId,
+        campaignId: campaignId || undefined,
+        blueprintId,
+        blueprintVersion: blueprint.blueprintVersion,
+        event: "PLAN_DOCUMENT_GENERATED",
+        details: { requestId, planId: plan.id, documentId: doc.id, fileName },
+      });
+
+      res.json({
+        success: true,
+        documentId: doc.id,
+        fileName,
+        content: markdown,
+        format: "markdown",
+        planId: plan.id,
+        requestId,
+      });
+    } catch (error: any) {
+      console.error("[Orchestrator] Plan PDF generation error:", error.message);
+      res.status(500).json({ success: false, error: "PLAN_PDF_FAILED", message: error.message, requestId });
+    }
+  });
+
+  app.get("/api/strategic/blueprint/:blueprintId/plan-pdf", async (req: Request, res: Response) => {
+    try {
+      const { blueprintId } = req.params;
+
+      const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, blueprintId)).limit(1);
+      if (!blueprint) {
+        return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND" });
+      }
+
+      const plan = await db.select().from(strategicPlans)
+        .where(and(
+          eq(strategicPlans.blueprintId, blueprintId),
+          eq(strategicPlans.accountId, blueprint.accountId),
+        ))
+        .orderBy(desc(strategicPlans.createdAt))
+        .limit(1);
+
+      const docs = await db.select().from(planDocuments)
+        .where(and(
+          eq(planDocuments.accountId, blueprint.accountId),
+          ...(plan.length > 0 ? [eq(planDocuments.planId, plan[0].id)] : []),
+        ))
+        .orderBy(desc(planDocuments.createdAt))
+        .limit(1);
+
+      if (docs.length === 0) {
+        return res.status(404).json({ success: false, error: "NO_DOCUMENT", message: "No plan document found. Generate one first." });
+      }
+
+      const doc = docs[0];
+      res.json({
+        success: true,
+        documentId: doc.id,
+        fileName: doc.fileName,
+        content: doc.content,
+        format: doc.format,
+        planId: doc.planId,
+        createdAt: doc.createdAt,
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 

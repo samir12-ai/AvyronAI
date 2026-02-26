@@ -370,6 +370,76 @@ Based on the creative brief above, create an edit plan that fulfills the client'
     }
   });
 
+  app.post("/api/studio/video-analyze", async (req, res) => {
+    try {
+      const { title, platform, goal, audience, cta, series, offer, mediaType, duration } = req.body;
+
+      if (!title) {
+        return res.status(400).json({ error: "Title is required for analysis" });
+      }
+
+      const response = await aiChat({
+        model: "gpt-4o-mini",
+        max_tokens: 600,
+        accountId: req.body.accountId || "default",
+        endpoint: "video-analyze",
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert social media strategist and video content analyst. Given metadata about a video, generate optimized suggestions. Return ONLY valid JSON with this structure:
+{
+  "hookSuggestion": "A compelling opening hook line for the video",
+  "captionDraft": "A full caption draft with hashtags",
+  "ctaSuggestion": "An optimized call-to-action",
+  "contentAngle": "The strategic content angle to use",
+  "keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"]
+}`
+          },
+          {
+            role: "user",
+            content: `Analyze this video and provide optimized suggestions:
+Title: ${title}
+Platform: ${platform || 'Instagram'}
+Goal: ${goal || 'Engagement'}
+Target Audience: ${audience || 'General'}
+Current CTA: ${cta || 'None'}
+Content Series: ${series || 'None'}
+Offer: ${offer || 'None'}
+Media Type: ${mediaType || 'video'}
+Duration: ${duration || 'Unknown'}`
+          }
+        ],
+      });
+
+      const content = response.choices[0]?.message?.content || "";
+      let analysis;
+      try {
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+      } catch {
+        analysis = null;
+      }
+
+      if (!analysis) {
+        return res.status(500).json({ error: "AI failed to generate analysis" });
+      }
+
+      res.json({
+        hookSuggestion: analysis.hookSuggestion || "",
+        captionDraft: analysis.captionDraft || "",
+        ctaSuggestion: analysis.ctaSuggestion || "",
+        contentAngle: analysis.contentAngle || "",
+        keywords: analysis.keywords || [],
+      });
+    } catch (error: any) {
+      console.error("Video analyze error:", error?.message || error);
+      if (error?.message?.includes("timeout") || error?.code === "ETIMEDOUT") {
+        return res.status(504).json({ error: "Analysis timed out. Please try again." });
+      }
+      res.status(500).json({ error: error?.message || "Failed to analyze video" });
+    }
+  });
+
   app.delete("/api/video/projects/:id", async (req, res) => {
     try {
       await db.delete(videoProjects).where(eq(videoProjects.id, req.params.id));

@@ -20,7 +20,7 @@ import Colors from '@/constants/colors';
 import { getApiUrl } from '@/lib/query-client';
 import { useApp } from '@/context/AppContext';
 import { useCampaign } from '@/context/CampaignContext';
-import BusinessDataForm from '@/components/BusinessDataForm';
+import { BusinessProfileModal } from '@/components/BusinessProfile';
 
 type Phase = 0 | 1 | 2 | 3 | 4 | 5;
 type BlueprintStatus = 'DRAFT' | 'GATE_PASSED' | 'EXTRACTION_COMPLETE' | 'EXTRACTION_FALLBACK' | 'CONFIRMED' | 'ANALYSIS_COMPLETE' | 'VALIDATED' | 'ORCHESTRATED';
@@ -115,14 +115,15 @@ interface CICompetitor {
 interface BuildThePlanProps {
   onNavigateToCI?: () => void;
   onNavigateToCalendar?: () => void;
+  onOpenProfile?: () => void;
 }
 
-export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar }: BuildThePlanProps) {
+export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onOpenProfile }: BuildThePlanProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
   const { metaConnection } = useApp();
-  const { refreshCampaigns, refreshSelection } = useCampaign();
+  const { refreshCampaigns, refreshSelection, selectedCampaign } = useCampaign();
 
   const [blueprint, setBlueprint] = useState<Blueprint | null>(null);
   const [currentPhase, setCurrentPhase] = useState<Phase>(0);
@@ -146,8 +147,38 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar }: B
   const [piExpanded, setPiExpanded] = useState(false);
 
   const [businessDataComplete, setBusinessDataComplete] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
 
   const isMetaReal = metaConnection?.isConnected === true;
+  const profileCampaignId = selectedCampaign?.selectedCampaignId;
+
+  const checkProfileCompleteness = useCallback(async () => {
+    if (!profileCampaignId) {
+      setBusinessDataComplete(false);
+      return;
+    }
+    try {
+      const res = await fetch(getApiUrl(`/api/business-data/${profileCampaignId}?accountId=default`));
+      const json = await res.json();
+      if (json.exists && json.data) {
+        const d = json.data;
+        const fields = [
+          d.businessLocation, d.businessType, d.coreOffer, d.priceRange,
+          d.targetAudienceAge, d.targetAudienceSegment, d.monthlyBudget,
+          d.funnelObjective, d.primaryConversionChannel,
+        ];
+        setBusinessDataComplete(fields.every((f: string) => f && f.trim().length > 0));
+      } else {
+        setBusinessDataComplete(false);
+      }
+    } catch {
+      setBusinessDataComplete(false);
+    }
+  }, [profileCampaignId]);
+
+  useEffect(() => {
+    checkProfileCompleteness();
+  }, [checkProfileCompleteness]);
 
   const seedDemoCampaign = useCallback(async () => {
     setSeeding(true);
@@ -697,15 +728,45 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar }: B
           </View>
         )}
 
-        <BusinessDataForm onDataChange={setBusinessDataComplete} />
-
-        {!businessDataComplete && (
-          <View style={[s.gateWarning, { backgroundColor: '#F59E0B12', borderColor: '#F59E0B30' }]}>
-            <Ionicons name="lock-closed" size={14} color="#F59E0B" />
-            <Text style={[s.gateWarningText, { color: '#F59E0B' }]}>
-              Complete business profile above to unlock plan creation
-            </Text>
+        {businessDataComplete ? (
+          <View style={[s.profileCompleteBadge, { backgroundColor: '#10B98112', borderColor: '#10B98130' }]}>
+            <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+            <View style={{ flex: 1 }}>
+              <Text style={[s.profileCompleteText, { color: '#10B981' }]}>Business Profile Complete</Text>
+            </View>
+            <Pressable
+              onPress={() => {
+                if (onOpenProfile) {
+                  onOpenProfile();
+                } else {
+                  setShowProfileModal(true);
+                }
+              }}
+              style={s.profileEditBtn}
+            >
+              <Ionicons name="pencil" size={14} color="#10B981" />
+            </Pressable>
           </View>
+        ) : (
+          <Pressable
+            onPress={() => {
+              if (onOpenProfile) {
+                onOpenProfile();
+              } else {
+                setShowProfileModal(true);
+              }
+            }}
+            style={[s.profileIncompleteBanner, { backgroundColor: '#F59E0B12', borderColor: '#F59E0B30' }]}
+          >
+            <Ionicons name="person-circle-outline" size={22} color="#F59E0B" />
+            <View style={{ flex: 1 }}>
+              <Text style={[s.profileIncompleteTitle, { color: '#F59E0B' }]}>Complete Your Profile</Text>
+              <Text style={[s.profileIncompleteDesc, { color: colors.textMuted }]}>
+                Business profile is required before plan creation
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#F59E0B" />
+          </Pressable>
         )}
 
         <Text style={[s.sectionLabel, { color: colors.text }]}>Competitors</Text>
@@ -1833,6 +1894,17 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar }: B
     <View>
       {renderPhaseIndicator()}
       {renderCurrentPhase()}
+
+      <BusinessProfileModal
+        visible={showProfileModal}
+        onClose={() => {
+          setShowProfileModal(false);
+          checkProfileCompleteness();
+        }}
+        onComplete={() => {
+          checkProfileCompleteness();
+        }}
+      />
     </View>
   );
 }
@@ -2302,5 +2374,38 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     flex: 1,
+  },
+  profileCompleteBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  profileCompleteText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  profileEditBtn: {
+    padding: 4,
+  },
+  profileIncompleteBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  profileIncompleteTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  profileIncompleteDesc: {
+    fontSize: 12,
+    marginTop: 2,
   },
 });
