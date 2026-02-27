@@ -178,14 +178,22 @@ export default function CalendarScreen() {
   }, [dbCalendarEntries]);
 
   const handleResetAllFailed = useCallback(async () => {
-    if (!dbPlanId) return;
+    if (!dbPlanId) {
+      Alert.alert('No Plan', 'No active plan found to reset entries for.');
+      return;
+    }
+    if (dbEntryStats.failed === 0) {
+      Alert.alert('No Failed Entries', 'There are no failed entries to reset.');
+      return;
+    }
     Alert.alert(
       'Reset Failed Entries',
-      `This will reset ${dbEntryStats.failed} failed entries back to draft so you can retry generating them.`,
+      `This will reset ${dbEntryStats.failed} failed entries back to draft so you can retry creating them.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Reset All',
+          style: 'destructive',
           onPress: async () => {
             setResettingFailed(true);
             try {
@@ -200,14 +208,16 @@ export default function CalendarScreen() {
                 headers: { 'Content-Type': 'application/json' },
               });
               const data = await res.json();
-              if (data.success) {
+              if (res.ok && data.success) {
                 Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                Alert.alert('Done', data.message || `Reset ${data.resetCount || 0} entries to draft.`);
                 fetchCalendarEntries();
               } else {
-                Alert.alert('Error', data.message || 'Reset failed');
+                const errorMsg = data.message || data.error || 'Reset failed';
+                Alert.alert('Reset Failed', errorMsg);
               }
             } catch (err: any) {
-              Alert.alert('Error', err.message);
+              Alert.alert('Error', err.message || 'Network error — could not reset entries.');
             } finally {
               setResettingFailed(false);
             }
@@ -215,7 +225,7 @@ export default function CalendarScreen() {
         },
       ]
     );
-  }, [dbPlanId, dbEntryStats.failed, fetchCalendarEntries]);
+  }, [dbPlanId, dbEntryStats.failed, fetchCalendarEntries, selectedCampaign?.selectedCampaignId]);
 
   const postTypes = postTypesDef.map(pt => ({ ...pt, label: t(pt.labelKey) }));
   const days = Array.from({length: 7}, (_, i) => t(`calendar.days.${i}`));

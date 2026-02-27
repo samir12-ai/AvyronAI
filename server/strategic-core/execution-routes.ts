@@ -899,11 +899,11 @@ export function registerExecutionRoutes(app: Express) {
         return res.status(403).json({ error: "CAMPAIGN_MISMATCH", message: "Plan does not belong to this campaign.", requestId });
       }
 
-      const resettableStatuses = ["APPROVED", "GENERATED_TO_CALENDAR", "CREATIVE_GENERATED", "REVIEW"];
+      const resettableStatuses = ["APPROVED", "GENERATED_TO_CALENDAR", "CREATIVE_GENERATED", "REVIEW", "SCHEDULED", "PUBLISHED"];
       if (!resettableStatuses.includes(plan.status)) {
         return res.status(409).json({
           error: "PLAN_NOT_RESETTABLE",
-          message: `Plan must be in an active execution state (APPROVED through REVIEW) to reset failed entries. Current status: ${plan.status}. SCHEDULED and PUBLISHED plans are locked.`,
+          message: `Plan must be in an active pipeline state to reset failed entries. Current status: ${plan.status}.`,
           currentStatus: plan.status,
           allowedStatuses: resettableStatuses,
           requestId,
