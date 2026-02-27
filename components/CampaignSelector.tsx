@@ -136,11 +136,6 @@ function CampaignBar() {
   const [showModal, setShowModal] = useState(false);
   const [selecting, setSelecting] = useState(false);
 
-  if (!selectedCampaign) return null;
-
-  const goalColor = GOAL_TYPE_COLORS[selectedCampaign.campaignGoalType] || '#6B7280';
-  const goalIcon = GOAL_TYPE_ICONS[selectedCampaign.campaignGoalType] || 'help-circle';
-
   const handleSelect = async (campaign: any) => {
     if (campaign.status === 'paused') return;
     setSelecting(true);
@@ -154,14 +149,51 @@ function CampaignBar() {
     }
   };
 
+  const openModal = () => {
+    refreshCampaigns();
+    setShowModal(true);
+  };
+
+  if (!selectedCampaign) {
+    return (
+      <>
+        <TouchableOpacity
+          style={[styles.campaignBar, { borderColor: '#8B5CF630', borderStyle: 'dashed' }]}
+          onPress={openModal}
+          activeOpacity={0.7}
+          testID="campaign-bar-empty"
+        >
+          <View style={styles.barLeft}>
+            <View style={{ width: 28, height: 28, borderRadius: 7, backgroundColor: '#8B5CF620', justifyContent: 'center', alignItems: 'center' }}>
+              <Ionicons name="add" size={16} color="#8B5CF6" />
+            </View>
+            <View style={styles.barInfo}>
+              <Text style={[styles.barName, { color: '#8B5CF6' }]}>Select or Create Campaign</Text>
+              <Text style={[styles.barPlatform, { marginTop: 1 }]}>Tap to get started</Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-down" size={16} color="#8B5CF6" />
+        </TouchableOpacity>
+
+        <CampaignListModal
+          visible={showModal}
+          campaigns={campaigns}
+          onSelect={handleSelect}
+          onClose={() => setShowModal(false)}
+          selecting={selecting}
+        />
+      </>
+    );
+  }
+
+  const goalColor = GOAL_TYPE_COLORS[selectedCampaign.campaignGoalType] || '#6B7280';
+  const goalIcon = GOAL_TYPE_ICONS[selectedCampaign.campaignGoalType] || 'help-circle';
+
   return (
     <>
       <TouchableOpacity
         style={styles.campaignBar}
-        onPress={() => {
-          refreshCampaigns();
-          setShowModal(true);
-        }}
+        onPress={openModal}
         activeOpacity={0.7}
       >
         <View style={styles.barLeft}>
