@@ -1,0 +1,68 @@
+Subject: Immediate Refactor Required — Phase 5 Section-Based Orchestration (SLA 24h)
+
+Replit,
+
+This is a final directive regarding Phase 5.
+
+The current implementation is still structurally unstable.
+Generating all six strategic sections in a single AI call is the root cause of repeated timeouts and deterministic fallback.
+
+Background jobs and retry logic did not solve the problem because the core design remains monolithic.
+
+This must be refactored immediately.
+
+⸻
+
+Required Structural Change
+
+Phase 5 must be converted to section-based orchestration.
+
+Each of the six strategic sections must:
+	•	Run as an independent AI call
+	•	Use a focused, minimal prompt
+	•	Have its own single retry policy
+	•	Persist immediately upon success
+	•	Fallback individually if necessary
+	•	Not block execution of other sections
+
+There must never again be a single large AI call responsible for the entire strategic schema.
+
+⸻
+
+Non-Negotiable Constraints
+	•	No section may exceed reasonable token limits.
+	•	Execution must be sequential within the background job.
+	•	Failure of one section must not collapse the entire plan.
+	•	Global skeleton fallback is no longer acceptable.
+	•	Observability must show timing per section.
+	•	The UI must reflect section-level status.
+
+Increasing timeouts is not a solution.
+Reducing payload and distributing execution is the solution.
+
+⸻
+
+SLA & Escalation
+
+This refactor must be completed within 24 hours.
+
+Acceptance requires:
+	•	Three consecutive new campaigns complete without global fallback.
+	•	At least four out of six sections AI-generated.
+	•	No timeout errors exposed to the UI.
+	•	Total job duration under 90 seconds.
+	•	Section-level logs visible in audit records.
+
+If this SLA is not met:
+	•	Phase 5 AI generation will be temporarily disabled.
+	•	The system will revert to deterministic generation.
+	•	Engine development will be paused.
+	•	The orchestration layer will undergo architectural review.
+
+We stabilize the foundation before scaling intelligence.
+
+This is not optional work.
+
+Proceed immediately.
+
+— Samir

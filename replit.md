@@ -51,9 +51,9 @@ Preferred communication style: Simple, everyday language.
 
 ### Strategic Core Architecture ("Build The Plan")
 - **System**: A 6-phase sequential intelligence engine with hard gates for plan generation (Gate, Creative Analysis, Confirm/Edit, Market Analysis, Validation, Orchestrator).
-- **AI Models**: Gemini for creative extraction, GPT for market analysis, validation, and orchestration, with optional Performance Intelligence signal injection.
-- **Asynchronous Processing**: Phase 5 orchestrator jobs run as background processes, with frontend polling for status updates.
-- **Resilience**: Controlled retry policies, per-section fallback mechanisms, and robust error handling with audit logging.
+- **AI Models**: Gemini for creative extraction, GPT-4.1-mini for section-based orchestration (6 independent calls), GPT for market analysis and validation, with optional Performance Intelligence signal injection.
+- **Section-Based Orchestration (Phase 5)**: Each of the 6 strategic sections (Content Distribution, Creative Testing, Budget Allocation, KPI Monitoring, Competitive Watch, Risk Monitoring) runs as an independent AI call with focused prompts (~500-800 tokens each), individual retry policy (1 retry with 1.5s delay), immediate per-section persistence to DB, and independent fallback. No single monolithic AI call. Sections execute sequentially within a background job.
+- **Section-Level Observability**: Frontend polls section statuses in real-time (PENDING → GENERATING → COMPLETE/FALLBACK). Per-section timing recorded in stageTimes. Partial fallback supported — some sections AI-generated while others fall back individually without collapsing the entire plan.
 - **Schema Validation**: Strict validation ensures plans contain all required sections before delivery.
 - **Plan Approval Gate**: Execution plans are initially drafted and require explicit approval to activate, locking the pipeline until approved. Regeneration reverts status and supersedes old plans.
 

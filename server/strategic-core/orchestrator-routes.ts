@@ -127,83 +127,58 @@ function validateBlueprintCompleteness(confirmedBlueprint: any): { valid: boolea
 }
 
 
-const ORCHESTRATOR_PROMPT = `You are an execution orchestrator. You do NOT think. You do NOT reinterpret. You do NOT override the confirmed blueprint.
+interface SectionSpec {
+  key: string;
+  label: string;
+  systemPrompt: string;
+  schemaHint: string;
+  maxTokens: number;
+}
 
-You organize execution STRICTLY from the validated, confirmed blueprint, market map, AND Business Data Layer.
-
-CRITICAL: The confirmed blueprint is the ONLY source of truth for positioning. The Business Data Layer is the ONLY source of truth for distribution parameters (business type, funnel objective, budget, conversion channel).
-
-DISTRIBUTION DERIVATION RULES — Content mix MUST be derived from the Business Data Layer:
-- Business type determines content format mix (e.g., visual businesses need more Reels/Videos, service businesses need more educational Posts/Carousels)
-- Funnel objective determines content purpose distribution:
-  - AWARENESS → heavy on Reels + Stories (high reach formats)
-  - LEADS → heavy on Carousels + Posts with lead magnets, plus Stories for engagement
-  - SALES → balanced Reels + Posts + Carousels with strong CTAs
-  - AUTHORITY → heavy on Carousels + long-form Posts, fewer Stories
-- Monthly budget determines total volume (lower budget = fewer pieces, higher budget = more pieces)
-- Primary conversion channel determines CTA placement:
-  - WHATSAPP → CTAs direct to WhatsApp in bio/DM
-  - WEBSITE → CTAs drive to website link
-  - DM → CTAs encourage DM engagement
-  - FORM → CTAs link to lead forms
-
-DO NOT use hardcoded defaults like "3 Reels/week, 3 Posts/week". Every distribution number must be justified by the business profile.
-
-You must generate exactly 6 structured execution plans. All output must be structured objects.
-
-All plans must be geo-scoped to the specified LOCATION. No global assumptions.
-
-Respond with ONLY a valid JSON object. Keep each section concise (3-5 items max per array):
-{
-  "contentDistributionPlan": {
-    "platforms": [
-      {
-        "platform": "string",
-        "frequency": "string",
-        "priority": "primary|secondary",
-        "contentTypes": [
-          { "type": "string", "percentage": "string", "weeklyCount": "number", "rationale": "string" }
-        ],
-        "bestPostingTimes": ["string"],
-        "hashtagStrategy": "string"
-      }
-    ],
-    "contentPillars": [
-      { "pillar": "string", "percentage": "string", "examples": ["string"] }
-    ]
+const SECTION_SPECS: SectionSpec[] = [
+  {
+    key: "contentDistributionPlan",
+    label: "Content Distribution",
+    maxTokens: 800,
+    systemPrompt: `You generate a content distribution plan for Instagram marketing. Use the confirmed blueprint for positioning and the Business Data Layer for distribution parameters. Business type determines format mix. Funnel objective determines purpose distribution (AWARENESS→Reels+Stories, LEADS→Carousels+Posts, SALES→balanced, AUTHORITY→Carousels+Posts). Budget determines volume. Conversion channel determines CTA placement. Geo-scope to the specified location. No hardcoded defaults. Respond with ONLY valid JSON.`,
+    schemaHint: `{"contentDistributionPlan":{"platforms":[{"platform":"string","frequency":"string","priority":"primary|secondary","contentTypes":[{"type":"string","percentage":"string","weeklyCount":"number","rationale":"string"}],"bestPostingTimes":["string"],"hashtagStrategy":"string"}],"contentPillars":[{"pillar":"string","percentage":"string","examples":["string"]}]}}`,
   },
-  "creativeTestingMatrix": {
-    "tests": [
-      { "testName": "string", "variable": "string", "duration": "string", "rationale": "string" }
-    ]
+  {
+    key: "creativeTestingMatrix",
+    label: "Creative Testing",
+    maxTokens: 500,
+    systemPrompt: `You generate a creative testing matrix for Instagram marketing campaigns. Define 3-4 A/B tests with specific variables, durations, and rationale tied to the campaign's audience and objectives. Respond with ONLY valid JSON.`,
+    schemaHint: `{"creativeTestingMatrix":{"tests":[{"testName":"string","variable":"string","duration":"string","rationale":"string"}]}}`,
   },
-  "budgetAllocationStructure": {
-    "totalRecommended": "string",
-    "breakdown": [
-      { "category": "string", "percentage": "number", "purpose": "string" }
-    ]
+  {
+    key: "budgetAllocationStructure",
+    label: "Budget Allocation",
+    maxTokens: 500,
+    systemPrompt: `You generate a budget allocation structure for Instagram marketing. Derive total budget and category breakdown from the Business Data Layer monthly budget. Categories should cover content creation, paid promotion, community management, and tools. Respond with ONLY valid JSON.`,
+    schemaHint: `{"budgetAllocationStructure":{"totalRecommended":"string","breakdown":[{"category":"string","percentage":"number","purpose":"string"}]}}`,
   },
-  "kpiMonitoringPriority": {
-    "primaryKPIs": [
-      { "kpi": "string", "target": "string", "frequency": "string", "alertThreshold": "string" }
-    ],
-    "secondaryKPIs": [
-      { "kpi": "string", "target": "string", "frequency": "string" }
-    ],
-    "reportingCadence": "string"
+  {
+    key: "kpiMonitoringPriority",
+    label: "KPI Monitoring",
+    maxTokens: 600,
+    systemPrompt: `You generate a KPI monitoring priority plan for Instagram marketing. Define 3 primary KPIs with targets, frequency, and alert thresholds, plus 2 secondary KPIs. Include a reporting cadence. Tie metrics to the campaign objective. Respond with ONLY valid JSON.`,
+    schemaHint: `{"kpiMonitoringPriority":{"primaryKPIs":[{"kpi":"string","target":"string","frequency":"string","alertThreshold":"string"}],"secondaryKPIs":[{"kpi":"string","target":"string","frequency":"string"}],"reportingCadence":"string"}}`,
   },
-  "competitiveWatchTargets": {
-    "targets": [
-      { "competitor": "string", "watchMetrics": ["string"], "alertTriggers": ["string"], "checkFrequency": "string" }
-    ]
+  {
+    key: "competitiveWatchTargets",
+    label: "Competitive Watch",
+    maxTokens: 500,
+    systemPrompt: `You generate competitive watch targets for Instagram marketing. For each competitor URL provided, define watch metrics, alert triggers, and check frequency. Focus on actionable intelligence. Respond with ONLY valid JSON.`,
+    schemaHint: `{"competitiveWatchTargets":{"targets":[{"competitor":"string","watchMetrics":["string"],"alertTriggers":["string"],"checkFrequency":"string"}]}}`,
   },
-  "riskMonitoringTriggers": {
-    "triggers": [
-      { "trigger": "string", "condition": "string", "action": "string", "severity": "low|medium|high|critical" }
-    ],
-    "escalationPath": ["string"]
-  }
-}`;
+  {
+    key: "riskMonitoringTriggers",
+    label: "Risk Monitoring",
+    maxTokens: 500,
+    systemPrompt: `You generate risk monitoring triggers for Instagram marketing campaigns. Define 3-4 triggers with conditions, actions, and severity levels. Include an escalation path. Geo-scope risks to the specified location. Respond with ONLY valid JSON.`,
+    schemaHint: `{"riskMonitoringTriggers":{"triggers":[{"trigger":"string","condition":"string","action":"string","severity":"low|medium|high|critical"}],"escalationPath":["string"]}}`,
+  },
+];
 
 function generatePlanMarkdown(params: {
   blueprint: any;
@@ -368,6 +343,79 @@ function initSectionStatuses(): Record<string, string> {
   return s;
 }
 
+function buildSectionContext(params: {
+  blueprint: any;
+  confirmedBlueprint: any;
+  campaignContext: any;
+  competitorUrls: string[];
+  businessData: any;
+  marketMapRaw: any;
+  performanceIntelligenceBlock: string;
+}): string {
+  const { blueprint, confirmedBlueprint, campaignContext, competitorUrls, businessData, marketMapRaw, performanceIntelligenceBlock } = params;
+  const businessDataBlock = businessData
+    ? `\nBUSINESS DATA:\n- Type: ${businessData.businessType || "N/A"}, Location: ${businessData.businessLocation || "N/A"}\n- Offer: ${capText(businessData.coreOffer, 200)}, Price: ${businessData.priceRange || "N/A"}\n- Audience: ${businessData.targetAudienceAge || "N/A"} / ${capText(businessData.targetAudienceSegment, 150)}\n- Budget: ${businessData.monthlyBudget || "N/A"}, Funnel: ${businessData.funnelObjective || "N/A"}\n- Conversion: ${businessData.primaryConversionChannel || "N/A"}`
+    : `\nNo Business Data Layer. Use reasonable defaults based on campaign objective.`;
+
+  return `Blueprint v${blueprint.blueprintVersion}. Do NOT override confirmed data.\nGeo-scope: ${campaignContext?.location || "Not specified"}\nCAMPAIGN: ${campaignContext?.campaignName || "N/A"} | ${campaignContext?.objective || "N/A"} | ${campaignContext?.platform || "N/A"}${businessDataBlock}\nBLUEPRINT: ${capJson(confirmedBlueprint, 1200)}\nASP: $${blueprint.averageSellingPrice || "N/A"}\nCOMPETITORS: ${competitorUrls.slice(0, 5).join(", ")}${marketMapRaw ? `\nMARKET MAP (summary): ${capJson(marketMapRaw, 600)}` : ""}${performanceIntelligenceBlock}`;
+}
+
+async function generateSingleSection(
+  spec: SectionSpec,
+  contextBlock: string,
+  accountId: string,
+  log: (stage: string, extra?: Record<string, any>) => void,
+): Promise<{ result: any; aiGenerated: boolean; error?: string }> {
+  const MAX_RETRIES = 1;
+  const userPrompt = `${contextBlock}\n\nGenerate the ${spec.label} section. Keep arrays to 3-5 items max.\nRequired JSON schema:\n${spec.schemaHint}\n\nRespond with ONLY valid JSON matching the schema above.`;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      log(`SECTION_${spec.key}_ATTEMPT_${attempt}`, { maxTokens: spec.maxTokens });
+
+      const response = await aiChat({
+        model: "gpt-4.1-mini",
+        messages: [
+          { role: "system", content: spec.systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        max_tokens: spec.maxTokens,
+        accountId,
+        endpoint: `strategic-orchestrator-${spec.key}`,
+      });
+
+      const rawText = response.choices[0]?.message?.content || "";
+      log(`SECTION_${spec.key}_RESPONSE`, { rawLength: rawText.length, attempt, finishReason: response.choices[0]?.finish_reason });
+
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("No JSON in response");
+
+      const parsed = JSON.parse(jsonMatch[0]);
+      const sectionData = parsed[spec.key] || parsed;
+      if (!sectionData || typeof sectionData !== "object" || Object.keys(sectionData).length === 0) {
+        throw new Error("Empty section data");
+      }
+
+      return { result: sectionData, aiGenerated: true };
+    } catch (err: any) {
+      log(`SECTION_${spec.key}_FAIL_${attempt}`, { error: err.message, code: err.code, willRetry: attempt < MAX_RETRIES });
+
+      if (err.code === "AI_BUDGET_EXCEEDED") {
+        return { result: null, aiGenerated: false, error: "AI_BUDGET_EXCEEDED" };
+      }
+
+      if (attempt < MAX_RETRIES) {
+        await new Promise(r => setTimeout(r, 1500));
+        continue;
+      }
+
+      return { result: null, aiGenerated: false, error: err.message };
+    }
+  }
+
+  return { result: null, aiGenerated: false, error: "Exhausted retries" };
+}
+
 async function executeOrchestratorJob(jobId: string, blueprintId: string) {
   const startMs = Date.now();
   const stageTimes: Record<string, number> = {};
@@ -425,109 +473,90 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
         ]);
         if (memories.length > 0 || insights.length > 0 || moats.length > 0) {
           performanceSignalsInjected = true;
-          performanceIntelligenceBlock = `\nPERFORMANCE SIGNALS (optional):\n${memories.length > 0 ? `Memory: ${capJson(memories.map(m => ({ type: m.memoryType, label: m.label, score: m.score })), 500)}` : ""}${insights.length > 0 ? `\nInsights: ${capJson(insights.map(i => ({ category: i.category, insight: i.insight, confidence: i.confidence })), 500)}` : ""}${moats.length > 0 ? `\nMoats: ${capJson(moats.map(m => ({ label: m.label, moatScore: m.moatScore })), 300)}` : ""}`;
+          performanceIntelligenceBlock = `\nPERFORMANCE SIGNALS:\n${memories.length > 0 ? `Memory: ${capJson(memories.map(m => ({ type: m.memoryType, label: m.label, score: m.score })), 400)}` : ""}${insights.length > 0 ? `\nInsights: ${capJson(insights.map(i => ({ category: i.category, insight: i.insight, confidence: i.confidence })), 400)}` : ""}${moats.length > 0 ? `\nMoats: ${capJson(moats.map(m => ({ label: m.label, moatScore: m.moatScore })), 200)}` : ""}`;
         }
       }
     } catch (err) { log("PERF_INTEL_SKIPPED", { error: (err as Error).message }); }
 
-    log("BUILD_PROMPT");
+    log("CONTEXT_BUILT");
 
-    const businessDataBlock = businessData ? `\nBUSINESS DATA:\n- Type: ${businessData.businessType || "N/A"}, Location: ${businessData.businessLocation || "N/A"}\n- Offer: ${capText(businessData.coreOffer, 200)}, Price: ${businessData.priceRange || "N/A"}\n- Audience: ${businessData.targetAudienceAge || "N/A"} / ${capText(businessData.targetAudienceSegment, 150)}\n- Budget: ${businessData.monthlyBudget || "N/A"}, Funnel: ${businessData.funnelObjective || "N/A"}\n- Conversion: ${businessData.primaryConversionChannel || "N/A"}\nDerive distribution from these fields.` : `\nNo Business Data Layer found. Use reasonable defaults based on campaign objective.`;
+    const contextBlock = buildSectionContext({
+      blueprint, confirmedBlueprint, campaignContext, competitorUrls, businessData, marketMapRaw, performanceIntelligenceBlock,
+    });
 
-    const userPrompt = `Generate 6 execution plans from validated blueprint v${blueprint.blueprintVersion}. Do NOT override confirmed data.\n\nGeo-scope: ${campaignContext?.location || "Not specified"}\n\nCAMPAIGN: ${campaignContext?.campaignName || "N/A"} | ${campaignContext?.objective || "N/A"} | ${campaignContext?.location || "N/A"} | ${campaignContext?.platform || "N/A"}${businessDataBlock}\n\nBLUEPRINT (source of truth): ${capJson(confirmedBlueprint, 2000)}\n\nASP: $${blueprint.averageSellingPrice || "N/A"}\nCOMPETITORS: ${competitorUrls.slice(0, 5).join(", ")}${marketMapRaw ? `\nMARKET MAP: ${capJson(marketMapRaw, 1000)}` : ""}${validationResultRaw ? `\nVALIDATION: ${capJson(validationResultRaw, 800)}` : ""}${performanceIntelligenceBlock}\n\nGenerate all 6 sections now. Keep output concise — each section with 3-5 items max. JSON only.`;
-
-    const promptChars = ORCHESTRATOR_PROMPT.length + userPrompt.length;
-    log("AI_CALL_START", { model: "gpt-5.2", maxTokens: 3000, promptChars });
+    const fallbackPlan = generateFallbackPlan({ confirmedBlueprint, campaignContext, competitorUrls, businessData });
 
     const sectionStatuses = initSectionStatuses();
     await updateJob({ sectionStatuses: JSON.stringify(sectionStatuses) });
 
-    let orchestratorPlan: any = null;
-    let usedFallback = false;
-    let fallbackReason: string | null = null;
-    const MAX_RETRIES = 1;
+    const orchestratorPlan: any = {};
+    let aiGeneratedCount = 0;
+    let fallbackCount = 0;
+    const fallbackReasons: string[] = [];
+    let budgetExceeded = false;
 
-    const attemptAiGeneration = async (attempt: number): Promise<any> => {
-      log(`AI_ATTEMPT_${attempt}_START`, { model: "gpt-5.2", attempt });
+    for (const spec of SECTION_SPECS) {
+      const sectionStartMs = Date.now();
+      sectionStatuses[spec.key] = "GENERATING";
+      await updateJob({ sectionStatuses: JSON.stringify(sectionStatuses) });
 
-      const response = await aiChat({
-        model: "gpt-5.2",
-        messages: [
-          { role: "system", content: ORCHESTRATOR_PROMPT },
-          { role: "user", content: userPrompt },
-        ],
-        max_tokens: 3000,
-        accountId: "default",
-        endpoint: "strategic-orchestrator",
+      log(`SECTION_START_${spec.key}`, { label: spec.label });
+
+      const { result, aiGenerated, error } = await generateSingleSection(spec, contextBlock, accountId, log);
+
+      const sectionDurationMs = Date.now() - sectionStartMs;
+      stageTimes[`section_${spec.key}`] = sectionDurationMs;
+
+      if (aiGenerated && result) {
+        orchestratorPlan[spec.key] = result;
+        sectionStatuses[spec.key] = "COMPLETE";
+        aiGeneratedCount++;
+        log(`SECTION_COMPLETE_${spec.key}`, { aiGenerated: true, durationMs: sectionDurationMs });
+      } else {
+        if (error === "AI_BUDGET_EXCEEDED") {
+          budgetExceeded = true;
+          log(`SECTION_BUDGET_EXCEEDED_${spec.key}`, { durationMs: sectionDurationMs });
+        }
+        orchestratorPlan[spec.key] = fallbackPlan[spec.key] || {};
+        sectionStatuses[spec.key] = "FALLBACK";
+        fallbackCount++;
+        fallbackReasons.push(`${spec.label}: ${error || "unknown"}`);
+        log(`SECTION_FALLBACK_${spec.key}`, { reason: error, durationMs: sectionDurationMs });
+      }
+
+      await updateJob({
+        sectionStatuses: JSON.stringify(sectionStatuses),
+        planJson: JSON.stringify(orchestratorPlan),
+        stageTimes: JSON.stringify(stageTimes),
       });
 
-      log(`AI_ATTEMPT_${attempt}_END`, { durationMs: Date.now() - startMs, finishReason: response.choices[0]?.finish_reason });
-
-      const rawText = response.choices[0]?.message?.content || "";
-      log("PARSE", { rawLength: rawText.length, attempt });
-
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error("No JSON object found in model response");
-
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (!parsed || Object.keys(parsed).length === 0) throw new Error("AI returned empty plan object");
-
-      return parsed;
-    };
-
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        orchestratorPlan = await attemptAiGeneration(attempt);
-        log("AI_SUCCESS", { attempt, durationMs: Date.now() - startMs });
+      if (budgetExceeded) {
+        for (const remaining of SECTION_SPECS) {
+          if (!orchestratorPlan[remaining.key]) {
+            orchestratorPlan[remaining.key] = fallbackPlan[remaining.key] || {};
+            sectionStatuses[remaining.key] = "FALLBACK";
+            fallbackCount++;
+            fallbackReasons.push(`${remaining.label}: budget exceeded`);
+          }
+        }
+        await updateJob({ sectionStatuses: JSON.stringify(sectionStatuses) });
         break;
-      } catch (aiErr: any) {
-        log(`AI_ATTEMPT_${attempt}_FAIL`, { code: aiErr.code, message: aiErr.message, attempt, willRetry: attempt < MAX_RETRIES });
-
-        if (aiErr.code === "AI_BUDGET_EXCEEDED") {
-          await updateJob({ status: "FAILED", error: aiErr.message, errorCode: "AI_BUDGET_EXCEEDED", stageTimes: JSON.stringify(stageTimes), durationMs: Date.now() - startMs, completedAt: new Date() });
-          await logAuditEvent({ accountId, campaignId: campaignId || undefined, blueprintId, blueprintVersion: blueprint.blueprintVersion, event: "ORCHESTRATOR_FAILED", details: { jobId, error: "AI_BUDGET_EXCEEDED", message: aiErr.message, stageTimes, attempt } });
-          return;
-        }
-
-        if (attempt < MAX_RETRIES) {
-          log("RETRY_SCHEDULED", { attempt, nextAttempt: attempt + 1, delayMs: 2000 });
-          await updateJob({ sectionStatuses: JSON.stringify({ ...sectionStatuses, _retryAttempt: attempt + 1 }) });
-          await new Promise(r => setTimeout(r, 2000));
-          continue;
-        }
-
-        usedFallback = true;
-        const isTimeout = aiErr.message?.includes("timeout") || aiErr.message?.includes("timed out") || aiErr.code === "ETIMEDOUT";
-        fallbackReason = isTimeout ? `AI timed out after ${attempt + 1} attempt(s)` : `AI failed after ${attempt + 1} attempt(s): ${aiErr.message}`;
-        log("FALLBACK_AFTER_RETRIES", { reason: fallbackReason, totalAttempts: attempt + 1 });
-        orchestratorPlan = generateFallbackPlan({ confirmedBlueprint, campaignContext, competitorUrls, businessData });
       }
     }
 
-    for (const key of PLAN_SECTIONS) {
-      if (orchestratorPlan[key] && typeof orchestratorPlan[key] === "object") {
-        sectionStatuses[key] = usedFallback ? "FALLBACK" : "COMPLETE";
-      } else {
-        const fallbackPlan = generateFallbackPlan({ confirmedBlueprint, campaignContext, competitorUrls, businessData });
-        if (fallbackPlan[key]) {
-          orchestratorPlan[key] = fallbackPlan[key];
-          sectionStatuses[key] = "FALLBACK";
-          if (!usedFallback) fallbackReason = `Section ${key} missing from AI response — filled with fallback`;
-          usedFallback = true;
-        } else {
-          sectionStatuses[key] = "FALLBACK";
-        }
-      }
-      await updateJob({ sectionStatuses: JSON.stringify(sectionStatuses) });
-    }
+    const usedFallback = fallbackCount > 0;
+    const fallbackReason = usedFallback ? `${fallbackCount}/${SECTION_SPECS.length} sections used fallback: ${fallbackReasons.join("; ")}` : null;
 
     orchestratorPlan.blueprintVersion = blueprint.blueprintVersion;
     if (usedFallback) {
-      orchestratorPlan.fallback = true;
+      orchestratorPlan.fallback = fallbackCount === SECTION_SPECS.length;
+      orchestratorPlan.partialFallback = fallbackCount > 0 && fallbackCount < SECTION_SPECS.length;
       orchestratorPlan.fallbackReason = fallbackReason;
+      orchestratorPlan.aiGeneratedSections = aiGeneratedCount;
+      orchestratorPlan.fallbackSections = fallbackCount;
     }
 
-    log("SECTION_VALIDATION_COMPLETE", { sectionStatuses, usedFallback });
+    log("ALL_SECTIONS_COMPLETE", { aiGenerated: aiGeneratedCount, fallback: fallbackCount, totalDurationMs: Date.now() - startMs, sectionStatuses });
 
     await db.update(strategicBlueprints)
       .set({
@@ -538,8 +567,11 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
       })
       .where(eq(strategicBlueprints.id, blueprintId));
 
-    const planSectionKeys = Object.keys(orchestratorPlan).filter(k => !["blueprintVersion", "fallback", "fallbackReason"].includes(k));
-    const summary = usedFallback ? `Fallback plan — ${planSectionKeys.length} sections` : `Execution plan — ${planSectionKeys.length} structured sections`;
+    const planSectionKeys = PLAN_SECTIONS.filter(k => orchestratorPlan[k] && typeof orchestratorPlan[k] === "object");
+    const summary = usedFallback
+      ? `Execution plan — ${aiGeneratedCount} AI-generated, ${fallbackCount} fallback`
+      : `Execution plan — ${planSectionKeys.length} AI-generated sections`;
+
     const [planRow] = await db.insert(strategicPlans).values({
       accountId,
       blueprintId,
@@ -552,13 +584,14 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
 
     log("DB_WRITE", { planId: planRow.id });
 
+    const auditEvent = aiGeneratedCount === 0 ? "ORCHESTRATOR_FALLBACK" : usedFallback ? "ORCHESTRATOR_PARTIAL" : "ORCHESTRATOR_GENERATED";
     await logAuditEvent({
       accountId,
       campaignId: campaignId || undefined,
       blueprintId,
       blueprintVersion: blueprint.blueprintVersion,
-      event: usedFallback ? "ORCHESTRATOR_FALLBACK" : "ORCHESTRATOR_GENERATED",
-      details: { jobId, planId: planRow.id, planSectionKeys, performanceSignalsInjected, durationMs: Date.now() - startMs, stageTimes, promptChars, usedFallback, sectionStatuses },
+      event: auditEvent,
+      details: { jobId, planId: planRow.id, aiGeneratedCount, fallbackCount, performanceSignalsInjected, durationMs: Date.now() - startMs, stageTimes, usedFallback, sectionStatuses, fallbackReasons },
     });
 
     await updateJob({
@@ -566,14 +599,14 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
       sectionStatuses: JSON.stringify(sectionStatuses),
       planJson: JSON.stringify(orchestratorPlan),
       planId: planRow.id,
-      fallback: usedFallback,
+      fallback: fallbackCount === SECTION_SPECS.length,
       fallbackReason,
       stageTimes: JSON.stringify(stageTimes),
       durationMs: Date.now() - startMs,
       completedAt: new Date(),
     });
 
-    log("COMPLETE", { durationMs: Date.now() - startMs, planId: planRow.id, usedFallback, stageTimes });
+    log("COMPLETE", { durationMs: Date.now() - startMs, planId: planRow.id, aiGeneratedCount, fallbackCount, stageTimes });
   } catch (error: any) {
     const durationMs = Date.now() - startMs;
     log("UNHANDLED_ERROR", { code: error.code, message: error.message, durationMs, stageTimes });
