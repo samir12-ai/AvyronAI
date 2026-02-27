@@ -118,7 +118,7 @@ export function registerLumaRoutes(app: Express) {
 
       const generationParams: any = {
         prompt,
-        model: model || "ray-flash-2",
+        model: model || "ray-2",
         aspect_ratio: aspectRatio || "16:9",
         duration: duration || "5s",
         loop: loop || false,
@@ -126,6 +126,8 @@ export function registerLumaRoutes(app: Express) {
 
       if (resolution) {
         generationParams.resolution = resolution;
+      } else {
+        generationParams.resolution = "1080p";
       }
 
       if (concepts && concepts.length > 0) {
@@ -191,10 +193,11 @@ export function registerLumaRoutes(app: Express) {
 
       const generationParams: any = {
         prompt,
-        model: model || "ray-flash-2",
+        model: model || "ray-2",
         aspect_ratio: aspectRatio || "16:9",
         duration: duration || "5s",
         loop: loop || false,
+        resolution: "1080p",
       };
 
       if (imageUrl) {

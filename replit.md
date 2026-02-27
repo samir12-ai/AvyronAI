@@ -37,6 +37,7 @@ Preferred communication style: Simple, everyday language.
 - **Calendar**: Content scheduling with AI Calendar Assistant.
 - **AI Management**: Auto-Publisher for Meta platforms, AI Audience Manager for optimized Meta ad audiences, and a Performance Intelligence Layer for insights.
 - **Studio**: Media library and AI Video Editor with FFmpeg rendering. AI Video Analysis Assist auto-extracts hooks, captions, CTAs, angles, and keywords per video item. "Apply to Draft" button with field toggles writes selected AI fields to draft (non-destructive, user edits survive).
+- **Luma AI Video**: Full-spec integration with Ray 2 Flash, Ray 2, and Ray 3 models. Durations: 5s/9s/10s/15s/20s. Resolutions: 540p/720p/1080p/4K. Default: Ray 2 at 1080p. Supports text-to-video, image-to-video, extend, and Photon image generation. 15-minute polling timeout for high-quality renders.
 - **Lead Engine**: Modular lead generation system with 8 independent modules and AI Lead Optimization.
 - **Competitive Intelligence**: Real-data competitor analysis system using a 2-step scrape ladder for MEASURED metrics and INFERRED AI insights.
 - **Creative Capture Layer**: 8-component pipeline analyzing reels with real data for deterministic signals and AI interpretation.

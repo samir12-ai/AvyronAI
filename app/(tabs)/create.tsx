@@ -168,8 +168,8 @@ const defaultCreateState: CreatePersistedState = {
   lumaMode: 'text-to-video',
   videoAspect: '16:9',
   videoDuration: '5s',
-  videoModel: 'ray-flash-2',
-  videoResolution: '720p',
+  videoModel: 'ray-2',
+  videoResolution: '1080p',
   videoLoop: false,
   selectedCameraMotion: null,
   photonModel: 'photon-1',
@@ -971,7 +971,7 @@ export default function CreateScreen() {
     setVideoPolling(true);
     const apiUrl = getApiUrl();
     let attempts = 0;
-    const maxAttempts = 120;
+    const maxAttempts = 180;
 
     const poll = async () => {
       try {
@@ -1030,19 +1030,23 @@ export default function CreateScreen() {
   ];
 
   const videoDurationOptions = [
-    { id: '5s', label: '5 sec' },
-    { id: '9s', label: '9 sec' },
+    { id: '5s', label: '5s' },
+    { id: '9s', label: '9s' },
+    { id: '10s', label: '10s' },
+    { id: '15s', label: '15s' },
+    { id: '20s', label: '20s' },
   ];
 
   const videoModelOptions = [
-    { id: 'ray-flash-2', label: 'Ray 2 Flash', desc: 'Fast' },
-    { id: 'ray-2', label: 'Ray 2', desc: 'Best quality' },
+    { id: 'ray-flash-2', label: 'Ray 2 Flash', desc: 'Fast, lower cost' },
+    { id: 'ray-2', label: 'Ray 2', desc: 'High quality' },
+    { id: 'ray-3', label: 'Ray 3', desc: 'Best quality, HDR' },
   ];
 
   const videoResolutionOptions = [
     { id: '540p', label: '540p', desc: 'Draft' },
     { id: '720p', label: '720p', desc: 'Standard' },
-    { id: '1080p', label: '1080p', desc: 'HD' },
+    { id: '1080p', label: '1080p', desc: 'Full HD' },
     { id: '4k', label: '4K', desc: 'Ultra HD' },
   ];
 
