@@ -456,17 +456,19 @@ function CampaignListModal({
                   const isPaused = item.status === 'paused';
 
                   return (
-                    <TouchableOpacity
+                    <View
                       style={[
                         styles.campaignItem,
                         isSelected && styles.campaignItemSelected,
                         isPaused && styles.campaignItemPaused,
                       ]}
-                      onPress={() => onSelect(item)}
-                      disabled={isPaused || selecting}
-                      activeOpacity={0.7}
                     >
-                      <View style={styles.campaignItemLeft}>
+                      <TouchableOpacity
+                        style={styles.campaignItemLeft}
+                        onPress={() => onSelect(item)}
+                        disabled={isPaused || selecting}
+                        activeOpacity={0.7}
+                      >
                         <View style={[styles.campaignGoalIcon, { backgroundColor: goalColor + '20' }]}>
                           <Ionicons name={goalIcon as any} size={16} color={isPaused ? '#6B7280' : goalColor} />
                         </View>
@@ -499,7 +501,7 @@ function CampaignListModal({
                             )}
                           </View>
                         </View>
-                      </View>
+                      </TouchableOpacity>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                         {isSelected && (
                           <Ionicons name="checkmark-circle" size={20} color="#8B5CF6" />
@@ -516,7 +518,7 @@ function CampaignListModal({
                           <Ionicons name="trash-outline" size={16} color="#EF4444" />
                         </TouchableOpacity>
                       </View>
-                    </TouchableOpacity>
+                    </View>
                   );
                 }}
                 ItemSeparatorComponent={() => <View style={styles.separator} />}
