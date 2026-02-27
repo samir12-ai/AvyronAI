@@ -237,6 +237,53 @@ export function registerCampaignRoutes(app: Express) {
     }
   });
 
+  app.delete("/api/campaigns/:campaignId", async (req: Request, res: Response) => {
+    try {
+      const { campaignId } = req.params;
+      const accountId = (req.query.accountId as string) || "default";
+      const requestId = `del_${Date.now()}`;
+
+      if (!campaignId) {
+        return res.status(400).json({ code: "MISSING_ID", message: "Campaign ID is required", requestId });
+      }
+
+      const existing = await db.select().from(campaignSelections)
+        .where(and(
+          eq(campaignSelections.selectedCampaignId, campaignId),
+          eq(campaignSelections.accountId, accountId)
+        ))
+        .limit(1);
+
+      if (existing.length === 0) {
+        return res.status(404).json({ code: "NOT_FOUND", message: "Campaign not found", requestId });
+      }
+
+      await db.delete(manualCampaignMetrics)
+        .where(and(
+          eq(manualCampaignMetrics.campaignId, campaignId),
+          eq(manualCampaignMetrics.accountId, accountId)
+        ));
+
+      await db.delete(campaignSelections)
+        .where(and(
+          eq(campaignSelections.selectedCampaignId, campaignId),
+          eq(campaignSelections.accountId, accountId)
+        ));
+
+      console.log(`[Campaigns] Campaign deleted: ${campaignId} account=${accountId}`);
+
+      res.json({
+        success: true,
+        requestId,
+        deletedCampaignId: campaignId,
+        message: "Campaign deleted successfully",
+      });
+    } catch (error: any) {
+      console.error("[Campaigns] Delete campaign error:", error);
+      res.status(500).json({ code: "DELETE_FAILED", message: "Failed to delete campaign", requestId: `del_err_${Date.now()}` });
+    }
+  });
+
   app.get("/api/dashboard/metrics", requireCampaign, async (req, res) => {
     try {
       const campaignContext = (req as any).campaignContext;

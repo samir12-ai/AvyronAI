@@ -379,8 +379,8 @@ export default function AIManagementScreen() {
           </View>
         </View>
         {!metaConnection.isConnected && (
-          <View style={[styles.demoBadge, { backgroundColor: colors.textMuted }]}>
-            <Text style={styles.demoBadgeText}>Not Connected</Text>
+          <View style={[styles.statusBadge, { backgroundColor: colors.textMuted }]}>
+            <Text style={styles.statusBadgeText}>Not Connected</Text>
           </View>
         )}
       </View>
@@ -976,8 +976,8 @@ const styles = StyleSheet.create({
   },
   connectionTitle: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
   connectionSub: { fontSize: 12, fontFamily: 'Inter_400Regular' },
-  demoBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  demoBadgeText: { color: '#fff', fontSize: 10, fontFamily: 'Inter_700Bold' },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  statusBadgeText: { color: '#fff', fontSize: 10, fontFamily: 'Inter_700Bold' },
   statsRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
   statCard: {
     flex: 1,

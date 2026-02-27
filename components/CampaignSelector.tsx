@@ -33,7 +33,7 @@ const GOAL_TYPE_ICONS: Record<string, string> = {
 };
 
 function CampaignBlocker() {
-  const { campaigns, selectCampaign, isLoading, refreshCampaigns } = useCampaign();
+  const { campaigns, selectCampaign, deleteCampaign, isLoading, refreshCampaigns } = useCampaign();
   const [showModal, setShowModal] = useState(false);
   const [selecting, setSelecting] = useState(false);
 
@@ -76,6 +76,7 @@ function CampaignBlocker() {
         visible={showModal}
         campaigns={campaigns}
         onSelect={handleSelect}
+        onDelete={(id) => deleteCampaign(id).catch(() => {})}
         onClose={() => setShowModal(false)}
         selecting={selecting}
       />
@@ -84,7 +85,7 @@ function CampaignBlocker() {
 }
 
 function CampaignWarningBanner() {
-  const { warning, campaigns, selectCampaign, refreshCampaigns } = useCampaign();
+  const { warning, campaigns, selectCampaign, deleteCampaign, refreshCampaigns } = useCampaign();
   const [showModal, setShowModal] = useState(false);
   const [selecting, setSelecting] = useState(false);
 
@@ -124,6 +125,7 @@ function CampaignWarningBanner() {
         visible={showModal}
         campaigns={campaigns}
         onSelect={handleSelect}
+        onDelete={(id) => deleteCampaign(id).catch(() => {})}
         onClose={() => setShowModal(false)}
         selecting={selecting}
       />
@@ -132,7 +134,7 @@ function CampaignWarningBanner() {
 }
 
 function CampaignBar() {
-  const { selectedCampaign, campaigns, selectCampaign, clearSelection, refreshCampaigns } = useCampaign();
+  const { selectedCampaign, campaigns, selectCampaign, deleteCampaign, clearSelection, refreshCampaigns } = useCampaign();
   const [showModal, setShowModal] = useState(false);
   const [selecting, setSelecting] = useState(false);
 
@@ -179,6 +181,7 @@ function CampaignBar() {
           visible={showModal}
           campaigns={campaigns}
           onSelect={handleSelect}
+          onDelete={(id) => deleteCampaign(id).catch(() => {})}
           onClose={() => setShowModal(false)}
           selecting={selecting}
         />
@@ -228,6 +231,7 @@ function CampaignBar() {
         visible={showModal}
         campaigns={campaigns}
         onSelect={handleSelect}
+        onDelete={(id) => deleteCampaign(id).catch(() => {})}
         onClose={() => setShowModal(false)}
         selecting={selecting}
         currentId={selectedCampaign.selectedCampaignId}
@@ -365,6 +369,7 @@ function CampaignListModal({
   visible,
   campaigns,
   onSelect,
+  onDelete,
   onClose,
   selecting,
   currentId,
@@ -372,20 +377,36 @@ function CampaignListModal({
   visible: boolean;
   campaigns: any[];
   onSelect: (c: any) => void;
+  onDelete: (campaignId: string) => void;
   onClose: () => void;
   selecting: boolean;
   currentId?: string;
 }) {
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmDeleteName, setConfirmDeleteName] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   const handleClose = () => {
     setShowCreateForm(false);
+    setConfirmDeleteId(null);
     onClose();
   };
 
   const handleCreated = () => {
     setShowCreateForm(false);
     onClose();
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!confirmDeleteId) return;
+    setDeleting(true);
+    try {
+      await onDelete(confirmDeleteId);
+    } catch {} finally {
+      setDeleting(false);
+      setConfirmDeleteId(null);
+    }
   };
 
   return (
@@ -479,15 +500,55 @@ function CampaignListModal({
                           </View>
                         </View>
                       </View>
-                      {isSelected && (
-                        <Ionicons name="checkmark-circle" size={20} color="#8B5CF6" />
-                      )}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        {isSelected && (
+                          <Ionicons name="checkmark-circle" size={20} color="#8B5CF6" />
+                        )}
+                        <TouchableOpacity
+                          onPress={() => {
+                            setConfirmDeleteId(item.id);
+                            setConfirmDeleteName(item.name);
+                          }}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          style={styles.deleteButton}
+                          testID={`delete-campaign-${item.id}`}
+                        >
+                          <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                        </TouchableOpacity>
+                      </View>
                     </TouchableOpacity>
                   );
                 }}
                 ItemSeparatorComponent={() => <View style={styles.separator} />}
                 style={styles.campaignList}
               />
+
+              {confirmDeleteId && (
+                <View style={styles.confirmDeleteBar}>
+                  <Text style={styles.confirmDeleteText} numberOfLines={2}>
+                    Delete "{confirmDeleteName}"? This removes all metrics.
+                  </Text>
+                  <View style={styles.confirmDeleteActions}>
+                    <TouchableOpacity
+                      style={styles.confirmDeleteCancel}
+                      onPress={() => setConfirmDeleteId(null)}
+                    >
+                      <Text style={styles.confirmDeleteCancelText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.confirmDeleteBtn}
+                      onPress={handleConfirmDelete}
+                      disabled={deleting}
+                    >
+                      {deleting ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Text style={styles.confirmDeleteBtnText}>Delete</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
 
               <View style={styles.modalFooter}>
                 <Text style={styles.footerNote}>
@@ -770,6 +831,14 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     fontWeight: '600',
   },
+  deleteButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: '#EF444410',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   separator: {
     height: 1,
     backgroundColor: '#1F293720',
@@ -906,5 +975,51 @@ const formStyles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#8B5CF6',
+  },
+  confirmDeleteBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#EF444415',
+    borderTopWidth: 1,
+    borderColor: '#EF444430',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+  },
+  confirmDeleteText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#EF4444',
+  },
+  confirmDeleteActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  confirmDeleteCancel: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#6B728040',
+  },
+  confirmDeleteCancelText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  confirmDeleteBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#EF4444',
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  confirmDeleteBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#fff',
   },
 });

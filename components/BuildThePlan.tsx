@@ -50,7 +50,6 @@ interface CampaignContext {
   objective: string;
   location: string | null;
   platform: string;
-  isDemo: boolean;
 }
 
 interface ClarificationPrompt {
@@ -139,8 +138,6 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
 
-  const [seeding, setSeeding] = useState(false);
-  const [seedResult, setSeedResult] = useState<any>(null);
 
   const [piData, setPiData] = useState<any>(null);
   const [piLoading, setPiLoading] = useState(false);
@@ -180,42 +177,6 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     checkProfileCompleteness();
   }, [checkProfileCompleteness]);
 
-  const seedDemoCampaign = useCallback(async () => {
-    setSeeding(true);
-    setError('');
-    setSeedResult(null);
-    try {
-      const res = await fetch(getApiUrl('/api/demo/seed-campaign'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          campaignName: 'SWA',
-          window: 'last_30_days',
-          spend: 3.21,
-          reach: 88,
-          impressions: 114,
-          messagingConversations: 0,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setSeedResult(data);
-        await refreshCampaigns();
-        await refreshSelection();
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        Alert.alert(
-          'Demo Campaign Seeded',
-          `"${data.campaignContext.name}" is now active with 30 days of seeded performance data.\n\nLocation: ${data.campaignContext.location}\nSpend: $${data.seededData.totalSpend}\nReach: ${data.seededData.totalReach}\nConversions: 0\n\nGate is ready — add competitors + price to proceed.`,
-        );
-      } else {
-        setError(data.error || 'Failed to seed demo campaign');
-      }
-    } catch (err: any) {
-      setError(err.message || 'Seed failed');
-    } finally {
-      setSeeding(false);
-    }
-  }, [refreshCampaigns, refreshSelection]);
 
   const pulseAnim = useRef(new RNAnimated.Value(0)).current;
 
@@ -649,11 +610,11 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     if (!ctx) return null;
 
     return (
-      <View style={[s.campaignBadge, { backgroundColor: ctx.isDemo ? '#F59E0B15' : '#10B98115', borderColor: ctx.isDemo ? '#F59E0B30' : '#10B98130' }]}>
-        <Ionicons name={ctx.isDemo ? 'flask' : 'megaphone'} size={14} color={ctx.isDemo ? '#F59E0B' : '#10B981'} />
+      <View style={[s.campaignBadge, { backgroundColor: '#10B98115', borderColor: '#10B98130' }]}>
+        <Ionicons name="megaphone" size={14} color="#10B981" />
         <View style={{ flex: 1 }}>
-          <Text style={[s.campaignBadgeName, { color: ctx.isDemo ? '#F59E0B' : '#10B981' }]} numberOfLines={1}>
-            {ctx.isDemo ? 'DEMO MODE' : ctx.campaignName}
+          <Text style={[s.campaignBadgeName, { color: '#10B981' }]} numberOfLines={1}>
+            {ctx.campaignName}
           </Text>
           <Text style={[s.campaignBadgeDetail, { color: colors.textMuted }]}>
             {ctx.objective}{ctx.location ? ` · ${ctx.location}` : ''}
@@ -702,31 +663,6 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
           </View>
         </View>
 
-        {!isMetaReal && !seedResult && (
-          <Pressable
-            onPress={seedDemoCampaign}
-            disabled={seeding}
-            style={[s.seedBtn, { opacity: seeding ? 0.6 : 1 }]}
-          >
-            <LinearGradient colors={['#EC4899', '#F43F5E']} style={s.seedBtnGrad}>
-              {seeding ? <ActivityIndicator color="#fff" size="small" /> : (
-                <>
-                  <Ionicons name="flask" size={16} color="#fff" />
-                  <Text style={s.seedBtnText}>Seed Demo Campaign (Manual Metrics)</Text>
-                </>
-              )}
-            </LinearGradient>
-          </Pressable>
-        )}
-
-        {seedResult && (
-          <View style={[s.seedBadge, { backgroundColor: '#10B98115', borderColor: '#10B98130' }]}>
-            <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-            <Text style={[s.seedBadgeText, { color: '#10B981' }]}>
-              DEMO: "{seedResult.campaignContext.name}" seeded — {seedResult.seededData.performanceSnapshots} days of data
-            </Text>
-          </View>
-        )}
 
         {businessDataComplete ? (
           <View style={[s.profileCompleteBadge, { backgroundColor: '#10B98112', borderColor: '#10B98130' }]}>
@@ -2341,39 +2277,6 @@ const s = StyleSheet.create({
   budgetPct: {
     fontSize: 14,
     fontWeight: '700',
-  },
-  seedBtn: {
-    marginBottom: 16,
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  seedBtnGrad: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    gap: 8,
-  },
-  seedBtnText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  seedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    marginBottom: 16,
-  },
-  seedBadgeText: {
-    fontSize: 13,
-    fontWeight: '600',
-    flex: 1,
   },
   profileCompleteBadge: {
     flexDirection: 'row',

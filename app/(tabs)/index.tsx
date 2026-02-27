@@ -651,9 +651,9 @@ export default function DashboardScreen() {
         }
       >
         {dataMode === 'MANUAL' && (
-          <View style={[s.demoBanner, { backgroundColor: P.mint + '18', borderColor: P.mint + '30' }]}>
+          <View style={[s.manualBanner, { backgroundColor: P.mint + '18', borderColor: P.mint + '30' }]}>
             <Ionicons name="create-outline" size={16} color={P.mint} />
-            <Text style={[s.demoBannerText, { color: P.mint }]}>Manual Data — Enter metrics in Settings</Text>
+            <Text style={[s.manualBannerText, { color: P.mint }]}>Manual Data — Enter metrics in Settings</Text>
           </View>
         )}
 
@@ -869,7 +869,7 @@ const s = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { paddingHorizontal: 18 },
 
-  demoBanner: {
+  manualBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -879,7 +879,7 @@ const s = StyleSheet.create({
     paddingVertical: 10,
     marginBottom: 12,
   },
-  demoBannerText: {
+  manualBannerText: {
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 0.5,

@@ -83,7 +83,9 @@ Preferred communication style: Simple, everyday language.
 - **Campaign Creation**: `POST /api/campaigns/create` with required name/objective/location, auto-generates campaignId, auto-selects. `CampaignContext.createCampaign()` wires frontend. `NewCampaignForm` in CampaignSelector modal with objective chips and validation. All errors structured (code/message/requestId).
 - **Single Execution Track**: All writes to key execution tables are confined to a single execution route.
 - **Distribution Plan-Derived**: Orchestrator injects business data into AI prompts to derive content distribution strategies.
-- **Manual/Real Isolation**: DataMode is "REAL" | "MANUAL" | "UNKNOWN" — demo removed entirely. Manual campaign metrics drive dashboard when Meta not connected.
+- **Manual/Real Isolation**: DataMode is "REAL" | "MANUAL" | "UNKNOWN" — demo removed entirely from runtime (zero demo references in frontend/backend). Manual campaign metrics drive dashboard when Meta not connected.
+- **Campaign Delete**: Inline confirmation UI in CampaignListModal (no Alert.alert for web compatibility). DELETE /api/campaigns/:campaignId cascades to manual_campaign_metrics.
+- **Demo Purge Complete**: All demo badges, demo buttons, demo seed functions, demo load mutations, isDemo interface fields, and demo style names removed from BuildThePlan, CompetitiveIntelligence, StrategyHub, and ai-management. Style names renamed from demo* to manual*/status*.
 
 ## External Dependencies
 

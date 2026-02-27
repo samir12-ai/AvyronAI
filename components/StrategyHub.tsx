@@ -132,7 +132,7 @@ export default function StrategyHub() {
       });
       const data = await res.json();
       if (data.success) {
-        Alert.alert('Data Synced', `${data.synced} performance records loaded.${data.demo ? ' (Demo mode)' : ''}`);
+        Alert.alert('Data Synced', `${data.synced} performance records loaded.`);
         fetchDashboard();
       }
     } catch {
@@ -396,7 +396,7 @@ export default function StrategyHub() {
               <View style={s.syncInfo}>
                 <Text style={[s.syncTitle, { color: colors.text }]}>Sync Performance Data</Text>
                 <Text style={[s.syncDesc, { color: colors.textSecondary }]}>
-                  Load your Meta analytics or use demo data to start the strategy engine
+                  Load your Meta analytics to start the strategy engine
                 </Text>
               </View>
             </View>

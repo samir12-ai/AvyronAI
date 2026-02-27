@@ -46,6 +46,7 @@ interface CampaignContextValue {
   isCampaignSelected: boolean;
   selectCampaign: (campaign: CampaignInfo) => Promise<void>;
   createCampaign: (input: CreateCampaignInput) => Promise<void>;
+  deleteCampaign: (campaignId: string) => Promise<void>;
   clearSelection: () => Promise<void>;
   refreshCampaigns: () => Promise<void>;
   refreshSelection: () => Promise<void>;
@@ -141,6 +142,28 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const deleteCampaign = useCallback(async (campaignId: string) => {
+    try {
+      const res = await fetch(getApiUrl(`/api/campaigns/${campaignId}`), {
+        method: 'DELETE',
+      });
+
+      if (res.ok) {
+        setCampaigns(prev => prev.filter(c => c.id !== campaignId));
+        if (selectedCampaign?.selectedCampaignId === campaignId) {
+          setSelectedCampaign(null);
+          setWarning(null);
+        }
+      } else {
+        const err = await res.json();
+        throw new Error(err.message || 'Failed to delete campaign');
+      }
+    } catch (err: any) {
+      console.error('[CampaignContext] Failed to delete campaign:', err);
+      throw err;
+    }
+  }, [selectedCampaign]);
+
   const clearSelection = useCallback(async () => {
     try {
       await fetch(getApiUrl('/api/campaigns/selected'), { method: 'DELETE' });
@@ -174,6 +197,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         isCampaignSelected,
         selectCampaign,
         createCampaign,
+        deleteCampaign,
         clearSelection,
         refreshCampaigns,
         refreshSelection,

@@ -38,7 +38,6 @@ interface Competitor {
   socialProofPresence: string | null;
   screenshotUrls: string | null;
   notes: string | null;
-  isDemo: boolean;
   evidenceComplete: boolean;
   missingFields: string[];
 }
@@ -59,7 +58,6 @@ interface Recommendation {
   impactRangeHigh: number;
   timeframe: string;
   status: string;
-  isDemo: boolean;
 }
 
 interface Analysis {
@@ -77,7 +75,6 @@ interface Analysis {
   monthDiff: string | null;
   dataCompleteness: number;
   status: string;
-  isDemo: boolean;
   createdAt: string;
 }
 
@@ -317,23 +314,6 @@ export default function CompetitiveIntelligence() {
     },
   });
 
-  const loadDemoMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(new URL('/api/ci/demo/load', baseUrl).toString(), {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accountId: 'default' }),
-      });
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['ci-competitors'] });
-      queryClient.invalidateQueries({ queryKey: ['ci-analyses'] });
-      queryClient.invalidateQueries({ queryKey: ['ci-recommendations'] });
-      queryClient.invalidateQueries({ queryKey: ['ci-timeline'] });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    },
-  });
-
   const deleteCompetitorMutation = useMutation({
     mutationFn: async (id: string) => {
       const res = await fetch(new URL(`/api/ci/competitors/${id}?accountId=default`, baseUrl).toString(), { method: 'DELETE' });
@@ -463,14 +443,6 @@ export default function CompetitiveIntelligence() {
           <Text style={[s.emptyDesc, { color: colors.textMuted }]}>
             Add competitors with complete evidence data, then run your first analysis.
           </Text>
-          <Pressable
-            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); loadDemoMutation.mutate(); }}
-            style={[s.demoBtn, { borderColor: '#8B5CF6' }]}
-          >
-            {loadDemoMutation.isPending ? <ActivityIndicator size="small" color="#8B5CF6" /> :
-              <><Ionicons name="flask-outline" size={16} color="#8B5CF6" /><Text style={[s.demoBtnText, { color: '#8B5CF6' }]}>Load Demo Data</Text></>
-            }
-          </Pressable>
         </View>
       );
     }
@@ -481,7 +453,6 @@ export default function CompetitiveIntelligence() {
           <View style={s.cardHeader}>
             <Ionicons name="globe-outline" size={18} color="#8B5CF6" />
             <Text style={[s.cardTitle, { color: colors.text }]}>Market Overview</Text>
-            {latestAnalysis.isDemo && <View style={s.demoBadge}><Text style={s.demoBadgeText}>DEMO</Text></View>}
           </View>
           <Text style={[s.cardBody, { color: colors.textSecondary }]}>{overview?.summary || 'Analysis in progress...'}</Text>
           {overview?.competitiveIntensity && (
@@ -628,7 +599,6 @@ export default function CompetitiveIntelligence() {
               <View style={s.compInfo}>
                 <View style={s.compNameRow}>
                   <Text style={[s.compName, { color: colors.text }]}>{comp.name}</Text>
-                  {comp.isDemo && <View style={s.demoBadge}><Text style={s.demoBadgeText}>DEMO</Text></View>}
                 </View>
                 <Text style={[s.compMeta, { color: colors.textMuted }]}>{comp.businessType} · {comp.primaryObjective}</Text>
               </View>
@@ -748,7 +718,6 @@ export default function CompetitiveIntelligence() {
                 <View style={{ flex: 1 }}>
                   <View style={s.recTitleRow}>
                     <Text style={[s.recTitle, { color: colors.text }]} numberOfLines={isExpanded ? undefined : 1}>{rec.title}</Text>
-                    {rec.isDemo && <View style={s.demoBadge}><Text style={s.demoBadgeText}>DEMO</Text></View>}
                   </View>
                   <View style={s.recMeta}>
                     <View style={[s.catChip, { backgroundColor: catColor + '15' }]}>
@@ -1543,8 +1512,6 @@ const s = StyleSheet.create({
   cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
   cardTitle: { fontSize: 15, fontWeight: '700', flex: 1 },
   cardBody: { fontSize: 13, lineHeight: 20, marginBottom: 8 },
-  demoBadge: { backgroundColor: '#F59E0B' + '20', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  demoBadgeText: { fontSize: 9, fontWeight: '800', color: '#F59E0B', letterSpacing: 0.5 },
   intensityRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 },
   intensityLabel: { fontSize: 12 },
   intensityBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
@@ -1633,8 +1600,6 @@ const s = StyleSheet.create({
   emptyState: { alignItems: 'center', padding: 30, gap: 8 },
   emptyTitle: { fontSize: 16, fontWeight: '700' },
   emptyDesc: { fontSize: 13, textAlign: 'center', lineHeight: 20 },
-  demoBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, borderWidth: 1, marginTop: 8 },
-  demoBtnText: { fontSize: 13, fontWeight: '600' },
   timelineHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   timelineDot: { width: 10, height: 10, borderRadius: 5 },
   timelineMonth: { fontSize: 15, fontWeight: '700', flex: 1 },
