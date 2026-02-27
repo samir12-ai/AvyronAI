@@ -1,0 +1,79 @@
+subject=“P0: Phase 5 504 Timeout on NEW Campaign (Manual Metrics) — Must Hard-Fix + Add New Campaign (+) Button”}
+Hi Replit,
+
+This is a P0 production blocker.
+
+Scenario (REAL, not demo):
+	•	Demo is removed.
+	•	I created a brand-new campaign.
+	•	I’m using Manual Metrics (Meta is NOT connected).
+	•	Only 1 competitor added.
+	•	Phase 5 (Execution Plans) fails with HTTP 504 AI generation timed out.
+
+This proves the failure is not caused by data volume. It’s caused by architecture/stability: synchronous orchestration + hard timeout + unnecessary data dependencies even in Manual mode.
+
+What you must do (single cohesive patch — no partials)
+
+1) Manual-first orchestration path (NO Meta dependency)
+
+When Meta is not connected, Phase 5 must:
+	•	Use ONLY: business profile + competitor(s) + manual metrics + blueprint fields.
+	•	Must NOT attempt to pull Meta/performance snapshots/revenue tables or any Meta-specific aggregation.
+	•	If any optional data is missing, continue safely (never block).
+
+Acceptance criteria
+	•	New campaign + manual metrics + 1 competitor → Phase 5 completes successfully without depending on Meta tables/calls.
+
+2) Never surface raw 504 to the user
+
+Replace raw 504 with a structured response:
+	•	{ success:false, code:"ORCHESTRATOR_TIMEOUT", requestId, message, retryAfterMs }
+UI must show:
+	•	clear error text + requestId (copyable) + “Retry” CTA.
+
+Acceptance criteria
+	•	User never sees “Error unknown” or generic 500/504 without a code + requestId.
+
+3) Deterministic fallback plan on timeout (no dead-end)
+
+If AI call times out OR parsing fails:
+	•	Return a non-empty deterministic skeleton plan (6 sections minimum) so the user can proceed.
+	•	Mark it explicitly: fallback:true.
+	•	Save it as the current plan with status DRAFT (still requires approval, but user isn’t blocked).
+
+Acceptance criteria
+	•	Forced-timeout test still renders a plan (fallback), pipeline doesn’t dead-end.
+
+4) Reduce timeout risk by design (prompt/output caps + split)
+
+Do both:
+	•	Cap payload + output (trim competitor text, cap section length, reduce max_tokens to a safer band in Phase 5).
+	•	Split orchestration:
+	•	Step A: generate “Plan Outline” fast
+	•	Step B: generate detailed calendar/required-work progressively (not one massive call)
+
+Acceptance criteria
+	•	Phase 5 completes reliably under worst-case conditions for Manual mode.
+	•	No single request should depend on a large one-shot AI output.
+
+5) Structured stage timing logs (must)
+
+For every Phase 5 request, log:
+START → LOAD_CONTEXT → BUILD_PROMPT → AI_CALL_START → AI_CALL_END/FAIL → PARSE → DB_WRITE → COMPLETE
+Include duration_ms per stage + prompt size estimate + model + requestId.
+
+Acceptance criteria
+	•	If this ever happens again, we can pinpoint the exact stage causing the delay within seconds.
+
+6) Campaign selector “+” button (Patch Plus)
+
+Add a “+ New Campaign” action in the campaign section (plus button):
+	•	Create campaign → auto-select it → reset all tab states properly → no refresh required.
+	•	Must work with Manual metrics flow so a user can onboard without Meta approval.
+
+Acceptance criteria
+	•	User can create a new campaign from the selector and immediately proceed with Build Plan in Manual mode.
+
+This needs to be delivered as one locked-down patch (no “we’ll see later” items). I need stability and predictable behavior in Manual mode, because Meta approval can take time and the system must still function end-to-end.
+
+Thanks,

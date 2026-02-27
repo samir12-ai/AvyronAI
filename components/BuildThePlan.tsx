@@ -492,9 +492,16 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     }
   }, [blueprint]);
 
+  const [lastRequestId, setLastRequestId] = useState<string | null>(null);
+  const [isFallbackPlan, setIsFallbackPlan] = useState(false);
+  const [fallbackReason, setFallbackReason] = useState<string | null>(null);
+
   const runOrchestrator = useCallback(async () => {
     if (!blueprint) return;
     setError('');
+    setLastRequestId(null);
+    setIsFallbackPlan(false);
+    setFallbackReason(null);
     setLoading(true);
 
     try {
@@ -503,15 +510,24 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
         headers: { 'Content-Type': 'application/json' },
       });
       const data = await res.json();
+
+      if (data.requestId) setLastRequestId(data.requestId);
+
       if (!res.ok || !data.success) {
-        const statusPrefix = !res.ok ? `[HTTP ${res.status}] ` : '';
-        setError(statusPrefix + (data.message || data.error || 'Orchestrator failed'));
+        const code = data.error || 'UNKNOWN';
+        const msg = data.message || 'Orchestrator failed';
+        setError(`[${code}] ${msg}`);
         return;
       }
 
       if (!data.orchestratorPlan || typeof data.orchestratorPlan !== 'object') {
-        setError('Server returned an empty execution plan. Please retry.');
+        setError('[EMPTY_PLAN] Server returned an empty execution plan. Please retry.');
         return;
+      }
+
+      if (data.fallback) {
+        setIsFallbackPlan(true);
+        setFallbackReason(data.fallbackReason || 'AI generation failed — using skeleton plan');
       }
 
       setBlueprint(prev => prev ? {
@@ -523,7 +539,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
       } : null);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch (err: any) {
-      setError(`Network error: ${err.message}`);
+      setError(`[NETWORK] ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -1424,6 +1440,14 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
               <Text style={{ color: '#EF4444', fontWeight: '700', fontSize: 14 }}>Execution Plan Failed</Text>
             </View>
             <Text style={{ color: '#991B1B', fontSize: 13, lineHeight: 18 }}>{error}</Text>
+            {lastRequestId && (
+              <View style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name="document-text-outline" size={14} color="#6B7280" />
+                <Text selectable style={{ color: '#6B7280', fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
+                  ID: {lastRequestId}
+                </Text>
+              </View>
+            )}
           </View>
           <Pressable onPress={runOrchestrator} style={[s.actionBtn, { marginTop: 12 }]}>
             <LinearGradient colors={['#EF4444', '#DC2626']} style={s.actionBtnGrad}>
@@ -1476,6 +1500,27 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
       <View style={s.phaseContent}>
         {renderCampaignBadge()}
         {renderPhase5Header()}
+
+        {(isFallbackPlan || plan?.fallback) && (
+          <View style={[s.phaseCard, { backgroundColor: '#FFFBEB', borderColor: '#FCD34D' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <Ionicons name="construct" size={18} color="#D97706" />
+              <Text style={{ color: '#92400E', fontSize: 13, fontWeight: '700' }}>Skeleton Plan (Fallback)</Text>
+            </View>
+            <Text style={{ color: '#78350F', fontSize: 12, lineHeight: 17 }}>
+              {fallbackReason || plan?.fallbackReason || 'AI generation timed out. This is a deterministic skeleton plan based on your blueprint data.'}
+            </Text>
+            <Text style={{ color: '#92400E', fontSize: 12, marginTop: 6 }}>
+              You can approve this plan and refine later, or retry to get an AI-generated plan.
+            </Text>
+            <Pressable onPress={regeneratePlan} disabled={loading} style={[s.actionBtn, { marginTop: 10 }]}>
+              <LinearGradient colors={['#D97706', '#B45309']} style={s.actionBtnGrad}>
+                <Ionicons name="refresh" size={16} color="#fff" />
+                <Text style={s.actionBtnText}>Retry AI Generation</Text>
+              </LinearGradient>
+            </Pressable>
+          </View>
+        )}
 
         {populatedSections.length === 0 && (
           <View style={[s.phaseCard, { backgroundColor: '#FFFBEB', borderColor: '#FCD34D' }]}>

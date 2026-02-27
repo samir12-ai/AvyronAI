@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -137,6 +137,7 @@ function CampaignBar() {
   const { selectedCampaign, campaigns, selectCampaign, deleteCampaign, clearSelection, refreshCampaigns } = useCampaign();
   const [showModal, setShowModal] = useState(false);
   const [selecting, setSelecting] = useState(false);
+  const [showCreateInModal, setShowCreateInModal] = useState(false);
 
   const handleSelect = async (campaign: any) => {
     if (campaign.status === 'paused') return;
@@ -224,7 +225,18 @@ function CampaignBar() {
             </View>
           </View>
         </View>
-        <Ionicons name="chevron-down" size={16} color="#6B7280" />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <TouchableOpacity
+            onPress={() => { setShowModal(true); setShowCreateInModal(true); }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            activeOpacity={0.6}
+          >
+            <View style={styles.plusButton}>
+              <Ionicons name="add" size={16} color="#10B981" />
+            </View>
+          </TouchableOpacity>
+          <Ionicons name="chevron-down" size={16} color="#6B7280" />
+        </View>
       </TouchableOpacity>
 
       <CampaignListModal
@@ -232,9 +244,10 @@ function CampaignBar() {
         campaigns={campaigns}
         onSelect={handleSelect}
         onDelete={(id) => deleteCampaign(id).catch(() => {})}
-        onClose={() => setShowModal(false)}
+        onClose={() => { setShowModal(false); setShowCreateInModal(false); }}
         selecting={selecting}
         currentId={selectedCampaign.selectedCampaignId}
+        initialCreate={showCreateInModal}
       />
     </>
   );
@@ -373,6 +386,7 @@ function CampaignListModal({
   onClose,
   selecting,
   currentId,
+  initialCreate,
 }: {
   visible: boolean;
   campaigns: any[];
@@ -381,8 +395,15 @@ function CampaignListModal({
   onClose: () => void;
   selecting: boolean;
   currentId?: string;
+  initialCreate?: boolean;
 }) {
   const [showCreateForm, setShowCreateForm] = useState(false);
+
+  useEffect(() => {
+    if (visible && initialCreate) {
+      setShowCreateForm(true);
+    }
+  }, [visible, initialCreate]);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmDeleteName, setConfirmDeleteName] = useState('');
   const [deleting, setDeleting] = useState(false);
@@ -664,6 +685,16 @@ const styles = StyleSheet.create({
     color: '#000',
     fontSize: 12,
     fontWeight: '600',
+  },
+  plusButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#10B98115',
+    borderWidth: 1,
+    borderColor: '#10B98140',
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
   },
   campaignBar: {
     flexDirection: 'row',

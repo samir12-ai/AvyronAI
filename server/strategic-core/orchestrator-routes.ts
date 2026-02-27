@@ -14,6 +14,105 @@ const REQUIRED_BLUEPRINT_FIELDS: { key: string; label: string }[] = [
   { key: "detectedPositioning", label: "Positioning" },
 ];
 
+function generateFallbackPlan(params: {
+  confirmedBlueprint: any;
+  campaignContext: any;
+  competitorUrls: string[];
+  businessData: any;
+}): any {
+  const { confirmedBlueprint, campaignContext, competitorUrls, businessData } = params;
+  const objective = campaignContext?.objective || "AWARENESS";
+  const location = campaignContext?.location || "Not specified";
+  const offer = confirmedBlueprint?.detectedOffer || "Core offer";
+  const cta = confirmedBlueprint?.detectedCTA || "Contact us";
+  const audience = confirmedBlueprint?.detectedAudienceGuess || "Target audience";
+
+  return {
+    fallback: true,
+    fallbackReason: "AI generation timed out or failed. This is a deterministic skeleton plan. You can approve it and refine later, or retry generation.",
+    contentDistributionPlan: {
+      platforms: [
+        {
+          platform: "Instagram",
+          frequency: "5x per week",
+          priority: "primary",
+          contentTypes: [
+            { type: "Reels", percentage: "40%", weeklyCount: 2, rationale: `High reach format for ${objective.toLowerCase()} in ${location}` },
+            { type: "Posts", percentage: "30%", weeklyCount: 2, rationale: `Educational content about ${offer}` },
+            { type: "Stories", percentage: "20%", weeklyCount: 3, rationale: "Daily engagement and behind-the-scenes" },
+            { type: "Carousels", percentage: "10%", weeklyCount: 1, rationale: `In-depth value content for ${audience}` },
+          ],
+          bestPostingTimes: ["9:00 AM", "12:00 PM", "6:00 PM"],
+          hashtagStrategy: `Mix of niche and location-based hashtags for ${location}`,
+        },
+      ],
+      contentPillars: [
+        { pillar: "Educational", percentage: "40%", examples: [`How-to content about ${offer}`] },
+        { pillar: "Social Proof", percentage: "30%", examples: ["Testimonials, case studies"] },
+        { pillar: "Behind the Scenes", percentage: "20%", examples: ["Process, team, culture"] },
+        { pillar: "Promotional", percentage: "10%", examples: [`Direct CTA: ${cta}`] },
+      ],
+    },
+    creativeTestingMatrix: {
+      tests: [
+        { testName: "Hook Variations", variable: "Opening 3 seconds", duration: "2 weeks", rationale: `Test different hooks for ${audience}` },
+        { testName: "CTA Placement", variable: "CTA position and format", duration: "2 weeks", rationale: `Optimize ${cta} conversion` },
+        { testName: "Content Format", variable: "Reels vs Carousels vs Posts", duration: "3 weeks", rationale: `Find best format for ${objective.toLowerCase()} in ${location}` },
+      ],
+    },
+    budgetAllocationStructure: {
+      totalRecommended: businessData?.monthlyBudget || "Based on campaign budget",
+      breakdown: [
+        { category: "Content Creation", percentage: 40, purpose: "High-quality visuals and video production" },
+        { category: "Paid Promotion", percentage: 30, purpose: `Boosting top-performing content for ${objective.toLowerCase()}` },
+        { category: "Community & Engagement", percentage: 15, purpose: "Community management and influencer partnerships" },
+        { category: "Tools & Analytics", percentage: 15, purpose: "Scheduling, analytics, and optimization tools" },
+      ],
+    },
+    kpiMonitoringPriority: {
+      primaryKPIs: [
+        { kpi: "Reach", target: "+20% month-over-month", frequency: "Weekly", alertThreshold: "-10% week-over-week" },
+        { kpi: "Engagement Rate", target: "3-5%", frequency: "Weekly", alertThreshold: "Below 2%" },
+        { kpi: "Profile Visits", target: "+15% monthly", frequency: "Weekly", alertThreshold: "Declining 2 weeks" },
+      ],
+      secondaryKPIs: [
+        { kpi: "Story Views", target: "10% of followers", frequency: "Weekly" },
+        { kpi: "Saves", target: "2% of reach", frequency: "Weekly" },
+      ],
+      reportingCadence: "Weekly review, monthly deep-dive",
+    },
+    competitiveWatchTargets: {
+      targets: competitorUrls.slice(0, 3).map((url: string) => ({
+        competitor: url,
+        watchMetrics: ["Posting frequency", "Engagement rate", "Content types", "Follower growth"],
+        alertTriggers: ["New campaign launch", "Viral content (10x avg engagement)", "Strategy shift"],
+        checkFrequency: "Weekly",
+      })),
+    },
+    riskMonitoringTriggers: {
+      triggers: [
+        { trigger: "Engagement Drop", condition: "Engagement rate below 2% for 2 consecutive weeks", action: "Review content mix and posting times", severity: "high" },
+        { trigger: "Reach Plateau", condition: "Reach flat for 3 weeks", action: "Test new content formats and hashtags", severity: "medium" },
+        { trigger: "Negative Sentiment", condition: "3+ negative comments in a week", action: "Review content tone and respond promptly", severity: "high" },
+        { trigger: "Algorithm Change", condition: "Sudden reach drop >30%", action: "Diversify content formats", severity: "critical" },
+      ],
+      escalationPath: ["Content review", "Strategy adjustment", "Full plan revision"],
+    },
+  };
+}
+
+function capText(text: string | undefined | null, maxLen: number): string {
+  if (!text) return "";
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen) + "... [trimmed]";
+}
+
+function capJson(obj: any, maxLen: number): string {
+  if (!obj) return "";
+  const str = typeof obj === "string" ? obj : JSON.stringify(obj);
+  return capText(str, maxLen);
+}
+
 function validateBlueprintCompleteness(confirmedBlueprint: any): { valid: boolean; missingFields: string[] } {
   const missingFields: string[] = [];
 
@@ -54,96 +153,53 @@ You must generate exactly 6 structured execution plans. All output must be struc
 
 All plans must be geo-scoped to the specified LOCATION. No global assumptions.
 
-Respond with ONLY a valid JSON object:
+Respond with ONLY a valid JSON object. Keep each section concise (3-5 items max per array):
 {
   "contentDistributionPlan": {
     "platforms": [
       {
         "platform": "string",
         "frequency": "string",
+        "priority": "primary|secondary",
         "contentTypes": [
-          {
-            "type": "string",
-            "percentage": "string",
-            "weeklyCount": "number",
-            "rationale": "string"
-          }
+          { "type": "string", "percentage": "string", "weeklyCount": "number", "rationale": "string" }
         ],
         "bestPostingTimes": ["string"],
         "hashtagStrategy": "string"
       }
     ],
     "contentPillars": [
-      {
-        "pillar": "string",
-        "percentage": "string",
-        "examples": ["string"]
-      }
+      { "pillar": "string", "percentage": "string", "examples": ["string"] }
     ]
   },
-  "engagementPlan": {
-    "dailyActions": [
-      {
-        "action": "string",
-        "priority": "high|medium|low"
-      }
-    ],
-    "weeklyActions": [
-      {
-        "action": "string",
-        "priority": "high|medium|low"
-      }
-    ],
-    "communityGrowthTactics": ["string"]
+  "creativeTestingMatrix": {
+    "tests": [
+      { "testName": "string", "variable": "string", "duration": "string", "rationale": "string" }
+    ]
   },
-  "conversionPlan": {
-    "funnelStages": [
-      {
-        "stage": "string",
-        "content": "string",
-        "cta": "string",
-        "metric": "string"
-      }
-    ],
-    "ctaStrategy": "string",
-    "leadCaptureMethod": "string"
+  "budgetAllocationStructure": {
+    "totalRecommended": "string",
+    "breakdown": [
+      { "category": "string", "percentage": "number", "purpose": "string" }
+    ]
   },
-  "measurementPlan": {
+  "kpiMonitoringPriority": {
     "primaryKPIs": [
-      {
-        "kpi": "string",
-        "target": "string",
-        "frequency": "string",
-        "alertThreshold": "string"
-      }
+      { "kpi": "string", "target": "string", "frequency": "string", "alertThreshold": "string" }
     ],
     "secondaryKPIs": [
-      {
-        "kpi": "string",
-        "target": "string",
-        "frequency": "string"
-      }
+      { "kpi": "string", "target": "string", "frequency": "string" }
     ],
     "reportingCadence": "string"
   },
   "competitiveWatchTargets": {
     "targets": [
-      {
-        "competitor": "string",
-        "watchMetrics": ["string"],
-        "alertTriggers": ["string"],
-        "checkFrequency": "string"
-      }
+      { "competitor": "string", "watchMetrics": ["string"], "alertTriggers": ["string"], "checkFrequency": "string" }
     ]
   },
   "riskMonitoringTriggers": {
     "triggers": [
-      {
-        "trigger": "string",
-        "condition": "string",
-        "action": "string",
-        "severity": "low|medium|high|critical"
-      }
+      { "trigger": "string", "condition": "string", "action": "string", "severity": "low|medium|high|critical" }
     ],
     "escalationPath": ["string"]
   }
@@ -305,10 +361,70 @@ export function registerOrchestratorRoutes(app: Express) {
     let accountId = "default";
     let campaignId = "";
     let competitorCount = 0;
+    const stageTimes: Record<string, number> = {};
 
     const log = (stage: string, extra?: Record<string, any>) => {
       const elapsed = Date.now() - startMs;
+      stageTimes[stage] = elapsed;
       console.log(`[Orchestrator] [${requestId}] ${stage} (+${elapsed}ms)`, extra ? JSON.stringify(extra) : "");
+    };
+
+    const saveFallbackAndRespond = async (
+      blueprint: any,
+      confirmedBlueprint: any,
+      campaignContext: any,
+      competitorUrls: string[],
+      businessData: any,
+      reason: string,
+    ) => {
+      log("FALLBACK_START", { reason });
+      const fallbackPlan = generateFallbackPlan({ confirmedBlueprint, campaignContext, competitorUrls, businessData });
+      fallbackPlan.blueprintVersion = blueprint.blueprintVersion;
+
+      await db.update(strategicBlueprints)
+        .set({
+          status: "ORCHESTRATED",
+          orchestratorPlan: JSON.stringify(fallbackPlan),
+          orchestratedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(strategicBlueprints.id, id));
+
+      const planSections = Object.keys(fallbackPlan).filter(k => !["blueprintVersion", "fallback", "fallbackReason"].includes(k));
+      const summary = `Fallback plan — ${planSections.length} sections (${reason})`;
+      const [planRow] = await db.insert(strategicPlans).values({
+        accountId,
+        blueprintId: id,
+        campaignId: campaignId || "default",
+        planJson: JSON.stringify(fallbackPlan),
+        planSummary: summary,
+        status: "DRAFT",
+        executionStatus: "IDLE",
+      }).returning();
+
+      await logAuditEvent({
+        accountId,
+        campaignId: campaignId || undefined,
+        blueprintId: id,
+        blueprintVersion: blueprint.blueprintVersion,
+        event: "ORCHESTRATOR_FALLBACK",
+        details: { requestId, reason, planId: planRow.id, planSections, durationMs: Date.now() - startMs, stageTimes },
+      });
+
+      log("FALLBACK_COMPLETE", { planId: planRow.id, durationMs: Date.now() - startMs });
+
+      return res.json({
+        success: true,
+        fallback: true,
+        fallbackReason: reason,
+        blueprintId: id,
+        blueprintVersion: blueprint.blueprintVersion,
+        status: "ORCHESTRATED",
+        orchestratorPlan: fallbackPlan,
+        planId: planRow.id,
+        planStatus: "DRAFT",
+        requestId,
+      });
     };
 
     try {
@@ -322,7 +438,7 @@ export function registerOrchestratorRoutes(app: Express) {
 
       accountId = blueprint.accountId;
       campaignId = blueprint.campaignId || "";
-      log("DB_READ_BLUEPRINT", { accountId, campaignId, status: blueprint.status });
+      log("LOAD_CONTEXT", { accountId, campaignId, status: blueprint.status });
 
       if (blueprint.status !== "VALIDATED") {
         log("ABORT: status gate", { currentStatus: blueprint.status });
@@ -404,8 +520,8 @@ export function registerOrchestratorRoutes(app: Express) {
 
       log("VALIDATION_PASSED", { competitorCount, competitors: competitorUrls.slice(0, 5) });
 
-      const marketMap = blueprint.marketMap ? JSON.parse(blueprint.marketMap) : null;
-      const validationResult = blueprint.validationResult ? JSON.parse(blueprint.validationResult) : null;
+      const marketMapRaw = blueprint.marketMap ? JSON.parse(blueprint.marketMap) : null;
+      const validationResultRaw = blueprint.validationResult ? JSON.parse(blueprint.validationResult) : null;
 
       let businessData: any = null;
       try {
@@ -434,82 +550,64 @@ export function registerOrchestratorRoutes(app: Express) {
         const signalAccountId = campaignContext.accountId || "default";
         const signalCampaignId = campaignContext.campaignId;
         if (!signalCampaignId) {
-          throw new Error("No campaignId in blueprint campaignContext — skipping signal injection");
+          throw new Error("No campaignId — skipping signal injection");
         }
         const [memories, highConfidenceInsights, topMoats] = await Promise.all([
-          db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, signalAccountId), eq(strategyMemory.campaignId, signalCampaignId), sql`${strategyMemory.campaignId} != 'unscoped_legacy'`)).orderBy(desc(strategyMemory.updatedAt)).limit(15),
+          db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, signalAccountId), eq(strategyMemory.campaignId, signalCampaignId), sql`${strategyMemory.campaignId} != 'unscoped_legacy'`)).orderBy(desc(strategyMemory.updatedAt)).limit(5),
           db.select().from(strategyInsights)
             .where(and(gte(strategyInsights.confidence, 0.7), eq(strategyInsights.accountId, signalAccountId), eq(strategyInsights.campaignId, signalCampaignId), sql`${strategyInsights.campaignId} != 'unscoped_legacy'`))
-            .orderBy(desc(strategyInsights.createdAt)).limit(10),
+            .orderBy(desc(strategyInsights.createdAt)).limit(5),
           db.select().from(moatCandidates)
             .where(and(eq(moatCandidates.status, "candidate"), eq(moatCandidates.accountId, signalAccountId), eq(moatCandidates.campaignId, signalCampaignId), sql`${moatCandidates.campaignId} != 'unscoped_legacy'`))
-            .orderBy(desc(moatCandidates.moatScore)).limit(5),
+            .orderBy(desc(moatCandidates.moatScore)).limit(3),
         ]);
 
         if (memories.length > 0 || highConfidenceInsights.length > 0 || topMoats.length > 0) {
           performanceSignalsInjected = true;
           performanceIntelligenceBlock = `
-
-PERFORMANCE INTELLIGENCE LAYER (optional signal injection — do NOT override confirmed blueprint):
-These signals come from the Performance Intelligence system analyzing past performance data. Use them to INFORM execution priorities, NOT to override the confirmed blueprint.
-
-${memories.length > 0 ? `STRATEGIC MEMORY (${memories.length} learnings):
-${JSON.stringify(memories.map(m => ({ type: m.memoryType, label: m.label, score: m.score, winner: m.isWinner })))}` : "No strategic memory available."}
-
-${highConfidenceInsights.length > 0 ? `HIGH-CONFIDENCE INSIGHTS (${highConfidenceInsights.length} signals, confidence ≥ 0.7):
-${JSON.stringify(highConfidenceInsights.map(i => ({ category: i.category, insight: i.insight, confidence: i.confidence, metric: i.relatedMetric })))}` : "No high-confidence insights available."}
-
-${topMoats.length > 0 ? `MOAT SIGNALS (${topMoats.length} candidates):
-${JSON.stringify(topMoats.map(m => ({ label: m.label, moatScore: m.moatScore, sourceType: m.sourceType })))}` : "No moat signals available."}
-
-NOTE: Performance signals were ${performanceSignalsInjected ? "INJECTED" : "NOT AVAILABLE"}. The confirmed blueprint remains the ONLY source of truth.`;
+PERFORMANCE SIGNALS (optional — do NOT override blueprint):
+${memories.length > 0 ? `Memory: ${capJson(memories.map(m => ({ type: m.memoryType, label: m.label, score: m.score })), 500)}` : ""}
+${highConfidenceInsights.length > 0 ? `Insights: ${capJson(highConfidenceInsights.map(i => ({ category: i.category, insight: i.insight, confidence: i.confidence })), 500)}` : ""}
+${topMoats.length > 0 ? `Moats: ${capJson(topMoats.map(m => ({ label: m.label, moatScore: m.moatScore })), 300)}` : ""}`;
         }
       } catch (err) {
         log("PERF_INTEL_SKIPPED", { error: (err as Error).message });
       }
 
+      log("BUILD_PROMPT");
+
       const businessDataBlock = businessData ? `
-BUSINESS DATA LAYER (source of truth for distribution derivation):
-- Business Type: ${businessData.businessType}
-- Business Location: ${businessData.businessLocation}
-- Core Offer: ${businessData.coreOffer}
-- Price Range: ${businessData.priceRange}
-- Target Audience Age: ${businessData.targetAudienceAge}
-- Target Audience Segment: ${businessData.targetAudienceSegment}
-- Monthly Budget: ${businessData.monthlyBudget}
-- Funnel Objective: ${businessData.funnelObjective}
-- Primary Conversion Channel: ${businessData.primaryConversionChannel}
+BUSINESS DATA:
+- Type: ${businessData.businessType || "N/A"}, Location: ${businessData.businessLocation || "N/A"}
+- Offer: ${capText(businessData.coreOffer, 200)}, Price: ${businessData.priceRange || "N/A"}
+- Audience: ${businessData.targetAudienceAge || "N/A"} / ${capText(businessData.targetAudienceSegment, 150)}
+- Budget: ${businessData.monthlyBudget || "N/A"}, Funnel: ${businessData.funnelObjective || "N/A"}
+- Conversion: ${businessData.primaryConversionChannel || "N/A"}
+Derive distribution from these fields.` : `No Business Data Layer found. Use reasonable defaults based on campaign objective.`;
 
-CRITICAL: Derive ALL content distribution numbers (reels/week, posts/week, stories/day, carousels/week, videos/week) from the above business profile. Do NOT use generic defaults.` : `
-WARNING: No Business Data Layer found. Distribution may use generic defaults. This is a degraded state.`;
+      const cappedBlueprint = capJson(confirmedBlueprint, 2000);
+      const cappedMarketMap = marketMapRaw ? capJson(marketMapRaw, 1000) : "";
+      const cappedValidation = validationResultRaw ? capJson(validationResultRaw, 800) : "";
 
-      const userPrompt = `Generate execution plans from this validated blueprint (v${blueprint.blueprintVersion}). Do NOT reinterpret or override ANY confirmed data. The confirmed blueprint is the ONLY source of truth for positioning. The Business Data Layer is the ONLY source of truth for distribution parameters.
+      const userPrompt = `Generate 6 execution plans from validated blueprint v${blueprint.blueprintVersion}. Do NOT override confirmed data.
 
-All plans must be geo-scoped to: ${campaignContext.location || "Not specified"}
+Geo-scope: ${campaignContext.location || "Not specified"}
 
-CAMPAIGN CONTEXT:
-- Campaign: ${campaignContext.campaignName}
-- Objective: ${campaignContext.objective}
-- Location: ${campaignContext.location || "Not specified"}
-- Platform: ${campaignContext.platform}
-- Mode: PRODUCTION
+CAMPAIGN: ${campaignContext.campaignName} | ${campaignContext.objective} | ${campaignContext.location || "N/A"} | ${campaignContext.platform}
 ${businessDataBlock}
 
-CONFIRMED BLUEPRINT (v${blueprint.blueprintVersion} — source of truth — do NOT change any values):
-${JSON.stringify(confirmedBlueprint, null, 2)}
+BLUEPRINT (source of truth): ${cappedBlueprint}
 
-AVERAGE SELLING PRICE: $${blueprint.averageSellingPrice}
-
-COMPETITOR URLS: ${competitorUrls.join(", ")}
-
-${marketMap ? `MARKET MAP:\n${JSON.stringify(marketMap, null, 2)}` : ""}
-
-${validationResult ? `VALIDATION RESULT:\n${JSON.stringify(validationResult, null, 2)}` : ""}
+ASP: $${blueprint.averageSellingPrice || "N/A"}
+COMPETITORS: ${competitorUrls.slice(0, 5).join(", ")}
+${cappedMarketMap ? `MARKET MAP: ${cappedMarketMap}` : ""}
+${cappedValidation ? `VALIDATION: ${cappedValidation}` : ""}
 ${performanceIntelligenceBlock}
 
-Generate all 6 execution plans now. Strictly from the confirmed, validated data. Distribution MUST be derived from the Business Data Layer fields (business type: ${businessData?.businessType || "unknown"}, funnel objective: ${businessData?.funnelObjective || "unknown"}, budget: ${businessData?.monthlyBudget || "unknown"}, conversion channel: ${businessData?.primaryConversionChannel || "unknown"}). No hardcoded defaults. Geo-scoped to ${campaignContext.location || "specified location"}.`;
+Generate all 6 sections now. Keep output concise — each section with 3-5 items max. JSON only.`;
 
-      log("BEFORE_AI_CALL", { model: "gpt-5.2", maxTokens: 4000 });
+      const promptSizeEstimate = ORCHESTRATOR_PROMPT.length + userPrompt.length;
+      log("AI_CALL_START", { model: "gpt-5.2", maxTokens: 3000, promptChars: promptSizeEstimate });
 
       let response;
       try {
@@ -519,13 +617,13 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
             { role: "system", content: ORCHESTRATOR_PROMPT },
             { role: "user", content: userPrompt },
           ],
-          max_tokens: 4000,
+          max_tokens: 3000,
           accountId: "default",
           endpoint: "strategic-orchestrator",
         });
       } catch (aiErr: any) {
         const durationMs = Date.now() - startMs;
-        log("AI_CALL_FAILED", { code: aiErr.code, message: aiErr.message, durationMs });
+        log("AI_CALL_FAIL", { code: aiErr.code, message: aiErr.message, durationMs });
 
         await logAuditEvent({
           accountId,
@@ -533,7 +631,7 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
           blueprintId: id,
           blueprintVersion: blueprint.blueprintVersion,
           event: "ORCHESTRATOR_FAILED",
-          details: { requestId, error: aiErr.code || "AI_ERROR", message: aiErr.message, durationMs },
+          details: { requestId, error: aiErr.code || "AI_ERROR", message: aiErr.message, durationMs, stageTimes },
         });
 
         if (aiErr.code === "AI_BUDGET_EXCEEDED") {
@@ -545,28 +643,22 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
           });
         }
 
-        if (aiErr.message?.includes("timeout") || aiErr.message?.includes("timed out") || aiErr.code === "ETIMEDOUT") {
-          return res.status(504).json({
-            success: false,
-            error: "ORCHESTRATOR_TIMEOUT",
-            message: "AI generation timed out. This is a complex operation — please retry.",
-            durationMs,
-            requestId,
-          });
+        const isTimeout = aiErr.message?.includes("timeout") || aiErr.message?.includes("timed out") || aiErr.code === "ETIMEDOUT";
+        if (isTimeout) {
+          log("TIMEOUT_FALLBACK_TRIGGERED", { durationMs });
+          return saveFallbackAndRespond(blueprint, confirmedBlueprint, campaignContext, competitorUrls, businessData, "AI generation timed out");
         }
 
-        return res.status(500).json({
-          success: false,
-          error: "AI_CALL_FAILED",
-          message: `AI call failed: ${aiErr.message}`,
-          requestId,
-        });
+        log("AI_ERROR_FALLBACK_TRIGGERED", { durationMs });
+        return saveFallbackAndRespond(blueprint, confirmedBlueprint, campaignContext, competitorUrls, businessData, `AI call failed: ${aiErr.message}`);
       }
 
-      log("AFTER_AI_CALL", { durationMs: Date.now() - startMs });
+      log("AI_CALL_END", { durationMs: Date.now() - startMs, finishReason: response.choices[0]?.finish_reason });
 
       const rawText = response.choices[0]?.message?.content || "";
       let orchestratorPlan: any;
+
+      log("PARSE", { rawLength: rawText.length, finishReason: response.choices[0]?.finish_reason });
 
       try {
         const jsonMatch = rawText.match(/\{[\s\S]*\}/);
@@ -576,7 +668,7 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
           throw new Error("No JSON object found in model response");
         }
       } catch (parseErr: any) {
-        log("PARSE_FAILED", { error: parseErr.message, finishReason: response.choices[0]?.finish_reason });
+        log("PARSE_FAIL", { error: parseErr.message, finishReason: response.choices[0]?.finish_reason });
 
         await logAuditEvent({
           accountId,
@@ -584,31 +676,21 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
           blueprintId: id,
           blueprintVersion: blueprint.blueprintVersion,
           event: "ORCHESTRATOR_FAILED",
-          details: { requestId, error: "PARSE_FAILED", message: parseErr.message, durationMs: Date.now() - startMs },
+          details: { requestId, error: "PARSE_FAILED", message: parseErr.message, durationMs: Date.now() - startMs, stageTimes },
         });
 
-        return res.status(500).json({
-          success: false,
-          error: "ORCHESTRATOR_PARSE_FAILED",
-          message: `Orchestrator returned invalid format: ${parseErr.message}. Please retry.`,
-          finishReason: response.choices[0]?.finish_reason || "unknown",
-          requestId,
-        });
+        log("PARSE_FALLBACK_TRIGGERED");
+        return saveFallbackAndRespond(blueprint, confirmedBlueprint, campaignContext, competitorUrls, businessData, `AI response parsing failed: ${parseErr.message}`);
       }
 
       if (!orchestratorPlan || Object.keys(orchestratorPlan).length === 0) {
-        log("EMPTY_PLAN");
-        return res.status(500).json({
-          success: false,
-          error: "ORCHESTRATOR_EMPTY_PLAN",
-          message: "Orchestrator generated an empty execution plan. Please retry.",
-          requestId,
-        });
+        log("EMPTY_PLAN_FALLBACK_TRIGGERED");
+        return saveFallbackAndRespond(blueprint, confirmedBlueprint, campaignContext, competitorUrls, businessData, "AI returned empty plan");
       }
 
       orchestratorPlan.blueprintVersion = blueprint.blueprintVersion;
 
-      log("BEFORE_DB_WRITE");
+      log("DB_WRITE");
 
       await db.update(strategicBlueprints)
         .set({
@@ -618,8 +700,6 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
           updatedAt: new Date(),
         })
         .where(eq(strategicBlueprints.id, id));
-
-      log("AFTER_DB_WRITE");
 
       const planSections = Object.keys(orchestratorPlan).filter(k => k !== "blueprintVersion");
       const summary = `Execution plan — ${planSections.length} structured sections`;
@@ -646,10 +726,12 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
           planSections,
           performanceSignalsInjected,
           durationMs: Date.now() - startMs,
+          stageTimes,
+          promptChars: ORCHESTRATOR_PROMPT.length + userPrompt.length,
         },
       });
 
-      log("COMPLETE", { durationMs: Date.now() - startMs, planId: realPlanRow.id });
+      log("COMPLETE", { durationMs: Date.now() - startMs, planId: realPlanRow.id, stageTimes });
 
       res.json({
         success: true,
@@ -663,7 +745,7 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
       });
     } catch (error: any) {
       const durationMs = Date.now() - startMs;
-      log("UNHANDLED_ERROR", { code: error.code, message: error.message, durationMs });
+      log("UNHANDLED_ERROR", { code: error.code, message: error.message, durationMs, stageTimes });
 
       await logAuditEvent({
         accountId,
@@ -671,7 +753,7 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
         blueprintId: id,
         blueprintVersion: 0,
         event: "ORCHESTRATOR_FAILED",
-        details: { requestId, error: error.code || "INTERNAL_ERROR", message: error.message, durationMs },
+        details: { requestId, error: error.code || "INTERNAL_ERROR", message: error.message, durationMs, stageTimes },
       }).catch(() => {});
 
       res.status(500).json({
@@ -679,6 +761,7 @@ Generate all 6 execution plans now. Strictly from the confirmed, validated data.
         error: "ORCHESTRATOR_INTERNAL_ERROR",
         message: `Failed to generate execution plans: ${error.message}`,
         requestId,
+        retryAfterMs: 5000,
       });
     }
   });
