@@ -11,7 +11,6 @@ interface CampaignInfo {
   status: string;
   budget?: string;
   startDate?: string;
-  isDemo?: boolean;
   location?: string;
 }
 
@@ -30,6 +29,14 @@ interface CampaignWarning {
   campaignStatus: string;
 }
 
+interface CreateCampaignInput {
+  name: string;
+  objective: string;
+  location: string;
+  platform?: string;
+  notes?: string;
+}
+
 interface CampaignContextValue {
   campaigns: CampaignInfo[];
   selectedCampaign: CampaignSelection | null;
@@ -38,6 +45,7 @@ interface CampaignContextValue {
   isLoading: boolean;
   isCampaignSelected: boolean;
   selectCampaign: (campaign: CampaignInfo) => Promise<void>;
+  createCampaign: (input: CreateCampaignInput) => Promise<void>;
   clearSelection: () => Promise<void>;
   refreshCampaigns: () => Promise<void>;
   refreshSelection: () => Promise<void>;
@@ -109,6 +117,30 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const createCampaign = useCallback(async (input: CreateCampaignInput) => {
+    try {
+      const res = await fetch(getApiUrl('/api/campaigns/create'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setSelectedCampaign(data.selection);
+        setWarning(null);
+        const newCampaign: CampaignInfo = data.campaign;
+        setCampaigns(prev => [newCampaign, ...prev]);
+      } else {
+        const err = await res.json();
+        throw new Error(err.message || 'Failed to create campaign');
+      }
+    } catch (err: any) {
+      console.error('[CampaignContext] Failed to create campaign:', err);
+      throw err;
+    }
+  }, []);
+
   const clearSelection = useCallback(async () => {
     try {
       await fetch(getApiUrl('/api/campaigns/selected'), { method: 'DELETE' });
@@ -141,6 +173,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         isLoading,
         isCampaignSelected,
         selectCampaign,
+        createCampaign,
         clearSelection,
         refreshCampaigns,
         refreshSelection,

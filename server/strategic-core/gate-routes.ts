@@ -10,14 +10,12 @@ interface CampaignContextObject {
   objective: string;
   location: string | null;
   platform: string;
-  isDemo: boolean;
 }
 
 async function resolveCampaignContext(
   accountId: string,
   campaignId?: string,
   metaConnected?: boolean,
-  demoLocation?: string,
 ): Promise<{ context: CampaignContextObject | null; error: string | null }> {
   if (campaignId) {
     const [campaign] = await db.select().from(campaignSelections)
@@ -37,7 +35,6 @@ async function resolveCampaignContext(
         objective: campaign.campaignGoalType,
         location: campaign.campaignLocation || null,
         platform: campaign.selectedPlatform || "meta",
-        isDemo: false,
       },
       error: null,
     };
@@ -55,7 +52,6 @@ async function resolveCampaignContext(
         objective: selectedCampaign.campaignGoalType,
         location: selectedCampaign.campaignLocation || null,
         platform: selectedCampaign.selectedPlatform || "meta",
-        isDemo: false,
       },
       error: null,
     };
@@ -76,7 +72,6 @@ export function registerGateRoutes(app: Express) {
         competitorUrls,
         averageSellingPrice,
         metaConnected = false,
-        demoLocation,
       } = req.body;
 
       if (!competitorUrls || !Array.isArray(competitorUrls) || competitorUrls.length < 1) {
@@ -110,7 +105,7 @@ export function registerGateRoutes(app: Express) {
       }
 
       const { context: campaignContext, error: campaignError } = await resolveCampaignContext(
-        accountId, campaignId, metaConnected, demoLocation,
+        accountId, campaignId, metaConnected,
       );
       if (campaignError) {
         return res.status(400).json({
@@ -142,7 +137,7 @@ export function registerGateRoutes(app: Express) {
         blueprintId: blueprint.id,
         blueprintVersion: 1,
         event: "GATE_PASSED",
-        details: { competitorCount: validUrls.length, averageSellingPrice: Number(averageSellingPrice), isDemo: campaignContext!.isDemo },
+        details: { competitorCount: validUrls.length, averageSellingPrice: Number(averageSellingPrice) },
       });
 
       res.json({

@@ -33,7 +33,71 @@ export function registerCampaignRoutes(app: Express) {
       });
     } catch (error: any) {
       console.error("[Campaigns] Error fetching campaigns:", error);
-      res.status(500).json({ error: "Failed to fetch campaigns" });
+      res.status(500).json({ code: "LIST_FAILED", message: "Failed to fetch campaigns", requestId: `lst_${Date.now()}` });
+    }
+  });
+
+  app.post("/api/campaigns/create", async (req, res) => {
+    try {
+      const { name, objective, location, platform, notes, accountId: reqAccountId } = req.body;
+      const accountId = reqAccountId || "default";
+      const requestId = `crt_${Date.now()}`;
+
+      if (!name || !name.trim()) {
+        return res.status(400).json({ code: "MISSING_NAME", message: "Campaign name is required", requestId });
+      }
+      if (!objective) {
+        return res.status(400).json({ code: "MISSING_OBJECTIVE", message: "Campaign objective is required", requestId });
+      }
+      if (!VALID_GOAL_TYPES.includes(objective)) {
+        return res.status(400).json({
+          code: "INVALID_OBJECTIVE",
+          message: `Invalid objective. Must be one of: ${VALID_GOAL_TYPES.join(", ")}`,
+          requestId,
+        });
+      }
+      if (!location || !location.trim()) {
+        return res.status(400).json({ code: "MISSING_LOCATION", message: "Campaign location is required", requestId });
+      }
+
+      const campaignId = `campaign_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+      const campaignName = name.trim();
+
+      const inserted = await db
+        .insert(campaignSelections)
+        .values({
+          accountId,
+          selectedCampaignId: campaignId,
+          selectedCampaignName: campaignName,
+          selectedPlatform: platform || "meta",
+          campaignGoalType: objective,
+          campaignStatus: "active",
+          campaignLocation: location.trim(),
+          selectedAt: new Date(),
+        })
+        .returning();
+
+      const selection = inserted[0];
+
+      console.log(`[Campaigns] Campaign created: ${campaignName} (${objective}) id=${campaignId} account=${accountId}`);
+
+      res.json({
+        success: true,
+        requestId,
+        campaign: {
+          id: campaignId,
+          name: campaignName,
+          platform: platform || "meta",
+          goalType: objective,
+          status: "active",
+          location: location.trim(),
+        },
+        selection,
+        message: "Campaign created and auto-selected",
+      });
+    } catch (error: any) {
+      console.error("[Campaigns] Create campaign error:", error);
+      res.status(500).json({ code: "CREATE_FAILED", message: "Failed to create campaign", requestId: `crt_err_${Date.now()}` });
     }
   });
 
@@ -42,13 +106,16 @@ export function registerCampaignRoutes(app: Express) {
       const { campaignId, campaignName, platform, goalType, campaignLocation, accountId: reqAccountId } = req.body;
       const accountId = reqAccountId || "default";
 
+      const requestId = `sel_${Date.now()}`;
       if (!campaignId || !campaignName || !goalType) {
-        return res.status(400).json({ error: "campaignId, campaignName, and goalType are required" });
+        return res.status(400).json({ code: "MISSING_FIELDS", message: "campaignId, campaignName, and goalType are required", requestId });
       }
 
       if (!VALID_GOAL_TYPES.includes(goalType)) {
         return res.status(400).json({
-          error: `Invalid goalType. Must be one of: ${VALID_GOAL_TYPES.join(", ")}`,
+          code: "INVALID_GOAL_TYPE",
+          message: `Invalid goalType. Must be one of: ${VALID_GOAL_TYPES.join(", ")}`,
+          requestId,
         });
       }
 
@@ -108,7 +175,7 @@ export function registerCampaignRoutes(app: Express) {
       });
     } catch (error: any) {
       console.error("[Campaigns] Error selecting campaign:", error);
-      res.status(500).json({ error: "Failed to select campaign" });
+      res.status(500).json({ code: "SELECT_FAILED", message: "Failed to select campaign", requestId: `sel_err_${Date.now()}` });
     }
   });
 
@@ -151,7 +218,7 @@ export function registerCampaignRoutes(app: Express) {
       });
     } catch (error: any) {
       console.error("[Campaigns] Error fetching selection:", error);
-      res.status(500).json({ error: "Failed to fetch selected campaign" });
+      res.status(500).json({ code: "SELECTION_FETCH_FAILED", message: "Failed to fetch selected campaign", requestId: `sel_get_${Date.now()}` });
     }
   });
 
@@ -166,7 +233,7 @@ export function registerCampaignRoutes(app: Express) {
       res.json({ success: true, message: "Campaign selection cleared" });
     } catch (error: any) {
       console.error("[Campaigns] Error clearing selection:", error);
-      res.status(500).json({ error: "Failed to clear campaign selection" });
+      res.status(500).json({ code: "CLEAR_FAILED", message: "Failed to clear campaign selection", requestId: `clr_${Date.now()}` });
     }
   });
 
@@ -178,7 +245,7 @@ export function registerCampaignRoutes(app: Express) {
       res.json({ success: true, ...dashboardMetrics, campaign: campaignContext });
     } catch (error: any) {
       console.error("[Dashboard] Metrics error:", error);
-      res.status(500).json({ error: "Failed to fetch dashboard metrics", httpCode: 500 });
+      res.status(500).json({ code: "DASHBOARD_FAILED", message: "Failed to fetch dashboard metrics", requestId: `dash_${Date.now()}` });
     }
   });
 
@@ -189,7 +256,7 @@ export function registerCampaignRoutes(app: Express) {
       res.json({ success: true, mode });
     } catch (error: any) {
       console.error("[Dashboard] Mode check error:", error);
-      res.status(500).json({ error: "Failed to check mode" });
+      res.status(500).json({ code: "MODE_CHECK_FAILED", message: "Failed to check mode", requestId: `mode_${Date.now()}` });
     }
   });
 
@@ -201,7 +268,7 @@ export function registerCampaignRoutes(app: Express) {
       res.json({ success: true, metrics, campaign: campaignContext });
     } catch (error: any) {
       console.error("[Campaigns] Metrics error:", error);
-      res.status(500).json({ error: "Failed to fetch campaign metrics" });
+      res.status(500).json({ code: "METRICS_FAILED", message: "Failed to fetch campaign metrics", requestId: `met_${Date.now()}` });
     }
   });
 
@@ -230,7 +297,7 @@ export function registerCampaignRoutes(app: Express) {
       });
     } catch (error: any) {
       console.error("[Campaigns] Signals error:", error);
-      res.status(500).json({ error: "Failed to detect performance signals" });
+      res.status(500).json({ code: "SIGNALS_FAILED", message: "Failed to detect performance signals", requestId: `sig_${Date.now()}` });
     }
   });
 
@@ -242,7 +309,7 @@ export function registerCampaignRoutes(app: Express) {
       res.json({ success: true, summary, campaign: campaignContext });
     } catch (error: any) {
       console.error("[Campaigns] Revenue summary error:", error);
-      res.status(500).json({ error: "Failed to fetch revenue summary" });
+      res.status(500).json({ code: "REVENUE_FAILED", message: "Failed to fetch revenue summary", requestId: `rev_${Date.now()}` });
     }
   });
 
@@ -262,7 +329,7 @@ export function registerCampaignRoutes(app: Express) {
       });
     } catch (error: any) {
       console.error("[Campaigns] Manual metrics GET error:", error);
-      res.status(500).json({ error: "Failed to fetch manual metrics" });
+      res.status(500).json({ code: "MANUAL_METRICS_FAILED", message: "Failed to fetch manual metrics", requestId: `mm_get_${Date.now()}` });
     }
   });
 
@@ -273,7 +340,7 @@ export function registerCampaignRoutes(app: Express) {
       const { spend, revenue, leads, conversions, impressions, clicks } = req.body;
 
       if (spend === undefined && revenue === undefined && leads === undefined && conversions === undefined && impressions === undefined && clicks === undefined) {
-        return res.status(400).json({ error: "At least one metric field is required" });
+        return res.status(400).json({ code: "MISSING_METRICS", message: "At least one metric field is required", requestId: `mm_${Date.now()}` });
       }
 
       const existing = await db.select().from(manualCampaignMetrics)
@@ -322,7 +389,7 @@ export function registerCampaignRoutes(app: Express) {
       });
     } catch (error: any) {
       console.error("[Campaigns] Manual metrics PUT error:", error);
-      res.status(500).json({ error: "Failed to save manual metrics" });
+      res.status(500).json({ code: "MANUAL_METRICS_SAVE_FAILED", message: "Failed to save manual metrics", requestId: `mm_put_${Date.now()}` });
     }
   });
 
@@ -359,8 +426,9 @@ export async function requireCampaign(req: Request, res: Response, next: NextFun
 
     if (selections.length === 0) {
       return res.status(400).json({
-        error: "CAMPAIGN_REQUIRED",
+        code: "CAMPAIGN_REQUIRED",
         message: "No campaign selected. Please select a campaign before accessing performance data.",
+        requestId: `mw_${Date.now()}`,
       });
     }
 
@@ -369,17 +437,19 @@ export async function requireCampaign(req: Request, res: Response, next: NextFun
     const campaignStatus = selection.campaignStatus || "active";
     if (campaignStatus === "paused" || campaignStatus === "removed") {
       return res.status(400).json({
-        error: "CAMPAIGN_INVALID",
+        code: "CAMPAIGN_INVALID",
         message: `Campaign "${selection.selectedCampaignName}" is ${campaignStatus}. Please select an active campaign.`,
         campaignStatus,
+        requestId: `mw_${Date.now()}`,
       });
     }
 
     const resolvedCampaignId = selection.selectedCampaignId;
     if (!resolvedCampaignId || resolvedCampaignId === "unscoped_legacy") {
       return res.status(400).json({
-        error: "CAMPAIGN_INVALID",
+        code: "CAMPAIGN_INVALID",
         message: "Invalid campaign ID. Please select a valid campaign.",
+        requestId: `mw_${Date.now()}`,
       });
     }
 
@@ -395,6 +465,6 @@ export async function requireCampaign(req: Request, res: Response, next: NextFun
     next();
   } catch (error: any) {
     console.error("[Campaigns] Middleware error:", error);
-    return res.status(500).json({ error: "Failed to validate campaign context" });
+    return res.status(500).json({ code: "MIDDLEWARE_FAILED", message: "Failed to validate campaign context", requestId: `mw_err_${Date.now()}` });
   }
 }

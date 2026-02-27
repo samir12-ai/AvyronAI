@@ -1,0 +1,111 @@
+
+⸻
+
+Subject: P0 Patch+ — Campaign Creation System (No More Static Campaign List)
+
+Replit,
+
+This is not optional.
+
+The Campaign section must be upgraded immediately.
+The system cannot depend on predefined or static campaigns anymore.
+
+We need a proper Campaign Creation & Management layer — stable, scoped, and production-ready.
+
+⸻
+
+REQUIRED — Build Campaign Manager (Patch+)
+
+1) Add “+ New Campaign” in Campaign Section
+
+User must be able to:
+	•	Click + New Campaign
+	•	Fill required fields:
+	•	Campaign Name (required)
+	•	Objective (required)
+	•	Location (required)
+	•	Platform (Meta for now)
+	•	Optional notes
+	•	Click Save
+	•	Campaign must be created in DB
+	•	Campaign must auto-select as active immediately
+
+No page reload.
+No refresh.
+No broken state.
+
+⸻
+
+2) Backend Requirements
+
+You must implement:
+	•	Create campaign endpoint
+	•	List campaigns endpoint
+	•	Select campaign endpoint
+	•	Account-level scoping enforced
+	•	All dashboard, AI, plan, calendar endpoints must respect campaignId
+
+No global fallback logic allowed.
+
+⸻
+
+3) State Discipline (No More Hanging Data)
+
+When:
+	•	Creating campaign
+	•	Switching campaign
+
+The UI must:
+	•	Immediately clear old state
+	•	Show loading
+	•	Fetch fresh scoped data
+
+Zero stale data allowed.
+Zero “flash” of previous campaign metrics.
+
+If I switch A → B → A rapidly, it must remain correct.
+
+⸻
+
+4) Manual Metrics Compatibility
+
+After creating a new campaign:
+	•	User must immediately be able to add manual metrics.
+	•	Dashboard must reflect manual metrics.
+	•	AI Actions must derive from manual metrics + plan progress.
+	•	No “Error unknown”.
+	•	No blank broken dashboard.
+
+⸻
+
+Acceptance Criteria (Hard Lock)
+
+I will only consider this done when:
+	•	I can create a campaign in under 10 seconds.
+	•	It auto-selects.
+	•	Dashboard updates instantly.
+	•	Manual metrics entry works immediately.
+	•	Switching campaigns never shows previous campaign data.
+	•	All endpoints return structured errors (code, message, requestId).
+	•	No demo references anywhere.
+
+⸻
+
+Tests Required
+
+Provide:
+	1.	E2E test:
+	•	Create Campaign
+	•	Auto-select
+	•	Add manual metrics
+	•	Dashboard reflects values
+	•	Switch campaign
+	•	No stale state
+	2.	Campaign isolation test with two real campaigns (both have metrics)
+	3.	Screenshot or recording proof.
+
+No partial implementation.
+No “works on my side”.
+
+This is foundational.
+Fix it properly.

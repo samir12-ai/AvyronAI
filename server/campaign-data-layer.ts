@@ -74,7 +74,7 @@ export interface DashboardMetricsResponse {
   };
   hasData: boolean;
   noDataFlag: boolean;
-  isDemoData: boolean;
+  isDemoData: false;
   dataSource: "META" | "MANUAL" | "PLAN" | "NONE";
   planMetrics: PlanDrivenMetrics;
 }
