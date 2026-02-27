@@ -670,6 +670,15 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     }
   }, [blueprint]);
 
+  const [autoRetryAfterRegenerate, setAutoRetryAfterRegenerate] = useState(false);
+
+  useEffect(() => {
+    if (autoRetryAfterRegenerate && blueprint?.status === 'VALIDATED' && !loading) {
+      setAutoRetryAfterRegenerate(false);
+      runOrchestrator();
+    }
+  }, [autoRetryAfterRegenerate, blueprint?.status, loading, runOrchestrator]);
+
   const regeneratePlan = useCallback(async () => {
     if (!blueprint) return;
 
@@ -692,6 +701,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
               const data = await res.json();
               if (!res.ok || !data.success) {
                 setError((data.message || data.error || 'Regeneration failed'));
+                setLoading(false);
                 return;
               }
 
@@ -703,10 +713,13 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
                 planStatus: null,
               } : null);
               setCurrentPhase(5);
+              setIsFallbackPlan(false);
+              setFallbackReason(null);
+              setLoading(false);
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              setAutoRetryAfterRegenerate(true);
             } catch (err: any) {
               setError(`Network error: ${err.message}`);
-            } finally {
               setLoading(false);
             }
           },
@@ -1464,6 +1477,26 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     );
   };
 
+  const safeStr = (val: any): string => {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'string') return val;
+    if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+    if (Array.isArray(val)) return val.map(safeStr).join(', ');
+    if (typeof val === 'object') {
+      const pick = val.type || val.name || val.label || val.value || val.title || val.text;
+      if (typeof pick === 'string') return pick;
+      try { return JSON.stringify(val); } catch { return '[object]'; }
+    }
+    return String(val);
+  };
+
+  const safeArr = (val: any): string => {
+    if (!val) return '';
+    if (typeof val === 'string') return val;
+    if (Array.isArray(val)) return val.map(safeStr).join(', ');
+    return safeStr(val);
+  };
+
   const renderPhase5 = () => {
     let plan = blueprint?.orchestratorPlan;
     if (typeof plan === 'string') {
@@ -1682,19 +1715,39 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
               </View>
 
               {sec.key === 'contentDistributionPlan' && (
-                data.platforms && data.platforms.length > 0 ? data.platforms.map((p: any, i: number) => (
-                  <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
-                    <View style={s.execItemHeader}>
-                      <Text style={[s.execItemTitle, { color: colors.text }]}>{p.platform}</Text>
-                      <View style={[s.badge, { backgroundColor: p.priority === 'primary' ? '#10B98120' : '#6366F120' }]}>
-                        <Text style={[s.badgeText, { color: p.priority === 'primary' ? '#10B981' : '#6366F1' }]}>{p.priority}</Text>
+                data.platforms && data.platforms.length > 0 ? data.platforms.map((p: any, i: number) => {
+                  const formatContentTypes = (ct: any[]): string => {
+                    if (!Array.isArray(ct) || ct.length === 0) return '';
+                    return ct.map((item: any) => {
+                      if (typeof item === 'string') return item;
+                      if (item && typeof item === 'object') return item.type || item.name || item.label || JSON.stringify(item);
+                      return String(item);
+                    }).join(', ');
+                  };
+                  return (
+                    <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                      <View style={s.execItemHeader}>
+                        <Text style={[s.execItemTitle, { color: colors.text }]}>{p.platform}</Text>
+                        <View style={[s.badge, { backgroundColor: p.priority === 'primary' ? '#10B98120' : '#6366F120' }]}>
+                          <Text style={[s.badgeText, { color: p.priority === 'primary' ? '#10B981' : '#6366F1' }]}>{p.priority}</Text>
+                        </View>
                       </View>
+                      <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
+                        {p.frequency} · {formatContentTypes(p.contentTypes)}
+                      </Text>
+                      {Array.isArray(p.contentTypes) && p.contentTypes.length > 0 && typeof p.contentTypes[0] === 'object' && (
+                        <View style={{ marginTop: 6, gap: 3 }}>
+                          {p.contentTypes.map((ct: any, ci: number) => (
+                            <View key={ci} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                              <Text style={{ color: colors.textSecondary, fontSize: 11 }}>{ct.type || ct.name || 'Content'}</Text>
+                              <Text style={{ color: colors.accent, fontSize: 11 }}>{ct.percentage || ct.weeklyCount ? `${ct.percentage || ''} ${ct.weeklyCount ? `(${ct.weeklyCount}/wk)` : ''}`.trim() : ''}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
                     </View>
-                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
-                      {p.frequency} · {Array.isArray(p.contentTypes) ? p.contentTypes.join(', ') : ''}
-                    </Text>
-                  </View>
-                )) : (
+                  );
+                }) : (
                   <View style={[s.execItem, { borderColor: colors.cardBorder }]}>
                     <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>No distribution platforms available.</Text>
                   </View>
@@ -1702,91 +1755,103 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
               )}
 
               {sec.key === 'creativeTestingMatrix' && (
-                data.tests && data.tests.length > 0 ? data.tests.map((t: any, i: number) => (
-                  <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
-                    <Text style={[s.execItemTitle, { color: colors.text }]}>{t.testName}</Text>
-                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
-                      Variable: {t.variable} · {t.duration}
-                    </Text>
-                  </View>
-                )) : (
-                  <View style={[s.execItem, { borderColor: colors.cardBorder }]}>
-                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>No creative tests available.</Text>
-                  </View>
-                )
+                (() => {
+                  const tests = data.tests || data.items || (Array.isArray(data) ? data : []);
+                  return tests.length > 0 ? tests.map((t: any, i: number) => (
+                    <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                      <Text style={[s.execItemTitle, { color: colors.text }]}>{safeStr(t.testName || t.name || t.test)}</Text>
+                      <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
+                        Variable: {safeStr(t.variable)} · {safeStr(t.duration)}
+                      </Text>
+                    </View>
+                  )) : (
+                    <View style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                      <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>No creative tests available.</Text>
+                    </View>
+                  );
+                })()
               )}
 
               {sec.key === 'budgetAllocationStructure' && (
                 <>
                   <Text style={[s.budgetTotal, { color: colors.accent }]}>
-                    Recommended: {data.totalRecommended}
+                    Recommended: {safeStr(data.totalRecommended || data.total)}
                   </Text>
-                  {data.breakdown?.map((b: any, i: number) => (
+                  {(data.breakdown || data.allocations || []).map((b: any, i: number) => (
                     <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
                       <View style={s.budgetRow}>
-                        <Text style={[s.execItemTitle, { color: colors.text }]}>{b.category}</Text>
+                        <Text style={[s.execItemTitle, { color: colors.text }]}>{safeStr(b.category || b.name)}</Text>
                         <Text style={[s.budgetPct, { color: colors.accent }]}>{b.percentage}%</Text>
                       </View>
-                      <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>{b.purpose}</Text>
+                      <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>{safeStr(b.purpose || b.description)}</Text>
                     </View>
                   ))}
                 </>
               )}
 
               {sec.key === 'kpiMonitoringPriority' && (
-                data.primaryKPIs && data.primaryKPIs.length > 0 ? data.primaryKPIs.map((k: any, i: number) => (
-                  <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
-                    <Text style={[s.execItemTitle, { color: colors.text }]}>{k.kpi}</Text>
-                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
-                      Target: {k.target} · Check: {k.frequency}
-                    </Text>
-                  </View>
-                )) : (
-                  <View style={[s.execItem, { borderColor: colors.cardBorder }]}>
-                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>No KPIs available.</Text>
-                  </View>
-                )
+                (() => {
+                  const kpis = data.primaryKPIs || data.kpis || data.items || (Array.isArray(data) ? data : []);
+                  return kpis.length > 0 ? kpis.map((k: any, i: number) => (
+                    <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                      <Text style={[s.execItemTitle, { color: colors.text }]}>{safeStr(k.kpi || k.name || k.metric)}</Text>
+                      <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
+                        Target: {safeStr(k.target)} · Check: {safeStr(k.frequency)}
+                      </Text>
+                    </View>
+                  )) : (
+                    <View style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                      <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>No KPIs available.</Text>
+                    </View>
+                  );
+                })()
               )}
 
               {sec.key === 'competitiveWatchTargets' && (
-                data.targets && data.targets.length > 0 ? data.targets.map((t: any, i: number) => (
-                  <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
-                    <Text style={[s.execItemTitle, { color: colors.text }]}>{t.competitor || 'Unknown competitor'}</Text>
-                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
-                      Watch: {Array.isArray(t.watchMetrics) ? t.watchMetrics.join(', ') : 'No metrics specified'}
-                    </Text>
-                  </View>
-                )) : (
-                  <View style={[s.execItem, { borderColor: colors.cardBorder }]}>
-                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>No competitive watch targets available. Consider retrying generation.</Text>
-                  </View>
-                )
+                (() => {
+                  const targets = data.targets || data.competitors || data.items || (Array.isArray(data) ? data : []);
+                  return targets.length > 0 ? targets.map((t: any, i: number) => (
+                    <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                      <Text style={[s.execItemTitle, { color: colors.text }]}>{safeStr(t.competitor || t.name || t.target)}</Text>
+                      <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
+                        Watch: {safeArr(t.watchMetrics || t.metrics)}
+                      </Text>
+                    </View>
+                  )) : (
+                    <View style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                      <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>No competitive watch targets available.</Text>
+                    </View>
+                  );
+                })()
               )}
 
               {sec.key === 'riskMonitoringTriggers' && (
-                data.triggers && data.triggers.length > 0 ? data.triggers.map((t: any, i: number) => (
-                  <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
-                    <View style={s.execItemHeader}>
-                      <Text style={[s.execItemTitle, { color: colors.text }]}>{t.trigger}</Text>
-                      <View style={[s.badge, {
-                        backgroundColor: t.severity === 'critical' ? '#EF444420' : t.severity === 'high' ? '#F59E0B20' : '#10B98120',
-                      }]}>
-                        <Text style={[s.badgeText, {
-                          color: t.severity === 'critical' ? '#EF4444' : t.severity === 'high' ? '#F59E0B' : '#10B981',
+                (() => {
+                  const triggers = data.triggers || data.risks || data.items || (Array.isArray(data) ? data : []);
+                  return triggers.length > 0 ? triggers.map((t: any, i: number) => (
+                    <View key={i} style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                      <View style={s.execItemHeader}>
+                        <Text style={[s.execItemTitle, { color: colors.text }]}>{safeStr(t.trigger || t.risk || t.name)}</Text>
+                        <View style={[s.badge, {
+                          backgroundColor: t.severity === 'critical' ? '#EF444420' : t.severity === 'high' ? '#F59E0B20' : '#10B98120',
                         }]}>
-                          {t.severity}
-                        </Text>
+                          <Text style={[s.badgeText, {
+                            color: t.severity === 'critical' ? '#EF4444' : t.severity === 'high' ? '#F59E0B' : '#10B981',
+                          }]}>
+                            {safeStr(t.severity || 'medium')}
+                          </Text>
+                        </View>
                       </View>
+                      <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
+                        Action: {safeStr(t.action || t.response || t.mitigation)}
+                      </Text>
                     </View>
-                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
-                      Action: {t.action}
-                    </Text>
-                  </View>
-                )) : (
-                  <View style={[s.execItem, { borderColor: colors.cardBorder }]}>
-                    <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>No risk triggers available.</Text>
-                  </View>
-                )
+                  )) : (
+                    <View style={[s.execItem, { borderColor: colors.cardBorder }]}>
+                      <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>No risk triggers available.</Text>
+                    </View>
+                  );
+                })()
               )}
             </View>
           );
