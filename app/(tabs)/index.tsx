@@ -147,7 +147,7 @@ export default function DashboardScreen() {
   const [metricsState, setMetricsState] = useState<PanelState>('loading');
   const [metricsError, setMetricsError] = useState<number | null>(null);
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
-  const [dataSource, setDataSource] = useState<'META' | 'PLAN' | 'NONE'>('NONE');
+  const [dataSource, setDataSource] = useState<'META' | 'MANUAL' | 'PLAN' | 'NONE'>('NONE');
   const [planMetrics, setPlanMetrics] = useState<{ plannedPieces: number; generatedPieces: number; failedPieces: number; pendingGeneration: number; completionPct: number; nextScheduledDate: string | null; hasPlan: boolean; planStatus: string | null } | null>(null);
 
   const [actionsState, setActionsState] = useState<PanelState>('loading');
@@ -178,21 +178,27 @@ export default function DashboardScreen() {
 
   const baseUrl = getApiUrl();
 
+  const activeCampaignRef = useRef<string | null>(selectedCampaignId);
+  useEffect(() => { activeCampaignRef.current = selectedCampaignId; }, [selectedCampaignId]);
+
   const fetchMetrics = useCallback(async () => {
-    if (!selectedCampaignId) {
+    const requestCampaign = selectedCampaignId;
+    if (!requestCampaign) {
       setMetricsState('empty');
       setMetrics(null);
       return;
     }
     setMetricsState('loading');
     try {
-      const res = await fetch(new URL('/api/dashboard/metrics?accountId=default', baseUrl).toString());
+      const res = await fetch(new URL(`/api/dashboard/metrics?accountId=default&campaignId=${requestCampaign}`, baseUrl).toString());
+      if (activeCampaignRef.current !== requestCampaign) return;
       if (!res.ok) {
         setMetricsState('error');
         setMetricsError(res.status);
         return;
       }
       const data = await res.json();
+      if (activeCampaignRef.current !== requestCampaign) return;
       if (!data.success) {
         setMetricsState('error');
         setMetricsError(500);
@@ -204,26 +210,30 @@ export default function DashboardScreen() {
       setMetricsState(data.dataSource === 'PLAN' ? 'no_data' : (data.hasData ? 'success' : 'no_data'));
       setMetricsError(null);
     } catch {
+      if (activeCampaignRef.current !== requestCampaign) return;
       setMetricsState('error');
       setMetricsError(0);
     }
   }, [baseUrl, selectedCampaignId]);
 
   const fetchActions = useCallback(async () => {
-    if (!selectedCampaignId) {
+    const requestCampaign = selectedCampaignId;
+    if (!requestCampaign) {
       setActionsState('empty');
       setAiActions([]);
       return;
     }
     setActionsState('loading');
     try {
-      const res = await fetch(new URL('/api/dashboard/ai-actions?accountId=default', baseUrl).toString());
+      const res = await fetch(new URL(`/api/dashboard/ai-actions?accountId=default&campaignId=${requestCampaign}`, baseUrl).toString());
+      if (activeCampaignRef.current !== requestCampaign) return;
       if (!res.ok) {
         setActionsState('error');
         setActionsError(res.status);
         return;
       }
       const data = await res.json();
+      if (activeCampaignRef.current !== requestCampaign) return;
       if (data.gated) {
         setActionsGated(true);
         setAiActions([]);
@@ -235,6 +245,7 @@ export default function DashboardScreen() {
       setActionsState(data.actions?.length > 0 ? 'success' : 'no_data');
       setActionsError(null);
     } catch {
+      if (activeCampaignRef.current !== requestCampaign) return;
       setActionsState('error');
       setActionsError(0);
     }
@@ -326,6 +337,9 @@ export default function DashboardScreen() {
     switch (tag) {
       case 'PERFORMANCE': return P.mint;
       case 'PLAN': return P.blue;
+      case 'PLAN_PROGRESS': return P.blue;
+      case 'MANUAL_METRICS': return P.orange;
+      case 'HYBRID': return P.purple;
       case 'GATES': return P.orange;
       case 'PUBLISH': return P.purple;
       default: return P.silver;

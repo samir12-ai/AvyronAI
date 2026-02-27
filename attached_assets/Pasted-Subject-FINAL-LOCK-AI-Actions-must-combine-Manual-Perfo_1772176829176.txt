@@ -1,0 +1,50 @@
+Subject: FINAL LOCK — AI Actions must combine Manual Performance + Plan Execution (Evidence-bound, no filler)
+
+We are proceeding with MANUAL mode (Meta not approved), so the system must still produce real guidance. AI Actions must be evidence-bound using both:
+
+A) Manual Campaign Metrics (Performance Evidence)
+	•	spend, revenue, results, CPA, ROAS, date range/timeframe
+
+B) Plan/Execution Progress (Operational Evidence)
+	•	active plan status, required_work counts, calendar_entries status breakdown (DRAFT/GENERATED/FAILED/SCHEDULED), studio_items progress, last failures, completion %
+
+Required Deliverables (P0, one PR)
+	1.	AI Actions = Combined Evidence Model
+
+	•	Endpoint: GET /api/dashboard/ai-actions
+	•	When mode=MANUAL AND an APPROVED/ACTIVE plan exists:
+	•	Return non-empty actions list
+	•	Every action MUST include:
+	•	sourceTag: must be one of MANUAL_METRICS, PLAN_PROGRESS, or HYBRID
+	•	evidenceMetric: MUST reference at least one numeric value (CPA/ROAS/Spend/Revenue OR counts like 12/50 generated)
+	•	evidenceTimeframe: e.g. “manual entry (last 7d)” or “plan execution (current plan)”
+	•	priority + priorityJustification
+	•	At least 1 action must be HYBRID combining BOTH performance + plan progress in the same action.
+	•	Absolutely NO generic filler (e.g., “Monitor performance”, “Post consistently”) without evidence.
+
+	2.	Campaign Switch Isolation — REAL A and REAL B
+
+	•	Both campaigns exist and both have manual metrics with different values.
+	•	Switching A→B→A must update:
+	•	dashboard metrics
+	•	AI actions
+	•	plan binding / autopilot gates
+without refresh and with zero stale flash.
+	•	Provide Playwright test that:
+	•	creates metrics for A and B
+	•	asserts values + actions change correctly on switch
+
+	3.	UI Proof
+
+	•	Screenshot or short recording:
+	•	Show Dashboard in Campaign A with metrics + AI actions
+	•	Switch to Campaign B and show different metrics + different AI actions
+	•	Switch back to A and confirm revert is correct
+
+Acceptance Criteria (hard)
+	•	Every AI action has evidence (numbers + timeframe)
+	•	HYBRID action required when plan exists
+	•	Campaign switching shows correct data immediately (no cached/hanging old campaign data)
+	•	MANUAL mode must never show DEMO indicators or fixtures
+
+Ship as one cohesive changeset. No partial merge.

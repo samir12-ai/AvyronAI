@@ -55,7 +55,12 @@ export function registerCampaignRoutes(app: Express) {
       const existing = await db
         .select()
         .from(campaignSelections)
-        .where(eq(campaignSelections.accountId, accountId))
+        .where(
+          and(
+            eq(campaignSelections.accountId, accountId),
+            eq(campaignSelections.selectedCampaignId, campaignId)
+          )
+        )
         .limit(1);
 
       let selection;
@@ -63,7 +68,6 @@ export function registerCampaignRoutes(app: Express) {
         const updated = await db
           .update(campaignSelections)
           .set({
-            selectedCampaignId: campaignId,
             selectedCampaignName: campaignName,
             selectedPlatform: platform || "meta",
             campaignGoalType: goalType,
@@ -72,7 +76,12 @@ export function registerCampaignRoutes(app: Express) {
             selectedAt: new Date(),
             updatedAt: new Date(),
           })
-          .where(eq(campaignSelections.accountId, accountId))
+          .where(
+            and(
+              eq(campaignSelections.accountId, accountId),
+              eq(campaignSelections.selectedCampaignId, campaignId)
+            )
+          )
           .returning();
         selection = updated[0];
       } else {
@@ -111,6 +120,7 @@ export function registerCampaignRoutes(app: Express) {
         .select()
         .from(campaignSelections)
         .where(eq(campaignSelections.accountId, accountId))
+        .orderBy(desc(campaignSelections.selectedAt))
         .limit(1);
 
       if (selections.length === 0) {
@@ -322,11 +332,30 @@ export async function requireCampaign(req: Request, res: Response, next: NextFun
   try {
     const accountId = (req.query.accountId as string) || (req.body?.accountId as string) || "default";
 
-    const selections = await db
-      .select()
-      .from(campaignSelections)
-      .where(eq(campaignSelections.accountId, accountId))
-      .limit(1);
+    const requestedCampaignId = (req.query.campaignId as string) || null;
+
+    let selections;
+    if (requestedCampaignId) {
+      selections = await db
+        .select()
+        .from(campaignSelections)
+        .where(
+          and(
+            eq(campaignSelections.accountId, accountId),
+            eq(campaignSelections.selectedCampaignId, requestedCampaignId)
+          )
+        )
+        .limit(1);
+    }
+
+    if (!selections || selections.length === 0) {
+      selections = await db
+        .select()
+        .from(campaignSelections)
+        .where(eq(campaignSelections.accountId, accountId))
+        .orderBy(desc(campaignSelections.selectedAt))
+        .limit(1);
+    }
 
     if (selections.length === 0) {
       return res.status(400).json({

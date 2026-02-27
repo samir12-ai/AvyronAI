@@ -32,7 +32,7 @@ Preferred communication style: Simple, everyday language.
 - **Server-side**: PostgreSQL with Drizzle ORM for user data and chat conversations.
 
 ### Key Features
-- **Dashboard**: Revenue-focused KPIs and AI action summaries. Profile icon in header opens unified Business Profile modal. Plan-driven fallback metrics (planned/generated/failed/pending/completion%) when no Meta data. "Meta not connected" badge. AI Actions always non-empty when plan exists.
+- **Dashboard**: Revenue-focused KPIs and AI action summaries. Profile icon in header opens unified Business Profile modal. Plan-driven fallback metrics (planned/generated/failed/pending/completion%) when no Meta data. "Meta not connected" badge. AI Actions evidence-bound: every action carries sourceTag (MANUAL_METRICS/PLAN_PROGRESS/HYBRID/PERFORMANCE), evidenceMetric (numeric), evidenceTimeframe, priority + justification. HYBRID actions combine manual performance + plan execution data. Campaign switch resets all state, passes explicit campaignId, guards against stale in-flight responses.
 - **Create**: AI Writer for text and AI Designer for image generation with style presets. Shows Required Work by branch (Designer/Writer/Video) with counts. Branch ownership: Carousels→DESIGNER, Posts+Stories→WRITER, Reels+Videos→VIDEO. No double counting — branch totals sum exactly to totalContentPieces.
 - **Calendar**: Content scheduling with AI Calendar Assistant.
 - **AI Management**: Auto-Publisher for Meta platforms, AI Audience Manager for optimized Meta ad audiences, and a Performance Intelligence Layer for insights.
@@ -78,10 +78,11 @@ Preferred communication style: Simple, everyday language.
 ### Final System Lock
 - **Business Data Layer**: `business_data_layer` table with 9 structural columns (e.g., businessLocation, businessType, coreOffer), campaign-scoped and used for orchestration. Unified Business Profile: single entry point via profile icon in dashboard header; BuildThePlan Phase 0 shows profile completeness gate, not duplicate form.
 - **Dashboard Campaign Truth**: All dashboard metrics derived from campaign-scoped DB queries; no hardcoded values.
-- **AI Actions Evidence-Bound**: AI actions carry evidence metadata (sourceTag, evidenceMetric, priority) and are gated by an APPROVED plan.
+- **AI Actions Evidence-Bound**: AI actions carry evidence metadata (sourceTag: MANUAL_METRICS/PLAN_PROGRESS/HYBRID/PERFORMANCE, evidenceMetric, evidenceTimeframe, priority + priorityJustification). When plan exists + manual data, at least 1 HYBRID action required. No generic filler without numeric evidence. Campaign-scoped: no cross-campaign plan fallback.
+- **Campaign Multi-Select**: `campaign_selections` table stores multiple campaigns per account (upsert by accountId+campaignId). `requireCampaign` middleware accepts `campaignId` query param for explicit scoping, falls back to most recently selected (orderBy selectedAt desc). Frontend passes explicit campaignId on all dashboard fetches.
 - **Single Execution Track**: All writes to key execution tables are confined to a single execution route.
 - **Distribution Plan-Derived**: Orchestrator injects business data into AI prompts to derive content distribution strategies.
-- **Demo/Real Isolation**: Data mode resolution ensures strict separation between demo fixtures and real data.
+- **Manual/Real Isolation**: DataMode is "REAL" | "MANUAL" | "UNKNOWN" — demo removed entirely. Manual campaign metrics drive dashboard when Meta not connected.
 
 ## External Dependencies
 
@@ -94,7 +95,6 @@ Preferred communication style: Simple, everyday language.
 
 ### User Authentication
 - **Meta OAuth**: Login via Facebook and Instagram.
-- **Demo Mode**: For simulated login.
 
 ### Meta Business Suite Integration
 - **Token Security**: AES-256-GCM encrypted tokens stored server-side.
