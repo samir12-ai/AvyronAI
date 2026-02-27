@@ -23,11 +23,37 @@ import { PlatformPicker } from '@/components/PlatformPicker';
 import { generateId } from '@/lib/storage';
 import { getApiUrl } from '@/lib/query-client';
 import { usePersistedState } from '@/hooks/usePersistedState';
+import { normalizeMediaType } from '@/lib/media-types';
 import type { MediaItem } from '@/lib/types';
+
+type StudioMediaType = 'video' | 'image' | 'poster';
+
+const STUDIO_TYPE_LABELS: Record<StudioMediaType, string> = {
+  video: 'Video / Reel',
+  image: 'Image',
+  poster: 'Poster',
+};
+
+function normalizeToStudioType(raw: string | undefined | null): StudioMediaType {
+  const canonical = normalizeMediaType(raw);
+  switch (canonical) {
+    case 'VIDEO':
+    case 'REEL':
+      return 'video';
+    case 'CAROUSEL':
+    case 'IMAGE':
+      return 'image';
+    case 'POST':
+    case 'STORY':
+      return 'image';
+    default:
+      return 'image';
+  }
+}
 
 interface StudioDraftState {
   mediaTitle: string;
-  mediaType: 'video' | 'image';
+  mediaType: StudioMediaType;
   mediaPlatform: string[];
   mediaGoal: string;
   mediaAudience: string;
@@ -49,10 +75,10 @@ const defaultStudioState: StudioDraftState = {
   selectedUri: null,
 };
 
-const mediaTypes = [
-  { id: 'video', label: 'Video', icon: 'videocam-outline' as const },
-  { id: 'image', label: 'Image', icon: 'image-outline' as const },
-  { id: 'poster', label: 'Poster', icon: 'easel-outline' as const },
+const mediaTypes: { id: StudioMediaType; label: string; icon: 'videocam-outline' | 'image-outline' | 'easel-outline' }[] = [
+  { id: 'video', label: 'Video / Reel', icon: 'videocam-outline' },
+  { id: 'image', label: 'Image', icon: 'image-outline' },
+  { id: 'poster', label: 'Poster', icon: 'easel-outline' },
 ];
 
 export default function StudioScreen() {
@@ -67,7 +93,7 @@ export default function StudioScreen() {
 
   const [showModal, setShowModal] = useState(false);
   const [mediaTitle, setMediaTitle] = useState('');
-  const [mediaType, setMediaType] = useState<'video' | 'image'>('video');
+  const [mediaType, setMediaType] = useState<StudioMediaType>('video');
   const [mediaPlatform, setMediaPlatform] = useState<string[]>(['Instagram']);
   const [selectedUri, setSelectedUri] = useState<string | null>(null);
   const [mediaGoal, setMediaGoal] = useState('');
@@ -113,8 +139,8 @@ export default function StudioScreen() {
     }
   }, [hydrationVersion, ps]);
 
-  const videos = mediaItems.filter(m => m.type === 'video');
-  const images = mediaItems.filter(m => m.type === 'image');
+  const videos = mediaItems.filter(m => normalizeToStudioType(m.type) === 'video');
+  const images = mediaItems.filter(m => normalizeToStudioType(m.type) === 'image');
   const posters = mediaItems.filter(m => m.type === 'poster');
 
   const handlePickMedia = async () => {
@@ -225,7 +251,7 @@ export default function StudioScreen() {
     setMediaOffer('');
     setIsSubmittingCase(false);
     setShowModal(false);
-    Alert.alert('Added', `${mediaType === 'video' ? 'Video' : 'Image'} added with AI captions generated.`);
+    Alert.alert('Added', `${STUDIO_TYPE_LABELS[mediaType] || mediaType} added with AI captions generated.`);
   };
 
   const handleDeleteMedia = async (id: string, title: string) => {
@@ -482,7 +508,7 @@ export default function StudioScreen() {
       <View style={styles.mediaCardRow}>
         <View style={[styles.mediaThumbnail, { backgroundColor: colors.inputBackground }]}>
           <Ionicons 
-            name={item.type === 'video' ? 'videocam' : item.type === 'poster' ? 'easel' : 'image'} 
+            name={normalizeToStudioType(item.type) === 'video' ? 'videocam' : item.type === 'poster' ? 'easel' : 'image'} 
             size={32} 
             color={colors.textMuted} 
           />
@@ -697,58 +723,39 @@ export default function StudioScreen() {
             <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
               <Text style={[styles.inputLabel, { color: colors.text }]}>{t('studio.mediaType')}</Text>
               <View style={styles.typeRow}>
-                <Pressable
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    setMediaType('video');
-                    updateState({ mediaType: 'video' });
-                  }}
-                  style={[
-                    styles.typeButton,
-                    { 
-                      backgroundColor: mediaType === 'video' ? colors.primary + '20' : colors.inputBackground,
-                      borderColor: mediaType === 'video' ? colors.primary : 'transparent',
-                    }
-                  ]}
-                >
-                  <Ionicons 
-                    name="videocam-outline" 
-                    size={24} 
-                    color={mediaType === 'video' ? colors.primary : colors.textMuted} 
-                  />
-                  <Text style={[
-                    styles.typeLabel,
-                    { color: mediaType === 'video' ? colors.primary : colors.textMuted }
-                  ]}>
-                    {t('studio.videoType')}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    setMediaType('image');
-                    updateState({ mediaType: 'image' });
-                  }}
-                  style={[
-                    styles.typeButton,
-                    { 
-                      backgroundColor: mediaType === 'image' ? colors.accent + '20' : colors.inputBackground,
-                      borderColor: mediaType === 'image' ? colors.accent : 'transparent',
-                    }
-                  ]}
-                >
-                  <Ionicons 
-                    name="image-outline" 
-                    size={24} 
-                    color={mediaType === 'image' ? colors.accent : colors.textMuted} 
-                  />
-                  <Text style={[
-                    styles.typeLabel,
-                    { color: mediaType === 'image' ? colors.accent : colors.textMuted }
-                  ]}>
-                    {t('studio.imageType')}
-                  </Text>
-                </Pressable>
+                {mediaTypes.map((mt) => {
+                  const isSelected = mediaType === mt.id;
+                  const accentColor = mt.id === 'video' ? colors.primary : mt.id === 'poster' ? (colors as any).accentOrange || '#F59E0B' : colors.accent;
+                  return (
+                    <Pressable
+                      key={mt.id}
+                      onPress={() => {
+                        Haptics.selectionAsync();
+                        setMediaType(mt.id);
+                        updateState({ mediaType: mt.id });
+                      }}
+                      style={[
+                        styles.typeButton,
+                        {
+                          backgroundColor: isSelected ? accentColor + '20' : colors.inputBackground,
+                          borderColor: isSelected ? accentColor : 'transparent',
+                        }
+                      ]}
+                    >
+                      <Ionicons
+                        name={mt.icon}
+                        size={24}
+                        color={isSelected ? accentColor : colors.textMuted}
+                      />
+                      <Text style={[
+                        styles.typeLabel,
+                        { color: isSelected ? accentColor : colors.textMuted }
+                      ]}>
+                        {mt.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
 
               <Text style={[styles.inputLabel, { color: colors.text }]}>{t('studio.titleLabel')}</Text>
@@ -823,14 +830,14 @@ export default function StudioScreen() {
                   <View style={styles.uploadedState}>
                     <Ionicons name="checkmark-circle" size={32} color={colors.success} />
                     <Text style={[styles.uploadedText, { color: colors.success }]}>
-                      {t('studio.selected').replace('{{type}}', mediaType === 'video' ? t('studio.videoType') : t('studio.imageType'))}
+                      {t('studio.selected').replace('{{type}}', STUDIO_TYPE_LABELS[mediaType] || mediaType)}
                     </Text>
                   </View>
                 ) : (
                   <>
                     <Ionicons name="cloud-upload-outline" size={40} color={colors.textMuted} />
                     <Text style={[styles.uploadText, { color: colors.textMuted }]}>
-                      Tap to select {mediaType === 'video' ? t('studio.videoType').toLowerCase() : t('studio.imageType').toLowerCase()}
+                      Tap to select {(STUDIO_TYPE_LABELS[mediaType] || mediaType).toLowerCase()}
                     </Text>
                     <Text style={[styles.uploadHint, { color: colors.textMuted }]}>
                       {t('studio.fromDevice')}

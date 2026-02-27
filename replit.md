@@ -74,6 +74,9 @@ Preferred communication style: Simple, everyday language.
 - **Single Execution Track**: All critical writes to execution tables are confined to a single route.
 - **Distribution Plan-Derived**: Orchestrator uses business data to derive content distribution strategies.
 - **Manual/Real Isolation**: System operates in "REAL" or "MANUAL" data modes, with all demo functionalities purged.
+- **Canonical Media Types**: Single source of truth in `lib/media-types.ts`. Canonical values: VIDEO, REEL, IMAGE, CAROUSEL, POST, STORY. `normalizeMediaType()` normalizer used across Studio and Calendar. `createRouteForContentType()` maps content types to Create screen tabs (content→AI Writer/Reels, designer→AI Designer).
+- **Calendar→Create Routing**: Calendar "Create" button navigates to `/(tabs)/create` with params (calendarEntryId, calendarContentType, calendarTab, calendarTopic). Create screen hydrates from calendar entry via `GET /api/execution/calendar-entries/:entryId`.
+- **Quality Gate Tests**: `server/tests/media-types.test.ts` — 12 tests validating `normalizeMediaType` never returns undefined/null and `createRouteForContentType` returns valid routes for all content types. Imports from actual `lib/media-types.ts` module.
 
 ## External Dependencies
 

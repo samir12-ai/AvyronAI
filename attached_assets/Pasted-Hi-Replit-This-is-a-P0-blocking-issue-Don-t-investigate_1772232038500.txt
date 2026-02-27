@@ -1,0 +1,87 @@
+Hi Replit,
+
+This is a P0 blocking issue. Don’t “investigate” — implement the following fixes exactly and ship them in one patch with proof.
+
+────────────────────────────────────────
+1) Calendar: “Create” button does nothing
+────────────────────────────────────────
+REQUIRED BEHAVIOR:
+When the user taps “Create” on a calendar entry, it MUST navigate to the correct creation screen based on entry.contentType, and it MUST pass entryId.
+
+IMPLEMENT:
+- In Calendar entry card/button handler, replace the current onPress with a hard route push:
+
+A) Always pass:
+- entryId = calendarEntry.id
+- contentType = calendarEntry.contentType (must be a non-empty string)
+
+B) Navigate like this:
+- If contentType is VIDEO/REEL → route to Reels creation flow
+- If contentType is IMAGE/CAROUSEL/POSTER → route to AI Designer flow
+- If contentType is POST/STORY/CAPTION → route to AI Writer flow
+
+C) Use a single canonical mapping function (no scattered ifs):
+- createRouteForContentType(contentType) → { pathname, params }
+
+D) In destination screens, read params from router and pre-load the calendar entry by entryId so the create screen knows what item it is generating for.
+
+PROOF REQUIRED:
+- Add a console log only in dev mode: “NAV_CREATE {entryId, contentType, pathname}”
+- Provide a short screen recording showing:
+  1) Tap Create on a VIDEO entry → lands in Reels creation with entryId visible in logs
+  2) Tap Create on an IMAGE entry → lands in AI Designer with entryId visible in logs
+  3) Tap Create on a WRITER entry → lands in AI Writer with entryId visible in logs
+
+────────────────────────────────────────
+2) Studio: “[missing "Video" value] selected”
+────────────────────────────────────────
+THIS IS NOT AN UPLOAD ISSUE — it’s an enum mismatch.
+The UI is receiving a mediaType value that does not exist in the picker options.
+
+IMPLEMENT:
+A) Create one canonical enum (single source of truth) for media types, and use it everywhere:
+- VIDEO
+- REEL
+- IMAGE
+- CAROUSEL
+- POST
+- STORY
+
+B) Add a strict normalizer (must run on every read + before every write):
+normalizeMediaType(input: string) → canonical value above
+
+Mapping rules:
+- “Video”, “video”, “reels”, “Reels” → REEL (or VIDEO if you insist, but pick ONE and use it everywhere)
+- “image”, “Image”, “poster” → IMAGE
+- Unknown → default to IMAGE AND log an error with the raw value (dev only)
+
+C) Update Studio picker:
+- options must exactly match canonical values (case-sensitive)
+- the selected value must be normalizeMediaType(item.mediaType)
+
+D) Ensure server returns canonical values only:
+- when reading studio_items, normalize before returning JSON response.
+
+PROOF REQUIRED:
+- Screenshot showing the Studio modal now displays “Video/Reel” correctly (no missing value)
+- One API response sample confirming mediaType is canonical (e.g., "REEL")
+
+────────────────────────────────────────
+3) Quality gate (must prevent regression)
+────────────────────────────────────────
+Add 2 automated checks:
+- Test 1: Calendar “Create” route mapping returns a valid pathname for every supported contentType (VIDEO/REEL/IMAGE/CAROUSEL/POST/STORY)
+- Test 2: normalizeMediaType never returns undefined/null for any of: ["Video","video","REEL","reels","Image","poster",""]
+
+If either test fails → build must fail.
+
+────────────────────────────────────────
+Deliverables
+────────────────────────────────────────
+1) Patch merged with the above behavior implemented exactly
+2) Proof artifacts (recording + screenshot + API sample)
+3) Tests passing
+
+No partials. This must be fixed end-to-end today.
+
+— Samir

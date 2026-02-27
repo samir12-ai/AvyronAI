@@ -709,6 +709,25 @@ export function registerExecutionRoutes(app: Express) {
     }
   );
 
+  app.get("/api/execution/calendar-entries/:entryId", async (req: Request, res: Response) => {
+    try {
+      const { entryId } = req.params;
+      const [entry] = await db
+        .select()
+        .from(calendarEntries)
+        .where(eq(calendarEntries.id, entryId))
+        .limit(1);
+
+      if (!entry) {
+        return res.status(404).json({ success: false, error: "ENTRY_NOT_FOUND" });
+      }
+
+      res.json({ success: true, entry });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   app.post("/api/execution/calendar-entries/:entryId/generate", async (req: Request, res: Response) => {
     try {
       const { entryId } = req.params;

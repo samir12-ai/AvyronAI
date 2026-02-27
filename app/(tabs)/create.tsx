@@ -15,6 +15,7 @@ import {
   Dimensions,
   Modal,
 } from 'react-native';
+import { useLocalSearchParams } from 'expo-router';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -299,6 +300,13 @@ export default function CreateScreen() {
   const [ciScriptResult, setCiScriptResult] = useState<any>(null);
   const [ciScriptError, setCiScriptError] = useState<string | null>(null);
   const { selectedCampaignId } = useCampaign();
+  const searchParams = useLocalSearchParams<{
+    calendarEntryId?: string;
+    calendarContentType?: string;
+    calendarTab?: string;
+    calendarTopic?: string;
+  }>();
+  const [calendarEntryId, setCalendarEntryId] = useState<string | null>(null);
 
   const { data: requiredWorkData } = useQuery<{
     success: boolean;
@@ -441,6 +449,54 @@ export default function CreateScreen() {
       setCiScriptError(null);
     }
   }, [creativeContext]);
+
+  useEffect(() => {
+    if (searchParams.calendarEntryId && searchParams.calendarTab) {
+      const entryId = searchParams.calendarEntryId;
+      const tab = searchParams.calendarTab as 'content' | 'designer' | 'video';
+      setActiveTab(tab);
+      setCalendarEntryId(entryId);
+      if (searchParams.calendarContentType) {
+        const ct = searchParams.calendarContentType.toLowerCase();
+        if (ct === 'reel' || ct === 'video') {
+          setContentType('reel');
+        } else {
+          setContentType('post');
+        }
+      }
+      if (searchParams.calendarTopic) {
+        setTopic(searchParams.calendarTopic);
+      }
+      if (__DEV__) {
+        console.log('NAV_CREATE', {
+          entryId,
+          contentType: searchParams.calendarContentType,
+          pathname: '/(tabs)/create',
+          tab,
+        });
+      }
+
+      (async () => {
+        try {
+          const baseUrl = getApiUrl();
+          const res = await fetch(new URL(`/api/execution/calendar-entries/${entryId}`, baseUrl).toString());
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.entry) {
+              const entry = data.entry;
+              if (entry.title && !searchParams.calendarTopic) setTopic(entry.title);
+              if (entry.caption) setPosterTopic(entry.caption);
+              if (__DEV__) {
+                console.log('CREATE_FROM_CALENDAR hydrated', { entryId, title: entry.title, contentType: entry.contentType });
+              }
+            }
+          }
+        } catch (err) {
+          if (__DEV__) console.warn('Failed to fetch calendar entry:', err);
+        }
+      })();
+    }
+  }, [searchParams.calendarEntryId, searchParams.calendarTab, searchParams.calendarContentType, searchParams.calendarTopic]);
 
   const handleGenerate = async () => {
     const hasCIContext = creativeContext?.source === 'CI' && contentType === 'reel';
@@ -1235,6 +1291,19 @@ export default function CreateScreen() {
               </Text>
             </Pressable>
           </View>
+
+          {calendarEntryId && (
+            <View style={{ backgroundColor: '#7C3AED' + '15', borderRadius: 12, padding: 12, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: '#7C3AED' + '30' }}>
+              <Ionicons name="calendar" size={18} color="#7C3AED" />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: '#7C3AED', fontSize: 13, fontWeight: '600' as const }}>Creating for Calendar Entry</Text>
+                <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>ID: {calendarEntryId.slice(0, 8)}...</Text>
+              </View>
+              <Pressable onPress={() => setCalendarEntryId(null)} hitSlop={8}>
+                <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+              </Pressable>
+            </View>
+          )}
 
           {activeTab === 'content' && (
             <>

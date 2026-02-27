@@ -30,6 +30,7 @@ import { ContentCard } from '@/components/ContentCard';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import { generateId } from '@/lib/storage';
 import { getApiUrl } from '@/lib/query-client';
+import { createRouteForContentType } from '@/lib/media-types';
 import type { ScheduledPost } from '@/lib/types';
 
 interface DBCalendarEntry {
@@ -143,41 +144,28 @@ export default function CalendarScreen() {
     fetchCalendarEntries();
   }, [fetchCalendarEntries]);
 
-  const getContentTypeRoute = (contentType: string): { tab: string; label: string; icon: string } => {
-    const ct = (contentType || '').toLowerCase();
-    if (ct === 'reel' || ct === 'video') return { tab: 'create', label: 'Reels Creation', icon: 'videocam' };
-    if (ct === 'carousel' || ct === 'image') return { tab: 'create', label: 'AI Designer', icon: 'brush' };
-    if (ct === 'post' || ct === 'story') return { tab: 'create', label: 'AI Writer', icon: 'create' };
-    return { tab: 'create', label: 'Content Studio', icon: 'sparkles' };
-  };
-
   const handleGenerateEntry = useCallback((entryId: string) => {
     const entry = dbCalendarEntries.find(e => e.id === entryId);
     if (!entry) return;
 
-    const route = getContentTypeRoute(entry.contentType);
-    const context = [
-      entry.title ? `Topic: ${entry.title}` : '',
-      entry.contentType ? `Type: ${entry.contentType}` : '',
-      entry.caption ? `Angle: ${entry.caption}` : '',
-      entry.scheduledDate ? `Scheduled: ${entry.scheduledDate}` : '',
-    ].filter(Boolean).join('\n');
+    const route = createRouteForContentType(entry.contentType);
+    const pathname = '/(tabs)/create';
 
-    Platform.OS !== 'web' && Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (__DEV__) {
+      console.log('NAV_CREATE', { entryId, contentType: entry.contentType, pathname, tab: route.tab });
+    }
 
-    Alert.alert(
-      `Create ${entry.contentType || 'Content'}`,
-      `This will take you to ${route.label} to create this piece.\n\n${context}`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: `Go to ${route.label}`,
-          onPress: () => {
-            router.navigate('/(tabs)/create' as any);
-          },
-        },
-      ],
-    );
+    Platform.OS !== 'web' && Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    router.navigate({
+      pathname: pathname as any,
+      params: {
+        calendarEntryId: entryId,
+        calendarContentType: entry.contentType || 'post',
+        calendarTab: route.tab,
+        calendarTopic: entry.title || '',
+      },
+    });
   }, [dbCalendarEntries, router]);
 
   const [resettingFailed, setResettingFailed] = useState(false);
