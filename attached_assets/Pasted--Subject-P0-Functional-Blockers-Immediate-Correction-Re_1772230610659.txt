@@ -1,0 +1,123 @@
+
+⸻
+
+Subject: P0 Functional Blockers — Immediate Correction Required (SLA 24h)
+
+Replit,
+
+This is a P0 directive.
+
+The following three issues are blocking the system from being production-usable.
+No new features, no engine expansion, and no architectural work may proceed until these are corrected.
+
+This is not a refinement phase.
+This is core workflow stabilization.
+
+⸻
+
+1️⃣ Studio — AI Video Analysis Must Be Executable
+
+Current state:
+The AI Video Analysis feature either does not function or produces shallow ideation.
+
+This is unacceptable.
+
+Required behavior:
+
+When “Analyze” is pressed on a video item, the system must return structured, production-ready output:
+	•	Hook (first 3 seconds)
+	•	Full spoken script (word-for-word)
+	•	Scene-by-scene breakdown
+	•	Camera directions per scene
+	•	On-screen text
+	•	B-roll suggestions
+	•	CTA line
+	•	Caption draft
+	•	Hashtags
+
+This must appear in a structured preview panel.
+
+No auto-overwrite.
+“Apply to Draft” must selectively populate fields.
+
+If this feature cannot generate executable scripts, it is functionally incomplete.
+
+⸻
+
+2️⃣ Calendar Generate — Must Route, Not Execute
+
+Current state:
+The Generate button attempts direct AI execution and returns FAILED.
+
+This is a design flaw.
+
+Required behavior:
+
+Generate must act as intelligent routing:
+	•	VIDEO → Navigate to Reels Creation
+	•	IMAGE → Navigate to AI Designer
+	•	POST → Navigate to AI Writer
+	•	STORY → Navigate to Story Engine
+
+Navigation must include:
+	•	Campaign context
+	•	Plan objective
+	•	Tone
+	•	Content angle
+
+Calendar defines required work.
+It does not execute AI.
+
+Remove direct generation logic from Calendar immediately.
+
+No more FAILED state from Calendar.
+
+⸻
+
+3️⃣ Reels Engine — Must Produce Full Script + Direction
+
+Current state:
+Reels engine produces filming ideas but not full scripts.
+
+This is insufficient.
+
+Required output:
+	•	Hook line
+	•	Full spoken script
+	•	Scene breakdown
+	•	Camera directions
+	•	Visual guidance
+	•	On-screen text
+	•	CTA
+	•	Caption
+	•	Hashtags
+
+The output must be production-ready.
+
+No brainstorming.
+No outlines.
+No generic “shoot like this” suggestions.
+
+⸻
+
+SLA & Enforcement
+
+These three corrections must be delivered within 24 hours.
+
+Acceptance requires:
+	•	Studio AI returns structured script output.
+	•	Calendar Generate never produces FAILED.
+	•	Reels engine outputs full scripts with scene breakdown.
+	•	End-to-end test proof provided.
+
+Until these are complete:
+	•	No engine expansion.
+	•	No new feature work.
+	•	No optimization tasks.
+	•	No UI enhancements.
+
+Core workflow stability takes priority over everything.
+
+Proceed immediately and confirm with proof.
+
+— Samir

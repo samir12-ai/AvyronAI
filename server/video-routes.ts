@@ -379,34 +379,53 @@ Based on the creative brief above, create an edit plan that fulfills the client'
       }
 
       const response = await aiChat({
-        model: "gpt-4o-mini",
-        max_tokens: 600,
+        model: "gpt-4.1-mini",
+        max_tokens: 1800,
         accountId: req.body.accountId || "default",
         endpoint: "video-analyze",
         messages: [
           {
             role: "system",
-            content: `You are an expert social media strategist and video content analyst. Given metadata about a video, generate optimized suggestions. Return ONLY valid JSON with this structure:
+            content: `You are a professional video director and social media content producer. Given metadata about a video, generate a complete, production-ready script breakdown. This must be executable — not ideation, not brainstorming. Every field must contain specific, actionable content a creator can film immediately.
+
+Return ONLY valid JSON with this exact structure:
 {
-  "hookSuggestion": "A compelling opening hook line for the video",
-  "captionDraft": "A full caption draft with hashtags",
-  "ctaSuggestion": "An optimized call-to-action",
-  "contentAngle": "The strategic content angle to use",
-  "keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"]
-}`
+  "hook": "The exact opening line or action for the first 3 seconds — word-for-word what is said or shown to stop the scroll",
+  "fullScript": "The complete spoken script, word-for-word, from hook to CTA. Write it as a continuous script the creator reads aloud.",
+  "scenes": [
+    {
+      "sceneNumber": 1,
+      "duration": "3-5s",
+      "visualDirection": "Exact camera angle, framing, movement. Be specific: close-up, wide shot, overhead, tracking, handheld, tripod.",
+      "onScreenText": "Bold text overlay shown during this scene",
+      "voiceover": "Exact words spoken during this scene",
+      "bRollSuggestion": "Alternative footage that could replace or supplement this scene"
+    }
+  ],
+  "cameraDirections": "Overall filming style: lighting setup, lens recommendations, background requirements, movement patterns",
+  "onScreenTextSummary": ["Array of all text overlays in sequence"],
+  "bRollList": ["Array of all B-roll shots needed"],
+  "ctaLine": "The exact call-to-action line spoken at the end",
+  "captionDraft": "Full social media caption with line breaks and hashtags",
+  "hashtags": ["hashtag1", "hashtag2", "hashtag3", "hashtag4", "hashtag5", "hashtag6", "hashtag7", "hashtag8"]
+}
+
+Generate 4-6 scenes. Every scene must have specific camera directions, not vague descriptions.`
           },
           {
             role: "user",
-            content: `Analyze this video and provide optimized suggestions:
+            content: `Produce a complete production script for this video:
 Title: ${title}
 Platform: ${platform || 'Instagram'}
 Goal: ${goal || 'Engagement'}
 Target Audience: ${audience || 'General'}
 Current CTA: ${cta || 'None'}
 Content Series: ${series || 'None'}
-Offer: ${offer || 'None'}
+Offer/Product: ${offer || 'None'}
 Media Type: ${mediaType || 'video'}
-Duration: ${duration || 'Unknown'}`
+Duration: ${duration || '30-60 seconds'}
+
+Generate a full production-ready script with scene-by-scene breakdown, exact spoken words, camera directions, and on-screen text.`
           }
         ],
       });
@@ -425,11 +444,19 @@ Duration: ${duration || 'Unknown'}`
       }
 
       res.json({
-        hookSuggestion: analysis.hookSuggestion || "",
+        hook: analysis.hook || "",
+        fullScript: analysis.fullScript || "",
+        scenes: analysis.scenes || [],
+        cameraDirections: analysis.cameraDirections || "",
+        onScreenTextSummary: analysis.onScreenTextSummary || [],
+        bRollList: analysis.bRollList || [],
+        ctaLine: analysis.ctaLine || "",
         captionDraft: analysis.captionDraft || "",
-        ctaSuggestion: analysis.ctaSuggestion || "",
-        contentAngle: analysis.contentAngle || "",
-        keywords: analysis.keywords || [],
+        hashtags: analysis.hashtags || [],
+        hookSuggestion: analysis.hook || "",
+        ctaSuggestion: analysis.ctaLine || "",
+        contentAngle: analysis.cameraDirections || "",
+        keywords: analysis.hashtags || [],
       });
     } catch (error: any) {
       console.error("Video analyze error:", error?.message || error);

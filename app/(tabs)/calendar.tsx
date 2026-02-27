@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Animated, { FadeIn, FadeInDown, FadeInUp } from 'react-native-reanimated';
+import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
 import { useCampaign } from '@/context/CampaignContext';
@@ -102,6 +103,7 @@ export default function CalendarScreen() {
   const { contentItems, removeContentItem, scheduledPosts, addScheduledPost, removeScheduledPost, mediaItems, brandProfile } = useApp();
   const { selectedCampaign } = useCampaign();
   const { t } = useLanguage();
+  const router = useRouter();
 
   const [dbCalendarEntries, setDbCalendarEntries] = useState<DBCalendarEntry[]>([]);
   const [dbEntriesLoading, setDbEntriesLoading] = useState(false);
@@ -141,27 +143,42 @@ export default function CalendarScreen() {
     fetchCalendarEntries();
   }, [fetchCalendarEntries]);
 
-  const handleGenerateEntry = useCallback(async (entryId: string) => {
-    setGeneratingEntryId(entryId);
-    try {
-      const baseUrl = getApiUrl();
-      const res = await fetch(new URL(`/api/execution/calendar-entries/${entryId}/generate`, baseUrl).toString(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const data = await res.json();
-      if (data.success) {
-        Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        fetchCalendarEntries();
-      } else {
-        Alert.alert('Generation Failed', data.message || data.error || 'Could not generate content');
-      }
-    } catch (err: any) {
-      Alert.alert('Error', err.message || 'Network error');
-    } finally {
-      setGeneratingEntryId(null);
-    }
-  }, [fetchCalendarEntries]);
+  const getContentTypeRoute = (contentType: string): { tab: string; label: string; icon: string } => {
+    const ct = (contentType || '').toLowerCase();
+    if (ct === 'reel' || ct === 'video') return { tab: 'create', label: 'Reels Creation', icon: 'videocam' };
+    if (ct === 'carousel' || ct === 'image') return { tab: 'create', label: 'AI Designer', icon: 'brush' };
+    if (ct === 'post' || ct === 'story') return { tab: 'create', label: 'AI Writer', icon: 'create' };
+    return { tab: 'create', label: 'Content Studio', icon: 'sparkles' };
+  };
+
+  const handleGenerateEntry = useCallback((entryId: string) => {
+    const entry = dbCalendarEntries.find(e => e.id === entryId);
+    if (!entry) return;
+
+    const route = getContentTypeRoute(entry.contentType);
+    const context = [
+      entry.title ? `Topic: ${entry.title}` : '',
+      entry.contentType ? `Type: ${entry.contentType}` : '',
+      entry.caption ? `Angle: ${entry.caption}` : '',
+      entry.scheduledDate ? `Scheduled: ${entry.scheduledDate}` : '',
+    ].filter(Boolean).join('\n');
+
+    Platform.OS !== 'web' && Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    Alert.alert(
+      `Create ${entry.contentType || 'Content'}`,
+      `This will take you to ${route.label} to create this piece.\n\n${context}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: `Go to ${route.label}`,
+          onPress: () => {
+            router.navigate('/(tabs)/create' as any);
+          },
+        },
+      ],
+    );
+  }, [dbCalendarEntries, router]);
 
   const [resettingFailed, setResettingFailed] = useState(false);
 
@@ -962,19 +979,12 @@ export default function CalendarScreen() {
                     {(isDraft || isFailed) && (
                       <Pressable
                         onPress={() => handleGenerateEntry(entry.id)}
-                        disabled={!!generatingEntryId}
-                        style={[styles.generateEntryBtn, { opacity: isGenerating ? 0.6 : 1 }]}
+                        style={[styles.generateEntryBtn]}
                       >
-                        {isGenerating ? (
-                          <ActivityIndicator size="small" color="#7C3AED" />
-                        ) : (
-                          <>
-                            <Ionicons name="sparkles" size={14} color="#7C3AED" />
-                            <Text style={styles.generateEntryBtnText}>
-                              {isFailed ? 'Retry' : 'Generate'}
-                            </Text>
-                          </>
-                        )}
+                        <Ionicons name="arrow-forward-circle" size={14} color="#7C3AED" />
+                        <Text style={styles.generateEntryBtnText}>
+                          Create
+                        </Text>
                       </Pressable>
                     )}
                   </View>

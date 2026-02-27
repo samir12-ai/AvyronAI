@@ -326,64 +326,146 @@ export default function StudioScreen() {
     const analysis = analysisResult[item.id];
     if (!analysis) return null;
     const toggles = applyToggles[item.id] || { hook: true, caption: true, cta: true, angle: true, keywords: true };
+
+    const sectionHeader = (icon: string, label: string, color: string) => (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, marginBottom: 4 }}>
+        <Ionicons name={icon as any} size={14} color={color} />
+        <Text style={{ color, fontSize: 12, fontWeight: '700', textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>{label}</Text>
+      </View>
+    );
+
     return (
       <View style={[styles.analysisPanel, { backgroundColor: colors.primary + '08', borderColor: colors.primary + '30' }]}>
-        {analysis.hookSuggestion ? (
-          <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'hook')}>
-            <Ionicons name={toggles.hook ? "checkbox" : "square-outline"} size={16} color={colors.primary} />
-            <View style={styles.analysisContent}>
-              <Text style={[styles.analysisLabel, { color: colors.primary }]}>Hook → Title</Text>
-              <Text style={[styles.analysisValue, { color: colors.text }]}>{analysis.hookSuggestion}</Text>
-            </View>
-          </Pressable>
+        <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '700', marginBottom: 4 }}>Production Script</Text>
+
+        {analysis.hook ? (
+          <>
+            {sectionHeader('flash', 'Hook (First 3 Seconds)', '#EF4444')}
+            <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'hook')}>
+              <Ionicons name={toggles.hook ? "checkbox" : "square-outline"} size={16} color={colors.primary} />
+              <View style={styles.analysisContent}>
+                <Text style={[styles.analysisLabel, { color: colors.primary }]}>Apply as Title</Text>
+                <Text style={[styles.analysisValue, { color: colors.text }]}>{analysis.hook}</Text>
+              </View>
+            </Pressable>
+          </>
         ) : null}
+
+        {analysis.fullScript ? (
+          <>
+            {sectionHeader('document-text', 'Full Spoken Script', colors.accent)}
+            <Text style={{ color: colors.text, fontSize: 13, lineHeight: 20, paddingHorizontal: 4 }}>{analysis.fullScript}</Text>
+          </>
+        ) : null}
+
+        {analysis.scenes?.length > 0 ? (
+          <>
+            {sectionHeader('film', 'Scene Breakdown', '#8B5CF6')}
+            {analysis.scenes.map((scene: any, i: number) => (
+              <View key={i} style={{ backgroundColor: colors.card, borderRadius: 8, padding: 10, marginBottom: 6, borderWidth: 1, borderColor: colors.cardBorder }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <Text style={{ color: '#8B5CF6', fontSize: 12, fontWeight: '700' }}>Scene {scene.sceneNumber || i + 1}</Text>
+                  <Text style={{ color: colors.textMuted, fontSize: 11 }}>{scene.duration}</Text>
+                </View>
+                {scene.visualDirection ? <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 3 }}>{scene.visualDirection}</Text> : null}
+                {scene.onScreenText ? (
+                  <View style={{ flexDirection: 'row', gap: 4, marginBottom: 3 }}>
+                    <Text style={{ color: '#F59E0B', fontSize: 11, fontWeight: '600' }}>TEXT:</Text>
+                    <Text style={{ color: colors.text, fontSize: 12, flex: 1 }}>{scene.onScreenText}</Text>
+                  </View>
+                ) : null}
+                {scene.voiceover ? (
+                  <View style={{ flexDirection: 'row', gap: 4, marginBottom: 3 }}>
+                    <Text style={{ color: '#3B82F6', fontSize: 11, fontWeight: '600' }}>VO:</Text>
+                    <Text style={{ color: colors.text, fontSize: 12, flex: 1, fontStyle: 'italic' as const }}>{scene.voiceover}</Text>
+                  </View>
+                ) : null}
+                {scene.bRollSuggestion ? (
+                  <View style={{ flexDirection: 'row', gap: 4 }}>
+                    <Text style={{ color: '#10B981', fontSize: 11, fontWeight: '600' }}>B-ROLL:</Text>
+                    <Text style={{ color: colors.textMuted, fontSize: 12, flex: 1 }}>{scene.bRollSuggestion}</Text>
+                  </View>
+                ) : null}
+              </View>
+            ))}
+          </>
+        ) : null}
+
+        {analysis.cameraDirections ? (
+          <>
+            {sectionHeader('camera', 'Camera Directions', '#F59E0B')}
+            <Text style={{ color: colors.text, fontSize: 12, lineHeight: 18, paddingHorizontal: 4 }}>{analysis.cameraDirections}</Text>
+          </>
+        ) : null}
+
+        {analysis.onScreenTextSummary?.length > 0 ? (
+          <>
+            {sectionHeader('text', 'On-Screen Text', '#F59E0B')}
+            {analysis.onScreenTextSummary.map((t: string, i: number) => (
+              <Text key={i} style={{ color: colors.text, fontSize: 12, paddingHorizontal: 4, marginBottom: 2 }}>• {t}</Text>
+            ))}
+          </>
+        ) : null}
+
+        {analysis.bRollList?.length > 0 ? (
+          <>
+            {sectionHeader('images', 'B-Roll Shots', '#10B981')}
+            {analysis.bRollList.map((b: string, i: number) => (
+              <Text key={i} style={{ color: colors.textSecondary, fontSize: 12, paddingHorizontal: 4, marginBottom: 2 }}>• {b}</Text>
+            ))}
+          </>
+        ) : null}
+
+        {analysis.ctaLine ? (
+          <>
+            {sectionHeader('megaphone', 'CTA Line', colors.success)}
+            <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'cta')}>
+              <Ionicons name={toggles.cta ? "checkbox" : "square-outline"} size={16} color={colors.success} />
+              <View style={styles.analysisContent}>
+                <Text style={[styles.analysisLabel, { color: colors.success }]}>Apply as CTA</Text>
+                <Text style={[styles.analysisValue, { color: colors.text }]}>{analysis.ctaLine}</Text>
+              </View>
+            </Pressable>
+          </>
+        ) : null}
+
         {analysis.captionDraft ? (
-          <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'caption')}>
-            <Ionicons name={toggles.caption ? "checkbox" : "square-outline"} size={16} color={colors.accent} />
-            <View style={styles.analysisContent}>
-              <Text style={[styles.analysisLabel, { color: colors.accent }]}>Caption</Text>
-              <Text style={[styles.analysisValue, { color: colors.text }]} numberOfLines={3}>{analysis.captionDraft}</Text>
-            </View>
-          </Pressable>
+          <>
+            {sectionHeader('chatbubble-ellipses', 'Caption Draft', colors.accent)}
+            <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'caption')}>
+              <Ionicons name={toggles.caption ? "checkbox" : "square-outline"} size={16} color={colors.accent} />
+              <View style={styles.analysisContent}>
+                <Text style={[styles.analysisLabel, { color: colors.accent }]}>Apply Caption</Text>
+                <Text style={[styles.analysisValue, { color: colors.text }]}>{analysis.captionDraft}</Text>
+              </View>
+            </Pressable>
+          </>
         ) : null}
-        {analysis.ctaSuggestion ? (
-          <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'cta')}>
-            <Ionicons name={toggles.cta ? "checkbox" : "square-outline"} size={16} color={colors.success} />
-            <View style={styles.analysisContent}>
-              <Text style={[styles.analysisLabel, { color: colors.success }]}>CTA</Text>
-              <Text style={[styles.analysisValue, { color: colors.text }]}>{analysis.ctaSuggestion}</Text>
-            </View>
-          </Pressable>
+
+        {analysis.hashtags?.length > 0 ? (
+          <>
+            {sectionHeader('pricetag', 'Hashtags', colors.textSecondary)}
+            <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'keywords')}>
+              <Ionicons name={toggles.keywords ? "checkbox" : "square-outline"} size={16} color={colors.textSecondary} />
+              <View style={styles.analysisContent}>
+                <Text style={[styles.analysisLabel, { color: colors.textSecondary }]}>Apply as Tags</Text>
+                <Text style={[styles.analysisValue, { color: colors.textMuted }]}>{analysis.hashtags.map((h: string) => h.startsWith('#') ? h : `#${h}`).join(' ')}</Text>
+              </View>
+            </Pressable>
+          </>
         ) : null}
-        {analysis.contentAngle ? (
-          <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'angle')}>
-            <Ionicons name={toggles.angle ? "checkbox" : "square-outline"} size={16} color={colors.accentOrange} />
-            <View style={styles.analysisContent}>
-              <Text style={[styles.analysisLabel, { color: colors.accentOrange }]}>Angle</Text>
-              <Text style={[styles.analysisValue, { color: colors.text }]}>{analysis.contentAngle}</Text>
-            </View>
-          </Pressable>
-        ) : null}
-        {analysis.keywords?.length > 0 ? (
-          <Pressable style={styles.analysisRow} onPress={() => toggleApplyField(item.id, 'keywords')}>
-            <Ionicons name={toggles.keywords ? "checkbox" : "square-outline"} size={16} color={colors.textSecondary} />
-            <View style={styles.analysisContent}>
-              <Text style={[styles.analysisLabel, { color: colors.textSecondary }]}>Keywords</Text>
-              <Text style={[styles.analysisValue, { color: colors.textMuted }]}>{analysis.keywords.join(', ')}</Text>
-            </View>
-          </Pressable>
-        ) : null}
+
         {!analysis.applied && (
           <Pressable
             onPress={() => handleApplyAnalysis(item)}
-            style={[styles.applyDraftBtn, { backgroundColor: colors.primary }]}
+            style={[styles.applyDraftBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
           >
             <Ionicons name="checkmark-circle" size={16} color="#fff" />
-            <Text style={styles.applyDraftBtnText}>Apply to Draft</Text>
+            <Text style={styles.applyDraftBtnText}>Apply Selected to Draft</Text>
           </Pressable>
         )}
         {analysis.applied && (
-          <View style={[styles.applyDraftBtn, { backgroundColor: colors.success + '20' }]}>
+          <View style={[styles.applyDraftBtn, { backgroundColor: colors.success + '20', marginTop: 12 }]}>
             <Ionicons name="checkmark-done" size={16} color={colors.success} />
             <Text style={[styles.applyDraftBtnText, { color: colors.success }]}>Applied</Text>
           </View>

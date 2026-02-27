@@ -270,6 +270,8 @@ SCRIPT STRUCTURE RULES:
 
       const userPrompt = `Create a complete, production-ready Reel script about: "${topic}"
 
+CRITICAL: This must be a FULL PRODUCTION SCRIPT, not brainstorming or outlines. Every word the creator speaks must be written out. Every camera direction must be specific enough to execute immediately.
+
 Return your response in this EXACT JSON format:
 {
   "title": "Working title for the reel",
@@ -278,41 +280,44 @@ Return your response in this EXACT JSON format:
     "text_overlay": "The bold text overlay shown on screen during the hook (keep under 8 words, high contrast)",
     "voiceover": "What is said aloud during the hook (punchy, curiosity-driven)"
   },
+  "full_script": "The COMPLETE spoken script from start to finish, word-for-word. This is what the creator reads from a teleprompter. Include the hook line, all scene dialogue, and the closing CTA as one continuous script.",
   "scenes": [
     {
       "scene_number": 1,
       "duration": "3-5s",
-      "visual_direction": "Detailed camera angle, movement, lighting, and what's shown on screen. Be specific enough for a photographer/videographer to execute.",
-      "text_overlay": "On-screen text for this scene",
-      "voiceover": "Script line for voiceover or dialogue",
-      "transition": "How this scene transitions to the next (cut, zoom, swipe, morph, etc.)",
-      "b_roll_suggestion": "Alternative or supplementary footage idea"
+      "visual_direction": "Exact camera angle (close-up/medium/wide), movement (pan/tilt/tracking/static), framing (centered/rule-of-thirds), and what is shown on screen. Specific enough for a videographer to execute without clarification.",
+      "text_overlay": "On-screen text for this scene (bold, high-contrast)",
+      "voiceover": "Exact words spoken during this scene — word for word",
+      "transition": "How this scene transitions to the next (jump cut, zoom, swipe, morph, whip pan, etc.)",
+      "b_roll_suggestion": "Specific alternative footage that could supplement this scene"
     }
   ],
   "closing": {
-    "visual": "Final visual description",
-    "cta_text": "Call-to-action text overlay",
-    "cta_voiceover": "Spoken CTA",
+    "visual": "Final visual description — what the viewer sees",
+    "cta_text": "Call-to-action text overlay on screen",
+    "cta_voiceover": "Exact spoken CTA words",
     "loop_trick": "How the ending connects back to the beginning for seamless replay"
   },
+  "caption": "Full social media caption with line breaks, emojis, and call-to-action. Ready to paste.",
+  "hashtags": ["hashtag1", "hashtag2", "hashtag3", "hashtag4", "hashtag5", "hashtag6", "hashtag7", "hashtag8"],
   "production_notes": {
     "estimated_duration": "Total estimated duration",
     "audio_direction": "Music style, trending sound suggestion, or voiceover tone guidance",
-    "lighting": "Lighting setup recommendation",
+    "lighting": "Specific lighting setup (natural/ring light/softbox, direction, color temp)",
     "props_needed": "List of props or setup needed",
     "best_posting_time": "Optimal posting window for the target audience",
-    "hashtag_strategy": "5-8 hashtags mixing broad reach and niche targeting"
+    "wardrobe": "What the creator should wear for this content"
   },
   "algorithm_optimization": {
-    "retention_hooks": ["List of micro-hooks placed throughout to maintain watch time"],
-    "share_trigger": "Why someone would share this reel (emotion, relatability, utility)",
-    "save_trigger": "Why someone would save this reel (reference value, tutorial, inspiration)",
+    "retention_hooks": ["Specific micro-hooks placed at exact timestamps to maintain watch time"],
+    "share_trigger": "Why someone would share this reel",
+    "save_trigger": "Why someone would save this reel",
     "engagement_prompt": "Caption question or poll to boost comments",
-    "repost_strategy": "How to repurpose this reel for Stories, Feed, and Facebook Reels"
+    "repost_strategy": "How to repurpose for Stories, Feed, and Facebook"
   }
 }
 
-Generate exactly 4-6 scenes. Make the photography/videography directions specific and actionable — as if you're briefing a professional content creator. The visual hook must be genuinely scroll-stopping, not generic.`;
+Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera directions must specify exact angles and movements, not vague descriptions like "show the product." The visual hook must be genuinely scroll-stopping.`;
 
       const response = await aiChat({
         model: "gpt-5.2",
