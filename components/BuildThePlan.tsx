@@ -498,6 +498,8 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
   const [jobId, setJobId] = useState<string | null>(null);
   const [sectionStatuses, setSectionStatuses] = useState<Record<string, string> | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollingStartRef = useRef<number>(0);
+  const POLLING_TIMEOUT_MS = 90000;
 
   const stopPolling = useCallback(() => {
     if (pollingRef.current) {
@@ -508,6 +510,14 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
 
   const pollJobStatus = useCallback(async (jId: string) => {
     try {
+      if (Date.now() - pollingStartRef.current > POLLING_TIMEOUT_MS) {
+        stopPolling();
+        setLoading(false);
+        setJobId(null);
+        setError('[POLL_TIMEOUT] Generation took too long (90s). The job may still complete — retry to check.');
+        return;
+      }
+
       const res = await fetch(getApiUrl(`/api/strategic/orchestrate-status/${jId}`));
       const data = await res.json();
 
@@ -519,21 +529,35 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
         setLoading(false);
         setJobId(null);
 
+        const requiredKeys = [
+          'contentDistributionPlan',
+          'creativeTestingMatrix',
+          'budgetAllocationStructure',
+          'kpiMonitoringPriority',
+          'competitiveWatchTargets',
+          'riskMonitoringTriggers',
+        ];
+        const plan = data.orchestratorPlan;
+        const missing = plan ? requiredKeys.filter(k => !plan[k] || typeof plan[k] !== 'object') : requiredKeys;
+
+        if (missing.length > 0) {
+          setError(`[SCHEMA_INVALID] Plan missing sections: ${missing.join(', ')}. Retry or contact support.`);
+          return;
+        }
+
         if (data.fallback) {
           setIsFallbackPlan(true);
           setFallbackReason(data.fallbackReason || 'AI generation failed — using skeleton plan');
         }
 
-        if (data.orchestratorPlan) {
-          setBlueprint(prev => prev ? {
-            ...prev,
-            status: 'ORCHESTRATED' as BlueprintStatus,
-            orchestratorPlan: data.orchestratorPlan,
-            planId: data.planId || null,
-            planStatus: data.planStatus || 'DRAFT',
-          } : null);
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        }
+        setBlueprint(prev => prev ? {
+          ...prev,
+          status: 'ORCHESTRATED' as BlueprintStatus,
+          orchestratorPlan: plan,
+          planId: data.planId || null,
+          planStatus: data.planStatus || 'DRAFT',
+        } : null);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         return;
       }
 
@@ -554,6 +578,12 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
   useEffect(() => {
     return () => stopPolling();
   }, [stopPolling]);
+
+  useEffect(() => {
+    stopPolling();
+    setJobId(null);
+    setSectionStatuses(null);
+  }, [blueprint?.id, stopPolling]);
 
   const runOrchestrator = useCallback(async () => {
     if (!blueprint) return;
@@ -596,6 +626,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
         };
         setSectionStatuses(initialStatuses);
 
+        pollingStartRef.current = Date.now();
         pollingRef.current = setInterval(() => {
           pollJobStatus(data.jobId);
         }, 2000);

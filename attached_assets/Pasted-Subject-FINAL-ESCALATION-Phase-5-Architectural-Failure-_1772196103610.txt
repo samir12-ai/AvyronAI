@@ -1,0 +1,78 @@
+Subject: FINAL ESCALATION — Phase 5 Architectural Failure | External Review + Rollback Authorization
+
+Replit,
+
+This is the final escalation regarding Phase 5.
+
+We are no longer discussing performance tuning.
+We are addressing a structural architecture failure.
+
+Phase 5 consistently times out under normal operating conditions and falls back deterministically. This confirms the current synchronous orchestration model is incompatible with production-grade reliability.
+
+The system cannot move forward to intelligence expansion until this is corrected at the architectural level.
+
+Effective immediately, this is classified as:
+
+Severity 1 — Core System Instability
+
+⸻
+
+Immediate Actions Required
+
+Phase 5 must be fully migrated to an Assigned Background Job architecture with strict separation between request handling and AI execution.
+
+The following are mandatory:
+	1.	Complete removal of synchronous AI calls from HTTP request threads.
+	2.	Implementation of a background job lifecycle with explicit state tracking.
+	3.	Section-level atomic generation and persistence.
+	4.	Strict schema validation before any frontend render.
+	5.	Controlled retry policy inside worker context only.
+	6.	Deterministic fallback per-section, not global collapse.
+	7.	Full observability and stage timing logs.
+
+No partial implementation will be accepted.
+
+⸻
+
+External Technical Review Clause
+
+If this structural correction is not delivered within SLA:
+	•	The orchestration layer will be subjected to external technical review.
+	•	Architecture will be audited for scalability, timeout handling, and concurrency safety.
+	•	Responsibility mapping for the current implementation will be documented.
+
+This is not a threat.
+It is governance.
+
+⸻
+
+Deployment Rollback Authorization
+
+If instability persists after implementation:
+	•	Phase 5 AI execution will be disabled.
+	•	System will revert to deterministic skeleton generation.
+	•	Intelligence roadmap will be paused.
+	•	Deployment authority will be restricted until architectural compliance is achieved.
+
+No further scaling or engine development will proceed under unstable core conditions.
+
+⸻
+
+SLA
+
+Correction must be delivered within 24 hours.
+
+Acceptance requires:
+	•	Three consecutive successful AI generations on a new campaign (manual metrics + 1 competitor).
+	•	Zero timeouts reaching the UI.
+	•	Zero schema mismatches.
+	•	Complete lifecycle logging traceable in under 60 seconds.
+	•	No duplicate plan artifacts on retry.
+
+Until these conditions are satisfied, the system is not production-stable.
+
+We do not scale unstable foundations.
+
+This is the final directive.
+
+— Samir

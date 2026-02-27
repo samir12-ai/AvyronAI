@@ -445,8 +445,11 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
     let orchestratorPlan: any = null;
     let usedFallback = false;
     let fallbackReason: string | null = null;
+    const MAX_RETRIES = 1;
 
-    try {
+    const attemptAiGeneration = async (attempt: number): Promise<any> => {
+      log(`AI_ATTEMPT_${attempt}_START`, { model: "gpt-5.2", attempt });
+
       const response = await aiChat({
         model: "gpt-5.2",
         messages: [
@@ -458,35 +461,47 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
         endpoint: "strategic-orchestrator",
       });
 
-      log("AI_CALL_END", { durationMs: Date.now() - startMs, finishReason: response.choices[0]?.finish_reason });
+      log(`AI_ATTEMPT_${attempt}_END`, { durationMs: Date.now() - startMs, finishReason: response.choices[0]?.finish_reason });
 
       const rawText = response.choices[0]?.message?.content || "";
-      log("PARSE", { rawLength: rawText.length });
+      log("PARSE", { rawLength: rawText.length, attempt });
 
       const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        orchestratorPlan = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error("No JSON object found in model response");
-      }
+      if (!jsonMatch) throw new Error("No JSON object found in model response");
 
-      if (!orchestratorPlan || Object.keys(orchestratorPlan).length === 0) {
-        throw new Error("AI returned empty plan object");
-      }
-    } catch (aiErr: any) {
-      log("AI_OR_PARSE_FAIL", { code: aiErr.code, message: aiErr.message });
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (!parsed || Object.keys(parsed).length === 0) throw new Error("AI returned empty plan object");
 
-      if (aiErr.code === "AI_BUDGET_EXCEEDED") {
-        await updateJob({ status: "FAILED", error: aiErr.message, errorCode: "AI_BUDGET_EXCEEDED", stageTimes: JSON.stringify(stageTimes), durationMs: Date.now() - startMs, completedAt: new Date() });
-        await logAuditEvent({ accountId, campaignId: campaignId || undefined, blueprintId, blueprintVersion: blueprint.blueprintVersion, event: "ORCHESTRATOR_FAILED", details: { jobId, error: "AI_BUDGET_EXCEEDED", message: aiErr.message, stageTimes } });
-        return;
-      }
+      return parsed;
+    };
 
-      usedFallback = true;
-      const isTimeout = aiErr.message?.includes("timeout") || aiErr.message?.includes("timed out") || aiErr.code === "ETIMEDOUT";
-      fallbackReason = isTimeout ? "AI generation timed out" : `AI call failed: ${aiErr.message}`;
-      log("FALLBACK_TRIGGERED", { reason: fallbackReason });
-      orchestratorPlan = generateFallbackPlan({ confirmedBlueprint, campaignContext, competitorUrls, businessData });
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        orchestratorPlan = await attemptAiGeneration(attempt);
+        log("AI_SUCCESS", { attempt, durationMs: Date.now() - startMs });
+        break;
+      } catch (aiErr: any) {
+        log(`AI_ATTEMPT_${attempt}_FAIL`, { code: aiErr.code, message: aiErr.message, attempt, willRetry: attempt < MAX_RETRIES });
+
+        if (aiErr.code === "AI_BUDGET_EXCEEDED") {
+          await updateJob({ status: "FAILED", error: aiErr.message, errorCode: "AI_BUDGET_EXCEEDED", stageTimes: JSON.stringify(stageTimes), durationMs: Date.now() - startMs, completedAt: new Date() });
+          await logAuditEvent({ accountId, campaignId: campaignId || undefined, blueprintId, blueprintVersion: blueprint.blueprintVersion, event: "ORCHESTRATOR_FAILED", details: { jobId, error: "AI_BUDGET_EXCEEDED", message: aiErr.message, stageTimes, attempt } });
+          return;
+        }
+
+        if (attempt < MAX_RETRIES) {
+          log("RETRY_SCHEDULED", { attempt, nextAttempt: attempt + 1, delayMs: 2000 });
+          await updateJob({ sectionStatuses: JSON.stringify({ ...sectionStatuses, _retryAttempt: attempt + 1 }) });
+          await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
+
+        usedFallback = true;
+        const isTimeout = aiErr.message?.includes("timeout") || aiErr.message?.includes("timed out") || aiErr.code === "ETIMEDOUT";
+        fallbackReason = isTimeout ? `AI timed out after ${attempt + 1} attempt(s)` : `AI failed after ${attempt + 1} attempt(s): ${aiErr.message}`;
+        log("FALLBACK_AFTER_RETRIES", { reason: fallbackReason, totalAttempts: attempt + 1 });
+        orchestratorPlan = generateFallbackPlan({ confirmedBlueprint, campaignContext, competitorUrls, businessData });
+      }
     }
 
     for (const key of PLAN_SECTIONS) {
@@ -503,6 +518,7 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
           sectionStatuses[key] = "FALLBACK";
         }
       }
+      await updateJob({ sectionStatuses: JSON.stringify(sectionStatuses) });
     }
 
     orchestratorPlan.blueprintVersion = blueprint.blueprintVersion;
@@ -511,7 +527,7 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
       orchestratorPlan.fallbackReason = fallbackReason;
     }
 
-    log("SECTION_SAVE", { sectionStatuses });
+    log("SECTION_VALIDATION_COMPLETE", { sectionStatuses, usedFallback });
 
     await db.update(strategicBlueprints)
       .set({
@@ -656,6 +672,32 @@ export function registerOrchestratorRoutes(app: Express) {
 
       if (job.status === "COMPLETE") {
         const plan = job.planJson ? JSON.parse(job.planJson) : null;
+
+        const requiredSections = [
+          "contentDistributionPlan",
+          "creativeTestingMatrix",
+          "budgetAllocationStructure",
+          "kpiMonitoringPriority",
+          "competitiveWatchTargets",
+          "riskMonitoringTriggers",
+        ];
+        const missingSections = plan ? requiredSections.filter(s => !plan[s] || typeof plan[s] !== "object") : requiredSections;
+        const schemaValid = missingSections.length === 0;
+
+        if (!schemaValid) {
+          return res.json({
+            success: false,
+            status: "FAILED",
+            jobId: job.id,
+            error: "SCHEMA_VALIDATION_FAILED",
+            message: `Plan missing required sections: ${missingSections.join(", ")}`,
+            missingSections,
+            sectionStatuses,
+            durationMs: job.durationMs,
+            stageTimes,
+          });
+        }
+
         return res.json({
           success: true,
           status: "COMPLETE",
@@ -664,6 +706,7 @@ export function registerOrchestratorRoutes(app: Express) {
           planStatus: "DRAFT",
           orchestratorPlan: plan,
           sectionStatuses,
+          schemaValid: true,
           fallback: job.fallback || false,
           fallbackReason: job.fallbackReason,
           durationMs: job.durationMs,

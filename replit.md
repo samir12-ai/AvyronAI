@@ -1,7 +1,7 @@
 # MarketMind AI
 
 ## Overview
-MarketMind AI is a cross-platform marketing automation application using AI to generate social media content, manage campaigns, schedule posts, and provide analytics. Built with Expo (React Native), its primary goal is to streamline marketing workflows, enhance brand presence through AI-powered content creation, and offer strategic insights. The project aims to act as an "AI Agency Replacement" focused on revenue generation and autonomous marketing capabilities.
+MarketMind AI is a cross-platform marketing automation application leveraging AI to generate social media content, manage campaigns, schedule posts, and provide analytics. Built with Expo (React Native), its core purpose is to streamline marketing workflows, enhance brand presence through AI-powered content creation, and offer strategic insights. The project aims to function as an "AI Agency Replacement" focused on revenue generation and autonomous marketing capabilities, transforming strategic blueprints into published content through a controlled execution pipeline.
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
@@ -15,8 +15,8 @@ Preferred communication style: Simple, everyday language.
 - **Dynamic Theming**: Support for light and dark modes.
 
 ### Frontend
-- **Framework**: Expo SDK 54 with React Native 0.81 (new architecture).
-- **Navigation**: Expo Router v6 (file-based routing).
+- **Framework**: Expo SDK with React Native (new architecture).
+- **Navigation**: Expo Router (file-based routing).
 - **State Management**: React Context API for global state, TanStack React Query for server state.
 - **Internationalization**: i18n-js for 32 languages.
 - **UI/UX**: Custom component library, React Native Reanimated for animations.
@@ -24,70 +24,56 @@ Preferred communication style: Simple, everyday language.
 ### Backend
 - **Server**: Express.js with Node.js and TypeScript.
 - **API Design**: RESTful endpoints.
-- **AI Integration**: Dual-AI engine utilizing OpenAI GPT-5.2 and Google Gemini 3 Pro for content and strategy, with Nano Banana Pro (Gemini 3 Pro Image) and GPT Image 1 for AI image/design.
-- **Autonomous Engine**: Production-safe backend with guardrails for marketing decisions (Guardrail Engine, Adaptive Baselines, Hybrid Risk Classifier, Decision Feedback Loop, Audit System) supporting autopilot for low-risk decisions.
+- **AI Integration**: Dual-AI engine utilizing OpenAI GPT and Google Gemini for content and strategy, with specialized models for AI image/design.
+- **Autonomous Engine**: Production-safe backend with guardrails, adaptive baselines, hybrid risk classifiers, and a decision feedback loop supporting autopilot for low-risk marketing decisions.
 
 ### Data Storage
 - **Client-side**: AsyncStorage for local data.
 - **Server-side**: PostgreSQL with Drizzle ORM for user data and chat conversations.
 
 ### Key Features
-- **Dashboard**: Revenue-focused KPIs and AI action summaries. Profile icon in header opens unified Business Profile modal. Plan-driven fallback metrics (planned/generated/failed/pending/completion%) when no Meta data. "Meta not connected" badge. AI Actions evidence-bound: every action carries sourceTag (MANUAL_METRICS/PLAN_PROGRESS/HYBRID/PERFORMANCE), evidenceMetric (numeric), evidenceTimeframe, priority + justification. HYBRID actions combine manual performance + plan execution data. Campaign switch resets all state, passes explicit campaignId, guards against stale in-flight responses.
-- **Create**: AI Writer for text and AI Designer for image generation with style presets. Shows Required Work by branch (Designer/Writer/Video) with counts. Branch ownership: Carousels→DESIGNER, Posts+Stories→WRITER, Reels+Videos→VIDEO. No double counting — branch totals sum exactly to totalContentPieces.
-- **Calendar**: Content scheduling with AI Calendar Assistant.
-- **AI Management**: Auto-Publisher for Meta platforms, AI Audience Manager for optimized Meta ad audiences, and a Performance Intelligence Layer for insights.
-- **Studio**: Media library and AI Video Editor with FFmpeg rendering. AI Video Analysis Assist auto-extracts hooks, captions, CTAs, angles, and keywords per video item. "Apply to Draft" button with field toggles writes selected AI fields to draft (non-destructive, user edits survive).
-- **Luma AI Video**: Full-spec integration with Ray 2 Flash, Ray 2, and Ray 3 models. Durations: 5s/9s/10s/15s/20s. Resolutions: 540p/720p/1080p/4K. Default: Ray 2 at 1080p. Supports text-to-video, image-to-video, extend, and Photon image generation. 15-minute polling timeout for high-quality renders.
-- **Lead Engine**: Modular lead generation system with 8 independent modules and AI Lead Optimization.
-- **Competitive Intelligence**: Real-data competitor analysis system using a 2-step scrape ladder for MEASURED metrics and INFERRED AI insights.
-- **Creative Capture Layer**: 8-component pipeline analyzing reels with real data for deterministic signals and AI interpretation.
-- **Plan Documents**: Plan PDF/markdown generation and storage via `plan_documents` table. Download from Pipeline UI.
+- **Dashboard**: Revenue-focused KPIs, AI action summaries with evidence-bound actions, and campaign-specific metrics.
+- **Content Creation**: AI Writer for text and AI Designer for image generation, with clear delineation of "Required Work" by content branch.
+- **Calendar**: AI Calendar Assistant for content scheduling.
+- **AI Management**: Auto-Publisher for Meta platforms, AI Audience Manager for optimized ad audiences, and a Performance Intelligence Layer.
+- **Studio**: Media library, AI Video Editor with FFmpeg rendering, and AI Video Analysis Assist for content extraction. Full integration with Luma AI Video models (Ray 2, Ray 3) for text-to-video and image-to-video generation across various resolutions and durations.
+- **Lead Engine**: Modular lead generation system with AI Lead Optimization.
+- **Competitive Intelligence**: Real-data competitor analysis system providing measured metrics and inferred AI insights.
+- **Creative Capture Layer**: Analyzes reels with real data for deterministic signals and AI interpretation.
+- **Plan Documents**: Generation and storage of strategic plans in PDF/markdown format.
 
 ### Strategic Execution Machine
-- **System**: Controlled single-track execution pipeline transforming strategic blueprints into published content through hard approval gates.
-- **Pipeline**: Blueprint → Strategic Plan → Client Approval Gate → Calendar Auto-Generation → Item-by-Item Creative Generation → Studio Drafts → Scheduled → Published.
-- **Single Calendar**: One canonical calendar source of truth (`calendar_entries` table). Main Calendar tab reads from DB. Pipeline shows summary only with "Open Calendar" CTA — no duplicate calendar rendering.
-- **Item-by-Item Generation**: `POST /api/execution/calendar-entries/:entryId/generate` generates content for exactly ONE calendar entry per request. No batch generation endpoints. Max 1 content unit per click.
-- **Execution Safety**: Idempotency, concurrency locks, emergency stop, and explicit failure tracking.
-- **Hard Rules**: Nothing executes until plans are APPROVED; no auto-publishing; all state transitions are audit logged; no batch content generation.
+- **System**: A single-track execution pipeline transforming strategic blueprints into published content through hard approval gates.
+- **Pipeline Flow**: Blueprint → Strategic Plan → Client Approval Gate → Calendar Auto-Generation → Item-by-Item Creative Generation → Studio Drafts → Scheduled → Published.
+- **Single Calendar Source**: A single canonical calendar for all scheduling.
+- **Item-by-Item Generation**: Content is generated for one calendar entry per request, ensuring controlled execution.
+- **Execution Safety**: Idempotency, concurrency locks, emergency stop, and explicit failure tracking are implemented.
 
 ### Strategic Core Architecture ("Build The Plan")
-- **System**: 6-phase sequential intelligence engine with hard gates (Gate, Creative Analysis, Confirm/Edit, Market Analysis, Validation, Orchestrator).
-- **AI Models**: Gemini 3 Pro for creative extraction, GPT-5.2 for market analysis, validation, and orchestration.
-- **Orchestrator Enhancement**: Optionally injects Performance Intelligence signals into the orchestrator prompt.
-- **Orchestrator Resilience**: On AI timeout/parse failure, generates deterministic fallback skeleton plan (6 sections) with `fallback: true` flag, saved as DRAFT. User can approve fallback or retry. Prompt payload capped (blueprint 2000 chars, market map 1000, validation 800). Performance signals trimmed. max_tokens reduced to 3000. System prompt uses concise section schema matching frontend keys.
-- **Stage Timing Logs**: Every Phase 5 request logs: START → LOAD_CONTEXT → VALIDATION_PASSED → DB_READS_COMPLETE → BUILD_PROMPT → AI_CALL_START → AI_CALL_END → PARSE → DB_WRITE → COMPLETE with duration_ms per stage, promptChars, model, and requestId.
-- **Competitor Linking**: Build The Plan pulls competitors from Competitive Intelligence (selectable list), minimum 1 competitor required (not 2). Strict validation at Phase 5: 400 COMPETITOR_REQUIRED for 0 competitors, 422 COMPETITOR_INCOMPLETE for invalid entries.
-- **Error Handling**: AI budget exceeded → 402 AI_BUDGET_EXCEEDED; AI timeout → fallback plan with `fallbackReason`; parse failure → fallback plan; every error includes `requestId` (copyable in UI). Every Phase 5 attempt produces an audit event with stageTimes.
-- **Plan Approval Gate**: After Phase 5 generates execution plans, a `strategic_plan` row is auto-created (status: DRAFT). Explicit "Approve & Activate Plan" button required to set status to APPROVED. Pipeline is LOCKED until plan.status === APPROVED. Regeneration reverts to VALIDATED and SUPERSEDES old plans, relocking pipeline.
-- **Approval Endpoints**: `POST /api/strategic/blueprint/:id/approve-plan` (DRAFT→APPROVED with audit), `POST /api/strategic/blueprint/:id/regenerate-plan` (reverts to VALIDATED, supersedes plans), `GET /api/strategic/blueprint/:id/plan-status`.
-
-### Execution Authority Matrix
-- **SINGLE EXECUTION TRACK**: "Build The Plan" is the sole execution authority, owning strategic plans, required work, calendar entries, studio items, and plan approvals.
-- **Performance Intelligence**: Reads its own signal tables (e.g., performance snapshots, strategy insights) and writes only to these, never to execution tables. All signal tables are scoped by `account_id` and `campaign_id`.
+- **System**: A 6-phase sequential intelligence engine with hard gates for plan generation (Gate, Creative Analysis, Confirm/Edit, Market Analysis, Validation, Orchestrator).
+- **AI Models**: Gemini for creative extraction, GPT for market analysis, validation, and orchestration, with optional Performance Intelligence signal injection.
+- **Asynchronous Processing**: Phase 5 orchestrator jobs run as background processes, with frontend polling for status updates.
+- **Resilience**: Controlled retry policies, per-section fallback mechanisms, and robust error handling with audit logging.
+- **Schema Validation**: Strict validation ensures plans contain all required sections before delivery.
+- **Plan Approval Gate**: Execution plans are initially drafted and require explicit approval to activate, locking the pipeline until approved. Regeneration reverts status and supersedes old plans.
 
 ### Backend Stabilization
-- **AI Cost Lock**: All AI calls routed through a centralized singleton with explicit tracking, usage logging, and weekly token budgets.
-- **Database Indexes**: Extensive custom indexes across all tables.
-- **Worker Hardening**: Autonomous worker with hourly decision caps, circuit breakers, and idle account skipping. Plan-gated: blocks cycle if no approved plan.
-- **Safety Gate Registry**: Centralized gate functions for route protection (e.g., `gateAutopilotEnabled`, `gateAIBudget`).
-- **Active Plan Status Constant**: `ACTIVE_PLAN_STATUSES` in `server/plan-constants.ts` — single source of truth for APPROVED/GENERATED_TO_CALENDAR/CREATIVE_GENERATED/REVIEW/SCHEDULED. Used by gates, autopilot, dashboard, and worker.
+- **AI Cost Lock**: Centralized AI call routing with usage tracking and token budgets.
+- **Database Indexes**: Extensive custom indexes for performance.
+- **Worker Hardening**: Autonomous worker with decision caps, circuit breakers, and account-based plan gating.
+- **Safety Gate Registry**: Centralized functions for route protection and feature gating.
+- **Memory Scoping Hardening**: Mathematically provable account and campaign isolation on all signal tables.
+- **Campaign Switch Safety**: Hard reset of campaign-scoped state on switch, preventing cross-campaign writes.
 - **Validation Layer**: Zod-based request validation middleware.
-- **Memory Scoping Hardening**: Mathematically provable account+campaign isolation on all signal tables with database NOT NULL constraints and write guards.
-- **Campaign Switch Safety**: Hard reset of all campaign-scoped state on switch. Debounced saves cancelled. No cross-campaign write possible. StrategicPipeline clears plans/account/progress/calendarEntries on campaign change and shows error state with retry on fetch failure.
-- **Execution Dashboard Campaign Scoping**: `/api/execution/dashboard` accepts optional `campaignId` query param to filter plans, required_work, and studio_items by campaign. StrategicPipeline passes `selectedCampaignId` to this endpoint.
 
 ### Final System Lock
-- **Business Data Layer**: `business_data_layer` table with 9 structural columns (e.g., businessLocation, businessType, coreOffer), campaign-scoped and used for orchestration. Unified Business Profile: single entry point via profile icon in dashboard header; BuildThePlan Phase 0 shows profile completeness gate, not duplicate form.
-- **Dashboard Campaign Truth**: All dashboard metrics derived from campaign-scoped DB queries; no hardcoded values.
-- **AI Actions Evidence-Bound**: AI actions carry evidence metadata (sourceTag: MANUAL_METRICS/PLAN_PROGRESS/HYBRID/PERFORMANCE, evidenceMetric, evidenceTimeframe, priority + priorityJustification). When plan exists + manual data, at least 1 HYBRID action required. No generic filler without numeric evidence. Campaign-scoped: no cross-campaign plan fallback.
-- **Campaign Multi-Select**: `campaign_selections` table stores multiple campaigns per account (upsert by accountId+campaignId). `requireCampaign` middleware accepts `campaignId` query param for explicit scoping, falls back to most recently selected (orderBy selectedAt desc). Frontend passes explicit campaignId on all dashboard fetches.
-- **Campaign Creation**: `POST /api/campaigns/create` with required name/objective/location, auto-generates campaignId, auto-selects. `CampaignContext.createCampaign()` wires frontend. `NewCampaignForm` in CampaignSelector modal with objective chips and validation. "+" button on CampaignBar opens modal directly in create mode (`initialCreate` prop). All errors structured (code/message/requestId).
-- **Single Execution Track**: All writes to key execution tables are confined to a single execution route.
-- **Distribution Plan-Derived**: Orchestrator injects business data into AI prompts to derive content distribution strategies.
-- **Manual/Real Isolation**: DataMode is "REAL" | "MANUAL" | "UNKNOWN" — demo removed entirely from runtime (zero demo references in frontend/backend). Manual campaign metrics drive dashboard when Meta not connected.
-- **Campaign Delete**: Inline confirmation UI in CampaignListModal (no Alert.alert for web compatibility). DELETE /api/campaigns/:campaignId cascades to manual_campaign_metrics.
-- **Demo Purge Complete**: All demo badges, demo buttons, demo seed functions, demo load mutations, isDemo interface fields, and demo style names removed from BuildThePlan, CompetitiveIntelligence, StrategyHub, and ai-management. Style names renamed from demo* to manual*/status*.
+- **Business Data Layer**: Unified business profile for orchestration, with core business data stored in a dedicated table.
+- **Dashboard Campaign Truth**: All dashboard metrics are derived from campaign-scoped database queries.
+- **AI Actions Evidence-Bound**: AI actions are tied to specific evidence metadata (sourceTag, evidenceMetric, evidenceTimeframe, priority).
+- **Campaign Management**: Support for multiple campaigns per account, explicit campaign ID scoping for data fetches, and streamlined campaign creation and deletion.
+- **Single Execution Track**: All critical writes to execution tables are confined to a single route.
+- **Distribution Plan-Derived**: Orchestrator uses business data to derive content distribution strategies.
+- **Manual/Real Isolation**: System operates in "REAL" or "MANUAL" data modes, with all demo functionalities purged.
 
 ## External Dependencies
 
@@ -104,12 +90,11 @@ Preferred communication style: Simple, everyday language.
 ### Meta Business Suite Integration
 - **Token Security**: AES-256-GCM encrypted tokens stored server-side.
 - **OAuth Flow**: Full-scope OAuth for managing permissions and token lifecycle.
-- **Meta Modes**: System handles various connection states (DISCONNECTED, REAL, PENDING_APPROVAL, etc.).
+- **Meta Modes**: Handles various connection states (DISCONNECTED, REAL, PENDING_APPROVAL).
 - **Capability Gates**: Publishing and insights capabilities gated by Meta permissions.
-- **Publish Worker**: Requires `meta_mode=REAL` for publishing.
 
 ### Audit & Control System
-- **Backend**: Provides endpoints for audit feeds, AI usage, gate status, decisions, publish history, and job management.
+- **Backend**: Endpoints for audit feeds, AI usage, gate status, decisions, publish history, and job management.
 - **Frontend**: 5-panel dashboard for System Gates, AI Token Budget, Recent Activity, Decisions, and Worker/Jobs.
 
 ### Social Platforms
