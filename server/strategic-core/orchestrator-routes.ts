@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { aiChat, AICallError } from "../ai-client";
 import { db } from "../db";
-import { strategicBlueprints, strategicPlans, planApprovals, strategyMemory, strategyInsights, moatCandidates, businessDataLayer, planDocuments, requiredWork, calendarEntries } from "@shared/schema";
+import { strategicBlueprints, strategicPlans, planApprovals, strategyMemory, strategyInsights, moatCandidates, businessDataLayer, planDocuments, requiredWork, calendarEntries, orchestratorJobs } from "@shared/schema";
 import { eq, desc, gte, and, sql, ne } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
 import { logAudit } from "../audit";
@@ -353,416 +353,345 @@ function generatePlanMarkdown(params: {
   return lines.join("\n");
 }
 
-export function registerOrchestratorRoutes(app: Express) {
-  app.post("/api/strategic/blueprint/:id/orchestrate", async (req: Request, res: Response) => {
-    const requestId = crypto.randomUUID();
-    const startMs = Date.now();
-    const { id } = req.params;
-    let accountId = "default";
-    let campaignId = "";
-    let competitorCount = 0;
-    const stageTimes: Record<string, number> = {};
+const PLAN_SECTIONS = [
+  "contentDistributionPlan",
+  "creativeTestingMatrix",
+  "budgetAllocationStructure",
+  "kpiMonitoringPriority",
+  "competitiveWatchTargets",
+  "riskMonitoringTriggers",
+] as const;
 
-    const log = (stage: string, extra?: Record<string, any>) => {
-      const elapsed = Date.now() - startMs;
-      stageTimes[stage] = elapsed;
-      console.log(`[Orchestrator] [${requestId}] ${stage} (+${elapsed}ms)`, extra ? JSON.stringify(extra) : "");
-    };
+function initSectionStatuses(): Record<string, string> {
+  const s: Record<string, string> = {};
+  for (const k of PLAN_SECTIONS) s[k] = "PENDING";
+  return s;
+}
 
-    const saveFallbackAndRespond = async (
-      blueprint: any,
-      confirmedBlueprint: any,
-      campaignContext: any,
-      competitorUrls: string[],
-      businessData: any,
-      reason: string,
-    ) => {
-      log("FALLBACK_START", { reason });
-      const fallbackPlan = generateFallbackPlan({ confirmedBlueprint, campaignContext, competitorUrls, businessData });
-      fallbackPlan.blueprintVersion = blueprint.blueprintVersion;
+async function executeOrchestratorJob(jobId: string, blueprintId: string) {
+  const startMs = Date.now();
+  const stageTimes: Record<string, number> = {};
+  let accountId = "default";
+  let campaignId = "";
 
-      await db.update(strategicBlueprints)
-        .set({
-          status: "ORCHESTRATED",
-          orchestratorPlan: JSON.stringify(fallbackPlan),
-          orchestratedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(strategicBlueprints.id, id));
+  const log = (stage: string, extra?: Record<string, any>) => {
+    const elapsed = Date.now() - startMs;
+    stageTimes[stage] = elapsed;
+    console.log(`[OrchestratorJob] [${jobId}] ${stage} (+${elapsed}ms)`, extra ? JSON.stringify(extra) : "");
+  };
 
-      const planSections = Object.keys(fallbackPlan).filter(k => !["blueprintVersion", "fallback", "fallbackReason"].includes(k));
-      const summary = `Fallback plan — ${planSections.length} sections (${reason})`;
-      const [planRow] = await db.insert(strategicPlans).values({
-        accountId,
-        blueprintId: id,
-        campaignId: campaignId || "default",
-        planJson: JSON.stringify(fallbackPlan),
-        planSummary: summary,
-        status: "DRAFT",
-        executionStatus: "IDLE",
-      }).returning();
+  const updateJob = async (fields: Record<string, any>) => {
+    await db.update(orchestratorJobs).set(fields).where(eq(orchestratorJobs.id, jobId));
+  };
 
-      await logAuditEvent({
-        accountId,
-        campaignId: campaignId || undefined,
-        blueprintId: id,
-        blueprintVersion: blueprint.blueprintVersion,
-        event: "ORCHESTRATOR_FALLBACK",
-        details: { requestId, reason, planId: planRow.id, planSections, durationMs: Date.now() - startMs, stageTimes },
-      });
+  try {
+    log("START", { blueprintId });
 
-      log("FALLBACK_COMPLETE", { planId: planRow.id, durationMs: Date.now() - startMs });
+    const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, blueprintId)).limit(1);
+    if (!blueprint) { await updateJob({ status: "FAILED", error: "Blueprint not found", errorCode: "BLUEPRINT_NOT_FOUND", completedAt: new Date() }); return; }
 
-      return res.json({
-        success: true,
-        fallback: true,
-        fallbackReason: reason,
-        blueprintId: id,
-        blueprintVersion: blueprint.blueprintVersion,
-        status: "ORCHESTRATED",
-        orchestratorPlan: fallbackPlan,
-        planId: planRow.id,
-        planStatus: "DRAFT",
-        requestId,
-      });
-    };
+    accountId = blueprint.accountId;
+    campaignId = blueprint.campaignId || "";
+    log("LOAD_CONTEXT", { accountId, campaignId, status: blueprint.status });
+
+    const confirmedBlueprint = blueprint.confirmedBlueprint ? JSON.parse(blueprint.confirmedBlueprint) : null;
+    const campaignContext = blueprint.campaignContext ? JSON.parse(blueprint.campaignContext) : null;
+    const competitorUrls = blueprint.competitorUrls ? JSON.parse(blueprint.competitorUrls) : [];
+    const marketMapRaw = blueprint.marketMap ? JSON.parse(blueprint.marketMap) : null;
+    const validationResultRaw = blueprint.validationResult ? JSON.parse(blueprint.validationResult) : null;
+
+    let businessData: any = null;
+    try {
+      const cId = campaignContext?.campaignId || blueprint.campaignId;
+      const aId = campaignContext?.accountId || blueprint.accountId || "default";
+      if (cId) {
+        const bizRows = await db.select().from(businessDataLayer).where(and(eq(businessDataLayer.campaignId, cId), eq(businessDataLayer.accountId, aId))).limit(1);
+        if (bizRows.length > 0) businessData = bizRows[0];
+      }
+    } catch (err) { log("BUSINESS_DATA_FETCH_SKIPPED", { error: (err as Error).message }); }
+
+    log("DB_READS_COMPLETE");
+
+    let performanceIntelligenceBlock = "";
+    let performanceSignalsInjected = false;
+    try {
+      const sAccountId = campaignContext?.accountId || "default";
+      const sCampaignId = campaignContext?.campaignId;
+      if (sCampaignId) {
+        const [memories, insights, moats] = await Promise.all([
+          db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, sAccountId), eq(strategyMemory.campaignId, sCampaignId), sql`${strategyMemory.campaignId} != 'unscoped_legacy'`)).orderBy(desc(strategyMemory.updatedAt)).limit(5),
+          db.select().from(strategyInsights).where(and(gte(strategyInsights.confidence, 0.7), eq(strategyInsights.accountId, sAccountId), eq(strategyInsights.campaignId, sCampaignId), sql`${strategyInsights.campaignId} != 'unscoped_legacy'`)).orderBy(desc(strategyInsights.createdAt)).limit(5),
+          db.select().from(moatCandidates).where(and(eq(moatCandidates.status, "candidate"), eq(moatCandidates.accountId, sAccountId), eq(moatCandidates.campaignId, sCampaignId), sql`${moatCandidates.campaignId} != 'unscoped_legacy'`)).orderBy(desc(moatCandidates.moatScore)).limit(3),
+        ]);
+        if (memories.length > 0 || insights.length > 0 || moats.length > 0) {
+          performanceSignalsInjected = true;
+          performanceIntelligenceBlock = `\nPERFORMANCE SIGNALS (optional):\n${memories.length > 0 ? `Memory: ${capJson(memories.map(m => ({ type: m.memoryType, label: m.label, score: m.score })), 500)}` : ""}${insights.length > 0 ? `\nInsights: ${capJson(insights.map(i => ({ category: i.category, insight: i.insight, confidence: i.confidence })), 500)}` : ""}${moats.length > 0 ? `\nMoats: ${capJson(moats.map(m => ({ label: m.label, moatScore: m.moatScore })), 300)}` : ""}`;
+        }
+      }
+    } catch (err) { log("PERF_INTEL_SKIPPED", { error: (err as Error).message }); }
+
+    log("BUILD_PROMPT");
+
+    const businessDataBlock = businessData ? `\nBUSINESS DATA:\n- Type: ${businessData.businessType || "N/A"}, Location: ${businessData.businessLocation || "N/A"}\n- Offer: ${capText(businessData.coreOffer, 200)}, Price: ${businessData.priceRange || "N/A"}\n- Audience: ${businessData.targetAudienceAge || "N/A"} / ${capText(businessData.targetAudienceSegment, 150)}\n- Budget: ${businessData.monthlyBudget || "N/A"}, Funnel: ${businessData.funnelObjective || "N/A"}\n- Conversion: ${businessData.primaryConversionChannel || "N/A"}\nDerive distribution from these fields.` : `\nNo Business Data Layer found. Use reasonable defaults based on campaign objective.`;
+
+    const userPrompt = `Generate 6 execution plans from validated blueprint v${blueprint.blueprintVersion}. Do NOT override confirmed data.\n\nGeo-scope: ${campaignContext?.location || "Not specified"}\n\nCAMPAIGN: ${campaignContext?.campaignName || "N/A"} | ${campaignContext?.objective || "N/A"} | ${campaignContext?.location || "N/A"} | ${campaignContext?.platform || "N/A"}${businessDataBlock}\n\nBLUEPRINT (source of truth): ${capJson(confirmedBlueprint, 2000)}\n\nASP: $${blueprint.averageSellingPrice || "N/A"}\nCOMPETITORS: ${competitorUrls.slice(0, 5).join(", ")}${marketMapRaw ? `\nMARKET MAP: ${capJson(marketMapRaw, 1000)}` : ""}${validationResultRaw ? `\nVALIDATION: ${capJson(validationResultRaw, 800)}` : ""}${performanceIntelligenceBlock}\n\nGenerate all 6 sections now. Keep output concise — each section with 3-5 items max. JSON only.`;
+
+    const promptChars = ORCHESTRATOR_PROMPT.length + userPrompt.length;
+    log("AI_CALL_START", { model: "gpt-5.2", maxTokens: 3000, promptChars });
+
+    const sectionStatuses = initSectionStatuses();
+    await updateJob({ sectionStatuses: JSON.stringify(sectionStatuses) });
+
+    let orchestratorPlan: any = null;
+    let usedFallback = false;
+    let fallbackReason: string | null = null;
 
     try {
-      log("START", { blueprintId: id });
-
-      const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
-      if (!blueprint) {
-        log("ABORT: blueprint not found");
-        return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", message: "Blueprint not found", requestId });
-      }
-
-      accountId = blueprint.accountId;
-      campaignId = blueprint.campaignId || "";
-      log("LOAD_CONTEXT", { accountId, campaignId, status: blueprint.status });
-
-      if (blueprint.status !== "VALIDATED") {
-        log("ABORT: status gate", { currentStatus: blueprint.status });
-        return res.status(400).json({
-          success: false,
-          error: "STATUS_GATE",
-          message: "Blueprint must be VALIDATED first. No confirmed + validated → no Orchestrator.",
-          currentStatus: blueprint.status,
-          requestId,
-        });
-      }
-
-      const confirmedBlueprint = blueprint.confirmedBlueprint ? JSON.parse(blueprint.confirmedBlueprint) : null;
-      if (!confirmedBlueprint) {
-        log("ABORT: no confirmed blueprint");
-        return res.status(400).json({ success: false, error: "NO_CONFIRMED_BLUEPRINT", message: "No confirmed blueprint. Confirmed blueprint is the only source of truth.", requestId });
-      }
-
-      if (confirmedBlueprint.blueprintVersion !== blueprint.blueprintVersion) {
-        log("ABORT: version mismatch", { confirmed: confirmedBlueprint.blueprintVersion, current: blueprint.blueprintVersion });
-        return res.status(400).json({
-          success: false,
-          error: "VERSION_MISMATCH",
-          message: "Confirmed blueprint version does not match current blueprint version. Re-confirm required.",
-          confirmedVersion: confirmedBlueprint.blueprintVersion,
-          currentVersion: blueprint.blueprintVersion,
-          requestId,
-        });
-      }
-
-      const { valid, missingFields } = validateBlueprintCompleteness(confirmedBlueprint);
-      if (!valid) {
-        log("ABORT: incomplete blueprint", { missingFields });
-        return res.status(400).json({
-          success: false,
-          error: "INCOMPLETE_BLUEPRINT",
-          missingFields,
-          message: `Cannot generate execution plans. Missing critical fields: ${missingFields.join(", ")}. No generic fallback plans allowed.`,
-          requestId,
-        });
-      }
-
-      const campaignContext = blueprint.campaignContext ? JSON.parse(blueprint.campaignContext) : null;
-      if (!campaignContext) {
-        log("ABORT: no campaign context");
-        return res.status(400).json({
-          success: false,
-          error: "CAMPAIGN_CONTEXT_REQUIRED",
-          message: "No campaign context — Orchestrator cannot run without campaign context.",
-          requestId,
-        });
-      }
-
-      const competitorUrls = blueprint.competitorUrls ? JSON.parse(blueprint.competitorUrls) : [];
-      competitorCount = competitorUrls.length;
-      if (competitorCount < 1) {
-        log("ABORT: no competitors", { competitorCount });
-        return res.status(400).json({
-          success: false,
-          error: "COMPETITOR_REQUIRED",
-          message: "At least 1 competitor is required. Add competitors in Competitor Intelligence first.",
-          competitorCount: 0,
-          requestId,
-        });
-      }
-
-      const invalidCompetitors = competitorUrls.filter((u: string) => !u || u.trim().length === 0);
-      if (invalidCompetitors.length > 0 && invalidCompetitors.length === competitorUrls.length) {
-        log("ABORT: all competitors incomplete", { invalidCompetitors });
-        return res.status(422).json({
-          success: false,
-          error: "COMPETITOR_INCOMPLETE",
-          message: "All competitor entries are empty or invalid. Competitors must have valid profile links.",
-          invalidCount: invalidCompetitors.length,
-          totalCount: competitorUrls.length,
-          requestId,
-        });
-      }
-
-      log("VALIDATION_PASSED", { competitorCount, competitors: competitorUrls.slice(0, 5) });
-
-      const marketMapRaw = blueprint.marketMap ? JSON.parse(blueprint.marketMap) : null;
-      const validationResultRaw = blueprint.validationResult ? JSON.parse(blueprint.validationResult) : null;
-
-      let businessData: any = null;
-      try {
-        const campaignIdForBiz = campaignContext.campaignId || blueprint.campaignId;
-        const accountIdForBiz = campaignContext.accountId || blueprint.accountId || "default";
-        if (campaignIdForBiz) {
-          const bizRows = await db.select().from(businessDataLayer)
-            .where(and(
-              eq(businessDataLayer.campaignId, campaignIdForBiz),
-              eq(businessDataLayer.accountId, accountIdForBiz)
-            ))
-            .limit(1);
-          if (bizRows.length > 0) {
-            businessData = bizRows[0];
-          }
-        }
-      } catch (err) {
-        log("BUSINESS_DATA_FETCH_SKIPPED", { error: (err as Error).message });
-      }
-
-      log("DB_READS_COMPLETE");
-
-      let performanceIntelligenceBlock = "";
-      let performanceSignalsInjected = false;
-      try {
-        const signalAccountId = campaignContext.accountId || "default";
-        const signalCampaignId = campaignContext.campaignId;
-        if (!signalCampaignId) {
-          throw new Error("No campaignId — skipping signal injection");
-        }
-        const [memories, highConfidenceInsights, topMoats] = await Promise.all([
-          db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, signalAccountId), eq(strategyMemory.campaignId, signalCampaignId), sql`${strategyMemory.campaignId} != 'unscoped_legacy'`)).orderBy(desc(strategyMemory.updatedAt)).limit(5),
-          db.select().from(strategyInsights)
-            .where(and(gte(strategyInsights.confidence, 0.7), eq(strategyInsights.accountId, signalAccountId), eq(strategyInsights.campaignId, signalCampaignId), sql`${strategyInsights.campaignId} != 'unscoped_legacy'`))
-            .orderBy(desc(strategyInsights.createdAt)).limit(5),
-          db.select().from(moatCandidates)
-            .where(and(eq(moatCandidates.status, "candidate"), eq(moatCandidates.accountId, signalAccountId), eq(moatCandidates.campaignId, signalCampaignId), sql`${moatCandidates.campaignId} != 'unscoped_legacy'`))
-            .orderBy(desc(moatCandidates.moatScore)).limit(3),
-        ]);
-
-        if (memories.length > 0 || highConfidenceInsights.length > 0 || topMoats.length > 0) {
-          performanceSignalsInjected = true;
-          performanceIntelligenceBlock = `
-PERFORMANCE SIGNALS (optional — do NOT override blueprint):
-${memories.length > 0 ? `Memory: ${capJson(memories.map(m => ({ type: m.memoryType, label: m.label, score: m.score })), 500)}` : ""}
-${highConfidenceInsights.length > 0 ? `Insights: ${capJson(highConfidenceInsights.map(i => ({ category: i.category, insight: i.insight, confidence: i.confidence })), 500)}` : ""}
-${topMoats.length > 0 ? `Moats: ${capJson(topMoats.map(m => ({ label: m.label, moatScore: m.moatScore })), 300)}` : ""}`;
-        }
-      } catch (err) {
-        log("PERF_INTEL_SKIPPED", { error: (err as Error).message });
-      }
-
-      log("BUILD_PROMPT");
-
-      const businessDataBlock = businessData ? `
-BUSINESS DATA:
-- Type: ${businessData.businessType || "N/A"}, Location: ${businessData.businessLocation || "N/A"}
-- Offer: ${capText(businessData.coreOffer, 200)}, Price: ${businessData.priceRange || "N/A"}
-- Audience: ${businessData.targetAudienceAge || "N/A"} / ${capText(businessData.targetAudienceSegment, 150)}
-- Budget: ${businessData.monthlyBudget || "N/A"}, Funnel: ${businessData.funnelObjective || "N/A"}
-- Conversion: ${businessData.primaryConversionChannel || "N/A"}
-Derive distribution from these fields.` : `No Business Data Layer found. Use reasonable defaults based on campaign objective.`;
-
-      const cappedBlueprint = capJson(confirmedBlueprint, 2000);
-      const cappedMarketMap = marketMapRaw ? capJson(marketMapRaw, 1000) : "";
-      const cappedValidation = validationResultRaw ? capJson(validationResultRaw, 800) : "";
-
-      const userPrompt = `Generate 6 execution plans from validated blueprint v${blueprint.blueprintVersion}. Do NOT override confirmed data.
-
-Geo-scope: ${campaignContext.location || "Not specified"}
-
-CAMPAIGN: ${campaignContext.campaignName} | ${campaignContext.objective} | ${campaignContext.location || "N/A"} | ${campaignContext.platform}
-${businessDataBlock}
-
-BLUEPRINT (source of truth): ${cappedBlueprint}
-
-ASP: $${blueprint.averageSellingPrice || "N/A"}
-COMPETITORS: ${competitorUrls.slice(0, 5).join(", ")}
-${cappedMarketMap ? `MARKET MAP: ${cappedMarketMap}` : ""}
-${cappedValidation ? `VALIDATION: ${cappedValidation}` : ""}
-${performanceIntelligenceBlock}
-
-Generate all 6 sections now. Keep output concise — each section with 3-5 items max. JSON only.`;
-
-      const promptSizeEstimate = ORCHESTRATOR_PROMPT.length + userPrompt.length;
-      log("AI_CALL_START", { model: "gpt-5.2", maxTokens: 3000, promptChars: promptSizeEstimate });
-
-      let response;
-      try {
-        response = await aiChat({
-          model: "gpt-5.2",
-          messages: [
-            { role: "system", content: ORCHESTRATOR_PROMPT },
-            { role: "user", content: userPrompt },
-          ],
-          max_tokens: 3000,
-          accountId: "default",
-          endpoint: "strategic-orchestrator",
-        });
-      } catch (aiErr: any) {
-        const durationMs = Date.now() - startMs;
-        log("AI_CALL_FAIL", { code: aiErr.code, message: aiErr.message, durationMs });
-
-        await logAuditEvent({
-          accountId,
-          campaignId: campaignId || undefined,
-          blueprintId: id,
-          blueprintVersion: blueprint.blueprintVersion,
-          event: "ORCHESTRATOR_FAILED",
-          details: { requestId, error: aiErr.code || "AI_ERROR", message: aiErr.message, durationMs, stageTimes },
-        });
-
-        if (aiErr.code === "AI_BUDGET_EXCEEDED") {
-          return res.status(402).json({
-            success: false,
-            error: "AI_BUDGET_EXCEEDED",
-            message: aiErr.message,
-            requestId,
-          });
-        }
-
-        const isTimeout = aiErr.message?.includes("timeout") || aiErr.message?.includes("timed out") || aiErr.code === "ETIMEDOUT";
-        if (isTimeout) {
-          log("TIMEOUT_FALLBACK_TRIGGERED", { durationMs });
-          return saveFallbackAndRespond(blueprint, confirmedBlueprint, campaignContext, competitorUrls, businessData, "AI generation timed out");
-        }
-
-        log("AI_ERROR_FALLBACK_TRIGGERED", { durationMs });
-        return saveFallbackAndRespond(blueprint, confirmedBlueprint, campaignContext, competitorUrls, businessData, `AI call failed: ${aiErr.message}`);
-      }
+      const response = await aiChat({
+        model: "gpt-5.2",
+        messages: [
+          { role: "system", content: ORCHESTRATOR_PROMPT },
+          { role: "user", content: userPrompt },
+        ],
+        max_tokens: 3000,
+        accountId: "default",
+        endpoint: "strategic-orchestrator",
+      });
 
       log("AI_CALL_END", { durationMs: Date.now() - startMs, finishReason: response.choices[0]?.finish_reason });
 
       const rawText = response.choices[0]?.message?.content || "";
-      let orchestratorPlan: any;
+      log("PARSE", { rawLength: rawText.length });
 
-      log("PARSE", { rawLength: rawText.length, finishReason: response.choices[0]?.finish_reason });
-
-      try {
-        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          orchestratorPlan = JSON.parse(jsonMatch[0]);
-        } else {
-          throw new Error("No JSON object found in model response");
-        }
-      } catch (parseErr: any) {
-        log("PARSE_FAIL", { error: parseErr.message, finishReason: response.choices[0]?.finish_reason });
-
-        await logAuditEvent({
-          accountId,
-          campaignId: campaignId || undefined,
-          blueprintId: id,
-          blueprintVersion: blueprint.blueprintVersion,
-          event: "ORCHESTRATOR_FAILED",
-          details: { requestId, error: "PARSE_FAILED", message: parseErr.message, durationMs: Date.now() - startMs, stageTimes },
-        });
-
-        log("PARSE_FALLBACK_TRIGGERED");
-        return saveFallbackAndRespond(blueprint, confirmedBlueprint, campaignContext, competitorUrls, businessData, `AI response parsing failed: ${parseErr.message}`);
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        orchestratorPlan = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error("No JSON object found in model response");
       }
 
       if (!orchestratorPlan || Object.keys(orchestratorPlan).length === 0) {
-        log("EMPTY_PLAN_FALLBACK_TRIGGERED");
-        return saveFallbackAndRespond(blueprint, confirmedBlueprint, campaignContext, competitorUrls, businessData, "AI returned empty plan");
+        throw new Error("AI returned empty plan object");
+      }
+    } catch (aiErr: any) {
+      log("AI_OR_PARSE_FAIL", { code: aiErr.code, message: aiErr.message });
+
+      if (aiErr.code === "AI_BUDGET_EXCEEDED") {
+        await updateJob({ status: "FAILED", error: aiErr.message, errorCode: "AI_BUDGET_EXCEEDED", stageTimes: JSON.stringify(stageTimes), durationMs: Date.now() - startMs, completedAt: new Date() });
+        await logAuditEvent({ accountId, campaignId: campaignId || undefined, blueprintId, blueprintVersion: blueprint.blueprintVersion, event: "ORCHESTRATOR_FAILED", details: { jobId, error: "AI_BUDGET_EXCEEDED", message: aiErr.message, stageTimes } });
+        return;
       }
 
-      orchestratorPlan.blueprintVersion = blueprint.blueprintVersion;
+      usedFallback = true;
+      const isTimeout = aiErr.message?.includes("timeout") || aiErr.message?.includes("timed out") || aiErr.code === "ETIMEDOUT";
+      fallbackReason = isTimeout ? "AI generation timed out" : `AI call failed: ${aiErr.message}`;
+      log("FALLBACK_TRIGGERED", { reason: fallbackReason });
+      orchestratorPlan = generateFallbackPlan({ confirmedBlueprint, campaignContext, competitorUrls, businessData });
+    }
 
-      log("DB_WRITE");
+    for (const key of PLAN_SECTIONS) {
+      if (orchestratorPlan[key] && typeof orchestratorPlan[key] === "object") {
+        sectionStatuses[key] = usedFallback ? "FALLBACK" : "COMPLETE";
+      } else {
+        const fallbackPlan = generateFallbackPlan({ confirmedBlueprint, campaignContext, competitorUrls, businessData });
+        if (fallbackPlan[key]) {
+          orchestratorPlan[key] = fallbackPlan[key];
+          sectionStatuses[key] = "FALLBACK";
+          if (!usedFallback) fallbackReason = `Section ${key} missing from AI response — filled with fallback`;
+          usedFallback = true;
+        } else {
+          sectionStatuses[key] = "FALLBACK";
+        }
+      }
+    }
 
-      await db.update(strategicBlueprints)
-        .set({
-          status: "ORCHESTRATED",
-          orchestratorPlan: JSON.stringify(orchestratorPlan),
-          orchestratedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(strategicBlueprints.id, id));
+    orchestratorPlan.blueprintVersion = blueprint.blueprintVersion;
+    if (usedFallback) {
+      orchestratorPlan.fallback = true;
+      orchestratorPlan.fallbackReason = fallbackReason;
+    }
 
-      const planSections = Object.keys(orchestratorPlan).filter(k => k !== "blueprintVersion");
-      const summary = `Execution plan — ${planSections.length} structured sections`;
-      const [realPlanRow] = await db.insert(strategicPlans).values({
-        accountId,
+    log("SECTION_SAVE", { sectionStatuses });
+
+    await db.update(strategicBlueprints)
+      .set({
+        status: "ORCHESTRATED",
+        orchestratorPlan: JSON.stringify(orchestratorPlan),
+        orchestratedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(strategicBlueprints.id, blueprintId));
+
+    const planSectionKeys = Object.keys(orchestratorPlan).filter(k => !["blueprintVersion", "fallback", "fallbackReason"].includes(k));
+    const summary = usedFallback ? `Fallback plan — ${planSectionKeys.length} sections` : `Execution plan — ${planSectionKeys.length} structured sections`;
+    const [planRow] = await db.insert(strategicPlans).values({
+      accountId,
+      blueprintId,
+      campaignId: campaignId || "default",
+      planJson: JSON.stringify(orchestratorPlan),
+      planSummary: summary,
+      status: "DRAFT",
+      executionStatus: "IDLE",
+    }).returning();
+
+    log("DB_WRITE", { planId: planRow.id });
+
+    await logAuditEvent({
+      accountId,
+      campaignId: campaignId || undefined,
+      blueprintId,
+      blueprintVersion: blueprint.blueprintVersion,
+      event: usedFallback ? "ORCHESTRATOR_FALLBACK" : "ORCHESTRATOR_GENERATED",
+      details: { jobId, planId: planRow.id, planSectionKeys, performanceSignalsInjected, durationMs: Date.now() - startMs, stageTimes, promptChars, usedFallback, sectionStatuses },
+    });
+
+    await updateJob({
+      status: "COMPLETE",
+      sectionStatuses: JSON.stringify(sectionStatuses),
+      planJson: JSON.stringify(orchestratorPlan),
+      planId: planRow.id,
+      fallback: usedFallback,
+      fallbackReason,
+      stageTimes: JSON.stringify(stageTimes),
+      durationMs: Date.now() - startMs,
+      completedAt: new Date(),
+    });
+
+    log("COMPLETE", { durationMs: Date.now() - startMs, planId: planRow.id, usedFallback, stageTimes });
+  } catch (error: any) {
+    const durationMs = Date.now() - startMs;
+    log("UNHANDLED_ERROR", { code: error.code, message: error.message, durationMs, stageTimes });
+    await updateJob({ status: "FAILED", error: error.message, errorCode: error.code || "INTERNAL_ERROR", stageTimes: JSON.stringify(stageTimes), durationMs, completedAt: new Date() }).catch(() => {});
+    await logAuditEvent({ accountId, campaignId: campaignId || undefined, blueprintId, blueprintVersion: 0, event: "ORCHESTRATOR_FAILED", details: { jobId, error: error.code || "INTERNAL_ERROR", message: error.message, durationMs, stageTimes } }).catch(() => {});
+  }
+}
+
+export function registerOrchestratorRoutes(app: Express) {
+  app.post("/api/strategic/blueprint/:id/orchestrate", async (req: Request, res: Response) => {
+    const requestId = crypto.randomUUID();
+    const { id } = req.params;
+
+    try {
+      const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
+      if (!blueprint) {
+        return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", message: "Blueprint not found", requestId });
+      }
+
+      if (blueprint.status !== "VALIDATED") {
+        return res.status(400).json({ success: false, error: "STATUS_GATE", message: "Blueprint must be VALIDATED first.", currentStatus: blueprint.status, requestId });
+      }
+
+      const confirmedBlueprint = blueprint.confirmedBlueprint ? JSON.parse(blueprint.confirmedBlueprint) : null;
+      if (!confirmedBlueprint) {
+        return res.status(400).json({ success: false, error: "NO_CONFIRMED_BLUEPRINT", message: "No confirmed blueprint.", requestId });
+      }
+
+      if (confirmedBlueprint.blueprintVersion !== blueprint.blueprintVersion) {
+        return res.status(400).json({ success: false, error: "VERSION_MISMATCH", message: "Blueprint version mismatch. Re-confirm required.", requestId });
+      }
+
+      const { valid, missingFields } = validateBlueprintCompleteness(confirmedBlueprint);
+      if (!valid) {
+        return res.status(400).json({ success: false, error: "INCOMPLETE_BLUEPRINT", missingFields, message: `Missing: ${missingFields.join(", ")}`, requestId });
+      }
+
+      const campaignContext = blueprint.campaignContext ? JSON.parse(blueprint.campaignContext) : null;
+      if (!campaignContext) {
+        return res.status(400).json({ success: false, error: "CAMPAIGN_CONTEXT_REQUIRED", message: "No campaign context.", requestId });
+      }
+
+      const competitorUrls = blueprint.competitorUrls ? JSON.parse(blueprint.competitorUrls) : [];
+      if (competitorUrls.length < 1) {
+        return res.status(400).json({ success: false, error: "COMPETITOR_REQUIRED", message: "At least 1 competitor is required.", requestId });
+      }
+
+      const allInvalid = competitorUrls.every((u: string) => !u || u.trim().length === 0);
+      if (allInvalid) {
+        return res.status(422).json({ success: false, error: "COMPETITOR_INCOMPLETE", message: "All competitor entries are empty or invalid.", requestId });
+      }
+
+      const existingRunning = await db.select().from(orchestratorJobs)
+        .where(and(eq(orchestratorJobs.blueprintId, id), eq(orchestratorJobs.status, "RUNNING")))
+        .limit(1);
+      if (existingRunning.length > 0) {
+        return res.json({ success: true, jobId: existingRunning[0].id, status: "RUNNING", message: "Job already in progress", requestId });
+      }
+
+      const [job] = await db.insert(orchestratorJobs).values({
         blueprintId: id,
-        campaignId: campaignId || "default",
-        planJson: JSON.stringify(orchestratorPlan),
-        planSummary: summary,
-        status: "DRAFT",
-        executionStatus: "IDLE",
+        accountId: blueprint.accountId,
+        campaignId: blueprint.campaignId || "default",
+        status: "RUNNING",
+        sectionStatuses: JSON.stringify(initSectionStatuses()),
       }).returning();
 
-      await logAuditEvent({
-        accountId,
-        campaignId: campaignId || undefined,
-        blueprintId: id,
-        blueprintVersion: blueprint.blueprintVersion,
-        event: "ORCHESTRATOR_GENERATED",
-        details: {
-          requestId,
-          mode: "PRODUCTION",
-          planId: realPlanRow.id,
-          planSections,
-          performanceSignalsInjected,
-          durationMs: Date.now() - startMs,
-          stageTimes,
-          promptChars: ORCHESTRATOR_PROMPT.length + userPrompt.length,
-        },
-      });
+      console.log(`[Orchestrator] Job created: ${job.id} for blueprint ${id}`);
 
-      log("COMPLETE", { durationMs: Date.now() - startMs, planId: realPlanRow.id, stageTimes });
+      executeOrchestratorJob(job.id, id).catch(err => {
+        console.error(`[Orchestrator] Background job ${job.id} unhandled error:`, err);
+      });
 
       res.json({
         success: true,
-        blueprintId: id,
-        blueprintVersion: blueprint.blueprintVersion,
-        status: "ORCHESTRATED",
-        orchestratorPlan,
-        planId: realPlanRow.id,
-        planStatus: "DRAFT",
+        jobId: job.id,
+        status: "RUNNING",
         requestId,
       });
     } catch (error: any) {
-      const durationMs = Date.now() - startMs;
-      log("UNHANDLED_ERROR", { code: error.code, message: error.message, durationMs, stageTimes });
+      console.error("[Orchestrator] Job creation failed:", error.message);
+      res.status(500).json({ success: false, error: "JOB_CREATION_FAILED", message: error.message, requestId });
+    }
+  });
 
-      await logAuditEvent({
-        accountId,
-        campaignId: campaignId || undefined,
-        blueprintId: id,
-        blueprintVersion: 0,
-        event: "ORCHESTRATOR_FAILED",
-        details: { requestId, error: error.code || "INTERNAL_ERROR", message: error.message, durationMs, stageTimes },
-      }).catch(() => {});
+  app.get("/api/strategic/orchestrate-status/:jobId", async (req: Request, res: Response) => {
+    try {
+      const { jobId } = req.params;
+      const [job] = await db.select().from(orchestratorJobs).where(eq(orchestratorJobs.id, jobId)).limit(1);
+      if (!job) {
+        return res.status(404).json({ success: false, error: "JOB_NOT_FOUND", message: "Job not found" });
+      }
 
-      res.status(500).json({
-        success: false,
-        error: "ORCHESTRATOR_INTERNAL_ERROR",
-        message: `Failed to generate execution plans: ${error.message}`,
-        requestId,
-        retryAfterMs: 5000,
+      const sectionStatuses = job.sectionStatuses ? JSON.parse(job.sectionStatuses) : initSectionStatuses();
+      const stageTimes = job.stageTimes ? JSON.parse(job.stageTimes) : {};
+
+      if (job.status === "COMPLETE") {
+        const plan = job.planJson ? JSON.parse(job.planJson) : null;
+        return res.json({
+          success: true,
+          status: "COMPLETE",
+          jobId: job.id,
+          planId: job.planId,
+          planStatus: "DRAFT",
+          orchestratorPlan: plan,
+          sectionStatuses,
+          fallback: job.fallback || false,
+          fallbackReason: job.fallbackReason,
+          durationMs: job.durationMs,
+          stageTimes,
+        });
+      }
+
+      if (job.status === "FAILED") {
+        return res.json({
+          success: false,
+          status: "FAILED",
+          jobId: job.id,
+          error: job.errorCode || "UNKNOWN",
+          message: job.error || "Job failed",
+          sectionStatuses,
+          durationMs: job.durationMs,
+          stageTimes,
+        });
+      }
+
+      res.json({
+        success: true,
+        status: "RUNNING",
+        jobId: job.id,
+        sectionStatuses,
       });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: "STATUS_CHECK_FAILED", message: error.message });
     }
   });
 

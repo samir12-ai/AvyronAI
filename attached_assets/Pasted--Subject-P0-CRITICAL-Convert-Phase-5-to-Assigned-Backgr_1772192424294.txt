@@ -1,0 +1,123 @@
+
+⸻
+
+Subject: P0 CRITICAL — Convert Phase 5 to Assigned Background Job (Immediate Structural Change)
+
+Replit,
+
+This is now a structural production issue.
+
+Phase 5 must no longer run as a synchronous AI request. Even with fallback, we are still seeing partial generation behavior and timeout risk. This architecture cannot scale and cannot be considered stable.
+
+We are moving to an Assigned Background Job model. This is mandatory.
+
+⸻
+
+Required Structural Change
+
+1) Phase 5 must become a background job
+
+When the user clicks “Generate Execution Plan”:
+	•	The system must immediately create a job record.
+	•	The request must return instantly with a job ID and status “RUNNING”.
+	•	The AI generation must execute in the background worker — never inside the HTTP request cycle.
+
+The UI must poll for job status until completion.
+
+There must be no blocking orchestration in the request thread anymore.
+
+⸻
+
+2) Section-level integrity (No more half-plans)
+
+Each plan section must be generated and stored independently:
+	•	Content Distribution
+	•	Creative Testing
+	•	Budget Allocation
+	•	KPI Monitoring
+	•	Competitive Watch
+	•	Risk Monitoring
+
+Each section must have a clear status:
+	•	PENDING
+	•	COMPLETE
+	•	FALLBACK
+
+No partial objects.
+No broken rendering.
+No missing sections.
+No “[object Object]” behavior.
+
+A plan must always be structurally complete — even if some sections used fallback.
+
+⸻
+
+3) Timeout discipline
+
+AI timeout may be extended reasonably, but since it runs in background it must never block the user.
+
+If a section times out:
+	•	Mark that section as FALLBACK.
+	•	Continue the rest of the job.
+	•	Final plan must still complete cleanly.
+
+The user must never see:
+	•	Raw 504
+	•	Request timeout
+	•	“Error unknown”
+
+⸻
+
+4) Observability (Non-negotiable)
+
+Every job must log its lifecycle:
+
+START
+LOAD_CONTEXT
+BUILD_PROMPT
+AI_CALL_START
+AI_CALL_END
+PARSE
+SECTION_SAVE
+COMPLETE
+
+Each stage must record duration, model, and job ID.
+
+If anything fails, we must know exactly where and why.
+
+⸻
+
+5) UI behavior
+
+When generation starts:
+	•	Show clear loading state.
+	•	Prevent button spamming.
+	•	Display deterministic progress state.
+
+When finished:
+	•	Render full plan.
+	•	If fallback used, show amber notice clearly.
+
+Retry must:
+	•	Create a new job.
+	•	Cleanly supersede the previous draft.
+	•	Never duplicate plan rows.
+
+⸻
+
+Hard Acceptance Criteria
+
+This is considered fixed only when:
+	1.	Phase 5 never blocks the request thread.
+	2.	No raw timeout can ever surface to the user.
+	3.	New campaign + manual metrics + 1 competitor works reliably.
+	4.	Plans are always structurally complete.
+	5.	Retry does not duplicate data.
+
+Deliver as one cohesive structural update.
+
+No incremental band-aids.
+
+We stabilize first — then we scale.
+
+— Samir

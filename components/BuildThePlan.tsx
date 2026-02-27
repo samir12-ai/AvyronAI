@@ -495,6 +495,65 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
   const [lastRequestId, setLastRequestId] = useState<string | null>(null);
   const [isFallbackPlan, setIsFallbackPlan] = useState(false);
   const [fallbackReason, setFallbackReason] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [sectionStatuses, setSectionStatuses] = useState<Record<string, string> | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+  }, []);
+
+  const pollJobStatus = useCallback(async (jId: string) => {
+    try {
+      const res = await fetch(getApiUrl(`/api/strategic/orchestrate-status/${jId}`));
+      const data = await res.json();
+
+      if (data.sectionStatuses) setSectionStatuses(data.sectionStatuses);
+      if (data.jobId) setLastRequestId(data.jobId);
+
+      if (data.status === 'COMPLETE') {
+        stopPolling();
+        setLoading(false);
+        setJobId(null);
+
+        if (data.fallback) {
+          setIsFallbackPlan(true);
+          setFallbackReason(data.fallbackReason || 'AI generation failed — using skeleton plan');
+        }
+
+        if (data.orchestratorPlan) {
+          setBlueprint(prev => prev ? {
+            ...prev,
+            status: 'ORCHESTRATED' as BlueprintStatus,
+            orchestratorPlan: data.orchestratorPlan,
+            planId: data.planId || null,
+            planStatus: data.planStatus || 'DRAFT',
+          } : null);
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        }
+        return;
+      }
+
+      if (data.status === 'FAILED') {
+        stopPolling();
+        setLoading(false);
+        setJobId(null);
+        const code = data.error || 'JOB_FAILED';
+        const msg = data.message || 'Generation failed';
+        setError(`[${code}] ${msg}`);
+        return;
+      }
+    } catch (err: any) {
+      console.warn('[BuildThePlan] Poll error:', err.message);
+    }
+  }, [stopPolling]);
+
+  useEffect(() => {
+    return () => stopPolling();
+  }, [stopPolling]);
 
   const runOrchestrator = useCallback(async () => {
     if (!blueprint) return;
@@ -502,6 +561,8 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     setLastRequestId(null);
     setIsFallbackPlan(false);
     setFallbackReason(null);
+    setSectionStatuses(null);
+    stopPolling();
     setLoading(true);
 
     try {
@@ -517,33 +578,35 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
         const code = data.error || 'UNKNOWN';
         const msg = data.message || 'Orchestrator failed';
         setError(`[${code}] ${msg}`);
+        setLoading(false);
         return;
       }
 
-      if (!data.orchestratorPlan || typeof data.orchestratorPlan !== 'object') {
-        setError('[EMPTY_PLAN] Server returned an empty execution plan. Please retry.');
-        return;
-      }
+      if (data.jobId) {
+        setJobId(data.jobId);
+        setLastRequestId(data.jobId);
 
-      if (data.fallback) {
-        setIsFallbackPlan(true);
-        setFallbackReason(data.fallbackReason || 'AI generation failed — using skeleton plan');
-      }
+        const initialStatuses: Record<string, string> = {
+          contentDistributionPlan: 'PENDING',
+          creativeTestingMatrix: 'PENDING',
+          budgetAllocationStructure: 'PENDING',
+          kpiMonitoringPriority: 'PENDING',
+          competitiveWatchTargets: 'PENDING',
+          riskMonitoringTriggers: 'PENDING',
+        };
+        setSectionStatuses(initialStatuses);
 
-      setBlueprint(prev => prev ? {
-        ...prev,
-        status: 'ORCHESTRATED' as BlueprintStatus,
-        orchestratorPlan: data.orchestratorPlan,
-        planId: data.planId || null,
-        planStatus: data.planStatus || 'DRAFT',
-      } : null);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        pollingRef.current = setInterval(() => {
+          pollJobStatus(data.jobId);
+        }, 2000);
+      } else {
+        setLoading(false);
+      }
     } catch (err: any) {
       setError(`[NETWORK] ${err.message}`);
-    } finally {
       setLoading(false);
     }
-  }, [blueprint]);
+  }, [blueprint, stopPolling, pollJobStatus]);
 
   const approvePlan = useCallback(async () => {
     if (!blueprint) return;
@@ -1415,15 +1478,57 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     );
 
     if (loading) {
+      const sectionLabels: Record<string, string> = {
+        contentDistributionPlan: 'Content Distribution',
+        creativeTestingMatrix: 'Creative Testing',
+        budgetAllocationStructure: 'Budget Allocation',
+        kpiMonitoringPriority: 'KPI Monitoring',
+        competitiveWatchTargets: 'Competitive Watch',
+        riskMonitoringTriggers: 'Risk Triggers',
+      };
+      const sectionColors: Record<string, string> = {
+        PENDING: '#6B7280',
+        COMPLETE: '#10B981',
+        FALLBACK: '#F59E0B',
+      };
+      const sectionIcons: Record<string, string> = {
+        PENDING: 'ellipse-outline',
+        COMPLETE: 'checkmark-circle',
+        FALLBACK: 'warning',
+      };
+
       return (
         <View style={s.phaseContent}>
           {renderCampaignBadge()}
           {renderPhase5Header()}
-          <View style={[s.phaseCard, { backgroundColor: colors.card, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 40 }]}>
-            <ActivityIndicator size="large" color="#10B981" />
-            <Text style={[s.phaseDesc, { color: colors.textSecondary, marginTop: 16 }]}>
-              Building execution plans...
-            </Text>
+          <View style={[s.phaseCard, { backgroundColor: colors.card, borderColor: colors.cardBorder, paddingVertical: 24 }]}>
+            <View style={{ alignItems: 'center', marginBottom: 16 }}>
+              <ActivityIndicator size="large" color="#10B981" />
+              <Text style={[s.phaseDesc, { color: colors.textSecondary, marginTop: 12 }]}>
+                Building execution plans...
+              </Text>
+              {lastRequestId && (
+                <Text selectable style={{ color: '#6B7280', fontSize: 10, marginTop: 4, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
+                  Job: {lastRequestId}
+                </Text>
+              )}
+            </View>
+            {sectionStatuses && (
+              <View style={{ gap: 6 }}>
+                {Object.entries(sectionLabels).map(([key, label]) => {
+                  const st = sectionStatuses[key] || 'PENDING';
+                  const clr = sectionColors[st] || '#6B7280';
+                  const icon = sectionIcons[st] || 'ellipse-outline';
+                  return (
+                    <View key={key} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 }}>
+                      <Ionicons name={icon as any} size={16} color={clr} />
+                      <Text style={{ color: clr, fontSize: 13, fontWeight: st === 'PENDING' ? '400' : '600' }}>{label}</Text>
+                      <Text style={{ color: clr, fontSize: 10, marginLeft: 'auto', textTransform: 'uppercase' as const }}>{st}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
           </View>
         </View>
       );

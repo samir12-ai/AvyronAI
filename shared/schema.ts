@@ -1281,3 +1281,26 @@ export const manualCampaignMetrics = pgTable("manual_campaign_metrics", {
 });
 
 export type ManualCampaignMetrics = typeof manualCampaignMetrics.$inferSelect;
+
+export const orchestratorJobs = pgTable("orchestrator_jobs", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  blueprintId: varchar("blueprint_id").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  status: text("status").notNull().default("RUNNING"),
+  sectionStatuses: text("section_statuses"),
+  planJson: text("plan_json"),
+  planId: varchar("plan_id"),
+  fallback: boolean("fallback").default(false),
+  fallbackReason: text("fallback_reason"),
+  error: text("error"),
+  errorCode: text("error_code"),
+  stageTimes: text("stage_times"),
+  durationMs: integer("duration_ms"),
+  createdAt: timestamp("created_at").defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
+export type OrchestratorJob = typeof orchestratorJobs.$inferSelect;
