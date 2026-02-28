@@ -889,7 +889,7 @@ export function registerExecutionRoutes(app: Express) {
       const campaignId = (req.query.campaignId as string) || (req.body?.campaignId as string) || null;
 
       const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
-      if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND", requestId });
+      if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND", message: "Plan not found. It may have been deleted.", requestId });
 
       if (plan.accountId !== accountId) {
         return res.status(403).json({ error: "ACCOUNT_MISMATCH", message: "Plan does not belong to this account.", requestId });

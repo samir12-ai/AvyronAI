@@ -342,7 +342,32 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
     }
   }, [fetchDashboard, fetchProgress]);
 
-  const handleResetFailed = useCallback(async (planId: string) => {
+  const executeResetFailed = useCallback(async (planId: string) => {
+    setActionLoading('reset-failed');
+    try {
+      const campaignId = selectedCampaign?.selectedCampaignId || '';
+      const url = getApiUrl(`/api/execution/plans/${planId}/reset-failed?accountId=default&campaignId=${encodeURIComponent(campaignId)}`);
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('Reset Complete', `${data.resetCount} entries reset to draft. Go to Calendar to retry.`);
+        fetchDashboard();
+        fetchProgress(planId);
+      } else {
+        Alert.alert('Reset Failed', data.message || data.error || `Server returned status ${res.status}. Please try again.`);
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Network error — could not reach the server.');
+    } finally {
+      setActionLoading(null);
+    }
+  }, [fetchDashboard, fetchProgress, selectedCampaign?.selectedCampaignId]);
+
+  const handleResetFailed = useCallback((planId: string) => {
     Alert.alert(
       'Reset Failed Entries',
       'This will reset all failed entries back to draft so you can retry them from the Calendar.',
@@ -350,34 +375,14 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Reset All Failed',
-          onPress: async () => {
-            setActionLoading('reset-failed');
-            try {
-              const campaignId = selectedCampaign?.selectedCampaignId || '';
-              const url = getApiUrl(`/api/execution/plans/${planId}/reset-failed?accountId=default&campaignId=${encodeURIComponent(campaignId)}`);
-              const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-              });
-              const data = await res.json();
-              if (data.success) {
-                Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                Alert.alert('Reset Complete', `${data.resetCount} entries reset to draft. Go to Calendar to retry.`);
-                fetchDashboard();
-                fetchProgress(planId);
-              } else {
-                Alert.alert('Error', data.message || 'Reset failed');
-              }
-            } catch (err: any) {
-              Alert.alert('Error', err.message);
-            } finally {
-              setActionLoading(null);
-            }
+          style: 'destructive',
+          onPress: () => {
+            executeResetFailed(planId);
           },
         },
       ]
     );
-  }, [fetchDashboard, fetchProgress, selectedCampaign?.selectedCampaignId]);
+  }, [executeResetFailed]);
 
   const handleDownloadPlan = useCallback(async (blueprintId: string) => {
     setActionLoading('download');
