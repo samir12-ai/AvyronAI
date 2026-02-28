@@ -144,17 +144,16 @@ export function registerDashboardRoutes(app: Express) {
 
       const actions: AIActionItem[] = [];
       const hasManualData = manual && (manual.spend > 0 || manual.revenue > 0 || manual.conversions > 0 || manual.impressions > 0 || manual.clicks > 0 || manual.leads > 0);
-      const calStats = calendarStats[0] || { total: 0, draft: 0, generated: 0, failed: 0, scheduled: 0, published: 0 };
-      const stuStats = studioStats[0] || { total: 0, ready: 0, failed: 0, published: 0 };
 
-      const workData = work.length > 0 ? work[0] : null;
-      const totalPieces = workData?.totalContentPieces || Number(calStats.total) || 0;
-      const publishedPieces = Number(stuStats.published) || Number(calStats.published) || 0;
-      const failedPieces = Number(stuStats.failed) || Number(calStats.failed) || 0;
-      const generatedPieces = Number(calStats.generated) || 0;
-      const draftPieces = Number(calStats.draft) || 0;
-      const scheduledPieces = Number(calStats.scheduled) || 0;
-      const completionPct = totalPieces > 0 ? Math.round((publishedPieces / totalPieces) * 100) : 0;
+      const { computeFulfillment: computeFulfillmentForActions } = await import("./fulfillment-engine");
+      const actionFulfillment = await computeFulfillmentForActions(campaignId, accountId);
+      const totalPieces = actionFulfillment.total.required;
+      const publishedPieces = actionFulfillment.total.fulfilled;
+      const failedPieces = 0;
+      const generatedPieces = actionFulfillment.total.fulfilled;
+      const draftPieces = 0;
+      const scheduledPieces = 0;
+      const completionPct = actionFulfillment.progressPercent;
       const hasPlanProgress = totalPieces > 0;
 
       if (hasManualData && hasPlanProgress) {
@@ -260,31 +259,31 @@ export function registerDashboardRoutes(app: Express) {
           });
         }
 
-        const studioReady = Number(stuStats.ready) || 0;
-        if (studioReady > 0) {
+        const fulfilledCount = actionFulfillment.total.fulfilled;
+        const remainingCount = actionFulfillment.total.remaining;
+        if (remainingCount > 0 && fulfilledCount > 0) {
           actions.push({
-            id: `studio-ready-${plan.id}`,
-            action: `${studioReady} studio items ready for review and scheduling`,
-            evidenceMetric: `${studioReady} items in READY state | ${Number(stuStats.published) || 0} already published`,
+            id: `studio-progress-${plan.id}`,
+            action: `${fulfilledCount} content pieces created, ${remainingCount} remaining — continue creating to maintain content cadence`,
+            evidenceMetric: `${fulfilledCount} fulfilled | ${remainingCount} remaining out of ${totalPieces} required`,
             evidenceTimeframe: `plan execution (current plan)`,
             sourceTag: "PLAN_PROGRESS",
             priority: "MEDIUM",
-            priorityJustification: `${studioReady} items awaiting review — schedule to maintain content cadence`,
+            priorityJustification: `${remainingCount} items remaining — schedule to maintain content cadence`,
           });
         }
       }
 
       if (actions.length === 0 && plan) {
-        const calCount = Number(calStats.total) || 0;
-        if (calCount > 0) {
+        if (totalPieces > 0) {
           actions.push({
             id: `plan-calendar-${plan.id}`,
-            action: `${calCount} calendar entries ready — generate content item-by-item`,
-            evidenceMetric: `${calCount} entries in calendar`,
+            action: `${totalPieces} content pieces required — start creating content item-by-item`,
+            evidenceMetric: `${totalPieces} pieces in plan`,
             evidenceTimeframe: "plan execution (current plan)",
             sourceTag: "PLAN_PROGRESS",
             priority: "HIGH",
-            priorityJustification: "Calendar populated from approved plan, content generation can begin",
+            priorityJustification: "Plan active, content creation can begin",
           });
         } else {
           actions.push({
