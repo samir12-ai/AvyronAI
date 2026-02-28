@@ -13,6 +13,7 @@ import { eq, and, sql, ne, inArray } from "drizzle-orm";
 import { logAudit } from "../audit";
 import { logAuditEvent } from "./audit-logger";
 import { aiChat } from "../ai-client";
+import { computeFulfillment } from "../fulfillment-engine";
 
 function deriveDistributionFromBusinessData(bizData: any): {
   reelsPerWeek: number;
@@ -961,30 +962,11 @@ export function registerExecutionRoutes(app: Express) {
       const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
       if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
 
-      const work = await db.select().from(requiredWork).where(eq(requiredWork.planId, planId));
       const entries = await db.select().from(calendarEntries).where(eq(calendarEntries.planId, planId));
-      const items = await db.select().from(studioItems).where(eq(studioItems.planId, planId));
-
-      const totalRequired = work[0]?.totalContentPieces || 0;
-      const published = items.filter((i) => i.status === "PUBLISHED").length;
-      const scheduled = items.filter((i) => i.status === "SCHEDULED").length;
-      const ready = items.filter((i) => i.status === "READY").length;
-      const studioFailed = items.filter((i) => i.status === "FAILED").length;
-      const draft = items.filter((i) => i.status === "DRAFT").length;
-      const canceled = items.filter((i) => i.status === "CANCELED").length;
-
       const calendarFailed = entries.filter((e) => e.status === "FAILED").length;
       const calendarDraft = entries.filter((e) => e.status === "DRAFT").length;
-      const failed = studioFailed + calendarFailed;
 
-      const progressPercent = totalRequired > 0 ? Math.round(((published + scheduled + ready) / totalRequired) * 100) : 0;
-
-      const workRecord = work[0] || null;
-      const branches = {
-        DESIGNER: { total: workRecord?.designerItems || 0, label: "Designer" },
-        WRITER: { total: workRecord?.writerItems || 0, label: "Writer" },
-        VIDEO: { total: workRecord?.videoItems || 0, label: "Video" },
-      };
+      const fulfillment = await computeFulfillment(plan.campaignId, plan.accountId);
 
       res.json({
         success: true,
@@ -992,19 +974,24 @@ export function registerExecutionRoutes(app: Express) {
         status: plan.status,
         executionStatus: plan.executionStatus,
         emergencyStopped: plan.emergencyStopped,
-        totalRequired,
+        totalRequired: fulfillment.total.required,
         calendarGenerated: entries.length,
         calendarDraft,
         calendarFailed,
-        studioTotal: items.length,
-        published,
-        scheduled,
-        ready,
-        draft,
-        failed,
-        canceled,
-        progressPercent,
-        branches,
+        studioTotal: fulfillment.total.fulfilled,
+        published: fulfillment.byStatus.published,
+        scheduled: fulfillment.byStatus.scheduled,
+        ready: fulfillment.byStatus.ready,
+        draft: fulfillment.byStatus.draft,
+        failed: fulfillment.byStatus.failed + calendarFailed,
+        canceled: 0,
+        progressPercent: fulfillment.progressPercent,
+        branches: {
+          DESIGNER: { total: fulfillment.byBranch.DESIGNER.required, fulfilled: fulfillment.byBranch.DESIGNER.fulfilled, remaining: fulfillment.byBranch.DESIGNER.remaining, label: "Designer" },
+          WRITER: { total: fulfillment.byBranch.WRITER.required, fulfilled: fulfillment.byBranch.WRITER.fulfilled, remaining: fulfillment.byBranch.WRITER.remaining, label: "Writer" },
+          VIDEO: { total: fulfillment.byBranch.VIDEO.required, fulfilled: fulfillment.byBranch.VIDEO.fulfilled, remaining: fulfillment.byBranch.VIDEO.remaining, label: "Video" },
+        },
+        fulfillment,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1024,35 +1011,22 @@ export function registerExecutionRoutes(app: Express) {
         .from(strategicPlans)
         .where(and(...planConditions));
 
-      const workConditions = [eq(requiredWork.accountId, accountId)];
-      if (campaignId) workConditions.push(eq(requiredWork.campaignId, campaignId));
-
-      const allWork = await db
-        .select()
-        .from(requiredWork)
-        .where(and(...workConditions));
-
-      const itemConditions = [eq(studioItems.accountId, accountId)];
-      if (campaignId) itemConditions.push(eq(studioItems.campaignId, campaignId));
-
-      const allItems = await db
-        .select()
-        .from(studioItems)
-        .where(and(...itemConditions));
-
       const totalPlans = plans.length;
       const activePlans = plans.filter((p) => !["REJECTED", "DRAFT"].includes(p.status)).length;
       const emergencyStoppedPlans = plans.filter((p) => p.emergencyStopped).length;
 
-      const totalRequired = allWork.reduce((sum, w) => sum + (w.totalContentPieces || 0), 0);
-      const totalPublished = allItems.filter((i) => i.status === "PUBLISHED").length;
-      const totalScheduled = allItems.filter((i) => i.status === "SCHEDULED").length;
-      const totalReady = allItems.filter((i) => i.status === "READY").length;
-      const totalFailed = allItems.filter((i) => i.status === "FAILED").length;
-      const totalDraft = allItems.filter((i) => i.status === "DRAFT").length;
-      const totalCanceled = allItems.filter((i) => i.status === "CANCELED").length;
+      let fulfillment = null;
+      if (campaignId) {
+        fulfillment = await computeFulfillment(campaignId, accountId);
+      }
 
-      const overallProgress = totalRequired > 0 ? Math.round(((totalPublished + totalScheduled + totalReady) / totalRequired) * 100) : 0;
+      const totalRequired = fulfillment?.total.required || 0;
+      const totalPublished = fulfillment?.byStatus.published || 0;
+      const totalScheduled = fulfillment?.byStatus.scheduled || 0;
+      const totalReady = fulfillment?.byStatus.ready || 0;
+      const totalFailed = fulfillment?.byStatus.failed || 0;
+      const totalDraft = fulfillment?.byStatus.draft || 0;
+      const overallProgress = fulfillment?.progressPercent || 0;
 
       res.json({
         success: true,
@@ -1066,7 +1040,7 @@ export function registerExecutionRoutes(app: Express) {
           totalReady,
           totalDraft,
           totalFailed,
-          totalCanceled,
+          totalCanceled: 0,
           overallProgress,
         },
         plans: plans.map((p) => ({
@@ -1080,6 +1054,7 @@ export function registerExecutionRoutes(app: Express) {
           totalCanceled: p.totalCanceled,
           createdAt: p.createdAt,
         })),
+        fulfillment,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1146,12 +1121,15 @@ export function registerExecutionRoutes(app: Express) {
         }
       }
 
+      const fulfillment = await computeFulfillment(campaignId, accountId);
+
       res.json({
         success: true,
         planId: bestPlan.id,
         planStatus: bestPlan.status,
         executionStatus: bestPlan.executionStatus,
         entries,
+        fulfillment,
       });
     } catch (err: any) {
       console.error("Calendar entries fetch error:", err);
@@ -1232,15 +1210,18 @@ export function registerExecutionRoutes(app: Express) {
 
       const workRec = work[0] || null;
 
+      const fulfillment = await computeFulfillment(campaignId, accountId);
+
       res.json({
         success: true,
         planId: workRec?.planId || activePlanIds[0],
         requiredWork: workRec,
         branches: {
-          DESIGNER: { total: workRec?.designerItems || 0, label: "Designer" },
-          WRITER: { total: workRec?.writerItems || 0, label: "Writer" },
-          VIDEO: { total: workRec?.videoItems || 0, label: "Video" },
+          DESIGNER: { total: fulfillment.byBranch.DESIGNER.required, fulfilled: fulfillment.byBranch.DESIGNER.fulfilled, remaining: fulfillment.byBranch.DESIGNER.remaining, label: "Designer" },
+          WRITER: { total: fulfillment.byBranch.WRITER.required, fulfilled: fulfillment.byBranch.WRITER.fulfilled, remaining: fulfillment.byBranch.WRITER.remaining, label: "Writer" },
+          VIDEO: { total: fulfillment.byBranch.VIDEO.required, fulfilled: fulfillment.byBranch.VIDEO.fulfilled, remaining: fulfillment.byBranch.VIDEO.remaining, label: "Video" },
         },
+        fulfillment,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

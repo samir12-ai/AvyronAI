@@ -46,6 +46,23 @@ interface AccountData {
   overallProgress: number;
 }
 
+interface BranchFulfillment {
+  required: number;
+  fulfilled: number;
+  remaining: number;
+}
+
+interface FulfillmentData {
+  total: { required: number; fulfilled: number; remaining: number };
+  byBranch: {
+    VIDEO: BranchFulfillment;
+    DESIGNER: BranchFulfillment;
+    WRITER: BranchFulfillment;
+  };
+  byStatus: { draft: number; ready: number; scheduled: number; published: number; failed: number };
+  progressPercent: number;
+}
+
 interface ProgressData {
   progressPercent: number;
   totalRequired: number;
@@ -57,6 +74,7 @@ interface ProgressData {
   draft: number;
   failed: number;
   canceled: number;
+  fulfillment?: FulfillmentData;
 }
 
 interface CalendarEntry {
@@ -612,19 +630,57 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
         </View>
 
         {progress && (
-          <View style={s.statsGrid}>
-            {[
-              { label: 'Required', value: progress.totalRequired, color: colors.text },
-              { label: 'Calendar', value: progress.calendarGenerated, color: '#A78BFA' },
-              { label: 'Ready', value: progress.ready, color: '#8B5CF6' },
-              { label: 'Published', value: progress.published, color: '#34D399' },
-              { label: 'Failed', value: progress.failed, color: '#FF6B6B' },
-            ].map((stat, i) => (
-              <View key={i} style={[s.statBox, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: colors.cardBorder }]}>
-                <Text style={[s.statValue, { color: stat.color }]}>{stat.value}</Text>
-                <Text style={[s.statLabel, { color: colors.textMuted }]}>{stat.label}</Text>
+          <View>
+            <View style={s.statsGrid}>
+              {[
+                { label: 'Completed', value: progress.fulfillment?.total.fulfilled ?? progress.studioTotal, color: '#34D399' },
+                { label: 'Required', value: progress.totalRequired, color: colors.text },
+                { label: 'Remaining', value: progress.fulfillment?.total.remaining ?? Math.max(0, progress.totalRequired - progress.studioTotal), color: '#FFB347' },
+                { label: 'Published', value: progress.published, color: '#A78BFA' },
+                { label: 'Failed', value: progress.failed, color: '#FF6B6B' },
+              ].map((stat, i) => (
+                <View key={i} style={[s.statBox, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: colors.cardBorder }]}>
+                  <Text style={[s.statValue, { color: stat.color }]}>{stat.value}</Text>
+                  <Text style={[s.statLabel, { color: colors.textMuted }]}>{stat.label}</Text>
+                </View>
+              ))}
+            </View>
+
+            {progress.fulfillment && (
+              <View style={[s.branchGrid, { borderColor: colors.cardBorder }]}>
+                {([
+                  { key: 'VIDEO' as const, label: 'Video / Reels', icon: 'videocam' as const, color: '#A78BFA' },
+                  { key: 'DESIGNER' as const, label: 'Designer', icon: 'color-palette' as const, color: '#34D399' },
+                  { key: 'WRITER' as const, label: 'Writer', icon: 'create' as const, color: '#4C9AFF' },
+                ]).map((branch) => {
+                  const b = progress.fulfillment!.byBranch[branch.key];
+                  const branchPct = b.required > 0 ? Math.min(100, Math.round((b.fulfilled / b.required) * 100)) : 0;
+                  return (
+                    <View key={branch.key} style={[s.branchRow, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: colors.cardBorder }]}>
+                      <View style={s.branchLeft}>
+                        <View style={[s.branchIcon, { backgroundColor: branch.color + '20' }]}>
+                          <Ionicons name={branch.icon} size={16} color={branch.color} />
+                        </View>
+                        <View>
+                          <Text style={[s.branchLabel, { color: colors.text }]}>{branch.label}</Text>
+                          <Text style={[s.branchCount, { color: colors.textMuted }]}>
+                            {b.fulfilled} / {b.required} completed
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={s.branchRight}>
+                        <View style={[s.branchTrack, { backgroundColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                          <View style={[s.branchFill, { width: `${branchPct}%`, backgroundColor: branch.color }]} />
+                        </View>
+                        {b.remaining > 0 && (
+                          <Text style={[s.branchRemaining, { color: '#FFB347' }]}>{b.remaining} left</Text>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
               </View>
-            ))}
+            )}
           </View>
         )}
 
@@ -1204,6 +1260,58 @@ const s = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     marginTop: 2,
+  },
+  branchGrid: {
+    marginTop: 12,
+    gap: 8,
+  },
+  branchRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 12,
+  },
+  branchLeft: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 10,
+    flex: 1,
+  },
+  branchIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  branchLabel: {
+    fontSize: 13,
+    fontWeight: '700' as const,
+  },
+  branchCount: {
+    fontSize: 11,
+    marginTop: 1,
+  },
+  branchRight: {
+    alignItems: 'flex-end' as const,
+    gap: 4,
+    minWidth: 80,
+  },
+  branchTrack: {
+    width: 80,
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden' as const,
+  },
+  branchFill: {
+    height: '100%' as const,
+    borderRadius: 3,
+  },
+  branchRemaining: {
+    fontSize: 10,
+    fontWeight: '600' as const,
   },
   execActions: {
     gap: 8,

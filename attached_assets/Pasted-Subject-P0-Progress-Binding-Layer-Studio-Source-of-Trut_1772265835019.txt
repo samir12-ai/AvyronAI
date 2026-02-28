@@ -1,0 +1,118 @@
+Subject: P0 — Progress Binding Layer (Studio = Source of Truth) + Zero-Drift Counters (Hard Requirements)
+
+Replit,
+
+This is a P0 structural requirement. We are NOT shipping unless this is implemented exactly.
+Right now progress is tied to Calendar/Generate flow only, which breaks real-world usage because users often produce content externally and upload directly to Studio. When they do, the plan / required work / pipeline numbers do not move, which makes the system feel fake.
+
+✅ Required Behavior (Single Track, Studio-Driven Fulfillment)
+
+Decision: Fulfillment is counted at upload time (Option A).
+That means: Any Studio item added for the campaign reduces remaining work immediately.
+
+Studio becomes the Source of Truth for “work completed”.
+Calendar stays a scheduling view, not the truth of execution.
+
+What must happen:
+
+When a user uploads 1 Reel to Studio (even if edited outside the app):
+	•	Required Work: reels remaining decreases by 1
+	•	Pipeline: draft remaining decreases by 1
+	•	Plan progress: completed increases by 1
+	•	Dashboard progress card: updates immediately
+	•	Calendar summary counters: updates (even if that Reel was not generated from calendar)
+
+This must apply across all content types (REEL / VIDEO / POST / CAROUSEL / STORY).
+
+⸻
+
+✅ Implementation Rules (Non-Negotiable)
+	1.	No manual counters stored that can drift.
+Progress must be computed from real persisted artifacts (Studio items), campaign-scoped.
+	2.	Campaign-scoped only.
+A Studio item only affects the counters for the same campaignId.
+	3.	No dependency on Calendar Entry linkage.
+Even if the Studio item has no calendarEntryId, it still counts toward fulfillment.
+	4.	No “Generate-only” logic.
+Upload = counts as done (Option A). Publish is separate.
+	5.	Never go negative.
+Remaining = max(0, required - fulfilled).
+	6.	Deterministic mapping must be explicit.
+Example mapping:
+
+	•	REEL/VIDEO → fulfill “Reels/Video bucket”
+	•	IMAGE/POST/CAROUSEL → fulfill “Design/Posts bucket” (as per our branch rules)
+	•	STORY → fulfill “Writer/Stories bucket”
+This mapping must be consistent everywhere.
+
+⸻
+
+✅ Where it must reflect (ALL must match)
+
+After upload, all of these must show the same truth within one refresh cycle:
+	•	Dashboard progress card
+	•	Pipeline progress summary
+	•	Required Work branch cards (Designer/Writer/Video)
+	•	Calendar header summary (not per-entry, but totals)
+
+If any screen shows outdated numbers, that is a fail.
+
+⸻
+
+✅ Hard Acceptance Criteria (Extreme)
+
+A) Progress Binding Tests (must be automated)
+	1.	Upload Reel → progress moves
+
+	•	Given plan requires 10 reels
+	•	Upload 1 Reel to Studio
+	•	Expected: remaining reels = 9 everywhere (dashboard/pipeline/required work)
+
+	2.	Upload external content not tied to calendar
+
+	•	Upload Reel with no calendarEntryId
+	•	Expected: it still reduces remaining
+
+	3.	Campaign isolation
+
+	•	Upload in Campaign A must NOT affect Campaign B
+
+	4.	Deletion rollback
+
+	•	Delete a Studio item that was counting
+	•	Expected: counters revert correctly (remaining increases by 1)
+
+	5.	No drift regression
+
+	•	Refresh / relaunch app / switch tabs
+	•	Expected: counters remain correct and identical everywhere
+
+B) UI Behavior
+	•	No “fake numbers”
+	•	No placeholders
+	•	No demo values
+	•	Must show: “Completed X / Total Y” based on real Studio items
+
+C) Performance
+	•	Counters must compute fast (no heavy scans). Use correct indexed queries and bounded aggregation.
+	•	Any call > 500ms repeatedly is unacceptable.
+
+⸻
+
+🚫 What is NOT acceptable
+	•	“Counts only when generated from calendar”
+	•	“Counts only when published”
+	•	Storing fulfilled counters that drift
+	•	Any mismatch between Dashboard/Pipeline/Required Work
+
+⸻
+
+Deliverables Required
+	1.	A single source implementation of “Fulfillment logic” used by all screens/endpoints
+	2.	Automated test suite covering all cases above
+	3.	Short internal doc: mapping rules + data flow + why Studio is truth
+
+This is the last missing piece to make the system feel real and trustworthy.
+Implement it as one cohesive patch — no partials.
+
+— Samir

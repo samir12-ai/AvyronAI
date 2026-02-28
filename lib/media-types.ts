@@ -31,6 +31,25 @@ export function normalizeMediaType(input: string | null | undefined): CanonicalM
   return 'IMAGE';
 }
 
+export type FulfillmentBranch = 'VIDEO' | 'DESIGNER' | 'WRITER';
+
+export function getBranchForMediaType(mediaType: string | null | undefined): FulfillmentBranch {
+  const normalized = normalizeMediaType(mediaType);
+  switch (normalized) {
+    case 'VIDEO':
+    case 'REEL':
+      return 'VIDEO';
+    case 'IMAGE':
+    case 'CAROUSEL':
+      return 'DESIGNER';
+    case 'POST':
+    case 'STORY':
+      return 'WRITER';
+    default:
+      return 'WRITER';
+  }
+}
+
 export type CreateFlowTarget = 'content' | 'designer' | 'video';
 
 interface RouteMapping {
