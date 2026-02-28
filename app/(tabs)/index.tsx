@@ -710,6 +710,37 @@ export default function DashboardScreen() {
           </View>
         ) : null}
 
+        {metricsState === 'success' && planMetrics?.hasPlan ? (
+          <View style={{ marginTop: 12, backgroundColor: cardBg, borderRadius: 16, borderWidth: 1, borderColor: isDark ? P.mint + '18' : P.mint + '20', padding: 16 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="document-text" size={16} color={P.mint} />
+                <Text style={{ fontSize: 13, fontWeight: '700' as const, color: isDark ? P.mint : P.mintDark, letterSpacing: 1 }}>PLAN PROGRESS</Text>
+              </View>
+              <Text style={{ fontSize: 22, fontWeight: '800' as const, color: textPrimary }}>{planMetrics.completionPct}%</Text>
+            </View>
+            <View style={{ height: 6, backgroundColor: isDark ? '#1A2530' : '#E5EBE7', borderRadius: 3, overflow: 'hidden' as const, marginBottom: 14 }}>
+              <View style={{ height: 6, backgroundColor: P.mint, borderRadius: 3, width: `${planMetrics.completionPct}%` }} />
+            </View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
+              <View style={{ alignItems: 'center' as const }}>
+                <Text style={{ fontSize: 20, fontWeight: '700' as const, color: P.mint }}>{planMetrics.plannedPieces}</Text>
+                <Text style={{ fontSize: 11, color: textMuted, marginTop: 2 }}>Required</Text>
+              </View>
+              <View style={{ width: 1, backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }} />
+              <View style={{ alignItems: 'center' as const }}>
+                <Text style={{ fontSize: 20, fontWeight: '700' as const, color: P.blue }}>{planMetrics.generatedPieces}</Text>
+                <Text style={{ fontSize: 11, color: textMuted, marginTop: 2 }}>Fulfilled</Text>
+              </View>
+              <View style={{ width: 1, backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }} />
+              <View style={{ alignItems: 'center' as const }}>
+                <Text style={{ fontSize: 20, fontWeight: '700' as const, color: planMetrics.pendingGeneration > 0 ? P.orange : P.mint }}>{planMetrics.pendingGeneration}</Text>
+                <Text style={{ fontSize: 11, color: textMuted, marginTop: 2 }}>Remaining</Text>
+              </View>
+            </View>
+          </View>
+        ) : null}
+
         {metricsState === 'success' && metrics ? (
           <View style={s.quickGrid}>
             <Pressable 
