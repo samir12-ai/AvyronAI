@@ -1245,10 +1245,15 @@ export const planDocuments = pgTable("plan_documents", {
     .primaryKey()
     .default(sql`gen_random_uuid()`),
   planId: varchar("plan_id").notNull(),
+  blueprintId: varchar("blueprint_id").notNull().default(""),
   campaignId: varchar("campaign_id").notNull(),
   accountId: varchar("account_id").notNull().default("default"),
+  version: integer("version").notNull().default(1),
   fileName: text("file_name").notNull(),
   content: text("content").notNull(),
+  contentJson: text("content_json"),
+  contentMarkdown: text("content_markdown"),
+  isFallback: boolean("is_fallback").notNull().default(false),
   format: text("format").notNull().default("markdown"),
   createdAt: timestamp("created_at").defaultNow(),
 });

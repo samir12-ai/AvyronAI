@@ -60,6 +60,28 @@ describe('normalizeMediaType', () => {
     expect(normalizeMediaType('xyz')).toBe('IMAGE');
     expect(normalizeMediaType('banana')).toBe('IMAGE');
   });
+
+  it('handles whitespace-padded and mixed-case inputs', () => {
+    expect(normalizeMediaType(' Video ')).toBe('VIDEO');
+    expect(normalizeMediaType('  REEL  ')).toBe('REEL');
+    expect(normalizeMediaType(' image')).toBe('IMAGE');
+    expect(normalizeMediaType('POST ')).toBe('POST');
+  });
+
+  it('always returns a canonical value from CANONICAL_MEDIA_TYPES', () => {
+    const edgeCases = ['', null, undefined, 'garbage', 'mp4', 'jpeg', 'png', 'gif', 'audio', 'doc'];
+    for (const input of edgeCases) {
+      const result = normalizeMediaType(input as any);
+      expect(CANONICAL_MEDIA_TYPES).toContain(result);
+    }
+  });
+
+  it('normalizes plural forms correctly', () => {
+    expect(normalizeMediaType('images')).toBe('IMAGE');
+    expect(normalizeMediaType('videos')).toBe('VIDEO');
+    expect(normalizeMediaType('reels')).toBe('REEL');
+    expect(normalizeMediaType('stories')).toBe('STORY');
+  });
 });
 
 describe('createRouteForContentType', () => {

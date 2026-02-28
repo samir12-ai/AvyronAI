@@ -584,6 +584,52 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
 
     log("DB_WRITE", { planId: planRow.id });
 
+    try {
+      const existingDocs = await db.select({ id: planDocuments.id }).from(planDocuments).where(eq(planDocuments.planId, planRow.id));
+      const nextVersion = existingDocs.length + 1;
+
+      const sectionsJson: Record<string, any> = {};
+      for (const k of PLAN_SECTIONS) {
+        sectionsJson[k] = orchestratorPlan[k] || {};
+      }
+      if (usedFallback) {
+        sectionsJson.metadata = { isFallback: fallbackCount === SECTION_SPECS.length, fallbackReason, aiGeneratedCount, fallbackCount, fallbackReasons, sectionStatuses };
+      }
+
+      const confirmedBlueprintForDoc = blueprint.confirmedBlueprint ? JSON.parse(blueprint.confirmedBlueprint) : null;
+      const workRows = await db.select().from(requiredWork).where(and(eq(requiredWork.planId, planRow.id), eq(requiredWork.accountId, accountId))).limit(1);
+      const calEntryCount = await db.select({ count: sql<number>`count(*)` }).from(calendarEntries).where(eq(calendarEntries.planId, planRow.id));
+
+      const markdown = generatePlanMarkdown({
+        blueprint,
+        confirmedBlueprint: confirmedBlueprintForDoc,
+        plan: planRow,
+        planJson: orchestratorPlan,
+        work: workRows[0] || null,
+        calendarCount: Number(calEntryCount[0]?.count || 0),
+      });
+
+      const fileName = `Plan_${planRow.id.slice(0, 8)}_v${nextVersion}_${new Date().toISOString().slice(0, 10)}.md`;
+
+      await db.insert(planDocuments).values({
+        planId: planRow.id,
+        blueprintId,
+        campaignId: campaignId || "default",
+        accountId,
+        version: nextVersion,
+        fileName,
+        content: markdown,
+        contentJson: JSON.stringify(sectionsJson),
+        contentMarkdown: markdown,
+        isFallback: fallbackCount === SECTION_SPECS.length,
+        format: "markdown",
+      });
+
+      log("PLAN_DOCUMENT_SAVED", { planId: planRow.id, version: nextVersion, isFallback: fallbackCount === SECTION_SPECS.length });
+    } catch (docErr: any) {
+      log("PLAN_DOCUMENT_SAVE_ERROR", { error: docErr.message });
+    }
+
     const auditEvent = aiGeneratedCount === 0 ? "ORCHESTRATOR_FALLBACK" : usedFallback ? "ORCHESTRATOR_PARTIAL" : "ORCHESTRATOR_GENERATED";
     await logAuditEvent({
       accountId,
@@ -1101,6 +1147,124 @@ export function registerOrchestratorRoutes(app: Express) {
       });
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.get("/api/plans/:planId/document", async (req: Request, res: Response) => {
+    try {
+      const { planId } = req.params;
+      const accountId = (req.query.accountId as string) || "default";
+      const campaignId = req.query.campaignId as string | undefined;
+
+      const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
+      if (!plan) {
+        return res.status(404).json({ success: false, error: "PLAN_NOT_FOUND", message: "Plan not found." });
+      }
+
+      if (plan.accountId !== accountId) {
+        return res.status(403).json({ success: false, error: "ACCOUNT_MISMATCH", message: "Plan does not belong to this account." });
+      }
+
+      const conditions = [eq(planDocuments.planId, planId), eq(planDocuments.accountId, accountId)];
+      if (campaignId) conditions.push(eq(planDocuments.campaignId, campaignId));
+
+      const docs = await db.select().from(planDocuments)
+        .where(and(...conditions))
+        .orderBy(desc(planDocuments.createdAt))
+        .limit(1);
+
+      if (docs.length === 0) {
+        return res.status(404).json({ success: false, error: "DOCUMENT_NOT_FOUND", message: "No plan document found for this plan." });
+      }
+
+      const doc = docs[0];
+      let parsedContentJson = null;
+      try {
+        if (doc.contentJson) parsedContentJson = JSON.parse(doc.contentJson);
+      } catch { parsedContentJson = null; }
+
+      res.json({
+        success: true,
+        document: {
+          id: doc.id,
+          planId: doc.planId,
+          blueprintId: doc.blueprintId,
+          campaignId: doc.campaignId,
+          version: doc.version,
+          fileName: doc.fileName,
+          contentJson: parsedContentJson,
+          contentMarkdown: doc.contentMarkdown || doc.content,
+          isFallback: doc.isFallback,
+          createdAt: doc.createdAt,
+        },
+        plan: { id: plan.id, status: plan.status, campaignId: plan.campaignId },
+      });
+    } catch (error: any) {
+      console.error("[PlanDocument] Error fetching document:", error.message);
+      res.status(500).json({ success: false, error: "INTERNAL_ERROR", message: error.message });
+    }
+  });
+
+  app.get("/api/strategic/blueprint/:id/document", async (req: Request, res: Response) => {
+    try {
+      const { id: blueprintId } = req.params;
+
+      const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, blueprintId)).limit(1);
+      if (!blueprint) {
+        return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", message: "Blueprint not found." });
+      }
+
+      const plans = await db.select().from(strategicPlans)
+        .where(and(
+          eq(strategicPlans.blueprintId, blueprintId),
+          eq(strategicPlans.accountId, blueprint.accountId),
+          ne(strategicPlans.status, "SUPERSEDED"),
+        ))
+        .orderBy(desc(strategicPlans.createdAt))
+        .limit(1);
+
+      if (plans.length === 0) {
+        return res.status(404).json({ success: false, error: "PLAN_NOT_FOUND", message: "No plan found for this blueprint." });
+      }
+
+      const plan = plans[0];
+      const docs = await db.select().from(planDocuments)
+        .where(and(
+          eq(planDocuments.planId, plan.id),
+          eq(planDocuments.accountId, blueprint.accountId),
+        ))
+        .orderBy(desc(planDocuments.createdAt))
+        .limit(1);
+
+      if (docs.length === 0) {
+        return res.status(404).json({ success: false, error: "DOCUMENT_NOT_FOUND", message: "No plan document found. The plan may not have been generated yet." });
+      }
+
+      const doc = docs[0];
+      let parsedContentJson = null;
+      try {
+        if (doc.contentJson) parsedContentJson = JSON.parse(doc.contentJson);
+      } catch { parsedContentJson = null; }
+
+      res.json({
+        success: true,
+        document: {
+          id: doc.id,
+          planId: doc.planId,
+          blueprintId: doc.blueprintId,
+          campaignId: doc.campaignId,
+          version: doc.version,
+          fileName: doc.fileName,
+          contentJson: parsedContentJson,
+          contentMarkdown: doc.contentMarkdown || doc.content,
+          isFallback: doc.isFallback,
+          createdAt: doc.createdAt,
+        },
+        plan: { id: plan.id, status: plan.status, campaignId: plan.campaignId },
+      });
+    } catch (error: any) {
+      console.error("[PlanDocument] Error fetching blueprint document:", error.message);
+      res.status(500).json({ success: false, error: "INTERNAL_ERROR", message: error.message });
     }
   });
 }

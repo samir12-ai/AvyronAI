@@ -1,0 +1,93 @@
+Hi Replit,
+
+Understood: PDF/Download is NOT the priority. The priority is: the plan must be saved and viewable INSIDE the app as a persistent “Plan Document” screen, scoped by account + campaign + planId, with versioning. Also Studio Video is still backend-broken.
+
+Ship BOTH fixes as one patch with proof.
+
+────────────────────────────────────────
+P0-1) Save the Plan INSIDE the app (no PDF)
+────────────────────────────────────────
+GOAL:
+After Phase 5 generates a plan (AI or Skeleton fallback), the user must have a stable, fast “Plan Document” inside the app that never disappears, even after refresh/campaign switch. This is the source-of-truth doc the user reviews.
+
+IMPLEMENTATION (best solution):
+1) DB table: plan_documents (single canonical store)
+   Columns:
+   - id (uuid)
+   - accountId (NOT NULL)
+   - campaignId (NOT NULL)
+   - planId (NOT NULL)
+   - blueprintId (NOT NULL)
+   - version (int, NOT NULL)   // increments per planId generation
+   - contentJson (text/json string)  // normalized sections JSON
+   - contentMarkdown (text)          // optional, for clean rendering
+   - isFallback (bool)
+   - createdAt
+
+2) When Phase 5 completes (AI or fallback):
+   - ALWAYS upsert/insert a plan_documents row.
+   - contentJson must include the 6 sections with stable keys (no [object Object]).
+   - If fallback: isFallback=true and store reason (timeout/parse/etc.) inside contentJson.metadata.
+
+3) API endpoints:
+   - GET /api/plans/:planId/document
+     Returns the latest document for that planId (campaign+account scoped).
+   - GET /api/strategic/blueprint/:id/document
+     Convenience endpoint: resolves active plan for the blueprint, then returns document.
+   - If plan missing → 404 PLAN_NOT_FOUND
+   - If document missing → 404 DOCUMENT_NOT_FOUND
+   - NEVER return 500 for these expected states.
+
+4) UI:
+   - Add a “Plan Document” button directly inside the Phase 5 card (next to Retry).
+   - Add a dedicated screen: /(tabs)/ai-management/plan-document (or similar)
+     This screen renders:
+     - Header: Plan ID + status + createdAt + fallback badge if any
+     - Sections: Content Distribution, Creative Testing, Budget, KPI Priority, Competitor Watch, Risk Triggers
+   - Pipeline should link to the same screen. ONE place. ONE truth.
+
+5) Versioning:
+   - Regenerate plan creates a NEW planId (or supersedes old).
+   - Document attaches to that planId. No overwriting old plan doc.
+   - If same planId re-generated (if your flow does that), increment version.
+
+PROOF REQUIRED:
+- Video proof: Generate plan → open Plan Document screen → shows all 6 sections populated → switch tabs/campaign and back → document still there.
+- API proof: GET document returns non-empty contentJson keys for all 6 sections, and correct campaign/account scoping.
+
+────────────────────────────────────────
+P0-2) Studio Video backend mismatch (UI has Video but backend breaks)
+────────────────────────────────────────
+SYMPTOM:
+Studio shows “missing Video value” / save errors / analyze not working.
+
+REQUIRED FIX:
+1) Canonical mediaType values at API layer:
+   "REEL" | "VIDEO" | "IMAGE" | "CAROUSEL" | "POST" | "STORY"
+2) Normalize on read AND write:
+   - Read: map any legacy strings to canonical.
+   - Write: normalize incoming before DB write.
+   - Unknown → 422 MEDIA_TYPE_INVALID (include raw value).
+3) Studio save endpoint must never write null/unknown mediaType.
+4) Video Analyze:
+   - Allowed only for REEL/VIDEO.
+   - IMAGE → 409 INVALID_MEDIA_TYPE_FOR_ANALYZE (not 500).
+   - Response must always return the expected keys (strings/arrays), never undefined.
+
+PROOF REQUIRED:
+- Screenshot: Studio no longer shows “missing Video value”.
+- One successful Save on a VIDEO item (no save error).
+- One successful Analyze call (200) + one guarded call on IMAGE (409) with correct error code.
+
+────────────────────────────────────────
+Non-negotiables
+────────────────────────────────────────
+- No silent fallbacks.
+- No 500 for expected states (404/409/422 as specified).
+- Add 2 tests:
+  1) mediaType normalization variants → canonical
+  2) plan document exists after Phase 5 and is readable via API
+
+Ship as one patch with proofs.
+
+— Samir

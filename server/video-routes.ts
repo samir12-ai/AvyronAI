@@ -8,6 +8,7 @@ import path from "path";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { aiChat } from "./ai-client";
+import { normalizeMediaType } from "../lib/media-types";
 
 const execAsync = promisify(exec);
 
@@ -372,10 +373,30 @@ Based on the creative brief above, create an edit plan that fulfills the client'
 
   app.post("/api/studio/video-analyze", async (req, res) => {
     try {
-      const { title, platform, goal, audience, cta, series, offer, mediaType, duration } = req.body;
+      const { title, platform, goal, audience, cta, series, offer, mediaType: rawMediaType, duration } = req.body;
 
       if (!title) {
         return res.status(400).json({ error: "Title is required for analysis" });
+      }
+
+      if (rawMediaType && typeof rawMediaType === 'string') {
+        const knownAliases = ['video', 'videos', 'reel', 'reels', 'image', 'images', 'photo', 'poster', 'carousel', 'post', 'caption', 'story', 'stories',
+          'VIDEO', 'REEL', 'IMAGE', 'CAROUSEL', 'POST', 'STORY'];
+        if (!knownAliases.includes(rawMediaType.trim().toLowerCase()) && !knownAliases.includes(rawMediaType.trim())) {
+          return res.status(422).json({
+            error: "MEDIA_TYPE_INVALID",
+            message: `Unknown media type: "${rawMediaType}". Valid types: VIDEO, REEL, IMAGE, CAROUSEL, POST, STORY.`,
+          });
+        }
+      }
+
+      const mediaType = normalizeMediaType(rawMediaType || "VIDEO");
+      if (mediaType !== "VIDEO" && mediaType !== "REEL") {
+        return res.status(409).json({
+          error: "INVALID_MEDIA_TYPE_FOR_ANALYZE",
+          message: `Video analysis is only available for VIDEO or REEL content. Got: "${rawMediaType}" (normalized: ${mediaType}).`,
+          mediaType,
+        });
       }
 
       const response = await aiChat({

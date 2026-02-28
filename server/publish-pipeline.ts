@@ -4,13 +4,14 @@ import { publishedPosts, accountState, captionVariants } from "@shared/schema";
 import { eq, sql, lte, desc } from "drizzle-orm";
 import { generateAndScoreCaptions, validateCaseMetadata } from "./caption-engine";
 import { logAudit } from "./audit";
+import { normalizeMediaType, CANONICAL_MEDIA_TYPES } from "../lib/media-types";
 
 const router = Router();
 
 router.post("/api/studio/case", async (req, res) => {
   try {
     const accountId = (req.body.accountId as string) || "default";
-    const { goal, audience, cta, series, offer, mediaType, mediaUri, mediaItemId, platform, scheduledDate, campaignId } = req.body;
+    const { goal, audience, cta, series, offer, mediaType: rawMediaType, mediaUri, mediaItemId, platform, scheduledDate, campaignId } = req.body;
 
     const validation = validateCaseMetadata({ goal, audience, cta });
     if (!validation.valid) {
@@ -21,12 +22,20 @@ router.post("/api/studio/case", async (req, res) => {
       });
     }
 
+    const normalizedType = normalizeMediaType(rawMediaType || "image");
+    if (rawMediaType && typeof rawMediaType === 'string') {
+      const upper = rawMediaType.trim().toUpperCase();
+      if (!CANONICAL_MEDIA_TYPES.includes(upper as any) && normalizedType === 'IMAGE' && !['photo', 'poster', 'image', 'images'].includes(rawMediaType.trim().toLowerCase())) {
+        return res.status(422).json({ error: "MEDIA_TYPE_INVALID", message: `Unknown media type: "${rawMediaType}". Valid types: ${CANONICAL_MEDIA_TYPES.join(', ')}` });
+      }
+    }
+
     const schedDate = scheduledDate ? new Date(scheduledDate) : new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     const inserted = await db.insert(publishedPosts).values({
       accountId,
       mediaItemId: mediaItemId || null,
-      mediaType: mediaType || "image",
+      mediaType: normalizedType,
       mediaUri: mediaUri || null,
       caption: "",
       platform: platform || "Instagram",
@@ -47,7 +56,7 @@ router.post("/api/studio/case", async (req, res) => {
 
     const captionResult = await generateAndScoreCaptions(
       accountId,
-      { goal, audience, cta, series, offer, mediaType: mediaType || "image", platform: platform || "Instagram" },
+      { goal, audience, cta, series, offer, mediaType: normalizedType, platform: platform || "Instagram" },
       postId
     );
 

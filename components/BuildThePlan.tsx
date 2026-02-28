@@ -21,6 +21,7 @@ import { getApiUrl } from '@/lib/query-client';
 import { useApp } from '@/context/AppContext';
 import { useCampaign } from '@/context/CampaignContext';
 import { BusinessProfileModal } from '@/components/BusinessProfile';
+import PlanDocumentView from '@/components/PlanDocumentView';
 
 type Phase = 0 | 1 | 2 | 3 | 4 | 5;
 type BlueprintStatus = 'DRAFT' | 'GATE_PASSED' | 'EXTRACTION_COMPLETE' | 'EXTRACTION_FALLBACK' | 'CONFIRMED' | 'ANALYSIS_COMPLETE' | 'VALIDATED' | 'ORCHESTRATED';
@@ -145,6 +146,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
 
   const [businessDataComplete, setBusinessDataComplete] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showPlanDocument, setShowPlanDocument] = useState(false);
 
   const isMetaReal = metaConnection?.isConnected === true;
   const profileCampaignId = selectedCampaign?.selectedCampaignId;
@@ -1902,6 +1904,13 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
             </View>
           )}
 
+          <Pressable onPress={() => setShowPlanDocument(true)} style={[s.actionBtn]}>
+            <LinearGradient colors={['#8B5CF6', '#7C3AED']} style={s.actionBtnGrad}>
+              <Ionicons name="document-text" size={18} color="#fff" />
+              <Text style={s.actionBtnText}>View Plan Document</Text>
+            </LinearGradient>
+          </Pressable>
+
           <Pressable onPress={regeneratePlan} disabled={loading} style={[s.actionBtn]}>
             <LinearGradient colors={['#6B7280', '#4B5563']} style={s.actionBtnGrad}>
               <Ionicons name="refresh" size={18} color="#fff" />
@@ -1909,6 +1918,16 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
             </LinearGradient>
           </Pressable>
         </View>
+
+        {showPlanDocument && (
+          <View style={{ marginTop: 16, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: isDark ? '#374151' : '#E5E7EB', minHeight: 300 }}>
+            <PlanDocumentView
+              planId={blueprint?.planId || undefined}
+              blueprintId={blueprint?.id}
+              onClose={() => setShowPlanDocument(false)}
+            />
+          </View>
+        )}
 
         {renderPerformanceIntelligence()}
       </View>

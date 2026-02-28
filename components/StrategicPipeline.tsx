@@ -16,6 +16,7 @@ import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { getApiUrl } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
+import PlanDocumentView from '@/components/PlanDocumentView';
 
 interface PlanData {
   id: string;
@@ -115,6 +116,7 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressData | null>(null);
   const [calendarEntries, setCalendarEntries] = useState<CalendarEntry[]>([]);
+  const [showPlanDoc, setShowPlanDoc] = useState(false);
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -726,6 +728,32 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
             </Pressable>
           )}
         </View>
+
+        {hasApprovedOrBeyond && (
+          <View style={{ marginTop: 12 }}>
+            <Pressable
+              style={s.openCalendarBtn}
+              onPress={() => {
+                Platform.OS !== 'web' && Haptics.selectionAsync();
+                setShowPlanDoc(!showPlanDoc);
+              }}
+            >
+              <LinearGradient colors={['#8B5CF6', '#7C3AED']} style={s.openCalendarBtnGrad}>
+                <Ionicons name={showPlanDoc ? 'close-circle-outline' : 'document-text-outline'} size={18} color="#fff" />
+                <Text style={s.openCalendarBtnText}>{showPlanDoc ? 'Close Plan Document' : 'View Plan Document'}</Text>
+              </LinearGradient>
+            </Pressable>
+          </View>
+        )}
+
+        {showPlanDoc && activePlan && (
+          <View style={{ marginTop: 12, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: colors.cardBorder, minHeight: 300 }}>
+            <PlanDocumentView
+              planId={activePlan.id}
+              onClose={() => setShowPlanDoc(false)}
+            />
+          </View>
+        )}
 
         {hasApprovedOrBeyond && calendarEntries.length === 0 && (
           <View style={{ marginTop: 12 }}>
