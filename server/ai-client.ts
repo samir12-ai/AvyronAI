@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { GoogleGenAI, Modality } from "@google/genai";
 
 const DEFAULT_MAX_TOKENS = 800;
-const HARD_TIMEOUT_MS = 25000;
+const HARD_TIMEOUT_MS = 45000;
 
 let openaiInstance: OpenAI | null = null;
 let geminiInstance: GoogleGenAI | null = null;

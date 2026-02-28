@@ -1,0 +1,213 @@
+:::writing{id=“94720” variant=“email” subject=“P0: Brutal Full-System QA Protocol (Single-Track Lock) — Execute + Report + Cleanup (No Excuses)”}
+Hi Replit,
+
+This is a P0 brutal QA protocol. I want you to run it exactly as written and report results with proof.
+Goal: prove the system is truly single-track, stable under pressure, and cannot leak or drift across campaigns.
+No “looks fine”. No summaries. I need hard evidence + cleanup at the end.
+
+Non-negotiables
+	1.	Every test ends with CLEANUP: delete all test campaigns, test plans, test calendar entries, test studio items, test manual metrics, test documents.
+	2.	NO DEMO anywhere: any demo/fixture/UI text/data = FAIL.
+	3.	Every endpoint error must be structured: correct HTTP code + { error/code, message, requestId }. No random 500s for expected states.
+	4.	Single-track only: one plan track, one calendar source, one required work source, one studio source. No parallel tracks.
+
+Deliverables (must include in your report)
+	•	A checklist with PASS/FAIL per test group below.
+	•	For every FAIL: root cause + exact fix + verification rerun.
+	•	Evidence: screenshots (UI), sample API responses, and server logs (requestId included).
+	•	Cleanup proof: list deleted entities / DB counts after cleanup (should be zero test artifacts).
+
+⸻
+
+A) SMOKE TEST (10 minutes) — “Does it even breathe?”
+Create TestCampaign_Smoke.
+	•	Open: Dashboard / Calendar / Create / Studio / AI Control.
+	•	Confirm no infinite skeleton (no loading stuck past 30s).
+	•	Switch campaign A→B→A: no stale data (no refresh required).
+
+FAIL conditions:
+	•	Any tab white screen / console crash / stuck skeleton / needs refresh to update campaign data.
+
+⸻
+
+B) END-TO-END SINGLE TRACK (Happy path) — From zero to content completion
+Create TestCampaign_E2E_1.
+	1.	Complete Business Profile from the single “Profile” entry point (not duplicated forms).
+	2.	Add 1 competitor.
+	3.	Build The Plan to Phase 5 → ensure Plan Document is saved INSIDE the app (PDF not required, but persistence is).
+	4.	Approve Plan → must unlock pipeline and show CTA that goes to MAIN Calendar tab (not pipeline calendar).
+	5.	Calendar entries exist (expected plan count).
+	6.	Generate ONE entry only (no batch).
+	7.	Confirm it creates/updates a studio_item linked to calendarEntryId + campaignId.
+	8.	Verify counts update everywhere: Pipeline progress / Required Work / Calendar / Dashboard progress.
+
+FAIL conditions:
+	•	A second calendar exists in pipeline.
+	•	Batch generation exists or hidden bypass exists.
+	•	Generating one item does NOT reduce remaining counts.
+
+⸻
+
+C) MULTI-CAMPAIGN ISOLATION (hardest real-world failure)
+Create TestCampaign_A and TestCampaign_B.
+
+Manual Metrics:
+	•	Enter different numbers for A and B (spend/revenue/conversions/etc).
+	•	Dashboard on A shows A numbers.
+	•	Switch to B: shows B numbers immediately (no refresh).
+	•	Switch back to A: shows A numbers.
+
+FAIL conditions:
+	•	Any cross-campaign leak, stale metrics, or hang state.
+	•	Any request returns data for the wrong campaign.
+
+⸻
+
+D) DASHBOARD (Manual-first mode) — Must be honest & actionable
+No Meta approval assumed.
+	•	With very low data (few impressions/clicks/conversions), autopilot must say explicitly:
+“Data is weak / not enough signal; do X/Y/Z to strengthen it.”
+Not generic praise or “scale winners” when nothing is published.
+	•	Verify CPA/ROAS/CTR math correctness after edits.
+
+FAIL conditions:
+	•	Autopilot recommendations ignore the reality of published=0.
+	•	KPI math inconsistent.
+
+⸻
+
+E) PLAN DOCUMENT (Persistence inside app)
+	•	Plan Document must open from Pipeline and from BuildThePlan Phase 5.
+	•	Regenerate plan → should create a new version/document without corrupting old one.
+	•	No [object Object], no null contentJson, no missing arrays crashing UI.
+
+FAIL conditions:
+	•	Document not found for a plan that exists.
+	•	Rendering crashes or displays garbage.
+
+⸻
+
+F) STUDIO VIDEO ANALYZE — Real VIDEO understanding (not caption-only)
+Upload 3 test videos:
+	1.	Silent video.
+	2.	Video with visible on-screen text.
+	3.	Video with a simple action.
+
+AI must produce ALL of:
+	•	Hook
+	•	Full caption draft
+	•	Goal
+	•	CTA
+	•	Angle
+	•	Keywords/hashtags
+And user edits must save without error.
+
+FAIL conditions:
+	•	“missing video” / analyze returns nothing / only generic caption.
+	•	Any save error or overwriting user edits unexpectedly.
+
+⸻
+
+G) CALENDAR → CREATE ROUTING (no dead button, no failed gen loop)
+From Calendar entries:
+	•	VIDEO/REEL → route to Reels creation flow.
+	•	IMAGE/CAROUSEL → route to AI Designer.
+	•	WRITER items → route to AI Writer.
+
+FAIL conditions:
+	•	“Create/Generate” does nothing.
+	•	It immediately fails without routing to the right creation tool.
+
+⸻
+
+H) AI WRITER REELS OUTPUT — Must include SCRIPT + shooting, not just tips
+Reels engine output must include:
+	•	Shot-by-shot script
+	•	On-screen text + VO
+	•	Timing
+	•	Camera directions
+	•	B-roll ideas
+	•	Hook variants
+	•	CTA
+
+FAIL conditions:
+	•	Only “how to shoot” tips without an executable script.
+
+⸻
+
+I) REQUIRED WORK BRANCHING ACCURACY (no double counting)
+Validate Designer/Writer/Video branch counts:
+	•	No double counting between branches.
+	•	Uploading a video must only move the Video branch.
+	•	Uploading an image must only move the Designer branch.
+	•	Text-only must only move the Writer branch.
+
+FAIL conditions:
+	•	One video becomes posters/images.
+	•	Counts jump or drift without real items.
+
+⸻
+
+J) AUTOPILOT + GATES CONSISTENCY (must never contradict)
+Test scenarios:
+	1.	No approved plan → autopilot BLOCKED, actions empty.
+	2.	Approved plan → CONNECTED, evidence-bound actions.
+	3.	Emergency stop → autopilot OFF immediately + audit event.
+	4.	Reset failed → only FAILED → DRAFT, no touching scheduled/published.
+
+FAIL conditions:
+	•	Autopilot says CONNECTED while gates say FAIL (or vice versa).
+	•	Actions appear with no plan binding.
+
+⸻
+
+K) API CONTRACT + ERROR DISCIPLINE
+For each critical endpoint (dashboard metrics, autopilot status/actions, calendar entries, generate single entry, video-analyze, plan document, manual metrics):
+	•	Test wrong campaignId / wrong accountId / missing params
+	•	Expect correct codes: 403/404/409/422/504 etc + requestId.
+
+FAIL conditions:
+	•	Any expected state returns a 500 without structured code.
+	•	Missing requestId.
+
+⸻
+
+L) LOAD + CHAOS (stress without killing the app)
+	•	20 concurrent requests to: dashboard metrics, autopilot actions, calendar entries.
+	•	Spam generate on the same entry 10 times (idempotency).
+	•	Simulate network drop during save/analyze and recovery.
+
+PASS conditions:
+	•	No duplicate studio items.
+	•	No duplicated RUNNING orchestrator jobs for same blueprint.
+	•	Server does not crash; UI recovers gracefully.
+
+⸻
+
+M) SECURITY / DATA LEAKAGE (must be impossible)
+Attempt to fetch plan document / metrics using a planId from a different campaign:
+	•	Must return CAMPAIGN_MISMATCH / ACCOUNT_MISMATCH.
+
+FAIL conditions:
+	•	Any cross-campaign data returned.
+
+⸻
+
+N) CLEANUP (Mandatory)
+Delete all:
+	•	TestCampaign_*
+	•	all generated plans + plan documents
+	•	calendar entries
+	•	studio items
+	•	manual metrics records
+
+You must provide a final cleanup proof:
+	•	counts for these tables/entities after deletion (should be zero test artifacts)
+	•	confirm no orphan rows remain.
+
+⸻
+
+This QA suite is designed to break weak architecture. Run it completely. If anything fails, fix it from the root (no patches that will regress), rerun only the failing section + the relevant dependency sections, and then provide the final report with evidence + cleanup proof.
+
+Samir
+:::

@@ -58,22 +58,7 @@ async function resolveActivePlan(accountId: string, campaignId: string) {
     .orderBy(desc(strategicPlans.createdAt))
     .limit(1);
 
-  if (plans.length === 0) {
-    const fallbackPlans = await db
-      .select()
-      .from(strategicPlans)
-      .where(
-        and(
-          eq(strategicPlans.accountId, accountId),
-          sql`${strategicPlans.status} IN (${sql.raw(ACTIVE_PLAN_STATUSES_SQL)})`
-        )
-      )
-      .orderBy(desc(strategicPlans.createdAt))
-      .limit(1);
-    return fallbackPlans[0] || null;
-  }
-
-  return plans[0];
+  return plans[0] || null;
 }
 
 router.get("/api/autopilot/status", requireCampaign, async (req, res) => {

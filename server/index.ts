@@ -71,10 +71,15 @@ function setupRequestLogging(app: express.Application) {
   app.use((req, res, next) => {
     const start = Date.now();
     const path = req.path;
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    (req as any).requestId = requestId;
     let capturedJsonResponse: Record<string, unknown> | undefined = undefined;
 
     const originalResJson = res.json;
     res.json = function (bodyJson, ...args) {
+      if (bodyJson && typeof bodyJson === 'object' && !Array.isArray(bodyJson) && path.startsWith('/api')) {
+        bodyJson.requestId = requestId;
+      }
       capturedJsonResponse = bodyJson;
       return originalResJson.apply(res, [bodyJson, ...args]);
     };
