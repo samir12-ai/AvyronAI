@@ -16,6 +16,7 @@ import {
 import { eq, desc, sql, and, isNotNull, min, max, gte, lte, inArray } from "drizzle-orm";
 import { logAudit } from "./audit";
 import { ACTIVE_PLAN_STATUSES } from "./plan-constants";
+import { computeFulfillment } from "./fulfillment-engine";
 
 const LOG_PREFIX = "[CampaignDataLayer]";
 
@@ -98,27 +99,21 @@ async function getPlanDrivenMetrics(campaignId: string, accountId: string): Prom
     }
 
     const plan = activePlans[0];
-    const activePlanIds = activePlans.map(p => p.id);
 
-    const [work, totalCal, generatedCal, failedCal, nextSched] = await Promise.all([
-      db.select().from(requiredWork).where(and(eq(requiredWork.campaignId, campaignId), eq(requiredWork.accountId, accountId), inArray(requiredWork.planId, activePlanIds))).orderBy(desc(requiredWork.createdAt)).limit(1),
-      db.select({ count: sql<number>`count(*)` }).from(calendarEntries).where(and(eq(calendarEntries.campaignId, campaignId), eq(calendarEntries.accountId, accountId))),
-      db.select({ count: sql<number>`count(*)` }).from(calendarEntries).where(and(eq(calendarEntries.campaignId, campaignId), eq(calendarEntries.accountId, accountId), inArray(calendarEntries.status, ["GENERATED", "SCHEDULED", "PUBLISHED"]))),
-      db.select({ count: sql<number>`count(*)` }).from(calendarEntries).where(and(eq(calendarEntries.campaignId, campaignId), eq(calendarEntries.accountId, accountId), eq(calendarEntries.status, "FAILED"))),
+    const [fulfillment, nextSched] = await Promise.all([
+      computeFulfillment(campaignId, accountId),
       db.select({ scheduledDate: calendarEntries.scheduledDate }).from(calendarEntries).where(and(eq(calendarEntries.campaignId, campaignId), eq(calendarEntries.accountId, accountId), eq(calendarEntries.status, "SCHEDULED"), gte(calendarEntries.scheduledDate, new Date()))).orderBy(calendarEntries.scheduledDate).limit(1),
     ]);
 
-    const plannedPieces = work.length > 0 ? (work[0].totalContentPieces || 0) : 0;
-    const totalCount = Number(totalCal[0]?.count || 0);
-    const generatedCount = Number(generatedCal[0]?.count || 0);
-    const failedCount = Number(failedCal[0]?.count || 0);
-    const pendingGeneration = Math.max(0, totalCount - generatedCount - failedCount);
-    const completionPct = plannedPieces > 0 ? Math.round((generatedCount / plannedPieces) * 100) : 0;
+    const plannedPieces = fulfillment.total.required;
+    const generatedPieces = fulfillment.total.fulfilled;
+    const pendingGeneration = fulfillment.total.remaining;
+    const completionPct = fulfillment.progressPercent;
 
     return {
       plannedPieces,
-      generatedPieces: generatedCount,
-      failedPieces: failedCount,
+      generatedPieces,
+      failedPieces: 0,
       pendingGeneration,
       completionPct,
       nextScheduledDate: nextSched[0]?.scheduledDate?.toISOString() || null,

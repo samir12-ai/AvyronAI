@@ -401,27 +401,18 @@ export default function DashboardScreen() {
               <View style={s.heroStats}>
                 <View style={s.heroStat}>
                   <Text style={[s.heroStatValue, { color: P.mint }]}>{pm.plannedPieces}</Text>
-                  <Text style={[s.heroStatLabel, { color: textMuted }]}>Planned</Text>
+                  <Text style={[s.heroStatLabel, { color: textMuted }]}>Required</Text>
                 </View>
                 <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
                 <View style={s.heroStat}>
                   <Text style={[s.heroStatValue, { color: P.blue }]}>{pm.generatedPieces}</Text>
-                  <Text style={[s.heroStatLabel, { color: textMuted }]}>Generated</Text>
+                  <Text style={[s.heroStatLabel, { color: textMuted }]}>Fulfilled</Text>
                 </View>
                 <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
                 <View style={s.heroStat}>
                   <Text style={[s.heroStatValue, { color: pm.pendingGeneration > 0 ? P.orange : P.mint }]}>{pm.pendingGeneration}</Text>
-                  <Text style={[s.heroStatLabel, { color: textMuted }]}>Pending</Text>
+                  <Text style={[s.heroStatLabel, { color: textMuted }]}>Remaining</Text>
                 </View>
-                {pm.failedPieces > 0 && (
-                  <>
-                    <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
-                    <View style={s.heroStat}>
-                      <Text style={[s.heroStatValue, { color: P.coral }]}>{pm.failedPieces}</Text>
-                      <Text style={[s.heroStatLabel, { color: textMuted }]}>Failed</Text>
-                    </View>
-                  </>
-                )}
               </View>
             </LinearGradient>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 4, marginTop: 6, marginBottom: 4 }}>
@@ -455,17 +446,17 @@ export default function DashboardScreen() {
             <View style={s.heroStats}>
               <View style={s.heroStat}>
                 <Text style={[s.heroStatValue, { color: textMuted }]}>0</Text>
-                <Text style={[s.heroStatLabel, { color: textMuted }]}>Planned</Text>
+                <Text style={[s.heroStatLabel, { color: textMuted }]}>Required</Text>
               </View>
               <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
               <View style={s.heroStat}>
                 <Text style={[s.heroStatValue, { color: textMuted }]}>0</Text>
-                <Text style={[s.heroStatLabel, { color: textMuted }]}>Generated</Text>
+                <Text style={[s.heroStatLabel, { color: textMuted }]}>Fulfilled</Text>
               </View>
               <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
               <View style={s.heroStat}>
                 <Text style={[s.heroStatValue, { color: textMuted }]}>0</Text>
-                <Text style={[s.heroStatLabel, { color: textMuted }]}>Pending</Text>
+                <Text style={[s.heroStatLabel, { color: textMuted }]}>Remaining</Text>
               </View>
             </View>
           </LinearGradient>
