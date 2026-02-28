@@ -149,8 +149,8 @@ export function registerDashboardRoutes(app: Express) {
 
       const workData = work.length > 0 ? work[0] : null;
       const totalPieces = workData?.totalContentPieces || Number(calStats.total) || 0;
-      const publishedPieces = workData?.publishedCount || Number(calStats.published) || 0;
-      const failedPieces = workData?.failedCount || Number(calStats.failed) || 0;
+      const publishedPieces = Number(stuStats.published) || Number(calStats.published) || 0;
+      const failedPieces = Number(stuStats.failed) || Number(calStats.failed) || 0;
       const generatedPieces = Number(calStats.generated) || 0;
       const draftPieces = Number(calStats.draft) || 0;
       const scheduledPieces = Number(calStats.scheduled) || 0;
@@ -392,6 +392,9 @@ export function registerDashboardRoutes(app: Express) {
 
       const isApproved = approvals.length > 0 && approvals[0].decision === "APPROVED";
 
+      const { computeFulfillment } = await import("./fulfillment-engine");
+      const fulfillment = await computeFulfillment(campaignId, accountId);
+
       res.json({
         success: true,
         hasPlan: true,
@@ -401,8 +404,9 @@ export function registerDashboardRoutes(app: Express) {
         isApproved,
         emergencyStopped: plan.emergencyStopped,
         totalCalendarEntries: plan.totalCalendarEntries,
-        totalStudioItems: plan.totalStudioItems,
-        totalPublished: plan.totalPublished,
+        totalStudioItems: fulfillment.total.fulfilled,
+        totalPublished: fulfillment.byStatus.published,
+        fulfillment,
       });
     } catch (error: any) {
       console.error(`${LOG_PREFIX} Plan status error:`, error);

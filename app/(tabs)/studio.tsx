@@ -18,6 +18,7 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
+import { useCampaign } from '@/context/CampaignContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import { generateId } from '@/lib/storage';
@@ -87,6 +88,7 @@ export default function StudioScreen() {
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
   const { mediaItems, addMediaItem, removeMediaItem, updateMediaItem } = useApp();
+  const { selectedCampaignId } = useCampaign();
   const { t } = useLanguage();
 
   const { state: ps, updateState, isLoading: psLoading, isSaving, saveError, resetState, hydrationVersion } = usePersistedState<StudioDraftState>('studio', defaultStudioState);
@@ -181,7 +183,20 @@ export default function StudioScreen() {
     setShowModal(true);
   };
 
+  const studioTypeToCanonical = (st: StudioMediaType): string => {
+    switch (st) {
+      case 'video': return 'REEL';
+      case 'image': return 'IMAGE';
+      case 'poster': return 'IMAGE';
+      default: return 'IMAGE';
+    }
+  };
+
   const handleSaveMedia = async () => {
+    if (!selectedCampaignId) {
+      Alert.alert('No Campaign Selected', 'Please select a campaign before saving media.');
+      return;
+    }
     if (!mediaTitle.trim()) {
       Alert.alert('Missing Title', 'Please enter a title for your media.');
       return;
@@ -193,6 +208,8 @@ export default function StudioScreen() {
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsSubmittingCase(true);
+
+    const canonicalType = studioTypeToCanonical(mediaType);
 
     const newMedia: MediaItem = {
       id: generateId(),
@@ -216,7 +233,9 @@ export default function StudioScreen() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           accountId: 'default',
-          mediaId: newMedia.id,
+          campaignId: selectedCampaignId,
+          mediaItemId: newMedia.id,
+          mediaType: canonicalType,
           title: newMedia.title,
           platform: newMedia.platform,
           goal: mediaGoal,
@@ -224,14 +243,15 @@ export default function StudioScreen() {
           cta: mediaCta,
           series: mediaSeries || undefined,
           offer: mediaOffer || undefined,
-          scheduledAt: new Date(Date.now() + 3600000).toISOString(),
+          scheduledDate: new Date(Date.now() + 3600000).toISOString(),
         }),
       });
 
       if (res.ok) {
         const data = await res.json();
         newMedia.serverPostId = data.postId;
-        newMedia.autoCaption = data.winningCaption;
+        newMedia.studioItemId = data.studioItemId;
+        newMedia.autoCaption = data.caption;
         newMedia.status = 'scheduled';
       }
     } catch (err) {
@@ -256,6 +276,17 @@ export default function StudioScreen() {
 
   const handleDeleteMedia = async (id: string, title: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const item = mediaItems.find(m => m.id === id);
+    if (item?.studioItemId) {
+      try {
+        const apiUrl = getApiUrl();
+        await fetch(new URL(`/api/studio/items/${item.studioItemId}?accountId=default`, apiUrl).toString(), {
+          method: 'DELETE',
+        });
+      } catch (err) {
+        console.log('Failed to delete studio item from server:', err);
+      }
+    }
     await removeMediaItem(id);
   };
 

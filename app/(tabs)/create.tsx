@@ -579,6 +579,11 @@ export default function CreateScreen() {
       return;
     }
 
+    if (!selectedCampaignId) {
+      Alert.alert('Campaign Required', 'Please select a campaign before saving content.');
+      return;
+    }
+
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     const newItem: ContentItem = {
@@ -591,6 +596,20 @@ export default function CreateScreen() {
     };
 
     await addContentItem(newItem);
+
+    try {
+      const canonicalType = contentType === 'reel' ? 'REEL' : contentType === 'caption' ? 'POST' : contentType === 'story' ? 'STORY' : 'POST';
+      await apiRequest('POST', '/api/studio/items', {
+        campaignId: selectedCampaignId,
+        accountId: 'default',
+        contentType: canonicalType,
+        title: topic.trim() || generatedContent.slice(0, 50),
+        caption: generatedContent,
+        calendarEntryId: calendarEntryId || undefined,
+      });
+    } catch (err) {
+      console.warn('[Create] Failed to save studio item:', err);
+    }
     
     setTopic('');
     setGeneratedContent('');
@@ -765,6 +784,11 @@ export default function CreateScreen() {
       return;
     }
 
+    if (!selectedCampaignId) {
+      Alert.alert('Campaign Required', 'Please select a campaign before saving designs.');
+      return;
+    }
+
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
@@ -779,6 +803,18 @@ export default function CreateScreen() {
       };
 
       await addMediaItem(newMedia);
+
+      try {
+        await apiRequest('POST', '/api/studio/items', {
+          campaignId: selectedCampaignId,
+          accountId: 'default',
+          contentType: 'IMAGE',
+          title: posterTopic || 'AI Design',
+          mediaUrl: generatedPoster,
+        });
+      } catch (err) {
+        console.warn('[Create] Failed to save poster studio item:', err);
+      }
 
       try {
         await saveImageToGallery(generatedPoster);

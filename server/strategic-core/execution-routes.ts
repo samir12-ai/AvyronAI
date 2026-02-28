@@ -938,7 +938,7 @@ export function registerExecutionRoutes(app: Express) {
 
         await tx
           .update(strategicPlans)
-          .set({ executionStatus: "IDLE", totalFailed: 0, updatedAt: new Date() })
+          .set({ executionStatus: "IDLE", updatedAt: new Date() })
           .where(eq(strategicPlans.id, planId));
       });
 
@@ -1049,9 +1049,6 @@ export function registerExecutionRoutes(app: Express) {
           executionStatus: p.executionStatus,
           emergencyStopped: p.emergencyStopped,
           totalCalendarEntries: p.totalCalendarEntries,
-          totalStudioItems: p.totalStudioItems,
-          totalFailed: p.totalFailed,
-          totalCanceled: p.totalCanceled,
           createdAt: p.createdAt,
         })),
         fulfillment,

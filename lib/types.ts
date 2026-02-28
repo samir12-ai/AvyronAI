@@ -99,6 +99,7 @@ export interface MediaItem {
   series?: string;
   offer?: string;
   serverPostId?: string;
+  studioItemId?: string;
   autoCaption?: string;
 }
 

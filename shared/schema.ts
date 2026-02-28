@@ -1185,6 +1185,7 @@ export const studioItems = pgTable("studio_items", {
   thumbnailUrl: text("thumbnail_url"),
   status: text("status").notNull().default("DRAFT"),
   errorReason: text("error_reason"),
+  sourcePostId: varchar("source_post_id"),
   publishedAt: timestamp("published_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
