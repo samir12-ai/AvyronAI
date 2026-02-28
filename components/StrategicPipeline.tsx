@@ -729,10 +729,8 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
         </View>
 
         {activePlan && (
-          <View style={{ marginTop: 16, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: isDark ? '#374151' : '#E5E7EB', minHeight: 200 }}>
-            <PlanDocumentView
-              planId={activePlan.id}
-            />
+          <View style={{ marginTop: 16 }}>
+            <PlanDocumentView planId={activePlan.id} />
           </View>
         )}
 

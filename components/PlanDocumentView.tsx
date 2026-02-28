@@ -3,24 +3,23 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   Pressable,
   ActivityIndicator,
   useColorScheme,
-  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import Colors from '@/constants/colors';
 import { getApiUrl } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
 
-const SECTION_META: Record<string, { label: string; icon: string; color: string }> = {
-  contentDistributionPlan: { label: 'Content Distribution', icon: 'megaphone-outline', color: '#8B5CF6' },
-  creativeTestingMatrix: { label: 'Creative Testing', icon: 'flask-outline', color: '#EC4899' },
-  budgetAllocationStructure: { label: 'Budget Allocation', icon: 'wallet-outline', color: '#10B981' },
-  kpiMonitoringPriority: { label: 'KPI Monitoring', icon: 'analytics-outline', color: '#F59E0B' },
-  competitiveWatchTargets: { label: 'Competitive Watch', icon: 'eye-outline', color: '#3B82F6' },
-  riskMonitoringTriggers: { label: 'Risk Triggers', icon: 'warning-outline', color: '#EF4444' },
+const SECTION_META: Record<string, { label: string; icon: string; gradient: [string, string] }> = {
+  contentDistributionPlan: { label: 'Content Distribution', icon: 'megaphone-outline', gradient: ['#8B5CF6', '#7C3AED'] },
+  creativeTestingMatrix: { label: 'Creative Testing', icon: 'flask-outline', gradient: ['#EC4899', '#DB2777'] },
+  budgetAllocationStructure: { label: 'Budget Allocation', icon: 'wallet-outline', gradient: ['#10B981', '#059669'] },
+  kpiMonitoringPriority: { label: 'KPI Monitoring', icon: 'analytics-outline', gradient: ['#F59E0B', '#D97706'] },
+  competitiveWatchTargets: { label: 'Competitive Watch', icon: 'eye-outline', gradient: ['#3B82F6', '#2563EB'] },
+  riskMonitoringTriggers: { label: 'Risk Triggers', icon: 'warning-outline', gradient: ['#EF4444', '#DC2626'] },
 };
 
 const SECTION_KEYS = Object.keys(SECTION_META);
@@ -64,9 +63,7 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
       if (res.ok && data.success) {
         setDocument(data.document);
         setPlan(data.plan);
-        const initial: Record<string, boolean> = {};
-        SECTION_KEYS.forEach(k => { initial[k] = true; });
-        setExpandedSections(initial);
+        setExpandedSections({});
       } else {
         setError(data.message || data.error || 'Failed to load plan document.');
       }
@@ -85,87 +82,107 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
     setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const renderSectionContent = (key: string, data: any) => {
-    if (!data || typeof data !== 'object') {
-      return <Text style={[s.emptyText, { color: colors.textSecondary }]}>No data available.</Text>;
-    }
-
-    switch (key) {
-      case 'contentDistributionPlan':
-        return renderContentDistribution(data);
-      case 'creativeTestingMatrix':
-        return renderCreativeTesting(data);
-      case 'budgetAllocationStructure':
-        return renderBudgetAllocation(data);
-      case 'kpiMonitoringPriority':
-        return renderKpiMonitoring(data);
-      case 'competitiveWatchTargets':
-        return renderCompetitiveWatch(data);
-      case 'riskMonitoringTriggers':
-        return renderRiskTriggers(data);
-      default:
-        return <Text style={[s.emptyText, { color: colors.textSecondary }]}>{JSON.stringify(data, null, 2)}</Text>;
-    }
-  };
-
   const safeStr = (v: any): string => {
     if (v === null || v === undefined) return '';
     if (typeof v === 'object') return JSON.stringify(v);
     return String(v);
   };
 
+  const safeArray = (v: any): any[] => {
+    if (Array.isArray(v)) return v;
+    return [];
+  };
+
   const renderContentDistribution = (data: any) => {
-    const platforms = data.platforms || [];
+    const platforms = safeArray(data.platforms);
+    const pillars = safeArray(data.contentPillars);
     return (
-      <View style={s.sectionBody}>
+      <View style={st.sectionBody}>
         {platforms.map((p: any, i: number) => (
-          <View key={i} style={[s.subCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
-            <Text style={[s.subCardTitle, { color: colors.text }]}>{safeStr(p.platform)} — {safeStr(p.frequency)}</Text>
-            {p.contentTypes?.map((ct: any, j: number) => (
-              <View key={j} style={s.listRow}>
-                <Text style={[s.listLabel, { color: colors.textSecondary }]}>{safeStr(ct.type)}</Text>
-                <Text style={[s.listValue, { color: colors.text }]}>{safeStr(ct.percentage)} • {safeStr(ct.weeklyCount)}/wk</Text>
+          <View key={i} style={[st.detailCard, { backgroundColor: isDark ? '#111827' : '#F8FAFC', borderColor: isDark ? '#1F2937' : '#E2E8F0' }]}>
+            <View style={st.detailCardHeader}>
+              <View style={[st.platformDot, { backgroundColor: '#8B5CF6' }]} />
+              <Text style={[st.detailCardTitle, { color: colors.text }]}>{safeStr(p.platform)}</Text>
+              <Text style={[st.detailCardBadge, { color: isDark ? '#A78BFA' : '#7C3AED' }]}>{safeStr(p.frequency)}</Text>
+            </View>
+            {safeArray(p.contentTypes).map((ct: any, j: number) => (
+              <View key={j} style={st.detailRow}>
+                <Text style={[st.detailLabel, { color: colors.textSecondary }]}>{safeStr(ct.type)}</Text>
+                <View style={st.detailValueWrap}>
+                  <Text style={[st.detailValue, { color: colors.text }]}>{safeStr(ct.percentage)}</Text>
+                  <Text style={[st.detailSub, { color: colors.textSecondary }]}>{safeStr(ct.weeklyCount)}/wk</Text>
+                </View>
               </View>
             ))}
             {p.bestPostingTimes && (
-              <Text style={[s.metaText, { color: colors.textSecondary }]}>Best times: {Array.isArray(p.bestPostingTimes) ? p.bestPostingTimes.join(', ') : safeStr(p.bestPostingTimes)}</Text>
+              <View style={[st.infoChip, { backgroundColor: isDark ? '#1E1B4B' : '#EDE9FE' }]}>
+                <Ionicons name="time-outline" size={12} color="#8B5CF6" />
+                <Text style={[st.infoChipText, { color: isDark ? '#C4B5FD' : '#6D28D9' }]}>
+                  {Array.isArray(p.bestPostingTimes) ? p.bestPostingTimes.join(' · ') : safeStr(p.bestPostingTimes)}
+                </Text>
+              </View>
             )}
           </View>
         ))}
-        {platforms.length === 0 && <Text style={[s.emptyText, { color: colors.textSecondary }]}>No distribution data.</Text>}
+        {pillars.length > 0 && (
+          <View style={{ marginTop: 4 }}>
+            <Text style={[st.subHeading, { color: colors.text }]}>Content Pillars</Text>
+            {pillars.map((pillar: any, i: number) => (
+              <View key={i} style={st.detailRow}>
+                <Text style={[st.detailLabel, { color: colors.textSecondary }]}>{safeStr(pillar.pillar)}</Text>
+                <Text style={[st.detailValue, { color: colors.text }]}>{safeStr(pillar.percentage)}%</Text>
+              </View>
+            ))}
+          </View>
+        )}
+        {platforms.length === 0 && <Text style={[st.emptyText, { color: colors.textSecondary }]}>No distribution data.</Text>}
       </View>
     );
   };
 
   const renderCreativeTesting = (data: any) => {
-    const tests = data.tests || data.experiments || [];
+    const tests = safeArray(data.tests || data.experiments);
     return (
-      <View style={s.sectionBody}>
+      <View style={st.sectionBody}>
         {tests.map((t: any, i: number) => (
-          <View key={i} style={[s.subCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
-            <Text style={[s.subCardTitle, { color: colors.text }]}>{safeStr(t.testName || t.name)}</Text>
-            <Text style={[s.metaText, { color: colors.textSecondary }]}>Variable: {safeStr(t.variable || t.hypothesis)}</Text>
-            <Text style={[s.metaText, { color: colors.textSecondary }]}>Duration: {safeStr(t.duration || t.timeline)}</Text>
-            {t.rationale && <Text style={[s.metaText, { color: colors.textSecondary }]}>Why: {safeStr(t.rationale)}</Text>}
+          <View key={i} style={[st.detailCard, { backgroundColor: isDark ? '#111827' : '#F8FAFC', borderColor: isDark ? '#1F2937' : '#E2E8F0' }]}>
+            <Text style={[st.detailCardTitle, { color: colors.text }]}>{safeStr(t.testName || t.name)}</Text>
+            <View style={st.testMeta}>
+              <View style={[st.infoChip, { backgroundColor: isDark ? '#1E1B4B' : '#FCE7F3' }]}>
+                <Ionicons name="flask-outline" size={11} color="#EC4899" />
+                <Text style={[st.infoChipText, { color: isDark ? '#F9A8D4' : '#BE185D' }]}>{safeStr(t.variable || t.hypothesis)}</Text>
+              </View>
+              <View style={[st.infoChip, { backgroundColor: isDark ? '#1E1B4B' : '#FEF3C7' }]}>
+                <Ionicons name="timer-outline" size={11} color="#F59E0B" />
+                <Text style={[st.infoChipText, { color: isDark ? '#FCD34D' : '#92400E' }]}>{safeStr(t.duration || t.timeline)}</Text>
+              </View>
+            </View>
+            {t.rationale && <Text style={[st.rationaleText, { color: colors.textSecondary }]}>{safeStr(t.rationale)}</Text>}
           </View>
         ))}
-        {tests.length === 0 && <Text style={[s.emptyText, { color: colors.textSecondary }]}>No tests defined.</Text>}
+        {tests.length === 0 && <Text style={[st.emptyText, { color: colors.textSecondary }]}>No tests defined.</Text>}
       </View>
     );
   };
 
   const renderBudgetAllocation = (data: any) => {
-    const totalBudget = data.totalBudget || data.total || 'N/A';
-    const categories = data.categories || data.breakdown || [];
+    const total = safeStr(data.totalBudget || data.totalRecommended || data.total || 'N/A');
+    const categories = safeArray(data.categories || data.breakdown);
     return (
-      <View style={s.sectionBody}>
-        <View style={[s.budgetHeader, { backgroundColor: isDark ? '#064E3B' : '#ECFDF5' }]}>
-          <Text style={[s.budgetTotal, { color: isDark ? '#6EE7B7' : '#065F46' }]}>Total: ${safeStr(totalBudget)}</Text>
+      <View style={st.sectionBody}>
+        <View style={[st.budgetBanner, { backgroundColor: isDark ? '#064E3B' : '#ECFDF5' }]}>
+          <Ionicons name="cash-outline" size={18} color={isDark ? '#6EE7B7' : '#059669'} />
+          <Text style={[st.budgetAmount, { color: isDark ? '#6EE7B7' : '#065F46' }]}>Total Budget: {total}</Text>
         </View>
         {categories.map((c: any, i: number) => (
-          <View key={i} style={s.listRow}>
-            <Text style={[s.listLabel, { color: colors.textSecondary }]}>{safeStr(c.category || c.name)}</Text>
-            <Text style={[s.listValue, { color: colors.text }]}>{safeStr(c.percentage || c.percent)}%</Text>
+          <View key={i} style={st.detailRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={[st.detailLabel, { color: colors.text }]}>{safeStr(c.category || c.name)}</Text>
+              {c.purpose && <Text style={[st.purposeText, { color: colors.textSecondary }]}>{safeStr(c.purpose)}</Text>}
+            </View>
+            <View style={[st.percentBadge, { backgroundColor: isDark ? '#064E3B' : '#D1FAE5' }]}>
+              <Text style={[st.percentText, { color: isDark ? '#6EE7B7' : '#065F46' }]}>{safeStr(c.percentage || c.percent)}%</Text>
+            </View>
           </View>
         ))}
       </View>
@@ -173,99 +190,144 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
   };
 
   const renderKpiMonitoring = (data: any) => {
-    const primary = data.primaryMetrics || data.primary || [];
-    const secondary = data.secondaryMetrics || data.secondary || [];
+    const primary = safeArray(data.primaryKPIs || data.primaryMetrics || data.primary);
+    const secondary = safeArray(data.secondaryKPIs || data.secondaryMetrics || data.secondary);
     return (
-      <View style={s.sectionBody}>
+      <View style={st.sectionBody}>
         {primary.length > 0 && (
           <>
-            <Text style={[s.subSectionLabel, { color: colors.text }]}>Primary</Text>
+            <Text style={[st.subHeading, { color: colors.text }]}>Primary KPIs</Text>
             {primary.map((m: any, i: number) => (
-              <View key={i} style={s.listRow}>
-                <Text style={[s.listLabel, { color: colors.textSecondary }]}>{safeStr(m.metric || m.name)}</Text>
-                <Text style={[s.listValue, { color: colors.text }]}>Target: {safeStr(m.target)}</Text>
+              <View key={i} style={[st.detailCard, { backgroundColor: isDark ? '#111827' : '#F8FAFC', borderColor: isDark ? '#1F2937' : '#E2E8F0' }]}>
+                <Text style={[st.detailCardTitle, { color: colors.text }]}>{safeStr(m.kpi || m.metric || m.name)}</Text>
+                <View style={st.kpiRow}>
+                  <View style={[st.infoChip, { backgroundColor: isDark ? '#1E1B4B' : '#FEF3C7' }]}>
+                    <Ionicons name="flag-outline" size={11} color="#F59E0B" />
+                    <Text style={[st.infoChipText, { color: isDark ? '#FCD34D' : '#92400E' }]}>{safeStr(m.target)}</Text>
+                  </View>
+                  {m.frequency && (
+                    <View style={[st.infoChip, { backgroundColor: isDark ? '#1E1B4B' : '#EDE9FE' }]}>
+                      <Ionicons name="sync-outline" size={11} color="#8B5CF6" />
+                      <Text style={[st.infoChipText, { color: isDark ? '#C4B5FD' : '#6D28D9' }]}>{safeStr(m.frequency)}</Text>
+                    </View>
+                  )}
+                </View>
               </View>
             ))}
           </>
         )}
         {secondary.length > 0 && (
           <>
-            <Text style={[s.subSectionLabel, { color: colors.text }]}>Secondary</Text>
+            <Text style={[st.subHeading, { color: colors.text, marginTop: 8 }]}>Secondary KPIs</Text>
             {secondary.map((m: any, i: number) => (
-              <View key={i} style={s.listRow}>
-                <Text style={[s.listLabel, { color: colors.textSecondary }]}>{safeStr(m.metric || m.name)}</Text>
-                <Text style={[s.listValue, { color: colors.text }]}>Target: {safeStr(m.target)}</Text>
+              <View key={i} style={st.detailRow}>
+                <Text style={[st.detailLabel, { color: colors.textSecondary, flex: 1 }]}>{safeStr(m.kpi || m.metric || m.name)}</Text>
+                <Text style={[st.detailValue, { color: colors.text }]}>{safeStr(m.target)}</Text>
               </View>
             ))}
           </>
         )}
-        {primary.length === 0 && secondary.length === 0 && <Text style={[s.emptyText, { color: colors.textSecondary }]}>No KPIs defined.</Text>}
+        {primary.length === 0 && secondary.length === 0 && <Text style={[st.emptyText, { color: colors.textSecondary }]}>No KPIs defined.</Text>}
       </View>
     );
   };
 
   const renderCompetitiveWatch = (data: any) => {
-    const targets = data.competitors || data.targets || [];
+    const targets = safeArray(data.competitors || data.targets);
     return (
-      <View style={s.sectionBody}>
+      <View style={st.sectionBody}>
         {targets.map((c: any, i: number) => (
-          <View key={i} style={[s.subCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
-            <Text style={[s.subCardTitle, { color: colors.text }]}>{safeStr(c.competitor || c.name)}</Text>
-            {c.metrics && <Text style={[s.metaText, { color: colors.textSecondary }]}>Watch: {Array.isArray(c.metrics) ? c.metrics.join(', ') : safeStr(c.metrics)}</Text>}
-            {c.trigger && <Text style={[s.metaText, { color: colors.textSecondary }]}>Trigger: {safeStr(c.trigger)}</Text>}
+          <View key={i} style={[st.detailCard, { backgroundColor: isDark ? '#111827' : '#F8FAFC', borderColor: isDark ? '#1F2937' : '#E2E8F0' }]}>
+            <Text style={[st.detailCardTitle, { color: colors.text }]}>{safeStr(c.competitor || c.name)}</Text>
+            {c.watchMetrics && (
+              <View style={st.chipWrap}>
+                {safeArray(c.watchMetrics).slice(0, 4).map((m: string, j: number) => (
+                  <View key={j} style={[st.infoChip, { backgroundColor: isDark ? '#1E1B4B' : '#DBEAFE' }]}>
+                    <Text style={[st.infoChipText, { color: isDark ? '#93C5FD' : '#1E40AF' }]}>{safeStr(m)}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+            {c.checkFrequency && <Text style={[st.purposeText, { color: colors.textSecondary, marginTop: 4 }]}>Check: {safeStr(c.checkFrequency)}</Text>}
           </View>
         ))}
-        {targets.length === 0 && <Text style={[s.emptyText, { color: colors.textSecondary }]}>No competitive watch targets.</Text>}
+        {targets.length === 0 && <Text style={[st.emptyText, { color: colors.textSecondary }]}>No competitive watch targets.</Text>}
       </View>
     );
   };
 
   const renderRiskTriggers = (data: any) => {
-    const risks = data.triggers || data.risks || [];
+    const risks = safeArray(data.triggers || data.risks);
+    const sevColors: Record<string, { bg: string; text: string; darkBg: string; darkText: string }> = {
+      critical: { bg: '#FEE2E2', text: '#991B1B', darkBg: '#450A0A', darkText: '#FCA5A5' },
+      high: { bg: '#FEF3C7', text: '#92400E', darkBg: '#451A03', darkText: '#FCD34D' },
+      medium: { bg: '#DBEAFE', text: '#1E40AF', darkBg: '#1E1B4B', darkText: '#93C5FD' },
+      low: { bg: '#D1FAE5', text: '#065F46', darkBg: '#064E3B', darkText: '#6EE7B7' },
+    };
     return (
-      <View style={s.sectionBody}>
+      <View style={st.sectionBody}>
         {risks.map((r: any, i: number) => {
-          const severity = safeStr(r.severity || 'medium').toLowerCase();
-          const sevColor = severity === 'critical' ? '#EF4444' : severity === 'high' ? '#F59E0B' : '#6B7280';
+          const sev = safeStr(r.severity || 'medium').toLowerCase();
+          const sc = sevColors[sev] || sevColors.medium;
           return (
-            <View key={i} style={[s.subCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
-              <View style={s.riskHeader}>
-                <Text style={[s.subCardTitle, { color: colors.text, flex: 1 }]}>{safeStr(r.trigger || r.risk || r.name)}</Text>
-                <View style={[s.severityBadge, { backgroundColor: sevColor + '20' }]}>
-                  <Text style={[s.severityText, { color: sevColor }]}>{severity}</Text>
+            <View key={i} style={[st.detailCard, { backgroundColor: isDark ? '#111827' : '#F8FAFC', borderColor: isDark ? '#1F2937' : '#E2E8F0' }]}>
+              <View style={st.riskHeader}>
+                <Text style={[st.detailCardTitle, { color: colors.text, flex: 1 }]}>{safeStr(r.trigger)}</Text>
+                <View style={[st.severityBadge, { backgroundColor: isDark ? sc.darkBg : sc.bg }]}>
+                  <Text style={[st.severityText, { color: isDark ? sc.darkText : sc.text }]}>{sev}</Text>
                 </View>
               </View>
-              {(r.action || r.mitigation || r.response) && (
-                <Text style={[s.metaText, { color: colors.textSecondary }]}>Action: {safeStr(r.action || r.mitigation || r.response)}</Text>
+              {r.condition && <Text style={[st.purposeText, { color: colors.textSecondary, marginTop: 4 }]}>{safeStr(r.condition)}</Text>}
+              {r.action && (
+                <View style={[st.infoChip, { backgroundColor: isDark ? '#1E1B4B' : '#EDE9FE', marginTop: 6 }]}>
+                  <Ionicons name="arrow-forward-outline" size={11} color="#8B5CF6" />
+                  <Text style={[st.infoChipText, { color: isDark ? '#C4B5FD' : '#6D28D9' }]}>{safeStr(r.action)}</Text>
+                </View>
               )}
             </View>
           );
         })}
-        {risks.length === 0 && <Text style={[s.emptyText, { color: colors.textSecondary }]}>No risk triggers.</Text>}
+        {risks.length === 0 && <Text style={[st.emptyText, { color: colors.textSecondary }]}>No risk triggers.</Text>}
       </View>
     );
   };
 
+  const renderSectionContent = (key: string, data: any) => {
+    if (!data || typeof data !== 'object') {
+      return <Text style={[st.emptyText, { color: colors.textSecondary }]}>No data available.</Text>;
+    }
+    switch (key) {
+      case 'contentDistributionPlan': return renderContentDistribution(data);
+      case 'creativeTestingMatrix': return renderCreativeTesting(data);
+      case 'budgetAllocationStructure': return renderBudgetAllocation(data);
+      case 'kpiMonitoringPriority': return renderKpiMonitoring(data);
+      case 'competitiveWatchTargets': return renderCompetitiveWatch(data);
+      case 'riskMonitoringTriggers': return renderRiskTriggers(data);
+      default: return <Text style={[st.emptyText, { color: colors.textSecondary }]}>{JSON.stringify(data, null, 2)}</Text>;
+    }
+  };
+
   if (loading) {
     return (
-      <View style={[s.container, { backgroundColor: colors.background }]}>
+      <View style={st.stateContainer}>
         <ActivityIndicator size="large" color="#8B5CF6" />
-        <Text style={[s.loadingText, { color: colors.textSecondary }]}>Loading plan document...</Text>
+        <Text style={[st.stateText, { color: colors.textSecondary }]}>Loading plan...</Text>
       </View>
     );
   }
 
   if (error) {
     return (
-      <View style={[s.container, { backgroundColor: colors.background }]}>
-        <Ionicons name="document-text-outline" size={40} color={colors.textMuted} />
-        <Text style={[s.errorText, { color: colors.text }]}>{error}</Text>
-        <Pressable onPress={fetchDocument} style={s.retryBtn}>
-          <Text style={s.retryBtnText}>Retry</Text>
+      <View style={st.stateContainer}>
+        <Ionicons name="cloud-offline-outline" size={28} color={colors.textSecondary} />
+        <Text style={[st.stateText, { color: colors.textSecondary }]}>{error}</Text>
+        <Pressable onPress={fetchDocument} style={[st.retryBtn, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
+          <Ionicons name="refresh" size={14} color="#8B5CF6" />
+          <Text style={st.retryBtnText}>Retry</Text>
         </Pressable>
         {onClose && (
-          <Pressable onPress={onClose} style={[s.retryBtn, { marginTop: 8 }]}>
-            <Text style={[s.retryBtnText, { color: '#6B7280' }]}>Close</Text>
+          <Pressable onPress={onClose} style={{ marginTop: 8 }}>
+            <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Close</Text>
           </Pressable>
         )}
       </View>
@@ -276,36 +338,46 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
 
   const contentJson = document.contentJson || {};
 
+  const statusLabel = plan?.status?.replace(/_/g, ' ') || 'DRAFT';
+  const isActive = ['APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'SCHEDULED', 'PUBLISHED'].includes(plan?.status);
+
   return (
-    <ScrollView style={[s.scroll, { backgroundColor: colors.background }]} contentContainerStyle={s.scrollContent}>
+    <View>
       {onClose && (
-        <Pressable onPress={onClose} style={s.closeBtn}>
-          <Ionicons name="arrow-back" size={20} color={colors.text} />
-          <Text style={[s.closeBtnText, { color: colors.text }]}>Back</Text>
+        <Pressable onPress={onClose} style={st.backBtn}>
+          <Ionicons name="arrow-back" size={18} color={colors.text} />
+          <Text style={[st.backBtnText, { color: colors.text }]}>Back</Text>
         </Pressable>
       )}
 
-      <View style={[s.headerCard, { backgroundColor: isDark ? '#1F2937' : '#fff', borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
-        <View style={s.headerRow}>
-          <Ionicons name="document-text" size={24} color="#8B5CF6" />
-          <View style={{ flex: 1, marginLeft: 10 }}>
-            <Text style={[s.headerTitle, { color: colors.text }]}>Strategic Plan</Text>
-            <Text style={[s.headerMeta, { color: colors.textSecondary }]}>
-              v{document.version} • {new Date(document.createdAt).toLocaleDateString()}
-            </Text>
-          </View>
-          {plan && (
-            <View style={[s.statusBadge, { backgroundColor: plan.status === 'APPROVED' ? '#10B98120' : '#F59E0B20' }]}>
-              <Text style={[s.statusText, { color: plan.status === 'APPROVED' ? '#10B981' : '#F59E0B' }]}>
-                {plan.status}
+      <View style={[st.headerCard, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1F2937' : '#E2E8F0' }]}>
+        <LinearGradient
+          colors={isDark ? ['#1E1B4B', '#312E81'] : ['#EDE9FE', '#DDD6FE']}
+          style={st.headerGradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          <View style={st.headerContent}>
+            <View style={st.headerIconWrap}>
+              <Ionicons name="document-text" size={22} color="#8B5CF6" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[st.headerTitle, { color: isDark ? '#E0E7FF' : '#312E81' }]}>The Plan</Text>
+              <Text style={[st.headerSub, { color: isDark ? '#A5B4FC' : '#6D28D9' }]}>
+                v{document.version} · {new Date(document.createdAt).toLocaleDateString()}
               </Text>
             </View>
-          )}
-        </View>
+            <View style={[st.statusPill, { backgroundColor: isActive ? '#10B98125' : '#F59E0B25' }]}>
+              <View style={[st.statusDot, { backgroundColor: isActive ? '#10B981' : '#F59E0B' }]} />
+              <Text style={[st.statusLabel, { color: isActive ? '#10B981' : '#F59E0B' }]}>{statusLabel}</Text>
+            </View>
+          </View>
+        </LinearGradient>
+
         {document.isFallback && (
-          <View style={[s.fallbackBanner, { backgroundColor: '#FEF3C7' }]}>
-            <Ionicons name="alert-circle" size={14} color="#D97706" />
-            <Text style={{ color: '#92400E', fontSize: 12, marginLeft: 6 }}>Skeleton fallback — AI generation was unavailable</Text>
+          <View style={[st.fallbackStrip, { backgroundColor: isDark ? '#451A03' : '#FEF3C7' }]}>
+            <Ionicons name="alert-circle" size={13} color="#D97706" />
+            <Text style={[st.fallbackText, { color: isDark ? '#FCD34D' : '#92400E' }]}>Fallback plan — AI was unavailable during generation</Text>
           </View>
         )}
       </View>
@@ -317,57 +389,315 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
         const hasData = sectionData && typeof sectionData === 'object' && Object.keys(sectionData).length > 0;
 
         return (
-          <View key={key} style={[s.sectionCard, { backgroundColor: isDark ? '#1F2937' : '#fff', borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
-            <Pressable onPress={() => toggleSection(key)} style={s.sectionHeader}>
-              <View style={[s.sectionIconWrap, { backgroundColor: meta.color + '15' }]}>
-                <Ionicons name={meta.icon as any} size={18} color={meta.color} />
+          <View key={key} style={[st.sectionCard, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1F2937' : '#E2E8F0' }]}>
+            <Pressable onPress={() => toggleSection(key)} style={st.sectionHeader}>
+              <LinearGradient
+                colors={meta.gradient}
+                style={st.sectionIconBg}
+              >
+                <Ionicons name={meta.icon as any} size={15} color="#fff" />
+              </LinearGradient>
+              <View style={{ flex: 1 }}>
+                <Text style={[st.sectionTitle, { color: colors.text }]}>{meta.label}</Text>
               </View>
-              <Text style={[s.sectionTitle, { color: colors.text }]}>{meta.label}</Text>
-              {!hasData && <View style={[s.emptyBadge, { backgroundColor: '#6B728020' }]}><Text style={{ fontSize: 10, color: '#6B7280' }}>Empty</Text></View>}
-              <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
+              {!hasData && (
+                <View style={[st.emptyTag, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
+                  <Text style={{ fontSize: 9, color: colors.textSecondary, fontWeight: '600' as const }}>EMPTY</Text>
+                </View>
+              )}
+              <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textSecondary} />
             </Pressable>
-            {isExpanded && renderSectionContent(key, sectionData)}
+            {isExpanded && (
+              <View style={[st.sectionContent, { borderTopColor: isDark ? '#1F2937' : '#F1F5F9' }]}>
+                {renderSectionContent(key, sectionData)}
+              </View>
+            )}
           </View>
         );
       })}
-    </ScrollView>
+    </View>
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
-  loadingText: { marginTop: 12, fontSize: 14 },
-  errorText: { marginTop: 12, fontSize: 14, textAlign: 'center' },
-  retryBtn: { marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#8B5CF620', borderRadius: 8 },
-  retryBtnText: { color: '#8B5CF6', fontWeight: '600', fontSize: 13 },
-  scroll: { flex: 1 },
-  scrollContent: { padding: 16, paddingBottom: 40 },
-  closeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
-  closeBtnText: { fontSize: 14, fontWeight: '600' },
-  headerCard: { borderRadius: 12, borderWidth: 1, padding: 16, marginBottom: 16 },
-  headerRow: { flexDirection: 'row', alignItems: 'center' },
-  headerTitle: { fontSize: 17, fontWeight: '700' },
-  headerMeta: { fontSize: 12, marginTop: 2 },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
-  statusText: { fontSize: 11, fontWeight: '700' },
-  fallbackBanner: { flexDirection: 'row', alignItems: 'center', marginTop: 10, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 },
-  sectionCard: { borderRadius: 12, borderWidth: 1, marginBottom: 12, overflow: 'hidden' },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 10 },
-  sectionIconWrap: { width: 32, height: 32, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
-  sectionTitle: { flex: 1, fontSize: 14, fontWeight: '600' },
-  emptyBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginRight: 4 },
-  sectionBody: { paddingHorizontal: 14, paddingBottom: 14 },
-  subCard: { borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 8 },
-  subCardTitle: { fontSize: 13, fontWeight: '600', marginBottom: 4 },
-  listRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
-  listLabel: { fontSize: 12, flex: 1 },
-  listValue: { fontSize: 12, fontWeight: '600' },
-  metaText: { fontSize: 11, marginTop: 2 },
-  emptyText: { fontSize: 12, fontStyle: 'italic', paddingVertical: 8 },
-  budgetHeader: { padding: 10, borderRadius: 8, marginBottom: 8 },
-  budgetTotal: { fontSize: 15, fontWeight: '700' },
-  subSectionLabel: { fontSize: 13, fontWeight: '700', marginTop: 8, marginBottom: 4 },
-  riskHeader: { flexDirection: 'row', alignItems: 'center' },
-  severityBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
-  severityText: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase' },
+const st = StyleSheet.create({
+  stateContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    gap: 10,
+  },
+  stateText: {
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  retryBtnText: {
+    color: '#8B5CF6',
+    fontWeight: '600' as const,
+    fontSize: 13,
+  },
+  backBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+    paddingVertical: 4,
+  },
+  backBtnText: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+  },
+  headerCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  headerGradient: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  headerIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#ffffff20',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '800' as const,
+    letterSpacing: -0.3,
+  },
+  headerSub: {
+    fontSize: 12,
+    fontWeight: '500' as const,
+    marginTop: 1,
+  },
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  statusLabel: {
+    fontSize: 10,
+    fontWeight: '700' as const,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  fallbackStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  fallbackText: {
+    fontSize: 11,
+    fontWeight: '500' as const,
+  },
+  sectionCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    paddingHorizontal: 14,
+    gap: 10,
+  },
+  sectionIconBg: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: '700' as const,
+  },
+  emptyTag: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginRight: 4,
+  },
+  sectionContent: {
+    borderTopWidth: 1,
+    paddingTop: 2,
+  },
+  sectionBody: {
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    paddingTop: 8,
+  },
+  detailCard: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+  },
+  detailCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  platformDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  detailCardTitle: {
+    fontSize: 13,
+    fontWeight: '700' as const,
+    marginBottom: 2,
+  },
+  detailCardBadge: {
+    fontSize: 11,
+    fontWeight: '600' as const,
+    marginLeft: 'auto',
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 5,
+  },
+  detailLabel: {
+    fontSize: 12,
+  },
+  detailValueWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  detailValue: {
+    fontSize: 12,
+    fontWeight: '700' as const,
+  },
+  detailSub: {
+    fontSize: 11,
+  },
+  infoChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    marginTop: 4,
+    flexShrink: 1,
+  },
+  infoChipText: {
+    fontSize: 11,
+    fontWeight: '500' as const,
+    flexShrink: 1,
+  },
+  chipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 4,
+  },
+  subHeading: {
+    fontSize: 12,
+    fontWeight: '700' as const,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+    marginTop: 4,
+  },
+  testMeta: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 4,
+  },
+  rationaleText: {
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 6,
+    fontStyle: 'italic',
+  },
+  budgetBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 10,
+  },
+  budgetAmount: {
+    fontSize: 16,
+    fontWeight: '800' as const,
+  },
+  purposeText: {
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 2,
+  },
+  percentBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginLeft: 8,
+  },
+  percentText: {
+    fontSize: 13,
+    fontWeight: '800' as const,
+  },
+  kpiRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 4,
+  },
+  riskHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  severityBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  severityText: {
+    fontSize: 10,
+    fontWeight: '800' as const,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  emptyText: {
+    fontSize: 12,
+    fontStyle: 'italic',
+    paddingVertical: 8,
+  },
 });
