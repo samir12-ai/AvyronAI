@@ -44,7 +44,7 @@ import { generateId } from '@/lib/storage';
 import { apiRequest, getApiUrl } from '@/lib/query-client';
 import { useCreativeContext } from '@/context/CreativeContext';
 import { usePersistedState } from '@/hooks/usePersistedState';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ContentItem, MediaItem } from '@/lib/types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -296,6 +296,7 @@ export default function CreateScreen() {
   const { brandProfile, addContentItem, addMediaItem } = useApp();
   const { t } = useLanguage();
   const { creativeContext, clearCreativeContext } = useCreativeContext();
+  const queryClient = useQueryClient();
   const { state: ps, updateState, isLoading: psLoading, isSaving, saveError, hydrationVersion } = usePersistedState<CreatePersistedState>('create', defaultCreateState);
   const [ciScriptResult, setCiScriptResult] = useState<any>(null);
   const [ciScriptError, setCiScriptError] = useState<string | null>(null);
@@ -311,7 +312,8 @@ export default function CreateScreen() {
   const { data: requiredWorkData } = useQuery<{
     success: boolean;
     requiredWork: any;
-    branches: { DESIGNER: { total: number; label: string }; WRITER: { total: number; label: string }; VIDEO: { total: number; label: string } };
+    branches: { DESIGNER: { total: number; fulfilled: number; remaining: number; label: string }; WRITER: { total: number; fulfilled: number; remaining: number; label: string }; VIDEO: { total: number; fulfilled: number; remaining: number; label: string } };
+    fulfillment: { total: { required: number; fulfilled: number; remaining: number } };
   }>({
     queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`],
     enabled: !!selectedCampaignId,
@@ -607,6 +609,7 @@ export default function CreateScreen() {
         caption: generatedContent,
         calendarEntryId: calendarEntryId || undefined,
       });
+      queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
     } catch (err) {
       console.warn('[Create] Failed to save studio item:', err);
     }
@@ -812,6 +815,7 @@ export default function CreateScreen() {
           title: posterTopic || 'AI Design',
           mediaUrl: generatedPoster,
         });
+        queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
       } catch (err) {
         console.warn('[Create] Failed to save poster studio item:', err);
       }
@@ -1212,7 +1216,7 @@ export default function CreateScreen() {
               <Text style={{ fontSize: 15, fontWeight: '700' as const, color: colors.text }}>Required Work</Text>
               <View style={{ flex: 1 }} />
               <Text style={{ fontSize: 12, color: colors.textMuted }}>
-                {requiredWorkData?.requiredWork?.totalContentPieces || 0} total
+                {requiredWorkData?.fulfillment?.total?.remaining ?? requiredWorkData?.requiredWork?.totalContentPieces ?? 0} remaining
               </Text>
             </View>
             <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -1222,7 +1226,7 @@ export default function CreateScreen() {
                 { key: 'VIDEO' as const, icon: 'videocam-outline' as const, color: '#F59E0B' },
               ] as const).map(branch => {
                 const branchData = requiredWorkData?.branches?.[branch.key];
-                const total = branchData?.total || 0;
+                const total = branchData?.remaining ?? branchData?.total ?? 0;
                 return (
                   <View key={branch.key} style={{
                     flex: 1,
