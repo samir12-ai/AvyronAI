@@ -61,6 +61,9 @@ interface FulfillmentData {
   };
   byStatus: { draft: number; ready: number; scheduled: number; published: number; failed: number };
   progressPercent: number;
+  campaignId?: string;
+  accountId?: string;
+  computedAt?: string;
 }
 
 interface ProgressData {
@@ -679,6 +682,14 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
                     </View>
                   );
                 })}
+              </View>
+            )}
+
+            {progress.fulfillment?.computedAt && (
+              <View style={s.fulfillmentFooter}>
+                <Text style={[s.fulfillmentFooterText, { color: colors.textMuted }]}>
+                  Campaign: {progress.fulfillment.campaignId?.slice(0, 20)}… · Updated: {new Date(progress.fulfillment.computedAt).toLocaleTimeString()}
+                </Text>
               </View>
             )}
           </View>
@@ -1312,6 +1323,14 @@ const s = StyleSheet.create({
   branchRemaining: {
     fontSize: 10,
     fontWeight: '600' as const,
+  },
+  fulfillmentFooter: {
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  fulfillmentFooterText: {
+    fontSize: 9,
+    fontStyle: 'italic' as const,
   },
   execActions: {
     gap: 8,

@@ -29,6 +29,9 @@ export interface FulfillmentResult {
   };
   progressPercent: number;
   planId: string | null;
+  campaignId: string;
+  accountId: string;
+  computedAt: string;
 }
 
 export async function computeFulfillment(
@@ -163,6 +166,9 @@ export async function computeFulfillment(
     byStatus: statusCounts,
     progressPercent,
     planId: activePlanIds[0] || null,
+    campaignId,
+    accountId,
+    computedAt: new Date().toISOString(),
   };
 }
 

@@ -1,0 +1,118 @@
+Subject: P0 — Fulfillment Engine “Shipped” but ZERO effect in app (Proof required + Immediate fix plan)
+
+Hi Replit,
+
+Right now I’m seeing no real change in the live app, despite your “Everything is complete” summary. I need proof inside the running app, not summaries.
+
+0) Non-negotiable: prove it’s on the same build I’m using
+	1.	Confirm the exact branch/commit deployed to the environment I’m testing.
+	2.	Confirm the app build/version and backend build are the same.
+If you shipped to a different branch, that’s the entire root cause — fix that first.
+
+⸻
+
+1) P0 Symptom: “Fulfillment numbers didn’t change at all”
+
+You said all 4 endpoints return identical fulfillment numbers from computeFulfillment().
+Prove it with live outputs for the SAME campaign/account I’m using.
+
+Required proof (paste the actual JSON responses):
+
+For campaignId = [MY SELECTED CAMPAIGN ID] and accountId = [MY ACCOUNT], paste:
+
+A) /api/execution/dashboard
+B) /api/execution/plans/:planId/progress
+C) /api/execution/required-work
+D) /api/execution/calendar-entries
+
+Each response must include:
+	•	campaignId, accountId, planId (where relevant)
+	•	totals: required, completed, remaining, failed
+	•	per-branch breakdown: designer, writer, video (same numbers across all endpoints)
+
+If any endpoint is returning different numbers → your “single source of truth” claim is false. Fix it.
+
+⸻
+
+2) P0 Root Cause possibilities — you must check and fix whichever applies (no guessing)
+
+A) Campaign scoping bug (most common)
+	•	The app “selected campaign” differs from what endpoints query (fallback-to-account, legacy selection, missing campaignId).
+Fix: Every call must use the campaign from the selector and backend must respect it. No silent fallback unless it returns a clear flag like scopeMode: "FALLBACK_ACCOUNT".
+
+B) Studio items not counted (or counted from wrong status)
+
+You claimed “studio_items only.”
+If I upload/insert a Reel in Studio and it doesn’t reduce remaining, then:
+	•	status mapping is wrong (e.g., stored as DRAFT forever)
+	•	mediaType normalization wrong (e.g., “Reels” stored as garbage)
+	•	branch mapping isn’t applied at runtime
+Fix: Define exactly which studio status counts as “completed” (e.g. GENERATED/SAVED/READY/…).
+Then enforce it consistently.
+
+C) UI is still showing old derived metrics (front-end not wired)
+
+Even if backend correct, UI may still use old local state / cached query key.
+Fix: Ensure Pipeline, Required Work, Calendar, Dashboard all render ONLY from the new endpoint responses. Also add a visible dataVersion / computedAt timestamp in UI so I can confirm it’s fresh.
+
+D) Cache / stale fetch issue on campaign switch
+
+If I switch campaign and still see old numbers until refresh → your query keys / invalidation are wrong.
+Fix: On campaign change, hard-reset to loading state and force re-fetch (no stale renders). Confirm this in Pipeline + Dashboard + Calendar.
+
+⸻
+
+3) Single-track fulfillment behavior I need (explicit)
+
+The rule is simple:
+
+If I add 1 Reel to Studio (even if it was filmed/edited outside), it must reduce remaining counts everywhere (Pipeline/Calendar/Required Work/Plan).
+
+So you must implement this logic:
+	•	Studio item creation/update triggers fulfillment recalculation.
+	•	All screens display the same computed totals.
+	•	Remaining never goes negative.
+	•	Completed increments exactly once per item (idempotent).
+
+⸻
+
+4) Acceptance Criteria (hard)
+
+This is pass/fail. No partial credit.
+
+AC1 — Same numbers everywhere
+
+For the same campaign, completed/required/remaining/failed are identical across:
+	•	Dashboard
+	•	Pipeline progress
+	•	Required work section
+	•	Calendar header
+
+AC2 — Real-world test
+
+I do this sequence with screen recording:
+	1.	Campaign has remaining = N
+	2.	I add/upload 1 Reel in Studio (mediaType=REEL/VIDEO)
+	3.	Within 2 seconds (or after one pull-to-refresh), remaining becomes N-1 in ALL screens.
+
+AC3 — Campaign isolation
+
+Switch campaign A → B:
+	•	A numbers disappear immediately (loading/empty), B shows B numbers.
+No refresh required.
+
+AC4 — Proof inside UI
+
+Show computedAt + campaignId visible in the UI card footer (small text) so I can verify it’s not stale.
+
+⸻
+
+5) Delivery format (mandatory)
+
+Reply with:
+	1.	The commit hash + where deployed
+	2.	The 4 JSON outputs (A-D)
+	3.	A short video or step-by-step reproduction confirming AC2 + AC3
+	4.	If any AC fails: list exactly what you will change and the exact files involved.
+
+No more summaries. Only proof.
