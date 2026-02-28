@@ -361,15 +361,17 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
             <View style={st.headerIconWrap}>
               <Ionicons name="document-text" size={22} color="#8B5CF6" />
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[st.headerTitle, { color: isDark ? '#E0E7FF' : '#312E81' }]}>The Plan</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                <Text style={[st.headerTitle, { color: isDark ? '#E0E7FF' : '#312E81' }]}>The Plan</Text>
+                <View style={[st.statusPill, { backgroundColor: isActive ? '#10B98125' : '#F59E0B25' }]}>
+                  <View style={[st.statusDot, { backgroundColor: isActive ? '#10B981' : '#F59E0B' }]} />
+                  <Text style={[st.statusLabel, { color: isActive ? '#10B981' : '#F59E0B' }]} numberOfLines={1}>{statusLabel}</Text>
+                </View>
+              </View>
               <Text style={[st.headerSub, { color: isDark ? '#A5B4FC' : '#6D28D9' }]}>
                 v{document.version} · {new Date(document.createdAt).toLocaleDateString()}
               </Text>
-            </View>
-            <View style={[st.statusPill, { backgroundColor: isActive ? '#10B98125' : '#F59E0B25' }]}>
-              <View style={[st.statusDot, { backgroundColor: isActive ? '#10B981' : '#F59E0B' }]} />
-              <Text style={[st.statusLabel, { color: isActive ? '#10B981' : '#F59E0B' }]}>{statusLabel}</Text>
             </View>
           </View>
         </LinearGradient>
@@ -502,6 +504,7 @@ const st = StyleSheet.create({
     borderRadius: 3,
   },
   statusLabel: {
+    maxWidth: 160,
     fontSize: 10,
     fontWeight: '700' as const,
     textTransform: 'uppercase',
