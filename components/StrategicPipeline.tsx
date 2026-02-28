@@ -124,7 +124,7 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
       if (campaignId) url += `&campaignId=${encodeURIComponent(campaignId)}`;
       const res = await fetch(getApiUrl(url));
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         setPlans(data.plans || []);
         setAccount(data.account || null);
       } else {
@@ -145,8 +145,8 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
         fetch(getApiUrl(`/api/execution/plans/${planId}/calendar`)),
       ]);
       const [progressData, calData] = await Promise.all([progressRes.json(), calRes.json()]);
-      if (progressData.success !== false) setProgress(progressData);
-      if (calData.success !== false) setCalendarEntries(calData.entries || []);
+      if (progressRes.ok && progressData.success !== false) setProgress(progressData);
+      if (calRes.ok && calData.success !== false) setCalendarEntries(calData.entries || []);
     } catch (err) {
       console.error('Progress fetch error:', err);
     }
@@ -223,48 +223,55 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
         body: JSON.stringify({ decidedBy: 'client' }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert('Approved', 'Plan approved successfully.');
         fetchDashboard();
       } else {
-        Alert.alert('Error', data.message || data.error || 'Approval failed');
+        Alert.alert('Error', data.message || data.error || `Approval failed (status ${res.status}).`);
       }
     } catch (err: any) {
-      Alert.alert('Error', err.message);
+      Alert.alert('Error', err.message || 'Network error — could not reach the server.');
     } finally {
       setActionLoading(null);
     }
   }, [fetchDashboard]);
 
-  const handleReject = useCallback(async (planId: string) => {
+  const executeReject = useCallback(async (planId: string) => {
+    setActionLoading('reject');
+    try {
+      const res = await fetch(getApiUrl(`/api/execution/plans/${planId}/reject`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'Rejected by client', decidedBy: 'client' }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        Alert.alert('Rejected', 'Plan has been rejected.');
+        fetchDashboard();
+      } else {
+        Alert.alert('Reject Failed', data.message || data.error || `Server returned status ${res.status}.`);
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Network error — could not reach the server.');
+    } finally {
+      setActionLoading(null);
+    }
+  }, [fetchDashboard]);
+
+  const handleReject = useCallback((planId: string) => {
     Alert.alert('Reject Plan', 'Are you sure you want to reject this plan?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Reject',
         style: 'destructive',
-        onPress: async () => {
-          setActionLoading('reject');
-          try {
-            const res = await fetch(getApiUrl(`/api/execution/plans/${planId}/reject`), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ reason: 'Rejected by client', decidedBy: 'client' }),
-            });
-            const data = await res.json();
-            if (data.success) {
-              Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-              fetchDashboard();
-            }
-          } catch (err: any) {
-            Alert.alert('Error', err.message);
-          } finally {
-            setActionLoading(null);
-          }
+        onPress: () => {
+          executeReject(planId);
         },
       },
     ]);
-  }, [fetchDashboard]);
+  }, [executeReject]);
 
   const handleExecuteCalendar = useCallback(async (planId: string) => {
     setActionLoading('calendar');
@@ -275,52 +282,58 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
         body: JSON.stringify({ periodDays: 30 }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert('Calendar Generated', `Created ${data.calendarEntries || 0} calendar entries.`);
         fetchDashboard();
         fetchProgress(planId);
       } else {
-        Alert.alert('Error', data.message || data.error || 'Calendar generation failed');
+        Alert.alert('Error', data.message || data.error || `Calendar generation failed (status ${res.status}).`);
       }
     } catch (err: any) {
-      Alert.alert('Error', err.message);
+      Alert.alert('Error', err.message || 'Network error — could not reach the server.');
     } finally {
       setActionLoading(null);
     }
   }, [fetchDashboard, fetchProgress]);
 
 
-  const handleEmergencyStop = useCallback(async (planId: string) => {
+  const executeEmergencyStop = useCallback(async (planId: string) => {
+    setActionLoading('emergency');
+    try {
+      const res = await fetch(getApiUrl(`/api/execution/plans/${planId}/emergency-stop`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'Manual emergency stop by client' }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert('Stopped', 'All execution paused.');
+        fetchDashboard();
+        fetchProgress(planId);
+      } else {
+        Alert.alert('Stop Failed', data.message || data.error || `Server returned status ${res.status}.`);
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Network error — could not reach the server.');
+    } finally {
+      setActionLoading(null);
+    }
+  }, [fetchDashboard, fetchProgress]);
+
+  const handleEmergencyStop = useCallback((planId: string) => {
     Alert.alert('Emergency Stop', 'This will immediately pause all execution. Nothing will be deleted.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'STOP',
         style: 'destructive',
-        onPress: async () => {
-          setActionLoading('emergency');
-          try {
-            const res = await fetch(getApiUrl(`/api/execution/plans/${planId}/emergency-stop`), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ reason: 'Manual emergency stop by client' }),
-            });
-            const data = await res.json();
-            if (data.success) {
-              Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-              Alert.alert('Stopped', 'All execution paused.');
-              fetchDashboard();
-              fetchProgress(planId);
-            }
-          } catch (err: any) {
-            Alert.alert('Error', err.message);
-          } finally {
-            setActionLoading(null);
-          }
+        onPress: () => {
+          executeEmergencyStop(planId);
         },
       },
     ]);
-  }, [fetchDashboard, fetchProgress]);
+  }, [executeEmergencyStop]);
 
   const handleResume = useCallback(async (planId: string) => {
     setActionLoading('resume');
@@ -330,13 +343,16 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
         headers: { 'Content-Type': 'application/json' },
       });
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('Resumed', 'Execution has been resumed.');
         fetchDashboard();
         fetchProgress(planId);
+      } else {
+        Alert.alert('Resume Failed', data.message || data.error || `Server returned status ${res.status}.`);
       }
     } catch (err: any) {
-      Alert.alert('Error', err.message);
+      Alert.alert('Error', err.message || 'Network error — could not reach the server.');
     } finally {
       setActionLoading(null);
     }
@@ -392,14 +408,14 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
         headers: { 'Content-Type': 'application/json' },
       });
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert('Plan Generated', `${data.fileName}\n\nPlan document has been generated and saved.`);
       } else {
-        Alert.alert('Error', data.message || data.error || 'Plan generation failed');
+        Alert.alert('Error', data.message || data.error || `Plan generation failed (status ${res.status}).`);
       }
     } catch (err: any) {
-      Alert.alert('Error', err.message);
+      Alert.alert('Error', err.message || 'Network error — could not reach the server.');
     } finally {
       setActionLoading(null);
     }
@@ -625,7 +641,7 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
             <View style={s.failedBannerActions}>
               <Pressable
                 style={[s.resetFailedBtn, { opacity: actionLoading === 'reset-failed' ? 0.6 : 1 }]}
-                onPress={() => handleResetFailed(activePlan.id)}
+                onPress={() => executeResetFailed(activePlan.id)}
                 disabled={!!actionLoading}
               >
                 <LinearGradient colors={['#FF6B6B', '#EF4444']} style={s.resetFailedBtnGrad}>
