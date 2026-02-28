@@ -51,7 +51,6 @@ export function registerVeoRoutes(app: Express) {
       const config: any = {
         aspectRatio: aspectRatio || "16:9",
         numberOfVideos: 1,
-        personGeneration: "allow_adult",
       };
 
       if (duration) {
@@ -62,7 +61,7 @@ export function registerVeoRoutes(app: Express) {
       }
 
       const params: any = {
-        model: "veo-3.0-generate-preview",
+        model: "veo-3.1-generate-preview",
         prompt,
         config,
       };
@@ -88,8 +87,8 @@ export function registerVeoRoutes(app: Express) {
 
   app.post("/api/veo/status", async (req, res) => {
     try {
-      const client = getVeoClient();
-      if (!client) {
+      const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
+      if (!apiKey) {
         return res.status(400).json({ error: "GOOGLE_GEMINI_API_KEY not configured." });
       }
 
@@ -98,13 +97,20 @@ export function registerVeoRoutes(app: Express) {
         return res.status(400).json({ error: "operationName is required" });
       }
 
-      const operation = await client.operations.getVideosOperation({
-        operationName,
-      });
+      const statusUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
+      const response = await fetch(statusUrl);
+      const operation = await response.json() as any;
+
+      if (operation.error) {
+        return res.status(500).json({ error: operation.error.message || "Operation failed", code: operation.error.code });
+      }
 
       let videoUrl = null;
-      if (operation.done && operation.response?.generatedVideos && operation.response.generatedVideos.length > 0) {
-        videoUrl = operation.response.generatedVideos[0].video?.uri || null;
+      if (operation.done && operation.response?.generateVideoResponse?.generatedSamples) {
+        const samples = operation.response.generateVideoResponse.generatedSamples;
+        if (samples.length > 0 && samples[0].video?.uri) {
+          videoUrl = samples[0].video.uri;
+        }
       }
 
       res.json({

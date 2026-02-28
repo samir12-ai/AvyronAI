@@ -2028,9 +2028,9 @@ export default function CreateScreen() {
                     <Ionicons name="videocam" size={20} color="#fff" />
                   </LinearGradient>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.cardTitle, { color: colors.text, marginBottom: 0 }]}>Veo 3 Video Studio</Text>
+                    <Text style={[styles.cardTitle, { color: colors.text, marginBottom: 0 }]}>Veo 3.1 Video Studio</Text>
                     <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginTop: 2 }}>
-                      Google Veo 3 AI Video Generation
+                      Google Veo 3.1 AI Video Generation
                     </Text>
                   </View>
                 </View>
@@ -2211,7 +2211,7 @@ export default function CreateScreen() {
 
               <View style={styles.poweredBy}>
                 <Text style={[styles.poweredByText, { color: colors.textMuted }]}>
-                  Powered by Google Veo 3
+                  Powered by Google Veo 3.1
                 </Text>
               </View>
             </>
