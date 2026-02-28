@@ -1,0 +1,116 @@
+
+⸻
+
+Subject: Fulfillment Architecture Must Be Rebuilt Properly — No More Patches
+
+Replit,
+
+We are not doing incremental fixes anymore.
+
+What we have right now is a structural inconsistency, not a small bug. The system is split between published_posts and studio_items, and the fulfillment engine reads from only one of them. That is not a wiring issue — that is an architectural flaw.
+
+I do not want another surface-level patch. I want this rebuilt correctly from the root.
+
+Here are the non-negotiable requirements:
+
+⸻
+
+1) Single Source of Truth
+
+From now on:
+
+studio_items must be the only source of fulfillment.
+
+Any content created or uploaded through Studio or Create must write directly into studio_items.
+
+published_posts must only represent publishing output.
+It must NOT be part of progress calculation.
+
+If there are two parallel write paths, the system is broken by design.
+
+⸻
+
+2) Mandatory Campaign Scoping
+
+Every save operation must include:
+	•	campaignId (required)
+	•	accountId (required)
+	•	normalized mediaType (required)
+
+No row should ever be created without campaignId.
+If campaignId is missing, the request must fail with 422.
+
+Silent fallback or NULL campaign_id is not acceptable.
+
+⸻
+
+3) Dynamic Fulfillment (No Stored Counters)
+
+I do not want stored fulfillment counters.
+
+Progress must be computed dynamically:
+
+Fulfilled = COUNT(studio_items WHERE campaignId = X AND branch = Y)
+
+Remaining = MAX(0, Required - Fulfilled)
+
+If I find any stored “fulfilled” number in the database, remove it.
+
+⸻
+
+4) Deterministic Branch Mapping
+
+There must be one centralized mapping function:
+	•	REEL / VIDEO → VIDEO branch
+	•	IMAGE / CAROUSEL → DESIGNER branch
+	•	POST / STORY → WRITER branch
+
+No scattered logic.
+No duplicated switch statements across endpoints.
+
+⸻
+
+5) Idempotency
+
+If a user presses Save twice, fulfillment must not increase twice.
+
+Upsert logic must prevent double counting.
+
+⸻
+
+6) Ad-hoc Content Must Count
+
+If a user records a Reel outside the system and uploads it into Studio, it must reduce remaining required work for that branch — even if it is not tied to a calendar entry.
+
+If this case does not work, the implementation is incomplete.
+
+⸻
+
+7) Hard Acceptance Criteria
+
+All of the following must pass:
+	•	Upload 1 Reel → remaining decreases immediately across:
+	•	Dashboard
+	•	Pipeline
+	•	Required Work
+	•	Calendar summary
+	•	Switch campaign → numbers update instantly (no stale values)
+	•	Delete the Reel → remaining increases correctly
+	•	All endpoints return identical fulfillment numbers for the same campaign
+	•	No 500 errors for expected states
+
+If any of these fail, the system is not coherent.
+
+⸻
+
+This must be implemented as a structural correction, not a patch.
+
+I need a confirmation of:
+	1.	What files were modified
+	2.	Which write path was eliminated
+	3.	Proof that both Studio and Create now write to studio_items
+	4.	API responses showing identical fulfillment numbers across endpoints
+
+No summaries. Only proof.
+
+— Samir
