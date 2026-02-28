@@ -104,6 +104,8 @@ export default function StudioScreen() {
   const [mediaSeries, setMediaSeries] = useState('');
   const [mediaOffer, setMediaOffer] = useState('');
   const [isSubmittingCase, setIsSubmittingCase] = useState(false);
+  const [isAutoFilling, setIsAutoFilling] = useState(false);
+  const [metadataFilled, setMetadataFilled] = useState(false);
   const [draftRestored, setDraftRestored] = useState(false);
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<{ [key: string]: any }>({});
@@ -192,6 +194,49 @@ export default function StudioScreen() {
     }
   };
 
+  const handleAIAutoFill = async () => {
+    if (!mediaTitle.trim()) {
+      Alert.alert('Missing Title', 'Please enter a title first so AI can suggest the best metadata.');
+      return;
+    }
+    setIsAutoFilling(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      const apiUrl = getApiUrl();
+      const res = await fetch(new URL('/api/studio/ai-metadata', apiUrl).toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accountId: 'default',
+          title: mediaTitle.trim(),
+          mediaType: mediaType,
+          platform: mediaPlatform[0] || 'Instagram',
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setMediaGoal(data.goal || '');
+          setMediaAudience(data.audience || '');
+          setMediaCta(data.cta || '');
+          setMediaSeries(data.series || '');
+          setMediaOffer(data.offer || '');
+          updateState({ mediaGoal: data.goal || '', mediaAudience: data.audience || '', mediaCta: data.cta || '', mediaSeries: data.series || '', mediaOffer: data.offer || '' });
+          setMetadataFilled(true);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } else {
+          Alert.alert('AI Error', data.error || 'Could not generate metadata.');
+        }
+      } else {
+        Alert.alert('Error', 'Could not reach AI service. Please fill manually.');
+      }
+    } catch (err) {
+      Alert.alert('Error', 'Network error. Please fill fields manually.');
+    } finally {
+      setIsAutoFilling(false);
+    }
+  };
+
   const handleSaveMedia = async () => {
     if (!selectedCampaignId) {
       Alert.alert('No Campaign Selected', 'Please select a campaign before saving media.');
@@ -202,7 +247,7 @@ export default function StudioScreen() {
       return;
     }
     if (!mediaGoal.trim() || !mediaAudience.trim() || !mediaCta.trim()) {
-      Alert.alert('Missing Info', 'Goal, Audience, and CTA are required for AI-powered publishing.');
+      Alert.alert('Missing Metadata', 'Please tap "AI Auto-Fill" to generate metadata, or fill Goal, Audience, and CTA manually.');
       return;
     }
 
@@ -270,6 +315,7 @@ export default function StudioScreen() {
     setMediaSeries('');
     setMediaOffer('');
     setIsSubmittingCase(false);
+    setMetadataFilled(false);
     setShowModal(false);
     Alert.alert('Added', `${STUDIO_TYPE_LABELS[mediaType] || mediaType} added with AI captions generated.`);
   };
@@ -801,56 +847,118 @@ export default function StudioScreen() {
               <Text style={[styles.inputLabel, { color: colors.text }]}>{t('create.platform')}</Text>
               <PlatformPicker selected={mediaPlatform} onChange={(v) => { setMediaPlatform(v); updateState({ mediaPlatform: v }); }} single />
 
-              <View style={[styles.metadataSection, { borderColor: colors.cardBorder }]}>
+              <View style={[styles.metadataSection, { borderColor: metadataFilled ? colors.success + '40' : colors.cardBorder }]}>
                 <View style={styles.metadataBadge}>
-                  <Ionicons name="flash" size={14} color={colors.primary} />
-                  <Text style={[styles.metadataBadgeText, { color: colors.primary }]}>AI Publishing Metadata</Text>
+                  <Ionicons name={metadataFilled ? "checkmark-circle" : "flash"} size={14} color={metadataFilled ? colors.success : colors.primary} />
+                  <Text style={[styles.metadataBadgeText, { color: metadataFilled ? colors.success : colors.primary }]}>
+                    {metadataFilled ? 'AI Metadata Ready — Edit if needed' : 'AI Publishing Metadata'}
+                  </Text>
                 </View>
 
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Goal *</Text>
-                <TextInput
-                  style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-                  placeholder="e.g. Drive sales, Build awareness, Get leads"
-                  placeholderTextColor={colors.textMuted}
-                  value={mediaGoal}
-                  onChangeText={(v) => { setMediaGoal(v); updateState({ mediaGoal: v }); }}
-                />
+                {!metadataFilled && !mediaGoal.trim() ? (
+                  <Pressable
+                    onPress={handleAIAutoFill}
+                    disabled={isAutoFilling}
+                    style={({ pressed }) => [
+                      {
+                        backgroundColor: isAutoFilling ? colors.primary + '30' : colors.primary + '15',
+                        borderRadius: 12,
+                        padding: 16,
+                        alignItems: 'center' as const,
+                        justifyContent: 'center' as const,
+                        gap: 8,
+                        borderWidth: 1,
+                        borderColor: colors.primary + '30',
+                        borderStyle: 'dashed' as const,
+                        opacity: pressed ? 0.7 : 1,
+                        marginVertical: 4,
+                      },
+                    ]}
+                  >
+                    <Ionicons name={isAutoFilling ? "hourglass-outline" : "sparkles"} size={28} color={colors.primary} />
+                    <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '600' as const, textAlign: 'center' as const }}>
+                      {isAutoFilling ? 'AI is analyzing your content...' : 'Tap to Auto-Fill with AI'}
+                    </Text>
+                    <Text style={{ color: colors.textMuted, fontSize: 12, textAlign: 'center' as const }}>
+                      {isAutoFilling ? 'Generating goal, audience, CTA & more' : 'AI will suggest Goal, Audience, CTA, and more based on your title'}
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <>
+                    <View style={{ flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginBottom: 4 }}>
+                      <Text style={[styles.inputLabel, { color: colors.text, marginBottom: 0 }]}>Goal</Text>
+                      {metadataFilled && <View style={{ backgroundColor: colors.success + '20', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}><Text style={{ color: colors.success, fontSize: 10, fontWeight: '600' as const }}>AI</Text></View>}
+                    </View>
+                    <TextInput
+                      style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: metadataFilled ? colors.success + '30' : colors.inputBorder }]}
+                      placeholder="e.g. Drive sales, Build awareness, Get leads"
+                      placeholderTextColor={colors.textMuted}
+                      value={mediaGoal}
+                      onChangeText={(v) => { setMediaGoal(v); updateState({ mediaGoal: v }); }}
+                    />
 
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Target Audience *</Text>
-                <TextInput
-                  style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-                  placeholder="e.g. Dubai entrepreneurs, 25-40, tech-savvy"
-                  placeholderTextColor={colors.textMuted}
-                  value={mediaAudience}
-                  onChangeText={(v) => { setMediaAudience(v); updateState({ mediaAudience: v }); }}
-                />
+                    <View style={{ flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginBottom: 4 }}>
+                      <Text style={[styles.inputLabel, { color: colors.text, marginBottom: 0 }]}>Target Audience</Text>
+                      {metadataFilled && <View style={{ backgroundColor: colors.success + '20', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}><Text style={{ color: colors.success, fontSize: 10, fontWeight: '600' as const }}>AI</Text></View>}
+                    </View>
+                    <TextInput
+                      style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: metadataFilled ? colors.success + '30' : colors.inputBorder }]}
+                      placeholder="e.g. Dubai entrepreneurs, 25-40, tech-savvy"
+                      placeholderTextColor={colors.textMuted}
+                      value={mediaAudience}
+                      onChangeText={(v) => { setMediaAudience(v); updateState({ mediaAudience: v }); }}
+                    />
 
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Call to Action *</Text>
-                <TextInput
-                  style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-                  placeholder="e.g. Book now, Shop the link, DM us"
-                  placeholderTextColor={colors.textMuted}
-                  value={mediaCta}
-                  onChangeText={(v) => { setMediaCta(v); updateState({ mediaCta: v }); }}
-                />
+                    <View style={{ flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginBottom: 4 }}>
+                      <Text style={[styles.inputLabel, { color: colors.text, marginBottom: 0 }]}>Call to Action</Text>
+                      {metadataFilled && <View style={{ backgroundColor: colors.success + '20', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}><Text style={{ color: colors.success, fontSize: 10, fontWeight: '600' as const }}>AI</Text></View>}
+                    </View>
+                    <TextInput
+                      style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: metadataFilled ? colors.success + '30' : colors.inputBorder }]}
+                      placeholder="e.g. Book now, Shop the link, DM us"
+                      placeholderTextColor={colors.textMuted}
+                      value={mediaCta}
+                      onChangeText={(v) => { setMediaCta(v); updateState({ mediaCta: v }); }}
+                    />
 
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Content Series</Text>
-                <TextInput
-                  style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-                  placeholder="e.g. Monday Motivation, Behind the Scenes"
-                  placeholderTextColor={colors.textMuted}
-                  value={mediaSeries}
-                  onChangeText={(v) => { setMediaSeries(v); updateState({ mediaSeries: v }); }}
-                />
+                    <View style={{ flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginBottom: 4 }}>
+                      <Text style={[styles.inputLabel, { color: colors.text, marginBottom: 0 }]}>Content Series</Text>
+                      {metadataFilled && mediaSeries.trim() !== '' && <View style={{ backgroundColor: colors.success + '20', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}><Text style={{ color: colors.success, fontSize: 10, fontWeight: '600' as const }}>AI</Text></View>}
+                    </View>
+                    <TextInput
+                      style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: metadataFilled && mediaSeries.trim() ? colors.success + '30' : colors.inputBorder }]}
+                      placeholder="e.g. Monday Motivation, Behind the Scenes"
+                      placeholderTextColor={colors.textMuted}
+                      value={mediaSeries}
+                      onChangeText={(v) => { setMediaSeries(v); updateState({ mediaSeries: v }); }}
+                    />
 
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Offer / Promotion</Text>
-                <TextInput
-                  style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-                  placeholder="e.g. 20% off this week, Free consultation"
-                  placeholderTextColor={colors.textMuted}
-                  value={mediaOffer}
-                  onChangeText={(v) => { setMediaOffer(v); updateState({ mediaOffer: v }); }}
-                />
+                    <View style={{ flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginBottom: 4 }}>
+                      <Text style={[styles.inputLabel, { color: colors.text, marginBottom: 0 }]}>Offer / Promotion</Text>
+                      {metadataFilled && mediaOffer.trim() !== '' && <View style={{ backgroundColor: colors.success + '20', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}><Text style={{ color: colors.success, fontSize: 10, fontWeight: '600' as const }}>AI</Text></View>}
+                    </View>
+                    <TextInput
+                      style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: metadataFilled && mediaOffer.trim() ? colors.success + '30' : colors.inputBorder }]}
+                      placeholder="e.g. 20% off this week, Free consultation"
+                      placeholderTextColor={colors.textMuted}
+                      value={mediaOffer}
+                      onChangeText={(v) => { setMediaOffer(v); updateState({ mediaOffer: v }); }}
+                    />
+
+                    {metadataFilled && (
+                      <Pressable
+                        onPress={handleAIAutoFill}
+                        disabled={isAutoFilling}
+                        style={{ flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, paddingVertical: 8, marginTop: 4 }}
+                      >
+                        <Ionicons name={isAutoFilling ? "hourglass-outline" : "refresh"} size={14} color={colors.primary} />
+                        <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '600' as const }}>
+                          {isAutoFilling ? 'Regenerating...' : 'Regenerate AI Suggestions'}
+                        </Text>
+                      </Pressable>
+                    )}
+                  </>
+                )}
               </View>
 
               <Pressable

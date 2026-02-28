@@ -488,6 +488,70 @@ Generate a full production-ready script with scene-by-scene breakdown, exact spo
     }
   });
 
+  app.post("/api/studio/ai-metadata", async (req, res) => {
+    try {
+      const { title, mediaType, platform } = req.body;
+
+      if (!title || !title.trim()) {
+        return res.status(400).json({ error: "Title is required for AI metadata generation" });
+      }
+
+      const response = await aiChat({
+        model: "gpt-4.1-mini",
+        max_tokens: 600,
+        accountId: req.body.accountId || "default",
+        endpoint: "ai-metadata",
+        messages: [
+          {
+            role: "system",
+            content: `You are a social media marketing strategist. Given a content title and media type, suggest the best publishing metadata. Return ONLY valid JSON:
+{
+  "goal": "The marketing goal (e.g. Drive sales, Build awareness, Generate leads, Boost engagement)",
+  "audience": "Target audience description (e.g. Dubai entrepreneurs, 25-40, interested in tech)",
+  "cta": "Call to action (e.g. Book now, Shop the link, DM us, Link in bio)",
+  "series": "Content series name if applicable (e.g. Monday Motivation, Behind the Scenes) or empty string",
+  "offer": "Offer or promotion if relevant (e.g. 20% off this week, Free consultation) or empty string"
+}
+Be specific and actionable. Match the goal to the content topic. Keep audience targeted.`
+          },
+          {
+            role: "user",
+            content: `Content Title: ${title.trim()}
+Media Type: ${mediaType || 'video'}
+Platform: ${platform || 'Instagram'}
+
+Suggest the best publishing metadata for this content.`
+          }
+        ],
+      });
+
+      const content = response.choices[0]?.message?.content || "";
+      let metadata;
+      try {
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        metadata = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+      } catch {
+        metadata = null;
+      }
+
+      if (!metadata) {
+        return res.status(500).json({ error: "AI failed to generate metadata" });
+      }
+
+      res.json({
+        success: true,
+        goal: metadata.goal || "Boost engagement",
+        audience: metadata.audience || "General audience",
+        cta: metadata.cta || "Learn more",
+        series: metadata.series || "",
+        offer: metadata.offer || "",
+      });
+    } catch (error: any) {
+      console.error("AI metadata error:", error?.message || error);
+      res.status(500).json({ error: error?.message || "Failed to generate metadata" });
+    }
+  });
+
   app.delete("/api/video/projects/:id", async (req, res) => {
     try {
       await db.delete(videoProjects).where(eq(videoProjects.id, req.params.id));
