@@ -136,6 +136,8 @@ interface CreatePersistedState {
   veoMode: 'text-to-video' | 'image-to-video';
   videoAspect: string;
   videoDuration: string;
+  videoResolution: string;
+  videoNegativePrompt: string;
 }
 
 const defaultCreateState: CreatePersistedState = {
@@ -160,7 +162,9 @@ const defaultCreateState: CreatePersistedState = {
   generatedImageUrl: null,
   veoMode: 'text-to-video',
   videoAspect: '16:9',
-  videoDuration: '5s',
+  videoDuration: '8s',
+  videoResolution: '720p',
+  videoNegativePrompt: '',
 };
 
 function DesignerLoadingOverlay({ isVisible }: { isVisible: boolean }) {
@@ -342,14 +346,20 @@ export default function CreateScreen() {
   const [videoPrompt, setVideoPrompt] = useState(ps.videoPrompt);
   const [videoAspect, setVideoAspect] = useState(ps.videoAspect);
   const [videoDuration, setVideoDuration] = useState(ps.videoDuration);
+  const [videoResolution, setVideoResolution] = useState(ps.videoResolution);
+  const [videoNegativePrompt, setVideoNegativePrompt] = useState(ps.videoNegativePrompt);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
   const [videoOperationName, setVideoOperationName] = useState<string | null>(null);
   const [videoStatus, setVideoStatus] = useState<string | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(ps.videoUrl);
+  const [videoUrls, setVideoUrls] = useState<string[]>(ps.videoUrl ? [ps.videoUrl] : []);
   const [videoError, setVideoError] = useState<string | null>(null);
   const [videoPolling, setVideoPolling] = useState(false);
   const [videoStartImage, setVideoStartImage] = useState<ImagePicker.ImagePickerAsset | null>(null);
+  const [videoLastFrame, setVideoLastFrame] = useState<ImagePicker.ImagePickerAsset | null>(null);
+  const [videoRefImages, setVideoRefImages] = useState<Array<{ uri: string; fileUri?: string; mimeType?: string }>>([]);
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(ps.generatedImageUrl);
+  const [showAdvancedVideo, setShowAdvancedVideo] = useState(false);
 
   const lastHydrationRef = useRef(0);
   const skipSyncRef = useRef(false);
@@ -378,6 +388,8 @@ export default function CreateScreen() {
       setVideoPrompt(ps.videoPrompt);
       setVideoAspect(ps.videoAspect);
       setVideoDuration(ps.videoDuration);
+      setVideoResolution(ps.videoResolution);
+      setVideoNegativePrompt(ps.videoNegativePrompt);
       setVideoUrl(ps.videoUrl);
       setGeneratedImageUrl(ps.generatedImageUrl);
       setTimeout(() => { skipSyncRef.current = false; }, 100);
@@ -391,14 +403,14 @@ export default function CreateScreen() {
       aiEngine, contentType, platform, reelDuration, reelGoal, genMode,
       posterStyle, aspectRatio, mood, generatedContent, reelScript,
       generatedPoster, videoUrl, generatedImageUrl, veoMode, videoAspect,
-      videoDuration,
+      videoDuration, videoResolution, videoNegativePrompt,
     });
   }, [
     activeTab, topic, posterTopic, videoPrompt, posterText,
     aiEngine, contentType, platform, reelDuration, reelGoal, genMode,
     posterStyle, aspectRatio, mood, generatedContent, reelScript,
     generatedPoster, videoUrl, generatedImageUrl, veoMode, videoAspect,
-    videoDuration,
+    videoDuration, videoResolution, videoNegativePrompt,
   ]);
 
   useEffect(() => {
@@ -855,18 +867,55 @@ export default function CreateScreen() {
         prompt: videoPrompt,
         aspectRatio: videoAspect,
         duration: videoDuration,
+        resolution: videoResolution,
       };
+
+      if (videoNegativePrompt.trim()) {
+        body.negativePrompt = videoNegativePrompt.trim();
+      }
 
       if (veoMode === 'image-to-video' && videoStartImage?.uri) {
         setVideoStatus('uploading image...');
         const uploaded = await uploadImageForVeo(videoStartImage);
         if (!uploaded) {
-          setVideoError('Failed to upload image');
+          setVideoError('Failed to upload start image');
           setIsGeneratingVideo(false);
           return;
         }
         body.imageFileUri = uploaded.fileUri;
         body.imageMimeType = uploaded.mimeType;
+      }
+
+      if (videoLastFrame?.uri) {
+        setVideoStatus('uploading last frame...');
+        const uploadedLast = await uploadImageForVeo(videoLastFrame);
+        if (!uploadedLast) {
+          setVideoError('Failed to upload last frame image');
+          setIsGeneratingVideo(false);
+          return;
+        }
+        body.lastFrameFileUri = uploadedLast.fileUri;
+        body.lastFrameMimeType = uploadedLast.mimeType;
+      }
+
+      if (videoRefImages.length > 0) {
+        setVideoStatus('uploading reference images...');
+        const uploadedRefs: Array<{ fileUri: string; mimeType: string }> = [];
+        for (const ref of videoRefImages) {
+          if (ref.fileUri && ref.mimeType) {
+            uploadedRefs.push({ fileUri: ref.fileUri, mimeType: ref.mimeType });
+          } else {
+            const uploaded = await uploadImageForVeo({ uri: ref.uri } as ImagePicker.ImagePickerAsset);
+            if (uploaded) {
+              ref.fileUri = uploaded.fileUri;
+              ref.mimeType = uploaded.mimeType;
+              uploadedRefs.push(uploaded);
+            }
+          }
+        }
+        if (uploadedRefs.length > 0) {
+          body.referenceImages = uploadedRefs;
+        }
       }
 
       setVideoStatus('generating');
@@ -911,6 +960,7 @@ export default function CreateScreen() {
 
         if (data.done && data.videoUrl) {
           setVideoUrl(data.videoUrl);
+          setVideoUrls(data.videos || [data.videoUrl]);
           setIsGeneratingVideo(false);
           setVideoPolling(false);
           setVideoStatus(null);
@@ -954,24 +1004,34 @@ export default function CreateScreen() {
   const videoAspectOptions = [
     { id: '16:9', label: 'Landscape', icon: 'tablet-landscape-outline' as const },
     { id: '9:16', label: 'Portrait', icon: 'phone-portrait-outline' as const },
-    { id: '1:1', label: 'Square', icon: 'square-outline' as const },
-    { id: '4:3', label: '4:3', icon: 'tablet-landscape-outline' as const },
-    { id: '3:4', label: '3:4', icon: 'phone-portrait-outline' as const },
-    { id: '21:9', label: 'Ultra Wide', icon: 'tablet-landscape-outline' as const },
   ];
 
   const videoDurationOptions = [
-    { id: '5s', label: '5s' },
-    { id: '9s', label: '9s' },
-    { id: '10s', label: '10s' },
-    { id: '15s', label: '15s' },
-    { id: '20s', label: '20s' },
+    { id: '4s', label: '4s' },
+    { id: '6s', label: '6s' },
+    { id: '8s', label: '8s' },
+  ];
+
+  const videoResolutionOptions = [
+    { id: '720p', label: '720p' },
+    { id: '1080p', label: '1080p' },
   ];
 
   const veoModeTabs = [
     { id: 'text-to-video' as const, label: 'Text to Video', icon: 'videocam-outline' as const },
     { id: 'image-to-video' as const, label: 'Image to Video', icon: 'images-outline' as const },
   ];
+
+  const pickVeoRefImage = async () => {
+    if (videoRefImages.length >= 3) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.9,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setVideoRefImages(prev => [...prev, { uri: result.assets[0].uri }]);
+    }
+  };
 
   return (
     <KeyboardAvoidingView 
@@ -2075,7 +2135,7 @@ export default function CreateScreen() {
 
               {veoMode === 'image-to-video' && (
                 <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                  <Text style={[styles.cardTitle, { color: colors.text }]}>Reference Image</Text>
+                  <Text style={[styles.cardTitle, { color: colors.text }]}>Start Frame</Text>
                   <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginBottom: 12 }}>
                     Animate this image into a video
                   </Text>
@@ -2089,42 +2149,148 @@ export default function CreateScreen() {
                   ) : (
                     <Pressable onPress={() => pickVeoImage(setVideoStartImage)} style={{ borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: '#7C3AED40', borderRadius: 14, padding: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.inputBackground, gap: 8 }}>
                       <Ionicons name="image-outline" size={32} color="#7C3AED" />
-                      <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>Choose Image</Text>
+                      <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>Choose Start Frame</Text>
                     </Pressable>
                   )}
                 </View>
               )}
 
               <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                <Text style={[styles.cardTitle, { color: colors.text }]}>Aspect Ratio</Text>
-                <View style={styles.reelOptionRow}>
-                  {videoAspectOptions.map(a => (
-                    <Pressable
-                      key={a.id}
-                      onPress={() => { Haptics.selectionAsync(); setVideoAspect(a.id); }}
-                      style={[styles.reelChip, { backgroundColor: videoAspect === a.id ? '#7C3AED20' : colors.inputBackground, borderColor: videoAspect === a.id ? '#7C3AED' : 'transparent' }]}
-                    >
-                      <Ionicons name={a.icon} size={16} color={videoAspect === a.id ? '#7C3AED' : colors.textMuted} />
-                      <Text style={[styles.reelChipText, { color: videoAspect === a.id ? '#7C3AED' : colors.textMuted }]}>{a.label}</Text>
-                    </Pressable>
-                  ))}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={[styles.cardTitle, { color: colors.text, marginBottom: 6 }]}>Aspect Ratio</Text>
+                    <View style={styles.reelOptionRow}>
+                      {videoAspectOptions.map(a => (
+                        <Pressable
+                          key={a.id}
+                          onPress={() => { Haptics.selectionAsync(); setVideoAspect(a.id); }}
+                          style={[styles.reelChip, { backgroundColor: videoAspect === a.id ? '#7C3AED20' : colors.inputBackground, borderColor: videoAspect === a.id ? '#7C3AED' : 'transparent' }]}
+                        >
+                          <Ionicons name={a.icon} size={16} color={videoAspect === a.id ? '#7C3AED' : colors.textMuted} />
+                          <Text style={[styles.reelChipText, { color: videoAspect === a.id ? '#7C3AED' : colors.textMuted }]}>{a.label}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 8 }}>
+                    <Text style={[styles.cardTitle, { color: colors.text, marginBottom: 6 }]}>Resolution</Text>
+                    <View style={styles.reelOptionRow}>
+                      {videoResolutionOptions.map(r => (
+                        <Pressable
+                          key={r.id}
+                          onPress={() => { Haptics.selectionAsync(); setVideoResolution(r.id); }}
+                          style={[styles.reelChip, { backgroundColor: videoResolution === r.id ? '#7C3AED20' : colors.inputBackground, borderColor: videoResolution === r.id ? '#7C3AED' : 'transparent' }]}
+                        >
+                          <Text style={[styles.reelChipText, { color: videoResolution === r.id ? '#7C3AED' : colors.textMuted }]}>{r.label}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                </View>
+
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={[styles.cardTitle, { color: colors.text, marginBottom: 6 }]}>Duration</Text>
+                    <View style={styles.reelOptionRow}>
+                      {videoDurationOptions.map(d => (
+                        <Pressable
+                          key={d.id}
+                          onPress={() => { Haptics.selectionAsync(); setVideoDuration(d.id); }}
+                          style={[styles.reelChip, { backgroundColor: videoDuration === d.id ? '#7C3AED20' : colors.inputBackground, borderColor: videoDuration === d.id ? '#7C3AED' : 'transparent' }]}
+                        >
+                          <Text style={[styles.reelChipText, { color: videoDuration === d.id ? '#7C3AED' : colors.textMuted }]}>{d.label}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
                 </View>
               </View>
 
-              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                <Text style={[styles.cardTitle, { color: colors.text }]}>Duration</Text>
-                <View style={styles.reelOptionRow}>
-                  {videoDurationOptions.map(d => (
-                    <Pressable
-                      key={d.id}
-                      onPress={() => { Haptics.selectionAsync(); setVideoDuration(d.id); }}
-                      style={[styles.reelChip, { backgroundColor: videoDuration === d.id ? '#7C3AED20' : colors.inputBackground, borderColor: videoDuration === d.id ? '#7C3AED' : 'transparent' }]}
-                    >
-                      <Text style={[styles.reelChipText, { color: videoDuration === d.id ? '#7C3AED' : colors.textMuted }]}>{d.label}</Text>
-                    </Pressable>
-                  ))}
+              <View style={[styles.card, { backgroundColor: '#7C3AED08', borderColor: '#7C3AED20' }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <Ionicons name="musical-notes" size={16} color="#7C3AED" />
+                  <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: colors.text, flex: 1 }}>
+                    Native audio included — dialogue, sound effects, and ambient sounds are generated automatically
+                  </Text>
                 </View>
               </View>
+
+              <Pressable
+                onPress={() => { Haptics.selectionAsync(); setShowAdvancedVideo(!showAdvancedVideo); }}
+                style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="options" size={18} color="#7C3AED" />
+                  <Text style={{ fontSize: 14, fontFamily: 'Inter_600SemiBold', color: colors.text }}>Advanced Options</Text>
+                </View>
+                <Ionicons name={showAdvancedVideo ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
+              </Pressable>
+
+              {showAdvancedVideo && (
+                <>
+                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                    <Text style={[styles.cardTitle, { color: colors.text }]}>Negative Prompt</Text>
+                    <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginBottom: 8 }}>
+                      Describe what to avoid in the video
+                    </Text>
+                    <TextInput
+                      style={[styles.promptInput, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder, minHeight: 60 }]}
+                      placeholder="cartoon, low quality, blurry, distorted..."
+                      placeholderTextColor={colors.textMuted}
+                      value={videoNegativePrompt}
+                      onChangeText={setVideoNegativePrompt}
+                      multiline
+                      numberOfLines={2}
+                      textAlignVertical="top"
+                    />
+                  </View>
+
+                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                    <Text style={[styles.cardTitle, { color: colors.text }]}>Last Frame (Interpolation)</Text>
+                    <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginBottom: 12 }}>
+                      Define the ending frame — Veo fills the transition between start and end
+                    </Text>
+                    {videoLastFrame ? (
+                      <View style={{ borderRadius: 14, overflow: 'hidden', marginBottom: 8 }}>
+                        <Image source={{ uri: videoLastFrame.uri }} style={{ width: '100%', height: 140, borderRadius: 14 }} resizeMode="cover" />
+                        <Pressable onPress={() => setVideoLastFrame(null)} style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 14, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}>
+                          <Ionicons name="close" size={18} color="#fff" />
+                        </Pressable>
+                      </View>
+                    ) : (
+                      <Pressable onPress={() => pickVeoImage(setVideoLastFrame)} style={{ borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: '#7C3AED40', borderRadius: 14, padding: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.inputBackground, gap: 6 }}>
+                        <Ionicons name="image-outline" size={28} color="#7C3AED" />
+                        <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>Choose Last Frame</Text>
+                      </Pressable>
+                    )}
+                  </View>
+
+                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                    <Text style={[styles.cardTitle, { color: colors.text }]}>Reference Images</Text>
+                    <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginBottom: 12 }}>
+                      Guide style and character consistency (up to 3)
+                    </Text>
+                    <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                      {videoRefImages.map((img, idx) => (
+                        <View key={idx} style={{ width: 90, height: 90, borderRadius: 12, overflow: 'hidden' }}>
+                          <Image source={{ uri: img.uri }} style={{ width: 90, height: 90 }} resizeMode="cover" />
+                          <Pressable
+                            onPress={() => setVideoRefImages(prev => prev.filter((_, i) => i !== idx))}
+                            style={{ position: 'absolute', top: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 10, width: 22, height: 22, alignItems: 'center', justifyContent: 'center' }}
+                          >
+                            <Ionicons name="close" size={14} color="#fff" />
+                          </Pressable>
+                        </View>
+                      ))}
+                      {videoRefImages.length < 3 && (
+                        <Pressable onPress={pickVeoRefImage} style={{ width: 90, height: 90, borderRadius: 12, borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: '#7C3AED40', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.inputBackground }}>
+                          <Ionicons name="add" size={24} color="#7C3AED" />
+                        </Pressable>
+                      )}
+                    </View>
+                  </View>
+                </>
+              )}
 
               <Pressable
                 onPress={handleGenerateVideo}
@@ -2182,26 +2348,33 @@ export default function CreateScreen() {
                 <View style={[styles.card, { backgroundColor: colors.card, borderColor: '#7C3AED40' }]}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                     <Ionicons name="checkmark-circle" size={20} color="#7C3AED" />
-                    <Text style={{ fontSize: 16, fontFamily: 'Inter_600SemiBold', color: colors.text }}>Video Ready</Text>
+                    <Text style={{ fontSize: 16, fontFamily: 'Inter_600SemiBold', color: colors.text }}>
+                      {videoUrls.length > 1 ? `${videoUrls.length} Videos Ready` : 'Video Ready'}
+                    </Text>
                   </View>
+                  {videoUrls.map((url, idx) => (
+                    <Pressable
+                      key={idx}
+                      onPress={() => {
+                        if (Platform.OS === 'web') {
+                          const link = document.createElement('a');
+                          link.href = url;
+                          link.target = '_blank';
+                          link.click();
+                        } else {
+                          Alert.alert('Video URL', url);
+                        }
+                      }}
+                      style={{ backgroundColor: '#7C3AED15', borderRadius: 12, padding: 16, alignItems: 'center', gap: 8, marginBottom: videoUrls.length > 1 ? 8 : 0 }}
+                    >
+                      <Ionicons name="play-circle" size={40} color="#7C3AED" />
+                      <Text style={{ fontSize: 14, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>
+                        {videoUrls.length > 1 ? `Open Video ${idx + 1}` : 'Open Video'}
+                      </Text>
+                    </Pressable>
+                  ))}
                   <Pressable
-                    onPress={() => {
-                      if (Platform.OS === 'web') {
-                        const link = document.createElement('a');
-                        link.href = videoUrl;
-                        link.target = '_blank';
-                        link.click();
-                      } else {
-                        Alert.alert('Video URL', videoUrl);
-                      }
-                    }}
-                    style={{ backgroundColor: '#7C3AED15', borderRadius: 12, padding: 16, alignItems: 'center', gap: 8 }}
-                  >
-                    <Ionicons name="play-circle" size={48} color="#7C3AED" />
-                    <Text style={{ fontSize: 14, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>Open Video</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => { setVideoUrl(null); setVideoPrompt(''); setVideoOperationName(null); setVideoStatus(null); }}
+                    onPress={() => { setVideoUrl(null); setVideoUrls([]); setVideoPrompt(''); setVideoOperationName(null); setVideoStatus(null); }}
                     style={{ marginTop: 12, alignItems: 'center', paddingVertical: 10 }}
                   >
                     <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: colors.textMuted }}>Generate another video</Text>

@@ -1080,19 +1080,6 @@ export function registerExecutionRoutes(app: Express) {
         .orderBy(sql`${strategicPlans.createdAt} DESC`);
 
       if (matchingPlans.length === 0) {
-        matchingPlans = await db
-          .select()
-          .from(strategicPlans)
-          .where(
-            and(
-              eq(strategicPlans.accountId, accountId),
-              sql`${strategicPlans.status} IN ('APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'REVIEW', 'SCHEDULED', 'PUBLISHED')`
-            )
-          )
-          .orderBy(sql`${strategicPlans.createdAt} DESC`);
-      }
-
-      if (matchingPlans.length === 0) {
         return res.json({ success: true, entries: [], planId: null, message: "No approved plan found for this campaign." });
       }
 

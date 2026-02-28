@@ -42,22 +42,60 @@ export function registerVeoRoutes(app: Express) {
         return res.status(400).json({ error: "GOOGLE_GEMINI_API_KEY not configured. Add it in secrets." });
       }
 
-      const { prompt, aspectRatio, duration, imageFileUri, imageMimeType } = req.body;
+      const {
+        prompt,
+        aspectRatio,
+        duration,
+        resolution,
+        negativePrompt,
+        imageFileUri,
+        imageMimeType,
+        lastFrameFileUri,
+        lastFrameMimeType,
+        referenceImages,
+      } = req.body;
 
       if (!prompt) {
         return res.status(400).json({ error: "Prompt is required" });
       }
 
+      const validAspectRatios = ["16:9", "9:16"];
       const config: any = {
-        aspectRatio: aspectRatio || "16:9",
+        aspectRatio: validAspectRatios.includes(aspectRatio) ? aspectRatio : "16:9",
         numberOfVideos: 1,
       };
 
       if (duration) {
-        const seconds = parseInt(duration.replace("s", ""));
-        if (!isNaN(seconds)) {
+        const seconds = parseInt(String(duration).replace("s", ""));
+        if (!isNaN(seconds) && [4, 6, 8].includes(seconds)) {
           config.durationSeconds = seconds;
         }
+      }
+
+      if (resolution && ["720p", "1080p"].includes(resolution)) {
+        config.resolution = resolution;
+      }
+
+      if (negativePrompt && typeof negativePrompt === "string" && negativePrompt.trim()) {
+        config.negativePrompt = negativePrompt.trim();
+      }
+
+      if (lastFrameFileUri && lastFrameMimeType) {
+        config.lastFrame = {
+          image: {
+            fileUri: lastFrameFileUri,
+            mimeType: lastFrameMimeType,
+          },
+        };
+      }
+
+      if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
+        config.referenceImages = referenceImages.slice(0, 3).map((img: any) => ({
+          image: {
+            fileUri: img.fileUri,
+            mimeType: img.mimeType,
+          },
+        }));
       }
 
       const params: any = {
@@ -105,17 +143,19 @@ export function registerVeoRoutes(app: Express) {
         return res.status(500).json({ error: operation.error.message || "Operation failed", code: operation.error.code });
       }
 
-      let videoUrl = null;
+      const videos: string[] = [];
       if (operation.done && operation.response?.generateVideoResponse?.generatedSamples) {
-        const samples = operation.response.generateVideoResponse.generatedSamples;
-        if (samples.length > 0 && samples[0].video?.uri) {
-          videoUrl = samples[0].video.uri;
+        for (const sample of operation.response.generateVideoResponse.generatedSamples) {
+          if (sample.video?.uri) {
+            videos.push(sample.video.uri);
+          }
         }
       }
 
       res.json({
         done: operation.done || false,
-        videoUrl,
+        videoUrl: videos[0] || null,
+        videos,
         state: operation.done ? "completed" : "processing",
       });
     } catch (error: any) {
