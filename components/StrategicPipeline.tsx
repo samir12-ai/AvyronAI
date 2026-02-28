@@ -283,16 +283,22 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
   }, [fetchDashboard]);
 
   const handleReject = useCallback((planId: string) => {
-    Alert.alert('Reject Plan', 'Are you sure you want to reject this plan?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Reject',
-        style: 'destructive',
-        onPress: () => {
-          executeReject(planId);
+    if (Platform.OS === 'web') {
+      if (window.confirm('Are you sure you want to reject this plan?')) {
+        executeReject(planId);
+      }
+    } else {
+      Alert.alert('Reject Plan', 'Are you sure you want to reject this plan?', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reject',
+          style: 'destructive',
+          onPress: () => {
+            executeReject(planId);
+          },
         },
-      },
-    ]);
+      ]);
+    }
   }, [executeReject]);
 
   const handleExecuteCalendar = useCallback(async (planId: string) => {
