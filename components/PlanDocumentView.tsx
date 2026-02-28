@@ -128,7 +128,7 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
               </View>
             ))}
             {p.bestPostingTimes && (
-              <Text style={[s.metaText, { color: colors.textSecondary }]}>Best times: {p.bestPostingTimes.join(', ')}</Text>
+              <Text style={[s.metaText, { color: colors.textSecondary }]}>Best times: {Array.isArray(p.bestPostingTimes) ? p.bestPostingTimes.join(', ') : safeStr(p.bestPostingTimes)}</Text>
             )}
           </View>
         ))}

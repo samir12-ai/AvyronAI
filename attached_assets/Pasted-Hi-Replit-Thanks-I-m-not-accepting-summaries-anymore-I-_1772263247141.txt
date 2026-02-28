@@ -1,0 +1,62 @@
+Hi Replit,
+
+Thanks. I’m not accepting summaries anymore — I need concrete proof that it’s live in the app and not just “tests passing”.
+
+Please deliver the following verification package (screens + API responses). No missing items.
+
+────────────────────────────────────────
+A) Plan Document — Must be visible and persistent INSIDE the app
+────────────────────────────────────────
+A1) UI proof (video screen-recording, 30–60s):
+1) Go to Phase 5 (Execution Plans) → tap “View Plan Document”
+2) Show the Plan Document screen with:
+   - PlanId visible
+   - createdAt visible
+   - fallback badge visible if it’s fallback
+3) Expand ALL 6 sections (must render real text, not [object Object])
+4) Switch tabs away and back → document still present
+5) Switch campaign → document changes accordingly (no cross-campaign leak)
+
+A2) API proof (copy-paste responses):
+- GET /api/plans/:planId/document (success case)
+  Must show:
+  - planId, campaignId, accountId
+  - version
+  - isFallback
+  - contentJson includes ALL 6 keys
+- GET /api/plans/:planId/document (missing doc)
+  Must return: 404 DOCUMENT_NOT_FOUND (not 500)
+- GET /api/strategic/blueprint/:id/document (missing plan)
+  Must return: 404 PLAN_NOT_FOUND (not 500)
+
+A3) Data integrity proof:
+- Create plan → regenerate plan → show that:
+  - old plan document still exists for old planId
+  - new plan has its own document (versioning correct)
+
+────────────────────────────────────────
+B) Studio Video — “missing Video value” and save/analyze MUST be fixed
+────────────────────────────────────────
+B1) UI proof (screenshots):
+1) Studio “Add Media” modal: no “[missing "Video" value] selected”
+2) Create a VIDEO item → Save → success (no save error)
+3) Tap Analyze on VIDEO/REEL → success, results displayed
+
+B2) Guardrail proof (API responses):
+- Analyze on IMAGE → returns 409 INVALID_MEDIA_TYPE_FOR_ANALYZE
+- Analyze on garbage type → returns 422 MEDIA_TYPE_INVALID
+(Include the exact JSON response bodies)
+
+B3) Regression proof:
+- Confirm Calendar → “Generate” now routes to the correct Creation path (Video → Reels creation, Image → AI Designer). Quick 10s video proof.
+
+────────────────────────────────────────
+Non-negotiables
+────────────────────────────────────────
+- No [object Object] anywhere in Plan Document rendering.
+- No 500 for expected states.
+- Must work in the live app build I’m using — not only tests.
+
+Send the proofs in one message. If any checklist item is missing, consider the patch incomplete.
+
+— Samir

@@ -830,7 +830,7 @@ export default function StudioScreen() {
                   <View style={styles.uploadedState}>
                     <Ionicons name="checkmark-circle" size={32} color={colors.success} />
                     <Text style={[styles.uploadedText, { color: colors.success }]}>
-                      {t('studio.selected').replace('{{type}}', STUDIO_TYPE_LABELS[mediaType] || mediaType)}
+                      {(STUDIO_TYPE_LABELS[mediaType] || mediaType) + ' selected'}
                     </Text>
                   </View>
                 ) : (
