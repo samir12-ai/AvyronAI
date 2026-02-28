@@ -118,7 +118,6 @@ interface CreatePersistedState {
   topic: string;
   posterTopic: string;
   videoPrompt: string;
-  photonPrompt: string;
   posterText: string;
   aiEngine: 'openai' | 'gemini';
   contentType: string;
@@ -134,15 +133,9 @@ interface CreatePersistedState {
   generatedPoster: string | null;
   videoUrl: string | null;
   generatedImageUrl: string | null;
-  lumaMode: 'text-to-video' | 'image-to-video' | 'extend' | 'image-gen';
+  veoMode: 'text-to-video' | 'image-to-video';
   videoAspect: string;
   videoDuration: string;
-  videoModel: string;
-  videoResolution: string;
-  videoLoop: boolean;
-  selectedCameraMotion: string | null;
-  photonModel: string;
-  photonAspect: string;
 }
 
 const defaultCreateState: CreatePersistedState = {
@@ -150,7 +143,6 @@ const defaultCreateState: CreatePersistedState = {
   topic: '',
   posterTopic: '',
   videoPrompt: '',
-  photonPrompt: '',
   posterText: '',
   aiEngine: 'openai',
   contentType: 'post',
@@ -166,15 +158,9 @@ const defaultCreateState: CreatePersistedState = {
   generatedPoster: null,
   videoUrl: null,
   generatedImageUrl: null,
-  lumaMode: 'text-to-video',
+  veoMode: 'text-to-video',
   videoAspect: '16:9',
   videoDuration: '5s',
-  videoModel: 'ray-2',
-  videoResolution: '1080p',
-  videoLoop: false,
-  selectedCameraMotion: null,
-  photonModel: 'photon-1',
-  photonAspect: '16:9',
 };
 
 function DesignerLoadingOverlay({ isVisible }: { isVisible: boolean }) {
@@ -352,37 +338,18 @@ export default function CreateScreen() {
   const [generationHistory, setGenerationHistory] = useState<GeneratedImage[]>([]);
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
 
-  const [lumaMode, setLumaMode] = useState<'text-to-video' | 'image-to-video' | 'extend' | 'image-gen'>(ps.lumaMode);
+  const [veoMode, setVeoMode] = useState<'text-to-video' | 'image-to-video'>(ps.veoMode);
   const [videoPrompt, setVideoPrompt] = useState(ps.videoPrompt);
   const [videoAspect, setVideoAspect] = useState(ps.videoAspect);
   const [videoDuration, setVideoDuration] = useState(ps.videoDuration);
-  const [videoModel, setVideoModel] = useState(ps.videoModel);
-  const [videoResolution, setVideoResolution] = useState(ps.videoResolution);
-  const [videoLoop, setVideoLoop] = useState(ps.videoLoop);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
-  const [videoGenId, setVideoGenId] = useState<string | null>(null);
+  const [videoOperationName, setVideoOperationName] = useState<string | null>(null);
   const [videoStatus, setVideoStatus] = useState<string | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(ps.videoUrl);
   const [videoError, setVideoError] = useState<string | null>(null);
   const [videoPolling, setVideoPolling] = useState(false);
   const [videoStartImage, setVideoStartImage] = useState<ImagePicker.ImagePickerAsset | null>(null);
-  const [videoEndImage, setVideoEndImage] = useState<ImagePicker.ImagePickerAsset | null>(null);
-  const [selectedCameraMotion, setSelectedCameraMotion] = useState<string | null>(ps.selectedCameraMotion);
-  const [extendGenId, setExtendGenId] = useState('');
-  const [reverseExtend, setReverseExtend] = useState(false);
-  const [photonPrompt, setPhotonPrompt] = useState(ps.photonPrompt);
-  const [photonModel, setPhotonModel] = useState(ps.photonModel);
-  const [photonAspect, setPhotonAspect] = useState(ps.photonAspect);
-  const [photonImageRef, setPhotonImageRef] = useState<ImagePicker.ImagePickerAsset | null>(null);
-  const [photonImageRefWeight, setPhotonImageRefWeight] = useState(0.85);
-  const [photonStyleRef, setPhotonStyleRef] = useState<ImagePicker.ImagePickerAsset | null>(null);
-  const [photonStyleRefWeight, setPhotonStyleRefWeight] = useState(0.8);
-  const [photonCharacterRef, setPhotonCharacterRef] = useState<ImagePicker.ImagePickerAsset | null>(null);
-  const [photonModifyImage, setPhotonModifyImage] = useState<ImagePicker.ImagePickerAsset | null>(null);
-  const [photonModifyWeight, setPhotonModifyWeight] = useState(1.0);
-  const [photonRefMode, setPhotonRefMode] = useState<'none' | 'image-ref' | 'style-ref' | 'character-ref' | 'modify'>('none');
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(ps.generatedImageUrl);
-  const [isGeneratingPhoton, setIsGeneratingPhoton] = useState(false);
 
   const lastHydrationRef = useRef(0);
   const skipSyncRef = useRef(false);
@@ -407,18 +374,11 @@ export default function CreateScreen() {
       setAspectRatio(ps.aspectRatio);
       setMood(ps.mood);
       setGeneratedPoster(ps.generatedPoster);
-      setLumaMode(ps.lumaMode);
+      setVeoMode(ps.veoMode);
       setVideoPrompt(ps.videoPrompt);
       setVideoAspect(ps.videoAspect);
       setVideoDuration(ps.videoDuration);
-      setVideoModel(ps.videoModel);
-      setVideoResolution(ps.videoResolution);
-      setVideoLoop(ps.videoLoop);
       setVideoUrl(ps.videoUrl);
-      setSelectedCameraMotion(ps.selectedCameraMotion);
-      setPhotonPrompt(ps.photonPrompt);
-      setPhotonModel(ps.photonModel);
-      setPhotonAspect(ps.photonAspect);
       setGeneratedImageUrl(ps.generatedImageUrl);
       setTimeout(() => { skipSyncRef.current = false; }, 100);
     }
@@ -427,20 +387,18 @@ export default function CreateScreen() {
   useEffect(() => {
     if (lastHydrationRef.current === 0 || skipSyncRef.current) return;
     updateState({
-      activeTab, topic, posterTopic, videoPrompt, photonPrompt, posterText,
+      activeTab, topic, posterTopic, videoPrompt, posterText,
       aiEngine, contentType, platform, reelDuration, reelGoal, genMode,
       posterStyle, aspectRatio, mood, generatedContent, reelScript,
-      generatedPoster, videoUrl, generatedImageUrl, lumaMode, videoAspect,
-      videoDuration, videoModel, videoResolution, videoLoop, selectedCameraMotion,
-      photonModel, photonAspect,
+      generatedPoster, videoUrl, generatedImageUrl, veoMode, videoAspect,
+      videoDuration,
     });
   }, [
-    activeTab, topic, posterTopic, videoPrompt, photonPrompt, posterText,
+    activeTab, topic, posterTopic, videoPrompt, posterText,
     aiEngine, contentType, platform, reelDuration, reelGoal, genMode,
     posterStyle, aspectRatio, mood, generatedContent, reelScript,
-    generatedPoster, videoUrl, generatedImageUrl, lumaMode, videoAspect,
-    videoDuration, videoModel, videoResolution, videoLoop, selectedCameraMotion,
-    photonModel, photonAspect,
+    generatedPoster, videoUrl, generatedImageUrl, veoMode, videoAspect,
+    videoDuration,
   ]);
 
   useEffect(() => {
@@ -834,7 +792,7 @@ export default function CreateScreen() {
     }
   };
 
-  const pickLumaImage = async (setter: (img: ImagePicker.ImagePickerAsset | null) => void) => {
+  const pickVeoImage = async (setter: (img: ImagePicker.ImagePickerAsset | null) => void) => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'] as ImagePicker.MediaType[],
@@ -849,7 +807,7 @@ export default function CreateScreen() {
     }
   };
 
-  const uploadImageForLuma = async (image: ImagePicker.ImagePickerAsset): Promise<string | null> => {
+  const uploadImageForVeo = async (image: ImagePicker.ImagePickerAsset): Promise<{ fileUri: string; mimeType: string } | null> => {
     try {
       const apiUrl = getApiUrl();
       const formData = new FormData();
@@ -866,13 +824,13 @@ export default function CreateScreen() {
         formData.append('image', { uri, name: filename, type } as any);
       }
 
-      const res = await fetch(new URL('/api/luma/upload-image', apiUrl).toString(), {
+      const res = await fetch(new URL('/api/veo/upload-image', apiUrl).toString(), {
         method: 'POST',
         body: formData,
       });
       const data = await res.json();
       if (!res.ok) return null;
-      return data.imageUrl;
+      return { fileUri: data.fileUri, mimeType: data.mimeType };
     } catch (err) {
       console.error('Upload image error:', err);
       return null;
@@ -885,57 +843,34 @@ export default function CreateScreen() {
       return;
     }
 
-    if (lumaMode === 'extend' && !extendGenId.trim()) {
-      Alert.alert('Missing ID', 'Enter the generation ID of the video to extend.');
-      return;
-    }
-
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsGeneratingVideo(true);
     setVideoUrl(null);
     setVideoError(null);
-    setVideoStatus('dreaming');
+    setVideoStatus('starting');
 
     try {
       const apiUrl = getApiUrl();
       const body: any = {
-        prompt: selectedCameraMotion ? `${videoPrompt}, ${selectedCameraMotion}` : videoPrompt,
+        prompt: videoPrompt,
         aspectRatio: videoAspect,
         duration: videoDuration,
-        model: videoModel,
-        loop: videoLoop,
-        resolution: videoResolution,
       };
 
-      if (lumaMode === 'extend') {
-        body.extendGenerationId = extendGenId.trim();
-        body.reverseExtend = reverseExtend;
-      }
-
-      if (videoStartImage?.uri) {
-        setVideoStatus('uploading start image...');
-        const url = await uploadImageForLuma(videoStartImage);
-        if (!url) {
-          setVideoError('Failed to upload start image');
+      if (veoMode === 'image-to-video' && videoStartImage?.uri) {
+        setVideoStatus('uploading image...');
+        const uploaded = await uploadImageForVeo(videoStartImage);
+        if (!uploaded) {
+          setVideoError('Failed to upload image');
           setIsGeneratingVideo(false);
           return;
         }
-        body.startImageUrl = url;
+        body.imageFileUri = uploaded.fileUri;
+        body.imageMimeType = uploaded.mimeType;
       }
 
-      if (videoEndImage?.uri) {
-        setVideoStatus('uploading end image...');
-        const url = await uploadImageForLuma(videoEndImage);
-        if (!url) {
-          setVideoError('Failed to upload end image');
-          setIsGeneratingVideo(false);
-          return;
-        }
-        body.endImageUrl = url;
-      }
-
-      setVideoStatus('dreaming');
-      const res = await fetch(new URL('/api/luma/generate-video', apiUrl).toString(), {
+      setVideoStatus('generating');
+      const res = await fetch(new URL('/api/veo/generate-video', apiUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -948,147 +883,46 @@ export default function CreateScreen() {
         return;
       }
 
-      setVideoGenId(data.id);
-      setVideoStatus('queued');
-      pollVideoStatus(data.id);
+      setVideoOperationName(data.operationName);
+      setVideoStatus('processing');
+      pollVeoStatus(data.operationName);
     } catch (err: any) {
       setVideoError(err.message || 'Network error');
       setIsGeneratingVideo(false);
     }
   };
 
-  const handleGeneratePhotonImage = async () => {
-    if (!photonPrompt.trim()) {
-      Alert.alert('Missing Prompt', 'Describe the image you want to create.');
-      return;
-    }
-
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setIsGeneratingPhoton(true);
-    setGeneratedImageUrl(null);
-    setVideoError(null);
-    setVideoStatus('dreaming');
-
-    try {
-      const apiUrl = getApiUrl();
-      const body: any = {
-        prompt: photonPrompt,
-        aspectRatio: photonAspect,
-        model: photonModel,
-      };
-
-      if (photonRefMode === 'image-ref' && photonImageRef?.uri) {
-        setVideoStatus('uploading reference...');
-        const url = await uploadImageForLuma(photonImageRef);
-        if (url) body.imageRef = [{ url, weight: photonImageRefWeight }];
-      }
-
-      if (photonRefMode === 'style-ref' && photonStyleRef?.uri) {
-        setVideoStatus('uploading style...');
-        const url = await uploadImageForLuma(photonStyleRef);
-        if (url) body.styleRef = [{ url, weight: photonStyleRefWeight }];
-      }
-
-      if (photonRefMode === 'character-ref' && photonCharacterRef?.uri) {
-        setVideoStatus('uploading character...');
-        const url = await uploadImageForLuma(photonCharacterRef);
-        if (url) body.characterRef = { images: [url] };
-      }
-
-      if (photonRefMode === 'modify' && photonModifyImage?.uri) {
-        setVideoStatus('uploading image...');
-        const url = await uploadImageForLuma(photonModifyImage);
-        if (url) body.modifyImageRef = { url, weight: photonModifyWeight };
-      }
-
-      setVideoStatus('generating...');
-      const res = await fetch(new URL('/api/luma/generate-image', apiUrl).toString(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setVideoError(data.error || 'Failed to start image generation');
-        setIsGeneratingPhoton(false);
-        return;
-      }
-
-      setVideoGenId(data.id);
-      setVideoStatus('queued');
-      pollPhotonStatus(data.id);
-    } catch (err: any) {
-      setVideoError(err.message || 'Network error');
-      setIsGeneratingPhoton(false);
-    }
-  };
-
-  const pollPhotonStatus = async (genId: string) => {
-    const apiUrl = getApiUrl();
-    let attempts = 0;
-    const maxAttempts = 60;
-
-    const poll = async () => {
-      try {
-        const res = await fetch(new URL(`/api/luma/status/${genId}`, apiUrl).toString());
-        const data = await res.json();
-        setVideoStatus(data.state);
-
-        if (data.state === 'completed' && data.imageUrl) {
-          setGeneratedImageUrl(data.imageUrl);
-          setIsGeneratingPhoton(false);
-          setVideoStatus(null);
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          return;
-        }
-        if (data.state === 'failed') {
-          setVideoError(data.failure_reason || 'Image generation failed');
-          setIsGeneratingPhoton(false);
-          setVideoStatus(null);
-          return;
-        }
-        attempts++;
-        if (attempts < maxAttempts) {
-          setTimeout(poll, 3000);
-        } else {
-          setVideoError('Generation timed out.');
-          setIsGeneratingPhoton(false);
-        }
-      } catch {
-        attempts++;
-        if (attempts < maxAttempts) setTimeout(poll, 3000);
-      }
-    };
-    poll();
-  };
-
-  const pollVideoStatus = async (genId: string) => {
+  const pollVeoStatus = async (operationName: string) => {
     setVideoPolling(true);
     const apiUrl = getApiUrl();
     let attempts = 0;
-    const maxAttempts = 180;
+    const maxAttempts = 120;
 
     const poll = async () => {
       try {
-        const res = await fetch(new URL(`/api/luma/status/${genId}`, apiUrl).toString());
+        const res = await fetch(new URL('/api/veo/status', apiUrl).toString(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ operationName }),
+        });
         const data = await res.json();
 
         setVideoStatus(data.state);
 
-        if (data.state === 'completed' && (data.videoUrl || data.imageUrl)) {
-          if (data.videoUrl) setVideoUrl(data.videoUrl);
-          if (data.imageUrl) setGeneratedImageUrl(data.imageUrl);
+        if (data.done && data.videoUrl) {
+          setVideoUrl(data.videoUrl);
           setIsGeneratingVideo(false);
           setVideoPolling(false);
+          setVideoStatus(null);
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           return;
         }
 
         if (data.state === 'failed') {
-          setVideoError(data.failure_reason || 'Video generation failed');
+          setVideoError('Video generation failed. Please try again.');
           setIsGeneratingVideo(false);
           setVideoPolling(false);
+          setVideoStatus(null);
           return;
         }
 
@@ -1096,9 +930,10 @@ export default function CreateScreen() {
         if (attempts < maxAttempts) {
           setTimeout(poll, 5000);
         } else {
-          setVideoError('Generation timed out. Check back later.');
+          setVideoError('Generation timed out. Please try again.');
           setIsGeneratingVideo(false);
           setVideoPolling(false);
+          setVideoStatus(null);
         }
       } catch (err) {
         attempts++;
@@ -1133,48 +968,9 @@ export default function CreateScreen() {
     { id: '20s', label: '20s' },
   ];
 
-  const videoModelOptions = [
-    { id: 'ray-flash-2', label: 'Ray 2 Flash', desc: 'Fast, lower cost' },
-    { id: 'ray-2', label: 'Ray 2', desc: 'High quality' },
-    { id: 'ray-3', label: 'Ray 3', desc: 'Best quality, HDR' },
-  ];
-
-  const videoResolutionOptions = [
-    { id: '540p', label: '540p', desc: 'Draft' },
-    { id: '720p', label: '720p', desc: 'Standard' },
-    { id: '1080p', label: '1080p', desc: 'Full HD' },
-    { id: '4k', label: '4K', desc: 'Ultra HD' },
-  ];
-
-  const cameraMotionPresets = [
-    { id: null as string | null, label: 'None' },
-    { id: 'camera orbit left', label: 'Orbit Left' },
-    { id: 'camera orbit right', label: 'Orbit Right' },
-    { id: 'camera pan left', label: 'Pan Left' },
-    { id: 'camera pan right', label: 'Pan Right' },
-    { id: 'camera push in', label: 'Push In' },
-    { id: 'camera pull out', label: 'Pull Out' },
-    { id: 'camera zoom in', label: 'Zoom In' },
-    { id: 'camera zoom out', label: 'Zoom Out' },
-    { id: 'camera crane up', label: 'Crane Up' },
-    { id: 'camera crane down', label: 'Crane Down' },
-    { id: 'camera dolly in', label: 'Dolly In' },
-    { id: 'camera tracking shot left', label: 'Track Left' },
-    { id: 'camera tracking shot right', label: 'Track Right' },
-    { id: 'camera static shot', label: 'Static' },
-    { id: 'camera handheld shot', label: 'Handheld' },
-  ];
-
-  const photonModelOptions = [
-    { id: 'photon-1', label: 'Photon', desc: 'Best quality' },
-    { id: 'photon-flash-1', label: 'Photon Flash', desc: 'Fast' },
-  ];
-
-  const lumaModeTabs = [
+  const veoModeTabs = [
     { id: 'text-to-video' as const, label: 'Text to Video', icon: 'videocam-outline' as const },
     { id: 'image-to-video' as const, label: 'Image to Video', icon: 'images-outline' as const },
-    { id: 'extend' as const, label: 'Extend Video', icon: 'resize-outline' as const },
-    { id: 'image-gen' as const, label: 'AI Image', icon: 'sparkles-outline' as const },
   ];
 
   return (
@@ -2232,19 +2028,19 @@ export default function CreateScreen() {
                     <Ionicons name="videocam" size={20} color="#fff" />
                   </LinearGradient>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.cardTitle, { color: colors.text, marginBottom: 0 }]}>Luma AI Studio</Text>
+                    <Text style={[styles.cardTitle, { color: colors.text, marginBottom: 0 }]}>Veo 3 Video Studio</Text>
                     <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginTop: 2 }}>
-                      Ray 2 Dream Machine & Photon
+                      Google Veo 3 AI Video Generation
                     </Text>
                   </View>
                 </View>
               </View>
 
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }} contentContainerStyle={{ gap: 8, paddingHorizontal: 2 }}>
-                {lumaModeTabs.map(tab => (
+                {veoModeTabs.map(tab => (
                   <Pressable
                     key={tab.id}
-                    onPress={() => { Haptics.selectionAsync(); setLumaMode(tab.id); }}
+                    onPress={() => { Haptics.selectionAsync(); setVeoMode(tab.id); }}
                     style={{
                       flexDirection: 'row',
                       alignItems: 'center',
@@ -2253,454 +2049,119 @@ export default function CreateScreen() {
                       paddingVertical: 10,
                       borderRadius: 20,
                       borderWidth: 1.5,
-                      backgroundColor: lumaMode === tab.id ? '#7C3AED15' : colors.inputBackground,
-                      borderColor: lumaMode === tab.id ? '#7C3AED' : 'transparent',
+                      backgroundColor: veoMode === tab.id ? '#7C3AED15' : colors.inputBackground,
+                      borderColor: veoMode === tab.id ? '#7C3AED' : 'transparent',
                     }}
                   >
-                    <Ionicons name={tab.icon} size={16} color={lumaMode === tab.id ? '#7C3AED' : colors.textMuted} />
-                    <Text style={{ fontSize: 13, fontFamily: 'Inter_600SemiBold', color: lumaMode === tab.id ? '#7C3AED' : colors.textMuted }}>{tab.label}</Text>
+                    <Ionicons name={tab.icon} size={16} color={veoMode === tab.id ? '#7C3AED' : colors.textMuted} />
+                    <Text style={{ fontSize: 13, fontFamily: 'Inter_600SemiBold', color: veoMode === tab.id ? '#7C3AED' : colors.textMuted }}>{tab.label}</Text>
                   </Pressable>
                 ))}
               </ScrollView>
 
-              {lumaMode !== 'image-gen' && (
+              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Describe your video</Text>
+                <TextInput
+                  style={[styles.promptInput, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
+                  placeholder="A cinematic drone shot over a modern city at sunset, golden hour lighting..."
+                  placeholderTextColor={colors.textMuted}
+                  value={videoPrompt}
+                  onChangeText={setVideoPrompt}
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                />
+              </View>
+
+              {veoMode === 'image-to-video' && (
                 <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                  <Text style={[styles.cardTitle, { color: colors.text }]}>Describe your video</Text>
-                  <TextInput
-                    style={[styles.promptInput, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-                    placeholder="A cinematic drone shot over a modern city at sunset, golden hour lighting..."
-                    placeholderTextColor={colors.textMuted}
-                    value={videoPrompt}
-                    onChangeText={setVideoPrompt}
-                    multiline
-                    numberOfLines={4}
-                    textAlignVertical="top"
-                  />
+                  <Text style={[styles.cardTitle, { color: colors.text }]}>Reference Image</Text>
+                  <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginBottom: 12 }}>
+                    Animate this image into a video
+                  </Text>
+                  {videoStartImage ? (
+                    <View style={{ borderRadius: 14, overflow: 'hidden', marginBottom: 8 }}>
+                      <Image source={{ uri: videoStartImage.uri }} style={{ width: '100%', height: 180, borderRadius: 14 }} resizeMode="cover" />
+                      <Pressable onPress={() => setVideoStartImage(null)} style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 14, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}>
+                        <Ionicons name="close" size={18} color="#fff" />
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <Pressable onPress={() => pickVeoImage(setVideoStartImage)} style={{ borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: '#7C3AED40', borderRadius: 14, padding: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.inputBackground, gap: 8 }}>
+                      <Ionicons name="image-outline" size={32} color="#7C3AED" />
+                      <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>Choose Image</Text>
+                    </Pressable>
+                  )}
                 </View>
               )}
 
-              {lumaMode === 'image-gen' && (
-                <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                  <Text style={[styles.cardTitle, { color: colors.text }]}>Describe your image</Text>
-                  <TextInput
-                    style={[styles.promptInput, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-                    placeholder="A stunning portrait with soft studio lighting, cinematic color grading..."
-                    placeholderTextColor={colors.textMuted}
-                    value={photonPrompt}
-                    onChangeText={setPhotonPrompt}
-                    multiline
-                    numberOfLines={4}
-                    textAlignVertical="top"
-                  />
+              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Aspect Ratio</Text>
+                <View style={styles.reelOptionRow}>
+                  {videoAspectOptions.map(a => (
+                    <Pressable
+                      key={a.id}
+                      onPress={() => { Haptics.selectionAsync(); setVideoAspect(a.id); }}
+                      style={[styles.reelChip, { backgroundColor: videoAspect === a.id ? '#7C3AED20' : colors.inputBackground, borderColor: videoAspect === a.id ? '#7C3AED' : 'transparent' }]}
+                    >
+                      <Ionicons name={a.icon} size={16} color={videoAspect === a.id ? '#7C3AED' : colors.textMuted} />
+                      <Text style={[styles.reelChipText, { color: videoAspect === a.id ? '#7C3AED' : colors.textMuted }]}>{a.label}</Text>
+                    </Pressable>
+                  ))}
                 </View>
-              )}
+              </View>
 
-              {lumaMode === 'image-to-video' && (
-                <>
-                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                    <Text style={[styles.cardTitle, { color: colors.text }]}>Start Frame</Text>
-                    <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginBottom: 12 }}>
-                      First frame of your video
-                    </Text>
-                    {videoStartImage ? (
-                      <View style={{ borderRadius: 14, overflow: 'hidden', marginBottom: 8 }}>
-                        <Image source={{ uri: videoStartImage.uri }} style={{ width: '100%', height: 180, borderRadius: 14 }} resizeMode="cover" />
-                        <Pressable onPress={() => setVideoStartImage(null)} style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 14, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}>
-                          <Ionicons name="close" size={18} color="#fff" />
-                        </Pressable>
-                      </View>
-                    ) : (
-                      <Pressable onPress={() => pickLumaImage(setVideoStartImage)} style={{ borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: '#7C3AED40', borderRadius: 14, padding: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.inputBackground, gap: 8 }}>
-                        <Ionicons name="image-outline" size={32} color="#7C3AED" />
-                        <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>Choose Image</Text>
-                      </Pressable>
-                    )}
-                  </View>
-                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                    <Text style={[styles.cardTitle, { color: colors.text }]}>End Frame (Optional)</Text>
-                    <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginBottom: 12 }}>
-                      Last frame of your video
-                    </Text>
-                    {videoEndImage ? (
-                      <View style={{ borderRadius: 14, overflow: 'hidden', marginBottom: 8 }}>
-                        <Image source={{ uri: videoEndImage.uri }} style={{ width: '100%', height: 180, borderRadius: 14 }} resizeMode="cover" />
-                        <Pressable onPress={() => setVideoEndImage(null)} style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 14, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}>
-                          <Ionicons name="close" size={18} color="#fff" />
-                        </Pressable>
-                      </View>
-                    ) : (
-                      <Pressable onPress={() => pickLumaImage(setVideoEndImage)} style={{ borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: '#7C3AED40', borderRadius: 14, padding: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.inputBackground, gap: 8 }}>
-                        <Ionicons name="image-outline" size={32} color="#7C3AED" />
-                        <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>Choose Image</Text>
-                      </Pressable>
-                    )}
-                  </View>
-                </>
-              )}
+              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Duration</Text>
+                <View style={styles.reelOptionRow}>
+                  {videoDurationOptions.map(d => (
+                    <Pressable
+                      key={d.id}
+                      onPress={() => { Haptics.selectionAsync(); setVideoDuration(d.id); }}
+                      style={[styles.reelChip, { backgroundColor: videoDuration === d.id ? '#7C3AED20' : colors.inputBackground, borderColor: videoDuration === d.id ? '#7C3AED' : 'transparent' }]}
+                    >
+                      <Text style={[styles.reelChipText, { color: videoDuration === d.id ? '#7C3AED' : colors.textMuted }]}>{d.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
 
-              {lumaMode === 'extend' && (
-                <>
-                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                    <Text style={[styles.cardTitle, { color: colors.text }]}>Generation ID</Text>
-                    <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginBottom: 12 }}>
-                      Enter the ID of the video to extend
-                    </Text>
-                    <TextInput
-                      style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-                      placeholder="e.g., abc123-def456..."
-                      placeholderTextColor={colors.textMuted}
-                      value={extendGenId}
-                      onChangeText={setExtendGenId}
-                    />
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 10 }}>
-                      <Pressable
-                        onPress={() => setReverseExtend(!reverseExtend)}
-                        style={[styles.reelChip, { backgroundColor: reverseExtend ? '#7C3AED20' : colors.inputBackground, borderColor: reverseExtend ? '#7C3AED' : 'transparent' }]}
-                      >
-                        <Ionicons name={reverseExtend ? 'checkbox' : 'square-outline'} size={18} color={reverseExtend ? '#7C3AED' : colors.textMuted} />
-                        <Text style={[styles.reelChipText, { color: reverseExtend ? '#7C3AED' : colors.textMuted }]}>Reverse extend (prepend)</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                    <Text style={[styles.cardTitle, { color: colors.text }]}>{reverseExtend ? 'Start Frame (Optional)' : 'End Frame (Optional)'}</Text>
-                    <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginBottom: 12 }}>
-                      {reverseExtend ? 'Frame to prepend before the video' : 'Frame to append after the video'}
-                    </Text>
-                    {(reverseExtend ? videoStartImage : videoEndImage) ? (
-                      <View style={{ borderRadius: 14, overflow: 'hidden', marginBottom: 8 }}>
-                        <Image source={{ uri: (reverseExtend ? videoStartImage : videoEndImage)!.uri }} style={{ width: '100%', height: 180, borderRadius: 14 }} resizeMode="cover" />
-                        <Pressable onPress={() => reverseExtend ? setVideoStartImage(null) : setVideoEndImage(null)} style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 14, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}>
-                          <Ionicons name="close" size={18} color="#fff" />
-                        </Pressable>
-                      </View>
-                    ) : (
-                      <Pressable onPress={() => pickLumaImage(reverseExtend ? setVideoStartImage : setVideoEndImage)} style={{ borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: '#7C3AED40', borderRadius: 14, padding: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.inputBackground, gap: 8 }}>
-                        <Ionicons name="image-outline" size={32} color="#7C3AED" />
-                        <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>Choose Image</Text>
-                      </Pressable>
-                    )}
-                  </View>
-                </>
-              )}
-
-              {lumaMode !== 'image-gen' && (
-                <>
-                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                    <Text style={[styles.cardTitle, { color: colors.text }]}>Model</Text>
-                    <View style={styles.reelOptionRow}>
-                      {videoModelOptions.map(m => (
-                        <Pressable
-                          key={m.id}
-                          onPress={() => { Haptics.selectionAsync(); setVideoModel(m.id); }}
-                          style={[styles.reelChip, { backgroundColor: videoModel === m.id ? '#7C3AED20' : colors.inputBackground, borderColor: videoModel === m.id ? '#7C3AED' : 'transparent' }]}
-                        >
-                          <Text style={[styles.reelChipText, { color: videoModel === m.id ? '#7C3AED' : colors.textMuted }]}>{m.label}</Text>
-                          <Text style={{ fontSize: 10, color: colors.textMuted, fontFamily: 'Inter_400Regular' }}>{m.desc}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  </View>
-
-                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                    <Text style={[styles.cardTitle, { color: colors.text }]}>Resolution</Text>
-                    <View style={styles.reelOptionRow}>
-                      {videoResolutionOptions.map(r => (
-                        <Pressable
-                          key={r.id}
-                          onPress={() => { Haptics.selectionAsync(); setVideoResolution(r.id); }}
-                          style={[styles.reelChip, { backgroundColor: videoResolution === r.id ? '#7C3AED20' : colors.inputBackground, borderColor: videoResolution === r.id ? '#7C3AED' : 'transparent' }]}
-                        >
-                          <Text style={[styles.reelChipText, { color: videoResolution === r.id ? '#7C3AED' : colors.textMuted }]}>{r.label}</Text>
-                          <Text style={{ fontSize: 10, color: colors.textMuted, fontFamily: 'Inter_400Regular' }}>{r.desc}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  </View>
-
-                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                    <Text style={[styles.cardTitle, { color: colors.text }]}>Aspect Ratio</Text>
-                    <View style={styles.reelOptionRow}>
-                      {videoAspectOptions.map(a => (
-                        <Pressable
-                          key={a.id}
-                          onPress={() => { Haptics.selectionAsync(); setVideoAspect(a.id); }}
-                          style={[styles.reelChip, { backgroundColor: videoAspect === a.id ? '#7C3AED20' : colors.inputBackground, borderColor: videoAspect === a.id ? '#7C3AED' : 'transparent' }]}
-                        >
-                          <Ionicons name={a.icon} size={16} color={videoAspect === a.id ? '#7C3AED' : colors.textMuted} />
-                          <Text style={[styles.reelChipText, { color: videoAspect === a.id ? '#7C3AED' : colors.textMuted }]}>{a.label}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  </View>
-
-                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                    <Text style={[styles.cardTitle, { color: colors.text }]}>Duration</Text>
-                    <View style={styles.reelOptionRow}>
-                      {videoDurationOptions.map(d => (
-                        <Pressable
-                          key={d.id}
-                          onPress={() => { Haptics.selectionAsync(); setVideoDuration(d.id); }}
-                          style={[styles.reelChip, { backgroundColor: videoDuration === d.id ? '#7C3AED20' : colors.inputBackground, borderColor: videoDuration === d.id ? '#7C3AED' : 'transparent' }]}
-                        >
-                          <Text style={[styles.reelChipText, { color: videoDuration === d.id ? '#7C3AED' : colors.textMuted }]}>{d.label}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 10 }}>
-                      <Pressable
-                        onPress={() => setVideoLoop(!videoLoop)}
-                        style={[styles.reelChip, { backgroundColor: videoLoop ? '#7C3AED20' : colors.inputBackground, borderColor: videoLoop ? '#7C3AED' : 'transparent' }]}
-                      >
-                        <Ionicons name={videoLoop ? 'checkbox' : 'square-outline'} size={18} color={videoLoop ? '#7C3AED' : colors.textMuted} />
-                        <Text style={[styles.reelChipText, { color: videoLoop ? '#7C3AED' : colors.textMuted }]}>Loop video</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-
-                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                    <Text style={[styles.cardTitle, { color: colors.text }]}>Camera Motion</Text>
-                    <View style={styles.reelOptionRow}>
-                      {cameraMotionPresets.map(cm => (
-                        <Pressable
-                          key={cm.label}
-                          onPress={() => { Haptics.selectionAsync(); setSelectedCameraMotion(cm.id); }}
-                          style={[styles.reelChip, { backgroundColor: selectedCameraMotion === cm.id ? '#7C3AED20' : colors.inputBackground, borderColor: selectedCameraMotion === cm.id ? '#7C3AED' : 'transparent' }]}
-                        >
-                          <Text style={[styles.reelChipText, { color: selectedCameraMotion === cm.id ? '#7C3AED' : colors.textMuted }]}>{cm.label}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  </View>
-                </>
-              )}
-
-              {lumaMode === 'image-gen' && (
-                <>
-                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                    <Text style={[styles.cardTitle, { color: colors.text }]}>Photon Model</Text>
-                    <View style={styles.reelOptionRow}>
-                      {photonModelOptions.map(m => (
-                        <Pressable
-                          key={m.id}
-                          onPress={() => { Haptics.selectionAsync(); setPhotonModel(m.id); }}
-                          style={[styles.reelChip, { backgroundColor: photonModel === m.id ? '#7C3AED20' : colors.inputBackground, borderColor: photonModel === m.id ? '#7C3AED' : 'transparent' }]}
-                        >
-                          <Text style={[styles.reelChipText, { color: photonModel === m.id ? '#7C3AED' : colors.textMuted }]}>{m.label}</Text>
-                          <Text style={{ fontSize: 10, color: colors.textMuted, fontFamily: 'Inter_400Regular' }}>{m.desc}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  </View>
-
-                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                    <Text style={[styles.cardTitle, { color: colors.text }]}>Aspect Ratio</Text>
-                    <View style={styles.reelOptionRow}>
-                      {videoAspectOptions.map(a => (
-                        <Pressable
-                          key={a.id}
-                          onPress={() => { Haptics.selectionAsync(); setPhotonAspect(a.id); }}
-                          style={[styles.reelChip, { backgroundColor: photonAspect === a.id ? '#7C3AED20' : colors.inputBackground, borderColor: photonAspect === a.id ? '#7C3AED' : 'transparent' }]}
-                        >
-                          <Ionicons name={a.icon} size={16} color={photonAspect === a.id ? '#7C3AED' : colors.textMuted} />
-                          <Text style={[styles.reelChipText, { color: photonAspect === a.id ? '#7C3AED' : colors.textMuted }]}>{a.label}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  </View>
-
-                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                    <Text style={[styles.cardTitle, { color: colors.text }]}>Reference Type</Text>
-                    <View style={styles.reelOptionRow}>
-                      {[
-                        { id: 'none', label: 'None', icon: 'close-circle-outline' },
-                        { id: 'image-ref', label: 'Image Ref', icon: 'image-outline' },
-                        { id: 'style-ref', label: 'Style Ref', icon: 'color-palette-outline' },
-                        { id: 'character-ref', label: 'Character', icon: 'person-outline' },
-                        { id: 'modify', label: 'Modify', icon: 'brush-outline' },
-                      ].map(r => (
-                        <Pressable key={r.id} onPress={() => { Haptics.selectionAsync(); setPhotonRefMode(r.id as any); }}
-                          style={[styles.reelChip, { backgroundColor: photonRefMode === r.id ? '#7C3AED20' : colors.inputBackground, borderColor: photonRefMode === r.id ? '#7C3AED' : 'transparent' }]}>
-                          <Ionicons name={r.icon as any} size={14} color={photonRefMode === r.id ? '#7C3AED' : colors.textMuted} />
-                          <Text style={[styles.reelChipText, { color: photonRefMode === r.id ? '#7C3AED' : colors.textMuted }]}>{r.label}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  </View>
-
-                  {photonRefMode === 'image-ref' && (
-                    <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                      <Text style={[styles.cardTitle, { color: colors.text }]}>Image Reference</Text>
-                      <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginBottom: 12 }}>Guide the generation with a reference image</Text>
-                      {photonImageRef ? (
-                        <View style={{ borderRadius: 14, overflow: 'hidden', marginBottom: 8 }}>
-                          <Image source={{ uri: photonImageRef.uri }} style={{ width: '100%', height: 180, borderRadius: 14 }} resizeMode="cover" />
-                          <Pressable onPress={() => setPhotonImageRef(null)} style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 14, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}>
-                            <Ionicons name="close" size={18} color="#fff" />
-                          </Pressable>
-                        </View>
-                      ) : (
-                        <Pressable onPress={() => pickLumaImage(setPhotonImageRef)} style={{ borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: '#7C3AED40', borderRadius: 14, padding: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.inputBackground, gap: 8 }}>
-                          <Ionicons name="image-outline" size={32} color="#7C3AED" />
-                          <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>Choose Image</Text>
-                        </Pressable>
-                      )}
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 }}>
-                        <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular' }}>Influence:</Text>
-                        <Pressable onPress={() => setPhotonImageRefWeight(Math.max(0, photonImageRefWeight - 0.05))} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: colors.inputBackground, alignItems: 'center', justifyContent: 'center' }}>
-                          <Ionicons name="remove" size={16} color={colors.text} />
-                        </Pressable>
-                        <Text style={{ fontSize: 14, fontFamily: 'Inter_600SemiBold', color: '#7C3AED', minWidth: 40, textAlign: 'center' as const }}>{(photonImageRefWeight * 100).toFixed(0)}%</Text>
-                        <Pressable onPress={() => setPhotonImageRefWeight(Math.min(1, photonImageRefWeight + 0.05))} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: colors.inputBackground, alignItems: 'center', justifyContent: 'center' }}>
-                          <Ionicons name="add" size={16} color={colors.text} />
-                        </Pressable>
-                      </View>
-                    </View>
-                  )}
-
-                  {photonRefMode === 'style-ref' && (
-                    <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                      <Text style={[styles.cardTitle, { color: colors.text }]}>Style Reference</Text>
-                      <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginBottom: 12 }}>Match the style of a reference image</Text>
-                      {photonStyleRef ? (
-                        <View style={{ borderRadius: 14, overflow: 'hidden', marginBottom: 8 }}>
-                          <Image source={{ uri: photonStyleRef.uri }} style={{ width: '100%', height: 180, borderRadius: 14 }} resizeMode="cover" />
-                          <Pressable onPress={() => setPhotonStyleRef(null)} style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 14, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}>
-                            <Ionicons name="close" size={18} color="#fff" />
-                          </Pressable>
-                        </View>
-                      ) : (
-                        <Pressable onPress={() => pickLumaImage(setPhotonStyleRef)} style={{ borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: '#7C3AED40', borderRadius: 14, padding: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.inputBackground, gap: 8 }}>
-                          <Ionicons name="color-palette-outline" size={32} color="#7C3AED" />
-                          <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>Choose Style Image</Text>
-                        </Pressable>
-                      )}
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 }}>
-                        <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular' }}>Influence:</Text>
-                        <Pressable onPress={() => setPhotonStyleRefWeight(Math.max(0, photonStyleRefWeight - 0.05))} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: colors.inputBackground, alignItems: 'center', justifyContent: 'center' }}>
-                          <Ionicons name="remove" size={16} color={colors.text} />
-                        </Pressable>
-                        <Text style={{ fontSize: 14, fontFamily: 'Inter_600SemiBold', color: '#7C3AED', minWidth: 40, textAlign: 'center' as const }}>{(photonStyleRefWeight * 100).toFixed(0)}%</Text>
-                        <Pressable onPress={() => setPhotonStyleRefWeight(Math.min(1, photonStyleRefWeight + 0.05))} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: colors.inputBackground, alignItems: 'center', justifyContent: 'center' }}>
-                          <Ionicons name="add" size={16} color={colors.text} />
-                        </Pressable>
-                      </View>
-                    </View>
-                  )}
-
-                  {photonRefMode === 'character-ref' && (
-                    <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                      <Text style={[styles.cardTitle, { color: colors.text }]}>Character Reference</Text>
-                      <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginBottom: 12 }}>Preserve a character's identity across generations</Text>
-                      {photonCharacterRef ? (
-                        <View style={{ borderRadius: 14, overflow: 'hidden', marginBottom: 8 }}>
-                          <Image source={{ uri: photonCharacterRef.uri }} style={{ width: '100%', height: 180, borderRadius: 14 }} resizeMode="cover" />
-                          <Pressable onPress={() => setPhotonCharacterRef(null)} style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 14, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}>
-                            <Ionicons name="close" size={18} color="#fff" />
-                          </Pressable>
-                        </View>
-                      ) : (
-                        <Pressable onPress={() => pickLumaImage(setPhotonCharacterRef)} style={{ borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: '#7C3AED40', borderRadius: 14, padding: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.inputBackground, gap: 8 }}>
-                          <Ionicons name="person-outline" size={32} color="#7C3AED" />
-                          <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>Choose Character Photo</Text>
-                        </Pressable>
-                      )}
-                    </View>
-                  )}
-
-                  {photonRefMode === 'modify' && (
-                    <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                      <Text style={[styles.cardTitle, { color: colors.text }]}>Modify Image</Text>
-                      <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginBottom: 12 }}>Edit an existing image with your prompt</Text>
-                      {photonModifyImage ? (
-                        <View style={{ borderRadius: 14, overflow: 'hidden', marginBottom: 8 }}>
-                          <Image source={{ uri: photonModifyImage.uri }} style={{ width: '100%', height: 180, borderRadius: 14 }} resizeMode="cover" />
-                          <Pressable onPress={() => setPhotonModifyImage(null)} style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 14, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}>
-                            <Ionicons name="close" size={18} color="#fff" />
-                          </Pressable>
-                        </View>
-                      ) : (
-                        <Pressable onPress={() => pickLumaImage(setPhotonModifyImage)} style={{ borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: '#7C3AED40', borderRadius: 14, padding: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.inputBackground, gap: 8 }}>
-                          <Ionicons name="brush-outline" size={32} color="#7C3AED" />
-                          <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>Choose Image to Modify</Text>
-                        </Pressable>
-                      )}
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 }}>
-                        <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular' }}>Influence:</Text>
-                        <Pressable onPress={() => setPhotonModifyWeight(Math.max(0, photonModifyWeight - 0.05))} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: colors.inputBackground, alignItems: 'center', justifyContent: 'center' }}>
-                          <Ionicons name="remove" size={16} color={colors.text} />
-                        </Pressable>
-                        <Text style={{ fontSize: 14, fontFamily: 'Inter_600SemiBold', color: '#7C3AED', minWidth: 40, textAlign: 'center' as const }}>{(photonModifyWeight * 100).toFixed(0)}%</Text>
-                        <Pressable onPress={() => setPhotonModifyWeight(Math.min(1, photonModifyWeight + 0.05))} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: colors.inputBackground, alignItems: 'center', justifyContent: 'center' }}>
-                          <Ionicons name="add" size={16} color={colors.text} />
-                        </Pressable>
-                      </View>
-                    </View>
-                  )}
-                </>
-              )}
-
-              {lumaMode !== 'image-gen' ? (
-                <Pressable
-                  onPress={handleGenerateVideo}
-                  disabled={isGeneratingVideo || !videoPrompt.trim()}
-                  style={[styles.generateDesignBtn, { opacity: (isGeneratingVideo || !videoPrompt.trim()) ? 0.5 : 1 }]}
+              <Pressable
+                onPress={handleGenerateVideo}
+                disabled={isGeneratingVideo || !videoPrompt.trim()}
+                style={[styles.generateDesignBtn, { opacity: (isGeneratingVideo || !videoPrompt.trim()) ? 0.5 : 1 }]}
+              >
+                <LinearGradient
+                  colors={['#7C3AED', '#A855F7', '#7C3AED']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.generateDesignGradient}
                 >
-                  <LinearGradient
-                    colors={['#7C3AED', '#A855F7', '#7C3AED']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.generateDesignGradient}
-                  >
-                    {isGeneratingVideo ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <Ionicons name="sparkles" size={20} color="#fff" />
-                    )}
-                    <Text style={styles.generateDesignText}>
-                      {isGeneratingVideo ? 'Generating...' : lumaMode === 'extend' ? 'Extend Video' : 'Generate Video'}
-                    </Text>
-                  </LinearGradient>
-                </Pressable>
-              ) : (
-                <Pressable
-                  onPress={handleGeneratePhotonImage}
-                  disabled={isGeneratingPhoton || !photonPrompt.trim()}
-                  style={[styles.generateDesignBtn, { opacity: (isGeneratingPhoton || !photonPrompt.trim()) ? 0.5 : 1 }]}
-                >
-                  <LinearGradient
-                    colors={['#7C3AED', '#A855F7', '#7C3AED']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.generateDesignGradient}
-                  >
-                    {isGeneratingPhoton ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <Ionicons name="sparkles" size={20} color="#fff" />
-                    )}
-                    <Text style={styles.generateDesignText}>
-                      {isGeneratingPhoton ? 'Generating...' : 'Generate Image'}
-                    </Text>
-                  </LinearGradient>
-                </Pressable>
-              )}
+                  {isGeneratingVideo ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Ionicons name="sparkles" size={20} color="#fff" />
+                  )}
+                  <Text style={styles.generateDesignText}>
+                    {isGeneratingVideo ? 'Generating...' : 'Generate Video'}
+                  </Text>
+                </LinearGradient>
+              </Pressable>
 
-              {(isGeneratingVideo || isGeneratingPhoton) && videoStatus && (
+              {isGeneratingVideo && videoStatus && (
                 <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 30 }]}>
                   <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: '#7C3AED15', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
                     <ActivityIndicator size="large" color="#7C3AED" />
                   </View>
                   <Text style={{ fontSize: 16, fontFamily: 'Inter_600SemiBold', color: colors.text, marginBottom: 4 }}>
-                    {videoStatus === 'dreaming' ? 'Starting...' :
-                     videoStatus === 'queued' ? 'Queued' :
-                     videoStatus === 'processing' ? (lumaMode === 'image-gen' ? 'Creating image...' : 'Rendering video...') :
+                    {videoStatus === 'starting' ? 'Starting...' :
+                     videoStatus === 'processing' ? 'Rendering video...' :
+                     videoStatus === 'generating' ? 'Generating...' :
                      videoStatus.includes('uploading') ? videoStatus :
-                     videoStatus === 'generating...' ? 'Creating image...' :
                      'Processing...'}
                   </Text>
                   <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', textAlign: 'center' }}>
-                    {lumaMode === 'image-gen' ? 'This usually takes 10-30 seconds.' : 'This usually takes 1-3 minutes. You can wait here.'}
+                    This usually takes 1-3 minutes. You can wait here.
                   </Text>
                 </View>
               )}
@@ -2717,7 +2178,7 @@ export default function CreateScreen() {
                 </View>
               )}
 
-              {videoUrl && lumaMode !== 'image-gen' && (
+              {videoUrl && (
                 <View style={[styles.card, { backgroundColor: colors.card, borderColor: '#7C3AED40' }]}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                     <Ionicons name="checkmark-circle" size={20} color="#7C3AED" />
@@ -2739,14 +2200,8 @@ export default function CreateScreen() {
                     <Ionicons name="play-circle" size={48} color="#7C3AED" />
                     <Text style={{ fontSize: 14, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>Open Video</Text>
                   </Pressable>
-                  {videoGenId && (
-                    <View style={{ marginTop: 12, backgroundColor: colors.inputBackground, borderRadius: 10, padding: 10 }}>
-                      <Text style={{ fontSize: 11, color: colors.textMuted, fontFamily: 'Inter_400Regular' }}>Generation ID (for extending):</Text>
-                      <Text style={{ fontSize: 12, color: colors.text, fontFamily: 'Inter_500Medium', marginTop: 2 }} selectable>{videoGenId}</Text>
-                    </View>
-                  )}
                   <Pressable
-                    onPress={() => { setVideoUrl(null); setVideoPrompt(''); setVideoGenId(null); setVideoStatus(null); }}
+                    onPress={() => { setVideoUrl(null); setVideoPrompt(''); setVideoOperationName(null); setVideoStatus(null); }}
                     style={{ marginTop: 12, alignItems: 'center', paddingVertical: 10 }}
                   >
                     <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: colors.textMuted }}>Generate another video</Text>
@@ -2754,36 +2209,9 @@ export default function CreateScreen() {
                 </View>
               )}
 
-              {generatedImageUrl && lumaMode === 'image-gen' && (
-                <View style={[styles.card, { backgroundColor: colors.card, borderColor: '#7C3AED40' }]}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                    <Ionicons name="checkmark-circle" size={20} color="#7C3AED" />
-                    <Text style={{ fontSize: 16, fontFamily: 'Inter_600SemiBold', color: colors.text }}>Image Ready</Text>
-                  </View>
-                  <Pressable onPress={() => setFullScreenImage(generatedImageUrl)}>
-                    <Image source={{ uri: generatedImageUrl }} style={{ width: '100%', height: 300, borderRadius: 14 }} resizeMode="contain" />
-                  </Pressable>
-                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-                    <Pressable
-                      onPress={() => saveImageToGallery(generatedImageUrl)}
-                      style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: '#7C3AED', gap: 6 }}
-                    >
-                      <Ionicons name="download-outline" size={16} color="#fff" />
-                      <Text style={{ fontSize: 13, fontFamily: 'Inter_600SemiBold', color: '#fff' }}>Save</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => { setGeneratedImageUrl(null); setPhotonPrompt(''); setVideoGenId(null); setVideoStatus(null); }}
-                      style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: colors.inputBackground }}
-                    >
-                      <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: colors.textMuted }}>New Image</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              )}
-
               <View style={styles.poweredBy}>
                 <Text style={[styles.poweredByText, { color: colors.textMuted }]}>
-                  Powered by Luma AI Dream Machine & Photon
+                  Powered by Google Veo 3
                 </Text>
               </View>
             </>

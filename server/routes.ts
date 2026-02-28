@@ -10,7 +10,7 @@ import { registerStrategyRoutes } from "./strategy-routes";
 import { registerAutopilotRoutes } from "./autopilot-routes";
 import { registerBrandConfigRoutes } from "./brand-config-routes";
 import { registerPublishPipelineRoutes } from "./publish-pipeline";
-import { registerLumaRoutes } from "./luma-routes";
+import { registerVeoRoutes } from "./veo-routes";
 import { registerLeadEngineRoutes } from "./lead-engine";
 import { registerCompetitiveIntelligenceRoutes } from "./competitive-intelligence";
 import { registerStrategicCoreRoutes } from "./strategic-core";
@@ -1346,7 +1346,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerAutopilotRoutes(app);
   registerBrandConfigRoutes(app);
   registerPublishPipelineRoutes(app);
-  registerLumaRoutes(app);
+  registerVeoRoutes(app);
   registerCampaignRoutes(app);
   registerLeadEngineRoutes(app);
   registerCompetitiveIntelligenceRoutes(app);
