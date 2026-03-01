@@ -13,7 +13,7 @@ function getCurrentMonth(): string {
 }
 
 function validateCompetitorEvidence(c: any): boolean {
-  return !!(c.profileLink && c.postingFrequency != null && c.contentTypeRatio && c.engagementRatio != null && c.ctaPatterns);
+  return !!(c.profileLink && c.postingFrequency != null && c.contentTypeRatio && c.engagementRatio != null);
 }
 
 export function registerCiAnalysisRoutes(app: Express) {
@@ -32,7 +32,7 @@ export function registerCiAnalysisRoutes(app: Express) {
       if (completeCompetitors.length < 1) {
         return res.status(400).json({
           error: "INSUFFICIENT_DATA",
-          message: "At least 1 competitor must have complete core evidence fields (profileLink, postingFrequency, contentTypeRatio, engagementRatio, ctaPatterns)",
+          message: "At least 1 competitor must have core evidence fields (profileLink, postingFrequency, contentTypeRatio, engagementRatio)",
           totalCompetitors: competitors.length,
           completeCompetitors: completeCompetitors.length,
           incomplete: competitors.filter(c => !validateCompetitorEvidence(c)).map(c => ({
