@@ -1,0 +1,16 @@
+{
+  "blueprintId": "9382cf81-30f0-46c3-b80b-9da9dfa3ae77",
+  "timestamp": "2026-03-01T19:35:05.009Z",
+  "attempts": [
+    {
+      "text": "{\n  \"detectedLanguage\": \"INSUFFICIENT_DATA\",\n  \"transcribedText\": null,\n  \"ocrText\": null,\n  \"detectedOffer\": {\n    \"value\": \"INSUFFICIENT_DATA\",\n    \"confidence\": 0\n  },\n  \"detectedPositioning\": {\n    \"value\": \"INSUFFICIENT_DATA\",\n    \"confidence\": 0\n  },\n  \"detectedCTA\": {\n    \"value\": \"INSUFFICIENT_DATA\",\n    \"confidence\": 0\n  },\n  \"detectedAudienceGuess\": {\n    \"value\": \"INSUFFICIENT_DATA\",\n    \"confidence\": 0\n  },\n  \"detectedFunnelStage\": {\n    \"value\": \"INSUFFICIENT_DATA\",\n    \"confidence\": 0\n  },\n  \"detectedPriceIfVisible\": {\n    \"value\": null,\n    \"confidence\": 0\n  }\n}",
+      "model": "gemini-3-pro-preview",
+      "tokens": {
+        "inputTokens": 1595,
+        "outputTokens": 207,
+        "totalTokens": 2656,
+        "truncated": false
+      }
+    }
+  ]
+}

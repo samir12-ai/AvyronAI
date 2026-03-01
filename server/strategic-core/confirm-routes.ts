@@ -236,6 +236,8 @@ export function registerConfirmRoutes(app: Express) {
 
       const currentVersion = blueprint.blueprintVersion || 1;
 
+      const editedFields = req.body.editedFields || {};
+
       const confirmedData: any = {
         confirmedAt: new Date().toISOString(),
         blueprintVersion: currentVersion,
@@ -246,13 +248,18 @@ export function registerConfirmRoutes(app: Express) {
 
       const extractionFields = ["detectedOffer", "detectedPositioning", "detectedCTA", "detectedAudienceGuess", "detectedFunnelStage", "detectedPriceIfVisible"];
       for (const field of extractionFields) {
-        const fieldData = draft[field];
-        if (fieldData && typeof fieldData === "object" && "value" in fieldData) {
-          confirmedData[field] = fieldData.value;
-          confirmedData[field + "Confidence"] = fieldData.confidence;
+        if (editedFields[field] && editedFields[field] !== "INSUFFICIENT_DATA") {
+          confirmedData[field] = editedFields[field];
+          confirmedData[field + "Confidence"] = 100;
         } else {
-          confirmedData[field] = fieldData;
-          confirmedData[field + "Confidence"] = 50;
+          const fieldData = draft[field];
+          if (fieldData && typeof fieldData === "object" && "value" in fieldData) {
+            confirmedData[field] = fieldData.value;
+            confirmedData[field + "Confidence"] = fieldData.confidence;
+          } else {
+            confirmedData[field] = fieldData;
+            confirmedData[field + "Confidence"] = 50;
+          }
         }
       }
 
