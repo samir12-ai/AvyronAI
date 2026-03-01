@@ -365,6 +365,7 @@ export default function CreateScreen() {
   const [videoRefImages, setVideoRefImages] = useState<Array<{ uri: string; fileUri?: string; mimeType?: string }>>([]);
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(ps.generatedImageUrl);
   const [showAdvancedVideo, setShowAdvancedVideo] = useState(false);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'analyzing' | 'done' | 'error'>('idle');
 
   const lastHydrationRef = useRef(0);
   const skipSyncRef = useRef(false);
@@ -563,6 +564,7 @@ export default function CreateScreen() {
       return;
     }
 
+    setSaveState('saving');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     const newItem: ContentItem = {
@@ -588,6 +590,8 @@ export default function CreateScreen() {
         generationId: writerGenIdRef.current || undefined,
       });
 
+      setSaveState('analyzing');
+
       if (result.studioItemId) {
         const writerMedia: MediaItem = {
           id: generateId(),
@@ -605,15 +609,19 @@ export default function CreateScreen() {
 
       queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
       queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
+      setSaveState('done');
+      setTimeout(() => {
+        setTopic('');
+        setGeneratedContent('');
+        setSaveState('idle');
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        router.replace('/(tabs)/studio');
+      }, 800);
     } catch (err) {
       console.warn('[Create] Failed to save studio item:', err);
+      setSaveState('error');
+      setTimeout(() => setSaveState('idle'), 3000);
     }
-    
-    setTopic('');
-    setGeneratedContent('');
-    
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    router.replace('/(tabs)/studio');
   };
 
   const pickPhoto = async (index: number) => {
@@ -789,6 +797,8 @@ export default function CreateScreen() {
       return;
     }
 
+    setSaveState('saving');
+
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
@@ -811,6 +821,7 @@ export default function CreateScreen() {
           engineName: 'AI Designer',
           generationId: designerGenIdRef.current || undefined,
         });
+        setSaveState('analyzing');
         if (result.studioItemId) {
           newMedia.studioItemId = result.studioItemId;
         }
@@ -818,6 +829,7 @@ export default function CreateScreen() {
         queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
       } catch (err) {
         console.warn('[Create] Failed to save poster studio item:', err);
+        setSaveState('error');
       }
 
       await addMediaItem(newMedia);
@@ -828,10 +840,16 @@ export default function CreateScreen() {
         console.warn('Gallery save skipped:', galleryError);
       }
 
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.replace('/(tabs)/studio');
+      setSaveState('done');
+      setTimeout(() => {
+        setSaveState('idle');
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        router.replace('/(tabs)/studio');
+      }, 800);
     } catch (error: any) {
       console.error('Save design error:', error);
+      setSaveState('error');
+      setTimeout(() => setSaveState('idle'), 2000);
       Alert.alert('Save Failed', error?.message || 'Could not save design. Please try again.');
     }
   };
@@ -1421,20 +1439,50 @@ export default function CreateScreen() {
                   </View>
                   <Text style={[styles.resultContent, { color: colors.text }]}>{generatedContent}</Text>
                   <View style={styles.resultActions}>
-                    <Pressable
-                      onPress={() => handleSave('draft')}
-                      style={[styles.saveButton, { backgroundColor: colors.inputBackground }]}
-                    >
-                      <Ionicons name="bookmark-outline" size={18} color={colors.text} />
-                      <Text style={[styles.saveButtonText, { color: colors.text }]}>{t('create.saveDraft')}</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => handleSave('scheduled')}
-                      style={[styles.saveButton, { backgroundColor: colors.primary }]}
-                    >
-                      <Ionicons name="calendar-outline" size={18} color="#fff" />
-                      <Text style={[styles.saveButtonText, { color: '#fff' }]}>Schedule</Text>
-                    </Pressable>
+                    {saveState !== 'idle' ? (
+                      <View style={[styles.saveButton, { backgroundColor: saveState === 'error' ? '#EF444420' : saveState === 'done' ? '#10B98120' : colors.primary + '15', flex: 1 }]}>
+                        {saveState === 'saving' ? (
+                          <>
+                            <ActivityIndicator size={14} color={colors.primary} />
+                            <Text style={[styles.saveButtonText, { color: colors.primary }]}>Saving to Studio...</Text>
+                          </>
+                        ) : saveState === 'analyzing' ? (
+                          <>
+                            <ActivityIndicator size={14} color={colors.accent} />
+                            <Text style={[styles.saveButtonText, { color: colors.accent }]}>AI Analyzing...</Text>
+                          </>
+                        ) : saveState === 'done' ? (
+                          <>
+                            <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+                            <Text style={[styles.saveButtonText, { color: '#10B981' }]}>Saved</Text>
+                          </>
+                        ) : (
+                          <>
+                            <Ionicons name="alert-circle" size={18} color="#EF4444" />
+                            <Text style={[styles.saveButtonText, { color: '#EF4444' }]}>Save Failed</Text>
+                          </>
+                        )}
+                      </View>
+                    ) : (
+                      <>
+                        <Pressable
+                          onPress={() => handleSave('draft')}
+                          disabled={saveState !== 'idle'}
+                          style={[styles.saveButton, { backgroundColor: colors.inputBackground }]}
+                        >
+                          <Ionicons name="bookmark-outline" size={18} color={colors.text} />
+                          <Text style={[styles.saveButtonText, { color: colors.text }]}>{t('create.saveDraft')}</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => handleSave('scheduled')}
+                          disabled={saveState !== 'idle'}
+                          style={[styles.saveButton, { backgroundColor: colors.primary }]}
+                        >
+                          <Ionicons name="calendar-outline" size={18} color="#fff" />
+                          <Text style={[styles.saveButtonText, { color: '#fff' }]}>Schedule</Text>
+                        </Pressable>
+                      </>
+                    )}
                   </View>
                 </View>
               ) : null}
@@ -1877,10 +1925,23 @@ export default function CreateScreen() {
                   </Pressable>
                   <Pressable
                     onPress={handleSavePoster}
-                    style={[styles.quickAction, { backgroundColor: colors.accent }]}
+                    disabled={saveState !== 'idle'}
+                    style={[styles.quickAction, { backgroundColor: saveState !== 'idle' ? (saveState === 'done' ? '#10B981' : saveState === 'error' ? '#EF4444' : colors.accent + 'CC') : colors.accent }]}
                   >
-                    <Ionicons name="download-outline" size={18} color="#fff" />
-                    <Text style={[styles.quickActionLabel, { color: '#fff' }]}>Save</Text>
+                    {saveState === 'saving' ? (
+                      <ActivityIndicator size={14} color="#fff" />
+                    ) : saveState === 'analyzing' ? (
+                      <ActivityIndicator size={14} color="#fff" />
+                    ) : saveState === 'done' ? (
+                      <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                    ) : saveState === 'error' ? (
+                      <Ionicons name="alert-circle" size={18} color="#fff" />
+                    ) : (
+                      <Ionicons name="download-outline" size={18} color="#fff" />
+                    )}
+                    <Text style={[styles.quickActionLabel, { color: '#fff' }]}>
+                      {saveState === 'saving' ? 'Saving...' : saveState === 'analyzing' ? 'Analyzing...' : saveState === 'done' ? 'Saved' : saveState === 'error' ? 'Failed' : 'Save'}
+                    </Text>
                   </Pressable>
                 </View>
               )}
@@ -2414,6 +2475,7 @@ export default function CreateScreen() {
                   {selectedCampaignId && (
                     <Pressable
                       onPress={async () => {
+                        setSaveState('saving');
                         try {
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                           await saveToStudio({
@@ -2424,19 +2486,51 @@ export default function CreateScreen() {
                             engineName: 'Veo 3.1',
                             generationId: videoGenIdRef.current || undefined,
                           });
+                          setSaveState('analyzing');
                           queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
                           queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
-                          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                          router.replace('/(tabs)/studio');
+                          setSaveState('done');
+                          setTimeout(() => {
+                            setSaveState('idle');
+                            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                            router.replace('/(tabs)/studio');
+                          }, 800);
                         } catch (err) {
                           console.warn('[Create] Failed to save video to studio:', err);
+                          setSaveState('error');
+                          setTimeout(() => setSaveState('idle'), 2000);
                           Alert.alert('Save Failed', 'Could not save video to Studio.');
                         }
                       }}
-                      style={{ marginTop: 8, backgroundColor: '#7C3AED', borderRadius: 12, padding: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}
+                      disabled={saveState !== 'idle'}
+                      style={{ marginTop: 8, backgroundColor: saveState !== 'idle' ? '#6D28D9' : '#7C3AED', borderRadius: 12, padding: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}
                     >
-                      <Ionicons name="arrow-forward-circle" size={20} color="#fff" />
-                      <Text style={{ fontSize: 15, fontFamily: 'Inter_600SemiBold', color: '#fff' }}>Save to Studio</Text>
+                      {saveState === 'saving' ? (
+                        <>
+                          <ActivityIndicator size={16} color="#fff" />
+                          <Text style={{ fontSize: 15, fontFamily: 'Inter_600SemiBold', color: '#fff' }}>Saving...</Text>
+                        </>
+                      ) : saveState === 'analyzing' ? (
+                        <>
+                          <ActivityIndicator size={16} color="#fff" />
+                          <Text style={{ fontSize: 15, fontFamily: 'Inter_600SemiBold', color: '#fff' }}>AI Analyzing...</Text>
+                        </>
+                      ) : saveState === 'done' ? (
+                        <>
+                          <Ionicons name="checkmark-circle" size={20} color="#fff" />
+                          <Text style={{ fontSize: 15, fontFamily: 'Inter_600SemiBold', color: '#fff' }}>Saved</Text>
+                        </>
+                      ) : saveState === 'error' ? (
+                        <>
+                          <Ionicons name="alert-circle" size={20} color="#fff" />
+                          <Text style={{ fontSize: 15, fontFamily: 'Inter_600SemiBold', color: '#fff' }}>Failed</Text>
+                        </>
+                      ) : (
+                        <>
+                          <Ionicons name="arrow-forward-circle" size={20} color="#fff" />
+                          <Text style={{ fontSize: 15, fontFamily: 'Inter_600SemiBold', color: '#fff' }}>Save to Studio</Text>
+                        </>
+                      )}
                     </Pressable>
                   )}
                   <Pressable

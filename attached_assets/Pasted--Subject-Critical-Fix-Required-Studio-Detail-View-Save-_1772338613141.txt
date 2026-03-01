@@ -1,0 +1,133 @@
+
+⸻
+
+Subject: Critical Fix Required — Studio Detail View, Save State Machine, and Fulfillment Integrity
+
+Replit,
+
+We have three structural issues in Studio that must be fixed properly at the root level — not patched.
+
+This is not cosmetic.
+This affects execution integrity and fulfillment accuracy.
+
+⸻
+
+1) Studio Items Are Not Openable (Missing Detail View)
+
+Current behavior:
+	•	Media saves successfully.
+	•	Item appears in Studio.
+	•	There is no way to open the item and view the generated caption or AI metadata.
+
+This is a structural flaw.
+
+Required Fix:
+
+Implement a proper Studio Item Detail route:
+
+/studio/:itemId
+
+Clicking any Studio card must:
+	•	Navigate to the detail screen
+	•	Fetch the full item by ID
+	•	Display:
+	•	Media preview
+	•	Caption
+	•	CTA
+	•	Goal
+	•	Keywords
+	•	AI status
+	•	Timestamps
+	•	Engine origin
+
+Studio must function as the execution source of truth — not just a media list.
+
+⸻
+
+2) Save Button Has No State Machine (UX Integrity Failure)
+
+Current behavior:
+	•	Save appears complete instantly.
+	•	No visible saving/analyzing state.
+	•	User cannot know if AI is still processing.
+
+This creates confusion and perceived instability.
+
+Required State Lifecycle:
+
+When Save is pressed:
+	1.	SAVING
+	•	Replace check icon with spinner.
+	•	Disable duplicate clicks.
+	2.	ANALYZING
+	•	Show badge “Analyzing…”
+	•	Status persisted in DB.
+	3.	COMPLETE
+	•	Show success state.
+	4.	FAILED
+	•	Show retry option with structured error.
+
+No silent processing.
+No ambiguous state.
+
+This must be implemented as a proper status enum in the database.
+
+⸻
+
+3) Fulfillment Not Updating After Media Save (Critical)
+
+Current behavior:
+	•	Image and Poster are saved.
+	•	Required Work does not change.
+	•	Pipeline numbers remain unchanged.
+
+This breaks the single source of truth principle.
+
+Possible Causes:
+	•	mediaType not normalized before DB write
+	•	POSTER not mapped to DESIGNER branch
+	•	campaignId is null on save
+	•	fulfillment engine reading wrong table
+
+Required Structural Fix:
+	1.	Enforce campaignId as mandatory.
+Reject save if null.
+	2.	Centralize mediaType normalization before DB write.
+	3.	Ensure branch mapping covers:
+	•	VIDEO/REEL → VIDEO
+	•	IMAGE/CAROUSEL/POSTER → DESIGNER
+	•	POST/STORY → WRITER
+	4.	Confirm fulfillment engine reads exclusively from studio_items.
+	5.	Confirm delete restores remaining count correctly.
+
+Run integration test:
+	•	Create image → DESIGNER decreases by 1
+	•	Delete image → DESIGNER increases by 1
+	•	Repeat for each branch
+
+All endpoints must return identical fulfillment numbers.
+
+⸻
+
+Non-Negotiable Requirements
+	•	No null campaignId allowed.
+	•	No unmapped media types.
+	•	No duplicate save.
+	•	No UI freeze.
+	•	No fulfillment drift.
+
+After implementation:
+
+Provide:
+	•	Before/After fulfillment numbers
+	•	Logs
+	•	Confirmation that Required Work, Pipeline, and Dashboard are consistent.
+
+⸻
+
+Studio is not a gallery.
+Studio is execution infrastructure.
+
+Fix it structurally.
+
+— Samir

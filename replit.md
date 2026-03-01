@@ -36,7 +36,8 @@ Preferred communication style: Simple, everyday language.
 - **Content Creation**: AI Writer for text and AI Designer for image generation.
 - **Calendar**: AI Calendar Assistant for content scheduling.
 - **AI Management**: Auto-Publisher for Meta platforms, AI Audience Manager, and a Performance Intelligence Layer.
-- **Studio**: Media library with AI Auto-Fill metadata, AI Video Editor with FFmpeg, and AI Video Analysis Assist. Integration with Google Veo 3.1 for text-to-video and image-to-video generation.
+- **Studio**: Media library with AI Auto-Fill metadata, AI Video Editor with FFmpeg, and AI Video Analysis Assist. Integration with Google Veo 3.1 for text-to-video and image-to-video generation. Studio item detail view at `/studio/:itemId` with analysis results, retry capability, and polling.
+- **Save State Machine**: All save flows (Writer, Designer, Video) use a `saveState` (idle→saving→analyzing→done/error) for visible progress feedback. Error states persist for 3s without navigating away.
 - **Lead Engine**: Modular lead generation system with AI Lead Optimization.
 - **Competitive Intelligence**: Real-data competitor analysis system.
 - **Creative Capture Layer**: Analyzes reels with real data for deterministic signals and AI interpretation.

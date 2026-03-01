@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
+import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
 import { useCampaign } from '@/context/CampaignContext';
@@ -743,10 +744,20 @@ export default function StudioScreen() {
     );
   };
 
+  const router = useRouter();
+
+  const handleOpenStudioItem = (item: MediaItem) => {
+    if (item.studioItemId) {
+      router.push(`/studio/${item.studioItemId}`);
+    }
+  };
+
   const renderMediaCard = (item: MediaItem) => (
-    <View 
+    <Pressable
       key={item.id}
-      style={[styles.mediaCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
+      onPress={() => handleOpenStudioItem(item)}
+      disabled={!item.studioItemId}
+      style={[styles.mediaCard, { backgroundColor: colors.card, borderColor: colors.cardBorder, opacity: item.studioItemId ? 1 : 0.85 }]}
     >
       <View style={styles.mediaCardRow}>
         <View style={[styles.mediaThumbnail, { backgroundColor: colors.inputBackground }]}>
@@ -810,7 +821,7 @@ export default function StudioScreen() {
       </View>
       {renderAutoAnalysisPanel(item)}
       {renderAnalysisPanel(item)}
-    </View>
+    </Pressable>
   );
 
   return (
