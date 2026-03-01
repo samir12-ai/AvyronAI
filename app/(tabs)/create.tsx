@@ -567,17 +567,6 @@ export default function CreateScreen() {
     setSaveState('saving');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-    const newItem: ContentItem = {
-      id: generateId(),
-      type: contentType as ContentItem['type'],
-      platform: platform[0],
-      content: generatedContent,
-      status,
-      createdAt: new Date().toISOString(),
-    };
-
-    await addContentItem(newItem);
-
     try {
       const canonicalType = contentType === 'reel' ? 'REEL' : contentType === 'caption' ? 'POST' : contentType === 'story' ? 'STORY' : 'POST';
       const result = await saveToStudio({
@@ -590,22 +579,34 @@ export default function CreateScreen() {
         generationId: writerGenIdRef.current || undefined,
       });
 
+      if (!result.success || !result.studioItemId) {
+        throw new Error(result.error || 'Server did not return a valid item ID.');
+      }
+
       setSaveState('analyzing');
 
-      if (result.studioItemId) {
-        const writerMedia: MediaItem = {
-          id: generateId(),
-          type: canonicalType === 'REEL' ? 'video' : 'image',
-          title: topic.trim() || generatedContent.slice(0, 50),
-          uri: '',
-          platform: platform[0],
-          status: 'draft',
-          createdAt: new Date().toISOString(),
-          studioItemId: result.studioItemId,
-          autoCaption: generatedContent,
-        };
-        await addMediaItem(writerMedia);
-      }
+      const newItem: ContentItem = {
+        id: generateId(),
+        type: contentType as ContentItem['type'],
+        platform: platform[0],
+        content: generatedContent,
+        status,
+        createdAt: new Date().toISOString(),
+      };
+      await addContentItem(newItem);
+
+      const writerMedia: MediaItem = {
+        id: generateId(),
+        type: canonicalType === 'REEL' ? 'video' : 'image',
+        title: topic.trim() || generatedContent.slice(0, 50),
+        uri: '',
+        platform: platform[0],
+        status: 'draft',
+        createdAt: new Date().toISOString(),
+        studioItemId: result.studioItemId,
+        autoCaption: generatedContent,
+      };
+      await addMediaItem(writerMedia);
 
       queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
       queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
@@ -617,7 +618,7 @@ export default function CreateScreen() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         router.replace('/(tabs)/studio');
       }, 800);
-    } catch (err) {
+    } catch (err: any) {
       console.warn('[Create] Failed to save studio item:', err);
       setSaveState('error');
       setTimeout(() => setSaveState('idle'), 3000);
@@ -798,9 +799,23 @@ export default function CreateScreen() {
     }
 
     setSaveState('saving');
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const result = await saveToStudio({
+        campaignId: selectedCampaignId,
+        contentType: 'POSTER',
+        title: posterTopic || 'AI Design',
+        mediaUrl: generatedPoster,
+        engineName: 'AI Designer',
+        generationId: designerGenIdRef.current || undefined,
+      });
+
+      if (!result.success || !result.studioItemId) {
+        throw new Error(result.error || 'Server did not return a valid item ID.');
+      }
+
+      setSaveState('analyzing');
 
       const newMedia: MediaItem = {
         id: generateId(),
@@ -810,29 +825,12 @@ export default function CreateScreen() {
         platform: platform[0],
         status: 'draft',
         createdAt: new Date().toISOString(),
+        studioItemId: result.studioItemId,
       };
-
-      try {
-        const result = await saveToStudio({
-          campaignId: selectedCampaignId,
-          contentType: 'IMAGE',
-          title: posterTopic || 'AI Design',
-          mediaUrl: generatedPoster,
-          engineName: 'AI Designer',
-          generationId: designerGenIdRef.current || undefined,
-        });
-        setSaveState('analyzing');
-        if (result.studioItemId) {
-          newMedia.studioItemId = result.studioItemId;
-        }
-        queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
-        queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
-      } catch (err) {
-        console.warn('[Create] Failed to save poster studio item:', err);
-        setSaveState('error');
-      }
-
       await addMediaItem(newMedia);
+
+      queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
+      queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
 
       try {
         await saveImageToGallery(generatedPoster);
@@ -849,8 +847,12 @@ export default function CreateScreen() {
     } catch (error: any) {
       console.error('Save design error:', error);
       setSaveState('error');
-      setTimeout(() => setSaveState('idle'), 2000);
-      Alert.alert('Save Failed', error?.message || 'Could not save design. Please try again.');
+      setTimeout(() => setSaveState('idle'), 3000);
+      if (Platform.OS === 'web') {
+        window.alert(error?.message || 'Could not save design. Please try again.');
+      } else {
+        Alert.alert('Save Failed', error?.message || 'Could not save design. Please try again.');
+      }
     }
   };
 
@@ -2478,7 +2480,7 @@ export default function CreateScreen() {
                         setSaveState('saving');
                         try {
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                          await saveToStudio({
+                          const result = await saveToStudio({
                             campaignId: selectedCampaignId,
                             contentType: 'VIDEO',
                             title: videoPrompt?.slice(0, 80) || 'AI Video',
@@ -2487,6 +2489,19 @@ export default function CreateScreen() {
                             generationId: videoGenIdRef.current || undefined,
                           });
                           setSaveState('analyzing');
+
+                          const videoMedia: MediaItem = {
+                            id: generateId(),
+                            type: 'video',
+                            title: videoPrompt?.slice(0, 80) || 'AI Video',
+                            uri: videoUrls[0] || videoUrl || '',
+                            platform: platform[0],
+                            status: 'draft',
+                            createdAt: new Date().toISOString(),
+                            studioItemId: result.studioItemId,
+                          };
+                          await addMediaItem(videoMedia);
+
                           queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
                           queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
                           setSaveState('done');
@@ -2495,11 +2510,15 @@ export default function CreateScreen() {
                             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                             router.replace('/(tabs)/studio');
                           }, 800);
-                        } catch (err) {
+                        } catch (err: any) {
                           console.warn('[Create] Failed to save video to studio:', err);
                           setSaveState('error');
-                          setTimeout(() => setSaveState('idle'), 2000);
-                          Alert.alert('Save Failed', 'Could not save video to Studio.');
+                          setTimeout(() => setSaveState('idle'), 3000);
+                          if (Platform.OS === 'web') {
+                            window.alert(err?.message || 'Could not save video to Studio.');
+                          } else {
+                            Alert.alert('Save Failed', err?.message || 'Could not save video to Studio.');
+                          }
                         }
                       }}
                       disabled={saveState !== 'idle'}

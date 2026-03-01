@@ -1,0 +1,58 @@
+Replit,
+
+This is still NOT fixed. We are losing data integrity and breaking the single-track flow.
+
+I’m seeing 3 P0 issues right now:
+
+1) SAVE ERROR still happening
+- The UI shows “Save error”.
+- Yet it sometimes redirects to Studio.
+- In Studio it’s EMPTY (no item, no caption, no detail screen).
+This is unacceptable because it means the client cannot trust whether the content was saved or not.
+
+You must fix this as a real transactional flow:
+- The Save request must be atomic:
+  - Either it returns success with the created item ID (and the item exists in DB),
+  - Or it fails and NOTHING is created.
+- The frontend must only redirect to Studio AFTER receiving:
+  - success=true AND itemId returned AND a follow-up GET /studio/:itemId succeeds.
+
+No “optimistic redirect”, no fake success, no silent partial write.
+
+2) Wrong media type — saving as BOTH “Poster” AND “Image”
+I do NOT want this. I want ONE type only.
+If the user is in “AI Posters” creation, it must save as POSTER only — not POSTER + IMAGE.
+Right now it’s duplicating or misclassifying the same asset, causing:
+- wrong counts in Studio
+- wrong fulfillment numbers
+- confusion for the user
+
+Fix requirements:
+- Enforce strict mediaType at the API boundary.
+- Reject any request that results in two types for one save.
+- Add a single source rule:
+  - This creation path => mediaType = POSTER ONLY (hard set server-side, not trusted from client).
+- Update branch mapping so POSTER counts under DESIGNER (but remains POSTER as type).
+
+3) Studio redirect opens empty / cannot open item
+Even when redirect happens, Studio shows no usable detail.
+I need the user to be able to open the saved poster and see:
+- generated caption
+- AI status (saving/analyzing/complete)
+- final saved result
+
+So you must implement:
+- A Studio Item Detail route (studio/:itemId)
+- Clicking the card opens it
+- The detail screen fetches by ID and shows the caption + metadata
+
+Acceptance criteria (must be proven, not claimed):
+A) Save a POSTER -> returns itemId -> Studio shows 1 poster -> open detail -> caption visible
+B) No duplicate “Image” entry created from poster flow
+C) No “Save error” unless the DB insert truly failed
+D) Required Work decreases by 1 under DESIGNER after poster save (and increases after delete)
+E) All endpoints show identical fulfillment numbers (dashboard / pipeline / required-work / calendar)
+
+This is a release blocker. I do not want partial fixes or “it should work”. I want hard proof with the above acceptance tests.
+
+— Samir

@@ -40,13 +40,23 @@ export async function saveToStudio(
     engineName: params.engineName,
   });
 
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ error: "Unknown server error" }));
+    throw new Error(errorData.error || errorData.message || `Save failed (HTTP ${res.status})`);
+  }
+
   const data = await res.json();
 
+  if (!data.success || !data.studioItemId) {
+    throw new Error(data.error || data.message || "Server did not confirm save.");
+  }
+
   return {
-    success: data.success ?? false,
-    studioItemId: data.studioItemId ?? null,
+    success: true,
+    studioItemId: data.studioItemId,
     analysisStatus: data.analysisStatus ?? "NONE",
     idempotent: data.idempotent ?? false,
     flagEnabled: data.flagEnabled,
+    error: undefined,
   };
 }

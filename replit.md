@@ -76,6 +76,9 @@ Preferred communication style: Simple, everyday language.
 - **Canonical Media Types**: Single source of truth in `lib/media-types.ts`.
 - **Fulfillment Engine**: Computes live progress from `studio_items` only, providing `required`, `fulfilled`, and `remaining` counts by branch and status.
 - **Unified Save→Studio + Auto AI Analysis**: All AI creation outputs use `saveToStudio()` to create `studio_items` rows with `analysisStatus: 'PENDING'`, triggering background AI analysis for metadata generation.
+- **Atomic Save Flows**: All save handlers (Writer, Designer, Video) are atomic — no local state (MediaItem, ContentItem) is created unless the DB write succeeds and returns a valid `studioItemId`. On failure, `saveState` shows 'error' for 3s without navigating.
+- **POSTER Canonical Type**: `POSTER` is a first-class canonical media type in `lib/media-types.ts`, mapped to the `DESIGNER` fulfillment branch. Frontend `MediaItem.type: 'poster'` maps to backend `contentType: 'POSTER'`.
+- **saveToStudio Error Propagation**: `lib/studio-save-service.ts` throws on HTTP errors and missing `studioItemId`, ensuring callers always get exceptions on failure.
 - **Fulfillment Write Paths**: All content creation paths write to `studio_items`, enforcing mandatory `campaignId`.
 
 ## External Dependencies

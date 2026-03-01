@@ -57,6 +57,7 @@ function normalizeToStudioType(raw: string | undefined | null): StudioMediaType 
       return 'video';
     case 'CAROUSEL':
     case 'IMAGE':
+    case 'POSTER':
       return 'image';
     case 'POST':
     case 'STORY':

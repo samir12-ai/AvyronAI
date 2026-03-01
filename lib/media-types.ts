@@ -1,4 +1,4 @@
-export const CANONICAL_MEDIA_TYPES = ['VIDEO', 'REEL', 'IMAGE', 'CAROUSEL', 'POST', 'STORY'] as const;
+export const CANONICAL_MEDIA_TYPES = ['VIDEO', 'REEL', 'IMAGE', 'POSTER', 'CAROUSEL', 'POST', 'STORY'] as const;
 export type CanonicalMediaType = (typeof CANONICAL_MEDIA_TYPES)[number];
 
 const NORMALIZE_MAP: Record<string, CanonicalMediaType> = {
@@ -9,7 +9,7 @@ const NORMALIZE_MAP: Record<string, CanonicalMediaType> = {
   image: 'IMAGE',
   images: 'IMAGE',
   photo: 'IMAGE',
-  poster: 'IMAGE',
+  poster: 'POSTER',
   carousel: 'CAROUSEL',
   post: 'POST',
   caption: 'POST',
@@ -40,6 +40,7 @@ export function getBranchForMediaType(mediaType: string | null | undefined): Ful
     case 'REEL':
       return 'VIDEO';
     case 'IMAGE':
+    case 'POSTER':
     case 'CAROUSEL':
       return 'DESIGNER';
     case 'POST':
@@ -65,6 +66,7 @@ export function createRouteForContentType(contentType: string): RouteMapping {
     case 'REEL':
       return { tab: 'content', contentType: 'reel', label: 'Reels Creation' };
     case 'IMAGE':
+    case 'POSTER':
     case 'CAROUSEL':
       return { tab: 'designer', contentType: 'post', label: 'AI Designer' };
     case 'POST':
