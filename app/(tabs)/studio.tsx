@@ -41,11 +41,10 @@ interface AutoAnalysisData {
   suggestedCaption?: string | null;
 }
 
-type StudioMediaType = 'video' | 'image' | 'poster';
+type StudioMediaType = 'video' | 'poster';
 
 const STUDIO_TYPE_LABELS: Record<StudioMediaType, string> = {
   video: 'Video / Reel',
-  image: 'Image',
   poster: 'Poster',
 };
 
@@ -55,15 +54,10 @@ function normalizeToStudioType(raw: string | undefined | null): StudioMediaType 
     case 'VIDEO':
     case 'REEL':
       return 'video';
-    case 'CAROUSEL':
-    case 'IMAGE':
     case 'POSTER':
-      return 'image';
-    case 'POST':
-    case 'STORY':
-      return 'image';
+      return 'poster';
     default:
-      return 'image';
+      return 'poster';
   }
 }
 
@@ -91,9 +85,8 @@ const defaultStudioState: StudioDraftState = {
   selectedUri: null,
 };
 
-const mediaTypes: { id: StudioMediaType; label: string; icon: 'videocam-outline' | 'image-outline' | 'easel-outline' }[] = [
+const mediaTypes: { id: StudioMediaType; label: string; icon: 'videocam-outline' | 'easel-outline' }[] = [
   { id: 'video', label: 'Video / Reel', icon: 'videocam-outline' },
-  { id: 'image', label: 'Image', icon: 'image-outline' },
   { id: 'poster', label: 'Poster', icon: 'easel-outline' },
 ];
 
@@ -207,7 +200,6 @@ export default function StudioScreen() {
   }, [hydrationVersion, ps]);
 
   const videos = mediaItems.filter(m => normalizeToStudioType(m.type) === 'video');
-  const images = mediaItems.filter(m => normalizeToStudioType(m.type) === 'image');
   const posters = mediaItems.filter(m => m.type === 'poster');
 
   const handlePickMedia = async () => {
@@ -251,9 +243,8 @@ export default function StudioScreen() {
   const studioTypeToCanonical = (st: StudioMediaType): string => {
     switch (st) {
       case 'video': return 'REEL';
-      case 'image': return 'IMAGE';
-      case 'poster': return 'IMAGE';
-      default: return 'IMAGE';
+      case 'poster': return 'POSTER';
+      default: return 'POSTER';
     }
   };
 
@@ -763,7 +754,7 @@ export default function StudioScreen() {
       <View style={styles.mediaCardRow}>
         <View style={[styles.mediaThumbnail, { backgroundColor: colors.inputBackground }]}>
           <Ionicons 
-            name={normalizeToStudioType(item.type) === 'video' ? 'videocam' : item.type === 'poster' ? 'easel' : 'image'} 
+            name={normalizeToStudioType(item.type) === 'video' ? 'videocam' : 'easel'} 
             size={32} 
             color={colors.textMuted} 
           />
@@ -876,12 +867,6 @@ export default function StudioScreen() {
               </View>
               <View style={[styles.statDivider, { backgroundColor: colors.cardBorder }]} />
               <View style={styles.stat}>
-                <Ionicons name="image" size={20} color={colors.accent} />
-                <Text style={[styles.statValue, { color: colors.text }]}>{images.length}</Text>
-                <Text style={[styles.statLabel, { color: colors.textMuted }]}>{t('studio.images')}</Text>
-              </View>
-              <View style={[styles.statDivider, { backgroundColor: colors.cardBorder }]} />
-              <View style={styles.stat}>
                 <Ionicons name="easel" size={20} color={colors.accentOrange} />
                 <Text style={[styles.statValue, { color: colors.text }]}>{posters.length}</Text>
                 <Text style={[styles.statLabel, { color: colors.textMuted }]}>{t('studio.posters')}</Text>
@@ -896,18 +881,6 @@ export default function StudioScreen() {
                 </View>
                 <View style={styles.mediaList}>
                   {videos.map(renderMediaCard)}
-                </View>
-              </View>
-            )}
-
-            {images.length > 0 && (
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Ionicons name="image" size={20} color={colors.accent} />
-                  <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('studio.images')}</Text>
-                </View>
-                <View style={styles.mediaList}>
-                  {images.map(renderMediaCard)}
                 </View>
               </View>
             )}

@@ -595,18 +595,20 @@ export default function CreateScreen() {
       };
       await addContentItem(newItem);
 
-      const writerMedia: MediaItem = {
-        id: generateId(),
-        type: canonicalType === 'REEL' ? 'video' : 'image',
-        title: topic.trim() || generatedContent.slice(0, 50),
-        uri: '',
-        platform: platform[0],
-        status: 'draft',
-        createdAt: new Date().toISOString(),
-        studioItemId: result.studioItemId,
-        autoCaption: generatedContent,
-      };
-      await addMediaItem(writerMedia);
+      if (canonicalType === 'REEL') {
+        const writerMedia: MediaItem = {
+          id: generateId(),
+          type: 'video',
+          title: topic.trim() || generatedContent.slice(0, 50),
+          uri: '',
+          platform: platform[0],
+          status: 'draft',
+          createdAt: new Date().toISOString(),
+          studioItemId: result.studioItemId,
+          autoCaption: generatedContent,
+        };
+        await addMediaItem(writerMedia);
+      }
 
       queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
       queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
