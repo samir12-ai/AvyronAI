@@ -443,6 +443,20 @@ export default function CompetitiveIntelligence() {
           <Text style={[s.emptyDesc, { color: colors.textMuted }]}>
             Add competitors with complete evidence data, then run your first analysis.
           </Text>
+          {competitors.length > 0 && (
+            <Pressable
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); analyzeMutation.mutate(); }}
+              disabled={analyzeMutation.isPending}
+              style={[s.emptyAnalyzeBtn, { opacity: analyzeMutation.isPending ? 0.6 : 1 }]}
+            >
+              {analyzeMutation.isPending ? (
+                <ActivityIndicator size={16} color="#fff" />
+              ) : (
+                <Ionicons name="analytics" size={18} color="#fff" />
+              )}
+              <Text style={s.emptyAnalyzeBtnText}>{analyzeMutation.isPending ? 'Running Analysis...' : 'Run Market Analysis'}</Text>
+            </Pressable>
+          )}
         </View>
       );
     }
@@ -453,6 +467,18 @@ export default function CompetitiveIntelligence() {
           <View style={s.cardHeader}>
             <Ionicons name="globe-outline" size={18} color="#8B5CF6" />
             <Text style={[s.cardTitle, { color: colors.text }]}>Market Overview</Text>
+            <Pressable
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); analyzeMutation.mutate(); }}
+              disabled={analyzeMutation.isPending}
+              style={[s.cardAnalyzeBtn, { backgroundColor: '#8B5CF6' + '15', opacity: analyzeMutation.isPending ? 0.6 : 1 }]}
+            >
+              {analyzeMutation.isPending ? (
+                <ActivityIndicator size={12} color="#8B5CF6" />
+              ) : (
+                <Ionicons name="analytics-outline" size={14} color="#8B5CF6" />
+              )}
+              <Text style={s.cardAnalyzeBtnText}>{analyzeMutation.isPending ? 'Analyzing...' : 'Analyze'}</Text>
+            </Pressable>
           </View>
           <Text style={[s.cardBody, { color: colors.textSecondary }]}>{overview?.summary || 'Analysis in progress...'}</Text>
           {overview?.competitiveIntensity && (
@@ -1539,6 +1565,10 @@ const s = StyleSheet.create({
   actionRow: { alignItems: 'center', marginTop: 8 },
   analyzeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#8B5CF6', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10 },
   analyzeBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  cardAnalyzeBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  cardAnalyzeBtnText: { fontSize: 12, fontWeight: '600', color: '#8B5CF6' },
+  emptyAnalyzeBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#8B5CF6', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10, marginTop: 16 },
+  emptyAnalyzeBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   sectionTitle: { fontSize: 16, fontWeight: '700' },
   addBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
