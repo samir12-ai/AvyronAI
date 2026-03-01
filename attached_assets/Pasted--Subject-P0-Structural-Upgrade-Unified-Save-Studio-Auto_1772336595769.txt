@@ -1,0 +1,165 @@
+
+⸻
+
+Subject: P0 Structural Upgrade — Unified Save→Studio + Auto AI Analysis (Feature-Flagged, Regression-Gated, Rollback-Ready)
+
+Replit,
+
+We are implementing a structural upgrade to the AI Creation workflow.
+
+This is P0.
+It must be clean, centralized, regression-safe, and reversible if needed.
+
+No partial rollouts.
+No module-specific hacks.
+
+⸻
+
+Objective
+
+Every AI Creation output (Writer, Designer, Reels, Stories, etc.) must support a unified:
+
+Save → Studio → Automatic AI Analysis flow.
+
+One pipeline.
+One logic layer.
+One source of truth.
+
+⸻
+
+Functional Requirements
+
+1) Unified Save → Studio
+
+Every AI output must expose a consistent:
+
+Save → Studio button.
+
+On click:
+	•	Create a Studio item with:
+	•	campaignId (mandatory, never null)
+	•	normalized mediaType
+	•	origin = AI_CREATION
+	•	engineName
+	•	generationId (for idempotency + traceability)
+	•	Immediately navigate to that Studio item.
+	•	Navigation must complete in < 1 second.
+	•	Must NOT wait for AI analysis to finish before navigating.
+
+This must be implemented in a shared service, not duplicated per module.
+
+⸻
+
+2) Automatic AI Analysis (Event-Driven)
+
+After Studio item creation:
+	•	Analysis must auto-trigger (no manual button required).
+	•	Status lifecycle required:
+	•	PENDING → RUNNING → COMPLETE / FAILED
+
+AI must generate:
+	•	Hook
+	•	Full caption draft
+	•	Suggested CTA
+	•	Suggested goal
+	•	Content angle
+	•	Keywords / hashtags
+
+The user’s role is review/edit — not pre-filling strategy.
+
+⸻
+
+3) Idempotency & Data Integrity
+	•	Pressing Save multiple times must not create duplicate Studio items.
+	•	generationId must enforce idempotent behavior.
+	•	No Studio item allowed without campaignId.
+	•	Analysis must never silently overwrite user edits.
+	•	If user edits before analysis completes → AI results must be treated as suggestions only.
+
+⸻
+
+4) Error Discipline
+
+If required asset is missing (e.g., broken video upload):
+	•	Return structured error (e.g., ASSET_MISSING).
+	•	No generic 500s.
+	•	Always include requestId.
+	•	UI must show recovery action, not crash.
+
+⸻
+
+Regression Gate (Mandatory Before Release)
+
+Before shipping:
+
+You must re-run full regression tests covering:
+	•	Required Work branch counts
+	•	Pipeline progress updates
+	•	Calendar entry state
+	•	Dashboard metrics
+	•	Autopilot plan binding
+	•	Campaign isolation
+	•	Single-track enforcement
+
+Provide:
+	•	PASS/FAIL matrix
+	•	Logs with requestIds
+	•	Confirmation that no fulfillment drift occurred
+
+If any regression appears → fix root cause, rerun full suite.
+
+⸻
+
+Feature Flag Requirement
+
+This enhancement must ship behind a feature flag:
+
+AUTO_STUDIO_ANALYZE_V2
+	•	Must be toggleable without redeploy.
+	•	Must allow rollback to previous stable behavior.
+	•	No destructive DB changes without backward compatibility.
+
+⸻
+
+Rollback Clause
+
+If post-deployment instability is detected:
+	•	Feature flag must disable new behavior immediately.
+	•	No manual data repair required.
+	•	System must revert to previous stable flow without corruption.
+
+⸻
+
+Performance Constraints
+	•	Save → Studio navigation: < 1 second.
+	•	Analysis start: < 3 seconds.
+	•	No UI freeze.
+	•	No duplicate background jobs.
+	•	No memory leak.
+	•	No hanging RUNNING states.
+
+⸻
+
+Deadline
+	•	Implementation plan within 24 hours.
+	•	ETA for release with regression verification.
+	•	Confirmation of centralized implementation approach.
+
+⸻
+
+Final Condition
+
+We are building an autonomous execution system.
+
+Creation → Studio must be seamless, deterministic, and stable under pressure.
+
+Confirm:
+	1.	Centralized implementation design.
+	2.	Idempotency enforcement strategy.
+	3.	Feature flag integration point.
+	4.	Regression test coverage list.
+	5.	Rollback validation plan.
+
+No partial compliance.
+
+— Samir

@@ -12,7 +12,8 @@ export type LeadEngineModule =
   | "revenue_attribution_enabled"
   | "ai_lead_optimization_enabled"
   | "lead_engine_global_off"
-  | "competitive_intelligence_enabled";
+  | "competitive_intelligence_enabled"
+  | "auto_studio_analyze_v2";
 
 const MODULE_DEPENDENCIES: Record<string, string[]> = {
   lead_capture_enabled: [],
@@ -24,6 +25,7 @@ const MODULE_DEPENDENCIES: Record<string, string[]> = {
   revenue_attribution_enabled: ["conversion_tracking_enabled"],
   ai_lead_optimization_enabled: ["conversion_tracking_enabled", "funnel_logic_enabled"],
   competitive_intelligence_enabled: [],
+  auto_studio_analyze_v2: [],
 };
 
 export interface FlagCheckResult {
@@ -76,7 +78,7 @@ export class FeatureFlagService {
       "lead_capture_enabled", "cta_engine_enabled", "conversion_tracking_enabled",
       "funnel_logic_enabled", "lead_magnet_enabled", "landing_pages_enabled",
       "revenue_attribution_enabled", "ai_lead_optimization_enabled", "lead_engine_global_off",
-      "competitive_intelligence_enabled",
+      "competitive_intelligence_enabled", "auto_studio_analyze_v2",
     ];
 
     for (const mod of allModules) {

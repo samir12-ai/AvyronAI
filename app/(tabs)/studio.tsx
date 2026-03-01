@@ -10,6 +10,7 @@ import {
   Modal,
   TextInput,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,10 +23,22 @@ import { useCampaign } from '@/context/CampaignContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import { generateId } from '@/lib/storage';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, apiRequest } from '@/lib/query-client';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { normalizeMediaType } from '@/lib/media-types';
 import type { MediaItem } from '@/lib/types';
+
+interface AutoAnalysisData {
+  id: string;
+  analysisStatus: string;
+  analysisError?: string | null;
+  hook?: string | null;
+  goal?: string | null;
+  keywords?: string | null;
+  contentAngle?: string | null;
+  suggestedCta?: string | null;
+  suggestedCaption?: string | null;
+}
 
 type StudioMediaType = 'video' | 'image' | 'poster';
 
@@ -110,7 +123,55 @@ export default function StudioScreen() {
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<{ [key: string]: any }>({});
   const [applyToggles, setApplyToggles] = useState<{ [itemId: string]: { hook: boolean; caption: boolean; cta: boolean; angle: boolean; keywords: boolean } }>({});
+  const [autoAnalysis, setAutoAnalysis] = useState<{ [studioItemId: string]: AutoAnalysisData }>({});
+  const pollingIdsRef = useRef<Set<string>>(new Set());
   const lastHydrationRef = useRef(0);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchAnalysisStatus = useCallback(async (studioItemId: string) => {
+    try {
+      const res = await apiRequest('GET', `/api/studio/items/${studioItemId}/analysis-status?accountId=default`);
+      const data: AutoAnalysisData = await res.json();
+      setAutoAnalysis(prev => ({ ...prev, [studioItemId]: data }));
+      if (data.analysisStatus !== 'PENDING' && data.analysisStatus !== 'RUNNING') {
+        pollingIdsRef.current.delete(studioItemId);
+        if (pollingIdsRef.current.size === 0 && pollTimerRef.current) {
+          clearInterval(pollTimerRef.current);
+          pollTimerRef.current = null;
+        }
+      }
+    } catch (err) {
+      console.warn('[Studio] Failed to fetch analysis status:', err);
+    }
+  }, []);
+
+  const startPolling = useCallback((studioItemId: string) => {
+    pollingIdsRef.current.add(studioItemId);
+    if (!pollTimerRef.current) {
+      pollTimerRef.current = setInterval(() => {
+        pollingIdsRef.current.forEach(id => fetchAnalysisStatus(id));
+      }, 3000);
+    }
+  }, [fetchAnalysisStatus]);
+
+  useEffect(() => {
+    const itemsWithStudioId = mediaItems.filter(m => m.studioItemId);
+    for (const item of itemsWithStudioId) {
+      if (!autoAnalysis[item.studioItemId!]) {
+        fetchAnalysisStatus(item.studioItemId!);
+        startPolling(item.studioItemId!);
+      }
+    }
+  }, [mediaItems]);
+
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (hydrationVersion > 0 && hydrationVersion !== lastHydrationRef.current) {
@@ -577,6 +638,111 @@ export default function StudioScreen() {
     );
   };
 
+  const handleRetryAnalysis = async (studioItemId: string) => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      await apiRequest('POST', `/api/studio/items/${studioItemId}/retry-analysis`, { accountId: 'default' });
+      setAutoAnalysis(prev => ({ ...prev, [studioItemId]: { ...prev[studioItemId], analysisStatus: 'PENDING', analysisError: null } }));
+      startPolling(studioItemId);
+    } catch (err) {
+      console.warn('[Studio] Retry analysis failed:', err);
+    }
+  };
+
+  const handleApplyAutoField = (item: MediaItem, field: string, value: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const updated = { ...item };
+    if (field === 'caption') updated.autoCaption = value;
+    if (field === 'cta') updated.cta = value;
+    if (field === 'goal') updated.goal = value;
+    updateMediaItem(updated);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const renderAutoAnalysisPanel = (item: MediaItem) => {
+    if (!item.studioItemId) return null;
+    const analysis = autoAnalysis[item.studioItemId];
+    if (!analysis) return null;
+    if (analysis.analysisStatus === 'NONE') return null;
+
+    if (analysis.analysisStatus === 'PENDING' || analysis.analysisStatus === 'RUNNING') {
+      return (
+        <View style={[styles.analysisPanel, { backgroundColor: colors.primary + '08', borderColor: colors.primary + '20' }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={{ color: colors.primary, fontSize: 13, fontFamily: 'Inter_500Medium' }}>
+              AI analyzing content...
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
+    if (analysis.analysisStatus === 'FAILED') {
+      return (
+        <View style={[styles.analysisPanel, { backgroundColor: '#EF444410', borderColor: '#EF444430' }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <Ionicons name="warning-outline" size={16} color="#EF4444" />
+            <Text style={{ color: '#EF4444', fontSize: 13, fontFamily: 'Inter_500Medium', flex: 1 }}>
+              Analysis failed: {analysis.analysisError || 'Unknown error'}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => handleRetryAnalysis(item.studioItemId!)}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#EF444415', borderRadius: 8, alignSelf: 'flex-start' }}
+          >
+            <Ionicons name="refresh" size={14} color="#EF4444" />
+            <Text style={{ color: '#EF4444', fontSize: 12, fontFamily: 'Inter_600SemiBold' }}>Retry</Text>
+          </Pressable>
+        </View>
+      );
+    }
+
+    if (analysis.analysisStatus !== 'COMPLETE') return null;
+
+    const suggestions = [
+      { key: 'hook', label: 'Hook', icon: 'flash', color: '#EF4444', value: analysis.hook },
+      { key: 'goal', label: 'Goal', icon: 'flag', color: '#3B82F6', value: analysis.goal, applyable: true },
+      { key: 'contentAngle', label: 'Content Angle', icon: 'compass', color: '#8B5CF6', value: analysis.contentAngle },
+      { key: 'suggestedCaption', label: 'Caption', icon: 'chatbubble-ellipses', color: colors.accent, value: analysis.suggestedCaption, applyable: true },
+      { key: 'suggestedCta', label: 'CTA', icon: 'megaphone', color: colors.success, value: analysis.suggestedCta, applyable: true },
+      { key: 'keywords', label: 'Keywords', icon: 'pricetag', color: colors.textSecondary, value: analysis.keywords },
+    ].filter(s => s.value);
+
+    if (suggestions.length === 0) return null;
+
+    return (
+      <View style={[styles.analysisPanel, { backgroundColor: colors.primary + '08', borderColor: colors.primary + '20' }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+          <Ionicons name="sparkles" size={14} color={colors.primary} />
+          <Text style={{ color: colors.primary, fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>AI Analysis</Text>
+        </View>
+        {suggestions.map(s => (
+          <View key={s.key} style={{ marginBottom: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+              <Ionicons name={s.icon as any} size={12} color={s.color} />
+              <Text style={{ color: s.color, fontSize: 11, fontFamily: 'Inter_600SemiBold', textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>
+                {s.label}
+              </Text>
+            </View>
+            <Text style={{ color: colors.text, fontSize: 12, lineHeight: 18, paddingLeft: 16 }} numberOfLines={3}>
+              {s.value}
+            </Text>
+            {s.applyable && (
+              <Pressable
+                onPress={() => handleApplyAutoField(item, s.key === 'suggestedCaption' ? 'caption' : s.key === 'suggestedCta' ? 'cta' : s.key, s.value!)}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 8, backgroundColor: s.color + '15', borderRadius: 6, alignSelf: 'flex-start', marginLeft: 16, marginTop: 4 }}
+              >
+                <Ionicons name="add-circle-outline" size={12} color={s.color} />
+                <Text style={{ color: s.color, fontSize: 11, fontFamily: 'Inter_600SemiBold' }}>Apply</Text>
+              </Pressable>
+            )}
+          </View>
+        ))}
+      </View>
+    );
+  };
+
   const renderMediaCard = (item: MediaItem) => (
     <View 
       key={item.id}
@@ -642,6 +808,7 @@ export default function StudioScreen() {
           </Pressable>
         </View>
       </View>
+      {renderAutoAnalysisPanel(item)}
       {renderAnalysisPanel(item)}
     </View>
   );

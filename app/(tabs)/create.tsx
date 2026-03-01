@@ -15,7 +15,7 @@ import {
   Dimensions,
   Modal,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -42,6 +42,7 @@ import { PlatformPicker } from '@/components/PlatformPicker';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { generateId } from '@/lib/storage';
 import { apiRequest, getApiUrl } from '@/lib/query-client';
+import { saveToStudio } from '@/lib/studio-save-service';
 import { useCreativeContext } from '@/context/CreativeContext';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -287,6 +288,7 @@ export default function CreateScreen() {
   const { t } = useLanguage();
   const { creativeContext, clearCreativeContext } = useCreativeContext();
   const queryClient = useQueryClient();
+  const router = useRouter();
   const { state: ps, updateState, isLoading: psLoading, isSaving, saveError, hydrationVersion } = usePersistedState<CreatePersistedState>('create', defaultCreateState);
   const [ciScriptResult, setCiScriptResult] = useState<any>(null);
   const [ciScriptError, setCiScriptError] = useState<string | null>(null);
@@ -324,6 +326,9 @@ export default function CreateScreen() {
   const [topic, setTopic] = useState(ps.topic);
   const [generatedContent, setGeneratedContent] = useState(ps.generatedContent);
   const [isGenerating, setIsGenerating] = useState(false);
+  const writerGenIdRef = useRef<string | null>(null);
+  const designerGenIdRef = useRef<string | null>(null);
+  const videoGenIdRef = useRef<string | null>(null);
   const [reelDuration, setReelDuration] = useState(ps.reelDuration);
   const [reelGoal, setReelGoal] = useState(ps.reelGoal);
   const [reelScript, setReelScript] = useState<any>(ps.reelScript);
@@ -521,6 +526,7 @@ export default function CreateScreen() {
           setReelScript(data.script);
         } else if (data.rawContent) {
           setGeneratedContent(data.rawContent);
+          writerGenIdRef.current = generateId();
         }
       } else {
         const response = await apiRequest('POST', '/api/generate-content', {
@@ -535,6 +541,7 @@ export default function CreateScreen() {
         });
         const data = await response.json();
         setGeneratedContent(data.content);
+        writerGenIdRef.current = generateId();
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
@@ -571,15 +578,33 @@ export default function CreateScreen() {
 
     try {
       const canonicalType = contentType === 'reel' ? 'REEL' : contentType === 'caption' ? 'POST' : contentType === 'story' ? 'STORY' : 'POST';
-      await apiRequest('POST', '/api/studio/items', {
+      const result = await saveToStudio({
         campaignId: selectedCampaignId,
-        accountId: 'default',
         contentType: canonicalType,
         title: topic.trim() || generatedContent.slice(0, 50),
         caption: generatedContent,
         calendarEntryId: calendarEntryId || undefined,
+        engineName: 'AI Writer',
+        generationId: writerGenIdRef.current || undefined,
       });
+
+      if (result.studioItemId) {
+        const writerMedia: MediaItem = {
+          id: generateId(),
+          type: canonicalType === 'REEL' ? 'video' : 'image',
+          title: topic.trim() || generatedContent.slice(0, 50),
+          uri: '',
+          platform: platform[0],
+          status: 'draft',
+          createdAt: new Date().toISOString(),
+          studioItemId: result.studioItemId,
+          autoCaption: generatedContent,
+        };
+        await addMediaItem(writerMedia);
+      }
+
       queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
+      queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
     } catch (err) {
       console.warn('[Create] Failed to save studio item:', err);
     }
@@ -587,7 +612,8 @@ export default function CreateScreen() {
     setTopic('');
     setGeneratedContent('');
     
-    Alert.alert(t('create.savedToGallery'), `Content saved as ${status}.`);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    router.replace('/(tabs)/studio');
   };
 
   const pickPhoto = async (index: number) => {
@@ -682,6 +708,7 @@ export default function CreateScreen() {
 
       const data = await response.json();
       setGeneratedPoster(data.imageUrl);
+      designerGenIdRef.current = generateId();
 
       const historyItem: GeneratedImage = {
         id: generateId(),
@@ -775,20 +802,25 @@ export default function CreateScreen() {
         createdAt: new Date().toISOString(),
       };
 
-      await addMediaItem(newMedia);
-
       try {
-        await apiRequest('POST', '/api/studio/items', {
+        const result = await saveToStudio({
           campaignId: selectedCampaignId,
-          accountId: 'default',
           contentType: 'IMAGE',
           title: posterTopic || 'AI Design',
           mediaUrl: generatedPoster,
+          engineName: 'AI Designer',
+          generationId: designerGenIdRef.current || undefined,
         });
+        if (result.studioItemId) {
+          newMedia.studioItemId = result.studioItemId;
+        }
         queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
+        queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
       } catch (err) {
         console.warn('[Create] Failed to save poster studio item:', err);
       }
+
+      await addMediaItem(newMedia);
 
       try {
         await saveImageToGallery(generatedPoster);
@@ -797,7 +829,7 @@ export default function CreateScreen() {
       }
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('Saved', 'Design saved to your Studio library.');
+      router.replace('/(tabs)/studio');
     } catch (error: any) {
       console.error('Save design error:', error);
       Alert.alert('Save Failed', error?.message || 'Could not save design. Please try again.');
@@ -966,6 +998,7 @@ export default function CreateScreen() {
           const makeFullUrl = (u: string) => u.startsWith('/') ? `${baseUrl}${u}` : u;
           setVideoUrl(makeFullUrl(data.videoUrl));
           setVideoUrls((data.videos || [data.videoUrl]).map(makeFullUrl));
+          videoGenIdRef.current = generateId();
           setIsGeneratingVideo(false);
           setVideoPolling(false);
           setVideoStatus(null);
@@ -2378,6 +2411,34 @@ export default function CreateScreen() {
                       </Text>
                     </Pressable>
                   ))}
+                  {selectedCampaignId && (
+                    <Pressable
+                      onPress={async () => {
+                        try {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          await saveToStudio({
+                            campaignId: selectedCampaignId,
+                            contentType: 'VIDEO',
+                            title: videoPrompt?.slice(0, 80) || 'AI Video',
+                            mediaUrl: videoUrls[0] || videoUrl || undefined,
+                            engineName: 'Veo 3.1',
+                            generationId: videoGenIdRef.current || undefined,
+                          });
+                          queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
+                          queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
+                          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                          router.replace('/(tabs)/studio');
+                        } catch (err) {
+                          console.warn('[Create] Failed to save video to studio:', err);
+                          Alert.alert('Save Failed', 'Could not save video to Studio.');
+                        }
+                      }}
+                      style={{ marginTop: 8, backgroundColor: '#7C3AED', borderRadius: 12, padding: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}
+                    >
+                      <Ionicons name="arrow-forward-circle" size={20} color="#fff" />
+                      <Text style={{ fontSize: 15, fontFamily: 'Inter_600SemiBold', color: '#fff' }}>Save to Studio</Text>
+                    </Pressable>
+                  )}
                   <Pressable
                     onPress={() => { setVideoUrl(null); setVideoUrls([]); setVideoPrompt(''); setVideoOperationName(null); setVideoStatus(null); }}
                     style={{ marginTop: 12, alignItems: 'center', paddingVertical: 10 }}
