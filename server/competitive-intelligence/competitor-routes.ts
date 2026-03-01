@@ -18,13 +18,17 @@ const REQUIRED_EVIDENCE_FIELDS = [
   "engagementRatio",
 ] as const;
 
-function validateEvidence(competitor: any): { complete: boolean; missing: string[] } {
+function validateEvidence(competitor: any): { complete: boolean; missing: string[]; meetsMinimum: boolean } {
   const missing: string[] = [];
+  const coreMissing: string[] = [];
+  if (competitor.postingFrequency == null || competitor.postingFrequency === "") { missing.push("postingFrequency"); coreMissing.push("postingFrequency"); }
+  if (!competitor.contentTypeRatio) { missing.push("contentTypeRatio"); coreMissing.push("contentTypeRatio"); }
+  if (competitor.engagementRatio == null || competitor.engagementRatio === "") { missing.push("engagementRatio"); coreMissing.push("engagementRatio"); }
   if (!competitor.profileLink) missing.push("profileLink");
-  if (competitor.postingFrequency == null || competitor.postingFrequency === "") missing.push("postingFrequency");
-  if (!competitor.contentTypeRatio) missing.push("contentTypeRatio");
-  if (competitor.engagementRatio == null || competitor.engagementRatio === "") missing.push("engagementRatio");
-  return { complete: missing.length === 0, missing };
+  if (!competitor.ctaPatterns) missing.push("ctaPatterns");
+  if (!competitor.hookStyles) missing.push("hookStyles");
+  if (!competitor.messagingTone) missing.push("messagingTone");
+  return { complete: missing.length === 0, missing, meetsMinimum: coreMissing.length === 0 };
 }
 
 export function registerCiCompetitorRoutes(app: Express) {

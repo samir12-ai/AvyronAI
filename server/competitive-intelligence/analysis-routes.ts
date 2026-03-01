@@ -12,8 +12,23 @@ function getCurrentMonth(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function validateCompetitorEvidence(c: any): boolean {
-  return !!(c.profileLink && c.postingFrequency != null && c.contentTypeRatio && c.engagementRatio != null);
+const MINIMUM_FIELDS = ["postingFrequency", "contentTypeRatio", "engagementRatio"] as const;
+const OPTIONAL_FIELDS = ["profileLink", "ctaPatterns", "hookStyles", "messagingTone", "socialProofPresence", "discountFrequency"] as const;
+
+function meetsMinimumCriteria(c: any): boolean {
+  return c.postingFrequency != null && !!c.contentTypeRatio && c.engagementRatio != null;
+}
+
+function getCompetitorMetadata(c: any): { isComplete: boolean; missingFields: string[]; evidenceScore: number } {
+  const allFields = [...MINIMUM_FIELDS, ...OPTIONAL_FIELDS];
+  const missingFields: string[] = [];
+  for (const f of allFields) {
+    if (c[f] == null || c[f] === "" || c[f] === "unknown") {
+      missingFields.push(f);
+    }
+  }
+  const evidenceScore = Math.round(((allFields.length - missingFields.length) / allFields.length) * 100) / 100;
+  return { isComplete: missingFields.length === 0, missingFields, evidenceScore };
 }
 
 export function registerCiAnalysisRoutes(app: Express) {
@@ -28,23 +43,30 @@ export function registerCiAnalysisRoutes(app: Express) {
       const competitors = await db.select().from(ciCompetitors)
         .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.isActive, true), eq(ciCompetitors.isDemo, false)));
 
-      const completeCompetitors = competitors.filter(validateCompetitorEvidence);
-      if (completeCompetitors.length < 1) {
+      const qualifiedCompetitors = competitors.filter(meetsMinimumCriteria);
+      if (qualifiedCompetitors.length < 1) {
         return res.status(400).json({
           error: "INSUFFICIENT_DATA",
-          message: "At least 1 competitor must have core evidence fields (profileLink, postingFrequency, contentTypeRatio, engagementRatio)",
+          message: "At least 1 competitor must have minimum core fields (postingFrequency, contentTypeRatio, engagementRatio)",
           totalCompetitors: competitors.length,
-          completeCompetitors: completeCompetitors.length,
-          incomplete: competitors.filter(c => !validateCompetitorEvidence(c)).map(c => ({
+          qualifiedCompetitors: 0,
+          allCompetitors: competitors.map(c => ({
             name: c.name,
-            missing: getMissingFields(c),
+            ...getCompetitorMetadata(c),
           })),
         });
       }
 
+      const competitorManifest = qualifiedCompetitors.map(c => {
+        const meta = getCompetitorMetadata(c);
+        return { name: c.name, id: c.id, ...meta };
+      });
+
+      console.log(`[CI-Analysis] PRE-AI AUDIT | accountId=${accountId} | competitorsCount=${qualifiedCompetitors.length} | competitors=${JSON.stringify(competitorManifest)}`);
+
       const currentMonth = getCurrentMonth();
 
-      for (const comp of completeCompetitors) {
+      for (const comp of qualifiedCompetitors) {
         await db.insert(ciSnapshots).values({
           accountId,
           competitorId: comp.id,
@@ -69,21 +91,29 @@ export function registerCiAnalysisRoutes(app: Express) {
         .where(and(eq(ciMarketAnalyses.accountId, accountId), eq(ciMarketAnalyses.analysisMonth, previousMonth)))
         .limit(1);
 
-      const competitorData = completeCompetitors.map(c => ({
-        name: c.name,
-        platform: c.platform,
-        profileLink: c.profileLink,
-        businessType: c.businessType,
-        objective: c.primaryObjective,
-        postingFrequency: c.postingFrequency,
-        contentTypeRatio: c.contentTypeRatio,
-        engagementRatio: c.engagementRatio,
-        ctaPatterns: c.ctaPatterns,
-        discountFrequency: c.discountFrequency || "unknown",
-        hookStyles: c.hookStyles || "unknown",
-        messagingTone: c.messagingTone || "unknown",
-        socialProofPresence: c.socialProofPresence || "unknown",
-      }));
+      const competitorData = qualifiedCompetitors.map(c => {
+        const meta = getCompetitorMetadata(c);
+        return {
+          name: c.name,
+          platform: c.platform,
+          profileLink: c.profileLink || null,
+          businessType: c.businessType,
+          objective: c.primaryObjective,
+          postingFrequency: c.postingFrequency,
+          contentTypeRatio: c.contentTypeRatio,
+          engagementRatio: c.engagementRatio,
+          ctaPatterns: c.ctaPatterns || null,
+          discountFrequency: c.discountFrequency || null,
+          hookStyles: c.hookStyles || null,
+          messagingTone: c.messagingTone || null,
+          socialProofPresence: c.socialProofPresence || null,
+          _metadata: {
+            isComplete: meta.isComplete,
+            missingFields: meta.missingFields,
+            evidenceScore: meta.evidenceScore,
+          },
+        };
+      });
 
       const prevData = prevSnapshots.length > 0 ? prevSnapshots.map(s => ({
         competitorId: s.competitorId,
@@ -116,7 +146,8 @@ export function registerCiAnalysisRoutes(app: Express) {
         return res.status(500).json({ error: "Failed to parse AI analysis" });
       }
 
-      const dataCompleteness = completeCompetitors.length / Math.max(competitors.length, 1);
+      const avgEvidenceScore = competitorData.reduce((sum, c) => sum + c._metadata.evidenceScore, 0) / competitorData.length;
+      const dataCompleteness = avgEvidenceScore;
 
       const [savedAnalysis] = await db.insert(ciMarketAnalyses).values({
         accountId,
@@ -142,7 +173,8 @@ export function registerCiAnalysisRoutes(app: Express) {
         details: {
           analysisId: savedAnalysis.id,
           month: currentMonth,
-          competitorsAnalyzed: completeCompetitors.length,
+          competitorsAnalyzed: qualifiedCompetitors.length,
+          competitorManifest,
           dataCompleteness,
         },
       });
@@ -408,15 +440,6 @@ export function registerCiAnalysisRoutes(app: Express) {
   });
 }
 
-function getMissingFields(c: any): string[] {
-  const missing: string[] = [];
-  if (!c.profileLink) missing.push("profileLink");
-  if (c.postingFrequency == null) missing.push("postingFrequency");
-  if (!c.contentTypeRatio) missing.push("contentTypeRatio");
-  if (c.engagementRatio == null) missing.push("engagementRatio");
-  return missing;
-}
-
 function getPreviousMonth(month: string): string {
   const [year, m] = month.split("-").map(Number);
   if (m === 1) return `${year - 1}-12`;
@@ -454,12 +477,32 @@ You must respond with valid JSON.`;
 }
 
 function buildAnalysisPrompt(competitors: any[], prevData: any[] | null, prevAnalysis: any | null): string {
+  const dataWithoutMeta = competitors.map(c => {
+    const { _metadata, ...fields } = c;
+    return fields;
+  });
+
+  const missingDataWarnings = competitors
+    .filter(c => c._metadata.missingFields.length > 0)
+    .map(c => `- Competitor "${c.name}" is missing: ${c._metadata.missingFields.join(", ")}. Do NOT assume or fabricate data for these fields. Mark any analysis involving these fields as "INSUFFICIENT DATA" for this competitor.`)
+    .join("\n");
+
   let prompt = `Analyze the following competitive intelligence data and generate strategic recommendations.
 
+TOTAL COMPETITORS PROVIDED: ${competitors.length}
+YOU MUST analyze and reference ALL ${competitors.length} competitors listed below. Do not skip any competitor.
+
 COMPETITOR DATA:
-${JSON.stringify(competitors, null, 2)}
+${JSON.stringify(dataWithoutMeta, null, 2)}
 
 `;
+
+  if (missingDataWarnings) {
+    prompt += `MISSING DATA WARNINGS (CRITICAL — do not ignore):
+${missingDataWarnings}
+
+`;
+  }
 
   if (prevData) {
     prompt += `PREVIOUS MONTH DATA:

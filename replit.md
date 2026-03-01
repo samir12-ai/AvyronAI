@@ -39,7 +39,7 @@ Preferred communication style: Simple, everyday language.
 - **Studio**: Media library with AI Auto-Fill metadata, AI Video Editor with FFmpeg, and AI Video Analysis Assist. Integration with Google Veo 3.1 for text-to-video and image-to-video generation. Studio item detail view at `/studio/:itemId` with analysis results, retry capability, and polling.
 - **Save State Machine**: All save flows (Writer, Designer, Video) use a `saveState` (idle→saving→analyzing→done/error) for visible progress feedback. Error states persist for 3s without navigating away.
 - **Lead Engine**: Modular lead generation system with AI Lead Optimization.
-- **Competitive Intelligence**: Real-data competitor analysis system.
+- **Competitive Intelligence**: Real-data competitor analysis system with deterministic inclusion — all competitors meeting minimum criteria (postingFrequency, contentTypeRatio, engagementRatio) are included in analysis. Missing optional fields are surfaced transparently in AI prompts and UI warnings. Pre-AI audit logging for provability.
 - **Creative Capture Layer**: Analyzes reels with real data for deterministic signals and AI interpretation.
 - **Plan Documents**: Generation and storage of strategic plans in PDF/markdown format.
 

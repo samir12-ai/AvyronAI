@@ -641,10 +641,13 @@ export default function CompetitiveIntelligence() {
               <Text style={[s.missingText, { color: '#F59E0B' }]}>
                 {comp.missingFields.map((f: string) => {
                   const labels: Record<string, string> = {
-                    postingFrequency: 'Posting Frequency: Unavailable (insufficient data)',
-                    contentTypeRatio: 'Content Mix: Unavailable (insufficient data)',
-                    engagementRatio: 'Engagement Rate: Unavailable (insufficient data)',
-                    profileLink: 'Profile Link: Not provided',
+                    postingFrequency: 'Posting frequency missing',
+                    contentTypeRatio: 'Content mix missing',
+                    engagementRatio: 'Engagement rate missing',
+                    profileLink: 'Profile link missing',
+                    ctaPatterns: 'CTA patterns missing',
+                    hookStyles: 'Hook styles missing',
+                    messagingTone: 'Messaging tone missing',
                   };
                   return labels[f] || f;
                 }).join(' · ')}
