@@ -957,33 +957,63 @@ Produce weakness analysis with this exact structure:
   return JSON.parse(raw);
 }
 
+async function runStrategySectionWithRetry(
+  sectionName: string,
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number,
+  retries: number = 1
+): Promise<any> {
+  let lastError: any;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await aiChat({
+        model: "gpt-5.2",
+        max_tokens: maxTokens,
+        accountId: "default",
+        endpoint: "dominance-analysis",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        response_format: { type: "json_object" },
+      });
+      const raw = response.choices[0]?.message?.content || "{}";
+      return JSON.parse(raw);
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`[Dominance] ${sectionName} attempt ${attempt + 1} failed: ${err.message}`);
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function runDominanceStrategy(competitor: any, dissection: any, weaknesses: any, location: string): Promise<any> {
-  const response = await aiChat({
-    model: "gpt-5.2",
-    max_tokens: 6000,
-    accountId: "default",
-    endpoint: "dominance-analysis",
-    messages: [
-      {
-        role: "system",
-        content: `You are a dominance strategy engine for the ${location} market. Your goal is NOT imitation — it is controlled strategic superiority.
-For every competitor strength, generate an upgraded variant. For every weakness, generate an exploitation plan.
-The output must be actionable blueprints, not advice.
+  const contextBlock = `COMPETITOR: ${competitor.name} | MARKET: ${location}
+
+CONTENT DISSECTION (summary):
+${JSON.stringify(dissection, null, 1).slice(0, 3000)}
+
+WEAKNESS DETECTION (summary):
+${JSON.stringify(weaknesses, null, 1).slice(0, 2000)}`;
+
+  let upgradedVariants: any[];
+  try {
+    const variantsResult = await runStrategySectionWithRetry(
+      "upgradedVariants",
+      `You are a dominance strategy engine for the ${location} market. Your goal is NOT imitation — it is controlled strategic superiority.
+For every competitor strength, generate an upgraded variant. The output must be actionable blueprints, not advice.
 For each variant, explicitly answer: "How is this SUPERIOR, not SIMILAR?"
 Include confidence and evidenceRefs for every key field.
 Respond with valid JSON only.`,
-      },
-      {
-        role: "user",
-        content: `Generate dominance strategy against ${competitor.name} for the ${location} market.
+      `Generate upgraded variant blueprints against ${competitor.name}.
 
-CONTENT DISSECTION:
-${JSON.stringify(dissection, null, 2)}
+${contextBlock}
 
-WEAKNESS DETECTION:
-${JSON.stringify(weaknesses, null, 2)}
-
-Generate upgraded variant blueprints with this structure:
+Generate this exact JSON structure:
 {
   "upgradedVariants": [
     {
@@ -1018,7 +1048,43 @@ Generate upgraded variant blueprints with this structure:
         }
       ]
     }
-  ],
+  ]
+}`,
+      3500,
+      1
+    );
+    upgradedVariants = variantsResult.upgradedVariants || [];
+  } catch (err: any) {
+    console.warn(`[Dominance] upgradedVariants section failed, using fallback: ${err.message}`);
+    upgradedVariants = [{
+      targetContentRank: 1,
+      originalStrength: { value: "INSUFFICIENT_DATA", confidence: 0, evidenceRefs: [] },
+      superiorityStatement: "Analysis unavailable — retry recommended",
+      upgradedHookLogic: { original: "N/A", upgraded: "N/A", whyBetter: { value: "INSUFFICIENT_DATA", confidence: 0, evidenceRefs: [] } },
+      strongerConversionMechanics: { original: "N/A", upgraded: "N/A", expectedLift: { value: "INSUFFICIENT_DATA", confidence: 0, evidenceRefs: [] } },
+      refinedPositioning: { original: "N/A", upgraded: "N/A", differentiator: { value: "INSUFFICIENT_DATA", confidence: 0, evidenceRefs: [] } },
+      ctaOptimization: { original: "N/A", upgraded: "N/A", frictionReduction: { value: "INSUFFICIENT_DATA", confidence: 0, evidenceRefs: [] } },
+      structuralUpgrades: [],
+    }];
+  }
+
+  let overallDominancePlaybook: any;
+  try {
+    const playbookResult = await runStrategySectionWithRetry(
+      "overallDominancePlaybook",
+      `You are a dominance playbook synthesizer for the ${location} market. Given upgraded variants already computed, synthesize the overall dominance playbook.
+Focus on primary strategy, key differentiators, expected outcomes, and implementation priority.
+Include confidence and evidenceRefs for every key field.
+Respond with valid JSON only.`,
+      `Synthesize the overall dominance playbook against ${competitor.name}.
+
+${contextBlock}
+
+UPGRADED VARIANTS (already computed):
+${JSON.stringify(upgradedVariants, null, 1).slice(0, 2500)}
+
+Generate this exact JSON structure:
+{
   "overallDominancePlaybook": {
     "primaryStrategy": { "value": "one-line dominance strategy", "confidence": 0.0-1.0, "evidenceRefs": [] },
     "keyDifferentiators": [
@@ -1038,13 +1104,26 @@ Generate upgraded variant blueprints with this structure:
     ]
   }
 }`,
-      },
-    ],
-    response_format: { type: "json_object" },
-  });
+      2500,
+      1
+    );
+    overallDominancePlaybook = playbookResult.overallDominancePlaybook || {
+      primaryStrategy: { value: "Leverage competitor weaknesses through superior positioning", confidence: 0.5, evidenceRefs: [] },
+      keyDifferentiators: [],
+      expectedOutcomeRange: { conservative: "10% improvement", optimistic: "25% improvement" },
+      implementationPriority: [],
+    };
+  } catch (err: any) {
+    console.warn(`[Dominance] overallDominancePlaybook section failed, using fallback: ${err.message}`);
+    overallDominancePlaybook = {
+      primaryStrategy: { value: "Leverage competitor weaknesses through superior positioning", confidence: 0.3, evidenceRefs: [] },
+      keyDifferentiators: [{ value: "INSUFFICIENT_DATA — retry recommended", confidence: 0, evidenceRefs: [] }],
+      expectedOutcomeRange: { conservative: "N/A", optimistic: "N/A" },
+      implementationPriority: [],
+    };
+  }
 
-  const raw = response.choices[0]?.message?.content || "{}";
-  return JSON.parse(raw);
+  return { upgradedVariants, overallDominancePlaybook };
 }
 
 async function runDominanceDelta(competitor: any, dissection: any, strategy: any, location: string): Promise<any> {
