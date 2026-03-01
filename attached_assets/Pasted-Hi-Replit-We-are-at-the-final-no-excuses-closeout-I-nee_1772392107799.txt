@@ -1,0 +1,198 @@
+Hi Replit,
+
+We are at the final “no-excuses” closeout. I need you to run a HARD QA gauntlet that tries to BREAK the system across every critical flow and prove (with evidence) that it holds. This is not a demo walkthrough — this is failure hunting.
+
+Non-negotiable outcomes:
+1) You run every test case below end-to-end and capture proof (screenshots + API responses/log snippets where needed).
+2) If ANY test fails, you fix it immediately and re-run the full affected suite.
+3) After testing, you MUST clean all test data you created (campaigns, competitors, plans, calendar entries, studio items, manual metrics, UI state store rows, documents). No pollution left behind.
+
+========================
+A) Test Setup Rules
+========================
+A1) Use TWO campaigns (Campaign A and Campaign B), same account.
+A2) Both campaigns must have:
+- Business Profile completed (all required fields)
+- Manual campaign metrics entered (spend/revenue/leads/conversions/impressions/clicks)
+- 1–2 competitors added (at least 1 must be incomplete to test “missing evidence” handling)
+A3) Record the IDs: campaignIdA, campaignIdB, blueprintId, planId, jobId, documentId.
+
+========================
+B) Critical Lock Rules (Must Never Break)
+========================
+B1) Single track only:
+PLAN → CALENDAR_ENTRIES → REQUIRED_WORK → STUDIO_ITEMS → PUBLISH
+No bypass. No double calendars. No batch generation.
+
+B2) Campaign isolation:
+Nothing from Campaign A is allowed to show up in Campaign B (UI state, metrics, plan docs, calendar, studio, required work, autopilot status).
+
+B3) No “demo” anywhere:
+System must run entirely from manual metrics + user inputs (no fixtures, no demo banners, no demo campaigns, no hidden fallbacks).
+
+========================
+C) The Hard QA Gauntlet (Run All)
+========================
+
+1) Campaign Switch Torture (Stale State Killer)
+Steps:
+- Open Dashboard on Campaign A → confirm metrics visible + AI actions visible.
+- Switch to Campaign B → within 1 second, A data must disappear (loading/empty), then B loads.
+- Switch back A → A data returns correctly WITHOUT refresh.
+Pass criteria:
+- No stale A data displayed on B at any time.
+- No manual refresh required.
+- No hanging/“stuck” state.
+
+2) Build The Plan Full Pipeline + Approval Gate
+Steps:
+- On Campaign A, run Build The Plan through Phase 5 until the execution plan is produced.
+- Confirm “Approve & Activate Plan” is visible.
+- Approve plan.
+Pass criteria:
+- Plan status changes to APPROVED in DB (source of truth).
+- Pipeline unlocks only after APPROVED.
+- No “locked even though approved” mismatch.
+
+3) Orchestrator Reliability Under Timeout Pressure
+Steps:
+- Trigger plan generation 3 times:
+  (a) Normal flow
+  (b) With incomplete competitor evidence
+  (c) With intentionally high payload (long notes / long blueprint inputs)
+Pass criteria:
+- No raw 500.
+- If AI times out: system returns deterministic fallback per missing section (not a blank plan).
+- Job status and requestId are visible/traceable.
+- Plan still saved consistently (DRAFT or APPROVED as per state machine rules).
+
+4) Plan Document (In-App) Persistence + Versioning
+Steps:
+- After Phase 5 completes, open Plan Document inside the app.
+- Regenerate plan → new planId → confirm a new Plan Document exists for the new plan.
+Pass criteria:
+- Plan Document exists for each planId (no missing document).
+- No [object Object] rendering.
+- Correct campaign scoping (A doc never shows in B).
+
+5) Calendar Single Source + Navigation Flow
+Steps:
+- After plan approval, go to Calendar (main calendar tab).
+- Verify plan entries are visible there.
+- From Pipeline, confirm it only shows summary + “Open Calendar” CTA.
+Pass criteria:
+- There is ONLY one calendar in the app (main calendar).
+- Pipeline never renders duplicate calendar entries list.
+
+6) Generation Flow Must Route Correctly (No “Failed” Dead-End)
+Steps:
+- On Calendar, find one VIDEO/REEL entry → tap Generate.
+- Must route to the correct Creation flow (Reels/Video creation), not fail silently.
+- Same for IMAGE/POSTER entry → routes to AI Designer.
+Pass criteria:
+- Generate does NOT just fail; it routes and explains what to do next.
+- No dead buttons.
+
+7) Required Work Fulfillment Accuracy (The “Numbers Must Move” Test)
+Steps:
+- Note Required Work totals (Video/Designer/Writer) for Campaign A.
+- Create/upload ONE real item in Studio:
+  a) 1 Reel/Video
+  b) 1 Poster/Image
+  c) 1 Writer content item
+Pass criteria:
+- After each item, the counts update everywhere:
+  Calendar header, Pipeline progress, Required Work, Dashboard progress.
+- Counts decrement only in the correct branch (no cross-branch pollution).
+- No phantom +5 posters from 1 video (this MUST never happen again).
+
+8) Studio Save Reliability + Correct MediaType
+Steps:
+- Upload a VIDEO → save → confirm it appears in Studio as VIDEO/REEL (not IMAGE/POSTER).
+- Upload a POSTER/IMAGE → confirm it appears as POSTER only (not duplicated as IMAGE too).
+Pass criteria:
+- No save errors.
+- UI must show Saving/Loading state until the backend finishes.
+- Media type normalization is correct and consistent.
+
+9) Video AI Analysis Must Be Real Video Analysis (Not Just Captions)
+Steps:
+- In Studio, pick a VIDEO item → run AI Analyze.
+Pass criteria:
+- AI output includes:
+  - Script (structured)
+  - Shot list / filming directions
+  - Hook options
+  - Caption options
+  - CTA suggestions
+  - Keywords
+- User can edit/confirm; system never overwrites user edits without confirmation.
+
+10) Autopilot: Must Say “Weak / Needs Improvement” When Metrics Are Weak
+Steps:
+- Set Campaign B manual metrics to clearly weak values (low ROAS, high CPA, low CTR).
+- Check Autopilot actions.
+Pass criteria:
+- Autopilot recommendations must explicitly call out weakness + give corrective actions.
+- No generic filler text.
+- Evidence-bound fields must match the manual metrics timeframe.
+
+11) Reset Failed: Transaction Integrity + No Damage
+Steps:
+- Force 2–3 entries to FAILED (generate + fail).
+- Hit “Reset All Failed” from Pipeline banner.
+Pass criteria:
+- Only FAILED entries reset to DRAFT.
+- No other statuses touched.
+- Deletions limited to failed studio items tied to those failed entries.
+- Audit event logged with requestId.
+- Running it twice is safe (idempotent).
+
+12) Persistence Across Tabs (Create / AI Management / Studio)
+Steps:
+- On Create, enter topic + settings → switch tabs → come back → must persist.
+- Same in AI Management (selected subtab / settings).
+- Same in Studio (draft fields / analysis selections).
+Pass criteria:
+- No lost state on tab switch.
+- Correct isolation by campaign.
+
+========================
+D) Evidence Pack You Must Deliver
+========================
+For each test group above, provide:
+- Screenshot before + after
+- API response (where relevant) including requestId and error codes
+- A short “PASS/FAIL + why” note
+If any fail → include root cause + fix commit + retest proof.
+
+========================
+E) Mandatory Cleanup (After Testing)
+========================
+You MUST remove all test artifacts you created:
+- Manual metrics rows
+- Test campaigns (A/B if they are test-only)
+- Competitors created for testing
+- Blueprints, plans, plan documents
+- Calendar entries created from those plans
+- Studio items created for testing
+- UI state store rows for test modules
+
+Deliver a final “CLEANUP PROOF”:
+- Counts by table before cleanup vs after cleanup (or screenshots of empty states)
+- Confirmation that production-like data is not contaminated
+
+========================
+F) Completion Standard
+========================
+We close ONLY when:
+- All tests pass
+- Evidence pack is delivered
+- Cleanup proof is delivered
+- No hidden demo paths
+- No cross-campaign contamination
+- Numbers move correctly everywhere
+
+Run this exactly, don’t simplify it, don’t skip anything.
+
+Samir
