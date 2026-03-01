@@ -119,7 +119,14 @@ export function registerVeoRoutes(app: Express) {
       });
     } catch (error: any) {
       console.error("Veo video generation error:", error);
-      res.status(500).json({ error: error.message || "Failed to start video generation" });
+      const msg = error.message || "Failed to start video generation";
+      if (msg.includes("SERVICE_DISABLED") || msg.includes("PERMISSION_DENIED") || msg.includes("has not been used in project")) {
+        return res.status(403).json({
+          error: "GOOGLE_API_NOT_ENABLED",
+          message: "The Generative Language API is not enabled for your Google Cloud project. Enable it at console.developers.google.com, then wait a few minutes and try again.",
+        });
+      }
+      res.status(500).json({ error: msg });
     }
   });
 
@@ -147,7 +154,8 @@ export function registerVeoRoutes(app: Express) {
       if (operation.done && operation.response?.generateVideoResponse?.generatedSamples) {
         for (const sample of operation.response.generateVideoResponse.generatedSamples) {
           if (sample.video?.uri) {
-            videos.push(sample.video.uri);
+            const proxyUrl = `/api/veo/video-proxy?url=${encodeURIComponent(sample.video.uri)}`;
+            videos.push(proxyUrl);
           }
         }
       }
@@ -161,6 +169,57 @@ export function registerVeoRoutes(app: Express) {
     } catch (error: any) {
       console.error("Veo status error:", error);
       res.status(500).json({ error: error.message || "Failed to get generation status" });
+    }
+  });
+
+  app.get("/api/veo/video-proxy", async (req, res) => {
+    try {
+      const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(400).json({ error: "GOOGLE_GEMINI_API_KEY not configured." });
+      }
+
+      const videoUrl = req.query.url as string;
+      if (!videoUrl || !videoUrl.includes("generativelanguage.googleapis.com")) {
+        return res.status(400).json({ error: "Invalid video URL" });
+      }
+
+      const separator = videoUrl.includes("?") ? "&" : "?";
+      const authedUrl = `${videoUrl}${separator}key=${apiKey}`;
+      const videoResponse = await fetch(authedUrl);
+
+      if (!videoResponse.ok) {
+        const errText = await videoResponse.text();
+        console.error("[VeoProxy] Upstream error:", videoResponse.status, errText);
+        return res.status(videoResponse.status).json({ error: "Failed to fetch video from Google" });
+      }
+
+      const contentType = videoResponse.headers.get("content-type") || "video/mp4";
+      const contentLength = videoResponse.headers.get("content-length");
+
+      res.setHeader("Content-Type", contentType);
+      if (contentLength) res.setHeader("Content-Length", contentLength);
+      res.setHeader("Cache-Control", "public, max-age=3600");
+
+      const reader = videoResponse.body?.getReader();
+      if (!reader) {
+        return res.status(500).json({ error: "Failed to stream video" });
+      }
+
+      const pump = async () => {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(value);
+        }
+        res.end();
+      };
+      await pump();
+    } catch (error: any) {
+      console.error("[VeoProxy] Error:", error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: error.message || "Failed to proxy video" });
+      }
     }
   });
 

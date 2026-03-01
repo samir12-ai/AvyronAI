@@ -927,7 +927,10 @@ export default function CreateScreen() {
 
       const data = await res.json();
       if (!res.ok) {
-        setVideoError(data.error || 'Failed to start generation');
+        const errMsg = data.error === 'GOOGLE_API_NOT_ENABLED'
+          ? data.message
+          : (data.message || data.error || 'Failed to start generation');
+        setVideoError(errMsg);
         setIsGeneratingVideo(false);
         return;
       }
@@ -959,8 +962,10 @@ export default function CreateScreen() {
         setVideoStatus(data.state);
 
         if (data.done && data.videoUrl) {
-          setVideoUrl(data.videoUrl);
-          setVideoUrls(data.videos || [data.videoUrl]);
+          const baseUrl = getApiUrl();
+          const makeFullUrl = (u: string) => u.startsWith('/') ? `${baseUrl}${u}` : u;
+          setVideoUrl(makeFullUrl(data.videoUrl));
+          setVideoUrls((data.videos || [data.videoUrl]).map(makeFullUrl));
           setIsGeneratingVideo(false);
           setVideoPolling(false);
           setVideoStatus(null);
