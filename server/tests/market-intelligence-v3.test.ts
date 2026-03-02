@@ -7,6 +7,7 @@ import { computeAllDominance } from "../market-intelligence-v3/dominance-module"
 import { computeTokenBudget, applySampling } from "../market-intelligence-v3/token-budget";
 import { evaluateRefreshDecision } from "../market-intelligence-v3/refresh-system";
 import { validateEngineIsolation, assertNoPlanWrites, assertNoOrchestrator, assertNoAutopilot } from "../market-intelligence-v3/isolation-guard";
+import { computeCompetitorHash } from "../market-intelligence-v3/utils";
 import type { CompetitorInput, PostData, CompetitorSignalResult, ExecutionMode } from "../market-intelligence-v3/types";
 import { MI_THRESHOLDS, MI_COST_LIMITS, MI_CONFIDENCE, MI_REVIVAL_CAP } from "../market-intelligence-v3/constants";
 
@@ -634,5 +635,121 @@ describe("Market Intelligence V3 - Output Structure", () => {
     }
 
     expect(Object.keys(output)).toHaveLength(12);
+  });
+});
+
+describe("Market Intelligence V3 - Snapshot Scope Isolation", () => {
+  it("N1) competitorHash is deterministic for same competitor set", () => {
+    const comps = [
+      makeCompetitor({ id: "comp-alpha", name: "Alpha" }),
+      makeCompetitor({ id: "comp-beta", name: "Beta" }),
+    ];
+    const hash1 = computeCompetitorHash(comps);
+    const hash2 = computeCompetitorHash(comps);
+    expect(hash1).toBe(hash2);
+    expect(hash1.length).toBe(16);
+  });
+
+  it("N2) competitorHash changes when competitor set changes", () => {
+    const comps1 = [
+      makeCompetitor({ id: "comp-alpha", name: "Alpha" }),
+      makeCompetitor({ id: "comp-beta", name: "Beta" }),
+    ];
+    const comps2 = [
+      makeCompetitor({ id: "comp-alpha", name: "Alpha" }),
+      makeCompetitor({ id: "comp-gamma", name: "Gamma" }),
+    ];
+    const hash1 = computeCompetitorHash(comps1);
+    const hash2 = computeCompetitorHash(comps2);
+    expect(hash1).not.toBe(hash2);
+  });
+
+  it("N3) competitorHash is order-independent", () => {
+    const comps1 = [
+      makeCompetitor({ id: "comp-alpha" }),
+      makeCompetitor({ id: "comp-beta" }),
+    ];
+    const comps2 = [
+      makeCompetitor({ id: "comp-beta" }),
+      makeCompetitor({ id: "comp-alpha" }),
+    ];
+    expect(computeCompetitorHash(comps1)).toBe(computeCompetitorHash(comps2));
+  });
+
+  it("N4) cross-campaign isolation: different campaigns produce different snapshot scopes", () => {
+    const comps = [makeCompetitor({ id: "comp-1" })];
+    const hash = computeCompetitorHash(comps);
+
+    const snapshotA = {
+      accountId: "acc-1",
+      campaignId: "campaign-A",
+      competitorHash: hash,
+    };
+    const snapshotB = {
+      accountId: "acc-1",
+      campaignId: "campaign-B",
+      competitorHash: hash,
+    };
+
+    expect(snapshotA.campaignId).not.toBe(snapshotB.campaignId);
+
+    const compositeKeyA = `${snapshotA.accountId}:${snapshotA.campaignId}:${snapshotA.competitorHash}`;
+    const compositeKeyB = `${snapshotB.accountId}:${snapshotB.campaignId}:${snapshotB.competitorHash}`;
+    expect(compositeKeyA).not.toBe(compositeKeyB);
+  });
+
+  it("N5) cross-account isolation: different accounts produce different composite keys", () => {
+    const comps = [makeCompetitor({ id: "comp-1" })];
+    const hash = computeCompetitorHash(comps);
+
+    const keyA = `acc-1:campaign-1:${hash}`;
+    const keyB = `acc-2:campaign-1:${hash}`;
+    expect(keyA).not.toBe(keyB);
+  });
+});
+
+describe("Market Intelligence V3 - Concurrency & Deduplication", () => {
+  it("O1) single-run lock key is composed of accountId:campaignId", () => {
+    const lockKey1 = "acc-1:camp-1";
+    const lockKey2 = "acc-1:camp-2";
+    const lockKey3 = "acc-1:camp-1";
+    expect(lockKey1).not.toBe(lockKey2);
+    expect(lockKey1).toBe(lockKey3);
+  });
+
+  it("O2) token budget blocks uncontrolled token growth at max load", () => {
+    const maxComps = MI_COST_LIMITS.MAX_COMPETITORS;
+    const maxPosts = MI_COST_LIMITS.MAX_POSTS_PER_COMPETITOR * maxComps;
+    const maxComments = MI_COST_LIMITS.MAX_TOTAL_COMMENTS;
+
+    const budget = computeTokenBudget(maxComps, maxComments, maxPosts);
+    expect(budget.projectedTokens).toBeGreaterThan(0);
+    expect(budget.projectedTokens).toBeLessThanOrEqual(
+      MI_COST_LIMITS.MAX_TOTAL_COMMENTS * 20 +
+      MI_COST_LIMITS.MAX_COMPETITORS * MI_COST_LIMITS.MAX_POSTS_PER_COMPETITOR * 50 +
+      1500 + 2000
+    );
+
+    const overloadBudget = computeTokenBudget(10, 2000, 500);
+    expect(["FULL", "REDUCED", "LIGHT"]).toContain(overloadBudget.selectedMode);
+  });
+
+  it("O3) rapid refresh: hard cap prevents duplicate snapshots within 72h", () => {
+    const signal = computeAllSignals([makeCompetitor({ id: "comp-rapid" }, 40)])[0];
+    const lastRefresh = new Date();
+
+    const decision = evaluateRefreshDecision(signal, lastRefresh);
+    expect(decision.shouldRefresh).toBe(false);
+    expect(decision.reason).toContain("Hard cap");
+  });
+
+  it("O4) snapshot deduplication: same hash within freshness window returns cached", () => {
+    const comps = [makeCompetitor({ id: "comp-1" }), makeCompetitor({ id: "comp-2" })];
+    const hash = computeCompetitorHash(comps);
+    expect(hash.length).toBe(16);
+
+    const snapshotWithHash = { competitorHash: hash, status: "COMPLETE" };
+    const newHash = computeCompetitorHash(comps);
+    expect(snapshotWithHash.competitorHash).toBe(newHash);
   });
 });

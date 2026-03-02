@@ -49,6 +49,8 @@ Preferred communication style: Simple, everyday language.
   - **Token Budget Guard**: 3 execution modes (FULL/REDUCED/LIGHT) with auto-downgrade. Hard token ceiling per snapshot. Single LLM call max per snapshot. Comment/post sampling with stratified selection.
   - **Dominance Module**: Internal-only module within MIv3. No standalone endpoint, no external invocation.
   - **Adaptive Refresh**: Dynamic intervals (3/7/14 days based on volatility). Hard cap: 1 refresh per competitor per 72 hours.
+  - **Snapshot Caching**: SHA-256 `competitorHash` invalidates cached snapshots when competitor set changes. 24h freshness window. `computeCompetitorHash()` in `utils.ts`.
+  - **Concurrency Lock**: `activeLocks` Map deduplicates parallel runs per `accountId:campaignId` key — concurrent requests reuse the in-flight promise.
   - **Engine Isolation**: Only MIv3 callable from CI section. Hard rejection + audit log for any cross-engine call attempt. No writes to strategic_plans or plan_documents.
   - **DB Tables**: mi_snapshots, mi_signal_logs, mi_refresh_schedule, mi_telemetry.
   - **API Endpoints**: POST /api/ci/mi-v3/analyze, GET /api/ci/mi-v3/snapshot/:campaignId, POST /api/ci/mi-v3/refresh, GET /api/ci/mi-v3/history/:campaignId, GET /api/ci/mi-v3/telemetry/:snapshotId.

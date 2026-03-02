@@ -1331,6 +1331,7 @@ export const miSnapshots = pgTable("mi_snapshots", {
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
+  competitorHash: varchar("competitor_hash", { length: 16 }),
   version: integer("version").notNull().default(1),
   competitorData: text("competitor_data"),
   signalData: text("signal_data"),

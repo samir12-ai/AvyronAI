@@ -19,13 +19,14 @@ import type {
 import { MI_CONFIDENCE } from "./constants";
 import { validateEngineIsolation } from "./isolation-guard";
 import { logAudit } from "../audit";
+import { computeCompetitorHash, parseJsonSafe } from "./utils";
+
+export { computeCompetitorHash } from "./utils";
 
 const SNAPSHOT_FRESHNESS_HOURS = 24;
+const ISOLATION_ALLOWED_CALLER = "MARKET_INTELLIGENCE_V3";
 
-function parseJsonSafe<T>(json: string | null | undefined, fallback: T): T {
-  if (!json) return fallback;
-  try { return JSON.parse(json); } catch { return fallback; }
-}
+const activeLocks = new Map<string, Promise<MIv3DiagnosticResult>>();
 
 async function getCompetitorData(accountId: string): Promise<CompetitorInput[]> {
   const competitors = await db.select().from(ciCompetitors)
@@ -50,7 +51,7 @@ async function getCompetitorData(accountId: string): Promise<CompetitorInput[]> 
   }));
 }
 
-async function getCachedSnapshot(accountId: string, campaignId: string): Promise<any | null> {
+async function getCachedSnapshot(accountId: string, campaignId: string, competitorHash: string): Promise<any | null> {
   const snapshots = await db.select().from(miSnapshots)
     .where(and(
       eq(miSnapshots.accountId, accountId),
@@ -63,6 +64,12 @@ async function getCachedSnapshot(accountId: string, campaignId: string): Promise
   if (snapshots.length === 0) return null;
 
   const snapshot = snapshots[0];
+
+  if (snapshot.competitorHash && snapshot.competitorHash !== competitorHash) {
+    console.log(`[MIv3] Snapshot invalidated: competitor set changed (${snapshot.competitorHash} → ${competitorHash})`);
+    return null;
+  }
+
   const age = Date.now() - new Date(snapshot.createdAt!).getTime();
   const freshnessMs = SNAPSHOT_FRESHNESS_HOURS * 60 * 60 * 1000;
 
@@ -162,6 +169,31 @@ export class MarketIntelligenceV3 {
     campaignId: string,
     forceRefresh: boolean = false,
   ): Promise<MIv3DiagnosticResult> {
+    const lockKey = `${accountId}:${campaignId}`;
+
+    const existingLock = activeLocks.get(lockKey);
+    if (existingLock) {
+      console.log(`[MIv3] Concurrent run detected for ${lockKey}, waiting for existing run`);
+      return existingLock;
+    }
+
+    const runPromise = this._executeRun(mode, accountId, campaignId, forceRefresh);
+    activeLocks.set(lockKey, runPromise);
+
+    try {
+      const result = await runPromise;
+      return result;
+    } finally {
+      activeLocks.delete(lockKey);
+    }
+  }
+
+  private static async _executeRun(
+    mode: MIv3Mode,
+    accountId: string,
+    campaignId: string,
+    forceRefresh: boolean,
+  ): Promise<MIv3DiagnosticResult> {
     console.log(`[MIv3] MARKET_OVERVIEW_DIAGNOSTIC_RUN | mode=${mode} | accountId=${accountId} | campaignId=${campaignId}`);
 
     logAudit("MARKET_OVERVIEW_DIAGNOSTIC_RUN", {
@@ -171,15 +203,16 @@ export class MarketIntelligenceV3 {
       caller: ISOLATION_ALLOWED_CALLER,
     }).catch(() => {});
 
+    const competitors = await getCompetitorData(accountId);
+    const competitorHash = computeCompetitorHash(competitors);
+
     if (!forceRefresh) {
-      const cached = await getCachedSnapshot(accountId, campaignId);
+      const cached = await getCachedSnapshot(accountId, campaignId, competitorHash);
       if (cached) {
         console.log(`[MIv3] Returning cached snapshot ${cached.id}`);
         return buildResultFromSnapshot(cached);
       }
     }
-
-    const competitors = await getCompetitorData(accountId);
 
     const totalPosts = competitors.reduce((s, c) => s + (c.posts?.length || 0), 0);
     const totalComments = competitors.reduce((s, c) => s + (c.comments?.length || 0), 0);
@@ -269,6 +302,7 @@ export class MarketIntelligenceV3 {
     const [snapshot] = await db.insert(miSnapshots).values({
       accountId,
       campaignId,
+      competitorHash,
       version: (previousSnapshot?.version || 0) + 1,
       competitorData: JSON.stringify(competitors.map(c => ({ id: c.id, name: c.name }))),
       signalData: JSON.stringify(signalResults),

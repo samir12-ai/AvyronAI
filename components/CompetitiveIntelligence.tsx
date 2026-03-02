@@ -172,9 +172,10 @@ export default function CompetitiveIntelligence() {
   });
 
   const { data: timelineData } = useQuery({
-    queryKey: ['ci-timeline'],
+    queryKey: ['ci-miv3-history', activeCampaignId],
+    enabled: !!activeCampaignId,
     queryFn: async () => {
-      const res = await fetch(new URL('/api/ci/strategy-timeline?accountId=default', baseUrl).toString());
+      const res = await fetch(new URL(`/api/ci/mi-v3/history/${activeCampaignId}?accountId=default`, baseUrl).toString());
       return res.json();
     },
   });
@@ -419,8 +420,8 @@ export default function CompetitiveIntelligence() {
     <View style={[s.subTabBar, { backgroundColor: isDark ? '#0A0E14' : '#F5F7FA', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
       {[
         { key: 'overview' as CIView, icon: 'eye-outline' as const, label: 'Overview' },
-        { key: 'competitors' as CIView, icon: 'people-outline' as const, label: 'Competitors' },
-        { key: 'recommendations' as CIView, icon: 'bulb-outline' as const, label: 'Actions' },
+        { key: 'competitors' as CIView, icon: 'trophy-outline' as const, label: 'Dominance' },
+        { key: 'recommendations' as CIView, icon: 'flash-outline' as const, label: 'Actions' },
         { key: 'timeline' as CIView, icon: 'time-outline' as const, label: 'History' },
       ].map(tab => (
         <Pressable
@@ -737,303 +738,269 @@ export default function CompetitiveIntelligence() {
     );
   };
 
-  const renderCompetitors = () => (
-    <View>
-      <View style={s.sectionHeader}>
-        <Text style={[s.sectionTitle, { color: colors.text }]}>Competitors ({competitors.length}/5)</Text>
-        <Pressable
-          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setShowAddCompetitor(true); }}
-          style={[s.addBtn, { backgroundColor: '#8B5CF6' }]}
-          disabled={competitors.length >= 5}
-        >
-          <Ionicons name="add" size={18} color="#fff" />
-          <Text style={s.addBtnText}>Add</Text>
-        </Pressable>
-      </View>
+  const renderCompetitors = () => {
+    const domData = miv3Result?.dominanceData || [];
+    const intentMap = miv3Result?.output?.competitorIntentMap || [];
 
-      {competitors.length === 0 ? (
-        <View style={s.emptyState}>
-          <Ionicons name="search-outline" size={40} color={colors.textMuted} />
-          <Text style={[s.emptyTitle, { color: colors.text }]}>No Competitors Added</Text>
-          <Text style={[s.emptyDesc, { color: colors.textMuted }]}>Add competitors to start tracking their strategy</Text>
-        </View>
-      ) : competitors.map(comp => (
-        <View key={comp.id} style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-          <Pressable onPress={() => setExpandedCompetitor(expandedCompetitor === comp.id ? null : comp.id)}>
-            <View style={s.compHeader}>
-              <View style={s.compInfo}>
-                <View style={s.compNameRow}>
-                  <Text style={[s.compName, { color: colors.text }]}>{comp.name}</Text>
-                </View>
-                <Text style={[s.compMeta, { color: colors.textMuted }]}>{comp.businessType} · {comp.primaryObjective}</Text>
-              </View>
-              <View style={s.compRight}>
-                <View style={[s.evidenceDot, { backgroundColor: comp.evidenceComplete ? '#10B981' : '#F59E0B' }]} />
-                <Ionicons name={expandedCompetitor === comp.id ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
-              </View>
-            </View>
-          </Pressable>
-
-          {!comp.evidenceComplete && comp.missingFields.length > 0 && (
-            <View style={[s.missingBar, { backgroundColor: '#F59E0B' + '12' }]}>
-              <Ionicons name="warning-outline" size={14} color="#F59E0B" />
-              <Text style={[s.missingText, { color: '#F59E0B' }]}>
-                {comp.missingFields.map((f: string) => {
-                  const labels: Record<string, string> = {
-                    postingFrequency: 'Posting frequency missing',
-                    contentTypeRatio: 'Content mix missing',
-                    engagementRatio: 'Engagement rate missing',
-                    profileLink: 'Profile link missing',
-                    ctaPatterns: 'CTA patterns missing',
-                    hookStyles: 'Hook styles missing',
-                    messagingTone: 'Messaging tone missing',
-                  };
-                  return labels[f] || f;
-                }).join(' · ')}
-              </Text>
-            </View>
-          )}
-
-          {expandedCompetitor === comp.id && (
-            <View style={s.compDetails}>
-              {[
-                { label: 'Profile', value: comp.profileLink, icon: 'link-outline' as const },
-                { label: 'Posts/Week', value: comp.postingFrequency?.toString(), icon: 'calendar-outline' as const },
-                { label: 'Content Mix', value: comp.contentTypeRatio, icon: 'pie-chart-outline' as const },
-                { label: 'Engagement (scanned posts)', value: comp.engagementRatio ? `${comp.engagementRatio}%` : null, icon: 'heart-outline' as const },
-                { label: 'CTA Patterns', value: comp.ctaPatterns || getCtaLabel(comp), icon: 'megaphone-outline' as const },
-                { label: 'Discounts', value: comp.discountFrequency, icon: 'pricetag-outline' as const },
-                { label: 'Hook Styles', value: comp.hookStyles, icon: 'videocam-outline' as const },
-                { label: 'Tone', value: comp.messagingTone, icon: 'chatbubble-outline' as const },
-                { label: 'Social Proof', value: comp.socialProofPresence, icon: 'star-outline' as const },
-              ].filter(x => x.value).map((item, i) => (
-                <View key={i} style={s.detailRow}>
-                  <Ionicons name={item.icon} size={14} color="#8B5CF6" />
-                  <Text style={[s.detailLabel, { color: colors.textMuted }]}>{item.label}:</Text>
-                  <Text style={[s.detailValue, { color: colors.textSecondary }]} numberOfLines={2}>{item.value}</Text>
-                </View>
-              ))}
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                <Pressable
-                  onPress={() => handleCreateReelsFromCI(comp)}
-                  disabled={loadingReelsFor === comp.id}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#8B5CF6' + '15', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#8B5CF6' + '30', flex: 1 }}
-                >
-                  {loadingReelsFor === comp.id ? (
-                    <ActivityIndicator size="small" color="#8B5CF6" />
-                  ) : (
-                    <Ionicons name="videocam-outline" size={14} color="#8B5CF6" />
-                  )}
-                  <Text style={{ fontSize: 12, fontWeight: '600', color: '#8B5CF6' }}>Create Reels Scripts</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    if (Platform.OS === 'web') {
-                      if (confirm(`Remove ${comp.name}?`)) {
-                        deleteCompetitorMutation.mutate(comp.id);
-                      }
-                    } else {
-                      Alert.alert('Remove Competitor', `Remove ${comp.name}?`, [
-                        { text: 'Cancel', style: 'cancel' },
-                        { text: 'Remove', style: 'destructive', onPress: () => deleteCompetitorMutation.mutate(comp.id) },
-                      ]);
-                    }
-                  }}
-                  style={s.removeBtn}
-                  disabled={deleteCompetitorMutation.isPending}
-                >
-                  {deleteCompetitorMutation.isPending ? (
-                    <ActivityIndicator size="small" color="#EF4444" />
-                  ) : (
-                    <Ionicons name="trash-outline" size={14} color="#EF4444" />
-                  )}
-                  <Text style={[s.removeBtnText, { color: '#EF4444' }]}>Remove</Text>
-                </Pressable>
-              </View>
-            </View>
-          )}
-        </View>
-      ))}
-    </View>
-  );
-
-  const renderRecommendations = () => (
-    <View>
-      <View style={s.sectionHeader}>
-        <Text style={[s.sectionTitle, { color: colors.text }]}>Strategy Recommendations</Text>
-        <View style={[s.countBadge, { backgroundColor: '#8B5CF6' + '20' }]}>
-          <Text style={[s.countText, { color: '#8B5CF6' }]}>{pendingRecs.length} pending</Text>
-        </View>
-      </View>
-
-      {recommendations.length === 0 ? (
-        <View style={s.emptyState}>
-          <Ionicons name="bulb-outline" size={40} color={colors.textMuted} />
-          <Text style={[s.emptyTitle, { color: colors.text }]}>No Recommendations</Text>
-          <Text style={[s.emptyDesc, { color: colors.textMuted }]}>Run an analysis to generate AI-powered strategy recommendations</Text>
-        </View>
-      ) : recommendations.map(rec => {
-        const citations = safeParseJSON(rec.evidenceCitations) || [];
-        const details = safeParseJSON(rec.actionDetails);
-        const isExpanded = expandedRec === rec.id;
-        const catColor = CATEGORY_COLORS[rec.category] || '#6B7280';
-
-        return (
-          <View key={rec.id} style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-            <Pressable onPress={() => setExpandedRec(isExpanded ? null : rec.id)}>
-              <View style={s.recHeader}>
-                <View style={[s.catDot, { backgroundColor: catColor }]} />
-                <View style={{ flex: 1 }}>
-                  <View style={s.recTitleRow}>
-                    <Text style={[s.recTitle, { color: colors.text }]} numberOfLines={isExpanded ? undefined : 1}>{rec.title}</Text>
-                  </View>
-                  <View style={s.recMeta}>
-                    <View style={[s.catChip, { backgroundColor: catColor + '15' }]}>
-                      <Text style={[s.catChipText, { color: catColor }]}>{rec.category.replace(/_/g, ' ')}</Text>
-                    </View>
-                    <View style={[s.statusChip, { backgroundColor: rec.status === 'pending' ? '#F59E0B' + '15' : rec.status === 'applied' ? '#10B981' + '15' : '#EF4444' + '15' }]}>
-                      <Text style={[s.statusChipText, { color: rec.status === 'pending' ? '#F59E0B' : rec.status === 'applied' ? '#10B981' : '#EF4444' }]}>{rec.status}</Text>
-                    </View>
-                  </View>
-                </View>
-                <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
-              </View>
-            </Pressable>
-
-            <View style={s.metersRow}>
-              <View style={s.meter}>
-                <Text style={[s.meterLabel, { color: colors.textMuted }]}>Confidence</Text>
-                <View style={s.meterBar}>
-                  <View style={[s.meterFill, { width: `${(rec.confidenceScore || 0) * 100}%`, backgroundColor: '#3B82F6' }]} />
-                </View>
-                <Text style={[s.meterVal, { color: '#3B82F6' }]}>{Math.round((rec.confidenceScore || 0) * 100)}%</Text>
-              </View>
-              <View style={s.meter}>
-                <Text style={[s.meterLabel, { color: colors.textMuted }]}>Risk</Text>
-                <View style={[s.riskDot, { backgroundColor: RISK_COLORS[rec.riskLevel] }]} />
-                <Text style={[s.meterVal, { color: RISK_COLORS[rec.riskLevel] }]}>{rec.riskLevel}</Text>
-              </View>
-              <View style={s.meter}>
-                <Text style={[s.meterLabel, { color: colors.textMuted }]}>Impact</Text>
-                <Text style={[s.meterVal, { color: '#10B981' }]}>{rec.impactRangeLow}-{rec.impactRangeHigh}%</Text>
-              </View>
-            </View>
-
-            {isExpanded && (
-              <View style={s.recExpanded}>
-                <Text style={[s.recDesc, { color: colors.textSecondary }]}>{rec.description}</Text>
-
-                <View style={s.actionMapCard}>
-                  <View style={s.actionMapHeader}>
-                    <Ionicons name="navigate-outline" size={14} color="#8B5CF6" />
-                    <Text style={[s.actionMapTitle, { color: '#8B5CF6' }]}>Action Map: {rec.actionType.replace(/_/g, ' ')}</Text>
-                  </View>
-                  <Text style={[s.actionMapTarget, { color: colors.textMuted }]}>Target: {rec.actionTarget}</Text>
-                  {details && (
-                    <>
-                      {details.proposedChange && <Text style={[s.actionMapDetail, { color: colors.textSecondary }]}>{details.proposedChange}</Text>}
-                      {details.implementation && <Text style={[s.actionMapImpl, { color: colors.textMuted }]}>{details.implementation}</Text>}
-                    </>
-                  )}
-                </View>
-
-                {citations.length > 0 && (
-                  <View style={s.citationsSection}>
-                    <Text style={[s.citationsTitle, { color: colors.text }]}>Evidence Citations</Text>
-                    {citations.map((c: any, i: number) => (
-                      <View key={i} style={[s.citationTag, { backgroundColor: catColor + '10', borderColor: catColor + '30' }]}>
-                        <Text style={[s.citationName, { color: catColor }]}>[{c.competitorName} — {c.field}]</Text>
-                        <Text style={[s.citationValue, { color: colors.textSecondary }]}>{c.value}</Text>
-                        <Text style={[s.citationInsight, { color: colors.textMuted }]}>{c.insight}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
-
-                <View style={s.timeframeRow}>
-                  <Ionicons name="time-outline" size={14} color={colors.textMuted} />
-                  <Text style={[s.timeframeText, { color: colors.textMuted }]}>Timeframe: {rec.timeframe?.replace(/_/g, ' ')}</Text>
-                </View>
-
-                {rec.status === 'pending' && (
-                  <View style={s.decisionRow}>
-                    <Pressable
-                      onPress={() => handleApplyPress(rec)}
-                      style={[s.applyBtn]}
-                    >
-                      <Ionicons name="checkmark-circle-outline" size={16} color="#fff" />
-                      <Text style={s.applyBtnText}>Apply Strategy</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => {
-                        Alert.alert('Reject Strategy', 'Keep your current plan instead?', [
-                          { text: 'Cancel', style: 'cancel' },
-                          { text: 'Reject', style: 'destructive', onPress: () => rejectMutation.mutate({ id: rec.id, reason: 'User chose to keep current plan' }) },
-                        ]);
-                      }}
-                      style={[s.rejectBtn, { borderColor: isDark ? '#333' : '#ddd' }]}
-                    >
-                      <Text style={[s.rejectBtnText, { color: colors.textMuted }]}>Keep Current Plan</Text>
-                    </Pressable>
-                  </View>
-                )}
-              </View>
-            )}
-          </View>
-        );
-      })}
-    </View>
-  );
-
-  const renderTimeline = () => {
-    const timeline = timelineData?.timeline || [];
     return (
       <View>
         <View style={s.sectionHeader}>
-          <Text style={[s.sectionTitle, { color: colors.text }]}>Strategy Timeline</Text>
-        </View>
-        {timeline.length === 0 ? (
-          <View style={s.emptyState}>
-            <Ionicons name="time-outline" size={40} color={colors.textMuted} />
-            <Text style={[s.emptyTitle, { color: colors.text }]}>No History</Text>
-            <Text style={[s.emptyDesc, { color: colors.textMuted }]}>Your monthly analysis history will appear here</Text>
-          </View>
-        ) : timeline.map((entry: any, i: number) => (
-          <View key={i} style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-            <View style={s.timelineHeader}>
-              <View style={[s.timelineDot, { backgroundColor: '#8B5CF6' }]} />
-              <Text style={[s.timelineMonth, { color: colors.text }]}>{entry.month}</Text>
-              <View style={[s.statusChip, { backgroundColor: '#10B981' + '15' }]}>
-                <Text style={[s.statusChipText, { color: '#10B981' }]}>{entry.status}</Text>
-              </View>
+          <Text style={[s.sectionTitle, { color: colors.text }]}>Dominance Analysis</Text>
+          {miv3Result && (
+            <View style={[s.countBadge, { backgroundColor: '#F59E0B' + '20' }]}>
+              <Text style={[s.countText, { color: '#F59E0B' }]}>{domData.length} competitors</Text>
             </View>
-            <Text style={[s.timelineDetail, { color: colors.textMuted }]}>
-              Data quality: {Math.round((entry.dataCompleteness || 0) * 100)}%
+          )}
+        </View>
+
+        {!miv3Result ? (
+          <View style={s.emptyState}>
+            <Ionicons name="trophy-outline" size={40} color={colors.textMuted} />
+            <Text style={[s.emptyTitle, { color: colors.text }]}>No Dominance Data</Text>
+            <Text style={[s.emptyDesc, { color: colors.textMuted }]}>Run an analysis from the Overview tab to generate dominance scores</Text>
+          </View>
+        ) : domData.length === 0 ? (
+          <View style={s.emptyState}>
+            <Ionicons name="analytics-outline" size={40} color={colors.textMuted} />
+            <Text style={[s.emptyTitle, { color: colors.text }]}>No Competitors in Snapshot</Text>
+            <Text style={[s.emptyDesc, { color: colors.textMuted }]}>Add competitors and run analysis to see dominance rankings</Text>
+          </View>
+        ) : domData.map((dom: any, i: number) => {
+          const intent = intentMap.find((im: any) => im.competitorId === dom.competitorId);
+          const domColor = dom.dominanceLevel === 'DOMINANT' ? '#EF4444' : dom.dominanceLevel === 'STRUCTURALLY_STRONG' ? '#F59E0B' : dom.dominanceLevel === 'EFFICIENT' ? '#3B82F6' : '#10B981';
+
+          return (
+            <View key={dom.competitorId || i} style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+              <View style={s.breakdownHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.breakdownName, { color: colors.text }]}>{dom.competitorName}</Text>
+                  {intent && (
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>Intent: {intent.intentCategory}{intent.degraded ? ' (degraded)' : ''}</Text>
+                  )}
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <View style={[s.threatBadge, { backgroundColor: domColor + '20' }]}>
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: domColor }}>{dom.dominanceLevel}</Text>
+                  </View>
+                  <Text style={{ fontSize: 18, fontWeight: '800', color: domColor, marginTop: 4 }}>{dom.dominanceScore}</Text>
+                </View>
+              </View>
+
+              {dom.strengths?.length > 0 && (
+                <View style={{ marginTop: 8 }}>
+                  <Text style={{ fontSize: 10, fontWeight: '600', color: '#10B981', marginBottom: 2 }}>Strengths</Text>
+                  {dom.strengths.map((str: string, j: number) => (
+                    <Text key={j} style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>+ {str}</Text>
+                  ))}
+                </View>
+              )}
+
+              {dom.weaknesses?.length > 0 && (
+                <View style={{ marginTop: 6 }}>
+                  <Text style={{ fontSize: 10, fontWeight: '600', color: '#EF4444', marginBottom: 2 }}>Weaknesses</Text>
+                  {dom.weaknesses.map((w: string, j: number) => (
+                    <Text key={j} style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>- {w}</Text>
+                  ))}
+                </View>
+              )}
+
+              {intent && (
+                <View style={{ marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: isDark ? '#1A2030' : '#F0F0F0' }}>
+                  <Text style={{ fontSize: 9, color: colors.textMuted, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
+                    intent_score: {intent.intentScore?.toFixed(3)} | source: miv3_snapshot
+                  </Text>
+                </View>
+              )}
+            </View>
+          );
+        })}
+
+        {miv3Result && (
+          <View style={{ paddingHorizontal: 4, paddingTop: 4 }}>
+            <Text style={{ fontSize: 9, color: colors.textMuted, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
+              source: miv3_snapshot:{miv3Result.snapshotId?.slice(0, 8)} | cached: {miv3Result.cached ? 'yes' : 'no'}
             </Text>
-            {entry.decisions && entry.decisions.length > 0 && (
-              <View style={s.timelineDecisions}>
-                {entry.decisions.map((d: any, j: number) => (
-                  <View key={j} style={s.timelineDecisionRow}>
-                    <Ionicons
-                      name={d.decision === 'applied' ? 'checkmark-circle' : 'close-circle'}
-                      size={14}
-                      color={d.decision === 'applied' ? '#10B981' : '#EF4444'}
-                    />
-                    <Text style={[s.timelineDecisionText, { color: colors.textSecondary }]}>{d.decision}</Text>
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderRecommendations = () => {
+    const output = miv3Result?.output;
+    const entryStrategy = output?.entryStrategy;
+    const defensiveRisks = output?.defensiveRisks || [];
+    const missingSignals = output?.missingSignalFlags || [];
+    const confidence = output?.confidence;
+    const intentMap = output?.competitorIntentMap || [];
+    const trajectory = miv3Result?.trajectoryData;
+
+    return (
+      <View>
+        <View style={s.sectionHeader}>
+          <Text style={[s.sectionTitle, { color: colors.text }]}>Strategic Actions</Text>
+          {confidence && (
+            <View style={[s.countBadge, { backgroundColor: confidence.guardDecision === 'PROCEED' ? '#10B981' + '20' : confidence.guardDecision === 'DOWNGRADE' ? '#F59E0B' + '20' : '#EF4444' + '20' }]}>
+              <Text style={[s.countText, { color: confidence.guardDecision === 'PROCEED' ? '#10B981' : confidence.guardDecision === 'DOWNGRADE' ? '#F59E0B' : '#EF4444' }]}>
+                {confidence.guardDecision}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {!miv3Result ? (
+          <View style={s.emptyState}>
+            <Ionicons name="flash-outline" size={40} color={colors.textMuted} />
+            <Text style={[s.emptyTitle, { color: colors.text }]}>No Actions Available</Text>
+            <Text style={[s.emptyDesc, { color: colors.textMuted }]}>Run an analysis from the Overview tab to generate strategic actions</Text>
+          </View>
+        ) : (
+          <View>
+            {entryStrategy && (
+              <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                <View style={s.cardHeader}>
+                  <Ionicons name="compass-outline" size={18} color="#8B5CF6" />
+                  <Text style={[s.cardTitle, { color: colors.text }]}>Entry Strategy</Text>
+                </View>
+                <Text style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 20 }}>{entryStrategy}</Text>
+              </View>
+            )}
+
+            {defensiveRisks.length > 0 && (
+              <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                <View style={s.cardHeader}>
+                  <Ionicons name="warning-outline" size={18} color="#EF4444" />
+                  <Text style={[s.cardTitle, { color: colors.text }]}>Defensive Risks</Text>
+                </View>
+                {defensiveRisks.map((risk: string, i: number) => (
+                  <View key={i} style={{ flexDirection: 'row', gap: 6, marginBottom: 6, alignItems: 'flex-start' }}>
+                    <Ionicons name="alert-circle" size={14} color="#EF4444" style={{ marginTop: 2 }} />
+                    <Text style={{ fontSize: 12, color: colors.textSecondary, flex: 1, lineHeight: 18 }}>{risk}</Text>
                   </View>
                 ))}
               </View>
             )}
-            {entry.monthDiff && (
-              <View style={[s.diffCard, { backgroundColor: isDark ? '#151A22' : '#F8F9FA' }]}>
-                <Ionicons name="swap-horizontal-outline" size={14} color="#8B5CF6" />
-                <Text style={[s.diffText, { color: colors.textSecondary }]}>
-                  Changes from previous month detected
-                </Text>
+
+            {intentMap.length > 0 && (
+              <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                <View style={s.cardHeader}>
+                  <Ionicons name="git-branch-outline" size={18} color="#3B82F6" />
+                  <Text style={[s.cardTitle, { color: colors.text }]}>Competitor Intent Map</Text>
+                </View>
+                {intentMap.map((intent: any, i: number) => {
+                  const intentColor = intent.intentCategory === 'AGGRESSIVE_SCALING' || intent.intentCategory === 'PRICE_WAR' ? '#EF4444' : intent.intentCategory === 'DEFENSIVE' ? '#F59E0B' : intent.intentCategory === 'TESTING' || intent.intentCategory === 'POSITIONING_SHIFT' ? '#3B82F6' : '#10B981';
+                  return (
+                    <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: i < intentMap.length - 1 ? 1 : 0, borderBottomColor: isDark ? '#1A2030' : '#F0F0F0' }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }}>{intent.competitorName}</Text>
+                        {intent.degraded && <Text style={{ fontSize: 10, color: '#F59E0B' }}>Degraded: {intent.degradeReason}</Text>}
+                      </View>
+                      <View style={[s.threatBadge, { backgroundColor: intentColor + '20' }]}>
+                        <Text style={{ fontSize: 10, fontWeight: '600', color: intentColor }}>{intent.intentCategory?.replace(/_/g, ' ')}</Text>
+                      </View>
+                    </View>
+                  );
+                })}
               </View>
             )}
+
+            {trajectory && (
+              <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                <View style={s.cardHeader}>
+                  <Ionicons name="trending-up-outline" size={18} color="#8B5CF6" />
+                  <Text style={[s.cardTitle, { color: colors.text }]}>Market Trajectory Indices</Text>
+                </View>
+                {[
+                  { label: 'Market Heating', value: trajectory.marketHeatingIndex, color: '#EF4444' },
+                  { label: 'Narrative Convergence', value: trajectory.narrativeConvergenceScore, color: '#F59E0B' },
+                  { label: 'Offer Compression', value: trajectory.offerCompressionIndex, color: '#3B82F6' },
+                  { label: 'Angle Saturation', value: trajectory.angleSaturationLevel, color: '#8B5CF6' },
+                  { label: 'Revival Potential', value: trajectory.revivalPotential, color: '#10B981' },
+                ].map((idx, i) => (
+                  <View key={i} style={{ marginBottom: 8 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                      <Text style={{ fontSize: 11, color: colors.textMuted }}>{idx.label}</Text>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: idx.color }}>{((idx.value || 0) * 100).toFixed(0)}%</Text>
+                    </View>
+                    <View style={[s.qualityBar]}>
+                      <View style={[s.qualityFill, { width: `${(idx.value || 0) * 100}%`, backgroundColor: idx.color }]} />
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {missingSignals.length > 0 && (
+              <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                <View style={s.cardHeader}>
+                  <Ionicons name="help-circle-outline" size={18} color="#F59E0B" />
+                  <Text style={[s.cardTitle, { color: colors.text }]}>Missing Signals</Text>
+                </View>
+                {missingSignals.slice(0, 8).map((flag: string, i: number) => (
+                  <Text key={i} style={{ fontSize: 11, color: colors.textMuted, marginBottom: 3 }}>• {flag}</Text>
+                ))}
+                {missingSignals.length > 8 && (
+                  <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>...and {missingSignals.length - 8} more</Text>
+                )}
+              </View>
+            )}
+
+            <View style={{ paddingHorizontal: 4, paddingTop: 4 }}>
+              <Text style={{ fontSize: 9, color: colors.textMuted, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
+                source: miv3_snapshot:{miv3Result?.snapshotId?.slice(0, 8)} | guard: {confidence?.guardDecision} | mode: {miv3Result?.executionMode}
+              </Text>
+            </View>
           </View>
-        ))}
+        )}
+      </View>
+    );
+  };
+
+  const renderTimeline = () => {
+    const history = timelineData?.history || [];
+    return (
+      <View>
+        <View style={s.sectionHeader}>
+          <Text style={[s.sectionTitle, { color: colors.text }]}>Snapshot History</Text>
+          {history.length > 0 && (
+            <View style={[s.countBadge, { backgroundColor: '#8B5CF6' + '20' }]}>
+              <Text style={[s.countText, { color: '#8B5CF6' }]}>{history.length} snapshots</Text>
+            </View>
+          )}
+        </View>
+        {history.length === 0 ? (
+          <View style={s.emptyState}>
+            <Ionicons name="time-outline" size={40} color={colors.textMuted} />
+            <Text style={[s.emptyTitle, { color: colors.text }]}>No Snapshot History</Text>
+            <Text style={[s.emptyDesc, { color: colors.textMuted }]}>Run an analysis to create your first MIv3 snapshot</Text>
+          </View>
+        ) : history.map((entry: any, i: number) => {
+          const confColor = entry.confidenceLevel === 'STRONG' || entry.confidenceLevel === 'MODERATE' ? '#10B981' : entry.confidenceLevel === 'LOW' ? '#F59E0B' : '#EF4444';
+          const modeColor = entry.executionMode === 'FULL' ? '#10B981' : entry.executionMode === 'REDUCED' ? '#F59E0B' : '#6B7280';
+          return (
+            <View key={entry.id} style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+              <View style={s.timelineHeader}>
+                <View style={[s.timelineDot, { backgroundColor: confColor }]} />
+                <Text style={[s.timelineMonth, { color: colors.text }]}>v{entry.version}</Text>
+                <View style={[s.statusChip, { backgroundColor: confColor + '15' }]}>
+                  <Text style={[s.statusChipText, { color: confColor }]}>{entry.confidenceLevel}</Text>
+                </View>
+                <View style={[s.statusChip, { backgroundColor: modeColor + '15', marginLeft: 4 }]}>
+                  <Text style={[s.statusChipText, { color: modeColor }]}>{entry.executionMode}</Text>
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 6 }}>
+                <Text style={{ fontSize: 11, color: colors.textMuted }}>Market: <Text style={{ color: colors.text, fontWeight: '600' }}>{entry.marketState || 'N/A'}</Text></Text>
+                <Text style={{ fontSize: 11, color: colors.textMuted }}>Confidence: <Text style={{ color: confColor, fontWeight: '600' }}>{Math.round((entry.overallConfidence || 0) * 100)}%</Text></Text>
+                <Text style={{ fontSize: 11, color: colors.textMuted }}>Volatility: <Text style={{ color: colors.text, fontWeight: '600' }}>{((entry.volatilityIndex || 0) * 100).toFixed(0)}%</Text></Text>
+                <Text style={{ fontSize: 11, color: colors.textMuted }}>Freshness: <Text style={{ color: colors.text, fontWeight: '600' }}>{entry.dataFreshnessDays || 0}d</Text></Text>
+              </View>
+              <Text style={{ fontSize: 9, color: colors.textMuted, marginTop: 6, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
+                {entry.id?.slice(0, 8)} | {entry.createdAt ? new Date(entry.createdAt).toLocaleString() : 'N/A'}
+              </Text>
+            </View>
+          );
+        })}
       </View>
     );
   };

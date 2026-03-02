@@ -1,0 +1,217 @@
+
+⸻
+
+Subject: MIv3 Final Validation — Pass or Fail (No Middle Ground)
+
+Replit,
+
+We are now at final validation stage for Market Intelligence V3.
+
+I need binary answers:
+PASS or FAIL.
+If FAIL → include exact corrective action.
+
+No soft confirmations.
+
+⸻
+
+1️⃣ Single Source Enforcement
+
+Question:
+
+Are ALL CI sub-tabs (Overview, Dominance, Actions, History, Analyze, Refresh) strictly reading from the same MIv3 snapshot instance?
+	•	No parallel dominance logic
+	•	No separate LLM calls
+	•	No hidden recomputation on tab switch
+
+PASS or FAIL.
+
+If FAIL:
+	•	Refactor so every sub-tab calls MIv3.run(mode) only.
+	•	Remove any independent signal/dominance calculations.
+	•	Log isolation violations.
+
+⸻
+
+2️⃣ Snapshot Scope Isolation
+
+Question:
+
+Is every snapshot strictly scoped by:
+	•	accountId
+	•	campaignId
+	•	competitorHash
+	•	version
+
+And is it impossible for cross-campaign leakage?
+
+PASS or FAIL.
+
+If FAIL:
+	•	Add strict composite snapshot key.
+	•	Invalidate snapshot on competitor set change.
+	•	Add unit test for cross-campaign contamination.
+
+⸻
+
+3️⃣ Token Budget Guard — Real Enforcement
+
+Question:
+
+Is token ceiling actively enforced (not just declared)?
+Does the engine auto-switch between FULL / REDUCED / LIGHT based on projectedTokens?
+
+Are these logged:
+	•	projectedTokens
+	•	actualTokensUsed
+	•	executionMode
+	•	downgradeReason
+
+PASS or FAIL.
+
+If FAIL:
+	•	Implement pre-call token estimator.
+	•	Enforce ceiling hard stop.
+	•	Add audit logging for every run.
+
+⸻
+
+4️⃣ Anti-Hallucination Integrity
+
+Question:
+
+If pricing, demand, or sentiment data is missing,
+does the engine:
+	•	downgrade confidence
+	•	avoid strong conclusions
+	•	list missingSignals explicitly
+
+PASS or FAIL.
+
+If FAIL:
+	•	Block narrative layer when signals insufficient.
+	•	Force output contract to include missingSignals[].
+
+⸻
+
+5️⃣ Confidence Downgrade Real Behavior
+
+Question:
+
+Have you tested scenarios where:
+	•	1 competitor only
+	•	No website
+	•	No maps
+	•	Weak signal density
+
+Does the engine properly downgrade to LOW or EXPLORATORY mode?
+
+PASS or FAIL.
+
+If FAIL:
+	•	Adjust Confidence Engine thresholds.
+	•	Enforce downgrade via Uncertainty Guard.
+
+⸻
+
+6️⃣ Refresh & Cache Discipline
+
+Question:
+
+Does snapshot refresh only occur when:
+	•	manual trigger
+	•	freshness expiration
+	•	volatility threshold
+
+And never on tab switch?
+
+PASS or FAIL.
+
+If FAIL:
+	•	Remove auto-recompute logic.
+	•	Enforce cache-first rule.
+
+⸻
+
+7️⃣ Deterministic Signal Separation
+
+Question:
+
+Are ALL numeric calculations (ratios, engagement math, dominance math) 100% deterministic and outside LLM?
+
+LLM should only handle:
+	•	narrative compression
+	•	pattern synthesis
+	•	intent summarization
+
+PASS or FAIL.
+
+If FAIL:
+	•	Extract math logic into pure server functions.
+	•	Remove LLM dependency for numeric logic.
+
+⸻
+
+8️⃣ Failure Containment
+
+Question:
+
+If LLM fails mid-run:
+	•	Does engine return deterministic diagnostic?
+	•	Avoid retry loops?
+	•	Avoid partial corrupted snapshot?
+
+PASS or FAIL.
+
+If FAIL:
+	•	Add try/catch isolation.
+	•	Return LIGHT deterministic fallback.
+	•	Abort without retry.
+
+⸻
+
+9️⃣ Output Contract Integrity
+
+Question:
+
+Does MIv3 always return the full 12-field output structure,
+even when BLOCKED or DOWNGRADED?
+
+PASS or FAIL.
+
+If FAIL:
+	•	Enforce output schema before returning.
+	•	Reject partial output.
+
+⸻
+
+10️⃣ Stress Test Proof
+
+Have you run a deliberate overload test:
+	•	10 competitors
+	•	Max comment sampling
+	•	Rapid refresh attempts
+	•	Tab switching stress
+
+Did system remain stable?
+No uncontrolled token growth?
+No duplicate snapshots?
+
+PASS or FAIL.
+
+If FAIL:
+	•	Add rate limiter.
+	•	Add snapshot deduplication.
+	•	Enforce single-run lock.
+
+⸻
+
+Reply with:
+
+PASS/FAIL per item
+	•	Evidence reference (test name, log ID, or code path)
+
+No assumptions.
+
+Once all items PASS with evidence,
+MIv3 is considered structurally sealed.
