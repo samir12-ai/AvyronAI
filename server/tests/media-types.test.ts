@@ -41,8 +41,12 @@ describe('normalizeMediaType', () => {
   it('normalizes image variants to IMAGE', () => {
     expect(normalizeMediaType('image')).toBe('IMAGE');
     expect(normalizeMediaType('Image')).toBe('IMAGE');
-    expect(normalizeMediaType('poster')).toBe('IMAGE');
     expect(normalizeMediaType('photo')).toBe('IMAGE');
+  });
+
+  it('normalizes poster to POSTER (canonical type)', () => {
+    expect(normalizeMediaType('poster')).toBe('POSTER');
+    expect(normalizeMediaType('POSTER')).toBe('POSTER');
   });
 
   it('normalizes post/story/carousel', () => {
@@ -121,15 +125,16 @@ describe('createRouteForContentType', () => {
     expect(createRouteForContentType('poster').tab).toBe('designer');
   });
 
-  it('POST and STORY route to AI Writer (content tab, post contentType)', () => {
+  it('POST and STORY route to content tab', () => {
     const postRoute = createRouteForContentType('POST');
     expect(postRoute.tab).toBe('content');
     expect(postRoute.contentType).toBe('post');
-    expect(postRoute.label).toBe('AI Writer');
+    expect(postRoute.label).toBe('Posts');
 
     const storyRoute = createRouteForContentType('STORY');
     expect(storyRoute.tab).toBe('content');
-    expect(storyRoute.contentType).toBe('post');
+    expect(storyRoute.contentType).toBe('story');
+    expect(storyRoute.label).toBe('Stories');
   });
 
   it('case-insensitive matching for all types', () => {

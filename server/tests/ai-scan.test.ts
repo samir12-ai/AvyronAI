@@ -1,6 +1,6 @@
+import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import assert from "assert";
 
 function getAllTsFiles(dir: string): string[] {
   const results: string[] = [];
@@ -34,76 +34,50 @@ function extractCallBlock(content: string, startIndex: number): string {
   return content.substring(startIndex, Math.min(startIndex + 500, content.length));
 }
 
-async function runScan() {
-  const serverDir = path.resolve(__dirname, "..");
+const serverDir = path.resolve(__dirname, "..");
+
+describe("AI Client Enforcement Scan", () => {
   const files = getAllTsFiles(serverDir);
-  const violations: string[] = [];
 
-  for (const file of files) {
-    const relPath = path.relative(serverDir, file);
-    if (relPath === "ai-client.ts") continue;
+  it("no direct OpenAI or GoogleGenAI instantiation outside ai-client.ts", () => {
+    const violations: string[] = [];
 
-    const content = fs.readFileSync(file, "utf-8");
+    for (const file of files) {
+      const relPath = path.relative(serverDir, file);
+      if (relPath === "ai-client.ts") continue;
 
-    if (content.includes("new OpenAI(")) {
-      violations.push(`${relPath}: contains "new OpenAI(" — must use ai-client.ts`);
-    }
-    if (content.includes("new GoogleGenAI(")) {
-      violations.push(`${relPath}: contains "new GoogleGenAI(" — must use ai-client.ts`);
-    }
-  }
+      const content = fs.readFileSync(file, "utf-8");
 
-  if (violations.length > 0) {
-    console.error("AI CLIENT VIOLATIONS FOUND:");
-    violations.forEach(v => console.error(`  ✗ ${v}`));
-    assert.fail(`${violations.length} violation(s) found — all AI calls must go through ai-client.ts`);
-  }
-
-  console.log(`✓ AI scan passed — ${files.length} files checked, no violations found.`);
-
-  const chatCalls: string[] = [];
-  for (const file of files) {
-    const relPath = path.relative(serverDir, file);
-    if (relPath === "ai-client.ts") continue;
-    const content = fs.readFileSync(file, "utf-8");
-    const lines = content.split("\n");
-    lines.forEach((line, i) => {
-      if (line.includes("aiChat(") || line.includes("aiGemini(")) {
-        chatCalls.push(`${relPath}:${i + 1}: ${line.trim()}`);
+      if (content.includes("new OpenAI(")) {
+        violations.push(`${relPath}: contains "new OpenAI(" — must use ai-client.ts`);
       }
-    });
-  }
-
-  console.log(`\nAI calls found (${chatCalls.length}):`);
-  chatCalls.forEach(c => console.log(`  ${c}`));
-
-  const uncapped: string[] = [];
-  for (const file of files) {
-    const relPath = path.relative(serverDir, file);
-    if (relPath === "ai-client.ts") continue;
-    const content = fs.readFileSync(file, "utf-8");
-
-    const aiChatPattern = /aiChat\(/g;
-    let match;
-    while ((match = aiChatPattern.exec(content)) !== null) {
-      const callBlock = extractCallBlock(content, match.index);
-      if (!callBlock.includes("max_tokens")) {
-        const lineNum = content.substring(0, match.index).split("\n").length;
-        uncapped.push(`${relPath}:${lineNum}: aiChat call missing max_tokens`);
+      if (content.includes("new GoogleGenAI(")) {
+        violations.push(`${relPath}: contains "new GoogleGenAI(" — must use ai-client.ts`);
       }
     }
-  }
 
-  if (uncapped.length > 0) {
-    console.error("\nUNCAPPED AI CALLS FOUND:");
-    uncapped.forEach(u => console.error(`  ✗ ${u}`));
-    assert.fail(`${uncapped.length} uncapped AI call(s) found`);
-  }
+    expect(violations).toEqual([]);
+  });
 
-  console.log("✓ All AI calls have explicit max_tokens.");
-}
+  it("all aiChat calls have explicit max_tokens", () => {
+    const uncapped: string[] = [];
 
-runScan().catch(err => {
-  console.error(err);
-  process.exit(1);
+    for (const file of files) {
+      const relPath = path.relative(serverDir, file);
+      if (relPath === "ai-client.ts") continue;
+      const content = fs.readFileSync(file, "utf-8");
+
+      const aiChatPattern = /aiChat\(/g;
+      let match;
+      while ((match = aiChatPattern.exec(content)) !== null) {
+        const callBlock = extractCallBlock(content, match.index);
+        if (!callBlock.includes("max_tokens")) {
+          const lineNum = content.substring(0, match.index).split("\n").length;
+          uncapped.push(`${relPath}:${lineNum}: aiChat call missing max_tokens`);
+        }
+      }
+    }
+
+    expect(uncapped).toEqual([]);
+  });
 });

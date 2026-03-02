@@ -1,5 +1,6 @@
 import type { Express } from "express";
-import { GoogleGenAI } from "@google/genai";
+import type { GoogleGenAI } from "@google/genai";
+import { getGemini } from "./ai-client";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
@@ -18,15 +19,12 @@ const upload = multer({
   },
 });
 
-let veoClient: GoogleGenAI | null = null;
-
 function getVeoClient(): GoogleGenAI | null {
-  const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
-  if (!apiKey) return null;
-  if (!veoClient) {
-    veoClient = new GoogleGenAI({ apiKey });
+  try {
+    return getGemini();
+  } catch {
+    return null;
   }
-  return veoClient;
 }
 
 export function registerVeoRoutes(app: Express) {
