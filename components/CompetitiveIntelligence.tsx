@@ -79,12 +79,7 @@ export default function CompetitiveIntelligence() {
   const [activeView, setActiveView] = useState<CIView>('overview');
   const [showAddCompetitor, setShowAddCompetitor] = useState(false);
   const [expandedCompetitor, setExpandedCompetitor] = useState<string | null>(null);
-  const [addStep, setAddStep] = useState<'input' | 'review'>('input');
-  const [viralInsights, setViralInsights] = useState('');
-  const [showManualFields, setShowManualFields] = useState(false);
-  const [ccExpanded, setCcExpanded] = useState(false);
-  const [ccReelExpanded, setCcReelExpanded] = useState<Record<number, boolean>>({});
-  const [profileAnalysis, setProfileAnalysis] = useState<any>(null);
+  const [addAndFetch, setAddAndFetch] = useState(false);
   const [miv3Result, setMiv3Result] = useState<any>(null);
 
   const [newComp, setNewComp] = useState({
@@ -142,79 +137,19 @@ export default function CompetitiveIntelligence() {
       if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ['ci-competitors'] });
       setShowAddCompetitor(false);
-      setAddStep('input');
-      setViralInsights('');
-      setShowManualFields(false);
-      setProfileAnalysis(null);
       setNewComp({ name: '', profileLink: '', businessType: '', primaryObjective: '', platform: 'instagram', postingFrequency: '', contentTypeRatio: '', engagementRatio: '', ctaPatterns: '', discountFrequency: '', hookStyles: '', messagingTone: '', socialProofPresence: '' });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (addAndFetch && data?.competitor?.id) {
+        setAddAndFetch(false);
+        setTimeout(() => {
+          fetchDataMutation.mutate({ id: data.competitor.id });
+        }, 500);
+      }
     },
     onError: (err: any) => Alert.alert('Error', err.message),
-  });
-
-  const autoAnalyzeMutation = useMutation({
-    mutationFn: async ({ name, profileLink }: { name: string; profileLink: string }) => {
-      const res = await fetch(new URL('/api/ci/competitors/analyze-profile', baseUrl).toString(), {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, profileLink }),
-      });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
-      return res.json();
-    },
-    onSuccess: (data) => {
-      setProfileAnalysis(data);
-      const m = data.measured;
-      const mix = m?.content_mix;
-      const mixStr = mix ? `Reels ${Math.round(mix.reels_ratio * 100)}% / Static ${Math.round(mix.static_ratio * 100)}%` : '';
-      const ctaInsights = data.inferred?.insights?.filter((ins: any) => ins.category === 'cta_pattern') || [];
-      const ctaStr = ctaInsights.length > 0 ? ctaInsights.map((ins: any) => ins.finding).join('; ') : '';
-      const ccCtaSignals: string[] = [];
-      if (data.creativeCapture?.length > 0) {
-        for (const cc of data.creativeCapture) {
-          if (cc.interpreted?.ctaSignals?.length > 0) {
-            for (const sig of cc.interpreted.ctaSignals) {
-              if (sig.text && !ccCtaSignals.includes(sig.text)) ccCtaSignals.push(sig.text);
-            }
-          }
-        }
-      }
-      const ccCtaStr = ccCtaSignals.length > 0 ? ccCtaSignals.join(', ') : '';
-      const combinedCta = [ctaStr, ccCtaStr].filter(Boolean).join('; ');
-      const hookInsights = data.inferred?.insights?.filter((ins: any) => ins.category === 'hook_style') || [];
-      const hookStr = hookInsights.length > 0 ? hookInsights.map((ins: any) => ins.finding).join('; ') : '';
-      const toneInsights = data.inferred?.insights?.filter((ins: any) => ins.category === 'messaging_tone') || [];
-      const toneStr = toneInsights.length > 0 ? toneInsights.map((ins: any) => ins.finding).join('; ') : '';
-      const proofInsights = data.inferred?.insights?.filter((ins: any) => ins.category === 'social_proof') || [];
-      const proofStr = proofInsights.length > 0 ? proofInsights.map((ins: any) => ins.finding).join('; ') : '';
-      const hf = data.hydratedFields;
-      const finalCta = hf?.ctaPatterns || combinedCta;
-      const finalHooks = hf?.hookStyles || hookStr;
-      const finalTone = hf?.messagingTone || toneStr;
-      const finalProof = hf?.socialProofPresence || proofStr;
-      const mappedCategories: string[] = [];
-      if (finalCta) mappedCategories.push('cta_pattern');
-      if (finalHooks) mappedCategories.push('hook_style');
-      if (finalTone) mappedCategories.push('messaging_tone');
-      if (finalProof) mappedCategories.push('social_proof');
-      console.log('[CI Hydration] Mapped insight categories:', mappedCategories.join(', ') || 'none');
-      setNewComp(p => ({
-        ...p,
-        postingFrequency: m?.avg_posts_per_week_28d?.value?.toString() || m?.posts_last_7d?.value?.toString() || p.postingFrequency,
-        contentTypeRatio: mixStr || p.contentTypeRatio,
-        engagementRatio: m?.engagement_rate?.value?.toString() || p.engagementRatio,
-        ctaPatterns: finalCta || p.ctaPatterns,
-        hookStyles: finalHooks || p.hookStyles,
-        messagingTone: finalTone || p.messagingTone,
-        socialProofPresence: finalProof || p.socialProofPresence,
-      }));
-      setViralInsights('');
-      setAddStep('review');
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    },
-    onError: (err: any) => Alert.alert('Analysis Failed', err.message + '\n\nYou can still add this competitor manually.'),
   });
 
   const analyzeMutation = useMutation({
@@ -1057,573 +992,112 @@ export default function CompetitiveIntelligence() {
       {activeView === 'recommendations' && renderRecommendations()}
       {activeView === 'timeline' && renderTimeline()}
 
-      <Modal visible={showAddCompetitor} animationType="slide" transparent onRequestClose={() => { setShowAddCompetitor(false); setAddStep('input'); setShowManualFields(false); }}>
+      <Modal visible={showAddCompetitor} animationType="slide" transparent onRequestClose={() => { setShowAddCompetitor(false); }}>
         <View style={s.modalOverlay}>
           <View style={[s.modalContent, { backgroundColor: isDark ? '#0F1419' : '#fff' }]}>
             <View style={s.modalHeader}>
-              <Text style={[s.modalTitle, { color: colors.text }]}>
-                {addStep === 'input' ? 'Add Competitor' : 'Review AI Analysis'}
-              </Text>
-              <Pressable onPress={() => { setShowAddCompetitor(false); setAddStep('input'); setShowManualFields(false); }}>
+              <Text style={[s.modalTitle, { color: colors.text }]}>Add Competitor</Text>
+              <Pressable onPress={() => { setShowAddCompetitor(false); }}>
                 <Ionicons name="close" size={24} color={colors.textMuted} />
               </Pressable>
             </View>
 
             <ScrollView style={s.modalScroll} showsVerticalScrollIndicator={false}>
-              {addStep === 'input' ? (
-                <>
-                  <View style={[s.aiHintCard, { backgroundColor: '#8B5CF6' + '10', borderColor: '#8B5CF6' + '30' }]}>
-                    <Ionicons name="sparkles" size={18} color="#8B5CF6" />
-                    <Text style={[s.aiHintText, { color: colors.textSecondary }]}>
-                      Just enter the company name and profile URL. AI will auto-analyze their content strategy from their top viral posts.
-                    </Text>
-                  </View>
+              <View style={[s.aiHintCard, { backgroundColor: '#10B981' + '10', borderColor: '#10B981' + '30' }]}>
+                <Ionicons name="cloud-download-outline" size={18} color="#10B981" />
+                <Text style={[s.aiHintText, { color: colors.textSecondary }]}>
+                  Add the competitor, then use Auto-Fetch on their card to collect posts, comments, and signals automatically.
+                </Text>
+              </View>
 
-                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Company Name *</Text>
-                  <TextInput
-                    style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                    value={newComp.name}
-                    onChangeText={v => setNewComp(p => ({ ...p, name: v }))}
-                    placeholder="e.g. Socialeyez"
-                    placeholderTextColor={colors.textMuted}
-                  />
+              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Company Name *</Text>
+              <TextInput
+                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
+                value={newComp.name}
+                onChangeText={v => setNewComp(p => ({ ...p, name: v }))}
+                placeholder="e.g. Socialeyez"
+                placeholderTextColor={colors.textMuted}
+              />
 
-                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Profile URL *</Text>
-                  <TextInput
-                    style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                    value={newComp.profileLink}
-                    onChangeText={v => setNewComp(p => ({ ...p, profileLink: v }))}
-                    placeholder="https://instagram.com/socialeyez"
-                    placeholderTextColor={colors.textMuted}
-                    autoCapitalize="none"
-                    keyboardType="url"
-                  />
+              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Profile URL *</Text>
+              <TextInput
+                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
+                value={newComp.profileLink}
+                onChangeText={v => setNewComp(p => ({ ...p, profileLink: v }))}
+                placeholder="https://instagram.com/socialeyez"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="none"
+                keyboardType="url"
+              />
 
-                  <Pressable
-                    onPress={() => {
-                      if (!newComp.name || !newComp.profileLink) {
-                        Alert.alert('Required', 'Enter company name and profile URL');
-                        return;
-                      }
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                      autoAnalyzeMutation.mutate({ name: newComp.name, profileLink: newComp.profileLink });
-                    }}
-                    style={[s.autoAnalyzeBtn, { opacity: autoAnalyzeMutation.isPending ? 0.7 : 1 }]}
-                    disabled={autoAnalyzeMutation.isPending}
-                  >
-                    {autoAnalyzeMutation.isPending ? (
-                      <>
-                        <ActivityIndicator size="small" color="#fff" />
-                        <Text style={s.autoAnalyzeBtnText}>Analyzing viral content...</Text>
-                      </>
-                    ) : (
-                      <>
-                        <Ionicons name="sparkles" size={18} color="#fff" />
-                        <Text style={s.autoAnalyzeBtnText}>Auto-Analyze with AI</Text>
-                      </>
-                    )}
-                  </Pressable>
+              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Business Type *</Text>
+              <TextInput
+                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
+                value={newComp.businessType}
+                onChangeText={v => setNewComp(p => ({ ...p, businessType: v }))}
+                placeholder="E-commerce, Agency, F&B, Service..."
+                placeholderTextColor={colors.textMuted}
+              />
 
-                  {autoAnalyzeMutation.isPending && (
-                    <View style={s.analyzingSteps}>
-                      <Text style={[s.analyzingStep, { color: colors.textMuted }]}>
-                        <Ionicons name="checkmark-circle" size={13} color="#8B5CF6" /> Scanning profile...
-                      </Text>
-                      <Text style={[s.analyzingStep, { color: colors.textMuted }]}>
-                        <Ionicons name="videocam" size={13} color="#8B5CF6" /> Analyzing 3-5 viral posts...
-                      </Text>
-                      <Text style={[s.analyzingStep, { color: colors.textMuted }]}>
-                        <Ionicons name="analytics" size={13} color="#8B5CF6" /> Extracting patterns...
-                      </Text>
-                    </View>
-                  )}
+              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Primary Objective *</Text>
+              <TextInput
+                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
+                value={newComp.primaryObjective}
+                onChangeText={v => setNewComp(p => ({ ...p, primaryObjective: v }))}
+                placeholder="Sales, Leads, Brand awareness..."
+                placeholderTextColor={colors.textMuted}
+              />
 
-                  <Pressable
-                    onPress={() => setShowManualFields(!showManualFields)}
-                    style={s.manualToggle}
-                  >
-                    <Ionicons name={showManualFields ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} />
-                    <Text style={[s.manualToggleText, { color: colors.textMuted }]}>
-                      {showManualFields ? 'Hide manual entry' : 'Or fill in manually'}
-                    </Text>
-                  </Pressable>
+              <Pressable
+                onPress={() => {
+                  if (!newComp.name || !newComp.profileLink || !newComp.businessType || !newComp.primaryObjective) {
+                    Alert.alert('Required Fields', 'Name, Profile URL, Business Type, and Primary Objective are required');
+                    return;
+                  }
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                  setAddAndFetch(true);
+                  addCompetitorMutation.mutate(newComp);
+                }}
+                style={[s.autoAnalyzeBtn, { opacity: addCompetitorMutation.isPending ? 0.7 : 1 }]}
+                disabled={addCompetitorMutation.isPending}
+              >
+                {addCompetitorMutation.isPending ? (
+                  <>
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={s.autoAnalyzeBtnText}>Adding competitor...</Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name="add-circle" size={18} color="#fff" />
+                    <Text style={s.autoAnalyzeBtnText}>Add & Auto-Fetch Data</Text>
+                  </>
+                )}
+              </Pressable>
 
-                  {showManualFields && (
-                    <>
-                      <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Business Type *</Text>
-                      <TextInput
-                        style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                        value={newComp.businessType}
-                        onChangeText={v => setNewComp(p => ({ ...p, businessType: v }))}
-                        placeholder="E-commerce, Service, Local..."
-                        placeholderTextColor={colors.textMuted}
-                      />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 12 }}>
+                <View style={{ flex: 1, height: 1, backgroundColor: isDark ? '#1A2030' : '#E2E8E4' }} />
+                <Text style={{ fontSize: 11, color: colors.textMuted }}>or</Text>
+                <View style={{ flex: 1, height: 1, backgroundColor: isDark ? '#1A2030' : '#E2E8E4' }} />
+              </View>
 
-                      <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Primary Objective *</Text>
-                      <TextInput
-                        style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                        value={newComp.primaryObjective}
-                        onChangeText={v => setNewComp(p => ({ ...p, primaryObjective: v }))}
-                        placeholder="Sales, Leads, Brand awareness..."
-                        placeholderTextColor={colors.textMuted}
-                      />
+              <Pressable
+                onPress={() => {
+                  if (!newComp.name || !newComp.profileLink || !newComp.businessType || !newComp.primaryObjective) {
+                    Alert.alert('Required Fields', 'Name, Profile URL, Business Type, and Primary Objective are required');
+                    return;
+                  }
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  setAddAndFetch(false);
+                  addCompetitorMutation.mutate(newComp);
+                }}
+                style={[s.submitBtn, { opacity: addCompetitorMutation.isPending ? 0.6 : 1 }]}
+                disabled={addCompetitorMutation.isPending}
+              >
+                {addCompetitorMutation.isPending ? <ActivityIndicator size="small" color="#fff" /> :
+                  <Text style={s.submitBtnText}>Add Only (Fetch Later)</Text>
+                }
+              </Pressable>
 
-                      <View style={[s.sectionDivider, { borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-                        <Text style={[s.sectionDividerText, { color: '#8B5CF6' }]}>Evidence Fields</Text>
-                      </View>
-
-                      <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Posts/Week</Text>
-                      <TextInput
-                        style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                        value={newComp.postingFrequency}
-                        onChangeText={v => setNewComp(p => ({ ...p, postingFrequency: v }))}
-                        placeholder="e.g. 5"
-                        keyboardType="numeric"
-                        placeholderTextColor={colors.textMuted}
-                      />
-
-                      <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Engagement Ratio (%)</Text>
-                      <TextInput
-                        style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                        value={newComp.engagementRatio}
-                        onChangeText={v => setNewComp(p => ({ ...p, engagementRatio: v }))}
-                        placeholder="e.g. 3.5"
-                        keyboardType="decimal-pad"
-                        placeholderTextColor={colors.textMuted}
-                      />
-
-                      <Text style={[s.fieldLabel, { color: colors.textMuted }]}>CTA Patterns</Text>
-                      <TextInput
-                        style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                        value={newComp.ctaPatterns}
-                        onChangeText={v => setNewComp(p => ({ ...p, ctaPatterns: v }))}
-                        placeholder="Book Now, Shop Now, DM to Order..."
-                        placeholderTextColor={colors.textMuted}
-                      />
-
-                      <Pressable
-                        onPress={() => {
-                          if (!newComp.name || !newComp.profileLink || !newComp.businessType || !newComp.primaryObjective) {
-                            Alert.alert('Required Fields', 'Name, Profile Link, Business Type, and Primary Objective are required');
-                            return;
-                          }
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                          addCompetitorMutation.mutate(newComp);
-                        }}
-                        style={[s.submitBtn, { opacity: addCompetitorMutation.isPending ? 0.6 : 1 }]}
-                        disabled={addCompetitorMutation.isPending}
-                      >
-                        {addCompetitorMutation.isPending ? <ActivityIndicator size="small" color="#fff" /> :
-                          <Text style={s.submitBtnText}>Add Manually</Text>
-                        }
-                      </Pressable>
-                    </>
-                  )}
-                </>
-              ) : (
-                <>
-                  {profileAnalysis && (
-                    <>
-                      <View style={[s.aiResultHeader, {
-                        backgroundColor: profileAnalysis.status === 'VALID' ? '#10B981' + '12' : '#F59E0B' + '12',
-                        borderColor: profileAnalysis.status === 'VALID' ? '#10B981' + '30' : '#F59E0B' + '30',
-                      }]}>
-                        <Ionicons
-                          name={profileAnalysis.status === 'VALID' ? 'checkmark-circle' : 'alert-circle'}
-                          size={20}
-                          color={profileAnalysis.status === 'VALID' ? '#10B981' : '#F59E0B'}
-                        />
-                        <View style={{ flex: 1 }}>
-                          <Text style={[s.aiResultTitle, { color: colors.text }]}>
-                            {profileAnalysis.status === 'VALID' ? 'Profile Verified' : 'Partial Data'}
-                          </Text>
-                          <Text style={[s.aiResultSub, { color: colors.textMuted }]}>
-                            {profileAnalysis.scannedPosts} posts scanned via {profileAnalysis.collection_method_used?.replace(/_/g, ' ').toLowerCase()}
-                          </Text>
-                        </View>
-                      </View>
-
-                      {profileAnalysis.warnings?.length > 0 && (
-                        <View style={{ gap: 4, marginBottom: 8 }}>
-                          {profileAnalysis.warningDetails?.map((w: string, i: number) => (
-                            <View key={i} style={{ flexDirection: 'row', gap: 6, alignItems: 'flex-start', paddingHorizontal: 4 }}>
-                              <Ionicons name="warning-outline" size={13} color="#F59E0B" style={{ marginTop: 1 }} />
-                              <Text style={{ fontSize: 11, color: '#F59E0B', flex: 1, lineHeight: 16 }}>{w}</Text>
-                            </View>
-                          ))}
-                        </View>
-                      )}
-
-                      <View style={[s.sectionDivider, { borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Ionicons name="shield-checkmark" size={14} color="#10B981" />
-                          <Text style={[s.sectionDividerText, { color: '#10B981' }]}>MEASURED (Verified)</Text>
-                        </View>
-                      </View>
-
-                      {profileAnalysis.measured?.followers && (
-                        <View style={s.measuredRow}>
-                          <Text style={[s.measuredLabel, { color: colors.textMuted }]}>Followers</Text>
-                          <Text style={[s.measuredValue, { color: colors.text }]}>{profileAnalysis.measured.followers.value.toLocaleString()}</Text>
-                          <Text style={[s.measuredMeta, { color: colors.textMuted }]}>source: {profileAnalysis.measured.followers.source}</Text>
-                        </View>
-                      )}
-
-                      {profileAnalysis.measured?.posts_last_7d && (
-                        <View style={s.measuredRow}>
-                          <Text style={[s.measuredLabel, { color: colors.textMuted }]}>Posts (last 7 days)</Text>
-                          <Text style={[s.measuredValue, { color: colors.text }]}>{profileAnalysis.measured.posts_last_7d.value}</Text>
-                          <Text style={[s.measuredMeta, { color: colors.textMuted }]}>from {profileAnalysis.measured.posts_last_7d.sampleSize} scanned posts</Text>
-                        </View>
-                      )}
-
-                      {profileAnalysis.measured?.reels_last_7d && (
-                        <View style={s.measuredRow}>
-                          <Text style={[s.measuredLabel, { color: colors.textMuted }]}>Reels (last 7 days)</Text>
-                          <Text style={[s.measuredValue, { color: colors.text }]}>{profileAnalysis.measured.reels_last_7d.value}</Text>
-                          <Text style={[s.measuredMeta, { color: colors.textMuted }]}>from {profileAnalysis.measured.reels_last_7d.sampleSize} scanned posts</Text>
-                        </View>
-                      )}
-
-                      {profileAnalysis.measured?.avg_posts_per_week_28d && (
-                        <View style={s.measuredRow}>
-                          <Text style={[s.measuredLabel, { color: colors.textMuted }]}>Avg posts/week (28d)</Text>
-                          <Text style={[s.measuredValue, { color: colors.text }]}>{profileAnalysis.measured.avg_posts_per_week_28d.value}</Text>
-                          <Text style={[s.measuredMeta, { color: colors.textMuted }]}>from {profileAnalysis.measured.avg_posts_per_week_28d.sampleSize} scanned posts</Text>
-                        </View>
-                      )}
-
-                      {profileAnalysis.measured?.content_mix && (
-                        <View style={s.measuredRow}>
-                          <Text style={[s.measuredLabel, { color: colors.textMuted }]}>Content Mix (n={profileAnalysis.measured.content_mix.sampleSize} scanned posts)</Text>
-                          <Text style={[s.measuredValue, { color: colors.text }]}>
-                            Reels {Math.round(profileAnalysis.measured.content_mix.reels_ratio * 100)}% / Static {Math.round(profileAnalysis.measured.content_mix.static_ratio * 100)}%
-                          </Text>
-                          <Text style={[s.measuredMeta, { color: colors.textMuted }]}>based on all {profileAnalysis.measured.content_mix.sampleSize} scanned posts, not time-filtered</Text>
-                        </View>
-                      )}
-
-                      {profileAnalysis.measured?.engagement_rate && (
-                        <View style={s.measuredRow}>
-                          <Text style={[s.measuredLabel, { color: colors.textMuted }]}>
-                            Engagement ({profileAnalysis.measured.engagement_rate.timeframe}, n={profileAnalysis.measured.engagement_rate.sampleSize})
-                          </Text>
-                          <Text style={[s.measuredValue, { color: colors.text, opacity: profileAnalysis.measured?.posts_last_7d?.value === 0 ? 0.5 : 1 }]}>
-                            {profileAnalysis.measured.engagement_rate.value}%
-                          </Text>
-                          <Text style={[s.measuredMeta, { color: colors.textMuted }]}>
-                            ({profileAnalysis.measured.engagement_rate.avgLikes.toLocaleString()} avg likes + {profileAnalysis.measured.engagement_rate.avgComments.toLocaleString()} avg comments) / {profileAnalysis.measured.engagement_rate.followers.toLocaleString()} followers
-                          </Text>
-                          {profileAnalysis.measured?.posts_last_7d?.value === 0 && (
-                            <Text style={{ fontSize: 10, color: '#F59E0B', marginTop: 2, fontStyle: 'italic' }}>
-                              Note: 0 posts in last 7d — engagement is based on older posts in the scanned sample
-                            </Text>
-                          )}
-                        </View>
-                      )}
-
-                      {profileAnalysis.inferred && profileAnalysis.inferred.insights?.length > 0 && (
-                        <>
-                          <View style={[s.sectionDivider, { borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                              <Ionicons name="sparkles" size={14} color="#F59E0B" />
-                              <Text style={[s.sectionDividerText, { color: '#F59E0B' }]}>INFERRED (AI Insight)</Text>
-                            </View>
-                          </View>
-
-                          {profileAnalysis.inferred.insights.map((insight: any, i: number) => (
-                            <View key={i} style={[s.insightsCard, { backgroundColor: '#F59E0B' + '08', borderColor: '#F59E0B' + '20' }]}>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                                <Ionicons name="sparkles" size={12} color="#F59E0B" />
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#F59E0B', letterSpacing: 0.5, textTransform: 'uppercase' }}>
-                                  {insight.category?.replace(/_/g, ' ')}
-                                </Text>
-                              </View>
-                              <Text style={[s.insightsBody, { color: colors.textSecondary }]}>{insight.finding}</Text>
-                              {insight.evidencePermalinks?.length > 0 && (
-                                <View style={{ marginTop: 4 }}>
-                                  <Text style={{ fontSize: 10, color: colors.textMuted }}>
-                                    Evidence: {insight.evidencePermalinks.length} reel{insight.evidencePermalinks.length > 1 ? 's' : ''} analyzed
-                                  </Text>
-                                </View>
-                              )}
-                            </View>
-                          ))}
-                        </>
-                      )}
-
-                      {profileAnalysis.creativeCapture && profileAnalysis.creativeCapture.length > 0 && (
-                        <>
-                          <Pressable
-                            onPress={() => setCcExpanded(!ccExpanded)}
-                            style={[s.sectionDivider, { borderColor: isDark ? '#1A2030' : '#E2E8E4', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
-                          >
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                              <Ionicons name="videocam" size={14} color="#8B5CF6" />
-                              <Text style={[s.sectionDividerText, { color: '#8B5CF6' }]}>CREATIVE CAPTURE ({profileAnalysis.creativeCapture.length} reels)</Text>
-                            </View>
-                            <Ionicons name={ccExpanded ? 'chevron-up' : 'chevron-down'} size={16} color="#8B5CF6" />
-                          </Pressable>
-
-                          {profileAnalysis.creativeCapture.map((cc: any, ci: number) => {
-                            const summaryParts: string[] = [];
-                            const sources = new Set<string>();
-                            if (cc.interpreted?.hookCandidates?.length > 0) {
-                              cc.interpreted.hookCandidates.forEach((h: any) => sources.add(h.source));
-                              summaryParts.push(`Hook: MEASURED (${[...sources].join(' + ')})`);
-                            }
-                            sources.clear();
-                            if (cc.interpreted?.ctaSignals?.length > 0) {
-                              cc.interpreted.ctaSignals.forEach((c: any) => sources.add(c.source));
-                              summaryParts.push(`CTA: MEASURED (${[...sources].join(' + ')})`);
-                            }
-                            sources.clear();
-                            if (cc.interpreted?.offerSignals?.length > 0) {
-                              cc.interpreted.offerSignals.forEach((o: any) => sources.add(o.source));
-                              summaryParts.push(`Offer: MEASURED (${[...sources].join(' + ')})`);
-                            }
-                            if (cc.interpreted?.unavailable?.length > 0) {
-                              summaryParts.push(`${cc.interpreted.unavailable.length} UNAVAILABLE`);
-                            }
-                            const summaryLine = summaryParts.length > 0 ? summaryParts.join(' | ') : 'No signals detected';
-                            const isReelExpanded = ccReelExpanded[ci] || false;
-                            const cb = cc.evidencePack?.confidenceBreakdown;
-
-                            return (
-                              <View key={ci} style={[s.insightsCard, { backgroundColor: isDark ? '#1A1A2E' : '#F8F7FF', borderColor: '#8B5CF6' + '30', marginBottom: 8 }]}>
-                                <Pressable
-                                  onPress={() => setCcReelExpanded(prev => ({ ...prev, [ci]: !prev[ci] }))}
-                                  style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}
-                                >
-                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-                                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6' }}>Reel {ci + 1}</Text>
-                                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: cc.evidencePack?.status === 'COMPLETE' ? '#10B981' : '#F59E0B' }} />
-                                    <Text style={{ fontSize: 9, color: cc.evidencePack?.status === 'COMPLETE' ? '#10B981' : '#F59E0B', fontWeight: '600' }}>
-                                      {cc.evidencePack?.status}
-                                    </Text>
-                                  </View>
-                                  <Ionicons name={isReelExpanded ? 'chevron-up' : 'chevron-down'} size={14} color="#8B5CF6" />
-                                </Pressable>
-
-                                <Text style={{ fontSize: 10, color: colors.text, lineHeight: 15 }} numberOfLines={2}>
-                                  {summaryLine}
-                                </Text>
-
-                                {cb && (
-                                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-                                    {cb.ocr_confidence !== null && (
-                                      <Text style={{ fontSize: 8, color: colors.textMuted }}>OCR: {Math.round(cb.ocr_confidence * 100)}%</Text>
-                                    )}
-                                    {cb.transcript_confidence !== null && (
-                                      <Text style={{ fontSize: 8, color: colors.textMuted }}>Transcript: {Math.round(cb.transcript_confidence * 100)}%</Text>
-                                    )}
-                                    <Text style={{ fontSize: 8, color: colors.textMuted }}>Rules: {cb.rule_confidence === 1 ? '100%' : '0%'}</Text>
-                                    <Text style={{ fontSize: 8, color: colors.textMuted }}>Quality: {Math.round(cb.overall_data_quality * 100)}%</Text>
-                                  </View>
-                                )}
-
-                                {(ccExpanded || isReelExpanded) && (
-                                  <View style={{ marginTop: 8 }}>
-                                    <View style={{ marginBottom: 6 }}>
-                                      <Text style={{ fontSize: 9, color: colors.textMuted }}>
-                                        Sources: {cc.evidencePack?.sourcesSucceeded?.join(', ') || 'none'} ({cc.evidencePack?.sourcesSucceeded?.length || 0}/{cc.evidencePack?.sourcesAttempted?.length || 0})
-                                      </Text>
-                                      {cc.evidencePack?.asset_ttl_hours && (
-                                        <Text style={{ fontSize: 8, color: colors.textMuted, marginTop: 2 }}>
-                                          Asset TTL: {cc.evidencePack.asset_ttl_hours}h | Purge: {cc.evidencePack.purge_scheduled_at ? new Date(cc.evidencePack.purge_scheduled_at).toLocaleTimeString() : 'N/A'}
-                                        </Text>
-                                      )}
-                                    </View>
-
-                                    {cc.evidencePack?.warnings?.length > 0 && (
-                                      <View style={{ marginBottom: 6 }}>
-                                        {cc.evidencePack.warnings.map((w: any, wi: number) => (
-                                          <Text key={wi} style={{ fontSize: 9, color: '#F59E0B', fontStyle: 'italic' }}>
-                                            {w.code}: {w.reason}
-                                          </Text>
-                                        ))}
-                                      </View>
-                                    )}
-
-                                    {cc.interpreted?.hookCandidates?.length > 0 && (
-                                      <View style={{ marginBottom: 4 }}>
-                                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#10B981', marginBottom: 2 }}>Hook Candidates</Text>
-                                        {cc.interpreted.hookCandidates.map((h: any, hi: number) => (
-                                          <View key={hi} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                                            <View style={{ backgroundColor: '#10B981' + '20', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
-                                              <Text style={{ fontSize: 8, color: '#10B981', fontWeight: '600' }}>MEASURED</Text>
-                                            </View>
-                                            <Text style={{ fontSize: 10, color: colors.text, flex: 1 }} numberOfLines={2}>{h.text}</Text>
-                                            <Text style={{ fontSize: 8, color: colors.textMuted }}>{h.source} ({Math.round(h.confidence * 100)}%)</Text>
-                                          </View>
-                                        ))}
-                                      </View>
-                                    )}
-
-                                    {cc.interpreted?.ctaSignals?.length > 0 && (
-                                      <View style={{ marginBottom: 4 }}>
-                                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#3B82F6', marginBottom: 2 }}>CTA Signals</Text>
-                                        {cc.interpreted.ctaSignals.map((c: any, csi: number) => (
-                                          <View key={csi} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                                            <View style={{ backgroundColor: '#3B82F6' + '20', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
-                                              <Text style={{ fontSize: 8, color: '#3B82F6', fontWeight: '600' }}>MEASURED</Text>
-                                            </View>
-                                            <Text style={{ fontSize: 10, color: colors.text }}>{c.text}</Text>
-                                            <Text style={{ fontSize: 8, color: colors.textMuted }}>{c.source}</Text>
-                                          </View>
-                                        ))}
-                                      </View>
-                                    )}
-
-                                    {cc.interpreted?.offerSignals?.length > 0 && (
-                                      <View style={{ marginBottom: 4 }}>
-                                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#F59E0B', marginBottom: 2 }}>Offer Signals</Text>
-                                        {cc.interpreted.offerSignals.map((o: any, oi: number) => (
-                                          <View key={oi} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                                            <View style={{ backgroundColor: '#F59E0B' + '20', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
-                                              <Text style={{ fontSize: 8, color: '#F59E0B', fontWeight: '600' }}>MEASURED</Text>
-                                            </View>
-                                            <Text style={{ fontSize: 10, color: colors.text }}>{o.text}</Text>
-                                            <Text style={{ fontSize: 8, color: colors.textMuted }}>{o.source}</Text>
-                                          </View>
-                                        ))}
-                                      </View>
-                                    )}
-
-                                    {cc.interpreted?.proofSignals?.length > 0 && (
-                                      <View style={{ marginBottom: 4 }}>
-                                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#EC4899', marginBottom: 2 }}>Proof Signals</Text>
-                                        {cc.interpreted.proofSignals.map((p: any, pi: number) => (
-                                          <View key={pi} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                                            <View style={{ backgroundColor: '#EC4899' + '20', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
-                                              <Text style={{ fontSize: 8, color: '#EC4899', fontWeight: '600' }}>MEASURED</Text>
-                                            </View>
-                                            <Text style={{ fontSize: 10, color: colors.text }}>{p.text}</Text>
-                                            <Text style={{ fontSize: 8, color: colors.textMuted }}>{p.source}</Text>
-                                          </View>
-                                        ))}
-                                      </View>
-                                    )}
-
-                                    {cc.interpreted?.unavailable?.length > 0 && (
-                                      <View style={{ marginTop: 4 }}>
-                                        {cc.interpreted.unavailable.map((u: any, ui: number) => (
-                                          <View key={ui} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                                            <View style={{ backgroundColor: '#6B7280' + '20', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
-                                              <Text style={{ fontSize: 8, color: '#6B7280', fontWeight: '600' }}>UNAVAILABLE</Text>
-                                            </View>
-                                            <Text style={{ fontSize: 9, color: colors.textMuted, flex: 1 }}>
-                                              {u.signal}: {u.reason}
-                                            </Text>
-                                          </View>
-                                        ))}
-                                      </View>
-                                    )}
-
-                                    {cc.evidencePack?.ocrTopLines?.length > 0 && (
-                                      <View style={{ marginTop: 4, padding: 4, backgroundColor: isDark ? '#0D1117' : '#F0F0F0', borderRadius: 4 }}>
-                                        <Text style={{ fontSize: 9, fontWeight: '600', color: colors.textMuted, marginBottom: 2 }}>OCR Text (deduplicated)</Text>
-                                        <Text style={{ fontSize: 9, color: colors.text }} numberOfLines={3}>
-                                          {cc.evidencePack.ocrTopLines.slice(0, 5).join(' | ')}
-                                        </Text>
-                                      </View>
-                                    )}
-
-                                    {cc.evidencePack?.transcript && (
-                                      <View style={{ marginTop: 4, padding: 4, backgroundColor: isDark ? '#0D1117' : '#F0F0F0', borderRadius: 4 }}>
-                                        <Text style={{ fontSize: 9, fontWeight: '600', color: colors.textMuted, marginBottom: 2 }}>
-                                          Transcript (confidence: {cc.evidencePack.transcriptConfidence ? Math.round(cc.evidencePack.transcriptConfidence * 100) + '%' : 'N/A'})
-                                        </Text>
-                                        <Text style={{ fontSize: 9, color: colors.text }} numberOfLines={3}>
-                                          {cc.evidencePack.transcript.substring(0, 200)}
-                                        </Text>
-                                      </View>
-                                    )}
-
-                                    {cc.evidencePack?.pinnedCommentText && (
-                                      <View style={{ marginTop: 4, padding: 4, backgroundColor: isDark ? '#0D1117' : '#F0F0F0', borderRadius: 4 }}>
-                                        <Text style={{ fontSize: 9, fontWeight: '600', color: colors.textMuted, marginBottom: 2 }}>Pinned Comment</Text>
-                                        <Text style={{ fontSize: 9, color: colors.text }} numberOfLines={2}>
-                                          {cc.evidencePack.pinnedCommentText.substring(0, 200)}
-                                        </Text>
-                                      </View>
-                                    )}
-                                  </View>
-                                )}
-                              </View>
-                            );
-                          })}
-                        </>
-                      )}
-
-                      <View style={{ marginTop: 8, padding: 8, borderRadius: 6, backgroundColor: isDark ? '#1A2030' + '60' : '#F5F7FA' }}>
-                        <Text style={{ fontSize: 10, color: colors.textMuted, lineHeight: 15 }}>
-                          Audit: {profileAnalysis.attempts?.join(' → ')} | Method: {profileAnalysis.collection_method_used} | Source: {profileAnalysis.source_type}
-                        </Text>
-                      </View>
-                    </>
-                  )}
-
-                  <View style={[s.sectionDivider, { borderColor: isDark ? '#1A2030' : '#E2E8E4', marginTop: 12 }]}>
-                    <Text style={[s.sectionDividerText, { color: '#8B5CF6' }]}>Competitor Details</Text>
-                  </View>
-
-                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Company Name</Text>
-                  <TextInput
-                    style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                    value={newComp.name}
-                    onChangeText={v => setNewComp(p => ({ ...p, name: v }))}
-                    placeholderTextColor={colors.textMuted}
-                  />
-
-                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Business Type *</Text>
-                  <TextInput
-                    style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                    value={newComp.businessType}
-                    onChangeText={v => setNewComp(p => ({ ...p, businessType: v }))}
-                    placeholder="E-commerce, Agency, F&B..."
-                    placeholderTextColor={colors.textMuted}
-                  />
-
-                  <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Primary Objective *</Text>
-                  <TextInput
-                    style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                    value={newComp.primaryObjective}
-                    onChangeText={v => setNewComp(p => ({ ...p, primaryObjective: v }))}
-                    placeholder="Sales, Leads, Brand awareness..."
-                    placeholderTextColor={colors.textMuted}
-                  />
-
-                  <View style={s.reviewBtns}>
-                    <Pressable
-                      onPress={() => { setAddStep('input'); setShowManualFields(false); setProfileAnalysis(null); }}
-                      style={[s.backBtn, { borderColor: isDark ? '#333' : '#ddd' }]}
-                    >
-                      <Ionicons name="arrow-back" size={16} color={colors.textMuted} />
-                      <Text style={[s.backBtnText, { color: colors.textMuted }]}>Back</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => {
-                        if (!newComp.name || !newComp.profileLink || !newComp.businessType || !newComp.primaryObjective) {
-                          Alert.alert('Required Fields', 'Name, Profile Link, Business Type, and Primary Objective are required');
-                          return;
-                        }
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                        addCompetitorMutation.mutate(newComp);
-                      }}
-                      style={[s.saveBtn, { opacity: addCompetitorMutation.isPending ? 0.6 : 1 }]}
-                      disabled={addCompetitorMutation.isPending}
-                    >
-                      {addCompetitorMutation.isPending ? <ActivityIndicator size="small" color="#fff" /> : (
-                        <>
-                          <Ionicons name="checkmark-circle" size={18} color="#fff" />
-                          <Text style={s.saveBtnText}>Save Competitor</Text>
-                        </>
-                      )}
-                    </Pressable>
-                  </View>
-                </>
-              )}
               <View style={{ height: 40 }} />
             </ScrollView>
           </View>
@@ -1765,26 +1239,6 @@ const s = StyleSheet.create({
   aiHintText: { fontSize: 13, lineHeight: 19, flex: 1 },
   autoAnalyzeBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#8B5CF6', paddingVertical: 14, borderRadius: 10, marginTop: 16 },
   autoAnalyzeBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  analyzingSteps: { gap: 6, marginTop: 14, paddingLeft: 4 },
-  analyzingStep: { fontSize: 12, lineHeight: 18 },
-  manualToggle: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center', marginTop: 20, paddingVertical: 8 },
-  manualToggleText: { fontSize: 13 },
-  aiResultHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 12 },
-  aiResultTitle: { fontSize: 14, fontWeight: '700' },
-  aiResultSub: { fontSize: 12, marginTop: 2 },
-  insightsCard: { padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 12 },
-  insightsTitle: { fontSize: 12, fontWeight: '700', letterSpacing: 0.3 },
-  insightsBody: { fontSize: 12, lineHeight: 18 },
-  aiFilledInput: { borderLeftWidth: 3, borderLeftColor: '#8B5CF6' },
-  measuredRow: { paddingVertical: 6, paddingHorizontal: 4, gap: 2 },
-  measuredLabel: { fontSize: 11, fontWeight: '600', letterSpacing: 0.3 },
-  measuredValue: { fontSize: 16, fontWeight: '700' },
-  measuredMeta: { fontSize: 10, lineHeight: 14 },
-  reviewBtns: { flexDirection: 'row', gap: 10, marginTop: 16 },
-  backBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 8, borderWidth: 1 },
-  backBtnText: { fontSize: 14, fontWeight: '600' },
-  saveBtn: { flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#10B981', paddingVertical: 12, borderRadius: 8 },
-  saveBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   confirmModal: { margin: 20, borderRadius: 16, padding: 24, alignItems: 'center' },
   confirmIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#8B5CF6' + '15', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   confirmTitle: { fontSize: 18, fontWeight: '700', marginBottom: 8 },
