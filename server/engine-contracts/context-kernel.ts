@@ -142,7 +142,7 @@ export async function buildStrategicContext(
     .select()
     .from(performanceSnapshots)
     .where(eq(performanceSnapshots.postId, campaignId))
-    .orderBy(desc(performanceSnapshots.createdAt))
+    .orderBy(desc(performanceSnapshots.fetchedAt))
     .limit(10);
 
   const impressions = metrics?.impressions || 0;

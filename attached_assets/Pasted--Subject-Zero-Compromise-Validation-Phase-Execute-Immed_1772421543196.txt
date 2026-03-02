@@ -1,0 +1,86 @@
+
+⸻
+
+Subject: Zero-Compromise Validation Phase — Execute Immediately
+
+Replit,
+
+Foundation is declared complete. Good.
+Now we move to the real test. No assumptions, no optimism, no soft validation.
+
+You will execute the following four validation tracks at maximum stress level.
+
+⸻
+
+1) Structural Integrity Torture Test
+
+You will attempt to break the system deliberately.
+	•	Trigger engines from unauthorized callers → must hard reject.
+	•	Send invalid output types to wrong sections → must hard reject.
+	•	Force cross-branch contamination (Writer output into Video, Video into Designer, etc.) → must reject.
+	•	Corrupt or partially build StrategicContext → must block execution.
+
+No silent handling. No fallback masking.
+Every failure must be explicit and logged.
+
+If a single invalid path passes silently, the foundation is not secure.
+
+⸻
+
+2) Anti-Hallucination & Evidence Lock Test
+
+You will simulate incomplete competitor data, partial metrics, and missing business inputs.
+
+The system must:
+	•	Explicitly list missing fields.
+	•	Reduce confidence accordingly.
+	•	Trigger DOWNGRADE or BLOCK via Uncertainty Guard when appropriate.
+	•	Never fabricate assumptions to “complete” reasoning.
+
+If the AI produces confident conclusions without sufficient data, this is a failure.
+
+No fabricated intelligence tolerated.
+
+⸻
+
+3) Decision Discipline Stress Test
+
+You will run edge-case campaigns:
+	•	High ROAS but tiny sample size.
+	•	Good engagement but zero conversions.
+	•	Weak market but strong differentiation potential.
+	•	Strong metrics but low data completeness.
+
+The Financial Governor must behave correctly:
+	•	Block when confidence is low.
+	•	Downgrade when risk is moderate.
+	•	Proceed only when statistically justified.
+
+No emotional scaling. No overconfidence.
+
+Every decision must align with confidence + dataCompleteness thresholds.
+
+⸻
+
+4) Full System Execution & Cleanroom Reset
+
+You will:
+	•	Run a full Build a Plan → Pipeline → Creation → Studio → Autopilot cycle.
+	•	Validate execution map isolation.
+	•	Validate no cross-campaign contamination.
+	•	Validate all sections consume only allowed output types.
+
+After testing:
+	•	Delete all generated test data.
+	•	Clear blueprints, plans, studio items, calendar entries, required work.
+	•	Reset audit logs related to test runs.
+	•	Confirm production campaigns remain untouched.
+
+Deliver a PASS/FAIL matrix with requestIds and jobIds for traceability.
+
+No summary paragraphs. Only verifiable evidence.
+
+This is not feature testing.
+This is structural warfare testing.
+
+Execute and report.
