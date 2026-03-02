@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { db } from "../db";
 import { miSnapshots, miTelemetry, miSignalLogs, miRefreshSchedule } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
-import { MarketIntelligenceV3, validateEngineIsolation, assertNoPlanWrites, assertNoOrchestrator, assertNoAutopilot } from "./engine";
+import { MarketIntelligenceV3, validateEngineIsolation, assertNoPlanWrites, assertNoOrchestrator, assertNoAutopilot, buildResultFromSnapshot } from "./engine";
 import { logAudit } from "../audit";
 import { requireCampaign } from "../campaign-routes";
 import type { MIv3Mode } from "./types";
@@ -83,7 +83,8 @@ export function registerMIv3Routes(app: Express) {
         return res.json({ snapshot: null, message: "No snapshot available. Run analysis first." });
       }
 
-      return res.json({ snapshot: snapshots[0] });
+      const result = buildResultFromSnapshot(snapshots[0]);
+      return res.json({ snapshot: snapshots[0], ...result });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }

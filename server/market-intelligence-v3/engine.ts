@@ -388,7 +388,7 @@ export class MarketIntelligenceV3 {
   }
 }
 
-function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
+export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
   const signalData = parseJsonSafe(snapshot.signalData, []);
   const intentData = parseJsonSafe(snapshot.intentData, []);
   const trajectoryData = parseJsonSafe(snapshot.trajectoryData, {

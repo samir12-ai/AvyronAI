@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -86,6 +86,27 @@ export default function CompetitiveIntelligence() {
     },
   });
 
+
+  const { data: cachedSnapshot } = useQuery({
+    queryKey: ['mi-v3-snapshot', activeCampaignId],
+    enabled: !!activeCampaignId,
+    queryFn: async () => {
+      const res = await fetch(new URL(`/api/ci/mi-v3/snapshot/${activeCampaignId}?accountId=default`, baseUrl).toString());
+      const data = await res.json();
+      if (data.snapshot && data.output) return data;
+      return null;
+    },
+  });
+
+  useEffect(() => {
+    if (cachedSnapshot && cachedSnapshot.snapshot?.campaignId === activeCampaignId) {
+      setMiv3Result(cachedSnapshot);
+    }
+  }, [cachedSnapshot, activeCampaignId]);
+
+  useEffect(() => {
+    setMiv3Result(null);
+  }, [activeCampaignId]);
 
   const { data: timelineData } = useQuery({
     queryKey: ['ci-miv3-history', activeCampaignId],
