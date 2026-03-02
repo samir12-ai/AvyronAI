@@ -403,7 +403,15 @@ export default function CompetitiveIntelligence() {
                   </View>
                 )}
                 <Pressable
-                  onPress={() => { Alert.alert('Remove Competitor', `Remove ${comp.name}?`, [{ text: 'Cancel' }, { text: 'Remove', style: 'destructive', onPress: () => deleteCompetitorMutation.mutate(comp.id) }]); }}
+                  onPress={() => {
+                    if (Platform.OS === 'web') {
+                      if (window.confirm(`Remove ${comp.name}?`)) {
+                        deleteCompetitorMutation.mutate(comp.id);
+                      }
+                    } else {
+                      Alert.alert('Remove Competitor', `Remove ${comp.name}?`, [{ text: 'Cancel' }, { text: 'Remove', style: 'destructive', onPress: () => deleteCompetitorMutation.mutate(comp.id) }]);
+                    }
+                  }}
                   style={s.removeBtn}
                 >
                   <Ionicons name="trash-outline" size={14} color="#EF4444" />
