@@ -866,49 +866,22 @@ async function runMonthlyCompetitiveIntelligence() {
   try {
     const flagService = new FeatureFlagService();
     const accounts = await db.select().from(accountState);
-    
+
     for (const account of accounts) {
       const accountId = account.accountId;
       const enabled = await flagService.isEnabled("competitive_intelligence_enabled", accountId);
       if (!enabled) continue;
 
-      const { ciMarketAnalyses } = await import("@shared/schema");
-      const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
-      
-      const existing = await db.select().from(ciMarketAnalyses)
-        .where(sql`${ciMarketAnalyses.accountId} = ${accountId} AND ${ciMarketAnalyses.analysisMonth} = ${currentMonth} AND ${ciMarketAnalyses.isDemo} = false`);
-      
-      if (existing.length > 0) continue;
+      const { miSnapshots } = await import("@shared/schema");
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-      const lastAnalysis = await db.select().from(ciMarketAnalyses)
-        .where(eq(ciMarketAnalyses.accountId, accountId))
-        .orderBy(desc(ciMarketAnalyses.createdAt))
+      const recentSnapshot = await db.select().from(miSnapshots)
+        .where(sql`${miSnapshots.accountId} = ${accountId} AND ${miSnapshots.createdAt} > ${thirtyDaysAgo.toISOString()}`)
         .limit(1);
-      
-      if (lastAnalysis.length > 0) {
-        const lastDate = lastAnalysis[0].createdAt;
-        if (lastDate && (Date.now() - lastDate.getTime()) < 25 * 24 * 60 * 60 * 1000) {
-          continue;
-        }
-      }
 
-      console.log(`[CI Worker] Monthly re-analysis due for account: ${accountId}`);
-      
-      try {
-        const response = await fetch(`http://localhost:5000/api/ci/analyze`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ accountId }),
-        });
-        const result = await response.json();
-        if (response.ok) {
-          console.log(`[CI Worker] Monthly analysis completed for ${accountId}: ${result.recommendations?.length || 0} recommendations`);
-        } else {
-          console.log(`[CI Worker] Analysis skipped for ${accountId}: ${result.error || result.message}`);
-        }
-      } catch (err) {
-        console.error(`[CI Worker] Error running analysis for ${accountId}:`, err);
-      }
+      if (recentSnapshot.length > 0) continue;
+
+      console.log(`[CI Worker] MIv3 snapshot stale for account: ${accountId} — manual refresh via /api/ci/mi-v3/analyze recommended`);
     }
   } catch (error) {
     console.error("[CI Worker] Monthly check error:", error);

@@ -1,0 +1,105 @@
+
+⸻
+
+Subject: Full Replacement Confirmation — Old CI Removed, MIv3 Sole Source of Truth
+
+Replit,
+
+We have officially decided:
+
+MIv3 is now the only Competitor Intelligence engine in the system.
+The old CI version must be completely removed — not deprecated, not shadowed, not partially referenced.
+
+This is a full structural replacement.
+
+I need confirmation of the following points — all of them:
+
+⸻
+
+1️⃣ No Parallel Systems
+	•	All legacy CI routes removed or return explicit 410.
+	•	No hidden references to old dominance or analysis logic.
+	•	No leftover UI components referencing old endpoints.
+	•	No fallback to legacy code under any condition.
+
+There must be one engine only: MIv3.
+
+⸻
+
+2️⃣ Data Integrity & Migration
+	•	Confirm that removing the old system did not orphan any data.
+	•	If old tables existed, confirm they are either:
+	•	Fully removed, or
+	•	Safely unused with no references in runtime.
+	•	Confirm no UI screen expects legacy response shapes.
+
+⸻
+
+3️⃣ API Contract Stability
+	•	All frontend calls now point exclusively to /api/ci/mi-v3/*
+	•	No 404 surprises.
+	•	No silent response shape changes.
+	•	No undefined fields causing runtime crashes.
+
+⸻
+
+4️⃣ Performance & Backend Simplicity
+
+The goal is simplification and speed.
+
+Confirm:
+	•	No redundant middleware.
+	•	No duplicated processing layers.
+	•	No double computation.
+	•	No unnecessary DB reads.
+
+MIv3 should be lighter, not heavier.
+
+⸻
+
+5️⃣ Token & Refresh Safety
+	•	Token guard still enforced.
+	•	No hidden re-execution on tab switch.
+	•	No refresh loops.
+	•	No token escalation due to engine replacement.
+
+⸻
+
+6️⃣ Isolation Integrity
+	•	MIv3 does not trigger orchestrator.
+	•	MIv3 does not write to plan tables.
+	•	No cross-engine invocation introduced during refactor.
+
+⸻
+
+7️⃣ Regression Risk Check
+
+Before we move forward:
+	•	Run full test suite.
+	•	Confirm 0 failures.
+	•	Confirm CI section renders under:
+	•	0 competitors
+	•	2 competitors
+	•	3+ competitors
+	•	Low coverage
+	•	High coverage
+
+No regressions allowed.
+
+⸻
+
+8️⃣ Final Structural Confirmation
+
+I need a clear answer:
+
+Is the backend now cleaner, simpler, and more maintainable than before?
+
+If there is any hidden technical debt introduced by this replacement, state it clearly now.
+
+No assumptions. No “should be fine.”
+
+Confirm structural stability.
+
+⸻
+
+Send me PASS/FAIL per section.

@@ -27,6 +27,26 @@ describe("Stabilization Suite", () => {
     const res = await fetch(`${BASE}/api/ci/competitors/analyze-profile`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "test", profileLink: "https://instagram.com/test" }),
+    });
+    expect(res.status).toBe(410);
+    const data = await res.json();
+    expect(data.error).toContain("DEPRECATED");
+  });
+
+  it("Old dominance endpoint returns 410 deprecated", async () => {
+    const res = await fetch(`${BASE}/api/dominance/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(410);
+  });
+
+  it("Old CI analyze endpoint returns 410 deprecated", async () => {
+    const res = await fetch(`${BASE}/api/ci/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(410);
