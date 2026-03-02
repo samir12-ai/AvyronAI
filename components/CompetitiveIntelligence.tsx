@@ -291,28 +291,139 @@ export default function CompetitiveIntelligence() {
     </View>
   );
 
+  const renderCompetitorsList = () => (
+    <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+      <View style={s.cardHeader}>
+        <Ionicons name="people-outline" size={18} color="#8B5CF6" />
+        <Text style={[s.cardTitle, { color: colors.text }]}>Competitors</Text>
+        <View style={[s.countBadge, { backgroundColor: '#8B5CF6' + '20' }]}>
+          <Text style={[s.countText, { color: '#8B5CF6' }]}>{competitors.length}</Text>
+        </View>
+        <Pressable
+          onPress={() => { Haptics.selectionAsync(); setShowAddCompetitor(true); }}
+          style={[s.addBtn, { backgroundColor: '#8B5CF6' }]}
+        >
+          <Ionicons name="add" size={16} color="#fff" />
+          <Text style={s.addBtnText}>Add</Text>
+        </Pressable>
+      </View>
+
+      {competitors.length === 0 ? (
+        <View style={{ alignItems: 'center', paddingVertical: 20, gap: 6 }}>
+          <Ionicons name="person-add-outline" size={32} color={colors.textMuted} />
+          <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }}>No competitors added yet</Text>
+          <Text style={{ fontSize: 12, color: colors.textMuted, textAlign: 'center' }}>Add your first competitor to start tracking their strategy</Text>
+        </View>
+      ) : (
+        competitors.map((comp: Competitor) => (
+          <View key={comp.id} style={[s.breakdownItem, { borderBottomWidth: 1, borderBottomColor: isDark ? '#1A2030' : '#F0F0F0' }]}>
+            <Pressable onPress={() => { Haptics.selectionAsync(); setExpandedCompetitor(expandedCompetitor === comp.id ? null : comp.id); }} style={s.compHeader}>
+              <View style={s.compInfo}>
+                <View style={s.compNameRow}>
+                  <Text style={[s.compName, { color: colors.text }]}>{comp.name}</Text>
+                  <View style={[s.evidenceDot, { backgroundColor: comp.evidenceComplete ? '#10B981' : '#F59E0B' }]} />
+                </View>
+                <Text style={[s.compMeta, { color: colors.textMuted }]}>{comp.platform} • {comp.businessType || 'Unknown type'}</Text>
+              </View>
+              <View style={s.compRight}>
+                <Ionicons name={expandedCompetitor === comp.id ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
+              </View>
+            </Pressable>
+
+            {!comp.evidenceComplete && comp.missingFields?.length > 0 && (
+              <View style={[s.missingBar, { backgroundColor: '#F59E0B' + '15' }]}>
+                <Ionicons name="warning-outline" size={14} color="#F59E0B" />
+                <Text style={[s.missingText, { color: '#F59E0B' }]}>{comp.missingFields.length} missing fields</Text>
+              </View>
+            )}
+
+            {expandedCompetitor === comp.id && (
+              <View style={s.compDetails}>
+                {comp.profileLink && (
+                  <View style={s.detailRow}>
+                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>Profile</Text>
+                    <Text style={[s.detailValue, { color: colors.text }]} numberOfLines={1}>{comp.profileLink}</Text>
+                  </View>
+                )}
+                {comp.postingFrequency != null && (
+                  <View style={s.detailRow}>
+                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>Frequency</Text>
+                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.postingFrequency}</Text>
+                  </View>
+                )}
+                {comp.engagementRatio != null && (
+                  <View style={s.detailRow}>
+                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>Engagement</Text>
+                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.engagementRatio}</Text>
+                  </View>
+                )}
+                {comp.ctaPatterns && (
+                  <View style={s.detailRow}>
+                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>CTA</Text>
+                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.ctaPatterns}</Text>
+                  </View>
+                )}
+                {comp.hookStyles && (
+                  <View style={s.detailRow}>
+                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>Hooks</Text>
+                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.hookStyles}</Text>
+                  </View>
+                )}
+                {comp.messagingTone && (
+                  <View style={s.detailRow}>
+                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>Tone</Text>
+                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.messagingTone}</Text>
+                  </View>
+                )}
+                {comp.notes && (
+                  <View style={s.detailRow}>
+                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>Notes</Text>
+                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.notes}</Text>
+                  </View>
+                )}
+                <Pressable
+                  onPress={() => { Alert.alert('Remove Competitor', `Remove ${comp.name}?`, [{ text: 'Cancel' }, { text: 'Remove', style: 'destructive', onPress: () => deleteCompetitorMutation.mutate(comp.id) }]); }}
+                  style={s.removeBtn}
+                >
+                  <Ionicons name="trash-outline" size={14} color="#EF4444" />
+                  <Text style={[s.removeBtnText, { color: '#EF4444' }]}>Remove</Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        ))
+      )}
+    </View>
+  );
+
   const renderOverview = () => {
     if (!miv3Result) {
       return (
-        <View style={s.emptyState}>
-          <Ionicons name="telescope-outline" size={48} color={colors.textMuted} />
-          <Text style={[s.emptyTitle, { color: colors.text }]}>No MI V3 Analysis Yet</Text>
-          <Text style={[s.emptyDesc, { color: colors.textMuted }]}>
-            Add competitors with complete evidence data, then run your first MI V3 analysis.
-          </Text>
-          {competitors.length > 0 && (
-            <Pressable
-              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); analyzeMutation.mutate(); }}
-              disabled={analyzeMutation.isPending}
-              style={[s.emptyAnalyzeBtn, { opacity: analyzeMutation.isPending ? 0.6 : 1 }]}
-            >
-              {analyzeMutation.isPending ? (
-                <ActivityIndicator size={16} color="#fff" />
-              ) : (
-                <Ionicons name="analytics" size={18} color="#fff" />
-              )}
-              <Text style={s.emptyAnalyzeBtnText}>{analyzeMutation.isPending ? 'Running MI V3...' : 'Run MI V3 Analysis'}</Text>
-            </Pressable>
+        <View>
+          {renderCompetitorsList()}
+          {competitors.length > 0 ? (
+            <View style={s.actionRow}>
+              <Pressable
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); analyzeMutation.mutate(); }}
+                disabled={analyzeMutation.isPending}
+                style={[s.analyzeBtn, { opacity: analyzeMutation.isPending ? 0.6 : 1 }]}
+              >
+                {analyzeMutation.isPending ? (
+                  <ActivityIndicator size={16} color="#fff" />
+                ) : (
+                  <Ionicons name="analytics" size={18} color="#fff" />
+                )}
+                <Text style={s.analyzeBtnText}>{analyzeMutation.isPending ? 'Running MI V3...' : 'Run MI V3 Analysis'}</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={s.emptyState}>
+              <Ionicons name="telescope-outline" size={48} color={colors.textMuted} />
+              <Text style={[s.emptyTitle, { color: colors.text }]}>No MI V3 Analysis Yet</Text>
+              <Text style={[s.emptyDesc, { color: colors.textMuted }]}>
+                Add competitors above, then run your first MI V3 analysis.
+              </Text>
+            </View>
           )}
         </View>
       );
@@ -320,6 +431,7 @@ export default function CompetitiveIntelligence() {
 
     return (
       <View>
+        {renderCompetitorsList()}
         {miv3Result && (
           <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
             <View style={s.cardHeader}>
