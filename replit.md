@@ -39,7 +39,20 @@ Preferred communication style: Simple, everyday language.
 - **Studio**: Media library with AI Auto-Fill metadata, AI Video Editor with FFmpeg, and AI Video Analysis Assist. Integration with Google Veo 3.1 for text-to-video and image-to-video generation. Studio item detail view at `/studio/:itemId` with analysis results, retry capability, and polling.
 - **Save State Machine**: All save flows (Writer, Designer, Video) use a `saveState` (idle→saving→analyzing→done/error) for visible progress feedback. Error states persist for 3s without navigating away.
 - **Lead Engine**: Modular lead generation system with AI Lead Optimization.
-- **Competitive Intelligence**: Real-data competitor analysis system with deterministic inclusion — all competitors meeting minimum criteria (postingFrequency, contentTypeRatio, engagementRatio) are included in analysis. Missing optional fields are surfaced transparently in AI prompts and UI warnings. Pre-AI audit logging for provability.
+- **Competitive Intelligence**: Real-data competitor analysis system governed exclusively by Market Intelligence V3 (MIv3). All CI tabs (Overview, Dominance, Actions, History) derive from the same MIv3 snapshot. No cross-engine calls allowed from this section.
+- **Market Intelligence V3**: Deep Predictive Adaptive Architecture in `server/market-intelligence-v3/`. 5-layer pipeline: Proxy Extraction → Normalization → Snapshot Store (Versioned) → Signal Engine → Intent & Trajectory Engine. Engines operate only on stored snapshots, never live scrape data.
+  - **Signal Engine**: 9 deterministic numeric signals per competitor (postingFrequencyTrend, engagementVolatility, ctaIntensityShift, offerLanguageChange, hashtagDriftScore, bioModificationFrequency, sentimentDrift, reviewVelocityChange, contentExperimentRate). No LLM calls for quantitative signals.
+  - **Intent Classification**: 7 categories (DEFENSIVE, AGGRESSIVE_SCALING, TESTING, POSITIONING_SHIFT, PRICE_WAR, DECLINING, STABLE_DOMINANT) via weighted formula scoring. No direct labeling.
+  - **Market Trajectory**: 5 indices (MarketHeatingIndex, NarrativeConvergenceScore, OfferCompressionIndex, AngleSaturationLevel, RevivalPotential). RevivalPotential capped at 0.7 unless specific conditions met.
+  - **Confidence Model**: 6 factors (dataCompleteness, freshnessDecay, sourceReliability=0.75, sampleStrength, crossCompetitorConsistency, signalStability). 5 levels: STRONG≥0.80, MODERATE≥0.65, LOW≥0.50, UNSTABLE≥0.40, INSUFFICIENT<0.40. BLOCK at <0.40.
+  - **Anti-Bias Guard**: SignalStabilityGuard (DOWNGRADE if coverage<0.65 or dominantSourceRatio>0.60, BLOCK if coverage<0.45 or reliability<0.50). Two-Run Confirmation (no directional verdict from single snapshot).
+  - **Token Budget Guard**: 3 execution modes (FULL/REDUCED/LIGHT) with auto-downgrade. Hard token ceiling per snapshot. Single LLM call max per snapshot. Comment/post sampling with stratified selection.
+  - **Dominance Module**: Internal-only module within MIv3. No standalone endpoint, no external invocation.
+  - **Adaptive Refresh**: Dynamic intervals (3/7/14 days based on volatility). Hard cap: 1 refresh per competitor per 72 hours.
+  - **Engine Isolation**: Only MIv3 callable from CI section. Hard rejection + audit log for any cross-engine call attempt. No writes to strategic_plans or plan_documents.
+  - **DB Tables**: mi_snapshots, mi_signal_logs, mi_refresh_schedule, mi_telemetry.
+  - **API Endpoints**: POST /api/ci/mi-v3/analyze, GET /api/ci/mi-v3/snapshot/:campaignId, POST /api/ci/mi-v3/refresh, GET /api/ci/mi-v3/history/:campaignId, GET /api/ci/mi-v3/telemetry/:snapshotId.
+  - **Output**: Strict 12-field structure (marketState, dominantIntentType, competitorIntentMap, trajectoryDirection, narrativeSaturationLevel, revivalPotential, entryStrategy, defensiveRisks, confidence, missingSignalFlags, dataFreshnessDays, volatilityIndex).
 - **Creative Capture Layer**: Analyzes reels with real data for deterministic signals and AI interpretation.
 - **Plan Documents**: Generation and storage of strategic plans in PDF/markdown format.
 

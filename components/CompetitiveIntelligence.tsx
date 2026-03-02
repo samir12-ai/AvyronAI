@@ -20,6 +20,7 @@ import { getApiUrl } from '@/lib/query-client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCreativeContext } from '@/context/CreativeContext';
 import { useApp } from '@/context/AppContext';
+import { useCampaign } from '@/context/CampaignContext';
 
 interface Competitor {
   id: string;
@@ -121,6 +122,7 @@ export default function CompetitiveIntelligence() {
   const router = useRouter();
   const { setCreativeContext } = useCreativeContext();
   const { brandProfile } = useApp();
+  const { selectedCampaignId: activeCampaignId } = useCampaign();
   const [loadingReelsFor, setLoadingReelsFor] = useState<string | null>(null);
 
   const [activeView, setActiveView] = useState<CIView>('overview');
@@ -136,6 +138,7 @@ export default function CompetitiveIntelligence() {
   const [ccExpanded, setCcExpanded] = useState(false);
   const [ccReelExpanded, setCcReelExpanded] = useState<Record<number, boolean>>({});
   const [profileAnalysis, setProfileAnalysis] = useState<any>(null);
+  const [miv3Result, setMiv3Result] = useState<any>(null);
 
   const [newComp, setNewComp] = useState({
     name: '', profileLink: '', businessType: '', primaryObjective: '',
@@ -262,18 +265,20 @@ export default function CompetitiveIntelligence() {
 
   const analyzeMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(new URL('/api/ci/analyze', baseUrl).toString(), {
+      const res = await fetch(new URL('/api/ci/mi-v3/analyze', baseUrl).toString(), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accountId: 'default' }),
+        body: JSON.stringify({ accountId: 'default', campaignId: activeCampaignId || 'default', mode: 'overview' }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error);
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
+      setMiv3Result(data);
       queryClient.invalidateQueries({ queryKey: ['ci-analyses'] });
       queryClient.invalidateQueries({ queryKey: ['ci-recommendations'] });
       queryClient.invalidateQueries({ queryKey: ['ci-timeline'] });
+      queryClient.invalidateQueries({ queryKey: ['mi-v3-snapshot'] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
     onError: (err: any) => Alert.alert('Analysis Error', err.message),
@@ -518,6 +523,140 @@ export default function CompetitiveIntelligence() {
             <Text style={{ fontSize: 9, color: colors.textMuted, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
               snapshot_id: {latestAnalysis.id} | created: {new Date(latestAnalysis.createdAt).toLocaleString()} | cta_trends: {latestAnalysis.ctaTrends || 'none'}
             </Text>
+          </View>
+        )}
+
+        {miv3Result && (
+          <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+            <View style={s.cardHeader}>
+              <Ionicons name="shield-checkmark-outline" size={18} color="#8B5CF6" />
+              <Text style={[s.cardTitle, { color: colors.text }]}>Intelligence Engine v3</Text>
+              <View style={[s.intensityBadge, { backgroundColor: miv3Result.executionMode === 'FULL' ? '#10B981' + '20' : miv3Result.executionMode === 'REDUCED' ? '#F59E0B' + '20' : '#6B7280' + '20' }]}>
+                <Text style={{ fontSize: 10, fontWeight: '600', color: miv3Result.executionMode === 'FULL' ? '#10B981' : miv3Result.executionMode === 'REDUCED' ? '#F59E0B' : '#6B7280' }}>
+                  {miv3Result.executionMode}
+                </Text>
+              </View>
+            </View>
+
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+              <View style={[s.miv3Stat, { backgroundColor: isDark ? '#1A2030' : '#F8F9FA' }]}>
+                <Text style={{ fontSize: 10, color: colors.textMuted }}>Market State</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>{miv3Result.output?.marketState || 'N/A'}</Text>
+              </View>
+              <View style={[s.miv3Stat, { backgroundColor: isDark ? '#1A2030' : '#F8F9FA' }]}>
+                <Text style={{ fontSize: 10, color: colors.textMuted }}>Trajectory</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>{miv3Result.output?.trajectoryDirection || 'N/A'}</Text>
+              </View>
+              <View style={[s.miv3Stat, { backgroundColor: isDark ? '#1A2030' : '#F8F9FA' }]}>
+                <Text style={{ fontSize: 10, color: colors.textMuted }}>Confidence</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: (miv3Result.output?.confidence?.level === 'STRONG' || miv3Result.output?.confidence?.level === 'MODERATE') ? '#10B981' : miv3Result.output?.confidence?.level === 'LOW' ? '#F59E0B' : '#EF4444' }}>
+                  {miv3Result.output?.confidence?.level || 'N/A'} ({Math.round((miv3Result.output?.confidence?.overall || 0) * 100)}%)
+                </Text>
+              </View>
+              <View style={[s.miv3Stat, { backgroundColor: isDark ? '#1A2030' : '#F8F9FA' }]}>
+                <Text style={{ fontSize: 10, color: colors.textMuted }}>Dominant Intent</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>{miv3Result.output?.dominantIntentType || 'N/A'}</Text>
+              </View>
+              <View style={[s.miv3Stat, { backgroundColor: isDark ? '#1A2030' : '#F8F9FA' }]}>
+                <Text style={{ fontSize: 10, color: colors.textMuted }}>Volatility</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>{((miv3Result.output?.volatilityIndex || 0) * 100).toFixed(0)}%</Text>
+              </View>
+              <View style={[s.miv3Stat, { backgroundColor: isDark ? '#1A2030' : '#F8F9FA' }]}>
+                <Text style={{ fontSize: 10, color: colors.textMuted }}>Freshness</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>{miv3Result.output?.dataFreshnessDays || 0}d</Text>
+              </View>
+            </View>
+
+            {miv3Result.output?.confidence?.guardDecision && miv3Result.output.confidence.guardDecision !== 'PROCEED' && (
+              <View style={{ backgroundColor: miv3Result.output.confidence.guardDecision === 'BLOCK' ? '#EF4444' + '15' : '#F59E0B' + '15', borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: miv3Result.output.confidence.guardDecision === 'BLOCK' ? '#EF4444' : '#F59E0B' }}>
+                  {miv3Result.output.confidence.guardDecision === 'BLOCK' ? 'BLOCKED' : 'EXPLORATORY MODE'}
+                </Text>
+                {(miv3Result.output.confidence.guardReasons || []).map((reason: string, i: number) => (
+                  <Text key={i} style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>• {reason}</Text>
+                ))}
+              </View>
+            )}
+
+            {miv3Result.output?.entryStrategy && (
+              <View style={{ marginBottom: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: '#8B5CF6', marginBottom: 2 }}>Entry Strategy</Text>
+                <Text style={{ fontSize: 11, color: colors.textSecondary }}>{miv3Result.output.entryStrategy}</Text>
+              </View>
+            )}
+
+            {miv3Result.output?.defensiveRisks?.length > 0 && (
+              <View style={{ marginBottom: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: '#EF4444', marginBottom: 2 }}>Defensive Risks</Text>
+                {miv3Result.output.defensiveRisks.map((risk: string, i: number) => (
+                  <Text key={i} style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>• {risk}</Text>
+                ))}
+              </View>
+            )}
+
+            {miv3Result.output?.missingSignalFlags?.length > 0 && (
+              <View style={{ marginBottom: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: '#F59E0B', marginBottom: 2 }}>Missing Signals</Text>
+                {miv3Result.output.missingSignalFlags.slice(0, 5).map((flag: string, i: number) => (
+                  <Text key={i} style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>• {flag}</Text>
+                ))}
+                {miv3Result.output.missingSignalFlags.length > 5 && (
+                  <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>...and {miv3Result.output.missingSignalFlags.length - 5} more</Text>
+                )}
+              </View>
+            )}
+
+            {!miv3Result.twoRunStatus?.isConfirmed && (
+              <View style={{ backgroundColor: '#3B82F6' + '15', borderRadius: 6, padding: 8, marginBottom: 4 }}>
+                <Text style={{ fontSize: 10, fontWeight: '600', color: '#3B82F6' }}>
+                  Two-Run Confirmation: {miv3Result.twoRunStatus?.confirmedRuns || 0}/2 runs completed
+                </Text>
+                <Text style={{ fontSize: 9, color: colors.textMuted }}>
+                  Direction verdict requires 2 independent runs for confirmation
+                </Text>
+              </View>
+            )}
+
+            <View style={{ paddingTop: 4 }}>
+              <Text style={{ fontSize: 9, color: colors.textMuted, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
+                snapshot: {miv3Result.snapshotId?.slice(0, 8)} | cached: {miv3Result.cached ? 'yes' : 'no'} | competitors: {miv3Result.telemetry?.competitorsCount || 0}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {miv3Result?.dominanceData?.length > 0 && (
+          <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+            <View style={s.cardHeader}>
+              <Ionicons name="trophy-outline" size={18} color="#F59E0B" />
+              <Text style={[s.cardTitle, { color: colors.text }]}>Dominance Analysis</Text>
+            </View>
+            {miv3Result.dominanceData.map((dom: any, i: number) => (
+              <View key={i} style={[s.breakdownItem, i < miv3Result.dominanceData.length - 1 && { borderBottomWidth: 1, borderBottomColor: isDark ? '#1A2030' : '#F0F0F0' }]}>
+                <View style={s.breakdownHeader}>
+                  <Text style={[s.breakdownName, { color: colors.text }]}>{dom.competitorName}</Text>
+                  <View style={[s.threatBadge, { backgroundColor: dom.dominanceLevel === 'DOMINANT' ? '#EF4444' + '20' : dom.dominanceLevel === 'STRUCTURALLY_STRONG' ? '#F59E0B' + '20' : '#10B981' + '20' }]}>
+                    <Text style={{ fontSize: 10, fontWeight: '600', color: dom.dominanceLevel === 'DOMINANT' ? '#EF4444' : dom.dominanceLevel === 'STRUCTURALLY_STRONG' ? '#F59E0B' : '#10B981' }}>
+                      {dom.dominanceLevel} ({dom.dominanceScore})
+                    </Text>
+                  </View>
+                </View>
+                {dom.strengths?.length > 0 && (
+                  <View style={{ marginTop: 4 }}>
+                    {dom.strengths.map((s2: string, j: number) => (
+                      <Text key={j} style={{ fontSize: 10, color: '#10B981' }}>+ {s2}</Text>
+                    ))}
+                  </View>
+                )}
+                {dom.weaknesses?.length > 0 && (
+                  <View style={{ marginTop: 2 }}>
+                    {dom.weaknesses.map((w: string, j: number) => (
+                      <Text key={j} style={{ fontSize: 10, color: '#EF4444' }}>- {w}</Text>
+                    ))}
+                  </View>
+                )}
+              </View>
+            ))}
           </View>
         )}
 
@@ -1687,4 +1826,5 @@ const s = StyleSheet.create({
   confirmCancelText: { fontSize: 14, fontWeight: '600' },
   confirmApply: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 8, backgroundColor: '#10B981' },
   confirmApplyText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  miv3Stat: { borderRadius: 8, padding: 8, minWidth: 100, flex: 1 },
 });

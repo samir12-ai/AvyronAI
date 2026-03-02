@@ -1,0 +1,962 @@
+Market intelligence engine V3
+
+⸻
+
+Subject: Implement Market Intelligence v3 – Deep Predictive Adaptive Architecture (Strict Guarded Execution)
+
+Replit,
+
+We are now implementing Market Intelligence v3 – Deep Predictive Mode.
+
+This is not an enhancement.
+This is a structural intelligence upgrade.
+
+This system must:
+	•	Detect competitor intent
+	•	Model market trajectory
+	•	Adapt refresh frequency dynamically
+	•	Remain resilient under proxy instability
+	•	Never hallucinate
+	•	Never overstate confidence
+	•	Never produce strong decisions from weak signals
+
+No shortcuts. No silent assumptions.
+
+⸻
+
+1️⃣ ARCHITECTURE REQUIREMENTS
+
+Implement a 5-layer pipeline:
+	1.	Proxy Extraction Layer
+	2.	Normalization Layer
+	3.	Snapshot Store (Versioned)
+	4.	Signal Engine
+	5.	Intent & Trajectory Engine
+
+Engines must never analyze live scrape data.
+They must operate only on stored snapshots.
+
+⸻
+
+2️⃣ MINIMUM DATA THRESHOLDS (STRICT)
+
+Per Competitor:
+	•	≥30 posts extracted
+	•	≥100 comment samples
+	•	Engagement computed from ≥15 posts
+	•	Posting frequency computed over ≥4 weeks
+	•	Bio + CTA detection mandatory
+
+Across Market:
+	•	≥3 competitors
+	•	≥2 competitors meeting full thresholds
+
+If below:
+	•	Confidence auto-downgrade
+	•	MissingSignalFlags must explicitly list what is missing
+	•	Intent classification must degrade to “UNSTABLE”
+
+If below critical threshold (<0.40 confidence):
+	•	BLOCK strategic predictions
+	•	Only allow descriptive reporting
+
+⸻
+
+3️⃣ SIGNAL EXTRACTION MODEL
+
+For each competitor compute:
+	•	postingFrequencyTrend (4-week rolling slope)
+	•	engagementVolatility
+	•	CTAIntensityShift
+	•	offerLanguageChange
+	•	hashtagDriftScore
+	•	bioModificationFrequency
+	•	sentimentDrift (comment clusters over time)
+	•	reviewVelocityChange (if available)
+	•	contentExperimentRate (new formats detected)
+
+All signals must be numeric and logged.
+
+No heuristic-only classification.
+
+⸻
+
+4️⃣ INTENT CLASSIFICATION
+
+Intent categories allowed:
+	•	DEFENSIVE
+	•	AGGRESSIVE_SCALING
+	•	TESTING
+	•	POSITIONING_SHIFT
+	•	PRICE_WAR
+	•	DECLINING
+	•	STABLE_DOMINANT
+
+IntentScore must be computed via weighted formula.
+
+No direct labeling without scoring.
+
+⸻
+
+5️⃣ MARKET TRAJECTORY ENGINE
+
+Compute:
+	•	MarketHeatingIndex
+	•	NarrativeConvergenceScore
+	•	OfferCompressionIndex
+	•	AngleSaturationLevel
+	•	RevivalPotential
+
+RevivalPotential must not exceed 0.7 unless:
+	•	High complaint clustering
+	•	Low angle diversity
+	•	Stable competitor fatigue signals
+
+⸻
+
+6️⃣ CONFIDENCE MODEL (DEEP)
+
+Confidence calculation must include:
+	•	Data completeness
+	•	Freshness decay
+	•	Source reliability (PROXY = 0.75)
+	•	Sample strength
+	•	Cross-competitor consistency
+	•	Signal stability
+
+Confidence Levels:
+
+≥0.80 → STRONG
+0.65–0.79 → MODERATE
+0.50–0.64 → LOW
+<0.50 → UNSTABLE
+<0.40 → INSUFFICIENT
+
+If <0.50:
+No aggressive entry strategies allowed.
+
+⸻
+
+7️⃣ ADAPTIVE REFRESH SYSTEM
+
+Implement dynamic refresh logic:
+
+If volatility high → refresh every 3 days
+If moderate → 7 days
+If stable → 14 days
+
+Volatility defined as:
+	•	engagement variance spike
+	•	CTA shift >20%
+	•	posting frequency spike
+	•	review velocity jump >15%
+
+No uncontrolled refresh loops.
+
+Hard cap: 1 refresh per competitor per 72 hours.
+
+⸻
+
+8️⃣ COST CONTROL (STRICT LIMITS)
+
+Max 5 competitors
+Max 40 posts per competitor
+Max 150 comments per competitor
+Batch NLP clustering only
+No per-post LLM calls
+
+Token consumption must remain bounded.
+
+Add telemetry log:
+	•	postsProcessed
+	•	commentsProcessed
+	•	tokensUsedEstimate
+	•	refreshReason
+
+⸻
+
+9️⃣ FAILSAFE & PROXY FAILURE HANDLING
+
+If proxy fails mid-cycle:
+	•	Use last valid snapshot
+	•	Decrease freshness weight
+	•	Set flag: DATA_REFRESH_DELAYED
+	•	Never crash
+	•	Never return empty objects
+
+If snapshot missing:
+Return INSUFFICIENT_DATA with explicit missing thresholds.
+
+⸻
+
+🔟 EXTREME STRESS TEST SUITE (MANDATORY)
+
+Implement and pass:
+
+A) Minimal data attack (1 competitor, 5 posts)
+→ confidence <0.40
+→ No strategic output allowed
+
+B) Viral spike distortion
+→ 2 viral posts only
+→ sampleStrength must prevent overconfidence
+
+C) Proxy blackout simulation
+→ system must continue with snapshot
+
+D) Conflicting signal scenario
+→ high engagement but high saturation
+→ must output constrained strategy
+
+E) Corrupted field injection
+→ missing engagement values
+→ downgrade confidence
+
+F) Max load test
+5 competitors × 40 posts × 150 comments
+→ no memory spike
+→ no timeout
+→ stable output
+
+⸻
+
+1️⃣1️⃣ NO HALLUCINATION RULE
+
+If pricing not detected:
+Do not invent ranges.
+
+If sentiment unclear:
+Mark as insufficient.
+
+If trajectory unstable:
+Say unstable.
+
+Never fabricate direction.
+
+⸻
+
+1️⃣2️⃣ OUTPUT STRUCTURE
+
+Return strictly:
+	•	marketState
+	•	dominantIntentType
+	•	competitorIntentMap[]
+	•	trajectoryDirection
+	•	narrativeSaturationLevel
+	•	revivalPotential
+	•	entryStrategy
+	•	defensiveRisks
+	•	confidence
+	•	missingSignalFlags[]
+	•	dataFreshnessDays
+	•	volatilityIndex
+
+No additional fields.
+
+⸻
+
+This engine must:
+	•	Survive incomplete data
+	•	Survive proxy instability
+	•	Survive noisy signals
+	•	Survive load pressure
+	•	Remain conservative under uncertainty
+	•	Never produce inflated optimism
+
+Once implemented:
+
+Run all torture tests.
+Provide logs.
+Provide confidence distributions.
+Provide failure case outputs.
+
+No deployment until all pass.
+
+⸻
+
+ADD THIS (MANDATORY) — Anti-Bias / Anti-Loop Guard (NO EXCEPTIONS)
+
+Problem to eliminate:
+We must prevent a “False Signal Reinforcement Loop” where weak/biased proxy data produces a confident Market View → then the Orchestrator + Autopilot reinforce it as if it’s truth.
+
+Hard requirements (must implement):
+	1.	Signal Stability Guard (Block / Downgrade Rules)
+Market Intelligence output MUST include:
+
+	•	signalCoverageScore (0–1)
+	•	sourceReliabilityScore (0–1)
+	•	sampleSize + timeWindowDays
+	•	varianceScore (how unstable the signals are)
+	•	dominantSourceRatio (if one competitor/source dominates)
+	•	missingFields[]
+
+Decision rules (non-negotiable):
+	•	If signalCoverageScore < 0.65 OR sampleSize < MIN_SAMPLE OR dominantSourceRatio > 0.60 → DOWNGRADE to “Exploratory Mode”
+	•	If signalCoverageScore < 0.45 OR sourceReliabilityScore < 0.50 → BLOCK (no market conclusions, only data collection tasks)
+	•	Orchestrator MUST refuse “strong recommendations” unless signalCoverageScore >= 0.75 AND sourceReliabilityScore >= 0.70
+
+	2.	Two-Run Confirmation (No single snapshot can lock strategy)
+Market Overview cannot set a “directional verdict” unless:
+
+	•	It’s confirmed across 2 independent runs, separated by time OR using different sources.
+Before confirmation: only “Hypotheses + What to verify next”.
+
+	3.	Explicit “No Fabrication” output constraints
+If any field is missing, the engine MUST say:
+
+	•	“Unknown” / “Not enough evidence”
+and MUST output a Data-Acquisition Plan (exact fields + where to get them) instead of guessing.
+
+	4.	Orchestrator + Autopilot must treat Market Intelligence as NON-authoritative
+They can use it only if it is PROCEED; if DOWNGRADE/BLOCK, they must switch to:
+
+	•	conservative plan defaults
+	•	and generate tasks to increase data quality (competitor links, maps links, reviews, etc.)
+
+⸻
+
+Stress tests (must pass)
+	•	Bias domination test: One competitor has 90% of signals → engine MUST DOWNGRADE or BLOCK.
+	•	Proxy partial outage test: 30–50% fetch failures → engine MUST produce “Exploratory Mode” + collection tasks, no verdict.
+	•	Contradictory sources test: IG shows high engagement, reviews show low satisfaction → engine MUST output “conflict detected” + resolution plan.
+	•	Regression test: Strategy must NOT flip direction more than once within 7 days unless confidence improves above threshold.
+
+⸻
+
+🔒 STRICT ENGINE ISOLATION RULE — NON-NEGOTIABLE
+
+The “Analyze Market Overview” button inside the Competitor Intelligence section must trigger Market Intelligence v3 ONLY.
+
+Under no circumstance may it:
+	•	Trigger Build a Plan Orchestrator
+	•	Trigger Storytelling Engine
+	•	Trigger Offer Engine
+	•	Trigger Budget Engine
+	•	Trigger Autopilot
+	•	Write or modify strategic plans
+	•	Create or modify plan artifacts
+	•	Call any execution pipeline
+
+This action is DIAGNOSTIC ONLY.
+
+It must:
+	1.	Build / refresh Market Snapshot
+	2.	Run Signal Engine
+	3.	Run Intent Classification
+	4.	Compute Market Trajectory
+	5.	Compute Confidence
+	6.	Return structured diagnostic output
+
+It must NOT generate strategic prescriptions.
+
+⸻
+
+🔐 ARCHITECTURAL ENFORCEMENT
+
+Implement:
+	•	Engine whitelist for this endpoint (Market Intelligence v3 only)
+	•	Explicit rejection if any non-allowed engine is invoked
+	•	Log event: MARKET_OVERVIEW_DIAGNOSTIC_RUN
+	•	Block if orchestration layer is referenced
+
+If any cross-call is detected → hard error + log violation.
+
+⸻
+
+🧪 Isolation Stress Tests (Mandatory)
+	1.	Attempt to trigger Build a Plan during Market Overview → must fail.
+	2.	Attempt to write plan_documents from this endpoint → must fail.
+	3.	Attempt to modify strategic_plans table → must fail.
+	4.	Attempt to trigger Autopilot from this route → must fail.
+
+No silent leakage allowed.
+
+⸻
+
+🔒 DOMINANCE MODULE CONTAINMENT RULE — NON-NEGOTIABLE
+
+The Competitor Analysis / Market Overview action must invoke:
+
+MarketIntelligenceV3.run() ONLY.
+
+Dominance v2 is NOT an independent engine.
+It is a strict internal module inside Market Intelligence v3.
+
+Under no circumstance may:
+	•	Dominance v2 be externally callable
+	•	Dominance v2 be invoked by Orchestrator
+	•	Dominance v2 be invoked by Autopilot
+	•	Dominance v2 run without full Market Intelligence context
+	•	Dominance v2 produce standalone outputs
+	•	Dominance v2 write to strategic_plans or plan_documents
+
+Dominance v2 must execute only within this internal flow:
+
+buildSnapshot()
+computeSignals()
+classifyIntent()
+computeDominanceScore()   ← internal only
+computeTrajectory()
+computeConfidence()
+return DiagnosticResult
+If any external call to Dominance v2 is detected:
+	•	Hard reject
+	•	Log DOMINANCE_ISOLATION_VIOLATION
+	•	Abort execution
+
+⸻
+
+🧪 Isolation Stress Tests (Add to Suite)
+	1.	Attempt to call Dominance v2 directly → must fail.
+	2.	Attempt to invoke Dominance from Orchestrator → must fail.
+	3.	Attempt to expose Dominance score endpoint → must not exist.
+	4.	Attempt to use Dominance output without full MIv3 context → must reject.
+
+No leakage. No partial execution. No standalone scoring.
+
+⸻
+
+🔒 FULL SECTION GOVERNANCE — NON-NEGOTIABLE
+
+The entire Competitor Intelligence section must be governed exclusively by MarketIntelligenceV3.
+
+This includes ALL tabs and actions:
+	•	Overview
+	•	Dominance
+	•	Actions
+	•	History
+	•	Analyze button
+	•	Any refresh or recalculation event
+
+No sub-section may invoke any engine outside the MarketIntelligenceV3 context.
+
+⸻
+
+🧠 SINGLE SOURCE OF TRUTH
+
+All outputs inside Competitor Intelligence must derive from:
+	•	The same Market Snapshot
+	•	The same Signal computation layer
+	•	The same Dominance module
+	•	The same Intent classification
+	•	The same Confidence model
+
+There must be:
+	•	No parallel engine calls
+	•	No partial recomputation
+	•	No independent dominance scoring
+	•	No orchestration calls
+	•	No plan writes
+	•	No autopilot triggers
+
+⸻
+
+🔐 STRICT EXECUTION RULE
+
+Competitor Intelligence UI
+⬇
+MarketIntelligenceV3.run(mode)
+
+Where mode can be:
+	•	“overview”
+	•	“dominance”
+	•	“actions”
+	•	“history”
+
+But the engine remains ONE.
+
+If any other engine is referenced from this section:
+	•	Hard reject
+	•	Log CI_ENGINE_ISOLATION_VIOLATION
+	•	Abort execution
+
+⸻
+
+🧪 Mandatory Validation
+	•	Switching between Overview and Dominance must not trigger new snapshots unless refresh is requested.
+	•	Actions must derive from the same confidence layer as Overview.
+	•	History must reference stored MIv3 snapshots only.
+	•	No strategic plans or artifacts may be written from this section.
+
+⸻
+
+Subject: Competitor Intelligence — Full Governance + Progressive Data Model (No Architectural Drift)
+
+Replit,
+
+We are finalizing the Competitor Intelligence architecture.
+
+This message extends previous directives.
+Nothing here contradicts prior constraints.
+This locks the section permanently.
+
+⸻
+
+1️⃣ FULL SECTION GOVERNANCE (CONFIRMED)
+
+The entire Competitor Intelligence section (Overview, Dominance, Actions, History, Analyze, Refresh) must be governed exclusively by:
+
+MarketIntelligenceV3
+
+No engine outside MIv3 may be invoked from this section.
+
+No Orchestrator.
+No Storytelling.
+No Autopilot.
+No plan writes.
+No strategic artifacts.
+
+Execution pattern:
+
+CompetitorIntelligenceUI
+   → MarketIntelligenceV3.run(mode)
+Modes allowed:
+	•	overview
+	•	dominance
+	•	actions
+	•	history
+
+Engine remains ONE.
+
+⸻
+
+2️⃣ SINGLE SNAPSHOT SOURCE (NO PARALLEL COMPUTATION)
+
+All tabs must derive from:
+	•	Same Market Snapshot
+	•	Same Signal layer
+	•	Same Intent layer
+	•	Same Dominance module
+	•	Same Confidence model
+
+Switching tabs must NOT trigger recomputation unless refresh requested.
+
+If any sub-tab tries to compute independently:
+→ Hard reject
+→ Log CI_ENGINE_ISOLATION_VIOLATION
+
+⸻
+
+3️⃣ PROGRESSIVE DATA MODEL (NO DEPENDENCY ON BUILD A PLAN)
+
+Competitor Intelligence must be self-sufficient.
+
+It must NOT rely on Build a Plan for required inputs.
+
+Instead:
+
+Inside Competitor Intelligence implement:
+
+Market Data Completeness Panel
+
+Display:
+	•	Completeness %
+	•	Confidence score
+	•	MissingSignalFlags
+	•	Explicit list of missing data
+	•	Boost suggestions
+
+This panel must allow adding optional data directly inside this section.
+
+⸻
+
+4️⃣ MINIMUM VIABLE ANALYSIS (ALWAYS RUNS)
+
+If user provides only:
+	•	Instagram URLs
+
+MarketIntelligenceV3 must still run.
+
+Output must be:
+	•	Baseline diagnostic
+	•	Reduced confidence
+	•	Explicit data gaps
+	•	No aggressive strategic conclusions
+
+Never return empty analysis.
+Never block basic diagnostics.
+
+⸻
+
+5️⃣ BOOST INPUTS (WITH CONFIDENCE IMPACT)
+
+Per competitor allow optional fields:
+	•	Instagram URL (required)
+	•	Website URL (optional)
+	•	Google Maps URL (optional)
+	•	Manual notes (optional)
+	•	Pricing hints (optional)
+
+Each additional verified signal must increase confidence weighting.
+
+Confidence must not inflate without real data.
+
+⸻
+
+6️⃣ CONFIDENCE INTEGRITY RULE
+
+Market Intelligence must clearly state:
+	•	What is known
+	•	What is estimated
+	•	What is missing
+	•	What cannot be concluded
+
+If confidence < threshold:
+	•	No strong entry strategies
+	•	No aggressive recommendations
+	•	Label as Exploratory Mode
+
+⸻
+
+7️⃣ SNAPSHOT + REFRESH CONTROL
+
+Implement:
+	•	Snapshot storage (versioned)
+	•	Manual refresh button
+	•	Scheduled refresh (adaptive)
+	•	LastUpdated timestamp visible
+	•	DataFreshnessDays exposed
+
+Volatility triggers must respect cost caps.
+
+No uncontrolled refresh loops.
+
+⸻
+
+8️⃣ HARD ANTI-HALLUCINATION RULE
+
+If pricing not detectable:
+→ Do not estimate.
+
+If sentiment unclear:
+→ Mark insufficient.
+
+If competitor sample < threshold:
+→ Downgrade confidence.
+
+No fabrication allowed.
+
+⸻
+
+9️⃣ CROSS-SECTION FIREWALL
+
+Competitor Intelligence must NOT:
+	•	Write to strategic_plans
+	•	Write to plan_documents
+	•	Trigger orchestrator
+	•	Trigger autopilot
+	•	Generate campaign actions automatically
+
+It produces DIAGNOSTIC intelligence only.
+
+Build a Plan may consume MIv3 output later — but CI never writes forward.
+
+⸻
+
+🔟 VALIDATION REQUIREMENTS
+
+Before approval, confirm:
+	•	Switching tabs uses same snapshot
+	•	Dominance is internal-only
+	•	Confidence degrades correctly under weak data
+	•	Baseline analysis runs with 1 competitor
+	•	Adding optional inputs increases confidence correctly
+	•	Removing competitor decreases completeness score
+	•	No plan artifacts created from CI
+
+⸻
+
+FINAL RULE
+
+Competitor Intelligence is:
+
+Diagnostic Brain
+Not Strategic Executor
+
+MarketIntelligenceV3 is:
+
+The only engine allowed inside this section.
+
+No drift.
+No shadow engines.
+No duplicated scoring logic.
+
+Confirm implementation compliance before proceeding.
+
+⸻
+
+Subject: Mandatory Token Budget Guard — MarketIntelligenceV3 (Hard Ceiling Enforcement)
+
+Replit,
+
+We are adding a non-negotiable Token Budget Guard to MarketIntelligenceV3.
+
+This is required to prevent silent token burn and uncontrolled LLM expansion.
+
+No exceptions.
+
+⸻
+
+1️⃣ HARD TOKEN CEILING (PER SNAPSHOT)
+
+Before any LLM call:
+	•	Estimate token usage based on:
+	•	Competitor count
+	•	Comment sample size
+	•	Post sample size
+	•	Prompt size
+	•	Compute projected total token cost.
+
+If projected usage exceeds configured ceiling:
+
+→ Automatically downgrade execution mode.
+
+Never proceed above budget.
+
+⸻
+
+2️⃣ EXECUTION MODES
+
+MarketIntelligenceV3 must support 3 modes:
+
+FULL MODE
+	•	Full clustering
+	•	Deep comment synthesis
+	•	Intent extraction
+	•	Narrative compression
+
+REDUCED MODE
+	•	Smaller comment sample
+	•	Fewer posts
+	•	Skip deep clustering
+	•	Shorter prompt schema
+
+LIGHT MODE
+	•	Deterministic signals only
+	•	No heavy narrative generation
+	•	No comment clustering
+	•	Summary only
+
+Mode selection must be automatic based on:
+	•	Token projection
+	•	Competitor count
+	•	Comment volume
+
+⸻
+
+3️⃣ LLM USAGE RULE
+
+LLM may ONLY be used for:
+	•	Intent summarization
+	•	Pattern compression
+	•	Narrative synthesis
+
+LLM must NOT be used for:
+	•	Raw counting
+	•	Engagement math
+	•	Frequency detection
+	•	Ratio computation
+	•	Dominance scoring math
+
+All quantitative signals must be deterministic server logic.
+
+⸻
+
+4️⃣ COMMENT SAMPLING CONTROL
+
+Comment analysis must:
+	•	Cap max comments per competitor
+	•	Cap total comments per snapshot
+	•	Use stratified sampling
+	•	Never analyze entire comment history
+
+Add configuration:
+
+MAX_COMMENTS_PER_COMPETITOR
+MAX_TOTAL_COMMENTS
+MAX_POSTS_PER_COMPETITOR
+Hard enforced.
+
+⸻
+
+5️⃣ SNAPSHOT CACHE PROTECTION
+
+If snapshot exists and freshness threshold not exceeded:
+
+→ No LLM execution allowed.
+→ Return cached intelligence.
+
+Refresh must require:
+	•	Manual trigger
+OR
+	•	Volatility trigger
+OR
+	•	Freshness expiration
+
+⸻
+
+6️⃣ TELEMETRY + AUDIT
+
+For every execution log:
+	•	executionMode
+	•	projectedTokens
+	•	actualTokensUsed
+	•	competitorsCount
+	•	commentSampleSize
+	•	downgradeReason (if any)
+
+Store in audit.
+
+⸻
+
+7️⃣ FAILSAFE RULE
+
+If LLM call fails or exceeds budget mid-run:
+
+→ Abort narrative layer
+→ Return deterministic diagnostic only
+→ Mark confidence downgraded
+→ Never retry automatically
+
+⸻
+
+FINAL REQUIREMENT
+
+MarketIntelligenceV3 must NEVER:
+	•	Scale token usage linearly with competitors
+	•	Scale token usage linearly with comment volume
+	•	Execute unlimited refresh loops
+	•	Execute parallel LLM calls
+
+Single controlled call per snapshot maximum.
+
+⸻
+
+Confirm:
+	•	Token ceiling implemented
+	•	Mode downgrade implemented
+	•	Deterministic signals separated
+	•	Snapshot caching enforced
+	•	Telemetry logging active
+
+No partial implementation.
+
+⸻
+
+Subject: Final Lock — Zero Gaps Before Engine Expansion
+
+Replit,
+
+We are closing the foundation.
+Before any further engine expansion, the following MUST be implemented and verified.
+No partial compliance. No assumptions.
+
+⸻
+
+1️⃣ Token Budget Guard — Real Implementation (Not Just Design)
+
+Confirm with proof:
+	•	Hard per-execution token ceiling.
+	•	FULL / REDUCED / LIGHT modes auto-switching.
+	•	Deterministic signals separated from LLM layer.
+	•	Single LLM call per snapshot maximum.
+	•	Snapshot caching enforced (no recompute on tab switch).
+	•	Telemetry logs showing:
+	•	projectedTokens
+	•	actualTokensUsed
+	•	downgradeReason
+	•	executionMode
+
+Provide logs.
+
+⸻
+
+2️⃣ Stress Test — Intentional Overload Scenario
+
+Run a destructive test:
+	•	10 competitors
+	•	Max comments per competitor
+	•	Manual refresh spam
+	•	Rapid tab switching
+
+Expected result:
+	•	No crash
+	•	No uncontrolled token growth
+	•	Automatic downgrade
+	•	No duplicate snapshot creation
+	•	No parallel LLM calls
+
+Provide audit logs.
+
+⸻
+
+3️⃣ Data Integrity Guard
+
+Verify:
+	•	No cross-campaign data contamination.
+	•	Snapshot strictly scoped by campaignId.
+	•	Confidence score degrades when data is weak.
+	•	No hallucinated pricing or market size.
+	•	No forward writes from Competitor Intelligence.
+
+⸻
+
+4️⃣ Failure Containment
+
+If LLM fails mid-run:
+	•	Return deterministic diagnostic only.
+	•	No retry loop.
+	•	No infinite background job.
+	•	Confidence downgraded.
+	•	System stable.
+
+⸻
+
+5️⃣ Snapshot Lifecycle
+
+Confirm:
+	•	Refresh only when:
+	•	Manual trigger
+	•	Freshness expiry
+	•	Volatility threshold
+
+No silent background execution.
+
+⸻
+
+6️⃣ Engine Isolation Audit
+
+Verify:
+	•	Competitor Intelligence calls only MarketIntelligenceV3.
+	•	No hidden calls to Orchestrator.
+	•	No shadow dominance logic.
+	•	No duplicated scoring layers.
+
+⸻
+
+7️⃣ Cost Projection
+
+Provide:
+	•	Worst-case token usage per snapshot.
+	•	Estimated monthly token cost under:
+	•	10 active campaigns
+	•	Weekly refresh
+	•	Max competitors.
+
+No guesswork — calculated estimate.
+
+⸻
+
+Final Condition
+
+Only after all above items are:
+	•	Implemented
+	•	Logged
+	•	Stress-tested
+	•	Verified with proof
+
+We proceed to engine expansion.
+
+This is the final structural seal.
+
+Confirm completion with evidence.

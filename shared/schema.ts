@@ -1321,3 +1321,96 @@ export const orchestratorJobs = pgTable("orchestrator_jobs", {
 });
 
 export type OrchestratorJob = typeof orchestratorJobs.$inferSelect;
+
+// =============================================
+// MARKET INTELLIGENCE V3
+// =============================================
+export const miSnapshots = pgTable("mi_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  version: integer("version").notNull().default(1),
+  competitorData: text("competitor_data"),
+  signalData: text("signal_data"),
+  intentData: text("intent_data"),
+  trajectoryData: text("trajectory_data"),
+  dominanceData: text("dominance_data"),
+  confidenceData: text("confidence_data"),
+  marketState: text("market_state"),
+  executionMode: text("execution_mode").notNull().default("FULL"),
+  telemetry: text("telemetry"),
+  narrativeSynthesis: text("narrative_synthesis"),
+  entryStrategy: text("entry_strategy"),
+  defensiveRisks: text("defensive_risks"),
+  missingSignalFlags: text("missing_signal_flags"),
+  volatilityIndex: doublePrecision("volatility_index").default(0),
+  dataFreshnessDays: doublePrecision("data_freshness_days").default(0),
+  overallConfidence: doublePrecision("overall_confidence").default(0),
+  confidenceLevel: text("confidence_level").default("INSUFFICIENT"),
+  status: text("status").notNull().default("PENDING"),
+  confirmedRuns: integer("confirmed_runs").default(0),
+  previousDirection: text("previous_direction"),
+  directionLockedUntil: timestamp("direction_locked_until"),
+  createdAt: timestamp("created_at").defaultNow(),
+  expiresAt: timestamp("expires_at"),
+});
+
+export type MiSnapshot = typeof miSnapshots.$inferSelect;
+
+export const miSignalLogs = pgTable("mi_signal_logs", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  snapshotId: varchar("snapshot_id").notNull(),
+  competitorId: varchar("competitor_id").notNull(),
+  signals: text("signals"),
+  signalCoverageScore: doublePrecision("signal_coverage_score").default(0),
+  sourceReliabilityScore: doublePrecision("source_reliability_score").default(0),
+  sampleSize: integer("sample_size").default(0),
+  timeWindowDays: integer("time_window_days").default(0),
+  varianceScore: doublePrecision("variance_score").default(0),
+  dominantSourceRatio: doublePrecision("dominant_source_ratio").default(0),
+  missingFields: text("missing_fields"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type MiSignalLog = typeof miSignalLogs.$inferSelect;
+
+export const miRefreshSchedule = pgTable("mi_refresh_schedule", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  competitorId: varchar("competitor_id").notNull(),
+  nextRefreshAt: timestamp("next_refresh_at"),
+  intervalDays: integer("interval_days").notNull().default(7),
+  volatilityIndex: doublePrecision("volatility_index").default(0),
+  lastRefreshAt: timestamp("last_refresh_at"),
+  refreshReason: text("refresh_reason"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type MiRefreshSchedule = typeof miRefreshSchedule.$inferSelect;
+
+export const miTelemetry = pgTable("mi_telemetry", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  snapshotId: varchar("snapshot_id").notNull(),
+  executionMode: text("execution_mode").notNull(),
+  projectedTokens: integer("projected_tokens").default(0),
+  actualTokensUsed: integer("actual_tokens_used").default(0),
+  competitorsCount: integer("competitors_count").default(0),
+  commentSampleSize: integer("comment_sample_size").default(0),
+  postSampleSize: integer("post_sample_size").default(0),
+  downgradeReason: text("downgrade_reason"),
+  postsProcessed: integer("posts_processed").default(0),
+  commentsProcessed: integer("comments_processed").default(0),
+  refreshReason: text("refresh_reason"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type MiTelemetry = typeof miTelemetry.$inferSelect;
