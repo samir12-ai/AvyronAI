@@ -1,0 +1,181 @@
+
+⸻
+
+Subject: FINAL VERIFICATION — MIv3 Must Be Structurally Sealed (Evidence Required)
+
+Replit,
+
+Before we move forward, I need complete structural verification of Market Intelligence V3.
+No statements. No “already verified.” I want evidence.
+
+Below is the final checklist. Each item requires proof.
+
+⸻
+
+1️⃣ CI Exclusivity — Zero Legacy Paths
+
+Confirm that Competitor Intelligence is 100% driven by MIv3.
+
+Required proof:
+	•	Grep output showing no frontend file references any legacy dominance/analysis routes.
+	•	Confirmation that no old CI endpoints are reachable.
+	•	If legacy routes exist, they must explicitly return 404 or 410.
+
+There must be zero parallel logic.
+
+⸻
+
+2️⃣ Single Snapshot Integrity
+
+All 4 sub-tabs (Overview, Dominance, Actions, History) must:
+	•	Read from the same snapshot object.
+	•	Use the same snapshotId.
+	•	Not trigger recomputation on tab switch.
+
+Provide:
+	•	Log output or test showing snapshotId consistency across sub-tabs.
+	•	Confirmation that switching tabs does not call the engine again.
+
+⸻
+
+3️⃣ Snapshot Scope Enforcement
+
+Each snapshot must be uniquely scoped by:
+	•	accountId
+	•	campaignId
+	•	competitorHash
+	•	version
+
+Provide:
+	•	Query showing snapshot table structure.
+	•	Confirmation that competitor set change invalidates snapshot.
+	•	Proof that cross-campaign leakage is impossible.
+
+⸻
+
+4️⃣ Token Budget Guard Enforcement
+
+Confirm with logs:
+	•	projectedTokens
+	•	actualTokensUsed
+	•	executionMode (FULL/REDUCED/LIGHT)
+	•	downgradeReason
+
+Prove that:
+	•	Ceiling is enforced before LLM call.
+	•	Only one LLM call per snapshot.
+	•	No token scaling linearly with competitor count.
+
+⸻
+
+5️⃣ Deterministic Signal Separation
+
+Confirm:
+	•	All numeric signals are deterministic.
+	•	No LLM used for math or ratios.
+	•	LLM only used for narrative compression / summarization.
+
+Provide code reference lines.
+
+⸻
+
+6️⃣ Confidence & Anti-Hallucination Guard
+
+Prove:
+	•	When signals are weak → confidence downgrades.
+	•	When critical data missing → no strong strategic claims.
+	•	Missing signals explicitly listed in output.
+
+Provide example output in LOW confidence mode.
+
+⸻
+
+7️⃣ Refresh Discipline
+
+Confirm:
+	•	Refresh occurs only on manual trigger OR expiry OR volatility.
+	•	No silent background recompute.
+	•	72-hour hard cap enforced.
+
+Provide refresh schedule proof.
+
+⸻
+
+8️⃣ Concurrency & Deduplication
+
+Confirm:
+	•	Concurrency lock prevents double snapshot creation.
+	•	Rapid refresh attempts do not create multiple snapshots.
+	•	Snapshot deduplication uses competitorHash.
+
+Provide test reference.
+
+⸻
+
+9️⃣ Engine Isolation Guard
+
+Confirm:
+	•	MIv3 cannot be invoked from unauthorized sections.
+	•	No orchestrator calls from CI.
+	•	No plan writes from CI.
+
+Provide whitelist enforcement proof.
+
+⸻
+
+🔟 Full Test Suite Status
+
+Provide:
+	•	Full test suite run output (showing Failed=0).
+	•	Total test count.
+	•	No disabled or skipped tests.
+	•	List of modified test files.
+
+⸻
+
+11️⃣ Database Integrity
+
+Confirm:
+	•	Composite indexes exist on all signal tables for account+campaign.
+	•	Snapshot table indexed properly.
+	•	No unscoped SELECT statements exist in MIv3.
+
+Provide index query output.
+
+⸻
+
+12️⃣ Failure Containment
+
+Prove:
+	•	If LLM fails mid-run → engine returns deterministic fallback.
+	•	No retry loop.
+	•	No corrupted snapshot persisted.
+
+Provide test or log reference.
+
+⸻
+
+13️⃣ Frontend Integrity
+
+Confirm:
+	•	CI UI renders correctly under:
+	•	FULL mode
+	•	REDUCED mode
+	•	LIGHT mode
+	•	Guard warnings visible when downgraded.
+	•	Telemetry metadata displayed.
+
+Provide screenshots or test references.
+
+⸻
+
+FINAL CONDITION
+
+Reply with:
+
+PASS/FAIL per item
+Evidence reference (test name, log ID, or code path)
+
+No general confirmations. Evidence only.
+
+Once verified, MIv3 is considered structurally sealed.
