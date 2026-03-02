@@ -6,6 +6,13 @@ import { eq, desc, gte, and, sql, ne } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
 import { logAudit } from "../audit";
 import * as crypto from "crypto";
+import { buildStrategicContext, type StrategicContext } from "../engine-contracts/context-kernel";
+import { wrapEngineOutput, type EngineOutput } from "../engine-contracts/engine-contract";
+import { validateSectionConsumption, type OutputType } from "../engine-contracts/output-types";
+import { evaluateUncertainty, type UncertaintyResult } from "../engine-contracts/uncertainty-guard";
+import { validateExecutionRoute } from "../engine-contracts/execution-map";
+import { enforceOutputType } from "../engine-contracts/type-enforcement";
+import { globalRegistry } from "../engine-contracts/engine-registry";
 
 const REQUIRED_BLUEPRINT_FIELDS: { key: string; label: string }[] = [
   { key: "detectedOffer", label: "Offer" },
@@ -480,6 +487,21 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
 
     log("CONTEXT_BUILT");
 
+    let strategicContext: StrategicContext | null = null;
+    try {
+      strategicContext = await buildStrategicContext(campaignId || "default", accountId);
+      log("STRATEGIC_CONTEXT_BUILT", {
+        marketMode: strategicContext.marketMode,
+        awarenessLevel: strategicContext.awarenessLevel,
+        competitionLevel: strategicContext.competitionLevel,
+        pricingBand: strategicContext.pricingBand,
+        growthDirection: strategicContext.growthDirection,
+        dataConfidence: strategicContext.dataConfidence,
+      });
+    } catch (ctxErr: any) {
+      log("STRATEGIC_CONTEXT_SKIPPED", { error: ctxErr.message });
+    }
+
     const contextBlock = buildSectionContext({
       blueprint, confirmedBlueprint, campaignContext, competitorUrls, businessData, marketMapRaw, performanceIntelligenceBlock,
     });
@@ -557,6 +579,104 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
     }
 
     log("ALL_SECTIONS_COMPLETE", { aiGenerated: aiGeneratedCount, fallback: fallbackCount, totalDurationMs: Date.now() - startMs, sectionStatuses });
+
+    const SECTION_TO_OUTPUT_TYPE: Record<string, OutputType> = {
+      contentDistributionPlan: "DISTRIBUTION_PLAN",
+      creativeTestingMatrix: "STRATEGY_SECTION",
+      budgetAllocationStructure: "STRATEGY_SECTION",
+      kpiMonitoringPriority: "STRATEGY_SECTION",
+      competitiveWatchTargets: "STRATEGY_SECTION",
+      riskMonitoringTriggers: "STRATEGY_SECTION",
+    };
+
+    let eligibleEngineIds: string[] = [];
+    if (strategicContext) {
+      const eligible = globalRegistry.getEligible(strategicContext);
+      eligibleEngineIds = eligible.map(e => e.id);
+      log("ENGINE_ELIGIBILITY", { eligible: eligibleEngineIds, total: globalRegistry.getRegistered().length });
+
+      const orchestratorEngine = globalRegistry.getById("strategic-orchestrator");
+      if (orchestratorEngine && !eligibleEngineIds.includes("strategic-orchestrator")) {
+        log("ENGINE_ORCHESTRATOR_INELIGIBLE", { reason: "Strategic orchestrator failed eligibility — skipping plan generation" });
+        await updateJob({ status: "FAILED", error: "Strategic orchestrator engine is not eligible for current context", errorCode: "ENGINE_INELIGIBLE", completedAt: new Date() });
+        await logAuditEvent({ accountId, campaignId: campaignId || undefined, blueprintId, blueprintVersion: blueprint.blueprintVersion, event: "ENGINE_INELIGIBLE", details: { engineId: "strategic-orchestrator", strategicContext } });
+        return;
+      }
+    }
+
+    const engineOutputs: EngineOutput[] = [];
+    for (const spec of SECTION_SPECS) {
+      const sectionData = orchestratorPlan[spec.key];
+      const wasAiGenerated = sectionStatuses[spec.key] === "COMPLETE";
+      const outputType = SECTION_TO_OUTPUT_TYPE[spec.key] || "STRATEGY_SECTION";
+
+      try {
+        const wrapped = wrapEngineOutput(sectionData, {
+          score: wasAiGenerated ? 80 : 40,
+          reasoning: wasAiGenerated ? `AI-generated ${spec.label}` : `Fallback ${spec.label}`,
+          confidence: wasAiGenerated ? 75 : 30,
+          dataCompleteness: wasAiGenerated ? 80 : 50,
+          scope: `campaign:${campaignId}`,
+          outputType: outputType as OutputType,
+          riskFlag: !wasAiGenerated ? `${spec.label} used fallback` : undefined,
+        });
+
+        validateSectionConsumption("BUILD_A_PLAN", wrapped.outputType);
+        enforceOutputType("BUILD_A_PLAN", wrapped);
+        validateExecutionRoute("BUILD_A_PLAN", "BUILD_A_PLAN", wrapped.outputType);
+
+        engineOutputs.push(wrapped);
+      } catch (wrapErr: any) {
+        log(`SECTION_CONTRACT_VIOLATION_${spec.key}`, { error: wrapErr.message, code: wrapErr.code });
+      }
+    }
+
+    let uncertaintyResult: UncertaintyResult | null = null;
+    if (engineOutputs.length > 0) {
+      uncertaintyResult = evaluateUncertainty(engineOutputs);
+      log("UNCERTAINTY_GUARD", {
+        decision: uncertaintyResult.decision,
+        confidence: uncertaintyResult.aggregatedConfidence,
+        completeness: uncertaintyResult.aggregatedCompleteness,
+        riskFlags: uncertaintyResult.riskFlags.length,
+      });
+
+      if (uncertaintyResult.decision === "BLOCK") {
+        orchestratorPlan.uncertaintyGuard = {
+          decision: "BLOCK",
+          confidence: uncertaintyResult.aggregatedConfidence,
+          completeness: uncertaintyResult.aggregatedCompleteness,
+          reasoning: uncertaintyResult.reasoning,
+          riskFlags: uncertaintyResult.riskFlags,
+        };
+        log("UNCERTAINTY_BLOCK", { reasoning: uncertaintyResult.reasoning });
+
+        await db.update(strategicBlueprints)
+          .set({ status: "ORCHESTRATED", orchestratorPlan: JSON.stringify(orchestratorPlan), orchestratedAt: new Date(), updatedAt: new Date() })
+          .where(eq(strategicBlueprints.id, blueprintId));
+
+        const [blockedPlan] = await db.insert(strategicPlans).values({
+          accountId, blueprintId, campaignId: campaignId || "default",
+          planJson: JSON.stringify(orchestratorPlan),
+          planSummary: `BLOCKED — ${uncertaintyResult.reasoning.substring(0, 100)}`,
+          status: "BLOCKED", executionStatus: "IDLE",
+        }).returning();
+
+        await updateJob({ status: "COMPLETE", sectionStatuses: JSON.stringify(sectionStatuses), planJson: JSON.stringify(orchestratorPlan), planId: blockedPlan.id, fallback: true, fallbackReason: `Uncertainty guard BLOCK: ${uncertaintyResult.reasoning}`, stageTimes: JSON.stringify(stageTimes), durationMs: Date.now() - startMs, completedAt: new Date() });
+        await logAuditEvent({ accountId, campaignId: campaignId || undefined, blueprintId, blueprintVersion: blueprint.blueprintVersion, event: "UNCERTAINTY_BLOCK", details: { jobId, planId: blockedPlan.id, uncertaintyGuard: uncertaintyResult, strategicContext: strategicContext || undefined } });
+        return;
+      }
+
+      if (uncertaintyResult.decision === "DOWNGRADE") {
+        orchestratorPlan.uncertaintyGuard = {
+          decision: "DOWNGRADE",
+          confidence: uncertaintyResult.aggregatedConfidence,
+          completeness: uncertaintyResult.aggregatedCompleteness,
+          reasoning: uncertaintyResult.reasoning,
+          riskFlags: uncertaintyResult.riskFlags,
+        };
+      }
+    }
 
     await db.update(strategicBlueprints)
       .set({
@@ -637,7 +757,7 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
       blueprintId,
       blueprintVersion: blueprint.blueprintVersion,
       event: auditEvent,
-      details: { jobId, planId: planRow.id, aiGeneratedCount, fallbackCount, performanceSignalsInjected, durationMs: Date.now() - startMs, stageTimes, usedFallback, sectionStatuses, fallbackReasons },
+      details: { jobId, planId: planRow.id, aiGeneratedCount, fallbackCount, performanceSignalsInjected, durationMs: Date.now() - startMs, stageTimes, usedFallback, sectionStatuses, fallbackReasons, strategicContext: strategicContext || undefined, uncertaintyGuard: uncertaintyResult || undefined },
     });
 
     await updateJob({

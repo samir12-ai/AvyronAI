@@ -1,0 +1,131 @@
+
+⸻
+
+Subject: Foundation Refactor Before Adding Any Engines
+
+Replit,
+
+We are not adding any new engines yet.
+
+Before anything else, we are restructuring the foundation to support a scalable Adaptive Engine Architecture. No feature additions, no half integrations — we are preparing the base properly so future engines do not break or interfere across sections.
+
+Here is what must be implemented now:
+
+⸻
+
+1) Output Type Matrix (Mandatory)
+
+Create a strict Output Type Matrix that defines:
+	•	Which engine can output which data type
+	•	Which section can consume which output type
+	•	Hard validation rules (no silent acceptance)
+
+Sections must be isolated:
+	•	AI Writer
+	•	AI Video
+	•	AI Designer
+	•	Studio
+	•	Autopilot
+	•	Dashboard
+	•	Build a Plan
+
+No section may consume output not explicitly allowed in the matrix.
+
+This prevents cross-branch contamination.
+
+⸻
+
+2) Unified Engine Contract
+
+All engines (future and current) must return a standardized structure:
+	•	score
+	•	reasoning
+	•	confidence
+	•	dataCompleteness
+	•	scope
+	•	outputType
+	•	riskFlag (optional)
+
+No exceptions. Any engine not matching this format must be rejected at runtime.
+
+⸻
+
+3) Context Kernel (Inside Build a Plan Only)
+
+Implement a StrategicContext builder that produces:
+	•	marketMode
+	•	awarenessLevel
+	•	competitionLevel
+	•	pricingBand
+	•	growthDirection
+	•	dataConfidence
+
+Every engine must receive this context as input. No engine may independently derive its own context.
+
+⸻
+
+4) Engine Registry + Scope Control
+
+Create a central Engine Registry.
+
+Only the Build a Plan Orchestrator can invoke engines.
+
+Each engine must declare:
+	•	eligibility()
+	•	supportedScopes
+	•	supportedOutputTypes
+
+If eligibility fails → engine is skipped cleanly.
+
+No implicit execution allowed.
+
+⸻
+
+5) Execution Map Layer
+
+Build a structure that maps:
+	•	Writer outputs
+	•	Video outputs
+	•	Designer outputs
+	•	Studio outputs
+	•	Autopilot outputs
+
+This ensures each section only consumes its assigned data.
+
+⸻
+
+6) Uncertainty Guard
+
+Before finalizing a plan:
+	•	Aggregate confidence
+	•	Aggregate dataCompleteness
+	•	Check riskFlags
+
+If thresholds are not met → downgrade plan recommendations.
+
+No overconfident decisions allowed.
+
+⸻
+
+7) Strict Type Enforcement
+
+If:
+	•	AI Writer receives Video output → hard reject
+	•	AI Video receives Caption-only output → reject
+	•	Designer receives ScriptScenes → reject
+
+No silent conversions.
+
+⸻
+
+This is a structural lockdown phase.
+
+Do not add new engines.
+Do not modify UI logic.
+Do not expand features.
+
+Prepare the base so we can safely integrate engines one by one and test them individually.
+
+Once the foundation is complete and validated, we will begin integrating engines incrementally and stress test each before moving forward.
+
+Confirm when foundation refactor is complete and validated.

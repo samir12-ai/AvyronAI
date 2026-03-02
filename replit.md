@@ -56,6 +56,16 @@ Preferred communication style: Simple, everyday language.
 - **Schema Validation**: Ensures plans contain all required sections.
 - **Plan Approval Gate**: Execution plans require explicit approval to activate.
 
+### Adaptive Engine Architecture (Foundation)
+- **Engine Contracts**: `server/engine-contracts/` — centralized foundation for scalable engine integration.
+- **Output Type Matrix**: Strict matrix defining which engine outputs which data type and which section can consume it. 10 output types (CAPTION, SCRIPT, SCENE_BREAKDOWN, VISUAL_CONCEPT, POSTER_DESIGN, METADATA, STRATEGY_SECTION, PERFORMANCE_SIGNAL, CREATIVE_ANALYSIS, DISTRIBUTION_PLAN) across 7 sections (AI_WRITER, AI_VIDEO, AI_DESIGNER, STUDIO, AUTOPILOT, DASHBOARD, BUILD_A_PLAN). Hard rejection on invalid consumption — no silent conversions.
+- **Unified Engine Contract**: All engines must return `{ score, reasoning, confidence, dataCompleteness, scope, outputType, riskFlag? }`. Zod-validated at runtime. Non-conforming outputs are rejected.
+- **Context Kernel**: `buildStrategicContext(campaignId, accountId)` produces `{ marketMode, awarenessLevel, competitionLevel, pricingBand, growthDirection, dataConfidence }` from business_data_layer, manual_campaign_metrics, ci_competitors, and performance_snapshots. No engine may derive its own context.
+- **Engine Registry**: Central `EngineRegistry` with `register()`, `getEligible()`, `invoke()`. Only BUILD_A_PLAN_ORCHESTRATOR can invoke engines. Each engine declares `eligibility()`, `supportedScopes`, and `supportedOutputTypes`. Ineligible engines are skipped with audit log.
+- **Execution Map**: Maps section → allowed output types. `validateExecutionRoute(source, destination, outputType)` ensures valid routing. Unmapped routes are rejected.
+- **Uncertainty Guard**: Aggregates confidence and completeness from engine outputs. Returns PROCEED (≥60%), DOWNGRADE (40-60%), or BLOCK (<40%). Risk flags aggregated. Downgraded plans are marked as low-confidence. Blocked plans halt generation.
+- **Type Enforcement**: Hard rejection rules — Writer+Video→reject, Video+Caption→reject, Designer+Script→reject. No silent type conversions.
+
 ### Backend Stabilization
 - **AI Cost Lock**: Centralized AI call routing with usage tracking and token budgets.
 - **Database Indexes**: Extensive custom indexes for performance.
