@@ -23,13 +23,13 @@ describe("Stabilization Suite", () => {
     expect(res.status).toBe(200);
   });
 
-  it("CI analyze-profile rejects empty body", async () => {
+  it("CI analyze-profile returns 410 deprecated", async () => {
     const res = await fetch(`${BASE}/api/ci/competitors/analyze-profile`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
-    expect([400, 422, 500]).toContain(res.status);
+    expect(res.status).toBe(410);
   });
 
   it("autopilot status endpoint works", async () => {

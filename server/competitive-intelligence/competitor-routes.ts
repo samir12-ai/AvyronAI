@@ -3,13 +3,6 @@ import { db } from "../db";
 import { ciCompetitors } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { featureFlagService } from "../feature-flags";
-import { analyzeInstagramProfile } from "./profile-analyzer";
-import { getScrapeStats } from "./profile-scraper";
-import { getCreativeCaptureStats, checkWeeklyLimits } from "./creative-capture";
-import { computeAllIntelligenceScores } from "./intelligence-scores";
-import { generateCreativeExpansion } from "./creative-expansion";
-import { generateScriptsAndConcepts } from "./script-engine";
-import type { BlueprintInput } from "./script-engine";
 import { getCompetitorDataCoverage } from "./data-acquisition";
 
 const REQUIRED_EVIDENCE_FIELDS = [
@@ -186,130 +179,11 @@ export function registerCiCompetitorRoutes(app: Express) {
     }
   });
 
-  app.post("/api/ci/competitors/analyze-profile", async (req, res) => {
-    try {
-      const { name, profileLink, enableCreativeCapture, saveFixtures } = req.body;
-
-      if (!name || !profileLink) {
-        return res.status(400).json({ error: "Company name and profile URL are required" });
-      }
-
-      if (!profileLink.includes("instagram.com")) {
-        return res.status(400).json({ error: "Currently only Instagram profiles are supported for deterministic analysis." });
-      }
-
-      const result = await analyzeInstagramProfile(profileLink, name, {
-        enableCreativeCapture: enableCreativeCapture !== false,
-        saveFixtures: !!saveFixtures,
-      });
-
-      const mappedCategories: string[] = [];
-      const ctaParts: string[] = [];
-      if (result.inferred?.insights?.length) {
-        const ctaInsights = result.inferred.insights.filter((i: any) => i.category === 'cta_pattern');
-        if (ctaInsights.length > 0) {
-          ctaParts.push(ctaInsights.map((i: any) => i.finding).join('; '));
-          mappedCategories.push(`cta_pattern:inferred(${ctaInsights.length})`);
-        }
-        const hookCount = result.inferred.insights.filter((i: any) => i.category === 'hook_style').length;
-        const toneCount = result.inferred.insights.filter((i: any) => i.category === 'messaging_tone').length;
-        const proofCount = result.inferred.insights.filter((i: any) => i.category === 'social_proof').length;
-        if (hookCount) mappedCategories.push(`hook_style(${hookCount})`);
-        if (toneCount) mappedCategories.push(`messaging_tone(${toneCount})`);
-        if (proofCount) mappedCategories.push(`social_proof(${proofCount})`);
-      }
-      if (result.creativeCapture?.length) {
-        const ccCtas: string[] = [];
-        for (const cc of result.creativeCapture) {
-          if (cc.interpreted?.ctaSignals?.length) {
-            for (const sig of cc.interpreted.ctaSignals) {
-              if (sig.text && !ccCtas.includes(sig.text)) ccCtas.push(sig.text);
-            }
-          }
-        }
-        if (ccCtas.length > 0) {
-          ctaParts.push(ccCtas.join(', '));
-          mappedCategories.push(`cta_pattern:creative_capture(${ccCtas.length})`);
-        }
-      }
-      const hydratedCtaPatterns = ctaParts.filter(Boolean).join('; ') || null;
-      console.log(`[CI Hydration] Profile: ${name} | Categories mapped: ${mappedCategories.join(', ') || 'none'} | ctaPatterns: ${hydratedCtaPatterns ? 'populated' : 'empty'}`);
-
-      (result as any).hydratedFields = {
-        ctaPatterns: hydratedCtaPatterns,
-        hookStyles: result.inferred?.insights?.filter((i: any) => i.category === 'hook_style').map((i: any) => i.finding).join('; ') || null,
-        messagingTone: result.inferred?.insights?.filter((i: any) => i.category === 'messaging_tone').map((i: any) => i.finding).join('; ') || null,
-        socialProofPresence: result.inferred?.insights?.filter((i: any) => i.category === 'social_proof').map((i: any) => i.finding).join('; ') || null,
-      };
-
-      const intelligenceScores = computeAllIntelligenceScores(result);
-      const si = intelligenceScores.storytelling_intelligence;
-      console.log(`[CI Intelligence] ${name} | Archetype: ${intelligenceScores.archetype} | Dominance: ${intelligenceScores.dominance.dominance_state} (${intelligenceScores.dominance.dominance_score}) | Storytelling: ${si.storytelling_present ? si.storytelling_type : 'none'} | Strategy: ${si.narrative_strategy_mode} | GPT calls: 1`);
-
-      let creativeOutput = null;
-      try {
-        creativeOutput = await generateCreativeExpansion(intelligenceScores, name);
-      } catch (err: any) {
-        console.error("[CI Intelligence] Creative GPT call failed:", err.message);
-      }
-
-      (result as any).intelligence = intelligenceScores;
-      (result as any).creative_expansion = creativeOutput?.creative_expansion || null;
-      (result as any).creative_strategy = creativeOutput?.creative_strategy || null;
-
-      res.json(result);
-    } catch (error: any) {
-      console.error("Profile analysis error:", error);
-      res.status(500).json({ error: "Profile analysis failed: " + (error.message || "Unknown error") });
-    }
+  app.post("/api/ci/competitors/analyze-profile", (_req, res) => {
+    res.status(410).json({ error: "DEPRECATED: Use the data acquisition system instead. Add competitor, then POST /api/ci/competitors/:id/fetch-data" });
   });
 
-  app.post("/api/ci/generate-scripts", async (req, res) => {
-    try {
-      const { intelligence, creative_strategy, blueprint } = req.body;
-
-      const missing_fields: string[] = [];
-      if (!intelligence) missing_fields.push("intelligence");
-      else {
-        if (!intelligence.storytelling_intelligence) missing_fields.push("intelligence.storytelling_intelligence");
-        if (!intelligence.dominance) missing_fields.push("intelligence.dominance");
-        if (!intelligence.archetype) missing_fields.push("intelligence.archetype");
-        if (!intelligence.conversion_intelligence) missing_fields.push("intelligence.conversion_intelligence");
-        if (!intelligence.narrative_intelligence) missing_fields.push("intelligence.narrative_intelligence");
-        if (!intelligence.performance_context) missing_fields.push("intelligence.performance_context");
-      }
-      if (!blueprint) missing_fields.push("blueprint");
-      else {
-        if (!blueprint.offer) missing_fields.push("blueprint.offer");
-        if (!blueprint.icp) missing_fields.push("blueprint.icp");
-      }
-      if (missing_fields.length > 0) {
-        return res.status(400).json({ error: "Missing required fields", missing_fields });
-      }
-
-      const blueprintInput: BlueprintInput = {
-        offer: blueprint.offer,
-        icp: blueprint.icp,
-        location: blueprint.location || "Dubai, UAE",
-        kpi_goal: blueprint.kpi_goal || "engagement",
-      };
-
-      const result = await generateScriptsAndConcepts(intelligence, creative_strategy || null, blueprintInput);
-      res.json(result);
-    } catch (error: any) {
-      console.error("[SSE+OCE] Route error:", error);
-      res.status(500).json({ status: "GENERATION_FAILED", reason: error.message || "Unknown error" });
-    }
-  });
-
-  app.get("/api/ci/scrape-stats", async (_req, res) => {
-    try {
-      const stats = getScrapeStats();
-      const ccStats = getCreativeCaptureStats();
-      const limits = checkWeeklyLimits();
-      res.json({ scraping: stats, creativeCapture: ccStats, weeklyLimits: limits });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
+  app.post("/api/ci/generate-scripts", (_req, res) => {
+    res.status(410).json({ error: "DEPRECATED: Script generation is no longer available via this endpoint." });
   });
 }
