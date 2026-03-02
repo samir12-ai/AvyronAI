@@ -43,75 +43,10 @@ interface Competitor {
   missingFields: string[];
 }
 
-interface Recommendation {
-  id: string;
-  category: string;
-  title: string;
-  description: string;
-  actionType: string;
-  actionTarget: string;
-  actionDetails: string;
-  evidenceCitations: string;
-  whyChanged: string | null;
-  confidenceScore: number;
-  riskLevel: string;
-  impactRangeLow: number;
-  impactRangeHigh: number;
-  timeframe: string;
-  status: string;
-}
 
-interface Analysis {
-  id: string;
-  analysisMonth: string;
-  marketOverview: string;
-  competitorBreakdown: string;
-  strategicGaps: string;
-  saturationPatterns: string | null;
-  differentiationGaps: string | null;
-  offerPositioningGaps: string | null;
-  funnelWeaknesses: string | null;
-  ctaTrends: string | null;
-  authorityGaps: string | null;
-  monthDiff: string | null;
-  dataCompleteness: number;
-  status: string;
-  createdAt: string;
-}
 
 type CIView = 'overview' | 'competitors' | 'recommendations' | 'timeline';
 
-const CATEGORY_COLORS: Record<string, string> = {
-  content_strategy: '#8B5CF6',
-  calendar_cadence: '#3B82F6',
-  cta_optimization: '#F59E0B',
-  offer_positioning: '#10B981',
-  authority_building: '#EC4899',
-  funnel_strategy: '#6366F1',
-  general: '#6B7280',
-};
-
-const RISK_COLORS: Record<string, string> = {
-  low: '#10B981',
-  medium: '#F59E0B',
-  high: '#EF4444',
-};
-
-function getCtaLabel(competitor: Competitor, analysis?: any): string {
-  if (analysis?.warnings?.includes('CTA_DATA_UNAVAILABLE') || analysis?.warnings?.includes('SCRAPE_BLOCKED')) {
-    return 'CTA: Unavailable (data not accessible)';
-  }
-
-  if (!competitor.ctaPatterns || competitor.ctaPatterns.trim() === '') {
-    if (analysis?.intelligence?.storytelling_intelligence?.storytelling_present === true) {
-      const mode = analysis?.intelligence?.storytelling_intelligence?.narrative_strategy_mode || 'narrative';
-      return `CTA: Not present (Narrative-first strategy: ${mode})`;
-    }
-    return 'CTA: Not present';
-  }
-
-  return 'CTA: Present';
-}
 
 export default function CompetitiveIntelligence() {
   const colorScheme = useColorScheme();
@@ -127,10 +62,6 @@ export default function CompetitiveIntelligence() {
 
   const [activeView, setActiveView] = useState<CIView>('overview');
   const [showAddCompetitor, setShowAddCompetitor] = useState(false);
-  const [showApplyModal, setShowApplyModal] = useState(false);
-  const [selectedRec, setSelectedRec] = useState<Recommendation | null>(null);
-  const [applyReason, setApplyReason] = useState('');
-  const [expandedRec, setExpandedRec] = useState<string | null>(null);
   const [expandedCompetitor, setExpandedCompetitor] = useState<string | null>(null);
   const [addStep, setAddStep] = useState<'input' | 'review'>('input');
   const [viralInsights, setViralInsights] = useState('');
@@ -155,21 +86,6 @@ export default function CompetitiveIntelligence() {
     },
   });
 
-  const { data: analysesData, isLoading: loadingAnalyses } = useQuery({
-    queryKey: ['ci-analyses'],
-    queryFn: async () => {
-      const res = await fetch(new URL('/api/ci/analyses?accountId=default', baseUrl).toString());
-      return res.json();
-    },
-  });
-
-  const { data: recsData, isLoading: loadingRecs } = useQuery({
-    queryKey: ['ci-recommendations'],
-    queryFn: async () => {
-      const res = await fetch(new URL('/api/ci/recommendations?accountId=default', baseUrl).toString());
-      return res.json();
-    },
-  });
 
   const { data: timelineData } = useQuery({
     queryKey: ['ci-miv3-history', activeCampaignId],
@@ -276,49 +192,13 @@ export default function CompetitiveIntelligence() {
     },
     onSuccess: (data: any) => {
       setMiv3Result(data);
-      queryClient.invalidateQueries({ queryKey: ['ci-analyses'] });
-      queryClient.invalidateQueries({ queryKey: ['ci-recommendations'] });
-      queryClient.invalidateQueries({ queryKey: ['ci-timeline'] });
+      queryClient.invalidateQueries({ queryKey: ['ci-miv3-history'] });
       queryClient.invalidateQueries({ queryKey: ['mi-v3-snapshot'] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
     onError: (err: any) => Alert.alert('Analysis Error', err.message),
   });
 
-  const applyMutation = useMutation({
-    mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
-      const res = await fetch(new URL(`/api/ci/recommendations/${id}/apply`, baseUrl).toString(), {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accountId: 'default', reason }),
-      });
-      if (!res.ok) throw new Error('Failed to apply');
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['ci-recommendations'] });
-      queryClient.invalidateQueries({ queryKey: ['ci-timeline'] });
-      setShowApplyModal(false);
-      setSelectedRec(null);
-      setApplyReason('');
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    },
-  });
-
-  const rejectMutation = useMutation({
-    mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
-      const res = await fetch(new URL(`/api/ci/recommendations/${id}/reject`, baseUrl).toString(), {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accountId: 'default', reason }),
-      });
-      if (!res.ok) throw new Error('Failed to reject');
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['ci-recommendations'] });
-      queryClient.invalidateQueries({ queryKey: ['ci-timeline'] });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    },
-  });
 
   const deleteCompetitorMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -334,24 +214,15 @@ export default function CompetitiveIntelligence() {
   });
 
   const competitors: Competitor[] = competitorsData?.competitors || [];
-  const analyses: Analysis[] = analysesData?.analyses || [];
-  const recommendations: Recommendation[] = recsData?.recommendations || [];
-  const latestAnalysis = analyses[0] || null;
-  const pendingRecs = recommendations.filter(r => r.status === 'pending');
-  const appliedRecs = recommendations.filter(r => r.status === 'applied');
 
   const handleCreateReelsFromCI = useCallback(async (comp: Competitor) => {
     setLoadingReelsFor(comp.id);
     try {
-      const res = await fetch(new URL(`/api/dominance/analyses?accountId=default`, baseUrl).toString());
-      const data = await res.json();
-      const allAnalyses = data?.analyses || [];
-      const compAnalysis = allAnalyses
-        .filter((a: any) => a.competitorName === comp.name || a.competitorUrl === comp.profileLink)
-        .sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
+      const domData = miv3Result?.dominanceData || [];
+      const compAnalysis = domData.find((d: any) => d.competitorName === comp.name || d.competitorId === comp.id);
 
       if (!compAnalysis) {
-        Alert.alert('No Analysis Found', 'Run a Dominance Analysis for this competitor first (AI Management → Dominance Engine).');
+        Alert.alert('No Analysis Found', 'Run MI V3 analysis first to generate dominance data.');
         return;
       }
 
@@ -398,23 +269,7 @@ export default function CompetitiveIntelligence() {
     }
   }, [baseUrl, brandProfile, setCreativeContext, router]);
 
-  const safeParseJSON = (str: string | null | undefined) => {
-    if (!str) return null;
-    try { return JSON.parse(str); } catch { return null; }
-  };
 
-  const handleApplyPress = useCallback((rec: Recommendation) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setSelectedRec(rec);
-    setApplyReason('');
-    setShowApplyModal(true);
-  }, []);
-
-  const handleConfirmApply = useCallback(() => {
-    if (!selectedRec) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    applyMutation.mutate({ id: selectedRec.id, reason: applyReason || 'User approved strategy' });
-  }, [selectedRec, applyReason]);
 
   const renderSubTabs = () => (
     <View style={[s.subTabBar, { backgroundColor: isDark ? '#0A0E14' : '#F5F7FA', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
@@ -437,17 +292,13 @@ export default function CompetitiveIntelligence() {
   );
 
   const renderOverview = () => {
-    const overview = safeParseJSON(latestAnalysis?.marketOverview);
-    const gaps = safeParseJSON(latestAnalysis?.strategicGaps);
-    const breakdown = safeParseJSON(latestAnalysis?.competitorBreakdown);
-
-    if (!latestAnalysis) {
+    if (!miv3Result) {
       return (
         <View style={s.emptyState}>
           <Ionicons name="telescope-outline" size={48} color={colors.textMuted} />
-          <Text style={[s.emptyTitle, { color: colors.text }]}>No Analysis Yet</Text>
+          <Text style={[s.emptyTitle, { color: colors.text }]}>No MI V3 Analysis Yet</Text>
           <Text style={[s.emptyDesc, { color: colors.textMuted }]}>
-            Add competitors with complete evidence data, then run your first analysis.
+            Add competitors with complete evidence data, then run your first MI V3 analysis.
           </Text>
           {competitors.length > 0 && (
             <Pressable
@@ -460,7 +311,7 @@ export default function CompetitiveIntelligence() {
               ) : (
                 <Ionicons name="analytics" size={18} color="#fff" />
               )}
-              <Text style={s.emptyAnalyzeBtnText}>{analyzeMutation.isPending ? 'Running Analysis...' : 'Run Market Analysis'}</Text>
+              <Text style={s.emptyAnalyzeBtnText}>{analyzeMutation.isPending ? 'Running MI V3...' : 'Run MI V3 Analysis'}</Text>
             </Pressable>
           )}
         </View>
@@ -469,69 +320,11 @@ export default function CompetitiveIntelligence() {
 
     return (
       <View>
-        <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-          <View style={s.cardHeader}>
-            <Ionicons name="globe-outline" size={18} color="#8B5CF6" />
-            <Text style={[s.cardTitle, { color: colors.text }]}>Market Overview</Text>
-            <Pressable
-              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); analyzeMutation.mutate(); }}
-              disabled={analyzeMutation.isPending}
-              style={[s.cardAnalyzeBtn, { backgroundColor: '#8B5CF6' + '15', opacity: analyzeMutation.isPending ? 0.6 : 1 }]}
-            >
-              {analyzeMutation.isPending ? (
-                <ActivityIndicator size={12} color="#8B5CF6" />
-              ) : (
-                <Ionicons name="analytics-outline" size={14} color="#8B5CF6" />
-              )}
-              <Text style={s.cardAnalyzeBtnText}>{analyzeMutation.isPending ? 'Analyzing...' : 'Analyze'}</Text>
-            </Pressable>
-          </View>
-          <Text style={[s.cardBody, { color: colors.textSecondary }]}>{overview?.summary || 'Analysis in progress...'}</Text>
-          {overview?.competitiveIntensity && (
-            <View style={s.intensityRow}>
-              <Text style={[s.intensityLabel, { color: colors.textMuted }]}>Competitive Intensity</Text>
-              <View style={[s.intensityBadge, { backgroundColor: overview.competitiveIntensity === 'high' ? '#EF4444' + '20' : overview.competitiveIntensity === 'medium' ? '#F59E0B' + '20' : '#10B981' + '20' }]}>
-                <Text style={[s.intensityText, { color: overview.competitiveIntensity === 'high' ? '#EF4444' : overview.competitiveIntensity === 'medium' ? '#F59E0B' : '#10B981' }]}>
-                  {overview.competitiveIntensity?.toUpperCase()}
-                </Text>
-              </View>
-            </View>
-          )}
-          {overview?.dominantTrends && (
-            <View style={s.trendsWrap}>
-              {overview.dominantTrends.map((t: string, i: number) => (
-                <View key={i} style={[s.trendChip, { backgroundColor: '#8B5CF6' + '12' }]}>
-                  <Text style={[s.trendChipText, { color: '#8B5CF6' }]}>{t}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-        </View>
-
-        <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-          <View style={s.cardHeader}>
-            <Ionicons name="bar-chart-outline" size={18} color="#3B82F6" />
-            <Text style={[s.cardTitle, { color: colors.text }]}>Data Quality</Text>
-          </View>
-          <View style={s.qualityBar}>
-            <View style={[s.qualityFill, { width: `${(latestAnalysis.dataCompleteness || 0) * 100}%`, backgroundColor: '#10B981' }]} />
-          </View>
-          <Text style={[s.qualityText, { color: colors.textMuted }]}>{Math.round((latestAnalysis.dataCompleteness || 0) * 100)}% evidence completeness</Text>
-        </View>
-
-        {latestAnalysis && (
-          <View style={{ paddingHorizontal: 12, paddingVertical: 6, marginTop: 4 }}>
-            <Text style={{ fontSize: 9, color: colors.textMuted, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
-              snapshot_id: {latestAnalysis.id} | created: {new Date(latestAnalysis.createdAt).toLocaleString()} | cta_trends: {latestAnalysis.ctaTrends || 'none'}
-            </Text>
-          </View>
-        )}
-
         {miv3Result && (
           <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
             <View style={s.cardHeader}>
               <Ionicons name="shield-checkmark-outline" size={18} color="#8B5CF6" />
-              <Text style={[s.cardTitle, { color: colors.text }]}>Intelligence Engine v3</Text>
+              <Text style={[s.cardTitle, { color: colors.text }]}>MI V3</Text>
               <View style={[s.intensityBadge, { backgroundColor: miv3Result.executionMode === 'FULL' ? '#10B981' + '20' : miv3Result.executionMode === 'REDUCED' ? '#F59E0B' + '20' : '#6B7280' + '20' }]}>
                 <Text style={{ fontSize: 10, fontWeight: '600', color: miv3Result.executionMode === 'FULL' ? '#10B981' : miv3Result.executionMode === 'REDUCED' ? '#F59E0B' : '#6B7280' }}>
                   {miv3Result.executionMode}
@@ -661,67 +454,6 @@ export default function CompetitiveIntelligence() {
           </View>
         )}
 
-        {breakdown && Array.isArray(breakdown) && breakdown.length > 0 && (
-          <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-            <View style={s.cardHeader}>
-              <Ionicons name="people-outline" size={18} color="#EC4899" />
-              <Text style={[s.cardTitle, { color: colors.text }]}>Competitor Breakdown</Text>
-            </View>
-            {breakdown.map((comp: any, i: number) => (
-              <View key={i} style={[s.breakdownItem, i < breakdown.length - 1 && { borderBottomWidth: 1, borderBottomColor: isDark ? '#1A2030' : '#F0F0F0' }]}>
-                <View style={s.breakdownHeader}>
-                  <Text style={[s.breakdownName, { color: colors.text }]}>{comp.name}</Text>
-                  <View style={[s.threatBadge, { backgroundColor: RISK_COLORS[comp.threatLevel] + '20' }]}>
-                    <Text style={[s.threatText, { color: RISK_COLORS[comp.threatLevel] }]}>
-                      {comp.threatLevel?.toUpperCase()} THREAT
-                    </Text>
-                  </View>
-                </View>
-                <Text style={[s.breakdownInsight, { color: colors.textSecondary }]}>{comp.keyInsight}</Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {gaps && Array.isArray(gaps) && gaps.length > 0 && (
-          <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-            <View style={s.cardHeader}>
-              <Ionicons name="flash-outline" size={18} color="#F59E0B" />
-              <Text style={[s.cardTitle, { color: colors.text }]}>Strategic Gaps</Text>
-            </View>
-            {gaps.map((gap: any, i: number) => (
-              <View key={i} style={[s.gapItem, { borderLeftColor: '#F59E0B' }]}>
-                <Text style={[s.gapArea, { color: colors.text }]}>{gap.area}</Text>
-                <Text style={[s.gapDesc, { color: colors.textSecondary }]}>{gap.description}</Text>
-                <View style={s.gapOpRow}>
-                  <Ionicons name="arrow-forward-circle-outline" size={14} color="#10B981" />
-                  <Text style={[s.gapOp, { color: '#10B981' }]}>{gap.opportunity}</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {latestAnalysis.saturationPatterns && (
-          <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-            <View style={s.cardHeader}>
-              <Ionicons name="layers-outline" size={18} color="#6366F1" />
-              <Text style={[s.cardTitle, { color: colors.text }]}>Deep Insights</Text>
-            </View>
-            {[
-              { label: 'Saturation', val: latestAnalysis.saturationPatterns },
-              { label: 'Differentiation', val: latestAnalysis.differentiationGaps },
-              { label: 'Funnel Weaknesses', val: latestAnalysis.funnelWeaknesses },
-              { label: 'CTA Trends', val: latestAnalysis.ctaTrends },
-              { label: 'Authority Gaps', val: latestAnalysis.authorityGaps },
-            ].filter(x => x.val).map((item, i) => (
-              <View key={i} style={s.insightRow}>
-                <Text style={[s.insightLabel, { color: '#8B5CF6' }]}>{item.label}</Text>
-                <Text style={[s.insightVal, { color: colors.textSecondary }]}>{item.val}</Text>
-              </View>
-            ))}
-          </View>
-        )}
 
         <View style={s.actionRow}>
           <Pressable
@@ -730,7 +462,7 @@ export default function CompetitiveIntelligence() {
             disabled={analyzeMutation.isPending}
           >
             {analyzeMutation.isPending ? <ActivityIndicator size="small" color="#fff" /> :
-              <><Ionicons name="sparkles" size={16} color="#fff" /><Text style={s.analyzeBtnText}>Run New Analysis</Text></>
+              <><Ionicons name="sparkles" size={16} color="#fff" /><Text style={s.analyzeBtnText}>Run MI V3</Text></>
             }
           </Pressable>
         </View>
@@ -745,7 +477,7 @@ export default function CompetitiveIntelligence() {
     return (
       <View>
         <View style={s.sectionHeader}>
-          <Text style={[s.sectionTitle, { color: colors.text }]}>Dominance Analysis</Text>
+          <Text style={[s.sectionTitle, { color: colors.text }]}>MI V3 Dominance</Text>
           {miv3Result && (
             <View style={[s.countBadge, { backgroundColor: '#F59E0B' + '20' }]}>
               <Text style={[s.countText, { color: '#F59E0B' }]}>{domData.length} competitors</Text>
@@ -757,7 +489,7 @@ export default function CompetitiveIntelligence() {
           <View style={s.emptyState}>
             <Ionicons name="trophy-outline" size={40} color={colors.textMuted} />
             <Text style={[s.emptyTitle, { color: colors.text }]}>No Dominance Data</Text>
-            <Text style={[s.emptyDesc, { color: colors.textMuted }]}>Run an analysis from the Overview tab to generate dominance scores</Text>
+            <Text style={[s.emptyDesc, { color: colors.textMuted }]}>Run MI V3 from the Overview tab to generate dominance scores</Text>
           </View>
         ) : domData.length === 0 ? (
           <View style={s.emptyState}>
@@ -838,7 +570,7 @@ export default function CompetitiveIntelligence() {
     return (
       <View>
         <View style={s.sectionHeader}>
-          <Text style={[s.sectionTitle, { color: colors.text }]}>Strategic Actions</Text>
+          <Text style={[s.sectionTitle, { color: colors.text }]}>MI V3 Actions</Text>
           {confidence && (
             <View style={[s.countBadge, { backgroundColor: confidence.guardDecision === 'PROCEED' ? '#10B981' + '20' : confidence.guardDecision === 'DOWNGRADE' ? '#F59E0B' + '20' : '#EF4444' + '20' }]}>
               <Text style={[s.countText, { color: confidence.guardDecision === 'PROCEED' ? '#10B981' : confidence.guardDecision === 'DOWNGRADE' ? '#F59E0B' : '#EF4444' }]}>
@@ -852,7 +584,7 @@ export default function CompetitiveIntelligence() {
           <View style={s.emptyState}>
             <Ionicons name="flash-outline" size={40} color={colors.textMuted} />
             <Text style={[s.emptyTitle, { color: colors.text }]}>No Actions Available</Text>
-            <Text style={[s.emptyDesc, { color: colors.textMuted }]}>Run an analysis from the Overview tab to generate strategic actions</Text>
+            <Text style={[s.emptyDesc, { color: colors.textMuted }]}>Run MI V3 from the Overview tab to generate strategic actions</Text>
           </View>
         ) : (
           <View>
@@ -961,7 +693,7 @@ export default function CompetitiveIntelligence() {
     return (
       <View>
         <View style={s.sectionHeader}>
-          <Text style={[s.sectionTitle, { color: colors.text }]}>Snapshot History</Text>
+          <Text style={[s.sectionTitle, { color: colors.text }]}>MI V3 History</Text>
           {history.length > 0 && (
             <View style={[s.countBadge, { backgroundColor: '#8B5CF6' + '20' }]}>
               <Text style={[s.countText, { color: '#8B5CF6' }]}>{history.length} snapshots</Text>
@@ -971,8 +703,8 @@ export default function CompetitiveIntelligence() {
         {history.length === 0 ? (
           <View style={s.emptyState}>
             <Ionicons name="time-outline" size={40} color={colors.textMuted} />
-            <Text style={[s.emptyTitle, { color: colors.text }]}>No Snapshot History</Text>
-            <Text style={[s.emptyDesc, { color: colors.textMuted }]}>Run an analysis to create your first MIv3 snapshot</Text>
+            <Text style={[s.emptyTitle, { color: colors.text }]}>No MI V3 History</Text>
+            <Text style={[s.emptyDesc, { color: colors.textMuted }]}>Run MI V3 from the Overview tab to create your first snapshot</Text>
           </View>
         ) : history.map((entry: any, i: number) => {
           const confColor = entry.confidenceLevel === 'STRONG' || entry.confidenceLevel === 'MODERATE' ? '#10B981' : entry.confidenceLevel === 'LOW' ? '#F59E0B' : '#EF4444';
@@ -1005,7 +737,7 @@ export default function CompetitiveIntelligence() {
     );
   };
 
-  if (loadingCompetitors || loadingAnalyses || loadingRecs) {
+  if (loadingCompetitors) {
     return (
       <View style={s.loadingWrap}>
         <ActivityIndicator size="large" color="#8B5CF6" />
@@ -1595,43 +1327,6 @@ export default function CompetitiveIntelligence() {
         </View>
       </Modal>
 
-      <Modal visible={showApplyModal} animationType="fade" transparent onRequestClose={() => setShowApplyModal(false)}>
-        <View style={s.modalOverlay}>
-          <View style={[s.confirmModal, { backgroundColor: isDark ? '#0F1419' : '#fff' }]}>
-            <View style={s.confirmIcon}>
-              <Ionicons name="shield-checkmark" size={32} color="#8B5CF6" />
-            </View>
-            <Text style={[s.confirmTitle, { color: colors.text }]}>Apply Strategy?</Text>
-            <Text style={[s.confirmDesc, { color: colors.textSecondary }]}>
-              {selectedRec?.title}
-            </Text>
-            <Text style={[s.confirmWarn, { color: colors.textMuted }]}>
-              This will mark the recommendation as applied and log it in your strategy audit trail.
-            </Text>
-            <TextInput
-              style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4', marginTop: 12 }]}
-              value={applyReason}
-              onChangeText={setApplyReason}
-              placeholder="Add a note (optional)..."
-              placeholderTextColor={colors.textMuted}
-            />
-            <View style={s.confirmBtns}>
-              <Pressable onPress={() => setShowApplyModal(false)} style={[s.confirmCancel, { borderColor: isDark ? '#333' : '#ddd' }]}>
-                <Text style={[s.confirmCancelText, { color: colors.textMuted }]}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={handleConfirmApply}
-                style={[s.confirmApply, { opacity: applyMutation.isPending ? 0.6 : 1 }]}
-                disabled={applyMutation.isPending}
-              >
-                {applyMutation.isPending ? <ActivityIndicator size="small" color="#fff" /> :
-                  <Text style={s.confirmApplyText}>Confirm & Apply</Text>
-                }
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }

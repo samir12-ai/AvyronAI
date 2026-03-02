@@ -30,7 +30,6 @@ import LeadControlPanel from '@/components/LeadControlPanel';
 import StrategicPipeline from '@/components/StrategicPipeline';
 import BuildThePlan from '@/components/BuildThePlan';
 import CompetitiveIntelligence from '@/components/CompetitiveIntelligence';
-import DominanceEngine from '@/components/DominanceEngine';
 import ControlCenter from '@/components/ControlCenter';
 import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
 
@@ -52,11 +51,9 @@ interface AIAudience {
 }
 
 type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'control' | 'publisher' | 'audience' | 'leads';
-type IntelSubTab = 'analysis' | 'dominance';
 
 interface AIMgmtPersistedState {
   activeTab: TabView;
-  intelSubTab: IntelSubTab;
   audienceGoal: string;
   audienceProduct: string;
   audienceBudget: string;
@@ -65,7 +62,6 @@ interface AIMgmtPersistedState {
 
 const defaultAIMgmtState: AIMgmtPersistedState = {
   activeTab: 'buildplan',
-  intelSubTab: 'analysis',
   audienceGoal: '',
   audienceProduct: '',
   audienceBudget: '',
@@ -109,7 +105,6 @@ export default function AIManagementScreen() {
   const { state: ps, updateState, isLoading: psLoading, isSaving, saveError, hydrationVersion } = usePersistedState('ai-management', defaultAIMgmtState);
 
   const [activeTab, setActiveTab] = useState<TabView>(ps.activeTab);
-  const [intelSubTab, setIntelSubTab] = useState<IntelSubTab>(ps.intelSubTab);
   const [autoPublishEnabled, setAutoPublishEnabled] = useState(false);
   const [selectedPosts, setSelectedPosts] = useState<Set<string>>(new Set());
   const [publishing, setPublishing] = useState(false);
@@ -148,7 +143,6 @@ export default function AIManagementScreen() {
       lastHydrationRef.current = hydrationVersion;
       skipSyncRef.current = true;
       setActiveTab(ps.activeTab);
-      setIntelSubTab(ps.intelSubTab);
       setAudienceGoal(ps.audienceGoal);
       setAudienceProduct(ps.audienceProduct);
       setAudienceBudget(ps.audienceBudget);
@@ -316,31 +310,7 @@ export default function AIManagementScreen() {
 
   const renderIntelligence = () => (
     <View style={styles.tabContent}>
-      <View style={[styles.intelSubTabs, { backgroundColor: isDark ? '#0F1419' : '#F5F7FA', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-        <Pressable
-          style={[styles.intelSubTab, intelSubTab === 'analysis' && { backgroundColor: '#3B82F6' + '18' }]}
-          onPress={() => {
-            Haptics.selectionAsync();
-            setIntelSubTab('analysis');
-            updateState({ intelSubTab: 'analysis' });
-          }}
-        >
-          <Ionicons name="analytics-outline" size={16} color={intelSubTab === 'analysis' ? '#3B82F6' : colors.textMuted} />
-          <Text style={[styles.intelSubTabText, { color: intelSubTab === 'analysis' ? '#3B82F6' : colors.textMuted }]}>Analysis</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.intelSubTab, intelSubTab === 'dominance' && { backgroundColor: '#EF4444' + '18' }]}
-          onPress={() => {
-            Haptics.selectionAsync();
-            setIntelSubTab('dominance');
-            updateState({ intelSubTab: 'dominance' });
-          }}
-        >
-          <Ionicons name="flash-outline" size={16} color={intelSubTab === 'dominance' ? '#EF4444' : colors.textMuted} />
-          <Text style={[styles.intelSubTabText, { color: intelSubTab === 'dominance' ? '#EF4444' : colors.textMuted }]}>Dominance</Text>
-        </Pressable>
-      </View>
-      {intelSubTab === 'analysis' ? <CompetitiveIntelligence /> : <DominanceEngine />}
+      <CompetitiveIntelligence />
     </View>
   );
 
@@ -674,7 +644,7 @@ export default function AIManagementScreen() {
             })}
         </ScrollView>
 
-        {activeTab === 'buildplan' ? <BuildThePlan onNavigateToCI={() => { setActiveTab('intelligence'); setIntelSubTab('analysis'); updateState({ activeTab: 'intelligence', intelSubTab: 'analysis' }); }} onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />
+        {activeTab === 'buildplan' ? <BuildThePlan onNavigateToCI={() => { setActiveTab('intelligence'); updateState({ activeTab: 'intelligence' }); }} onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />
           : activeTab === 'pipeline' ? <StrategicPipeline onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />
           : activeTab === 'intelligence' ? renderIntelligence()
           : activeTab === 'control' ? renderControlCenter()
@@ -1186,24 +1156,4 @@ const styles = StyleSheet.create({
   controlActionWhy: { fontSize: 12, fontFamily: 'Inter_400Regular', marginLeft: 32, lineHeight: 17 },
   emergencyBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 12, borderWidth: 1.5, borderColor: '#EF4444', paddingVertical: 14 },
   emergencyBtnText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: '#EF4444' },
-  intelSubTabs: {
-    flexDirection: 'row',
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 4,
-    marginBottom: 12,
-  },
-  intelSubTab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  intelSubTabText: {
-    fontSize: 13,
-    fontFamily: 'Inter_600SemiBold',
-  },
 });
