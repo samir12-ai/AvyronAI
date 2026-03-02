@@ -41,11 +41,12 @@ interface AutoAnalysisData {
   suggestedCaption?: string | null;
 }
 
-type StudioMediaType = 'video' | 'poster';
+type StudioMediaType = 'story' | 'post' | 'reel';
 
 const STUDIO_TYPE_LABELS: Record<StudioMediaType, string> = {
-  video: 'Video / Reel',
-  poster: 'Poster',
+  story: 'Story',
+  post: 'Post',
+  reel: 'Reel',
 };
 
 function normalizeToStudioType(raw: string | undefined | null): StudioMediaType {
@@ -53,11 +54,15 @@ function normalizeToStudioType(raw: string | undefined | null): StudioMediaType 
   switch (canonical) {
     case 'VIDEO':
     case 'REEL':
-      return 'video';
+      return 'reel';
+    case 'STORY':
+      return 'story';
+    case 'IMAGE':
     case 'POSTER':
-      return 'poster';
+    case 'CAROUSEL':
+    case 'POST':
     default:
-      return 'poster';
+      return 'post';
   }
 }
 
@@ -75,7 +80,7 @@ interface StudioDraftState {
 
 const defaultStudioState: StudioDraftState = {
   mediaTitle: '',
-  mediaType: 'video',
+  mediaType: 'reel',
   mediaPlatform: ['Instagram'],
   mediaGoal: '',
   mediaAudience: '',
@@ -85,9 +90,10 @@ const defaultStudioState: StudioDraftState = {
   selectedUri: null,
 };
 
-const mediaTypes: { id: StudioMediaType; label: string; icon: 'videocam-outline' | 'easel-outline' }[] = [
-  { id: 'video', label: 'Video / Reel', icon: 'videocam-outline' },
-  { id: 'poster', label: 'Poster', icon: 'easel-outline' },
+const mediaTypes: { id: StudioMediaType; label: string; icon: 'videocam-outline' | 'images-outline' | 'layers-outline' }[] = [
+  { id: 'reel', label: 'Reel', icon: 'videocam-outline' },
+  { id: 'post', label: 'Post', icon: 'images-outline' },
+  { id: 'story', label: 'Story', icon: 'layers-outline' },
 ];
 
 export default function StudioScreen() {
@@ -103,7 +109,7 @@ export default function StudioScreen() {
 
   const [showModal, setShowModal] = useState(false);
   const [mediaTitle, setMediaTitle] = useState('');
-  const [mediaType, setMediaType] = useState<StudioMediaType>('video');
+  const [mediaType, setMediaType] = useState<StudioMediaType>('reel');
   const [mediaPlatform, setMediaPlatform] = useState<string[]>(['Instagram']);
   const [selectedUri, setSelectedUri] = useState<string | null>(null);
   const [mediaGoal, setMediaGoal] = useState('');
@@ -187,7 +193,7 @@ export default function StudioScreen() {
         setTimeout(() => setDraftRestored(false), 3000);
       } else if (!isFirstHydration) {
         setMediaTitle('');
-        setMediaType('video');
+        setMediaType('reel');
         setMediaPlatform(['Instagram']);
         setMediaGoal('');
         setMediaAudience('');
@@ -199,13 +205,14 @@ export default function StudioScreen() {
     }
   }, [hydrationVersion, ps]);
 
-  const videos = mediaItems.filter(m => normalizeToStudioType(m.type) === 'video');
-  const posters = mediaItems.filter(m => m.type === 'poster');
+  const reels = mediaItems.filter(m => normalizeToStudioType(m.type) === 'reel');
+  const posts = mediaItems.filter(m => normalizeToStudioType(m.type) === 'post');
+  const stories = mediaItems.filter(m => normalizeToStudioType(m.type) === 'story');
 
   const handlePickMedia = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: mediaType === 'video' 
+        mediaTypes: mediaType === 'reel' 
           ? ImagePicker.MediaTypeOptions.Videos 
           : ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
@@ -228,7 +235,7 @@ export default function StudioScreen() {
     const hasDraft = mediaTitle !== '' || mediaGoal !== '' || mediaAudience !== '' || mediaCta !== '' || selectedUri !== null;
     if (!hasDraft) {
       setMediaTitle('');
-      setMediaType('video');
+      setMediaType('reel');
       setMediaPlatform(['Instagram']);
       setSelectedUri(null);
       setMediaGoal('');
@@ -242,9 +249,10 @@ export default function StudioScreen() {
 
   const studioTypeToCanonical = (st: StudioMediaType): string => {
     switch (st) {
-      case 'video': return 'REEL';
-      case 'poster': return 'POSTER';
-      default: return 'POSTER';
+      case 'reel': return 'REEL';
+      case 'story': return 'STORY';
+      case 'post': return 'POST';
+      default: return 'POST';
     }
   };
 
@@ -360,7 +368,7 @@ export default function StudioScreen() {
     await addMediaItem(newMedia);
     resetState();
     setMediaTitle('');
-    setMediaType('video');
+    setMediaType('reel');
     setMediaPlatform(['Instagram']);
     setSelectedUri(null);
     setMediaGoal('');
@@ -754,7 +762,7 @@ export default function StudioScreen() {
       <View style={styles.mediaCardRow}>
         <View style={[styles.mediaThumbnail, { backgroundColor: colors.inputBackground }]}>
           <Ionicons 
-            name={normalizeToStudioType(item.type) === 'video' ? 'videocam' : 'easel'} 
+            name={normalizeToStudioType(item.type) === 'reel' ? 'videocam' : normalizeToStudioType(item.type) === 'story' ? 'layers' : 'images'} 
             size={32} 
             color={colors.textMuted} 
           />
@@ -862,37 +870,55 @@ export default function StudioScreen() {
             <View style={[styles.statsRow, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
               <View style={styles.stat}>
                 <Ionicons name="videocam" size={20} color={colors.primary} />
-                <Text style={[styles.statValue, { color: colors.text }]}>{videos.length}</Text>
-                <Text style={[styles.statLabel, { color: colors.textMuted }]}>{t('studio.videos')}</Text>
+                <Text style={[styles.statValue, { color: colors.text }]}>{reels.length}</Text>
+                <Text style={[styles.statLabel, { color: colors.textMuted }]}>Reels</Text>
               </View>
               <View style={[styles.statDivider, { backgroundColor: colors.cardBorder }]} />
               <View style={styles.stat}>
-                <Ionicons name="easel" size={20} color={colors.accentOrange} />
-                <Text style={[styles.statValue, { color: colors.text }]}>{posters.length}</Text>
-                <Text style={[styles.statLabel, { color: colors.textMuted }]}>{t('studio.posters')}</Text>
+                <Ionicons name="images" size={20} color={colors.accentOrange} />
+                <Text style={[styles.statValue, { color: colors.text }]}>{posts.length}</Text>
+                <Text style={[styles.statLabel, { color: colors.textMuted }]}>Posts</Text>
+              </View>
+              <View style={[styles.statDivider, { backgroundColor: colors.cardBorder }]} />
+              <View style={styles.stat}>
+                <Ionicons name="layers" size={20} color="#A78BFA" />
+                <Text style={[styles.statValue, { color: colors.text }]}>{stories.length}</Text>
+                <Text style={[styles.statLabel, { color: colors.textMuted }]}>Stories</Text>
               </View>
             </View>
 
-            {videos.length > 0 && (
+            {reels.length > 0 && (
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Ionicons name="videocam" size={20} color={colors.primary} />
-                  <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('studio.videos')}</Text>
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>Reels</Text>
                 </View>
                 <View style={styles.mediaList}>
-                  {videos.map(renderMediaCard)}
+                  {reels.map(renderMediaCard)}
                 </View>
               </View>
             )}
 
-            {posters.length > 0 && (
+            {posts.length > 0 && (
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
-                  <Ionicons name="easel" size={20} color={colors.accentOrange} />
-                  <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('studio.aiPosters')}</Text>
+                  <Ionicons name="images" size={20} color={colors.accentOrange} />
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>Posts</Text>
                 </View>
                 <View style={styles.mediaList}>
-                  {posters.map(renderMediaCard)}
+                  {posts.map(renderMediaCard)}
+                </View>
+              </View>
+            )}
+
+            {stories.length > 0 && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Ionicons name="layers" size={20} color="#A78BFA" />
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>Stories</Text>
+                </View>
+                <View style={styles.mediaList}>
+                  {stories.map(renderMediaCard)}
                 </View>
               </View>
             )}

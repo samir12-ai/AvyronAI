@@ -55,9 +55,9 @@ interface BranchFulfillment {
 interface FulfillmentData {
   total: { required: number; fulfilled: number; remaining: number };
   byBranch: {
-    VIDEO: BranchFulfillment;
-    DESIGNER: BranchFulfillment;
-    WRITER: BranchFulfillment;
+    REELS: BranchFulfillment;
+    POSTS: BranchFulfillment;
+    STORIES: BranchFulfillment;
   };
   byStatus: { draft: number; ready: number; scheduled: number; published: number; failed: number };
   progressPercent: number;
@@ -658,9 +658,9 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
             {progress.fulfillment && (
               <View style={[s.branchGrid, { borderColor: colors.cardBorder }]}>
                 {([
-                  { key: 'VIDEO' as const, label: 'Video / Reels', icon: 'videocam' as const, color: '#A78BFA' },
-                  { key: 'DESIGNER' as const, label: 'Designer', icon: 'color-palette' as const, color: '#34D399' },
-                  { key: 'WRITER' as const, label: 'Writer', icon: 'create' as const, color: '#4C9AFF' },
+                  { key: 'REELS' as const, label: 'Reels', icon: 'videocam' as const, color: '#A78BFA' },
+                  { key: 'POSTS' as const, label: 'Posts', icon: 'images' as const, color: '#34D399' },
+                  { key: 'STORIES' as const, label: 'Stories', icon: 'layers' as const, color: '#4C9AFF' },
                 ]).map((branch) => {
                   const b = progress.fulfillment!.byBranch[branch.key];
                   const branchPct = b.required > 0 ? Math.min(100, Math.round((b.fulfilled / b.required) * 100)) : 0;

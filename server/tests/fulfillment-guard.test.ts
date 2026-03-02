@@ -5,12 +5,12 @@ import type { FulfillmentBranch } from "../../lib/media-types";
 describe("Fulfillment Guard Tests", () => {
 
   describe("Branch mapping is deterministic and centralized", () => {
-    it("REEL maps to VIDEO", () => expect(getBranchForMediaType("REEL")).toBe("VIDEO"));
-    it("VIDEO maps to VIDEO", () => expect(getBranchForMediaType("VIDEO")).toBe("VIDEO"));
-    it("IMAGE maps to DESIGNER", () => expect(getBranchForMediaType("IMAGE")).toBe("DESIGNER"));
-    it("CAROUSEL maps to DESIGNER", () => expect(getBranchForMediaType("CAROUSEL")).toBe("DESIGNER"));
-    it("POST maps to WRITER", () => expect(getBranchForMediaType("POST")).toBe("WRITER"));
-    it("STORY maps to WRITER", () => expect(getBranchForMediaType("STORY")).toBe("WRITER"));
+    it("REEL maps to REELS", () => expect(getBranchForMediaType("REEL")).toBe("REELS"));
+    it("VIDEO maps to REELS", () => expect(getBranchForMediaType("VIDEO")).toBe("REELS"));
+    it("IMAGE maps to POSTS", () => expect(getBranchForMediaType("IMAGE")).toBe("POSTS"));
+    it("CAROUSEL maps to POSTS", () => expect(getBranchForMediaType("CAROUSEL")).toBe("POSTS"));
+    it("POST maps to POSTS", () => expect(getBranchForMediaType("POST")).toBe("POSTS"));
+    it("STORY maps to STORIES", () => expect(getBranchForMediaType("STORY")).toBe("STORIES"));
   });
 
   describe("normalizeMediaType never returns null or undefined", () => {
@@ -25,10 +25,12 @@ describe("Fulfillment Guard Tests", () => {
 
   describe("Studio type to canonical mapping matches branch expectations", () => {
     const studioMap: Record<string, { canonical: string; branch: FulfillmentBranch }> = {
-      REEL: { canonical: "REEL", branch: "VIDEO" },
-      VIDEO: { canonical: "VIDEO", branch: "VIDEO" },
-      IMAGE: { canonical: "IMAGE", branch: "DESIGNER" },
-      poster: { canonical: "IMAGE", branch: "DESIGNER" },
+      REEL: { canonical: "REEL", branch: "REELS" },
+      VIDEO: { canonical: "VIDEO", branch: "REELS" },
+      IMAGE: { canonical: "IMAGE", branch: "POSTS" },
+      poster: { canonical: "POSTER", branch: "POSTS" },
+      POST: { canonical: "POST", branch: "POSTS" },
+      STORY: { canonical: "STORY", branch: "STORIES" },
     };
 
     for (const [studioType, expected] of Object.entries(studioMap)) {
@@ -71,37 +73,37 @@ describe("Fulfillment Guard Tests", () => {
         { contentType: "REEL", campaignId: "camp1", status: "READY" },
       ];
 
-      const fulfilledByBranch: Record<FulfillmentBranch, number> = { VIDEO: 0, DESIGNER: 0, WRITER: 0 };
+      const fulfilledByBranch: Record<FulfillmentBranch, number> = { REELS: 0, POSTS: 0, STORIES: 0 };
       for (const row of dbRows) {
         const branch = getBranchForMediaType(row.contentType);
         fulfilledByBranch[branch]++;
       }
-      const totalFulfilled = fulfilledByBranch.VIDEO + fulfilledByBranch.DESIGNER + fulfilledByBranch.WRITER;
+      const totalFulfilled = fulfilledByBranch.REELS + fulfilledByBranch.POSTS + fulfilledByBranch.STORIES;
 
       expect(totalFulfilled).toBe(dbRows.length);
-      expect(fulfilledByBranch.VIDEO).toBe(1);
-      expect(fulfilledByBranch.DESIGNER).toBe(0);
-      expect(fulfilledByBranch.WRITER).toBe(0);
+      expect(fulfilledByBranch.REELS).toBe(1);
+      expect(fulfilledByBranch.POSTS).toBe(0);
+      expect(fulfilledByBranch.STORIES).toBe(0);
     });
 
     it("simulated: 3 mixed items in DB = correct per-branch counts", () => {
       const dbRows = [
         { contentType: "REEL", campaignId: "camp1", status: "READY" },
         { contentType: "IMAGE", campaignId: "camp1", status: "DRAFT" },
-        { contentType: "POST", campaignId: "camp1", status: "DRAFT" },
+        { contentType: "STORY", campaignId: "camp1", status: "DRAFT" },
       ];
 
-      const fulfilledByBranch: Record<FulfillmentBranch, number> = { VIDEO: 0, DESIGNER: 0, WRITER: 0 };
+      const fulfilledByBranch: Record<FulfillmentBranch, number> = { REELS: 0, POSTS: 0, STORIES: 0 };
       for (const row of dbRows) {
         const branch = getBranchForMediaType(row.contentType);
         fulfilledByBranch[branch]++;
       }
-      const totalFulfilled = fulfilledByBranch.VIDEO + fulfilledByBranch.DESIGNER + fulfilledByBranch.WRITER;
+      const totalFulfilled = fulfilledByBranch.REELS + fulfilledByBranch.POSTS + fulfilledByBranch.STORIES;
 
       expect(totalFulfilled).toBe(3);
-      expect(fulfilledByBranch.VIDEO).toBe(1);
-      expect(fulfilledByBranch.DESIGNER).toBe(1);
-      expect(fulfilledByBranch.WRITER).toBe(1);
+      expect(fulfilledByBranch.REELS).toBe(1);
+      expect(fulfilledByBranch.POSTS).toBe(1);
+      expect(fulfilledByBranch.STORIES).toBe(1);
     });
 
     it("campaign isolation: items from different campaigns don't cross-count", () => {
@@ -114,23 +116,23 @@ describe("Fulfillment Guard Tests", () => {
       const camp1Rows = allRows.filter(r => r.campaignId === "camp1");
       const camp2Rows = allRows.filter(r => r.campaignId === "camp2");
 
-      const camp1Fulfilled: Record<FulfillmentBranch, number> = { VIDEO: 0, DESIGNER: 0, WRITER: 0 };
+      const camp1Fulfilled: Record<FulfillmentBranch, number> = { REELS: 0, POSTS: 0, STORIES: 0 };
       for (const row of camp1Rows) {
         camp1Fulfilled[getBranchForMediaType(row.contentType)]++;
       }
 
-      const camp2Fulfilled: Record<FulfillmentBranch, number> = { VIDEO: 0, DESIGNER: 0, WRITER: 0 };
+      const camp2Fulfilled: Record<FulfillmentBranch, number> = { REELS: 0, POSTS: 0, STORIES: 0 };
       for (const row of camp2Rows) {
         camp2Fulfilled[getBranchForMediaType(row.contentType)]++;
       }
 
-      expect(camp1Fulfilled.VIDEO).toBe(1);
-      expect(camp1Fulfilled.DESIGNER).toBe(1);
-      expect(camp1Fulfilled.WRITER).toBe(0);
+      expect(camp1Fulfilled.REELS).toBe(1);
+      expect(camp1Fulfilled.POSTS).toBe(1);
+      expect(camp1Fulfilled.STORIES).toBe(0);
 
-      expect(camp2Fulfilled.VIDEO).toBe(1);
-      expect(camp2Fulfilled.DESIGNER).toBe(0);
-      expect(camp2Fulfilled.WRITER).toBe(0);
+      expect(camp2Fulfilled.REELS).toBe(1);
+      expect(camp2Fulfilled.POSTS).toBe(0);
+      expect(camp2Fulfilled.STORIES).toBe(0);
     });
   });
 

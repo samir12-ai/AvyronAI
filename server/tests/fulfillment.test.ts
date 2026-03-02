@@ -6,40 +6,41 @@ import {
 } from '../../lib/media-types';
 
 describe('getBranchForMediaType', () => {
-  it('maps REEL and VIDEO to VIDEO branch', () => {
-    expect(getBranchForMediaType('REEL')).toBe('VIDEO');
-    expect(getBranchForMediaType('VIDEO')).toBe('VIDEO');
-    expect(getBranchForMediaType('reel')).toBe('VIDEO');
-    expect(getBranchForMediaType('video')).toBe('VIDEO');
-    expect(getBranchForMediaType('Video')).toBe('VIDEO');
+  it('maps REEL and VIDEO to REELS branch', () => {
+    expect(getBranchForMediaType('REEL')).toBe('REELS');
+    expect(getBranchForMediaType('VIDEO')).toBe('REELS');
+    expect(getBranchForMediaType('reel')).toBe('REELS');
+    expect(getBranchForMediaType('video')).toBe('REELS');
+    expect(getBranchForMediaType('Video')).toBe('REELS');
   });
 
-  it('maps IMAGE and CAROUSEL to DESIGNER branch', () => {
-    expect(getBranchForMediaType('IMAGE')).toBe('DESIGNER');
-    expect(getBranchForMediaType('CAROUSEL')).toBe('DESIGNER');
-    expect(getBranchForMediaType('image')).toBe('DESIGNER');
-    expect(getBranchForMediaType('carousel')).toBe('DESIGNER');
+  it('maps IMAGE, CAROUSEL, and POST to POSTS branch', () => {
+    expect(getBranchForMediaType('IMAGE')).toBe('POSTS');
+    expect(getBranchForMediaType('CAROUSEL')).toBe('POSTS');
+    expect(getBranchForMediaType('image')).toBe('POSTS');
+    expect(getBranchForMediaType('carousel')).toBe('POSTS');
+    expect(getBranchForMediaType('POST')).toBe('POSTS');
+    expect(getBranchForMediaType('post')).toBe('POSTS');
+    expect(getBranchForMediaType('POSTER')).toBe('POSTS');
   });
 
-  it('maps POST and STORY to WRITER branch', () => {
-    expect(getBranchForMediaType('POST')).toBe('WRITER');
-    expect(getBranchForMediaType('STORY')).toBe('WRITER');
-    expect(getBranchForMediaType('post')).toBe('WRITER');
-    expect(getBranchForMediaType('story')).toBe('WRITER');
+  it('maps STORY to STORIES branch', () => {
+    expect(getBranchForMediaType('STORY')).toBe('STORIES');
+    expect(getBranchForMediaType('story')).toBe('STORIES');
   });
 
   it('handles null/undefined/empty with fallback', () => {
     expect(getBranchForMediaType(null)).toBeDefined();
     expect(getBranchForMediaType(undefined)).toBeDefined();
     expect(getBranchForMediaType('')).toBeDefined();
-    const valid: FulfillmentBranch[] = ['VIDEO', 'DESIGNER', 'WRITER'];
+    const valid: FulfillmentBranch[] = ['REELS', 'POSTS', 'STORIES'];
     expect(valid).toContain(getBranchForMediaType(null));
     expect(valid).toContain(getBranchForMediaType(undefined));
     expect(valid).toContain(getBranchForMediaType(''));
   });
 
   it('handles unknown types without crashing', () => {
-    const valid: FulfillmentBranch[] = ['VIDEO', 'DESIGNER', 'WRITER'];
+    const valid: FulfillmentBranch[] = ['REELS', 'POSTS', 'STORIES'];
     expect(valid).toContain(getBranchForMediaType('UNKNOWN'));
     expect(valid).toContain(getBranchForMediaType('garbage'));
     expect(valid).toContain(getBranchForMediaType('reels'));
@@ -47,7 +48,7 @@ describe('getBranchForMediaType', () => {
 
   it('every canonical media type maps to a valid branch', () => {
     const canonicals = ['VIDEO', 'REEL', 'IMAGE', 'CAROUSEL', 'POST', 'STORY'];
-    const valid: FulfillmentBranch[] = ['VIDEO', 'DESIGNER', 'WRITER'];
+    const valid: FulfillmentBranch[] = ['REELS', 'POSTS', 'STORIES'];
     for (const mt of canonicals) {
       const branch = getBranchForMediaType(mt);
       expect(valid).toContain(branch);
@@ -58,7 +59,7 @@ describe('getBranchForMediaType', () => {
 describe('branch mapping consistency', () => {
   it('normalizeMediaType + getBranchForMediaType always produces a valid branch', () => {
     const inputs = ['video', 'Video', 'REEL', 'reels', 'Image', 'carousel', 'post', 'story', 'unknown', '', null, undefined];
-    const valid: FulfillmentBranch[] = ['VIDEO', 'DESIGNER', 'WRITER'];
+    const valid: FulfillmentBranch[] = ['REELS', 'POSTS', 'STORIES'];
     for (const input of inputs) {
       const normalized = normalizeMediaType(input as any);
       const branch = getBranchForMediaType(normalized);

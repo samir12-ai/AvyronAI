@@ -167,9 +167,9 @@ function calcTotals(distribution: any, periodDays: number): any {
   const totalVideos = videosPerWeek * weeks;
   const totalContentPieces = totalReels + totalPosts + totalStories + totalCarousels + totalVideos;
 
-  const designerItems = totalCarousels;
-  const videoItems = totalReels + totalVideos;
-  const writerItems = totalStories + totalPosts;
+  const storyItems = totalStories;
+  const postItems = totalPosts + totalCarousels;
+  const reelItems = totalReels + totalVideos;
 
   return {
     reelsPerWeek,
@@ -183,9 +183,9 @@ function calcTotals(distribution: any, periodDays: number): any {
     totalCarousels,
     totalVideos,
     totalContentPieces,
-    designerItems,
-    writerItems,
-    videoItems,
+    storyItems,
+    postItems,
+    reelItems,
   };
 }
 
@@ -390,9 +390,9 @@ export function registerExecutionRoutes(app: Express) {
           draft: items.filter((i) => i.status === "DRAFT").length,
         },
         branches: {
-          DESIGNER: { total: workRec?.designerItems || 0, label: "Designer" },
-          WRITER: { total: workRec?.writerItems || 0, label: "Writer" },
-          VIDEO: { total: workRec?.videoItems || 0, label: "Video" },
+          STORIES: { total: workRec?.storyItems || 0, label: "Stories" },
+          POSTS: { total: workRec?.postItems || 0, label: "Posts" },
+          REELS: { total: workRec?.reelItems || 0, label: "Reels" },
         },
       });
     } catch (err: any) {
@@ -987,9 +987,9 @@ export function registerExecutionRoutes(app: Express) {
         canceled: 0,
         progressPercent: fulfillment.progressPercent,
         branches: {
-          DESIGNER: { total: fulfillment.byBranch.DESIGNER.required, fulfilled: fulfillment.byBranch.DESIGNER.fulfilled, remaining: fulfillment.byBranch.DESIGNER.remaining, label: "Designer" },
-          WRITER: { total: fulfillment.byBranch.WRITER.required, fulfilled: fulfillment.byBranch.WRITER.fulfilled, remaining: fulfillment.byBranch.WRITER.remaining, label: "Writer" },
-          VIDEO: { total: fulfillment.byBranch.VIDEO.required, fulfilled: fulfillment.byBranch.VIDEO.fulfilled, remaining: fulfillment.byBranch.VIDEO.remaining, label: "Video" },
+          STORIES: { total: fulfillment.byBranch.STORIES.required, fulfilled: fulfillment.byBranch.STORIES.fulfilled, remaining: fulfillment.byBranch.STORIES.remaining, label: "Stories" },
+          POSTS: { total: fulfillment.byBranch.POSTS.required, fulfilled: fulfillment.byBranch.POSTS.fulfilled, remaining: fulfillment.byBranch.POSTS.remaining, label: "Posts" },
+          REELS: { total: fulfillment.byBranch.REELS.required, fulfilled: fulfillment.byBranch.REELS.fulfilled, remaining: fulfillment.byBranch.REELS.remaining, label: "Reels" },
         },
         fulfillment,
       });
@@ -1176,7 +1176,7 @@ export function registerExecutionRoutes(app: Express) {
         return res.json({
           success: true,
           requiredWork: null,
-          branches: { DESIGNER: { total: 0, label: "Designer" }, WRITER: { total: 0, label: "Writer" }, VIDEO: { total: 0, label: "Video" } },
+          branches: { STORIES: { total: 0, label: "Stories" }, POSTS: { total: 0, label: "Posts" }, REELS: { total: 0, label: "Reels" } },
           message: "No active plan found for this campaign.",
         });
       }
@@ -1201,9 +1201,9 @@ export function registerExecutionRoutes(app: Express) {
         planId: workRec?.planId || activePlanIds[0],
         requiredWork: workRec,
         branches: {
-          DESIGNER: { total: fulfillment.byBranch.DESIGNER.required, fulfilled: fulfillment.byBranch.DESIGNER.fulfilled, remaining: fulfillment.byBranch.DESIGNER.remaining, label: "Designer" },
-          WRITER: { total: fulfillment.byBranch.WRITER.required, fulfilled: fulfillment.byBranch.WRITER.fulfilled, remaining: fulfillment.byBranch.WRITER.remaining, label: "Writer" },
-          VIDEO: { total: fulfillment.byBranch.VIDEO.required, fulfilled: fulfillment.byBranch.VIDEO.fulfilled, remaining: fulfillment.byBranch.VIDEO.remaining, label: "Video" },
+          STORIES: { total: fulfillment.byBranch.STORIES.required, fulfilled: fulfillment.byBranch.STORIES.fulfilled, remaining: fulfillment.byBranch.STORIES.remaining, label: "Stories" },
+          POSTS: { total: fulfillment.byBranch.POSTS.required, fulfilled: fulfillment.byBranch.POSTS.fulfilled, remaining: fulfillment.byBranch.POSTS.remaining, label: "Posts" },
+          REELS: { total: fulfillment.byBranch.REELS.required, fulfilled: fulfillment.byBranch.REELS.fulfilled, remaining: fulfillment.byBranch.REELS.remaining, label: "Reels" },
         },
         fulfillment,
       });

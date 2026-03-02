@@ -304,7 +304,7 @@ export default function CreateScreen() {
   const { data: requiredWorkData } = useQuery<{
     success: boolean;
     requiredWork: any;
-    branches: { DESIGNER: { total: number; fulfilled: number; remaining: number; label: string }; WRITER: { total: number; fulfilled: number; remaining: number; label: string }; VIDEO: { total: number; fulfilled: number; remaining: number; label: string } };
+    branches: { STORIES: { total: number; fulfilled: number; remaining: number; label: string }; POSTS: { total: number; fulfilled: number; remaining: number; label: string }; REELS: { total: number; fulfilled: number; remaining: number; label: string } };
     fulfillment: { total: { required: number; fulfilled: number; remaining: number } };
   }>({
     queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`],
@@ -1137,9 +1137,9 @@ export default function CreateScreen() {
             </View>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {([
-                { key: 'DESIGNER' as const, icon: 'brush-outline' as const, color: '#8B5CF6' },
-                { key: 'WRITER' as const, icon: 'create-outline' as const, color: '#10B981' },
-                { key: 'VIDEO' as const, icon: 'videocam-outline' as const, color: '#F59E0B' },
+                { key: 'STORIES' as const, icon: 'layers-outline' as const, color: '#8B5CF6' },
+                { key: 'POSTS' as const, icon: 'images-outline' as const, color: '#10B981' },
+                { key: 'REELS' as const, icon: 'videocam-outline' as const, color: '#F59E0B' },
               ] as const).map(branch => {
                 const branchData = requiredWorkData?.branches?.[branch.key];
                 const total = branchData?.remaining ?? branchData?.total ?? 0;

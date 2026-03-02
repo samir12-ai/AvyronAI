@@ -31,23 +31,23 @@ export function normalizeMediaType(input: string | null | undefined): CanonicalM
   return 'IMAGE';
 }
 
-export type FulfillmentBranch = 'VIDEO' | 'DESIGNER' | 'WRITER';
+export type FulfillmentBranch = 'STORIES' | 'POSTS' | 'REELS';
 
 export function getBranchForMediaType(mediaType: string | null | undefined): FulfillmentBranch {
   const normalized = normalizeMediaType(mediaType);
   switch (normalized) {
     case 'VIDEO':
     case 'REEL':
-      return 'VIDEO';
+      return 'REELS';
     case 'IMAGE':
     case 'POSTER':
     case 'CAROUSEL':
-      return 'DESIGNER';
     case 'POST':
+      return 'POSTS';
     case 'STORY':
-      return 'WRITER';
+      return 'STORIES';
     default:
-      return 'WRITER';
+      return 'POSTS';
   }
 }
 
@@ -68,11 +68,12 @@ export function createRouteForContentType(contentType: string): RouteMapping {
     case 'IMAGE':
     case 'POSTER':
     case 'CAROUSEL':
-      return { tab: 'designer', contentType: 'post', label: 'AI Designer' };
+      return { tab: 'designer', contentType: 'post', label: 'Posts' };
     case 'POST':
+      return { tab: 'content', contentType: 'post', label: 'Posts' };
     case 'STORY':
-      return { tab: 'content', contentType: 'post', label: 'AI Writer' };
+      return { tab: 'content', contentType: 'story', label: 'Stories' };
     default:
-      return { tab: 'content', contentType: 'post', label: 'AI Writer' };
+      return { tab: 'content', contentType: 'post', label: 'Posts' };
   }
 }

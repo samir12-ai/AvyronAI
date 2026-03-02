@@ -16,9 +16,9 @@ export interface FulfillmentResult {
     remaining: number;
   };
   byBranch: {
-    VIDEO: BranchFulfillment;
-    DESIGNER: BranchFulfillment;
-    WRITER: BranchFulfillment;
+    REELS: BranchFulfillment;
+    POSTS: BranchFulfillment;
+    STORIES: BranchFulfillment;
   };
   byStatus: {
     draft: number;
@@ -81,9 +81,9 @@ export async function computeFulfillment(
   }
 
   const requiredByBranch = {
-    VIDEO: workRec?.videoItems || 0,
-    DESIGNER: workRec?.designerItems || 0,
-    WRITER: workRec?.writerItems || 0,
+    REELS: workRec?.reelItems || 0,
+    POSTS: workRec?.postItems || 0,
+    STORIES: workRec?.storyItems || 0,
   };
   const totalRequired = workRec?.totalContentPieces || 0;
 
@@ -101,9 +101,9 @@ export async function computeFulfillment(
     );
 
   const fulfilledByBranch: Record<FulfillmentBranch, number> = {
-    VIDEO: 0,
-    DESIGNER: 0,
-    WRITER: 0,
+    REELS: 0,
+    POSTS: 0,
+    STORIES: 0,
   };
   const statusCounts = {
     draft: 0,
@@ -120,9 +120,9 @@ export async function computeFulfillment(
   }
 
   const totalFulfilled =
-    fulfilledByBranch.VIDEO +
-    fulfilledByBranch.DESIGNER +
-    fulfilledByBranch.WRITER;
+    fulfilledByBranch.REELS +
+    fulfilledByBranch.POSTS +
+    fulfilledByBranch.STORIES;
 
   const totalRemaining = Math.max(0, totalRequired - totalFulfilled);
 
@@ -138,28 +138,28 @@ export async function computeFulfillment(
       remaining: totalRemaining,
     },
     byBranch: {
-      VIDEO: {
-        required: requiredByBranch.VIDEO,
-        fulfilled: fulfilledByBranch.VIDEO,
+      REELS: {
+        required: requiredByBranch.REELS,
+        fulfilled: fulfilledByBranch.REELS,
         remaining: Math.max(
           0,
-          requiredByBranch.VIDEO - fulfilledByBranch.VIDEO
+          requiredByBranch.REELS - fulfilledByBranch.REELS
         ),
       },
-      DESIGNER: {
-        required: requiredByBranch.DESIGNER,
-        fulfilled: fulfilledByBranch.DESIGNER,
+      POSTS: {
+        required: requiredByBranch.POSTS,
+        fulfilled: fulfilledByBranch.POSTS,
         remaining: Math.max(
           0,
-          requiredByBranch.DESIGNER - fulfilledByBranch.DESIGNER
+          requiredByBranch.POSTS - fulfilledByBranch.POSTS
         ),
       },
-      WRITER: {
-        required: requiredByBranch.WRITER,
-        fulfilled: fulfilledByBranch.WRITER,
+      STORIES: {
+        required: requiredByBranch.STORIES,
+        fulfilled: fulfilledByBranch.STORIES,
         remaining: Math.max(
           0,
-          requiredByBranch.WRITER - fulfilledByBranch.WRITER
+          requiredByBranch.STORIES - fulfilledByBranch.STORIES
         ),
       },
     },
