@@ -20,6 +20,7 @@ import { MI_CONFIDENCE } from "./constants";
 import { validateEngineIsolation } from "./isolation-guard";
 import { logAudit } from "../audit";
 import { computeCompetitorHash, parseJsonSafe } from "./utils";
+import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
 
 export { computeCompetitorHash } from "./utils";
 
@@ -32,23 +33,30 @@ async function getCompetitorData(accountId: string): Promise<CompetitorInput[]> 
   const competitors = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.isActive, true)));
 
-  return competitors.map(c => ({
-    id: c.id,
-    name: c.name,
-    platform: c.platform,
-    profileLink: c.profileLink,
-    businessType: c.businessType,
-    postingFrequency: c.postingFrequency,
-    contentTypeRatio: c.contentTypeRatio,
-    engagementRatio: c.engagementRatio,
-    ctaPatterns: c.ctaPatterns,
-    discountFrequency: c.discountFrequency,
-    hookStyles: c.hookStyles,
-    messagingTone: c.messagingTone,
-    socialProofPresence: c.socialProofPresence,
-    posts: [],
-    comments: [],
-  }));
+  const results: CompetitorInput[] = [];
+  for (const c of competitors) {
+    const posts = await getStoredPostsForMIv3(c.id, accountId);
+    const comments = await getStoredCommentsForMIv3(c.id, accountId);
+
+    results.push({
+      id: c.id,
+      name: c.name,
+      platform: c.platform,
+      profileLink: c.profileLink,
+      businessType: c.businessType,
+      postingFrequency: c.postingFrequency,
+      contentTypeRatio: c.contentTypeRatio,
+      engagementRatio: c.engagementRatio,
+      ctaPatterns: c.ctaPatterns,
+      discountFrequency: c.discountFrequency,
+      hookStyles: c.hookStyles,
+      messagingTone: c.messagingTone,
+      socialProofPresence: c.socialProofPresence,
+      posts,
+      comments,
+    });
+  }
+  return results;
 }
 
 async function getCachedSnapshot(accountId: string, campaignId: string, competitorHash: string): Promise<any | null> {

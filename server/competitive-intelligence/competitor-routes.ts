@@ -10,6 +10,7 @@ import { computeAllIntelligenceScores } from "./intelligence-scores";
 import { generateCreativeExpansion } from "./creative-expansion";
 import { generateScriptsAndConcepts } from "./script-engine";
 import type { BlueprintInput } from "./script-engine";
+import { getCompetitorDataCoverage } from "./data-acquisition";
 
 const REQUIRED_EVIDENCE_FIELDS = [
   "profileLink",
@@ -43,10 +44,11 @@ export function registerCiCompetitorRoutes(app: Express) {
         .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.isActive, true), eq(ciCompetitors.isDemo, false)))
         .orderBy(sql`${ciCompetitors.createdAt} DESC`);
 
-      const enriched = competitors.map(c => {
+      const enriched = await Promise.all(competitors.map(async c => {
         const validation = validateEvidence(c);
-        return { ...c, evidenceComplete: validation.complete, missingFields: validation.missing };
-      });
+        const coverage = await getCompetitorDataCoverage(c.id, accountId);
+        return { ...c, evidenceComplete: validation.complete, missingFields: validation.missing, dataCoverage: coverage };
+      }));
       res.json({ competitors: enriched });
     } catch (error: any) {
       res.status(500).json({ error: error.message });

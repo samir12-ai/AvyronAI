@@ -1415,3 +1415,71 @@ export const miTelemetry = pgTable("mi_telemetry", {
 });
 
 export type MiTelemetry = typeof miTelemetry.$inferSelect;
+
+export const ciCompetitorPosts = pgTable("ci_competitor_posts", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  competitorId: varchar("competitor_id").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  postId: text("post_id").notNull(),
+  permalink: text("permalink"),
+  mediaType: text("media_type"),
+  caption: text("caption"),
+  likes: integer("likes"),
+  comments: integer("comments"),
+  views: integer("views"),
+  hashtags: text("hashtags"),
+  timestamp: timestamp("timestamp"),
+  hasCTA: boolean("has_cta").default(false),
+  ctaType: text("cta_type"),
+  hasOffer: boolean("has_offer").default(false),
+  shortcode: text("shortcode"),
+  batchId: varchar("batch_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type CiCompetitorPost = typeof ciCompetitorPosts.$inferSelect;
+
+export const ciCompetitorComments = pgTable("ci_competitor_comments", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  competitorId: varchar("competitor_id").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  postId: text("post_id").notNull(),
+  commentText: text("comment_text"),
+  sentiment: doublePrecision("sentiment"),
+  timestamp: timestamp("timestamp"),
+  batchId: varchar("batch_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type CiCompetitorComment = typeof ciCompetitorComments.$inferSelect;
+
+export const ciCompetitorMetricsSnapshot = pgTable("ci_competitor_metrics_snapshot", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  competitorId: varchar("competitor_id").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  postsCollected: integer("posts_collected").default(0),
+  commentsCollected: integer("comments_collected").default(0),
+  ctaCoverage: doublePrecision("cta_coverage").default(0),
+  ctaTypes: text("cta_types"),
+  followers: integer("followers"),
+  engagementRate: doublePrecision("engagement_rate"),
+  postingFrequency: doublePrecision("posting_frequency"),
+  contentMix: text("content_mix"),
+  bioText: text("bio_text"),
+  linkInBio: text("link_in_bio"),
+  websiteUrl: text("website_url"),
+  dataFreshnessDays: integer("data_freshness_days").default(0),
+  lastFetchAt: timestamp("last_fetch_at"),
+  fetchMethod: text("fetch_method"),
+  fetchStatus: text("fetch_status").default("PENDING"),
+  batchId: varchar("batch_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type CiCompetitorMetricsSnapshot = typeof ciCompetitorMetricsSnapshot.$inferSelect;

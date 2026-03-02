@@ -22,6 +22,21 @@ import { useCreativeContext } from '@/context/CreativeContext';
 import { useApp } from '@/context/AppContext';
 import { useCampaign } from '@/context/CampaignContext';
 
+interface DataCoverage {
+  postsCollected: number;
+  commentsCollected: number;
+  ctaCoverage: number;
+  ctaTypes: string;
+  followers: number | null;
+  engagementRate: number | null;
+  postingFrequency: number | null;
+  contentMix: string | null;
+  dataFreshnessDays: number;
+  lastFetchAt: string | null;
+  fetchStatus: string;
+  fetchMethod: string | null;
+}
+
 interface Competitor {
   id: string;
   name: string;
@@ -41,6 +56,7 @@ interface Competitor {
   notes: string | null;
   evidenceComplete: boolean;
   missingFields: string[];
+  dataCoverage?: DataCoverage;
 }
 
 
@@ -234,6 +250,56 @@ export default function CompetitiveIntelligence() {
     onError: (err: any) => Alert.alert('Error', err.message || 'Failed to remove competitor'),
   });
 
+  const [fetchingCompetitorId, setFetchingCompetitorId] = useState<string | null>(null);
+  const [fetchingAll, setFetchingAll] = useState(false);
+
+  const fetchDataMutation = useMutation({
+    mutationFn: async ({ id, forceRefresh }: { id: string; forceRefresh?: boolean }) => {
+      setFetchingCompetitorId(id);
+      const res = await fetch(new URL(`/api/ci/competitors/${id}/fetch-data`, baseUrl).toString(), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId: 'default', forceRefresh: forceRefresh || false }),
+      });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Fetch failed'); }
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      setFetchingCompetitorId(null);
+      queryClient.invalidateQueries({ queryKey: ['ci-competitors'] });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (data.status === 'COOLDOWN') {
+        Alert.alert('Cooldown Active', data.message);
+      }
+    },
+    onError: (err: any) => {
+      setFetchingCompetitorId(null);
+      Alert.alert('Fetch Error', err.message);
+    },
+  });
+
+  const fetchAllMutation = useMutation({
+    mutationFn: async () => {
+      setFetchingAll(true);
+      const res = await fetch(new URL('/api/ci/competitors/fetch-all', baseUrl).toString(), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId: 'default' }),
+      });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Fetch failed'); }
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      setFetchingAll(false);
+      queryClient.invalidateQueries({ queryKey: ['ci-competitors'] });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      const s = data.summary;
+      Alert.alert('Data Fetch Complete', `${s.totalPosts} posts, ${s.totalComments} comments collected from ${s.success + s.partial}/${s.total} competitors.`);
+    },
+    onError: (err: any) => {
+      setFetchingAll(false);
+      Alert.alert('Fetch Error', err.message);
+    },
+  });
+
   const competitors: Competitor[] = competitorsData?.competitors || [];
 
   const handleCreateReelsFromCI = useCallback(async (comp: Competitor) => {
@@ -312,6 +378,9 @@ export default function CompetitiveIntelligence() {
     </View>
   );
 
+  const qualifiedCount = competitors.filter(c => (c.dataCoverage?.postsCollected || 0) >= 10).length;
+  const hasInsufficientData = competitors.length > 0 && (competitors.length < 3 || qualifiedCount < 2);
+
   const renderCompetitorsList = () => (
     <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
       <View style={s.cardHeader}>
@@ -329,98 +398,149 @@ export default function CompetitiveIntelligence() {
         </Pressable>
       </View>
 
+      {hasInsufficientData && (
+        <View style={{ backgroundColor: '#F59E0B' + '15', borderRadius: 8, padding: 10, marginBottom: 10, flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+          <Ionicons name="warning" size={16} color="#F59E0B" />
+          <Text style={{ fontSize: 11, color: '#F59E0B', flex: 1, lineHeight: 16 }}>
+            {competitors.length < 3
+              ? `Low confidence due to insufficient competitor signals. Add at least ${3 - competitors.length} more competitor(s).`
+              : `Low confidence: only ${qualifiedCount} of ${competitors.length} competitors have sufficient data. Use Auto-Fetch to collect signals.`}
+          </Text>
+        </View>
+      )}
+
+      {competitors.length > 0 && (
+        <Pressable
+          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); fetchAllMutation.mutate(); }}
+          disabled={fetchingAll || fetchAllMutation.isPending}
+          style={[s.autoFetchAllBtn, { opacity: (fetchingAll || fetchAllMutation.isPending) ? 0.6 : 1 }]}
+        >
+          {(fetchingAll || fetchAllMutation.isPending) ? (
+            <ActivityIndicator size={14} color="#fff" />
+          ) : (
+            <Ionicons name="cloud-download-outline" size={16} color="#fff" />
+          )}
+          <Text style={s.autoFetchAllBtnText}>
+            {(fetchingAll || fetchAllMutation.isPending) ? 'Fetching all data...' : 'Auto-Fetch All Data'}
+          </Text>
+        </Pressable>
+      )}
+
       {competitors.length === 0 ? (
         <View style={{ alignItems: 'center', paddingVertical: 20, gap: 6 }}>
           <Ionicons name="person-add-outline" size={32} color={colors.textMuted} />
           <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }}>No competitors added yet</Text>
-          <Text style={{ fontSize: 12, color: colors.textMuted, textAlign: 'center' }}>Add your first competitor to start tracking their strategy</Text>
+          <Text style={{ fontSize: 12, color: colors.textMuted, textAlign: 'center' }}>Add at least 3 competitors to start tracking their strategy</Text>
         </View>
       ) : (
-        competitors.map((comp: Competitor) => (
+        competitors.map((comp: Competitor) => {
+          const dc = comp.dataCoverage;
+          const isFetching = fetchingCompetitorId === comp.id;
+          return (
           <View key={comp.id} style={[s.breakdownItem, { borderBottomWidth: 1, borderBottomColor: isDark ? '#1A2030' : '#F0F0F0' }]}>
             <Pressable onPress={() => { Haptics.selectionAsync(); setExpandedCompetitor(expandedCompetitor === comp.id ? null : comp.id); }} style={s.compHeader}>
               <View style={s.compInfo}>
                 <View style={s.compNameRow}>
                   <Text style={[s.compName, { color: colors.text }]}>{comp.name}</Text>
-                  <View style={[s.evidenceDot, { backgroundColor: comp.evidenceComplete ? '#10B981' : '#F59E0B' }]} />
+                  <View style={[s.evidenceDot, { backgroundColor: (dc?.postsCollected || 0) >= 10 ? '#10B981' : '#F59E0B' }]} />
                 </View>
-                <Text style={[s.compMeta, { color: colors.textMuted }]}>{comp.platform} • {comp.businessType || 'Unknown type'}</Text>
+                <Text style={[s.compMeta, { color: colors.textMuted }]}>
+                  {(dc?.postsCollected || 0) > 0
+                    ? `${dc?.postsCollected || 0} posts • ${dc?.commentsCollected || 0} comments • ${dc?.dataFreshnessDays ?? '?'}d ago`
+                    : `${comp.platform} • No data collected`}
+                </Text>
               </View>
               <View style={s.compRight}>
                 <Ionicons name={expandedCompetitor === comp.id ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
               </View>
             </Pressable>
 
-            {!comp.evidenceComplete && comp.missingFields?.length > 0 && (
-              <View style={[s.missingBar, { backgroundColor: '#F59E0B' + '15' }]}>
-                <Ionicons name="warning-outline" size={14} color="#F59E0B" />
-                <Text style={[s.missingText, { color: '#F59E0B' }]}>{comp.missingFields.length} missing fields</Text>
-              </View>
-            )}
-
             {expandedCompetitor === comp.id && (
               <View style={s.compDetails}>
+                <View style={{ backgroundColor: isDark ? '#1A2030' : '#F8F9FA', borderRadius: 8, padding: 10, gap: 6, marginBottom: 8 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6', marginBottom: 2 }}>DATA COVERAGE</Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={{ fontSize: 11, color: colors.textMuted }}>Posts collected</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.postsCollected || 0) >= 30 ? '#10B981' : colors.text }}>{dc?.postsCollected || 0} / 30</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={{ fontSize: 11, color: colors.textMuted }}>Comments collected</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.commentsCollected || 0) >= 100 ? '#10B981' : colors.text }}>{dc?.commentsCollected || 0} / 100</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={{ fontSize: 11, color: colors.textMuted }}>CTA coverage</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.ctaCoverage || 0) >= 0.5 ? '#10B981' : colors.text }}>{Math.round((dc?.ctaCoverage || 0) * 100)}%</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={{ fontSize: 11, color: colors.textMuted }}>Data freshness</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.dataFreshnessDays || 999) <= 7 ? '#10B981' : '#F59E0B' }}>{dc?.lastFetchAt ? `${dc.dataFreshnessDays}d ago` : 'Never fetched'}</Text>
+                  </View>
+                  {dc?.followers != null && (
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={{ fontSize: 11, color: colors.textMuted }}>Followers</Text>
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text }}>{dc.followers.toLocaleString()}</Text>
+                    </View>
+                  )}
+                  {dc?.engagementRate != null && (
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={{ fontSize: 11, color: colors.textMuted }}>Engagement rate</Text>
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text }}>{dc.engagementRate}%</Text>
+                    </View>
+                  )}
+                  {dc?.ctaTypes ? (
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={{ fontSize: 11, color: colors.textMuted }}>CTA types</Text>
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text }} numberOfLines={1}>{dc.ctaTypes}</Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+                  <Pressable
+                    onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); fetchDataMutation.mutate({ id: comp.id }); }}
+                    disabled={isFetching || fetchDataMutation.isPending}
+                    style={[s.fetchBtn, { flex: 1, opacity: (isFetching || fetchDataMutation.isPending) ? 0.6 : 1 }]}
+                  >
+                    {isFetching ? (
+                      <ActivityIndicator size={12} color="#fff" />
+                    ) : (
+                      <Ionicons name="cloud-download-outline" size={14} color="#fff" />
+                    )}
+                    <Text style={s.fetchBtnText}>{isFetching ? 'Fetching...' : (dc?.postsCollected || 0) > 0 ? 'Refresh Data' : 'Auto-Fetch Data'}</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      if (Platform.OS === 'web') {
+                        if (window.confirm(`Remove ${comp.name}?`)) {
+                          deleteCompetitorMutation.mutate(comp.id);
+                        }
+                      } else {
+                        Alert.alert('Remove Competitor', `Remove ${comp.name}?`, [{ text: 'Cancel' }, { text: 'Remove', style: 'destructive', onPress: () => deleteCompetitorMutation.mutate(comp.id) }]);
+                      }
+                    }}
+                    style={s.removeBtn}
+                  >
+                    <Ionicons name="trash-outline" size={14} color="#EF4444" />
+                  </Pressable>
+                </View>
+
                 {comp.profileLink && (
                   <View style={s.detailRow}>
                     <Text style={[s.detailLabel, { color: colors.textMuted }]}>Profile</Text>
                     <Text style={[s.detailValue, { color: colors.text }]} numberOfLines={1}>{comp.profileLink}</Text>
                   </View>
                 )}
-                {comp.postingFrequency != null && (
+                {comp.contentTypeRatio && (
                   <View style={s.detailRow}>
-                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>Frequency</Text>
-                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.postingFrequency}</Text>
+                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>Content Mix</Text>
+                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.contentTypeRatio}</Text>
                   </View>
                 )}
-                {comp.engagementRatio != null && (
-                  <View style={s.detailRow}>
-                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>Engagement</Text>
-                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.engagementRatio}</Text>
-                  </View>
-                )}
-                {comp.ctaPatterns && (
-                  <View style={s.detailRow}>
-                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>CTA</Text>
-                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.ctaPatterns}</Text>
-                  </View>
-                )}
-                {comp.hookStyles && (
-                  <View style={s.detailRow}>
-                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>Hooks</Text>
-                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.hookStyles}</Text>
-                  </View>
-                )}
-                {comp.messagingTone && (
-                  <View style={s.detailRow}>
-                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>Tone</Text>
-                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.messagingTone}</Text>
-                  </View>
-                )}
-                {comp.notes && (
-                  <View style={s.detailRow}>
-                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>Notes</Text>
-                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.notes}</Text>
-                  </View>
-                )}
-                <Pressable
-                  onPress={() => {
-                    if (Platform.OS === 'web') {
-                      if (window.confirm(`Remove ${comp.name}?`)) {
-                        deleteCompetitorMutation.mutate(comp.id);
-                      }
-                    } else {
-                      Alert.alert('Remove Competitor', `Remove ${comp.name}?`, [{ text: 'Cancel' }, { text: 'Remove', style: 'destructive', onPress: () => deleteCompetitorMutation.mutate(comp.id) }]);
-                    }
-                  }}
-                  style={s.removeBtn}
-                >
-                  <Ionicons name="trash-outline" size={14} color="#EF4444" />
-                  <Text style={[s.removeBtnText, { color: '#EF4444' }]}>Remove</Text>
-                </Pressable>
               </View>
             )}
           </View>
-        ))
+          );
+        })
       )}
     </View>
   );
@@ -1531,8 +1651,12 @@ const s = StyleSheet.create({
   detailRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   detailLabel: { fontSize: 11, fontWeight: '600', width: 80 },
   detailValue: { fontSize: 11, flex: 1 },
-  removeBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8, alignSelf: 'flex-end', paddingVertical: 4, paddingHorizontal: 8 },
+  removeBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: '#EF4444' + '15', borderRadius: 8 },
   removeBtnText: { fontSize: 12, fontWeight: '600' },
+  autoFetchAllBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, backgroundColor: '#10B981', borderRadius: 8, paddingVertical: 10, marginBottom: 10 },
+  autoFetchAllBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' as const },
+  fetchBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, backgroundColor: '#8B5CF6', borderRadius: 8, paddingVertical: 8 },
+  fetchBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' as const },
   countBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
   countText: { fontSize: 11, fontWeight: '700' },
   recHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
