@@ -446,8 +446,8 @@ export default function CompetitiveIntelligence() {
                 </View>
                 <Text style={[s.compMeta, { color: colors.textMuted }]}>
                   {(dc?.postsCollected || 0) > 0
-                    ? `${dc?.postsCollected || 0} posts • ${dc?.commentsCollected || 0} comments • ${dc?.dataFreshnessDays ?? '?'}d ago`
-                    : `${comp.platform} • No data collected`}
+                    ? `${comp.platform} • ${comp.businessType || 'Unknown type'} • ${dc?.postsCollected || 0} posts`
+                    : `${comp.platform} • ${comp.businessType || 'Unknown type'} • No data collected`}
                 </Text>
               </View>
               <View style={s.compRight}>
@@ -530,10 +530,52 @@ export default function CompetitiveIntelligence() {
                     <Text style={[s.detailValue, { color: colors.text }]} numberOfLines={1}>{comp.profileLink}</Text>
                   </View>
                 )}
+                {comp.businessType && (
+                  <View style={s.detailRow}>
+                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>Type</Text>
+                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.businessType}</Text>
+                  </View>
+                )}
+                {comp.postingFrequency != null && (
+                  <View style={s.detailRow}>
+                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>Frequency</Text>
+                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.postingFrequency}</Text>
+                  </View>
+                )}
+                {comp.engagementRatio != null && (
+                  <View style={s.detailRow}>
+                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>Engagement</Text>
+                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.engagementRatio}</Text>
+                  </View>
+                )}
+                {comp.ctaPatterns && (
+                  <View style={s.detailRow}>
+                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>CTA</Text>
+                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.ctaPatterns}</Text>
+                  </View>
+                )}
+                {comp.hookStyles && (
+                  <View style={s.detailRow}>
+                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>Hooks</Text>
+                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.hookStyles}</Text>
+                  </View>
+                )}
+                {comp.messagingTone && (
+                  <View style={s.detailRow}>
+                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>Tone</Text>
+                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.messagingTone}</Text>
+                  </View>
+                )}
                 {comp.contentTypeRatio && (
                   <View style={s.detailRow}>
                     <Text style={[s.detailLabel, { color: colors.textMuted }]}>Content Mix</Text>
                     <Text style={[s.detailValue, { color: colors.text }]}>{comp.contentTypeRatio}</Text>
+                  </View>
+                )}
+                {comp.notes && (
+                  <View style={s.detailRow}>
+                    <Text style={[s.detailLabel, { color: colors.textMuted }]}>Notes</Text>
+                    <Text style={[s.detailValue, { color: colors.text }]}>{comp.notes}</Text>
                   </View>
                 )}
               </View>
