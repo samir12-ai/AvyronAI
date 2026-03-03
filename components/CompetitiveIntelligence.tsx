@@ -266,7 +266,7 @@ export default function CompetitiveIntelligence() {
         if (controller.signal.aborted) return;
         setFetchJobStatus(data);
 
-        if (data.status === 'COMPLETE' || data.status === 'FAILED') {
+        if (data.status === 'COMPLETE' || data.status === 'FAILED' || data.status === 'COMPLETE_WITH_COOLDOWN') {
           setFetchingAll(false);
           setFetchJobId(null);
 
@@ -283,6 +283,13 @@ export default function CompetitiveIntelligence() {
             Alert.alert(
               'Fetch Complete',
               `${data.totalPostsFetched} posts, ${data.totalCommentsFetched} comments collected.${stopMsg}${snapMsg}`
+            );
+          } else if (data.status === 'COMPLETE_WITH_COOLDOWN') {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            const snapMsg = data.newSnapshotId ? `\nNew snapshot: ${data.newSnapshotId.slice(0, 8)}` : '';
+            Alert.alert(
+              'Analysis Complete (Cooldown Active)',
+              `Fetch blocked (cooldown active). Analysis executed using cached data.\n${data.totalPostsFetched} cached posts, ${data.totalCommentsFetched} cached comments analyzed.${snapMsg}`
             );
           } else {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -493,54 +500,80 @@ export default function CompetitiveIntelligence() {
         </Pressable>
       )}
 
-      {fetchJobStatus && (fetchingAll || fetchJobStatus.status === 'COMPLETE' || fetchJobStatus.status === 'FAILED') && (
+      {fetchJobStatus && (fetchingAll || fetchJobStatus.status === 'COMPLETE' || fetchJobStatus.status === 'FAILED' || fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN') && (
         <View style={{ backgroundColor: isDark ? '#1A2030' : '#F0F4FF', borderRadius: 8, padding: 10, marginBottom: 10, gap: 6 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
             {fetchJobStatus.status === 'COMPLETE' ? (
               <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+            ) : fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN' ? (
+              <Ionicons name="checkmark-circle" size={14} color="#F59E0B" />
             ) : fetchJobStatus.status === 'FAILED' ? (
               <Ionicons name="close-circle" size={14} color="#EF4444" />
             ) : (
               <ActivityIndicator size={12} color="#8B5CF6" />
             )}
-            <Text style={{ fontSize: 12, fontWeight: '700', color: fetchJobStatus.status === 'COMPLETE' ? '#10B981' : fetchJobStatus.status === 'FAILED' ? '#EF4444' : '#8B5CF6' }}>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: fetchJobStatus.status === 'COMPLETE' ? '#10B981' : fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN' ? '#F59E0B' : fetchJobStatus.status === 'FAILED' ? '#EF4444' : '#8B5CF6' }}>
               {fetchJobStatus.status === 'COMPLETE'
                 ? (fetchJobStatus.stopReason && fetchJobStatus.stopReason !== 'COMPLETE'
                     ? `MI V3 COMPLETE (${fetchJobStatus.stopReason.replace(/_/g, ' ')})`
                     : 'MI V3 DATA PULL COMPLETE')
+                : fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN'
+                    ? 'ANALYSIS COMPLETE (CACHED)'
                 : fetchJobStatus.status === 'FAILED' ? 'MI V3 DATA PULL FAILED' : 'MI V3 DATA PULL'}
             </Text>
             <Text style={{ fontSize: 10, color: colors.textMuted, marginLeft: 'auto' }}>
               {fetchJobStatus.totalPostsFetched} posts • {fetchJobStatus.totalCommentsFetched} comments
             </Text>
           </View>
+          {fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN' && (
+            <View style={{ backgroundColor: '#F59E0B' + '15', borderRadius: 6, padding: 6, marginBottom: 6 }}>
+              <Text style={{ fontSize: 10, fontWeight: '600', color: '#F59E0B' }}>Fetch blocked (cooldown active) — Analysis executed using cached data</Text>
+            </View>
+          )}
           {Object.values(fetchJobStatus.stageStatuses || {}).map((cs: any) => {
             const stageIcon = (status: string) => {
               if (status === 'COMPLETE') return <Ionicons name="checkmark-circle" size={12} color="#10B981" />;
+              if (status === 'CACHED_ANALYSIS') return <Ionicons name="checkmark-circle" size={12} color="#3B82F6" />;
+              if (status === 'COOLDOWN_BLOCKED') return <Ionicons name="time" size={12} color="#F59E0B" />;
+              if (status === 'BLOCKED_INSUFFICIENT_DATA') return <Ionicons name="alert-circle" size={12} color="#EF4444" />;
               if (status === 'RUNNING') return <ActivityIndicator size={10} color="#8B5CF6" />;
               if (status === 'FAILED') return <Ionicons name="close-circle" size={12} color="#EF4444" />;
               if (status === 'SKIPPED') return <Ionicons name="remove-circle" size={12} color="#9CA3AF" />;
               return <Ionicons name="ellipse-outline" size={12} color="#9CA3AF" />;
             };
+            const stageLabel = (status: string, stage: string) => {
+              if (status === 'COOLDOWN_BLOCKED') return `${stage} (cooldown)`;
+              if (status === 'CACHED_ANALYSIS') return `${stage} (cached)`;
+              if (status === 'BLOCKED_INSUFFICIENT_DATA') return `${stage} (no data)`;
+              return stage;
+            };
             return (
               <View key={cs.competitorId} style={{ gap: 3 }}>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text }}>{cs.competitorName}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text }}>{cs.competitorName}</Text>
+                  {cs.cooldownRemainingHours != null && (
+                    <Text style={{ fontSize: 9, color: '#F59E0B' }}>{cs.cooldownRemainingHours}h cooldown</Text>
+                  )}
+                  {cs.analysisSource === 'CACHED_DATA' && (
+                    <Text style={{ fontSize: 9, color: '#3B82F6' }}>cached analysis</Text>
+                  )}
+                </View>
                 <View style={{ flexDirection: 'row', gap: 8, paddingLeft: 4 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                     {stageIcon(cs.POSTS_FETCH)}
-                    <Text style={{ fontSize: 9, color: colors.textMuted }}>Posts</Text>
+                    <Text style={{ fontSize: 9, color: colors.textMuted }}>{stageLabel(cs.POSTS_FETCH, 'Posts')}</Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                     {stageIcon(cs.COMMENTS_FETCH)}
-                    <Text style={{ fontSize: 9, color: colors.textMuted }}>Comments</Text>
+                    <Text style={{ fontSize: 9, color: colors.textMuted }}>{stageLabel(cs.COMMENTS_FETCH, 'Comments')}</Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                     {stageIcon(cs.CTA_ANALYSIS)}
-                    <Text style={{ fontSize: 9, color: colors.textMuted }}>CTA</Text>
+                    <Text style={{ fontSize: 9, color: colors.textMuted }}>{stageLabel(cs.CTA_ANALYSIS, 'CTA')}</Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                     {stageIcon(cs.SIGNAL_COMPUTE)}
-                    <Text style={{ fontSize: 9, color: colors.textMuted }}>Signals</Text>
+                    <Text style={{ fontSize: 9, color: colors.textMuted }}>{stageLabel(cs.SIGNAL_COMPUTE, 'Signals')}</Text>
                   </View>
                 </View>
               </View>

@@ -305,12 +305,12 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
   });
 
   describe("F) Snapshot Persistence After Fetch", () => {
-    it("should call persistSnapshotAfterFetch when SIGNAL_COMPUTE completes", async () => {
+    it("should call persistSnapshotAfterFetch when analysis completes (COMPLETE or CACHED_ANALYSIS)", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
       );
       expect(source).toContain("persistSnapshotAfterFetch");
-      expect(source).toContain("anySignalComplete");
+      expect(source).toContain("anyAnalysisRan");
       expect(source).toContain("Snapshot persisted");
     });
 
@@ -490,7 +490,161 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
     });
   });
 
-  describe("K) Build-a-Plan Reads Only (No Compute)", () => {
+  describe("K) Cooldown State Model — Correct Stage Truth", () => {
+    it("should mark fetch stages as COOLDOWN_BLOCKED (not COMPLETE) when cooldown active", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain('stage.POSTS_FETCH = "COOLDOWN_BLOCKED"');
+      expect(source).toContain('stage.COMMENTS_FETCH = "COOLDOWN_BLOCKED"');
+    });
+
+    it("should include cooldownRemainingHours in CompetitorStage metadata", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("cooldownRemainingHours");
+      expect(source).toContain("remainingHours");
+    });
+
+    it("should run CTA_ANALYSIS and SIGNAL_COMPUTE on cached data when sufficient", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain('stage.CTA_ANALYSIS = "CACHED_ANALYSIS"');
+      expect(source).toContain('stage.SIGNAL_COMPUTE = "CACHED_ANALYSIS"');
+      expect(source).toContain('analysisSource = "CACHED_DATA"');
+    });
+
+    it("should mark analysis as BLOCKED_INSUFFICIENT_DATA when not enough cached data", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain('stage.CTA_ANALYSIS = "BLOCKED_INSUFFICIENT_DATA"');
+      expect(source).toContain('stage.SIGNAL_COMPUTE = "BLOCKED_INSUFFICIENT_DATA"');
+    });
+
+    it("should set job status to COMPLETE_WITH_COOLDOWN when all competitors in cooldown", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain('"COMPLETE_WITH_COOLDOWN"');
+      expect(source).toContain("allCooldown && anyAnalysisRan");
+    });
+
+    it("should set stopReason to COOLDOWN_ACTIVE", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain('"COOLDOWN_ACTIVE"');
+      expect(source).toContain('stopReason = "COOLDOWN_ACTIVE"');
+    });
+
+    it("should NOT set COOLDOWN to COMPLETE artificially for any stage", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      const cooldownBlock = source.substring(
+        source.indexOf('fetchResult.status === "COOLDOWN"'),
+        source.indexOf('continue;', source.indexOf('fetchResult.status === "COOLDOWN"'))
+      );
+      expect(cooldownBlock).not.toContain('POSTS_FETCH = "COMPLETE"');
+      expect(cooldownBlock).not.toContain('COMMENTS_FETCH = "COMPLETE"');
+      expect(cooldownBlock).not.toContain('CTA_ANALYSIS = "COMPLETE"');
+      expect(cooldownBlock).not.toContain('SIGNAL_COMPUTE = "COMPLETE"');
+    });
+
+    it("should persist snapshot when analysis ran on cached data during cooldown", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain('s.SIGNAL_COMPUTE === "CACHED_ANALYSIS"');
+      expect(source).toContain("anyAnalysisRan");
+    });
+
+    it("should track cooldownCount and use it for job status determination", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("cooldownCount++");
+      expect(source).toContain("cooldownCount === competitors.length");
+    });
+
+    it("should NOT trigger partial coverage downgrade for COOLDOWN_ACTIVE", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain('stopReason !== "COOLDOWN_ACTIVE"');
+    });
+
+    it("should include analysisSource in CompetitorStage type", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain('analysisSource?: "CACHED_DATA" | "FRESH_DATA"');
+    });
+  });
+
+  describe("L) Cooldown UI — Distinct Display States", () => {
+    it("should show COMPLETE_WITH_COOLDOWN as distinct status in frontend", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
+      );
+      expect(source).toContain("COMPLETE_WITH_COOLDOWN");
+      expect(source).toContain("ANALYSIS COMPLETE (CACHED)");
+    });
+
+    it("should display 'Fetch blocked (cooldown active)' banner", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
+      );
+      expect(source).toContain("Fetch blocked (cooldown active)");
+      expect(source).toContain("Analysis executed using cached data");
+    });
+
+    it("should render COOLDOWN_BLOCKED icon (clock/time) for fetch stages", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
+      );
+      expect(source).toContain("COOLDOWN_BLOCKED");
+      expect(source).toContain('"time"');
+    });
+
+    it("should render CACHED_ANALYSIS icon (blue checkmark) for analysis stages", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
+      );
+      expect(source).toContain("CACHED_ANALYSIS");
+      expect(source).toContain("#3B82F6");
+    });
+
+    it("should display cooldown remaining hours per competitor", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
+      );
+      expect(source).toContain("cooldownRemainingHours");
+      expect(source).toContain("cooldown");
+    });
+
+    it("should show 'cached analysis' label when analysisSource is CACHED_DATA", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
+      );
+      expect(source).toContain("CACHED_DATA");
+      expect(source).toContain("cached analysis");
+    });
+
+    it("should show stage labels with source context: (cooldown), (cached), (no data)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
+      );
+      expect(source).toContain("(cooldown)");
+      expect(source).toContain("(cached)");
+      expect(source).toContain("(no data)");
+    });
+  });
+
+  describe("M) Build-a-Plan Reads Only (No Compute)", () => {
     it("should not import compute functions in orchestrator-routes", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/strategic-core/orchestrator-routes.ts", "utf-8")

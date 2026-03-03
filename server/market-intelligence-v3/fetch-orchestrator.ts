@@ -22,9 +22,9 @@ const MAX_PAGES_PER_COMPETITOR = 5;
 const MAX_REQUESTS_PER_JOB = 50;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
 
-type StopReason = "MAX_PAGES_REACHED" | "MAX_REQUESTS_REACHED" | "MAX_RUNTIME_REACHED" | "COMPLETE" | "ERROR" | "ALL_FAILED";
+type StopReason = "MAX_PAGES_REACHED" | "MAX_REQUESTS_REACHED" | "MAX_RUNTIME_REACHED" | "COMPLETE" | "ERROR" | "ALL_FAILED" | "COOLDOWN_ACTIVE";
 
-type StageStatus = "PENDING" | "RUNNING" | "COMPLETE" | "FAILED" | "SKIPPED";
+type StageStatus = "PENDING" | "RUNNING" | "COMPLETE" | "FAILED" | "SKIPPED" | "COOLDOWN_BLOCKED" | "CACHED_ANALYSIS" | "BLOCKED_INSUFFICIENT_DATA";
 
 interface CompetitorStage {
   competitorId: string;
@@ -35,6 +35,8 @@ interface CompetitorStage {
   SIGNAL_COMPUTE: StageStatus;
   postsFetched: number;
   commentsFetched: number;
+  cooldownRemainingHours?: number;
+  analysisSource?: "CACHED_DATA" | "FRESH_DATA";
   error?: string;
 }
 
@@ -48,7 +50,7 @@ interface FetchLimitReason {
 
 export interface FetchJobStatus {
   jobId: string;
-  status: "PENDING" | "RUNNING" | "COMPLETE" | "FAILED";
+  status: "PENDING" | "RUNNING" | "COMPLETE" | "FAILED" | "COMPLETE_WITH_COOLDOWN";
   stageStatuses: Record<string, CompetitorStage>;
   fetchLimitReasons: FetchLimitReason[];
   totalPostsFetched: number;
@@ -188,6 +190,7 @@ async function executeFetchJob(
   let totalPosts = 0;
   let totalComments = 0;
   let totalRequests = 0;
+  let cooldownCount = 0;
   let stopReason: StopReason = "COMPLETE";
 
   for (const c of competitors) {
@@ -305,14 +308,56 @@ async function executeFetchJob(
       }
 
       if (fetchResult.status === "COOLDOWN") {
-        stage.POSTS_FETCH = "COMPLETE";
-        stage.COMMENTS_FETCH = "COMPLETE";
-        stage.CTA_ANALYSIS = "COMPLETE";
-        stage.SIGNAL_COMPUTE = "COMPLETE";
+        const hoursMatch = fetchResult.message.match(/(\d+)h remaining/);
+        const remainingHours = hoursMatch ? parseInt(hoursMatch[1], 10) : undefined;
+
+        stage.POSTS_FETCH = "COOLDOWN_BLOCKED";
+        stage.COMMENTS_FETCH = "COOLDOWN_BLOCKED";
+        stage.cooldownRemainingHours = remainingHours;
         stage.postsFetched = fetchResult.postsCollected;
         stage.commentsFetched = fetchResult.commentsCollected;
         totalPosts += fetchResult.postsCollected;
         totalComments += fetchResult.commentsCollected;
+
+        cooldownCount++;
+
+        const hasSufficientCachedData = fetchResult.postsCollected >= 5;
+        if (hasSufficientCachedData) {
+          stage.analysisSource = "CACHED_DATA";
+
+          stage.CTA_ANALYSIS = "RUNNING";
+          await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
+          stage.CTA_ANALYSIS = "CACHED_ANALYSIS";
+
+          stage.SIGNAL_COMPUTE = "RUNNING";
+          await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
+
+          try {
+            const posts = await getStoredPostsForMIv3(comp.id, accountId);
+            const comments = await getStoredCommentsForMIv3(comp.id, accountId);
+            const competitorInput: CompetitorInput = {
+              id: comp.id, name: comp.name, platform: comp.platform,
+              profileLink: comp.profileLink, businessType: comp.businessType,
+              postingFrequency: comp.postingFrequency, contentTypeRatio: comp.contentTypeRatio,
+              engagementRatio: comp.engagementRatio, ctaPatterns: comp.ctaPatterns,
+              discountFrequency: comp.discountFrequency, hookStyles: comp.hookStyles,
+              messagingTone: comp.messagingTone, socialProofPresence: comp.socialProofPresence,
+              posts, comments,
+            };
+            const signalResults = computeAllSignals([competitorInput]);
+            console.log(`[FetchOrch] Cached analysis for ${comp.name}: ${signalResults.length} signals from ${posts.length} posts`);
+            stage.SIGNAL_COMPUTE = "CACHED_ANALYSIS";
+          } catch (err: any) {
+            console.error(`[FetchOrch] Cached signal compute failed for ${comp.name}:`, err.message);
+            stage.SIGNAL_COMPUTE = "FAILED";
+            stage.error = `Cached signal compute: ${err.message}`;
+          }
+        } else {
+          stage.CTA_ANALYSIS = "BLOCKED_INSUFFICIENT_DATA";
+          stage.SIGNAL_COMPUTE = "BLOCKED_INSUFFICIENT_DATA";
+          stage.analysisSource = undefined;
+        }
+
         limitReasons.push({
           competitorId: comp.id, competitorName: comp.name,
           stage: "POSTS_FETCH", reason: "COOLDOWN",
@@ -338,6 +383,7 @@ async function executeFetchJob(
 
       stage.POSTS_FETCH = "COMPLETE";
       stage.postsFetched = fetchResult.postsCollected;
+      stage.analysisSource = "FRESH_DATA";
       totalPosts += fetchResult.postsCollected;
 
       if (fetchResult.postsCollected < MIN_POSTS_TARGET && (fetchResult.status as string) !== "COOLDOWN") {
@@ -397,12 +443,17 @@ async function executeFetchJob(
       await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
     }
 
-    const anySignalComplete = Object.values(stages).some(s => s.SIGNAL_COMPUTE === "COMPLETE");
-    const isPartialCoverage = stopReason !== "COMPLETE";
-    if (anySignalComplete) {
+    const anyAnalysisRan = Object.values(stages).some(
+      s => s.SIGNAL_COMPUTE === "COMPLETE" || s.SIGNAL_COMPUTE === "CACHED_ANALYSIS"
+    );
+    const allCooldown = cooldownCount === competitors.length && competitors.length > 0;
+    if (allCooldown) stopReason = "COOLDOWN_ACTIVE";
+    const isPartialCoverage = stopReason !== "COMPLETE" && stopReason !== "COOLDOWN_ACTIVE";
+
+    if (anyAnalysisRan) {
       try {
         await persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverage, stopReason);
-        console.log(`[FetchOrch] Snapshot persisted for ${accountId}/${campaignId} | partial=${isPartialCoverage}`);
+        console.log(`[FetchOrch] Snapshot persisted for ${accountId}/${campaignId} | partial=${isPartialCoverage} | allCooldown=${allCooldown}`);
       } catch (err: any) {
         console.error(`[FetchOrch] Snapshot persistence failed:`, err.message);
       }
@@ -410,11 +461,10 @@ async function executeFetchJob(
 
     const durationMs = Date.now() - startTime;
     const allFailed = Object.values(stages).every(s => s.POSTS_FETCH === "FAILED");
-    if (allFailed) stopReason = "ALL_FAILED";
+    if (allFailed && !allCooldown) stopReason = "ALL_FAILED";
 
     let snapshotIdCreated: string | null = null;
-    const anySignalComplete2 = Object.values(stages).some(s => s.SIGNAL_COMPUTE === "COMPLETE");
-    if (anySignalComplete2) {
+    if (anyAnalysisRan) {
       try {
         const latestSnap = await db.select({ id: miSnapshots.id }).from(miSnapshots)
           .where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.status, "COMPLETE")))
@@ -425,10 +475,19 @@ async function executeFetchJob(
       } catch { }
     }
 
+    let finalJobStatus: string;
+    if (allFailed && !allCooldown) {
+      finalJobStatus = "FAILED";
+    } else if (allCooldown && anyAnalysisRan) {
+      finalJobStatus = "COMPLETE_WITH_COOLDOWN";
+    } else {
+      finalJobStatus = "COMPLETE";
+    }
+
     const finalStopReason = stopReason !== "COMPLETE" ? stopReason : null;
 
     await db.update(miFetchJobs).set({
-      status: allFailed ? "FAILED" : "COMPLETE",
+      status: finalJobStatus,
       stageStatuses: JSON.stringify(stages),
       fetchLimitReasons: JSON.stringify(limitReasons),
       totalPostsFetched: totalPosts,
@@ -448,7 +507,8 @@ async function executeFetchJob(
         limitReasons: limitReasons.length,
         totalRequests,
         stopReason,
-        status: allFailed ? "FAILED" : "COMPLETE",
+        cooldownCount,
+        status: finalJobStatus,
         hardCeilings: {
           maxPagesPerCompetitor: MAX_PAGES_PER_COMPETITOR,
           maxRequestsPerJob: MAX_REQUESTS_PER_JOB,
