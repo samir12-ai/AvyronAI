@@ -826,12 +826,27 @@ export default function CompetitiveIntelligence() {
             <View style={s.cardHeader}>
               <Ionicons name="shield-checkmark-outline" size={18} color="#8B5CF6" />
               <Text style={[s.cardTitle, { color: colors.text }]}>MI V3</Text>
+              {miv3Result.snapshotStatus === 'PARTIAL' && (
+                <View style={[s.intensityBadge, { backgroundColor: '#EF444420' }]}>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#EF4444' }}>PARTIAL</Text>
+                </View>
+              )}
               <View style={[s.intensityBadge, { backgroundColor: miv3Result.executionMode === 'FULL' ? '#10B981' + '20' : miv3Result.executionMode === 'REDUCED' ? '#F59E0B' + '20' : '#6B7280' + '20' }]}>
                 <Text style={{ fontSize: 10, fontWeight: '600', color: miv3Result.executionMode === 'FULL' ? '#10B981' : miv3Result.executionMode === 'REDUCED' ? '#F59E0B' : '#6B7280' }}>
                   {miv3Result.executionMode}
                 </Text>
               </View>
             </View>
+            {miv3Result.cacheInvalidationReason === 'ENGINE_UPGRADE' && (
+              <View style={{ backgroundColor: '#3B82F615', borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: '#3B82F6' }}>Analysis refreshed due to engine upgrade.</Text>
+              </View>
+            )}
+            {miv3Result.snapshotStatus === 'PARTIAL' && (
+              <View style={{ backgroundColor: '#EF444415', borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: '#EF4444' }}>Partial analysis — some analytical fields may be incomplete. Results should not be interpreted as final strategy.</Text>
+              </View>
+            )}
 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
               <View style={[s.miv3Stat, { backgroundColor: isDark ? '#1A2030' : '#F8F9FA' }]}>

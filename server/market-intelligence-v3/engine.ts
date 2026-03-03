@@ -159,7 +159,12 @@ async function getCompetitorData(accountId: string): Promise<CompetitorInput[]> 
   return results;
 }
 
-async function getCachedSnapshot(accountId: string, campaignId: string, competitorHash: string): Promise<any | null> {
+interface CacheResult {
+  snapshot: any | null;
+  invalidationReason: import("./types").CacheInvalidationReason;
+}
+
+async function getCachedSnapshot(accountId: string, campaignId: string, competitorHash: string): Promise<CacheResult> {
   const snapshots = await db.select().from(miSnapshots)
     .where(and(
       eq(miSnapshots.accountId, accountId),
@@ -169,31 +174,31 @@ async function getCachedSnapshot(accountId: string, campaignId: string, competit
     .orderBy(desc(miSnapshots.createdAt))
     .limit(1);
 
-  if (snapshots.length === 0) return null;
+  if (snapshots.length === 0) return { snapshot: null, invalidationReason: null };
 
   const snapshot = snapshots[0];
 
   if (snapshot.competitorHash && snapshot.competitorHash !== competitorHash) {
     console.log(`[MIv3] Snapshot invalidated: competitor set changed (${snapshot.competitorHash} → ${competitorHash})`);
-    return null;
+    return { snapshot: null, invalidationReason: "COMPETITOR_SET_CHANGED" };
   }
 
   const snapshotVersion = snapshot.analysisVersion || 0;
   if (snapshotVersion !== ENGINE_VERSION) {
     console.log(`[MIv3] SNAPSHOT_VERSION_INVALIDATED | snapshotId=${snapshot.id} | snapshotVersion=${snapshotVersion} | engineVersion=${ENGINE_VERSION} | reason=engine_upgrade`);
-    return null;
+    return { snapshot: null, invalidationReason: "ENGINE_UPGRADE" };
   }
 
   if (!isSnapshotAnalyticallyComplete(snapshot)) {
-    return null;
+    return { snapshot: null, invalidationReason: "INCOMPLETE_SNAPSHOT" };
   }
 
   const age = Date.now() - new Date(snapshot.createdAt!).getTime();
   const freshnessMs = SNAPSHOT_FRESHNESS_HOURS * 60 * 60 * 1000;
 
-  if (age > freshnessMs) return null;
+  if (age > freshnessMs) return { snapshot: null, invalidationReason: "STALE" };
 
-  return snapshot;
+  return { snapshot, invalidationReason: null };
 }
 
 function computeDataFreshnessDays(competitors: CompetitorInput[]): number {
@@ -324,12 +329,15 @@ export class MarketIntelligenceV3 {
     const competitors = await getCompetitorData(accountId);
     const competitorHash = computeCompetitorHash(competitors);
 
+    let cacheInvalidationReason: import("./types").CacheInvalidationReason = null;
+
     if (!forceRefresh) {
-      const cached = await getCachedSnapshot(accountId, campaignId, competitorHash);
-      if (cached) {
-        console.log(`[MIv3] Returning cached snapshot ${cached.id}`);
-        return buildResultFromSnapshot(cached);
+      const cacheResult = await getCachedSnapshot(accountId, campaignId, competitorHash);
+      if (cacheResult.snapshot) {
+        console.log(`[MIv3] Returning cached snapshot ${cacheResult.snapshot.id}`);
+        return buildResultFromSnapshot(cacheResult.snapshot);
       }
+      cacheInvalidationReason = cacheResult.invalidationReason;
     }
 
     const totalPosts = competitors.reduce((s, c) => s + (c.posts?.length || 0), 0);
@@ -497,6 +505,7 @@ export class MarketIntelligenceV3 {
     return {
       output,
       snapshotId: snapshot.id,
+      snapshotStatus: snapshot.status === "COMPLETE" ? "COMPLETE" as const : "PARTIAL" as const,
       executionMode,
       telemetry,
       dominanceData: dominanceResults,
@@ -504,6 +513,7 @@ export class MarketIntelligenceV3 {
       signalGuard: guard,
       twoRunStatus,
       cached: false,
+      cacheInvalidationReason,
       timestamp: new Date().toISOString(),
     };
   }
@@ -560,6 +570,7 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
   return {
     output,
     snapshotId: snapshot.id,
+    snapshotStatus: (snapshot.status === "COMPLETE" ? "COMPLETE" : "PARTIAL") as "COMPLETE" | "PARTIAL",
     executionMode: snapshot.executionMode as ExecutionMode,
     telemetry,
     dominanceData,
@@ -583,6 +594,7 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
       directionStable: true,
     },
     cached: true,
+    cacheInvalidationReason: null,
     timestamp: snapshot.createdAt?.toISOString?.() || new Date().toISOString(),
   };
 }

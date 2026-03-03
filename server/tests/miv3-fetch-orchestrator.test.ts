@@ -1105,25 +1105,52 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(result.failures.length).toBe(0);
     });
 
-    it("STATIC SCAN: no direct db.insert(miSnapshots) outside persistValidatedSnapshot", async () => {
-      const engineSource = await import("fs").then(fs =>
-        fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
-      );
-      const fetchSource = await import("fs").then(fs =>
-        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
-      );
+    it("STATIC SCAN: no direct db.insert(miSnapshots) or tx.insert(miSnapshots) outside persistValidatedSnapshot", async () => {
+      const fs = await import("fs");
+      const path = await import("path");
+      const engineSource = fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+      const fetchSource = fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8");
+      const routesSource = fs.readFileSync("server/market-intelligence-v3/routes.ts", "utf-8");
 
-      const engineInsertCount = (engineSource.match(/db\.insert\(miSnapshots\)/g) || []).length;
-      expect(engineInsertCount).toBe(1);
+      const engineDbInsertCount = (engineSource.match(/db\.insert\(miSnapshots\)/g) || []).length;
+      expect(engineDbInsertCount).toBe(1);
+
+      const engineTxInsertCount = (engineSource.match(/tx\.insert\(miSnapshots\)/g) || []).length;
+      expect(engineTxInsertCount).toBe(0);
 
       const gatewayIdx = engineSource.indexOf("export async function persistValidatedSnapshot");
       const insertIdx = engineSource.indexOf("db.insert(miSnapshots)");
       expect(insertIdx).toBeGreaterThan(gatewayIdx);
-      const gatewayEnd = engineSource.indexOf("\nasync function getCompetitorData");
+      const gatewayEnd = engineSource.indexOf("\nasync function getCompetitorData") !== -1
+        ? engineSource.indexOf("\nasync function getCompetitorData")
+        : engineSource.indexOf("\ninterface CacheResult");
       expect(insertIdx).toBeLessThan(gatewayEnd);
 
       expect(fetchSource).not.toContain("db.insert(miSnapshots)");
+      expect(fetchSource).not.toContain("tx.insert(miSnapshots)");
       expect(fetchSource).toContain("persistValidatedSnapshot");
+
+      expect(routesSource).not.toContain("db.insert(miSnapshots)");
+      expect(routesSource).not.toContain("tx.insert(miSnapshots)");
+
+      const serverDir = "server";
+      const allTsFiles = fs.readdirSync(serverDir, { recursive: true })
+        .filter((f: any) => typeof f === 'string' && f.endsWith('.ts') && !f.includes('node_modules') && !f.includes('test'));
+
+      for (const file of allTsFiles) {
+        const filePath = path.join(serverDir, file as string);
+        if (filePath.includes("engine.ts") && filePath.includes("market-intelligence-v3")) continue;
+        try {
+          const content = fs.readFileSync(filePath, "utf-8");
+          const hasDbInsert = content.includes("db.insert(miSnapshots)");
+          const hasTxInsert = content.includes("tx.insert(miSnapshots)");
+          if (hasDbInsert || hasTxInsert) {
+            throw new Error(`ROGUE mi_snapshots INSERT found in ${filePath}`);
+          }
+        } catch (e: any) {
+          if (e.message.includes("ROGUE")) throw e;
+        }
+      }
     });
   });
 
@@ -1150,11 +1177,13 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
       );
-      const cacheBlock = source.slice(source.indexOf("async function getCachedSnapshot"), source.indexOf("async function getCachedSnapshot") + 1500);
+      const startIdx = source.indexOf("async function getCachedSnapshot");
+      const endIdx = source.indexOf("\nfunction computeDataFreshnessDays");
+      const cacheBlock = source.slice(startIdx, endIdx);
       expect(cacheBlock).toContain("ENGINE_VERSION");
       expect(cacheBlock).toContain("analysisVersion");
       expect(cacheBlock).toContain("SNAPSHOT_VERSION_INVALIDATED");
-      expect(cacheBlock).toContain("return null");
+      expect(cacheBlock).toContain("snapshot: null");
     });
 
     it("both engine and fetch-orchestrator must write analysisVersion to snapshots", async () => {
@@ -1185,9 +1214,11 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
       );
-      const cacheBlock = source.slice(source.indexOf("async function getCachedSnapshot"), source.indexOf("async function getCachedSnapshot") + 1200);
+      const startIdx = source.indexOf("async function getCachedSnapshot");
+      const endIdx = source.indexOf("\nfunction computeDataFreshnessDays");
+      const cacheBlock = source.slice(startIdx, endIdx);
       expect(cacheBlock).toContain("isSnapshotAnalyticallyComplete(snapshot)");
-      expect(cacheBlock).toContain("return null");
+      expect(cacheBlock).toContain("snapshot: null");
     });
 
     it("isSnapshotAnalyticallyComplete must log CACHE_INVALID_INCOMPLETE_SNAPSHOT on failure", async () => {
@@ -1205,7 +1236,9 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
       );
-      const cacheFunc = source.slice(source.indexOf("async function getCachedSnapshot"), source.indexOf("async function getCachedSnapshot") + 1500);
+      const startIdx = source.indexOf("async function getCachedSnapshot");
+      const endIdx = source.indexOf("\nfunction computeDataFreshnessDays");
+      const cacheFunc = source.slice(startIdx, endIdx);
       const versionCheck = cacheFunc.indexOf("snapshotVersion !== ENGINE_VERSION");
       const completenessCheck = cacheFunc.indexOf("isSnapshotAnalyticallyComplete");
       const freshnessCheck = cacheFunc.indexOf("age > freshnessMs");
@@ -1314,7 +1347,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
       );
-      const cacheFunc = source.slice(source.indexOf("async function getCachedSnapshot"), source.indexOf("async function getCachedSnapshot") + 1500);
+      const cacheFunc = source.slice(source.indexOf("async function getCachedSnapshot"), source.indexOf("\nfunction computeDataFreshnessDays"));
       const hashCheck = cacheFunc.indexOf("competitorHash");
       const versionCheck = cacheFunc.indexOf("ENGINE_VERSION");
       const completenessCheck = cacheFunc.indexOf("isSnapshotAnalyticallyComplete");
@@ -1332,7 +1365,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
       );
-      const cacheFunc = source.slice(source.indexOf("async function getCachedSnapshot"), source.indexOf("async function getCachedSnapshot") + 1200);
+      const cacheFunc = source.slice(source.indexOf("async function getCachedSnapshot"), source.indexOf("\nfunction computeDataFreshnessDays"));
       expect(cacheFunc).toContain("SNAPSHOT_VERSION_INVALIDATED");
       expect(cacheFunc).toContain("reason=engine_upgrade");
     });
@@ -1346,6 +1379,74 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("DO NOT increment for:");
       expect(source).toContain("Output schema changes");
       expect(source).toContain("Logging changes");
+    });
+
+    it("API must return cacheInvalidationReason and snapshotStatus fields", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/types.ts", "utf-8")
+      );
+      expect(source).toContain("cacheInvalidationReason");
+      expect(source).toContain("snapshotStatus");
+      expect(source).toContain("ENGINE_UPGRADE");
+      expect(source).toContain("COMPETITOR_SET_CHANGED");
+      expect(source).toContain("INCOMPLETE_SNAPSHOT");
+      expect(source).toContain("STALE");
+
+      const engineSource = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
+      );
+      expect(engineSource).toContain("snapshotStatus:");
+      expect(engineSource).toContain("cacheInvalidationReason");
+
+      const buildResultStart = engineSource.indexOf("export function buildResultFromSnapshot");
+      const buildResultEnd = engineSource.indexOf("export function buildDeterministicNarrative");
+      const buildResult = engineSource.slice(buildResultStart, buildResultEnd);
+      expect(buildResult).toContain("snapshotStatus:");
+      expect(buildResult).toContain("cacheInvalidationReason:");
+    });
+
+    it("getCachedSnapshot returns structured invalidation reasons (not just null)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
+      );
+      const cacheFunc = source.slice(source.indexOf("async function getCachedSnapshot"), source.indexOf("async function getCachedSnapshot") + 2000);
+      expect(cacheFunc).toContain('invalidationReason: "ENGINE_UPGRADE"');
+      expect(cacheFunc).toContain('invalidationReason: "COMPETITOR_SET_CHANGED"');
+      expect(cacheFunc).toContain('invalidationReason: "INCOMPLETE_SNAPSHOT"');
+      expect(cacheFunc).toContain('invalidationReason: "STALE"');
+      expect(cacheFunc).toContain('invalidationReason: null');
+    });
+
+    it("cache NEVER serves PARTIAL snapshots (filter by COMPLETE only)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
+      );
+      const cacheFunc = source.slice(source.indexOf("async function getCachedSnapshot"), source.indexOf("async function getCachedSnapshot") + 800);
+      expect(cacheFunc).toContain('eq(miSnapshots.status, "COMPLETE")');
+      expect(cacheFunc).not.toContain('eq(miSnapshots.status, "PARTIAL")');
+
+      const routesSource = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/routes.ts", "utf-8")
+      );
+      const snapshotRoute = routesSource.slice(routesSource.indexOf("snapshot/:campaignId"), routesSource.indexOf("snapshot/:campaignId") + 500);
+      expect(snapshotRoute).toContain('eq(miSnapshots.status, "COMPLETE")');
+    });
+
+    it("UI visually distinguishes PARTIAL from COMPLETE", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
+      );
+      expect(source).toContain("snapshotStatus === 'PARTIAL'");
+      expect(source).toContain("PARTIAL");
+      expect(source).toContain("should not be interpreted as final strategy");
+    });
+
+    it("UI displays engine upgrade message (not log-only)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
+      );
+      expect(source).toContain("cacheInvalidationReason === 'ENGINE_UPGRADE'");
+      expect(source).toContain("Analysis refreshed due to engine upgrade");
     });
 
     it("REGRESSION: same ENGINE_VERSION does not invalidate snapshot", async () => {
