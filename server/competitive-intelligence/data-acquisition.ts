@@ -284,10 +284,19 @@ async function _executeFetch(
       if (elapsed < FETCH_COOLDOWN_MS) {
         const hoursLeft = Math.ceil((FETCH_COOLDOWN_MS - elapsed) / (60 * 60 * 1000));
         console.log(`[DataAcq] 72h cooldown active for ${competitor.name}, ${hoursLeft}h remaining`);
+
+        const livePostCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
+          .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+        const liveCommentCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
+          .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
+
+        const postsCollected = Number(livePostCount[0]?.count || 0);
+        const commentsCollected = Number(liveCommentCount[0]?.count || 0);
+
         return {
           competitorId,
-          postsCollected: latestMetrics[0].postsCollected || 0,
-          commentsCollected: latestMetrics[0].commentsCollected || 0,
+          postsCollected,
+          commentsCollected,
           ctaCoverage: latestMetrics[0].ctaCoverage || 0,
           ctaTypes: latestMetrics[0].ctaTypes ? latestMetrics[0].ctaTypes.split(",") : [],
           followers: latestMetrics[0].followers,
@@ -320,6 +329,12 @@ async function _executeFetch(
 
   const batchId = `batch_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
   const postsToStore = scrapeResult.posts.slice(0, MAX_POSTS_TO_STORE);
+
+  await db.delete(ciCompetitorComments)
+    .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
+  await db.delete(ciCompetitorPosts)
+    .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+  console.log(`[DataAcq] Cleared old data for ${competitor.name} before re-insert`);
 
   let ctaCount = 0;
   const allCtaTypes: string[] = [];
@@ -410,11 +425,26 @@ async function _executeFetch(
   const carouselCount = postsToStore.filter(p => p.mediaType === "CAROUSEL").length;
   const contentMix = `Reels:${Math.round((reelCount / postsToStore.length) * 100)}%,Posts:${Math.round((imageCount / postsToStore.length) * 100)}%,Carousel:${Math.round((carouselCount / postsToStore.length) * 100)}%`;
 
+  const verifyPosts = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
+    .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+  const verifyComments = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
+    .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
+
+  const persistedPostCount = Number(verifyPosts[0]?.count || 0);
+  const persistedCommentCount = Number(verifyComments[0]?.count || 0);
+
+  if (persistedPostCount !== postsToStore.length) {
+    console.error(`[DataAcq] DATA_MISMATCH_ERROR for ${competitor.name}: inserted ${postsToStore.length} posts but DB has ${persistedPostCount}`);
+  }
+  if (persistedCommentCount !== commentsCollected) {
+    console.error(`[DataAcq] DATA_MISMATCH_ERROR for ${competitor.name}: inserted ${commentsCollected} comments but DB has ${persistedCommentCount}`);
+  }
+
   await db.insert(ciCompetitorMetricsSnapshot).values({
     competitorId,
     accountId,
-    postsCollected: postsToStore.length,
-    commentsCollected,
+    postsCollected: persistedPostCount,
+    commentsCollected: persistedCommentCount,
     ctaCoverage: Math.round(ctaCoverage * 100) / 100,
     ctaTypes: allCtaTypes.join(","),
     followers: scrapeResult.followers,
@@ -438,12 +468,12 @@ async function _executeFetch(
     })
     .where(eq(ciCompetitors.id, competitorId));
 
-  console.log(`[DataAcq] Completed for ${competitor.name}: ${postsToStore.length} posts, ${commentsCollected} comments, CTA coverage ${Math.round(ctaCoverage * 100)}%, method=${scrapeResult.collectionMethodUsed}`);
+  console.log(`[DataAcq] Completed for ${competitor.name}: ${persistedPostCount} posts (verified), ${persistedCommentCount} comments (verified), CTA coverage ${Math.round(ctaCoverage * 100)}%, method=${scrapeResult.collectionMethodUsed}`);
 
   return {
     competitorId,
-    postsCollected: postsToStore.length,
-    commentsCollected,
+    postsCollected: persistedPostCount,
+    commentsCollected: persistedCommentCount,
     ctaCoverage: Math.round(ctaCoverage * 100) / 100,
     ctaTypes: allCtaTypes,
     followers: scrapeResult.followers,

@@ -1,0 +1,172 @@
+Replit,
+
+We have a structural data inconsistency. This is not cosmetic. This is a persistence integrity issue.
+
+Observed behavior:
+
+Top Job Card shows:
+• 36 posts  
+• 44 comments  
+
+But competitor profile (e.g., Voral media) still shows:
+• 12 / 30 posts  
+• 17 / 100 comments  
+
+This means the fetch job counters and the persisted competitor record are out of sync.
+
+This must be treated as a data-layer fault until proven otherwise.
+
+You must audit ALL of the following immediately.
+
+────────────────────────
+1) Verify Where Fetch Counters Are Stored
+────────────────────────
+
+Confirm clearly:
+
+Are the 36 posts / 44 comments:
+
+A) Persisted into ci_competitors (or equivalent canonical table)?
+OR
+B) Stored only in mi_fetch_jobs.stage_statuses / job-level counters?
+
+If B → this is incorrect architecture.
+
+Fetch job counters must never be treated as authoritative.
+Only DB-persisted competitor records are source of truth.
+
+Required fix if not already implemented:
+
+After POSTS_FETCH and COMMENTS_FETCH:
+• Perform explicit upsert on competitor record:
+    - postsCollected
+    - commentsCollected
+    - lastFetchedAt
+    - coverage metrics
+• Wrap in transaction
+• Confirm rows affected > 0
+• Log update
+
+No stage should move to COMPLETE unless persistence succeeded.
+
+────────────────────────
+2) Snapshot vs Competitor Table Split
+────────────────────────
+
+Audit whether:
+
+• Snapshot pipeline reads from signal logs
+• Competitor branch UI reads from ci_competitors
+• Job card reads from job-level counters
+
+If these three sources differ → this is a split-brain system.
+
+Required structural rule:
+
+Single source of truth:
+Either:
+• Everything reads from canonical competitor table
+OR
+• Everything reads from latest snapshot
+
+No hybrid read paths.
+
+If hybrid exists → unify immediately.
+
+────────────────────────
+3) Query Invalidation & Cache Integrity
+────────────────────────
+
+After job COMPLETE:
+
+Ensure frontend invalidates:
+• ci-competitors
+• mi-v3-snapshot
+• history
+
+If competitor table updates but UI shows stale 12/17,
+then cache invalidation is broken.
+
+Add explicit queryClient.invalidateQueries for all 3 keys.
+
+────────────────────────
+4) Transactional Integrity of Fetch Stages
+────────────────────────
+
+Audit each stage:
+
+POSTS_FETCH:
+• Fetch
+• Persist
+• Verify persisted count matches fetched count
+• Then mark stage COMPLETE
+
+Same for COMMENTS_FETCH.
+
+If stage status flips before DB write commits → race condition.
+
+Enforce:
+
+BEGIN TRANSACTION  
+persist competitor metrics  
+persist signal logs  
+update job stage  
+COMMIT  
+
+No partial writes.
+
+────────────────────────
+5) Data Hash Verification
+────────────────────────
+
+After job completes:
+
+Compute dataHash from:
+• Post IDs
+• Comment sample IDs
+• lastFetchedAt
+
+Compare with previous snapshot.
+
+If hash changed but competitor record did not → persistence bug.
+
+Add assertion:
+If job counters != competitor DB counts → throw and log DATA_MISMATCH_ERROR.
+
+────────────────────────
+6) UI Rendering Source Audit
+────────────────────────
+
+Confirm explicitly:
+
+What does:
+• Job card read from?
+• Competitor branch read from?
+• Snapshot pipeline read from?
+
+List file + function names.
+
+No assumptions.
+
+────────────────────────
+
+Definition of Done:
+
+• Fetch counters and competitor record always match.
+• No job counter ever displayed unless persisted.
+• No split data sources.
+• No race conditions.
+• No stale UI cache.
+
+Reply with:
+
+1) Root cause identified (exact file + line)
+2) What was wrong
+3) What was fixed
+4) Proof of persistence (test or log output)
+5) PASS confirmation
+
+No general confirmations.
+Only structural evidence.
+
+— Samir

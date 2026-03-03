@@ -644,6 +644,84 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
     });
   });
 
+  describe("M-1) Data Integrity — Delete-Before-Insert & Verified Counts", () => {
+    it("should delete old posts/comments before re-inserting on fresh fetch", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
+      );
+      expect(source).toContain("db.delete(ciCompetitorComments)");
+      expect(source).toContain("db.delete(ciCompetitorPosts)");
+      const deleteCommentsIdx = source.indexOf("db.delete(ciCompetitorComments)");
+      const deletePostsIdx = source.indexOf("db.delete(ciCompetitorPosts)");
+      const insertPostsIdx = source.indexOf("db.insert(ciCompetitorPosts)");
+      expect(deleteCommentsIdx).toBeLessThan(insertPostsIdx);
+      expect(deletePostsIdx).toBeLessThan(insertPostsIdx);
+    });
+
+    it("should verify persisted counts after insertion", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
+      );
+      expect(source).toContain("DATA_MISMATCH_ERROR");
+      expect(source).toContain("persistedPostCount");
+      expect(source).toContain("persistedCommentCount");
+      const verifyIdx = source.indexOf("persistedPostCount");
+      const snapshotIdx = source.indexOf("db.insert(ciCompetitorMetricsSnapshot)");
+      expect(verifyIdx).toBeLessThan(snapshotIdx);
+    });
+
+    it("should write verified counts to metrics snapshot (not raw insert count)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
+      );
+      const snapshotBlock = source.slice(
+        source.indexOf("db.insert(ciCompetitorMetricsSnapshot)"),
+        source.indexOf("db.insert(ciCompetitorMetricsSnapshot)") + 300
+      );
+      expect(snapshotBlock).toContain("persistedPostCount");
+      expect(snapshotBlock).toContain("persistedCommentCount");
+      expect(snapshotBlock).not.toContain("postsToStore.length");
+    });
+
+    it("should return verified counts from fetchCompetitorData", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
+      );
+      const completedLogIdx = source.indexOf("posts (verified)");
+      expect(completedLogIdx).toBeGreaterThan(-1);
+      const returnAfterLog = source.slice(completedLogIdx, completedLogIdx + 300);
+      expect(returnAfterLog).toContain("persistedPostCount");
+      expect(returnAfterLog).toContain("persistedCommentCount");
+    });
+
+    it("should use live DB counts (not stale metrics) in cooldown path", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
+      );
+      const cooldownSection = source.slice(
+        source.indexOf("72h cooldown active"),
+        source.indexOf("72h cooldown active") + 600
+      );
+      expect(cooldownSection).toContain("livePostCount");
+      expect(cooldownSection).toContain("liveCommentCount");
+      expect(cooldownSection).not.toContain("latestMetrics[0].postsCollected");
+      expect(cooldownSection).not.toContain("latestMetrics[0].commentsCollected");
+    });
+
+    it("getCompetitorDataCoverage should use live count(*) not metrics snapshot", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
+      );
+      const coverageFn = source.slice(
+        source.indexOf("export async function getCompetitorDataCoverage"),
+        source.indexOf("export async function getCompetitorDataCoverage") + 500
+      );
+      expect(coverageFn).toContain("count(*)");
+      expect(coverageFn).toContain("ciCompetitorPosts");
+      expect(coverageFn).toContain("ciCompetitorComments");
+    });
+  });
+
   describe("M) Build-a-Plan Reads Only (No Compute)", () => {
     it("should not import compute functions in orchestrator-routes", async () => {
       const source = await import("fs").then(fs =>
