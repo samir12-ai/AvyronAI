@@ -223,7 +223,7 @@ const MAX_POSTS_TO_STORE = 60;
 const MAX_COMMENTS_PER_POST = 20;
 const MAX_COMMENT_POSTS = 30;
 const INSTAGRAM_PUBLIC_API_POST_CEILING = 12;
-const MIN_POSTS_THRESHOLD = INSTAGRAM_PUBLIC_API_POST_CEILING;
+const MIN_POSTS_THRESHOLD = 30;
 const MIN_COMMENTS_THRESHOLD = 100;
 
 const activeFetches = new Map<string, Promise<FetchResult>>();
@@ -343,14 +343,12 @@ async function _executeFetch(
   const batchId = `batch_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
   const postsToStore = scrapeResult.posts.slice(0, MAX_POSTS_TO_STORE);
 
-  await db.delete(ciCompetitorComments)
-    .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
-  await db.delete(ciCompetitorPosts)
-    .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
-  console.log(`[DataAcq] Cleared old data for ${competitor.name} before re-insert`);
-
   let ctaCount = 0;
   const allCtaTypes: string[] = [];
+  let commentsCollected = 0;
+
+  const postInserts: Parameters<typeof db.insert>[0] extends any ? any[] : never = [];
+  const commentInserts: any[] = [];
 
   for (const post of postsToStore) {
     const cta = detectCTA(post.caption);
@@ -363,7 +361,7 @@ async function _executeFetch(
       }
     }
 
-    await db.insert(ciCompetitorPosts).values({
+    postInserts.push({
       competitorId,
       accountId,
       postId: post.postId,
@@ -383,7 +381,6 @@ async function _executeFetch(
     });
   }
 
-  let commentsCollected = 0;
   const sortedPosts = [...postsToStore]
     .filter(p => p.comments && p.comments > 0)
     .sort((a, b) => (b.comments || 0) - (a.comments || 0))
@@ -393,7 +390,7 @@ async function _executeFetch(
     if (post.caption) {
       const fakeComments = generateSyntheticCommentSamples(post);
       for (const comment of fakeComments.slice(0, MAX_COMMENTS_PER_POST)) {
-        await db.insert(ciCompetitorComments).values({
+        commentInserts.push({
           competitorId,
           accountId,
           postId: post.postId,
@@ -406,6 +403,21 @@ async function _executeFetch(
       }
     }
   }
+
+  await db.transaction(async (tx) => {
+    await tx.delete(ciCompetitorComments)
+      .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
+    await tx.delete(ciCompetitorPosts)
+      .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+
+    for (const postRow of postInserts) {
+      await tx.insert(ciCompetitorPosts).values(postRow);
+    }
+    for (const commentRow of commentInserts) {
+      await tx.insert(ciCompetitorComments).values(commentRow);
+    }
+  });
+  console.log(`[DataAcq] Transaction complete: deleted old data, inserted ${postInserts.length} posts + ${commentInserts.length} comments for ${competitor.name}`);
 
   const ctaCoverage = postsToStore.length > 0 ? ctaCount / postsToStore.length : 0;
 

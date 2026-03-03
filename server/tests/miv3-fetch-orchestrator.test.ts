@@ -645,15 +645,16 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
   });
 
   describe("M-1) Data Integrity — Delete-Before-Insert & Verified Counts", () => {
-    it("should delete old posts/comments before re-inserting on fresh fetch", async () => {
+    it("should delete old posts/comments before re-inserting in transaction", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
       );
-      expect(source).toContain("db.delete(ciCompetitorComments)");
-      expect(source).toContain("db.delete(ciCompetitorPosts)");
-      const deleteCommentsIdx = source.indexOf("db.delete(ciCompetitorComments)");
-      const deletePostsIdx = source.indexOf("db.delete(ciCompetitorPosts)");
-      const insertPostsIdx = source.indexOf("db.insert(ciCompetitorPosts)");
+      expect(source).toContain("db.transaction");
+      expect(source).toContain("tx.delete(ciCompetitorComments)");
+      expect(source).toContain("tx.delete(ciCompetitorPosts)");
+      const deleteCommentsIdx = source.indexOf("tx.delete(ciCompetitorComments)");
+      const deletePostsIdx = source.indexOf("tx.delete(ciCompetitorPosts)");
+      const insertPostsIdx = source.indexOf("tx.insert(ciCompetitorPosts)");
       expect(deleteCommentsIdx).toBeLessThan(insertPostsIdx);
       expect(deletePostsIdx).toBeLessThan(insertPostsIdx);
     });
@@ -740,17 +741,15 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(coverageCheck).toContain("MIN_COMMENTS_THRESHOLD");
     });
 
-    it("cooldown only applies when posts >= INSTAGRAM_PUBLIC_API_POST_CEILING AND comments >= 100", async () => {
+    it("cooldown only applies when posts >= 30 AND comments >= 100", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
       );
-      expect(source).toContain("INSTAGRAM_PUBLIC_API_POST_CEILING");
-      expect(source).toContain("MIN_POSTS_THRESHOLD = INSTAGRAM_PUBLIC_API_POST_CEILING");
-      const ceilingMatch = source.match(/const INSTAGRAM_PUBLIC_API_POST_CEILING\s*=\s*(\d+)/);
+      const thresholdLine = source.match(/const MIN_POSTS_THRESHOLD\s*=\s*(\d+)/);
       const commentLine = source.match(/const MIN_COMMENTS_THRESHOLD\s*=\s*(\d+)/);
-      expect(ceilingMatch).not.toBeNull();
+      expect(thresholdLine).not.toBeNull();
       expect(commentLine).not.toBeNull();
-      expect(parseInt(ceilingMatch![1])).toBe(12);
+      expect(parseInt(thresholdLine![1])).toBe(30);
       expect(parseInt(commentLine![1])).toBe(100);
     });
 
@@ -890,20 +889,82 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(maxPossible).toBeGreaterThanOrEqual(100);
     });
 
-    it("post threshold must reflect Instagram API ceiling (12), not unreachable 30", async () => {
+    it("post threshold must be 30 (not 12) — 12 is page ceiling, not sufficiency", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
       );
       expect(source).toContain("INSTAGRAM_PUBLIC_API_POST_CEILING = 12");
-      expect(source).toContain("MIN_POSTS_THRESHOLD = INSTAGRAM_PUBLIC_API_POST_CEILING");
+      const thresholdMatch = source.match(/const MIN_POSTS_THRESHOLD\s*=\s*(\d+)/);
+      expect(thresholdMatch).not.toBeNull();
+      expect(parseInt(thresholdMatch![1])).toBe(30);
+      expect(source).not.toContain("MIN_POSTS_THRESHOLD = INSTAGRAM_PUBLIC_API_POST_CEILING");
     });
 
-    it("fetch orchestrator must use Instagram API ceiling for post target", async () => {
+    it("fetch orchestrator must use 30 as post target (not 12)", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
       );
       expect(source).toContain("INSTAGRAM_PUBLIC_API_POST_CEILING = 12");
-      expect(source).toContain("MIN_POSTS_TARGET = INSTAGRAM_PUBLIC_API_POST_CEILING");
+      const targetMatch = source.match(/const MIN_POSTS_TARGET\s*=\s*(\d+)/);
+      expect(targetMatch).not.toBeNull();
+      expect(parseInt(targetMatch![1])).toBe(30);
+      expect(source).not.toContain("MIN_POSTS_TARGET = INSTAGRAM_PUBLIC_API_POST_CEILING");
+    });
+
+    it("REGRESSION GUARD: 12 posts with totalMediaCount > 12 must be INSUFFICIENT_DATA", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
+      );
+      expect(source).toContain("INSUFFICIENT_DATA");
+      expect(source).toContain("coverageSufficient");
+      const thresholdMatch = source.match(/const MIN_POSTS_THRESHOLD\s*=\s*(\d+)/);
+      expect(parseInt(thresholdMatch![1])).toBe(30);
+      expect(source).toContain("persistedPostCount >= MIN_POSTS_THRESHOLD");
+      expect(source).toContain("persistedCommentCount >= MIN_COMMENTS_THRESHOLD");
+      const insufficientIdx = source.indexOf("} else if (persistedPostCount >= 5)");
+      expect(insufficientIdx).toBeGreaterThan(-1);
+      const insufficientBlock = source.slice(insufficientIdx, insufficientIdx + 300);
+      expect(insufficientBlock).toContain("INSUFFICIENT_DATA");
+      expect(insufficientBlock).not.toContain('"SUCCESS"');
+    });
+
+    it("REGRESSION GUARD: paginationAttempted must be true when has_next_page is true", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
+      );
+      expect(source).toContain("paginationAttempted");
+      const attemptBlock = source.slice(source.indexOf("paginationAttempted = true"), source.indexOf("paginationAttempted = true") + 200);
+      expect(attemptBlock).toBeTruthy();
+      expect(source).toContain("has_next_page=true. Attempting v1 feed pagination");
+      expect(source).toContain("diag.paginationAttempted = true");
+    });
+
+    it("REGRESSION GUARD: no path silently accepts 12 posts as sufficient", async () => {
+      const daSource = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
+      );
+      const foSource = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(daSource).not.toContain("MIN_POSTS_THRESHOLD = 12");
+      expect(daSource).not.toContain("MIN_POSTS_THRESHOLD = INSTAGRAM_PUBLIC_API_POST_CEILING");
+      expect(foSource).not.toContain("MIN_POSTS_TARGET = 12");
+      expect(foSource).not.toContain("MIN_POSTS_TARGET = INSTAGRAM_PUBLIC_API_POST_CEILING");
+      const daThreshold = daSource.match(/const MIN_POSTS_THRESHOLD\s*=\s*(\d+)/);
+      const foTarget = foSource.match(/const MIN_POSTS_TARGET\s*=\s*(\d+)/);
+      expect(parseInt(daThreshold![1])).toBeGreaterThanOrEqual(30);
+      expect(parseInt(foTarget![1])).toBeGreaterThanOrEqual(30);
+    });
+
+    it("data atomicity: delete + insert wrapped in transaction", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
+      );
+      expect(source).toContain("db.transaction");
+      expect(source).toContain("tx.delete(ciCompetitorComments)");
+      expect(source).toContain("tx.delete(ciCompetitorPosts)");
+      expect(source).toContain("tx.insert(ciCompetitorPosts)");
+      expect(source).toContain("tx.insert(ciCompetitorComments)");
     });
   });
 

@@ -1,0 +1,107 @@
+Replit,
+
+The pagination issue is structurally fixed. Good.
+
+However, we are not finished.
+
+There is one architectural inconsistency that must be resolved immediately to prevent silent regression.
+
+────────────────────────
+1) Threshold Misalignment — Must Be Corrected
+────────────────────────
+
+You aligned:
+
+MIN_POSTS_THRESHOLD = INSTAGRAM_PUBLIC_API_POST_CEILING (12)
+
+This is dangerous long-term.
+
+Even though pagination now reaches 30+ posts, defining 12 as “sufficient” weakens MIv3 integrity and creates a future regression risk.
+
+We must restore strict analytical integrity:
+
+• TARGET_POSTS must remain 30  
+• MIN_POSTS_THRESHOLD must remain 30  
+• Ceiling (12 per page) must NOT redefine sufficiency  
+• Sufficiency = coverage depth, not API page size  
+
+If pagination fails and only 12 posts are collected, the system must:
+
+• Mark status = INSUFFICIENT_DATA  
+• Set missingSignalFlags.posts = true  
+• Downgrade confidence  
+• Explicitly log stopReason  
+
+Under no circumstance should 12 posts be considered sufficient.
+
+Fix this now.
+
+────────────────────────
+2) Mandatory Cleanup Checklist (You Must Execute All)
+────────────────────────
+
+Perform the following verification pass and confirm each item:
+
+A) Threshold Integrity
+- Confirm MIN_POSTS_TARGET = 30 in:
+    - fetch-orchestrator.ts
+    - data-acquisition.ts
+    - any shared constants file
+- Confirm UI threshold display shows 30, not 12
+- Confirm tests expect 30
+
+B) Stop Reason Classification
+- Ensure SINGLE_PAGE no longer exists
+- Ensure all failures map to:
+    - TARGET_REACHED
+    - NO_MORE_PAGES
+    - PROXY_BLOCKED
+    - RATE_LIMITED
+    - AUTH_REQUIRED
+    - ACCOUNT_PRIVATE
+    - UNKNOWN_FAILURE
+- No silent fallback allowed
+
+C) Regression Guard
+- Add test: if only 12 posts fetched and totalMediaCount > 12 → status must be INSUFFICIENT_DATA
+- Add test: paginationAttempted must be true when has_next_page = true
+
+D) Snapshot Integrity
+- Confirm snapshot creation only occurs after:
+    - SIGNAL_COMPUTE
+    - verified DB counts
+- Confirm snapshot version increments correctly
+- Confirm no duplicate snapshot writes
+
+E) Proxy Stability
+- Confirm same proxy session is used per pagination chain
+- Confirm session resets per new competitor
+- Confirm backoff does not exceed cost guard
+
+F) Data Atomicity (Optional but Recommended)
+- Wrap delete + insert + count verification in a transaction
+- Prevent partial state if crash mid-fetch
+
+────────────────────────
+Delivery Condition
+────────────────────────
+
+Do NOT respond with generic PASS.
+
+Reply with:
+
+1) Updated threshold values (exact constants and file locations)
+2) Confirmation that 30 remains the analytical minimum
+3) Test proof (name of test + result)
+4) Final stopReason enum list
+5) Confirmation no path silently accepts 12 posts as sufficient
+
+We are building a deterministic, enterprise-grade MIv3 system.
+
+No soft thresholds.
+No silent downgrades.
+No future regressions.
+
+Clean it fully.
+
+— Samir
