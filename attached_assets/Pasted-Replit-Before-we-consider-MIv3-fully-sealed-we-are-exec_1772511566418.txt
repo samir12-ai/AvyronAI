@@ -1,0 +1,157 @@
+Replit,
+
+Before we consider MIv3 fully sealed, we are executing a final structural weak point scan.
+
+This is not optional.  
+Reply PASS / FAIL per section.  
+If FAIL — implement the fix immediately and confirm DONE.
+
+No explanations without action.
+
+────────────────────────
+
+1️⃣ Job Lifecycle Integrity
+
+Test:
+
+- Trigger a fetch job and force a STOP_REASON (e.g., MAX_REQUESTS_REACHED).
+- Verify:
+  - status = COMPLETE (not FAILED)
+  - stageStatuses reflect the last completed stage
+  - UI displays completion with explicit stop reason
+
+If FAIL:
+- Implement explicit state handling:
+  STOP_REASON → COMPLETE_WITH_LIMITS (or COMPLETE + stopReason)
+- STOP conditions must never be treated as crash/failure.
+
+────────────────────────
+
+2️⃣ Polling Discipline
+
+Test:
+
+- Polling must stop immediately when job reaches:
+  COMPLETE / FAILED / COMPLETE_WITH_LIMITS
+- Switch tabs during RUNNING.
+- Switch campaigns during RUNNING.
+
+Expected:
+- No continued polling
+- No stale state
+- No memory leak
+- No cross-campaign job bleed
+
+If FAIL:
+- Add strict cleanup:
+  - clearInterval / AbortController
+  - stop polling on unmount
+  - stop polling on campaign change
+  - stop polling on terminal state
+
+────────────────────────
+
+3️⃣ Snapshot Freshness Contract
+
+Test:
+
+- After job completion:
+  - snapshot version increments
+  - new snapshotId generated
+  - CI UI reflects new snapshot immediately (no manual refresh)
+  - timeline/history records new entry
+
+If FAIL:
+- Ensure persistSnapshotAfterFetch() runs in same transaction as final stage.
+- Return newSnapshotId in job completion record.
+
+────────────────────────
+
+4️⃣ Idempotency Under Rapid Clicks
+
+Test:
+
+- Click “Auto-Fetch All Data” rapidly 10+ times.
+Expected:
+  - Same jobId returned while RUNNING
+  - No duplicate jobs
+  - No duplicated DB rows
+
+If FAIL:
+- Enforce DB-level unique constraint on:
+  (accountId, campaignId, competitorHash, status=RUNNING)
+- Use SELECT FOR UPDATE before creating new job.
+
+────────────────────────
+
+5️⃣ Concurrency Lock Cleanup
+
+Test:
+
+- Run 50 sequential jobs.
+Expected:
+  - activeJobs / activeLocks map does not grow indefinitely.
+  - No residual lock keys after completion.
+
+If FAIL:
+- Ensure activeJobs.delete(lockKey) in all execution paths (success, stop, failure).
+
+────────────────────────
+
+6️⃣ Proxy Cost Guard Validation
+
+Test:
+
+- Add maximum allowed competitors.
+- Verify:
+  - MAX_PAGES_PER_COMPETITOR enforced
+  - MAX_REQUESTS_PER_JOB enforced
+  - MAX_RUNTIME_MS enforced
+  - STOP_REASON logged when ceiling reached
+  - No infinite retry loop
+
+If FAIL:
+- Implement hard kill conditions with explicit STOP_REASON + telemetry log.
+
+────────────────────────
+
+7️⃣ MIv3 Single Ownership Enforcement
+
+Critical verification:
+
+- Confirm MIv3 is the only engine that:
+  - fetches competitor data
+  - computes dominance
+  - computes CTA intelligence
+  - computes confidence
+  - writes snapshots
+
+- Confirm Build-a-Plan:
+  - does NOT import dominance logic
+  - does NOT call CTA logic
+  - does NOT compute competitor signals
+  - only reads snapshot
+
+If FAIL:
+- Enforce isolation guard hard-block with audit violation.
+
+────────────────────────
+
+Definition of Acceptance:
+
+All sections PASS.
+No partial confirmations.
+No theoretical guarantees.
+Code-level enforcement only.
+
+Reply:
+
+1️⃣ PASS / FAIL  
+2️⃣ PASS / FAIL  
+3️⃣ PASS / FAIL  
+4️⃣ PASS / FAIL  
+5️⃣ PASS / FAIL  
+6️⃣ PASS / FAIL  
+7️⃣ PASS / FAIL  
+
+If any FAIL → fix immediately

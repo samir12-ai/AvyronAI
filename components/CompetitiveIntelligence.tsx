@@ -231,28 +231,59 @@ export default function CompetitiveIntelligence() {
   const [fetchingAll, setFetchingAll] = useState(false);
   const [fetchJobId, setFetchJobId] = useState<string | null>(null);
   const [fetchJobStatus, setFetchJobStatus] = useState<any>(null);
+  const prevCampaignRef = React.useRef(activeCampaignId);
+
+  useEffect(() => {
+    if (prevCampaignRef.current !== activeCampaignId) {
+      prevCampaignRef.current = activeCampaignId;
+      setFetchJobId(null);
+      setFetchJobStatus(null);
+      setFetchingAll(false);
+    }
+  }, [activeCampaignId]);
 
   useEffect(() => {
     if (!fetchJobId) return;
-    let cancelled = false;
+    const controller = new AbortController();
     let pollCount = 0;
     const maxPolls = 45;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      controller.abort();
+      if (timeoutId) clearTimeout(timeoutId);
+    };
 
     const poll = async () => {
+      if (controller.signal.aborted) return;
       try {
-        const res = await fetch(new URL(`/api/ci/mi-v3/fetch-status/${fetchJobId}`, baseUrl).toString());
-        if (!res.ok) return;
+        const res = await fetch(
+          new URL(`/api/ci/mi-v3/fetch-status/${fetchJobId}`, baseUrl).toString(),
+          { signal: controller.signal }
+        );
+        if (!res.ok || controller.signal.aborted) return;
         const data = await res.json();
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         setFetchJobStatus(data);
 
         if (data.status === 'COMPLETE' || data.status === 'FAILED') {
           setFetchingAll(false);
           setFetchJobId(null);
+
           queryClient.invalidateQueries({ queryKey: ['ci-competitors'] });
+          queryClient.invalidateQueries({ queryKey: ['mi-v3-snapshot'] });
+          queryClient.invalidateQueries({ queryKey: ['ci-miv3-history'] });
 
           if (data.status === 'COMPLETE') {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            const stopMsg = data.stopReason && data.stopReason !== 'COMPLETE'
+              ? `\nCompleted with limit: ${data.stopReason.replace(/_/g, ' ')}`
+              : '';
+            const snapMsg = data.newSnapshotId ? `\nNew snapshot: ${data.newSnapshotId.slice(0, 8)}` : '';
+            Alert.alert(
+              'Fetch Complete',
+              `${data.totalPostsFetched} posts, ${data.totalCommentsFetched} comments collected.${stopMsg}${snapMsg}`
+            );
           } else {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
           }
@@ -267,15 +298,20 @@ export default function CompetitiveIntelligence() {
           return;
         }
 
-        if (!cancelled) setTimeout(poll, 2000);
-      } catch {
-        if (!cancelled) setTimeout(poll, 3000);
+        if (!controller.signal.aborted) {
+          timeoutId = setTimeout(poll, 2000);
+        }
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return;
+        if (!controller.signal.aborted) {
+          timeoutId = setTimeout(poll, 3000);
+        }
       }
     };
 
-    setTimeout(poll, 1000);
-    return () => { cancelled = true; };
-  }, [fetchJobId]);
+    timeoutId = setTimeout(poll, 1000);
+    return cleanup;
+  }, [fetchJobId, activeCampaignId]);
 
   const fetchDataMutation = useMutation({
     mutationFn: async ({ id, forceRefresh }: { id: string; forceRefresh?: boolean }) => {
@@ -457,11 +493,23 @@ export default function CompetitiveIntelligence() {
         </Pressable>
       )}
 
-      {fetchJobStatus && fetchingAll && (
+      {fetchJobStatus && (fetchingAll || fetchJobStatus.status === 'COMPLETE' || fetchJobStatus.status === 'FAILED') && (
         <View style={{ backgroundColor: isDark ? '#1A2030' : '#F0F4FF', borderRadius: 8, padding: 10, marginBottom: 10, gap: 6 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-            <ActivityIndicator size={12} color="#8B5CF6" />
-            <Text style={{ fontSize: 12, fontWeight: '700', color: '#8B5CF6' }}>MI V3 DATA PULL</Text>
+            {fetchJobStatus.status === 'COMPLETE' ? (
+              <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+            ) : fetchJobStatus.status === 'FAILED' ? (
+              <Ionicons name="close-circle" size={14} color="#EF4444" />
+            ) : (
+              <ActivityIndicator size={12} color="#8B5CF6" />
+            )}
+            <Text style={{ fontSize: 12, fontWeight: '700', color: fetchJobStatus.status === 'COMPLETE' ? '#10B981' : fetchJobStatus.status === 'FAILED' ? '#EF4444' : '#8B5CF6' }}>
+              {fetchJobStatus.status === 'COMPLETE'
+                ? (fetchJobStatus.stopReason && fetchJobStatus.stopReason !== 'COMPLETE'
+                    ? `MI V3 COMPLETE (${fetchJobStatus.stopReason.replace(/_/g, ' ')})`
+                    : 'MI V3 DATA PULL COMPLETE')
+                : fetchJobStatus.status === 'FAILED' ? 'MI V3 DATA PULL FAILED' : 'MI V3 DATA PULL'}
+            </Text>
             <Text style={{ fontSize: 10, color: colors.textMuted, marginLeft: 'auto' }}>
               {fetchJobStatus.totalPostsFetched} posts • {fetchJobStatus.totalCommentsFetched} comments
             </Text>

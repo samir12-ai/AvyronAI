@@ -94,7 +94,8 @@ export type AuditEventType =
   | "FAILED_RESET_ERROR"
   | "JOB_SKIPPED"
   | "CI_ENGINE_ISOLATION_VIOLATION"
-  | "MI_FETCH_JOB_COMPLETE";
+  | "MI_FETCH_JOB_COMPLETE"
+  | "MI_SNAPSHOT_PERSISTED_POST_FETCH";
 
 export async function logAudit(
   accountId: string,

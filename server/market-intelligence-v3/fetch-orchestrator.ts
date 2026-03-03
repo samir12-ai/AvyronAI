@@ -55,6 +55,7 @@ export interface FetchJobStatus {
   totalCommentsFetched: number;
   competitorCount: number;
   stopReason?: StopReason;
+  newSnapshotId?: string;
   totalRequestsMade?: number;
   error?: string;
   durationMs?: number;
@@ -62,9 +63,36 @@ export interface FetchJobStatus {
   completedAt?: string;
 }
 
+const pendingSnapshotIds = new Map<string, string>();
+
 const activeJobs = new Map<string, Promise<void>>();
+const creationLocks = new Set<string>();
 
 export async function startFetchJob(accountId: string, campaignId: string): Promise<string> {
+  const lockKey = `${accountId}:${campaignId}`;
+
+  if (creationLocks.has(lockKey)) {
+    const existingRunning = await db.select().from(miFetchJobs)
+      .where(and(
+        eq(miFetchJobs.accountId, accountId),
+        eq(miFetchJobs.campaignId, campaignId),
+        eq(miFetchJobs.status, "RUNNING"),
+      ))
+      .orderBy(desc(miFetchJobs.createdAt))
+      .limit(1);
+    if (existingRunning.length > 0) return existingRunning[0].id;
+    throw new Error("Job creation already in progress. Please wait.");
+  }
+
+  creationLocks.add(lockKey);
+  try {
+    return await _createAndStartJob(accountId, campaignId, lockKey);
+  } finally {
+    creationLocks.delete(lockKey);
+  }
+}
+
+async function _createAndStartJob(accountId: string, campaignId: string, lockKey: string): Promise<string> {
   const competitors = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.isActive, true)));
 
@@ -81,8 +109,6 @@ export async function startFetchJob(accountId: string, campaignId: string): Prom
     socialProofPresence: c.socialProofPresence, posts: [], comments: [],
   }));
   const hash = computeCompetitorHash(competitorInputs);
-
-  const lockKey = `${accountId}:${campaignId}`;
 
   const existingRunning = await db.select().from(miFetchJobs)
     .where(and(
@@ -303,7 +329,7 @@ async function executeFetchJob(
       stage.postsFetched = fetchResult.postsCollected;
       totalPosts += fetchResult.postsCollected;
 
-      if (fetchResult.postsCollected < MIN_POSTS_TARGET && fetchResult.status !== "COOLDOWN") {
+      if (fetchResult.postsCollected < MIN_POSTS_TARGET && (fetchResult.status as string) !== "COOLDOWN") {
         limitReasons.push({
           competitorId: comp.id, competitorName: comp.name,
           stage: "POSTS_FETCH", reason: "INSUFFICIENT_DATA",
@@ -373,6 +399,18 @@ async function executeFetchJob(
     const durationMs = Date.now() - startTime;
     const allFailed = Object.values(stages).every(s => s.POSTS_FETCH === "FAILED");
     if (allFailed) stopReason = "ALL_FAILED";
+
+    const anySignalComplete2 = Object.values(stages).some(s => s.SIGNAL_COMPUTE === "COMPLETE");
+    if (anySignalComplete2) {
+      try {
+        const latestSnap = await db.select({ id: miSnapshots.id }).from(miSnapshots)
+          .where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.status, "COMPLETE")))
+          .orderBy(desc(miSnapshots.createdAt)).limit(1);
+        if (latestSnap.length > 0) {
+          pendingSnapshotIds.set(jobId, latestSnap[0].id);
+        }
+      } catch { }
+    }
 
     await db.update(miFetchJobs).set({
       status: allFailed ? "FAILED" : "COMPLETE",
@@ -586,9 +624,15 @@ export async function getFetchJobStatus(jobId: string): Promise<FetchJobStatus |
   if (!job) return null;
 
   const errorStr = job.error || undefined;
-  let stopReasonFromError: StopReason | undefined;
-  if (errorStr && errorStr.startsWith("STOP_REASON: ")) {
-    stopReasonFromError = errorStr.replace("STOP_REASON: ", "") as StopReason;
+  let stopReasonParsed: StopReason | undefined;
+  if (errorStr && errorStr.includes("STOP_REASON: ")) {
+    const match = errorStr.match(/STOP_REASON:\s*(\S+)/);
+    if (match) stopReasonParsed = match[1] as StopReason;
+  }
+
+  const snapshotId = pendingSnapshotIds.get(job.id);
+  if (snapshotId && (job.status === "COMPLETE" || job.status === "FAILED")) {
+    pendingSnapshotIds.delete(job.id);
   }
 
   return {
@@ -599,7 +643,8 @@ export async function getFetchJobStatus(jobId: string): Promise<FetchJobStatus |
     totalPostsFetched: job.totalPostsFetched || 0,
     totalCommentsFetched: job.totalCommentsFetched || 0,
     competitorCount: job.competitorCount || 0,
-    stopReason: stopReasonFromError,
+    stopReason: stopReasonParsed,
+    newSnapshotId: snapshotId,
     error: errorStr,
     durationMs: job.durationMs || undefined,
     createdAt: job.createdAt?.toISOString(),
