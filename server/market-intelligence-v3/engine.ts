@@ -100,7 +100,7 @@ function computeDataFreshnessDays(competitors: CompetitorInput[]): number {
   return Math.round((now - oldest) / (1000 * 60 * 60 * 24));
 }
 
-function computeVolatilityIndex(signalResults: any[]): number {
+export function computeVolatilityIndex(signalResults: any[]): number {
   if (signalResults.length === 0) return 0;
   const volatilities = signalResults.map((r: any) => {
     const s = r.signals;
@@ -114,7 +114,7 @@ function computeVolatilityIndex(signalResults: any[]): number {
   return Math.min(1, volatilities.reduce((s: number, v: number) => s + v, 0) / volatilities.length);
 }
 
-function buildEntryStrategy(confidence: any, trajectory: any, dominantIntent: string): string | null {
+export function buildEntryStrategy(confidence: any, trajectory: any, dominantIntent: string): string | null {
   if (confidence.guardDecision === "BLOCK") return null;
   if (confidence.overall < MI_CONFIDENCE.NO_AGGRESSIVE_THRESHOLD) return null;
 
@@ -140,7 +140,7 @@ function buildEntryStrategy(confidence: any, trajectory: any, dominantIntent: st
   }
 }
 
-function buildDefensiveRisks(confidence: any, trajectory: any, intents: any[]): string[] {
+export function buildDefensiveRisks(confidence: any, trajectory: any, intents: any[]): string[] {
   const risks: string[] = [];
 
   if (confidence.guardDecision === "BLOCK") {
@@ -474,7 +474,7 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
   };
 }
 
-function buildDeterministicNarrative(
+export function buildDeterministicNarrative(
   marketState: string,
   direction: string,
   dominantIntent: string,

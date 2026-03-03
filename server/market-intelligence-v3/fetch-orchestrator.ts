@@ -10,6 +10,7 @@ import { computeAllDominance } from "./dominance-module";
 import { computeTokenBudget, applySampling } from "./token-budget";
 import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
 import { computeCompetitorHash } from "./utils";
+import { computeVolatilityIndex, buildEntryStrategy, buildDefensiveRisks, buildDeterministicNarrative } from "./engine";
 import type { CompetitorInput } from "./types";
 import { logAudit } from "../audit";
 
@@ -635,6 +636,19 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     console.log(`[FetchOrch] Partial coverage snapshot: confidence downgraded to ${confidence.overall} (${confidence.level}), stopReason=${jobStopReason}`);
   }
 
+  const volatilityIndex = computeVolatilityIndex(signalResults);
+  const entryStrategy = buildEntryStrategy(confidence, trajectory, dominantIntent);
+  const defensiveRisks = buildDefensiveRisks(confidence, trajectory, intents);
+
+  let narrativeSynthesis: string | null = null;
+  if (executionMode !== "LIGHT" && confidence.guardDecision !== "BLOCK") {
+    try {
+      narrativeSynthesis = buildDeterministicNarrative(marketState, trajectoryDirection, dominantIntent, confidence, intents);
+    } catch (err) {
+      console.error(`[FetchOrch] Narrative synthesis failed:`, err);
+    }
+  }
+
   const previousSnapshots = await db.select().from(miSnapshots)
     .where(and(
       eq(miSnapshots.accountId, accountId),
@@ -674,11 +688,11 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
       partialCoverage: isPartialCoverage,
       jobStopReason: isPartialCoverage ? jobStopReason : null,
     }),
-    narrativeSynthesis: null,
-    entryStrategy: null,
-    defensiveRisks: JSON.stringify([]),
+    narrativeSynthesis,
+    entryStrategy,
+    defensiveRisks: JSON.stringify(defensiveRisks),
     missingSignalFlags: JSON.stringify(missingFlags),
-    volatilityIndex: 0,
+    volatilityIndex,
     dataFreshnessDays,
     overallConfidence: confidence.overall,
     confidenceLevel: confidence.level,
