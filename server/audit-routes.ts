@@ -382,8 +382,8 @@ export function registerAuditRoutes(app: Express) {
 
       gates.push({
         gateName: "confidenceScore",
-        status: (acct?.confidenceScore || 0) >= 50 ? "PASS" : "WARN",
-        reason: `Confidence: ${acct?.confidenceScore || 0}/100 (${acct?.confidenceStatus || "Unknown"})`,
+        status: (acct?.confidenceScore ?? 0) >= 50 ? "PASS" : "WARN",
+        reason: `Confidence: ${acct?.confidenceScore ?? 0}/100 (${acct?.confidenceStatus || "Unstable"})`,
         lastCheckedAt: now.toISOString(),
       });
 

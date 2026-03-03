@@ -16,6 +16,7 @@ import { eq, and, desc, sql, gte } from "drizzle-orm";
 import { logAudit } from "./audit";
 import { requireCampaign } from "./campaign-routes";
 import { ACTIVE_PLAN_STATUSES_SQL } from "./plan-constants";
+import { calculateConfidence, computeDecisionSuccessRate } from "./confidence";
 
 const router = Router();
 
@@ -128,6 +129,50 @@ router.get("/api/autopilot/status", requireCampaign, async (req, res) => {
       };
     }
 
+    const config = await db.select().from(guardrailConfig)
+      .where(eq(guardrailConfig.accountId, accountId))
+      .limit(1);
+    const volThreshold = config[0]?.volatilityThreshold ?? 0.15;
+
+    const { successRate: decSuccessRate, total: decTotal } = await computeDecisionSuccessRate(accountId);
+
+    const confidenceResult = calculateConfidence({
+      volatilityIndex: state.volatilityIndex || 0,
+      volatilityThreshold: volThreshold,
+      decisionSuccessRate: decSuccessRate,
+      totalDecisions: decTotal,
+      driftFlag: state.driftFlag || false,
+      guardrailTriggers24h: state.guardrailTriggers24h || 0,
+      currentState: state.state || "ACTIVE",
+    });
+
+    let liveScore = confidenceResult.score;
+
+    if (state.metaMode !== "REAL") {
+      liveScore -= 40;
+    }
+
+    if (planBinding.state === "BLOCKED") {
+      liveScore -= 15;
+    }
+
+    liveScore = Math.max(10, Math.min(100, liveScore));
+
+    let liveStatus: "Stable" | "Caution" | "Unstable";
+    if (liveScore >= 80) {
+      liveStatus = "Stable";
+    } else if (liveScore >= 60) {
+      liveStatus = "Caution";
+    } else {
+      liveStatus = "Unstable";
+    }
+
+    if (state.confidenceScore !== liveScore || state.confidenceStatus !== liveStatus) {
+      await db.update(accountState)
+        .set({ confidenceScore: liveScore, confidenceStatus: liveStatus, updatedAt: new Date() })
+        .where(eq(accountState.accountId, accountId));
+    }
+
     res.json({
       autopilotOn: state.autopilotOn,
       state: state.state,
@@ -136,8 +181,8 @@ router.get("/api/autopilot/status", requireCampaign, async (req, res) => {
       consecutiveFailures: state.consecutiveFailures,
       guardrailTriggers24h: state.guardrailTriggers24h,
       lastWorkerRun: state.lastWorkerRun,
-      confidenceScore: state.confidenceScore ?? 100,
-      confidenceStatus: state.confidenceStatus ?? "Stable",
+      confidenceScore: liveScore,
+      confidenceStatus: liveStatus,
       planBinding,
     });
   } catch (error) {
@@ -318,8 +363,8 @@ router.patch("/api/autopilot/status", requireCampaign, async (req, res) => {
       state: updated[0]?.state,
       volatilityIndex: updated[0]?.volatilityIndex,
       driftFlag: updated[0]?.driftFlag,
-      confidenceScore: updated[0]?.confidenceScore ?? 100,
-      confidenceStatus: updated[0]?.confidenceStatus ?? "Stable",
+      confidenceScore: updated[0]?.confidenceScore ?? 0,
+      confidenceStatus: updated[0]?.confidenceStatus ?? "Unstable",
     });
   } catch (error) {
     console.error("[Autopilot] Error updating status:", error);
