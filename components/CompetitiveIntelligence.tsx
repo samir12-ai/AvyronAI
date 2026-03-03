@@ -81,13 +81,16 @@ export default function CompetitiveIntelligence() {
   const [expandedCompetitor, setExpandedCompetitor] = useState<string | null>(null);
   const [addAndFetch, setAddAndFetch] = useState(false);
   const [miv3Result, setMiv3Result] = useState<any>(null);
+  const [editingCompetitorId, setEditingCompetitorId] = useState<string | null>(null);
 
-  const [newComp, setNewComp] = useState({
+  const emptyComp = {
     name: '', profileLink: '', businessType: '', primaryObjective: '',
     platform: 'instagram', postingFrequency: '', contentTypeRatio: '',
     engagementRatio: '', ctaPatterns: '', discountFrequency: '',
     hookStyles: '', messagingTone: '', socialProofPresence: '',
-  });
+  };
+
+  const [newComp, setNewComp] = useState(emptyComp);
 
   const { data: competitorsData, isLoading: loadingCompetitors } = useQuery({
     queryKey: ['ci-competitors'],
@@ -140,7 +143,7 @@ export default function CompetitiveIntelligence() {
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ['ci-competitors'] });
       setShowAddCompetitor(false);
-      setNewComp({ name: '', profileLink: '', businessType: '', primaryObjective: '', platform: 'instagram', postingFrequency: '', contentTypeRatio: '', engagementRatio: '', ctaPatterns: '', discountFrequency: '', hookStyles: '', messagingTone: '', socialProofPresence: '' });
+      setNewComp(emptyComp);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       if (addAndFetch && data?.competitor?.id) {
         setAddAndFetch(false);
@@ -151,6 +154,45 @@ export default function CompetitiveIntelligence() {
     },
     onError: (err: any) => Alert.alert('Error', err.message),
   });
+
+  const updateCompetitorMutation = useMutation({
+    mutationFn: async ({ id, comp }: { id: string; comp: any }) => {
+      const res = await fetch(new URL(`/api/ci/competitors/${id}`, baseUrl).toString(), {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...comp, accountId: 'default' }),
+      });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ci-competitors'] });
+      setShowAddCompetitor(false);
+      setEditingCompetitorId(null);
+      setNewComp(emptyComp);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: (err: any) => Alert.alert('Error', err.message),
+  });
+
+  const openEditModal = useCallback((comp: Competitor) => {
+    setEditingCompetitorId(comp.id);
+    setNewComp({
+      name: comp.name || '',
+      profileLink: comp.profileLink || '',
+      businessType: comp.businessType || '',
+      primaryObjective: comp.primaryObjective || '',
+      platform: comp.platform || 'instagram',
+      postingFrequency: comp.postingFrequency != null ? String(comp.postingFrequency) : '',
+      contentTypeRatio: comp.contentTypeRatio || '',
+      engagementRatio: comp.engagementRatio != null ? String(comp.engagementRatio) : '',
+      ctaPatterns: comp.ctaPatterns || '',
+      discountFrequency: comp.discountFrequency || '',
+      hookStyles: comp.hookStyles || '',
+      messagingTone: comp.messagingTone || '',
+      socialProofPresence: comp.socialProofPresence || '',
+    });
+    setShowAddCompetitor(true);
+  }, []);
 
   const analyzeMutation = useMutation({
     mutationFn: async () => {
@@ -332,7 +374,7 @@ export default function CompetitiveIntelligence() {
           <Text style={[s.countText, { color: '#8B5CF6' }]}>{competitors.length}</Text>
         </View>
         <Pressable
-          onPress={() => { Haptics.selectionAsync(); setShowAddCompetitor(true); }}
+          onPress={() => { Haptics.selectionAsync(); setEditingCompetitorId(null); setNewComp(emptyComp); setShowAddCompetitor(true); }}
           style={[s.addBtn, { backgroundColor: '#8B5CF6' }]}
         >
           <Ionicons name="add" size={16} color="#fff" />
@@ -449,6 +491,12 @@ export default function CompetitiveIntelligence() {
                       <Ionicons name="cloud-download-outline" size={14} color="#fff" />
                     )}
                     <Text style={s.fetchBtnText}>{isFetching ? 'Fetching...' : (dc?.postsCollected || 0) > 0 ? 'Refresh Data' : 'Auto-Fetch Data'}</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => { Haptics.selectionAsync(); openEditModal(comp); }}
+                    style={s.editBtn}
+                  >
+                    <Ionicons name="create-outline" size={14} color="#8B5CF6" />
                   </Pressable>
                   <Pressable
                     onPress={() => {
@@ -999,23 +1047,33 @@ export default function CompetitiveIntelligence() {
       {activeView === 'recommendations' && renderRecommendations()}
       {activeView === 'timeline' && renderTimeline()}
 
-      <Modal visible={showAddCompetitor} animationType="slide" transparent onRequestClose={() => { setShowAddCompetitor(false); }}>
+      <Modal visible={showAddCompetitor} animationType="slide" transparent onRequestClose={() => { setShowAddCompetitor(false); setEditingCompetitorId(null); setNewComp(emptyComp); }}>
         <View style={s.modalOverlay}>
           <View style={[s.modalContent, { backgroundColor: isDark ? '#0F1419' : '#fff' }]}>
             <View style={s.modalHeader}>
-              <Text style={[s.modalTitle, { color: colors.text }]}>Add Competitor</Text>
-              <Pressable onPress={() => { setShowAddCompetitor(false); }}>
+              <Text style={[s.modalTitle, { color: colors.text }]}>{editingCompetitorId ? 'Edit Competitor' : 'Add Competitor'}</Text>
+              <Pressable onPress={() => { setShowAddCompetitor(false); setEditingCompetitorId(null); setNewComp(emptyComp); }}>
                 <Ionicons name="close" size={24} color={colors.textMuted} />
               </Pressable>
             </View>
 
             <ScrollView style={s.modalScroll} showsVerticalScrollIndicator={false}>
-              <View style={[s.aiHintCard, { backgroundColor: '#10B981' + '10', borderColor: '#10B981' + '30' }]}>
-                <Ionicons name="cloud-download-outline" size={18} color="#10B981" />
-                <Text style={[s.aiHintText, { color: colors.textSecondary }]}>
-                  Add the competitor, then use Auto-Fetch on their card to collect posts, comments, and signals automatically.
-                </Text>
-              </View>
+              {!editingCompetitorId && (
+                <View style={[s.aiHintCard, { backgroundColor: '#10B981' + '10', borderColor: '#10B981' + '30' }]}>
+                  <Ionicons name="cloud-download-outline" size={18} color="#10B981" />
+                  <Text style={[s.aiHintText, { color: colors.textSecondary }]}>
+                    Add the competitor, then use Auto-Fetch on their card to collect posts, comments, and signals automatically.
+                  </Text>
+                </View>
+              )}
+              {editingCompetitorId && (
+                <View style={[s.aiHintCard, { backgroundColor: '#8B5CF6' + '10', borderColor: '#8B5CF6' + '30' }]}>
+                  <Ionicons name="create-outline" size={18} color="#8B5CF6" />
+                  <Text style={[s.aiHintText, { color: colors.textSecondary }]}>
+                    Update competitor details to fix missing fields and improve analysis accuracy.
+                  </Text>
+                </View>
+              )}
 
               <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Company Name *</Text>
               <TextInput
@@ -1055,55 +1113,85 @@ export default function CompetitiveIntelligence() {
                 placeholderTextColor={colors.textMuted}
               />
 
-              <Pressable
-                onPress={() => {
-                  if (!newComp.name || !newComp.profileLink || !newComp.businessType || !newComp.primaryObjective) {
-                    Alert.alert('Required Fields', 'Name, Profile URL, Business Type, and Primary Objective are required');
-                    return;
-                  }
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                  setAddAndFetch(true);
-                  addCompetitorMutation.mutate(newComp);
-                }}
-                style={[s.autoAnalyzeBtn, { opacity: addCompetitorMutation.isPending ? 0.7 : 1 }]}
-                disabled={addCompetitorMutation.isPending}
-              >
-                {addCompetitorMutation.isPending ? (
-                  <>
-                    <ActivityIndicator size="small" color="#fff" />
-                    <Text style={s.autoAnalyzeBtnText}>Adding competitor...</Text>
-                  </>
-                ) : (
-                  <>
-                    <Ionicons name="add-circle" size={18} color="#fff" />
-                    <Text style={s.autoAnalyzeBtnText}>Add & Auto-Fetch Data</Text>
-                  </>
-                )}
-              </Pressable>
+              {editingCompetitorId ? (
+                <Pressable
+                  onPress={() => {
+                    if (!newComp.name || !newComp.profileLink || !newComp.businessType || !newComp.primaryObjective) {
+                      Alert.alert('Required Fields', 'Name, Profile URL, Business Type, and Primary Objective are required');
+                      return;
+                    }
+                    if (!editingCompetitorId) return;
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                    updateCompetitorMutation.mutate({ id: editingCompetitorId, comp: newComp });
+                  }}
+                  style={[s.autoAnalyzeBtn, { opacity: updateCompetitorMutation.isPending ? 0.7 : 1 }]}
+                  disabled={updateCompetitorMutation.isPending}
+                >
+                  {updateCompetitorMutation.isPending ? (
+                    <>
+                      <ActivityIndicator size="small" color="#fff" />
+                      <Text style={s.autoAnalyzeBtnText}>Saving changes...</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                      <Text style={s.autoAnalyzeBtnText}>Save Changes</Text>
+                    </>
+                  )}
+                </Pressable>
+              ) : (
+                <>
+                  <Pressable
+                    onPress={() => {
+                      if (!newComp.name || !newComp.profileLink || !newComp.businessType || !newComp.primaryObjective) {
+                        Alert.alert('Required Fields', 'Name, Profile URL, Business Type, and Primary Objective are required');
+                        return;
+                      }
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                      setAddAndFetch(true);
+                      addCompetitorMutation.mutate(newComp);
+                    }}
+                    style={[s.autoAnalyzeBtn, { opacity: addCompetitorMutation.isPending ? 0.7 : 1 }]}
+                    disabled={addCompetitorMutation.isPending}
+                  >
+                    {addCompetitorMutation.isPending ? (
+                      <>
+                        <ActivityIndicator size="small" color="#fff" />
+                        <Text style={s.autoAnalyzeBtnText}>Adding competitor...</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Ionicons name="add-circle" size={18} color="#fff" />
+                        <Text style={s.autoAnalyzeBtnText}>Add & Auto-Fetch Data</Text>
+                      </>
+                    )}
+                  </Pressable>
 
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 12 }}>
-                <View style={{ flex: 1, height: 1, backgroundColor: isDark ? '#1A2030' : '#E2E8E4' }} />
-                <Text style={{ fontSize: 11, color: colors.textMuted }}>or</Text>
-                <View style={{ flex: 1, height: 1, backgroundColor: isDark ? '#1A2030' : '#E2E8E4' }} />
-              </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 12 }}>
+                    <View style={{ flex: 1, height: 1, backgroundColor: isDark ? '#1A2030' : '#E2E8E4' }} />
+                    <Text style={{ fontSize: 11, color: colors.textMuted }}>or</Text>
+                    <View style={{ flex: 1, height: 1, backgroundColor: isDark ? '#1A2030' : '#E2E8E4' }} />
+                  </View>
 
-              <Pressable
-                onPress={() => {
-                  if (!newComp.name || !newComp.profileLink || !newComp.businessType || !newComp.primaryObjective) {
-                    Alert.alert('Required Fields', 'Name, Profile URL, Business Type, and Primary Objective are required');
-                    return;
-                  }
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  setAddAndFetch(false);
-                  addCompetitorMutation.mutate(newComp);
-                }}
-                style={[s.submitBtn, { opacity: addCompetitorMutation.isPending ? 0.6 : 1 }]}
-                disabled={addCompetitorMutation.isPending}
-              >
-                {addCompetitorMutation.isPending ? <ActivityIndicator size="small" color="#fff" /> :
-                  <Text style={s.submitBtnText}>Add Only (Fetch Later)</Text>
-                }
-              </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      if (!newComp.name || !newComp.profileLink || !newComp.businessType || !newComp.primaryObjective) {
+                        Alert.alert('Required Fields', 'Name, Profile URL, Business Type, and Primary Objective are required');
+                        return;
+                      }
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      setAddAndFetch(false);
+                      addCompetitorMutation.mutate(newComp);
+                    }}
+                    style={[s.submitBtn, { opacity: addCompetitorMutation.isPending ? 0.6 : 1 }]}
+                    disabled={addCompetitorMutation.isPending}
+                  >
+                    {addCompetitorMutation.isPending ? <ActivityIndicator size="small" color="#fff" /> :
+                      <Text style={s.submitBtnText}>Add Only (Fetch Later)</Text>
+                    }
+                  </Pressable>
+                </>
+              )}
 
               <View style={{ height: 40 }} />
             </ScrollView>
@@ -1174,6 +1262,7 @@ const s = StyleSheet.create({
   detailRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   detailLabel: { fontSize: 11, fontWeight: '600', width: 80 },
   detailValue: { fontSize: 11, flex: 1 },
+  editBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: '#8B5CF6' + '15', borderRadius: 8 },
   removeBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: '#EF4444' + '15', borderRadius: 8 },
   removeBtnText: { fontSize: 12, fontWeight: '600' },
   autoFetchAllBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, backgroundColor: '#10B981', borderRadius: 8, paddingVertical: 10, marginBottom: 10 },

@@ -78,9 +78,9 @@ export function registerCiCompetitorRoutes(app: Express) {
         profileLink,
         businessType,
         primaryObjective,
-        postingFrequency: postingFrequency != null ? parseInt(postingFrequency) : null,
+        postingFrequency: postingFrequency !== undefined && postingFrequency !== null && postingFrequency !== '' ? (isNaN(parseInt(postingFrequency)) ? null : parseInt(postingFrequency)) : null,
         contentTypeRatio: contentTypeRatio || null,
-        engagementRatio: engagementRatio != null ? parseFloat(engagementRatio) : null,
+        engagementRatio: engagementRatio !== undefined && engagementRatio !== null && engagementRatio !== '' ? (isNaN(parseFloat(engagementRatio)) ? null : parseFloat(engagementRatio)) : null,
         ctaPatterns: ctaPatterns || null,
         discountFrequency: discountFrequency || null,
         hookStyles: hookStyles || null,
@@ -114,8 +114,8 @@ export function registerCiCompetitorRoutes(app: Express) {
 
       for (const f of fields) {
         if (req.body[f] !== undefined) {
-          if (f === "postingFrequency") updates[f] = req.body[f] != null ? parseInt(req.body[f]) : null;
-          else if (f === "engagementRatio") updates[f] = req.body[f] != null ? parseFloat(req.body[f]) : null;
+          if (f === "postingFrequency") { const v = req.body[f]; updates[f] = v !== undefined && v !== null && v !== '' ? (isNaN(parseInt(v)) ? null : parseInt(v)) : null; }
+          else if (f === "engagementRatio") { const v = req.body[f]; updates[f] = v !== undefined && v !== null && v !== '' ? (isNaN(parseFloat(v)) ? null : parseFloat(v)) : null; }
           else updates[f] = req.body[f];
         }
       }
