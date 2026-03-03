@@ -249,23 +249,12 @@ export default function CompetitiveIntelligence() {
         if (data.status === 'COMPLETE' || data.status === 'FAILED') {
           setFetchingAll(false);
           setFetchJobId(null);
-          setFetchJobStatus(data);
           queryClient.invalidateQueries({ queryKey: ['ci-competitors'] });
-
-          const limitReasons = data.fetchLimitReasons || [];
-          const cooldownCount = limitReasons.filter((r: any) => r.reason === 'COOLDOWN').length;
-          const totalComps = Object.keys(data.stageStatuses || {}).length;
 
           if (data.status === 'COMPLETE') {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            if (cooldownCount === totalComps && totalComps > 0) {
-              Alert.alert('All On Cooldown', `All ${totalComps} competitors were fetched recently (within 72h). Data is already up to date.`);
-            } else {
-              Alert.alert('Data Pull Complete', `${data.totalPostsFetched} posts, ${data.totalCommentsFetched} comments collected.${cooldownCount > 0 ? ` ${cooldownCount} competitor(s) on 72h cooldown.` : ''}`);
-            }
           } else {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            Alert.alert('Data Pull Failed', data.error || 'Some competitors could not be fetched.');
           }
           return;
         }
@@ -284,7 +273,7 @@ export default function CompetitiveIntelligence() {
       }
     };
 
-    poll();
+    setTimeout(poll, 1000);
     return () => { cancelled = true; };
   }, [fetchJobId]);
 
@@ -468,29 +457,13 @@ export default function CompetitiveIntelligence() {
         </Pressable>
       )}
 
-      {fetchJobStatus && (fetchingAll || fetchJobStatus.status === 'COMPLETE' || fetchJobStatus.status === 'FAILED') && (
+      {fetchJobStatus && fetchingAll && (
         <View style={{ backgroundColor: isDark ? '#1A2030' : '#F0F4FF', borderRadius: 8, padding: 10, marginBottom: 10, gap: 6 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-            {fetchJobStatus.status === 'COMPLETE' ? (
-              <Ionicons name="checkmark-circle" size={14} color="#10B981" />
-            ) : fetchJobStatus.status === 'FAILED' ? (
-              <Ionicons name="close-circle" size={14} color="#EF4444" />
-            ) : (
-              <ActivityIndicator size={12} color="#8B5CF6" />
-            )}
-            <Text style={{ fontSize: 12, fontWeight: '700', color: fetchJobStatus.status === 'COMPLETE' ? '#10B981' : fetchJobStatus.status === 'FAILED' ? '#EF4444' : '#8B5CF6' }}>
-              {fetchJobStatus.status === 'COMPLETE' ? 'MI V3 DATA PULL COMPLETE' : fetchJobStatus.status === 'FAILED' ? 'MI V3 DATA PULL FAILED' : 'MI V3 DATA PULL'}
-            </Text>
-            {!fetchingAll && (
-              <Pressable onPress={() => setFetchJobStatus(null)} style={{ marginLeft: 'auto' }}>
-                <Ionicons name="close" size={14} color={colors.textMuted} />
-              </Pressable>
-            )}
-          </View>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Text style={{ fontSize: 10, color: colors.textMuted }}>
+            <ActivityIndicator size={12} color="#8B5CF6" />
+            <Text style={{ fontSize: 12, fontWeight: '700', color: '#8B5CF6' }}>MI V3 DATA PULL</Text>
+            <Text style={{ fontSize: 10, color: colors.textMuted, marginLeft: 'auto' }}>
               {fetchJobStatus.totalPostsFetched} posts • {fetchJobStatus.totalCommentsFetched} comments
-              {fetchJobStatus.durationMs ? ` • ${(fetchJobStatus.durationMs / 1000).toFixed(1)}s` : ''}
             </Text>
           </View>
           {Object.values(fetchJobStatus.stageStatuses || {}).map((cs: any) => {
