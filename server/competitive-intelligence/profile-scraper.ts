@@ -187,41 +187,118 @@ function parsePostFromGraphQL(node: any, handle: string): ScrapedPost {
 
 const TARGET_POSTS = 30;
 const MAX_PAGINATION_PAGES = 4;
+const INSTAGRAM_PUBLIC_API_CEILING = 12;
 
-async function attemptWebProfileApi(handle: string): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number; paginationPages: number; rawFetchedCount: number }> {
+export type PaginationStopReason =
+  | "NO_MORE_PAGES"
+  | "TARGET_REACHED"
+  | "MAX_PAGES_REACHED"
+  | "INSTAGRAM_API_CEILING"
+  | "FEED_PAGINATION_AUTH_REQUIRED"
+  | "FEED_PAGINATION_BLOCKED"
+  | "FEED_PAGINATION_SUCCESS"
+  | "ACCOUNT_PRIVATE"
+  | "PROXY_BLOCKED"
+  | "NO_USER_ID"
+  | "RATE_LIMITED"
+  | "UNKNOWN_FAILURE";
+
+interface PaginationDiagnostics {
+  page1PostCount: number;
+  page1HasNextPage: boolean;
+  page1EndCursorPresent: boolean;
+  page1HttpStatus: number;
+  page1ResponseKB: number;
+  totalMediaCount: number | null;
+  userId: string | null;
+  paginationAttempted: boolean;
+  paginationMethod: string | null;
+  paginationHttpStatus: number | null;
+  paginationErrorDetail: string | null;
+  stopReason: PaginationStopReason;
+  pagesCompleted: number;
+  totalPostsFetched: number;
+  proxyUsed: boolean;
+}
+
+function getSessionDispatcher(): { dispatcher: ProxyAgent | undefined; sessionId: string | null } {
+  const proxy = getProxyConfig();
+  if (!proxy) return { dispatcher: undefined, sessionId: null };
+  const sessionId = `scrape_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  const sessionUsername = `${proxy.username}-session-${sessionId}`;
+  const sessionUrl = `http://${sessionUsername}:${proxy.password}@${proxy.host}:${proxy.port}`;
+  return {
+    dispatcher: new ProxyAgent({ uri: sessionUrl, requestTls: { rejectUnauthorized: false } }),
+    sessionId,
+  };
+}
+
+async function attemptWebProfileApi(handle: string): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number; paginationPages: number; rawFetchedCount: number; paginationStopReason: PaginationStopReason; diagnostics: PaginationDiagnostics }> {
   const apiUrl = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`;
 
   const headers: Record<string, string> = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
     "X-IG-App-ID": "936619743392459",
     "X-Requested-With": "XMLHttpRequest",
     "Accept": "*/*",
     "Accept-Language": "en-US,en;q=0.9",
     "Referer": `https://www.instagram.com/${handle}/`,
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
   };
 
-  const dispatcher = getProxyDispatcher();
+  const { dispatcher, sessionId } = getSessionDispatcher();
   const fetchOptions: any = { headers, redirect: "follow" };
   if (dispatcher) {
     fetchOptions.dispatcher = dispatcher;
   }
+  const proxyUsed = !!dispatcher;
 
-  console.log(`[CI Scraper] WEB_API: Fetching web_profile_info for ${handle} ${dispatcher ? "via Bright Data proxy" : "direct"}`);
+  console.log(`[CI Scraper] WEB_API: Fetching web_profile_info for ${handle} ${proxyUsed ? `via Bright Data proxy (session=${sessionId})` : "direct"}`);
+
+  const diag: PaginationDiagnostics = {
+    page1PostCount: 0,
+    page1HasNextPage: false,
+    page1EndCursorPresent: false,
+    page1HttpStatus: 0,
+    page1ResponseKB: 0,
+    totalMediaCount: null,
+    userId: null,
+    paginationAttempted: false,
+    paginationMethod: null,
+    paginationHttpStatus: null,
+    paginationErrorDetail: null,
+    stopReason: "UNKNOWN_FAILURE",
+    pagesCompleted: 1,
+    totalPostsFetched: 0,
+    proxyUsed,
+  };
 
   const response = await fetch(apiUrl, fetchOptions);
+  diag.page1HttpStatus = response.status;
+
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const text = await response.text();
   let bytesReceived = Buffer.byteLength(text, "utf-8");
+  diag.page1ResponseKB = Math.round(bytesReceived / 1024 * 10) / 10;
 
-  console.log(`[CI Scraper] WEB_API: Received ${(bytesReceived / 1024).toFixed(1)} KB for ${handle}`);
+  console.log(`[CI Scraper] WEB_API: PAGE_1 response ${diag.page1ResponseKB} KB, HTTP ${diag.page1HttpStatus} for ${handle}`);
 
   const data = JSON.parse(text);
   const user = data?.data?.user;
   if (!user) throw new Error("No user data in API response");
 
+  if (user.is_private === true) {
+    console.log(`[CI Scraper] WEB_API: ACCOUNT_PRIVATE for ${handle}`);
+    diag.stopReason = "ACCOUNT_PRIVATE";
+    return { posts: [], followers: user.edge_followed_by?.count ?? null, profileName: user.full_name || handle, bytesReceived, paginationPages: 1, rawFetchedCount: 0, paginationStopReason: "ACCOUNT_PRIVATE", diagnostics: diag };
+  }
+
   const profileName = user.full_name || user.username || handle;
   const followers = user.edge_followed_by?.count ?? null;
   const userId = user.id;
+  diag.userId = userId;
 
   const mediaData = user.edge_owner_to_timeline_media;
   const edges = mediaData?.edges || [];
@@ -236,63 +313,191 @@ async function attemptWebProfileApi(handle: string): Promise<{ posts: ScrapedPos
     }
   }
 
-  let paginationPages = 1;
-  let endCursor = mediaData?.page_info?.end_cursor;
-  let hasNextPage = mediaData?.page_info?.has_next_page === true;
+  diag.page1PostCount = posts.length;
+  diag.page1HasNextPage = mediaData?.page_info?.has_next_page === true;
+  diag.page1EndCursorPresent = !!mediaData?.page_info?.end_cursor;
+  diag.totalMediaCount = mediaData?.count ?? null;
 
-  while (hasNextPage && endCursor && posts.length < TARGET_POSTS && paginationPages < MAX_PAGINATION_PAGES && userId) {
-    paginationPages++;
+  console.log(`[CI Scraper] WEB_API: PAGE_1 AUDIT | posts=${diag.page1PostCount} | has_next_page=${diag.page1HasNextPage} | end_cursor=${diag.page1EndCursorPresent ? "PRESENT" : "NULL"} | total_media_count=${diag.totalMediaCount} | userId=${userId || "NULL"} | for ${handle}`);
+
+  if (!diag.page1HasNextPage) {
+    diag.stopReason = posts.length <= INSTAGRAM_PUBLIC_API_CEILING ? "NO_MORE_PAGES" : "NO_MORE_PAGES";
+    diag.totalPostsFetched = posts.length;
+    console.log(`[CI Scraper] WEB_API: NO_MORE_PAGES — profile has ${diag.totalMediaCount ?? "unknown"} total posts, API returned ${posts.length}. No pagination available.`);
+    return { posts, followers, profileName, bytesReceived, paginationPages: 1, rawFetchedCount: posts.length, paginationStopReason: "NO_MORE_PAGES", diagnostics: diag };
+  }
+
+  if (posts.length >= TARGET_POSTS) {
+    diag.stopReason = "TARGET_REACHED";
+    diag.totalPostsFetched = posts.length;
+    return { posts, followers, profileName, bytesReceived, paginationPages: 1, rawFetchedCount: posts.length, paginationStopReason: "TARGET_REACHED", diagnostics: diag };
+  }
+
+  if (!userId) {
+    diag.stopReason = "NO_USER_ID";
+    diag.totalPostsFetched = posts.length;
+    console.log(`[CI Scraper] WEB_API: NO_USER_ID — cannot paginate without userId`);
+    return { posts, followers, profileName, bytesReceived, paginationPages: 1, rawFetchedCount: posts.length, paginationStopReason: "NO_USER_ID", diagnostics: diag };
+  }
+
+  diag.paginationAttempted = true;
+  let paginationPages = 1;
+  let paginationSuccess = false;
+
+  console.log(`[CI Scraper] WEB_API: PAGE_1 has ${posts.length}/${TARGET_POSTS} posts with has_next_page=true. Attempting v1 feed pagination...`);
+
+  const lastPostNode = edges[edges.length - 1]?.node;
+  const lastPostId = lastPostNode?.id;
+
+  if (lastPostId) {
+    diag.paginationMethod = "V1_FEED_API";
     await randomDelay();
 
-    const variables = JSON.stringify({ id: userId, first: 12, after: endCursor });
-    const queryHash = "472f257a40c653c64c666ce877d59d2b";
-    const paginationUrl = `https://www.instagram.com/graphql/query/?query_hash=${queryHash}&variables=${encodeURIComponent(variables)}`;
+    const maxId = `${lastPostId}_${userId}`;
+    const feedUrl = `https://www.instagram.com/api/v1/feed/user/${userId}/?count=50&max_id=${maxId}`;
 
-    console.log(`[CI Scraper] WEB_API: Pagination page ${paginationPages} for ${handle} (have ${posts.length}/${TARGET_POSTS})`);
+    console.log(`[CI Scraper] WEB_API: PAGINATION_ATTEMPT | method=V1_FEED_API | userId=${userId} | max_id=${maxId.substring(0, 30)}... | for ${handle}`);
 
     try {
-      const pageResponse = await fetch(paginationUrl, fetchOptions);
-      if (!pageResponse.ok) {
-        console.log(`[CI Scraper] WEB_API: Pagination HTTP ${pageResponse.status}, stopping`);
-        break;
-      }
+      const feedResponse = await fetch(feedUrl, fetchOptions);
+      diag.paginationHttpStatus = feedResponse.status;
 
-      const pageText = await pageResponse.text();
-      bytesReceived += Buffer.byteLength(pageText, "utf-8");
-      const pageData = JSON.parse(pageText);
-      const pageMedia = pageData?.data?.user?.edge_owner_to_timeline_media;
-      const pageEdges = pageMedia?.edges || [];
+      console.log(`[CI Scraper] WEB_API: PAGINATION_RESPONSE | HTTP=${feedResponse.status} | Content-Type=${feedResponse.headers.get("content-type")} | for ${handle}`);
 
-      if (pageEdges.length === 0) {
-        console.log(`[CI Scraper] WEB_API: Pagination returned 0 edges, stopping`);
-        break;
-      }
+      if (feedResponse.ok) {
+        const feedText = await feedResponse.text();
+        const feedBytes = Buffer.byteLength(feedText, "utf-8");
+        bytesReceived += feedBytes;
 
-      for (const edge of pageEdges) {
-        const post = parsePostFromGraphQL(edge.node, handle);
-        if (!seenIds.has(post.postId)) {
-          seenIds.add(post.postId);
-          posts.push(post);
+        try {
+          const feedData = JSON.parse(feedText);
+          const feedItems = feedData?.items || [];
+
+          console.log(`[CI Scraper] WEB_API: PAGINATION_PAGE_2 | items=${feedItems.length} | more_available=${feedData?.more_available} | response_size=${(feedBytes / 1024).toFixed(1)}KB | for ${handle}`);
+
+          if (feedItems.length > 0) {
+            for (const item of feedItems) {
+              const post = parsePostFromV1Feed(item, handle);
+              if (!seenIds.has(post.postId)) {
+                seenIds.add(post.postId);
+                posts.push(post);
+              }
+            }
+            paginationPages = 2;
+            paginationSuccess = true;
+
+            let nextMaxId = feedData?.next_max_id;
+            while (feedData?.more_available && nextMaxId && posts.length < TARGET_POSTS && paginationPages < MAX_PAGINATION_PAGES) {
+              paginationPages++;
+              await randomDelay();
+
+              const nextFeedUrl = `https://www.instagram.com/api/v1/feed/user/${userId}/?count=50&max_id=${nextMaxId}`;
+              console.log(`[CI Scraper] WEB_API: PAGINATION_PAGE_${paginationPages} | have=${posts.length}/${TARGET_POSTS} | for ${handle}`);
+
+              try {
+                const nextResp = await fetch(nextFeedUrl, fetchOptions);
+                if (!nextResp.ok) {
+                  console.log(`[CI Scraper] WEB_API: PAGINATION_PAGE_${paginationPages} HTTP ${nextResp.status}, stopping`);
+                  break;
+                }
+                const nextText = await nextResp.text();
+                bytesReceived += Buffer.byteLength(nextText, "utf-8");
+                const nextData = JSON.parse(nextText);
+                const nextItems = nextData?.items || [];
+
+                if (nextItems.length === 0) break;
+
+                for (const item of nextItems) {
+                  const post = parsePostFromV1Feed(item, handle);
+                  if (!seenIds.has(post.postId)) {
+                    seenIds.add(post.postId);
+                    posts.push(post);
+                  }
+                }
+                nextMaxId = nextData?.next_max_id;
+                if (!nextData?.more_available) break;
+              } catch (err: any) {
+                console.log(`[CI Scraper] WEB_API: PAGINATION_PAGE_${paginationPages} error: ${err.message}`);
+                break;
+              }
+            }
+          }
+        } catch {
+          diag.paginationErrorDetail = "JSON_PARSE_FAILED";
+          console.log(`[CI Scraper] WEB_API: PAGINATION v1 feed response not valid JSON`);
+        }
+      } else {
+        const errBody = await feedResponse.text().catch(() => "");
+        const isAuthRequired = errBody.includes("require_login") || feedResponse.status === 401;
+        const isRateLimited = errBody.includes("wait a few minutes") || feedResponse.status === 429;
+
+        if (isAuthRequired) {
+          diag.paginationErrorDetail = "AUTH_REQUIRED: Instagram requires login for feed pagination beyond page 1";
+          diag.stopReason = "FEED_PAGINATION_AUTH_REQUIRED";
+          console.log(`[CI Scraper] WEB_API: PAGINATION_AUTH_REQUIRED | HTTP ${feedResponse.status} | Instagram requires authenticated session for v1/feed pagination | for ${handle}`);
+        } else if (isRateLimited) {
+          diag.paginationErrorDetail = "RATE_LIMITED";
+          diag.stopReason = "RATE_LIMITED";
+          console.log(`[CI Scraper] WEB_API: PAGINATION_RATE_LIMITED | HTTP ${feedResponse.status} | for ${handle}`);
+        } else {
+          diag.paginationErrorDetail = `HTTP_${feedResponse.status}: ${errBody.substring(0, 200)}`;
+          diag.stopReason = "FEED_PAGINATION_BLOCKED";
+          console.log(`[CI Scraper] WEB_API: PAGINATION_BLOCKED | HTTP ${feedResponse.status} | ${errBody.substring(0, 150)} | for ${handle}`);
         }
       }
-
-      endCursor = pageMedia?.page_info?.end_cursor;
-      hasNextPage = pageMedia?.page_info?.has_next_page === true;
     } catch (err: any) {
-      console.log(`[CI Scraper] WEB_API: Pagination error: ${err.message}, stopping`);
-      break;
+      diag.paginationErrorDetail = `NETWORK: ${err.message}`;
+      diag.stopReason = "PROXY_BLOCKED";
+      console.log(`[CI Scraper] WEB_API: PAGINATION_NETWORK_ERROR | ${err.message} | for ${handle}`);
     }
   }
 
+  if (paginationSuccess) {
+    diag.stopReason = posts.length >= TARGET_POSTS ? "TARGET_REACHED" :
+      paginationPages >= MAX_PAGINATION_PAGES ? "MAX_PAGES_REACHED" :
+      "FEED_PAGINATION_SUCCESS";
+    console.log(`[CI Scraper] WEB_API: PAGINATION_SUCCESS | ${posts.length} posts across ${paginationPages} pages | stopReason=${diag.stopReason} | for ${handle}`);
+  } else if (diag.stopReason === "UNKNOWN_FAILURE" || diag.stopReason === "FEED_PAGINATION_AUTH_REQUIRED" || diag.stopReason === "FEED_PAGINATION_BLOCKED") {
+    if (posts.length === INSTAGRAM_PUBLIC_API_CEILING && (diag.totalMediaCount ?? 0) > INSTAGRAM_PUBLIC_API_CEILING) {
+      diag.stopReason = "INSTAGRAM_API_CEILING" as PaginationStopReason;
+      console.log(`[CI Scraper] WEB_API: INSTAGRAM_API_CEILING | Profile has ${diag.totalMediaCount} posts but Instagram public API returns max ${INSTAGRAM_PUBLIC_API_CEILING} per request. Pagination requires authenticated session (login). | ${diag.paginationErrorDetail || "No error detail"} | for ${handle}`);
+    }
+  }
+
+  diag.pagesCompleted = paginationPages;
+  diag.totalPostsFetched = posts.length;
+
   const rawFetchedCount = posts.length;
-  const stopReason = !hasNextPage ? "NO_MORE_PAGES" :
-    posts.length >= TARGET_POSTS ? "TARGET_REACHED" :
-    paginationPages >= MAX_PAGINATION_PAGES ? "MAX_PAGES_REACHED" :
-    !userId ? "NO_USER_ID_FOR_PAGINATION" : "UNKNOWN";
+  const finalStopReason = diag.stopReason;
 
-  console.log(`[CI Scraper] WEB_API: Extracted ${posts.length} posts (${paginationPages} pages, stop=${stopReason}), ${followers ?? "unknown"} followers for ${handle}`);
+  console.log(`[CI Scraper] WEB_API: FINAL_AUDIT | posts=${posts.length} | pages=${paginationPages} | stopReason=${finalStopReason} | totalMediaOnProfile=${diag.totalMediaCount} | paginationAttempted=${diag.paginationAttempted} | paginationMethod=${diag.paginationMethod || "NONE"} | paginationHTTP=${diag.paginationHttpStatus || "N/A"} | error=${diag.paginationErrorDetail || "NONE"} | for ${handle}`);
 
-  return { posts, followers, profileName, bytesReceived, paginationPages, rawFetchedCount };
+  return { posts, followers, profileName, bytesReceived, paginationPages, rawFetchedCount, paginationStopReason: finalStopReason, diagnostics: diag };
+}
+
+function parsePostFromV1Feed(item: any, handle: string): ScrapedPost {
+  const shortcode = item.code || item.shortcode || "";
+  const caption = item.caption?.text || null;
+  const timestamp = item.taken_at || null;
+
+  let mediaType: ScrapedPost["mediaType"] = "IMAGE";
+  if (item.media_type === 2 || item.video_versions) mediaType = "REEL";
+  else if (item.media_type === 8 || item.carousel_media) mediaType = "CAROUSEL";
+  else if (item.media_type === 1) mediaType = "IMAGE";
+
+  return {
+    postId: item.pk?.toString() || item.id?.toString() || shortcode,
+    permalink: shortcode ? `https://www.instagram.com/p/${shortcode}/` : `https://www.instagram.com/${handle}/`,
+    mediaType,
+    timestamp: timestamp ? new Date(timestamp * 1000).toISOString() : null,
+    caption: caption ? String(caption).substring(0, 2000) : null,
+    likes: item.like_count ?? null,
+    comments: item.comment_count ?? null,
+    views: item.play_count ?? item.view_count ?? null,
+    videoUrl: item.video_versions?.[0]?.url || null,
+    displayUrl: item.image_versions2?.candidates?.[0]?.url || item.thumbnail_url || null,
+    shortcode,
+  };
 }
 
 async function attemptHtmlPageParse(profileUrl: string, handle: string): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number }> {
@@ -553,11 +758,12 @@ export async function scrapeInstagramProfile(rawUrl: string): Promise<ScrapeResu
     profileName = result.profileName;
     paginationPages = result.paginationPages;
     rawFetchedCount = result.rawFetchedCount;
+    paginationStopReason = result.paginationStopReason;
     scrapeStats.totalBytesEstimated += result.bytesReceived;
     if (posts.length > 0) {
       collectionMethodUsed = "WEB_API";
       scrapeStats.webApiSuccess++;
-      console.log(`[CI Scraper] WEB_API SUCCESS: ${posts.length} posts (${paginationPages} pages), ${followers ?? "unknown"} followers for ${handle}`);
+      console.log(`[CI Scraper] WEB_API SUCCESS: ${posts.length} posts (${paginationPages} pages, stop=${paginationStopReason}), ${followers ?? "unknown"} followers for ${handle}`);
     }
   } catch (err: any) {
     console.log(`[CI Scraper] WEB_API failed for ${handle}: ${err.message}, trying HTML_PARSE...`);
@@ -612,7 +818,7 @@ export async function scrapeInstagramProfile(rawUrl: string): Promise<ScrapeResu
   console.log(`[CI Scraper] Stats: total=${stats.totalRequests}, success=${stats.successRate}, blocked=${stats.blockedRate}, bandwidth=${stats.bandwidthMB}`);
 
   if (!paginationStopReason && posts.length > 0) {
-    paginationStopReason = posts.length >= TARGET_POSTS ? "TARGET_REACHED" : "SINGLE_PAGE";
+    paginationStopReason = posts.length >= TARGET_POSTS ? "TARGET_REACHED" : "INSTAGRAM_API_CEILING";
   }
 
   const result: ScrapeResult = {

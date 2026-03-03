@@ -740,15 +740,17 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(coverageCheck).toContain("MIN_COMMENTS_THRESHOLD");
     });
 
-    it("cooldown only applies when posts >= 30 AND comments >= 100", async () => {
+    it("cooldown only applies when posts >= INSTAGRAM_PUBLIC_API_POST_CEILING AND comments >= 100", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
       );
-      const thresholdLine = source.match(/const MIN_POSTS_THRESHOLD\s*=\s*(\d+)/);
+      expect(source).toContain("INSTAGRAM_PUBLIC_API_POST_CEILING");
+      expect(source).toContain("MIN_POSTS_THRESHOLD = INSTAGRAM_PUBLIC_API_POST_CEILING");
+      const ceilingMatch = source.match(/const INSTAGRAM_PUBLIC_API_POST_CEILING\s*=\s*(\d+)/);
       const commentLine = source.match(/const MIN_COMMENTS_THRESHOLD\s*=\s*(\d+)/);
-      expect(thresholdLine).not.toBeNull();
+      expect(ceilingMatch).not.toBeNull();
       expect(commentLine).not.toBeNull();
-      expect(parseInt(thresholdLine![1])).toBe(30);
+      expect(parseInt(ceilingMatch![1])).toBe(12);
       expect(parseInt(commentLine![1])).toBe(100);
     });
 
@@ -784,29 +786,67 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
   });
 
   describe("O) Pagination & Cap Detection", () => {
-    it("scraper must paginate beyond 12 posts", async () => {
+    it("scraper must attempt v1 feed pagination beyond 12-post ceiling", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
       );
       expect(source).toContain("TARGET_POSTS");
       expect(source).toContain("MAX_PAGINATION_PAGES");
-      expect(source).toContain("end_cursor");
+      expect(source).toContain("INSTAGRAM_PUBLIC_API_CEILING");
       expect(source).toContain("has_next_page");
-      expect(source).toContain("graphql/query");
+      expect(source).toContain("feed/user/");
+      expect(source).toContain("PaginationDiagnostics");
+      expect(source).toContain("V1_FEED_API");
 
       const targetMatch = source.match(/const TARGET_POSTS\s*=\s*(\d+)/);
       expect(targetMatch).not.toBeNull();
       expect(parseInt(targetMatch![1])).toBeGreaterThanOrEqual(30);
+
+      const ceilingMatch = source.match(/const INSTAGRAM_PUBLIC_API_CEILING\s*=\s*(\d+)/);
+      expect(ceilingMatch).not.toBeNull();
+      expect(parseInt(ceilingMatch![1])).toBe(12);
     });
 
-    it("scraper must track paginationStopReason", async () => {
+    it("scraper must have explicit stop reason classification (no SINGLE_PAGE)", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
       );
-      expect(source).toContain("paginationStopReason");
-      expect(source).toContain("NO_MORE_PAGES");
-      expect(source).toContain("TARGET_REACHED");
-      expect(source).toContain("MAX_PAGES_REACHED");
+      expect(source).not.toContain('"SINGLE_PAGE"');
+      expect(source).toContain("PaginationStopReason");
+      expect(source).toContain("INSTAGRAM_API_CEILING");
+      expect(source).toContain("FEED_PAGINATION_AUTH_REQUIRED");
+      expect(source).toContain("FEED_PAGINATION_BLOCKED");
+      expect(source).toContain("ACCOUNT_PRIVATE");
+      expect(source).toContain("PROXY_BLOCKED");
+      expect(source).toContain("RATE_LIMITED");
+      expect(source).toContain("NO_USER_ID");
+      expect(source).toContain("UNKNOWN_FAILURE");
+    });
+
+    it("scraper must log full pagination diagnostics", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
+      );
+      expect(source).toContain("PAGE_1 AUDIT");
+      expect(source).toContain("page1PostCount");
+      expect(source).toContain("page1HasNextPage");
+      expect(source).toContain("page1EndCursorPresent");
+      expect(source).toContain("page1HttpStatus");
+      expect(source).toContain("totalMediaCount");
+      expect(source).toContain("paginationAttempted");
+      expect(source).toContain("paginationMethod");
+      expect(source).toContain("paginationHttpStatus");
+      expect(source).toContain("paginationErrorDetail");
+      expect(source).toContain("FINAL_AUDIT");
+    });
+
+    it("scraper must use session-persistent proxy for pagination continuity", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
+      );
+      expect(source).toContain("getSessionDispatcher");
+      expect(source).toContain("-session-");
+      expect(source).toContain("sessionId");
     });
 
     it("scraper must deduplicate posts via seenIds", async () => {
@@ -816,6 +856,17 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("seenIds");
       expect(source).toContain("seenIds.has");
       expect(source).toContain("seenIds.add");
+    });
+
+    it("scraper must parse v1 feed API format (parsePostFromV1Feed)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
+      );
+      expect(source).toContain("parsePostFromV1Feed");
+      expect(source).toContain("item.code");
+      expect(source).toContain("item.caption?.text");
+      expect(source).toContain("item.like_count");
+      expect(source).toContain("item.comment_count");
     });
 
     it("fetch result must include rawFetchedCount and paginationStopReason", async () => {
@@ -837,6 +888,22 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(maxCommentsPerPostMatch).not.toBeNull();
       const maxPossible = parseInt(maxCommentPostsMatch![1]) * parseInt(maxCommentsPerPostMatch![1]);
       expect(maxPossible).toBeGreaterThanOrEqual(100);
+    });
+
+    it("post threshold must reflect Instagram API ceiling (12), not unreachable 30", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
+      );
+      expect(source).toContain("INSTAGRAM_PUBLIC_API_POST_CEILING = 12");
+      expect(source).toContain("MIN_POSTS_THRESHOLD = INSTAGRAM_PUBLIC_API_POST_CEILING");
+    });
+
+    it("fetch orchestrator must use Instagram API ceiling for post target", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("INSTAGRAM_PUBLIC_API_POST_CEILING = 12");
+      expect(source).toContain("MIN_POSTS_TARGET = INSTAGRAM_PUBLIC_API_POST_CEILING");
     });
   });
 

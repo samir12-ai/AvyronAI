@@ -1,0 +1,125 @@
+Replit,
+
+We are stopping here.
+
+This is no longer a MIv3 logic issue.  
+This is a scraping-layer failure, and it must be fixed structurally before anything is considered complete.
+
+The system is still returning SINGLE PAGE (12 posts) despite pagination logic being added.
+
+That means:
+
+• Either pagination is not executing  
+• Or the second request is blocked  
+• Or cursor extraction is failing  
+• Or proxy/auth headers are insufficient  
+• Or Instagram is silently degrading the response  
+
+Regardless of which — the result is unacceptable.
+
+Manual input is NOT an option.  
+The client must never be required to fill missing posts or comments manually.
+
+────────────────────────
+MANDATORY OBJECTIVE
+────────────────────────
+
+Auto-Fetch must reliably:
+
+• Collect ≥ 30 posts when available
+• Collect ≥ 100 comments when available
+• Only stop when:
+    - NO_MORE_PAGES
+    - ACCOUNT_PRIVATE
+    - PROXY_BLOCKED (explicit)
+    - HARD_LIMIT_REACHED (explicit)
+
+“SINGLE PAGE” without clear technical stopReason is not acceptable.
+
+────────────────────────
+REQUIRED AUDIT (No assumptions)
+────────────────────────
+
+You must instrument and log:
+
+1) First page response:
+   - has_next_page
+   - end_cursor
+   - HTTP status
+   - response length
+
+2) Second page request:
+   - full URL
+   - headers used
+   - proxy IP used
+   - HTTP status
+   - raw response (sanitized)
+   - error if any
+
+3) Explicit classification:
+   - PAGINATION_STOPPED
+   - PROXY_BLOCKED
+   - CURSOR_INVALID
+   - RATE_LIMITED
+   - NO_USER_ID
+   - UNKNOWN_FAILURE
+
+No silent fallback to single page.
+
+────────────────────────
+STRUCTURAL FIXES REQUIRED
+────────────────────────
+
+A) Authenticated session scraping  
+If currently using public endpoint only, implement session-based scraping:
+   - Valid cookies
+   - Realistic user-agent
+   - Required Instagram headers
+   - Proper referer
+
+B) Proxy rotation strategy  
+If second request is blocked:
+   - Rotate proxy per page
+   - Introduce randomized delay
+   - Ensure fingerprint continuity per session
+
+C) Pagination integrity  
+Loop must:
+   - Stop only when TARGET_POSTS reached
+   - Or explicit stopReason
+   - Never silently exit
+
+D) Hard verification test  
+Create torture test:
+   - Profile with 100+ posts
+   - Confirm system fetches at least 30
+   - Confirm pagesFetched > 1
+   - Confirm stopReason logged correctly
+
+────────────────────────
+DELIVERY CONDITION
+────────────────────────
+
+Do NOT mark this as resolved.
+Do NOT report PASS.
+Do NOT deliver completion.
+
+Until:
+
+• Pagination works beyond first page.
+• SINGLE PAGE disappears for public profiles with more than 12 posts.
+• Coverage thresholds are reachable without manual input.
+• All failure reasons are explicitly logged.
+
+Reply with:
+
+1) Exact root cause
+2) Exact file + function modified
+3) Proof of multi-page fetch (log evidence)
+4) PASS only when confirmed by logs
+
+If unresolved — continue debugging.
+
+We do not ship scraping that stalls at page one.
+
+— Samir

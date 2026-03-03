@@ -14,7 +14,8 @@ import type { CompetitorInput } from "./types";
 import { logAudit } from "../audit";
 
 const FETCH_COOLDOWN_MS = 72 * 60 * 60 * 1000;
-const MIN_POSTS_TARGET = 30;
+const INSTAGRAM_PUBLIC_API_POST_CEILING = 12;
+const MIN_POSTS_TARGET = INSTAGRAM_PUBLIC_API_POST_CEILING;
 const MIN_COMMENTS_TARGET = 100;
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 2000;

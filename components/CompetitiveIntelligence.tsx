@@ -288,7 +288,7 @@ export default function CompetitiveIntelligence() {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             Alert.alert(
               'Partial Data Collected',
-              `${data.totalPostsFetched} posts, ${data.totalCommentsFetched} comments collected.\nBelow coverage thresholds (30 posts / 100 comments per competitor).\nNext fetch will bypass cooldown to collect more data.`
+              `${data.totalPostsFetched} posts, ${data.totalCommentsFetched} comments collected.\nBelow coverage thresholds (12 posts / 100 comments per competitor).\nInstagram public API returns max 12 posts per profile.\nNext fetch will bypass cooldown to collect more data.`
             );
           } else if (data.status === 'COMPLETE_WITH_COOLDOWN') {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -537,7 +537,7 @@ export default function CompetitiveIntelligence() {
           </View>
           {fetchJobStatus.status === 'PARTIAL_COMPLETE' && (
             <View style={{ backgroundColor: '#F97316' + '15', borderRadius: 6, padding: 6, marginBottom: 6 }}>
-              <Text style={{ fontSize: 10, fontWeight: '600', color: '#F97316' }}>Coverage below minimum thresholds (30 posts / 100 comments). Next fetch will bypass cooldown to collect more data.</Text>
+              <Text style={{ fontSize: 10, fontWeight: '600', color: '#F97316' }}>Coverage below minimum thresholds (12 posts / 100 comments). Instagram public API ceiling: 12 posts/profile. Next fetch will bypass cooldown to collect more data.</Text>
             </View>
           )}
           {fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN' && (
@@ -573,7 +573,7 @@ export default function CompetitiveIntelligence() {
                     <Text style={{ fontSize: 9, color: '#8B5CF6' }}>{cs.paginationPages}pg</Text>
                   )}
                   {cs.paginationStopReason && (
-                    <Text style={{ fontSize: 8, color: '#9CA3AF' }}>{cs.paginationStopReason.replace(/_/g, ' ')}</Text>
+                    <Text style={{ fontSize: 8, color: cs.paginationStopReason === 'TARGET_REACHED' || cs.paginationStopReason === 'NO_MORE_PAGES' || cs.paginationStopReason === 'FEED_PAGINATION_SUCCESS' ? '#10B981' : cs.paginationStopReason === 'INSTAGRAM_API_CEILING' || cs.paginationStopReason === 'FEED_PAGINATION_AUTH_REQUIRED' ? '#F59E0B' : '#EF4444' }}>{cs.paginationStopReason.replace(/_/g, ' ')}</Text>
                   )}
                   {cs.cooldownRemainingHours != null && (
                     <Text style={{ fontSize: 9, color: '#F59E0B' }}>{cs.cooldownRemainingHours}h cooldown</Text>

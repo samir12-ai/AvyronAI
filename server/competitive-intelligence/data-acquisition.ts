@@ -222,7 +222,8 @@ const FETCH_COOLDOWN_MS = 72 * 60 * 60 * 1000;
 const MAX_POSTS_TO_STORE = 60;
 const MAX_COMMENTS_PER_POST = 20;
 const MAX_COMMENT_POSTS = 30;
-const MIN_POSTS_THRESHOLD = 30;
+const INSTAGRAM_PUBLIC_API_POST_CEILING = 12;
+const MIN_POSTS_THRESHOLD = INSTAGRAM_PUBLIC_API_POST_CEILING;
 const MIN_COMMENTS_THRESHOLD = 100;
 
 const activeFetches = new Map<string, Promise<FetchResult>>();
@@ -486,16 +487,16 @@ async function _executeFetch(
 
   if (coverageSufficient) {
     fetchStatus = "SUCCESS";
-    fetchMessage = `Collected ${persistedPostCount} posts, ${persistedCommentCount} comments. Coverage thresholds met.`;
-  } else if (persistedPostCount >= 10) {
+    fetchMessage = `Collected ${persistedPostCount} posts, ${persistedCommentCount} comments. Coverage thresholds met (${MIN_POSTS_THRESHOLD} posts / ${MIN_COMMENTS_THRESHOLD} comments).`;
+  } else if (persistedPostCount >= 5) {
     fetchStatus = "INSUFFICIENT_DATA";
     const missing: string[] = [];
     if (persistedPostCount < MIN_POSTS_THRESHOLD) missing.push(`posts: ${persistedPostCount}/${MIN_POSTS_THRESHOLD}`);
     if (persistedCommentCount < MIN_COMMENTS_THRESHOLD) missing.push(`comments: ${persistedCommentCount}/${MIN_COMMENTS_THRESHOLD}`);
-    fetchMessage = `Partial data collected. Below thresholds: ${missing.join(", ")}. Pagination stop: ${scrapeResult.paginationStopReason || "unknown"}.`;
+    fetchMessage = `Partial data collected. Below thresholds: ${missing.join(", ")}. Stop reason: ${scrapeResult.paginationStopReason || "unknown"}.`;
   } else {
     fetchStatus = "PARTIAL";
-    fetchMessage = `Low data: ${persistedPostCount} posts, ${persistedCommentCount} comments. Scrape may be blocked.`;
+    fetchMessage = `Low data: ${persistedPostCount} posts, ${persistedCommentCount} comments. Scrape may be blocked or account is private.`;
   }
 
   console.log(`[DataAcq] Completed for ${competitor.name}: ${persistedPostCount} posts (verified), ${persistedCommentCount} comments (verified), status=${fetchStatus}, CTA coverage ${Math.round(ctaCoverage * 100)}%, method=${scrapeResult.collectionMethodUsed}, pagination=${scrapeResult.paginationPages || 1} pages, stopReason=${scrapeResult.paginationStopReason || "N/A"}`);
