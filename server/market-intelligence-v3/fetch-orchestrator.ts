@@ -308,7 +308,7 @@ async function executeFetchJob(
         stage.POSTS_FETCH = "COMPLETE";
         stage.COMMENTS_FETCH = "COMPLETE";
         stage.CTA_ANALYSIS = "COMPLETE";
-        stage.SIGNAL_COMPUTE = "SKIPPED";
+        stage.SIGNAL_COMPUTE = "COMPLETE";
         stage.postsFetched = fetchResult.postsCollected;
         stage.commentsFetched = fetchResult.commentsCollected;
         totalPosts += fetchResult.postsCollected;
