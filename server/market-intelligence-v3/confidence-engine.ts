@@ -17,7 +17,7 @@ export function computeDataCompleteness(signalResults: CompetitorSignalResult[])
   const coverages = signalResults.map(r => r.signalCoverageScore);
   const avgCoverage = mean(coverages);
   const competitorRatio = Math.min(1, signalResults.length / MI_THRESHOLDS.MIN_COMPETITORS);
-  return Math.round(avgCoverage * 0.6 + competitorRatio * 0.4 * 100) / 100;
+  return Math.round((avgCoverage * 0.6 + competitorRatio * 0.4) * 100) / 100;
 }
 
 export function computeFreshnessDecay(dataAgeDays: number): number {

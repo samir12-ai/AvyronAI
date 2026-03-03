@@ -110,7 +110,7 @@ export function deriveTrajectoryDirection(trajectory: TrajectoryData): string {
 }
 
 export function deriveMarketState(trajectory: TrajectoryData, confidenceLevel: string): string {
-  if (confidenceLevel === "INSUFFICIENT" || confidenceLevel === "UNSTABLE") {
+  if (confidenceLevel === "INSUFFICIENT") {
     return "INSUFFICIENT_DATA";
   }
   const direction = deriveTrajectoryDirection(trajectory);

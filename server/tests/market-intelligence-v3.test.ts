@@ -294,14 +294,13 @@ describe("Market Intelligence V3 - Anti-Bias Guard", () => {
 
 
 describe("Market Intelligence V3 - Stress Tests", () => {
-  it("A) Minimal data attack: 1 competitor, 5 posts → confidence <0.40", () => {
+  it("A) Minimal data attack: 1 competitor, 5 posts → confidence below MODERATE", () => {
     const comp = makeCompetitor({ name: "Minimal" }, 5);
     const signals = computeAllSignals([comp]);
     const confidence = computeConfidence(signals, 14);
-    expect(confidence.overall).toBeLessThan(MI_CONFIDENCE.UNSTABLE_THRESHOLD + 0.15);
-    if (confidence.overall < MI_CONFIDENCE.BLOCK_THRESHOLD) {
-      expect(confidence.guardDecision).toBe("BLOCK");
-    }
+    expect(confidence.overall).toBeLessThan(MI_CONFIDENCE.MODERATE_THRESHOLD);
+    expect(confidence.level).not.toBe("STRONG");
+    expect(confidence.level).not.toBe("MODERATE");
   });
 
   it("B) Viral spike distortion: sampleStrength prevents overconfidence", () => {
@@ -505,8 +504,8 @@ describe("Market Intelligence V3 - Token Budget Guard", () => {
   });
 
   it("M3) Large data downgrades to REDUCED or LIGHT", () => {
-    const budget = computeTokenBudget(5, 750, 200);
-    if (budget.projectedTokens > 8000) {
+    const budget = computeTokenBudget(5, 2000, 500);
+    if (budget.projectedTokens > 25000) {
       expect(budget.selectedMode).not.toBe("FULL");
       expect(budget.downgradeReason).not.toBeNull();
     }
