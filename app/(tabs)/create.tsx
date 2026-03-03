@@ -1533,6 +1533,24 @@ export default function CreateScreen() {
                     </View>
                   )}
 
+                  {/* Full Script */}
+                  {reelScript.full_script && (
+                    <View style={[styles.reelSection, { borderColor: colors.cardBorder }]}>
+                      <View style={styles.reelSectionHeader}>
+                        <View style={[styles.reelBadge, { backgroundColor: '#8B5CF6' }]}>
+                          <Ionicons name="document-text" size={12} color="#fff" />
+                          <Text style={styles.reelBadgeText}>{t('create.fullScript')}</Text>
+                        </View>
+                        <Text style={[styles.reelSectionNote, { color: colors.textMuted }]}>{t('create.teleprompterReady')}</Text>
+                      </View>
+                      <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground, flexDirection: 'column', alignItems: 'flex-start' }]}>
+                        <Text style={[styles.reelDetailValue, { color: colors.text, lineHeight: 22, fontSize: 14 }]}>
+                          {reelScript.full_script}
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+
                   {/* Scenes */}
                   {reelScript.scenes?.map((scene: any, idx: number) => (
                     <Pressable
@@ -1632,6 +1650,42 @@ export default function CreateScreen() {
                           </View>
                         </View>
                       )}
+                    </View>
+                  )}
+
+                  {/* Caption */}
+                  {reelScript.caption && (
+                    <View style={[styles.reelSection, { borderColor: colors.cardBorder }]}>
+                      <View style={styles.reelSectionHeader}>
+                        <View style={[styles.reelBadge, { backgroundColor: '#3B82F6' }]}>
+                          <Ionicons name="chatbubble-ellipses" size={12} color="#fff" />
+                          <Text style={styles.reelBadgeText}>{t('create.captionSection')}</Text>
+                        </View>
+                      </View>
+                      <View style={[styles.reelDetailRow, { backgroundColor: colors.inputBackground, flexDirection: 'column', alignItems: 'flex-start' }]}>
+                        <Text style={[styles.reelDetailValue, { color: colors.text, lineHeight: 20 }]}>
+                          {reelScript.caption}
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Hashtags */}
+                  {reelScript.hashtags?.length > 0 && (
+                    <View style={[styles.reelSection, { borderColor: colors.cardBorder }]}>
+                      <View style={styles.reelSectionHeader}>
+                        <View style={[styles.reelBadge, { backgroundColor: '#6366F1' }]}>
+                          <Ionicons name="pricetag" size={12} color="#fff" />
+                          <Text style={styles.reelBadgeText}>{t('create.hashtagsSection')}</Text>
+                        </View>
+                      </View>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 12, paddingBottom: 12 }}>
+                        {reelScript.hashtags.map((tag: string, i: number) => (
+                          <View key={i} style={{ backgroundColor: colors.inputBackground, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 }}>
+                            <Text style={{ fontSize: 12, color: colors.accent, fontWeight: '600' }}>#{tag.replace(/^#/, '')}</Text>
+                          </View>
+                        ))}
+                      </View>
                     </View>
                   )}
 
