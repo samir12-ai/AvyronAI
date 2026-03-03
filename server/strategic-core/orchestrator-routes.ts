@@ -13,6 +13,15 @@ import { evaluateUncertainty, type UncertaintyResult } from "../engine-contracts
 import { validateExecutionRoute } from "../engine-contracts/execution-map";
 import { enforceOutputType } from "../engine-contracts/type-enforcement";
 import { globalRegistry } from "../engine-contracts/engine-registry";
+import { assertSnapshotReadOnly, assertNoComputeFromExternal } from "../market-intelligence-v3/isolation-guard";
+
+function enforceBuildAPlanSnapshotOnly(operation: string): void {
+  assertSnapshotReadOnly("BUILD_A_PLAN_ORCHESTRATOR", operation);
+}
+
+function enforceBuildAPlanNoCompute(computeFunction: string): void {
+  assertNoComputeFromExternal("BUILD_A_PLAN_ORCHESTRATOR", computeFunction);
+}
 
 const REQUIRED_BLUEPRINT_FIELDS: { key: string; label: string }[] = [
   { key: "detectedOffer", label: "Offer" },
@@ -448,6 +457,9 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
     accountId = blueprint.accountId;
     campaignId = blueprint.campaignId || "";
     log("LOAD_CONTEXT", { accountId, campaignId, status: blueprint.status });
+
+    enforceBuildAPlanSnapshotOnly("READ_BLUEPRINT");
+    log("ISOLATION_CHECK", { result: "PASS", rule: "BUILD_A_PLAN reads snapshot only, no MIv3 compute calls" });
 
     const confirmedBlueprint = blueprint.confirmedBlueprint ? JSON.parse(blueprint.confirmedBlueprint) : null;
     const campaignContext = blueprint.campaignContext ? JSON.parse(blueprint.campaignContext) : null;

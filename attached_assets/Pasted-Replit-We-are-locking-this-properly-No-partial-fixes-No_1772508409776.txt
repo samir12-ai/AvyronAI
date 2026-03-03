@@ -1,0 +1,160 @@
+Replit,
+
+We are locking this properly. No partial fixes. No refresh-based hacks. This is a structural upgrade to MIv3.
+
+This email replaces all previous fragmented instructions. Treat this as the unified execution directive.
+
+────────────────────────
+1) Replace Refresh-Based Fetch with Build-a-Plan Style Job Orchestration
+────────────────────────
+
+Problem:
+Current Auto-Fetch relies on capped pulls (≈12 posts) and manual refresh cycles. This keeps confidence low and creates UX friction. With Bright Data proxy limits, this approach is fragile.
+
+Required Change:
+Implement a MIv3 Data Pull Orchestrator using the same architecture pattern as Build-a-Plan.
+
+Single click → returns jobId immediately → background staged execution.
+
+Behavior:
+
+• User clicks “Auto-Fetch All Data”
+• Server immediately returns jobId (no blocking)
+• Background job executes staged pipeline per competitor:
+    - POSTS_FETCH → PENDING → COMPLETE
+    - COMMENTS_FETCH → PENDING → COMPLETE
+    - CTA_ANALYSIS → PENDING → COMPLETE
+    - SIGNAL_COMPUTE → PENDING → COMPLETE
+• Each stage writes incrementally to DB
+• UI subscribes/polls job status exactly like Build-a-Plan
+
+Hard Requirements:
+
+• First run target per competitor:
+    - Minimum 30 posts OR explicit FETCH_LIMIT_REASON
+    - Minimum 100 comments OR explicit FETCH_LIMIT_REASON
+• No silent caps
+• If rate-limited / blocked:
+    - Log reason (RATE_LIMIT, PROXY_BLOCKED, PRIVATE_ACCOUNT, PAGINATION_STOPPED)
+    - Surface in UI under Missing Signals
+• Implement retry with exponential backoff
+• Strict idempotency:
+    - Same accountId + campaignId + competitorHash = reuse active job
+• Respect MIv3 concurrency lock (no duplicate parallel pulls)
+• No LLM usage introduced
+• No token explosion
+
+Manual refresh must NOT be required anymore.
+
+────────────────────────
+2) CTA Intelligence v2 – Replace Keyword Detection with Intent Detection
+────────────────────────
+
+Problem:
+CTA coverage shows 0% because logic only detects explicit CTA keywords. Market now uses storytelling-based implicit CTAs.
+
+Required Change:
+Upgrade CTA detection inside MIv3 only.
+
+Do NOT create a separate CTA engine.
+
+Implement deterministic intent classifier:
+
+Output must include:
+• ctaIntentScore (0–1)
+• ctaTypeDistribution:
+    - Explicit
+    - Soft
+    - Narrative
+    - Trust
+• Top detected narrative patterns
+• Deterministic explanation (no LLM)
+
+CTA Coverage Definition:
+Coverage = % of content carrying conversion intent (explicit OR implicit).
+
+If insufficient caption/comment text:
+• Flag missingSignalFlags.ctaPatterns
+• Confidence downgrade must explain “insufficient textual evidence”
+• No guessing.
+
+────────────────────────
+3) Single Engine Ownership – Zero Conflicts
+────────────────────────
+
+Critical rule:
+
+MIv3 is the ONLY engine allowed to:
+• Fetch competitor data
+• Compute dominance
+• Compute CTA intelligence
+• Compute confidence
+• Persist competitor snapshots
+
+Build-a-Plan Orchestrator:
+• Must only READ MIv3 snapshot
+• Must NOT call dominance separately
+• Must NOT call CTA logic separately
+• Must NOT spawn parallel competitor engines
+
+Enforce via:
+• Isolation guard
+• Engine whitelist validation
+• Audit log on violation
+
+There must never be two engines computing competitor logic simultaneously.
+
+────────────────────────
+4) Required Torture Tests (Mandatory)
+────────────────────────
+
+A) First-Run Sufficiency Test
+- After one Auto-Fetch click:
+    - posts ≥ 30 OR logged limit reason
+    - comments ≥ 100 OR logged limit reason
+    - confidence increases when thresholds met
+
+B) Deep Mode Trigger
+- If coverage insufficient:
+    - system auto-enters deep fetch
+    - no manual refresh loops
+    - respects 72h hard cap
+
+C) CTA Storytelling Detection
+- Provide dataset with only implicit CTAs
+    - coverage > 0
+    - correctly classified as Soft/Narrative
+    - no false “missing” if text exists
+
+D) Engine Conflict Test
+- Run Build-a-Plan
+    - verify it only reads MIv3 snapshot
+    - verify no duplicate competitor logic invocation
+    - verify no double writes
+
+E) Proxy Stress Test
+- Simulate rate limits
+- Ensure retry/backoff works
+- Ensure no infinite loop
+- Ensure job completes with explicit failure reasons
+
+────────────────────────
+Definition of Done
+────────────────────────
+
+• One click → complete staged collection without manual refresh.
+• CTA coverage reflects modern storytelling intent.
+• MIv3 remains single source of truth.
+• No token overrun.
+• No duplicated engines.
+• All torture tests pass.
+
+Reply PASS / FAIL per section:
+1) Job Orchestrator
+2) CTA v2
+3) Single Ownership Enforcement
+4) QA Gauntlet
+
+No vague confirmations. Only structured response.
+
+— Samir

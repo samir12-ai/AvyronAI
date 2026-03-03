@@ -3,35 +3,190 @@ import { ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMet
 import { eq, and, desc, sql } from "drizzle-orm";
 import { scrapeInstagramProfile, type ScrapedPost } from "./profile-scraper";
 
-const CTA_PATTERNS_EN = [
-  /\b(dm|message|inbox)\s*(us|me|now)?\b/i,
-  /\blink\s*in\s*bio\b/i,
-  /\b(shop|buy|order)\s*(now|today|here)?\b/i,
-  /\b(book|schedule|reserve)\s*(now|today|a call)?\b/i,
-  /\b(call|whatsapp|text)\s*(us|me|now)?\b/i,
-  /\b(sign\s*up|register|subscribe)\b/i,
-  /\b(download|get|grab)\s*(now|free|yours)?\b/i,
-  /\b(click|tap|swipe)\s*(here|up|the link)?\b/i,
-  /\b(limited|hurry|last\s*chance|don'?t\s*miss)\b/i,
-  /\b(free|discount|off|sale|offer|promo|deal)\b/i,
+const EXPLICIT_CTA_PATTERNS: { pattern: RegExp; label: string }[] = [
+  { pattern: /\b(dm|message|inbox)\s*(us|me|now)?\b/i, label: "DM" },
+  { pattern: /\blink\s*in\s*bio\b/i, label: "LinkInBio" },
+  { pattern: /\b(shop|buy|order)\s*(now|today|here)?\b/i, label: "Shop" },
+  { pattern: /\b(book|schedule|reserve)\s*(now|today|a call)?\b/i, label: "Book" },
+  { pattern: /\b(call|whatsapp|text)\s*(us|me|now)?\b/i, label: "Contact" },
+  { pattern: /\b(sign\s*up|register|subscribe)\b/i, label: "SignUp" },
+  { pattern: /\b(download|get|grab)\s*(now|free|yours)?\b/i, label: "Download" },
+  { pattern: /\b(click|tap|swipe)\s*(here|up|the link)?\b/i, label: "ClickAction" },
+  { pattern: /\b(limited|hurry|last\s*chance|don'?t\s*miss)\b/i, label: "Urgency" },
+  { pattern: /(تواصل|راسلنا|ارسل)/i, label: "DM_AR" },
+  { pattern: /الرابط\s*في\s*البايو/i, label: "LinkInBio_AR" },
+  { pattern: /(اشتري|اطلب|احجز)/i, label: "Shop_AR" },
+  { pattern: /(اتصل|واتساب)/i, label: "Contact_AR" },
 ];
 
-const CTA_PATTERNS_AR = [
-  /\b(تواصل|راسلنا|ارسل)\b/i,
-  /\bالرابط\s*في\s*البايو\b/i,
-  /\b(اشتري|اطلب|احجز)\b/i,
-  /\b(اتصل|واتساب)\b/i,
-  /\b(خصم|عرض|تخفيض|مجاني)\b/i,
+const SOFT_CTA_PATTERNS: { pattern: RegExp; label: string }[] = [
+  { pattern: /\b(check\s*(it\s*)?out|take\s*a\s*look)\b/i, label: "CheckOut" },
+  { pattern: /\b(learn\s*more|find\s*out|read\s*more)\b/i, label: "LearnMore" },
+  { pattern: /\b(discover|explore|uncover)\b/i, label: "Discover" },
+  { pattern: /\b(see\s*how|see\s*what|see\s*why|watch\s*how)\b/i, label: "SeeHow" },
+  { pattern: /\b(try\s*(it|this|now)|give\s*(it\s*)?a\s*try)\b/i, label: "Try" },
+  { pattern: /\b(start\s*(your|the)|begin\s*(your|the))\b/i, label: "StartYour" },
+  { pattern: /\b(don'?t\s*wait|act\s*now|today\s*only)\b/i, label: "ActNow" },
+  { pattern: /\b(join\s*(us|the|our))\b/i, label: "Join" },
+  { pattern: /\b(save\s*your\s*spot|secure\s*your)\b/i, label: "SecureSpot" },
+  { pattern: /\b(what\s*are\s*you\s*waiting\s*for)\b/i, label: "WhatWaiting" },
+  { pattern: /(اكتشف|تعرف|جرب)/i, label: "Discover_AR" },
+  { pattern: /(شوف|شاهد)/i, label: "SeeHow_AR" },
+];
+
+const NARRATIVE_CTA_PATTERNS: { pattern: RegExp; label: string }[] = [
+  { pattern: /\b(before\s*and\s*after|transformation)\b/i, label: "BeforeAfter" },
+  { pattern: /\b(my\s*(journey|story|experience)|our\s*(journey|story))\b/i, label: "JourneyStory" },
+  { pattern: /\b(here'?s?\s*(what|how|why)|this\s*is\s*(how|why|what))\b/i, label: "HeresHow" },
+  { pattern: /\b(i\s*(used\s*to|never\s*thought|was\s*struggling|couldn'?t))\b/i, label: "PersonalStruggle" },
+  { pattern: /\b(changed\s*my\s*life|game\s*changer|life\s*changing|turned\s*around)\b/i, label: "LifeChanger" },
+  { pattern: /\b(imagine\s*(if|what|how|a\s*world))\b/i, label: "Imagine" },
+  { pattern: /\b(the\s*secret\s*(to|of|behind)|what\s*no\s*one\s*tells)\b/i, label: "SecretReveal" },
+  { pattern: /\b(step\s*by\s*step|how\s*i\s*(did|made|built|grew))\b/i, label: "StepByStep" },
+  { pattern: /\b(real\s*talk|honest(ly)?|truth\s*(is|bomb))\b/i, label: "RealTalk" },
+  { pattern: /\b(behind\s*the\s*scenes|the\s*process|making\s*of)\b/i, label: "BehindScenes" },
+  { pattern: /\b(lesson\s*(i\s*)?learned|what\s*i\s*learned|takeaway)\b/i, label: "LessonLearned" },
+  { pattern: /(قصتي|رحلتي|تجربتي)/i, label: "JourneyStory_AR" },
+  { pattern: /(قبل\s*و\s*بعد|التحول)/i, label: "BeforeAfter_AR" },
+];
+
+const TRUST_CTA_PATTERNS: { pattern: RegExp; label: string }[] = [
+  { pattern: /\b(\d+\s*\+?\s*(clients?|customers?|projects?|years?))\b/i, label: "ClientCount" },
+  { pattern: /\b(review|testimonial|feedback|what\s*(they|clients?|customers?)\s*sa(y|id))\b/i, label: "Reviews" },
+  { pattern: /\b(results?\s*(speak|proven|guaranteed|driven))\b/i, label: "ResultsLanguage" },
+  { pattern: /\b(certif(ied|ication)|award[- ]?winning|accredited|licensed)\b/i, label: "Certification" },
+  { pattern: /\b(trusted\s*by|as\s*seen\s*(in|on)|featured\s*(in|on|by))\b/i, label: "TrustedBy" },
+  { pattern: /\b(guarantee|money\s*back|risk\s*free|no\s*risk)\b/i, label: "Guarantee" },
+  { pattern: /\b(rated|rating|\d+(\.\d+)?\s*stars?|⭐)\b/i, label: "Rating" },
+  { pattern: /\b(proven|track\s*record|success\s*rate)\b/i, label: "ProvenRecord" },
+  { pattern: /\b(satisfied|happy\s*(clients?|customers?))\b/i, label: "HappyClients" },
+  { pattern: /\b(case\s*study|success\s*stor(y|ies))\b/i, label: "CaseStudy" },
+  { pattern: /(عملاء|شهادات|نتائج|معتمد)/i, label: "Trust_AR" },
 ];
 
 const OFFER_PATTERNS = [
-  /\b\d+\s*%\s*(off|خصم|discount)\b/i,
+  /\d+\s*%\s*(off|خصم|discount)/i,
   /\b(AED|USD|SAR|QAR|KWD|BHD|OMR)\s*\d+/i,
-  /\b(free|مجان[يا])\b/i,
-  /\b(sale|تخفيض|عرض)\b/i,
+  /\b(free)\b|مجان[يا]/i,
+  /\b(sale)\b|تخفيض|عرض/i,
   /\bbuy\s*\d+\s*get\s*\d+/i,
   /\b(limited\s*time|limited\s*offer)\b/i,
 ];
+
+export interface CTAIntentResult {
+  ctaIntentScore: number;
+  ctaTypeDistribution: {
+    explicit: number;
+    soft: number;
+    narrative: number;
+    trust: number;
+  };
+  detectedPatterns: string[];
+  explanation: string;
+  hasCTA: boolean;
+  ctaType: string | null;
+  hasOffer: boolean;
+  missingSignalFlags: { ctaPatterns: boolean };
+  confidenceDowngrade: boolean;
+}
+
+export function detectCTAIntent(caption: string | null): CTAIntentResult {
+  const emptyResult: CTAIntentResult = {
+    ctaIntentScore: 0,
+    ctaTypeDistribution: { explicit: 0, soft: 0, narrative: 0, trust: 0 },
+    detectedPatterns: [],
+    explanation: "No caption text available",
+    hasCTA: false,
+    ctaType: null,
+    hasOffer: false,
+    missingSignalFlags: { ctaPatterns: true },
+    confidenceDowngrade: true,
+  };
+
+  if (!caption) return emptyResult;
+
+  const trimmed = caption.trim();
+  if (trimmed.length < 10) {
+    return {
+      ...emptyResult,
+      explanation: "Insufficient caption text for CTA analysis",
+    };
+  }
+
+  const explicitMatches: string[] = [];
+  const softMatches: string[] = [];
+  const narrativeMatches: string[] = [];
+  const trustMatches: string[] = [];
+
+  for (const { pattern, label } of EXPLICIT_CTA_PATTERNS) {
+    if (pattern.test(trimmed)) explicitMatches.push(label);
+  }
+  for (const { pattern, label } of SOFT_CTA_PATTERNS) {
+    if (pattern.test(trimmed)) softMatches.push(label);
+  }
+  for (const { pattern, label } of NARRATIVE_CTA_PATTERNS) {
+    if (pattern.test(trimmed)) narrativeMatches.push(label);
+  }
+  for (const { pattern, label } of TRUST_CTA_PATTERNS) {
+    if (pattern.test(trimmed)) trustMatches.push(label);
+  }
+
+  const allPatterns = [...explicitMatches, ...softMatches, ...narrativeMatches, ...trustMatches];
+  const totalMatches = allPatterns.length;
+
+  const explicitWeight = 1.0;
+  const softWeight = 0.7;
+  const narrativeWeight = 0.5;
+  const trustWeight = 0.6;
+
+  const weightedScore =
+    explicitMatches.length * explicitWeight +
+    softMatches.length * softWeight +
+    narrativeMatches.length * narrativeWeight +
+    trustMatches.length * trustWeight;
+
+  const maxPossibleScore = 5.0;
+  const ctaIntentScore = Math.min(1, Math.round((weightedScore / maxPossibleScore) * 100) / 100);
+
+  const totalCategoryMatches = Math.max(1, totalMatches);
+  const ctaTypeDistribution = {
+    explicit: Math.round((explicitMatches.length / totalCategoryMatches) * 100) / 100,
+    soft: Math.round((softMatches.length / totalCategoryMatches) * 100) / 100,
+    narrative: Math.round((narrativeMatches.length / totalCategoryMatches) * 100) / 100,
+    trust: Math.round((trustMatches.length / totalCategoryMatches) * 100) / 100,
+  };
+
+  const hasOffer = OFFER_PATTERNS.some(p => p.test(trimmed));
+  const hasCTA = totalMatches > 0;
+
+  const explanationParts: string[] = [];
+  if (explicitMatches.length > 0) explanationParts.push(`Explicit(${explicitMatches.join(",")})`);
+  if (softMatches.length > 0) explanationParts.push(`Soft(${softMatches.join(",")})`);
+  if (narrativeMatches.length > 0) explanationParts.push(`Narrative(${narrativeMatches.join(",")})`);
+  if (trustMatches.length > 0) explanationParts.push(`Trust(${trustMatches.join(",")})`);
+
+  const explanation = explanationParts.length > 0
+    ? `Intent detected: ${explanationParts.join(" | ")}`
+    : "No CTA intent patterns detected";
+
+  const legacyCtaTypes: string[] = [];
+  if (explicitMatches.length > 0) legacyCtaTypes.push(...explicitMatches);
+  if (softMatches.length > 0) legacyCtaTypes.push(...softMatches);
+  if (narrativeMatches.length > 0) legacyCtaTypes.push(...narrativeMatches);
+  if (trustMatches.length > 0) legacyCtaTypes.push(...trustMatches);
+
+  return {
+    ctaIntentScore,
+    ctaTypeDistribution,
+    detectedPatterns: allPatterns,
+    explanation,
+    hasCTA,
+    ctaType: legacyCtaTypes.length > 0 ? legacyCtaTypes.join(",") : null,
+    hasOffer,
+    missingSignalFlags: { ctaPatterns: false },
+    confidenceDowngrade: false,
+  };
+}
 
 interface CTADetection {
   hasCTA: boolean;
@@ -40,33 +195,11 @@ interface CTADetection {
 }
 
 function detectCTA(caption: string | null): CTADetection {
-  if (!caption) return { hasCTA: false, ctaType: null, hasOffer: false };
-
-  const detectedTypes: string[] = [];
-  const allPatterns = [...CTA_PATTERNS_EN, ...CTA_PATTERNS_AR];
-
-  for (const pattern of allPatterns) {
-    if (pattern.test(caption)) {
-      const match = caption.match(pattern)?.[0]?.toLowerCase() || "";
-      if (/dm|message|inbox|راسل|تواصل/.test(match)) detectedTypes.push("DM");
-      else if (/whatsapp|واتساب/.test(match)) detectedTypes.push("WhatsApp");
-      else if (/call|اتصل/.test(match)) detectedTypes.push("Call");
-      else if (/link|bio|رابط|بايو/.test(match)) detectedTypes.push("Link");
-      else if (/shop|buy|order|اشتري|اطلب/.test(match)) detectedTypes.push("Shop");
-      else if (/book|schedule|reserve|احجز/.test(match)) detectedTypes.push("Book");
-      else if (/sign|register|subscribe/.test(match)) detectedTypes.push("SignUp");
-      else if (/free|discount|off|sale|خصم|عرض|مجان/.test(match)) detectedTypes.push("Offer");
-      else detectedTypes.push("Other");
-    }
-  }
-
-  const hasOffer = OFFER_PATTERNS.some(p => p.test(caption));
-  const uniqueTypes = [...new Set(detectedTypes)];
-
+  const intent = detectCTAIntent(caption);
   return {
-    hasCTA: uniqueTypes.length > 0,
-    ctaType: uniqueTypes.length > 0 ? uniqueTypes.join(",") : null,
-    hasOffer,
+    hasCTA: intent.hasCTA,
+    ctaType: intent.ctaType,
+    hasOffer: intent.hasOffer,
   };
 }
 

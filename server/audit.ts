@@ -92,7 +92,9 @@ export type AuditEventType =
   | "EMERGENCY_STOP_TRIGGERED"
   | "FAILED_ENTRIES_RESET"
   | "FAILED_RESET_ERROR"
-  | "JOB_SKIPPED";
+  | "JOB_SKIPPED"
+  | "CI_ENGINE_ISOLATION_VIOLATION"
+  | "MI_FETCH_JOB_COMPLETE";
 
 export async function logAudit(
   accountId: string,

@@ -498,4 +498,4 @@ function buildDeterministicNarrative(
   return parts.join(" ");
 }
 
-export { validateEngineIsolation, assertNoPlanWrites, assertNoOrchestrator, assertNoAutopilot } from "./isolation-guard";
+export { validateEngineIsolation, validateDomainOwnership, rejectBlockedEngine, assertSnapshotReadOnly, assertNoPlanWrites, assertNoOrchestrator, assertNoAutopilot, assertNoComputeFromExternal, getProtectedDomains, getBlockedEngines } from "./isolation-guard";

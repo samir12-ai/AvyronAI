@@ -1483,3 +1483,25 @@ export const ciCompetitorMetricsSnapshot = pgTable("ci_competitor_metrics_snapsh
 });
 
 export type CiCompetitorMetricsSnapshot = typeof ciCompetitorMetricsSnapshot.$inferSelect;
+
+export const miFetchJobs = pgTable("mi_fetch_jobs", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  competitorHash: varchar("competitor_hash"),
+  status: text("status").notNull().default("PENDING"),
+  stageStatuses: text("stage_statuses"),
+  fetchLimitReasons: text("fetch_limit_reasons"),
+  totalPostsFetched: integer("total_posts_fetched").default(0),
+  totalCommentsFetched: integer("total_comments_fetched").default(0),
+  competitorCount: integer("competitor_count").default(0),
+  error: text("error"),
+  retryCount: integer("retry_count").default(0),
+  durationMs: integer("duration_ms"),
+  createdAt: timestamp("created_at").defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
+export type MiFetchJob = typeof miFetchJobs.$inferSelect;

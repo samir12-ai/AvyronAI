@@ -2,30 +2,19 @@ import type { Express } from "express";
 import { db } from "../db";
 import { miSnapshots, miTelemetry, miSignalLogs, miRefreshSchedule } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
-import { MarketIntelligenceV3, validateEngineIsolation, assertNoPlanWrites, assertNoOrchestrator, assertNoAutopilot, buildResultFromSnapshot } from "./engine";
+import { MarketIntelligenceV3, validateEngineIsolation, rejectBlockedEngine, assertNoPlanWrites, assertNoOrchestrator, assertNoAutopilot, buildResultFromSnapshot } from "./engine";
 import { logAudit } from "../audit";
 import { requireCampaign } from "../campaign-routes";
+import { startFetchJob, getFetchJobStatus } from "./fetch-orchestrator";
 import type { MIv3Mode } from "./types";
 
 const ALLOWED_MODES: MIv3Mode[] = ["overview", "dominance", "actions", "history"];
 
-const BLOCKED_ENGINE_NAMES = [
-  "BUILD_A_PLAN_ORCHESTRATOR",
-  "STORYTELLING_ENGINE",
-  "OFFER_ENGINE",
-  "BUDGET_ENGINE",
-  "AUTOPILOT",
-];
-
 function enforceEngineWhitelist(req: any): void {
   const body = req.body || {};
   const engineRef = body.engine || body.engineName || body.orchestrator;
-  if (engineRef && BLOCKED_ENGINE_NAMES.includes(engineRef)) {
-    logAudit("CI_ENGINE_ISOLATION_VIOLATION", {
-      attemptedEngine: engineRef,
-      endpoint: req.originalUrl,
-    }).catch(() => {});
-    throw new Error(`ISOLATION VIOLATION: Engine '${engineRef}' is not allowed in Market Intelligence V3 context.`);
+  if (engineRef) {
+    rejectBlockedEngine(engineRef, req.originalUrl);
   }
 }
 
@@ -169,10 +158,6 @@ export function registerMIv3Routes(app: Express) {
     try {
       assertNoPlanWrites();
     } catch (err: any) {
-      logAudit("CI_ENGINE_ISOLATION_VIOLATION", {
-        type: "PLAN_WRITE_ATTEMPT",
-        endpoint: req.originalUrl,
-      }).catch(() => {});
       return res.status(403).json({ error: err.message });
     }
   });
@@ -181,10 +166,6 @@ export function registerMIv3Routes(app: Express) {
     try {
       assertNoOrchestrator();
     } catch (err: any) {
-      logAudit("CI_ENGINE_ISOLATION_VIOLATION", {
-        type: "ORCHESTRATOR_ATTEMPT",
-        endpoint: req.originalUrl,
-      }).catch(() => {});
       return res.status(403).json({ error: err.message });
     }
   });
@@ -193,11 +174,49 @@ export function registerMIv3Routes(app: Express) {
     try {
       assertNoAutopilot();
     } catch (err: any) {
-      logAudit("CI_ENGINE_ISOLATION_VIOLATION", {
-        type: "AUTOPILOT_ATTEMPT",
-        endpoint: req.originalUrl,
-      }).catch(() => {});
       return res.status(403).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/ci/mi-v3/fetch", requireCampaign, async (req, res) => {
+    try {
+      enforceEngineWhitelist(req);
+      validateEngineIsolation("MARKET_INTELLIGENCE_V3");
+
+      const accountId = (req.body.accountId as string) || "default";
+      const campaignId = req.body.campaignId as string;
+
+      if (!campaignId) {
+        return res.status(422).json({ error: "campaignId is required" });
+      }
+
+      console.log(`[MIv3-Route] POST /api/ci/mi-v3/fetch | accountId=${accountId} | campaignId=${campaignId}`);
+
+      const jobId = await startFetchJob(accountId, campaignId);
+
+      return res.json({ success: true, jobId });
+    } catch (err: any) {
+      console.error("[MIv3-Route] Fetch job error:", err.message);
+      if (err.message.includes("ISOLATION VIOLATION")) {
+        return res.status(403).json({ error: err.message });
+      }
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/ci/mi-v3/fetch-status/:jobId", async (req, res) => {
+    try {
+      const jobId = req.params.jobId;
+      const status = await getFetchJobStatus(jobId);
+
+      if (!status) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      return res.json(status);
+    } catch (err: any) {
+      console.error("[MIv3-Route] Fetch status error:", err.message);
+      return res.status(500).json({ error: err.message });
     }
   });
 }

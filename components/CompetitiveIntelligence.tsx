@@ -229,6 +229,53 @@ export default function CompetitiveIntelligence() {
 
   const [fetchingCompetitorId, setFetchingCompetitorId] = useState<string | null>(null);
   const [fetchingAll, setFetchingAll] = useState(false);
+  const [fetchJobId, setFetchJobId] = useState<string | null>(null);
+  const [fetchJobStatus, setFetchJobStatus] = useState<any>(null);
+
+  useEffect(() => {
+    if (!fetchJobId) return;
+    let cancelled = false;
+    let pollCount = 0;
+    const maxPolls = 45;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(new URL(`/api/ci/mi-v3/fetch-status/${fetchJobId}`, baseUrl).toString());
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        setFetchJobStatus(data);
+
+        if (data.status === 'COMPLETE' || data.status === 'FAILED') {
+          setFetchingAll(false);
+          setFetchJobId(null);
+          queryClient.invalidateQueries({ queryKey: ['ci-competitors'] });
+
+          if (data.status === 'COMPLETE') {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          } else {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          }
+          return;
+        }
+
+        pollCount++;
+        if (pollCount >= maxPolls) {
+          setFetchingAll(false);
+          setFetchJobId(null);
+          Alert.alert('Timeout', 'Data fetch is still running in the background. Check back shortly.');
+          return;
+        }
+
+        if (!cancelled) setTimeout(poll, 2000);
+      } catch {
+        if (!cancelled) setTimeout(poll, 3000);
+      }
+    };
+
+    setTimeout(poll, 1000);
+    return () => { cancelled = true; };
+  }, [fetchJobId]);
 
   const fetchDataMutation = useMutation({
     mutationFn: async ({ id, forceRefresh }: { id: string; forceRefresh?: boolean }) => {
@@ -261,22 +308,22 @@ export default function CompetitiveIntelligence() {
     },
   });
 
-  const fetchAllMutation = useMutation({
+  const startFetchJobMutation = useMutation({
     mutationFn: async () => {
       setFetchingAll(true);
-      const res = await fetch(new URL('/api/ci/competitors/fetch-all', baseUrl).toString(), {
+      setFetchJobStatus(null);
+      const res = await fetch(new URL('/api/ci/mi-v3/fetch', baseUrl).toString(), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accountId: 'default' }),
+        body: JSON.stringify({ accountId: 'default', campaignId: activeCampaignId || 'default' }),
       });
       if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Fetch failed'); }
       return res.json();
     },
     onSuccess: (data: any) => {
-      setFetchingAll(false);
-      queryClient.invalidateQueries({ queryKey: ['ci-competitors'] });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      const s = data.summary;
-      Alert.alert('Data Fetch Complete', `${s.totalPosts} posts, ${s.totalComments} comments collected from ${s.success + s.partial}/${s.total} competitors.`);
+      if (data.jobId) {
+        setFetchJobId(data.jobId);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }
     },
     onError: (err: any) => {
       setFetchingAll(false);
@@ -395,19 +442,75 @@ export default function CompetitiveIntelligence() {
 
       {competitors.length > 0 && (
         <Pressable
-          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); fetchAllMutation.mutate(); }}
-          disabled={fetchingAll || fetchAllMutation.isPending}
-          style={[s.autoFetchAllBtn, { opacity: (fetchingAll || fetchAllMutation.isPending) ? 0.6 : 1 }]}
+          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); startFetchJobMutation.mutate(); }}
+          disabled={fetchingAll || startFetchJobMutation.isPending}
+          style={[s.autoFetchAllBtn, { opacity: (fetchingAll || startFetchJobMutation.isPending) ? 0.6 : 1 }]}
         >
-          {(fetchingAll || fetchAllMutation.isPending) ? (
+          {(fetchingAll || startFetchJobMutation.isPending) ? (
             <ActivityIndicator size={14} color="#fff" />
           ) : (
             <Ionicons name="cloud-download-outline" size={16} color="#fff" />
           )}
           <Text style={s.autoFetchAllBtnText}>
-            {(fetchingAll || fetchAllMutation.isPending) ? 'Fetching all data...' : 'Auto-Fetch All Data'}
+            {(fetchingAll || startFetchJobMutation.isPending) ? 'Fetching all data...' : 'Auto-Fetch All Data'}
           </Text>
         </Pressable>
+      )}
+
+      {fetchJobStatus && fetchingAll && (
+        <View style={{ backgroundColor: isDark ? '#1A2030' : '#F0F4FF', borderRadius: 8, padding: 10, marginBottom: 10, gap: 6 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <ActivityIndicator size={12} color="#8B5CF6" />
+            <Text style={{ fontSize: 12, fontWeight: '700', color: '#8B5CF6' }}>MI V3 DATA PULL</Text>
+            <Text style={{ fontSize: 10, color: colors.textMuted, marginLeft: 'auto' }}>
+              {fetchJobStatus.totalPostsFetched} posts • {fetchJobStatus.totalCommentsFetched} comments
+            </Text>
+          </View>
+          {Object.values(fetchJobStatus.stageStatuses || {}).map((cs: any) => {
+            const stageIcon = (status: string) => {
+              if (status === 'COMPLETE') return <Ionicons name="checkmark-circle" size={12} color="#10B981" />;
+              if (status === 'RUNNING') return <ActivityIndicator size={10} color="#8B5CF6" />;
+              if (status === 'FAILED') return <Ionicons name="close-circle" size={12} color="#EF4444" />;
+              if (status === 'SKIPPED') return <Ionicons name="remove-circle" size={12} color="#9CA3AF" />;
+              return <Ionicons name="ellipse-outline" size={12} color="#9CA3AF" />;
+            };
+            return (
+              <View key={cs.competitorId} style={{ gap: 3 }}>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text }}>{cs.competitorName}</Text>
+                <View style={{ flexDirection: 'row', gap: 8, paddingLeft: 4 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                    {stageIcon(cs.POSTS_FETCH)}
+                    <Text style={{ fontSize: 9, color: colors.textMuted }}>Posts</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                    {stageIcon(cs.COMMENTS_FETCH)}
+                    <Text style={{ fontSize: 9, color: colors.textMuted }}>Comments</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                    {stageIcon(cs.CTA_ANALYSIS)}
+                    <Text style={{ fontSize: 9, color: colors.textMuted }}>CTA</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                    {stageIcon(cs.SIGNAL_COMPUTE)}
+                    <Text style={{ fontSize: 9, color: colors.textMuted }}>Signals</Text>
+                  </View>
+                </View>
+              </View>
+            );
+          })}
+          {(fetchJobStatus.fetchLimitReasons || []).length > 0 && (
+            <View style={{ marginTop: 4, gap: 2 }}>
+              {(fetchJobStatus.fetchLimitReasons || []).map((lr: any, i: number) => (
+                <View key={i} style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
+                  <Ionicons name="information-circle" size={10} color="#F59E0B" />
+                  <Text style={{ fontSize: 9, color: '#F59E0B', flex: 1 }} numberOfLines={1}>
+                    {lr.competitorName}: {lr.reason} — {lr.details}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
       )}
 
       {competitors.length === 0 ? (
