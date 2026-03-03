@@ -1012,4 +1012,272 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).not.toContain("MarketIntelligenceV3.run");
     });
   });
+
+  describe("Q) Snapshot Completion Contract — No Fake COMPLETE", () => {
+    it("validateSnapshotCompleteness must exist and be exported from engine.ts", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
+      );
+      expect(source).toContain("export function validateSnapshotCompleteness");
+    });
+
+    it("engine._executeRun must validate before persisting COMPLETE", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
+      );
+      const insertIdx = source.indexOf("db.insert(miSnapshots)");
+      const validationIdx = source.indexOf("validateSnapshotCompleteness(snapshotPayload)");
+      expect(validationIdx).toBeGreaterThan(-1);
+      expect(insertIdx).toBeGreaterThan(-1);
+      expect(validationIdx).toBeLessThan(insertIdx);
+      const guardBlock = source.slice(validationIdx, insertIdx);
+      expect(guardBlock).toContain("SNAPSHOT_COMPLETION_CONTRACT_VIOLATED");
+      expect(guardBlock).toContain('"PARTIAL"');
+    });
+
+    it("fetch-orchestrator.persistSnapshotAfterFetch must validate before persisting COMPLETE", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      const insertIdx = source.indexOf("db.insert(miSnapshots)");
+      const validationIdx = source.indexOf("validateSnapshotCompleteness(snapshotPayload)");
+      expect(validationIdx).toBeGreaterThan(-1);
+      expect(insertIdx).toBeGreaterThan(-1);
+      expect(validationIdx).toBeLessThan(insertIdx);
+      const guardBlock = source.slice(validationIdx, insertIdx);
+      expect(guardBlock).toContain("SNAPSHOT_COMPLETION_CONTRACT_VIOLATED");
+      expect(guardBlock).toContain('"PARTIAL"');
+    });
+
+    it("validateSnapshotCompleteness rejects null/missing analytical fields", async () => {
+      const { validateSnapshotCompleteness } = await import("../market-intelligence-v3/engine");
+      const incomplete = {
+        signalData: null,
+        intentData: null,
+        trajectoryData: null,
+        dominanceData: null,
+        confidenceData: null,
+        marketState: null,
+        volatilityIndex: null,
+        entryStrategy: null,
+        defensiveRisks: null,
+        narrativeSynthesis: null,
+        confidenceLevel: null,
+      };
+      const result = validateSnapshotCompleteness(incomplete);
+      expect(result.valid).toBe(false);
+      expect(result.failures.length).toBeGreaterThanOrEqual(6);
+      expect(result.failures.some((f: string) => f.includes("marketState"))).toBe(true);
+      expect(result.failures.some((f: string) => f.includes("trajectoryData"))).toBe(true);
+      expect(result.failures.some((f: string) => f.includes("confidenceData"))).toBe(true);
+      expect(result.failures.some((f: string) => f.includes("signalData"))).toBe(true);
+      expect(result.failures.some((f: string) => f.includes("intentData"))).toBe(true);
+      expect(result.failures.some((f: string) => f.includes("defensiveRisks"))).toBe(true);
+      expect(result.failures.some((f: string) => f.includes("volatilityIndex"))).toBe(true);
+    });
+
+    it("validateSnapshotCompleteness accepts valid snapshot", async () => {
+      const { validateSnapshotCompleteness } = await import("../market-intelligence-v3/engine");
+      const valid = {
+        signalData: JSON.stringify([{ competitorId: "c1", signals: {} }]),
+        intentData: JSON.stringify([{ competitorId: "c1", intentCategory: "TESTING" }]),
+        trajectoryData: JSON.stringify({ marketHeatingIndex: 0.5 }),
+        dominanceData: JSON.stringify([{ competitorId: "c1" }]),
+        confidenceData: JSON.stringify({ overall: 0.6, level: "MODERATE" }),
+        marketState: "HEATING",
+        volatilityIndex: 0.33,
+        entryStrategy: "Test entry strategy",
+        defensiveRisks: JSON.stringify(["risk1"]),
+        narrativeSynthesis: "Test narrative",
+        confidenceLevel: "MODERATE",
+      };
+      const result = validateSnapshotCompleteness(valid);
+      expect(result.valid).toBe(true);
+      expect(result.failures.length).toBe(0);
+    });
+
+    it("no path can persist status=COMPLETE with null analytical fields", async () => {
+      const engineSource = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
+      );
+      const fetchSource = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      for (const source of [engineSource, fetchSource]) {
+        const insertIdx = source.indexOf("db.insert(miSnapshots)");
+        if (insertIdx === -1) continue;
+        const preInsert = source.slice(Math.max(0, insertIdx - 500), insertIdx);
+        expect(preInsert).toContain("validateSnapshotCompleteness");
+        expect(preInsert).toContain("PARTIAL");
+      }
+    });
+  });
+
+  describe("R) Version-Aware Cache Invalidation (ENGINE_VERSION)", () => {
+    it("ENGINE_VERSION must exist in constants.ts", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/constants.ts", "utf-8")
+      );
+      expect(source).toContain("export const ENGINE_VERSION =");
+      const match = source.match(/export const ENGINE_VERSION = (\d+)/);
+      expect(match).not.toBeNull();
+      expect(parseInt(match![1])).toBeGreaterThanOrEqual(8);
+    });
+
+    it("analysisVersion must be stored in snapshot schema", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("shared/schema.ts", "utf-8")
+      );
+      expect(source).toContain("analysisVersion");
+      expect(source).toContain("analysis_version");
+    });
+
+    it("getCachedSnapshot must reject snapshots with wrong analysisVersion", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
+      );
+      const cacheBlock = source.slice(source.indexOf("async function getCachedSnapshot"), source.indexOf("async function getCachedSnapshot") + 1200);
+      expect(cacheBlock).toContain("ENGINE_VERSION");
+      expect(cacheBlock).toContain("analysisVersion");
+      expect(cacheBlock).toContain("version mismatch");
+      expect(cacheBlock).toContain("return null");
+    });
+
+    it("both engine and fetch-orchestrator must write analysisVersion to snapshots", async () => {
+      const engineSource = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
+      );
+      const fetchSource = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(engineSource).toContain("analysisVersion: ENGINE_VERSION");
+      expect(fetchSource).toContain("analysisVersion: ENGINE_VERSION");
+    });
+
+    it("REGRESSION: old snapshot (version 0) must be rejected by cache", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
+      );
+      const cacheFunc = source.slice(source.indexOf("async function getCachedSnapshot"), source.indexOf("async function getCachedSnapshot") + 1200);
+      expect(cacheFunc).toContain("snapshot.analysisVersion || 0");
+      expect(cacheFunc).toContain("snapshotVersion !== ENGINE_VERSION");
+      const { ENGINE_VERSION } = await import("../market-intelligence-v3/constants");
+      expect(ENGINE_VERSION).toBeGreaterThan(0);
+    });
+  });
+
+  describe("S) Anti-Stale Guard — Forced Recompute on Incomplete Snapshot", () => {
+    it("getCachedSnapshot must call isSnapshotAnalyticallyComplete", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
+      );
+      const cacheBlock = source.slice(source.indexOf("async function getCachedSnapshot"), source.indexOf("async function getCachedSnapshot") + 1200);
+      expect(cacheBlock).toContain("isSnapshotAnalyticallyComplete(snapshot)");
+      expect(cacheBlock).toContain("return null");
+    });
+
+    it("isSnapshotAnalyticallyComplete must log CACHE_INVALID_INCOMPLETE_SNAPSHOT on failure", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
+      );
+      expect(source).toContain("CACHE_INVALID_INCOMPLETE_SNAPSHOT");
+      const guardFunc = source.slice(source.indexOf("function isSnapshotAnalyticallyComplete"), source.indexOf("function isSnapshotAnalyticallyComplete") + 400);
+      expect(guardFunc).toContain("validateSnapshotCompleteness");
+      expect(guardFunc).toContain("CACHE_INVALID_INCOMPLETE_SNAPSHOT");
+      expect(guardFunc).toContain("return false");
+    });
+
+    it("REGRESSION: incomplete COMPLETE snapshot must trigger recompute (not be served from cache)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
+      );
+      const cacheFunc = source.slice(source.indexOf("async function getCachedSnapshot"), source.indexOf("async function getCachedSnapshot") + 1200);
+      const versionCheck = cacheFunc.indexOf("snapshotVersion !== ENGINE_VERSION");
+      const completenessCheck = cacheFunc.indexOf("isSnapshotAnalyticallyComplete");
+      const freshnessCheck = cacheFunc.indexOf("age > freshnessMs");
+      expect(versionCheck).toBeGreaterThan(-1);
+      expect(completenessCheck).toBeGreaterThan(-1);
+      expect(freshnessCheck).toBeGreaterThan(-1);
+      expect(versionCheck).toBeLessThan(completenessCheck);
+      expect(completenessCheck).toBeLessThan(freshnessCheck);
+    });
+
+    it("REGRESSION: validateSnapshotCompleteness catches zeroed volatilityIndex correctly", async () => {
+      const { validateSnapshotCompleteness } = await import("../market-intelligence-v3/engine");
+      const withNullVolatility = {
+        signalData: JSON.stringify([{ competitorId: "c1", signals: {} }]),
+        intentData: JSON.stringify([{ competitorId: "c1", intentCategory: "TESTING" }]),
+        trajectoryData: JSON.stringify({ marketHeatingIndex: 0.5 }),
+        dominanceData: JSON.stringify([{ competitorId: "c1" }]),
+        confidenceData: JSON.stringify({ overall: 0.6, level: "MODERATE" }),
+        marketState: "HEATING",
+        volatilityIndex: null,
+        entryStrategy: null,
+        defensiveRisks: JSON.stringify([]),
+        narrativeSynthesis: null,
+        confidenceLevel: "MODERATE",
+      };
+      const result = validateSnapshotCompleteness(withNullVolatility);
+      expect(result.valid).toBe(false);
+      expect(result.failures.some((f: string) => f.includes("volatilityIndex"))).toBe(true);
+
+      const withZeroVolatility = { ...withNullVolatility, volatilityIndex: 0 };
+      const result2 = validateSnapshotCompleteness(withZeroVolatility);
+      expect(result2.failures.some((f: string) => f.includes("volatilityIndex"))).toBe(false);
+    });
+
+    it("REGRESSION: high-confidence snapshot with null entryStrategy must fail validation", async () => {
+      const { validateSnapshotCompleteness } = await import("../market-intelligence-v3/engine");
+      const highConfidence = {
+        signalData: JSON.stringify([{ competitorId: "c1", signals: {} }]),
+        intentData: JSON.stringify([{ competitorId: "c1", intentCategory: "TESTING" }]),
+        trajectoryData: JSON.stringify({ marketHeatingIndex: 0.5 }),
+        dominanceData: JSON.stringify([{ competitorId: "c1" }]),
+        confidenceData: JSON.stringify({ overall: 0.85, level: "STRONG", guardDecision: "PROCEED" }),
+        marketState: "HEATING",
+        volatilityIndex: 0.3,
+        entryStrategy: null,
+        defensiveRisks: JSON.stringify(["risk1"]),
+        narrativeSynthesis: null,
+        confidenceLevel: "STRONG",
+      };
+      const result = validateSnapshotCompleteness(highConfidence);
+      expect(result.valid).toBe(false);
+      expect(result.failures.some((f: string) => f.includes("entryStrategy"))).toBe(true);
+      expect(result.failures.some((f: string) => f.includes("narrativeSynthesis"))).toBe(true);
+    });
+
+    it("REGRESSION: entryStrategy=null is acceptable when confidence is low", async () => {
+      const { validateSnapshotCompleteness } = await import("../market-intelligence-v3/engine");
+      const lowConfidence = {
+        signalData: JSON.stringify([{ competitorId: "c1", signals: {} }]),
+        intentData: JSON.stringify([{ competitorId: "c1", intentCategory: "TESTING" }]),
+        trajectoryData: JSON.stringify({ marketHeatingIndex: 0.5 }),
+        dominanceData: JSON.stringify([{ competitorId: "c1" }]),
+        confidenceData: JSON.stringify({ overall: 0.3, level: "LOW", guardDecision: "BLOCK" }),
+        marketState: "INSUFFICIENT_DATA",
+        volatilityIndex: 0.2,
+        entryStrategy: null,
+        defensiveRisks: JSON.stringify(["INSUFFICIENT DATA"]),
+        narrativeSynthesis: null,
+        confidenceLevel: "LOW",
+      };
+      const result = validateSnapshotCompleteness(lowConfidence);
+      expect(result.valid).toBe(true);
+    });
+
+    it("cache rejection order: version check → completeness check → freshness check", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
+      );
+      const cacheFunc = source.slice(source.indexOf("async function getCachedSnapshot"), source.indexOf("async function getCachedSnapshot") + 1200);
+      const hashCheck = cacheFunc.indexOf("competitorHash");
+      const versionCheck = cacheFunc.indexOf("ENGINE_VERSION");
+      const completenessCheck = cacheFunc.indexOf("isSnapshotAnalyticallyComplete");
+      const freshnessCheck = cacheFunc.indexOf("freshnessMs");
+      expect(hashCheck).toBeLessThan(versionCheck);
+      expect(versionCheck).toBeLessThan(completenessCheck);
+      expect(completenessCheck).toBeLessThan(freshnessCheck);
+    });
+  });
 });

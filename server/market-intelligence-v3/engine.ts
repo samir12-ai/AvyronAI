@@ -16,18 +16,102 @@ import type {
   TwoRunConfirmation,
   ExecutionMode,
 } from "./types";
-import { MI_CONFIDENCE } from "./constants";
+import { MI_CONFIDENCE, ENGINE_VERSION } from "./constants";
 import { validateEngineIsolation } from "./isolation-guard";
 import { logAudit } from "../audit";
 import { computeCompetitorHash, parseJsonSafe } from "./utils";
 import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
 
 export { computeCompetitorHash } from "./utils";
+export { ENGINE_VERSION } from "./constants";
 
 const SNAPSHOT_FRESHNESS_HOURS = 24;
 const ISOLATION_ALLOWED_CALLER = "MARKET_INTELLIGENCE_V3";
 
 const activeLocks = new Map<string, Promise<MIv3DiagnosticResult>>();
+
+interface SnapshotValidationResult {
+  valid: boolean;
+  failures: string[];
+}
+
+export function validateSnapshotCompleteness(snapshot: {
+  signalData?: string | null;
+  intentData?: string | null;
+  trajectoryData?: string | null;
+  dominanceData?: string | null;
+  confidenceData?: string | null;
+  marketState?: string | null;
+  volatilityIndex?: number | null;
+  entryStrategy?: string | null;
+  defensiveRisks?: string | null;
+  narrativeSynthesis?: string | null;
+  confidenceLevel?: string | null;
+}): SnapshotValidationResult {
+  const failures: string[] = [];
+
+  if (!snapshot.marketState || snapshot.marketState === "PENDING") {
+    failures.push("marketState is missing or PENDING");
+  }
+
+  const trajectoryData = parseJsonSafe(snapshot.trajectoryData, null);
+  if (!trajectoryData || typeof trajectoryData !== "object") {
+    failures.push("trajectoryData is missing or invalid");
+  }
+
+  const dominanceData = parseJsonSafe(snapshot.dominanceData, null);
+  if (!dominanceData || (Array.isArray(dominanceData) && dominanceData.length === 0)) {
+    failures.push("dominanceData is missing or empty");
+  }
+
+  const confidenceData = parseJsonSafe(snapshot.confidenceData, null);
+  if (!confidenceData || typeof confidenceData !== "object") {
+    failures.push("confidenceData is missing or invalid");
+  }
+
+  if (snapshot.volatilityIndex === null || snapshot.volatilityIndex === undefined) {
+    failures.push("volatilityIndex is null");
+  }
+
+  const defensiveRisks = parseJsonSafe(snapshot.defensiveRisks, null);
+  if (defensiveRisks === null) {
+    failures.push("defensiveRisks is null (must be array, even if empty)");
+  }
+
+  const signalData = parseJsonSafe(snapshot.signalData, null);
+  if (!signalData || (Array.isArray(signalData) && signalData.length === 0)) {
+    failures.push("signalData is missing or empty");
+  }
+
+  const intentData = parseJsonSafe(snapshot.intentData, null);
+  if (!intentData || (Array.isArray(intentData) && intentData.length === 0)) {
+    failures.push("intentData is missing or empty");
+  }
+
+  const isLowConfidence = confidenceData &&
+    (confidenceData.guardDecision === "BLOCK" || confidenceData.guardDecision === "DOWNGRADE" ||
+     confidenceData.overall < MI_CONFIDENCE.NO_AGGRESSIVE_THRESHOLD);
+
+  if (!isLowConfidence) {
+    if (!snapshot.entryStrategy) {
+      failures.push("entryStrategy is null (required when confidence is not BLOCK/DOWNGRADE)");
+    }
+    if (!snapshot.narrativeSynthesis) {
+      failures.push("narrativeSynthesis is null (required when confidence is not BLOCK/DOWNGRADE)");
+    }
+  }
+
+  return { valid: failures.length === 0, failures };
+}
+
+function isSnapshotAnalyticallyComplete(snapshot: any): boolean {
+  const validation = validateSnapshotCompleteness(snapshot);
+  if (!validation.valid) {
+    console.log(`[MIv3] CACHE_INVALID_INCOMPLETE_SNAPSHOT | failures=${validation.failures.join(", ")} | snapshotId=${snapshot.id}`);
+    return false;
+  }
+  return true;
+}
 
 async function getCompetitorData(accountId: string): Promise<CompetitorInput[]> {
   const competitors = await db.select().from(ciCompetitors)
@@ -75,6 +159,16 @@ async function getCachedSnapshot(accountId: string, campaignId: string, competit
 
   if (snapshot.competitorHash && snapshot.competitorHash !== competitorHash) {
     console.log(`[MIv3] Snapshot invalidated: competitor set changed (${snapshot.competitorHash} → ${competitorHash})`);
+    return null;
+  }
+
+  const snapshotVersion = snapshot.analysisVersion || 0;
+  if (snapshotVersion !== ENGINE_VERSION) {
+    console.log(`[MIv3] Snapshot invalidated: version mismatch (snapshot=${snapshotVersion}, engine=${ENGINE_VERSION})`);
+    return null;
+  }
+
+  if (!isSnapshotAnalyticallyComplete(snapshot)) {
     return null;
   }
 
@@ -307,7 +401,7 @@ export class MarketIntelligenceV3 {
       }
     }
 
-    const [snapshot] = await db.insert(miSnapshots).values({
+    const snapshotPayload = {
       accountId,
       campaignId,
       competitorHash,
@@ -329,11 +423,20 @@ export class MarketIntelligenceV3 {
       dataFreshnessDays,
       overallConfidence: confidence.overall,
       confidenceLevel: confidence.level,
-      status: "COMPLETE",
+      analysisVersion: ENGINE_VERSION,
+      status: "COMPLETE" as const,
       confirmedRuns,
       previousDirection: trajectoryDirection,
       directionLockedUntil: directionLockedUntil ? new Date(directionLockedUntil) : null,
-    }).returning();
+    };
+
+    const completionCheck = validateSnapshotCompleteness(snapshotPayload);
+    if (!completionCheck.valid) {
+      console.log(`[MIv3] SNAPSHOT_COMPLETION_CONTRACT_VIOLATED | failures=${completionCheck.failures.join(", ")}`);
+      snapshotPayload.status = "PARTIAL" as any;
+    }
+
+    const [snapshot] = await db.insert(miSnapshots).values(snapshotPayload).returning();
 
     for (const sr of signalResults) {
       await db.insert(miSignalLogs).values({

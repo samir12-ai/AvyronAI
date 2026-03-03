@@ -1,0 +1,120 @@
+Replit,
+
+The snapshot caching issue was correctly identified and fixed. Good.
+
+However, we are not finished.
+
+We are now locking this structurally so this class of bug can never reappear in a different form.
+
+Below are three mandatory hardening requirements. These are not improvements — they are structural safeguards.
+
+────────────────────────
+1) Snapshot Completion Contract (No Fake COMPLETE Ever Again)
+────────────────────────
+
+Effective immediately:
+
+A snapshot must NEVER be saved with status = "COMPLETE" unless all analytical fields are fully computed.
+
+Mandatory validation before persist:
+
+Required non-null / non-empty fields:
+- marketState
+- trajectoryIndices
+- dominance
+- confidence
+- volatilityIndex
+- entryStrategy
+- defensiveRisks
+- narrativeSynthesis
+
+If ANY of these are:
+- null
+- undefined
+- empty object
+- zeroed placeholder
+- default stub value
+
+Then:
+- status MUST be "PARTIAL" (or "INVALID")
+- snapshot MUST NOT be marked COMPLETE
+- cache MUST NOT serve it as authoritative
+
+Add explicit validation guard before DB write:
+If validation fails → throw or downgrade status.
+
+No silent acceptance.
+
+────────────────────────
+2) Cache Invalidation Hardening (Version-Aware Caching)
+────────────────────────
+
+Current cache logic relies on competitorHash only.
+
+This is insufficient.
+
+You must add one of the following:
+
+Option A (Preferred):
+- analysisVersion field in mi_snapshots
+- Hardcoded ENGINE_VERSION constant in MIv3
+- Cache valid only if snapshot.analysisVersion === ENGINE_VERSION
+
+Option B:
+- schemaVersion stored in snapshot
+- Invalidate if schemaVersion mismatch
+
+Rationale:
+Future logic changes must never reuse an old “technically complete” snapshot that was computed under outdated rules.
+
+This prevents invisible analytical drift.
+
+Add regression test:
+- Change ENGINE_VERSION
+- Ensure previous snapshot is rejected
+- Ensure recomputation runs
+
+────────────────────────
+3) Forced Recompute Safety Net (Anti-Stale Guard)
+────────────────────────
+
+Add deterministic safeguard:
+
+If a snapshot is:
+- COMPLETE
+- competitorHash matches
+BUT
+- any required analytical field is null or structurally invalid
+
+Then:
+- Ignore cached snapshot
+- Force full recompute
+- Log: CACHE_INVALID_INCOMPLETE_SNAPSHOT
+
+Add regression test:
+1) Manually insert incomplete snapshot marked COMPLETE
+2) Call analyze
+3) Confirm recompute happens
+4) Confirm new snapshot overwrites old one
+
+This test must fail if cache incorrectly trusts malformed snapshot.
+
+────────────────────────
+Delivery Condition
+────────────────────────
+
+Reply with:
+
+1) Snapshot validation guard implementation location (file + function)
+2) ENGINE_VERSION implementation location
+3) Test name proving version-based invalidation
+4) Test name proving forced recompute on incomplete snapshot
+5) Confirmation that no path can persist COMPLETE with null analytical fields
+
+No generic PASS.
+
+We are eliminating an entire category of silent analytical corruption.
+
+MIv3 must remain deterministic, version-safe, and cache-correct.
+
+— Samir

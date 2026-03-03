@@ -10,7 +10,7 @@ import { computeAllDominance } from "./dominance-module";
 import { computeTokenBudget, applySampling } from "./token-budget";
 import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
 import { computeCompetitorHash } from "./utils";
-import { computeVolatilityIndex, buildEntryStrategy, buildDefensiveRisks, buildDeterministicNarrative } from "./engine";
+import { computeVolatilityIndex, buildEntryStrategy, buildDefensiveRisks, buildDeterministicNarrative, validateSnapshotCompleteness, ENGINE_VERSION } from "./engine";
 import type { CompetitorInput } from "./types";
 import { logAudit } from "../audit";
 
@@ -661,7 +661,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   const previousSnapshot = previousSnapshots[0] || null;
   const newVersion = (previousSnapshot?.version || 0) + 1;
 
-  const [snapshot] = await db.insert(miSnapshots).values({
+  const snapshotPayload = {
     accountId,
     campaignId,
     competitorHash,
@@ -696,11 +696,20 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     dataFreshnessDays,
     overallConfidence: confidence.overall,
     confidenceLevel: confidence.level,
-    status: "COMPLETE",
+    analysisVersion: ENGINE_VERSION,
+    status: "COMPLETE" as const,
     confirmedRuns: (previousSnapshot?.confirmedRuns || 0) + 1,
     previousDirection: trajectoryDirection,
     directionLockedUntil: null,
-  }).returning();
+  };
+
+  const completionCheck = validateSnapshotCompleteness(snapshotPayload);
+  if (!completionCheck.valid) {
+    console.log(`[FetchOrch] SNAPSHOT_COMPLETION_CONTRACT_VIOLATED | failures=${completionCheck.failures.join(", ")}`);
+    snapshotPayload.status = "PARTIAL" as any;
+  }
+
+  const [snapshot] = await db.insert(miSnapshots).values(snapshotPayload).returning();
 
   for (const sr of signalResults) {
     await db.insert(miSignalLogs).values({

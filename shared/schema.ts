@@ -1350,6 +1350,7 @@ export const miSnapshots = pgTable("mi_snapshots", {
   dataFreshnessDays: doublePrecision("data_freshness_days").default(0),
   overallConfidence: doublePrecision("overall_confidence").default(0),
   confidenceLevel: text("confidence_level").default("INSUFFICIENT"),
+  analysisVersion: integer("analysis_version").default(0),
   status: text("status").notNull().default("PENDING"),
   confirmedRuns: integer("confirmed_runs").default(0),
   previousDirection: text("previous_direction"),

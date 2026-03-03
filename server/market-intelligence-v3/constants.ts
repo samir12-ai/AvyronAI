@@ -1,3 +1,5 @@
+export const ENGINE_VERSION = 8;
+
 export const MI_THRESHOLDS = {
   MIN_POSTS_PER_COMPETITOR: 30,
   MIN_COMMENTS_SAMPLE: 100,
