@@ -201,13 +201,20 @@ export default function CompetitiveIntelligence() {
     onSuccess: (data: any) => {
       setFetchingCompetitorId(null);
       queryClient.invalidateQueries({ queryKey: ['ci-competitors'] });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      if (data.status === 'COOLDOWN') {
+      if (data.status === 'SUCCESS' || data.status === 'PARTIAL') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('Data Collected', `${data.postsCollected} posts, ${data.commentsCollected} comments collected.${data.followers ? ` Followers: ${data.followers.toLocaleString()}` : ''}`);
+      } else if (data.status === 'COOLDOWN') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         Alert.alert('Cooldown Active', data.message);
+      } else if (data.status === 'BLOCKED') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert('Fetch Blocked', 'All scraping methods failed. Instagram may be blocking requests. Try again later.');
       }
     },
     onError: (err: any) => {
       setFetchingCompetitorId(null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert('Fetch Error', err.message);
     },
   });
