@@ -384,13 +384,17 @@ async function executeFetchJob(
       stage.POSTS_FETCH = "COMPLETE";
       stage.postsFetched = fetchResult.postsCollected;
       stage.analysisSource = "FRESH_DATA";
+      stage.rawFetchedCount = fetchResult.rawFetchedCount;
+      stage.paginationPages = fetchResult.paginationPages;
+      stage.paginationStopReason = fetchResult.paginationStopReason;
       totalPosts += fetchResult.postsCollected;
 
       if (fetchResult.postsCollected < MIN_POSTS_TARGET && (fetchResult.status as string) !== "COOLDOWN") {
+        const paginationDetail = fetchResult.paginationStopReason ? ` (pagination: ${fetchResult.paginationStopReason}, ${fetchResult.paginationPages || 1} pages, raw=${fetchResult.rawFetchedCount || 0})` : '';
         limitReasons.push({
           competitorId: comp.id, competitorName: comp.name,
           stage: "POSTS_FETCH", reason: "INSUFFICIENT_DATA",
-          details: `Only ${fetchResult.postsCollected} posts collected (target: ${MIN_POSTS_TARGET})`,
+          details: `Only ${fetchResult.postsCollected} posts collected (target: ${MIN_POSTS_TARGET})${paginationDetail}`,
         });
       }
 
@@ -475,11 +479,17 @@ async function executeFetchJob(
       } catch { }
     }
 
+    const anyInsufficientData = Object.values(stages).some(
+      s => s.postsFetched !== undefined && (s.postsFetched < 30 || (s.commentsFetched || 0) < 100)
+    );
+
     let finalJobStatus: string;
     if (allFailed && !allCooldown) {
       finalJobStatus = "FAILED";
     } else if (allCooldown && anyAnalysisRan) {
       finalJobStatus = "COMPLETE_WITH_COOLDOWN";
+    } else if (anyInsufficientData && !allCooldown) {
+      finalJobStatus = "PARTIAL_COMPLETE";
     } else {
       finalJobStatus = "COMPLETE";
     }

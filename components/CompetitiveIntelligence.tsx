@@ -266,7 +266,7 @@ export default function CompetitiveIntelligence() {
         if (controller.signal.aborted) return;
         setFetchJobStatus(data);
 
-        if (data.status === 'COMPLETE' || data.status === 'FAILED' || data.status === 'COMPLETE_WITH_COOLDOWN') {
+        if (data.status === 'COMPLETE' || data.status === 'FAILED' || data.status === 'COMPLETE_WITH_COOLDOWN' || data.status === 'PARTIAL_COMPLETE') {
           setFetchingAll(false);
           setFetchJobId(null);
 
@@ -283,6 +283,12 @@ export default function CompetitiveIntelligence() {
             Alert.alert(
               'Fetch Complete',
               `${data.totalPostsFetched} posts, ${data.totalCommentsFetched} comments collected.${stopMsg}${snapMsg}`
+            );
+          } else if (data.status === 'PARTIAL_COMPLETE') {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            Alert.alert(
+              'Partial Data Collected',
+              `${data.totalPostsFetched} posts, ${data.totalCommentsFetched} comments collected.\nBelow coverage thresholds (30 posts / 100 comments per competitor).\nNext fetch will bypass cooldown to collect more data.`
             );
           } else if (data.status === 'COMPLETE_WITH_COOLDOWN') {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -500,23 +506,27 @@ export default function CompetitiveIntelligence() {
         </Pressable>
       )}
 
-      {fetchJobStatus && (fetchingAll || fetchJobStatus.status === 'COMPLETE' || fetchJobStatus.status === 'FAILED' || fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN') && (
+      {fetchJobStatus && (fetchingAll || fetchJobStatus.status === 'COMPLETE' || fetchJobStatus.status === 'FAILED' || fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN' || fetchJobStatus.status === 'PARTIAL_COMPLETE') && (
         <View style={{ backgroundColor: isDark ? '#1A2030' : '#F0F4FF', borderRadius: 8, padding: 10, marginBottom: 10, gap: 6 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
             {fetchJobStatus.status === 'COMPLETE' ? (
               <Ionicons name="checkmark-circle" size={14} color="#10B981" />
             ) : fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN' ? (
               <Ionicons name="checkmark-circle" size={14} color="#F59E0B" />
+            ) : fetchJobStatus.status === 'PARTIAL_COMPLETE' ? (
+              <Ionicons name="warning" size={14} color="#F97316" />
             ) : fetchJobStatus.status === 'FAILED' ? (
               <Ionicons name="close-circle" size={14} color="#EF4444" />
             ) : (
               <ActivityIndicator size={12} color="#8B5CF6" />
             )}
-            <Text style={{ fontSize: 12, fontWeight: '700', color: fetchJobStatus.status === 'COMPLETE' ? '#10B981' : fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN' ? '#F59E0B' : fetchJobStatus.status === 'FAILED' ? '#EF4444' : '#8B5CF6' }}>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: fetchJobStatus.status === 'COMPLETE' ? '#10B981' : fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN' ? '#F59E0B' : fetchJobStatus.status === 'PARTIAL_COMPLETE' ? '#F97316' : fetchJobStatus.status === 'FAILED' ? '#EF4444' : '#8B5CF6' }}>
               {fetchJobStatus.status === 'COMPLETE'
                 ? (fetchJobStatus.stopReason && fetchJobStatus.stopReason !== 'COMPLETE'
                     ? `MI V3 COMPLETE (${fetchJobStatus.stopReason.replace(/_/g, ' ')})`
                     : 'MI V3 DATA PULL COMPLETE')
+                : fetchJobStatus.status === 'PARTIAL_COMPLETE'
+                    ? 'MI V3 PARTIAL — BELOW THRESHOLDS'
                 : fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN'
                     ? 'ANALYSIS COMPLETE (CACHED)'
                 : fetchJobStatus.status === 'FAILED' ? 'MI V3 DATA PULL FAILED' : 'MI V3 DATA PULL'}
@@ -525,6 +535,11 @@ export default function CompetitiveIntelligence() {
               {fetchJobStatus.totalPostsFetched} posts • {fetchJobStatus.totalCommentsFetched} comments
             </Text>
           </View>
+          {fetchJobStatus.status === 'PARTIAL_COMPLETE' && (
+            <View style={{ backgroundColor: '#F97316' + '15', borderRadius: 6, padding: 6, marginBottom: 6 }}>
+              <Text style={{ fontSize: 10, fontWeight: '600', color: '#F97316' }}>Coverage below minimum thresholds (30 posts / 100 comments). Next fetch will bypass cooldown to collect more data.</Text>
+            </View>
+          )}
           {fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN' && (
             <View style={{ backgroundColor: '#F59E0B' + '15', borderRadius: 6, padding: 6, marginBottom: 6 }}>
               <Text style={{ fontSize: 10, fontWeight: '600', color: '#F59E0B' }}>Fetch blocked (cooldown active) — Analysis executed using cached data</Text>
@@ -549,8 +564,17 @@ export default function CompetitiveIntelligence() {
             };
             return (
               <View key={cs.competitorId} style={{ gap: 3 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
                   <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text }}>{cs.competitorName}</Text>
+                  {cs.postsFetched != null && (
+                    <Text style={{ fontSize: 9, color: colors.textMuted }}>{cs.postsFetched}p/{cs.commentsFetched || 0}c</Text>
+                  )}
+                  {cs.paginationPages != null && cs.paginationPages > 1 && (
+                    <Text style={{ fontSize: 9, color: '#8B5CF6' }}>{cs.paginationPages}pg</Text>
+                  )}
+                  {cs.paginationStopReason && (
+                    <Text style={{ fontSize: 8, color: '#9CA3AF' }}>{cs.paginationStopReason.replace(/_/g, ' ')}</Text>
+                  )}
                   {cs.cooldownRemainingHours != null && (
                     <Text style={{ fontSize: 9, color: '#F59E0B' }}>{cs.cooldownRemainingHours}h cooldown</Text>
                   )}
@@ -629,11 +653,11 @@ export default function CompetitiveIntelligence() {
                   <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6', marginBottom: 2 }}>DATA COVERAGE</Text>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                     <Text style={{ fontSize: 11, color: colors.textMuted }}>Posts collected</Text>
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.postsCollected || 0) >= 30 ? '#10B981' : colors.text }}>{dc?.postsCollected || 0} / 30</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.postsCollected || 0) >= 30 ? '#10B981' : '#F97316' }}>{dc?.postsCollected || 0} / 30</Text>
                   </View>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                     <Text style={{ fontSize: 11, color: colors.textMuted }}>Comments collected</Text>
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.commentsCollected || 0) >= 100 ? '#10B981' : colors.text }}>{dc?.commentsCollected || 0} / 100</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.commentsCollected || 0) >= 100 ? '#10B981' : '#F97316' }}>{dc?.commentsCollected || 0} / 100</Text>
                   </View>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                     <Text style={{ fontSize: 11, color: colors.textMuted }}>CTA coverage</Text>

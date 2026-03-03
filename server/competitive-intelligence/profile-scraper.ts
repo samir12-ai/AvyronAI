@@ -78,6 +78,9 @@ export interface ScrapeResult {
   collectionMethodUsed: "WEB_API" | "HTML_PARSE" | "HEADLESS_RENDER" | "NONE";
   attempts: string[];
   warnings: string[];
+  paginationPages?: number;
+  rawFetchedCount?: number;
+  paginationStopReason?: string;
 }
 
 export interface ScrapeStats {
@@ -182,7 +185,10 @@ function parsePostFromGraphQL(node: any, handle: string): ScrapedPost {
   };
 }
 
-async function attemptWebProfileApi(handle: string): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number }> {
+const TARGET_POSTS = 30;
+const MAX_PAGINATION_PAGES = 4;
+
+async function attemptWebProfileApi(handle: string): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number; paginationPages: number; rawFetchedCount: number }> {
   const apiUrl = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`;
 
   const headers: Record<string, string> = {
@@ -205,7 +211,7 @@ async function attemptWebProfileApi(handle: string): Promise<{ posts: ScrapedPos
   const response = await fetch(apiUrl, fetchOptions);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const text = await response.text();
-  const bytesReceived = Buffer.byteLength(text, "utf-8");
+  let bytesReceived = Buffer.byteLength(text, "utf-8");
 
   console.log(`[CI Scraper] WEB_API: Received ${(bytesReceived / 1024).toFixed(1)} KB for ${handle}`);
 
@@ -215,16 +221,78 @@ async function attemptWebProfileApi(handle: string): Promise<{ posts: ScrapedPos
 
   const profileName = user.full_name || user.username || handle;
   const followers = user.edge_followed_by?.count ?? null;
+  const userId = user.id;
 
-  const edges = user.edge_owner_to_timeline_media?.edges || [];
+  const mediaData = user.edge_owner_to_timeline_media;
+  const edges = mediaData?.edges || [];
   const posts: ScrapedPost[] = [];
-  for (const edge of edges.slice(0, 30)) {
-    posts.push(parsePostFromGraphQL(edge.node, handle));
+  const seenIds = new Set<string>();
+
+  for (const edge of edges) {
+    const post = parsePostFromGraphQL(edge.node, handle);
+    if (!seenIds.has(post.postId)) {
+      seenIds.add(post.postId);
+      posts.push(post);
+    }
   }
 
-  console.log(`[CI Scraper] WEB_API: Extracted ${posts.length} posts, ${followers ?? "unknown"} followers for ${handle}`);
+  let paginationPages = 1;
+  let endCursor = mediaData?.page_info?.end_cursor;
+  let hasNextPage = mediaData?.page_info?.has_next_page === true;
 
-  return { posts, followers, profileName, bytesReceived };
+  while (hasNextPage && endCursor && posts.length < TARGET_POSTS && paginationPages < MAX_PAGINATION_PAGES && userId) {
+    paginationPages++;
+    await randomDelay();
+
+    const variables = JSON.stringify({ id: userId, first: 12, after: endCursor });
+    const queryHash = "472f257a40c653c64c666ce877d59d2b";
+    const paginationUrl = `https://www.instagram.com/graphql/query/?query_hash=${queryHash}&variables=${encodeURIComponent(variables)}`;
+
+    console.log(`[CI Scraper] WEB_API: Pagination page ${paginationPages} for ${handle} (have ${posts.length}/${TARGET_POSTS})`);
+
+    try {
+      const pageResponse = await fetch(paginationUrl, fetchOptions);
+      if (!pageResponse.ok) {
+        console.log(`[CI Scraper] WEB_API: Pagination HTTP ${pageResponse.status}, stopping`);
+        break;
+      }
+
+      const pageText = await pageResponse.text();
+      bytesReceived += Buffer.byteLength(pageText, "utf-8");
+      const pageData = JSON.parse(pageText);
+      const pageMedia = pageData?.data?.user?.edge_owner_to_timeline_media;
+      const pageEdges = pageMedia?.edges || [];
+
+      if (pageEdges.length === 0) {
+        console.log(`[CI Scraper] WEB_API: Pagination returned 0 edges, stopping`);
+        break;
+      }
+
+      for (const edge of pageEdges) {
+        const post = parsePostFromGraphQL(edge.node, handle);
+        if (!seenIds.has(post.postId)) {
+          seenIds.add(post.postId);
+          posts.push(post);
+        }
+      }
+
+      endCursor = pageMedia?.page_info?.end_cursor;
+      hasNextPage = pageMedia?.page_info?.has_next_page === true;
+    } catch (err: any) {
+      console.log(`[CI Scraper] WEB_API: Pagination error: ${err.message}, stopping`);
+      break;
+    }
+  }
+
+  const rawFetchedCount = posts.length;
+  const stopReason = !hasNextPage ? "NO_MORE_PAGES" :
+    posts.length >= TARGET_POSTS ? "TARGET_REACHED" :
+    paginationPages >= MAX_PAGINATION_PAGES ? "MAX_PAGES_REACHED" :
+    !userId ? "NO_USER_ID_FOR_PAGINATION" : "UNKNOWN";
+
+  console.log(`[CI Scraper] WEB_API: Extracted ${posts.length} posts (${paginationPages} pages, stop=${stopReason}), ${followers ?? "unknown"} followers for ${handle}`);
+
+  return { posts, followers, profileName, bytesReceived, paginationPages, rawFetchedCount };
 }
 
 async function attemptHtmlPageParse(profileUrl: string, handle: string): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number }> {
@@ -473,17 +541,23 @@ export async function scrapeInstagramProfile(rawUrl: string): Promise<ScrapeResu
 
   await randomDelay();
 
+  let paginationPages = 0;
+  let rawFetchedCount = 0;
+  let paginationStopReason = "";
+
   attempts.push("WEB_API");
   try {
     const result = await attemptWebProfileApi(handle);
     posts = result.posts;
     followers = result.followers;
     profileName = result.profileName;
+    paginationPages = result.paginationPages;
+    rawFetchedCount = result.rawFetchedCount;
     scrapeStats.totalBytesEstimated += result.bytesReceived;
     if (posts.length > 0) {
       collectionMethodUsed = "WEB_API";
       scrapeStats.webApiSuccess++;
-      console.log(`[CI Scraper] WEB_API SUCCESS: ${posts.length} posts, ${followers ?? "unknown"} followers for ${handle}`);
+      console.log(`[CI Scraper] WEB_API SUCCESS: ${posts.length} posts (${paginationPages} pages), ${followers ?? "unknown"} followers for ${handle}`);
     }
   } catch (err: any) {
     console.log(`[CI Scraper] WEB_API failed for ${handle}: ${err.message}, trying HTML_PARSE...`);
@@ -537,14 +611,21 @@ export async function scrapeInstagramProfile(rawUrl: string): Promise<ScrapeResu
   const stats = getScrapeStats();
   console.log(`[CI Scraper] Stats: total=${stats.totalRequests}, success=${stats.successRate}, blocked=${stats.blockedRate}, bandwidth=${stats.bandwidthMB}`);
 
+  if (!paginationStopReason && posts.length > 0) {
+    paginationStopReason = posts.length >= TARGET_POSTS ? "TARGET_REACHED" : "SINGLE_PAGE";
+  }
+
   const result: ScrapeResult = {
     success: posts.length > 0,
-    posts: posts.slice(0, 30),
+    posts: posts.slice(0, 60),
     followers,
     profileName: profileName || handle,
     collectionMethodUsed,
     attempts,
     warnings,
+    paginationPages: paginationPages || 1,
+    rawFetchedCount: rawFetchedCount || posts.length,
+    paginationStopReason,
   };
 
   profileCache.set(handle, { data: result, timestamp: Date.now() });

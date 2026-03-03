@@ -1,0 +1,112 @@
+Replit,
+
+We still have the SAME problem in production UI. Your “data integrity fix” did not resolve the real issue.
+
+What I see right now (screenshot attached):
+
+Top card:
+- “ANALYSIS COMPLETE (CACHED)”
+- “Fetch blocked (cooldown active) — Analysis executed using cached data”
+- Shows: 12 posts / 11 comments
+
+Competitor card (Viral mates):
+- Posts collected: 12 / 30
+- Comments collected: 11 / 100
+- Freshness: 0d ago
+
+So nothing improved. We are still not getting enough data from first run, and cooldown blocks us from reaching thresholds. Worse: the system looks “complete” while it’s actually insufficient.
+
+This is NOT a “delete-before-insert” problem. This is a pipeline/control-flow + source-of-truth problem.
+
+────────────────────────
+A) Root Problem (Must be acknowledged)
+────────────────────────
+Cooldown is blocking fetch when coverage is still below minimum thresholds (30 posts / 100 comments).  
+So the system gets stuck permanently in low coverage, and the UI misleadingly shows “Complete (Cached)”.
+
+If coverage < thresholds, cooldown must NOT prevent the system from completing the minimum dataset — otherwise MIv3 can never escape “Exploratory / Low Confidence”.
+
+────────────────────────
+B) Required Structural Fix (No hacks)
+────────────────────────
+
+1) Cooldown gating must become “coverage-aware”
+Rule:
+- If posts < 30 OR comments < 100 → allow fetch continuation EVEN if cooldown active
+- Only apply 72h cooldown when:
+  posts ≥ 30 AND comments ≥ 100 (or explicit hard stop reason)
+
+This is the only way to guarantee “first-run sufficiency” and stop the user from being trapped.
+
+2) Job status must be honest (state machine fix)
+If fetch is blocked:
+- Job cannot be marked “DATA PULL COMPLETE”
+- It must be “FETCH_BLOCKED” (terminal) OR “PARTIAL_COMPLETE”
+- And must show exactly what is blocked (posts/comments) + remaining required counts.
+
+3) Persisted source-of-truth must be unified
+Confirm which table the competitor cards read from:
+- If competitor UI reads from ci_competitors (or metrics snapshot), it must show the SAME verified DB counts used by MIv3.
+- No separate job counters.
+- No “cached analysis” counts that differ from competitor coverage.
+
+Right now the UI is still stuck at 12/11, so either:
+- the fetch is not actually persisting beyond 12/11 (pagination/limit), OR
+- the competitor card is reading from a stale source and not the persisted dataset.
+
+We need proof, not assumptions.
+
+4) Pagination / cap audit (likely cause of 12)
+12 is a suspicious constant. This strongly suggests we’re still capped by default page size / early stop.
+You must locate the exact limit:
+- BrightData response pagination stop?
+- MAX_PAGES_PER_COMPETITOR too low?
+- MAX_REQUESTS_PER_JOB too low?
+- Parser drops items?
+- Duplicate filtering collapsing counts?
+
+Print and store in DB:
+- rawFetchedCount
+- insertedCount
+- dedupedCount
+- stopReason
+Per stage. Then render it in UI.
+
+────────────────────────
+C) Mandatory Tests (Must PASS)
+────────────────────────
+
+1) Coverage-aware cooldown escape
+- Start with 12 posts/11 comments, cooldown active
+- Run Auto-Fetch
+- System must fetch MORE until ≥ 30 / ≥ 100 OR stopReason explains why
+
+2) “Complete” honesty test
+- When fetch is blocked under cooldown AND coverage < threshold
+  UI must NOT display “Complete”
+  It must display “Blocked / Partial” with remaining counts
+
+3) Cap detection test
+- Force the system to hit 12 due to an imposed limit
+- Ensure stopReason = PAGINATION_STOPPED or MAX_PAGES_REACHED etc. is persisted and shown
+
+4) Single source-of-truth test
+- Competitor card coverage numbers must equal the DB-verified counts used by MIv3 snapshot
+- No divergence allowed
+
+────────────────────────
+D) What I need from you (PASS/FAIL + Direct Action)
+────────────────────────
+
+Reply with PASS/FAIL for each:
+
+1) Coverage-aware cooldown gating
+2) State machine honesty (Complete vs Blocked/Partial)
+3) Pagination/cap root cause found (why it stalls at ~12)
+4) Unified source-of-truth confirmed (competitor UI == MIv3 verified DB counts)
+
+If any item is FAIL, tell me EXACTLY what you will change (file + function) and do it directly.
+
+No vague confirmations.
+
+— Samir
