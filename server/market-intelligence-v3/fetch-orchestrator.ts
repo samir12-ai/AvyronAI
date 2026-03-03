@@ -63,8 +63,6 @@ export interface FetchJobStatus {
   completedAt?: string;
 }
 
-const pendingSnapshotIds = new Map<string, string>();
-
 const activeJobs = new Map<string, Promise<void>>();
 const creationLocks = new Set<string>();
 
@@ -140,18 +138,31 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
     };
   }
 
-  await db.insert(miFetchJobs).values({
-    id: jobId,
-    accountId,
-    campaignId,
-    competitorHash: hash,
-    status: "RUNNING",
-    stageStatuses: JSON.stringify(initialStages),
-    fetchLimitReasons: JSON.stringify([]),
-    totalPostsFetched: 0,
-    totalCommentsFetched: 0,
-    competitorCount: competitors.length,
-  });
+  try {
+    await db.insert(miFetchJobs).values({
+      id: jobId,
+      accountId,
+      campaignId,
+      competitorHash: hash,
+      status: "RUNNING",
+      stageStatuses: JSON.stringify(initialStages),
+      fetchLimitReasons: JSON.stringify([]),
+      totalPostsFetched: 0,
+      totalCommentsFetched: 0,
+      competitorCount: competitors.length,
+    });
+  } catch (insertErr: any) {
+    if (insertErr.code === "23505") {
+      const existing = await db.select().from(miFetchJobs)
+        .where(and(eq(miFetchJobs.accountId, accountId), eq(miFetchJobs.campaignId, campaignId), eq(miFetchJobs.status, "RUNNING")))
+        .orderBy(desc(miFetchJobs.createdAt)).limit(1);
+      if (existing.length > 0) {
+        console.log(`[FetchOrch] Unique constraint hit — reusing DB job ${existing[0].id}`);
+        return existing[0].id;
+      }
+    }
+    throw insertErr;
+  }
 
   console.log(`[FetchOrch] Job ${jobId} created for ${competitors.length} competitors`);
 
@@ -387,10 +398,11 @@ async function executeFetchJob(
     }
 
     const anySignalComplete = Object.values(stages).some(s => s.SIGNAL_COMPUTE === "COMPLETE");
+    const isPartialCoverage = stopReason !== "COMPLETE";
     if (anySignalComplete) {
       try {
-        await persistSnapshotAfterFetch(accountId, campaignId);
-        console.log(`[FetchOrch] Snapshot persisted for ${accountId}/${campaignId}`);
+        await persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverage, stopReason);
+        console.log(`[FetchOrch] Snapshot persisted for ${accountId}/${campaignId} | partial=${isPartialCoverage}`);
       } catch (err: any) {
         console.error(`[FetchOrch] Snapshot persistence failed:`, err.message);
       }
@@ -400,6 +412,7 @@ async function executeFetchJob(
     const allFailed = Object.values(stages).every(s => s.POSTS_FETCH === "FAILED");
     if (allFailed) stopReason = "ALL_FAILED";
 
+    let snapshotIdCreated: string | null = null;
     const anySignalComplete2 = Object.values(stages).some(s => s.SIGNAL_COMPUTE === "COMPLETE");
     if (anySignalComplete2) {
       try {
@@ -407,10 +420,12 @@ async function executeFetchJob(
           .where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.status, "COMPLETE")))
           .orderBy(desc(miSnapshots.createdAt)).limit(1);
         if (latestSnap.length > 0) {
-          pendingSnapshotIds.set(jobId, latestSnap[0].id);
+          snapshotIdCreated = latestSnap[0].id;
         }
       } catch { }
     }
+
+    const finalStopReason = stopReason !== "COMPLETE" ? stopReason : null;
 
     await db.update(miFetchJobs).set({
       status: allFailed ? "FAILED" : "COMPLETE",
@@ -418,9 +433,11 @@ async function executeFetchJob(
       fetchLimitReasons: JSON.stringify(limitReasons),
       totalPostsFetched: totalPosts,
       totalCommentsFetched: totalComments,
+      snapshotIdCreated,
+      stopReason: finalStopReason,
       durationMs,
       completedAt: new Date(),
-      error: stopReason !== "COMPLETE" && stopReason !== "ALL_FAILED" ? `STOP_REASON: ${stopReason}` : null,
+      error: finalStopReason ? `STOP_REASON: ${finalStopReason}` : null,
     }).where(eq(miFetchJobs.id, jobId));
 
     console.log(`[FetchOrch] Job ${jobId} completed in ${durationMs}ms | posts=${totalPosts} comments=${totalComments} | requests=${totalRequests} | stopReason=${stopReason}`);
@@ -478,7 +495,7 @@ function classifyBlockReason(result: FetchResult): "RATE_LIMIT" | "PROXY_BLOCKED
   return "ERROR";
 }
 
-async function persistSnapshotAfterFetch(accountId: string, campaignId: string): Promise<void> {
+async function persistSnapshotAfterFetch(accountId: string, campaignId: string, isPartialCoverage: boolean = false, jobStopReason: StopReason = "COMPLETE"): Promise<void> {
   const competitors = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.isActive, true)));
 
@@ -519,9 +536,33 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string):
   const trajectory = computeTrajectory(signalResults, intents);
   const confidence = computeConfidence(signalResults, dataFreshnessDays);
   const dominanceResults = computeAllDominance(signalResults, confidence);
-  const missingFlags = aggregateMissingFlags(signalResults);
+  let missingFlags = aggregateMissingFlags(signalResults);
   const trajectoryDirection = deriveTrajectoryDirection(trajectory);
   const marketState = deriveMarketState(trajectory, confidence.level);
+
+  if (isPartialCoverage) {
+    const PARTIAL_CONFIDENCE_PENALTY = 0.3;
+    confidence.overall = Math.max(0, Math.round((confidence.overall - PARTIAL_CONFIDENCE_PENALTY) * 100) / 100);
+    if (confidence.overall < 0.3) {
+      confidence.level = "INSUFFICIENT";
+      confidence.guardDecision = "BLOCK";
+      confidence.guardReasons = [...(confidence.guardReasons || []), `PARTIAL_COVERAGE: ${jobStopReason}`];
+    } else if (confidence.overall < 0.5) {
+      confidence.level = "LOW";
+      confidence.guardDecision = "DOWNGRADE";
+      confidence.guardReasons = [...(confidence.guardReasons || []), `PARTIAL_COVERAGE: ${jobStopReason}`];
+    }
+
+    const partialFlags: any = Array.isArray(missingFlags) ? [...missingFlags] : [];
+    partialFlags.push({
+      type: "PARTIAL_COVERAGE",
+      reason: jobStopReason,
+      message: `Data collection stopped early due to ${jobStopReason.replace(/_/g, " ").toLowerCase()}. Coverage is incomplete.`,
+    });
+    missingFlags = partialFlags;
+
+    console.log(`[FetchOrch] Partial coverage snapshot: confidence downgraded to ${confidence.overall} (${confidence.level}), stopReason=${jobStopReason}`);
+  }
 
   const previousSnapshots = await db.select().from(miSnapshots)
     .where(and(
@@ -546,7 +587,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string):
     trajectoryData: JSON.stringify(trajectory),
     dominanceData: JSON.stringify(dominanceResults),
     confidenceData: JSON.stringify(confidence),
-    marketState,
+    marketState: isPartialCoverage ? "PARTIAL_DATA" : marketState,
     executionMode,
     telemetry: JSON.stringify({
       executionMode,
@@ -555,10 +596,12 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string):
       competitorsCount: competitorInputs.length,
       commentSampleSize: totalComments,
       postSampleSize: totalPosts,
-      downgradeReason: tokenBudget.downgradeReason,
+      downgradeReason: isPartialCoverage ? `PARTIAL_COVERAGE:${jobStopReason}` : tokenBudget.downgradeReason,
       postsProcessed: totalPosts,
       commentsProcessed: totalComments,
       refreshReason: "FETCH_JOB_COMPLETE",
+      partialCoverage: isPartialCoverage,
+      jobStopReason: isPartialCoverage ? jobStopReason : null,
     }),
     narrativeSynthesis: null,
     entryStrategy: null,
@@ -623,18 +666,6 @@ export async function getFetchJobStatus(jobId: string): Promise<FetchJobStatus |
 
   if (!job) return null;
 
-  const errorStr = job.error || undefined;
-  let stopReasonParsed: StopReason | undefined;
-  if (errorStr && errorStr.includes("STOP_REASON: ")) {
-    const match = errorStr.match(/STOP_REASON:\s*(\S+)/);
-    if (match) stopReasonParsed = match[1] as StopReason;
-  }
-
-  const snapshotId = pendingSnapshotIds.get(job.id);
-  if (snapshotId && (job.status === "COMPLETE" || job.status === "FAILED")) {
-    pendingSnapshotIds.delete(job.id);
-  }
-
   return {
     jobId: job.id,
     status: job.status as FetchJobStatus["status"],
@@ -643,9 +674,9 @@ export async function getFetchJobStatus(jobId: string): Promise<FetchJobStatus |
     totalPostsFetched: job.totalPostsFetched || 0,
     totalCommentsFetched: job.totalCommentsFetched || 0,
     competitorCount: job.competitorCount || 0,
-    stopReason: stopReasonParsed,
-    newSnapshotId: snapshotId,
-    error: errorStr,
+    stopReason: (job.stopReason as StopReason) || undefined,
+    newSnapshotId: job.snapshotIdCreated || undefined,
+    error: job.error || undefined,
     durationMs: job.durationMs || undefined,
     createdAt: job.createdAt?.toISOString(),
     completedAt: job.completedAt?.toISOString(),

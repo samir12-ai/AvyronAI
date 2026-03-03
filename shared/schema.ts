@@ -1497,6 +1497,8 @@ export const miFetchJobs = pgTable("mi_fetch_jobs", {
   totalPostsFetched: integer("total_posts_fetched").default(0),
   totalCommentsFetched: integer("total_comments_fetched").default(0),
   competitorCount: integer("competitor_count").default(0),
+  snapshotIdCreated: varchar("snapshot_id_created"),
+  stopReason: text("stop_reason"),
   error: text("error"),
   retryCount: integer("retry_count").default(0),
   durationMs: integer("duration_ms"),

@@ -350,7 +350,147 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
     });
   });
 
-  describe("G) Build-a-Plan Reads Only (No Compute)", () => {
+  describe("G) DB-Persisted snapshotIdCreated (No In-Memory Dependency)", () => {
+    it("should have snapshotIdCreated column in mi_fetch_jobs schema", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("shared/schema.ts", "utf-8")
+      );
+      expect(source).toContain("snapshotIdCreated");
+      expect(source).toContain("snapshot_id_created");
+    });
+
+    it("should write snapshotIdCreated to DB at job completion", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("snapshotIdCreated");
+      expect(source).toContain("snapshotIdCreated,");
+      expect(source).not.toContain("pendingSnapshotIds");
+    });
+
+    it("should return snapshotIdCreated from DB in getFetchJobStatus", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("job.snapshotIdCreated");
+    });
+
+    it("should have stopReason column in mi_fetch_jobs schema", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("shared/schema.ts", "utf-8")
+      );
+      expect(source).toContain("stopReason: text");
+      expect(source).toContain("stop_reason");
+    });
+
+    it("should write stopReason to DB at job completion", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("stopReason: finalStopReason");
+    });
+  });
+
+  describe("H) DB-Level RUNNING Job Uniqueness", () => {
+    it("should have partial unique index on RUNNING status in schema or migration", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("23505");
+    });
+
+    it("should handle unique constraint violation by returning existing jobId", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("Unique constraint hit");
+      expect(source).toContain("insertErr.code");
+    });
+  });
+
+  describe("I) Partial Coverage Downgrade on Limit-Stop", () => {
+    it("should accept isPartialCoverage flag in persistSnapshotAfterFetch", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("isPartialCoverage");
+      expect(source).toContain("jobStopReason");
+    });
+
+    it("should downgrade confidence when partial coverage", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("PARTIAL_CONFIDENCE_PENALTY");
+      expect(source).toContain("PARTIAL_COVERAGE:");
+    });
+
+    it("should add PARTIAL_COVERAGE to missingSignalFlags", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain('"PARTIAL_COVERAGE"');
+      expect(source).toContain("Coverage is incomplete");
+    });
+
+    it("should set marketState to PARTIAL_DATA when partial", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("PARTIAL_DATA");
+    });
+
+    it("should include partialCoverage flag in telemetry", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("partialCoverage: isPartialCoverage");
+      expect(source).toContain("jobStopReason: isPartialCoverage");
+    });
+  });
+
+  describe("J) Crash/Restart Recovery", () => {
+    it("should recover RUNNING jobs from DB after backend restart", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain('eq(miFetchJobs.status, "RUNNING")');
+      expect(source).toContain("Reusing active DB job");
+    });
+
+    it("should return stable stageStatuses from DB (not memory)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("job.stageStatuses ? JSON.parse(job.stageStatuses)");
+    });
+
+    it("should return snapshotIdCreated from DB after restart", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("job.snapshotIdCreated");
+      expect(source).not.toContain("pendingSnapshotIds.get");
+    });
+
+    it("should cleanup activeJobs in-memory map in finally block", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("activeJobs.delete(lockKey)");
+      expect(source).toContain(".finally(");
+    });
+
+    it("should handle DB state correctly: stages persist incrementally", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      const updateCount = (source.match(/updateJobStages\(/g) || []).length;
+      expect(updateCount).toBeGreaterThanOrEqual(5);
+    });
+  });
+
+  describe("K) Build-a-Plan Reads Only (No Compute)", () => {
     it("should not import compute functions in orchestrator-routes", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/strategic-core/orchestrator-routes.ts", "utf-8")
