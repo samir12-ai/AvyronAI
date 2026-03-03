@@ -1,0 +1,119 @@
+
+⸻
+
+Subject: MIv3 FINAL LOCK — PASS / FAIL Confirmation Required
+
+Replit,
+
+We are locking MIv3 structurally.
+No assumptions. No vague confirmations.
+
+For each section below reply strictly:
+
+PASS
+or
+FAIL → and implement the fix immediately (no discussion), then confirm DONE.
+
+Everything under Competitor Intelligence must be owned by MIv3 only.
+Build-a-Plan must only READ snapshots.
+
+⸻
+
+1️⃣ Single Engine Ownership (MIv3 Only)
+
+Confirm PASS/FAIL:
+	•	MIv3 is the ONLY engine that:
+	•	fetches competitor data
+	•	computes dominance
+	•	computes CTA intelligence
+	•	computes confidence
+	•	writes snapshots
+	•	Build-a-Plan does NOT:
+	•	call dominance module directly
+	•	call CTA logic
+	•	spawn competitor engines
+
+If FAIL:
+→ Enforce hard whitelist + isolation guard + audit violation log immediately.
+
+⸻
+
+2️⃣ Fetch Job Safety (Crash-Safe + Incremental)
+
+Confirm PASS/FAIL:
+	•	Each stage writes incrementally to DB.
+	•	If server crashes mid-job, completed stages remain persisted.
+	•	Job can resume or re-run safely without duplication.
+
+If FAIL:
+→ Convert to stage-atomic persistence with resume-safe logic.
+
+⸻
+
+3️⃣ Proxy / Cost Protection (Hard Ceilings)
+
+Confirm PASS/FAIL:
+	•	Hard limits exist for:
+	•	max pages per competitor
+	•	max requests per job
+	•	max runtime per job
+	•	max retries
+	•	Job stops with explicit STOP_REASON if limits reached.
+
+If FAIL:
+→ Add hard ceilings + explicit STOP_REASON + telemetry.
+
+⸻
+
+4️⃣ Idempotency & Deep Fetch Control
+
+Confirm PASS/FAIL:
+	•	Same accountId + campaignId + competitorHash reuses active RUNNING job.
+	•	No duplicate parallel jobs possible.
+	•	Deep fetch runs inside same controlled pipeline (not uncontrolled new job).
+
+If FAIL:
+→ Implement strict job reuse + lock enforcement immediately.
+
+⸻
+
+5️⃣ Snapshot Integrity
+
+Confirm PASS/FAIL:
+	•	After SIGNAL_COMPUTE, a new snapshot is persisted.
+	•	Snapshot version increments correctly.
+	•	CI UI reads only latest scoped snapshot.
+	•	Build-a-Plan reads snapshot only (never recomputes competitor logic).
+
+If FAIL:
+→ Fix snapshot write logic + enforce read-only consumption.
+
+⸻
+
+6️⃣ CTA v2 Correctness
+
+Confirm PASS/FAIL:
+	•	Storytelling-based implicit CTAs produce coverage > 0.
+	•	No keyword-only logic remains.
+	•	If text insufficient → explicit missingSignalFlags + confidence downgrade.
+	•	No fabrication.
+
+If FAIL:
+→ Replace detection logic immediately with deterministic intent scoring.
+
+⸻
+
+Reply strictly:
+
+1️⃣ PASS / FAIL
+2️⃣ PASS / FAIL
+3️⃣ PASS / FAIL
+4️⃣ PASS / FAIL
+5️⃣ PASS / FAIL
+6️⃣ PASS / FAIL
+
+If FAIL anywhere → fix directly, then confirm DONE.
+
+No vague explanations.
+
+— Samir

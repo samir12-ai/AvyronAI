@@ -230,7 +230,127 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
     });
   });
 
-  describe("E) Build-a-Plan Reads Only (No Compute)", () => {
+  describe("E) Hard Ceilings — Proxy & Cost Protection", () => {
+    it("should have MAX_PAGES_PER_COMPETITOR hard ceiling in orchestrator", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("MAX_PAGES_PER_COMPETITOR");
+      const match = source.match(/MAX_PAGES_PER_COMPETITOR\s*=\s*(\d+)/);
+      expect(match).not.toBeNull();
+      expect(Number(match![1])).toBeGreaterThan(0);
+      expect(Number(match![1])).toBeLessThanOrEqual(10);
+    });
+
+    it("should have MAX_REQUESTS_PER_JOB hard ceiling in orchestrator", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("MAX_REQUESTS_PER_JOB");
+      const match = source.match(/MAX_REQUESTS_PER_JOB\s*=\s*(\d+)/);
+      expect(match).not.toBeNull();
+      expect(Number(match![1])).toBeGreaterThan(0);
+      expect(Number(match![1])).toBeLessThanOrEqual(100);
+    });
+
+    it("should have MAX_RUNTIME_MS hard ceiling in orchestrator", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("MAX_RUNTIME_MS");
+      const match = source.match(/MAX_RUNTIME_MS\s*=\s*([\d*\s]+)/);
+      expect(match).not.toBeNull();
+    });
+
+    it("should have MAX_RETRIES hard ceiling in orchestrator", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("MAX_RETRIES");
+      const match = source.match(/MAX_RETRIES\s*=\s*(\d+)/);
+      expect(match).not.toBeNull();
+      expect(Number(match![1])).toBeGreaterThan(0);
+      expect(Number(match![1])).toBeLessThanOrEqual(5);
+    });
+
+    it("should stop with explicit STOP_REASON when limits reached", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("StopReason");
+      expect(source).toContain("MAX_PAGES_REACHED");
+      expect(source).toContain("MAX_REQUESTS_REACHED");
+      expect(source).toContain("MAX_RUNTIME_REACHED");
+      expect(source).toContain("STOP_REASON:");
+    });
+
+    it("should log hard ceiling telemetry in audit", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("hardCeilings");
+      expect(source).toContain("maxPagesPerCompetitor");
+      expect(source).toContain("maxRequestsPerJob");
+      expect(source).toContain("maxRuntimeMs");
+      expect(source).toContain("maxRetries");
+    });
+
+    it("should track totalRequests counter in job execution", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("totalRequests");
+      expect(source).toContain("totalRequests++");
+    });
+  });
+
+  describe("F) Snapshot Persistence After Fetch", () => {
+    it("should call persistSnapshotAfterFetch when SIGNAL_COMPUTE completes", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("persistSnapshotAfterFetch");
+      expect(source).toContain("anySignalComplete");
+      expect(source).toContain("Snapshot persisted");
+    });
+
+    it("should persist snapshot with version increment", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("newVersion");
+      expect(source).toContain("previousSnapshot?.version || 0) + 1");
+    });
+
+    it("should persist signal logs and telemetry with snapshot", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("miSignalLogs");
+      expect(source).toContain("miTelemetry");
+      expect(source).toContain("snapshotId: snapshot.id");
+    });
+
+    it("should compute full pipeline (signals, intents, trajectory, confidence, dominance) before persistence", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("computeAllSignals(competitorInputs)");
+      expect(source).toContain("classifyAllIntents(signalResults)");
+      expect(source).toContain("computeTrajectory(signalResults");
+      expect(source).toContain("computeConfidence(signalResults");
+      expect(source).toContain("computeAllDominance(signalResults");
+    });
+
+    it("should audit log the snapshot persistence event", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("MI_SNAPSHOT_PERSISTED_POST_FETCH");
+    });
+  });
+
+  describe("G) Build-a-Plan Reads Only (No Compute)", () => {
     it("should not import compute functions in orchestrator-routes", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/strategic-core/orchestrator-routes.ts", "utf-8")

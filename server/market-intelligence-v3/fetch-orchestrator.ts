@@ -1,8 +1,13 @@
 import { db } from "../db";
-import { miFetchJobs, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot } from "@shared/schema";
+import { miFetchJobs, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, miSnapshots, miSignalLogs, miTelemetry } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { fetchCompetitorData, type FetchResult } from "../competitive-intelligence/data-acquisition";
-import { computeAllSignals } from "./signal-engine";
+import { computeAllSignals, aggregateMissingFlags } from "./signal-engine";
+import { classifyAllIntents, computeDominantMarketIntent } from "./intent-engine";
+import { computeTrajectory, deriveTrajectoryDirection, deriveMarketState } from "./trajectory-engine";
+import { computeConfidence } from "./confidence-engine";
+import { computeAllDominance } from "./dominance-module";
+import { computeTokenBudget, applySampling } from "./token-budget";
 import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
 import { computeCompetitorHash } from "./utils";
 import type { CompetitorInput } from "./types";
@@ -13,6 +18,11 @@ const MIN_POSTS_TARGET = 30;
 const MIN_COMMENTS_TARGET = 100;
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 2000;
+const MAX_PAGES_PER_COMPETITOR = 5;
+const MAX_REQUESTS_PER_JOB = 50;
+const MAX_RUNTIME_MS = 10 * 60 * 1000;
+
+type StopReason = "MAX_PAGES_REACHED" | "MAX_REQUESTS_REACHED" | "MAX_RUNTIME_REACHED" | "COMPLETE" | "ERROR" | "ALL_FAILED";
 
 type StageStatus = "PENDING" | "RUNNING" | "COMPLETE" | "FAILED" | "SKIPPED";
 
@@ -44,6 +54,8 @@ export interface FetchJobStatus {
   totalPostsFetched: number;
   totalCommentsFetched: number;
   competitorCount: number;
+  stopReason?: StopReason;
+  totalRequestsMade?: number;
   error?: string;
   durationMs?: number;
   createdAt?: string;
@@ -138,6 +150,8 @@ async function executeFetchJob(
   const limitReasons: FetchLimitReason[] = [];
   let totalPosts = 0;
   let totalComments = 0;
+  let totalRequests = 0;
+  let stopReason: StopReason = "COMPLETE";
 
   for (const c of competitors) {
     stages[c.id] = {
@@ -152,8 +166,67 @@ async function executeFetchJob(
     };
   }
 
+  function checkRuntimeCeiling(): boolean {
+    if (Date.now() - startTime >= MAX_RUNTIME_MS) {
+      stopReason = "MAX_RUNTIME_REACHED";
+      console.log(`[FetchOrch] HARD CEILING: MAX_RUNTIME ${MAX_RUNTIME_MS}ms reached`);
+      return true;
+    }
+    return false;
+  }
+
+  function checkRequestCeiling(): boolean {
+    if (totalRequests >= MAX_REQUESTS_PER_JOB) {
+      stopReason = "MAX_REQUESTS_REACHED";
+      console.log(`[FetchOrch] HARD CEILING: MAX_REQUESTS ${MAX_REQUESTS_PER_JOB} reached`);
+      return true;
+    }
+    return false;
+  }
+
   try {
+    let competitorPageCount = 0;
+
     for (const comp of competitors) {
+      if (checkRuntimeCeiling() || checkRequestCeiling()) {
+        for (const s of Object.values(stages)) {
+          if (s.POSTS_FETCH === "PENDING") {
+            s.POSTS_FETCH = "SKIPPED";
+            s.COMMENTS_FETCH = "SKIPPED";
+            s.CTA_ANALYSIS = "SKIPPED";
+            s.SIGNAL_COMPUTE = "SKIPPED";
+          }
+        }
+        limitReasons.push({
+          competitorId: comp.id, competitorName: comp.name,
+          stage: "POSTS_FETCH", reason: "ERROR",
+          details: `Job stopped: ${stopReason}`,
+        });
+        await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
+        break;
+      }
+
+      competitorPageCount++;
+      if (competitorPageCount > MAX_PAGES_PER_COMPETITOR) {
+        stopReason = "MAX_PAGES_REACHED";
+        console.log(`[FetchOrch] HARD CEILING: MAX_PAGES_PER_COMPETITOR ${MAX_PAGES_PER_COMPETITOR} reached`);
+        for (const s of Object.values(stages)) {
+          if (s.POSTS_FETCH === "PENDING") {
+            s.POSTS_FETCH = "SKIPPED";
+            s.COMMENTS_FETCH = "SKIPPED";
+            s.CTA_ANALYSIS = "SKIPPED";
+            s.SIGNAL_COMPUTE = "SKIPPED";
+          }
+        }
+        limitReasons.push({
+          competitorId: comp.id, competitorName: comp.name,
+          stage: "POSTS_FETCH", reason: "ERROR",
+          details: `Job stopped: ${stopReason}`,
+        });
+        await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
+        break;
+      }
+
       const stage = stages[comp.id];
 
       stage.POSTS_FETCH = "RUNNING";
@@ -163,6 +236,8 @@ async function executeFetchJob(
       let retries = 0;
 
       while (retries <= MAX_RETRIES) {
+        if (checkRuntimeCeiling() || checkRequestCeiling()) break;
+        totalRequests++;
         try {
           fetchResult = await fetchCompetitorData(comp.id, accountId, retries > 0);
           break;
@@ -184,7 +259,7 @@ async function executeFetchJob(
       }
 
       if (!fetchResult) {
-        stage.POSTS_FETCH = "FAILED";
+        stage.POSTS_FETCH = stage.POSTS_FETCH === "RUNNING" ? "FAILED" : stage.POSTS_FETCH;
         stage.COMMENTS_FETCH = "SKIPPED";
         stage.CTA_ANALYSIS = "SKIPPED";
         stage.SIGNAL_COMPUTE = "SKIPPED";
@@ -285,11 +360,19 @@ async function executeFetchJob(
       await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
     }
 
+    const anySignalComplete = Object.values(stages).some(s => s.SIGNAL_COMPUTE === "COMPLETE");
+    if (anySignalComplete) {
+      try {
+        await persistSnapshotAfterFetch(accountId, campaignId);
+        console.log(`[FetchOrch] Snapshot persisted for ${accountId}/${campaignId}`);
+      } catch (err: any) {
+        console.error(`[FetchOrch] Snapshot persistence failed:`, err.message);
+      }
+    }
+
     const durationMs = Date.now() - startTime;
-    const hasAnyFailure = Object.values(stages).some(s =>
-      s.POSTS_FETCH === "FAILED" && s.COMMENTS_FETCH === "SKIPPED"
-    );
     const allFailed = Object.values(stages).every(s => s.POSTS_FETCH === "FAILED");
+    if (allFailed) stopReason = "ALL_FAILED";
 
     await db.update(miFetchJobs).set({
       status: allFailed ? "FAILED" : "COMPLETE",
@@ -299,15 +382,24 @@ async function executeFetchJob(
       totalCommentsFetched: totalComments,
       durationMs,
       completedAt: new Date(),
+      error: stopReason !== "COMPLETE" && stopReason !== "ALL_FAILED" ? `STOP_REASON: ${stopReason}` : null,
     }).where(eq(miFetchJobs.id, jobId));
 
-    console.log(`[FetchOrch] Job ${jobId} completed in ${durationMs}ms | posts=${totalPosts} comments=${totalComments}`);
+    console.log(`[FetchOrch] Job ${jobId} completed in ${durationMs}ms | posts=${totalPosts} comments=${totalComments} | requests=${totalRequests} | stopReason=${stopReason}`);
 
     logAudit(accountId, "MI_FETCH_JOB_COMPLETE", {
       details: {
         jobId, totalPosts, totalComments, durationMs,
         limitReasons: limitReasons.length,
+        totalRequests,
+        stopReason,
         status: allFailed ? "FAILED" : "COMPLETE",
+        hardCeilings: {
+          maxPagesPerCompetitor: MAX_PAGES_PER_COMPETITOR,
+          maxRequestsPerJob: MAX_REQUESTS_PER_JOB,
+          maxRuntimeMs: MAX_RUNTIME_MS,
+          maxRetries: MAX_RETRIES,
+        },
       },
     }).catch(() => {});
 
@@ -315,7 +407,7 @@ async function executeFetchJob(
     console.error(`[FetchOrch] Job ${jobId} fatal:`, err.message);
     await db.update(miFetchJobs).set({
       status: "FAILED",
-      error: err.message,
+      error: `FATAL: ${err.message} | STOP_REASON: ERROR`,
       stageStatuses: JSON.stringify(stages),
       fetchLimitReasons: JSON.stringify(limitReasons),
       durationMs: Date.now() - startTime,
@@ -348,11 +440,156 @@ function classifyBlockReason(result: FetchResult): "RATE_LIMIT" | "PROXY_BLOCKED
   return "ERROR";
 }
 
+async function persistSnapshotAfterFetch(accountId: string, campaignId: string): Promise<void> {
+  const competitors = await db.select().from(ciCompetitors)
+    .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.isActive, true)));
+
+  if (competitors.length === 0) return;
+
+  const competitorInputs: CompetitorInput[] = [];
+  for (const c of competitors) {
+    const posts = await getStoredPostsForMIv3(c.id, accountId);
+    const comments = await getStoredCommentsForMIv3(c.id, accountId);
+    competitorInputs.push({
+      id: c.id, name: c.name, platform: c.platform, profileLink: c.profileLink,
+      businessType: c.businessType, postingFrequency: c.postingFrequency,
+      contentTypeRatio: c.contentTypeRatio, engagementRatio: c.engagementRatio,
+      ctaPatterns: c.ctaPatterns, discountFrequency: c.discountFrequency,
+      hookStyles: c.hookStyles, messagingTone: c.messagingTone,
+      socialProofPresence: c.socialProofPresence, posts, comments,
+    });
+  }
+
+  const competitorHash = computeCompetitorHash(competitorInputs);
+  const totalPosts = competitorInputs.reduce((s, c) => s + (c.posts?.length || 0), 0);
+  const totalComments = competitorInputs.reduce((s, c) => s + (c.comments?.length || 0), 0);
+  const tokenBudget = computeTokenBudget(competitorInputs.length, totalComments, totalPosts);
+  const executionMode = tokenBudget.selectedMode;
+
+  for (const comp of competitorInputs) {
+    const { sampledPosts, sampledComments } = applySampling(
+      comp.posts || [], comp.comments || [], executionMode
+    );
+    comp.posts = sampledPosts;
+    comp.comments = sampledComments;
+  }
+
+  const signalResults = computeAllSignals(competitorInputs);
+  const dataFreshnessDays = signalResults.length > 0 ? Math.max(...signalResults.map(r => r.timeWindowDays || 0)) : 0;
+  const intents = classifyAllIntents(signalResults);
+  const dominantIntent = computeDominantMarketIntent(intents);
+  const trajectory = computeTrajectory(signalResults, intents);
+  const confidence = computeConfidence(signalResults, dataFreshnessDays);
+  const dominanceResults = computeAllDominance(signalResults, confidence);
+  const missingFlags = aggregateMissingFlags(signalResults);
+  const trajectoryDirection = deriveTrajectoryDirection(trajectory);
+  const marketState = deriveMarketState(trajectory, confidence.level);
+
+  const previousSnapshots = await db.select().from(miSnapshots)
+    .where(and(
+      eq(miSnapshots.accountId, accountId),
+      eq(miSnapshots.campaignId, campaignId),
+      eq(miSnapshots.status, "COMPLETE"),
+    ))
+    .orderBy(desc(miSnapshots.createdAt))
+    .limit(1);
+
+  const previousSnapshot = previousSnapshots[0] || null;
+  const newVersion = (previousSnapshot?.version || 0) + 1;
+
+  const [snapshot] = await db.insert(miSnapshots).values({
+    accountId,
+    campaignId,
+    competitorHash,
+    version: newVersion,
+    competitorData: JSON.stringify(competitorInputs.map(c => ({ id: c.id, name: c.name }))),
+    signalData: JSON.stringify(signalResults),
+    intentData: JSON.stringify(intents),
+    trajectoryData: JSON.stringify(trajectory),
+    dominanceData: JSON.stringify(dominanceResults),
+    confidenceData: JSON.stringify(confidence),
+    marketState,
+    executionMode,
+    telemetry: JSON.stringify({
+      executionMode,
+      projectedTokens: tokenBudget.projectedTokens,
+      actualTokensUsed: 0,
+      competitorsCount: competitorInputs.length,
+      commentSampleSize: totalComments,
+      postSampleSize: totalPosts,
+      downgradeReason: tokenBudget.downgradeReason,
+      postsProcessed: totalPosts,
+      commentsProcessed: totalComments,
+      refreshReason: "FETCH_JOB_COMPLETE",
+    }),
+    narrativeSynthesis: null,
+    entryStrategy: null,
+    defensiveRisks: JSON.stringify([]),
+    missingSignalFlags: JSON.stringify(missingFlags),
+    volatilityIndex: 0,
+    dataFreshnessDays,
+    overallConfidence: confidence.overall,
+    confidenceLevel: confidence.level,
+    status: "COMPLETE",
+    confirmedRuns: (previousSnapshot?.confirmedRuns || 0) + 1,
+    previousDirection: trajectoryDirection,
+    directionLockedUntil: null,
+  }).returning();
+
+  for (const sr of signalResults) {
+    await db.insert(miSignalLogs).values({
+      snapshotId: snapshot.id,
+      competitorId: sr.competitorId,
+      signals: JSON.stringify(sr.signals),
+      signalCoverageScore: sr.signalCoverageScore,
+      sourceReliabilityScore: sr.sourceReliabilityScore,
+      sampleSize: sr.sampleSize,
+      timeWindowDays: sr.timeWindowDays,
+      varianceScore: sr.varianceScore,
+      dominantSourceRatio: sr.dominantSourceRatio,
+      missingFields: JSON.stringify(sr.missingFields),
+    });
+  }
+
+  await db.insert(miTelemetry).values({
+    snapshotId: snapshot.id,
+    executionMode,
+    projectedTokens: tokenBudget.projectedTokens,
+    actualTokensUsed: 0,
+    competitorsCount: competitorInputs.length,
+    commentSampleSize: totalComments,
+    postSampleSize: totalPosts,
+    downgradeReason: tokenBudget.downgradeReason,
+    postsProcessed: totalPosts,
+    commentsProcessed: totalComments,
+    refreshReason: "FETCH_JOB_COMPLETE",
+  });
+
+  console.log(`[FetchOrch] Snapshot v${newVersion} persisted (id=${snapshot.id}) for ${accountId}/${campaignId}`);
+
+  logAudit(accountId, "MI_SNAPSHOT_PERSISTED_POST_FETCH", {
+    details: {
+      snapshotId: snapshot.id,
+      version: newVersion,
+      competitorCount: competitorInputs.length,
+      signalCount: signalResults.length,
+      marketState,
+      confidence: confidence.overall,
+    },
+  }).catch(() => {});
+}
+
 export async function getFetchJobStatus(jobId: string): Promise<FetchJobStatus | null> {
   const [job] = await db.select().from(miFetchJobs)
     .where(eq(miFetchJobs.id, jobId));
 
   if (!job) return null;
+
+  const errorStr = job.error || undefined;
+  let stopReasonFromError: StopReason | undefined;
+  if (errorStr && errorStr.startsWith("STOP_REASON: ")) {
+    stopReasonFromError = errorStr.replace("STOP_REASON: ", "") as StopReason;
+  }
 
   return {
     jobId: job.id,
@@ -362,7 +599,8 @@ export async function getFetchJobStatus(jobId: string): Promise<FetchJobStatus |
     totalPostsFetched: job.totalPostsFetched || 0,
     totalCommentsFetched: job.totalCommentsFetched || 0,
     competitorCount: job.competitorCount || 0,
-    error: job.error || undefined,
+    stopReason: stopReasonFromError,
+    error: errorStr,
     durationMs: job.durationMs || undefined,
     createdAt: job.createdAt?.toISOString(),
     completedAt: job.completedAt?.toISOString(),
