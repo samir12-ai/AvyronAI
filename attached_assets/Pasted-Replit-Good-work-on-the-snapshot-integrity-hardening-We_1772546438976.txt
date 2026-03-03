@@ -1,0 +1,147 @@
+Replit,
+
+Good work on the snapshot integrity hardening.
+
+We are now closing the remaining structural gaps. This is not about fixing bugs — this is about preventing entire classes of future corruption.
+
+This email defines final invariants. Treat them as non-negotiable system contracts.
+
+────────────────────────
+1) Confidence-Aware Completion Must Be Guard-Decision Based (Not Threshold Based)
+────────────────────────
+
+Current logic allows entryStrategy / narrativeSynthesis to be null when confidence is below a threshold.
+
+This must be tightened.
+
+New invariant:
+
+If guardDecision === "PROCEED":
+    • entryStrategy MUST be present
+    • defensiveRisks MUST be present
+    • narrativeSynthesis MUST be present
+
+If guardDecision === "DOWNGRADE" or "BLOCK":
+    • entryStrategy MAY be null
+    • narrativeSynthesis MAY be null
+    • defensiveRisks must still exist (even if defensive)
+
+We do NOT rely on numeric thresholds alone.
+We rely on final guardDecision outcome.
+
+Add:
+
+• Explicit invariant check inside validateSnapshotCompleteness
+• Regression test:
+    - guardDecision = PROCEED + entryStrategy = null → must fail validation
+    - guardDecision = DOWNGRADE + entryStrategy = null → must pass
+
+This prevents miscomputed confidence from silently weakening structural integrity.
+
+────────────────────────
+2) Single Persist Gateway (No Rogue COMPLETE Writes)
+────────────────────────
+
+We must guarantee that status="COMPLETE" can only be written through one validated path.
+
+Required change:
+
+• Create a single internal function:
+    persistValidatedSnapshot(payload)
+
+• All snapshot writes (engine.ts and fetch-orchestrator.ts) MUST call this function
+• This function:
+    - runs validateSnapshotCompleteness
+    - sets analysisVersion
+    - enforces status discipline
+    - throws if invalid COMPLETE attempt
+
+No direct db.insert(miSnapshots) calls allowed anywhere else.
+
+Add regression test:
+
+• Static scan asserting no other direct writes to mi_snapshots exist
+• Test must fail if new write path appears
+
+We eliminate future accidental bypass.
+
+────────────────────────
+3) Engine Version Discipline Policy
+────────────────────────
+
+ENGINE_VERSION bump rules must be formalized.
+
+Bump ENGINE_VERSION only when:
+• Output schema changes
+• Confidence rules change
+• Guard logic changes
+• Trajectory / dominance logic changes
+• Snapshot completeness contract changes
+
+Do NOT bump for:
+• Logging changes
+• UI changes
+• Refactors with identical output
+
+Add comment block above ENGINE_VERSION explaining bump policy.
+
+Add test:
+
+• Changing ENGINE_VERSION invalidates old snapshot
+• Same ENGINE_VERSION does not invalidate snapshot
+
+We must avoid unnecessary recompute storms.
+
+────────────────────────
+4) Backward Snapshot Handling (User Stability)
+────────────────────────
+
+If an old snapshot (analysisVersion mismatch) is rejected:
+
+• Log: SNAPSHOT_VERSION_INVALIDATED
+• UI must show:
+  "Analysis refreshed due to engine upgrade"
+
+No silent invalidation.
+
+Users must never feel like data randomly disappeared.
+
+────────────────────────
+5) Cache Integrity Order Must Remain Strict
+────────────────────────
+
+Cache validation order must always be:
+
+1) competitorHash match
+2) analysisVersion match
+3) completeness check
+4) freshness window
+
+Add regression test asserting this exact order.
+If order changes → test fails.
+
+This prevents stale-but-valid-looking snapshots from leaking through.
+
+────────────────────────
+Delivery Requirements
+────────────────────────
+
+Reply with:
+
+1) File + function where guardDecision-based invariant was added
+2) Location of persistValidatedSnapshot
+3) Confirmation that no other mi_snapshots write paths exist
+4) ENGINE_VERSION comment block location
+5) Test names covering:
+   - PROCEED + null entryStrategy failure
+   - Version invalidation
+   - Single persist gateway enforcement
+   - Cache validation order
+
+No vague confirmation.
+
+We are finishing the structural sealing of MIv3.
+
+Once this is complete, snapshot corruption class is permanently closed.
+
+— Samir

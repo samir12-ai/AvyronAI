@@ -88,16 +88,15 @@ export function validateSnapshotCompleteness(snapshot: {
     failures.push("intentData is missing or empty");
   }
 
-  const isLowConfidence = confidenceData &&
-    (confidenceData.guardDecision === "BLOCK" || confidenceData.guardDecision === "DOWNGRADE" ||
-     confidenceData.overall < MI_CONFIDENCE.NO_AGGRESSIVE_THRESHOLD);
+  const guardDecision = confidenceData?.guardDecision;
+  const isProceed = guardDecision === "PROCEED";
 
-  if (!isLowConfidence) {
+  if (isProceed) {
     if (!snapshot.entryStrategy) {
-      failures.push("entryStrategy is null (required when confidence is not BLOCK/DOWNGRADE)");
+      failures.push("entryStrategy is null (required when guardDecision=PROCEED)");
     }
     if (!snapshot.narrativeSynthesis) {
-      failures.push("narrativeSynthesis is null (required when confidence is not BLOCK/DOWNGRADE)");
+      failures.push("narrativeSynthesis is null (required when guardDecision=PROCEED)");
     }
   }
 
@@ -111,6 +110,23 @@ function isSnapshotAnalyticallyComplete(snapshot: any): boolean {
     return false;
   }
   return true;
+}
+
+export async function persistValidatedSnapshot(snapshotPayload: any, caller: string): Promise<any> {
+  if (!snapshotPayload.analysisVersion) {
+    snapshotPayload.analysisVersion = ENGINE_VERSION;
+  }
+
+  if (snapshotPayload.status === "COMPLETE") {
+    const completionCheck = validateSnapshotCompleteness(snapshotPayload);
+    if (!completionCheck.valid) {
+      console.log(`[MIv3] SNAPSHOT_COMPLETION_CONTRACT_VIOLATED | caller=${caller} | failures=${completionCheck.failures.join(", ")}`);
+      snapshotPayload.status = "PARTIAL";
+    }
+  }
+
+  const [snapshot] = await db.insert(miSnapshots).values(snapshotPayload).returning();
+  return snapshot;
 }
 
 async function getCompetitorData(accountId: string): Promise<CompetitorInput[]> {
@@ -164,7 +180,7 @@ async function getCachedSnapshot(accountId: string, campaignId: string, competit
 
   const snapshotVersion = snapshot.analysisVersion || 0;
   if (snapshotVersion !== ENGINE_VERSION) {
-    console.log(`[MIv3] Snapshot invalidated: version mismatch (snapshot=${snapshotVersion}, engine=${ENGINE_VERSION})`);
+    console.log(`[MIv3] SNAPSHOT_VERSION_INVALIDATED | snapshotId=${snapshot.id} | snapshotVersion=${snapshotVersion} | engineVersion=${ENGINE_VERSION} | reason=engine_upgrade`);
     return null;
   }
 
@@ -430,13 +446,7 @@ export class MarketIntelligenceV3 {
       directionLockedUntil: directionLockedUntil ? new Date(directionLockedUntil) : null,
     };
 
-    const completionCheck = validateSnapshotCompleteness(snapshotPayload);
-    if (!completionCheck.valid) {
-      console.log(`[MIv3] SNAPSHOT_COMPLETION_CONTRACT_VIOLATED | failures=${completionCheck.failures.join(", ")}`);
-      snapshotPayload.status = "PARTIAL" as any;
-    }
-
-    const [snapshot] = await db.insert(miSnapshots).values(snapshotPayload).returning();
+    const snapshot = await persistValidatedSnapshot(snapshotPayload, "engine._executeRun");
 
     for (const sr of signalResults) {
       await db.insert(miSignalLogs).values({

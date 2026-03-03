@@ -1,3 +1,22 @@
+/**
+ * ENGINE_VERSION — Bump Policy
+ *
+ * INCREMENT when:
+ *   - Output schema changes (new/removed fields in snapshot payload)
+ *   - Confidence rules change (guard decision logic, thresholds)
+ *   - Guard logic changes (validateSnapshotCompleteness contract)
+ *   - Trajectory / dominance computation logic changes
+ *   - Snapshot completeness contract changes
+ *
+ * DO NOT increment for:
+ *   - Logging changes (new log lines, log format)
+ *   - UI/frontend changes
+ *   - Refactors with identical output (rename, restructure)
+ *   - Test additions
+ *
+ * All snapshots with analysisVersion !== ENGINE_VERSION are cache-rejected
+ * and recomputed on next access. Unnecessary bumps cause recompute storms.
+ */
 export const ENGINE_VERSION = 8;
 
 export const MI_THRESHOLDS = {
