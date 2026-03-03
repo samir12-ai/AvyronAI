@@ -29,12 +29,16 @@ export function registerCiCompetitorRoutes(app: Express) {
   app.get("/api/ci/competitors", async (req, res) => {
     try {
       const accountId = (req.query.accountId as string) || "default";
+      const campaignId = req.query.campaignId as string;
+      if (!campaignId) {
+        return res.status(400).json({ error: "campaignId is required" });
+      }
       const enabled = await featureFlagService.isEnabled("competitive_intelligence_enabled", accountId);
       if (!enabled) {
         return res.json({ disabled: true, competitors: [] });
       }
       const competitors = await db.select().from(ciCompetitors)
-        .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.isActive, true), eq(ciCompetitors.isDemo, false)))
+        .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true), eq(ciCompetitors.isDemo, false)))
         .orderBy(sql`${ciCompetitors.createdAt} DESC`);
 
       const enriched = await Promise.all(competitors.map(async c => {
@@ -51,15 +55,19 @@ export function registerCiCompetitorRoutes(app: Express) {
   app.post("/api/ci/competitors", async (req, res) => {
     try {
       const accountId = (req.body.accountId as string) || "default";
+      const campaignId = req.body.campaignId as string;
+      if (!campaignId) {
+        return res.status(400).json({ error: "campaignId is required" });
+      }
       const enabled = await featureFlagService.isEnabled("competitive_intelligence_enabled", accountId);
       if (!enabled) {
         return res.status(403).json({ error: "Competitive intelligence is disabled" });
       }
 
       const existing = await db.select().from(ciCompetitors)
-        .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.isActive, true)));
+        .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
       if (existing.length >= 5) {
-        return res.status(400).json({ error: "Maximum 5 competitors allowed" });
+        return res.status(400).json({ error: "Maximum 5 competitors allowed per campaign" });
       }
 
       const { name, platform, profileLink, businessType, primaryObjective,
@@ -73,6 +81,7 @@ export function registerCiCompetitorRoutes(app: Express) {
 
       const [competitor] = await db.insert(ciCompetitors).values({
         accountId,
+        campaignId,
         name,
         platform: platform || "instagram",
         profileLink,
@@ -120,9 +129,14 @@ export function registerCiCompetitorRoutes(app: Express) {
         }
       }
 
+      const campaignId = req.body.campaignId as string;
+      if (!campaignId) {
+        return res.status(400).json({ error: "campaignId is required" });
+      }
+
       const [updated] = await db.update(ciCompetitors)
         .set(updates)
-        .where(and(eq(ciCompetitors.id, id), eq(ciCompetitors.accountId, accountId)))
+        .where(and(eq(ciCompetitors.id, id), eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId)))
         .returning();
 
       if (!updated) return res.status(404).json({ error: "Competitor not found" });
@@ -138,9 +152,13 @@ export function registerCiCompetitorRoutes(app: Express) {
     try {
       const { id } = req.params;
       const accountId = (req.query.accountId as string) || "default";
+      const campaignId = req.query.campaignId as string;
+      if (!campaignId) {
+        return res.status(400).json({ error: "campaignId is required" });
+      }
       await db.update(ciCompetitors)
         .set({ isActive: false, updatedAt: new Date() })
-        .where(and(eq(ciCompetitors.id, id), eq(ciCompetitors.accountId, accountId)));
+        .where(and(eq(ciCompetitors.id, id), eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId)));
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -151,8 +169,12 @@ export function registerCiCompetitorRoutes(app: Express) {
     try {
       const { id } = req.params;
       const accountId = (req.query.accountId as string) || "default";
+      const campaignId = req.query.campaignId as string;
+      if (!campaignId) {
+        return res.status(400).json({ error: "campaignId is required" });
+      }
       const [competitor] = await db.select().from(ciCompetitors)
-        .where(and(eq(ciCompetitors.id, id), eq(ciCompetitors.accountId, accountId)));
+        .where(and(eq(ciCompetitors.id, id), eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId)));
       if (!competitor) return res.status(404).json({ error: "Not found" });
       const validation = validateEvidence(competitor);
       res.json({

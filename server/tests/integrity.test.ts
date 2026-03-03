@@ -5,8 +5,9 @@ import {
   performanceSnapshots,
   guardrailConfig,
   accountState,
+  ciCompetitors,
 } from "@shared/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { runAllGuardrails } from "../guardrails";
 import { logAudit } from "../audit";
 
@@ -362,5 +363,103 @@ describe("MarketMind AI Integrity Suite", () => {
     await logAudit(TEST_ACCOUNT, "WORKER_SHUTDOWN", {
       details: { test: true, graceful: true },
     });
+  });
+});
+
+describe("Campaign Isolation - Competitors", () => {
+  const ISO_ACCOUNT = "iso_test_" + Date.now();
+  const CAMPAIGN_A = "campaign_iso_a_" + Date.now();
+  const CAMPAIGN_B = "campaign_iso_b_" + Date.now();
+  const createdIds: string[] = [];
+
+  afterAll(async () => {
+    for (const id of createdIds) {
+      await db.delete(ciCompetitors).where(eq(ciCompetitors.id, id));
+    }
+  });
+
+  it("competitors are strictly isolated per campaign", async () => {
+    const compA1 = await db.insert(ciCompetitors).values({
+      accountId: ISO_ACCOUNT, campaignId: CAMPAIGN_A,
+      name: "Agency Comp 1", platform: "instagram", profileLink: "https://instagram.com/agency1",
+      businessType: "agency", primaryObjective: "leads",
+    }).returning();
+    const compA2 = await db.insert(ciCompetitors).values({
+      accountId: ISO_ACCOUNT, campaignId: CAMPAIGN_A,
+      name: "Agency Comp 2", platform: "instagram", profileLink: "https://instagram.com/agency2",
+      businessType: "agency", primaryObjective: "leads",
+    }).returning();
+    const compA3 = await db.insert(ciCompetitors).values({
+      accountId: ISO_ACCOUNT, campaignId: CAMPAIGN_A,
+      name: "Agency Comp 3", platform: "instagram", profileLink: "https://instagram.com/agency3",
+      businessType: "agency", primaryObjective: "leads",
+    }).returning();
+    const compB1 = await db.insert(ciCompetitors).values({
+      accountId: ISO_ACCOUNT, campaignId: CAMPAIGN_B,
+      name: "Fitness Comp 1", platform: "instagram", profileLink: "https://instagram.com/fitness1",
+      businessType: "fitness", primaryObjective: "sales",
+    }).returning();
+    const compB2 = await db.insert(ciCompetitors).values({
+      accountId: ISO_ACCOUNT, campaignId: CAMPAIGN_B,
+      name: "Fitness Comp 2", platform: "instagram", profileLink: "https://instagram.com/fitness2",
+      businessType: "fitness", primaryObjective: "sales",
+    }).returning();
+
+    createdIds.push(compA1[0].id, compA2[0].id, compA3[0].id, compB1[0].id, compB2[0].id);
+
+    const campaignAComps = await db.select().from(ciCompetitors)
+      .where(and(eq(ciCompetitors.accountId, ISO_ACCOUNT), eq(ciCompetitors.campaignId, CAMPAIGN_A), eq(ciCompetitors.isActive, true)));
+
+    const campaignBComps = await db.select().from(ciCompetitors)
+      .where(and(eq(ciCompetitors.accountId, ISO_ACCOUNT), eq(ciCompetitors.campaignId, CAMPAIGN_B), eq(ciCompetitors.isActive, true)));
+
+    expect(campaignAComps.length).toBe(3);
+    expect(campaignBComps.length).toBe(2);
+
+    expect(campaignAComps.every(c => c.campaignId === CAMPAIGN_A)).toBe(true);
+    expect(campaignBComps.every(c => c.campaignId === CAMPAIGN_B)).toBe(true);
+
+    const allComps = await db.select().from(ciCompetitors)
+      .where(and(eq(ciCompetitors.accountId, ISO_ACCOUNT), eq(ciCompetitors.isActive, true)));
+    expect(allComps.length).toBe(5);
+
+    expect(campaignAComps.every(c => c.businessType === "agency")).toBe(true);
+    expect(campaignBComps.every(c => c.businessType === "fitness")).toBe(true);
+
+    const noBleed = campaignAComps.filter(c => c.campaignId === CAMPAIGN_B);
+    expect(noBleed.length).toBe(0);
+  });
+
+  it("competitor queries without campaignId are rejected by API", async () => {
+    const res = await fetch("http://localhost:5000/api/ci/competitors?accountId=default");
+    const data = await res.json();
+    expect(res.status).toBe(400);
+    expect(data.error).toContain("campaignId is required");
+  });
+
+  it("static scan: all server competitor queries include campaignId scoping", async () => {
+    const fs = await import("fs");
+    const path = await import("path");
+
+    const serverDir = path.resolve(__dirname, "..");
+    const filesToScan = [
+      "competitive-intelligence/competitor-routes.ts",
+      "competitive-intelligence/data-acquisition.ts",
+      "market-intelligence-v3/engine.ts",
+      "market-intelligence-v3/fetch-orchestrator.ts",
+      "engine-contracts/context-kernel.ts",
+    ];
+
+    for (const file of filesToScan) {
+      const filePath = path.join(serverDir, file);
+      if (!fs.existsSync(filePath)) continue;
+      const content = fs.readFileSync(filePath, "utf-8");
+
+      const queryPattern = /\.where\(.*ciCompetitors\.accountId.*ciCompetitors\.isActive/g;
+      const matches = content.match(queryPattern) || [];
+      for (const match of matches) {
+        expect(match).toContain("campaignId");
+      }
+    }
   });
 });

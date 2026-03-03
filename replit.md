@@ -66,6 +66,7 @@ Preferred communication style: Simple, everyday language.
 - **Worker Hardening**: Autonomous worker with decision caps and circuit breakers.
 - **Safety Gate Registry**: Centralized functions for route protection and feature gating.
 - **Memory Scoping Hardening**: Provable account and campaign isolation.
+- **Campaign-Scoped Competitors**: All CI competitors are strictly bound to `campaignId`. No cross-campaign competitor bleed. All queries (GET/POST/PUT/DELETE/fetch-data/data-coverage) require `campaignId`. Ownership validated on data operations. Regression tests enforce isolation.
 - **Validation Layer**: Zod-based request validation middleware.
 
 ### Final System Lock

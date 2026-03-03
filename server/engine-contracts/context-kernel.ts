@@ -136,7 +136,7 @@ export async function buildStrategicContext(
   const competitors = await db
     .select()
     .from(ciCompetitors)
-    .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.isActive, true)));
+    .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
 
   const perfSnapshots = await db
     .select()

@@ -96,10 +96,10 @@ export async function startFetchJob(accountId: string, campaignId: string): Prom
 
 async function _createAndStartJob(accountId: string, campaignId: string, lockKey: string): Promise<string> {
   const competitors = await db.select().from(ciCompetitors)
-    .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.isActive, true)));
+    .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
 
   if (competitors.length === 0) {
-    throw new Error("No active competitors found for this account");
+    throw new Error("No active competitors found for this campaign");
   }
 
   const competitorInputs: CompetitorInput[] = competitors.map(c => ({
@@ -569,7 +569,7 @@ function classifyBlockReason(result: FetchResult): "RATE_LIMIT" | "PROXY_BLOCKED
 
 async function persistSnapshotAfterFetch(accountId: string, campaignId: string, isPartialCoverage: boolean = false, jobStopReason: StopReason = "COMPLETE"): Promise<void> {
   const competitors = await db.select().from(ciCompetitors)
-    .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.isActive, true)));
+    .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
 
   if (competitors.length === 0) return;
 

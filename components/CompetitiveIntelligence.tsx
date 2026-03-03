@@ -93,9 +93,10 @@ export default function CompetitiveIntelligence() {
   const [newComp, setNewComp] = useState(emptyComp);
 
   const { data: competitorsData, isLoading: loadingCompetitors } = useQuery({
-    queryKey: ['ci-competitors'],
+    queryKey: ['ci-competitors', activeCampaignId],
+    enabled: !!activeCampaignId,
     queryFn: async () => {
-      const res = await fetch(new URL('/api/ci/competitors?accountId=default', baseUrl).toString());
+      const res = await fetch(new URL(`/api/ci/competitors?accountId=default&campaignId=${activeCampaignId}`, baseUrl).toString());
       return res.json();
     },
   });
@@ -135,13 +136,13 @@ export default function CompetitiveIntelligence() {
     mutationFn: async (comp: any) => {
       const res = await fetch(new URL('/api/ci/competitors', baseUrl).toString(), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...comp, accountId: 'default' }),
+        body: JSON.stringify({ ...comp, accountId: 'default', campaignId: activeCampaignId }),
       });
       if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
       return res.json();
     },
     onSuccess: (data: any) => {
-      queryClient.invalidateQueries({ queryKey: ['ci-competitors'] });
+      queryClient.invalidateQueries({ queryKey: ['ci-competitors', activeCampaignId] });
       setShowAddCompetitor(false);
       setNewComp(emptyComp);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -159,13 +160,13 @@ export default function CompetitiveIntelligence() {
     mutationFn: async ({ id, comp }: { id: string; comp: any }) => {
       const res = await fetch(new URL(`/api/ci/competitors/${id}`, baseUrl).toString(), {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...comp, accountId: 'default' }),
+        body: JSON.stringify({ ...comp, accountId: 'default', campaignId: activeCampaignId }),
       });
       if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['ci-competitors'] });
+      queryClient.invalidateQueries({ queryKey: ['ci-competitors', activeCampaignId] });
       setShowAddCompetitor(false);
       setEditingCompetitorId(null);
       setNewComp(emptyComp);
@@ -216,12 +217,12 @@ export default function CompetitiveIntelligence() {
 
   const deleteCompetitorMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(new URL(`/api/ci/competitors/${id}?accountId=default`, baseUrl).toString(), { method: 'DELETE' });
+      const res = await fetch(new URL(`/api/ci/competitors/${id}?accountId=default&campaignId=${activeCampaignId}`, baseUrl).toString(), { method: 'DELETE' });
       if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Delete failed'); }
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['ci-competitors'] });
+      queryClient.invalidateQueries({ queryKey: ['ci-competitors', activeCampaignId] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
     onError: (err: any) => Alert.alert('Error', err.message || 'Failed to remove competitor'),
@@ -270,9 +271,9 @@ export default function CompetitiveIntelligence() {
           setFetchingAll(false);
           setFetchJobId(null);
 
-          queryClient.invalidateQueries({ queryKey: ['ci-competitors'] });
-          queryClient.invalidateQueries({ queryKey: ['mi-v3-snapshot'] });
-          queryClient.invalidateQueries({ queryKey: ['ci-miv3-history'] });
+          queryClient.invalidateQueries({ queryKey: ['ci-competitors', activeCampaignId] });
+          queryClient.invalidateQueries({ queryKey: ['mi-v3-snapshot', activeCampaignId] });
+          queryClient.invalidateQueries({ queryKey: ['ci-miv3-history', activeCampaignId] });
 
           if (data.status === 'COMPLETE') {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -331,14 +332,14 @@ export default function CompetitiveIntelligence() {
       setFetchingCompetitorId(id);
       const res = await fetch(new URL(`/api/ci/competitors/${id}/fetch-data`, baseUrl).toString(), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accountId: 'default', forceRefresh: forceRefresh || false }),
+        body: JSON.stringify({ accountId: 'default', campaignId: activeCampaignId, forceRefresh: forceRefresh || false }),
       });
       if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Fetch failed'); }
       return res.json();
     },
     onSuccess: (data: any) => {
       setFetchingCompetitorId(null);
-      queryClient.invalidateQueries({ queryKey: ['ci-competitors'] });
+      queryClient.invalidateQueries({ queryKey: ['ci-competitors', activeCampaignId] });
       if (data.status === 'SUCCESS' || data.status === 'PARTIAL') {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert('Data Collected', `${data.postsCollected} posts, ${data.commentsCollected} comments collected.${data.followers ? ` Followers: ${data.followers.toLocaleString()}` : ''}`);

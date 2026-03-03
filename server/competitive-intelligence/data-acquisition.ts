@@ -647,9 +647,9 @@ export async function getStoredCommentsForMIv3(competitorId: string, accountId: 
   }));
 }
 
-export async function fetchAllCompetitors(accountId: string = "default"): Promise<FetchResult[]> {
+export async function fetchAllCompetitors(accountId: string = "default", campaignId: string): Promise<FetchResult[]> {
   const competitors = await db.select().from(ciCompetitors)
-    .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.isActive, true)));
+    .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
 
   const results: FetchResult[] = [];
   for (const comp of competitors) {

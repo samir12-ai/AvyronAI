@@ -1,0 +1,87 @@
+Hi,
+
+We have identified a structural isolation issue that must be fixed immediately.
+
+## Problem
+
+When switching between campaigns, the competitors persist instead of being scoped to their respective campaign.
+
+Example:
+
+- Campaign A (Agency) → has Agency competitors
+- Campaign B (Fitness) → should have Fitness competitors
+- Current behavior: when switching campaigns, competitors from Campaign A appear inside Campaign B
+
+This means competitors are not properly isolated per campaign context.
+
+This is a critical architectural violation.
+
+Each campaign must act as an isolated data boundary.
+
+---
+
+## Expected Architecture (Non-Negotiable)
+
+Competitors must be:
+
+- Strictly bound to campaignId
+- Queried using WHERE campaign_id = ?
+- Never stored in shared/global state
+- Never cached without campaign scoping
+- Never reused across campaigns
+
+Campaign → owns its competitors  
+Campaign → owns its snapshots  
+Campaign → owns its fetch jobs  
+
+No cross-campaign bleed under any circumstance.
+
+---
+
+## Likely Root Causes to Inspect
+
+Please audit the following areas:
+
+1. Database schema  
+   - Ensure competitors table includes campaign_id
+   - Ensure foreign key constraint exists
+   - Ensure no competitor record exists without campaign_id
+
+2. API layer  
+   - Verify GET /competitors filters by campaignId
+   - Verify no global cache is returning competitors without campaign scoping
+
+3. Frontend state  
+   - Ensure competitor state resets when campaignId changes
+   - Ensure useEffect dependencies include activeCampaignId
+   - Ensure no global store persists competitors across campaign switches
+
+4. Query keys  
+   - Ensure React Query keys include campaignId
+   - Example: ["ci-competitors", campaignId]
+
+5. Static isolation test  
+   Add regression test:
+   - Create Campaign A with 3 competitors
+   - Create Campaign B with 2 competitors
+   - Switching must never show 5
+   - Assert strict isolation
+
+---
+
+## Required Deliverables
+
+Do NOT mark this as resolved until:
+
+- Root cause is identified
+- Fix implemented
+- Isolation regression test added
+- Static scan confirms all competitor queries are campaign-scoped
+- Manual test confirms no bleed
+
+This is a data boundary issue, not a UI glitch.
+
+No delivery accepted until campaign isolation is structurally guaranteed.
+
+Regards,  
+Samir

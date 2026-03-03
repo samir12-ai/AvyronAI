@@ -779,6 +779,7 @@ export const ciCompetitors = pgTable("ci_competitors", {
     .primaryKey()
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull().default("default"),
   name: text("name").notNull(),
   platform: text("platform").notNull().default("instagram"),
   profileLink: text("profile_link").notNull(),

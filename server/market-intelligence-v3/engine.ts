@@ -129,9 +129,9 @@ export async function persistValidatedSnapshot(snapshotPayload: any, caller: str
   return snapshot;
 }
 
-async function getCompetitorData(accountId: string): Promise<CompetitorInput[]> {
+async function getCompetitorData(accountId: string, campaignId: string): Promise<CompetitorInput[]> {
   const competitors = await db.select().from(ciCompetitors)
-    .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.isActive, true)));
+    .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
 
   const results: CompetitorInput[] = [];
   for (const c of competitors) {
@@ -326,7 +326,7 @@ export class MarketIntelligenceV3 {
       caller: ISOLATION_ALLOWED_CALLER,
     }).catch(() => {});
 
-    const competitors = await getCompetitorData(accountId);
+    const competitors = await getCompetitorData(accountId, campaignId);
     const competitorHash = computeCompetitorHash(competitors);
 
     let cacheInvalidationReason: import("./types").CacheInvalidationReason = null;
