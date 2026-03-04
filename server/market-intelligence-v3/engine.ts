@@ -8,6 +8,7 @@ import { computeConfidence } from "./confidence-engine";
 import { computeAllDominance } from "./dominance-module";
 import { computeTokenBudget, applySampling } from "./token-budget";
 import { computeSimilarityDiagnosis } from "./similarity-engine";
+import { computeAllContentDNA } from "./content-dna";
 import type {
   MIv3Mode,
   MIv3Output,
@@ -18,6 +19,11 @@ import type {
   ExecutionMode,
   GoalMode,
   SimilarityResult,
+  DeltaReport,
+  SignalDelta,
+  IntentChange,
+  TrajectoryDelta,
+  DominanceChange,
 } from "./types";
 import { MI_CONFIDENCE, ENGINE_VERSION } from "./constants";
 import { validateEngineIsolation } from "./isolation-guard";
@@ -288,6 +294,118 @@ export function buildDefensiveRisks(confidence: any, trajectory: any, intents: a
   return risks;
 }
 
+export function computeSnapshotDeltas(prevSnapshot: any, currSnapshot: {
+  competitorHash: string;
+  signalData: any[];
+  intentData: any[];
+  trajectoryData: any;
+  dominanceData: any[];
+}): DeltaReport | null {
+  if (!prevSnapshot) return null;
+
+  const prevHash = prevSnapshot.competitorHash;
+  const currHash = currSnapshot.competitorHash;
+  const competitorHashMatch = prevHash === currHash;
+
+  if (!competitorHashMatch) return null;
+
+  const prevSignals: any[] = parseJsonSafe(prevSnapshot.signalData, []);
+  const prevIntents: any[] = parseJsonSafe(prevSnapshot.intentData, []);
+  const prevTrajectory: any = parseJsonSafe(prevSnapshot.trajectoryData, {});
+  const prevDominance: any[] = parseJsonSafe(prevSnapshot.dominanceData, []);
+
+  const currSignals = currSnapshot.signalData;
+  const currIntents = currSnapshot.intentData;
+  const currTrajectory = currSnapshot.trajectoryData;
+  const currDominance = currSnapshot.dominanceData;
+
+  const signalDeltas: SignalDelta[] = [];
+  const signalFields = [
+    "postingFrequencyTrend", "engagementVolatility", "ctaIntensityShift",
+    "offerLanguageChange", "hashtagDriftScore", "bioModificationFrequency",
+    "sentimentDrift", "reviewVelocityChange", "contentExperimentRate",
+  ];
+
+  for (const curr of currSignals) {
+    const prev = prevSignals.find((p: any) => p.competitorId === curr.competitorId);
+    if (!prev) continue;
+    for (const field of signalFields) {
+      const prevVal = prev.signals?.[field] ?? 0;
+      const currVal = curr.signals?.[field] ?? 0;
+      const delta = currVal - prevVal;
+      if (Math.abs(delta) > 0.001) {
+        signalDeltas.push({
+          competitorId: curr.competitorId,
+          competitorName: curr.competitorName,
+          signalField: field,
+          previous: prevVal,
+          current: currVal,
+          delta,
+        });
+      }
+    }
+  }
+
+  const intentChanges: IntentChange[] = [];
+  for (const curr of currIntents) {
+    const prev = prevIntents.find((p: any) => p.competitorId === curr.competitorId);
+    if (!prev) continue;
+    intentChanges.push({
+      competitorId: curr.competitorId,
+      competitorName: curr.competitorName,
+      previousIntent: prev.intentCategory,
+      currentIntent: curr.intentCategory,
+      changed: prev.intentCategory !== curr.intentCategory,
+    });
+  }
+
+  const trajectoryFields = [
+    "marketHeatingIndex", "narrativeConvergenceScore",
+    "offerCompressionIndex", "angleSaturationLevel", "revivalPotential",
+  ];
+  const trajectoryDeltas: TrajectoryDelta[] = [];
+  for (const field of trajectoryFields) {
+    const prevVal = prevTrajectory[field] ?? 0;
+    const currVal = currTrajectory[field] ?? 0;
+    const delta = currVal - prevVal;
+    if (Math.abs(delta) > 0.001) {
+      trajectoryDeltas.push({ field, previous: prevVal, current: currVal, delta });
+    }
+  }
+
+  const dominanceChanges: DominanceChange[] = [];
+  for (const curr of currDominance) {
+    const prev = prevDominance.find((p: any) => p.competitorId === curr.competitorId);
+    if (!prev) continue;
+    const scoreDelta = (curr.dominanceScore ?? 0) - (prev.dominanceScore ?? 0);
+    dominanceChanges.push({
+      competitorId: curr.competitorId,
+      competitorName: curr.competitorName,
+      previousScore: prev.dominanceScore ?? 0,
+      currentScore: curr.dominanceScore ?? 0,
+      previousLevel: prev.dominanceLevel ?? "UNKNOWN",
+      currentLevel: curr.dominanceLevel ?? "UNKNOWN",
+      scoreDelta,
+      levelChanged: prev.dominanceLevel !== curr.dominanceLevel,
+    });
+  }
+
+  const hasMeaningfulChanges =
+    signalDeltas.length > 0 ||
+    intentChanges.some(c => c.changed) ||
+    trajectoryDeltas.length > 0 ||
+    dominanceChanges.some(c => c.levelChanged || Math.abs(c.scoreDelta) >= 1);
+
+  return {
+    signalDeltas,
+    intentChanges,
+    trajectoryDeltas,
+    dominanceChanges,
+    competitorHashMatch,
+    hasMeaningfulChanges,
+  };
+}
+
 export class MarketIntelligenceV3 {
   static async run(
     mode: MIv3Mode,
@@ -366,6 +484,7 @@ export class MarketIntelligenceV3 {
     }
 
     const signalResults = computeAllSignals(competitors);
+    const contentDnaResults = computeAllContentDNA(competitors);
     const dataFreshnessDays = computeDataFreshnessDays(competitors);
     const intents = classifyAllIntents(signalResults);
     const dominantIntent = computeDominantMarketIntent(intents);
@@ -438,6 +557,17 @@ export class MarketIntelligenceV3 {
       }
     }
 
+    const deltaReport = computeSnapshotDeltas(
+      previousSnapshot?.status === "COMPLETE" ? previousSnapshot : null,
+      {
+        competitorHash,
+        signalData: signalResults,
+        intentData: intents,
+        trajectoryData: trajectory,
+        dominanceData: dominanceResults,
+      }
+    );
+
     const snapshotPayload = {
       accountId,
       campaignId,
@@ -459,6 +589,8 @@ export class MarketIntelligenceV3 {
       defensiveRisks: JSON.stringify(defensiveRisks),
       missingSignalFlags: JSON.stringify(missingFlags),
       similarityData: JSON.stringify(similarityData),
+      contentDnaData: JSON.stringify(contentDnaResults),
+      deltaReport: deltaReport ? JSON.stringify(deltaReport) : null,
       volatilityIndex,
       dataFreshnessDays,
       overallConfidence: confidence.overall,
@@ -531,6 +663,8 @@ export class MarketIntelligenceV3 {
       signalGuard: guard,
       twoRunStatus,
       similarityData,
+      contentDnaData: contentDnaResults,
+      deltaReport,
       cached: false,
       cacheInvalidationReason,
       snapshotSource: "FRESH_DATA" as const,
@@ -573,6 +707,7 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
   const defensiveRisks = parseJsonSafe(snapshot.defensiveRisks, []);
   const missingFlags = parseJsonSafe(snapshot.missingSignalFlags, []);
   const similarityData = parseJsonSafe(snapshot.similarityData, null);
+  const deltaReportData = parseJsonSafe(snapshot.deltaReport, null);
 
   const output: MIv3Output = {
     marketState: snapshot.marketState || "INSUFFICIENT_DATA",
@@ -617,6 +752,8 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
       directionStable: true,
     },
     similarityData,
+    contentDnaData: parseJsonSafe(snapshot.contentDnaData, null),
+    deltaReport: deltaReportData,
     cached: true,
     cacheInvalidationReason: null,
     snapshotSource: (snapshot.snapshotSource as "FRESH_DATA" | "CACHED_DATA") || "FRESH_DATA",

@@ -161,6 +161,8 @@ export interface MIv3DiagnosticResult {
   signalGuard: SignalStabilityGuard;
   twoRunStatus: TwoRunConfirmation;
   similarityData: SimilarityResult | null;
+  contentDnaData: CompetitorContentDNA[] | null;
+  deltaReport: DeltaReport | null;
   cached: boolean;
   cacheInvalidationReason: CacheInvalidationReason;
   snapshotSource: "FRESH_DATA" | "CACHED_DATA";
@@ -230,6 +232,71 @@ export interface SimilarityResult {
   evidenceCoverage: CompetitorEvidenceCoverage[];
   diagnosis: "SIMILARITY_LIKELY_MARKET_REALITY" | "SIMILARITY_LIKELY_DATA_LIMITATION" | "LOW_SIMILARITY" | "INSUFFICIENT_DATA" | "LOW_CONFIDENCE";
   explanation: string;
+}
+
+export type HookArchetype = "shock" | "authority" | "curiosity" | "problem" | "question" | "statistic" | "story";
+export type NarrativeFramework = "mistake_fix" | "problem_solution" | "before_after" | "story_lesson" | "listicle" | "how_to";
+export type CTAFramework = "explicit" | "soft" | "narrative" | "trust";
+
+export interface ContentDNAEvidence {
+  postId: string;
+  snippet: string;
+  detectedType: string;
+}
+
+export interface CompetitorContentDNA {
+  competitorId: string;
+  competitorName: string;
+  hookArchetypes: HookArchetype[];
+  narrativeFrameworks: NarrativeFramework[];
+  ctaFrameworks: CTAFramework[];
+  evidence: ContentDNAEvidence[];
+  dnaConfidence: number;
+  missingSignalFlags: string[];
+}
+
+export interface SignalDelta {
+  competitorId: string;
+  competitorName: string;
+  signalField: string;
+  previous: number;
+  current: number;
+  delta: number;
+}
+
+export interface IntentChange {
+  competitorId: string;
+  competitorName: string;
+  previousIntent: IntentCategory;
+  currentIntent: IntentCategory;
+  changed: boolean;
+}
+
+export interface TrajectoryDelta {
+  field: string;
+  previous: number;
+  current: number;
+  delta: number;
+}
+
+export interface DominanceChange {
+  competitorId: string;
+  competitorName: string;
+  previousScore: number;
+  currentScore: number;
+  previousLevel: string;
+  currentLevel: string;
+  scoreDelta: number;
+  levelChanged: boolean;
+}
+
+export interface DeltaReport {
+  signalDeltas: SignalDelta[];
+  intentChanges: IntentChange[];
+  trajectoryDeltas: TrajectoryDelta[];
+  dominanceChanges: DominanceChange[];
+  competitorHashMatch: boolean;
+  hasMeaningfulChanges: boolean;
 }
 
 export interface RefreshDecision {

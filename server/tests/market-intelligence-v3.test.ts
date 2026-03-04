@@ -1111,3 +1111,200 @@ describe("Market Intelligence V3 - Goal Mode Source of Truth", () => {
     expect(routesSrc).toContain("REACH_MODE");
   });
 });
+
+describe("T004: Calibration Layer Isolation Verification", () => {
+  const fs = require("fs");
+  const path = require("path");
+
+  const baselinesSource = fs.readFileSync("server/baselines.ts", "utf-8");
+  const confidenceEngineSource = fs.readFileSync("server/market-intelligence-v3/confidence-engine.ts", "utf-8");
+  const isolationGuardSource = fs.readFileSync("server/market-intelligence-v3/isolation-guard.ts", "utf-8");
+
+  describe("Baselines isolation from MIv3", () => {
+    it("baselines.ts has zero imports from market-intelligence-v3 modules", () => {
+      expect(baselinesSource).not.toContain("market-intelligence-v3");
+      expect(baselinesSource).not.toContain("./market-intelligence-v3");
+      expect(baselinesSource).not.toContain("../market-intelligence-v3");
+    });
+
+    it("baselines.ts does not reference miSnapshots table", () => {
+      expect(baselinesSource).not.toContain("miSnapshots");
+      expect(baselinesSource).not.toContain("mi_snapshots");
+    });
+
+    it("baselines.ts does not reference any MIv3 types", () => {
+      const miv3Types = [
+        "CompetitorSignalResult",
+        "ConfidenceResult",
+        "DominanceResult",
+        "TrajectoryResult",
+        "IntentResult",
+        "ContentDNAResult",
+        "DeltaReport",
+      ];
+      for (const typeName of miv3Types) {
+        expect(baselinesSource).not.toContain(typeName);
+      }
+    });
+
+    it("baselines.ts only imports from non-MIv3 sources", () => {
+      const importLines = baselinesSource.split("\n").filter((line: string) => line.startsWith("import"));
+      for (const line of importLines) {
+        expect(line).not.toContain("market-intelligence");
+        expect(line).not.toContain("signal-engine");
+        expect(line).not.toContain("confidence-engine");
+        expect(line).not.toContain("dominance-module");
+        expect(line).not.toContain("trajectory-engine");
+        expect(line).not.toContain("intent-engine");
+        expect(line).not.toContain("isolation-guard");
+      }
+    });
+  });
+
+  describe("Confidence engine isolation from baselines", () => {
+    it("confidence-engine.ts has zero imports from baselines.ts", () => {
+      expect(confidenceEngineSource).not.toContain("baselines");
+      expect(confidenceEngineSource).not.toContain("../baselines");
+    });
+
+    it("confidence-engine.ts does not reference performanceSnapshots table", () => {
+      expect(confidenceEngineSource).not.toContain("performanceSnapshots");
+      expect(confidenceEngineSource).not.toContain("performance_snapshots");
+    });
+
+    it("confidence-engine.ts does not reference baselineHistory table", () => {
+      expect(confidenceEngineSource).not.toContain("baselineHistory");
+      expect(confidenceEngineSource).not.toContain("baseline_history");
+    });
+
+    it("confidence-engine.ts does not reference accountState table", () => {
+      expect(confidenceEngineSource).not.toContain("accountState");
+      expect(confidenceEngineSource).not.toContain("account_state");
+    });
+
+    it("confidence-engine.ts does not import db (no direct database access)", () => {
+      const importLines = confidenceEngineSource.split("\n").filter((line: string) => line.startsWith("import"));
+      for (const line of importLines) {
+        expect(line).not.toContain("../db");
+        expect(line).not.toContain("./db");
+      }
+    });
+
+    it("confidence-engine.ts only imports from MIv3-internal modules", () => {
+      const importLines = confidenceEngineSource.split("\n").filter((line: string) => line.startsWith("import"));
+      for (const line of importLines) {
+        const fromMatch = line.match(/from\s+["']([^"']+)["']/);
+        if (fromMatch) {
+          const importPath = fromMatch[1];
+          expect(
+            importPath.startsWith("./") || importPath.startsWith("../market-intelligence-v3/")
+          ).toBe(true);
+        }
+      }
+    });
+  });
+
+  describe("Isolation guard scope covers MIv3-only domains", () => {
+    it("isolation-guard.ts defines protected domains for MIv3-only tables", () => {
+      const requiredDomains = [
+        "COMPETITOR_DATA",
+        "DOMINANCE",
+        "CTA_ANALYSIS",
+        "CONFIDENCE",
+        "SNAPSHOTS",
+        "SIGNAL_COMPUTE",
+        "TRAJECTORY",
+        "INTENT_CLASSIFICATION",
+      ];
+      for (const domain of requiredDomains) {
+        expect(isolationGuardSource).toContain(domain);
+      }
+    });
+
+    it("isolation-guard.ts blocks non-MIv3 engines", () => {
+      const blockedEngines = [
+        "BUILD_A_PLAN_ORCHESTRATOR",
+        "STORYTELLING_ENGINE",
+        "OFFER_ENGINE",
+        "BUDGET_ENGINE",
+        "AUTOPILOT",
+        "CREATIVE_ENGINE",
+        "LEAD_ENGINE",
+        "FULFILLMENT_ENGINE",
+      ];
+      for (const engine of blockedEngines) {
+        expect(isolationGuardSource).toContain(engine);
+      }
+    });
+
+    it("isolation-guard.ts does not import from baselines or performance modules", () => {
+      expect(isolationGuardSource).not.toContain("baselines");
+      expect(isolationGuardSource).not.toContain("performanceSnapshots");
+      expect(isolationGuardSource).not.toContain("baselineHistory");
+    });
+
+    it("isolation-guard.ts enforces MARKET_INTELLIGENCE_V3 as sole allowed caller", () => {
+      expect(isolationGuardSource).toContain("MARKET_INTELLIGENCE_V3");
+      expect(isolationGuardSource).toContain("ISOLATION_ALLOWED_CALLER");
+    });
+
+    it("isolation-guard.ts prevents plan writes", () => {
+      expect(isolationGuardSource).toContain("assertNoPlanWrites");
+      expect(isolationGuardSource).toContain("strategic_plans");
+    });
+
+    it("isolation-guard.ts prevents orchestrator invocation", () => {
+      expect(isolationGuardSource).toContain("assertNoOrchestrator");
+    });
+
+    it("isolation-guard.ts prevents autopilot invocation", () => {
+      expect(isolationGuardSource).toContain("assertNoAutopilot");
+    });
+  });
+
+  describe("Cross-system static isolation proof", () => {
+    it("no MIv3 module imports from baselines.ts", () => {
+      const miv3Dir = "server/market-intelligence-v3";
+      const miv3Files = fs.readdirSync(miv3Dir).filter((f: string) => f.endsWith(".ts"));
+      for (const file of miv3Files) {
+        const content = fs.readFileSync(path.join(miv3Dir, file), "utf-8");
+        const importLines = content.split("\n").filter((line: string) => line.startsWith("import"));
+        for (const line of importLines) {
+          expect(line).not.toContain("baselines");
+        }
+      }
+    });
+
+    it("baselines.ts does not import from any MIv3 file", () => {
+      const miv3Dir = "server/market-intelligence-v3";
+      const miv3Files = fs.readdirSync(miv3Dir).filter((f: string) => f.endsWith(".ts")).map((f: string) => f.replace(".ts", ""));
+      const importLines = baselinesSource.split("\n").filter((line: string) => line.startsWith("import"));
+      for (const line of importLines) {
+        for (const miv3File of miv3Files) {
+          expect(line).not.toContain(miv3File);
+        }
+      }
+    });
+
+    it("two calibration systems share zero common dependencies beyond drizzle/db", () => {
+      const baselinesImports = baselinesSource.split("\n")
+        .filter((line: string) => line.startsWith("import"))
+        .map((line: string) => {
+          const match = line.match(/from\s+["']([^"']+)["']/);
+          return match ? match[1] : "";
+        })
+        .filter(Boolean);
+
+      const confidenceImports = confidenceEngineSource.split("\n")
+        .filter((line: string) => line.startsWith("import"))
+        .map((line: string) => {
+          const match = line.match(/from\s+["']([^"']+)["']/);
+          return match ? match[1] : "";
+        })
+        .filter(Boolean);
+
+      const sharedImports = baselinesImports.filter((imp: string) => confidenceImports.includes(imp));
+      expect(sharedImports.length).toBe(0);
+    });
+  });
+});

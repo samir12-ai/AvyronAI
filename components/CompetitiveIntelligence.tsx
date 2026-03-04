@@ -1165,6 +1165,137 @@ export default function CompetitiveIntelligence() {
           </View>
         )}
 
+        {miv3Result?.deltaReport && miv3Result.deltaReport.hasMeaningfulChanges && (
+          <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+            <View style={s.cardHeader}>
+              <Ionicons name="git-compare-outline" size={18} color="#3B82F6" />
+              <Text style={[s.cardTitle, { color: colors.text }]}>What Changed</Text>
+              <View style={[s.intensityBadge, { backgroundColor: '#3B82F6' + '20' }]}>
+                <Text style={{ fontSize: 10, fontWeight: '600', color: '#3B82F6' }}>DELTA</Text>
+              </View>
+            </View>
+
+            {miv3Result.deltaReport.intentChanges?.filter((c: any) => c.changed).length > 0 && (
+              <View style={{ marginBottom: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: '#F59E0B', marginBottom: 4 }}>Intent Changes</Text>
+                {miv3Result.deltaReport.intentChanges.filter((c: any) => c.changed).map((c: any, i: number) => (
+                  <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text }}>{c.competitorName}</Text>
+                    <Text style={{ fontSize: 10, color: '#EF4444' }}>{c.previousIntent?.replace(/_/g, ' ')}</Text>
+                    <Ionicons name="arrow-forward" size={10} color={colors.textMuted} />
+                    <Text style={{ fontSize: 10, color: '#10B981' }}>{c.currentIntent?.replace(/_/g, ' ')}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {miv3Result.deltaReport.dominanceChanges?.filter((c: any) => c.levelChanged || Math.abs(c.scoreDelta) >= 1).length > 0 && (
+              <View style={{ marginBottom: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: '#8B5CF6', marginBottom: 4 }}>Dominance Shifts</Text>
+                {miv3Result.deltaReport.dominanceChanges.filter((c: any) => c.levelChanged || Math.abs(c.scoreDelta) >= 1).map((c: any, i: number) => (
+                  <View key={i} style={{ marginBottom: 4 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text }}>{c.competitorName}</Text>
+                      <Text style={{ fontSize: 10, color: c.scoreDelta > 0 ? '#EF4444' : '#10B981', fontWeight: '700' }}>
+                        {c.scoreDelta > 0 ? '+' : ''}{c.scoreDelta.toFixed(0)}
+                      </Text>
+                    </View>
+                    {c.levelChanged && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                        <Text style={{ fontSize: 9, color: colors.textMuted }}>{c.previousLevel}</Text>
+                        <Ionicons name="arrow-forward" size={8} color={colors.textMuted} />
+                        <Text style={{ fontSize: 9, color: colors.textMuted }}>{c.currentLevel}</Text>
+                      </View>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {miv3Result.deltaReport.trajectoryDeltas?.length > 0 && (
+              <View style={{ marginBottom: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: '#3B82F6', marginBottom: 4 }}>Trajectory Shifts</Text>
+                {miv3Result.deltaReport.trajectoryDeltas.map((t: any, i: number) => (
+                  <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                    <Text style={{ fontSize: 10, color: colors.textMuted }}>{t.field.replace(/([A-Z])/g, ' $1').trim()}</Text>
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: t.delta > 0 ? '#EF4444' : '#10B981' }}>
+                      {t.delta > 0 ? '+' : ''}{(t.delta * 100).toFixed(0)}%
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {miv3Result.deltaReport.signalDeltas?.length > 0 && (
+              <View>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: '#6B7280', marginBottom: 4 }}>Signal Changes ({miv3Result.deltaReport.signalDeltas.length})</Text>
+                {miv3Result.deltaReport.signalDeltas.slice(0, 6).map((sd: any, i: number) => (
+                  <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                    <Text style={{ fontSize: 9, color: colors.textMuted, flex: 1 }}>{sd.competitorName} — {sd.signalField}</Text>
+                    <Text style={{ fontSize: 9, fontWeight: '700', color: sd.delta > 0 ? '#EF4444' : '#10B981' }}>
+                      {sd.delta > 0 ? '+' : ''}{sd.delta.toFixed(3)}
+                    </Text>
+                  </View>
+                ))}
+                {miv3Result.deltaReport.signalDeltas.length > 6 && (
+                  <Text style={{ fontSize: 9, color: colors.textMuted, marginTop: 2 }}>...and {miv3Result.deltaReport.signalDeltas.length - 6} more</Text>
+                )}
+              </View>
+            )}
+          </View>
+        )}
+
+        {miv3Result?.contentDnaData && miv3Result.contentDnaData.length > 0 && (
+          <View style={[s.card, { backgroundColor: colors.card, marginBottom: 12 }]}>  
+            <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 8 }}>Content DNA</Text>
+            {miv3Result.contentDnaData.map((dna: any, idx: number) => (
+              <View key={dna.competitorId || idx} style={{ marginBottom: idx < miv3Result.contentDnaData.length - 1 ? 10 : 0 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: colors.text, flex: 1 }}>{dna.competitorName}</Text>
+                  <View style={{ backgroundColor: dna.dnaConfidence > 0.7 ? '#22C55E' : dna.dnaConfidence > 0.4 ? '#F59E0B' : '#EF4444', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
+                    <Text style={{ fontSize: 9, fontWeight: '700', color: '#fff' }}>{Math.round(dna.dnaConfidence * 100)}%</Text>
+                  </View>
+                </View>
+                {dna.hookArchetypes?.length > 0 && (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>
+                    <Text style={{ fontSize: 10, fontWeight: '600', color: '#6B7280', width: '100%' }}>Hooks</Text>
+                    {dna.hookArchetypes.map((h: string, i: number) => (
+                      <View key={i} style={{ backgroundColor: '#EFF6FF', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+                        <Text style={{ fontSize: 9, color: '#3B82F6', fontWeight: '600' }}>{h}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                {dna.narrativeFrameworks?.length > 0 && (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>
+                    <Text style={{ fontSize: 10, fontWeight: '600', color: '#6B7280', width: '100%' }}>Narrative</Text>
+                    {dna.narrativeFrameworks.map((n: string, i: number) => (
+                      <View key={i} style={{ backgroundColor: '#F0FDF4', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+                        <Text style={{ fontSize: 9, color: '#22C55E', fontWeight: '600' }}>{n.replace(/_/g, ' → ')}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                {dna.ctaFrameworks?.length > 0 && (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>
+                    <Text style={{ fontSize: 10, fontWeight: '600', color: '#6B7280', width: '100%' }}>CTA Style</Text>
+                    {dna.ctaFrameworks.map((c: string, i: number) => (
+                      <View key={i} style={{ backgroundColor: '#FEF3C7', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+                        <Text style={{ fontSize: 9, color: '#D97706', fontWeight: '600' }}>{c}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                {dna.missingSignalFlags?.length > 0 && (
+                  <Text style={{ fontSize: 9, color: '#EF4444', fontStyle: 'italic', marginTop: 2 }}>
+                    {dna.missingSignalFlags[0]}
+                  </Text>
+                )}
+              </View>
+            ))}
+          </View>
+        )}
+
         {renderInsightCards()}
         {renderSimilarityCard()}
         {renderGoalModeCard()}

@@ -1361,6 +1361,8 @@ export const miSnapshots = pgTable("mi_snapshots", {
   previousDirection: text("previous_direction"),
   directionLockedUntil: timestamp("direction_locked_until"),
   goalMode: text("goal_mode").default("STRATEGY_MODE"),
+  contentDnaData: text("content_dna_data"),
+  deltaReport: text("delta_report"),
   createdAt: timestamp("created_at").defaultNow(),
   expiresAt: timestamp("expires_at"),
 });
