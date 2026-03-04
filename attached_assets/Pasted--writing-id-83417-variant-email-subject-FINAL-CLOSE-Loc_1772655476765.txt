@@ -1,0 +1,92 @@
+:::writing{id=“83417” variant=“email” subject=“FINAL CLOSE — Lock MIv3 Intelligence Layers (Content DNA + Delta + Calibration) | PASS/FAIL Required”}
+Replit,
+
+This email is the FINAL directive to close the MIv3 intelligence-layers file. No partial confirmations. Reply PASS/FAIL per section and if FAIL, apply the “Direct Fix” immediately.
+
+────────────────────────────────
+	1.	Content DNA (Framework Detection) — MUST BE FULLY SEALED
+────────────────────────────────
+Current state (per your last note): “partially implemented / spread across modules” = NOT ACCEPTABLE.
+
+Required:
+A) Create a dedicated module:
+	•	server/market-intelligence-v3/content-dna.ts
+
+B) The module must output a deterministic ContentDNAResult per competitor:
+	•	hookArchetypes[] (e.g., shock/authority/curiosity/problem)
+	•	narrativeFrameworks[] (e.g., mistake→fix, problem→solution, before→after, story→lesson)
+	•	ctaFrameworks[] (explicit/soft/narrative/trust)
+	•	evidence[] (postIds/text snippets refs — no fabrication)
+	•	dnaConfidence (0–1) + missingSignalFlags
+
+C) Wire it into MIv3 pipeline in ONE place (no duplicates):
+Pipeline order must be:
+Signals → ContentDNA → Intent → Trajectory → Confidence → Dominance
+	•	No side engines.
+	•	No UI-triggered recompute on tab switch.
+
+D) Persist to snapshot (source of truth):
+	•	Add contentDnaAnalysis JSON to mi_snapshots
+	•	Ensure it is included in the snapshot response + UI rendering.
+	•	Must be gated by confidence: if insufficient evidence, set dnaConfidence low + flags, never guess.
+
+Direct Fix if FAIL:
+Implement the module + pipeline wiring + snapshot persistence exactly as above and add the tests in section (4).
+
+────────────────────────────────
+2) Delta Intelligence — CONFIRM IT’S REAL + SNAPSHOT-TO-SNAPSHOT
+────────────────────────────────
+Required confirmation:
+	•	Delta is not “time-split only”; it must also compare previous COMPLETE snapshot to current COMPLETE snapshot when competitorHash matches.
+	•	Must produce explicit deltas and “what changed” signals (not narrative).
+
+Direct Fix if FAIL:
+Add a computeSnapshotDeltas(prevSnapshot, currSnapshot) step and persist deltaReport in snapshot output.
+
+────────────────────────────────
+3) Calibration Layer — CONFIRM BOTH TYPES + NO HALLUCINATION
+────────────────────────────────
+We must have:
+A) Market Intelligence calibration (coverage/freshness/sampleStrength/cross-consistency/stability) already used by guardDecision
+B) Baseline calibration (rolling baselines) must be explicitly separated from MIv3 (no cross-writing, no conflicts)
+
+Direct Fix if FAIL:
+Separate types and enforce via isolation guard + audits: MIv3 reads only CI tables + MI tables.
+
+────────────────────────────────
+4) Torture Tests — MANDATORY (NO SKIPS)
+────────────────────────────────
+Add/confirm tests that PROVE the contracts:
+
+A) Content DNA detection:
+	•	dataset with known frameworks → must detect correctly
+	•	implicit CTA dataset → must classify narrative/trust (no “missing” when text exists)
+
+B) Pipeline integration:
+	•	Content DNA present in snapshot when status COMPLETE
+	•	No duplicated compute paths, no second engine invoked
+
+C) Guard behavior:
+	•	insufficient evidence → dnaConfidence low + missing flags (no guessing)
+	•	PROCEED requires non-null required fields; DOWNGRADE/BLOCK may legitimately omit specific strategy fields, but must be explicit.
+
+D) Static scan:
+	•	Only MIv3 pipeline can compute Content DNA / dominance / CTA / confidence (single ownership enforced)
+
+────────────────────────────────
+Definition of Done (Non-Negotiable)
+────────────────────────────────
+	•	Content DNA is a first-class MIv3 layer (module + pipeline + snapshot + UI)
+	•	Delta Intelligence and Calibration are confirmed structurally (not “implied”)
+	•	All tests pass, no skipped/todo
+	•	Reply in this format ONLY:
+
+	1.	Content DNA: PASS/FAIL (+ what changed)
+	2.	Delta Intelligence: PASS/FAIL (+ what changed)
+	3.	Calibration Layer: PASS/FAIL (+ what changed)
+	4.	Torture Tests: PASS/FAIL (+ evidence test names)
+
+No vague confirmations.
+
+— Samir
+:::
