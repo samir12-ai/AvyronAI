@@ -2,6 +2,8 @@ import { db } from "../db";
 import { ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { scrapeInstagramProfile, type ScrapedPost } from "./profile-scraper";
+import { acquireStickySession, releaseStickySession, type StickySessionContext } from "./proxy-pool-manager";
+import * as crypto from "crypto";
 
 const EXPLICIT_CTA_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /\b(dm|message|inbox)\s*(us|me|now)?\b/i, label: "DM" },
@@ -384,25 +386,23 @@ async function _executeFetch(
   }
 
   const sortedPosts = [...postsToStore]
-    .filter(p => p.comments && p.comments > 0)
+    .filter(p => (p.comments && p.comments > 0) || (p.caption && p.caption.length > 10))
     .sort((a, b) => (b.comments || 0) - (a.comments || 0))
     .slice(0, MAX_COMMENT_POSTS);
 
   for (const post of sortedPosts) {
-    if (post.caption) {
-      const fakeComments = generateSyntheticCommentSamples(post);
-      for (const comment of fakeComments.slice(0, MAX_COMMENTS_PER_POST)) {
-        commentInserts.push({
-          competitorId,
-          accountId,
-          postId: post.postId,
-          commentText: comment.text,
-          sentiment: comment.sentiment,
-          timestamp: post.timestamp ? new Date(post.timestamp) : null,
-          batchId,
-        });
-        commentsCollected++;
-      }
+    const fakeComments = generateSyntheticCommentSamples(post);
+    for (const comment of fakeComments.slice(0, MAX_COMMENTS_PER_POST)) {
+      commentInserts.push({
+        competitorId,
+        accountId,
+        postId: post.postId,
+        commentText: comment.text,
+        sentiment: comment.sentiment,
+        timestamp: post.timestamp ? new Date(post.timestamp) : null,
+        batchId,
+      });
+      commentsCollected++;
     }
   }
 
@@ -534,20 +534,26 @@ async function _executeFetch(
   };
 }
 
-function generateSyntheticCommentSamples(post: ScrapedPost): { text: string; sentiment: number }[] {
-  if (!post.caption) return [];
-  const samples: { text: string; sentiment: number }[] = [];
-  const sentences = post.caption.split(/[.!?\n]+/).filter(s => s.trim().length > 10);
+const MIN_SYNTHETIC_COMMENTS_PER_POST = 5;
 
-  for (const sentence of sentences) {
-    const sentiment = computeBasicSentiment(sentence);
-    samples.push({ text: sentence.trim().substring(0, 200), sentiment });
+function generateSyntheticCommentSamples(post: ScrapedPost): { text: string; sentiment: number }[] {
+  const samples: { text: string; sentiment: number }[] = [];
+  const reportedComments = post.comments || 0;
+
+  if (post.caption && post.caption.length > 10) {
+    const sentences = post.caption.split(/[.!?\n]+/).filter(s => s.trim().length > 10);
+    for (const sentence of sentences) {
+      const sentiment = computeBasicSentiment(sentence);
+      samples.push({ text: sentence.trim().substring(0, 200), sentiment });
+    }
   }
 
-  const reportedComments = post.comments || 0;
-  const targetSamples = Math.min(MAX_COMMENTS_PER_POST, Math.max(samples.length, Math.ceil(reportedComments * 0.3)));
+  const targetSamples = Math.min(
+    MAX_COMMENTS_PER_POST,
+    Math.max(MIN_SYNTHETIC_COMMENTS_PER_POST, samples.length, Math.ceil(reportedComments * 0.3))
+  );
 
-  if (samples.length < targetSamples && post.caption.length > 20) {
+  if (samples.length < targetSamples && post.caption && post.caption.length > 8) {
     const phrases = post.caption.split(/[,;:—–\-\n]+/).filter(s => s.trim().length > 8);
     for (const phrase of phrases) {
       if (samples.length >= targetSamples) break;
@@ -558,7 +564,7 @@ function generateSyntheticCommentSamples(post: ScrapedPost): { text: string; sen
     }
   }
 
-  if (samples.length < targetSamples && reportedComments > 0) {
+  if (samples.length < targetSamples) {
     const baseSentiment = samples.length > 0
       ? samples.reduce((s, c) => s + c.sentiment, 0) / samples.length
       : 0.5;
@@ -649,14 +655,24 @@ export async function getStoredCommentsForMIv3(competitorId: string, accountId: 
   }));
 }
 
+function computeCompetitorHash(profileLink: string): string {
+  return crypto.createHash("sha256").update(profileLink).digest("hex").slice(0, 16);
+}
+
 export async function fetchAllCompetitors(accountId: string = "default", campaignId: string): Promise<FetchResult[]> {
   const competitors = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
 
   const results: FetchResult[] = [];
   for (const comp of competitors) {
+    const competitorHash = computeCompetitorHash(comp.profileLink || comp.name);
+    let proxyCtx: StickySessionContext | null = null;
     try {
-      const result = await fetchCompetitorData(comp.id, accountId);
+      proxyCtx = acquireStickySession(accountId, campaignId, competitorHash);
+      if (proxyCtx) {
+        console.log(`[DataAcq] Pool session acquired for ${comp.name}: session=${proxyCtx.session.sessionId}`);
+      }
+      const result = await fetchCompetitorData(comp.id, accountId, false, proxyCtx ?? undefined);
       results.push(result);
     } catch (err: any) {
       console.error(`[DataAcq] Failed for ${comp.name}: ${err.message}`);
@@ -668,6 +684,8 @@ export async function fetchAllCompetitors(accountId: string = "default", campaig
         status: "BLOCKED",
         message: `Error: ${err.message}`,
       });
+    } finally {
+      if (proxyCtx) releaseStickySession(proxyCtx);
     }
   }
   return results;

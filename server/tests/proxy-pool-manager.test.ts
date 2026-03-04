@@ -536,6 +536,32 @@ describe("Proxy Pool Manager — Torture Tests", () => {
       expect(source).toContain("scrapeInstagramProfile(competitor.profileLink, proxyCtx)");
     });
 
+    it("fetchAllCompetitors acquires pool sessions per competitor", () => {
+      const source = require("fs").readFileSync(
+        "server/competitive-intelligence/data-acquisition.ts", "utf-8"
+      );
+      expect(source).toContain("acquireStickySession(accountId, campaignId, competitorHash)");
+      expect(source).toContain("releaseStickySession(proxyCtx)");
+      expect(source).toContain("proxyCtx ?? undefined");
+    });
+
+    it("single-competitor route acquires pool session before fetch", () => {
+      const source = require("fs").readFileSync(
+        "server/competitive-intelligence/data-acquisition-routes.ts", "utf-8"
+      );
+      expect(source).toContain("acquireStickySession(accountId, campaignId, competitorHash)");
+      expect(source).toContain("releaseStickySession(proxyCtx)");
+      expect(source).toContain("fetchCompetitorData(id, accountId, forceRefresh, proxyCtx ?? undefined)");
+    });
+
+    it("synthetic comment generator has minimum 5 per post", () => {
+      const source = require("fs").readFileSync(
+        "server/competitive-intelligence/data-acquisition.ts", "utf-8"
+      );
+      expect(source).toContain("MIN_SYNTHETIC_COMMENTS_PER_POST = 5");
+      expect(source).toContain("MIN_SYNTHETIC_COMMENTS_PER_POST");
+    });
+
     it("profile-scraper uses pool-managed sessions exclusively (old proxy system deleted)", () => {
       const source = require("fs").readFileSync(
         "server/competitive-intelligence/profile-scraper.ts", "utf-8"
