@@ -679,62 +679,63 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
     });
   });
 
-  describe("L) Cooldown UI — Distinct Display States", () => {
-    it("should show COMPLETE_WITH_COOLDOWN as distinct status in frontend", async () => {
+  describe("L) Sequential Per-Competitor Fetch — No Batch Fetch", () => {
+    it("should NOT contain Auto-Fetch All Data button in frontend", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
       );
-      expect(source).toContain("COMPLETE_WITH_COOLDOWN");
-      expect(source).toContain("ANALYSIS COMPLETE (CACHED)");
+      expect(source).not.toContain("Auto-Fetch All Data");
+      expect(source).not.toContain("autoFetchAllBtn");
+      expect(source).not.toContain("startFetchJobMutation");
     });
 
-    it("should display 'Fetch blocked (cooldown active)' banner", async () => {
+    it("should NOT contain fetchingAll or fetchJobId state in frontend", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
       );
-      expect(source).toContain("Fetch blocked (cooldown active)");
-      expect(source).toContain("Analysis executed using cached data");
+      expect(source).not.toContain("fetchingAll");
+      expect(source).not.toContain("fetchJobId");
+      expect(source).not.toContain("fetchJobStatus");
     });
 
-    it("should render SKIPPED_FETCH_COOLDOWN icon (clock/time) for fetch stages", async () => {
+    it("should have per-competitor fetch button inside competitor card", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
       );
-      expect(source).toContain("SKIPPED_FETCH_COOLDOWN");
-      expect(source).toContain('"time"');
+      expect(source).toContain("fetchDataMutation.mutate({ id: comp.id })");
+      expect(source).toContain("fetchingCompetitorId");
     });
 
-    it("should render CACHED_ANALYSIS icon (blue checkmark) for analysis stages", async () => {
+    it("should enforce sequential fetching — disable all fetch buttons when any fetch in progress", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
       );
-      expect(source).toContain("CACHED_ANALYSIS");
-      expect(source).toContain("#3B82F6");
+      expect(source).toContain("anyFetchInProgress");
+      expect(source).toContain("fetchingCompetitorId !== null");
+      expect(source).toContain("disabled={anyFetchInProgress");
     });
 
-    it("should display cooldown remaining hours per competitor", async () => {
+    it("should show 'Wait...' on non-active competitor cards during fetch", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
       );
-      expect(source).toContain("cooldownRemainingHours");
-      expect(source).toContain("cooldown");
+      expect(source).toContain("Wait...");
     });
 
-    it("should show 'cached analysis' label when analysisSource is CACHED_DATA", async () => {
+    it("should handle COOLDOWN status in per-competitor fetch response", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
       );
-      expect(source).toContain("CACHED_DATA");
-      expect(source).toContain("cached analysis");
+      expect(source).toContain("COOLDOWN");
+      expect(source).toContain("Cooldown Active");
     });
 
-    it("should show stage labels with source context: (skipped — cooldown), (cached), (no data)", async () => {
+    it("should handle BLOCKED status in per-competitor fetch response", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
       );
-      expect(source).toContain("(skipped — cooldown)");
-      expect(source).toContain("(cached)");
-      expect(source).toContain("(no data)");
+      expect(source).toContain("BLOCKED");
+      expect(source).toContain("Fetch Blocked");
     });
 
     it("should include remainingCooldownSeconds and existingCoverage in stage metadata", async () => {
@@ -771,6 +772,45 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
         fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
       );
       expect(source).not.toContain('"COOLDOWN_BLOCKED"');
+    });
+
+    it("should enforce MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT = 1 (strict sequential)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT = 1");
+    });
+
+    it("batch fetch route /api/ci/mi-v3/fetch should be deprecated (410)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/routes.ts", "utf-8")
+      );
+      const fetchRoute = source.substring(
+        source.indexOf('"/api/ci/mi-v3/fetch"'),
+        source.indexOf("});", source.indexOf('"/api/ci/mi-v3/fetch"')) + 3
+      );
+      expect(fetchRoute).toContain("410");
+      expect(fetchRoute).toContain("DEPRECATED");
+    });
+
+    it("batch fetch-all route /api/ci/competitors/fetch-all should be deprecated (410)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/data-acquisition-routes.ts", "utf-8")
+      );
+      const marker = "/api/ci/competitors/fetch-all";
+      const idx = source.indexOf(marker);
+      expect(idx).toBeGreaterThan(-1);
+      const fetchAllRoute = source.substring(idx, source.indexOf("});", idx) + 3);
+      expect(fetchAllRoute).toContain("410");
+      expect(fetchAllRoute).toContain("DEPRECATED");
+    });
+
+    it("per-competitor fetch route should still be active", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/data-acquisition-routes.ts", "utf-8")
+      );
+      expect(source).toContain('"/api/ci/competitors/:id/fetch-data"');
+      expect(source).toContain("fetchCompetitorData");
     });
   });
 
@@ -828,11 +868,12 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(telemetrySection).toContain("fetchExecuted");
     });
 
-    it("should show existingCoverage in UI for cooldown competitors", async () => {
+    it("should show data coverage section in per-competitor card", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
       );
-      expect(source).toContain("existingCoverage");
+      expect(source).toContain("DATA COVERAGE");
+      expect(source).toContain("dataCoverage");
     });
   });
 
@@ -974,14 +1015,12 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("Below thresholds");
     });
 
-    it("UI must show PARTIAL — BELOW THRESHOLDS (never COMPLETE when insufficient)", async () => {
+    it("UI must show per-competitor PARTIAL status in fetch response handler", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
       );
-      expect(source).toContain("PARTIAL_COMPLETE");
-      expect(source).toContain("MI V3 PARTIAL");
-      expect(source).toContain("BELOW THRESHOLDS");
-      expect(source).toContain("bypass cooldown");
+      expect(source).toContain("PARTIAL");
+      expect(source).toContain("Data Collected");
     });
   });
 

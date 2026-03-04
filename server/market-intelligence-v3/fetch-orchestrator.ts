@@ -29,7 +29,7 @@ const MAX_REQUESTS_PER_JOB = 50;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
 const MAX_CONCURRENT_COMPETITORS_PER_JOB = 1;
 const CONCURRENCY_FEATURE_FLAG = false;
-export const MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT = 2;
+export const MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT = 1;
 const STAGGER_DELAY_MS = 5000;
 
 const lastJobStartByAccount = new Map<string, number>();

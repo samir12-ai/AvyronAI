@@ -5,7 +5,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { MarketIntelligenceV3, validateEngineIsolation, rejectBlockedEngine, assertNoPlanWrites, assertNoOrchestrator, assertNoAutopilot, buildResultFromSnapshot } from "./engine";
 import { logAudit } from "../audit";
 import { requireCampaign } from "../campaign-routes";
-import { startFetchJob, getFetchJobStatus, getRunningJobCountForAccount, MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT } from "./fetch-orchestrator";
+import { getFetchJobStatus } from "./fetch-orchestrator";
 import type { MIv3Mode } from "./types";
 
 const ALLOWED_MODES: MIv3Mode[] = ["overview", "dominance", "actions", "history"];
@@ -180,30 +180,8 @@ export function registerMIv3Routes(app: Express) {
     }
   });
 
-  app.post("/api/ci/mi-v3/fetch", requireCampaign, async (req, res) => {
-    try {
-      enforceEngineWhitelist(req);
-      validateEngineIsolation("MARKET_INTELLIGENCE_V3");
-
-      const accountId = (req.body.accountId as string) || "default";
-      const campaignId = req.body.campaignId as string;
-
-      if (!campaignId) {
-        return res.status(422).json({ error: "campaignId is required" });
-      }
-
-      console.log(`[MIv3-Route] POST /api/ci/mi-v3/fetch | accountId=${accountId} | campaignId=${campaignId}`);
-
-      const jobId = await startFetchJob(accountId, campaignId);
-
-      return res.json({ success: true, jobId });
-    } catch (err: any) {
-      console.error("[MIv3-Route] Fetch job error:", err.message);
-      if (err.message.includes("ISOLATION VIOLATION")) {
-        return res.status(403).json({ error: err.message });
-      }
-      return res.status(500).json({ error: err.message });
-    }
+  app.post("/api/ci/mi-v3/fetch", requireCampaign, async (_req, res) => {
+    return res.status(410).json({ error: "DEPRECATED: Batch fetch removed to prevent proxy blocks. Use per-competitor fetch: POST /api/ci/competitors/:id/fetch-data" });
   });
 
   app.get("/api/ci/mi-v3/fetch-status/:jobId", async (req, res) => {

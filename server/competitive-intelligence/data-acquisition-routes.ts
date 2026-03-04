@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { db } from "../db";
 import { ciCompetitors } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
-import { fetchCompetitorData, fetchAllCompetitors, getCompetitorDataCoverage } from "./data-acquisition";
+import { fetchCompetitorData, getCompetitorDataCoverage } from "./data-acquisition";
 import { acquireStickySession, releaseStickySession } from "./proxy-pool-manager";
 import * as crypto from "crypto";
 
@@ -46,32 +46,8 @@ export function registerDataAcquisitionRoutes(app: Express) {
     }
   });
 
-  app.post("/api/ci/competitors/fetch-all", async (req, res) => {
-    try {
-      const accountId = (req.body.accountId as string) || "default";
-      const campaignId = req.body.campaignId as string;
-      if (!campaignId) {
-        return res.status(400).json({ error: "campaignId is required" });
-      }
-
-      console.log(`[DataAcq Route] Fetch all competitors for campaign ${campaignId}`);
-      const results = await fetchAllCompetitors(accountId, campaignId);
-
-      const summary = {
-        total: results.length,
-        success: results.filter(r => r.status === "SUCCESS").length,
-        partial: results.filter(r => r.status === "PARTIAL").length,
-        blocked: results.filter(r => r.status === "BLOCKED").length,
-        cooldown: results.filter(r => r.status === "COOLDOWN").length,
-        totalPosts: results.reduce((s, r) => s + r.postsCollected, 0),
-        totalComments: results.reduce((s, r) => s + r.commentsCollected, 0),
-      };
-
-      res.json({ results, summary });
-    } catch (error: any) {
-      console.error(`[DataAcq Route] Fetch-all error:`, error.message);
-      res.status(500).json({ error: error.message });
-    }
+  app.post("/api/ci/competitors/fetch-all", async (_req, res) => {
+    return res.status(410).json({ error: "DEPRECATED: Batch fetch removed to prevent proxy blocks. Use per-competitor fetch: POST /api/ci/competitors/:id/fetch-data" });
   });
 
   app.get("/api/ci/competitors/:id/data-coverage", async (req, res) => {

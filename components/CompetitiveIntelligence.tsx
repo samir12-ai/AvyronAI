@@ -229,103 +229,6 @@ export default function CompetitiveIntelligence() {
   });
 
   const [fetchingCompetitorId, setFetchingCompetitorId] = useState<string | null>(null);
-  const [fetchingAll, setFetchingAll] = useState(false);
-  const [fetchJobId, setFetchJobId] = useState<string | null>(null);
-  const [fetchJobStatus, setFetchJobStatus] = useState<any>(null);
-  const prevCampaignRef = React.useRef(activeCampaignId);
-
-  useEffect(() => {
-    if (prevCampaignRef.current !== activeCampaignId) {
-      prevCampaignRef.current = activeCampaignId;
-      setFetchJobId(null);
-      setFetchJobStatus(null);
-      setFetchingAll(false);
-    }
-  }, [activeCampaignId]);
-
-  useEffect(() => {
-    if (!fetchJobId) return;
-    const controller = new AbortController();
-    let pollCount = 0;
-    const maxPolls = 45;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    const cleanup = () => {
-      controller.abort();
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-
-    const poll = async () => {
-      if (controller.signal.aborted) return;
-      try {
-        const res = await fetch(
-          new URL(`/api/ci/mi-v3/fetch-status/${fetchJobId}`, baseUrl).toString(),
-          { signal: controller.signal }
-        );
-        if (!res.ok || controller.signal.aborted) return;
-        const data = await res.json();
-        if (controller.signal.aborted) return;
-        setFetchJobStatus(data);
-
-        if (data.status === 'COMPLETE' || data.status === 'FAILED' || data.status === 'COMPLETE_WITH_COOLDOWN' || data.status === 'PARTIAL_COMPLETE') {
-          setFetchingAll(false);
-          setFetchJobId(null);
-
-          queryClient.invalidateQueries({ queryKey: ['ci-competitors', activeCampaignId] });
-          queryClient.invalidateQueries({ queryKey: ['mi-v3-snapshot', activeCampaignId] });
-          queryClient.invalidateQueries({ queryKey: ['ci-miv3-history', activeCampaignId] });
-
-          if (data.status === 'COMPLETE') {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            const stopMsg = data.stopReason && data.stopReason !== 'COMPLETE'
-              ? `\nCompleted with limit: ${data.stopReason.replace(/_/g, ' ')}`
-              : '';
-            const snapMsg = data.newSnapshotId ? `\nNew snapshot: ${data.newSnapshotId.slice(0, 8)}` : '';
-            Alert.alert(
-              'Fetch Complete',
-              `${data.totalPostsFetched} posts, ${data.totalCommentsFetched} comments collected.${stopMsg}${snapMsg}`
-            );
-          } else if (data.status === 'PARTIAL_COMPLETE') {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            Alert.alert(
-              'Partial Data Collected',
-              `${data.totalPostsFetched} posts, ${data.totalCommentsFetched} comments collected.\nBelow coverage thresholds (14 posts / 50 comments per competitor).\nNext fetch will bypass cooldown to collect more data.`
-            );
-          } else if (data.status === 'COMPLETE_WITH_COOLDOWN') {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            const snapMsg = data.newSnapshotId ? `\nNew snapshot: ${data.newSnapshotId.slice(0, 8)}` : '';
-            Alert.alert(
-              'Analysis Complete (Cooldown Active)',
-              `Fetch blocked (cooldown active). Analysis executed using cached data.\n${data.totalPostsFetched} cached posts, ${data.totalCommentsFetched} cached comments analyzed.${snapMsg}`
-            );
-          } else {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          }
-          return;
-        }
-
-        pollCount++;
-        if (pollCount >= maxPolls) {
-          setFetchingAll(false);
-          setFetchJobId(null);
-          Alert.alert('Timeout', 'Data fetch is still running in the background. Check back shortly.');
-          return;
-        }
-
-        if (!controller.signal.aborted) {
-          timeoutId = setTimeout(poll, 2000);
-        }
-      } catch (err: any) {
-        if (err?.name === 'AbortError') return;
-        if (!controller.signal.aborted) {
-          timeoutId = setTimeout(poll, 3000);
-        }
-      }
-    };
-
-    timeoutId = setTimeout(poll, 1000);
-    return cleanup;
-  }, [fetchJobId, activeCampaignId]);
 
   const fetchDataMutation = useMutation({
     mutationFn: async ({ id, forceRefresh }: { id: string; forceRefresh?: boolean }) => {
@@ -354,29 +257,6 @@ export default function CompetitiveIntelligence() {
     onError: (err: any) => {
       setFetchingCompetitorId(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Fetch Error', err.message);
-    },
-  });
-
-  const startFetchJobMutation = useMutation({
-    mutationFn: async () => {
-      setFetchingAll(true);
-      setFetchJobStatus(null);
-      const res = await fetch(new URL('/api/ci/mi-v3/fetch', baseUrl).toString(), {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accountId: 'default', campaignId: activeCampaignId || 'default' }),
-      });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Fetch failed'); }
-      return res.json();
-    },
-    onSuccess: (data: any) => {
-      if (data.jobId) {
-        setFetchJobId(data.jobId);
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      }
-    },
-    onError: (err: any) => {
-      setFetchingAll(false);
       Alert.alert('Fetch Error', err.message);
     },
   });
@@ -485,143 +365,8 @@ export default function CompetitiveIntelligence() {
           <Text style={{ fontSize: 11, color: '#F59E0B', flex: 1, lineHeight: 16 }}>
             {competitors.length < 3
               ? `Low confidence due to insufficient competitor signals. Add at least ${3 - competitors.length} more competitor(s).`
-              : `Low confidence: only ${qualifiedCount} of ${competitors.length} competitors have sufficient data. Use Auto-Fetch to collect signals.`}
+              : `Low confidence: only ${qualifiedCount} of ${competitors.length} competitors have sufficient data. Fetch data for each competitor individually.`}
           </Text>
-        </View>
-      )}
-
-      {competitors.length > 0 && (
-        <Pressable
-          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); startFetchJobMutation.mutate(); }}
-          disabled={fetchingAll || startFetchJobMutation.isPending}
-          style={[s.autoFetchAllBtn, { opacity: (fetchingAll || startFetchJobMutation.isPending) ? 0.6 : 1 }]}
-        >
-          {(fetchingAll || startFetchJobMutation.isPending) ? (
-            <ActivityIndicator size={14} color="#fff" />
-          ) : (
-            <Ionicons name="cloud-download-outline" size={16} color="#fff" />
-          )}
-          <Text style={s.autoFetchAllBtnText}>
-            {(fetchingAll || startFetchJobMutation.isPending) ? 'Fetching all data...' : 'Auto-Fetch All Data'}
-          </Text>
-        </Pressable>
-      )}
-
-      {fetchJobStatus && (fetchingAll || fetchJobStatus.status === 'COMPLETE' || fetchJobStatus.status === 'FAILED' || fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN' || fetchJobStatus.status === 'PARTIAL_COMPLETE') && (
-        <View style={{ backgroundColor: isDark ? '#1A2030' : '#F0F4FF', borderRadius: 8, padding: 10, marginBottom: 10, gap: 6 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-            {fetchJobStatus.status === 'COMPLETE' ? (
-              <Ionicons name="checkmark-circle" size={14} color="#10B981" />
-            ) : fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN' ? (
-              <Ionicons name="checkmark-circle" size={14} color="#F59E0B" />
-            ) : fetchJobStatus.status === 'PARTIAL_COMPLETE' ? (
-              <Ionicons name="warning" size={14} color="#F97316" />
-            ) : fetchJobStatus.status === 'FAILED' ? (
-              <Ionicons name="close-circle" size={14} color="#EF4444" />
-            ) : (
-              <ActivityIndicator size={12} color="#8B5CF6" />
-            )}
-            <Text style={{ fontSize: 12, fontWeight: '700', color: fetchJobStatus.status === 'COMPLETE' ? '#10B981' : fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN' ? '#F59E0B' : fetchJobStatus.status === 'PARTIAL_COMPLETE' ? '#F97316' : fetchJobStatus.status === 'FAILED' ? '#EF4444' : '#8B5CF6' }}>
-              {fetchJobStatus.status === 'COMPLETE'
-                ? (fetchJobStatus.stopReason && fetchJobStatus.stopReason !== 'COMPLETE'
-                    ? `MI V3 COMPLETE (${fetchJobStatus.stopReason.replace(/_/g, ' ')})`
-                    : 'MI V3 DATA PULL COMPLETE')
-                : fetchJobStatus.status === 'PARTIAL_COMPLETE'
-                    ? 'MI V3 PARTIAL — BELOW THRESHOLDS'
-                : fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN'
-                    ? 'ANALYSIS COMPLETE (CACHED)'
-                : fetchJobStatus.status === 'FAILED' ? 'MI V3 DATA PULL FAILED' : 'MI V3 DATA PULL'}
-            </Text>
-            <Text style={{ fontSize: 10, color: colors.textMuted, marginLeft: 'auto' }}>
-              {fetchJobStatus.totalPostsFetched} posts • {fetchJobStatus.totalCommentsFetched} comments
-            </Text>
-          </View>
-          {fetchJobStatus.status === 'PARTIAL_COMPLETE' && (
-            <View style={{ backgroundColor: '#F97316' + '15', borderRadius: 6, padding: 6, marginBottom: 6 }}>
-              <Text style={{ fontSize: 10, fontWeight: '600', color: '#F97316' }}>Coverage below minimum thresholds (14 posts / 50 comments). Next fetch will bypass cooldown to collect more data.</Text>
-            </View>
-          )}
-          {fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN' && (
-            <View style={{ backgroundColor: '#F59E0B' + '15', borderRadius: 6, padding: 6, marginBottom: 6 }}>
-              <Text style={{ fontSize: 10, fontWeight: '600', color: '#F59E0B' }}>Fetch skipped (cooldown active) — Analysis executed using cached data only</Text>
-            </View>
-          )}
-          {Object.values(fetchJobStatus.stageStatuses || {}).map((cs: any) => {
-            const stageIcon = (status: string) => {
-              if (status === 'COMPLETE') return <Ionicons name="checkmark-circle" size={12} color="#10B981" />;
-              if (status === 'CACHED_ANALYSIS') return <Ionicons name="checkmark-circle" size={12} color="#3B82F6" />;
-              if (status === 'SKIPPED_FETCH_COOLDOWN') return <Ionicons name="time" size={12} color="#F59E0B" />;
-              if (status === 'BLOCKED_INSUFFICIENT_DATA') return <Ionicons name="alert-circle" size={12} color="#EF4444" />;
-              if (status === 'RUNNING') return <ActivityIndicator size={10} color="#8B5CF6" />;
-              if (status === 'FAILED') return <Ionicons name="close-circle" size={12} color="#EF4444" />;
-              if (status === 'SKIPPED') return <Ionicons name="remove-circle" size={12} color="#9CA3AF" />;
-              return <Ionicons name="ellipse-outline" size={12} color="#9CA3AF" />;
-            };
-            const stageLabel = (status: string, stage: string) => {
-              if (status === 'SKIPPED_FETCH_COOLDOWN') return `${stage} (skipped — cooldown)`;
-              if (status === 'CACHED_ANALYSIS') return `${stage} (cached)`;
-              if (status === 'BLOCKED_INSUFFICIENT_DATA') return `${stage} (no data)`;
-              return stage;
-            };
-            return (
-              <View key={cs.competitorId} style={{ gap: 3 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                  <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text }}>{cs.competitorName}</Text>
-                  {cs.postsFetched != null && (
-                    <Text style={{ fontSize: 9, color: colors.textMuted }}>{cs.postsFetched}p/{cs.commentsFetched || 0}c</Text>
-                  )}
-                  {cs.paginationPages != null && cs.paginationPages > 1 && (
-                    <Text style={{ fontSize: 9, color: '#8B5CF6' }}>{cs.paginationPages}pg</Text>
-                  )}
-                  {cs.paginationStopReason && (
-                    <Text style={{ fontSize: 8, color: cs.paginationStopReason === 'TARGET_REACHED' || cs.paginationStopReason === 'NO_MORE_PAGES' || cs.paginationStopReason === 'FEED_PAGINATION_SUCCESS' ? '#10B981' : cs.paginationStopReason === 'INSTAGRAM_API_CEILING' || cs.paginationStopReason === 'FEED_PAGINATION_AUTH_REQUIRED' ? '#F59E0B' : '#EF4444' }}>{cs.paginationStopReason.replace(/_/g, ' ')}</Text>
-                  )}
-                  {cs.cooldownRemainingHours != null && (
-                    <Text style={{ fontSize: 9, color: '#F59E0B' }}>{cs.cooldownRemainingHours}h cooldown</Text>
-                  )}
-                  {cs.existingCoverage && (
-                    <Text style={{ fontSize: 9, color: '#F59E0B' }}>existing: {cs.existingCoverage.posts}p/{cs.existingCoverage.comments}c</Text>
-                  )}
-                  {cs.analysisSource === 'CACHED_DATA' && (
-                    <Text style={{ fontSize: 9, color: '#3B82F6' }}>cached analysis</Text>
-                  )}
-                  {cs.fetchExecuted === false && cs.analysisSource !== 'CACHED_DATA' && (
-                    <Text style={{ fontSize: 9, color: '#F59E0B' }}>no fetch</Text>
-                  )}
-                </View>
-                <View style={{ flexDirection: 'row', gap: 8, paddingLeft: 4 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                    {stageIcon(cs.POSTS_FETCH)}
-                    <Text style={{ fontSize: 9, color: colors.textMuted }}>{stageLabel(cs.POSTS_FETCH, 'Posts')}</Text>
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                    {stageIcon(cs.COMMENTS_FETCH)}
-                    <Text style={{ fontSize: 9, color: colors.textMuted }}>{stageLabel(cs.COMMENTS_FETCH, 'Comments')}</Text>
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                    {stageIcon(cs.CTA_ANALYSIS)}
-                    <Text style={{ fontSize: 9, color: colors.textMuted }}>{stageLabel(cs.CTA_ANALYSIS, 'CTA')}</Text>
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                    {stageIcon(cs.SIGNAL_COMPUTE)}
-                    <Text style={{ fontSize: 9, color: colors.textMuted }}>{stageLabel(cs.SIGNAL_COMPUTE, 'Signals')}</Text>
-                  </View>
-                </View>
-              </View>
-            );
-          })}
-          {(fetchJobStatus.fetchLimitReasons || []).length > 0 && (
-            <View style={{ marginTop: 4, gap: 2 }}>
-              {(fetchJobStatus.fetchLimitReasons || []).map((lr: any, i: number) => (
-                <View key={i} style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
-                  <Ionicons name="information-circle" size={10} color="#F59E0B" />
-                  <Text style={{ fontSize: 9, color: '#F59E0B', flex: 1 }} numberOfLines={1}>
-                    {lr.competitorName}: {lr.reason} — {lr.details}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          )}
         </View>
       )}
 
@@ -635,6 +380,7 @@ export default function CompetitiveIntelligence() {
         competitors.map((comp: Competitor) => {
           const dc = comp.dataCoverage;
           const isFetching = fetchingCompetitorId === comp.id;
+          const anyFetchInProgress = fetchingCompetitorId !== null;
           return (
           <View key={comp.id} style={[s.breakdownItem, { borderBottomWidth: 1, borderBottomColor: isDark ? '#1A2030' : '#F0F0F0' }]}>
             <Pressable onPress={() => { Haptics.selectionAsync(); setExpandedCompetitor(expandedCompetitor === comp.id ? null : comp.id); }} style={s.compHeader}>
@@ -697,15 +443,15 @@ export default function CompetitiveIntelligence() {
                 <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
                   <Pressable
                     onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); fetchDataMutation.mutate({ id: comp.id }); }}
-                    disabled={isFetching || fetchDataMutation.isPending}
-                    style={[s.fetchBtn, { flex: 1, opacity: (isFetching || fetchDataMutation.isPending) ? 0.6 : 1 }]}
+                    disabled={anyFetchInProgress || fetchDataMutation.isPending}
+                    style={[s.fetchBtn, { flex: 1, opacity: (anyFetchInProgress || fetchDataMutation.isPending) ? 0.6 : 1 }]}
                   >
                     {isFetching ? (
                       <ActivityIndicator size={12} color="#fff" />
                     ) : (
                       <Ionicons name="cloud-download-outline" size={14} color="#fff" />
                     )}
-                    <Text style={s.fetchBtnText}>{isFetching ? 'Fetching...' : (dc?.postsCollected || 0) > 0 ? 'Refresh Data' : 'Auto-Fetch Data'}</Text>
+                    <Text style={s.fetchBtnText}>{isFetching ? 'Fetching...' : !isFetching && anyFetchInProgress ? 'Wait...' : (dc?.postsCollected || 0) > 0 ? 'Refresh Data' : 'Fetch Data'}</Text>
                   </Pressable>
                   <Pressable
                     onPress={() => { Haptics.selectionAsync(); openEditModal(comp); }}
@@ -1841,8 +1587,6 @@ const s = StyleSheet.create({
   editBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: '#8B5CF6' + '15', borderRadius: 8 },
   removeBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: '#EF4444' + '15', borderRadius: 8 },
   removeBtnText: { fontSize: 12, fontWeight: '600' },
-  autoFetchAllBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, backgroundColor: '#10B981', borderRadius: 8, paddingVertical: 10, marginBottom: 10 },
-  autoFetchAllBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' as const },
   fetchBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, backgroundColor: '#8B5CF6', borderRadius: 8, paddingVertical: 8 },
   fetchBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' as const },
   countBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },

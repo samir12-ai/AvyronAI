@@ -332,15 +332,15 @@ describe("Section 7: Integration Invariants", () => {
 });
 
 describe("Section 8: Global Request Ceiling — Account-Level Concurrency Limit", () => {
-  it("MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT is 2", () => {
-    expect(MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT).toBe(2);
+  it("MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT is 1 (strict sequential)", () => {
+    expect(MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT).toBe(1);
   });
 
-  it("MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT constant exists in source", async () => {
+  it("MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT constant exists in source as 1", async () => {
     const source = await import("fs").then(fs =>
       fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
     );
-    expect(source).toContain("MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT = 2");
+    expect(source).toContain("MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT = 1");
   });
 
   it("account-level job count check runs before creating a new job", async () => {
