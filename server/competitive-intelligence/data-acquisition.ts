@@ -344,6 +344,38 @@ async function _executeFetch(
     };
   }
 
+  const existingPostCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
+    .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+  const existingPosts = Number(existingPostCount[0]?.count || 0);
+
+  if (existingPosts > 0 && scrapeResult.posts.length < existingPosts) {
+    console.log(`[DataAcq] DATA_DEGRADATION_GUARD: New fetch returned ${scrapeResult.posts.length} posts, DB has ${existingPosts}. Keeping existing data for ${competitor.name}.`);
+    const existingCommentCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
+      .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
+    const existingComments = Number(existingCommentCount[0]?.count || 0);
+
+    await db.insert(ciCompetitorMetricsSnapshot).values({
+      competitorId, accountId,
+      postsCollected: existingPosts,
+      commentsCollected: existingComments,
+      followers: scrapeResult.followers,
+      lastFetchAt: new Date(),
+      fetchMethod: scrapeResult.collectionMethodUsed,
+    });
+
+    return {
+      competitorId,
+      postsCollected: existingPosts,
+      commentsCollected: existingComments,
+      ctaCoverage: 0, ctaTypes: [],
+      followers: scrapeResult.followers,
+      engagementRate: null, postingFrequency: null, contentMix: null,
+      fetchMethod: scrapeResult.collectionMethodUsed,
+      status: existingPosts >= MIN_POSTS_THRESHOLD && existingComments >= MIN_COMMENTS_THRESHOLD ? "PARTIAL_COMPLETE" : "INSUFFICIENT_DATA",
+      message: `Kept existing ${existingPosts} posts (new fetch got only ${scrapeResult.posts.length}). Pagination limited by Instagram API ceiling.`,
+    };
+  }
+
   const batchId = `batch_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
   const postsToStore = scrapeResult.posts.slice(0, MAX_POSTS_TO_STORE);
 

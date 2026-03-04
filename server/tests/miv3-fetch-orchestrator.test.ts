@@ -667,21 +667,30 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("persistedPostCount");
       expect(source).toContain("persistedCommentCount");
       const verifyIdx = source.indexOf("persistedPostCount");
-      const snapshotIdx = source.indexOf("db.insert(ciCompetitorMetricsSnapshot)");
-      expect(verifyIdx).toBeLessThan(snapshotIdx);
+      const transactionIdx = source.indexOf("await db.transaction(");
+      expect(verifyIdx).toBeGreaterThan(transactionIdx);
     });
 
     it("should write verified counts to metrics snapshot (not raw insert count)", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
       );
-      const snapshotBlock = source.slice(
-        source.indexOf("db.insert(ciCompetitorMetricsSnapshot)"),
-        source.indexOf("db.insert(ciCompetitorMetricsSnapshot)") + 300
-      );
+      const txBlock = source.slice(source.indexOf("await db.transaction("));
+      const mainSnapshotIdx = txBlock.indexOf("db.insert(ciCompetitorMetricsSnapshot)");
+      expect(mainSnapshotIdx).toBeGreaterThan(0);
+      const snapshotBlock = txBlock.slice(mainSnapshotIdx, mainSnapshotIdx + 300);
       expect(snapshotBlock).toContain("persistedPostCount");
       expect(snapshotBlock).toContain("persistedCommentCount");
       expect(snapshotBlock).not.toContain("postsToStore.length");
+    });
+
+    it("should have data degradation guard to prevent replacing better data", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
+      );
+      expect(source).toContain("DATA_DEGRADATION_GUARD");
+      expect(source).toContain("scrapeResult.posts.length < existingPosts");
+      expect(source).toContain("Keeping existing data");
     });
 
     it("should return verified counts from fetchCompetitorData", async () => {

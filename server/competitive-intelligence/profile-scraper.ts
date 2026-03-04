@@ -238,56 +238,66 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
     proxyUsed,
   };
 
+  const iHeaders: Record<string, string> = {
+    "User-Agent": "Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100)",
+    "X-IG-App-ID": "936619743392459",
+    "X-IG-WWW-Claim": "0",
+    "Accept": "*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+  };
+  const iFetchOptions: any = { headers: iHeaders, redirect: "follow" };
+  if (dispatcher) iFetchOptions.dispatcher = dispatcher;
+
+  let user: any = null;
+  let bytesReceived = 0;
+
   const response = await fetch(apiUrl, fetchOptions);
   diag.page1HttpStatus = response.status;
 
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const text = await response.text();
-  let bytesReceived = Buffer.byteLength(text, "utf-8");
-  diag.page1ResponseKB = Math.round(bytesReceived / 1024 * 10) / 10;
-
-  console.log(`[CI Scraper] WEB_API: PAGE_1 response ${diag.page1ResponseKB} KB, HTTP ${diag.page1HttpStatus} for ${handle}`);
-
-  let data: any;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    console.log(`[CI Scraper] WEB_API: Response is not JSON (${text.substring(0, 200)}) for ${handle}`);
-    throw new Error("Non-JSON response from web_profile_info");
+  if (response.ok) {
+    const text = await response.text();
+    bytesReceived = Buffer.byteLength(text, "utf-8");
+    diag.page1ResponseKB = Math.round(bytesReceived / 1024 * 10) / 10;
+    console.log(`[CI Scraper] WEB_API: PAGE_1 response ${diag.page1ResponseKB} KB, HTTP ${diag.page1HttpStatus} for ${handle}`);
+    try {
+      const data = JSON.parse(text);
+      user = data?.data?.user;
+    } catch {
+      console.log(`[CI Scraper] WEB_API: www response not valid JSON for ${handle}`);
+    }
+  } else {
+    console.log(`[CI Scraper] WEB_API: www endpoint returned HTTP ${response.status} for ${handle}`);
   }
-  let user = data?.data?.user;
 
   if (!user) {
-    console.log(`[CI Scraper] WEB_API: www endpoint returned null user for ${handle}, trying i.instagram.com variant...`);
+    console.log(`[CI Scraper] WEB_API: www failed for ${handle} (HTTP ${diag.page1HttpStatus}), trying i.instagram.com variant...`);
     const iApiUrl = `https://i.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`;
-    const iHeaders: Record<string, string> = {
-      "User-Agent": "Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100)",
-      "X-IG-App-ID": "936619743392459",
-      "X-IG-WWW-Claim": "0",
-      "Accept": "*/*",
-      "Accept-Language": "en-US,en;q=0.9",
-    };
-    const iFetchOptions: any = { headers: iHeaders, redirect: "follow" };
-    if (dispatcher) iFetchOptions.dispatcher = dispatcher;
     try {
       const iResp = await fetch(iApiUrl, iFetchOptions);
       if (iResp.ok) {
         const iText = await iResp.text();
         const iBytes = Buffer.byteLength(iText, "utf-8");
         bytesReceived += iBytes;
-        diag.page1ResponseKB = Math.round((bytesReceived) / 1024 * 10) / 10;
-        const iData = JSON.parse(iText);
-        user = iData?.data?.user;
-        if (user) {
-          console.log(`[CI Scraper] WEB_API: i.instagram.com variant SUCCESS for ${handle} (${(iBytes / 1024).toFixed(1)} KB)`);
-        } else {
-          console.log(`[CI Scraper] WEB_API: i.instagram.com also returned null user for ${handle}`);
+        diag.page1ResponseKB = Math.round(bytesReceived / 1024 * 10) / 10;
+        diag.page1HttpStatus = iResp.status;
+        try {
+          const iData = JSON.parse(iText);
+          user = iData?.data?.user;
+          if (user) {
+            console.log(`[CI Scraper] WEB_API: i.instagram.com variant SUCCESS for ${handle} (${(iBytes / 1024).toFixed(1)} KB)`);
+          } else {
+            console.log(`[CI Scraper] WEB_API: i.instagram.com also returned null user for ${handle}`);
+          }
+        } catch {
+          console.log(`[CI Scraper] WEB_API: i.instagram.com response not valid JSON for ${handle}`);
         }
+      } else {
+        console.log(`[CI Scraper] WEB_API: i.instagram.com returned HTTP ${iResp.status} for ${handle}`);
       }
     } catch (iErr: any) {
       console.log(`[CI Scraper] WEB_API: i.instagram.com fallback failed for ${handle}: ${iErr.message}`);
     }
-    if (!user) throw new Error("No user data in API response (both www and i.instagram.com)");
+    if (!user) throw new Error("No user data from web_profile_info (www and i.instagram.com both failed)");
   }
 
   if (user.is_private === true) {
