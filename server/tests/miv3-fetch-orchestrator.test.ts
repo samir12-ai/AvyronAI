@@ -196,12 +196,12 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(maxRetries).toBeGreaterThanOrEqual(1);
     });
 
-    it("should use exponential backoff", async () => {
+    it("should use jittered retry delays via proxy pool manager", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
       );
-      expect(source).toContain("Math.pow");
-      expect(source).toContain("RETRY_BASE_MS");
+      expect(source).toContain("getRetryDelay");
+      expect(source).toContain("rotateSessionOnBlock");
     });
 
     it("should respect 72h cooldown", async () => {

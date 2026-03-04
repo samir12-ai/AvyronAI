@@ -13,6 +13,7 @@ import { computeCompetitorHash } from "./utils";
 import { computeVolatilityIndex, buildEntryStrategy, buildDefensiveRisks, buildDeterministicNarrative, persistValidatedSnapshot, ENGINE_VERSION } from "./engine";
 import type { CompetitorInput } from "./types";
 import { logAudit } from "../audit";
+import { acquireStickySession, releaseStickySession, rotateSessionOnBlock, classifyBlock, logProxyTelemetry, getRetryDelay, getPoolDiagnostics, type StickySessionContext, type BlockClass } from "../competitive-intelligence/proxy-pool-manager";
 
 const FETCH_COOLDOWN_MS = 72 * 60 * 60 * 1000;
 const INSTAGRAM_PUBLIC_API_POST_CEILING = 12;
@@ -23,6 +24,8 @@ const RETRY_BASE_MS = 2000;
 const MAX_PAGES_PER_COMPETITOR = 5;
 const MAX_REQUESTS_PER_JOB = 50;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
+const MAX_CONCURRENT_COMPETITORS_PER_JOB = 1;
+const MAX_INFLIGHT_REQUESTS_PER_COMPETITOR = 1;
 
 type StopReason = "MAX_PAGES_REACHED" | "MAX_REQUESTS_REACHED" | "MAX_RUNTIME_REACHED" | "COMPLETE" | "ERROR" | "ALL_FAILED" | "COOLDOWN_ACTIVE";
 
@@ -195,6 +198,9 @@ async function executeFetchJob(
   let cooldownCount = 0;
   let stopReason: StopReason = "COMPLETE";
 
+  const poolBefore = getPoolDiagnostics(accountId);
+  console.log(`[FetchOrch] ProxyPool state at job start | account=${accountId} | active=${poolBefore.activeSessions} | quarantined=${poolBefore.quarantinedSessions} | stickyBindings=${poolBefore.stickyBindings}`);
+
   for (const c of competitors) {
     stages[c.id] = {
       competitorId: c.id,
@@ -275,29 +281,62 @@ async function executeFetchJob(
       await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
 
       let fetchResult: FetchResult | null = null;
-      let retries = 0;
+      const compHash = computeCompetitorHash([{
+        id: comp.id, name: comp.name, platform: comp.platform,
+        profileLink: comp.profileLink, businessType: comp.businessType,
+        posts: [], comments: [],
+      }]);
+      let proxyCtx = acquireStickySession(accountId, campaignId, compHash);
+      if (proxyCtx) {
+        console.log(`[FetchOrch] Sticky session acquired | competitor=${comp.name} | session=${proxyCtx.session.sessionId} | ipHash=${proxyCtx.session.ipHash}`);
+      }
 
-      while (retries <= MAX_RETRIES) {
+      let attempt = 1;
+      while (attempt <= MAX_RETRIES) {
         if (checkRuntimeCeiling() || checkRequestCeiling()) break;
         totalRequests++;
+        const startMs = Date.now();
         try {
-          fetchResult = await fetchCompetitorData(comp.id, accountId, retries > 0);
+          fetchResult = await fetchCompetitorData(comp.id, accountId, attempt > 1, proxyCtx || undefined);
+          if (proxyCtx) {
+            logProxyTelemetry(proxyCtx, "POSTS_FETCH", 200, null, Date.now() - startMs, true);
+          }
           break;
         } catch (err: any) {
-          retries++;
-          if (retries > MAX_RETRIES) {
+          const blockClass = classifyBlock(null, err.message);
+          if (proxyCtx) {
+            logProxyTelemetry(proxyCtx, "POSTS_FETCH", null, blockClass, Date.now() - startMs, false);
+          }
+
+          attempt++;
+          if (attempt > MAX_RETRIES) {
             stage.POSTS_FETCH = "FAILED";
             stage.error = err.message;
             limitReasons.push({
               competitorId: comp.id, competitorName: comp.name,
-              stage: "POSTS_FETCH", reason: "ERROR", details: err.message,
+              stage: "POSTS_FETCH", reason: blockClass === "PROXY_BLOCKED" ? "BLOCKED_BY_PLATFORM" : "ERROR",
+              details: `${err.message} (blockClass=${blockClass}, attempts=${attempt - 1})`,
             });
             break;
           }
-          const delay = RETRY_BASE_MS * Math.pow(2, retries - 1);
-          console.log(`[FetchOrch] Retry ${retries}/${MAX_RETRIES} for ${comp.name} in ${delay}ms`);
-          await sleep(delay);
+
+          if (proxyCtx && (blockClass === "PROXY_BLOCKED" || blockClass === "RATE_LIMIT")) {
+            const rotated = rotateSessionOnBlock(proxyCtx, blockClass);
+            if (rotated) {
+              proxyCtx = rotated;
+              console.log(`[FetchOrch] Session rotated for ${comp.name} | newSession=${proxyCtx.session.sessionId} | attempt=${attempt}`);
+            } else {
+              console.log(`[FetchOrch] Session rotation exhausted for ${comp.name} | blockClass=${blockClass}`);
+            }
+          }
+
+          await getRetryDelay(attempt);
+          console.log(`[FetchOrch] Retry ${attempt - 1}/${MAX_RETRIES} for ${comp.name} | blockClass=${blockClass}`);
         }
+      }
+
+      if (proxyCtx) {
+        releaseStickySession(proxyCtx);
       }
 
       if (!fetchResult) {

@@ -1,0 +1,202 @@
+Replit Team,
+
+This is not a “tuning” request. This is a structural requirement.
+
+The system is still stalling because proxy behavior is unstable (IP rotates mid-pagination / mid-competitor pipeline). Instagram flags that instantly and we end up in PROXY_BLOCKED loops which destroys MIv3 reliability.  
+
+We are implementing a Per-Account Proxy Pool with hard sticky-session enforcement. Do not ship anything unless the items below are PASS with proof.
+
+This email replaces any earlier fragmented proxy notes. Treat it as the execution directive.
+
+────────────────────────
+1) Per-Account Proxy Pool (Isolation is Mandatory)
+────────────────────────
+Requirement:
+Create a ProxyPoolManager keyed by accountId (NOT global).
+
+• Proxy health, quarantine, rotation history MUST be isolated per account  
+• No shared pool across customers  
+• No “global best proxy” shortcuts
+
+PASS Criteria:
+• account A blocks do not affect account B behavior  
+• pool state is keyed by accountId and verified by logs / tests
+
+FAIL Action:
+• If any pool map/set is global without accountId scoping → refactor immediately.
+
+────────────────────────
+2) Sticky Session Enforcement (Hard Rule — No Exceptions)
+────────────────────────
+Requirement:
+A competitor fetch must run inside ONE sticky proxy session:
+
+accountId + campaignId + competitorHash → proxySessionId
+
+For the entire competitor pipeline:
+• profile fetch  
+• post pagination  
+• comments pull  
+• CTA signal extraction  
+• coverage computation  
+
+NO rotation during pagination. NO rotation mid-stage.  
+
+Session TTL: 10–15 minutes OR job completion.
+
+PASS Criteria:
+• For a single competitor run, ALL requests share the same proxySessionId + ipHash  
+• Pagination uses the same session across page 1..N
+
+FAIL Action:
+• If any codepath can change proxy/session inside pagination → block release and fix.
+
+────────────────────────
+3) Rotation Rules (Only at Controlled Boundaries)
+────────────────────────
+Allowed rotation events ONLY:
+1) Retry after PROXY_BLOCKED  
+2) Retry after RATE_LIMIT  
+3) Starting a different competitor  
+4) Starting a new job  
+
+Not allowed:
+• rotation between pagination pages  
+• rotation between sequential calls inside same competitor stage
+
+PASS Criteria:
+• rotation occurs only at the boundary points above, proven by logs.
+
+FAIL Action:
+• Add hard guards that throw and log violation if rotation attempted in-session.
+
+────────────────────────
+4) Quarantine + Health Scoring (Stop Reusing Burned IPs)
+────────────────────────
+Track per proxy session:
+• successCount  
+• blockCount  
+• lastBlockAt  
+• cooldownUntil  
+
+Rules:
+• 2 PROXY_BLOCKED within 10 minutes → quarantine that session/IP  
+• quarantine duration 30–120 minutes (configurable)  
+• quarantined sessions MUST NOT be reused
+
+PASS Criteria:
+• blocked sessions are quarantined and do not get selected again until cooldown ends  
+• logs show quarantine triggers + expiry
+
+FAIL Action:
+• If session selection can pick quarantined proxy → fix selection logic.
+
+────────────────────────
+5) Retry Policy (Bounded + Rotating Sessions, No Infinite Loops)
+────────────────────────
+Retries must be bounded and rotate session on each retry:
+
+Attempt 1:
+• normal session
+
+Attempt 2 (after block):
+• wait 10–25s (jitter)
+• NEW session
+
+Attempt 3:
+• wait 30–60s (jitter)
+• NEW session
+
+If still blocked:
+• classify as BLOCKED_BY_PLATFORM
+• proceed MIv3 as PARTIAL (never hang)
+
+PASS Criteria:
+• maximum 3 attempts per competitor stage  
+• no infinite loops  
+• job reaches terminal state even under block storm
+
+FAIL Action:
+• Any while(true) / unbounded retry → remove, enforce MAX_RETRIES hard stop.
+
+────────────────────────
+6) Concurrency Limits (Per Account)
+────────────────────────
+Hard limits to avoid triggering platform heuristics:
+
+• MAX_CONCURRENT_COMPETITORS_PER_JOB = 1  
+• MAX_INFLIGHT_REQUESTS_PER_COMPETITOR = 1  
+
+PASS Criteria:
+• concurrency guards are enforced server-side (not just UI)  
+• tests confirm competitor runs are serialized per account
+
+FAIL Action:
+• If multiple competitor pipelines run concurrently under same account → throttle/queue.
+
+────────────────────────
+7) Telemetry (We Need Truth, Not Guessing)
+────────────────────────
+Every request MUST log:
+• accountId  
+• campaignId  
+• competitorHash  
+• proxySessionId  
+• ipHash (hashed)  
+• stageName  
+• attemptNumber  
+• httpStatus  
+• blockClass (PROXY_BLOCKED | RATE_LIMIT | AUTH_REQUIRED | CHECKPOINT | OTHER)
+
+PASS Criteria:
+• a single job can be replayed/debugged from logs  
+• we can identify if failure is platform vs proxy vs parsing
+
+FAIL Action:
+• If logs are missing proxySessionId or ipHash → add them immediately.
+
+────────────────────────
+8) Mandatory Torture Tests (Must PASS Before Shipping)
+────────────────────────
+A) Sticky Session Pagination Test
+• Force pagination to 3+ pages
+• Assert proxySessionId constant across all pages
+
+B) Proxy Block Storm Test
+• Simulate PROXY_BLOCKED on first 2 sessions
+• Assert: rotates sessions + bounded retries + terminal completion
+
+C) Quarantine Test
+• Trigger 2 blocks in <10 min
+• Assert quarantined session not selected again
+
+D) Cross-Account Isolation Test
+• Account A fully blocked
+• Account B should still fetch normally (independent pool)
+
+E) No-Hang Test
+• Simulate continuous RATE_LIMIT
+• Assert job stops with BLOCKED_BY_PLATFORM and returns PARTIAL — never stalls UI
+
+────────────────────────
+Definition of Done
+────────────────────────
+• Proxy behavior is stable: no mid-pagination rotation.  
+• Blocks do not stall the system.  
+• Pools are isolated per account.  
+• All torture tests pass with evidence.  
+• Provide PASS/FAIL per section (1–8). If FAIL, include exact fix steps and ship only after PASS.
+
+Reply in this exact format:
+1) Per-account pool — PASS/FAIL  
+2) Sticky sessions — PASS/FAIL  
+3) Rotation rules — PASS/FAIL  
+4) Quarantine — PASS/FAIL  
+5) Retry policy — PASS/FAIL  
+6) Concurrency — PASS/FAIL  
+7) Telemetry — PASS/FAIL  
+8) Torture tests — PASS/FAIL  
+
+No vague confirmations.
+
+— Samir

@@ -1,4 +1,6 @@
 import { ProxyAgent } from "undici";
+import type { StickySessionContext } from "./proxy-pool-manager";
+import { logProxyTelemetry, classifyBlock, rotateSessionOnBlock, getRetryDelay } from "./proxy-pool-manager";
 
 type Browser = any;
 type Page = any;
@@ -233,7 +235,7 @@ function getSessionDispatcher(): { dispatcher: ProxyAgent | undefined; sessionId
   };
 }
 
-async function attemptWebProfileApi(handle: string): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number; paginationPages: number; rawFetchedCount: number; paginationStopReason: PaginationStopReason; diagnostics: PaginationDiagnostics }> {
+async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionContext): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number; paginationPages: number; rawFetchedCount: number; paginationStopReason: PaginationStopReason; diagnostics: PaginationDiagnostics }> {
   const apiUrl = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`;
 
   const headers: Record<string, string> = {
@@ -248,7 +250,16 @@ async function attemptWebProfileApi(handle: string): Promise<{ posts: ScrapedPos
     "Sec-Fetch-Site": "same-origin",
   };
 
-  const { dispatcher, sessionId } = getSessionDispatcher();
+  let dispatcher: ProxyAgent | undefined;
+  let sessionId: string | null;
+  if (proxyCtx) {
+    dispatcher = proxyCtx.session.dispatcher;
+    sessionId = proxyCtx.session.sessionId;
+  } else {
+    const legacy = getSessionDispatcher();
+    dispatcher = legacy.dispatcher;
+    sessionId = legacy.sessionId;
+  }
   const fetchOptions: any = { headers, redirect: "follow" };
   if (dispatcher) {
     fetchOptions.dispatcher = dispatcher;
@@ -359,6 +370,7 @@ async function attemptWebProfileApi(handle: string): Promise<{ posts: ScrapedPos
     console.log(`[CI Scraper] WEB_API: PAGINATION_ATTEMPT | method=V1_FEED_API | userId=${userId} | max_id=${maxId.substring(0, 30)}... | for ${handle}`);
 
     try {
+      const page2StartMs = Date.now();
       const feedResponse = await fetch(feedUrl, fetchOptions);
       diag.paginationHttpStatus = feedResponse.status;
 
@@ -374,6 +386,7 @@ async function attemptWebProfileApi(handle: string): Promise<{ posts: ScrapedPos
           const feedItems = feedData?.items || [];
 
           console.log(`[CI Scraper] WEB_API: PAGINATION_PAGE_2 | items=${feedItems.length} | more_available=${feedData?.more_available} | response_size=${(feedBytes / 1024).toFixed(1)}KB | for ${handle}`);
+          if (proxyCtx) logProxyTelemetry(proxyCtx, "PAGINATION_PAGE_2", feedResponse.status, null, Date.now() - page2StartMs, feedItems.length > 0);
 
           if (feedItems.length > 0) {
             for (const item of feedItems) {
@@ -395,8 +408,10 @@ async function attemptWebProfileApi(handle: string): Promise<{ posts: ScrapedPos
               console.log(`[CI Scraper] WEB_API: PAGINATION_PAGE_${paginationPages} | have=${posts.length}/${TARGET_POSTS} | for ${handle}`);
 
               try {
+                const pageStartMs = Date.now();
                 const nextResp = await fetch(nextFeedUrl, fetchOptions);
                 if (!nextResp.ok) {
+                  if (proxyCtx) logProxyTelemetry(proxyCtx, `PAGINATION_PAGE_${paginationPages}`, nextResp.status, classifyBlock(nextResp.status, ""), Date.now() - pageStartMs, false);
                   console.log(`[CI Scraper] WEB_API: PAGINATION_PAGE_${paginationPages} HTTP ${nextResp.status}, stopping`);
                   break;
                 }
@@ -404,6 +419,7 @@ async function attemptWebProfileApi(handle: string): Promise<{ posts: ScrapedPos
                 bytesReceived += Buffer.byteLength(nextText, "utf-8");
                 const nextData = JSON.parse(nextText);
                 const nextItems = nextData?.items || [];
+                if (proxyCtx) logProxyTelemetry(proxyCtx, `PAGINATION_PAGE_${paginationPages}`, nextResp.status, null, Date.now() - pageStartMs, nextItems.length > 0);
 
                 if (nextItems.length === 0) break;
 
@@ -417,6 +433,7 @@ async function attemptWebProfileApi(handle: string): Promise<{ posts: ScrapedPos
                 nextMaxId = nextData?.next_max_id;
                 if (!nextData?.more_available) break;
               } catch (err: any) {
+                if (proxyCtx) logProxyTelemetry(proxyCtx, `PAGINATION_PAGE_${paginationPages}`, null, classifyBlock(null, err.message), 0, false);
                 console.log(`[CI Scraper] WEB_API: PAGINATION_PAGE_${paginationPages} error: ${err.message}`);
                 break;
               }
@@ -434,20 +451,24 @@ async function attemptWebProfileApi(handle: string): Promise<{ posts: ScrapedPos
         if (isAuthRequired) {
           diag.paginationErrorDetail = "AUTH_REQUIRED: Instagram requires login for feed pagination beyond page 1";
           diag.stopReason = "FEED_PAGINATION_AUTH_REQUIRED";
+          if (proxyCtx) logProxyTelemetry(proxyCtx, "PAGINATION_PAGE_2", feedResponse.status, "AUTH_REQUIRED", Date.now() - page2StartMs, false);
           console.log(`[CI Scraper] WEB_API: PAGINATION_AUTH_REQUIRED | HTTP ${feedResponse.status} | Instagram requires authenticated session for v1/feed pagination | for ${handle}`);
         } else if (isRateLimited) {
           diag.paginationErrorDetail = "RATE_LIMITED";
           diag.stopReason = "RATE_LIMITED";
+          if (proxyCtx) logProxyTelemetry(proxyCtx, "PAGINATION_PAGE_2", feedResponse.status, "RATE_LIMIT", Date.now() - page2StartMs, false);
           console.log(`[CI Scraper] WEB_API: PAGINATION_RATE_LIMITED | HTTP ${feedResponse.status} | for ${handle}`);
         } else {
           diag.paginationErrorDetail = `HTTP_${feedResponse.status}: ${errBody.substring(0, 200)}`;
           diag.stopReason = "FEED_PAGINATION_BLOCKED";
+          if (proxyCtx) logProxyTelemetry(proxyCtx, "PAGINATION_PAGE_2", feedResponse.status, "PROXY_BLOCKED", Date.now() - page2StartMs, false);
           console.log(`[CI Scraper] WEB_API: PAGINATION_BLOCKED | HTTP ${feedResponse.status} | ${errBody.substring(0, 150)} | for ${handle}`);
         }
       }
     } catch (err: any) {
       diag.paginationErrorDetail = `NETWORK: ${err.message}`;
       diag.stopReason = "PROXY_BLOCKED";
+      if (proxyCtx) logProxyTelemetry(proxyCtx, "PAGINATION_PAGE_2", null, classifyBlock(null, err.message), 0, false);
       console.log(`[CI Scraper] WEB_API: PAGINATION_NETWORK_ERROR | ${err.message} | for ${handle}`);
     }
   }
@@ -699,7 +720,7 @@ async function attemptHeadlessRender(profileUrl: string, handle: string): Promis
   }
 }
 
-export async function scrapeInstagramProfile(rawUrl: string): Promise<ScrapeResult> {
+export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySessionContext): Promise<ScrapeResult> {
   const profileUrl = normalizeInstagramUrl(rawUrl);
   const handle = extractHandleFromUrl(rawUrl);
 
@@ -752,7 +773,11 @@ export async function scrapeInstagramProfile(rawUrl: string): Promise<ScrapeResu
 
   attempts.push("WEB_API");
   try {
-    const result = await attemptWebProfileApi(handle);
+    const startMs = Date.now();
+    const result = await attemptWebProfileApi(handle, proxyCtx);
+    if (proxyCtx) {
+      logProxyTelemetry(proxyCtx, "WEB_API", 200, null, Date.now() - startMs, result.posts.length > 0);
+    }
     posts = result.posts;
     followers = result.followers;
     profileName = result.profileName;
@@ -766,10 +791,16 @@ export async function scrapeInstagramProfile(rawUrl: string): Promise<ScrapeResu
       console.log(`[CI Scraper] WEB_API SUCCESS: ${posts.length} posts (${paginationPages} pages, stop=${paginationStopReason}), ${followers ?? "unknown"} followers for ${handle}`);
     }
   } catch (err: any) {
+    if (proxyCtx) {
+      const bc = classifyBlock(null, err.message);
+      logProxyTelemetry(proxyCtx, "WEB_API", null, bc, 0, false);
+    }
     console.log(`[CI Scraper] WEB_API failed for ${handle}: ${err.message}, trying HTML_PARSE...`);
     attempts.push("HTML_PARSE");
     try {
+      const htmlStartMs = Date.now();
       const result = await attemptHtmlPageParse(profileUrl, handle);
+      if (proxyCtx) logProxyTelemetry(proxyCtx, "HTML_PARSE", 200, null, Date.now() - htmlStartMs, result.posts.length > 0);
       posts = result.posts;
       followers = result.followers;
       profileName = result.profileName;
@@ -782,6 +813,7 @@ export async function scrapeInstagramProfile(rawUrl: string): Promise<ScrapeResu
         console.log(`[CI Scraper] HTML_PARSE: Page loaded but no post data extracted for ${handle}`);
       }
     } catch (err2: any) {
+      if (proxyCtx) logProxyTelemetry(proxyCtx, "HTML_PARSE", null, classifyBlock(null, err2.message), 0, false);
       warnings.push(`WEB_API failed: ${err.message} | HTML_PARSE failed: ${err2.message}`);
       console.log(`[CI Scraper] HTML_PARSE FAILED for ${handle}: ${err2.message}`);
     }
@@ -791,7 +823,9 @@ export async function scrapeInstagramProfile(rawUrl: string): Promise<ScrapeResu
     await randomDelay();
     attempts.push("HEADLESS_RENDER");
     try {
+      const headlessStartMs = Date.now();
       const result = await attemptHeadlessRender(profileUrl, handle);
+      if (proxyCtx) logProxyTelemetry(proxyCtx, "HEADLESS_RENDER", 200, null, Date.now() - headlessStartMs, result.posts.length > 0);
       scrapeStats.totalBytesEstimated += result.bytesEstimated;
       if (result.posts.length > posts.length) {
         posts = result.posts;
@@ -802,6 +836,7 @@ export async function scrapeInstagramProfile(rawUrl: string): Promise<ScrapeResu
       if (!followers && result.followers) followers = result.followers;
       if (!profileName && result.profileName) profileName = result.profileName;
     } catch (err: any) {
+      if (proxyCtx) logProxyTelemetry(proxyCtx, "HEADLESS_RENDER", null, classifyBlock(null, err.message), 0, false);
       warnings.push(`HEADLESS_RENDER failed: ${err.message}`);
       console.log(`[CI Scraper] HEADLESS_RENDER FAILED for ${handle}: ${err.message}`);
     }

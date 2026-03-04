@@ -250,6 +250,7 @@ export async function fetchCompetitorData(
   competitorId: string,
   accountId: string = "default",
   forceRefresh: boolean = false,
+  proxyCtx?: import("./proxy-pool-manager").StickySessionContext,
 ): Promise<FetchResult> {
   const lockKey = `${accountId}:${competitorId}`;
   const existing = activeFetches.get(lockKey);
@@ -258,7 +259,7 @@ export async function fetchCompetitorData(
     return existing;
   }
 
-  const promise = _executeFetch(competitorId, accountId, forceRefresh);
+  const promise = _executeFetch(competitorId, accountId, forceRefresh, proxyCtx);
   activeFetches.set(lockKey, promise);
   try {
     return await promise;
@@ -271,6 +272,7 @@ async function _executeFetch(
   competitorId: string,
   accountId: string,
   forceRefresh: boolean,
+  proxyCtx?: import("./proxy-pool-manager").StickySessionContext,
 ): Promise<FetchResult> {
   const [competitor] = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId)));
@@ -324,9 +326,9 @@ async function _executeFetch(
     }
   }
 
-  console.log(`[DataAcq] Starting fetch for ${competitor.name} (${competitor.profileLink})`);
+  console.log(`[DataAcq] Starting fetch for ${competitor.name} (${competitor.profileLink})${proxyCtx ? ` | session=${proxyCtx.session.sessionId}` : ""}`);
 
-  const scrapeResult = await scrapeInstagramProfile(competitor.profileLink);
+  const scrapeResult = await scrapeInstagramProfile(competitor.profileLink, proxyCtx);
 
   if (!scrapeResult.success || scrapeResult.posts.length === 0) {
     console.log(`[DataAcq] Scrape blocked for ${competitor.name}`);
