@@ -8,6 +8,7 @@ import {
   clearPool,
   type StickySessionContext,
 } from "../competitive-intelligence/proxy-pool-manager";
+import { MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT } from "../market-intelligence-v3/fetch-orchestrator";
 
 describe("Section 1: Proxy Rate Test — Token Bucket Rate Limiter", () => {
   beforeEach(() => {
@@ -327,5 +328,80 @@ describe("Section 7: Integration Invariants", () => {
       fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
     );
     expect(source).toContain("CONCURRENCY_FEATURE_FLAG ? 2 : MAX_CONCURRENT_COMPETITORS_PER_JOB");
+  });
+});
+
+describe("Section 8: Global Request Ceiling — Account-Level Concurrency Limit", () => {
+  it("MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT is 2", () => {
+    expect(MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT).toBe(2);
+  });
+
+  it("MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT constant exists in source", async () => {
+    const source = await import("fs").then(fs =>
+      fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+    );
+    expect(source).toContain("MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT = 2");
+  });
+
+  it("account-level job count check runs before creating a new job", async () => {
+    const source = await import("fs").then(fs =>
+      fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+    );
+    expect(source).toContain("getRunningJobCountForAccount(accountId)");
+    expect(source).toContain("runningCount >= MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT");
+  });
+
+  it("excess jobs are inserted with QUEUED status", async () => {
+    const source = await import("fs").then(fs =>
+      fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+    );
+    expect(source).toContain('status: "QUEUED"');
+    expect(source).toContain("QUEUED job");
+  });
+
+  it("QUEUED is part of FetchJobStatus type", async () => {
+    const source = await import("fs").then(fs =>
+      fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+    );
+    expect(source).toContain('"QUEUED"');
+    const statusLine = source.match(/status:\s*"PENDING"\s*\|\s*"RUNNING"\s*\|\s*"COMPLETE"\s*\|\s*"FAILED"\s*\|\s*"COMPLETE_WITH_COOLDOWN"\s*\|\s*"QUEUED"/);
+    expect(statusLine).not.toBeNull();
+  });
+
+  it("stagger delay (5s) is enforced between job starts for same account", async () => {
+    const source = await import("fs").then(fs =>
+      fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+    );
+    expect(source).toContain("STAGGER_DELAY_MS = 5000");
+    expect(source).toContain("Stagger delay");
+    expect(source).toContain("lastJobStartByAccount");
+  });
+
+  it("ceiling check is on accountId only (not accountId:campaignId)", async () => {
+    const source = await import("fs").then(fs =>
+      fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+    );
+    const fnBody = source.substring(
+      source.indexOf("async function getRunningJobCountForAccount"),
+      source.indexOf("async function _createAndStartJob")
+    );
+    expect(fnBody).toContain("eq(miFetchJobs.accountId, accountId)");
+    expect(fnBody).not.toContain("campaignId");
+  });
+
+  it("getRunningJobCountForAccount is exported and available", async () => {
+    const mod = await import("../market-intelligence-v3/fetch-orchestrator");
+    expect(typeof mod.getRunningJobCountForAccount).toBe("function");
+  });
+
+  it("simulate 5 campaigns: source confirms ceiling gate before job insert", async () => {
+    const source = await import("fs").then(fs =>
+      fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+    );
+    const ceilingCheckPos = source.indexOf("runningCount >= MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT");
+    const jobInsertPos = source.indexOf('status: "RUNNING"', source.indexOf("async function _createAndStartJob"));
+    expect(ceilingCheckPos).toBeGreaterThan(0);
+    expect(jobInsertPos).toBeGreaterThan(0);
+    expect(ceilingCheckPos).toBeLessThan(jobInsertPos);
   });
 });

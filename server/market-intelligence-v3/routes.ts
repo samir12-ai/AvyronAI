@@ -5,7 +5,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { MarketIntelligenceV3, validateEngineIsolation, rejectBlockedEngine, assertNoPlanWrites, assertNoOrchestrator, assertNoAutopilot, buildResultFromSnapshot } from "./engine";
 import { logAudit } from "../audit";
 import { requireCampaign } from "../campaign-routes";
-import { startFetchJob, getFetchJobStatus } from "./fetch-orchestrator";
+import { startFetchJob, getFetchJobStatus, getRunningJobCountForAccount, MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT } from "./fetch-orchestrator";
 import type { MIv3Mode } from "./types";
 
 const ALLOWED_MODES: MIv3Mode[] = ["overview", "dominance", "actions", "history"];

@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { miFetchJobs, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, miSnapshots, miSignalLogs, miTelemetry } from "@shared/schema";
+import { miFetchJobs, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, miSnapshots, miSignalLogs, miTelemetry, growthCampaigns } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { fetchCompetitorData, type FetchResult } from "../competitive-intelligence/data-acquisition";
 import { computeAllSignals, aggregateMissingFlags } from "./signal-engine";
@@ -12,7 +12,7 @@ import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-
 import { computeCompetitorHash } from "./utils";
 import { computeVolatilityIndex, buildEntryStrategy, buildDefensiveRisks, buildDeterministicNarrative, persistValidatedSnapshot, ENGINE_VERSION } from "./engine";
 import { computeSimilarityDiagnosis } from "./similarity-engine";
-import type { CompetitorInput } from "./types";
+import type { CompetitorInput, GoalMode } from "./types";
 import { logAudit } from "../audit";
 import { acquireStickySession, releaseStickySession, rotateSessionOnBlock, classifyBlock, logProxyTelemetry, getPoolDiagnostics, type StickySessionContext, type BlockClass } from "../competitive-intelligence/proxy-pool-manager";
 import { acquireToken, getBucketState } from "../competitive-intelligence/rate-limiter";
@@ -29,6 +29,10 @@ const MAX_REQUESTS_PER_JOB = 50;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
 const MAX_CONCURRENT_COMPETITORS_PER_JOB = 1;
 const CONCURRENCY_FEATURE_FLAG = false;
+export const MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT = 2;
+const STAGGER_DELAY_MS = 5000;
+
+const lastJobStartByAccount = new Map<string, number>();
 
 type StopReason = "MAX_PAGES_REACHED" | "MAX_REQUESTS_REACHED" | "MAX_RUNTIME_REACHED" | "COMPLETE" | "ERROR" | "ALL_FAILED" | "COOLDOWN_ACTIVE";
 
@@ -65,7 +69,7 @@ interface FetchLimitReason {
 
 export interface FetchJobStatus {
   jobId: string;
-  status: "PENDING" | "RUNNING" | "COMPLETE" | "FAILED" | "COMPLETE_WITH_COOLDOWN";
+  status: "PENDING" | "RUNNING" | "COMPLETE" | "FAILED" | "COMPLETE_WITH_COOLDOWN" | "QUEUED";
   stageStatuses: Record<string, CompetitorStage>;
   fetchLimitReasons: FetchLimitReason[];
   totalPostsFetched: number;
@@ -107,6 +111,15 @@ export async function startFetchJob(accountId: string, campaignId: string): Prom
   }
 }
 
+export async function getRunningJobCountForAccount(accountId: string): Promise<number> {
+  const result = await db.select({ count: sql<number>`count(*)` }).from(miFetchJobs)
+    .where(and(
+      eq(miFetchJobs.accountId, accountId),
+      eq(miFetchJobs.status, "RUNNING"),
+    ));
+  return Number(result[0]?.count ?? 0);
+}
+
 async function _createAndStartJob(accountId: string, campaignId: string, lockKey: string): Promise<string> {
   const competitors = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
@@ -139,6 +152,49 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
     return existingRunning[0].id;
   }
 
+  const runningCount = await getRunningJobCountForAccount(accountId);
+  if (runningCount >= MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT) {
+    const jobId = `fetch_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+    const initialStages: Record<string, CompetitorStage> = {};
+    for (const c of competitors) {
+      initialStages[c.id] = {
+        competitorId: c.id,
+        competitorName: c.name,
+        POSTS_FETCH: "PENDING",
+        COMMENTS_FETCH: "PENDING",
+        CTA_ANALYSIS: "PENDING",
+        SIGNAL_COMPUTE: "PENDING",
+        postsFetched: 0,
+        commentsFetched: 0,
+        fetchExecuted: false,
+      };
+    }
+    await db.insert(miFetchJobs).values({
+      id: jobId,
+      accountId,
+      campaignId,
+      competitorHash: hash,
+      status: "QUEUED",
+      stageStatuses: JSON.stringify(initialStages),
+      fetchLimitReasons: JSON.stringify([]),
+      totalPostsFetched: 0,
+      totalCommentsFetched: 0,
+      competitorCount: competitors.length,
+    });
+    console.log(`[FetchOrch] QUEUED job ${jobId} | account=${accountId} | runningJobs=${runningCount} >= ceiling=${MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT}`);
+    return jobId;
+  }
+
+  const lastStart = lastJobStartByAccount.get(accountId);
+  if (lastStart) {
+    const elapsed = Date.now() - lastStart;
+    if (elapsed < STAGGER_DELAY_MS) {
+      const waitMs = STAGGER_DELAY_MS - elapsed;
+      console.log(`[FetchOrch] Stagger delay ${waitMs}ms for account ${accountId}`);
+      await sleep(waitMs);
+    }
+  }
+
   const jobId = `fetch_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
 
   const initialStages: Record<string, CompetitorStage> = {};
@@ -152,6 +208,7 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
       SIGNAL_COMPUTE: "PENDING",
       postsFetched: 0,
       commentsFetched: 0,
+      fetchExecuted: false,
     };
   }
 
@@ -181,6 +238,7 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
     throw insertErr;
   }
 
+  lastJobStartByAccount.set(accountId, Date.now());
   console.log(`[FetchOrch] Job ${jobId} created for ${competitors.length} competitors`);
 
   const promise = executeFetchJob(jobId, accountId, campaignId, competitors).catch(err => {
@@ -667,6 +725,9 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
 
   if (competitors.length === 0) return;
 
+  const campaignRows = await db.select().from(growthCampaigns).where(eq(growthCampaigns.id, campaignId)).limit(1);
+  const campaignGoalMode: GoalMode = (campaignRows[0]?.goalMode === "REACH_MODE" ? "REACH_MODE" : "STRATEGY_MODE");
+
   const competitorInputs: CompetitorInput[] = [];
   for (const c of competitors) {
     const posts = await getStoredPostsForMIv3(c.id, accountId);
@@ -705,7 +766,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   const dominantIntent = computeDominantMarketIntent(intents);
   const trajectory = computeTrajectory(signalResults, intents);
   const confidence = computeConfidence(signalResults, dataFreshnessDays);
-  const dominanceResults = computeAllDominance(signalResults, confidence, "STRATEGY_MODE");
+  const dominanceResults = computeAllDominance(signalResults, confidence, campaignGoalMode);
   let missingFlags = aggregateMissingFlags(signalResults);
   const trajectoryDirection = deriveTrajectoryDirection(trajectory);
   const marketState = deriveMarketState(trajectory, confidence.level);
@@ -805,7 +866,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     confirmedRuns: (previousSnapshot?.confirmedRuns || 0) + 1,
     previousDirection: trajectoryDirection,
     directionLockedUntil: null,
-    goalMode: "STRATEGY_MODE",
+    goalMode: campaignGoalMode,
   };
 
   const snapshot = await persistValidatedSnapshot(snapshotPayload, "fetch-orchestrator.persistSnapshotAfterFetch");

@@ -1,4 +1,5 @@
 import type { CompetitorInput, CompetitorSignalResult, SimilarityResult, CompetitorEvidenceCoverage, SimilarityDimension } from "./types";
+import { SIMILARITY_MIN_EVIDENCE_THRESHOLD } from "./constants";
 
 function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length || a.length === 0) return 0;
@@ -235,12 +236,18 @@ export function computeSimilarityDiagnosis(
   const evidenceCoverage = buildEvidenceCoverageMap(competitors);
   const avgCoverage = evidenceCoverage.reduce((s, c) => s + c.coverageRatio, 0) / evidenceCoverage.length;
   const anyMissingPosts = evidenceCoverage.some(c => c.postsAvailable === 0);
+  const lowPostEvidence = competitors.some(c => (c.posts || []).length < SIMILARITY_MIN_EVIDENCE_THRESHOLD);
   const lowCoverage = avgCoverage < 0.5 || anyMissingPosts;
 
   let diagnosis: SimilarityResult["diagnosis"];
   let explanation: string;
 
-  if (lowCoverage && overallSimilarityIndex > 0.6) {
+  if (lowPostEvidence) {
+    const belowThreshold = competitors.filter(c => (c.posts || []).length < SIMILARITY_MIN_EVIDENCE_THRESHOLD);
+    const names = belowThreshold.map(c => c.name).join(", ");
+    diagnosis = "LOW_CONFIDENCE";
+    explanation = `LOW_CONFIDENCE: Competitor(s) ${names} have fewer than ${SIMILARITY_MIN_EVIDENCE_THRESHOLD} posts. Similarity index (${overallSimilarityIndex}) is unreliable due to insufficient evidence per competitor.`;
+  } else if (lowCoverage && overallSimilarityIndex > 0.6) {
     diagnosis = "SIMILARITY_LIKELY_DATA_LIMITATION";
     explanation = `High similarity (${overallSimilarityIndex}) detected with low evidence coverage (avg ${Math.round(avgCoverage * 100)}%). Similarity is likely an artifact of limited data, not market reality.`;
   } else if (!lowCoverage && overallSimilarityIndex > 0.6) {

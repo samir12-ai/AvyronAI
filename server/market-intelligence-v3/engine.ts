@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { miSnapshots, miSignalLogs, miTelemetry, ciCompetitors } from "@shared/schema";
+import { miSnapshots, miSignalLogs, miTelemetry, ciCompetitors, growthCampaigns } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { computeAllSignals, aggregateMissingFlags } from "./signal-engine";
 import { classifyAllIntents, computeDominantMarketIntent } from "./intent-engine";
@@ -322,7 +322,14 @@ export class MarketIntelligenceV3 {
     forceRefresh: boolean,
     goalMode: GoalMode = "STRATEGY_MODE",
   ): Promise<MIv3DiagnosticResult> {
-    console.log(`[MIv3] MARKET_OVERVIEW_DIAGNOSTIC_RUN | mode=${mode} | accountId=${accountId} | campaignId=${campaignId}`);
+    if (!goalMode || goalMode === "STRATEGY_MODE") {
+      const campaignRows = await db.select().from(growthCampaigns).where(eq(growthCampaigns.id, campaignId)).limit(1);
+      if (campaignRows[0]?.goalMode === "REACH_MODE") {
+        goalMode = "REACH_MODE";
+      }
+    }
+
+    console.log(`[MIv3] MARKET_OVERVIEW_DIAGNOSTIC_RUN | mode=${mode} | accountId=${accountId} | campaignId=${campaignId} | goalMode=${goalMode}`);
 
     logAudit("MARKET_OVERVIEW_DIAGNOSTIC_RUN", {
       mode,

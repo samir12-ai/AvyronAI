@@ -1,0 +1,180 @@
+:::writing{id=“58241” variant=“email” subject=“MIv3 Post-Deployment Audit — Close Remaining Gaps and Structural Safeguards”}
+Replit Team,
+
+The 6-phase execution report looks strong overall, but before we consider MIv3 stable we must close several structural gaps. These are not feature requests — they are safeguards to prevent future regressions, proxy failures, or intelligence drift.
+
+Treat this as a post-deployment audit directive. Each item must be verified and sealed. Reply PASS / FAIL per section with evidence.
+
+────────────────────────────────
+	1.	GLOBAL REQUEST CEILING (Proxy Safety)
+────────────────────────────────
+
+Current implementation includes:
+• token bucket rate limiter
+• backoff rules
+• sticky sessions
+
+However, there is no confirmation of a global request ceiling per account.
+
+Risk:
+Multiple campaigns under the same account running concurrently could still overload the proxy pool.
+
+Required safeguard:
+• Introduce MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT
+• Enforce queueing when exceeded
+• Lock key must remain accountId:campaignId
+• Scheduler must ensure staggered execution
+
+QA requirements:
+• Run 5 concurrent campaigns under one account
+• Verify only the allowed number execute simultaneously
+• Remaining jobs enter queue state, not RUNNING
+
+Fail condition:
+If simultaneous jobs bypass the ceiling or bypass the queue.
+
+────────────────────────────────
+2) GOAL MODE SOURCE OF TRUTH
+────────────────────────────────
+
+Current implementation:
+Fetch orchestrator defaults to STRATEGY_MODE.
+
+While acceptable for data collection, goal mode must not drift between fetch and analysis.
+
+Required safeguard:
+• goal_mode must originate from campaign configuration
+• Snapshot must store goal_mode
+• Engine must always read snapshot goal mode during analysis
+• Build-a-Plan must consume the same value
+
+QA requirements:
+• Run analysis with campaign configured as REACH_MODE
+• Confirm snapshot.goal_mode == REACH_MODE
+• Confirm Build-a-Plan receives identical value
+
+Fail condition:
+Default STRATEGY_MODE overriding campaign settings.
+
+────────────────────────────────
+3) SNAPSHOT CONSISTENCY CHECK
+────────────────────────────────
+
+Now that thresholds changed (14 posts / 50 comments), verify that snapshot validity rules still hold.
+
+Required safeguard:
+• Snapshot must contain:
+	•	evidence fields
+	•	similarity diagnostics
+	•	goal_mode
+	•	confidence explanation
+• PARTIAL snapshots must NEVER enter cache path.
+
+QA requirements:
+• Force partial fetch
+• Verify snapshot stored as PARTIAL
+• Verify cached snapshot endpoint never returns PARTIAL
+
+Fail condition:
+PARTIAL snapshot served as COMPLETE.
+
+────────────────────────────────
+4) SIMILARITY DIAGNOSIS GUARD
+────────────────────────────────
+
+Similarity engine currently evaluates:
+• content mix
+• offer language
+• hook style
+• CTA intent
+
+However, similarity must never be asserted without sufficient coverage.
+
+Required safeguard:
+• Introduce SIMILARITY_MIN_EVIDENCE_THRESHOLD
+• If insufficient signals → diagnosis must return LOW_CONFIDENCE
+
+QA requirements:
+• Run analysis with limited dataset (< 8 posts competitor)
+• Ensure similarity claims are suppressed
+
+Fail condition:
+Strong similarity claims produced from weak data.
+
+────────────────────────────────
+5) ENGAGEMENT BIAS PROTECTION
+────────────────────────────────
+
+GoalMode weighting introduces risk of engagement bias.
+
+Required safeguard:
+• Detect when engagement signals exceed 50% influence in scoring
+• Trigger ENGAGEMENT_WEIGHT_BIAS_RISK flag
+• Surface warning in diagnostic output
+
+QA requirements:
+• Simulate dataset dominated by engagement metrics
+• Verify bias flag triggers
+
+Fail condition:
+Dominance output shifts entirely due to engagement signals.
+
+────────────────────────────────
+6) DATA RESILIENCE VERIFICATION
+────────────────────────────────
+
+MIv3 must continue functioning when scraping fails.
+
+Required safeguard:
+• Analysis must fall back to latest valid snapshot
+• Snapshot metadata must include:
+	•	data_age
+	•	freshness indicator
+
+QA requirements:
+• Simulate proxy blocked fetch
+• Verify system analyzes previous snapshot
+• Verify UI shows data_age
+
+Fail condition:
+Analysis endpoint fails when fetch fails.
+
+────────────────────────────────
+7) PRESENTATION LAYER ISOLATION
+────────────────────────────────
+
+Presentation upgrade must remain strictly read-only.
+
+Required safeguard:
+• No data writes
+• No fetch triggers
+• No recompute calls
+• Presenter maps snapshot → Reality / Weakness / Opportunity only
+
+QA requirements:
+• Switch between all CI tabs
+• Verify zero new API fetch calls
+• Verify no DB writes triggered
+
+Fail condition:
+Tab navigation triggers backend compute.
+
+────────────────────────────────
+DELIVERABLE FORMAT
+────────────────────────────────
+
+Reply with:
+
+Proxy Ceiling: PASS / FAIL
+Goal Mode Source: PASS / FAIL
+Snapshot Integrity: PASS / FAIL
+Similarity Guard: PASS / FAIL
+Engagement Bias Guard: PASS / FAIL
+Resilience Verification: PASS / FAIL
+Presentation Isolation: PASS / FAIL
+
+Include logs or test outputs where relevant.
+
+Do not consider the system closed until all safeguards pass.
+
+— Samir

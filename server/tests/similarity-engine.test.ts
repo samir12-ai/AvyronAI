@@ -105,7 +105,7 @@ describe("Similarity Engine", () => {
       const signals = [makeSignalResult("c1", "CompA"), makeSignalResult("c2", "CompB")];
       const result = computeSimilarityDiagnosis([compA, compB], signals);
       expect(result.overallSimilarityIndex).toBeLessThan(0.6);
-      expect(result.diagnosis).toBe("LOW_SIMILARITY");
+      expect(result.diagnosis).toBe("LOW_CONFIDENCE");
     });
 
     it("should produce low similarity when CTA distributions differ significantly", () => {
@@ -133,7 +133,7 @@ describe("Similarity Engine", () => {
 
   describe("Similar competitors → high similarity", () => {
     it("should produce high similarity for competitors with identical content mixes", () => {
-      const sharedPosts = Array.from({ length: 5 }, () => makePost(true, false, "Book now! Link in bio! DM us today!", "REEL"));
+      const sharedPosts = Array.from({ length: 10 }, () => makePost(true, false, "Book now! Link in bio! DM us today!", "REEL"));
       const sharedComments = Array.from({ length: 5 }, (_, i) => ({ id: `cm${i}`, text: "Great service!", timestamp: new Date().toISOString() }));
       const compA = makeCompetitor({
         id: "c1",
@@ -180,10 +180,9 @@ describe("Similarity Engine", () => {
       const result = computeSimilarityDiagnosis([compA, compB], signals);
 
       if (result.overallSimilarityIndex > 0.6) {
-        expect(result.diagnosis).toBe("SIMILARITY_LIKELY_DATA_LIMITATION");
-        expect(result.explanation).toContain("limited data");
+        expect(["SIMILARITY_LIKELY_DATA_LIMITATION", "LOW_CONFIDENCE"]).toContain(result.diagnosis);
       } else {
-        expect(result.diagnosis).toBe("INSUFFICIENT_DATA");
+        expect(["INSUFFICIENT_DATA", "LOW_CONFIDENCE"]).toContain(result.diagnosis);
       }
     });
   });
@@ -248,6 +247,93 @@ describe("Similarity Engine", () => {
       expect(result1.overallSimilarityIndex).toBe(result2.overallSimilarityIndex);
       expect(result1.diagnosis).toBe(result2.diagnosis);
       expect(result1.dimensions).toEqual(result2.dimensions);
+    });
+  });
+
+  describe("Similarity minimum evidence threshold (LOW_CONFIDENCE guard)", () => {
+    it("should return LOW_CONFIDENCE when any competitor has fewer than 8 posts", () => {
+      const fewPosts = Array.from({ length: 5 }, () => makePost(true, false, "Book now! Link in bio! DM us today!", "REEL"));
+      const compA = makeCompetitor({
+        id: "c1",
+        name: "CompA",
+        contentTypeRatio: "Reels:60%,Posts:30%,Carousel:10%",
+        hookStyles: "question,listicle,how-to",
+        ctaPatterns: "DM,Book",
+        engagementRatio: 3.5,
+        messagingTone: "professional",
+        posts: fewPosts,
+        comments: [{ id: "cm1", text: "Great!", timestamp: new Date().toISOString() }],
+      });
+      const compB = makeCompetitor({
+        id: "c2",
+        name: "CompB",
+        contentTypeRatio: "Reels:60%,Posts:30%,Carousel:10%",
+        hookStyles: "question,listicle,how-to",
+        ctaPatterns: "DM,Book",
+        engagementRatio: 4.0,
+        messagingTone: "professional",
+        posts: fewPosts,
+        comments: [{ id: "cm2", text: "Nice!", timestamp: new Date().toISOString() }],
+      });
+      const signals = [makeSignalResult("c1", "CompA"), makeSignalResult("c2", "CompB")];
+      const result = computeSimilarityDiagnosis([compA, compB], signals);
+      expect(result.diagnosis).toBe("LOW_CONFIDENCE");
+      expect(result.explanation).toContain("LOW_CONFIDENCE");
+      expect(result.explanation).toContain("fewer than 8 posts");
+    });
+
+    it("should return LOW_CONFIDENCE when only one competitor has fewer than 8 posts", () => {
+      const manyPosts = Array.from({ length: 10 }, () => makePost(true, false, "Book now! Link in bio! DM us today!", "REEL"));
+      const fewPosts = Array.from({ length: 3 }, () => makePost(true, false, "Shop here! Great deals!", "IMAGE"));
+      const compA = makeCompetitor({
+        id: "c1",
+        name: "CompA",
+        contentTypeRatio: "Reels:60%,Posts:30%,Carousel:10%",
+        hookStyles: "question,listicle",
+        posts: manyPosts,
+        comments: [{ id: "cm1", text: "Great!", timestamp: new Date().toISOString() }],
+      });
+      const compB = makeCompetitor({
+        id: "c2",
+        name: "CompB",
+        contentTypeRatio: "Reels:60%,Posts:30%,Carousel:10%",
+        hookStyles: "question,listicle",
+        posts: fewPosts,
+        comments: [{ id: "cm2", text: "Nice!", timestamp: new Date().toISOString() }],
+      });
+      const signals = [makeSignalResult("c1", "CompA"), makeSignalResult("c2", "CompB")];
+      const result = computeSimilarityDiagnosis([compA, compB], signals);
+      expect(result.diagnosis).toBe("LOW_CONFIDENCE");
+      expect(result.explanation).toContain("CompB");
+    });
+
+    it("should NOT return LOW_CONFIDENCE when all competitors have >= 8 posts", () => {
+      const enoughPosts = Array.from({ length: 10 }, () => makePost(true, false, "Book now! Link in bio! DM us today!", "REEL"));
+      const compA = makeCompetitor({
+        id: "c1",
+        name: "CompA",
+        contentTypeRatio: "Reels:60%,Posts:30%,Carousel:10%",
+        hookStyles: "question,listicle,how-to",
+        ctaPatterns: "DM,Book",
+        engagementRatio: 3.5,
+        messagingTone: "professional",
+        posts: enoughPosts,
+        comments: [{ id: "cm1", text: "Great!", timestamp: new Date().toISOString() }],
+      });
+      const compB = makeCompetitor({
+        id: "c2",
+        name: "CompB",
+        contentTypeRatio: "Reels:60%,Posts:30%,Carousel:10%",
+        hookStyles: "question,listicle,how-to",
+        ctaPatterns: "DM,Book",
+        engagementRatio: 4.0,
+        messagingTone: "professional",
+        posts: enoughPosts,
+        comments: [{ id: "cm2", text: "Nice!", timestamp: new Date().toISOString() }],
+      });
+      const signals = [makeSignalResult("c1", "CompA"), makeSignalResult("c2", "CompB")];
+      const result = computeSimilarityDiagnosis([compA, compB], signals);
+      expect(result.diagnosis).not.toBe("LOW_CONFIDENCE");
     });
   });
 

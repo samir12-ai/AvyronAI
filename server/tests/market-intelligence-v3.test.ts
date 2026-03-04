@@ -9,6 +9,7 @@ import { evaluateRefreshDecision } from "../market-intelligence-v3/refresh-syste
 import { validateEngineIsolation, assertNoPlanWrites, assertNoOrchestrator, assertNoAutopilot } from "../market-intelligence-v3/isolation-guard";
 import { computeCompetitorHash } from "../market-intelligence-v3/utils";
 import { computeDominanceForCompetitor } from "../market-intelligence-v3/dominance-module";
+import { buildResultFromSnapshot, validateSnapshotCompleteness } from "../market-intelligence-v3/engine";
 import type { CompetitorInput, PostData, CompetitorSignalResult, ExecutionMode, GoalMode } from "../market-intelligence-v3/types";
 import { MI_THRESHOLDS, MI_COST_LIMITS, MI_CONFIDENCE, MI_REVIVAL_CAP, GOAL_MODE_WEIGHTS, ENGAGEMENT_BIAS_THRESHOLD } from "../market-intelligence-v3/constants";
 
@@ -843,5 +844,270 @@ describe("Market Intelligence V3 - Goal Mode Weighting", () => {
   it("P9) ENGAGEMENT_BIAS_THRESHOLD is between 0 and 1", () => {
     expect(ENGAGEMENT_BIAS_THRESHOLD).toBeGreaterThan(0);
     expect(ENGAGEMENT_BIAS_THRESHOLD).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("Post-Deployment Audit Safeguards", () => {
+
+  describe("Section 3: Snapshot Consistency", () => {
+    it("A3.1) validateSnapshotCompleteness rejects missing marketState", () => {
+      const result = validateSnapshotCompleteness({
+        marketState: "PENDING",
+        trajectoryData: JSON.stringify({ direction: "UP" }),
+        dominanceData: JSON.stringify([{ id: "1" }]),
+        confidenceData: JSON.stringify({ overall: 0.8 }),
+        signalData: JSON.stringify([{ id: "1" }]),
+        intentData: JSON.stringify([{ id: "1" }]),
+        volatilityIndex: 0.5,
+        confidenceLevel: "STRONG",
+      });
+      expect(result.valid).toBe(false);
+      expect(result.failures.some((f: string) => f.includes("marketState"))).toBe(true);
+    });
+
+    it("A3.2) getCachedSnapshot filters by status=COMPLETE (source code verification)", () => {
+      const fs = require("fs");
+      const engineSrc = fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+      const cacheFunction = engineSrc.match(/async function getCachedSnapshot[\s\S]*?^}/m)?.[0] || engineSrc;
+      expect(cacheFunction).toContain('eq(miSnapshots.status, "COMPLETE")');
+    });
+
+    it("A3.3) /snapshot route filters by status=COMPLETE (source code verification)", () => {
+      const fs = require("fs");
+      const routesSrc = fs.readFileSync("server/market-intelligence-v3/routes.ts", "utf-8");
+      expect(routesSrc).toContain('eq(miSnapshots.status, "COMPLETE")');
+    });
+
+    it("A3.4) persistValidatedSnapshot downgrades invalid COMPLETE to PARTIAL", () => {
+      const fs = require("fs");
+      const engineSrc = fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+      expect(engineSrc).toContain('snapshotPayload.status = "PARTIAL"');
+      expect(engineSrc).toContain("persistValidatedSnapshot");
+    });
+  });
+
+  describe("Section 5: Engagement Bias Protection", () => {
+    it("A5.1) ENGAGEMENT_BIAS_THRESHOLD is 0.50", () => {
+      expect(ENGAGEMENT_BIAS_THRESHOLD).toBe(0.50);
+    });
+
+    it("A5.2) detectEngagementBiasRisk exists in dominance-module source", () => {
+      const fs = require("fs");
+      const src = fs.readFileSync("server/market-intelligence-v3/dominance-module.ts", "utf-8");
+      expect(src).toContain("detectEngagementBiasRisk");
+      expect(src).toContain("ENGAGEMENT_BIAS_THRESHOLD");
+    });
+
+    it("A5.3) Engagement-dominated dataset triggers bias warning in REACH_MODE", () => {
+      const comp = makeCompetitor({ name: "EngDom" }, 30);
+      comp.posts = Array.from({ length: 30 }, () =>
+        makePost({ likes: 5000, comments: 500, caption: "amazing content" })
+      );
+
+      const signals = computeAllSignals([comp]);
+      signals[0].signals.engagementVolatility = 0.05;
+      signals[0].signals.ctaIntensityShift = 0.0;
+      signals[0].signals.contentExperimentRate = 0.0;
+      signals[0].signals.sentimentDrift = 0.0;
+
+      const confidence = computeConfidence(signals, 1);
+      const domResults = computeAllDominance(signals, confidence, "REACH_MODE");
+
+      expect(domResults[0]).toHaveProperty("engagementWeightBiasRisk");
+    });
+  });
+
+  describe("Section 6: Data Resilience", () => {
+    it("A6.1) Engine exports getCachedSnapshot path that falls back to valid snapshot", () => {
+      const fs = require("fs");
+      const engineSrc = fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+      expect(engineSrc).toContain("getCachedSnapshot");
+      expect(engineSrc).toContain("buildResultFromSnapshot");
+      expect(engineSrc).toContain("SNAPSHOT_FRESHNESS_HOURS");
+    });
+
+    it("A6.2) Snapshot metadata includes dataFreshnessDays", () => {
+      const fs = require("fs");
+      const engineSrc = fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+      expect(engineSrc).toContain("dataFreshnessDays");
+      expect(engineSrc).toContain("computeDataFreshnessDays");
+    });
+
+    it("A6.3) UI displays data_age with freshness coloring", () => {
+      const fs = require("fs");
+      const uiSrc = fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8");
+      expect(uiSrc).toContain("dataFreshnessDays");
+      expect(uiSrc).toContain("d ago");
+      expect(uiSrc).toContain("Never fetched");
+    });
+
+    it("A6.4) Fetch failure paths maintain PARTIAL status not COMPLETE", () => {
+      const fs = require("fs");
+      const orchestratorSrc = fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8");
+      expect(orchestratorSrc).toContain("PARTIAL_COMPLETE");
+      expect(orchestratorSrc).toContain("PARTIAL_CONFIDENCE_PENALTY");
+    });
+  });
+
+  describe("Section 7: Presentation Layer Isolation", () => {
+    it("A7.1) Tab switching uses only in-memory state (no fetch calls in render functions)", () => {
+      const fs = require("fs");
+      const uiSrc = fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8");
+
+      const renderInsightCards = uiSrc.match(/const renderInsightCards[\s\S]*?^  };/m)?.[0] || "";
+      expect(renderInsightCards).not.toContain("fetch(");
+      expect(renderInsightCards).not.toContain("mutate(");
+
+      const renderSimilarityCard = uiSrc.match(/const renderSimilarityCard[\s\S]*?^  };/m)?.[0] || "";
+      expect(renderSimilarityCard).not.toContain("fetch(");
+      expect(renderSimilarityCard).not.toContain("mutate(");
+
+      const renderGoalModeCard = uiSrc.match(/const renderGoalModeCard[\s\S]*?^  };/m)?.[0] || "";
+      expect(renderGoalModeCard).not.toContain("fetch(");
+      expect(renderGoalModeCard).not.toContain("mutate(");
+    });
+
+    it("A7.2) Dominance and Timeline tabs use only miv3Result state (no new fetches)", () => {
+      const fs = require("fs");
+      const uiSrc = fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8");
+
+      const renderCompetitors = uiSrc.match(/const renderCompetitors = \(\)[\s\S]*?^  };/m)?.[0] || "";
+      expect(renderCompetitors.length).toBeGreaterThan(50);
+      expect(renderCompetitors).not.toContain("analyzeMutation.mutate");
+      expect(renderCompetitors).not.toContain("startFetchJobMutation.mutate");
+
+      const renderTimeline = uiSrc.match(/const renderTimeline = \(\)[\s\S]*?^  };/m)?.[0] || "";
+      expect(renderTimeline.length).toBeGreaterThan(50);
+      expect(renderTimeline).not.toContain("analyzeMutation.mutate");
+      expect(renderTimeline).not.toContain("startFetchJobMutation.mutate");
+    });
+
+    it("A7.3) buildInsightCards is pure computation with no side effects", () => {
+      const fs = require("fs");
+      const uiSrc = fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8");
+      const buildInsightCards = uiSrc.match(/const buildInsightCards[\s\S]*?^  }, \[miv3Result\]\);/m)?.[0] || "";
+      expect(buildInsightCards).not.toContain("fetch(");
+      expect(buildInsightCards).not.toContain("mutate(");
+      expect(buildInsightCards).not.toContain("queryClient");
+      expect(buildInsightCards.length).toBeGreaterThan(100);
+    });
+  });
+});
+
+describe("Market Intelligence V3 - Goal Mode Source of Truth", () => {
+  it("T002.1) goalMode flows through dominance computation with REACH_MODE", () => {
+    const comp = makeFullCompetitor("GoalFlow");
+    const signals = computeAllSignals([comp]);
+    const confidence = computeConfidence(signals, 1);
+
+    const reachDom = computeAllDominance(signals, confidence, "REACH_MODE");
+    const stratDom = computeAllDominance(signals, confidence, "STRATEGY_MODE");
+
+    expect(reachDom[0].dominanceScore).not.toBe(stratDom[0].dominanceScore);
+  });
+
+  it("T002.2) buildResultFromSnapshot reads goalMode from stored snapshot", () => {
+    const mockSnapshot = {
+      id: "snap-test",
+      accountId: "acc-1",
+      campaignId: "camp-1",
+      status: "COMPLETE",
+      goalMode: "REACH_MODE",
+      signalData: JSON.stringify([]),
+      intentData: JSON.stringify([]),
+      trajectoryData: JSON.stringify({ marketHeatingIndex: 0.5, narrativeConvergenceScore: 0.3, offerCompressionIndex: 0.2, angleSaturationLevel: 0.4, revivalPotential: 0.3 }),
+      dominanceData: JSON.stringify([]),
+      confidenceData: JSON.stringify({ overall: 0.7, level: "MODERATE", factors: {}, guardDecision: "PROCEED", guardReasons: [] }),
+      marketState: "COMPETITIVE_MARKET",
+      executionMode: "FULL",
+      telemetry: JSON.stringify({}),
+      defensiveRisks: JSON.stringify([]),
+      missingSignalFlags: JSON.stringify([]),
+      similarityData: JSON.stringify(null),
+      volatilityIndex: 0.3,
+      dataFreshnessDays: 2,
+      overallConfidence: 0.7,
+      confidenceLevel: "MODERATE",
+      previousDirection: "HEATING",
+      confirmedRuns: 2,
+      createdAt: new Date().toISOString(),
+    };
+
+    const result = buildResultFromSnapshot(mockSnapshot);
+    expect(result.goalMode).toBe("REACH_MODE");
+  });
+
+  it("T002.3) buildResultFromSnapshot defaults to STRATEGY_MODE when goalMode not set", () => {
+    const mockSnapshot = {
+      id: "snap-test-2",
+      accountId: "acc-1",
+      campaignId: "camp-1",
+      status: "COMPLETE",
+      signalData: JSON.stringify([]),
+      intentData: JSON.stringify([]),
+      trajectoryData: JSON.stringify({ marketHeatingIndex: 0.5, narrativeConvergenceScore: 0.3, offerCompressionIndex: 0.2, angleSaturationLevel: 0.4, revivalPotential: 0.3 }),
+      dominanceData: JSON.stringify([]),
+      confidenceData: JSON.stringify({ overall: 0.7, level: "MODERATE", factors: {}, guardDecision: "PROCEED", guardReasons: [] }),
+      marketState: "COMPETITIVE_MARKET",
+      executionMode: "FULL",
+      telemetry: JSON.stringify({}),
+      defensiveRisks: JSON.stringify([]),
+      missingSignalFlags: JSON.stringify([]),
+      similarityData: JSON.stringify(null),
+      volatilityIndex: 0.3,
+      dataFreshnessDays: 2,
+      overallConfidence: 0.7,
+      confidenceLevel: "MODERATE",
+      previousDirection: "HEATING",
+      confirmedRuns: 2,
+      createdAt: new Date().toISOString(),
+    };
+
+    const result = buildResultFromSnapshot(mockSnapshot);
+    expect(result.goalMode).toBe("STRATEGY_MODE");
+  });
+
+  it("T002.4) growthCampaigns schema has goalMode column with STRATEGY_MODE default", () => {
+    const fs = require("fs");
+    const schemaSrc = fs.readFileSync("shared/schema.ts", "utf-8");
+    expect(schemaSrc).toContain('goalMode: text("goal_mode").default("STRATEGY_MODE")');
+    const campaignSection = schemaSrc.match(/export const growthCampaigns[\s\S]*?\}\);/)?.[0] || "";
+    expect(campaignSection).toContain("goal_mode");
+  });
+
+  it("T002.5) fetch-orchestrator reads goalMode from campaign config", () => {
+    const fs = require("fs");
+    const orchSrc = fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8");
+    expect(orchSrc).toContain("growthCampaigns");
+    expect(orchSrc).toContain("campaignGoalMode");
+    expect(orchSrc).not.toMatch(/goalMode:\s*"STRATEGY_MODE"/);
+  });
+
+  it("T002.6) engine.ts falls back to campaign config when goalMode is default", () => {
+    const fs = require("fs");
+    const engineSrc = fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+    expect(engineSrc).toContain("growthCampaigns");
+    expect(engineSrc).toContain("campaignRows[0]?.goalMode");
+  });
+
+  it("T002.7) miSnapshots schema stores goalMode", () => {
+    const fs = require("fs");
+    const schemaSrc = fs.readFileSync("shared/schema.ts", "utf-8");
+    const snapshotSection = schemaSrc.match(/export const miSnapshots[\s\S]*?\}\);/)?.[0] || "";
+    expect(snapshotSection).toContain("goal_mode");
+  });
+
+  it("T002.8) engine snapshot payload includes goalMode from run parameter", () => {
+    const fs = require("fs");
+    const engineSrc = fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+    const executeRunSection = engineSrc.match(/_executeRun[\s\S]*?const snapshotPayload[\s\S]*?\};/)?.[0] || "";
+    expect(executeRunSection).toContain("goalMode");
+  });
+
+  it("T002.9) routes pass goalMode from request body to engine", () => {
+    const fs = require("fs");
+    const routesSrc = fs.readFileSync("server/market-intelligence-v3/routes.ts", "utf-8");
+    expect(routesSrc).toContain("req.body.goalMode");
+    expect(routesSrc).toContain("REACH_MODE");
   });
 });

@@ -95,6 +95,8 @@ export const GOAL_MODE_WEIGHTS = {
 
 export const ENGAGEMENT_BIAS_THRESHOLD = 0.50;
 
+export const SIMILARITY_MIN_EVIDENCE_THRESHOLD = 8;
+
 export const MI_INTENT_WEIGHTS = {
   DEFENSIVE: {
     postingFrequencyTrend: -0.3,

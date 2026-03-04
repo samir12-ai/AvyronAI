@@ -228,7 +228,7 @@ export interface SimilarityResult {
   overallSimilarityIndex: number;
   dimensions: Record<string, SimilarityDimension>;
   evidenceCoverage: CompetitorEvidenceCoverage[];
-  diagnosis: "SIMILARITY_LIKELY_MARKET_REALITY" | "SIMILARITY_LIKELY_DATA_LIMITATION" | "LOW_SIMILARITY" | "INSUFFICIENT_DATA";
+  diagnosis: "SIMILARITY_LIKELY_MARKET_REALITY" | "SIMILARITY_LIKELY_DATA_LIMITATION" | "LOW_SIMILARITY" | "INSUFFICIENT_DATA" | "LOW_CONFIDENCE";
   explanation: string;
 }
 
