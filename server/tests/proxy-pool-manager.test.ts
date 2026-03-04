@@ -365,7 +365,138 @@ describe("Proxy Pool Manager — Torture Tests", () => {
     });
   });
 
-  describe("J) Telemetry Coverage — All Request Paths", () => {
+  describe("J) INVARIANT 1 — Sticky Session Integrity Across All Fallback Paths", () => {
+    it("WEB_API, HTML_PARSE, HEADLESS_RENDER must share identical proxySessionId and ipHash", () => {
+      const ctx = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "invariant_1_comp");
+      expect(ctx).not.toBeNull();
+      if (!ctx) return;
+
+      const sessionId = ctx.session.sessionId;
+      const ipHash = ctx.session.ipHash;
+
+      logProxyTelemetry(ctx, "WEB_API", 200, null, 100, true);
+      logProxyTelemetry(ctx, "HTML_PARSE", 200, null, 80, true);
+      logProxyTelemetry(ctx, "HEADLESS_RENDER", 200, null, 5000, true);
+
+      const telemetry = getTelemetryForJob(TEST_ACCOUNT_A, "invariant_1_comp");
+      expect(telemetry.length).toBe(3);
+
+      for (const entry of telemetry) {
+        expect(entry.proxySessionId).toBe(sessionId);
+        expect(entry.ipHash).toBe(ipHash);
+        expect(entry.accountId).toBe(TEST_ACCOUNT_A);
+        expect(entry.campaignId).toBe(TEST_CAMPAIGN);
+        expect(entry.competitorHash).toBe("invariant_1_comp");
+      }
+
+      const stages = telemetry.map(e => e.stageName);
+      expect(stages).toContain("WEB_API");
+      expect(stages).toContain("HTML_PARSE");
+      expect(stages).toContain("HEADLESS_RENDER");
+
+      releaseStickySession(ctx);
+    });
+
+    it("scrapeInstagramProfile threads the same proxyCtx to all fallback paths", () => {
+      const source = require("fs").readFileSync(
+        "server/competitive-intelligence/profile-scraper.ts", "utf-8"
+      );
+      expect(source).toContain("attemptWebProfileApi(handle, proxyCtx)");
+      expect(source).toContain("attemptHtmlPageParse(profileUrl, handle, proxyCtx)");
+      expect(source).toContain("attemptHeadlessRender(profileUrl, handle, proxyCtx)");
+
+      expect(source).not.toContain("getProxyDispatcher()");
+      expect(source).not.toContain("getSessionDispatcher()");
+    });
+  });
+
+  describe("J2) INVARIANT 2 — Playwright Proxy Uses Session Credentials", () => {
+    it("HEADLESS_RENDER reads session-specific username from proxyCtx, not base getProxyConfig", () => {
+      const source = require("fs").readFileSync(
+        "server/competitive-intelligence/profile-scraper.ts", "utf-8"
+      );
+      expect(source).toContain("proxyCtx?.session.sessionUsername");
+      expect(source).toContain("proxyCtx?.session.sessionPassword");
+      expect(source).toContain("proxyCtx?.session.proxyHost");
+      expect(source).toContain("proxyCtx?.session.proxyPort");
+
+      const fnMatch = source.match(/async function attemptHeadlessRender[\s\S]*?^}/m);
+      expect(fnMatch).not.toBeNull();
+      const headlessFnBody = fnMatch![0];
+      expect(headlessFnBody).not.toContain("getProxyConfig()");
+      expect(headlessFnBody).toContain("proxyCtx?.session.sessionUsername");
+    });
+
+    it("ProxySession stores session-specific credentials for Playwright", () => {
+      const ctx = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "playwright_creds");
+      expect(ctx).not.toBeNull();
+      if (!ctx) return;
+
+      expect(ctx.session.sessionUsername).toBeDefined();
+      expect(ctx.session.sessionPassword).toBeDefined();
+      expect(ctx.session.proxyHost).toBeDefined();
+      expect(ctx.session.proxyPort).toBeDefined();
+
+      expect(ctx.session.sessionUsername).toContain("-session-");
+      expect(ctx.session.sessionUsername).toContain(ctx.session.sessionId);
+
+      releaseStickySession(ctx);
+    });
+  });
+
+  describe("J3) INVARIANT 3 — Pagination Session Stability", () => {
+    it("all pagination pages share the same proxy session (no mid-stream rotation)", () => {
+      const ctx = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "pagination_stability");
+      expect(ctx).not.toBeNull();
+      if (!ctx) return;
+
+      const sessionId = ctx.session.sessionId;
+      const ipHash = ctx.session.ipHash;
+
+      logProxyTelemetry(ctx, "WEB_API", 200, null, 100, true);
+      logProxyTelemetry(ctx, "PAGINATION_PAGE_2", 200, null, 100, true);
+      logProxyTelemetry(ctx, "PAGINATION_PAGE_3", 200, null, 100, true);
+      logProxyTelemetry(ctx, "PAGINATION_PAGE_4", 200, null, 100, true);
+
+      const telemetry = getTelemetryForJob(TEST_ACCOUNT_A, "pagination_stability");
+      expect(telemetry.length).toBe(4);
+
+      for (const entry of telemetry) {
+        expect(entry.proxySessionId).toBe(sessionId);
+        expect(entry.ipHash).toBe(ipHash);
+      }
+
+      releaseStickySession(ctx);
+    });
+
+    it("pagination code uses fetchOptions (same dispatcher), no mid-page session creation", () => {
+      const source = require("fs").readFileSync(
+        "server/competitive-intelligence/profile-scraper.ts", "utf-8"
+      );
+      const paginationBlock = source.split("paginationAttempted = true")[1]?.split("if (paginationSuccess)")[0] || "";
+      expect(paginationBlock.length).toBeGreaterThan(100);
+      expect(paginationBlock).toContain("fetch(feedUrl, fetchOptions)");
+      expect(paginationBlock).not.toContain("getSessionDispatcher");
+      expect(paginationBlock).not.toContain("getProxyDispatcher");
+      expect(paginationBlock).not.toContain("acquireStickySession");
+    });
+
+    it("rotation only allowed on PROXY_BLOCKED or RATE_LIMIT (never between pages)", () => {
+      const ctx = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "no_rotation_test");
+      if (!ctx) return;
+
+      expect(rotateSessionOnBlock(ctx, "AUTH_REQUIRED")).toBeNull();
+      expect(rotateSessionOnBlock(ctx, "CHECKPOINT")).toBeNull();
+      expect(rotateSessionOnBlock(ctx, "OTHER")).toBeNull();
+
+      const rotated = rotateSessionOnBlock(ctx, "PROXY_BLOCKED");
+      expect(rotated).not.toBeNull();
+
+      releaseStickySession(rotated || ctx);
+    });
+  });
+
+  describe("K) Telemetry Coverage — All Request Paths", () => {
     it("profile-scraper instruments telemetry for all stages", () => {
       const source = require("fs").readFileSync(
         "server/competitive-intelligence/profile-scraper.ts", "utf-8"
@@ -385,7 +516,7 @@ describe("Proxy Pool Manager — Torture Tests", () => {
     });
   });
 
-  describe("K) Orchestrator Integration", () => {
+  describe("L) Orchestrator Integration", () => {
     it("fetch orchestrator imports and uses proxy pool manager", () => {
       const source = require("fs").readFileSync(
         "server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8"

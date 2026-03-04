@@ -15,6 +15,10 @@ export interface ProxySession {
   sessionId: string;
   ipHash: string;
   dispatcher: ProxyAgent;
+  sessionUsername: string;
+  sessionPassword: string;
+  proxyHost: string;
+  proxyPort: string;
   createdAt: number;
   successCount: number;
   blockCount: number;
@@ -87,6 +91,10 @@ function createSession(accountId: string): ProxySession | null {
     sessionId,
     ipHash: computeIpHash(sessionId),
     dispatcher: new ProxyAgent({ uri: sessionUrl, requestTls: { rejectUnauthorized: false } }),
+    sessionUsername,
+    sessionPassword: proxy.password,
+    proxyHost: proxy.host,
+    proxyPort: proxy.port,
     createdAt: Date.now(),
     successCount: 0,
     blockCount: 0,

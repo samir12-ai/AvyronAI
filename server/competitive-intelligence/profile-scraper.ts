@@ -553,12 +553,17 @@ async function attemptHeadlessRender(profileUrl: string, handle: string, proxyCt
   const chromiumModule = await getChromium();
   if (!chromiumModule) throw new Error("Playwright not available");
 
-  const proxy = proxyCtx ? getProxyConfig() : getProxyConfig();
   let browser: Browser | null = null;
+
+  const proxyHost = proxyCtx?.session.proxyHost ?? null;
+  const proxyPort = proxyCtx?.session.proxyPort ?? null;
+  const proxyUsername = proxyCtx?.session.sessionUsername ?? null;
+  const proxyPassword = proxyCtx?.session.sessionPassword ?? null;
+  const hasProxy = !!(proxyHost && proxyPort && proxyUsername && proxyPassword);
 
   try {
     const baseArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"];
-    if (proxy) {
+    if (hasProxy) {
       baseArgs.push("--ignore-certificate-errors");
     }
 
@@ -568,13 +573,13 @@ async function attemptHeadlessRender(profileUrl: string, handle: string, proxyCt
       args: baseArgs,
     };
 
-    if (proxy) {
+    if (hasProxy) {
       launchOptions.proxy = {
-        server: `http://${proxy.host}:${proxy.port}`,
-        username: proxy.username,
-        password: proxy.password,
+        server: `http://${proxyHost}:${proxyPort}`,
+        username: proxyUsername,
+        password: proxyPassword,
       };
-      console.log(`[CI Scraper] HEADLESS_RENDER: Launching with Bright Data proxy for ${handle}`);
+      console.log(`[CI Scraper] HEADLESS_RENDER: Launching with pool-managed proxy session=${proxyCtx?.session.sessionId} for ${handle}`);
     } else {
       console.log(`[CI Scraper] HEADLESS_RENDER: Launching direct (no proxy) for ${handle}`);
     }
