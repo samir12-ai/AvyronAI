@@ -839,13 +839,14 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("FINAL_AUDIT");
     });
 
-    it("scraper must use session-persistent proxy for pagination continuity", async () => {
+    it("scraper must use pool-managed sticky sessions for pagination continuity", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
       );
-      expect(source).toContain("getSessionDispatcher");
-      expect(source).toContain("-session-");
-      expect(source).toContain("sessionId");
+      expect(source).toContain("proxyCtx?.session.dispatcher");
+      expect(source).toContain("proxyCtx?.session.sessionId");
+      expect(source).not.toContain("getSessionDispatcher");
+      expect(source).not.toContain("getProxyDispatcher");
     });
 
     it("scraper must deduplicate posts via seenIds", async () => {

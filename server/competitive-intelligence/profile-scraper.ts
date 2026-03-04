@@ -1,6 +1,6 @@
 import { ProxyAgent } from "undici";
 import type { StickySessionContext } from "./proxy-pool-manager";
-import { logProxyTelemetry, classifyBlock, rotateSessionOnBlock, getRetryDelay } from "./proxy-pool-manager";
+import { logProxyTelemetry, classifyBlock, rotateSessionOnBlock, getRetryDelay, getProxyConfig } from "./proxy-pool-manager";
 
 type Browser = any;
 type Page = any;
@@ -24,34 +24,6 @@ async function getChromium(): Promise<any> {
 }
 
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH || "/nix/store/zi4f80l169xlmivz8vja8wlphq74qqk0-chromium-125.0.6422.141/bin/chromium";
-
-function getProxyConfig(): { url: string; host: string; port: string; username: string; password: string } | null {
-  const host = process.env.BRIGHT_DATA_PROXY_HOST;
-  const port = process.env.BRIGHT_DATA_PROXY_PORT;
-  const username = process.env.BRIGHT_DATA_PROXY_USERNAME;
-  const password = process.env.BRIGHT_DATA_PROXY_PASSWORD;
-  if (!host || !port || !username || !password) {
-    return null;
-  }
-  return {
-    url: `http://${username}:${password}@${host}:${port}`,
-    host,
-    port,
-    username,
-    password,
-  };
-}
-
-function getProxyDispatcher(): ProxyAgent | undefined {
-  const proxy = getProxyConfig();
-  if (!proxy) return undefined;
-  return new ProxyAgent({
-    uri: proxy.url,
-    requestTls: {
-      rejectUnauthorized: false,
-    },
-  });
-}
 
 function randomDelay(): Promise<void> {
   const ms = 1000 + Math.random() * 2000;
@@ -223,18 +195,6 @@ interface PaginationDiagnostics {
   proxyUsed: boolean;
 }
 
-function getSessionDispatcher(): { dispatcher: ProxyAgent | undefined; sessionId: string | null } {
-  const proxy = getProxyConfig();
-  if (!proxy) return { dispatcher: undefined, sessionId: null };
-  const sessionId = `scrape_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-  const sessionUsername = `${proxy.username}-session-${sessionId}`;
-  const sessionUrl = `http://${sessionUsername}:${proxy.password}@${proxy.host}:${proxy.port}`;
-  return {
-    dispatcher: new ProxyAgent({ uri: sessionUrl, requestTls: { rejectUnauthorized: false } }),
-    sessionId,
-  };
-}
-
 async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionContext): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number; paginationPages: number; rawFetchedCount: number; paginationStopReason: PaginationStopReason; diagnostics: PaginationDiagnostics }> {
   const apiUrl = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`;
 
@@ -250,16 +210,8 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
     "Sec-Fetch-Site": "same-origin",
   };
 
-  let dispatcher: ProxyAgent | undefined;
-  let sessionId: string | null;
-  if (proxyCtx) {
-    dispatcher = proxyCtx.session.dispatcher;
-    sessionId = proxyCtx.session.sessionId;
-  } else {
-    const legacy = getSessionDispatcher();
-    dispatcher = legacy.dispatcher;
-    sessionId = legacy.sessionId;
-  }
+  const dispatcher = proxyCtx?.session.dispatcher ?? undefined;
+  const sessionId = proxyCtx?.session.sessionId ?? null;
   const fetchOptions: any = { headers, redirect: "follow" };
   if (dispatcher) {
     fetchOptions.dispatcher = dispatcher;
@@ -521,7 +473,7 @@ function parsePostFromV1Feed(item: any, handle: string): ScrapedPost {
   };
 }
 
-async function attemptHtmlPageParse(profileUrl: string, handle: string): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number }> {
+async function attemptHtmlPageParse(profileUrl: string, handle: string, proxyCtx?: StickySessionContext): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number }> {
   const headers: Record<string, string> = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -529,13 +481,13 @@ async function attemptHtmlPageParse(profileUrl: string, handle: string): Promise
     "Cache-Control": "no-cache",
   };
 
-  const dispatcher = getProxyDispatcher();
+  const dispatcher = proxyCtx?.session.dispatcher ?? undefined;
   const fetchOptions: any = { headers, redirect: "follow" };
   if (dispatcher) {
     fetchOptions.dispatcher = dispatcher;
   }
 
-  console.log(`[CI Scraper] HTML_PARSE: Fetching ${profileUrl}`);
+  console.log(`[CI Scraper] HTML_PARSE: Fetching ${profileUrl} ${dispatcher ? `via pool session (${proxyCtx?.session.sessionId})` : "direct"}`);
 
   const response = await fetch(profileUrl, fetchOptions);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -597,11 +549,11 @@ async function attemptHtmlPageParse(profileUrl: string, handle: string): Promise
   return { posts, followers, profileName, bytesReceived };
 }
 
-async function attemptHeadlessRender(profileUrl: string, handle: string): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesEstimated: number }> {
+async function attemptHeadlessRender(profileUrl: string, handle: string, proxyCtx?: StickySessionContext): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesEstimated: number }> {
   const chromiumModule = await getChromium();
   if (!chromiumModule) throw new Error("Playwright not available");
 
-  const proxy = getProxyConfig();
+  const proxy = proxyCtx ? getProxyConfig() : getProxyConfig();
   let browser: Browser | null = null;
 
   try {
@@ -799,7 +751,7 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
     attempts.push("HTML_PARSE");
     try {
       const htmlStartMs = Date.now();
-      const result = await attemptHtmlPageParse(profileUrl, handle);
+      const result = await attemptHtmlPageParse(profileUrl, handle, proxyCtx);
       if (proxyCtx) logProxyTelemetry(proxyCtx, "HTML_PARSE", 200, null, Date.now() - htmlStartMs, result.posts.length > 0);
       posts = result.posts;
       followers = result.followers;
@@ -824,7 +776,7 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
     attempts.push("HEADLESS_RENDER");
     try {
       const headlessStartMs = Date.now();
-      const result = await attemptHeadlessRender(profileUrl, handle);
+      const result = await attemptHeadlessRender(profileUrl, handle, proxyCtx);
       if (proxyCtx) logProxyTelemetry(proxyCtx, "HEADLESS_RENDER", 200, null, Date.now() - headlessStartMs, result.posts.length > 0);
       scrapeStats.totalBytesEstimated += result.bytesEstimated;
       if (result.posts.length > posts.length) {

@@ -405,12 +405,32 @@ describe("Proxy Pool Manager — Torture Tests", () => {
       expect(source).toContain("scrapeInstagramProfile(competitor.profileLink, proxyCtx)");
     });
 
-    it("profile-scraper uses sticky session dispatcher when provided", () => {
+    it("profile-scraper uses pool-managed sessions exclusively (old proxy system deleted)", () => {
       const source = require("fs").readFileSync(
         "server/competitive-intelligence/profile-scraper.ts", "utf-8"
       );
-      expect(source).toContain("proxyCtx.session.dispatcher");
-      expect(source).toContain("proxyCtx.session.sessionId");
+      expect(source).toContain("proxyCtx?.session.dispatcher");
+      expect(source).toContain("proxyCtx?.session.sessionId");
+      expect(source).not.toContain("function getProxyDispatcher");
+      expect(source).not.toContain("function getSessionDispatcher");
+      expect(source).not.toContain("function getProxyConfig");
+      expect(source).toContain("import { logProxyTelemetry, classifyBlock, rotateSessionOnBlock, getRetryDelay, getProxyConfig }");
+    });
+
+    it("attemptHtmlPageParse accepts proxyCtx parameter", () => {
+      const source = require("fs").readFileSync(
+        "server/competitive-intelligence/profile-scraper.ts", "utf-8"
+      );
+      expect(source).toContain("attemptHtmlPageParse(profileUrl, handle, proxyCtx)");
+      expect(source).toMatch(/attemptHtmlPageParse\(.*proxyCtx\?: StickySessionContext/);
+    });
+
+    it("attemptHeadlessRender accepts proxyCtx parameter", () => {
+      const source = require("fs").readFileSync(
+        "server/competitive-intelligence/profile-scraper.ts", "utf-8"
+      );
+      expect(source).toContain("attemptHeadlessRender(profileUrl, handle, proxyCtx)");
+      expect(source).toMatch(/attemptHeadlessRender\(.*proxyCtx\?: StickySessionContext/);
     });
   });
 });

@@ -45,7 +45,7 @@ interface AccountPool {
   stickyBindings: Map<string, string>;
 }
 
-function getProxyConfig(): { host: string; port: string; username: string; password: string } | null {
+export function getProxyConfig(): { host: string; port: string; username: string; password: string } | null {
   const host = process.env.BRIGHT_DATA_PROXY_HOST;
   const port = process.env.BRIGHT_DATA_PROXY_PORT;
   const username = process.env.BRIGHT_DATA_PROXY_USERNAME;
