@@ -1355,9 +1355,11 @@ export const miSnapshots = pgTable("mi_snapshots", {
   snapshotSource: text("snapshot_source").default("FRESH_DATA"),
   fetchExecuted: boolean("fetch_executed").default(true),
   status: text("status").notNull().default("PENDING"),
+  similarityData: text("similarity_data"),
   confirmedRuns: integer("confirmed_runs").default(0),
   previousDirection: text("previous_direction"),
   directionLockedUntil: timestamp("direction_locked_until"),
+  goalMode: text("goal_mode").default("STRATEGY_MODE"),
   createdAt: timestamp("created_at").defaultNow(),
   expiresAt: timestamp("expires_at"),
 });

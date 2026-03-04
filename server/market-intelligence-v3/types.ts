@@ -16,6 +16,8 @@ export type ConfidenceLevel =
 
 export type ExecutionMode = "FULL" | "REDUCED" | "LIGHT";
 
+export type GoalMode = "REACH_MODE" | "STRATEGY_MODE";
+
 export type GuardDecision = "PROCEED" | "DOWNGRADE" | "BLOCK";
 
 export type MIv3Mode = "overview" | "dominance" | "actions" | "history";
@@ -70,6 +72,7 @@ export interface DominanceResult {
   dominanceLevel: string;
   weaknesses: string[];
   strengths: string[];
+  engagementWeightBiasRisk?: string | null;
 }
 
 export interface ConfidenceFactors {
@@ -151,11 +154,13 @@ export interface MIv3DiagnosticResult {
   snapshotId: string;
   snapshotStatus: "COMPLETE" | "PARTIAL";
   executionMode: ExecutionMode;
+  goalMode: GoalMode;
   telemetry: TelemetryRecord;
   dominanceData: DominanceResult[];
   trajectoryData: TrajectoryData;
   signalGuard: SignalStabilityGuard;
   twoRunStatus: TwoRunConfirmation;
+  similarityData: SimilarityResult | null;
   cached: boolean;
   cacheInvalidationReason: CacheInvalidationReason;
   snapshotSource: "FRESH_DATA" | "CACHED_DATA";
@@ -203,6 +208,28 @@ export interface CommentData {
   text: string;
   sentiment?: number;
   timestamp: string;
+}
+
+export interface SimilarityDimension {
+  score: number;
+  sufficient: boolean;
+}
+
+export interface CompetitorEvidenceCoverage {
+  competitorId: string;
+  competitorName: string;
+  postsAvailable: number;
+  commentsAvailable: number;
+  missingDataPoints: string[];
+  coverageRatio: number;
+}
+
+export interface SimilarityResult {
+  overallSimilarityIndex: number;
+  dimensions: Record<string, SimilarityDimension>;
+  evidenceCoverage: CompetitorEvidenceCoverage[];
+  diagnosis: "SIMILARITY_LIKELY_MARKET_REALITY" | "SIMILARITY_LIKELY_DATA_LIMITATION" | "LOW_SIMILARITY" | "INSUFFICIENT_DATA";
+  explanation: string;
 }
 
 export interface RefreshDecision {

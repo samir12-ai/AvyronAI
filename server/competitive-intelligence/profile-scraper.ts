@@ -160,7 +160,7 @@ function parsePostFromGraphQL(node: any, handle: string): ScrapedPost {
   };
 }
 
-const TARGET_POSTS = 30;
+const TARGET_POSTS = 14;
 const MAX_PAGINATION_PAGES = 4;
 const INSTAGRAM_PUBLIC_API_CEILING = 12;
 

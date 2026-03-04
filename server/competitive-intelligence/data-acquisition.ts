@@ -48,8 +48,17 @@ const NARRATIVE_CTA_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /\b(real\s*talk|honest(ly)?|truth\s*(is|bomb))\b/i, label: "RealTalk" },
   { pattern: /\b(behind\s*the\s*scenes|the\s*process|making\s*of)\b/i, label: "BehindScenes" },
   { pattern: /\b(lesson\s*(i\s*)?learned|what\s*i\s*learned|takeaway)\b/i, label: "LessonLearned" },
+  { pattern: /\b(what\s*would\s*you\s*do|would\s*you\s*rather|have\s*you\s*ever)\b/i, label: "EngagementQuestion" },
+  { pattern: /\b(unpopular\s*opinion|hot\s*take|controversial)\b/i, label: "OpinionHook" },
+  { pattern: /\b(the\s*truth\s*about|nobody\s*talks\s*about|no\s*one\s*mentions)\b/i, label: "TruthReveal" },
+  { pattern: /\b(how\s*to|guide\s*to|tips\s*for|ways\s*to)\b/i, label: "HowToGuide" },
   { pattern: /(قصتي|رحلتي|تجربتي)/i, label: "JourneyStory_AR" },
   { pattern: /(قبل\s*و\s*بعد|التحول)/i, label: "BeforeAfter_AR" },
+  { pattern: /(تعلمت|درس|عبرة)/i, label: "LessonLearned_AR" },
+  { pattern: /(السر|ما\s*لا\s*يقوله\s*أحد)/i, label: "SecretReveal_AR" },
+  { pattern: /(كيف\s*(بدأت|حققت|نجحت|وصلت))/i, label: "StepByStep_AR" },
+  { pattern: /(تخيل|تصور)/i, label: "Imagine_AR" },
+  { pattern: /(نصائح|طريقة|خطوات)/i, label: "HowToGuide_AR" },
 ];
 
 const TRUST_CTA_PATTERNS: { pattern: RegExp; label: string }[] = [
@@ -63,7 +72,12 @@ const TRUST_CTA_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /\b(proven|track\s*record|success\s*rate)\b/i, label: "ProvenRecord" },
   { pattern: /\b(satisfied|happy\s*(clients?|customers?))\b/i, label: "HappyClients" },
   { pattern: /\b(case\s*study|success\s*stor(y|ies))\b/i, label: "CaseStudy" },
+  { pattern: /\b(exclusive|members?\s*only|insider)\b/i, label: "Exclusivity" },
+  { pattern: /\b(industry\s*leader|market\s*leader|number\s*one|#1)\b/i, label: "MarketLeader" },
   { pattern: /(عملاء|شهادات|نتائج|معتمد)/i, label: "Trust_AR" },
+  { pattern: /(ضمان|مضمون|بدون\s*مخاطر)/i, label: "Guarantee_AR" },
+  { pattern: /(حائز|جائزة|الأول|رقم\s*واحد)/i, label: "MarketLeader_AR" },
+  { pattern: /(حصري|للأعضاء\s*فقط)/i, label: "Exclusivity_AR" },
 ];
 
 const OFFER_PATTERNS = [
@@ -225,8 +239,8 @@ const MAX_POSTS_TO_STORE = 60;
 const MAX_COMMENTS_PER_POST = 20;
 const MAX_COMMENT_POSTS = 30;
 const INSTAGRAM_PUBLIC_API_POST_CEILING = 12;
-const MIN_POSTS_THRESHOLD = 30;
-const MIN_COMMENTS_THRESHOLD = 100;
+const MIN_POSTS_THRESHOLD = 14;
+const MIN_COMMENTS_THRESHOLD = 50;
 
 const activeFetches = new Map<string, Promise<FetchResult>>();
 

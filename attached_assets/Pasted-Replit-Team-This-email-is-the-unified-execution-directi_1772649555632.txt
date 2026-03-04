@@ -1,0 +1,208 @@
+Replit Team,
+
+This email is the unified execution directive. Treat it as the single source of truth (it replaces fragmented instructions). The goal is to stabilize MIv3 under proxy constraints, increase intelligence depth, and improve UX — WITHOUT breaking the single-track philosophy (Build-a-Plan remains the only place where actions/decisions are generated).
+
+You must reply PASS / FAIL per phase. If FAIL, apply the “Fix Immediately” bullets under that phase and re-test before reporting back.
+
+────────────────────────────────
+NON-NEGOTIABLE GLOBAL RULES
+────────────────────────────────
+1) MIv3 is the only owner of competitor intelligence:
+- Data acquisition (posts/comments/etc.)
+- Dominance computation
+- CTA intent coverage (explicit + implicit)
+- Confidence model & missing-signal flags
+- Snapshot persistence + caching
+
+2) Build-a-Plan is READ-ONLY with respect to competitor intelligence:
+- Build-a-Plan may only READ MIv3 snapshots
+- It must NOT fetch competitor data
+- It must NOT recompute dominance/CTA/confidence
+- It must NOT spawn any competitor engines in parallel
+
+Enforce with whitelist + isolation guard + audit logs on violations.
+
+3) Token/Cost discipline is mandatory:
+- No token burn loops
+- Deterministic pipelines first; narrative/LLM only when allowed by confidence and budget guard
+- HARD ceilings must remain in place (pages/requests/runtime/retries) with explicit stop reasons and telemetry
+
+────────────────────────────────
+PHASE 1 — Proxy Reliability Under Real Conditions (Hardening)
+────────────────────────────────
+Objective:
+Stop the system from stalling/being blocked, and ensure “one click” reliably produces usable data without manual refresh loops.
+
+Deliverables:
+A) Per-account Proxy Pool (Residential Bright Data) with stickiness + quarantine
+- Sticky session per account (and per campaign when needed), not per request
+- Session health scoring: success/fail/timeout/blocked
+- Quarantine “bad” sessions and rotate automatically
+- Full telemetry: proxy sessionId, stop reason, retries, and ceilings hit
+
+B) Reduce request pressure (batching + pacing)
+- Introduce controlled pacing between requests (adaptive backoff)
+- Use staged acquisition jobs (already present) but ensure each stage respects pacing and ceilings
+- No uncontrolled concurrency; lock keys must be accountId:campaignId
+
+Hard QA Gates:
+- Proxy Stress Test: simulate RATE_LIMIT / PROXY_BLOCKED → ensure bounded retries + clean terminal stop
+- No infinite loops
+- No job stuck in RUNNING beyond MAX_RUNTIME_MS
+- Clear stopReason must surface in UI + audit log
+
+Fix Immediately if FAIL:
+- Add/adjust per-stage pacing and retry backoff
+- Enforce max parallelism per account
+- Quarantine logic for sessions producing repeated 401/403/429/400 patterns
+
+────────────────────────────────
+PHASE 2 — “Light Coverage” Strategy (Reduce Post Requirements Without Killing Quality)
+────────────────────────────────
+Objective:
+Solve the proxy volume problem by reducing required fetch volume while maintaining market usefulness.
+
+Policy Change (recommended for reliability):
+- Default analysis window: 12–14 posts from the last 60 days per competitor
+- If competitor is low-frequency: expand window to 120 days to reach 12–14 posts
+- Refresh cadence: weekly refresh (e.g., every Saturday) OR manual refresh (but one-click orchestration)
+- Do NOT crawl years of history by default
+
+Rules:
+- If minimum coverage not met → confidence must DOWNGRADE with explicit missing flags (no fabrication)
+- Coverage thresholds become “dynamic”:
+  - Target: 12–14 posts / 60 days
+  - If insufficient → widen to 120 days
+  - If still insufficient → mark LOW/UNSTABLE with exact stop reasons
+
+Hard QA Gates:
+- First-click job must finish with either:
+  - Coverage met, OR
+  - Explicit reasons (PRIVATE_ACCOUNT, PROXY_BLOCKED, RATE_LIMITED, NO_MORE_PAGES, etc.)
+- Confidence must move logically with coverage (no random 58% while missing core evidence)
+
+Fix Immediately if FAIL:
+- Ensure thresholds in UI and engine are aligned
+- Ensure cooldown never blocks re-fetch if coverage below target
+- Ensure stopReason is always set when fetch is partial
+
+────────────────────────────────
+PHASE 3 — Similarity Diagnosis Layer (Make the “Why” Measurable, Without Conflicting with Build-a-Plan)
+────────────────────────────────
+Objective:
+Samir saw “outputs feel similar.” We need a deterministic diagnostic that proves whether similarity is real (data-driven) or a system bug — without creating a new decision engine that conflicts with Build-a-Plan.
+
+Deliverables:
+A) MIv3 Diagnostic Output (read-only, no actions)
+- Similarity Index per competitor set:
+  - Content mix similarity
+  - Offer language similarity
+  - Hook style similarity
+  - CTA intent distribution similarity (explicit/soft/narrative/trust)
+- Evidence coverage map showing what data is missing per competitor
+- A clear statement: “Similarity likely market reality” vs “Similarity likely data limitation”
+- Strict: never guess; only claim what evidence supports
+
+B) Boundary System (No conflict with Build-a-Plan)
+- This diagnostic only explains and flags; it does NOT recommend actions
+- Build-a-Plan consumes it later for decisions
+
+Hard QA Gates:
+- With mocked distinct competitors → similarity index must drop and outputs must differ
+- With mocked highly similar competitors → similarity index must rise and explain why
+- With missing data → similarity must not be asserted; must attribute to low coverage
+
+Fix Immediately if FAIL:
+- Add missing-field gating: if textual evidence insufficient, similarity claims must be disabled
+- Add regression tests preventing “same output” across unrelated competitor sets
+
+────────────────────────────────
+PHASE 4 — CTA Coverage v2 (Storytelling-Compatible, Not Keyword-Based)
+────────────────────────────────
+Objective:
+CTA is now often implicit (storytelling). Coverage must reflect intent, not just explicit CTA keywords.
+
+Deliverables:
+- Deterministic intent classifier already exists; ensure it is the sole CTA logic in CI
+- Coverage = % content with conversion intent (explicit OR implicit)
+- If text insufficient → missingSignalFlags.ctaPatterns + confidence downgrade reason
+
+Hard QA Gates:
+- Dataset with only implicit CTAs → coverage > 0 and categorized as Narrative/Soft
+- No false “0% CTA” when captions clearly carry intent
+
+Fix Immediately if FAIL:
+- Expand Arabic + English narrative intent patterns
+- Add minimum text length checks and disable scoring when below threshold
+
+────────────────────────────────
+PHASE 5 — Presentation Upgrade (Better UX Without Breaking Single-Track)
+────────────────────────────────
+Objective:
+Market Overview must feel useful, but we will NOT duplicate actions here (actions remain in Build-a-Plan).
+
+Deliverables:
+A) Presentation Layer ONLY (Read-Only)
+- Add a small presenter/mapping layer:
+  - snapshot → 3 cards: Reality / Weakness / Opportunity
+  - each card must show evidence bullets + confidence level
+- Dominance “red flags” must be explained as:
+  - what it means
+  - which signals caused it
+  - what data is missing
+  - NOT “do this action”
+
+B) Keep sub-tabs intact:
+- Overview / Dominance / Actions / History remain
+- “Actions” tab must not become execution actions; rename internally if needed to “Implications” (optional)
+- No new engine calls; no new data acquisition triggered by tab switches
+
+Hard QA Gates:
+- Switching tabs triggers zero new fetch/recompute
+- Build-a-Plan remains the only place that generates actionable steps
+- UI must clearly show confidence and missing-signal reasons (so red flags feel justified, not random)
+
+Fix Immediately if FAIL:
+- Remove any action-like phrasing from CI
+- Add signal→reason mapping under each red flag
+
+────────────────────────────────
+PHASE 6 — Strategy Weighting Modes (Reach vs Strategy) + Engagement Bias Guard
+────────────────────────────────
+Objective:
+Avoid over-weighting engagement signals when the client’s goal may be reach/sales, and avoid forcing “CTA-heavy” strategy when storytelling is deliberate.
+
+Deliverables:
+- Add a “Goal Mode” selector (config) that MIv3 outputs can carry:
+  - REACH_MODE (less punitive on soft CTA, more weight on distribution + reach signals)
+  - STRATEGY_MODE (balanced)
+- MIv3 must surface: “engagement-weight bias risk” when engagement dominates signals
+- Build-a-Plan decides the final plan using this mode (single-track ownership)
+
+Hard QA Gates:
+- Same dataset with different Goal Mode changes weights and output emphasis
+- No contradictions: mode must be explicit in snapshot metadata
+
+Fix Immediately if FAIL:
+- Add deterministic weight table and tests verifying weight application
+- Ensure mode never triggers new engine conflicts
+
+────────────────────────────────
+PASS/FAIL RESPONSE FORMAT (MANDATORY)
+────────────────────────────────
+Reply with:
+PHASE 1: PASS/FAIL + evidence
+PHASE 2: PASS/FAIL + evidence
+PHASE 3: PASS/FAIL + evidence
+PHASE 4: PASS/FAIL + evidence
+PHASE 5: PASS/FAIL + evidence
+PHASE 6: PASS/FAIL + evidence
+
+If any FAIL:
+- apply “Fix Immediately” items
+- re-run torture tests
+- do not mark complete until resolved
+
+No vague confirmations. Evidence must include: logs, stop reasons, snapshot metadata, and test results.
+
+— Samir

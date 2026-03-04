@@ -39,7 +39,8 @@ export function registerMIv3Routes(app: Express) {
 
       console.log(`[MIv3-Route] POST /api/ci/mi-v3/analyze | mode=${mode} | accountId=${accountId} | campaignId=${campaignId}`);
 
-      const result = await MarketIntelligenceV3.run(mode, accountId, campaignId, forceRefresh);
+      const goalMode = (req.body.goalMode === "REACH_MODE" ? "REACH_MODE" : "STRATEGY_MODE") as import("./types").GoalMode;
+      const result = await MarketIntelligenceV3.run(mode, accountId, campaignId, forceRefresh, goalMode);
 
       return res.json({
         success: true,
@@ -93,7 +94,8 @@ export function registerMIv3Routes(app: Express) {
 
       console.log(`[MIv3-Route] POST /api/ci/mi-v3/refresh | manual refresh | campaignId=${campaignId}`);
 
-      const result = await MarketIntelligenceV3.run("overview", accountId, campaignId, true);
+      const goalMode = (req.body.goalMode === "REACH_MODE" ? "REACH_MODE" : "STRATEGY_MODE") as import("./types").GoalMode;
+      const result = await MarketIntelligenceV3.run("overview", accountId, campaignId, true, goalMode);
 
       return res.json({
         success: true,

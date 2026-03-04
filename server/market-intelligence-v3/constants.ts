@@ -17,11 +17,11 @@
  * All snapshots with analysisVersion !== ENGINE_VERSION are cache-rejected
  * and recomputed on next access. Unnecessary bumps cause recompute storms.
  */
-export const ENGINE_VERSION = 8;
+export const ENGINE_VERSION = 9;
 
 export const MI_THRESHOLDS = {
-  MIN_POSTS_PER_COMPETITOR: 30,
-  MIN_COMMENTS_SAMPLE: 100,
+  MIN_POSTS_PER_COMPETITOR: 14,
+  MIN_COMMENTS_SAMPLE: 50,
   MIN_ENGAGEMENT_POSTS: 15,
   MIN_POSTING_FREQUENCY_WEEKS: 4,
   MIN_COMPETITORS: 3,
@@ -73,6 +73,27 @@ export const MI_REFRESH = {
 } as const;
 
 export const MI_REVIVAL_CAP = 0.7;
+
+export const GOAL_MODE_WEIGHTS = {
+  REACH_MODE: {
+    engagement: 0.35,
+    frequency: 0.25,
+    cta: 0.10,
+    innovation: 0.10,
+    sentiment: 0.15,
+    coverage: 0.05,
+  },
+  STRATEGY_MODE: {
+    engagement: 0.15,
+    frequency: 0.15,
+    cta: 0.20,
+    innovation: 0.20,
+    sentiment: 0.15,
+    coverage: 0.15,
+  },
+} as const;
+
+export const ENGAGEMENT_BIAS_THRESHOLD = 0.50;
 
 export const MI_INTENT_WEIGHTS = {
   DEFENSIVE: {

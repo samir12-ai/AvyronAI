@@ -84,6 +84,98 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(result.ctaTypeDistribution.narrative).toBeGreaterThan(0);
       expect(result.ctaIntentScore).toBeGreaterThan(0.3);
     });
+
+    it("should detect engagement question narrative CTAs", () => {
+      const result = detectCTAIntent("What would you do if you had unlimited resources? Have you ever felt stuck in your career? Let me share my perspective.");
+      expect(result.hasCTA).toBe(true);
+      expect(result.ctaTypeDistribution.narrative).toBeGreaterThan(0);
+      expect(result.detectedPatterns).toEqual(expect.arrayContaining(["EngagementQuestion"]));
+    });
+
+    it("should detect how-to/guide narrative CTAs", () => {
+      const result = detectCTAIntent("Here are 5 tips for growing your business. A complete guide to social media marketing for beginners.");
+      expect(result.hasCTA).toBe(true);
+      expect(result.ctaTypeDistribution.narrative).toBeGreaterThan(0);
+      expect(result.detectedPatterns).toEqual(expect.arrayContaining(["HowToGuide"]));
+    });
+
+    it("should detect opinion hook narrative CTAs", () => {
+      const result = detectCTAIntent("Unpopular opinion: most marketing advice is completely wrong. The truth about what actually works in 2024.");
+      expect(result.hasCTA).toBe(true);
+      expect(result.ctaTypeDistribution.narrative).toBeGreaterThan(0);
+    });
+
+    it("should detect exclusivity trust CTAs", () => {
+      const result = detectCTAIntent("This exclusive offer is for members only. We are the industry leader in premium skincare solutions.");
+      expect(result.hasCTA).toBe(true);
+      expect(result.ctaTypeDistribution.trust).toBeGreaterThan(0);
+      expect(result.detectedPatterns).toEqual(expect.arrayContaining(["Exclusivity"]));
+    });
+
+    it("should detect Arabic narrative patterns (lesson/secret/how-to)", () => {
+      const result = detectCTAIntent("تعلمت من هذه التجربة أن النجاح يحتاج صبر. نصائح مهمة لكل مبتدئ");
+      expect(result.hasCTA).toBe(true);
+      expect(result.ctaIntentScore).toBeGreaterThan(0);
+      expect(result.ctaTypeDistribution.narrative).toBeGreaterThan(0);
+    });
+
+    it("should detect Arabic trust patterns (guarantee/exclusivity)", () => {
+      const result = detectCTAIntent("خدماتنا حصري للأعضاء فقط مع ضمان كامل على جميع المنتجات");
+      expect(result.hasCTA).toBe(true);
+      expect(result.ctaTypeDistribution.trust).toBeGreaterThan(0);
+    });
+
+    it("dataset with only implicit CTAs should produce coverage > 0", () => {
+      const implicitOnlyCaptions = [
+        "Behind the scenes of how we built this from scratch. A real talk about challenges.",
+        "What I learned after 10 years in this industry. The lesson is invaluable.",
+        "Imagine a world where everyone has access to quality education. This is how we are making it happen.",
+        "Our journey started 5 years ago in a small garage. My experience taught me resilience.",
+        "The truth about overnight success: nobody talks about the years of hard work.",
+        "How to build a sustainable business. Tips for young entrepreneurs starting out.",
+        "Trusted by 200+ clients worldwide with a proven track record of success.",
+        null,
+        "Hi",
+        "A beautiful sunset over the ocean with golden light reflecting on the water surface.",
+      ];
+
+      let ctaCount = 0;
+      for (const caption of implicitOnlyCaptions) {
+        const result = detectCTAIntent(caption);
+        if (result.hasCTA) ctaCount++;
+      }
+
+      const coverage = ctaCount / implicitOnlyCaptions.length;
+      expect(coverage).toBeGreaterThan(0);
+      expect(ctaCount).toBeGreaterThanOrEqual(5);
+    });
+
+    it("should not have false 0% CTA on value-proposition content", () => {
+      const valueContent = [
+        "Step by step guide to transform your morning routine completely.",
+        "What no one tells you about freelancing and the hidden costs involved.",
+        "Case study: how we grew revenue by 300% in just six months.",
+        "Honest review of the top 5 productivity tools for remote workers.",
+        "This is why most startups fail in their first year of operation.",
+      ];
+
+      for (const caption of valueContent) {
+        const result = detectCTAIntent(caption);
+        expect(result.hasCTA).toBe(true);
+        expect(result.ctaIntentScore).toBeGreaterThan(0);
+      }
+    });
+
+    it("minimum text length threshold should prevent scoring very short text", () => {
+      const shortTexts = ["OK", "Yes", "Hi!", "Cool", "Nice pic"];
+      for (const text of shortTexts) {
+        const result = detectCTAIntent(text);
+        expect(result.hasCTA).toBe(false);
+        expect(result.ctaIntentScore).toBe(0);
+        expect(result.missingSignalFlags.ctaPatterns).toBe(true);
+        expect(result.confidenceDowngrade).toBe(true);
+      }
+    });
   });
 
   describe("B) Engine Isolation — Single Ownership", () => {
@@ -835,7 +927,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
   });
 
   describe("N) Coverage-Aware Cooldown & State Machine Honesty", () => {
-    it("cooldown must NOT block when posts < 30 or comments < 100", async () => {
+    it("cooldown must NOT block when posts < 14 or comments < 50", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
       );
@@ -850,7 +942,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(coverageCheck).toContain("MIN_COMMENTS_THRESHOLD");
     });
 
-    it("cooldown only applies when posts >= 30 AND comments >= 100", async () => {
+    it("cooldown only applies when posts >= 14 AND comments >= 50", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
       );
@@ -858,8 +950,8 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       const commentLine = source.match(/const MIN_COMMENTS_THRESHOLD\s*=\s*(\d+)/);
       expect(thresholdLine).not.toBeNull();
       expect(commentLine).not.toBeNull();
-      expect(parseInt(thresholdLine![1])).toBe(30);
-      expect(parseInt(commentLine![1])).toBe(100);
+      expect(parseInt(thresholdLine![1])).toBe(14);
+      expect(parseInt(commentLine![1])).toBe(50);
     });
 
     it("job status must be PARTIAL_COMPLETE when coverage below thresholds (not COMPLETE)", async () => {
@@ -908,7 +1000,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
 
       const targetMatch = source.match(/const TARGET_POSTS\s*=\s*(\d+)/);
       expect(targetMatch).not.toBeNull();
-      expect(parseInt(targetMatch![1])).toBeGreaterThanOrEqual(30);
+      expect(parseInt(targetMatch![1])).toBeGreaterThanOrEqual(14);
 
       const ceilingMatch = source.match(/const INSTAGRAM_PUBLIC_API_CEILING\s*=\s*(\d+)/);
       expect(ceilingMatch).not.toBeNull();
@@ -987,7 +1079,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("paginationStopReason");
     });
 
-    it("comment generator must produce enough to approach 100 threshold", async () => {
+    it("comment generator must produce enough to approach 50 threshold", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
       );
@@ -996,28 +1088,28 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(maxCommentPostsMatch).not.toBeNull();
       expect(maxCommentsPerPostMatch).not.toBeNull();
       const maxPossible = parseInt(maxCommentPostsMatch![1]) * parseInt(maxCommentsPerPostMatch![1]);
-      expect(maxPossible).toBeGreaterThanOrEqual(100);
+      expect(maxPossible).toBeGreaterThanOrEqual(50);
     });
 
-    it("post threshold must be 30 (not 12) — 12 is page ceiling, not sufficiency", async () => {
+    it("post threshold must be 14 (not 12) — 12 is page ceiling, not sufficiency", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
       );
       expect(source).toContain("INSTAGRAM_PUBLIC_API_POST_CEILING = 12");
       const thresholdMatch = source.match(/const MIN_POSTS_THRESHOLD\s*=\s*(\d+)/);
       expect(thresholdMatch).not.toBeNull();
-      expect(parseInt(thresholdMatch![1])).toBe(30);
+      expect(parseInt(thresholdMatch![1])).toBe(14);
       expect(source).not.toContain("MIN_POSTS_THRESHOLD = INSTAGRAM_PUBLIC_API_POST_CEILING");
     });
 
-    it("fetch orchestrator must use 30 as post target (not 12)", async () => {
+    it("fetch orchestrator must use 14 as post target (not 12)", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
       );
       expect(source).toContain("INSTAGRAM_PUBLIC_API_POST_CEILING = 12");
       const targetMatch = source.match(/const MIN_POSTS_TARGET\s*=\s*(\d+)/);
       expect(targetMatch).not.toBeNull();
-      expect(parseInt(targetMatch![1])).toBe(30);
+      expect(parseInt(targetMatch![1])).toBe(14);
       expect(source).not.toContain("MIN_POSTS_TARGET = INSTAGRAM_PUBLIC_API_POST_CEILING");
     });
 
@@ -1028,7 +1120,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("INSUFFICIENT_DATA");
       expect(source).toContain("coverageSufficient");
       const thresholdMatch = source.match(/const MIN_POSTS_THRESHOLD\s*=\s*(\d+)/);
-      expect(parseInt(thresholdMatch![1])).toBe(30);
+      expect(parseInt(thresholdMatch![1])).toBe(14);
       expect(source).toContain("persistedPostCount >= MIN_POSTS_THRESHOLD");
       expect(source).toContain("persistedCommentCount >= MIN_COMMENTS_THRESHOLD");
       const insufficientIdx = source.indexOf("} else if (persistedPostCount >= 5)");
@@ -1062,8 +1154,8 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(foSource).not.toContain("MIN_POSTS_TARGET = INSTAGRAM_PUBLIC_API_POST_CEILING");
       const daThreshold = daSource.match(/const MIN_POSTS_THRESHOLD\s*=\s*(\d+)/);
       const foTarget = foSource.match(/const MIN_POSTS_TARGET\s*=\s*(\d+)/);
-      expect(parseInt(daThreshold![1])).toBeGreaterThanOrEqual(30);
-      expect(parseInt(foTarget![1])).toBeGreaterThanOrEqual(30);
+      expect(parseInt(daThreshold![1])).toBeGreaterThanOrEqual(14);
+      expect(parseInt(foTarget![1])).toBeGreaterThanOrEqual(14);
     });
 
     it("data atomicity: delete + insert wrapped in transaction", async () => {
@@ -1098,7 +1190,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       );
       expect(source).toContain("#F97316");
       const postLine = source.slice(source.indexOf("Posts collected"), source.indexOf("Posts collected") + 200);
-      expect(postLine).toContain("30");
+      expect(postLine).toContain("14");
       expect(postLine).toContain("#10B981");
       expect(postLine).toContain("#F97316");
     });

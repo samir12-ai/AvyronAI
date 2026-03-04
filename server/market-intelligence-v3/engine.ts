@@ -7,6 +7,7 @@ import { computeTrajectory, deriveTrajectoryDirection, deriveMarketState } from 
 import { computeConfidence } from "./confidence-engine";
 import { computeAllDominance } from "./dominance-module";
 import { computeTokenBudget, applySampling } from "./token-budget";
+import { computeSimilarityDiagnosis } from "./similarity-engine";
 import type {
   MIv3Mode,
   MIv3Output,
@@ -15,6 +16,8 @@ import type {
   TelemetryRecord,
   TwoRunConfirmation,
   ExecutionMode,
+  GoalMode,
+  SimilarityResult,
 } from "./types";
 import { MI_CONFIDENCE, ENGINE_VERSION } from "./constants";
 import { validateEngineIsolation } from "./isolation-guard";
@@ -291,6 +294,7 @@ export class MarketIntelligenceV3 {
     accountId: string,
     campaignId: string,
     forceRefresh: boolean = false,
+    goalMode: GoalMode = "STRATEGY_MODE",
   ): Promise<MIv3DiagnosticResult> {
     const lockKey = `${accountId}:${campaignId}`;
 
@@ -300,7 +304,7 @@ export class MarketIntelligenceV3 {
       return existingLock;
     }
 
-    const runPromise = this._executeRun(mode, accountId, campaignId, forceRefresh);
+    const runPromise = this._executeRun(mode, accountId, campaignId, forceRefresh, goalMode);
     activeLocks.set(lockKey, runPromise);
 
     try {
@@ -316,6 +320,7 @@ export class MarketIntelligenceV3 {
     accountId: string,
     campaignId: string,
     forceRefresh: boolean,
+    goalMode: GoalMode = "STRATEGY_MODE",
   ): Promise<MIv3DiagnosticResult> {
     console.log(`[MIv3] MARKET_OVERVIEW_DIAGNOSTIC_RUN | mode=${mode} | accountId=${accountId} | campaignId=${campaignId}`);
 
@@ -359,13 +364,14 @@ export class MarketIntelligenceV3 {
     const dominantIntent = computeDominantMarketIntent(intents);
     const trajectory = computeTrajectory(signalResults, intents);
     const confidence = computeConfidence(signalResults, dataFreshnessDays);
-    const dominanceResults = computeAllDominance(signalResults, confidence);
+    const dominanceResults = computeAllDominance(signalResults, confidence, goalMode);
     const missingFlags = aggregateMissingFlags(signalResults);
     const volatilityIndex = computeVolatilityIndex(signalResults);
     const trajectoryDirection = deriveTrajectoryDirection(trajectory);
     const marketState = deriveMarketState(trajectory, confidence.level);
     const entryStrategy = buildEntryStrategy(confidence, trajectory, dominantIntent);
     const defensiveRisks = buildDefensiveRisks(confidence, trajectory, intents);
+    const similarityData = computeSimilarityDiagnosis(competitors, signalResults);
 
     const previousSnapshots = await db.select().from(miSnapshots)
       .where(and(
@@ -445,6 +451,7 @@ export class MarketIntelligenceV3 {
       entryStrategy,
       defensiveRisks: JSON.stringify(defensiveRisks),
       missingSignalFlags: JSON.stringify(missingFlags),
+      similarityData: JSON.stringify(similarityData),
       volatilityIndex,
       dataFreshnessDays,
       overallConfidence: confidence.overall,
@@ -454,6 +461,7 @@ export class MarketIntelligenceV3 {
       confirmedRuns,
       previousDirection: trajectoryDirection,
       directionLockedUntil: directionLockedUntil ? new Date(directionLockedUntil) : null,
+      goalMode,
     };
 
     const snapshot = await persistValidatedSnapshot(snapshotPayload, "engine._executeRun");
@@ -509,11 +517,13 @@ export class MarketIntelligenceV3 {
       snapshotId: snapshot.id,
       snapshotStatus: snapshot.status === "COMPLETE" ? "COMPLETE" as const : "PARTIAL" as const,
       executionMode,
+      goalMode,
       telemetry,
       dominanceData: dominanceResults,
       trajectoryData: trajectory,
       signalGuard: guard,
       twoRunStatus,
+      similarityData,
       cached: false,
       cacheInvalidationReason,
       snapshotSource: "FRESH_DATA" as const,
@@ -555,6 +565,7 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
   });
   const defensiveRisks = parseJsonSafe(snapshot.defensiveRisks, []);
   const missingFlags = parseJsonSafe(snapshot.missingSignalFlags, []);
+  const similarityData = parseJsonSafe(snapshot.similarityData, null);
 
   const output: MIv3Output = {
     marketState: snapshot.marketState || "INSUFFICIENT_DATA",
@@ -576,6 +587,7 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
     snapshotId: snapshot.id,
     snapshotStatus: (snapshot.status === "COMPLETE" ? "COMPLETE" : "PARTIAL") as "COMPLETE" | "PARTIAL",
     executionMode: snapshot.executionMode as ExecutionMode,
+    goalMode: (snapshot.goalMode as GoalMode) || "STRATEGY_MODE",
     telemetry,
     dominanceData,
     trajectoryData,
@@ -597,6 +609,7 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
       currentDirection: snapshot.previousDirection || "STABLE",
       directionStable: true,
     },
+    similarityData,
     cached: true,
     cacheInvalidationReason: null,
     snapshotSource: (snapshot.snapshotSource as "FRESH_DATA" | "CACHED_DATA") || "FRESH_DATA",

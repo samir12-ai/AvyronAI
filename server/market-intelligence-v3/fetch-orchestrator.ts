@@ -11,6 +11,7 @@ import { computeTokenBudget, applySampling } from "./token-budget";
 import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
 import { computeCompetitorHash } from "./utils";
 import { computeVolatilityIndex, buildEntryStrategy, buildDefensiveRisks, buildDeterministicNarrative, persistValidatedSnapshot, ENGINE_VERSION } from "./engine";
+import { computeSimilarityDiagnosis } from "./similarity-engine";
 import type { CompetitorInput } from "./types";
 import { logAudit } from "../audit";
 import { acquireStickySession, releaseStickySession, rotateSessionOnBlock, classifyBlock, logProxyTelemetry, getPoolDiagnostics, type StickySessionContext, type BlockClass } from "../competitive-intelligence/proxy-pool-manager";
@@ -18,8 +19,10 @@ import { acquireToken, getBucketState } from "../competitive-intelligence/rate-l
 
 const FETCH_COOLDOWN_MS = 72 * 60 * 60 * 1000;
 const INSTAGRAM_PUBLIC_API_POST_CEILING = 12;
-const MIN_POSTS_TARGET = 30;
-const MIN_COMMENTS_TARGET = 100;
+const MIN_POSTS_TARGET = 14;
+const MIN_COMMENTS_TARGET = 50;
+const DEFAULT_TIME_WINDOW_DAYS = 60;
+const EXPANDED_TIME_WINDOW_DAYS = 120;
 const MAX_RETRIES = 3;
 const MAX_PAGES_PER_COMPETITOR = 5;
 const MAX_REQUESTS_PER_JOB = 50;
@@ -567,7 +570,7 @@ async function executeFetchJob(
     }
 
     const anyInsufficientData = Object.values(stages).some(
-      s => s.postsFetched !== undefined && (s.postsFetched < 30 || (s.commentsFetched || 0) < 100)
+      s => s.postsFetched !== undefined && (s.postsFetched < MIN_POSTS_TARGET || (s.commentsFetched || 0) < MIN_COMMENTS_TARGET)
     );
 
     let finalJobStatus: string;
@@ -577,11 +580,12 @@ async function executeFetchJob(
       finalJobStatus = "COMPLETE_WITH_COOLDOWN";
     } else if (anyInsufficientData && !allCooldown) {
       finalJobStatus = "PARTIAL_COMPLETE";
+      if (stopReason === "COMPLETE") stopReason = "COMPLETE" as StopReason;
     } else {
       finalJobStatus = "COMPLETE";
     }
 
-    const finalStopReason = stopReason !== "COMPLETE" ? stopReason : null;
+    const finalStopReason = stopReason !== "COMPLETE" ? stopReason : (anyInsufficientData ? "COMPLETE" : null);
 
     await db.update(miFetchJobs).set({
       status: finalJobStatus,
@@ -692,12 +696,16 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   }
 
   const signalResults = computeAllSignals(competitorInputs);
-  const dataFreshnessDays = signalResults.length > 0 ? Math.max(...signalResults.map(r => r.timeWindowDays || 0)) : 0;
+  let dataFreshnessDays = signalResults.length > 0 ? Math.max(...signalResults.map(r => r.timeWindowDays || 0)) : 0;
+  if (totalPosts < MIN_POSTS_TARGET && dataFreshnessDays <= DEFAULT_TIME_WINDOW_DAYS) {
+    dataFreshnessDays = EXPANDED_TIME_WINDOW_DAYS;
+    console.log(`[FetchOrch] Dynamic time window expanded to ${EXPANDED_TIME_WINDOW_DAYS} days due to insufficient posts (${totalPosts}/${MIN_POSTS_TARGET})`);
+  }
   const intents = classifyAllIntents(signalResults);
   const dominantIntent = computeDominantMarketIntent(intents);
   const trajectory = computeTrajectory(signalResults, intents);
   const confidence = computeConfidence(signalResults, dataFreshnessDays);
-  const dominanceResults = computeAllDominance(signalResults, confidence);
+  const dominanceResults = computeAllDominance(signalResults, confidence, "STRATEGY_MODE");
   let missingFlags = aggregateMissingFlags(signalResults);
   const trajectoryDirection = deriveTrajectoryDirection(trajectory);
   const marketState = deriveMarketState(trajectory, confidence.level);
@@ -729,6 +737,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   const volatilityIndex = computeVolatilityIndex(signalResults);
   const entryStrategy = buildEntryStrategy(confidence, trajectory, dominantIntent);
   const defensiveRisks = buildDefensiveRisks(confidence, trajectory, intents);
+  const similarityData = computeSimilarityDiagnosis(competitorInputs, signalResults);
 
   let narrativeSynthesis: string | null = null;
   if (executionMode !== "LIGHT" && confidence.guardDecision !== "BLOCK") {
@@ -786,6 +795,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     entryStrategy,
     defensiveRisks: JSON.stringify(defensiveRisks),
     missingSignalFlags: JSON.stringify(missingFlags),
+    similarityData: JSON.stringify(similarityData),
     volatilityIndex,
     dataFreshnessDays,
     overallConfidence: confidence.overall,
@@ -795,6 +805,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     confirmedRuns: (previousSnapshot?.confirmedRuns || 0) + 1,
     previousDirection: trajectoryDirection,
     directionLockedUntil: null,
+    goalMode: "STRATEGY_MODE",
   };
 
   const snapshot = await persistValidatedSnapshot(snapshotPayload, "fetch-orchestrator.persistSnapshotAfterFetch");

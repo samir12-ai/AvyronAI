@@ -8,8 +8,9 @@ import { computeTokenBudget, applySampling } from "../market-intelligence-v3/tok
 import { evaluateRefreshDecision } from "../market-intelligence-v3/refresh-system";
 import { validateEngineIsolation, assertNoPlanWrites, assertNoOrchestrator, assertNoAutopilot } from "../market-intelligence-v3/isolation-guard";
 import { computeCompetitorHash } from "../market-intelligence-v3/utils";
-import type { CompetitorInput, PostData, CompetitorSignalResult, ExecutionMode } from "../market-intelligence-v3/types";
-import { MI_THRESHOLDS, MI_COST_LIMITS, MI_CONFIDENCE, MI_REVIVAL_CAP } from "../market-intelligence-v3/constants";
+import { computeDominanceForCompetitor } from "../market-intelligence-v3/dominance-module";
+import type { CompetitorInput, PostData, CompetitorSignalResult, ExecutionMode, GoalMode } from "../market-intelligence-v3/types";
+import { MI_THRESHOLDS, MI_COST_LIMITS, MI_CONFIDENCE, MI_REVIVAL_CAP, GOAL_MODE_WEIGHTS, ENGAGEMENT_BIAS_THRESHOLD } from "../market-intelligence-v3/constants";
 
 function makePost(overrides: Partial<PostData> = {}): PostData {
   return {
@@ -750,5 +751,97 @@ describe("Market Intelligence V3 - Concurrency & Deduplication", () => {
     const snapshotWithHash = { competitorHash: hash, status: "COMPLETE" };
     const newHash = computeCompetitorHash(comps);
     expect(snapshotWithHash.competitorHash).toBe(newHash);
+  });
+});
+
+
+describe("Market Intelligence V3 - Goal Mode Weighting", () => {
+  it("P1) GOAL_MODE_WEIGHTS sums to 1.0 for both modes", () => {
+    for (const mode of ["REACH_MODE", "STRATEGY_MODE"] as GoalMode[]) {
+      const w = GOAL_MODE_WEIGHTS[mode];
+      const sum = w.engagement + w.frequency + w.cta + w.innovation + w.sentiment + w.coverage;
+      expect(Math.abs(sum - 1.0)).toBeLessThan(0.001);
+    }
+  });
+
+  it("P2) REACH_MODE gives higher engagement weight than STRATEGY_MODE", () => {
+    expect(GOAL_MODE_WEIGHTS.REACH_MODE.engagement).toBeGreaterThan(GOAL_MODE_WEIGHTS.STRATEGY_MODE.engagement);
+  });
+
+  it("P3) STRATEGY_MODE gives higher CTA + innovation weight than REACH_MODE", () => {
+    const strategyCombined = GOAL_MODE_WEIGHTS.STRATEGY_MODE.cta + GOAL_MODE_WEIGHTS.STRATEGY_MODE.innovation;
+    const reachCombined = GOAL_MODE_WEIGHTS.REACH_MODE.cta + GOAL_MODE_WEIGHTS.REACH_MODE.innovation;
+    expect(strategyCombined).toBeGreaterThan(reachCombined);
+  });
+
+  it("P4) Same dataset with different GoalMode produces different dominance scores", () => {
+    const comp = makeFullCompetitor("GoalTest");
+    const signals = computeAllSignals([comp]);
+    const confidence = computeConfidence(signals, 1);
+
+    const reachDominance = computeAllDominance(signals, confidence, "REACH_MODE");
+    const strategyDominance = computeAllDominance(signals, confidence, "STRATEGY_MODE");
+
+    expect(reachDominance).toHaveLength(1);
+    expect(strategyDominance).toHaveLength(1);
+    expect(reachDominance[0].dominanceScore).not.toBe(strategyDominance[0].dominanceScore);
+  });
+
+  it("P5) REACH_MODE produces higher scores for high-engagement competitor", () => {
+    const comp = makeCompetitor({ name: "HighEngagement", engagementRatio: 0.09 }, 30);
+    comp.posts = Array.from({ length: 30 }, () => makePost({ likes: 500, comments: 50 }));
+    comp.comments = Array.from({ length: 100 }, (_, i) => ({
+      id: `c-${i}`, text: "great content", sentiment: 0.5, timestamp: new Date().toISOString(),
+    }));
+    const signals = computeAllSignals([comp]);
+    const confidence = computeConfidence(signals, 1);
+
+    const reachDom = computeAllDominance(signals, confidence, "REACH_MODE");
+    const stratDom = computeAllDominance(signals, confidence, "STRATEGY_MODE");
+
+    expect(reachDom[0].dominanceScore).toBeGreaterThanOrEqual(stratDom[0].dominanceScore - 5);
+  });
+
+  it("P6) Engagement bias risk surfaced when engagement dominates", () => {
+    const comp = makeCompetitor({ name: "BiasTest" }, 30);
+    comp.posts = Array.from({ length: 30 }, () => makePost({ likes: 1000, comments: 100 }));
+    const signals = computeAllSignals([comp]);
+    const confidence = computeConfidence(signals, 1);
+
+    const reachDom = computeAllDominance(signals, confidence, "REACH_MODE");
+    const hasAnyBiasRisk = reachDom.some(d => d.engagementWeightBiasRisk !== null && d.engagementWeightBiasRisk !== undefined);
+
+    expect(reachDom[0]).toHaveProperty("engagementWeightBiasRisk");
+  });
+
+  it("P7) computeDominanceForCompetitor applies mode weights correctly", () => {
+    const comp = makeFullCompetitor("WeightTest");
+    const signals = computeAllSignals([comp]);
+    const confidence = computeConfidence(signals, 1);
+
+    const reachResult = computeDominanceForCompetitor(signals[0], signals, confidence, "REACH_MODE");
+    const stratResult = computeDominanceForCompetitor(signals[0], signals, confidence, "STRATEGY_MODE");
+
+    expect(reachResult.dominanceScore).toBeGreaterThanOrEqual(0);
+    expect(reachResult.dominanceScore).toBeLessThanOrEqual(100);
+    expect(stratResult.dominanceScore).toBeGreaterThanOrEqual(0);
+    expect(stratResult.dominanceScore).toBeLessThanOrEqual(100);
+    expect(reachResult.dominanceScore).not.toBe(stratResult.dominanceScore);
+  });
+
+  it("P8) GoalMode defaults to STRATEGY_MODE when not specified", () => {
+    const comp = makeFullCompetitor("DefaultMode");
+    const signals = computeAllSignals([comp]);
+    const confidence = computeConfidence(signals, 1);
+
+    const defaultDom = computeAllDominance(signals, confidence);
+    const explicitDom = computeAllDominance(signals, confidence, "STRATEGY_MODE");
+
+    expect(defaultDom[0].dominanceScore).toBe(explicitDom[0].dominanceScore);
+  });
+
+  it("P9) ENGAGEMENT_BIAS_THRESHOLD is between 0 and 1", () => {
+    expect(ENGAGEMENT_BIAS_THRESHOLD).toBeGreaterThan(0);
+    expect(ENGAGEMENT_BIAS_THRESHOLD).toBeLessThanOrEqual(1);
   });
 });

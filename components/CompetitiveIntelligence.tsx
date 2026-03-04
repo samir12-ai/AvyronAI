@@ -289,7 +289,7 @@ export default function CompetitiveIntelligence() {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             Alert.alert(
               'Partial Data Collected',
-              `${data.totalPostsFetched} posts, ${data.totalCommentsFetched} comments collected.\nBelow coverage thresholds (30 posts / 100 comments per competitor).\nNext fetch will bypass cooldown to collect more data.`
+              `${data.totalPostsFetched} posts, ${data.totalCommentsFetched} comments collected.\nBelow coverage thresholds (14 posts / 50 comments per competitor).\nNext fetch will bypass cooldown to collect more data.`
             );
           } else if (data.status === 'COMPLETE_WITH_COOLDOWN') {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -538,7 +538,7 @@ export default function CompetitiveIntelligence() {
           </View>
           {fetchJobStatus.status === 'PARTIAL_COMPLETE' && (
             <View style={{ backgroundColor: '#F97316' + '15', borderRadius: 6, padding: 6, marginBottom: 6 }}>
-              <Text style={{ fontSize: 10, fontWeight: '600', color: '#F97316' }}>Coverage below minimum thresholds (30 posts / 100 comments). Next fetch will bypass cooldown to collect more data.</Text>
+              <Text style={{ fontSize: 10, fontWeight: '600', color: '#F97316' }}>Coverage below minimum thresholds (14 posts / 50 comments). Next fetch will bypass cooldown to collect more data.</Text>
             </View>
           )}
           {fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN' && (
@@ -660,11 +660,11 @@ export default function CompetitiveIntelligence() {
                   <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6', marginBottom: 2 }}>DATA COVERAGE</Text>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                     <Text style={{ fontSize: 11, color: colors.textMuted }}>Posts collected</Text>
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.postsCollected || 0) >= 30 ? '#10B981' : '#F97316' }}>{dc?.postsCollected || 0} / 30</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.postsCollected || 0) >= 14 ? '#10B981' : '#F97316' }}>{dc?.postsCollected || 0} / 14</Text>
                   </View>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                     <Text style={{ fontSize: 11, color: colors.textMuted }}>Comments collected</Text>
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.commentsCollected || 0) >= 100 ? '#10B981' : '#F97316' }}>{dc?.commentsCollected || 0} / 100</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.commentsCollected || 0) >= 50 ? '#10B981' : '#F97316' }}>{dc?.commentsCollected || 0} / 50</Text>
                   </View>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                     <Text style={{ fontSize: 11, color: colors.textMuted }}>CTA coverage</Text>
@@ -791,6 +791,194 @@ export default function CompetitiveIntelligence() {
       )}
     </View>
   );
+
+  const buildInsightCards = useCallback(() => {
+    if (!miv3Result) return { reality: [], weaknesses: [], opportunities: [] };
+    const domData = miv3Result?.dominanceData || [];
+    const output = miv3Result?.output;
+    const confidence = output?.confidence;
+    const intentMap = output?.competitorIntentMap || [];
+    const missingSignals = output?.missingSignalFlags || [];
+    const trajectory = miv3Result?.trajectoryData;
+
+    const reality: { text: string; source: string }[] = [];
+    const weaknesses: { text: string; source: string }[] = [];
+    const opportunities: { text: string; source: string }[] = [];
+
+    const dominantCompetitors = domData.filter((d: any) => d.dominanceLevel === 'DOMINANT' || d.dominanceLevel === 'STRUCTURALLY_STRONG');
+    const weakCompetitors = domData.filter((d: any) => d.dominanceLevel === 'WEAK' || d.dominanceLevel === 'EXPOSED');
+
+    if (dominantCompetitors.length > 0) {
+      reality.push({ text: `${dominantCompetitors.length} competitor(s) hold dominant or structurally strong positions`, source: 'dominance_score' });
+    }
+    if (output?.marketState) {
+      reality.push({ text: `Market state: ${output.marketState.replace(/_/g, ' ')}`, source: 'trajectory_engine' });
+    }
+    if (output?.dominantIntentType) {
+      reality.push({ text: `Dominant market intent: ${output.dominantIntentType.replace(/_/g, ' ')}`, source: 'intent_engine' });
+    }
+    if (confidence) {
+      reality.push({ text: `Analysis confidence: ${confidence.level} (${Math.round((confidence.overall || 0) * 100)}%)`, source: 'confidence_engine' });
+    }
+    if (trajectory?.marketHeatingIndex > 0.6) {
+      reality.push({ text: `Market heating index elevated at ${Math.round(trajectory.marketHeatingIndex * 100)}%`, source: 'trajectory_index' });
+    }
+
+    domData.forEach((dom: any) => {
+      if (dom.weaknesses?.length > 0) {
+        dom.weaknesses.forEach((w: string) => {
+          weaknesses.push({ text: `${dom.competitorName}: ${w}`, source: 'dominance_analysis' });
+        });
+      }
+      if (dom.engagementWeightBiasRisk) {
+        weaknesses.push({ text: `${dom.competitorName}: ${dom.engagementWeightBiasRisk}`, source: 'engagement_bias_detector' });
+      }
+    });
+
+    if (missingSignals.length > 0) {
+      weaknesses.push({ text: `${missingSignals.length} signal gap(s) detected in data coverage`, source: 'signal_guard' });
+    }
+
+    if (weakCompetitors.length > 0) {
+      opportunities.push({ text: `${weakCompetitors.length} competitor(s) show weak or exposed positioning`, source: 'dominance_score' });
+    }
+    if (trajectory?.revivalPotential > 0.5) {
+      opportunities.push({ text: `Revival potential detected (${Math.round(trajectory.revivalPotential * 100)}%) — declining competitors may leave gaps`, source: 'trajectory_revival' });
+    }
+    if (trajectory?.angleSaturationLevel < 0.4) {
+      opportunities.push({ text: `Low angle saturation (${Math.round(trajectory.angleSaturationLevel * 100)}%) — content differentiation space available`, source: 'trajectory_saturation' });
+    }
+    if (trajectory?.offerCompressionIndex < 0.3) {
+      opportunities.push({ text: `Low offer compression — room for premium positioning`, source: 'trajectory_offer' });
+    }
+
+    const aggressiveIntents = intentMap.filter((im: any) => im.intentCategory === 'AGGRESSIVE_SCALING' || im.intentCategory === 'PRICE_WAR');
+    if (aggressiveIntents.length > 0) {
+      reality.push({ text: `${aggressiveIntents.length} competitor(s) in aggressive or price war stance`, source: 'intent_engine' });
+    }
+
+    const decliningIntents = intentMap.filter((im: any) => im.intentCategory === 'DECLINING');
+    if (decliningIntents.length > 0) {
+      opportunities.push({ text: `${decliningIntents.length} competitor(s) showing declining intent — potential market share capture`, source: 'intent_engine' });
+    }
+
+    return { reality, weaknesses, opportunities };
+  }, [miv3Result]);
+
+  const renderInsightCards = () => {
+    if (!miv3Result) return null;
+    const { reality, weaknesses, opportunities } = buildInsightCards();
+    const confLevel = miv3Result?.output?.confidence?.level || 'UNKNOWN';
+    const confColor = confLevel === 'STRONG' || confLevel === 'MODERATE' ? '#10B981' : confLevel === 'LOW' ? '#F59E0B' : '#EF4444';
+
+    const cards = [
+      { title: 'Market Reality', icon: 'eye-outline' as const, color: '#3B82F6', items: reality },
+      { title: 'Identified Weaknesses', icon: 'alert-circle-outline' as const, color: '#EF4444', items: weaknesses },
+      { title: 'Detected Opportunities', icon: 'bulb-outline' as const, color: '#10B981', items: opportunities },
+    ];
+
+    return (
+      <View style={{ gap: 10, marginBottom: 10 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+          <Ionicons name="layers-outline" size={16} color="#8B5CF6" />
+          <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }}>Intelligence Cards</Text>
+          <View style={[s.countBadge, { backgroundColor: confColor + '20' }]}>
+            <Text style={[s.countText, { color: confColor }]}>{confLevel}</Text>
+          </View>
+        </View>
+        {cards.map((card) => (
+          <View key={card.title} style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4', borderLeftWidth: 3, borderLeftColor: card.color }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <Ionicons name={card.icon} size={16} color={card.color} />
+              <Text style={{ fontSize: 13, fontWeight: '700', color: card.color }}>{card.title}</Text>
+            </View>
+            {card.items.length === 0 ? (
+              <Text style={{ fontSize: 11, color: colors.textMuted, fontStyle: 'italic' }}>No evidence detected</Text>
+            ) : (
+              card.items.map((item, j) => (
+                <View key={j} style={{ flexDirection: 'row', gap: 6, marginBottom: 5, alignItems: 'flex-start' }}>
+                  <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: card.color, marginTop: 5 }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 11, color: colors.textSecondary, lineHeight: 16 }}>{item.text}</Text>
+                    <Text style={{ fontSize: 8, color: colors.textMuted, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', marginTop: 1 }}>{item.source}</Text>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+        ))}
+      </View>
+    );
+  };
+
+  const renderSimilarityCard = () => {
+    const simData = miv3Result?.similarityData || miv3Result?.output?.similarityData;
+    if (!miv3Result || !simData) return null;
+
+    const diagnosisColor = simData.diagnosis === 'LOW_SIMILARITY' ? '#10B981'
+      : simData.diagnosis === 'SIMILARITY_LIKELY_MARKET_REALITY' ? '#3B82F6'
+      : simData.diagnosis === 'SIMILARITY_LIKELY_DATA_LIMITATION' ? '#F59E0B'
+      : '#9CA3AF';
+
+    const diagnosisLabel = simData.diagnosis === 'LOW_SIMILARITY' ? 'Low Similarity'
+      : simData.diagnosis === 'SIMILARITY_LIKELY_MARKET_REALITY' ? 'Market Reality'
+      : simData.diagnosis === 'SIMILARITY_LIKELY_DATA_LIMITATION' ? 'Data Limitation'
+      : 'Insufficient Data';
+
+    return (
+      <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4', marginBottom: 10 }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+          <Ionicons name="git-compare-outline" size={16} color="#8B5CF6" />
+          <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, flex: 1 }}>Similarity Diagnosis</Text>
+          <View style={[s.threatBadge, { backgroundColor: diagnosisColor + '20' }]}>
+            <Text style={{ fontSize: 10, fontWeight: '600', color: diagnosisColor }}>{diagnosisLabel}</Text>
+          </View>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <Text style={{ fontSize: 11, color: colors.textMuted }}>Overall Similarity</Text>
+          <View style={[s.qualityBar, { flex: 1, marginVertical: 0 }]}>
+            <View style={[s.qualityFill, { width: `${Math.round(simData.overallSimilarityIndex * 100)}%`, backgroundColor: diagnosisColor }]} />
+          </View>
+          <Text style={{ fontSize: 11, fontWeight: '700', color: diagnosisColor }}>{Math.round(simData.overallSimilarityIndex * 100)}%</Text>
+        </View>
+        {simData.dimensions && Object.entries(simData.dimensions).map(([key, dim]: [string, any]) => (
+          <View key={key} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <Text style={{ fontSize: 10, color: colors.textMuted, width: 85 }}>{key.replace(/([A-Z])/g, ' $1').trim()}</Text>
+            <View style={[s.qualityBar, { flex: 1, marginVertical: 0, height: 4 }]}>
+              <View style={[s.qualityFill, { width: `${Math.round(dim.score * 100)}%`, backgroundColor: dim.sufficient ? '#3B82F6' : '#9CA3AF' }]} />
+            </View>
+            <Text style={{ fontSize: 9, fontWeight: '600', color: dim.sufficient ? '#3B82F6' : '#9CA3AF' }}>{Math.round(dim.score * 100)}%</Text>
+          </View>
+        ))}
+        {simData.explanation && (
+          <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 6, lineHeight: 15, fontStyle: 'italic' }}>{simData.explanation}</Text>
+        )}
+      </View>
+    );
+  };
+
+  const renderGoalModeCard = () => {
+    if (!miv3Result) return null;
+    const goalMode = miv3Result?.goalMode || miv3Result?.output?.goalMode || 'STRATEGY_MODE';
+    const modeColor = goalMode === 'REACH_MODE' ? '#3B82F6' : '#8B5CF6';
+    const modeLabel = goalMode === 'REACH_MODE' ? 'Reach Mode' : 'Strategy Mode';
+    const modeDesc = goalMode === 'REACH_MODE'
+      ? 'Engagement and visibility signals weighted higher. Best for brand awareness campaigns.'
+      : 'CTA, innovation, and strategic signals weighted equally. Best for conversion-focused campaigns.';
+
+    return (
+      <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4', marginBottom: 10 }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+          <Ionicons name="options-outline" size={16} color={modeColor} />
+          <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, flex: 1 }}>Analysis Mode</Text>
+          <View style={[s.threatBadge, { backgroundColor: modeColor + '20' }]}>
+            <Text style={{ fontSize: 10, fontWeight: '600', color: modeColor }}>{modeLabel}</Text>
+          </View>
+        </View>
+        <Text style={{ fontSize: 11, color: colors.textMuted, lineHeight: 16 }}>{modeDesc}</Text>
+      </View>
+    );
+  };
 
   const renderOverview = () => {
     if (!miv3Result) {
@@ -977,6 +1165,9 @@ export default function CompetitiveIntelligence() {
           </View>
         )}
 
+        {renderInsightCards()}
+        {renderSimilarityCard()}
+        {renderGoalModeCard()}
 
         <View style={s.actionRow}>
           <Pressable
@@ -1053,9 +1244,33 @@ export default function CompetitiveIntelligence() {
               {dom.weaknesses?.length > 0 && (
                 <View style={{ marginTop: 6 }}>
                   <Text style={{ fontSize: 10, fontWeight: '600', color: '#EF4444', marginBottom: 2 }}>Weaknesses</Text>
-                  {dom.weaknesses.map((w: string, j: number) => (
-                    <Text key={j} style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>- {w}</Text>
-                  ))}
+                  {dom.weaknesses.map((w: string, j: number) => {
+                    const signalMap: Record<string, string> = {
+                      'Declining posting frequency': 'postingFrequencyTrend < -0.2 — fewer posts over time',
+                      'Unstable engagement': 'engagementVolatility > 0.6 — inconsistent audience response',
+                      'Weakening CTA presence': 'ctaIntensityShift < -0.1 — reduced calls to action',
+                      'Frequent offer changes (instability)': 'offerLanguageChange > 0.3 — shifting pricing/value messaging',
+                      'High hashtag drift (unclear positioning)': 'hashtagDriftScore > 0.6 — repositioning or unfocused strategy',
+                      'Declining audience sentiment': 'sentimentDrift < -0.1 — audience becoming more negative',
+                      'Low content innovation': 'contentExperimentRate < 0.1 — stagnant content approach',
+                    };
+                    const explanation = signalMap[w];
+                    return (
+                      <View key={j} style={{ marginTop: 3 }}>
+                        <Text style={{ fontSize: 10, color: colors.textMuted }}>- {w}</Text>
+                        {explanation && (
+                          <Text style={{ fontSize: 8, color: '#EF4444', marginLeft: 10, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', marginTop: 1 }}>{explanation}</Text>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+
+              {dom.engagementWeightBiasRisk && (
+                <View style={{ marginTop: 6, backgroundColor: '#F59E0B' + '10', borderRadius: 6, padding: 6 }}>
+                  <Text style={{ fontSize: 10, fontWeight: '600', color: '#F59E0B' }}>Engagement Bias Risk</Text>
+                  <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>{dom.engagementWeightBiasRisk}</Text>
                 </View>
               )}
 
