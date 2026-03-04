@@ -1,0 +1,64 @@
+
+⸻
+
+Subject: Campaign Isolation – FINAL hardening (Snapshots + Fetch Jobs + In-Memory Keys) — PASS/FAIL Required
+
+Hi Replit,
+
+Good progress on fixing competitor isolation by adding campaign_id to ci_competitors and scoping all competitor CRUD + UI query keys.
+Before we consider this closed, we must structurally seal the remaining 3 leakage vectors. No partial confirmations — reply PASS/FAIL per item with proof.
+
+⸻
+
+1) Snapshot Isolation (MIv3 output must be campaign-scoped) — REQUIRED
+
+Risk: Even if competitors are scoped, if mi_snapshots is not scoped by campaign_id, the UI can still show analysis from another campaign.
+
+Checklist (must all be PASS):
+	•	mi_snapshots table has campaign_id (NOT NULL) + index (account_id, campaign_id, created_at)
+	•	Every snapshot read path filters by campaign_id:
+	•	/api/ci/mi-v3/snapshot/:campaignId (or equivalent)
+	•	any getCachedSnapshot(...)
+	•	history endpoints (ci-miv3-history)
+	•	Cache eligibility must include campaign_id in the hash/lookup (no cross-campaign cache hits)
+
+Deliverable: show the exact SQL migration + the exact query lines where campaign_id is enforced.
+
+⸻
+
+2) Fetch Job Isolation (orchestrator must be campaign-scoped) — REQUIRED
+
+Risk: If mi_fetch_jobs isn’t tied to campaign, the system can reuse a RUNNING job or stopReason from another campaign.
+
+Checklist (must all be PASS):
+	•	mi_fetch_jobs table has campaign_id (NOT NULL) + index (account_id, campaign_id, status)
+	•	DB-level RUNNING uniqueness includes campaign_id:
+	•	unique constraint must be on (account_id, campaign_id, status='RUNNING') (or (account_id, campaign_id, competitor_hash, status='RUNNING') depending on design)
+	•	All orchestrator create/reuse queries include campaign_id
+	•	All status reads include campaign_id validation (no reading another campaign’s jobId)
+
+Deliverable: show the schema + the RUNNING uniqueness logic + sample queries.
+
+⸻
+
+3) In-Memory Keying (no cross-campaign bleed via maps) — REQUIRED
+
+Risk: Any in-memory structures like activeJobs, creationLocks, pendingSnapshotIds, etc. can bleed across campaigns if keyed only by accountId.
+
+Checklist (must all be PASS):
+	•	All maps/locks are keyed by accountId:campaignId (or a structured key containing both)
+	•	Cleanup happens on terminal states + on campaign switch
+	•	No global accountId-only locks remain
+
+Deliverable: show the key format + the locations where it is used.
+
+⸻
+
+Definition of Done (non-negotiable)
+	•	Switching campaigns shows different competitors ✅ (already addressed)
+	•	Switching campaigns shows different snapshots, jobs, and analysis ✅ (must be proven)
+	•	No shared cache hits across campaigns ✅
+	•	Reply with PASS/FAIL per section (1/2/3), and if any FAIL: include the exact fix you will apply immediately.
+
+Thanks,
+Samir

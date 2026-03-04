@@ -207,8 +207,8 @@ export default function CompetitiveIntelligence() {
     },
     onSuccess: (data: any) => {
       setMiv3Result(data);
-      queryClient.invalidateQueries({ queryKey: ['ci-miv3-history'] });
-      queryClient.invalidateQueries({ queryKey: ['mi-v3-snapshot'] });
+      queryClient.invalidateQueries({ queryKey: ['ci-miv3-history', activeCampaignId] });
+      queryClient.invalidateQueries({ queryKey: ['mi-v3-snapshot', activeCampaignId] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
     onError: (err: any) => Alert.alert('Analysis Error', err.message),
