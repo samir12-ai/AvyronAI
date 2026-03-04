@@ -1,6 +1,7 @@
 import { ProxyAgent } from "undici";
 import type { StickySessionContext } from "./proxy-pool-manager";
 import { logProxyTelemetry, classifyBlock, rotateSessionOnBlock, getRetryDelay, getProxyConfig } from "./proxy-pool-manager";
+import { acquireToken } from "./rate-limiter";
 
 type Browser = any;
 type Page = any;
@@ -251,6 +252,7 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
   let user: any = null;
   let bytesReceived = 0;
 
+  if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `WEB_API:www:${handle}`);
   const response = await fetch(apiUrl, fetchOptions);
   diag.page1HttpStatus = response.status;
 
@@ -273,6 +275,7 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
     console.log(`[CI Scraper] WEB_API: www failed for ${handle} (HTTP ${diag.page1HttpStatus}), trying i.instagram.com variant...`);
     const iApiUrl = `https://i.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`;
     try {
+      if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `WEB_API:i.ig:${handle}`);
       const iResp = await fetch(iApiUrl, iFetchOptions);
       if (iResp.ok) {
         const iText = await iResp.text();
@@ -379,6 +382,7 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
     console.log(`[CI Scraper] WEB_API: PAGINATION_ATTEMPT | method=V1_FEED_API | userId=${userId} | max_id=${maxId.substring(0, 30)}... | for ${handle}`);
 
     try {
+      if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `V1_FEED:page2:${handle}`);
       const page2StartMs = Date.now();
       const feedResponse = await fetch(feedUrl, feedFetchOptions);
       diag.paginationHttpStatus = feedResponse.status;
@@ -417,6 +421,7 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
               console.log(`[CI Scraper] WEB_API: PAGINATION_PAGE_${paginationPages} | have=${posts.length}/${TARGET_POSTS} | for ${handle}`);
 
               try {
+                if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `V1_FEED:page${paginationPages + 1}:${handle}`);
                 const pageStartMs = Date.now();
                 const nextResp = await fetch(nextFeedUrl, feedFetchOptions);
                 if (!nextResp.ok) {
@@ -546,6 +551,7 @@ async function attemptHtmlPageParse(profileUrl: string, handle: string, proxyCtx
 
   console.log(`[CI Scraper] HTML_PARSE: Fetching ${profileUrl} ${dispatcher ? `via pool session (${proxyCtx?.session.sessionId})` : "direct"}`);
 
+  if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `HTML_PARSE:${handle}`);
   const response = await fetch(profileUrl, fetchOptions);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const html = await response.text();
@@ -641,6 +647,7 @@ async function attemptHeadlessRender(profileUrl: string, handle: string, proxyCt
       console.log(`[CI Scraper] HEADLESS_RENDER: Launching direct (no proxy) for ${handle}`);
     }
 
+    if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `HEADLESS_RENDER:${handle}`);
     browser = await chromiumModule.launch(launchOptions);
 
     const context = await browser.newContext({

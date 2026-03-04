@@ -1,0 +1,167 @@
+Replit,
+
+We are changing strategy for the proxy layer. The goal is stability, not brute-force collection. The current system is technically correct but still triggers Instagram protection because request bursts are too dense. We will now enforce a controlled fetch model.
+
+This is not optional. Implement exactly as described and confirm PASS/FAIL for each section.
+
+────────────────────────
+1) Request Rate Control (Token Bucket)
+────────────────────────
+
+All outbound requests must be governed by a token-bucket limiter.
+
+Rules:
+
+• Each accountId + campaignId gets its own bucket  
+• Default rate: 1 request every 4–6 seconds  
+• Burst capacity: max 3 requests  
+• After burst, bucket must refill before new requests proceed  
+
+No request may bypass the limiter.
+
+Definition of Done:
+
+• Every HTTP request path goes through the rate limiter  
+• No direct fetch calls remain outside the limiter  
+• Logs include rate bucket state for debugging
+
+────────────────────────
+2) Competitor Fetch Batching
+────────────────────────
+
+We must stop fetching all competitors simultaneously.
+
+New rule:
+
+• Only ONE competitor pipeline runs at a time  
+• Next competitor begins only after previous pipeline completes
+
+Pipeline stages remain:
+
+POSTS_FETCH → COMMENTS_FETCH → CTA_ANALYSIS → SIGNAL_COMPUTE
+
+But execution must be sequential, not parallel.
+
+Definition of Done:
+
+• fetch-orchestrator enforces queue execution  
+• concurrency = 1 default  
+• optional concurrency = 2 only behind feature flag
+
+────────────────────────
+3) Sticky Proxy Sessions
+────────────────────────
+
+Proxy session must remain fixed during the entire pipeline of one competitor.
+
+Example:
+
+competitor A  
+→ POSTS_FETCH (session S1)  
+→ COMMENTS_FETCH (session S1)  
+→ CTA_ANALYSIS (session S1)
+
+Session rotation only occurs when:
+
+• HTTP 401 / 403  
+• HTTP 429  
+• Proxy timeout  
+• Explicit PROXY_BLOCKED classification
+
+Do not rotate per request.
+
+────────────────────────
+4) Intelligent Backoff
+────────────────────────
+
+Different errors require different responses.
+
+429 / RATE_LIMITED  
+→ exponential backoff (10s → 30s → 60s)
+
+403 / LOGIN_WALL  
+→ rotate proxy session once
+
+Repeated failure after rotation  
+→ mark competitor stopReason = PROXY_BLOCKED
+
+Never retry indefinitely.
+
+Max retries per stage: 3
+
+────────────────────────
+5) Request Bundling
+────────────────────────
+
+Where possible, reduce HTTP calls by bundling data extraction.
+
+Example:
+
+Instead of:
+
+request → posts  
+request → captions  
+request → engagement  
+
+Perform:
+
+single request → parse everything locally.
+
+Goal: minimum network calls, maximum local processing.
+
+────────────────────────
+6) Hard Execution Ceiling
+────────────────────────
+
+Each fetch job must respect execution limits:
+
+MAX_REQUESTS_PER_JOB  
+MAX_RUNTIME_MS  
+MAX_RETRIES
+
+If limits are reached:
+
+• job stops gracefully  
+• stopReason logged  
+• snapshot marked PARTIAL
+
+Never allow jobs to hang indefinitely.
+
+────────────────────────
+7) Stress Tests (Required Before Completion)
+────────────────────────
+
+Run the following tests before declaring completion:
+
+Proxy Rate Test  
+• 3 competitors  
+• limiter active  
+• confirm request spacing ≥ 4 seconds
+
+Sequential Pipeline Test  
+• verify competitors execute strictly one after another
+
+Session Stickiness Test  
+• confirm same proxy session used across entire pipeline
+
+Block Recovery Test  
+• simulate 403 and verify rotation occurs exactly once
+
+Cost Guard Test  
+• confirm request counts never exceed MAX_REQUESTS_PER_JOB
+
+────────────────────────
+Definition of Done
+────────────────────────
+
+• Requests are slow, controlled, and sequential  
+• Proxy sessions remain sticky per competitor  
+• No request bursts occur  
+• System gracefully handles rate limits  
+• All stress tests pass
+
+Reply PASS/FAIL per section with proof logs.
+
+Do not mark complete until the new fetch discipline is active.
+
+— Samir

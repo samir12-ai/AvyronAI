@@ -13,19 +13,19 @@ import { computeCompetitorHash } from "./utils";
 import { computeVolatilityIndex, buildEntryStrategy, buildDefensiveRisks, buildDeterministicNarrative, persistValidatedSnapshot, ENGINE_VERSION } from "./engine";
 import type { CompetitorInput } from "./types";
 import { logAudit } from "../audit";
-import { acquireStickySession, releaseStickySession, rotateSessionOnBlock, classifyBlock, logProxyTelemetry, getRetryDelay, getPoolDiagnostics, type StickySessionContext, type BlockClass } from "../competitive-intelligence/proxy-pool-manager";
+import { acquireStickySession, releaseStickySession, rotateSessionOnBlock, classifyBlock, logProxyTelemetry, getPoolDiagnostics, type StickySessionContext, type BlockClass } from "../competitive-intelligence/proxy-pool-manager";
+import { acquireToken, getBucketState } from "../competitive-intelligence/rate-limiter";
 
 const FETCH_COOLDOWN_MS = 72 * 60 * 60 * 1000;
 const INSTAGRAM_PUBLIC_API_POST_CEILING = 12;
 const MIN_POSTS_TARGET = 30;
 const MIN_COMMENTS_TARGET = 100;
 const MAX_RETRIES = 3;
-const RETRY_BASE_MS = 2000;
 const MAX_PAGES_PER_COMPETITOR = 5;
 const MAX_REQUESTS_PER_JOB = 50;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
 const MAX_CONCURRENT_COMPETITORS_PER_JOB = 1;
-const MAX_INFLIGHT_REQUESTS_PER_COMPETITOR = 1;
+const CONCURRENCY_FEATURE_FLAG = false;
 
 type StopReason = "MAX_PAGES_REACHED" | "MAX_REQUESTS_REACHED" | "MAX_RUNTIME_REACHED" | "COMPLETE" | "ERROR" | "ALL_FAILED" | "COOLDOWN_ACTIVE";
 
@@ -302,6 +302,7 @@ async function executeFetchJob(
       let attempt = 1;
       while (attempt <= MAX_RETRIES) {
         if (checkRuntimeCeiling() || checkRequestCeiling()) break;
+        await acquireToken(accountId, campaignId, `POSTS_FETCH:${comp.name}`);
         totalRequests++;
         const startMs = Date.now();
         try {
@@ -328,17 +329,43 @@ async function executeFetchJob(
             break;
           }
 
-          if (proxyCtx && (blockClass === "PROXY_BLOCKED" || blockClass === "RATE_LIMIT")) {
-            const rotated = rotateSessionOnBlock(proxyCtx, blockClass);
-            if (rotated) {
-              proxyCtx = rotated;
-              console.log(`[FetchOrch] Session rotated for ${comp.name} | newSession=${proxyCtx.session.sessionId} | attempt=${attempt}`);
-            } else {
-              console.log(`[FetchOrch] Session rotation exhausted for ${comp.name} | blockClass=${blockClass}`);
+          if (blockClass === "RATE_LIMIT") {
+            const backoffIdx = Math.max(0, Math.min(attempt - 2, 2));
+            const backoffMs = [10000, 30000, 60000][backoffIdx];
+            console.log(`[FetchOrch] RATE_LIMIT backoff ${backoffMs}ms for ${comp.name} | attempt=${attempt}`);
+            await new Promise(resolve => setTimeout(resolve, backoffMs));
+          } else if (blockClass === "PROXY_BLOCKED") {
+            if (proxyCtx) {
+              const rotated = rotateSessionOnBlock(proxyCtx, blockClass);
+              if (rotated) {
+                proxyCtx = rotated;
+                console.log(`[FetchOrch] 403/BLOCKED: Session rotated once for ${comp.name} | newSession=${proxyCtx.session.sessionId}`);
+              } else {
+                console.log(`[FetchOrch] 403/BLOCKED: Rotation exhausted for ${comp.name}, marking PROXY_BLOCKED`);
+                stage.POSTS_FETCH = "FAILED";
+                stage.error = `PROXY_BLOCKED after rotation failure`;
+                limitReasons.push({
+                  competitorId: comp.id, competitorName: comp.name,
+                  stage: "POSTS_FETCH", reason: "PROXY_BLOCKED",
+                  details: `Proxy blocked after rotation failure (attempts=${attempt - 1})`,
+                });
+                break;
+              }
             }
+            await new Promise(resolve => setTimeout(resolve, 5000));
+          } else if (blockClass === "AUTH_REQUIRED") {
+            if (proxyCtx) {
+              const rotated = rotateSessionOnBlock(proxyCtx, "PROXY_BLOCKED");
+              if (rotated) {
+                proxyCtx = rotated;
+                console.log(`[FetchOrch] AUTH_REQUIRED: Session rotated for ${comp.name} | newSession=${proxyCtx.session.sessionId}`);
+              }
+            }
+            await new Promise(resolve => setTimeout(resolve, 5000));
+          } else {
+            await new Promise(resolve => setTimeout(resolve, 3000 + Math.random() * 2000));
           }
 
-          await getRetryDelay(attempt);
           console.log(`[FetchOrch] Retry ${attempt - 1}/${MAX_RETRIES} for ${comp.name} | blockClass=${blockClass}`);
         }
       }
@@ -571,6 +598,9 @@ async function executeFetchJob(
 
     console.log(`[FetchOrch] Job ${jobId} completed in ${durationMs}ms | posts=${totalPosts} comments=${totalComments} | requests=${totalRequests} | stopReason=${stopReason}`);
 
+    const rateBucketState = getBucketState(accountId, campaignId);
+    console.log(`[FetchOrch] Rate bucket state at job end | tokens=${rateBucketState.tokens}/${rateBucketState.maxBurst} | consumed=${rateBucketState.totalConsumed} | waited=${rateBucketState.totalWaited} | refillMs=${rateBucketState.refillIntervalMs}`);
+
     logAudit(accountId, "MI_FETCH_JOB_COMPLETE", {
       details: {
         jobId, totalPosts, totalComments, durationMs,
@@ -579,11 +609,13 @@ async function executeFetchJob(
         stopReason,
         cooldownCount,
         status: finalJobStatus,
+        rateBucket: rateBucketState,
         hardCeilings: {
           maxPagesPerCompetitor: MAX_PAGES_PER_COMPETITOR,
           maxRequestsPerJob: MAX_REQUESTS_PER_JOB,
           maxRuntimeMs: MAX_RUNTIME_MS,
           maxRetries: MAX_RETRIES,
+          concurrency: CONCURRENCY_FEATURE_FLAG ? 2 : MAX_CONCURRENT_COMPETITORS_PER_JOB,
         },
       },
     }).catch(() => {});

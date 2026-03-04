@@ -345,7 +345,7 @@ describe("Proxy Pool Manager — Torture Tests", () => {
         "server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8"
       );
       expect(source).toContain("MAX_CONCURRENT_COMPETITORS_PER_JOB = 1");
-      expect(source).toContain("MAX_INFLIGHT_REQUESTS_PER_COMPETITOR = 1");
+      expect(source).toContain("CONCURRENCY_FEATURE_FLAG = false");
     });
 
     it("competitors run sequentially (for loop, not Promise.all)", () => {
