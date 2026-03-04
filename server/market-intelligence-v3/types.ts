@@ -158,6 +158,8 @@ export interface MIv3DiagnosticResult {
   twoRunStatus: TwoRunConfirmation;
   cached: boolean;
   cacheInvalidationReason: CacheInvalidationReason;
+  snapshotSource: "FRESH_DATA" | "CACHED_DATA";
+  fetchExecuted: boolean;
   timestamp: string;
 }
 

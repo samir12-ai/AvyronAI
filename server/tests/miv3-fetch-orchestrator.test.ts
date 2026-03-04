@@ -491,12 +491,13 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
   });
 
   describe("K) Cooldown State Model — Correct Stage Truth", () => {
-    it("should mark fetch stages as COOLDOWN_BLOCKED (not COMPLETE) when cooldown active", async () => {
+    it("should mark fetch stages as SKIPPED_FETCH_COOLDOWN (not COMPLETE or COOLDOWN_BLOCKED) when cooldown active", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
       );
-      expect(source).toContain('stage.POSTS_FETCH = "COOLDOWN_BLOCKED"');
-      expect(source).toContain('stage.COMMENTS_FETCH = "COOLDOWN_BLOCKED"');
+      expect(source).toContain('stage.POSTS_FETCH = "SKIPPED_FETCH_COOLDOWN"');
+      expect(source).toContain('stage.COMMENTS_FETCH = "SKIPPED_FETCH_COOLDOWN"');
+      expect(source).not.toContain('stage.POSTS_FETCH = "COMPLETE";\n      stage.COMMENTS_FETCH = "COOLDOWN"');
     });
 
     it("should include cooldownRemainingHours in CompetitorStage metadata", async () => {
@@ -602,11 +603,11 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("Analysis executed using cached data");
     });
 
-    it("should render COOLDOWN_BLOCKED icon (clock/time) for fetch stages", async () => {
+    it("should render SKIPPED_FETCH_COOLDOWN icon (clock/time) for fetch stages", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
       );
-      expect(source).toContain("COOLDOWN_BLOCKED");
+      expect(source).toContain("SKIPPED_FETCH_COOLDOWN");
       expect(source).toContain('"time"');
     });
 
@@ -634,13 +635,111 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("cached analysis");
     });
 
-    it("should show stage labels with source context: (cooldown), (cached), (no data)", async () => {
+    it("should show stage labels with source context: (skipped — cooldown), (cached), (no data)", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
       );
-      expect(source).toContain("(cooldown)");
+      expect(source).toContain("(skipped — cooldown)");
       expect(source).toContain("(cached)");
       expect(source).toContain("(no data)");
+    });
+
+    it("should include remainingCooldownSeconds and existingCoverage in stage metadata", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("remainingCooldownSeconds");
+      expect(source).toContain("lastFetchTimestamp");
+      expect(source).toContain("existingCoverage");
+    });
+
+    it("should track fetchExecuted per competitor stage (false for cooldown, true for fresh)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("stage.fetchExecuted = false");
+      expect(source).toContain("stage.fetchExecuted = true");
+    });
+
+    it("should NEVER set POSTS_FETCH or COMMENTS_FETCH to COMPLETE during cooldown", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      const cooldownBlock = source.substring(
+        source.indexOf('fetchResult.status === "COOLDOWN"'),
+        source.indexOf("continue;", source.indexOf('fetchResult.status === "COOLDOWN"'))
+      );
+      expect(cooldownBlock).not.toContain('POSTS_FETCH = "COMPLETE"');
+      expect(cooldownBlock).not.toContain('COMMENTS_FETCH = "COMPLETE"');
+    });
+
+    it("should never allow COOLDOWN_BLOCKED as a valid StageStatus (replaced by SKIPPED_FETCH_COOLDOWN)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).not.toContain('"COOLDOWN_BLOCKED"');
+    });
+  });
+
+  describe("K2) Snapshot Source Transparency", () => {
+    it("should include snapshotSource and fetchExecuted in mi_snapshots schema", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("shared/schema.ts", "utf-8")
+      );
+      expect(source).toContain('snapshotSource: text("snapshot_source")');
+      expect(source).toContain('fetchExecuted: boolean("fetch_executed")');
+    });
+
+    it("should set snapshotSource and fetchExecuted in fetch-orchestrator snapshot payload", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("snapshotSource");
+      expect(source).toContain("fetchExecuted");
+      expect(source).toContain('? "FRESH_DATA" : "CACHED_DATA"');
+    });
+
+    it("should set snapshotSource and fetchExecuted in engine.ts snapshot payload", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
+      );
+      expect(source).toContain('snapshotSource: "FRESH_DATA"');
+      expect(source).toContain("fetchExecuted: true");
+    });
+
+    it("should include snapshotSource and fetchExecuted in MIv3DiagnosticResult type", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/types.ts", "utf-8")
+      );
+      expect(source).toContain('snapshotSource: "FRESH_DATA" | "CACHED_DATA"');
+      expect(source).toContain("fetchExecuted: boolean");
+    });
+
+    it("should display snapshotSource and fetchExecuted in UI", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
+      );
+      expect(source).toContain("snapshotSource");
+      expect(source).toContain("fetchExecuted");
+    });
+
+    it("should include snapshotSource and fetchExecuted in telemetry JSON", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      const telemetrySection = source.substring(
+        source.indexOf("telemetry: JSON.stringify({"),
+        source.indexOf("}),", source.indexOf("telemetry: JSON.stringify({")) + 5
+      );
+      expect(telemetrySection).toContain("snapshotSource");
+      expect(telemetrySection).toContain("fetchExecuted");
+    });
+
+    it("should show existingCoverage in UI for cooldown competitors", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
+      );
+      expect(source).toContain("existingCoverage");
     });
   });
 

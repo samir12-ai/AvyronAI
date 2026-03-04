@@ -543,14 +543,14 @@ export default function CompetitiveIntelligence() {
           )}
           {fetchJobStatus.status === 'COMPLETE_WITH_COOLDOWN' && (
             <View style={{ backgroundColor: '#F59E0B' + '15', borderRadius: 6, padding: 6, marginBottom: 6 }}>
-              <Text style={{ fontSize: 10, fontWeight: '600', color: '#F59E0B' }}>Fetch blocked (cooldown active) — Analysis executed using cached data</Text>
+              <Text style={{ fontSize: 10, fontWeight: '600', color: '#F59E0B' }}>Fetch skipped (cooldown active) — Analysis executed using cached data only</Text>
             </View>
           )}
           {Object.values(fetchJobStatus.stageStatuses || {}).map((cs: any) => {
             const stageIcon = (status: string) => {
               if (status === 'COMPLETE') return <Ionicons name="checkmark-circle" size={12} color="#10B981" />;
               if (status === 'CACHED_ANALYSIS') return <Ionicons name="checkmark-circle" size={12} color="#3B82F6" />;
-              if (status === 'COOLDOWN_BLOCKED') return <Ionicons name="time" size={12} color="#F59E0B" />;
+              if (status === 'SKIPPED_FETCH_COOLDOWN') return <Ionicons name="time" size={12} color="#F59E0B" />;
               if (status === 'BLOCKED_INSUFFICIENT_DATA') return <Ionicons name="alert-circle" size={12} color="#EF4444" />;
               if (status === 'RUNNING') return <ActivityIndicator size={10} color="#8B5CF6" />;
               if (status === 'FAILED') return <Ionicons name="close-circle" size={12} color="#EF4444" />;
@@ -558,7 +558,7 @@ export default function CompetitiveIntelligence() {
               return <Ionicons name="ellipse-outline" size={12} color="#9CA3AF" />;
             };
             const stageLabel = (status: string, stage: string) => {
-              if (status === 'COOLDOWN_BLOCKED') return `${stage} (cooldown)`;
+              if (status === 'SKIPPED_FETCH_COOLDOWN') return `${stage} (skipped — cooldown)`;
               if (status === 'CACHED_ANALYSIS') return `${stage} (cached)`;
               if (status === 'BLOCKED_INSUFFICIENT_DATA') return `${stage} (no data)`;
               return stage;
@@ -579,8 +579,14 @@ export default function CompetitiveIntelligence() {
                   {cs.cooldownRemainingHours != null && (
                     <Text style={{ fontSize: 9, color: '#F59E0B' }}>{cs.cooldownRemainingHours}h cooldown</Text>
                   )}
+                  {cs.existingCoverage && (
+                    <Text style={{ fontSize: 9, color: '#F59E0B' }}>existing: {cs.existingCoverage.posts}p/{cs.existingCoverage.comments}c</Text>
+                  )}
                   {cs.analysisSource === 'CACHED_DATA' && (
                     <Text style={{ fontSize: 9, color: '#3B82F6' }}>cached analysis</Text>
+                  )}
+                  {cs.fetchExecuted === false && cs.analysisSource !== 'CACHED_DATA' && (
+                    <Text style={{ fontSize: 9, color: '#F59E0B' }}>no fetch</Text>
                   )}
                 </View>
                 <View style={{ flexDirection: 'row', gap: 8, paddingLeft: 4 }}>
@@ -1067,7 +1073,7 @@ export default function CompetitiveIntelligence() {
         {miv3Result && (
           <View style={{ paddingHorizontal: 4, paddingTop: 4 }}>
             <Text style={{ fontSize: 9, color: colors.textMuted, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
-              source: miv3_snapshot:{miv3Result.snapshotId?.slice(0, 8)} | cached: {miv3Result.cached ? 'yes' : 'no'}
+              source: miv3_snapshot:{miv3Result.snapshotId?.slice(0, 8)} | cached: {miv3Result.cached ? 'yes' : 'no'} | snapshotSource: {miv3Result.snapshotSource || 'N/A'} | fetchExecuted: {miv3Result.fetchExecuted === false ? 'no' : 'yes'}
             </Text>
           </View>
         )}
@@ -1196,7 +1202,7 @@ export default function CompetitiveIntelligence() {
 
             <View style={{ paddingHorizontal: 4, paddingTop: 4 }}>
               <Text style={{ fontSize: 9, color: colors.textMuted, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
-                source: miv3_snapshot:{miv3Result?.snapshotId?.slice(0, 8)} | guard: {confidence?.guardDecision} | mode: {miv3Result?.executionMode}
+                source: miv3_snapshot:{miv3Result?.snapshotId?.slice(0, 8)} | guard: {confidence?.guardDecision} | mode: {miv3Result?.executionMode} | dataSource: {miv3Result?.snapshotSource || 'N/A'} | fetched: {miv3Result?.fetchExecuted === false ? 'no' : 'yes'}
               </Text>
             </View>
           </View>

@@ -29,7 +29,7 @@ const MAX_INFLIGHT_REQUESTS_PER_COMPETITOR = 1;
 
 type StopReason = "MAX_PAGES_REACHED" | "MAX_REQUESTS_REACHED" | "MAX_RUNTIME_REACHED" | "COMPLETE" | "ERROR" | "ALL_FAILED" | "COOLDOWN_ACTIVE";
 
-type StageStatus = "PENDING" | "RUNNING" | "COMPLETE" | "FAILED" | "SKIPPED" | "COOLDOWN_BLOCKED" | "CACHED_ANALYSIS" | "BLOCKED_INSUFFICIENT_DATA";
+type StageStatus = "PENDING" | "RUNNING" | "COMPLETE" | "FAILED" | "SKIPPED" | "SKIPPED_FETCH_COOLDOWN" | "CACHED_ANALYSIS" | "BLOCKED_INSUFFICIENT_DATA";
 
 interface CompetitorStage {
   competitorId: string;
@@ -41,8 +41,15 @@ interface CompetitorStage {
   postsFetched: number;
   commentsFetched: number;
   cooldownRemainingHours?: number;
+  remainingCooldownSeconds?: number;
+  lastFetchTimestamp?: string;
+  existingCoverage?: { posts: number; comments: number };
   analysisSource?: "CACHED_DATA" | "FRESH_DATA";
+  fetchExecuted: boolean;
   error?: string;
+  rawFetchedCount?: number;
+  paginationPages?: number;
+  paginationStopReason?: string;
 }
 
 interface FetchLimitReason {
@@ -211,6 +218,7 @@ async function executeFetchJob(
       SIGNAL_COMPUTE: "PENDING",
       postsFetched: 0,
       commentsFetched: 0,
+      fetchExecuted: false,
     };
   }
 
@@ -351,10 +359,15 @@ async function executeFetchJob(
       if (fetchResult.status === "COOLDOWN") {
         const hoursMatch = fetchResult.message.match(/(\d+)h remaining/);
         const remainingHours = hoursMatch ? parseInt(hoursMatch[1], 10) : undefined;
+        const remainingCooldownSeconds = remainingHours ? remainingHours * 3600 : undefined;
 
-        stage.POSTS_FETCH = "COOLDOWN_BLOCKED";
-        stage.COMMENTS_FETCH = "COOLDOWN_BLOCKED";
+        stage.POSTS_FETCH = "SKIPPED_FETCH_COOLDOWN";
+        stage.COMMENTS_FETCH = "SKIPPED_FETCH_COOLDOWN";
+        stage.fetchExecuted = false;
         stage.cooldownRemainingHours = remainingHours;
+        stage.remainingCooldownSeconds = remainingCooldownSeconds;
+        stage.lastFetchTimestamp = new Date().toISOString();
+        stage.existingCoverage = { posts: fetchResult.postsCollected, comments: fetchResult.commentsCollected };
         stage.postsFetched = fetchResult.postsCollected;
         stage.commentsFetched = fetchResult.commentsCollected;
         totalPosts += fetchResult.postsCollected;
@@ -362,8 +375,9 @@ async function executeFetchJob(
 
         cooldownCount++;
 
-        const hasSufficientCachedData = fetchResult.postsCollected >= 5;
-        if (hasSufficientCachedData) {
+        const coverageMeetsThresholds = fetchResult.postsCollected >= MIN_POSTS_TARGET && fetchResult.commentsCollected >= MIN_COMMENTS_TARGET;
+
+        if (coverageMeetsThresholds) {
           stage.analysisSource = "CACHED_DATA";
 
           stage.CTA_ANALYSIS = "RUNNING";
@@ -386,7 +400,7 @@ async function executeFetchJob(
               posts, comments,
             };
             const signalResults = computeAllSignals([competitorInput]);
-            console.log(`[FetchOrch] Cached analysis for ${comp.name}: ${signalResults.length} signals from ${posts.length} posts`);
+            console.log(`[FetchOrch] Cached analysis for ${comp.name}: ${signalResults.length} signals from ${posts.length} posts | coverageMeetsThresholds=${coverageMeetsThresholds}`);
             stage.SIGNAL_COMPUTE = "CACHED_ANALYSIS";
           } catch (err: any) {
             console.error(`[FetchOrch] Cached signal compute failed for ${comp.name}:`, err.message);
@@ -397,12 +411,13 @@ async function executeFetchJob(
           stage.CTA_ANALYSIS = "BLOCKED_INSUFFICIENT_DATA";
           stage.SIGNAL_COMPUTE = "BLOCKED_INSUFFICIENT_DATA";
           stage.analysisSource = undefined;
+          console.log(`[FetchOrch] COVERAGE_VALIDATION_FAILED: Cached analysis blocked for ${comp.name} | posts=${fetchResult.postsCollected}/${MIN_POSTS_TARGET} comments=${fetchResult.commentsCollected}/${MIN_COMMENTS_TARGET} | cooldown active, coverage insufficient for analysis`);
         }
 
         limitReasons.push({
           competitorId: comp.id, competitorName: comp.name,
           stage: "POSTS_FETCH", reason: "COOLDOWN",
-          details: fetchResult.message,
+          details: `${fetchResult.message} | existingCoverage: ${fetchResult.postsCollected}p/${fetchResult.commentsCollected}c | thresholdsMet: ${coverageMeetsThresholds}`,
         });
         await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
         continue;
@@ -425,6 +440,7 @@ async function executeFetchJob(
       stage.POSTS_FETCH = "COMPLETE";
       stage.postsFetched = fetchResult.postsCollected;
       stage.analysisSource = "FRESH_DATA";
+      stage.fetchExecuted = true;
       stage.rawFetchedCount = fetchResult.rawFetchedCount;
       stage.paginationPages = fetchResult.paginationPages;
       stage.paginationStopReason = fetchResult.paginationStopReason;
@@ -495,10 +511,13 @@ async function executeFetchJob(
     if (allCooldown) stopReason = "COOLDOWN_ACTIVE";
     const isPartialCoverage = stopReason !== "COMPLETE" && stopReason !== "COOLDOWN_ACTIVE";
 
+    const anyFetchExecuted = Object.values(stages).some(s => s.fetchExecuted === true);
+    const snapshotSourceType = anyFetchExecuted ? "FRESH_DATA" : "CACHED_DATA";
+
     if (anyAnalysisRan) {
       try {
-        await persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverage, stopReason);
-        console.log(`[FetchOrch] Snapshot persisted for ${accountId}/${campaignId} | partial=${isPartialCoverage} | allCooldown=${allCooldown}`);
+        await persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverage, stopReason, snapshotSourceType, anyFetchExecuted);
+        console.log(`[FetchOrch] Snapshot persisted for ${accountId}/${campaignId} | partial=${isPartialCoverage} | allCooldown=${allCooldown} | snapshotSource=${snapshotSourceType} | fetchExecuted=${anyFetchExecuted}`);
       } catch (err: any) {
         console.error(`[FetchOrch] Snapshot persistence failed:`, err.message);
       }
@@ -606,7 +625,7 @@ function classifyBlockReason(result: FetchResult): "RATE_LIMIT" | "PROXY_BLOCKED
   return "ERROR";
 }
 
-async function persistSnapshotAfterFetch(accountId: string, campaignId: string, isPartialCoverage: boolean = false, jobStopReason: StopReason = "COMPLETE"): Promise<void> {
+async function persistSnapshotAfterFetch(accountId: string, campaignId: string, isPartialCoverage: boolean = false, jobStopReason: StopReason = "COMPLETE", snapshotSource: "FRESH_DATA" | "CACHED_DATA" = "FRESH_DATA", fetchExecuted: boolean = true): Promise<void> {
   const competitors = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
 
@@ -713,6 +732,8 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     confidenceData: JSON.stringify(confidence),
     marketState: isPartialCoverage ? "PARTIAL_DATA" : marketState,
     executionMode,
+    snapshotSource,
+    fetchExecuted,
     telemetry: JSON.stringify({
       executionMode,
       projectedTokens: tokenBudget.projectedTokens,
@@ -726,6 +747,8 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
       refreshReason: "FETCH_JOB_COMPLETE",
       partialCoverage: isPartialCoverage,
       jobStopReason: isPartialCoverage ? jobStopReason : null,
+      snapshotSource,
+      fetchExecuted,
     }),
     narrativeSynthesis,
     entryStrategy,

@@ -438,7 +438,9 @@ export class MarketIntelligenceV3 {
       confidenceData: JSON.stringify(confidence),
       marketState,
       executionMode,
-      telemetry: JSON.stringify(telemetry),
+      snapshotSource: "FRESH_DATA" as const,
+      fetchExecuted: true,
+      telemetry: JSON.stringify({ ...telemetry, snapshotSource: "FRESH_DATA", fetchExecuted: true }),
       narrativeSynthesis,
       entryStrategy,
       defensiveRisks: JSON.stringify(defensiveRisks),
@@ -514,6 +516,8 @@ export class MarketIntelligenceV3 {
       twoRunStatus,
       cached: false,
       cacheInvalidationReason,
+      snapshotSource: "FRESH_DATA" as const,
+      fetchExecuted: true,
       timestamp: new Date().toISOString(),
     };
   }
@@ -595,6 +599,8 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
     },
     cached: true,
     cacheInvalidationReason: null,
+    snapshotSource: (snapshot.snapshotSource as "FRESH_DATA" | "CACHED_DATA") || "FRESH_DATA",
+    fetchExecuted: snapshot.fetchExecuted ?? true,
     timestamp: snapshot.createdAt?.toISOString?.() || new Date().toISOString(),
   };
 }

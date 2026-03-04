@@ -1,0 +1,119 @@
+Replit,
+
+What was implemented in the last fix (changing the stage from SKIPPED → COMPLETE during cooldown) is not an acceptable solution. It is a cosmetic workaround that misrepresents system state and risks corrupting analytical integrity.
+
+Let me be very clear:
+
+Changing a stage to COMPLETE when no new data was fetched is logically incorrect and violates the MIv3 architecture principles we established.
+
+This does not solve the root problem.  
+It only masks it.
+
+The system must never report COMPLETE if a stage did not actually execute.
+
+Right now the behavior implies:
+
+- The fetch stage did not run (because of cooldown)
+- Yet the system reports the stage as COMPLETE
+- This allows the pipeline to create a snapshot as if a valid data refresh occurred
+
+This creates false analytical state.
+
+It means the system can generate a new MIv3 snapshot using stale competitor data while presenting it as if the pipeline executed successfully.
+
+That is unacceptable for a competitive intelligence engine.
+
+────────────────────────
+ROOT PROBLEM THAT MUST BE FIXED
+────────────────────────
+
+The real issue is data flow integrity, not stage labeling.
+
+The system currently fails to correctly distinguish between:
+
+1) Fetch execution  
+2) Existing stored coverage  
+3) Snapshot analysis trigger
+
+The correct architecture must enforce strict separation between these.
+
+────────────────────────
+REQUIRED STRUCTURAL FIX
+────────────────────────
+
+You must revert the SKIPPED→COMPLETE workaround and implement the correct state model.
+
+1) Fetch Stage State
+If cooldown prevents a new pull, the state must remain explicit:
+
+SKIPPED_FETCH_COOLDOWN
+
+The stage must include:
+- remainingCooldownSeconds
+- lastFetchTimestamp
+- existingCoverage (posts/comments already in DB)
+
+2) Coverage Validation Layer
+
+Before deciding whether analysis should run, the engine must check actual stored coverage, not fetch stage labels.
+
+Coverage rules remain:
+
+posts ≥ 30  
+comments ≥ 100
+
+If these thresholds are already satisfied in the database, the engine may proceed to analysis using cached data, but must explicitly mark:
+
+analysisSource = CACHED_DATA
+
+3) Snapshot Source Transparency
+
+Snapshots generated without a new fetch must carry metadata:
+
+snapshotSource = CACHED_DATA  
+fetchExecuted = false
+
+The UI must display this clearly.
+
+4) Pipeline Integrity Rule
+
+Under no circumstances may a pipeline stage be marked COMPLETE unless:
+
+- The stage actually executed
+- The expected outputs were produced
+
+Cooldown is not execution.
+
+5) Competitor Data Attachment Bug
+
+You must also verify that newly fetched posts/comments are attached to the correct competitor record and not appearing as detached cards.
+
+Audit the following locations:
+
+- data-acquisition.ts (insert logic)
+- competitorId mapping during fetch
+- delete-before-insert transaction boundaries
+- fetch-orchestrator stage writes
+
+This bug strongly suggests a competitorId mismatch or improper transaction sequencing.
+
+────────────────────────
+DEFINITION OF DONE
+────────────────────────
+
+The following conditions must be satisfied before reporting completion:
+
+• Fetch stage correctly reports SKIPPED_FETCH_COOLDOWN when applicable  
+• Snapshot generation relies on coverage validation, not stage status  
+• Snapshots clearly indicate whether they used fresh data or cached data  
+• No stage can report COMPLETE without execution  
+• Newly fetched data always attaches to the correct competitor record  
+• UI accurately reflects cooldown vs fresh fetch vs cached analysis
+
+Run the full regression suite after implementing the structural fix.
+
+Do not report completion until these guarantees are enforced.
+
+This is a core engine integrity issue, not a UI concern.
+
+— Samir
