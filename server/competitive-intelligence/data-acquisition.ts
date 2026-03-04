@@ -534,7 +534,7 @@ async function _executeFetch(
   };
 }
 
-const MIN_SYNTHETIC_COMMENTS_PER_POST = 5;
+const MIN_SYNTHETIC_COMMENTS_PER_POST = 10;
 
 function generateSyntheticCommentSamples(post: ScrapedPost): { text: string; sentiment: number }[] {
   const samples: { text: string; sentiment: number }[] = [];

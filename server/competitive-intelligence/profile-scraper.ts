@@ -248,9 +248,47 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
 
   console.log(`[CI Scraper] WEB_API: PAGE_1 response ${diag.page1ResponseKB} KB, HTTP ${diag.page1HttpStatus} for ${handle}`);
 
-  const data = JSON.parse(text);
-  const user = data?.data?.user;
-  if (!user) throw new Error("No user data in API response");
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    console.log(`[CI Scraper] WEB_API: Response is not JSON (${text.substring(0, 200)}) for ${handle}`);
+    throw new Error("Non-JSON response from web_profile_info");
+  }
+  let user = data?.data?.user;
+
+  if (!user) {
+    console.log(`[CI Scraper] WEB_API: www endpoint returned null user for ${handle}, trying i.instagram.com variant...`);
+    const iApiUrl = `https://i.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`;
+    const iHeaders: Record<string, string> = {
+      "User-Agent": "Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100)",
+      "X-IG-App-ID": "936619743392459",
+      "X-IG-WWW-Claim": "0",
+      "Accept": "*/*",
+      "Accept-Language": "en-US,en;q=0.9",
+    };
+    const iFetchOptions: any = { headers: iHeaders, redirect: "follow" };
+    if (dispatcher) iFetchOptions.dispatcher = dispatcher;
+    try {
+      const iResp = await fetch(iApiUrl, iFetchOptions);
+      if (iResp.ok) {
+        const iText = await iResp.text();
+        const iBytes = Buffer.byteLength(iText, "utf-8");
+        bytesReceived += iBytes;
+        diag.page1ResponseKB = Math.round((bytesReceived) / 1024 * 10) / 10;
+        const iData = JSON.parse(iText);
+        user = iData?.data?.user;
+        if (user) {
+          console.log(`[CI Scraper] WEB_API: i.instagram.com variant SUCCESS for ${handle} (${(iBytes / 1024).toFixed(1)} KB)`);
+        } else {
+          console.log(`[CI Scraper] WEB_API: i.instagram.com also returned null user for ${handle}`);
+        }
+      }
+    } catch (iErr: any) {
+      console.log(`[CI Scraper] WEB_API: i.instagram.com fallback failed for ${handle}: ${iErr.message}`);
+    }
+    if (!user) throw new Error("No user data in API response (both www and i.instagram.com)");
+  }
 
   if (user.is_private === true) {
     console.log(`[CI Scraper] WEB_API: ACCOUNT_PRIVATE for ${handle}`);
@@ -317,13 +355,22 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
     await randomDelay();
 
     const maxId = `${lastPostId}_${userId}`;
-    const feedUrl = `https://www.instagram.com/api/v1/feed/user/${userId}/?count=50&max_id=${maxId}`;
+    const feedUrl = `https://i.instagram.com/api/v1/feed/user/${userId}/?count=50&max_id=${maxId}`;
+    const feedHeaders: Record<string, string> = {
+      "User-Agent": "Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100)",
+      "X-IG-App-ID": "936619743392459",
+      "X-IG-WWW-Claim": "0",
+      "Accept": "*/*",
+      "Accept-Language": "en-US,en;q=0.9",
+    };
+    const feedFetchOptions: any = { headers: feedHeaders, redirect: "follow" };
+    if (dispatcher) feedFetchOptions.dispatcher = dispatcher;
 
     console.log(`[CI Scraper] WEB_API: PAGINATION_ATTEMPT | method=V1_FEED_API | userId=${userId} | max_id=${maxId.substring(0, 30)}... | for ${handle}`);
 
     try {
       const page2StartMs = Date.now();
-      const feedResponse = await fetch(feedUrl, fetchOptions);
+      const feedResponse = await fetch(feedUrl, feedFetchOptions);
       diag.paginationHttpStatus = feedResponse.status;
 
       console.log(`[CI Scraper] WEB_API: PAGINATION_RESPONSE | HTTP=${feedResponse.status} | Content-Type=${feedResponse.headers.get("content-type")} | for ${handle}`);
@@ -356,12 +403,12 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
               paginationPages++;
               await randomDelay();
 
-              const nextFeedUrl = `https://www.instagram.com/api/v1/feed/user/${userId}/?count=50&max_id=${nextMaxId}`;
+              const nextFeedUrl = `https://i.instagram.com/api/v1/feed/user/${userId}/?count=50&max_id=${nextMaxId}`;
               console.log(`[CI Scraper] WEB_API: PAGINATION_PAGE_${paginationPages} | have=${posts.length}/${TARGET_POSTS} | for ${handle}`);
 
               try {
                 const pageStartMs = Date.now();
-                const nextResp = await fetch(nextFeedUrl, fetchOptions);
+                const nextResp = await fetch(nextFeedUrl, feedFetchOptions);
                 if (!nextResp.ok) {
                   if (proxyCtx) logProxyTelemetry(proxyCtx, `PAGINATION_PAGE_${paginationPages}`, nextResp.status, classifyBlock(nextResp.status, ""), Date.now() - pageStartMs, false);
                   console.log(`[CI Scraper] WEB_API: PAGINATION_PAGE_${paginationPages} HTTP ${nextResp.status}, stopping`);

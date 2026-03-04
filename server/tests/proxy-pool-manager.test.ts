@@ -469,13 +469,16 @@ describe("Proxy Pool Manager — Torture Tests", () => {
       releaseStickySession(ctx);
     });
 
-    it("pagination code uses fetchOptions (same dispatcher), no mid-page session creation", () => {
+    it("pagination code uses feedFetchOptions with i.instagram.com and mobile UA, no mid-page session creation", () => {
       const source = require("fs").readFileSync(
         "server/competitive-intelligence/profile-scraper.ts", "utf-8"
       );
       const paginationBlock = source.split("paginationAttempted = true")[1]?.split("if (paginationSuccess)")[0] || "";
       expect(paginationBlock.length).toBeGreaterThan(100);
-      expect(paginationBlock).toContain("fetch(feedUrl, fetchOptions)");
+      expect(paginationBlock).toContain("fetch(feedUrl, feedFetchOptions)");
+      expect(paginationBlock).toContain("i.instagram.com/api/v1/feed/user/");
+      expect(paginationBlock).toContain("fetch(nextFeedUrl, feedFetchOptions)");
+      expect(paginationBlock).not.toContain("www.instagram.com/api/v1/feed");
       expect(paginationBlock).not.toContain("getSessionDispatcher");
       expect(paginationBlock).not.toContain("getProxyDispatcher");
       expect(paginationBlock).not.toContain("acquireStickySession");
@@ -554,11 +557,11 @@ describe("Proxy Pool Manager — Torture Tests", () => {
       expect(source).toContain("fetchCompetitorData(id, accountId, forceRefresh, proxyCtx ?? undefined)");
     });
 
-    it("synthetic comment generator has minimum 5 per post", () => {
+    it("synthetic comment generator has minimum 10 per post", () => {
       const source = require("fs").readFileSync(
         "server/competitive-intelligence/data-acquisition.ts", "utf-8"
       );
-      expect(source).toContain("MIN_SYNTHETIC_COMMENTS_PER_POST = 5");
+      expect(source).toContain("MIN_SYNTHETIC_COMMENTS_PER_POST = 10");
       expect(source).toContain("MIN_SYNTHETIC_COMMENTS_PER_POST");
     });
 
