@@ -1347,6 +1347,7 @@ export const miSnapshots = pgTable("mi_snapshots", {
   narrativeSynthesis: text("narrative_synthesis"),
   marketDiagnosis: text("market_diagnosis"),
   threatSignals: text("threat_signals"),
+  opportunitySignals: text("opportunity_signals"),
   missingSignalFlags: text("missing_signal_flags"),
   volatilityIndex: doublePrecision("volatility_index").default(0),
   dataFreshnessDays: doublePrecision("data_freshness_days").default(0),

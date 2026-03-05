@@ -1201,6 +1201,7 @@ export default function CompetitiveIntelligence() {
     const output = miv3Result?.output;
     const marketDiagnosis = output?.marketDiagnosis;
     const threatSignals = output?.threatSignals || [];
+    const opportunitySignals = output?.opportunitySignals || [];
     const missingSignals = output?.missingSignalFlags || [];
     const confidence = output?.confidence;
     const intentMap = output?.competitorIntentMap || [];
@@ -1252,6 +1253,28 @@ export default function CompetitiveIntelligence() {
                 ))
               ) : (
                 <Text style={{ fontSize: 12, color: colors.textMuted }}>No structural threat signals detected in current data window.</Text>
+              )}
+            </View>
+
+            <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+              <View style={s.cardHeader}>
+                <Ionicons name="leaf-outline" size={18} color="#10B981" />
+                <Text style={[s.cardTitle, { color: colors.text }]}>Opportunity Signals</Text>
+                {opportunitySignals.length > 0 && (
+                  <View style={[s.countBadge, { backgroundColor: '#10B981' + '20', marginLeft: 8 }]}>
+                    <Text style={[s.countText, { color: '#10B981' }]}>{opportunitySignals.length}</Text>
+                  </View>
+                )}
+              </View>
+              {opportunitySignals.length > 0 ? (
+                opportunitySignals.map((opp: string, i: number) => (
+                  <View key={i} style={{ flexDirection: 'row', gap: 6, marginBottom: 8, alignItems: 'flex-start' }}>
+                    <Ionicons name="checkmark-circle" size={14} color="#10B981" style={{ marginTop: 2 }} />
+                    <Text style={{ fontSize: 12, color: colors.textSecondary, flex: 1, lineHeight: 18 }}>{opp}</Text>
+                  </View>
+                ))
+              ) : (
+                <Text style={{ fontSize: 12, color: colors.textMuted }}>No opportunity signals detected in current data window.</Text>
               )}
             </View>
 

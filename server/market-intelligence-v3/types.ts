@@ -148,6 +148,7 @@ export interface MIv3Output {
   revivalPotential: number;
   marketDiagnosis: string | null;
   threatSignals: string[];
+  opportunitySignals: string[];
   confidence: ConfidenceResult;
   missingSignalFlags: string[];
   dataFreshnessDays: number;

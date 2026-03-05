@@ -55,6 +55,7 @@ export function validateSnapshotCompleteness(snapshot: {
   volatilityIndex?: number | null;
   marketDiagnosis?: string | null;
   threatSignals?: string | null;
+  opportunitySignals?: string | null;
   narrativeSynthesis?: string | null;
   confidenceLevel?: string | null;
 }): SnapshotValidationResult {
@@ -86,6 +87,11 @@ export function validateSnapshotCompleteness(snapshot: {
   const threatSignals = parseJsonSafe(snapshot.threatSignals, null);
   if (threatSignals === null) {
     failures.push("threatSignals is null (must be array, even if empty)");
+  }
+
+  const opportunitySignals = parseJsonSafe(snapshot.opportunitySignals, null);
+  if (opportunitySignals === null) {
+    failures.push("opportunitySignals is null (must be array, even if empty)");
   }
 
   const signalData = parseJsonSafe(snapshot.signalData, null);
@@ -332,6 +338,41 @@ export function buildThreatSignals(confidence: any, trajectory: any, intents: an
   return threats;
 }
 
+export function buildOpportunitySignals(confidence: any, trajectory: any, intents: any[]): string[] {
+  const opportunities: string[] = [];
+
+  if (confidence.guardDecision === "BLOCK") {
+    return opportunities;
+  }
+
+  if (trajectory.marketHeatingIndex < 0.2) {
+    opportunities.push("Market posting density is low — reduced competitive noise in this category");
+  }
+
+  const decliningCompetitors = intents.filter((i: any) => i.intentCategory === "DECLINING");
+  if (decliningCompetitors.length > 0) {
+    opportunities.push(`${decliningCompetitors.length} competitor(s) showing declining activity — reduced publishing pressure observed`);
+  }
+
+  if (trajectory.narrativeConvergenceScore > 0.6) {
+    opportunities.push("High narrative convergence — content differentiation gaps are widening across the competitive set");
+  }
+
+  if (trajectory.angleSaturationLevel < 0.2) {
+    opportunities.push("Creative angle diversity is high — multiple untapped content formats observed in the market");
+  }
+
+  if (trajectory.offerCompressionIndex < 0.2) {
+    opportunities.push("Offer structures remain highly differentiated — low pricing convergence across competitors");
+  }
+
+  if (trajectory.revivalPotential < 0.2 && trajectory.marketHeatingIndex < 0.4) {
+    opportunities.push("No dormant competitor re-entry signals detected — market entrant activity is stable");
+  }
+
+  return opportunities;
+}
+
 export function computeSnapshotDeltas(prevSnapshot: any, currSnapshot: {
   competitorHash: string;
   signalData: any[];
@@ -535,6 +576,7 @@ export class MarketIntelligenceV3 {
     const marketState = deriveMarketState(trajectory, confidence.level);
     const marketDiagnosis = buildMarketDiagnosis(confidence, trajectory, dominantIntent);
     const threatSignals = buildThreatSignals(confidence, trajectory, intents);
+    const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents);
     const signalNoiseRatio = computeSignalNoiseRatio(signalResults, confidence);
     const evidenceCoverage = computeEvidenceCoverage(signalResults, competitors.length);
     const similarityData = computeSimilarityDiagnosis(competitors, signalResults);
@@ -627,6 +669,7 @@ export class MarketIntelligenceV3 {
       narrativeSynthesis,
       marketDiagnosis,
       threatSignals: JSON.stringify(threatSignals),
+      opportunitySignals: JSON.stringify(opportunitySignals),
       missingSignalFlags: JSON.stringify(missingFlags),
       similarityData: JSON.stringify(similarityData),
       contentDnaData: JSON.stringify(contentDnaResults),
@@ -683,6 +726,7 @@ export class MarketIntelligenceV3 {
       revivalPotential: trajectory.revivalPotential,
       marketDiagnosis,
       threatSignals,
+      opportunitySignals,
       confidence,
       missingSignalFlags: missingFlags,
       dataFreshnessDays,
@@ -747,6 +791,7 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
     refreshReason: null,
   });
   const threatSignals = parseJsonSafe(snapshot.threatSignals, []);
+  const opportunitySignals = parseJsonSafe(snapshot.opportunitySignals, []);
   const missingFlags = parseJsonSafe(snapshot.missingSignalFlags, []);
   const similarityData = parseJsonSafe(snapshot.similarityData, null);
   const deltaReportData = parseJsonSafe(snapshot.deltaReport, null);
@@ -760,6 +805,7 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
     revivalPotential: trajectoryData.revivalPotential || 0,
     marketDiagnosis: snapshot.marketDiagnosis || null,
     threatSignals,
+    opportunitySignals,
     confidence: confidenceData,
     missingSignalFlags: missingFlags,
     dataFreshnessDays: snapshot.dataFreshnessDays || 0,

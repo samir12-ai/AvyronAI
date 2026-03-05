@@ -1,0 +1,139 @@
+Hi Replit Team,
+
+MIv3 is very close to being fully closed. Before we mark the Market Intelligence engine as finalized, please run the following final verification checklist.  
+If any item is FAIL, please fix it and confirm.
+
+---
+
+### 1. Signals-Only Contract
+Verify that MIv3 outputs signals and observations only.
+
+Confirm that no prescriptive or strategy language appears anywhere in engine outputs (e.g., “focus”, “advantage”, “you should”, “recommend”, “strategy”, etc.).
+
+If found, clean the output so it remains purely descriptive market observations.
+
+---
+
+### 2. Threat vs Opportunity Separation
+Confirm that signals are logically categorized.
+
+Signals such as:
+- revival potential
+- declining activity
+
+should not appear as threats only.
+
+Verify that the system distinguishes between:
+• Threat Signals  
+• Opportunity Signals
+
+---
+
+### 3. Data Sufficiency Guard (Minimum Data Check)
+Since the minimum post coverage was reduced to 14 posts, confirm that the engine has a data sufficiency guard.
+
+Check that MIv3 evaluates:
+- posts analyzed
+- comments analyzed
+- competitors analyzed
+
+If coverage is too weak, the engine should downgrade confidence instead of returning normal analysis.
+
+---
+
+### 4. Confidence / Signal Quality Validation
+Confirm that the system evaluates signal quality using:
+- signalNoiseRatio
+- evidence coverage
+- competitor coverage
+
+If signal quality is low, the system should indicate reduced confidence in the signals.
+
+---
+
+### 5. Snapshot Integrity
+Confirm the snapshot system enforces:
+
+• Engine version compatibility  
+• Snapshot completeness  
+• Snapshot freshness validation  
+
+Old or incompatible snapshots should not be reused.
+
+---
+
+### 6. Freshness Hard Gate
+Confirm the 14-day freshness rule is enforced:
+
+If analyzed data is older than 14 days, the engine should block or flag the analysis as stale.
+
+---
+
+### 7. Threat Signal Coverage
+Verify that structural threat detection is active for major patterns such as:
+
+- narrative convergence
+- hook duplication
+- offer clustering
+- aggressive scaling
+- market density changes
+- positioning shifts
+- declining activity
+- revival potential
+
+---
+
+### 8. Market Trajectory Interpretations
+Confirm that each trajectory index includes a signal interpretation line explaining the observed pattern, without turning it into advice.
+
+---
+
+### 9. Competitor Intelligence Completeness
+Verify competitor cards expose structural signals such as:
+- narrative pattern
+- hook style
+- CTA pattern
+- content style
+
+If insufficient post data exists, the UI should clearly indicate that.
+
+---
+
+### 10. Evidence Coverage Transparency
+Confirm that MIv3 always exposes:
+
+• posts analyzed  
+• comments analyzed  
+• competitors analyzed  
+• signal quality (signalNoiseRatio)
+
+so users understand the reliability of the signals.
+
+---
+
+### 11. Layer-0 Boundary Enforcement
+MIv3 must remain pure Market Intelligence.
+
+Confirm that it produces:
+• signals  
+• patterns  
+• observations
+
+and does not produce strategy recommendations or actions.
+
+---
+
+### 12. Test Coverage
+Confirm that all regression tests pass and that checks exist for:
+- signals-only output
+- freshness hard gate
+- snapshot integrity
+- data sufficiency guard
+
+---
+
+Once this checklist is verified and any remaining gaps are corrected, MIv3 can be considered fully closed as the Market Intelligence layer.
+
+Please confirm PASS/FAIL for each item.
+
+Thanks.

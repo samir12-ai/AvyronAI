@@ -1338,6 +1338,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
         volatilityIndex: 0.33,
         marketDiagnosis: "Test market diagnosis",
         threatSignals: JSON.stringify(["risk1"]),
+        opportunitySignals: JSON.stringify([]),
         narrativeSynthesis: "Test narrative",
         confidenceLevel: "MODERATE",
       };
@@ -1547,6 +1548,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
         volatilityIndex: 0.2,
         marketDiagnosis: null,
         threatSignals: JSON.stringify(["INSUFFICIENT DATA"]),
+        opportunitySignals: JSON.stringify([]),
         narrativeSynthesis: null,
         confidenceLevel: "LOW",
       };
@@ -1566,6 +1568,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
         volatilityIndex: 0.1,
         marketDiagnosis: null,
         threatSignals: JSON.stringify(["BLOCKED"]),
+        opportunitySignals: JSON.stringify([]),
         narrativeSynthesis: null,
         confidenceLevel: "LOW",
       };

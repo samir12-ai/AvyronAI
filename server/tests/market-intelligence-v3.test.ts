@@ -9,7 +9,7 @@ import { evaluateRefreshDecision } from "../market-intelligence-v3/refresh-syste
 import { validateEngineIsolation, assertNoPlanWrites, assertNoOrchestrator, assertNoAutopilot } from "../market-intelligence-v3/isolation-guard";
 import { computeCompetitorHash } from "../market-intelligence-v3/utils";
 import { computeDominanceForCompetitor } from "../market-intelligence-v3/dominance-module";
-import { buildResultFromSnapshot, validateSnapshotCompleteness, buildMarketDiagnosis, buildThreatSignals } from "../market-intelligence-v3/engine";
+import { buildResultFromSnapshot, validateSnapshotCompleteness, buildMarketDiagnosis, buildThreatSignals, buildOpportunitySignals } from "../market-intelligence-v3/engine";
 import type { CompetitorInput, PostData, CompetitorSignalResult, ExecutionMode, GoalMode } from "../market-intelligence-v3/types";
 import { MI_THRESHOLDS, MI_COST_LIMITS, MI_CONFIDENCE, MI_REVIVAL_CAP, GOAL_MODE_WEIGHTS, ENGAGEMENT_BIAS_THRESHOLD } from "../market-intelligence-v3/constants";
 
@@ -1334,11 +1334,12 @@ describe("T004: Calibration Layer Isolation Verification", () => {
 });
 
 describe("Layer-0 Signal-Only Contract", () => {
-  it("MIv3Output type has marketDiagnosis, NOT entryStrategy", () => {
+  it("MIv3Output type has marketDiagnosis, threatSignals, and opportunitySignals", () => {
     const source = require("fs").readFileSync("server/market-intelligence-v3/types.ts", "utf-8");
     expect(source).toContain("marketDiagnosis:");
     expect(source).not.toContain("entryStrategy:");
     expect(source).toContain("threatSignals:");
+    expect(source).toContain("opportunitySignals:");
     expect(source).not.toContain("defensiveRisks:");
   });
 
@@ -1405,6 +1406,38 @@ describe("Layer-0 Signal-Only Contract", () => {
       }
     }
     expect(result.length).toBeGreaterThan(0);
+  });
+
+  it("buildOpportunitySignals runtime outputs contain no prescriptive words", () => {
+    const forbiddenWords = ["Focus on", "Differentiate", "Establish", "You should", "Must ", "We recommend", "first-mover", "best approach", "best angle", "strategy pivot"];
+    const confidence = { overall: 0.7, guardDecision: "PROCEED" };
+    const trajectory = { marketHeatingIndex: 0.15, narrativeConvergenceScore: 0.7, offerCompressionIndex: 0.1, angleSaturationLevel: 0.1, revivalPotential: 0.1 };
+    const intents = [
+      { competitorName: "A", intentCategory: "DECLINING" },
+      { competitorName: "B", intentCategory: "DECLINING" },
+    ];
+    const result = buildOpportunitySignals(confidence, trajectory, intents);
+    expect(result.length).toBeGreaterThan(0);
+    for (const signal of result) {
+      for (const word of forbiddenWords) {
+        expect(signal).not.toContain(word);
+      }
+    }
+  });
+
+  it("declining activity appears in BOTH threat and opportunity signals", () => {
+    const confidence = { overall: 0.7, guardDecision: "PROCEED" };
+    const trajectory = { marketHeatingIndex: 0.15, narrativeConvergenceScore: 0.7, offerCompressionIndex: 0.1, angleSaturationLevel: 0.1, revivalPotential: 0.1 };
+    const intents = [
+      { competitorName: "A", intentCategory: "DECLINING" },
+      { competitorName: "B", intentCategory: "DECLINING" },
+    ];
+    const threats = buildThreatSignals(confidence, trajectory, intents);
+    const opportunities = buildOpportunitySignals(confidence, trajectory, intents);
+    expect(threats.some(t => t.toLowerCase().includes("declining activity"))).toBe(true);
+    expect(opportunities.some(o => o.toLowerCase().includes("declining activity"))).toBe(true);
+    expect(threats.some(t => t.includes("Market posting density below"))).toBe(true);
+    expect(opportunities.some(o => o.includes("reduced competitive noise"))).toBe(true);
   });
 
   it("ENGINE_VERSION is 11", () => {

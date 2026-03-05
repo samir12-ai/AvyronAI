@@ -10,7 +10,7 @@ import { computeAllDominance } from "./dominance-module";
 import { computeTokenBudget, applySampling } from "./token-budget";
 import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
 import { computeCompetitorHash } from "./utils";
-import { computeVolatilityIndex, buildMarketDiagnosis, buildThreatSignals, buildMarketSummary, computeSignalNoiseRatio, computeEvidenceCoverage, persistValidatedSnapshot, ENGINE_VERSION } from "./engine";
+import { computeVolatilityIndex, buildMarketDiagnosis, buildThreatSignals, buildOpportunitySignals, buildMarketSummary, computeSignalNoiseRatio, computeEvidenceCoverage, persistValidatedSnapshot, ENGINE_VERSION } from "./engine";
 import { computeSimilarityDiagnosis } from "./similarity-engine";
 import type { CompetitorInput, GoalMode } from "./types";
 import { logAudit } from "../audit";
@@ -798,6 +798,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   const volatilityIndex = computeVolatilityIndex(signalResults);
   const marketDiagnosis = buildMarketDiagnosis(confidence, trajectory, dominantIntent);
   const threatSignals = buildThreatSignals(confidence, trajectory, intents);
+  const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents);
   const similarityData = computeSimilarityDiagnosis(competitorInputs, signalResults);
 
   let narrativeSynthesis: string | null = null;
@@ -855,6 +856,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     narrativeSynthesis,
     marketDiagnosis,
     threatSignals: JSON.stringify(threatSignals),
+    opportunitySignals: JSON.stringify(opportunitySignals),
     missingSignalFlags: JSON.stringify(missingFlags),
     similarityData: JSON.stringify(similarityData),
     volatilityIndex,
