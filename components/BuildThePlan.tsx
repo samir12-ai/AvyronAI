@@ -15,7 +15,6 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import * as DocumentPicker from 'expo-document-picker';
 import Colors from '@/constants/colors';
 import { getApiUrl } from '@/lib/query-client';
 import { useApp } from '@/context/AppContext';
@@ -41,8 +40,14 @@ interface DraftBlueprint {
   detectedAudienceGuess?: FieldWithConfidence;
   detectedFunnelStage?: FieldWithConfidence;
   detectedPriceIfVisible?: FieldWithConfidence;
+  hookDirection?: FieldWithConfidence;
+  narrativeStructure?: FieldWithConfidence;
+  contentAngle?: FieldWithConfidence;
+  visualDirection?: FieldWithConfidence;
+  formatSuggestion?: FieldWithConfidence;
   extractionFallbackUsed?: boolean;
   parseFailedReason?: string | null;
+  generationSource?: string;
 }
 
 interface CampaignContext {
@@ -87,8 +92,8 @@ const STATUS_TO_PHASE: Record<BlueprintStatus, Phase> = {
   ORCHESTRATED: 5,
 };
 
-const PHASE_LABELS = ['Gate', 'Extract', 'Confirm', 'Analyze', 'Validate', 'Execute'];
-const PHASE_ICONS: any[] = ['lock-closed', 'scan', 'checkmark-circle', 'analytics', 'shield-checkmark', 'rocket'];
+const PHASE_LABELS = ['Gate', 'Blueprint', 'Confirm', 'Analyze', 'Validate', 'Execute'];
+const PHASE_ICONS: any[] = ['lock-closed', 'bulb', 'checkmark-circle', 'analytics', 'shield-checkmark', 'rocket'];
 
 function getConfidenceColor(confidence: number): string {
   if (confidence >= 80) return '#10B981';
@@ -272,46 +277,21 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     }
   }, [ciCompetitors, selectedCompetitorIds, avgPrice]);
 
-  const analyzeCreative = useCallback(async () => {
+  const generateCreativeBlueprint = useCallback(async () => {
     if (!blueprint) return;
     setError('');
+    setLoading(true);
 
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['image/*', 'video/*'],
-        copyToCacheDirectory: true,
-      });
-
-      if (result.canceled) return;
-      const file = result.assets[0];
-
-      setLoading(true);
-      const formData = new FormData();
-      formData.append('blueprintId', blueprint.id);
-
-      if (Platform.OS === 'web') {
-        const response = await globalThis.fetch(file.uri);
-        const blob = await response.blob();
-        formData.append('media', blob, file.name || 'creative.jpg');
-      } else {
-        formData.append('media', {
-          uri: file.uri,
-          name: file.name || 'creative.jpg',
-          type: file.mimeType || 'image/jpeg',
-        } as any);
-      }
-
-      const uploadUrl = getApiUrl('/api/strategic/analyze-creative');
-      console.log('[BuildThePlan] Upload URL:', uploadUrl, 'File:', file.name, 'Type:', file.mimeType);
-      const res = await globalThis.fetch(uploadUrl, {
+      const res = await fetch(getApiUrl('/api/strategic/generate-creative-blueprint'), {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blueprintId: blueprint.id }),
       });
-      console.log('[BuildThePlan] Upload response status:', res.status);
       const data = await res.json();
 
       if (!data.success) {
-        setError(data.error || 'Analysis failed');
+        setError(data.error || 'Blueprint generation failed');
         return;
       }
 
@@ -327,7 +307,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
       setCurrentPhase(2);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch (err: any) {
-      setError(err.message || 'Upload failed');
+      setError(err.message || 'Blueprint generation failed');
     } finally {
       setLoading(false);
     }
@@ -925,34 +905,49 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
       {renderCampaignBadge()}
       <View style={[s.phaseCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
         <View style={s.phaseHeader}>
-          <View style={[s.phaseIconWrap, { backgroundColor: '#0EA5E920' }]}>
-            <Ionicons name="scan" size={20} color="#0EA5E9" />
+          <View style={[s.phaseIconWrap, { backgroundColor: '#8B5CF620' }]}>
+            <Ionicons name="bulb" size={20} color="#8B5CF6" />
           </View>
           <View style={s.phaseHeaderText}>
-            <Text style={[s.phaseTitle, { color: colors.text }]}>Phase 1: Creative Analysis</Text>
+            <Text style={[s.phaseTitle, { color: colors.text }]}>Phase 1: Creative Blueprint</Text>
             <Text style={[s.phaseDesc, { color: colors.textSecondary }]}>
-              Upload a campaign creative — AI will extract offer, positioning, CTA, and audience with per-field confidence
+              AI generates creative direction from your market intelligence, competitor signals, and campaign strategy
             </Text>
+          </View>
+        </View>
+
+        <View style={{ marginTop: 12, marginBottom: 8, gap: 6 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+            <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Hook direction and narrative structure</Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+            <Text style={{ color: colors.textSecondary, fontSize: 13 }}>CTA and content angle recommendations</Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+            <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Visual direction and format suggestions</Text>
           </View>
         </View>
 
         {error ? <Text style={s.errorText}>{error}</Text> : null}
 
         <Pressable
-          onPress={analyzeCreative}
+          onPress={generateCreativeBlueprint}
           disabled={loading}
           style={[s.actionBtn, { opacity: loading ? 0.6 : 1 }]}
         >
-          <LinearGradient colors={['#0EA5E9', '#3B82F6']} style={s.actionBtnGrad}>
+          <LinearGradient colors={['#8B5CF6', '#6366F1']} style={s.actionBtnGrad}>
             {loading ? (
               <View style={s.loadingRow}>
                 <ActivityIndicator color="#fff" size="small" />
-                <Text style={s.actionBtnText}>Analyzing creative...</Text>
+                <Text style={s.actionBtnText}>Generating blueprint...</Text>
               </View>
             ) : (
               <>
-                <Ionicons name="cloud-upload" size={18} color="#fff" />
-                <Text style={s.actionBtnText}>Upload Creative</Text>
+                <Ionicons name="sparkles" size={18} color="#fff" />
+                <Text style={s.actionBtnText}>Generate Creative Blueprint</Text>
               </>
             )}
           </LinearGradient>
@@ -1069,8 +1064,8 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
                 {isConfirmed
                   ? 'Blueprint confirmed. Editing any field will reset downstream analysis.'
                   : isFallback
-                    ? 'AI extraction failed. Fill in the fields manually, or retry the extraction.'
-                    : 'Review AI extraction results. Edit fields with low confidence, then confirm.'}
+                    ? 'AI generation incomplete. Fill in the fields manually, or regenerate the blueprint.'
+                    : 'Review AI-generated creative blueprint. Edit fields with low confidence, then confirm.'}
               </Text>
             </View>
           </View>
@@ -1080,7 +1075,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
               <Ionicons name="warning" size={16} color="#EF4444" />
               <View style={{ flex: 1 }}>
                 <Text style={[s.statusBannerText, { color: '#EF4444', fontWeight: '700' }]}>
-                  AI extraction failed — switched to manual mode
+                  AI blueprint generation incomplete — switched to manual mode
                 </Text>
                 <Text style={[s.statusBannerText, { color: '#EF4444', fontSize: 12, marginTop: 2 }]}>
                   Reason: {fallbackReasonLabel}
@@ -1096,7 +1091,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#3B82F615', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#3B82F630' }}>
                 <Ionicons name="refresh" size={16} color="#3B82F6" />
-                <Text style={{ color: '#3B82F6', fontWeight: '600', fontSize: 14, marginLeft: 6 }}>Retry Extraction</Text>
+                <Text style={{ color: '#3B82F6', fontWeight: '600', fontSize: 14, marginLeft: 6 }}>Regenerate Blueprint</Text>
               </View>
             </Pressable>
           )}
@@ -1118,12 +1113,17 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
           )}
         </View>
 
-        {renderExtractionField('Detected Offer', 'detectedOffer', draft.detectedOffer, 'pricetag')}
-        {renderExtractionField('Positioning', 'detectedPositioning', draft.detectedPositioning, 'trending-up')}
+        {renderExtractionField('Offer Positioning', 'detectedOffer', draft.detectedOffer, 'pricetag')}
+        {renderExtractionField('Brand Positioning', 'detectedPositioning', draft.detectedPositioning, 'trending-up')}
         {renderExtractionField('Call to Action', 'detectedCTA', draft.detectedCTA, 'megaphone')}
         {renderExtractionField('Target Audience', 'detectedAudienceGuess', draft.detectedAudienceGuess, 'people')}
         {renderExtractionField('Funnel Stage', 'detectedFunnelStage', draft.detectedFunnelStage, 'funnel')}
-        {renderExtractionField('Detected Price', 'detectedPriceIfVisible', draft.detectedPriceIfVisible, 'cash')}
+
+        {draft.hookDirection && renderExtractionField('Hook Direction', 'hookDirection', draft.hookDirection, 'flash')}
+        {draft.narrativeStructure && renderExtractionField('Narrative Structure', 'narrativeStructure', draft.narrativeStructure, 'document-text')}
+        {draft.contentAngle && renderExtractionField('Content Angle', 'contentAngle', draft.contentAngle, 'compass')}
+        {draft.visualDirection && renderExtractionField('Visual Direction', 'visualDirection', draft.visualDirection, 'color-palette')}
+        {draft.formatSuggestion && renderExtractionField('Format Suggestion', 'formatSuggestion', draft.formatSuggestion, 'film')}
 
         {error ? <Text style={s.errorText}>{error}</Text> : null}
 
@@ -1170,7 +1170,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
           <View style={[s.statusBanner, { backgroundColor: '#F59E0B15', borderWidth: 1, borderColor: '#F59E0B30' }]}>
             <Ionicons name="warning" size={16} color="#F59E0B" />
             <Text style={[s.statusBannerText, { color: '#F59E0B' }]}>
-              AI extraction used fallback — analysis may be less accurate. Consider retrying extraction in Phase 2.
+              AI blueprint generation used fallback — analysis may be less accurate. Consider regenerating the blueprint.
             </Text>
           </View>
         )}

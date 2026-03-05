@@ -1,77 +1,36 @@
 import type { Express, Request, Response } from "express";
-import { aiGemini } from "../ai-client";
-import multer from "multer";
+import { aiChat } from "../ai-client";
 import { db } from "../db";
-import { strategicBlueprints, extractionMetrics } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { strategicBlueprints, businessDataLayer, miSnapshots } from "@shared/schema";
+import { eq, and, desc } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
-import fs from "fs";
-import path from "path";
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const CREATIVE_BLUEPRINT_PROMPT = `You are a marketing creative strategist. Given campaign context, business data, competitor intelligence, and market signals, generate a structured Creative Blueprint that will guide content creation.
 
-const AUDIT_DIR = path.join(process.cwd(), "logs", "extraction-audit");
-
-function ensureAuditDir() {
-  if (!fs.existsSync(AUDIT_DIR)) {
-    fs.mkdirSync(AUDIT_DIR, { recursive: true });
-  }
-}
-
-function storeRawAudit(blueprintId: string, attempts: { text: string; error?: string; model?: string; tokens?: any }[]) {
-  ensureAuditDir();
-  const filename = `${blueprintId}_${Date.now()}.json`;
-  const filepath = path.join(AUDIT_DIR, filename);
-  const payload = {
-    blueprintId,
-    timestamp: new Date().toISOString(),
-    attempts: attempts.slice(-3),
-  };
-  fs.writeFileSync(filepath, JSON.stringify(payload, null, 2));
-  console.log(`[StrategicCore] Audit log saved: ${filepath}`);
-
-  const files = fs.readdirSync(AUDIT_DIR)
-    .filter(f => f.endsWith(".json"))
-    .sort()
-    .reverse();
-  if (files.length > 100) {
-    for (const old of files.slice(100)) {
-      fs.unlinkSync(path.join(AUDIT_DIR, old));
-    }
-  }
-}
-
-const EXTRACTION_PROMPT = `You are a campaign creative analysis engine. Analyze the provided media (video or image) and extract structured marketing intelligence.
-
-Your tasks:
-1. Auto-detect the language used in the creative
-2. If video: transcribe all speech (multilingual support)
-3. Extract all visible text (OCR)
-4. Detect the offer being made
-5. Detect the call-to-action (CTA)
-6. Infer the positioning strategy: one of "premium", "discount", "authority", "convenience", or "value"
-7. Infer the funnel stage: one of "awareness", "consideration", "conversion", "retention"
-8. Infer the target audience
-9. Detect any visible price
+Your task is to generate strategic creative direction — NOT analyze existing content.
 
 CRITICAL RULES:
-- You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no free text.
-- Each field MUST have its own confidence score (0-100).
-- If you cannot determine a field, set its value to "INSUFFICIENT_DATA" and its confidence to 0.
-- NEVER guess or hallucinate. If unsure, mark as INSUFFICIENT_DATA.
-- A field with confidence below 60 means the AI is NOT confident — the user must confirm.
+- Respond with ONLY a valid JSON object. No markdown, no explanation, no free text.
+- Each field MUST have a confidence score (0-100) based on how much input data supports the recommendation.
+- If insufficient data exists for a field, provide a reasonable direction based on available context and set confidence to 40-60.
+- All recommendations must be grounded in the provided market data and campaign objectives.
 
 Response format (strict JSON only):
 {
-  "detectedLanguage": "string",
-  "transcribedText": "string or null",
-  "ocrText": "string or null",
-  "detectedOffer": { "value": "string or INSUFFICIENT_DATA", "confidence": 0-100 },
-  "detectedPositioning": { "value": "premium|discount|authority|convenience|value|INSUFFICIENT_DATA", "confidence": 0-100 },
-  "detectedCTA": { "value": "string or INSUFFICIENT_DATA", "confidence": 0-100 },
-  "detectedAudienceGuess": { "value": "string or INSUFFICIENT_DATA", "confidence": 0-100 },
-  "detectedFunnelStage": { "value": "awareness|consideration|conversion|retention|INSUFFICIENT_DATA", "confidence": 0-100 },
-  "detectedPriceIfVisible": { "value": "number or null", "confidence": 0-100 }
+  "detectedLanguage": "string (primary language for content)",
+  "transcribedText": null,
+  "ocrText": null,
+  "detectedOffer": { "value": "string (recommended offer positioning based on market gaps and pricing)", "confidence": 0-100 },
+  "detectedPositioning": { "value": "premium|discount|authority|convenience|value", "confidence": 0-100 },
+  "detectedCTA": { "value": "string (recommended call-to-action based on funnel stage and objective)", "confidence": 0-100 },
+  "detectedAudienceGuess": { "value": "string (target audience based on business data and market analysis)", "confidence": 0-100 },
+  "detectedFunnelStage": { "value": "awareness|consideration|conversion|retention", "confidence": 0-100 },
+  "detectedPriceIfVisible": { "value": null, "confidence": 0 },
+  "hookDirection": { "value": "string (recommended hook style and opening approach)", "confidence": 0-100 },
+  "narrativeStructure": { "value": "string (recommended story arc: problem-solution, testimonial, educational, etc.)", "confidence": 0-100 },
+  "contentAngle": { "value": "string (unique angle to differentiate from competitors)", "confidence": 0-100 },
+  "visualDirection": { "value": "string (visual style, mood, color direction)", "confidence": 0-100 },
+  "formatSuggestion": { "value": "reel|post|story|carousel", "confidence": 0-100 }
 }`;
 
 export function cleanJsonString(raw: string): string {
@@ -93,7 +52,7 @@ export function cleanJsonString(raw: string): string {
   return s;
 }
 
-function buildFallbackExtraction(): any {
+function buildFallbackBlueprint(): any {
   return {
     detectedLanguage: "unknown",
     transcribedText: null,
@@ -104,15 +63,24 @@ function buildFallbackExtraction(): any {
     detectedAudienceGuess: { value: "INSUFFICIENT_DATA", confidence: 0 },
     detectedFunnelStage: { value: "INSUFFICIENT_DATA", confidence: 0 },
     detectedPriceIfVisible: { value: null, confidence: 0 },
+    hookDirection: { value: "INSUFFICIENT_DATA", confidence: 0 },
+    narrativeStructure: { value: "INSUFFICIENT_DATA", confidence: 0 },
+    contentAngle: { value: "INSUFFICIENT_DATA", confidence: 0 },
+    visualDirection: { value: "INSUFFICIENT_DATA", confidence: 0 },
+    formatSuggestion: { value: "INSUFFICIENT_DATA", confidence: 0 },
   };
 }
 
 function normalizeExtraction(raw: any): any {
-  const fields = ["detectedOffer", "detectedPositioning", "detectedCTA", "detectedAudienceGuess", "detectedFunnelStage", "detectedPriceIfVisible"];
+  const fields = [
+    "detectedOffer", "detectedPositioning", "detectedCTA", "detectedAudienceGuess",
+    "detectedFunnelStage", "detectedPriceIfVisible",
+    "hookDirection", "narrativeStructure", "contentAngle", "visualDirection", "formatSuggestion",
+  ];
   const result: any = {
     detectedLanguage: raw.detectedLanguage || "unknown",
-    transcribedText: raw.transcribedText || null,
-    ocrText: raw.ocrText || null,
+    transcribedText: null,
+    ocrText: null,
   };
 
   for (const field of fields) {
@@ -136,20 +104,8 @@ function normalizeExtraction(raw: any): any {
   return result;
 }
 
-function extractTokenUsage(response: any): { inputTokens?: number; outputTokens?: number; totalTokens?: number; truncated: boolean } {
-  const usage = response.usageMetadata || response.usage || {};
-  const inputTokens = usage.promptTokenCount || usage.promptTokens || usage.input_tokens;
-  const outputTokens = usage.candidatesTokenCount || usage.completionTokens || usage.output_tokens;
-  const totalTokens = usage.totalTokenCount || usage.totalTokens || usage.total_tokens;
-
-  const finishReason = response.candidates?.[0]?.finishReason || "";
-  const truncated = finishReason === "MAX_TOKENS" || finishReason === "STOP" && !response.text?.trim().endsWith("}");
-
-  return { inputTokens, outputTokens, totalTokens, truncated };
-}
-
 export function registerExtractionRoutes(app: Express) {
-  app.post("/api/strategic/analyze-creative", upload.single("media"), async (req: Request, res: Response) => {
+  app.post("/api/strategic/generate-creative-blueprint", async (req: Request, res: Response) => {
     try {
       const { blueprintId } = req.body;
 
@@ -163,115 +119,149 @@ export function registerExtractionRoutes(app: Express) {
       }
 
       if (!["GATE_PASSED", "EXTRACTION_COMPLETE", "EXTRACTION_FALLBACK", "ANALYSIS_COMPLETE"].includes(blueprint.status)) {
-        return res.status(400).json({ error: "Blueprint must pass Phase 0 gate before creative analysis" });
+        return res.status(400).json({ error: "Blueprint must pass Phase 0 gate before creative blueprint generation" });
       }
 
-      if (!req.file) {
-        return res.status(400).json({ error: "Media file is required (video or image)" });
+      const campaignContext = blueprint.campaignContext ? JSON.parse(blueprint.campaignContext) : null;
+      const competitorUrls = blueprint.competitorUrls ? JSON.parse(blueprint.competitorUrls) : [];
+      const asp = blueprint.averageSellingPrice;
+
+      let businessData: any = null;
+      if (campaignContext?.campaignId) {
+        const [bd] = await db.select().from(businessDataLayer)
+          .where(eq(businessDataLayer.campaignId, campaignContext.campaignId))
+          .limit(1);
+        if (bd) businessData = bd;
       }
 
-      const mimeType = req.file.mimetype;
-      const base64Data = req.file.buffer.toString("base64");
-      const isVideo = mimeType.startsWith("video/");
-      const isImage = mimeType.startsWith("image/");
+      let marketSignals: any = null;
+      if (campaignContext?.campaignId) {
+        const [latestSnapshot] = await db.select({
+          marketDiagnosis: miSnapshots.marketDiagnosis,
+          threatSignals: miSnapshots.threatSignals,
+          opportunitySignals: miSnapshots.opportunitySignals,
+          trajectoryData: miSnapshots.trajectoryData,
+        }).from(miSnapshots)
+          .where(and(
+            eq(miSnapshots.accountId, blueprint.accountId),
+            eq(miSnapshots.campaignId, campaignContext.campaignId),
+            eq(miSnapshots.status, "COMPLETE"),
+          ))
+          .orderBy(desc(miSnapshots.createdAt))
+          .limit(1);
 
-      if (!isVideo && !isImage) {
-        return res.status(400).json({ error: "Only video and image files are supported" });
-      }
-
-      const parts: any[] = [
-        { text: EXTRACTION_PROMPT },
-        { inlineData: { data: base64Data, mimeType } },
-      ];
-
-      const auditAttempts: { text: string; error?: string; model?: string; tokens?: any }[] = [];
-      let rawAnalysis: any = null;
-      const MODEL_NAME = "gemini-3-pro-preview";
-
-      try {
-        const response = await aiGemini({
-          model: MODEL_NAME,
-          contents: [{ role: "user", parts }],
-          config: {
-            maxOutputTokens: 4096,
-            responseMimeType: "application/json",
-          },
-          accountId: "default",
-          endpoint: "strategic-extraction",
-        });
-
-        const rawText = response.text || "";
-        const tokenInfo = extractTokenUsage(response);
-        console.log(`[StrategicCore] Model: ${MODEL_NAME} | Tokens: in=${tokenInfo.inputTokens ?? "?"}, out=${tokenInfo.outputTokens ?? "?"}, total=${tokenInfo.totalTokens ?? "?"} | Truncated: ${tokenInfo.truncated}`);
-
-        auditAttempts.push({ text: rawText, model: MODEL_NAME, tokens: tokenInfo });
-
-        if (tokenInfo.truncated) {
-          console.warn(`[StrategicCore] WARNING: Response appears truncated (finishReason or missing closing brace)`);
+        if (latestSnapshot) {
+          marketSignals = {
+            diagnosis: latestSnapshot.marketDiagnosis,
+            threats: latestSnapshot.threatSignals ? JSON.parse(latestSnapshot.threatSignals) : [],
+            opportunities: latestSnapshot.opportunitySignals ? JSON.parse(latestSnapshot.opportunitySignals) : [],
+            trajectory: latestSnapshot.trajectoryData ? JSON.parse(latestSnapshot.trajectoryData) : null,
+          };
         }
+      }
 
-        const cleaned = cleanJsonString(rawText);
-        rawAnalysis = JSON.parse(cleaned);
-      } catch (parseErr: any) {
-        console.error("[StrategicCore] Attempt 1 failed:", parseErr.message);
-        if (auditAttempts.length > 0) {
-          auditAttempts[auditAttempts.length - 1].error = parseErr.message;
+      let contextBlock = `CAMPAIGN CONTEXT:\n`;
+      if (campaignContext) {
+        contextBlock += `- Campaign: ${campaignContext.campaignName}\n`;
+        contextBlock += `- Objective: ${campaignContext.objective}\n`;
+        contextBlock += `- Location: ${campaignContext.location || "Not specified"}\n`;
+        contextBlock += `- Platform: ${campaignContext.platform || "meta"}\n`;
+      }
+      contextBlock += `- Average Selling Price: $${asp || "Not specified"}\n`;
+      contextBlock += `- Competitors Tracked: ${competitorUrls.length}\n`;
+
+      if (businessData) {
+        contextBlock += `\nBUSINESS PROFILE:\n`;
+        contextBlock += `- Business Type: ${businessData.businessType || "Unknown"}\n`;
+        contextBlock += `- Core Offer: ${businessData.coreOffer || "Unknown"}\n`;
+        contextBlock += `- Price Range: ${businessData.priceRange || "Unknown"}\n`;
+        contextBlock += `- Target Audience Age: ${businessData.targetAudienceAge || "Unknown"}\n`;
+        contextBlock += `- Target Segment: ${businessData.targetAudienceSegment || "Unknown"}\n`;
+        contextBlock += `- Monthly Budget: ${businessData.monthlyBudget || "Unknown"}\n`;
+        contextBlock += `- Funnel Objective: ${businessData.funnelObjective || "Unknown"}\n`;
+        contextBlock += `- Conversion Channel: ${businessData.primaryConversionChannel || "Unknown"}\n`;
+        if (businessData.businessLocation) contextBlock += `- Location: ${businessData.businessLocation}\n`;
+      }
+
+      if (marketSignals) {
+        contextBlock += `\nMARKET INTELLIGENCE:\n`;
+        if (marketSignals.diagnosis) {
+          contextBlock += `- Market Diagnosis: ${marketSignals.diagnosis}\n`;
         }
-
-        try {
-          console.log("[StrategicCore] Retrying extraction with stricter prompt...");
-          const retryResponse = await aiGemini({
-            model: MODEL_NAME,
-            contents: [{
-              role: "user",
-              parts: [
-                { text: EXTRACTION_PROMPT + "\n\nPREVIOUS ATTEMPT FAILED JSON PARSING. You MUST return ONLY a valid JSON object. No markdown code blocks. No trailing commas. No comments. Just the raw JSON object starting with { and ending with }." },
-                { inlineData: { data: base64Data, mimeType } },
-              ],
-            }],
-            config: {
-              maxOutputTokens: 4096,
-              responseMimeType: "application/json",
-            },
-            accountId: "default",
-            endpoint: "strategic-extraction-retry",
-          });
-
-          const retryText = retryResponse.text || "";
-          const retryTokens = extractTokenUsage(retryResponse);
-          console.log(`[StrategicCore] Retry | Model: ${MODEL_NAME} | Tokens: in=${retryTokens.inputTokens ?? "?"}, out=${retryTokens.outputTokens ?? "?"} | Truncated: ${retryTokens.truncated}`);
-
-          auditAttempts.push({ text: retryText, model: MODEL_NAME, tokens: retryTokens });
-
-          const cleaned = cleanJsonString(retryText);
-          rawAnalysis = JSON.parse(cleaned);
-        } catch (retryErr: any) {
-          console.error("[StrategicCore] Attempt 2 also failed:", retryErr.message);
-          if (auditAttempts.length > 0) {
-            auditAttempts[auditAttempts.length - 1].error = retryErr.message;
+        if (marketSignals.threats?.length > 0) {
+          contextBlock += `- Threat Signals:\n`;
+          for (const t of marketSignals.threats.slice(0, 5)) {
+            contextBlock += `  • ${t}\n`;
           }
         }
+        if (marketSignals.opportunities?.length > 0) {
+          contextBlock += `- Market Openings:\n`;
+          for (const o of marketSignals.opportunities.slice(0, 5)) {
+            contextBlock += `  • ${o}\n`;
+          }
+        }
+        if (marketSignals.trajectory) {
+          const traj = marketSignals.trajectory;
+          contextBlock += `- Market Heating Index: ${traj.marketHeatingIndex ?? "N/A"}\n`;
+          contextBlock += `- Narrative Convergence: ${traj.narrativeConvergenceScore ?? "N/A"}\n`;
+        }
       }
 
+      if (competitorUrls.length > 0) {
+        contextBlock += `\nCOMPETITOR URLS:\n`;
+        for (const url of competitorUrls.slice(0, 10)) {
+          contextBlock += `- ${url}\n`;
+        }
+      }
+
+      let rawBlueprint: any = null;
       let extractionFallbackUsed = false;
       let parseFailedReason: string | null = null;
 
-      if (!rawAnalysis) {
-        extractionFallbackUsed = true;
-        const lastAttempt = auditAttempts[auditAttempts.length - 1];
-        if (lastAttempt?.tokens?.truncated) {
-          parseFailedReason = "TRUNCATED";
-        } else if (lastAttempt?.text && lastAttempt.text.trim().length === 0) {
-          parseFailedReason = "EMPTY_RESPONSE";
-        } else {
-          parseFailedReason = "INVALID_JSON";
+      try {
+        const response = await aiChat({
+          model: "gpt-4.1-mini",
+          messages: [
+            { role: "system", content: CREATIVE_BLUEPRINT_PROMPT },
+            { role: "user", content: `Generate a Creative Blueprint based on this strategic data:\n\n${contextBlock}` },
+          ],
+          accountId: blueprint.accountId || "default",
+          endpoint: "strategic-creative-blueprint",
+        });
+
+        const rawText = typeof response === "string" ? response : response?.choices?.[0]?.message?.content || "";
+        const cleaned = cleanJsonString(rawText);
+        rawBlueprint = JSON.parse(cleaned);
+      } catch (err: any) {
+        console.error("[StrategicCore] Creative blueprint generation attempt 1 failed:", err.message);
+
+        try {
+          const retryResponse = await aiChat({
+            model: "gpt-4.1-mini",
+            messages: [
+              { role: "system", content: CREATIVE_BLUEPRINT_PROMPT + "\n\nPREVIOUS ATTEMPT FAILED. Return ONLY a valid JSON object. No markdown. No comments." },
+              { role: "user", content: `Generate a Creative Blueprint:\n\n${contextBlock}` },
+            ],
+            accountId: blueprint.accountId || "default",
+            endpoint: "strategic-creative-blueprint-retry",
+          });
+
+          const retryText = typeof retryResponse === "string" ? retryResponse : retryResponse?.choices?.[0]?.message?.content || "";
+          const cleaned = cleanJsonString(retryText);
+          rawBlueprint = JSON.parse(cleaned);
+        } catch (retryErr: any) {
+          console.error("[StrategicCore] Creative blueprint generation attempt 2 failed:", retryErr.message);
         }
-        console.warn(`[StrategicCore] Extraction fallback triggered: ${parseFailedReason}`);
-        storeRawAudit(blueprintId, auditAttempts);
-        rawAnalysis = {};
       }
 
-      const draftBlueprint = normalizeExtraction(rawAnalysis);
+      if (!rawBlueprint) {
+        extractionFallbackUsed = true;
+        parseFailedReason = "AI_GENERATION_FAILED";
+        console.warn(`[StrategicCore] Creative blueprint fallback triggered: ${parseFailedReason}`);
+        rawBlueprint = {};
+      }
+
+      const draftBlueprint = normalizeExtraction(rawBlueprint);
 
       const allInsufficient = ["detectedOffer", "detectedPositioning", "detectedCTA", "detectedAudienceGuess", "detectedFunnelStage"].every(
         f => draftBlueprint[f]?.value === "INSUFFICIENT_DATA"
@@ -279,41 +269,18 @@ export function registerExtractionRoutes(app: Express) {
       if (allInsufficient && !extractionFallbackUsed) {
         extractionFallbackUsed = true;
         parseFailedReason = "EMPTY_FIELDS";
-        storeRawAudit(blueprintId, auditAttempts);
       }
 
       draftBlueprint.extractionFallbackUsed = extractionFallbackUsed;
       draftBlueprint.parseFailedReason = parseFailedReason;
-
-      if (extractionFallbackUsed) {
-        const lastAttempt = auditAttempts[auditAttempts.length - 1];
-        const tokens = lastAttempt?.tokens || {};
-        try {
-          await db.insert(extractionMetrics).values({
-            campaignId: blueprint.campaignId || null,
-            blueprintId,
-            modelName: lastAttempt?.model || MODEL_NAME,
-            parseFailedReason: parseFailedReason || "UNKNOWN",
-            inputTokenCount: tokens.inputTokens ?? null,
-            outputTokenCount: tokens.outputTokens ?? null,
-            totalTokenCount: tokens.totalTokens ?? null,
-            finishReason: tokens.truncated ? "MAX_TOKENS" : null,
-            creativeType: isVideo ? "video" : "image",
-            videoDuration: null,
-            attemptCount: auditAttempts.length,
-          });
-          console.log(`[ExtractionMetrics] Logged fallback: reason=${parseFailedReason}, model=${MODEL_NAME}, attempts=${auditAttempts.length}`);
-        } catch (metricErr: any) {
-          console.error("[ExtractionMetrics] Failed to log metric (non-blocking):", metricErr.message);
-        }
-      }
+      draftBlueprint.generationSource = "AI_STRATEGY";
 
       const finalStatus = extractionFallbackUsed ? "EXTRACTION_FALLBACK" : "EXTRACTION_COMPLETE";
 
       await db.update(strategicBlueprints)
         .set({
           status: finalStatus,
-          creativeMediaType: isVideo ? "video" : "image",
+          creativeMediaType: "ai_generated",
           draftBlueprint: JSON.stringify(draftBlueprint),
           creativeAnalysis: JSON.stringify(draftBlueprint),
           confirmedBlueprint: null,
@@ -330,13 +297,14 @@ export function registerExtractionRoutes(app: Express) {
         campaignId: blueprint.campaignId || undefined,
         blueprintId,
         blueprintVersion: blueprint.blueprintVersion,
-        event: extractionFallbackUsed ? "EXTRACTION_FALLBACK" : "EXTRACTION_COMPLETED",
+        event: extractionFallbackUsed ? "CREATIVE_BLUEPRINT_FALLBACK" : "CREATIVE_BLUEPRINT_GENERATED",
         details: {
-          mediaType: isVideo ? "video" : "image",
+          source: "AI_STRATEGY",
           allInsufficient,
           extractionFallbackUsed,
           parseFailedReason,
-          attempts: auditAttempts.length,
+          hasMarketSignals: !!marketSignals,
+          hasBusinessData: !!businessData,
         },
       });
 
@@ -349,13 +317,15 @@ export function registerExtractionRoutes(app: Express) {
         extractionFallbackUsed,
         parseFailedReason,
         _meta: {
-          attempts: auditAttempts.length,
+          source: "AI_STRATEGY",
           allFieldsInsufficient: allInsufficient,
+          hasMarketSignals: !!marketSignals,
+          hasBusinessData: !!businessData,
         },
       });
     } catch (error: any) {
-      console.error("[StrategicCore] Creative analysis error:", error.message);
-      res.status(500).json({ error: "Failed to analyze creative. Please try again." });
+      console.error("[StrategicCore] Creative blueprint generation error:", error.message);
+      res.status(500).json({ error: "Failed to generate creative blueprint. Please try again." });
     }
   });
 }

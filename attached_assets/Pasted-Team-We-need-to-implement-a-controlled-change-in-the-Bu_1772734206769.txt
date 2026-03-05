@@ -1,0 +1,132 @@
+Team,
+
+We need to implement a controlled change in the Build Plan pipeline. This is a product architecture correction, not a feature addition. Please follow the instructions carefully to avoid breaking the system’s single-track workflow.
+
+---
+
+## Objective
+
+Remove the “Upload Campaign Video” requirement from the Build Plan flow.
+
+Build Plan must generate strategy and creative direction, not analyze existing creative.
+
+Currently the flow assumes a user uploads a campaign video and the AI extracts CTA / hook / angle. That logic contradicts the architecture of the system.
+
+The correct order must be:
+
+Strategy → Creative Blueprint → Content Plan → Execution
+
+NOT:
+
+Creative → Strategy
+
+---
+
+## What must change
+
+### 1. Remove the campaign video upload step from Build Plan
+Any UI or pipeline step that requires the user to upload a video during Build Plan must be removed.
+
+This includes:
+
+- Any upload component
+- Any CTA asking for a campaign video
+- Any pipeline stage that analyzes a user video during plan creation
+- Any logic that blocks plan generation until a video is uploaded
+
+Build Plan must not depend on user creative input.
+
+---
+
+### 2. Build Plan must output a Creative Blueprint instead
+Instead of analyzing a video, Build Plan should generate a Creative Blueprint internally based on:
+
+- Market Intelligence signals
+- Competitor signals
+- Strategy decisions
+- Positioning logic
+
+The blueprint should include structured outputs such as:
+
+- Hook direction
+- Narrative structure
+- CTA recommendation
+- Content angle
+- Visual direction
+- Format suggestion (reel/post/story)
+
+This becomes the foundation for the content plan.
+
+---
+
+### 3. Preserve the Single-Track System
+
+Do NOT modify the system workflow.
+
+The correct architecture must remain:
+
+Build Plan  
+→ Strategy Blueprint  
+→ Creative Blueprint  
+→ Content Plan  
+→ Calendar  
+→ Required Work  
+→ Create  
+→ Studio
+
+The system is intentionally designed as a single operational track, so this structure must remain untouched.
+
+Do not introduce parallel flows or additional plan types.
+
+---
+
+### 4. Video analysis belongs in Studio (not Build Plan)
+
+The Studio section is where user media uploads belong.
+
+When a user uploads content in Studio, AI can analyze it for:
+
+- Hook detection
+- CTA detection
+- Content DNA extraction
+- Caption signals
+- Keyword signals
+
+This is execution analysis, not strategy generation.
+
+---
+
+### 5. Important constraints
+
+Please ensure the following remain unchanged:
+
+- The Build Plan pipeline structure
+- The calendar generation logic
+- The Required Work calculation
+- The Create → Studio execution flow
+- The Market Intelligence integration
+
+This change should only remove the dependency on campaign video input during Build Plan.
+
+Nothing else in the system should be refactored.
+
+---
+
+## Summary
+
+Build Plan must generate strategy and creative direction without requiring user creative input.
+
+Video uploads are handled later in Studio, where execution and analysis belong.
+
+This change aligns the system with the intended architecture:
+
+Market Intelligence  
+→ Strategy  
+→ Creative Direction  
+→ Execution
+
+---
+
+If any part of this change requires clarification before implementation, pause and confirm before modifying the pipeline.
+
+Thanks.
