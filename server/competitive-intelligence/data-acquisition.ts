@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot } from "@shared/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { scrapeInstagramProfile, type ScrapedPost } from "./profile-scraper";
 import { acquireStickySession, releaseStickySession, type StickySessionContext } from "./proxy-pool-manager";
 import * as crypto from "crypto";
@@ -234,13 +234,24 @@ function computeBasicSentiment(text: string): number {
   return Math.max(0, Math.min(1, 0.5 + (positiveCount - negativeCount) * 0.15));
 }
 
+export type CollectionMode = "FAST_PASS" | "DEEP_PASS";
+
+const TARGET_POSTS_FAST = 10;
+
+const TARGET_POSTS_DEEP = 25;
+const MAX_COMMENT_POSTS_DEEP = 3;
+const MAX_COMMENTS_PER_POST_DEEP = 50;
+
 const FETCH_COOLDOWN_MS = 72 * 60 * 60 * 1000;
+const CACHE_REUSE_WINDOW_MS = 12 * 60 * 60 * 1000;
 const MAX_POSTS_TO_STORE = 60;
 const MAX_COMMENTS_PER_POST = 20;
 const MAX_COMMENT_POSTS = 30;
 const INSTAGRAM_PUBLIC_API_POST_CEILING = 12;
 const MIN_POSTS_THRESHOLD = 14;
 const MIN_COMMENTS_THRESHOLD = 50;
+
+export { TARGET_POSTS_FAST, TARGET_POSTS_DEEP, MAX_COMMENT_POSTS_DEEP, MAX_COMMENTS_PER_POST_DEEP, CACHE_REUSE_WINDOW_MS };
 
 const activeFetches = new Map<string, Promise<FetchResult>>();
 
@@ -260,6 +271,8 @@ export interface FetchResult {
   rawFetchedCount?: number;
   paginationPages?: number;
   paginationStopReason?: string;
+  collectionMode?: CollectionMode;
+  cachedPostsReused?: number;
 }
 
 export async function fetchCompetitorData(
@@ -267,6 +280,7 @@ export async function fetchCompetitorData(
   accountId: string = "default",
   forceRefresh: boolean = false,
   proxyCtx?: import("./proxy-pool-manager").StickySessionContext,
+  collectionMode: CollectionMode = "FAST_PASS",
 ): Promise<FetchResult> {
   const lockKey = `${accountId}:${competitorId}`;
   const existing = activeFetches.get(lockKey);
@@ -275,7 +289,7 @@ export async function fetchCompetitorData(
     return existing;
   }
 
-  const promise = _executeFetch(competitorId, accountId, forceRefresh, proxyCtx);
+  const promise = _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, collectionMode);
   activeFetches.set(lockKey, promise);
   try {
     return await promise;
@@ -289,6 +303,7 @@ async function _executeFetch(
   accountId: string,
   forceRefresh: boolean,
   proxyCtx?: import("./proxy-pool-manager").StickySessionContext,
+  collectionMode: CollectionMode = "FAST_PASS",
 ): Promise<FetchResult> {
   const [competitor] = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId)));
@@ -305,6 +320,38 @@ async function _executeFetch(
 
     if (latestMetrics.length > 0 && latestMetrics[0].lastFetchAt) {
       const elapsed = Date.now() - new Date(latestMetrics[0].lastFetchAt).getTime();
+
+      if (elapsed < CACHE_REUSE_WINDOW_MS) {
+        const livePostCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
+          .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+        const cachedPosts = Number(livePostCount[0]?.count || 0);
+
+        if (cachedPosts >= MIN_POSTS_THRESHOLD) {
+          const liveCommentCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
+            .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
+          const cachedComments = Number(liveCommentCount[0]?.count || 0);
+          const hoursAgo = Math.round(elapsed / (60 * 60 * 1000) * 10) / 10;
+
+          console.log(`[DataAcq] CACHE_REUSE: ${competitor.name} fetched ${hoursAgo}h ago with ${cachedPosts} posts (>= ${MIN_POSTS_THRESHOLD}). Reusing cached data.`);
+
+          return {
+            competitorId,
+            postsCollected: cachedPosts,
+            commentsCollected: cachedComments,
+            ctaCoverage: latestMetrics[0].ctaCoverage || 0,
+            ctaTypes: latestMetrics[0].ctaTypes ? latestMetrics[0].ctaTypes.split(",") : [],
+            followers: latestMetrics[0].followers,
+            engagementRate: latestMetrics[0].engagementRate,
+            postingFrequency: latestMetrics[0].postingFrequency,
+            contentMix: latestMetrics[0].contentMix,
+            fetchMethod: "CACHE_REUSE",
+            status: "SUCCESS",
+            message: `Cache reuse: data fetched ${hoursAgo}h ago with sufficient coverage (${cachedPosts} posts, ${cachedComments} comments).`,
+            cachedPostsReused: cachedPosts,
+          };
+        }
+      }
+
       if (elapsed < FETCH_COOLDOWN_MS) {
         const hoursLeft = Math.ceil((FETCH_COOLDOWN_MS - elapsed) / (60 * 60 * 1000));
 
@@ -342,9 +389,10 @@ async function _executeFetch(
     }
   }
 
-  console.log(`[DataAcq] Starting fetch for ${competitor.name} (${competitor.profileLink})${proxyCtx ? ` | session=${proxyCtx.session.sessionId}` : ""}`);
+  const maxPosts = collectionMode === "FAST_PASS" ? TARGET_POSTS_FAST : TARGET_POSTS_DEEP;
+  console.log(`[DataAcq] Starting ${collectionMode} fetch for ${competitor.name} (${competitor.profileLink})${proxyCtx ? ` | session=${proxyCtx.session.sessionId}` : ""} | maxPosts=${maxPosts}`);
 
-  const scrapeResult = await scrapeInstagramProfile(competitor.profileLink, proxyCtx);
+  const scrapeResult = await scrapeInstagramProfile(competitor.profileLink, proxyCtx, maxPosts);
 
   if (!scrapeResult.success || scrapeResult.posts.length === 0) {
     console.log(`[DataAcq] Scrape blocked for ${competitor.name}`);
@@ -393,12 +441,39 @@ async function _executeFetch(
   const batchId = `batch_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
   const postsToStore = scrapeResult.posts.slice(0, MAX_POSTS_TO_STORE);
 
+  const existingStoredPosts = await db.select({
+    postId: ciCompetitorPosts.postId,
+    shortcode: ciCompetitorPosts.shortcode,
+  }).from(ciCompetitorPosts)
+    .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+
+  const existingPostIds = new Set(existingStoredPosts.map(p => p.postId));
+  const existingShortcodes = new Set(existingStoredPosts.filter(p => p.shortcode).map(p => p.shortcode!));
+
+  const existingPostIdsWithComments = new Set<string>();
+  if (existingPostIds.size > 0) {
+    const postIdsArray = Array.from(existingPostIds);
+    const postsWithComments = await db.select({
+      postId: ciCompetitorComments.postId,
+    }).from(ciCompetitorComments)
+      .where(and(
+        eq(ciCompetitorComments.competitorId, competitorId),
+        eq(ciCompetitorComments.accountId, accountId),
+        inArray(ciCompetitorComments.postId, postIdsArray),
+      ));
+    for (const row of postsWithComments) {
+      existingPostIdsWithComments.add(row.postId);
+    }
+  }
+
   let ctaCount = 0;
   const allCtaTypes: string[] = [];
   let commentsCollected = 0;
+  let cachedPostsReused = 0;
 
   const postInserts: Parameters<typeof db.insert>[0] extends any ? any[] : never = [];
   const commentInserts: any[] = [];
+  const newPostIds: string[] = [];
 
   for (const post of postsToStore) {
     const cta = detectCTA(post.caption);
@@ -411,6 +486,15 @@ async function _executeFetch(
       }
     }
 
+    const isDuplicate = existingPostIds.has(post.postId) ||
+      (post.shortcode && existingShortcodes.has(post.shortcode));
+
+    if (isDuplicate) {
+      cachedPostsReused++;
+      continue;
+    }
+
+    newPostIds.push(post.postId);
     postInserts.push({
       competitorId,
       accountId,
@@ -431,33 +515,39 @@ async function _executeFetch(
     });
   }
 
-  const sortedPosts = [...postsToStore]
-    .filter(p => (p.comments && p.comments > 0) || (p.caption && p.caption.length > 10))
-    .sort((a, b) => (b.comments || 0) - (a.comments || 0))
-    .slice(0, MAX_COMMENT_POSTS);
+  if (cachedPostsReused > 0) {
+    console.log(`[DataAcq] CACHE_FIRST: ${cachedPostsReused} existing posts reused, ${postInserts.length} new posts to insert for ${competitor.name}`);
+  }
 
-  for (const post of sortedPosts) {
-    const fakeComments = generateSyntheticCommentSamples(post);
-    for (const comment of fakeComments.slice(0, MAX_COMMENTS_PER_POST)) {
-      commentInserts.push({
-        competitorId,
-        accountId,
-        postId: post.postId,
-        commentText: comment.text,
-        sentiment: comment.sentiment,
-        timestamp: post.timestamp ? new Date(post.timestamp) : null,
-        batchId,
-      });
-      commentsCollected++;
+  if (collectionMode !== "FAST_PASS") {
+    const commentPostLimit = collectionMode === "DEEP_PASS" ? MAX_COMMENT_POSTS_DEEP : MAX_COMMENT_POSTS;
+    const commentPerPostLimit = collectionMode === "DEEP_PASS" ? MAX_COMMENTS_PER_POST_DEEP : MAX_COMMENTS_PER_POST;
+    const postsNeedingComments = postsToStore
+      .filter(p => !existingPostIdsWithComments.has(p.postId))
+      .filter(p => (p.comments && p.comments > 0) || (p.caption && p.caption.length > 10))
+      .sort((a, b) => (b.comments || 0) - (a.comments || 0))
+      .slice(0, commentPostLimit);
+
+    for (const post of postsNeedingComments) {
+      const fakeComments = generateSyntheticCommentSamples(post);
+      for (const comment of fakeComments.slice(0, commentPerPostLimit)) {
+        commentInserts.push({
+          competitorId,
+          accountId,
+          postId: post.postId,
+          commentText: comment.text,
+          sentiment: comment.sentiment,
+          timestamp: post.timestamp ? new Date(post.timestamp) : null,
+          batchId,
+        });
+        commentsCollected++;
+      }
     }
+  } else {
+    console.log(`[DataAcq] FAST_PASS: Skipping comment generation for ${competitor.name}`);
   }
 
   await db.transaction(async (tx) => {
-    await tx.delete(ciCompetitorComments)
-      .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
-    await tx.delete(ciCompetitorPosts)
-      .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
-
     for (const postRow of postInserts) {
       await tx.insert(ciCompetitorPosts).values(postRow);
     }
@@ -465,7 +555,7 @@ async function _executeFetch(
       await tx.insert(ciCompetitorComments).values(commentRow);
     }
   });
-  console.log(`[DataAcq] Transaction complete: deleted old data, inserted ${postInserts.length} posts + ${commentInserts.length} comments for ${competitor.name}`);
+  console.log(`[DataAcq] Transaction complete: inserted ${postInserts.length} new posts + ${commentInserts.length} comments (reused ${cachedPostsReused} cached posts) for ${competitor.name}`);
 
   const ctaCoverage = postsToStore.length > 0 ? ctaCount / postsToStore.length : 0;
 
@@ -506,11 +596,9 @@ async function _executeFetch(
   const persistedPostCount = Number(verifyPosts[0]?.count || 0);
   const persistedCommentCount = Number(verifyComments[0]?.count || 0);
 
-  if (persistedPostCount !== postsToStore.length) {
-    console.error(`[DataAcq] DATA_MISMATCH_ERROR for ${competitor.name}: inserted ${postsToStore.length} posts but DB has ${persistedPostCount}`);
-  }
-  if (persistedCommentCount !== commentsCollected) {
-    console.error(`[DataAcq] DATA_MISMATCH_ERROR for ${competitor.name}: inserted ${commentsCollected} comments but DB has ${persistedCommentCount}`);
+  const expectedPostCount = existingPostIds.size + postInserts.length;
+  if (persistedPostCount !== expectedPostCount) {
+    console.error(`[DataAcq] DATA_MISMATCH_ERROR for ${competitor.name}: expected ${expectedPostCount} posts (${existingPostIds.size} existing + ${postInserts.length} new) but DB has ${persistedPostCount}`);
   }
 
   await db.insert(ciCompetitorMetricsSnapshot).values({
@@ -541,25 +629,29 @@ async function _executeFetch(
     })
     .where(eq(ciCompetitors.id, competitorId));
 
-  const coverageSufficient = persistedPostCount >= MIN_POSTS_THRESHOLD && persistedCommentCount >= MIN_COMMENTS_THRESHOLD;
+  const postsTarget = collectionMode === "FAST_PASS" ? TARGET_POSTS_FAST : MIN_POSTS_THRESHOLD;
+  const commentsTarget = collectionMode === "FAST_PASS" ? 0 : MIN_COMMENTS_THRESHOLD;
+  const coverageSufficient = persistedPostCount >= postsTarget && persistedCommentCount >= commentsTarget;
   let fetchStatus: FetchResult["status"];
   let fetchMessage: string;
 
+  const cacheInfo = cachedPostsReused > 0 ? ` (${cachedPostsReused} cached reused)` : "";
+
   if (coverageSufficient) {
     fetchStatus = "SUCCESS";
-    fetchMessage = `Collected ${persistedPostCount} posts, ${persistedCommentCount} comments. Coverage thresholds met (${MIN_POSTS_THRESHOLD} posts / ${MIN_COMMENTS_THRESHOLD} comments).`;
+    fetchMessage = `${collectionMode}: Collected ${persistedPostCount} posts, ${persistedCommentCount} comments${cacheInfo}. Coverage thresholds met.`;
   } else if (persistedPostCount >= 5) {
     fetchStatus = "INSUFFICIENT_DATA";
     const missing: string[] = [];
-    if (persistedPostCount < MIN_POSTS_THRESHOLD) missing.push(`posts: ${persistedPostCount}/${MIN_POSTS_THRESHOLD}`);
-    if (persistedCommentCount < MIN_COMMENTS_THRESHOLD) missing.push(`comments: ${persistedCommentCount}/${MIN_COMMENTS_THRESHOLD}`);
-    fetchMessage = `Partial data collected. Below thresholds: ${missing.join(", ")}. Stop reason: ${scrapeResult.paginationStopReason || "unknown"}.`;
+    if (persistedPostCount < postsTarget) missing.push(`posts: ${persistedPostCount}/${postsTarget}`);
+    if (collectionMode !== "FAST_PASS" && persistedCommentCount < commentsTarget) missing.push(`comments: ${persistedCommentCount}/${commentsTarget}`);
+    fetchMessage = `${collectionMode}: Partial data collected${cacheInfo}. Below thresholds: ${missing.join(", ")}. Stop reason: ${scrapeResult.paginationStopReason || "unknown"}.`;
   } else {
     fetchStatus = "PARTIAL";
-    fetchMessage = `Low data: ${persistedPostCount} posts, ${persistedCommentCount} comments. Scrape may be blocked or account is private.`;
+    fetchMessage = `${collectionMode}: Low data: ${persistedPostCount} posts, ${persistedCommentCount} comments${cacheInfo}. Scrape may be blocked or account is private.`;
   }
 
-  console.log(`[DataAcq] Completed for ${competitor.name}: ${persistedPostCount} posts (verified), ${persistedCommentCount} comments (verified), status=${fetchStatus}, CTA coverage ${Math.round(ctaCoverage * 100)}%, method=${scrapeResult.collectionMethodUsed}, pagination=${scrapeResult.paginationPages || 1} pages, stopReason=${scrapeResult.paginationStopReason || "N/A"}`);
+  console.log(`[DataAcq] Completed for ${competitor.name}: ${persistedPostCount} posts (verified, ${cachedPostsReused} cached), ${persistedCommentCount} comments (verified), status=${fetchStatus}, CTA coverage ${Math.round(ctaCoverage * 100)}%, method=${scrapeResult.collectionMethodUsed}, pagination=${scrapeResult.paginationPages || 1} pages, stopReason=${scrapeResult.paginationStopReason || "N/A"}`);
 
   return {
     competitorId,
@@ -577,6 +669,8 @@ async function _executeFetch(
     rawFetchedCount: scrapeResult.rawFetchedCount,
     paginationPages: scrapeResult.paginationPages,
     paginationStopReason: scrapeResult.paginationStopReason,
+    collectionMode,
+    cachedPostsReused,
   };
 }
 

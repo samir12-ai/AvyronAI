@@ -1364,6 +1364,7 @@ export const miSnapshots = pgTable("mi_snapshots", {
   goalMode: text("goal_mode").default("STRATEGY_MODE"),
   contentDnaData: text("content_dna_data"),
   deltaReport: text("delta_report"),
+  dataStatus: text("data_status").default("LIVE"),
   createdAt: timestamp("created_at").defaultNow(),
   expiresAt: timestamp("expires_at"),
 });
@@ -1512,6 +1513,8 @@ export const miFetchJobs = pgTable("mi_fetch_jobs", {
   error: text("error"),
   retryCount: integer("retry_count").default(0),
   durationMs: integer("duration_ms"),
+  collectionMode: text("collection_mode").default("FAST_PASS"),
+  dataStatus: text("data_status").default("LIVE"),
   createdAt: timestamp("created_at").defaultNow(),
   completedAt: timestamp("completed_at"),
 });

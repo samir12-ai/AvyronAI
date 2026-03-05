@@ -1,4 +1,4 @@
-import type { CompetitorSignalResult, IntentResult, TrajectoryData } from "./types";
+import type { CompetitorSignalResult, IntentResult, TrajectoryData, EngagementQuality } from "./types";
 import { MI_REVIVAL_CAP } from "./constants";
 
 function clamp01(v: number): number {
@@ -84,16 +84,36 @@ export function computeRevivalPotential(
   return clamp01(Math.round(rawRevival * 1000) / 1000);
 }
 
+export function computeMarketActivityLevel(signals: CompetitorSignalResult[]): number {
+  if (signals.length === 0) return 0;
+  const avgFrequency = mean(signals.map(s => Math.max(0, s.signals.postingFrequencyTrend)));
+  const avgExperiment = mean(signals.map(s => s.signals.contentExperimentRate));
+  return clamp01(avgFrequency * 0.6 + avgExperiment * 0.4);
+}
+
+export function computeDemandConfidence(engagementQuality: EngagementQuality, signals: CompetitorSignalResult[]): number {
+  if (signals.length === 0) return 0;
+  const qualityWeight = engagementQuality.engagementQualityRatio * 0.5;
+  const avgSentimentStrength = mean(signals.map(s => Math.abs(s.signals.sentimentDrift)));
+  const dataWeight = Math.min(1, (engagementQuality.highIntentCount + engagementQuality.lowValueCount) / 20) * 0.3;
+  const sentimentWeight = avgSentimentStrength * 0.2;
+  return clamp01(qualityWeight + dataWeight + sentimentWeight);
+}
+
 export function computeTrajectory(
   signals: CompetitorSignalResult[],
   intents: IntentResult[],
+  engagementQuality?: EngagementQuality,
 ): TrajectoryData {
+  const eq: EngagementQuality = engagementQuality || { highIntentCount: 0, lowValueCount: 0, engagementQualityRatio: 0 };
   return {
     marketHeatingIndex: computeMarketHeatingIndex(signals, intents),
     narrativeConvergenceScore: computeNarrativeConvergenceScore(signals),
     offerCompressionIndex: computeOfferCompressionIndex(signals),
     angleSaturationLevel: computeAngleSaturationLevel(signals),
     revivalPotential: computeRevivalPotential(signals, intents),
+    marketActivityLevel: computeMarketActivityLevel(signals),
+    demandConfidence: computeDemandConfidence(eq, signals),
   };
 }
 

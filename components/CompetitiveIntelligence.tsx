@@ -105,6 +105,11 @@ export default function CompetitiveIntelligence() {
   const { data: cachedSnapshot } = useQuery({
     queryKey: ['mi-v3-snapshot', activeCampaignId],
     enabled: !!activeCampaignId,
+    refetchInterval: (query) => {
+      const snap = query.state.data;
+      if (snap?.dataStatus === 'ENRICHING') return 30000;
+      return false;
+    },
     queryFn: async () => {
       const res = await fetch(new URL(`/api/ci/mi-v3/snapshot/${activeCampaignId}?accountId=default`, baseUrl).toString());
       const data = await res.json();
@@ -759,6 +764,32 @@ export default function CompetitiveIntelligence() {
       );
     }
 
+    const dataStatus = miv3Result?.dataStatus || miv3Result?.snapshot?.dataStatus || 'COMPLETE';
+    const dataStatusColor = dataStatus === 'LIVE' ? '#3B82F6' : dataStatus === 'ENRICHING' ? '#F59E0B' : '#10B981';
+    const dataStatusLabel = dataStatus === 'LIVE' ? 'LIVE' : dataStatus === 'ENRICHING' ? 'ENRICHING' : 'COMPLETE';
+
+    const evCoverage = miv3Result?.output?.evidenceCoverage;
+    const coveragePct = evCoverage ? Math.round((evCoverage.competitorsWithSufficientData / Math.max(evCoverage.totalCompetitors, 1)) * 100) : 0;
+
+    const confScore = miv3Result?.output?.confidence?.overall != null ? Math.round(miv3Result.output.confidence.overall * 100) : 0;
+    const confLevel = miv3Result?.output?.confidence?.level || 'UNKNOWN';
+    const confColor = confLevel === 'STRONG' ? '#10B981' : confLevel === 'MODERATE' ? '#3B82F6' : confLevel === 'LOW' ? '#F59E0B' : '#EF4444';
+
+    const snapshotCreatedAt = miv3Result?.snapshot?.createdAt || miv3Result?.timestamp;
+    const updatedAgo = snapshotCreatedAt ? (() => {
+      const diffMs = Date.now() - new Date(snapshotCreatedAt).getTime();
+      const mins = Math.floor(diffMs / 60000);
+      if (mins < 1) return 'Just now';
+      if (mins < 60) return `${mins}m ago`;
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return `${hrs}h ago`;
+      return `${Math.floor(hrs / 24)}d ago`;
+    })() : null;
+
+    const marketActivity = miv3Result?.output?.marketActivityLevel ?? miv3Result?.trajectoryData?.marketActivityLevel;
+    const demandConf = miv3Result?.output?.demandConfidence ?? miv3Result?.trajectoryData?.demandConfidence;
+    const intentSignals: string[] = miv3Result?.output?.audienceIntentSignals || [];
+
     return (
       <View>
         {renderCompetitorsList()}
@@ -767,6 +798,12 @@ export default function CompetitiveIntelligence() {
             <View style={s.cardHeader}>
               <Ionicons name="shield-checkmark-outline" size={18} color="#8B5CF6" />
               <Text style={[s.cardTitle, { color: colors.text }]}>MI V3</Text>
+              <View style={[s.intensityBadge, { backgroundColor: dataStatusColor + '20' }]}>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: dataStatusColor }}>{dataStatusLabel}</Text>
+              </View>
+              {dataStatus === 'ENRICHING' && (
+                <ActivityIndicator size={12} color={dataStatusColor} />
+              )}
               {miv3Result.snapshotStatus === 'PARTIAL' && (
                 <View style={[s.intensityBadge, { backgroundColor: '#EF444420' }]}>
                   <Text style={{ fontSize: 10, fontWeight: '700', color: '#EF4444' }}>PARTIAL</Text>
@@ -778,6 +815,72 @@ export default function CompetitiveIntelligence() {
                 </Text>
               </View>
             </View>
+
+            <View style={{ backgroundColor: isDark ? '#1A2030' : '#F8F9FA', borderRadius: 10, padding: 12, marginBottom: 10, gap: 8 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: colors.textMuted }}>Evidence Coverage</Text>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: coveragePct >= 70 ? '#10B981' : coveragePct >= 40 ? '#F59E0B' : '#EF4444' }}>{coveragePct}%</Text>
+              </View>
+              <View style={[s.qualityBar, { marginVertical: 0, height: 5 }]}>
+                <View style={[s.qualityFill, { width: `${coveragePct}%`, backgroundColor: coveragePct >= 70 ? '#10B981' : coveragePct >= 40 ? '#F59E0B' : '#EF4444' }]} />
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: colors.textMuted }}>Confidence</Text>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: confColor }}>{confScore} / 100</Text>
+              </View>
+              <View style={[s.qualityBar, { marginVertical: 0, height: 5 }]}>
+                <View style={[s.qualityFill, { width: `${confScore}%`, backgroundColor: confColor }]} />
+              </View>
+
+              {updatedAgo && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Ionicons name="time-outline" size={12} color={colors.textMuted} />
+                  <Text style={{ fontSize: 10, color: colors.textMuted }}>Updated {updatedAgo}</Text>
+                </View>
+              )}
+            </View>
+
+            {(marketActivity != null || demandConf != null) && (
+              <View style={{ backgroundColor: isDark ? '#1A2030' : '#F8F9FA', borderRadius: 10, padding: 12, marginBottom: 10, gap: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6', marginBottom: 2 }}>MARKET SIGNALS</Text>
+                {marketActivity != null && (
+                  <View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                      <Text style={{ fontSize: 11, color: colors.textMuted }}>Market Activity (posting freq.)</Text>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#3B82F6' }}>{Math.round(marketActivity * 100)}%</Text>
+                    </View>
+                    <View style={[s.qualityBar, { marginVertical: 0, height: 4 }]}>
+                      <View style={[s.qualityFill, { width: `${Math.round(marketActivity * 100)}%`, backgroundColor: '#3B82F6' }]} />
+                    </View>
+                  </View>
+                )}
+                {demandConf != null && (
+                  <View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                      <Text style={{ fontSize: 11, color: colors.textMuted }}>Market Demand (intent quality)</Text>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#10B981' }}>{Math.round(demandConf * 100)}%</Text>
+                    </View>
+                    <View style={[s.qualityBar, { marginVertical: 0, height: 4 }]}>
+                      <View style={[s.qualityFill, { width: `${Math.round(demandConf * 100)}%`, backgroundColor: '#10B981' }]} />
+                    </View>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {intentSignals.length > 0 && (
+              <View style={{ backgroundColor: isDark ? '#1A2030' : '#F8F9FA', borderRadius: 10, padding: 12, marginBottom: 10 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6', marginBottom: 6 }}>AUDIENCE INTENT SIGNALS</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                  {intentSignals.map((sig: string, idx: number) => (
+                    <View key={idx} style={{ backgroundColor: '#8B5CF6' + '15', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
+                      <Text style={{ fontSize: 10, fontWeight: '600', color: '#8B5CF6' }}>{sig.replace(/_/g, ' ')}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
             {miv3Result.cacheInvalidationReason === 'ENGINE_UPGRADE' && (
               <View style={{ backgroundColor: '#3B82F615', borderRadius: 8, padding: 10, marginBottom: 8 }}>
                 <Text style={{ fontSize: 11, fontWeight: '600', color: '#3B82F6' }}>Analysis refreshed due to engine upgrade.</Text>

@@ -63,6 +63,8 @@ export interface TrajectoryData {
   offerCompressionIndex: number;
   angleSaturationLevel: number;
   revivalPotential: number;
+  marketActivityLevel: number;
+  demandConfidence: number;
 }
 
 export interface DominanceResult {
@@ -139,6 +141,12 @@ export interface EvidenceCoverage {
   totalCompetitors: number;
 }
 
+export interface EngagementQuality {
+  highIntentCount: number;
+  lowValueCount: number;
+  engagementQualityRatio: number;
+}
+
 export interface MIv3Output {
   marketState: string;
   dominantIntentType: IntentCategory;
@@ -155,6 +163,10 @@ export interface MIv3Output {
   volatilityIndex: number;
   signalNoiseRatio: number;
   evidenceCoverage: EvidenceCoverage;
+  engagementQuality: EngagementQuality;
+  marketActivityLevel: number;
+  demandConfidence: number;
+  audienceIntentSignals: string[];
 }
 
 export type CacheInvalidationReason = "ENGINE_UPGRADE" | "COMPETITOR_SET_CHANGED" | "INCOMPLETE_SNAPSHOT" | "STALE" | null;
@@ -178,6 +190,7 @@ export interface MIv3DiagnosticResult {
   snapshotSource: "FRESH_DATA" | "CACHED_DATA";
   fetchExecuted: boolean;
   timestamp: string;
+  dataStatus: "LIVE" | "ENRICHING" | "COMPLETE";
 }
 
 export interface CompetitorInput {

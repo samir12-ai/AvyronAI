@@ -27,7 +27,7 @@ async function getChromium(): Promise<any> {
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH || "/nix/store/zi4f80l169xlmivz8vja8wlphq74qqk0-chromium-125.0.6422.141/bin/chromium";
 
 function randomDelay(): Promise<void> {
-  const ms = 1000 + Math.random() * 2000;
+  const ms = 3000 + Math.random() * 2000;
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
@@ -741,7 +741,7 @@ async function attemptHeadlessRender(profileUrl: string, handle: string, proxyCt
   }
 }
 
-export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySessionContext): Promise<ScrapeResult> {
+export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySessionContext, maxPosts: number = TARGET_POSTS): Promise<ScrapeResult> {
   const profileUrl = normalizeInstagramUrl(rawUrl);
   const handle = extractHandleFromUrl(rawUrl);
 
@@ -874,12 +874,12 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
   console.log(`[CI Scraper] Stats: total=${stats.totalRequests}, success=${stats.successRate}, blocked=${stats.blockedRate}, bandwidth=${stats.bandwidthMB}`);
 
   if (!paginationStopReason && posts.length > 0) {
-    paginationStopReason = posts.length >= TARGET_POSTS ? "TARGET_REACHED" : "INSTAGRAM_API_CEILING";
+    paginationStopReason = posts.length >= maxPosts ? "TARGET_REACHED" : "INSTAGRAM_API_CEILING";
   }
 
   const result: ScrapeResult = {
     success: posts.length > 0,
-    posts: posts.slice(0, 60),
+    posts: posts.slice(0, maxPosts > 60 ? 60 : maxPosts),
     followers,
     profileName: profileName || handle,
     collectionMethodUsed,

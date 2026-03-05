@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { acquireToken, getBucketState, resetBucket, resetAllBuckets, TOKEN_REFILL_INTERVAL_MS, MAX_BURST_TOKENS } from "../competitive-intelligence/rate-limiter";
+import { acquireToken, getBucketState, resetBucket, resetAllBuckets, TOKEN_REFILL_INTERVAL_MS, MAX_BURST_TOKENS, TOKEN_REFILL_JITTER_MS } from "../competitive-intelligence/rate-limiter";
 import {
   acquireStickySession,
   releaseStickySession,
@@ -28,7 +28,7 @@ describe("Section 1: Proxy Rate Test — Token Bucket Rate Limiter", () => {
     expect(state.tokens).toBe(0);
   });
 
-  it("enforces wait after burst exhaustion (spacing >= 4 seconds)", async () => {
+  it("enforces wait after burst exhaustion (spacing >= 5 seconds)", async () => {
     for (let i = 0; i < MAX_BURST_TOKENS; i++) {
       await acquireToken("acct2", "camp2", `drain_${i}`);
     }
@@ -37,12 +37,12 @@ describe("Section 1: Proxy Rate Test — Token Bucket Rate Limiter", () => {
     await acquireToken("acct2", "camp2", "post_burst");
     const elapsed = Date.now() - start;
     expect(elapsed).toBeGreaterThanOrEqual(TOKEN_REFILL_INTERVAL_MS);
-    expect(elapsed).toBeLessThan(TOKEN_REFILL_INTERVAL_MS + 3000);
+    expect(elapsed).toBeLessThan(TOKEN_REFILL_INTERVAL_MS + TOKEN_REFILL_JITTER_MS + 1000);
 
     const state = getBucketState("acct2", "camp2");
     expect(state.totalConsumed).toBe(MAX_BURST_TOKENS + 1);
     expect(state.totalWaited).toBe(1);
-  }, 10000);
+  }, 15000);
 
   it("each accountId+campaignId gets its own bucket", () => {
     const stateA = getBucketState("acctA", "campA");
@@ -51,7 +51,7 @@ describe("Section 1: Proxy Rate Test — Token Bucket Rate Limiter", () => {
     expect(stateB.tokens).toBe(MAX_BURST_TOKENS);
   });
 
-  it("3 competitors with limiter active — confirms request spacing >= 4s after burst", async () => {
+  it("3 competitors with limiter active — confirms request spacing >= 5s after burst", async () => {
     const timestamps: number[] = [];
     for (let i = 0; i < MAX_BURST_TOKENS; i++) {
       await acquireToken("acct3", "camp3", `burst_${i}`);

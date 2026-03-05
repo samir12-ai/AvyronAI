@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { miSnapshots, miSignalLogs, miTelemetry, ciCompetitors, growthCampaigns } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
-import { computeAllSignals, aggregateMissingFlags } from "./signal-engine";
+import { computeAllSignals, aggregateMissingFlags, classifyEngagementQuality, detectAudienceIntentSignals } from "./signal-engine";
 import { classifyAllIntents, computeDominantMarketIntent } from "./intent-engine";
 import { computeTrajectory, deriveTrajectoryDirection, deriveMarketState } from "./trajectory-engine";
 import { computeConfidence } from "./confidence-engine";
@@ -26,6 +26,7 @@ import type {
   TrajectoryDelta,
   DominanceChange,
   EvidenceCoverage,
+  EngagementQuality,
 } from "./types";
 import { MI_CONFIDENCE, ENGINE_VERSION } from "./constants";
 import { validateEngineIsolation } from "./isolation-guard";
@@ -592,7 +593,10 @@ export class MarketIntelligenceV3 {
     const dataFreshnessDays = computeDataFreshnessDays(competitors);
     const intents = classifyAllIntents(signalResults);
     const dominantIntent = computeDominantMarketIntent(intents);
-    const trajectory = computeTrajectory(signalResults, intents);
+    const allComments = competitors.flatMap(c => c.comments || []);
+    const engagementQuality = classifyEngagementQuality(allComments);
+    const audienceIntentSignals = detectAudienceIntentSignals(allComments);
+    const trajectory = computeTrajectory(signalResults, intents, engagementQuality);
     const confidence = computeConfidence(signalResults, dataFreshnessDays);
     const dominanceResults = computeAllDominance(signalResults, confidence, goalMode);
     const missingFlags = aggregateMissingFlags(signalResults);
@@ -767,6 +771,10 @@ export class MarketIntelligenceV3 {
       volatilityIndex,
       signalNoiseRatio,
       evidenceCoverage,
+      engagementQuality,
+      marketActivityLevel: trajectory.marketActivityLevel,
+      demandConfidence: trajectory.demandConfidence,
+      audienceIntentSignals,
     };
 
     const guard = await import("./confidence-engine").then(m => m.evaluateSignalStabilityGuard(signalResults));
@@ -790,6 +798,7 @@ export class MarketIntelligenceV3 {
       snapshotSource: "FRESH_DATA" as const,
       fetchExecuted: true,
       timestamp: new Date().toISOString(),
+      dataStatus: "LIVE" as const,
     };
   }
 }
@@ -803,6 +812,8 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
     offerCompressionIndex: 0,
     angleSaturationLevel: 0,
     revivalPotential: 0,
+    marketActivityLevel: 0,
+    demandConfidence: 0,
   });
   const dominanceData = parseJsonSafe(snapshot.dominanceData, []);
   const confidenceData = parseJsonSafe(snapshot.confidenceData, {
@@ -851,6 +862,10 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
       competitorsWithSufficientData: telemetry.competitorsCount || 0,
       totalCompetitors: telemetry.competitorsCount || 0,
     },
+    engagementQuality: { highIntentCount: 0, lowValueCount: 0, engagementQualityRatio: 0 },
+    marketActivityLevel: trajectoryData.marketActivityLevel || 0,
+    demandConfidence: trajectoryData.demandConfidence || 0,
+    audienceIntentSignals: [],
   };
 
   return {
@@ -888,6 +903,7 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
     snapshotSource: (snapshot.snapshotSource as "FRESH_DATA" | "CACHED_DATA") || "FRESH_DATA",
     fetchExecuted: snapshot.fetchExecuted ?? true,
     timestamp: snapshot.createdAt?.toISOString?.() || new Date().toISOString(),
+    dataStatus: (snapshot.dataStatus as "LIVE" | "ENRICHING" | "COMPLETE") || "COMPLETE",
   };
 }
 

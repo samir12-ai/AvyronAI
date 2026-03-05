@@ -1,4 +1,4 @@
-import type { CompetitorInput, CompetitorSignalResult, SignalData, PostData } from "./types";
+import type { CompetitorInput, CompetitorSignalResult, SignalData, PostData, CommentData, EngagementQuality } from "./types";
 import { MI_THRESHOLDS, MI_COST_LIMITS } from "./constants";
 
 function clamp(v: number, min = -1, max = 1): number {
@@ -134,6 +134,101 @@ function computeContentExperimentRate(posts: PostData[]): number {
   const earlyTypes = new Set(earlyQuarter.map(p => p.mediaType));
   const newFormats = [...recentTypes].filter(t => !earlyTypes.has(t));
   return clamp(newFormats.length / Math.max(1, types.size), 0, 1);
+}
+
+const HIGH_INTENT_PATTERNS = [
+  /\?/,
+  /how\s+to/i,
+  /where\s+can\s+i/i,
+  /does\s+this\s+work/i,
+  /can\s+you\s+help/i,
+  /help\s+me/i,
+  /i\s+need/i,
+  /what\s+is/i,
+  /which\s+one/i,
+  /how\s+much/i,
+  /how\s+long/i,
+  /is\s+this/i,
+  /can\s+i/i,
+  /should\s+i/i,
+  /any\s+tips/i,
+  /recommend/i,
+  /confused/i,
+  /don'?t\s+understand/i,
+  /struggling/i,
+  /doesn'?t\s+work/i,
+  /not\s+working/i,
+  /vs\.?\s/i,
+  /compared\s+to/i,
+  /difference\s+between/i,
+  /alternative/i,
+  /better\s+than/i,
+];
+
+const LOW_VALUE_PATTERNS = [
+  /^[\p{Emoji}\s]+$/u,
+  /^(nice|great|love\s+this|amazing|awesome|cool|wow|beautiful|perfect|fire|lit|dope|sick|yass?|yes+|yep|yeah)\s*[!.]*$/i,
+  /^[\u{1F525}\u{1F44D}\u{2764}\u{FE0F}\u{1F60D}\u{1F64F}\u{1F44F}\u{1F4AF}\u{2728}\u{1F389}\u{1F49C}\u{1F499}\u{1F49A}\u{1F497}\u{1F496}\u{2665}]+$/u,
+  /^(lol|lmao|haha+|omg)\s*[!.]*$/i,
+  /^@\w+\s*$/,
+  /^[.!]+$/,
+];
+
+export function classifyEngagementQuality(comments: CommentData[]): EngagementQuality {
+  let highIntentCount = 0;
+  let lowValueCount = 0;
+
+  for (const comment of comments) {
+    const text = (comment.text || "").trim();
+    if (!text) continue;
+
+    const isHighIntent = HIGH_INTENT_PATTERNS.some(p => p.test(text));
+    const isLowValue = LOW_VALUE_PATTERNS.some(p => p.test(text));
+
+    if (isHighIntent) highIntentCount++;
+    if (isLowValue) lowValueCount++;
+  }
+
+  const total = highIntentCount + lowValueCount;
+  const engagementQualityRatio = total > 0 ? highIntentCount / total : 0;
+
+  return { highIntentCount, lowValueCount, engagementQualityRatio };
+}
+
+export function detectAudienceIntentSignals(comments: CommentData[]): string[] {
+  const signals: string[] = [];
+  const texts = comments.map(c => (c.text || "").toLowerCase());
+  if (texts.length === 0) return signals;
+
+  const confusionPatterns = [/confused/i, /don'?t\s+understand/i, /what\s+does/i, /explain/i, /unclear/i];
+  const confusionCount = texts.filter(t => confusionPatterns.some(p => p.test(t))).length;
+  if (confusionCount >= 2) signals.push("audience_confusion");
+
+  const beginnerPatterns = [/beginner/i, /newbie/i, /just\s+started/i, /new\s+to/i, /how\s+do\s+i\s+start/i, /first\s+time/i];
+  const beginnerCount = texts.filter(t => beginnerPatterns.some(p => p.test(t))).length;
+  if (beginnerCount >= 2) signals.push("beginner_questions");
+
+  const pricePatterns = [/how\s+much/i, /price/i, /cost/i, /afford/i, /expensive/i, /cheap/i, /budget/i, /worth\s+it/i, /free/i];
+  const priceCount = texts.filter(t => pricePatterns.some(p => p.test(t))).length;
+  if (priceCount >= 2) signals.push("price_sensitivity");
+
+  const comparisonPatterns = [/vs\.?\s/i, /compared\s+to/i, /difference\s+between/i, /better\s+than/i, /alternative/i, /which\s+one/i, /or\s+should\s+i/i];
+  const comparisonCount = texts.filter(t => comparisonPatterns.some(p => p.test(t))).length;
+  if (comparisonCount >= 2) signals.push("method_comparison");
+
+  const helpPatterns = [/help\s+me/i, /can\s+you\s+help/i, /i\s+need\s+help/i, /please\s+help/i, /struggling/i, /stuck/i];
+  const helpCount = texts.filter(t => helpPatterns.some(p => p.test(t))).length;
+  if (helpCount >= 2) signals.push("help_requests");
+
+  const resultPatterns = [/does\s+(this|it)\s+work/i, /results/i, /before\s+and\s+after/i, /did\s+it\s+work/i, /how\s+long.*results/i, /transformation/i];
+  const resultCount = texts.filter(t => resultPatterns.some(p => p.test(t))).length;
+  if (resultCount >= 2) signals.push("results_seeking");
+
+  const trustPatterns = [/scam/i, /legit/i, /trust/i, /real/i, /fake/i, /honest/i, /proof/i, /testimonial/i];
+  const trustCount = texts.filter(t => trustPatterns.some(p => p.test(t))).length;
+  if (trustCount >= 2) signals.push("trust_concerns");
+
+  return signals;
 }
 
 export function computeCompetitorSignals(competitor: CompetitorInput): CompetitorSignalResult {

@@ -1570,9 +1570,9 @@ describe("Layer-0 Signal-Only Contract", () => {
     expect(a.isDepressed).toBe(b.isDepressed);
   });
 
-  it("ENGINE_VERSION is 11", () => {
+  it("ENGINE_VERSION is 12", () => {
     const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
-    expect(source).toContain("export const ENGINE_VERSION = 11;");
+    expect(source).toContain("export const ENGINE_VERSION = 12;");
   });
 
   it("schema uses market_diagnosis and threat_signals columns (not old names)", () => {

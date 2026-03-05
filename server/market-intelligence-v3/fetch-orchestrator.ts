@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { miFetchJobs, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, miSnapshots, miSignalLogs, miTelemetry, growthCampaigns } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { fetchCompetitorData, type FetchResult } from "../competitive-intelligence/data-acquisition";
+import { fetchCompetitorData, type FetchResult, type CollectionMode } from "../competitive-intelligence/data-acquisition";
 import { computeAllSignals, aggregateMissingFlags } from "./signal-engine";
 import { classifyAllIntents, computeDominantMarketIntent } from "./intent-engine";
 import { computeTrajectory, deriveTrajectoryDirection, deriveMarketState } from "./trajectory-engine";
@@ -83,6 +83,8 @@ export interface FetchJobStatus {
   durationMs?: number;
   createdAt?: string;
   completedAt?: string;
+  collectionMode?: string;
+  dataStatus?: string;
 }
 
 const activeJobs = new Map<string, Promise<void>>();
@@ -368,7 +370,7 @@ async function executeFetchJob(
         totalRequests++;
         const startMs = Date.now();
         try {
-          fetchResult = await fetchCompetitorData(comp.id, accountId, attempt > 1, proxyCtx || undefined);
+          fetchResult = await fetchCompetitorData(comp.id, accountId, attempt > 1, proxyCtx || undefined, "FAST_PASS");
           if (proxyCtx) {
             logProxyTelemetry(proxyCtx, "POSTS_FETCH", 200, null, Date.now() - startMs, true);
           }
@@ -604,11 +606,20 @@ async function executeFetchJob(
     const snapshotSourceType = anyFetchExecuted ? "FRESH_DATA" : "CACHED_DATA";
 
     if (anyAnalysisRan) {
+      const willRunDeepPass = anyFetchExecuted && !allCooldown;
+      const fastPassDataStatus = willRunDeepPass ? "LIVE" : "COMPLETE";
       try {
-        await persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverage, stopReason, snapshotSourceType, anyFetchExecuted);
-        console.log(`[FetchOrch] Snapshot persisted for ${accountId}/${campaignId} | partial=${isPartialCoverage} | allCooldown=${allCooldown} | snapshotSource=${snapshotSourceType} | fetchExecuted=${anyFetchExecuted}`);
+        await persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverage, stopReason, snapshotSourceType, anyFetchExecuted, fastPassDataStatus as "LIVE" | "ENRICHING" | "COMPLETE");
+        console.log(`[FetchOrch] Snapshot persisted for ${accountId}/${campaignId} | partial=${isPartialCoverage} | allCooldown=${allCooldown} | snapshotSource=${snapshotSourceType} | fetchExecuted=${anyFetchExecuted} | dataStatus=${fastPassDataStatus}`);
       } catch (err: any) {
         console.error(`[FetchOrch] Snapshot persistence failed:`, err.message);
+      }
+
+      if (willRunDeepPass) {
+        console.log(`[FetchOrch] Fast Pass complete. Auto-queuing Deep Pass for ${accountId}/${campaignId}`);
+        queueDeepPass(accountId, campaignId, competitors).catch(err => {
+          console.error(`[FetchOrch] Deep Pass auto-queue failed:`, err.message);
+        });
       }
     }
 
@@ -720,7 +731,7 @@ function classifyBlockReason(result: FetchResult): "RATE_LIMIT" | "PROXY_BLOCKED
   return "ERROR";
 }
 
-async function persistSnapshotAfterFetch(accountId: string, campaignId: string, isPartialCoverage: boolean = false, jobStopReason: StopReason = "COMPLETE", snapshotSource: "FRESH_DATA" | "CACHED_DATA" = "FRESH_DATA", fetchExecuted: boolean = true): Promise<void> {
+async function persistSnapshotAfterFetch(accountId: string, campaignId: string, isPartialCoverage: boolean = false, jobStopReason: StopReason = "COMPLETE", snapshotSource: "FRESH_DATA" | "CACHED_DATA" = "FRESH_DATA", fetchExecuted: boolean = true, dataStatus: "LIVE" | "ENRICHING" | "COMPLETE" = "LIVE"): Promise<void> {
   const competitors = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
 
@@ -877,6 +888,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     confidenceLevel: confidence.level,
     analysisVersion: ENGINE_VERSION,
     status: "COMPLETE" as const,
+    dataStatus,
     confirmedRuns: (previousSnapshot?.confirmedRuns || 0) + 1,
     previousDirection: trajectoryDirection,
     directionLockedUntil: null,
@@ -948,7 +960,62 @@ export async function getFetchJobStatus(jobId: string): Promise<FetchJobStatus |
     durationMs: job.durationMs || undefined,
     createdAt: job.createdAt?.toISOString(),
     completedAt: job.completedAt?.toISOString(),
+    collectionMode: job.collectionMode || "FAST_PASS",
+    dataStatus: job.dataStatus || "LIVE",
   };
+}
+
+async function queueDeepPass(accountId: string, campaignId: string, competitors: any[]): Promise<void> {
+  const DEEP_PASS_DELAY_MS = 10000;
+  console.log(`[FetchOrch] Deep Pass scheduled in ${DEEP_PASS_DELAY_MS}ms for ${accountId}/${campaignId}`);
+  await sleep(DEEP_PASS_DELAY_MS);
+
+  try {
+    await db.update(miSnapshots)
+      .set({ dataStatus: "ENRICHING" })
+      .where(and(
+        eq(miSnapshots.accountId, accountId),
+        eq(miSnapshots.campaignId, campaignId),
+        eq(miSnapshots.status, "COMPLETE"),
+      ));
+    console.log(`[FetchOrch] Snapshot dataStatus set to ENRICHING for ${accountId}/${campaignId}`);
+  } catch (err: any) {
+    console.error(`[FetchOrch] Failed to set ENRICHING status: ${err.message}`);
+  }
+
+  const startTime = Date.now();
+  console.log(`[FetchOrch] Deep Pass starting for ${accountId}/${campaignId} | ${competitors.length} competitors`);
+
+  for (const comp of competitors) {
+    try {
+      const compHash = computeCompetitorHash([{
+        id: comp.id, name: comp.name, platform: comp.platform,
+        profileLink: comp.profileLink, businessType: comp.businessType,
+        postingFrequency: comp.postingFrequency, contentTypeRatio: comp.contentTypeRatio,
+        engagementRatio: comp.engagementRatio, ctaPatterns: comp.ctaPatterns,
+        discountFrequency: comp.discountFrequency, hookStyles: comp.hookStyles,
+        messagingTone: comp.messagingTone, socialProofPresence: comp.socialProofPresence,
+        posts: [], comments: [],
+      }]);
+      const proxyCtx = acquireStickySession(accountId, campaignId, compHash);
+
+      await acquireToken(accountId, campaignId, `DEEP_PASS:${comp.name}`);
+      const result = await fetchCompetitorData(comp.id, accountId, true, proxyCtx || undefined, "DEEP_PASS");
+
+      if (proxyCtx) releaseStickySession(proxyCtx);
+
+      console.log(`[FetchOrch] Deep Pass complete for ${comp.name}: ${result.postsCollected} posts, ${result.commentsCollected} comments, status=${result.status}`);
+    } catch (err: any) {
+      console.error(`[FetchOrch] Deep Pass failed for ${comp.name}: ${err.message}`);
+    }
+  }
+
+  try {
+    await persistSnapshotAfterFetch(accountId, campaignId, false, "COMPLETE", "FRESH_DATA", true, "COMPLETE");
+    console.log(`[FetchOrch] Deep Pass snapshot recomputed (COMPLETE) for ${accountId}/${campaignId} | duration=${Date.now() - startTime}ms`);
+  } catch (err: any) {
+    console.error(`[FetchOrch] Deep Pass snapshot persistence failed: ${err.message}`);
+  }
 }
 
 function sleep(ms: number): Promise<void> {

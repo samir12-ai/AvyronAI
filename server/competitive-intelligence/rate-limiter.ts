@@ -1,6 +1,6 @@
-const TOKEN_REFILL_INTERVAL_MS = 4000;
+const TOKEN_REFILL_INTERVAL_MS = 5000;
 const MAX_BURST_TOKENS = 3;
-const TOKEN_REFILL_JITTER_MS = 2000;
+const TOKEN_REFILL_JITTER_MS = 7000;
 
 interface TokenBucket {
   tokens: number;

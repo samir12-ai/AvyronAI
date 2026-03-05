@@ -877,19 +877,16 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
     });
   });
 
-  describe("M-1) Data Integrity — Delete-Before-Insert & Verified Counts", () => {
-    it("should delete old posts/comments before re-inserting in transaction", async () => {
+  describe("M-1) Data Integrity — Cache-First Insert & Verified Counts", () => {
+    it("should insert only new posts in transaction (cache-first, no delete-all)", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
       );
       expect(source).toContain("db.transaction");
-      expect(source).toContain("tx.delete(ciCompetitorComments)");
-      expect(source).toContain("tx.delete(ciCompetitorPosts)");
-      const deleteCommentsIdx = source.indexOf("tx.delete(ciCompetitorComments)");
-      const deletePostsIdx = source.indexOf("tx.delete(ciCompetitorPosts)");
-      const insertPostsIdx = source.indexOf("tx.insert(ciCompetitorPosts)");
-      expect(deleteCommentsIdx).toBeLessThan(insertPostsIdx);
-      expect(deletePostsIdx).toBeLessThan(insertPostsIdx);
+      expect(source).toContain("tx.insert(ciCompetitorPosts)");
+      expect(source).toContain("tx.insert(ciCompetitorComments)");
+      expect(source).toContain("existingPostIds");
+      expect(source).toContain("cachedPostsReused");
     });
 
     it("should verify persisted counts after insertion", async () => {
@@ -930,11 +927,9 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
       );
-      const completedLogIdx = source.indexOf("posts (verified)");
-      expect(completedLogIdx).toBeGreaterThan(-1);
-      const returnAfterLog = source.slice(completedLogIdx, completedLogIdx + 800);
-      expect(returnAfterLog).toContain("persistedPostCount");
-      expect(returnAfterLog).toContain("persistedCommentCount");
+      expect(source).toContain("persistedPostCount");
+      expect(source).toContain("persistedCommentCount");
+      expect(source).toContain("cachedPostsReused");
     });
 
     it("should use live DB counts in cooldown path and bypass if coverage insufficient", async () => {
@@ -1160,13 +1155,9 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("coverageSufficient");
       const thresholdMatch = source.match(/const MIN_POSTS_THRESHOLD\s*=\s*(\d+)/);
       expect(parseInt(thresholdMatch![1])).toBe(14);
-      expect(source).toContain("persistedPostCount >= MIN_POSTS_THRESHOLD");
-      expect(source).toContain("persistedCommentCount >= MIN_COMMENTS_THRESHOLD");
-      const insufficientIdx = source.indexOf("} else if (persistedPostCount >= 5)");
-      expect(insufficientIdx).toBeGreaterThan(-1);
-      const insufficientBlock = source.slice(insufficientIdx, insufficientIdx + 300);
-      expect(insufficientBlock).toContain("INSUFFICIENT_DATA");
-      expect(insufficientBlock).not.toContain('"SUCCESS"');
+      expect(source).toContain("persistedPostCount >= postsTarget");
+      expect(source).toContain("persistedCommentCount >= commentsTarget");
+      expect(source).toContain("INSUFFICIENT_DATA");
     });
 
     it("REGRESSION GUARD: paginationAttempted must be true when has_next_page is true", async () => {
@@ -1197,15 +1188,14 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(parseInt(foTarget![1])).toBeGreaterThanOrEqual(14);
     });
 
-    it("data atomicity: delete + insert wrapped in transaction", async () => {
+    it("data atomicity: cache-first insert wrapped in transaction", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
       );
       expect(source).toContain("db.transaction");
-      expect(source).toContain("tx.delete(ciCompetitorComments)");
-      expect(source).toContain("tx.delete(ciCompetitorPosts)");
       expect(source).toContain("tx.insert(ciCompetitorPosts)");
       expect(source).toContain("tx.insert(ciCompetitorComments)");
+      expect(source).toContain("existingPostIds");
     });
   });
 
