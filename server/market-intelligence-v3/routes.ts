@@ -8,7 +8,7 @@ import { requireCampaign } from "../campaign-routes";
 import { getFetchJobStatus } from "./fetch-orchestrator";
 import type { MIv3Mode } from "./types";
 
-const ALLOWED_MODES: MIv3Mode[] = ["overview", "dominance", "actions", "history"];
+const ALLOWED_MODES: MIv3Mode[] = ["overview", "dominance", "threats", "history"];
 
 function enforceEngineWhitelist(req: any): void {
   const body = req.body || {};

@@ -1,0 +1,176 @@
+
+Replit Team,
+
+Before we consider MIv3 finalized, we need a strict PASS/FAIL verification with evidence for each item below.
+Please provide file references, grep output, or test proof where applicable.
+
+This is a structural integrity check to confirm that the latest changes (Signals-only Layer, Freshness Hard Gate, Schema migration, and UI updates) were implemented correctly and that no legacy behavior remains.
+
+⸻
+
+1️⃣ Signals-Only Contract (Layer-0 Discipline)
+
+Confirm the system now produces signals only (no prescriptions).
+
+Required proof:
+
+• marketDiagnosis and threatSignals contain descriptive observations only
+• No prescriptive language remains
+
+Run verification:
+
+grep -R “Focus on|Differentiate|Establish|You should|We recommend|Must” server/market-intelligence-v3
+
+Expected result: 0 matches
+
+Also confirm:
+
+• entryStrategy → removed everywhere
+• defensiveRisks → removed everywhere
+• buildDeterministicNarrative() → replaced with buildMarketSummary()
+
+⸻
+
+2️⃣ Freshness Hard Gate (14-Day Data Limit)
+
+Confirm the hard gate is implemented exactly as specified.
+
+Evidence required:
+
+• Constant exists
+FRESHNESS_HARD_GATE_DAYS = 14
+
+• Hard gate is the first guard check in the chain
+
+Logic confirmation:
+
+IF dataAge > 14 days
+→ status = BLOCK
+→ reason = DATA_STALE_HARD_GATE
+
+No other guard decision should execute before this check.
+
+Provide file + line reference.
+
+⸻
+
+3️⃣ Database Schema Migration
+
+Confirm the database migration was fully applied.
+
+Required verification:
+
+• Column rename completed
+
+entry_strategy → market_diagnosis
+defensive_risks → threat_signals
+
+• No remaining queries reference old columns.
+
+Verification command:
+
+grep -R “entry_strategy|defensive_risks” server/
+
+Expected result: 0 matches
+
+Also confirm:
+
+• ENGINE_VERSION bumped to 11
+• analysisVersion correctly stored in snapshots
+• Old snapshots are rejected by version mismatch in cache.
+
+⸻
+
+4️⃣ API Response Structure
+
+Confirm all API routes now return the updated MIv3 fields.
+
+Routes to verify:
+
+• /analyze
+• /snapshot
+• /history
+
+Response fields must include:
+
+marketDiagnosis
+threatSignals
+signalNoiseRatio
+evidenceCoverage
+
+Confirm that no deprecated fields appear in responses.
+
+⸻
+
+5️⃣ Frontend Migration
+
+Confirm the UI layer reflects the structural changes.
+
+Required verification:
+
+• “Actions” tab renamed to “Threats”
+• Shield icon displayed
+• renderRecommendations() removed
+• renderThreats() implemented
+
+Also confirm:
+
+• Evidence Coverage card displays
+
+– posts analyzed
+– comments analyzed
+– competitors analyzed
+– signalNoiseRatio %
+
+⸻
+
+6️⃣ Mode Type Update
+
+Confirm the frontend mode type was updated.
+
+MIv3Mode must now be:
+
+“overview”
+“dominance”
+“threats”
+“history”
+
+Confirm "actions" no longer exists anywhere in the codebase.
+
+Verification command:
+
+grep -R “actions” client/
+
+Expected result: 0 structural references to the old mode.
+
+⸻
+
+7️⃣ Test Integrity
+
+Confirm test coverage reflects the new architecture.
+
+Expected:
+
+• 369 tests passing
+
+New test groups must include:
+
+• Freshness Hard Gate tests
+– 14 days → PASS
+– 15 days → BLOCK
+
+• Signals-only contract tests
+
+• Schema migration verification
+
+• UI mode migration verification
+
+⸻
+
+Final confirmation required:
+
+Please provide PASS / FAIL for each checklist item along with file references or command outputs.
+
+MIv3 will be considered structurally closed only after this verification passes.
+
+Best regards,
