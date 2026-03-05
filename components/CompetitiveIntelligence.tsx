@@ -1173,6 +1173,30 @@ export default function CompetitiveIntelligence() {
     );
   };
 
+  const getIndexInterpretation = (label: string, value: number): string => {
+    const pct = Math.round(value * 100);
+    switch (label) {
+      case 'Market Heating':
+        return pct > 60 ? 'Competitive posting activity is above baseline levels across tracked accounts.'
+          : pct < 20 ? 'Posting activity is below typical category density.'
+          : 'Posting activity is within normal competitive range.';
+      case 'Narrative Convergence':
+        return pct > 50 ? 'Majority of analyzed competitors are using similar messaging themes.'
+          : 'Messaging patterns remain structurally varied across competitors.';
+      case 'Offer Compression':
+        return pct > 40 ? 'Offer language and pricing signals are converging across competitors.'
+          : 'Offers remain structurally differentiated across competitors.';
+      case 'Angle Saturation':
+        return pct > 40 ? 'Majority of analyzed hooks repeat similar creative angles.'
+          : 'Creative angle diversity remains present in the competitive set.';
+      case 'Revival Potential':
+        return pct > 60 ? 'Previously dormant competitors show signals of returning to active posting.'
+          : 'No significant dormant competitor re-entry signals detected.';
+      default:
+        return '';
+    }
+  };
+
   const renderThreats = () => {
     const output = miv3Result?.output;
     const marketDiagnosis = output?.marketDiagnosis;
@@ -1182,6 +1206,11 @@ export default function CompetitiveIntelligence() {
     const intentMap = output?.competitorIntentMap || [];
     const trajectory = miv3Result?.trajectoryData;
     const evidenceCoverage = output?.evidenceCoverage;
+    const contentDna = miv3Result?.contentDnaData || [];
+
+    const getDnaForCompetitor = (competitorId: string) => contentDna.find((d: any) => d.competitorId === competitorId);
+
+    const formatDnaList = (items: string[]) => items.length > 0 ? items.map((s: string) => s.replace(/_/g, ' ')).join(', ') : 'Not detected';
 
     return (
       <View>
@@ -1204,6 +1233,38 @@ export default function CompetitiveIntelligence() {
           </View>
         ) : (
           <View>
+            <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+              <View style={s.cardHeader}>
+                <Ionicons name="shield-outline" size={18} color="#EF4444" />
+                <Text style={[s.cardTitle, { color: colors.text }]}>Observed Threat Signals</Text>
+                {threatSignals.length > 0 && (
+                  <View style={[s.countBadge, { backgroundColor: '#EF4444' + '20', marginLeft: 8 }]}>
+                    <Text style={[s.countText, { color: '#EF4444' }]}>{threatSignals.length}</Text>
+                  </View>
+                )}
+              </View>
+              {threatSignals.length > 0 ? (
+                threatSignals.map((threat: string, i: number) => (
+                  <View key={i} style={{ flexDirection: 'row', gap: 6, marginBottom: 8, alignItems: 'flex-start' }}>
+                    <Ionicons name="alert-circle" size={14} color="#EF4444" style={{ marginTop: 2 }} />
+                    <Text style={{ fontSize: 12, color: colors.textSecondary, flex: 1, lineHeight: 18 }}>{threat}</Text>
+                  </View>
+                ))
+              ) : (
+                <Text style={{ fontSize: 12, color: colors.textMuted }}>No structural threat signals detected in current data window.</Text>
+              )}
+            </View>
+
+            {marketDiagnosis && (
+              <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                <View style={s.cardHeader}>
+                  <Ionicons name="pulse-outline" size={18} color="#8B5CF6" />
+                  <Text style={[s.cardTitle, { color: colors.text }]}>Market Diagnosis</Text>
+                </View>
+                <Text style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 20 }}>{marketDiagnosis}</Text>
+              </View>
+            )}
+
             {evidenceCoverage && (
               <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
                 <View style={s.cardHeader}>
@@ -1233,31 +1294,6 @@ export default function CompetitiveIntelligence() {
               </View>
             )}
 
-            {marketDiagnosis && (
-              <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-                <View style={s.cardHeader}>
-                  <Ionicons name="pulse-outline" size={18} color="#8B5CF6" />
-                  <Text style={[s.cardTitle, { color: colors.text }]}>Market Diagnosis</Text>
-                </View>
-                <Text style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 20 }}>{marketDiagnosis}</Text>
-              </View>
-            )}
-
-            {threatSignals.length > 0 && (
-              <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-                <View style={s.cardHeader}>
-                  <Ionicons name="shield-outline" size={18} color="#EF4444" />
-                  <Text style={[s.cardTitle, { color: colors.text }]}>Observed Threats</Text>
-                </View>
-                {threatSignals.map((threat: string, i: number) => (
-                  <View key={i} style={{ flexDirection: 'row', gap: 6, marginBottom: 6, alignItems: 'flex-start' }}>
-                    <Ionicons name="alert-circle" size={14} color="#EF4444" style={{ marginTop: 2 }} />
-                    <Text style={{ fontSize: 12, color: colors.textSecondary, flex: 1, lineHeight: 18 }}>{threat}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-
             {intentMap.length > 0 && (
               <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
                 <View style={s.cardHeader}>
@@ -1266,15 +1302,32 @@ export default function CompetitiveIntelligence() {
                 </View>
                 {intentMap.map((intent: any, i: number) => {
                   const intentColor = intent.intentCategory === 'AGGRESSIVE_SCALING' || intent.intentCategory === 'PRICE_WAR' ? '#EF4444' : intent.intentCategory === 'DEFENSIVE' ? '#F59E0B' : intent.intentCategory === 'TESTING' || intent.intentCategory === 'POSITIONING_SHIFT' ? '#3B82F6' : '#10B981';
+                  const dna = getDnaForCompetitor(intent.competitorId);
                   return (
-                    <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: i < intentMap.length - 1 ? 1 : 0, borderBottomColor: isDark ? '#1A2030' : '#F0F0F0' }}>
-                      <View style={{ flex: 1 }}>
+                    <View key={i} style={{ paddingVertical: 8, borderBottomWidth: i < intentMap.length - 1 ? 1 : 0, borderBottomColor: isDark ? '#1A2030' : '#F0F0F0' }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }}>{intent.competitorName}</Text>
-                        {intent.degraded && <Text style={{ fontSize: 10, color: '#F59E0B' }}>Degraded: {intent.degradeReason}</Text>}
+                        <View style={[s.threatBadge, { backgroundColor: intentColor + '20' }]}>
+                          <Text style={{ fontSize: 10, fontWeight: '600', color: intentColor }}>{intent.intentCategory?.replace(/_/g, ' ')}</Text>
+                        </View>
                       </View>
-                      <View style={[s.threatBadge, { backgroundColor: intentColor + '20' }]}>
-                        <Text style={{ fontSize: 10, fontWeight: '600', color: intentColor }}>{intent.intentCategory?.replace(/_/g, ' ')}</Text>
-                      </View>
+                      {intent.degraded && <Text style={{ fontSize: 10, color: '#F59E0B', marginTop: 2 }}>Degraded: {intent.degradeReason}</Text>}
+                      {dna && (
+                        <View style={{ marginTop: 4, gap: 2 }}>
+                          <Text style={{ fontSize: 10, color: colors.textMuted }}>
+                            <Text style={{ fontWeight: '600' }}>Narrative: </Text>{formatDnaList(dna.narrativeFrameworks || [])}
+                          </Text>
+                          <Text style={{ fontSize: 10, color: colors.textMuted }}>
+                            <Text style={{ fontWeight: '600' }}>Hook Style: </Text>{formatDnaList(dna.hookArchetypes || [])}
+                          </Text>
+                          <Text style={{ fontSize: 10, color: colors.textMuted }}>
+                            <Text style={{ fontWeight: '600' }}>CTA Pattern: </Text>{formatDnaList(dna.ctaFrameworks || [])}
+                          </Text>
+                        </View>
+                      )}
+                      {!dna && (
+                        <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 2, fontStyle: 'italic' }}>Content DNA not available — insufficient post data</Text>
+                      )}
                     </View>
                   );
                 })}
@@ -1294,7 +1347,7 @@ export default function CompetitiveIntelligence() {
                   { label: 'Angle Saturation', value: trajectory.angleSaturationLevel, color: '#8B5CF6' },
                   { label: 'Revival Potential', value: trajectory.revivalPotential, color: '#10B981' },
                 ].map((idx, i) => (
-                  <View key={i} style={{ marginBottom: 8 }}>
+                  <View key={i} style={{ marginBottom: 10 }}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
                       <Text style={{ fontSize: 11, color: colors.textMuted }}>{idx.label}</Text>
                       <Text style={{ fontSize: 11, fontWeight: '700', color: idx.color }}>{((idx.value || 0) * 100).toFixed(0)}%</Text>
@@ -1302,6 +1355,9 @@ export default function CompetitiveIntelligence() {
                     <View style={[s.qualityBar]}>
                       <View style={[s.qualityFill, { width: `${(idx.value || 0) * 100}%`, backgroundColor: idx.color }]} />
                     </View>
+                    <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>
+                      → {getIndexInterpretation(idx.label, idx.value || 0)}
+                    </Text>
                   </View>
                 ))}
               </View>

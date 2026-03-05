@@ -1,0 +1,163 @@
+Replit Team,
+
+After reviewing the latest MIv3 interface (Threats tab), the system is very close to the intended architecture. However, a few critical corrections are required to ensure the Layer-0 contract (signals only) is strictly respected and to prevent future conflicts with the Fortress decision layer.
+
+Please review and implement the following items.
+
+---
+
+## 1️⃣ Threats Tab Does Not Display Actual Threat Signals
+
+Currently the “Threats” tab displays:
+
+• Evidence Coverage  
+• Market Diagnosis  
+• Competitor Intent Map  
+• Market Trajectory Indices  
+
+However, it does not display explicit Threat Signals, which is the primary purpose of this tab.
+
+Please add a Threat Signals section that lists observed structural risks.
+
+Example format:
+
+Threat Signals
+
+• Narrative convergence increasing across competitors  
+• Hook/angle duplication detected in multiple creators  
+• Market posting density below category baseline  
+• Offer clustering detected in similar price bands  
+
+These must remain observational signals only, not recommendations.
+
+---
+
+## 2️⃣ Market Diagnosis Contains Implicit Prescription Language
+
+Current text example:
+
+"Opportunity for first-mover advantage with consistent presence."
+
+This violates the Signals-Only contract because it contains implied strategic guidance.
+
+Please refactor diagnosis outputs to pure descriptive language.
+
+Correct example:
+
+"Market activity density is currently low.  
+Consistent publisher presence is uncommon across analyzed competitors."
+
+Avoid any language implying action or advantage.
+
+Words that must not appear in Layer-0 outputs:
+
+Opportunity  
+Advantage  
+Focus  
+Differentiate  
+Establish  
+You should / Must / Recommend
+
+---
+
+## 3️⃣ Market Trajectory Indices Require Signal Interpretation
+
+The following indices are displayed:
+
+• Market Heating  
+• Narrative Convergence  
+• Offer Compression  
+• Angle Saturation  
+• Revival Potential  
+
+Currently these appear as raw percentages only, which limits interpretability.
+
+Each index should include a short signal interpretation line.
+
+Example:
+
+Angle Saturation — 59%  
+→ Majority of analyzed hooks repeat similar creative angles.
+
+Offer Compression — 6%  
+→ Offers remain structurally differentiated across competitors.
+
+This keeps the layer informational without becoming prescriptive.
+
+---
+
+## 4️⃣ Competitor Intent Map Lacks Strategic Structure
+
+Currently the map lists only competitor names:
+
+Kay agency  
+Viral mates  
+Voral media  
+
+Please expand each competitor card with structural signals such as:
+
+• Dominant narrative pattern  
+• Offer structure type  
+• Content style cluster
+
+Example:
+
+Kay Agency  
+Narrative Pattern: Authority positioning  
+Offer Pattern: Bundled service packages  
+Content Style: Educational reels
+
+This improves competitive signal clarity without introducing strategy recommendations.
+
+---
+
+## 5️⃣ Structural Design Conflict Detected (Layer Overlap Risk)
+
+A potential architectural issue was identified.
+
+Some fields in the Market Trajectory Indices may unintentionally overlap with analysis expected later in the Fortress decision layer.
+
+Example risk:
+
+Indices such as:
+
+• Narrative Convergence  
+• Offer Compression  
+• Angle Saturation  
+
+If interpreted as strategy guidance, they could influence positioning or creative decisions prematurely, which violates the layer hierarchy.
+
+Reminder of the intended architecture:
+
+Layer 0 — Market Intelligence  
+Layer 1 — Fortress (Strategic Decision Engines)  
+Layer 2 — Financial Governor  
+Layer 3 — Beast (Creative Execution)
+
+To prevent layer leakage:
+
+Market Intelligence must only expose signals, not conclusions that resemble strategy.
+
+Therefore:
+
+• Indices should remain diagnostic signals only  
+• No language implying market entry strategy or differentiation paths  
+• No ranking of “best approach” or “best angle”
+
+Fortress will later interpret these signals.
+
+---
+
+## 6️⃣ Final Requirement
+
+Please confirm the following after fixes:
+
+• Threat Signals section added to Threats tab  
+• Diagnosis language cleaned of all prescriptive wording  
+• Index interpretation added (signal explanation only)  
+• Competitor Intent Map expanded with structural signals  
+• Layer-0 contract verified again (signals only, no strategy leakage)
+
+Provide confirmation once implemented.
+
+Best regar

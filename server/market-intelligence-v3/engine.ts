@@ -260,22 +260,22 @@ export function buildMarketDiagnosis(confidence: any, trajectory: any, dominantI
   const direction = deriveTrajectoryDirection(trajectory);
 
   if (confidence.guardDecision === "DOWNGRADE") {
-    return "Exploratory: Insufficient data for confident diagnosis. Data collection required before assessment.";
+    return "Exploratory assessment. Data volume is below confidence thresholds. Current signals are provisional.";
   }
 
   switch (direction) {
     case "HEATING_COMPRESSED":
-      return "Market heating with compressed offers. Rising competitive intensity with narrowing price bands.";
+      return "Market activity is elevated with narrowing offer price bands. Competitive intensity is increasing across tracked competitors.";
     case "HEATING":
-      return "Growing competition detected. Increasing activity across competitor set.";
+      return "Competitor activity levels are rising. Posting frequency and engagement signals show upward movement across the tracked set.";
     case "COOLING":
-      return "Low activity market. Declining competitive signals across tracked competitors.";
+      return "Market activity density is currently low. Consistent publisher presence is uncommon across analyzed competitors.";
     case "SATURATED":
-      return "Content saturation detected. High angle overlap and low format experimentation.";
+      return "Content angle overlap is high across competitors. Format experimentation is limited. Most creators are using similar hooks and narratives.";
     case "COMPRESSING":
-      return "Price compression observed. Offer language converging across competitors.";
+      return "Offer language is converging across competitors. Pricing signals show narrowing differentiation between tracked accounts.";
     default:
-      return "Moderate market activity. Stable competitive landscape with no dominant trend.";
+      return "Market activity is at moderate levels. No dominant directional trend detected across the competitive set.";
   }
 }
 
@@ -291,19 +291,42 @@ export function buildThreatSignals(confidence: any, trajectory: any, intents: an
     i.intentCategory === "AGGRESSIVE_SCALING" || i.intentCategory === "PRICE_WAR"
   );
   if (aggressiveCompetitors.length > 0) {
-    threats.push(`${aggressiveCompetitors.length} competitor(s) showing aggressive scaling or price-war signals`);
+    const names = aggressiveCompetitors.map((c: any) => c.competitorName).join(", ");
+    threats.push(`${aggressiveCompetitors.length} competitor(s) showing aggressive scaling or price-war signals: ${names}`);
   }
 
-  if (trajectory.offerCompressionIndex > 0.5) {
-    threats.push("Offer compression detected: market trending toward price competition");
+  if (trajectory.narrativeConvergenceScore > 0.5) {
+    threats.push("Narrative convergence increasing across competitors — messaging patterns are becoming more similar");
   }
 
-  if (trajectory.narrativeConvergenceScore > 0.7) {
-    threats.push("High narrative convergence detected: competitors using similar messaging patterns");
+  if (trajectory.angleSaturationLevel > 0.4) {
+    threats.push("Hook/angle duplication detected in multiple creators — content differentiation is decreasing");
   }
 
-  if (trajectory.angleSaturationLevel > 0.6) {
-    threats.push("Content angle saturation detected: high overlap in content formats across competitors");
+  if (trajectory.offerCompressionIndex > 0.4) {
+    threats.push("Offer clustering detected in similar price bands — pricing structures are converging");
+  }
+
+  if (trajectory.marketHeatingIndex > 0.6) {
+    threats.push("Market posting density is elevated — competitive activity is above baseline levels");
+  }
+
+  if (trajectory.marketHeatingIndex < 0.2) {
+    threats.push("Market posting density below category baseline — low overall competitive activity detected");
+  }
+
+  const positioningShifts = intents.filter((i: any) => i.intentCategory === "POSITIONING_SHIFT");
+  if (positioningShifts.length > 0) {
+    threats.push(`Positioning shift signals detected across ${positioningShifts.length} competitor(s) — content patterns diverging from prior baseline`);
+  }
+
+  const decliningCompetitors = intents.filter((i: any) => i.intentCategory === "DECLINING");
+  if (decliningCompetitors.length > 1) {
+    threats.push(`Declining activity signals observed across ${decliningCompetitors.length} competitors — posting frequency below historical norms`);
+  }
+
+  if (trajectory.revivalPotential > 0.7) {
+    threats.push("Revival potential is elevated — previously dormant competitors may re-enter active posting");
   }
 
   return threats;

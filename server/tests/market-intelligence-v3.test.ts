@@ -9,7 +9,7 @@ import { evaluateRefreshDecision } from "../market-intelligence-v3/refresh-syste
 import { validateEngineIsolation, assertNoPlanWrites, assertNoOrchestrator, assertNoAutopilot } from "../market-intelligence-v3/isolation-guard";
 import { computeCompetitorHash } from "../market-intelligence-v3/utils";
 import { computeDominanceForCompetitor } from "../market-intelligence-v3/dominance-module";
-import { buildResultFromSnapshot, validateSnapshotCompleteness } from "../market-intelligence-v3/engine";
+import { buildResultFromSnapshot, validateSnapshotCompleteness, buildMarketDiagnosis, buildThreatSignals } from "../market-intelligence-v3/engine";
 import type { CompetitorInput, PostData, CompetitorSignalResult, ExecutionMode, GoalMode } from "../market-intelligence-v3/types";
 import { MI_THRESHOLDS, MI_COST_LIMITS, MI_CONFIDENCE, MI_REVIVAL_CAP, GOAL_MODE_WEIGHTS, ENGAGEMENT_BIAS_THRESHOLD } from "../market-intelligence-v3/constants";
 
@@ -1357,15 +1357,54 @@ describe("Layer-0 Signal-Only Contract", () => {
     const diagStart = source.indexOf("export function buildMarketDiagnosis");
     const diagEnd = source.indexOf("export function buildThreatSignals");
     const diagnosis = source.slice(diagStart, diagEnd);
-    expect(diagnosis).not.toContain("Focus on");
-    expect(diagnosis).not.toContain("Differentiate");
-    expect(diagnosis).not.toContain("Establish authority");
 
     const threatStart = diagEnd;
     const threatEnd = source.indexOf("export function computeSignalNoiseRatio");
     const threats = source.slice(threatStart, threatEnd);
-    expect(threats).not.toContain("Focus on");
-    expect(threats).not.toContain("Differentiate on value");
+
+    const combinedOutput = diagnosis + threats;
+    const forbiddenWords = [
+      "Opportunity", "Advantage", "Focus on", "Differentiate",
+      "Establish authority", "You should", "We recommend", "Must ",
+      "first-mover", "best approach", "best angle"
+    ];
+    for (const word of forbiddenWords) {
+      expect(combinedOutput).not.toContain(word);
+    }
+  });
+
+  it("buildMarketDiagnosis runtime outputs contain no forbidden words", () => {
+    const forbiddenWords = ["Opportunity", "Advantage", "Focus on", "Differentiate", "Establish", "You should", "Must ", "We recommend", "first-mover", "best approach", "best angle"];
+    const directions = ["HEATING_COMPRESSED", "HEATING", "COOLING", "SATURATED", "COMPRESSING", "STABLE"];
+    for (const dir of directions) {
+      const confidence = { overall: 0.7, guardDecision: "PROCEED" };
+      const trajectory = { marketHeatingIndex: dir === "HEATING" ? 0.8 : 0.3, narrativeConvergenceScore: dir === "SATURATED" ? 0.9 : 0.3, offerCompressionIndex: dir === "COMPRESSING" ? 0.8 : 0.1, angleSaturationLevel: 0.3, revivalPotential: 0.2 };
+      const result = buildMarketDiagnosis(confidence, trajectory);
+      if (result) {
+        for (const word of forbiddenWords) {
+          expect(result).not.toContain(word);
+        }
+      }
+    }
+  });
+
+  it("buildThreatSignals runtime outputs contain no forbidden words", () => {
+    const forbiddenWords = ["Opportunity", "Advantage", "Focus on", "Differentiate", "Establish", "You should", "Must ", "We recommend", "first-mover", "best approach", "best angle", "strategy pivot"];
+    const confidence = { overall: 0.7, guardDecision: "PROCEED" };
+    const trajectory = { marketHeatingIndex: 0.7, narrativeConvergenceScore: 0.8, offerCompressionIndex: 0.6, angleSaturationLevel: 0.5, revivalPotential: 0.8 };
+    const intents = [
+      { competitorName: "A", intentCategory: "AGGRESSIVE_SCALING" },
+      { competitorName: "B", intentCategory: "POSITIONING_SHIFT" },
+      { competitorName: "C", intentCategory: "DECLINING" },
+      { competitorName: "D", intentCategory: "DECLINING" },
+    ];
+    const result = buildThreatSignals(confidence, trajectory, intents);
+    for (const signal of result) {
+      for (const word of forbiddenWords) {
+        expect(signal).not.toContain(word);
+      }
+    }
+    expect(result.length).toBeGreaterThan(0);
   });
 
   it("ENGINE_VERSION is 11", () => {
