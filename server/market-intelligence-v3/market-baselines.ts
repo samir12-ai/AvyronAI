@@ -20,11 +20,21 @@ export interface DeviationResult {
   deviationPct: number;
   isElevated: boolean;
   isDepressed: boolean;
+  effectiveThreshold: number;
+}
+
+export interface CalibrationContext {
+  signalNoiseRatio: number;
+  confidenceScore: number;
+  postsAnalyzed: number;
+  competitorCoverage: number;
 }
 
 const BASELINE_WINDOW = 5;
-const DEVIATION_TRIGGER = 0.25;
+const BASE_DEVIATION_TRIGGER = 0.25;
 const MIN_SNAPSHOTS_FOR_CALIBRATION = 2;
+
+const TIME_WEIGHTS = [0.10, 0.15, 0.20, 0.25, 0.30];
 
 const FALLBACK_BASELINE: MarketBaseline = {
   narrativeConvergence: 0.35,
@@ -42,6 +52,14 @@ function parseJsonSafe(val: any, fallback: any): any {
   try { return JSON.parse(val); } catch { return fallback; }
 }
 
+function getTimeWeights(count: number): number[] {
+  if (count <= 0) return [];
+  if (count === 1) return [1.0];
+  const fullWeights = TIME_WEIGHTS.slice(-count);
+  const sum = fullWeights.reduce((a, b) => a + b, 0);
+  return fullWeights.map(w => w / sum);
+}
+
 export async function computeMarketBaseline(accountId: string, campaignId: string): Promise<MarketBaseline> {
   try {
     const snapshots = await db.select({
@@ -57,35 +75,38 @@ export async function computeMarketBaseline(accountId: string, campaignId: strin
       .orderBy(desc(miSnapshots.createdAt))
       .limit(BASELINE_WINDOW);
 
-    if (snapshots.length < MIN_SNAPSHOTS_FOR_CALIBRATION) {
-      return FALLBACK_BASELINE;
-    }
-
-    let sumNarrative = 0, sumAngle = 0, sumOffer = 0, sumHeating = 0, sumRevival = 0;
-    let count = 0;
-
+    const validTrajectories: any[] = [];
     for (const snap of snapshots) {
       const traj = parseJsonSafe(snap.trajectoryData, null);
-      if (!traj) continue;
-      sumNarrative += (traj.narrativeConvergenceScore || 0);
-      sumAngle += (traj.angleSaturationLevel || 0);
-      sumOffer += (traj.offerCompressionIndex || 0);
-      sumHeating += (traj.marketHeatingIndex || 0);
-      sumRevival += (traj.revivalPotential || 0);
-      count++;
+      if (traj) validTrajectories.push(traj);
     }
 
-    if (count < MIN_SNAPSHOTS_FOR_CALIBRATION) {
+    if (validTrajectories.length < MIN_SNAPSHOTS_FOR_CALIBRATION) {
       return FALLBACK_BASELINE;
+    }
+
+    const ordered = validTrajectories.reverse();
+    const weights = getTimeWeights(ordered.length);
+
+    let wNarrative = 0, wAngle = 0, wOffer = 0, wHeating = 0, wRevival = 0;
+
+    for (let i = 0; i < ordered.length; i++) {
+      const t = ordered[i];
+      const w = weights[i];
+      wNarrative += (t.narrativeConvergenceScore || 0) * w;
+      wAngle += (t.angleSaturationLevel || 0) * w;
+      wOffer += (t.offerCompressionIndex || 0) * w;
+      wHeating += (t.marketHeatingIndex || 0) * w;
+      wRevival += (t.revivalPotential || 0) * w;
     }
 
     return {
-      narrativeConvergence: sumNarrative / count,
-      angleSaturation: sumAngle / count,
-      offerCompression: sumOffer / count,
-      marketHeating: sumHeating / count,
-      revivalPotential: sumRevival / count,
-      snapshotsUsed: count,
+      narrativeConvergence: wNarrative,
+      angleSaturation: wAngle,
+      offerCompression: wOffer,
+      marketHeating: wHeating,
+      revivalPotential: wRevival,
+      snapshotsUsed: ordered.length,
       isCalibrated: true,
     };
   } catch (err) {
@@ -94,7 +115,32 @@ export async function computeMarketBaseline(accountId: string, campaignId: strin
   }
 }
 
-export function computeDeviation(observed: number, baseline: number, field: string): DeviationResult {
+export function computeDynamicThreshold(baseThreshold: number, ctx?: CalibrationContext): number {
+  if (!ctx) return baseThreshold;
+
+  let modifier = 0;
+
+  if (ctx.postsAnalyzed < 20) modifier += 0.15;
+  else if (ctx.postsAnalyzed < 50) modifier += 0.08;
+  else if (ctx.postsAnalyzed >= 100) modifier -= 0.05;
+
+  if (ctx.signalNoiseRatio < 0.3) modifier += 0.12;
+  else if (ctx.signalNoiseRatio < 0.5) modifier += 0.06;
+  else if (ctx.signalNoiseRatio >= 0.7) modifier -= 0.05;
+
+  if (ctx.confidenceScore < 0.4) modifier += 0.10;
+  else if (ctx.confidenceScore < 0.6) modifier += 0.05;
+  else if (ctx.confidenceScore >= 0.8) modifier -= 0.05;
+
+  if (ctx.competitorCoverage < 0.5) modifier += 0.10;
+  else if (ctx.competitorCoverage >= 0.8) modifier -= 0.03;
+
+  const threshold = baseThreshold + modifier;
+  return Math.max(0.10, Math.min(0.60, threshold));
+}
+
+export function computeDeviation(observed: number, baseline: number, field: string, threshold?: number): DeviationResult {
+  const effectiveThreshold = threshold ?? BASE_DEVIATION_TRIGGER;
   const deviation = observed - baseline;
   const deviationPct = baseline > 0.01 ? Math.abs(deviation) / baseline : Math.abs(deviation);
   return {
@@ -103,18 +149,20 @@ export function computeDeviation(observed: number, baseline: number, field: stri
     baseline,
     deviation,
     deviationPct,
-    isElevated: deviation > 0 && deviationPct > DEVIATION_TRIGGER,
-    isDepressed: deviation < 0 && deviationPct > DEVIATION_TRIGGER,
+    isElevated: deviation > 0 && deviationPct > effectiveThreshold,
+    isDepressed: deviation < 0 && deviationPct > effectiveThreshold,
+    effectiveThreshold,
   };
 }
 
-export function computeAllDeviations(trajectory: any, baseline: MarketBaseline): DeviationResult[] {
+export function computeAllDeviations(trajectory: any, baseline: MarketBaseline, ctx?: CalibrationContext): DeviationResult[] {
+  const threshold = computeDynamicThreshold(BASE_DEVIATION_TRIGGER, ctx);
   return [
-    computeDeviation(trajectory.narrativeConvergenceScore || 0, baseline.narrativeConvergence, "narrativeConvergence"),
-    computeDeviation(trajectory.angleSaturationLevel || 0, baseline.angleSaturation, "angleSaturation"),
-    computeDeviation(trajectory.offerCompressionIndex || 0, baseline.offerCompression, "offerCompression"),
-    computeDeviation(trajectory.marketHeatingIndex || 0, baseline.marketHeating, "marketHeating"),
-    computeDeviation(trajectory.revivalPotential || 0, baseline.revivalPotential, "revivalPotential"),
+    computeDeviation(trajectory.narrativeConvergenceScore || 0, baseline.narrativeConvergence, "narrativeConvergence", threshold),
+    computeDeviation(trajectory.angleSaturationLevel || 0, baseline.angleSaturation, "angleSaturation", threshold),
+    computeDeviation(trajectory.offerCompressionIndex || 0, baseline.offerCompression, "offerCompression", threshold),
+    computeDeviation(trajectory.marketHeatingIndex || 0, baseline.marketHeating, "marketHeating", threshold),
+    computeDeviation(trajectory.revivalPotential || 0, baseline.revivalPotential, "revivalPotential", threshold),
   ];
 }
 
@@ -122,4 +170,4 @@ export function getDeviationForField(deviations: DeviationResult[], field: strin
   return deviations.find(d => d.field === field);
 }
 
-export { DEVIATION_TRIGGER, BASELINE_WINDOW, MIN_SNAPSHOTS_FOR_CALIBRATION, FALLBACK_BASELINE };
+export { BASE_DEVIATION_TRIGGER as DEVIATION_TRIGGER, BASELINE_WINDOW, MIN_SNAPSHOTS_FOR_CALIBRATION, FALLBACK_BASELINE, TIME_WEIGHTS };

@@ -1,0 +1,73 @@
+Hi Replit,
+
+We are very close to formally closing MIv3 as the finalized Market Intelligence layer. Before marking it complete, we need to seal the last structural safeguards around the Market Baseline Calibration system to ensure long-term stability and prevent false signals.
+
+Please review and confirm the following final checklist:
+
+---
+
+### 1. Time-Weighted Baseline (Replace Equal Rolling Average)
+
+The current rolling 5-snapshot baseline should be time-weighted, giving higher importance to recent snapshots.
+
+Example weighting model (illustrative):
+
+Snapshot N-4 → weight 0.10  
+Snapshot N-3 → weight 0.15  
+Snapshot N-2 → weight 0.20  
+Snapshot N-1 → weight 0.25  
+Snapshot N   → weight 0.30  
+
+This ensures the baseline adapts correctly when market conditions shift quickly.
+
+---
+
+### 2. Uncalibrated Mode (No False Signals)
+
+When the engine has insufficient snapshots to build a reliable baseline, the system must enter an explicit UNCALIBRATED state.
+
+In this state:
+
+• No threat signals should be generated  
+• No opportunity signals should be generated  
+• Output should clearly state that baseline calibration is still in progress  
+
+Fallback numeric baselines may still exist internally, but they must not trigger structural signals until calibration is established.
+
+---
+
+### 3. Dynamic Deviation Threshold
+
+The current fixed deviation trigger (25%) should be converted to a dynamic deviation threshold that considers signal reliability.
+
+Deviation sensitivity should be adjusted based on:
+
+• sample size (posts analyzed)  
+• signalNoiseRatio  
+• confidence score  
+• competitor coverage
+
+Higher uncertainty → higher deviation threshold  
+Higher confidence → lower deviation threshold
+
+This prevents noisy datasets from triggering misleading signals.
+
+---
+
+### 4. Baseline Integrity Guarantee
+
+Please confirm the following invariants:
+
+• Baselines are computed only from MIv3 historical snapshots  
+• No cross-module imports from performance baseline systems  
+• Baseline computation is deterministic per snapshot  
+• Snapshot comparisons always use the same calibrated baseline window
+
+---
+
+Once these safeguards are confirmed implemented, MIv3 can be considered structurally complete and ready to be formally closed as the Market Intelligence layer.
+
+Please confirm once these final calibration safeguards are in place.
+
+Best regards,  
+Samir

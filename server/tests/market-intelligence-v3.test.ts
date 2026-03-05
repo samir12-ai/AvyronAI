@@ -10,7 +10,7 @@ import { validateEngineIsolation, assertNoPlanWrites, assertNoOrchestrator, asse
 import { computeCompetitorHash } from "../market-intelligence-v3/utils";
 import { computeDominanceForCompetitor } from "../market-intelligence-v3/dominance-module";
 import { buildResultFromSnapshot, validateSnapshotCompleteness, buildMarketDiagnosis, buildThreatSignals, buildOpportunitySignals } from "../market-intelligence-v3/engine";
-import { computeAllDeviations, computeDeviation, FALLBACK_BASELINE, type MarketBaseline, type DeviationResult } from "../market-intelligence-v3/market-baselines";
+import { computeAllDeviations, computeDeviation, computeDynamicThreshold, FALLBACK_BASELINE, TIME_WEIGHTS, BASELINE_WINDOW, MIN_SNAPSHOTS_FOR_CALIBRATION, type MarketBaseline, type DeviationResult, type CalibrationContext } from "../market-intelligence-v3/market-baselines";
 import type { CompetitorInput, PostData, CompetitorSignalResult, ExecutionMode, GoalMode } from "../market-intelligence-v3/types";
 import { MI_THRESHOLDS, MI_COST_LIMITS, MI_CONFIDENCE, MI_REVIVAL_CAP, GOAL_MODE_WEIGHTS, ENGAGEMENT_BIAS_THRESHOLD } from "../market-intelligence-v3/constants";
 
@@ -1394,15 +1394,16 @@ describe("Layer-0 Signal-Only Contract", () => {
   it("buildThreatSignals runtime outputs contain no forbidden words", () => {
     const forbiddenWords = ["Opportunity", "Advantage", "Focus on", "Differentiate", "Establish", "You should", "Must ", "We recommend", "first-mover", "best approach", "best angle", "strategy pivot"];
     const confidence = { overall: 0.7, guardDecision: "PROCEED" };
+    const calibratedBaseline: MarketBaseline = { narrativeConvergence: 0.35, angleSaturation: 0.30, offerCompression: 0.25, marketHeating: 0.40, revivalPotential: 0.30, snapshotsUsed: 3, isCalibrated: true };
     const trajectory = { marketHeatingIndex: 0.7, narrativeConvergenceScore: 0.8, offerCompressionIndex: 0.6, angleSaturationLevel: 0.5, revivalPotential: 0.8 };
-    const deviations = computeAllDeviations(trajectory, FALLBACK_BASELINE);
+    const deviations = computeAllDeviations(trajectory, calibratedBaseline);
     const intents = [
       { competitorName: "A", intentCategory: "AGGRESSIVE_SCALING" },
       { competitorName: "B", intentCategory: "POSITIONING_SHIFT" },
       { competitorName: "C", intentCategory: "DECLINING" },
       { competitorName: "D", intentCategory: "DECLINING" },
     ];
-    const result = buildThreatSignals(confidence, trajectory, intents, deviations);
+    const result = buildThreatSignals(confidence, trajectory, intents, deviations, true);
     for (const signal of result) {
       for (const word of forbiddenWords) {
         expect(signal).not.toContain(word);
@@ -1414,13 +1415,14 @@ describe("Layer-0 Signal-Only Contract", () => {
   it("buildOpportunitySignals runtime outputs contain no prescriptive words", () => {
     const forbiddenWords = ["Focus on", "Differentiate", "Establish", "You should", "Must ", "We recommend", "first-mover", "best approach", "best angle", "strategy pivot"];
     const confidence = { overall: 0.7, guardDecision: "PROCEED" };
+    const calibratedBaseline: MarketBaseline = { narrativeConvergence: 0.35, angleSaturation: 0.30, offerCompression: 0.25, marketHeating: 0.40, revivalPotential: 0.30, snapshotsUsed: 3, isCalibrated: true };
     const trajectory = { marketHeatingIndex: 0.10, narrativeConvergenceScore: 0.7, offerCompressionIndex: 0.05, angleSaturationLevel: 0.05, revivalPotential: 0.1 };
-    const deviations = computeAllDeviations(trajectory, FALLBACK_BASELINE);
+    const deviations = computeAllDeviations(trajectory, calibratedBaseline);
     const intents = [
       { competitorName: "A", intentCategory: "DECLINING" },
       { competitorName: "B", intentCategory: "DECLINING" },
     ];
-    const result = buildOpportunitySignals(confidence, trajectory, intents, deviations);
+    const result = buildOpportunitySignals(confidence, trajectory, intents, deviations, true);
     expect(result.length).toBeGreaterThan(0);
     for (const signal of result) {
       for (const word of forbiddenWords) {
@@ -1429,25 +1431,89 @@ describe("Layer-0 Signal-Only Contract", () => {
     }
   });
 
-  it("declining activity appears in BOTH threat and opportunity signals", () => {
+  it("declining activity appears in BOTH threat and opportunity signals (calibrated)", () => {
     const confidence = { overall: 0.7, guardDecision: "PROCEED" };
+    const calibratedBaseline: MarketBaseline = { narrativeConvergence: 0.35, angleSaturation: 0.30, offerCompression: 0.25, marketHeating: 0.40, revivalPotential: 0.30, snapshotsUsed: 3, isCalibrated: true };
     const trajectory = { marketHeatingIndex: 0.10, narrativeConvergenceScore: 0.7, offerCompressionIndex: 0.05, angleSaturationLevel: 0.05, revivalPotential: 0.1 };
-    const deviations = computeAllDeviations(trajectory, FALLBACK_BASELINE);
+    const deviations = computeAllDeviations(trajectory, calibratedBaseline);
     const intents = [
       { competitorName: "A", intentCategory: "DECLINING" },
       { competitorName: "B", intentCategory: "DECLINING" },
     ];
-    const threats = buildThreatSignals(confidence, trajectory, intents, deviations);
-    const opportunities = buildOpportunitySignals(confidence, trajectory, intents, deviations);
+    const threats = buildThreatSignals(confidence, trajectory, intents, deviations, true);
+    const opportunities = buildOpportunitySignals(confidence, trajectory, intents, deviations, true);
     expect(threats.some(t => t.toLowerCase().includes("declining activity"))).toBe(true);
     expect(opportunities.some(o => o.toLowerCase().includes("declining activity"))).toBe(true);
     expect(threats.some(t => t.toLowerCase().includes("market posting density below baseline"))).toBe(true);
     expect(opportunities.some(o => o.toLowerCase().includes("reduced competitive noise"))).toBe(true);
   });
 
+  it("UNCALIBRATED MODE: no threat signals generated when baseline is not calibrated", () => {
+    const confidence = { overall: 0.7, guardDecision: "PROCEED" };
+    const trajectory = { marketHeatingIndex: 0.9, narrativeConvergenceScore: 0.9, offerCompressionIndex: 0.9, angleSaturationLevel: 0.9, revivalPotential: 0.9 };
+    const deviations = computeAllDeviations(trajectory, FALLBACK_BASELINE);
+    const intents = [
+      { competitorName: "A", intentCategory: "AGGRESSIVE_SCALING" },
+      { competitorName: "B", intentCategory: "POSITIONING_SHIFT" },
+    ];
+    const threats = buildThreatSignals(confidence, trajectory, intents, deviations, false);
+    expect(threats.length).toBe(1);
+    expect(threats[0]).toContain("BASELINE CALIBRATION IN PROGRESS");
+    expect(threats[0]).toContain("threat signals will activate once calibration is established");
+  });
+
+  it("UNCALIBRATED MODE: no opportunity signals generated when baseline is not calibrated", () => {
+    const confidence = { overall: 0.7, guardDecision: "PROCEED" };
+    const trajectory = { marketHeatingIndex: 0.05, narrativeConvergenceScore: 0.05, offerCompressionIndex: 0.05, angleSaturationLevel: 0.05, revivalPotential: 0.05 };
+    const deviations = computeAllDeviations(trajectory, FALLBACK_BASELINE);
+    const intents = [
+      { competitorName: "A", intentCategory: "DECLINING" },
+    ];
+    const opportunities = buildOpportunitySignals(confidence, trajectory, intents, deviations, false);
+    expect(opportunities.length).toBe(1);
+    expect(opportunities[0]).toContain("BASELINE CALIBRATION IN PROGRESS");
+    expect(opportunities[0]).toContain("opportunity signals will activate once calibration is established");
+  });
+
+  it("TIME-WEIGHTED BASELINE: recent snapshots have higher weight", () => {
+    expect(TIME_WEIGHTS).toEqual([0.10, 0.15, 0.20, 0.25, 0.30]);
+    expect(TIME_WEIGHTS[4]).toBeGreaterThan(TIME_WEIGHTS[0]);
+    const sum = TIME_WEIGHTS.reduce((a, b) => a + b, 0);
+    expect(sum).toBeCloseTo(1.0, 5);
+  });
+
+  it("DYNAMIC THRESHOLD: low confidence raises deviation threshold", () => {
+    const lowConfCtx: CalibrationContext = { signalNoiseRatio: 0.2, confidenceScore: 0.3, postsAnalyzed: 10, competitorCoverage: 0.3 };
+    const highConfCtx: CalibrationContext = { signalNoiseRatio: 0.8, confidenceScore: 0.9, postsAnalyzed: 150, competitorCoverage: 0.9 };
+    const lowThreshold = computeDynamicThreshold(0.25, lowConfCtx);
+    const highThreshold = computeDynamicThreshold(0.25, highConfCtx);
+    expect(lowThreshold).toBeGreaterThan(highThreshold);
+    expect(lowThreshold).toBeGreaterThan(0.25);
+    expect(highThreshold).toBeLessThan(0.25);
+  });
+
+  it("DYNAMIC THRESHOLD: threshold is bounded between 0.10 and 0.60", () => {
+    const extremeLow: CalibrationContext = { signalNoiseRatio: 0.99, confidenceScore: 0.99, postsAnalyzed: 500, competitorCoverage: 1.0 };
+    const extremeHigh: CalibrationContext = { signalNoiseRatio: 0.01, confidenceScore: 0.1, postsAnalyzed: 5, competitorCoverage: 0.1 };
+    expect(computeDynamicThreshold(0.25, extremeLow)).toBeGreaterThanOrEqual(0.10);
+    expect(computeDynamicThreshold(0.25, extremeHigh)).toBeLessThanOrEqual(0.60);
+  });
+
+  it("DYNAMIC THRESHOLD: noisy data suppresses weak deviations", () => {
+    const noisyCtx: CalibrationContext = { signalNoiseRatio: 0.2, confidenceScore: 0.4, postsAnalyzed: 15, competitorCoverage: 0.4 };
+    const calibratedBaseline: MarketBaseline = { narrativeConvergence: 0.35, angleSaturation: 0.30, offerCompression: 0.25, marketHeating: 0.40, revivalPotential: 0.30, snapshotsUsed: 5, isCalibrated: true };
+    const trajectory = { marketHeatingIndex: 0.52, narrativeConvergenceScore: 0.44, offerCompressionIndex: 0.32, angleSaturationLevel: 0.38, revivalPotential: 0.38 };
+    const deviationsNoCtx = computeAllDeviations(trajectory, calibratedBaseline);
+    const deviationsWithCtx = computeAllDeviations(trajectory, calibratedBaseline, noisyCtx);
+    const triggeredNoCtx = deviationsNoCtx.filter(d => d.isElevated || d.isDepressed).length;
+    const triggeredWithCtx = deviationsWithCtx.filter(d => d.isElevated || d.isDepressed).length;
+    expect(triggeredWithCtx).toBeLessThanOrEqual(triggeredNoCtx);
+  });
+
   it("baseline calibration: computeAllDeviations detects elevated and depressed signals", () => {
+    const calibratedBaseline: MarketBaseline = { narrativeConvergence: 0.35, angleSaturation: 0.30, offerCompression: 0.25, marketHeating: 0.40, revivalPotential: 0.30, snapshotsUsed: 3, isCalibrated: true };
     const elevatedTrajectory = { marketHeatingIndex: 0.80, narrativeConvergenceScore: 0.70, offerCompressionIndex: 0.60, angleSaturationLevel: 0.55, revivalPotential: 0.60 };
-    const deviations = computeAllDeviations(elevatedTrajectory, FALLBACK_BASELINE);
+    const deviations = computeAllDeviations(elevatedTrajectory, calibratedBaseline);
     const elevated = deviations.filter(d => d.isElevated);
     expect(elevated.length).toBeGreaterThan(0);
     for (const d of elevated) {
@@ -1461,14 +1527,47 @@ describe("Layer-0 Signal-Only Contract", () => {
     const trajectory = { marketHeatingIndex: 0.65, narrativeConvergenceScore: 0.72, offerCompressionIndex: 0.52, angleSaturationLevel: 0.62, revivalPotential: 0.52 };
     const deviations = computeAllDeviations(trajectory, highBaseline);
     const confidence = { overall: 0.7, guardDecision: "PROCEED" };
-    const threats = buildThreatSignals(confidence, trajectory, [], deviations);
+    const threats = buildThreatSignals(confidence, trajectory, [], deviations, true);
     expect(threats.filter(t => t.includes("above baseline")).length).toBe(0);
   });
 
-  it("FALLBACK_BASELINE is used when no calibration data exists", () => {
+  it("FALLBACK_BASELINE is uncalibrated with zero snapshots", () => {
     expect(FALLBACK_BASELINE.isCalibrated).toBe(false);
     expect(FALLBACK_BASELINE.snapshotsUsed).toBe(0);
     expect(FALLBACK_BASELINE.narrativeConvergence).toBeGreaterThan(0);
+  });
+
+  it("BASELINE INTEGRITY: BASELINE_WINDOW is 5, MIN_SNAPSHOTS is 2", () => {
+    expect(BASELINE_WINDOW).toBe(5);
+    expect(MIN_SNAPSHOTS_FOR_CALIBRATION).toBe(2);
+  });
+
+  it("BASELINE INTEGRITY: computeMarketBaseline imports only from drizzle/schema (no cross-module)", () => {
+    const fs = require("fs");
+    const source = fs.readFileSync("server/market-intelligence-v3/market-baselines.ts", "utf-8");
+    const importLines = source.split("\n").filter((l: string) => l.startsWith("import"));
+    for (const line of importLines) {
+      if (line.includes("market-baselines")) continue;
+      expect(line).not.toContain("baselines");
+      expect(line).not.toContain("engine");
+      expect(line).not.toContain("signal-engine");
+      expect(line).not.toContain("confidence-engine");
+    }
+  });
+
+  it("BASELINE INTEGRITY: DeviationResult includes effectiveThreshold field", () => {
+    const dev = computeDeviation(0.5, 0.3, "test");
+    expect(dev).toHaveProperty("effectiveThreshold");
+    expect(typeof dev.effectiveThreshold).toBe("number");
+  });
+
+  it("BASELINE INTEGRITY: computeDeviation is deterministic", () => {
+    const a = computeDeviation(0.6, 0.4, "test");
+    const b = computeDeviation(0.6, 0.4, "test");
+    expect(a.deviation).toBe(b.deviation);
+    expect(a.deviationPct).toBe(b.deviationPct);
+    expect(a.isElevated).toBe(b.isElevated);
+    expect(a.isDepressed).toBe(b.isDepressed);
   });
 
   it("ENGINE_VERSION is 11", () => {

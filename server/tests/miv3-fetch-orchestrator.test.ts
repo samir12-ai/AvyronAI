@@ -1285,7 +1285,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       );
       const executeRunBlock = source.slice(
         source.indexOf("async _executeRun"),
-        source.indexOf("async _executeRun") + 8000
+        source.indexOf("async _executeRun") + 10000
       );
       expect(executeRunBlock).toContain("persistValidatedSnapshot(snapshotPayload");
       expect(executeRunBlock).not.toContain("db.insert(miSnapshots)");

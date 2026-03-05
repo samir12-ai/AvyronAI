@@ -9,7 +9,7 @@ import { computeAllDominance } from "./dominance-module";
 import { computeTokenBudget, applySampling } from "./token-budget";
 import { computeSimilarityDiagnosis } from "./similarity-engine";
 import { computeAllContentDNA } from "./content-dna";
-import { computeMarketBaseline, computeAllDeviations, type DeviationResult } from "./market-baselines";
+import { computeMarketBaseline, computeAllDeviations, computeDynamicThreshold, type DeviationResult, type CalibrationContext } from "./market-baselines";
 import type {
   MIv3Mode,
   MIv3Output,
@@ -286,11 +286,16 @@ export function buildMarketDiagnosis(confidence: any, trajectory: any, dominantI
   }
 }
 
-export function buildThreatSignals(confidence: any, trajectory: any, intents: any[], deviations?: DeviationResult[]): string[] {
+export function buildThreatSignals(confidence: any, trajectory: any, intents: any[], deviations?: DeviationResult[], baselineCalibrated?: boolean): string[] {
   const threats: string[] = [];
 
   if (confidence.guardDecision === "BLOCK") {
     threats.push("INSUFFICIENT DATA: Cannot assess threat landscape reliably");
+    return threats;
+  }
+
+  if (baselineCalibrated === false) {
+    threats.push("BASELINE CALIBRATION IN PROGRESS: Collecting historical snapshots — threat signals will activate once calibration is established");
     return threats;
   }
 
@@ -344,10 +349,15 @@ export function buildThreatSignals(confidence: any, trajectory: any, intents: an
   return threats;
 }
 
-export function buildOpportunitySignals(confidence: any, trajectory: any, intents: any[], deviations?: DeviationResult[]): string[] {
+export function buildOpportunitySignals(confidence: any, trajectory: any, intents: any[], deviations?: DeviationResult[], baselineCalibrated?: boolean): string[] {
   const opportunities: string[] = [];
 
   if (confidence.guardDecision === "BLOCK") {
+    return opportunities;
+  }
+
+  if (baselineCalibrated === false) {
+    opportunities.push("BASELINE CALIBRATION IN PROGRESS: Collecting historical snapshots — opportunity signals will activate once calibration is established");
     return opportunities;
   }
 
@@ -591,12 +601,18 @@ export class MarketIntelligenceV3 {
     const marketState = deriveMarketState(trajectory, confidence.level);
     const marketDiagnosis = buildMarketDiagnosis(confidence, trajectory, dominantIntent);
     const marketBaseline = await computeMarketBaseline(accountId, campaignId);
-    const deviations = computeAllDeviations(trajectory, marketBaseline);
-    console.log(`[MIv3] Baseline calibration: calibrated=${marketBaseline.isCalibrated}, snapshotsUsed=${marketBaseline.snapshotsUsed}, deviations=${deviations.filter(d => d.isElevated || d.isDepressed).length} triggered`);
-    const threatSignals = buildThreatSignals(confidence, trajectory, intents, deviations);
-    const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents, deviations);
     const signalNoiseRatio = computeSignalNoiseRatio(signalResults, confidence);
     const evidenceCoverage = computeEvidenceCoverage(signalResults, competitors.length);
+    const calibrationCtx: CalibrationContext = {
+      signalNoiseRatio,
+      confidenceScore: confidence.overall,
+      postsAnalyzed: evidenceCoverage.postsAnalyzed,
+      competitorCoverage: competitors.length > 0 ? evidenceCoverage.competitorsWithSufficientData / competitors.length : 0,
+    };
+    const deviations = computeAllDeviations(trajectory, marketBaseline, calibrationCtx);
+    console.log(`[MIv3] Baseline calibration: calibrated=${marketBaseline.isCalibrated}, snapshotsUsed=${marketBaseline.snapshotsUsed}, deviations=${deviations.filter(d => d.isElevated || d.isDepressed).length} triggered, effectiveThreshold=${deviations[0]?.effectiveThreshold?.toFixed(2) ?? "N/A"}`);
+    const threatSignals = buildThreatSignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated);
+    const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated);
     const similarityData = computeSimilarityDiagnosis(competitors, signalResults);
 
     const previousSnapshots = await db.select().from(miSnapshots)

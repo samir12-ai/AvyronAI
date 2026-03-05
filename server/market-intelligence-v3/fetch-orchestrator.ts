@@ -11,7 +11,7 @@ import { computeTokenBudget, applySampling } from "./token-budget";
 import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
 import { computeCompetitorHash } from "./utils";
 import { computeVolatilityIndex, buildMarketDiagnosis, buildThreatSignals, buildOpportunitySignals, buildMarketSummary, computeSignalNoiseRatio, computeEvidenceCoverage, persistValidatedSnapshot, ENGINE_VERSION } from "./engine";
-import { computeMarketBaseline, computeAllDeviations } from "./market-baselines";
+import { computeMarketBaseline, computeAllDeviations, type CalibrationContext } from "./market-baselines";
 import { computeSimilarityDiagnosis } from "./similarity-engine";
 import type { CompetitorInput, GoalMode } from "./types";
 import { logAudit } from "../audit";
@@ -799,10 +799,18 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   const volatilityIndex = computeVolatilityIndex(signalResults);
   const marketDiagnosis = buildMarketDiagnosis(confidence, trajectory, dominantIntent);
   const marketBaseline = await computeMarketBaseline(accountId, campaignId);
-  const deviations = computeAllDeviations(trajectory, marketBaseline);
-  console.log(`[FetchOrch] Baseline calibration: calibrated=${marketBaseline.isCalibrated}, snapshotsUsed=${marketBaseline.snapshotsUsed}`);
-  const threatSignals = buildThreatSignals(confidence, trajectory, intents, deviations);
-  const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents, deviations);
+  const snr = computeSignalNoiseRatio(signalResults, confidence);
+  const evCov = computeEvidenceCoverage(signalResults, competitorInputs.length);
+  const calibrationCtx: CalibrationContext = {
+    signalNoiseRatio: snr,
+    confidenceScore: confidence.overall,
+    postsAnalyzed: evCov.postsAnalyzed,
+    competitorCoverage: competitorInputs.length > 0 ? evCov.competitorsWithSufficientData / competitorInputs.length : 0,
+  };
+  const deviations = computeAllDeviations(trajectory, marketBaseline, calibrationCtx);
+  console.log(`[FetchOrch] Baseline calibration: calibrated=${marketBaseline.isCalibrated}, snapshotsUsed=${marketBaseline.snapshotsUsed}, effectiveThreshold=${deviations[0]?.effectiveThreshold?.toFixed(2) ?? "N/A"}`);
+  const threatSignals = buildThreatSignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated);
+  const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated);
   const similarityData = computeSimilarityDiagnosis(competitorInputs, signalResults);
 
   let narrativeSynthesis: string | null = null;
