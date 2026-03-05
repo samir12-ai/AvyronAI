@@ -909,11 +909,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 3,
     marginBottom: 16,
+    maxHeight: 44,
   },
   tabBarContent: {
     flexDirection: 'row',
     gap: 4,
     paddingHorizontal: 2,
+    alignItems: 'center',
   },
   tab: {
     flexDirection: 'row',
@@ -925,6 +927,7 @@ const styles = StyleSheet.create({
     gap: 4,
     borderWidth: 1,
     borderColor: 'transparent',
+    height: 32,
   },
   tabText: { fontSize: 11, fontFamily: 'Inter_600SemiBold', letterSpacing: 0.1 },
   tabContent: {},
