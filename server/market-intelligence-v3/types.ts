@@ -20,7 +20,7 @@ export type GoalMode = "REACH_MODE" | "STRATEGY_MODE";
 
 export type GuardDecision = "PROCEED" | "DOWNGRADE" | "BLOCK";
 
-export type MIv3Mode = "overview" | "dominance" | "actions" | "history";
+export type MIv3Mode = "overview" | "dominance" | "threats" | "history";
 
 export interface SignalData {
   postingFrequencyTrend: number;
@@ -132,6 +132,13 @@ export interface TelemetryRecord {
   refreshReason: string | null;
 }
 
+export interface EvidenceCoverage {
+  postsAnalyzed: number;
+  commentsAnalyzed: number;
+  competitorsWithSufficientData: number;
+  totalCompetitors: number;
+}
+
 export interface MIv3Output {
   marketState: string;
   dominantIntentType: IntentCategory;
@@ -139,12 +146,14 @@ export interface MIv3Output {
   trajectoryDirection: string;
   narrativeSaturationLevel: number;
   revivalPotential: number;
-  entryStrategy: string | null;
-  defensiveRisks: string[];
+  marketDiagnosis: string | null;
+  threatSignals: string[];
   confidence: ConfidenceResult;
   missingSignalFlags: string[];
   dataFreshnessDays: number;
   volatilityIndex: number;
+  signalNoiseRatio: number;
+  evidenceCoverage: EvidenceCoverage;
 }
 
 export type CacheInvalidationReason = "ENGINE_UPGRADE" | "COMPETITOR_SET_CHANGED" | "INCOMPLETE_SNAPSHOT" | "STALE" | null;

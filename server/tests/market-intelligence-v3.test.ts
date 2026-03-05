@@ -244,6 +244,27 @@ describe("Market Intelligence V3 - Confidence Model", () => {
     const old = computeConfidence(signals, 30);
     expect(fresh.factors.freshnessDecay).toBeGreaterThan(old.factors.freshnessDecay);
   });
+
+  it("FRESHNESS_HARD_GATE: dataAge > 14 days → BLOCK overrides all other guards", () => {
+    const comps = [makeFullCompetitor("HG1"), makeFullCompetitor("HG2"), makeFullCompetitor("HG3")];
+    const signals = computeAllSignals(comps);
+    const fresh = computeConfidence(signals, 1);
+    expect(fresh.guardDecision).not.toBe("BLOCK");
+    const stale = computeConfidence(signals, 15);
+    expect(stale.guardDecision).toBe("BLOCK");
+    expect(stale.guardReasons.some((r: string) => r.includes("DATA_STALE_HARD_GATE"))).toBe(true);
+  });
+
+  it("FRESHNESS_HARD_GATE: exactly 14 days is NOT blocked", () => {
+    const comps = [makeFullCompetitor("HG2"), makeFullCompetitor("HG3")];
+    const signals = computeAllSignals(comps);
+    const atLimit = computeConfidence(signals, 14);
+    expect(atLimit.guardReasons.some((r: string) => r.includes("DATA_STALE_HARD_GATE"))).toBe(false);
+  });
+
+  it("FRESHNESS_HARD_GATE_DAYS constant is 14", () => {
+    expect(MI_CONFIDENCE.FRESHNESS_HARD_GATE_DAYS).toBe(14);
+  });
 });
 
 
@@ -590,9 +611,9 @@ describe("Market Intelligence V3 - No Hallucination Rule", () => {
     }, 2);
     const signals = computeAllSignals([comp]);
     const confidence = computeConfidence(signals, 30);
-    if (confidence.guardDecision === "BLOCK") {
-      expect(confidence.level).toBe("INSUFFICIENT");
-    }
+    expect(confidence.guardDecision).toBe("BLOCK");
+    const validBlockedLevels = ["INSUFFICIENT", "LOW", "UNSTABLE"];
+    expect(validBlockedLevels).toContain(confidence.level);
   });
 });
 
@@ -616,26 +637,29 @@ describe("Market Intelligence V3 - Output Structure", () => {
       trajectoryDirection: direction,
       narrativeSaturationLevel: trajectory.angleSaturationLevel,
       revivalPotential: trajectory.revivalPotential,
-      entryStrategy: null,
-      defensiveRisks: [],
+      marketDiagnosis: null,
+      threatSignals: [],
       confidence: confidence,
       missingSignalFlags: flags,
       dataFreshnessDays: 1,
       volatilityIndex: 0.5,
+      signalNoiseRatio: 0,
+      evidenceCoverage: { postsAnalyzed: 0, commentsAnalyzed: 0, competitorsWithSufficientData: 0, totalCompetitors: 0 },
     };
 
     const requiredFields = [
       "marketState", "dominantIntentType", "competitorIntentMap",
       "trajectoryDirection", "narrativeSaturationLevel", "revivalPotential",
-      "entryStrategy", "defensiveRisks", "confidence",
-      "missingSignalFlags", "dataFreshnessDays", "volatilityIndex"
+      "marketDiagnosis", "threatSignals", "confidence",
+      "missingSignalFlags", "dataFreshnessDays", "volatilityIndex",
+      "signalNoiseRatio", "evidenceCoverage"
     ];
 
     for (const field of requiredFields) {
       expect(output).toHaveProperty(field);
     }
 
-    expect(Object.keys(output)).toHaveLength(12);
+    expect(Object.keys(output)).toHaveLength(14);
   });
 });
 
@@ -1021,7 +1045,7 @@ describe("Market Intelligence V3 - Goal Mode Source of Truth", () => {
       marketState: "COMPETITIVE_MARKET",
       executionMode: "FULL",
       telemetry: JSON.stringify({}),
-      defensiveRisks: JSON.stringify([]),
+      threatSignals: JSON.stringify([]),
       missingSignalFlags: JSON.stringify([]),
       similarityData: JSON.stringify(null),
       volatilityIndex: 0.3,
@@ -1051,7 +1075,7 @@ describe("Market Intelligence V3 - Goal Mode Source of Truth", () => {
       marketState: "COMPETITIVE_MARKET",
       executionMode: "FULL",
       telemetry: JSON.stringify({}),
-      defensiveRisks: JSON.stringify([]),
+      threatSignals: JSON.stringify([]),
       missingSignalFlags: JSON.stringify([]),
       similarityData: JSON.stringify(null),
       volatilityIndex: 0.3,
@@ -1306,5 +1330,64 @@ describe("T004: Calibration Layer Isolation Verification", () => {
       const sharedImports = baselinesImports.filter((imp: string) => confidenceImports.includes(imp));
       expect(sharedImports.length).toBe(0);
     });
+  });
+});
+
+describe("Layer-0 Signal-Only Contract", () => {
+  it("MIv3Output type has marketDiagnosis, NOT entryStrategy", () => {
+    const source = require("fs").readFileSync("server/market-intelligence-v3/types.ts", "utf-8");
+    expect(source).toContain("marketDiagnosis:");
+    expect(source).not.toContain("entryStrategy:");
+    expect(source).toContain("threatSignals:");
+    expect(source).not.toContain("defensiveRisks:");
+  });
+
+  it("MIv3Output includes signalNoiseRatio and evidenceCoverage", () => {
+    const source = require("fs").readFileSync("server/market-intelligence-v3/types.ts", "utf-8");
+    expect(source).toContain("signalNoiseRatio: number");
+    expect(source).toContain("evidenceCoverage: EvidenceCoverage");
+    expect(source).toContain("postsAnalyzed: number");
+    expect(source).toContain("commentsAnalyzed: number");
+    expect(source).toContain("competitorsWithSufficientData: number");
+    expect(source).toContain("totalCompetitors: number");
+  });
+
+  it("engine.ts has NO prescriptive language in buildMarketDiagnosis or buildThreatSignals", () => {
+    const source = require("fs").readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+    const diagStart = source.indexOf("export function buildMarketDiagnosis");
+    const diagEnd = source.indexOf("export function buildThreatSignals");
+    const diagnosis = source.slice(diagStart, diagEnd);
+    expect(diagnosis).not.toContain("Focus on");
+    expect(diagnosis).not.toContain("Differentiate");
+    expect(diagnosis).not.toContain("Establish authority");
+
+    const threatStart = diagEnd;
+    const threatEnd = source.indexOf("export function computeSignalNoiseRatio");
+    const threats = source.slice(threatStart, threatEnd);
+    expect(threats).not.toContain("Focus on");
+    expect(threats).not.toContain("Differentiate on value");
+  });
+
+  it("ENGINE_VERSION is 11", () => {
+    const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
+    expect(source).toContain("export const ENGINE_VERSION = 11;");
+  });
+
+  it("schema uses market_diagnosis and threat_signals columns (not old names)", () => {
+    const source = require("fs").readFileSync("shared/schema.ts", "utf-8");
+    expect(source).toContain("market_diagnosis");
+    expect(source).toContain("threat_signals");
+    expect(source).not.toContain("entry_strategy");
+    expect(source).not.toContain("defensive_risks");
+  });
+
+  it("frontend uses threats tab (not actions/recommendations)", () => {
+    const source = require("fs").readFileSync("components/CompetitiveIntelligence.tsx", "utf-8");
+    expect(source).toContain("'threats'");
+    expect(source).toContain("Threats");
+    expect(source).not.toContain("'recommendations'");
+    expect(source).not.toContain("label: 'Actions'");
+    expect(source).toContain("renderThreats");
+    expect(source).not.toContain("renderRecommendations");
   });
 });

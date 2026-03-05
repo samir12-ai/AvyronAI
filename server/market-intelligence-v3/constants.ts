@@ -17,7 +17,7 @@
  * All snapshots with analysisVersion !== ENGINE_VERSION are cache-rejected
  * and recomputed on next access. Unnecessary bumps cause recompute storms.
  */
-export const ENGINE_VERSION = 10;
+export const ENGINE_VERSION = 11;
 
 export const MI_THRESHOLDS = {
   MIN_POSTS_PER_COMPETITOR: 14,
@@ -59,6 +59,7 @@ export const MI_CONFIDENCE = {
   DOWNGRADE_DOMINANT_SOURCE: 0.60,
   BLOCK_COVERAGE: 0.45,
   BLOCK_RELIABILITY: 0.50,
+  FRESHNESS_HARD_GATE_DAYS: 14,
 } as const;
 
 export const MI_REFRESH = {

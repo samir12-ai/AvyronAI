@@ -10,7 +10,7 @@ import { computeAllDominance } from "./dominance-module";
 import { computeTokenBudget, applySampling } from "./token-budget";
 import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
 import { computeCompetitorHash } from "./utils";
-import { computeVolatilityIndex, buildEntryStrategy, buildDefensiveRisks, buildDeterministicNarrative, persistValidatedSnapshot, ENGINE_VERSION } from "./engine";
+import { computeVolatilityIndex, buildMarketDiagnosis, buildThreatSignals, buildMarketSummary, computeSignalNoiseRatio, computeEvidenceCoverage, persistValidatedSnapshot, ENGINE_VERSION } from "./engine";
 import { computeSimilarityDiagnosis } from "./similarity-engine";
 import type { CompetitorInput, GoalMode } from "./types";
 import { logAudit } from "../audit";
@@ -796,14 +796,14 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   }
 
   const volatilityIndex = computeVolatilityIndex(signalResults);
-  const entryStrategy = buildEntryStrategy(confidence, trajectory, dominantIntent);
-  const defensiveRisks = buildDefensiveRisks(confidence, trajectory, intents);
+  const marketDiagnosis = buildMarketDiagnosis(confidence, trajectory, dominantIntent);
+  const threatSignals = buildThreatSignals(confidence, trajectory, intents);
   const similarityData = computeSimilarityDiagnosis(competitorInputs, signalResults);
 
   let narrativeSynthesis: string | null = null;
   if (executionMode !== "LIGHT" && confidence.guardDecision !== "BLOCK") {
     try {
-      narrativeSynthesis = buildDeterministicNarrative(marketState, trajectoryDirection, dominantIntent, confidence, intents);
+      narrativeSynthesis = buildMarketSummary(marketState, trajectoryDirection, dominantIntent, confidence, intents);
     } catch (err) {
       console.error(`[FetchOrch] Narrative synthesis failed:`, err);
     }
@@ -853,8 +853,8 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
       fetchExecuted,
     }),
     narrativeSynthesis,
-    entryStrategy,
-    defensiveRisks: JSON.stringify(defensiveRisks),
+    marketDiagnosis,
+    threatSignals: JSON.stringify(threatSignals),
     missingSignalFlags: JSON.stringify(missingFlags),
     similarityData: JSON.stringify(similarityData),
     volatilityIndex,

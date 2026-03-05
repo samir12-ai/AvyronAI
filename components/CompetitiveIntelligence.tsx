@@ -61,7 +61,7 @@ interface Competitor {
 
 
 
-type CIView = 'overview' | 'competitors' | 'recommendations' | 'timeline';
+type CIView = 'overview' | 'competitors' | 'threats' | 'timeline';
 
 
 export default function CompetitiveIntelligence() {
@@ -324,7 +324,7 @@ export default function CompetitiveIntelligence() {
       {[
         { key: 'overview' as CIView, icon: 'eye-outline' as const, label: 'Overview' },
         { key: 'competitors' as CIView, icon: 'trophy-outline' as const, label: 'Dominance' },
-        { key: 'recommendations' as CIView, icon: 'flash-outline' as const, label: 'Actions' },
+        { key: 'threats' as CIView, icon: 'shield-outline' as const, label: 'Threats' },
         { key: 'timeline' as CIView, icon: 'time-outline' as const, label: 'History' },
       ].map(tab => (
         <Pressable
@@ -829,18 +829,18 @@ export default function CompetitiveIntelligence() {
               </View>
             )}
 
-            {miv3Result.output?.entryStrategy && (
+            {miv3Result.output?.marketDiagnosis && (
               <View style={{ marginBottom: 8 }}>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: '#8B5CF6', marginBottom: 2 }}>Entry Strategy</Text>
-                <Text style={{ fontSize: 11, color: colors.textSecondary }}>{miv3Result.output.entryStrategy}</Text>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: '#8B5CF6', marginBottom: 2 }}>Market Diagnosis</Text>
+                <Text style={{ fontSize: 11, color: colors.textSecondary }}>{miv3Result.output.marketDiagnosis}</Text>
               </View>
             )}
 
-            {miv3Result.output?.defensiveRisks?.length > 0 && (
+            {miv3Result.output?.threatSignals?.length > 0 && (
               <View style={{ marginBottom: 8 }}>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: '#EF4444', marginBottom: 2 }}>Defensive Risks</Text>
-                {miv3Result.output.defensiveRisks.map((risk: string, i: number) => (
-                  <Text key={i} style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>• {risk}</Text>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: '#EF4444', marginBottom: 2 }}>Threat Signals</Text>
+                {miv3Result.output.threatSignals.map((threat: string, i: number) => (
+                  <Text key={i} style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>• {threat}</Text>
                 ))}
               </View>
             )}
@@ -1173,19 +1173,20 @@ export default function CompetitiveIntelligence() {
     );
   };
 
-  const renderRecommendations = () => {
+  const renderThreats = () => {
     const output = miv3Result?.output;
-    const entryStrategy = output?.entryStrategy;
-    const defensiveRisks = output?.defensiveRisks || [];
+    const marketDiagnosis = output?.marketDiagnosis;
+    const threatSignals = output?.threatSignals || [];
     const missingSignals = output?.missingSignalFlags || [];
     const confidence = output?.confidence;
     const intentMap = output?.competitorIntentMap || [];
     const trajectory = miv3Result?.trajectoryData;
+    const evidenceCoverage = output?.evidenceCoverage;
 
     return (
       <View>
         <View style={s.sectionHeader}>
-          <Text style={[s.sectionTitle, { color: colors.text }]}>MI V3 Actions</Text>
+          <Text style={[s.sectionTitle, { color: colors.text }]}>Threat Signals</Text>
           {confidence && (
             <View style={[s.countBadge, { backgroundColor: confidence.guardDecision === 'PROCEED' ? '#10B981' + '20' : confidence.guardDecision === 'DOWNGRADE' ? '#F59E0B' + '20' : '#EF4444' + '20' }]}>
               <Text style={[s.countText, { color: confidence.guardDecision === 'PROCEED' ? '#10B981' : confidence.guardDecision === 'DOWNGRADE' ? '#F59E0B' : '#EF4444' }]}>
@@ -1197,32 +1198,61 @@ export default function CompetitiveIntelligence() {
 
         {!miv3Result ? (
           <View style={s.emptyState}>
-            <Ionicons name="flash-outline" size={40} color={colors.textMuted} />
-            <Text style={[s.emptyTitle, { color: colors.text }]}>No Actions Available</Text>
-            <Text style={[s.emptyDesc, { color: colors.textMuted }]}>Run MI V3 from the Overview tab to generate strategic actions</Text>
+            <Ionicons name="shield-outline" size={40} color={colors.textMuted} />
+            <Text style={[s.emptyTitle, { color: colors.text }]}>No Threat Data</Text>
+            <Text style={[s.emptyDesc, { color: colors.textMuted }]}>Run MI V3 from the Overview tab to detect market threats</Text>
           </View>
         ) : (
           <View>
-            {entryStrategy && (
+            {evidenceCoverage && (
               <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
                 <View style={s.cardHeader}>
-                  <Ionicons name="compass-outline" size={18} color="#8B5CF6" />
-                  <Text style={[s.cardTitle, { color: colors.text }]}>Entry Strategy</Text>
+                  <Ionicons name="analytics-outline" size={18} color="#3B82F6" />
+                  <Text style={[s.cardTitle, { color: colors.text }]}>Evidence Coverage</Text>
                 </View>
-                <Text style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 20 }}>{entryStrategy}</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+                  <View>
+                    <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>{evidenceCoverage.postsAnalyzed}</Text>
+                    <Text style={{ fontSize: 10, color: colors.textMuted }}>Posts</Text>
+                  </View>
+                  <View>
+                    <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>{evidenceCoverage.commentsAnalyzed}</Text>
+                    <Text style={{ fontSize: 10, color: colors.textMuted }}>Comments</Text>
+                  </View>
+                  <View>
+                    <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>{evidenceCoverage.competitorsWithSufficientData}/{evidenceCoverage.totalCompetitors}</Text>
+                    <Text style={{ fontSize: 10, color: colors.textMuted }}>Sufficient Data</Text>
+                  </View>
+                  {output?.signalNoiseRatio !== undefined && (
+                    <View>
+                      <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>{(output.signalNoiseRatio * 100).toFixed(0)}%</Text>
+                      <Text style={{ fontSize: 10, color: colors.textMuted }}>Signal Quality</Text>
+                    </View>
+                  )}
+                </View>
               </View>
             )}
 
-            {defensiveRisks.length > 0 && (
+            {marketDiagnosis && (
               <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
                 <View style={s.cardHeader}>
-                  <Ionicons name="warning-outline" size={18} color="#EF4444" />
-                  <Text style={[s.cardTitle, { color: colors.text }]}>Defensive Risks</Text>
+                  <Ionicons name="pulse-outline" size={18} color="#8B5CF6" />
+                  <Text style={[s.cardTitle, { color: colors.text }]}>Market Diagnosis</Text>
                 </View>
-                {defensiveRisks.map((risk: string, i: number) => (
+                <Text style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 20 }}>{marketDiagnosis}</Text>
+              </View>
+            )}
+
+            {threatSignals.length > 0 && (
+              <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                <View style={s.cardHeader}>
+                  <Ionicons name="shield-outline" size={18} color="#EF4444" />
+                  <Text style={[s.cardTitle, { color: colors.text }]}>Observed Threats</Text>
+                </View>
+                {threatSignals.map((threat: string, i: number) => (
                   <View key={i} style={{ flexDirection: 'row', gap: 6, marginBottom: 6, alignItems: 'flex-start' }}>
                     <Ionicons name="alert-circle" size={14} color="#EF4444" style={{ marginTop: 2 }} />
-                    <Text style={{ fontSize: 12, color: colors.textSecondary, flex: 1, lineHeight: 18 }}>{risk}</Text>
+                    <Text style={{ fontSize: 12, color: colors.textSecondary, flex: 1, lineHeight: 18 }}>{threat}</Text>
                   </View>
                 ))}
               </View>
@@ -1366,7 +1396,7 @@ export default function CompetitiveIntelligence() {
       {renderSubTabs()}
       {activeView === 'overview' && renderOverview()}
       {activeView === 'competitors' && renderCompetitors()}
-      {activeView === 'recommendations' && renderRecommendations()}
+      {activeView === 'threats' && renderThreats()}
       {activeView === 'timeline' && renderTimeline()}
 
       <Modal visible={showAddCompetitor} animationType="slide" transparent onRequestClose={() => { setShowAddCompetitor(false); setEditingCompetitorId(null); setNewComp(emptyComp); }}>

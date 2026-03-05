@@ -1309,8 +1309,8 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
         confidenceData: null,
         marketState: null,
         volatilityIndex: null,
-        entryStrategy: null,
-        defensiveRisks: null,
+        marketDiagnosis: null,
+        threatSignals: null,
         narrativeSynthesis: null,
         confidenceLevel: null,
       };
@@ -1322,7 +1322,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(result.failures.some((f: string) => f.includes("confidenceData"))).toBe(true);
       expect(result.failures.some((f: string) => f.includes("signalData"))).toBe(true);
       expect(result.failures.some((f: string) => f.includes("intentData"))).toBe(true);
-      expect(result.failures.some((f: string) => f.includes("defensiveRisks"))).toBe(true);
+      expect(result.failures.some((f: string) => f.includes("threatSignals"))).toBe(true);
       expect(result.failures.some((f: string) => f.includes("volatilityIndex"))).toBe(true);
     });
 
@@ -1336,8 +1336,8 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
         confidenceData: JSON.stringify({ overall: 0.6, level: "MODERATE", guardDecision: "PROCEED" }),
         marketState: "HEATING",
         volatilityIndex: 0.33,
-        entryStrategy: "Test entry strategy",
-        defensiveRisks: JSON.stringify(["risk1"]),
+        marketDiagnosis: "Test market diagnosis",
+        threatSignals: JSON.stringify(["risk1"]),
         narrativeSynthesis: "Test narrative",
         confidenceLevel: "MODERATE",
       };
@@ -1500,8 +1500,8 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
         confidenceData: JSON.stringify({ overall: 0.6, level: "MODERATE" }),
         marketState: "HEATING",
         volatilityIndex: null,
-        entryStrategy: null,
-        defensiveRisks: JSON.stringify([]),
+        marketDiagnosis: null,
+        threatSignals: JSON.stringify([]),
         narrativeSynthesis: null,
         confidenceLevel: "MODERATE",
       };
@@ -1514,7 +1514,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(result2.failures.some((f: string) => f.includes("volatilityIndex"))).toBe(false);
     });
 
-    it("REGRESSION: guardDecision=PROCEED + null entryStrategy must fail validation", async () => {
+    it("REGRESSION: guardDecision=PROCEED + null marketDiagnosis must fail validation", async () => {
       const { validateSnapshotCompleteness } = await import("../market-intelligence-v3/engine");
       const proceedWithNull = {
         signalData: JSON.stringify([{ competitorId: "c1", signals: {} }]),
@@ -1524,18 +1524,18 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
         confidenceData: JSON.stringify({ overall: 0.85, level: "STRONG", guardDecision: "PROCEED" }),
         marketState: "HEATING",
         volatilityIndex: 0.3,
-        entryStrategy: null,
-        defensiveRisks: JSON.stringify(["risk1"]),
+        marketDiagnosis: null,
+        threatSignals: JSON.stringify(["risk1"]),
         narrativeSynthesis: null,
         confidenceLevel: "STRONG",
       };
       const result = validateSnapshotCompleteness(proceedWithNull);
       expect(result.valid).toBe(false);
-      expect(result.failures.some((f: string) => f.includes("entryStrategy") && f.includes("guardDecision=PROCEED"))).toBe(true);
+      expect(result.failures.some((f: string) => f.includes("marketDiagnosis") && f.includes("guardDecision=PROCEED"))).toBe(true);
       expect(result.failures.some((f: string) => f.includes("narrativeSynthesis") && f.includes("guardDecision=PROCEED"))).toBe(true);
     });
 
-    it("REGRESSION: guardDecision=DOWNGRADE + null entryStrategy must pass validation", async () => {
+    it("REGRESSION: guardDecision=DOWNGRADE + null marketDiagnosis must pass validation", async () => {
       const { validateSnapshotCompleteness } = await import("../market-intelligence-v3/engine");
       const downgradeWithNull = {
         signalData: JSON.stringify([{ competitorId: "c1", signals: {} }]),
@@ -1545,8 +1545,8 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
         confidenceData: JSON.stringify({ overall: 0.4, level: "LOW", guardDecision: "DOWNGRADE" }),
         marketState: "COOLING",
         volatilityIndex: 0.2,
-        entryStrategy: null,
-        defensiveRisks: JSON.stringify(["INSUFFICIENT DATA"]),
+        marketDiagnosis: null,
+        threatSignals: JSON.stringify(["INSUFFICIENT DATA"]),
         narrativeSynthesis: null,
         confidenceLevel: "LOW",
       };
@@ -1554,7 +1554,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(result.valid).toBe(true);
     });
 
-    it("REGRESSION: guardDecision=BLOCK + null entryStrategy must pass validation", async () => {
+    it("REGRESSION: guardDecision=BLOCK + null marketDiagnosis must pass validation", async () => {
       const { validateSnapshotCompleteness } = await import("../market-intelligence-v3/engine");
       const blockWithNull = {
         signalData: JSON.stringify([{ competitorId: "c1", signals: {} }]),
@@ -1564,8 +1564,8 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
         confidenceData: JSON.stringify({ overall: 0.2, level: "LOW", guardDecision: "BLOCK" }),
         marketState: "INSUFFICIENT_DATA",
         volatilityIndex: 0.1,
-        entryStrategy: null,
-        defensiveRisks: JSON.stringify(["BLOCKED"]),
+        marketDiagnosis: null,
+        threatSignals: JSON.stringify(["BLOCKED"]),
         narrativeSynthesis: null,
         confidenceLevel: "LOW",
       };
@@ -1573,7 +1573,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(result.valid).toBe(true);
     });
 
-    it("REGRESSION: validation uses guardDecision (not numeric threshold) for entryStrategy/narrativeSynthesis", async () => {
+    it("REGRESSION: validation uses guardDecision (not numeric threshold) for marketDiagnosis/narrativeSynthesis", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8")
       );
@@ -1640,7 +1640,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(engineSource).toContain("cacheInvalidationReason");
 
       const buildResultStart = engineSource.indexOf("export function buildResultFromSnapshot");
-      const buildResultEnd = engineSource.indexOf("export function buildDeterministicNarrative");
+      const buildResultEnd = engineSource.indexOf("export function buildMarketSummary");
       const buildResult = engineSource.slice(buildResultStart, buildResultEnd);
       expect(buildResult).toContain("snapshotStatus:");
       expect(buildResult).toContain("cacheInvalidationReason:");

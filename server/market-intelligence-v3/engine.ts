@@ -24,6 +24,7 @@ import type {
   IntentChange,
   TrajectoryDelta,
   DominanceChange,
+  EvidenceCoverage,
 } from "./types";
 import { MI_CONFIDENCE, ENGINE_VERSION } from "./constants";
 import { validateEngineIsolation } from "./isolation-guard";
@@ -52,8 +53,8 @@ export function validateSnapshotCompleteness(snapshot: {
   confidenceData?: string | null;
   marketState?: string | null;
   volatilityIndex?: number | null;
-  entryStrategy?: string | null;
-  defensiveRisks?: string | null;
+  marketDiagnosis?: string | null;
+  threatSignals?: string | null;
   narrativeSynthesis?: string | null;
   confidenceLevel?: string | null;
 }): SnapshotValidationResult {
@@ -82,9 +83,9 @@ export function validateSnapshotCompleteness(snapshot: {
     failures.push("volatilityIndex is null");
   }
 
-  const defensiveRisks = parseJsonSafe(snapshot.defensiveRisks, null);
-  if (defensiveRisks === null) {
-    failures.push("defensiveRisks is null (must be array, even if empty)");
+  const threatSignals = parseJsonSafe(snapshot.threatSignals, null);
+  if (threatSignals === null) {
+    failures.push("threatSignals is null (must be array, even if empty)");
   }
 
   const signalData = parseJsonSafe(snapshot.signalData, null);
@@ -101,8 +102,8 @@ export function validateSnapshotCompleteness(snapshot: {
   const isProceed = guardDecision === "PROCEED";
 
   if (isProceed) {
-    if (!snapshot.entryStrategy) {
-      failures.push("entryStrategy is null (required when guardDecision=PROCEED)");
+    if (!snapshot.marketDiagnosis) {
+      failures.push("marketDiagnosis is null (required when guardDecision=PROCEED)");
     }
     if (!snapshot.narrativeSynthesis) {
       failures.push("narrativeSynthesis is null (required when guardDecision=PROCEED)");
@@ -238,60 +239,74 @@ export function computeVolatilityIndex(signalResults: any[]): number {
   return Math.min(1, volatilities.reduce((s: number, v: number) => s + v, 0) / volatilities.length);
 }
 
-export function buildEntryStrategy(confidence: any, trajectory: any, dominantIntent: string): string | null {
+export function computeSignalNoiseRatio(signalResults: any[], confidence: any): number {
+  if (signalResults.length === 0) return 0;
+  const avgCoverage = signalResults.reduce((s: number, r: any) => s + (r.signalCoverageScore || 0), 0) / signalResults.length;
+  const stabilityFactor = confidence.factors?.signalStability || 0.5;
+  return Math.round(Math.min(1, avgCoverage * 0.6 + stabilityFactor * 0.4) * 100) / 100;
+}
+
+export function computeEvidenceCoverage(signalResults: any[], totalCompetitors: number): EvidenceCoverage {
+  const postsAnalyzed = signalResults.reduce((s: number, r: any) => s + (r.sampleSize || 0), 0);
+  const commentsAnalyzed = signalResults.reduce((s: number, r: any) => s + (r.commentCount || 0), 0);
+  const competitorsWithSufficientData = signalResults.filter((r: any) => (r.sampleSize || 0) >= 14).length;
+  return { postsAnalyzed, commentsAnalyzed, competitorsWithSufficientData, totalCompetitors };
+}
+
+export function buildMarketDiagnosis(confidence: any, trajectory: any, dominantIntent: string): string | null {
   if (confidence.guardDecision === "BLOCK") return null;
   if (confidence.overall < MI_CONFIDENCE.NO_AGGRESSIVE_THRESHOLD) return null;
 
   const direction = deriveTrajectoryDirection(trajectory);
 
   if (confidence.guardDecision === "DOWNGRADE") {
-    return "Exploratory Mode: Insufficient data for strategic recommendations. Focus on data collection.";
+    return "Exploratory: Insufficient data for confident diagnosis. Data collection required before assessment.";
   }
 
   switch (direction) {
     case "HEATING_COMPRESSED":
-      return "Market is heating with compressed offers. Differentiate on value, not price. Avoid direct competition.";
+      return "Market heating with compressed offers. Rising competitive intensity with narrowing price bands.";
     case "HEATING":
-      return "Growing competition. Establish authority early with unique angles.";
+      return "Growing competition detected. Increasing activity across competitor set.";
     case "COOLING":
-      return "Low activity market. Opportunity for first-mover advantage with consistent presence.";
+      return "Low activity market. Declining competitive signals across tracked competitors.";
     case "SATURATED":
-      return "Content saturation detected. Focus on underserved formats and angles.";
+      return "Content saturation detected. High angle overlap and low format experimentation.";
     case "COMPRESSING":
-      return "Price pressure increasing. Emphasize value proposition over discounts.";
+      return "Price compression observed. Offer language converging across competitors.";
     default:
-      return "Moderate market activity. Build consistent presence with differentiated positioning.";
+      return "Moderate market activity. Stable competitive landscape with no dominant trend.";
   }
 }
 
-export function buildDefensiveRisks(confidence: any, trajectory: any, intents: any[]): string[] {
-  const risks: string[] = [];
+export function buildThreatSignals(confidence: any, trajectory: any, intents: any[]): string[] {
+  const threats: string[] = [];
 
   if (confidence.guardDecision === "BLOCK") {
-    risks.push("INSUFFICIENT DATA: Cannot assess defensive risks reliably");
-    return risks;
+    threats.push("INSUFFICIENT DATA: Cannot assess threat landscape reliably");
+    return threats;
   }
 
   const aggressiveCompetitors = intents.filter((i: any) =>
     i.intentCategory === "AGGRESSIVE_SCALING" || i.intentCategory === "PRICE_WAR"
   );
   if (aggressiveCompetitors.length > 0) {
-    risks.push(`${aggressiveCompetitors.length} competitor(s) showing aggressive/price-war behavior`);
+    threats.push(`${aggressiveCompetitors.length} competitor(s) showing aggressive scaling or price-war signals`);
   }
 
   if (trajectory.offerCompressionIndex > 0.5) {
-    risks.push("Offer compression detected: market trending toward price competition");
+    threats.push("Offer compression detected: market trending toward price competition");
   }
 
   if (trajectory.narrativeConvergenceScore > 0.7) {
-    risks.push("High narrative convergence: competitors using similar messaging, differentiation needed");
+    threats.push("High narrative convergence detected: competitors using similar messaging patterns");
   }
 
   if (trajectory.angleSaturationLevel > 0.6) {
-    risks.push("Content angle saturation: fresh angles needed to stand out");
+    threats.push("Content angle saturation detected: high overlap in content formats across competitors");
   }
 
-  return risks;
+  return threats;
 }
 
 export function computeSnapshotDeltas(prevSnapshot: any, currSnapshot: {
@@ -495,8 +510,10 @@ export class MarketIntelligenceV3 {
     const volatilityIndex = computeVolatilityIndex(signalResults);
     const trajectoryDirection = deriveTrajectoryDirection(trajectory);
     const marketState = deriveMarketState(trajectory, confidence.level);
-    const entryStrategy = buildEntryStrategy(confidence, trajectory, dominantIntent);
-    const defensiveRisks = buildDefensiveRisks(confidence, trajectory, intents);
+    const marketDiagnosis = buildMarketDiagnosis(confidence, trajectory, dominantIntent);
+    const threatSignals = buildThreatSignals(confidence, trajectory, intents);
+    const signalNoiseRatio = computeSignalNoiseRatio(signalResults, confidence);
+    const evidenceCoverage = computeEvidenceCoverage(signalResults, competitors.length);
     const similarityData = computeSimilarityDiagnosis(competitors, signalResults);
 
     const previousSnapshots = await db.select().from(miSnapshots)
@@ -549,7 +566,7 @@ export class MarketIntelligenceV3 {
     let narrativeSynthesis: string | null = null;
     if (executionMode !== "LIGHT" && confidence.guardDecision !== "BLOCK") {
       try {
-        narrativeSynthesis = buildDeterministicNarrative(marketState, trajectoryDirection, dominantIntent, confidence, intents);
+        narrativeSynthesis = buildMarketSummary(marketState, trajectoryDirection, dominantIntent, confidence, intents);
         telemetry.actualTokensUsed = 0;
       } catch (err) {
         console.error(`[MIv3] Narrative synthesis failed, returning deterministic only:`, err);
@@ -585,8 +602,8 @@ export class MarketIntelligenceV3 {
       fetchExecuted: true,
       telemetry: JSON.stringify({ ...telemetry, snapshotSource: "FRESH_DATA", fetchExecuted: true }),
       narrativeSynthesis,
-      entryStrategy,
-      defensiveRisks: JSON.stringify(defensiveRisks),
+      marketDiagnosis,
+      threatSignals: JSON.stringify(threatSignals),
       missingSignalFlags: JSON.stringify(missingFlags),
       similarityData: JSON.stringify(similarityData),
       contentDnaData: JSON.stringify(contentDnaResults),
@@ -641,12 +658,14 @@ export class MarketIntelligenceV3 {
       trajectoryDirection,
       narrativeSaturationLevel: trajectory.angleSaturationLevel,
       revivalPotential: trajectory.revivalPotential,
-      entryStrategy,
-      defensiveRisks,
+      marketDiagnosis,
+      threatSignals,
       confidence,
       missingSignalFlags: missingFlags,
       dataFreshnessDays,
       volatilityIndex,
+      signalNoiseRatio,
+      evidenceCoverage,
     };
 
     const guard = await import("./confidence-engine").then(m => m.evaluateSignalStabilityGuard(signalResults));
@@ -704,7 +723,7 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
     commentsProcessed: 0,
     refreshReason: null,
   });
-  const defensiveRisks = parseJsonSafe(snapshot.defensiveRisks, []);
+  const threatSignals = parseJsonSafe(snapshot.threatSignals, []);
   const missingFlags = parseJsonSafe(snapshot.missingSignalFlags, []);
   const similarityData = parseJsonSafe(snapshot.similarityData, null);
   const deltaReportData = parseJsonSafe(snapshot.deltaReport, null);
@@ -716,12 +735,19 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
     trajectoryDirection: snapshot.previousDirection || "STABLE",
     narrativeSaturationLevel: trajectoryData.angleSaturationLevel || 0,
     revivalPotential: trajectoryData.revivalPotential || 0,
-    entryStrategy: snapshot.entryStrategy || null,
-    defensiveRisks,
+    marketDiagnosis: snapshot.marketDiagnosis || null,
+    threatSignals,
     confidence: confidenceData,
     missingSignalFlags: missingFlags,
     dataFreshnessDays: snapshot.dataFreshnessDays || 0,
     volatilityIndex: snapshot.volatilityIndex || 0,
+    signalNoiseRatio: confidenceData.factors?.signalStability ? Math.round(Math.min(1, (confidenceData.overall || 0) * 0.6 + (confidenceData.factors.signalStability || 0.5) * 0.4) * 100) / 100 : 0,
+    evidenceCoverage: {
+      postsAnalyzed: telemetry.postsProcessed || 0,
+      commentsAnalyzed: telemetry.commentsProcessed || 0,
+      competitorsWithSufficientData: telemetry.competitorsCount || 0,
+      totalCompetitors: telemetry.competitorsCount || 0,
+    },
   };
 
   return {
@@ -762,7 +788,7 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
   };
 }
 
-export function buildDeterministicNarrative(
+export function buildMarketSummary(
   marketState: string,
   direction: string,
   dominantIntent: string,
@@ -777,7 +803,7 @@ export function buildDeterministicNarrative(
   parts.push(`Confidence: ${confidence.level} (${(confidence.overall * 100).toFixed(1)}%).`);
 
   if (confidence.guardDecision === "DOWNGRADE") {
-    parts.push("EXPLORATORY MODE: Data insufficient for strong conclusions. Recommendations are hypotheses only.");
+    parts.push("EXPLORATORY MODE: Data insufficient for confident market assessment.");
   }
 
   const intentSummary = intents.map((i: any) => `${i.competitorName}: ${i.intentCategory}`).join(", ");

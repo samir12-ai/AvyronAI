@@ -153,7 +153,10 @@ export function computeConfidence(
   let guardDecision = guard.decision;
   const guardReasons = [...guard.reasons];
 
-  if (overall < MI_CONFIDENCE.BLOCK_THRESHOLD && guardDecision !== "BLOCK") {
+  if (dataAgeDays > MI_CONFIDENCE.FRESHNESS_HARD_GATE_DAYS) {
+    guardDecision = "BLOCK";
+    guardReasons.push(`DATA_STALE_HARD_GATE: data older than ${MI_CONFIDENCE.FRESHNESS_HARD_GATE_DAYS} days requires refresh (age: ${dataAgeDays}d)`);
+  } else if (overall < MI_CONFIDENCE.BLOCK_THRESHOLD && guardDecision !== "BLOCK") {
     guardDecision = "BLOCK";
     guardReasons.push(`Overall confidence below block threshold: ${overall} < ${MI_CONFIDENCE.BLOCK_THRESHOLD}`);
   } else if (overall < MI_CONFIDENCE.NO_AGGRESSIVE_THRESHOLD && guardDecision === "PROCEED") {
