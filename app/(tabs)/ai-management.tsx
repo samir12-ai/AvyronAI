@@ -637,7 +637,7 @@ export default function AIManagementScreen() {
                   onPress={() => { Haptics.selectionAsync(); setActiveTab(t.key); updateState({ activeTab: t.key }); }}
                   style={[styles.tab, isActive && { backgroundColor: t.color + '14', borderColor: t.color + '30' }]}
                 >
-                  <Ionicons name={t.icon} size={17} color={isActive ? t.color : colors.textMuted} />
+                  <Ionicons name={t.icon} size={14} color={isActive ? t.color : colors.textMuted} />
                   <Text style={[styles.tabText, { color: isActive ? t.color : colors.textMuted }]}>
                     {t.label}
                   </Text>
@@ -905,28 +905,28 @@ const styles = StyleSheet.create({
   title: { fontSize: 28, fontFamily: 'Inter_700Bold', marginBottom: 4 },
   subtitle: { fontSize: 14, fontFamily: 'Inter_400Regular' },
   tabBar: {
-    borderRadius: 16,
+    borderRadius: 12,
     borderWidth: 1,
-    padding: 5,
-    marginBottom: 20,
+    padding: 3,
+    marginBottom: 16,
   },
   tabBarContent: {
     flexDirection: 'row',
-    gap: 6,
+    gap: 4,
     paddingHorizontal: 2,
   },
   tab: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 11,
-    gap: 7,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    gap: 4,
     borderWidth: 1,
     borderColor: 'transparent',
   },
-  tabText: { fontSize: 13, fontFamily: 'Inter_600SemiBold', letterSpacing: 0.1 },
+  tabText: { fontSize: 11, fontFamily: 'Inter_600SemiBold', letterSpacing: 0.1 },
   tabContent: {},
   connectionBanner: {
     flexDirection: 'row',
