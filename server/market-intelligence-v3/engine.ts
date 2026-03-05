@@ -9,6 +9,7 @@ import { computeAllDominance } from "./dominance-module";
 import { computeTokenBudget, applySampling } from "./token-budget";
 import { computeSimilarityDiagnosis } from "./similarity-engine";
 import { computeAllContentDNA } from "./content-dna";
+import { computeMarketBaseline, computeAllDeviations, type DeviationResult } from "./market-baselines";
 import type {
   MIv3Mode,
   MIv3Output,
@@ -285,7 +286,7 @@ export function buildMarketDiagnosis(confidence: any, trajectory: any, dominantI
   }
 }
 
-export function buildThreatSignals(confidence: any, trajectory: any, intents: any[]): string[] {
+export function buildThreatSignals(confidence: any, trajectory: any, intents: any[], deviations?: DeviationResult[]): string[] {
   const threats: string[] = [];
 
   if (confidence.guardDecision === "BLOCK") {
@@ -301,24 +302,28 @@ export function buildThreatSignals(confidence: any, trajectory: any, intents: an
     threats.push(`${aggressiveCompetitors.length} competitor(s) showing aggressive scaling or price-war signals: ${names}`);
   }
 
-  if (trajectory.narrativeConvergenceScore > 0.5) {
-    threats.push("Narrative convergence increasing across competitors — messaging patterns are becoming more similar");
+  const narDev = deviations?.find(d => d.field === "narrativeConvergence");
+  if (narDev?.isElevated) {
+    threats.push(`Narrative convergence above baseline (${fmt(narDev.observed)} vs ${fmt(narDev.baseline)} baseline) — messaging patterns are becoming more similar`);
   }
 
-  if (trajectory.angleSaturationLevel > 0.4) {
-    threats.push("Hook/angle duplication detected in multiple creators — content differentiation is decreasing");
+  const angleDev = deviations?.find(d => d.field === "angleSaturation");
+  if (angleDev?.isElevated) {
+    threats.push(`Hook/angle duplication above baseline (${fmt(angleDev.observed)} vs ${fmt(angleDev.baseline)} baseline) — content differentiation is decreasing`);
   }
 
-  if (trajectory.offerCompressionIndex > 0.4) {
-    threats.push("Offer clustering detected in similar price bands — pricing structures are converging");
+  const offerDev = deviations?.find(d => d.field === "offerCompression");
+  if (offerDev?.isElevated) {
+    threats.push(`Offer clustering above baseline (${fmt(offerDev.observed)} vs ${fmt(offerDev.baseline)} baseline) — pricing structures are converging`);
   }
 
-  if (trajectory.marketHeatingIndex > 0.6) {
-    threats.push("Market posting density is elevated — competitive activity is above baseline levels");
+  const heatDev = deviations?.find(d => d.field === "marketHeating");
+  if (heatDev?.isElevated) {
+    threats.push(`Market posting density above baseline (${fmt(heatDev.observed)} vs ${fmt(heatDev.baseline)} baseline) — competitive activity is elevated`);
   }
 
-  if (trajectory.marketHeatingIndex < 0.2) {
-    threats.push("Market posting density below category baseline — low overall competitive activity detected");
+  if (heatDev?.isDepressed) {
+    threats.push(`Market posting density below baseline (${fmt(heatDev.observed)} vs ${fmt(heatDev.baseline)} baseline) — low overall competitive activity detected`);
   }
 
   const positioningShifts = intents.filter((i: any) => i.intentCategory === "POSITIONING_SHIFT");
@@ -331,22 +336,24 @@ export function buildThreatSignals(confidence: any, trajectory: any, intents: an
     threats.push(`Declining activity signals observed across ${decliningCompetitors.length} competitors — posting frequency below historical norms`);
   }
 
-  if (trajectory.revivalPotential > 0.7) {
-    threats.push("Revival potential is elevated — previously dormant competitors may re-enter active posting");
+  const revDev = deviations?.find(d => d.field === "revivalPotential");
+  if (revDev?.isElevated) {
+    threats.push(`Revival potential above baseline (${fmt(revDev.observed)} vs ${fmt(revDev.baseline)} baseline) — previously dormant competitors may re-enter active posting`);
   }
 
   return threats;
 }
 
-export function buildOpportunitySignals(confidence: any, trajectory: any, intents: any[]): string[] {
+export function buildOpportunitySignals(confidence: any, trajectory: any, intents: any[], deviations?: DeviationResult[]): string[] {
   const opportunities: string[] = [];
 
   if (confidence.guardDecision === "BLOCK") {
     return opportunities;
   }
 
-  if (trajectory.marketHeatingIndex < 0.2) {
-    opportunities.push("Market posting density is low — reduced competitive noise in this category");
+  const heatDev = deviations?.find(d => d.field === "marketHeating");
+  if (heatDev?.isDepressed) {
+    opportunities.push(`Market posting density below baseline (${fmt(heatDev.observed)} vs ${fmt(heatDev.baseline)} baseline) — reduced competitive noise in this category`);
   }
 
   const decliningCompetitors = intents.filter((i: any) => i.intentCategory === "DECLINING");
@@ -354,23 +361,31 @@ export function buildOpportunitySignals(confidence: any, trajectory: any, intent
     opportunities.push(`${decliningCompetitors.length} competitor(s) showing declining activity — reduced publishing pressure observed`);
   }
 
-  if (trajectory.narrativeConvergenceScore > 0.6) {
-    opportunities.push("High narrative convergence — content differentiation gaps are widening across the competitive set");
+  const narDev = deviations?.find(d => d.field === "narrativeConvergence");
+  if (narDev?.isElevated) {
+    opportunities.push(`Narrative convergence above baseline (${fmt(narDev.observed)} vs ${fmt(narDev.baseline)} baseline) — content differentiation gaps are widening across the competitive set`);
   }
 
-  if (trajectory.angleSaturationLevel < 0.2) {
-    opportunities.push("Creative angle diversity is high — multiple untapped content formats observed in the market");
+  const angleDev = deviations?.find(d => d.field === "angleSaturation");
+  if (angleDev?.isDepressed) {
+    opportunities.push(`Creative angle diversity above baseline (${fmt(angleDev.observed)} vs ${fmt(angleDev.baseline)} baseline) — multiple content formats remain underutilized in the market`);
   }
 
-  if (trajectory.offerCompressionIndex < 0.2) {
-    opportunities.push("Offer structures remain highly differentiated — low pricing convergence across competitors");
+  const offerDev = deviations?.find(d => d.field === "offerCompression");
+  if (offerDev?.isDepressed) {
+    opportunities.push(`Offer differentiation above baseline (${fmt(offerDev.observed)} vs ${fmt(offerDev.baseline)} baseline) — low pricing convergence across competitors`);
   }
 
-  if (trajectory.revivalPotential < 0.2 && trajectory.marketHeatingIndex < 0.4) {
+  const revDev = deviations?.find(d => d.field === "revivalPotential");
+  if (revDev && !revDev.isElevated && heatDev && !heatDev.isElevated) {
     opportunities.push("No dormant competitor re-entry signals detected — market entrant activity is stable");
   }
 
   return opportunities;
+}
+
+function fmt(val: number): string {
+  return `${Math.round(val * 100)}%`;
 }
 
 export function computeSnapshotDeltas(prevSnapshot: any, currSnapshot: {
@@ -575,8 +590,11 @@ export class MarketIntelligenceV3 {
     const trajectoryDirection = deriveTrajectoryDirection(trajectory);
     const marketState = deriveMarketState(trajectory, confidence.level);
     const marketDiagnosis = buildMarketDiagnosis(confidence, trajectory, dominantIntent);
-    const threatSignals = buildThreatSignals(confidence, trajectory, intents);
-    const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents);
+    const marketBaseline = await computeMarketBaseline(accountId, campaignId);
+    const deviations = computeAllDeviations(trajectory, marketBaseline);
+    console.log(`[MIv3] Baseline calibration: calibrated=${marketBaseline.isCalibrated}, snapshotsUsed=${marketBaseline.snapshotsUsed}, deviations=${deviations.filter(d => d.isElevated || d.isDepressed).length} triggered`);
+    const threatSignals = buildThreatSignals(confidence, trajectory, intents, deviations);
+    const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents, deviations);
     const signalNoiseRatio = computeSignalNoiseRatio(signalResults, confidence);
     const evidenceCoverage = computeEvidenceCoverage(signalResults, competitors.length);
     const similarityData = computeSimilarityDiagnosis(competitors, signalResults);

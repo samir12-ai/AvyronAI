@@ -1,0 +1,81 @@
+Hi Replit Team,
+
+Before we mark MIv3 as fully closed, there is one remaining architectural requirement that must be addressed.
+
+Currently, several structural signals rely on fixed thresholds such as:
+
+- Narrative convergence > 50%  
+- Hook/angle duplication > 40%  
+- Offer clustering > 40%  
+- Market density thresholds
+
+These static thresholds create a long-term risk because market behavior varies significantly across categories. What appears as saturation in one category may be normal baseline behavior in another.
+
+For this reason, MIv3 must not rely on fixed thresholds for structural pattern detection.
+
+---
+
+## Required Change — Baseline Calibration Layer
+
+Please introduce a baseline calibration mechanism so signals are detected relative to observed market norms rather than hardcoded thresholds.
+
+Instead of rules like:
+
+Narrative Convergence > 50%
+
+The engine should evaluate deviation from a computed baseline, for example:
+
+Observed Narrative Convergence  
+vs  
+Category Baseline Convergence
+
+Signal detection should then trigger when deviation exceeds a calibrated range rather than a fixed percentage.
+
+Example logic:
+
+Observed Hook Duplication Rate  
+compared against  
+Baseline Hook Duplication Rate
+
+Signal triggers only when deviation exceeds the expected baseline.
+
+---
+
+## Scope of Calibration
+
+The following indices should be calibrated using baseline comparisons rather than static thresholds:
+
+• Narrative convergence  
+• Hook / angle duplication  
+• Offer clustering  
+• Market density shifts  
+• Positioning shifts
+
+This ensures MIv3 remains robust across different industries and prevents false signals caused by category-specific norms.
+
+---
+
+## Expected Outcome
+
+After this change, MIv3 signals should be interpreted as:
+
+Observed Pattern  
+vs  
+Market Baseline
+
+rather than simply:
+
+Value > Fixed Threshold
+
+This will allow the Market Intelligence layer to adapt automatically to different market structures while maintaining signal integrity.
+
+---
+
+## Final Note
+
+This is the last structural requirement before we close MIv3 as the Market Intelligence layer. Once baseline calibration replaces static thresholds, the engine will be significantly more resilient and category-agnostic.
+
+Please confirm once this calibration mechanism is implemented.
+
+Best regards,  
+Samir
