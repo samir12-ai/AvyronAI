@@ -1018,6 +1018,136 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
   }
 }
 
+const GLOBAL_MAX_CONCURRENT_JOBS = 3;
+const QUEUE_PROCESSOR_INTERVAL_MS = 30000;
+const PER_ACCOUNT_JOB_BUDGET_PER_HOUR = 4;
+
+const accountJobTracker = new Map<string, { count: number; resetAt: number }>();
+
+function checkAccountBudget(accountId: string): boolean {
+  const now = Date.now();
+  const tracker = accountJobTracker.get(accountId);
+  if (!tracker || now > tracker.resetAt) {
+    accountJobTracker.set(accountId, { count: 0, resetAt: now + 3600000 });
+    return true;
+  }
+  return tracker.count < PER_ACCOUNT_JOB_BUDGET_PER_HOUR;
+}
+
+function incrementAccountBudget(accountId: string): void {
+  const tracker = accountJobTracker.get(accountId);
+  if (tracker) tracker.count++;
+}
+
+async function getGlobalRunningJobCount(): Promise<number> {
+  const result = await db.select({ count: sql<number>`count(*)` }).from(miFetchJobs)
+    .where(eq(miFetchJobs.status, "RUNNING"));
+  return Number(result[0]?.count ?? 0);
+}
+
+async function processJobQueue(): Promise<void> {
+  try {
+    const globalRunning = await getGlobalRunningJobCount();
+    if (globalRunning >= GLOBAL_MAX_CONCURRENT_JOBS) {
+      return;
+    }
+
+    const slotsAvailable = GLOBAL_MAX_CONCURRENT_JOBS - globalRunning;
+
+    const queuedJobs = await db.select().from(miFetchJobs)
+      .where(eq(miFetchJobs.status, "QUEUED"))
+      .orderBy(miFetchJobs.createdAt)
+      .limit(slotsAvailable);
+
+    if (queuedJobs.length === 0) return;
+
+    for (const job of queuedJobs) {
+      const accountRunning = await getRunningJobCountForAccount(job.accountId);
+      if (accountRunning >= MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT) {
+        continue;
+      }
+
+      if (!checkAccountBudget(job.accountId)) {
+        console.log(`[QueueProcessor] Account ${job.accountId} exceeded hourly budget (${PER_ACCOUNT_JOB_BUDGET_PER_HOUR}/hr), skipping job ${job.id}`);
+        continue;
+      }
+
+      const competitors = await db.select().from(ciCompetitors)
+        .where(and(eq(ciCompetitors.accountId, job.accountId), eq(ciCompetitors.campaignId, job.campaignId), eq(ciCompetitors.isActive, true)));
+
+      if (competitors.length === 0) {
+        await db.update(miFetchJobs).set({ status: "FAILED", error: "No active competitors", completedAt: new Date() }).where(eq(miFetchJobs.id, job.id));
+        continue;
+      }
+
+      const promoted = await db.update(miFetchJobs)
+        .set({ status: "RUNNING" })
+        .where(and(eq(miFetchJobs.id, job.id), eq(miFetchJobs.status, "QUEUED")))
+        .returning({ id: miFetchJobs.id });
+
+      if (promoted.length === 0) {
+        console.log(`[QueueProcessor] Job ${job.id} already promoted by another process, skipping`);
+        continue;
+      }
+
+      incrementAccountBudget(job.accountId);
+
+      const lockKey = `${job.accountId}:${job.campaignId}`;
+      console.log(`[QueueProcessor] Atomically promoted QUEUED→RUNNING job ${job.id} | account=${job.accountId} | globalSlots=${slotsAvailable}`);
+
+      const promise = executeFetchJob(job.id, job.accountId, job.campaignId, competitors).catch(err => {
+        console.error(`[QueueProcessor] Job ${job.id} fatal error:`, err.message);
+      }).finally(() => {
+        activeJobs.delete(lockKey);
+      });
+      activeJobs.set(lockKey, promise);
+    }
+  } catch (err: any) {
+    console.error(`[QueueProcessor] Error processing queue:`, err.message);
+  }
+}
+
+let queueProcessorHandle: ReturnType<typeof setInterval> | null = null;
+
+export function startQueueProcessor(): void {
+  if (queueProcessorHandle) return;
+  queueProcessorHandle = setInterval(processJobQueue, QUEUE_PROCESSOR_INTERVAL_MS);
+  console.log(`[QueueProcessor] Started — interval=${QUEUE_PROCESSOR_INTERVAL_MS}ms, globalMax=${GLOBAL_MAX_CONCURRENT_JOBS}, perAccountBudget=${PER_ACCOUNT_JOB_BUDGET_PER_HOUR}/hr`);
+}
+
+export function stopQueueProcessor(): void {
+  if (queueProcessorHandle) {
+    clearInterval(queueProcessorHandle);
+    queueProcessorHandle = null;
+  }
+}
+
+export async function getQueueDiagnostics(): Promise<{
+  globalRunning: number;
+  globalMaxConcurrent: number;
+  queuedJobs: number;
+  perAccountBudget: number;
+  accountTrackers: Record<string, { count: number; resetIn: number }>;
+}> {
+  const globalRunning = await getGlobalRunningJobCount();
+  const queued = await db.select({ count: sql<number>`count(*)` }).from(miFetchJobs)
+    .where(eq(miFetchJobs.status, "QUEUED"));
+
+  const trackers: Record<string, { count: number; resetIn: number }> = {};
+  const now = Date.now();
+  for (const [acct, t] of accountJobTracker) {
+    trackers[acct] = { count: t.count, resetIn: Math.max(0, Math.round((t.resetAt - now) / 1000)) };
+  }
+
+  return {
+    globalRunning,
+    globalMaxConcurrent: GLOBAL_MAX_CONCURRENT_JOBS,
+    queuedJobs: Number(queued[0]?.count ?? 0),
+    perAccountBudget: PER_ACCOUNT_JOB_BUDGET_PER_HOUR,
+    accountTrackers: trackers,
+  };
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }

@@ -1,0 +1,287 @@
+Hi Replit Team,
+
+We are moving to the next critical step in the architecture of the AI Marketing Operating System. The goal is to make Market Intelligence stable, scalable, and resistant to Instagram blocks while supporting large numbers of users in the future.
+
+Please treat this implementation as high priority and production-grade. The system must be built in a way that remains stable even under heavy load.
+
+This message consolidates the final architecture requirements.
+
+---------------------------------------------------------------------
+
+1. CORE PRINCIPLE
+
+Market Intelligence must NOT depend on live scraping every time a user runs analysis.
+
+Instead, we will introduce a Market Database Layer that stores collected market data and serves it to the application.
+
+Users must never directly trigger scraping operations against Instagram.
+
+The correct architecture becomes:
+
+User  
+→ Market Intelligence Engine  
+→ Market Database  
+→ Analysis
+
+Instagram should only be contacted by a background crawler service.
+
+---------------------------------------------------------------------
+
+2. MARKET DATABASE LAYER
+
+Create an internal database dedicated to market intelligence.
+
+This database must live only in the backend and must never be exposed directly to users.
+
+Users will only see analysis results, not raw market data.
+
+Suggested core tables:
+
+- market_competitors
+- market_posts
+- market_comments
+- market_signals
+- market_snapshots
+
+These tables store:
+
+competitor accounts  
+post captions  
+hashtags  
+timestamps  
+engagement counts  
+sampled comments  
+derived signals  
+
+The Market Intelligence engine reads from this database to generate analysis.
+
+---------------------------------------------------------------------
+
+3. BACKGROUND CRAWLER SERVICE
+
+Scraping must move to a dedicated crawler service.
+
+The crawler is responsible for:
+
+- collecting competitor data gradually
+- updating stored records
+- refreshing stale data
+- enriching market intelligence signals
+
+Crawler activity must be independent from user requests.
+
+---------------------------------------------------------------------
+
+4. TWO-STAGE COLLECTION (Fast Pass + Deep Pass)
+
+To reduce blocks and stabilize scraping, implement two levels of data collection.
+
+FAST PASS
+
+Purpose: quickly capture essential signals.
+
+Collect:
+6–10 competitors  
+8–12 posts per competitor
+
+Collect only:
+caption text  
+hashtags  
+timestamps  
+engagement counts  
+
+Do NOT collect comment text during Fast Pass.
+
+DEEP PASS
+
+Runs in background after Fast Pass.
+
+Gradually enrich data:
+
+increase posts per competitor up to 20–30  
+collect sampled comments
+
+Comments rules:
+
+Only analyze comments on the top 2–3 posts per competitor.  
+Maximum 30–80 comments per post.  
+No deep pagination.
+
+---------------------------------------------------------------------
+
+5. SCRAPING SAFETY RULES
+
+Even with residential proxies, scraping patterns must appear human-like.
+
+Enforce the following limits:
+
+Global concurrency:
+Maximum 2–4 workers.
+
+Per competitor:
+Only one worker per competitor.
+
+Request pacing:
+One request every 5–12 seconds with random delay.
+
+Sessions:
+Use sticky sessions for each competitor scan (10–20 minutes).
+Maintain consistent headers, cookies, and user agent during each session.
+
+Do NOT rotate identity per request.
+
+---------------------------------------------------------------------
+
+6. CACHE FIRST POLICY
+
+Prevent re-scraping identical data.
+
+Rules:
+
+Store post IDs locally.  
+Only fetch posts newer than the latest stored timestamp.  
+If competitor data was updated within the last 12–24 hours, reuse cached data.
+
+Comments must not be re-scraped repeatedly.
+
+---------------------------------------------------------------------
+
+7. SELF-UPDATING MARKET INTELLIGENCE
+
+Market Intelligence must update automatically without requiring user refresh.
+
+Workflow:
+
+User runs Market Intelligence  
+Fast Pass collects lightweight signals  
+Initial snapshot appears immediately  
+Deep Pass continues enriching data in background  
+Snapshot automatically recomputes when new evidence arrives
+
+The user must never wait hours for results.
+
+---------------------------------------------------------------------
+
+8. USER INTERFACE SIGNALS
+
+The application must show data quality indicators:
+
+Data Status Badge
+LIVE  
+ENRICHING  
+COMPLETE  
+
+Evidence Coverage Percentage
+
+Confidence Score
+
+Last Updated Timestamp
+
+Example:
+
+Evidence Coverage: 55%  
+Confidence: 42 / 100  
+Last Updated: 12 minutes ago
+
+---------------------------------------------------------------------
+
+9. MARKET ACTIVITY VS MARKET DEMAND
+
+Market Intelligence must distinguish between two different concepts.
+
+Market Activity
+How frequently competitors publish content.
+
+Market Demand
+Audience interest and intent derived from comments and engagement patterns.
+
+Low posting activity does NOT necessarily mean low market demand.
+
+The system must output both indicators.
+
+---------------------------------------------------------------------
+
+10. ENGAGEMENT QUALITY ANALYSIS
+
+Engagement counts alone are not sufficient.
+
+The system must identify meaningful audience signals from comment samples.
+
+Examples:
+
+questions about fat loss  
+confusion about diet plans  
+requests for coaching  
+beginner training concerns  
+
+These signals feed Audience and Positioning engines.
+
+---------------------------------------------------------------------
+
+11. SCALABILITY PROTECTION
+
+The system must be resilient even with thousands of users.
+
+Implement:
+
+Global job queue  
+Rate limiting  
+Shared market data cache  
+Per-user and per-niche job budgets  
+Stale-data tolerance (reuse snapshots within freshness window)
+
+The system must never trigger scraping bursts when multiple users request analysis.
+
+---------------------------------------------------------------------
+
+12. ADMIN-ONLY MARKET DATABASE
+
+The Market Database must be visible only in the admin environment.
+
+Create an admin dashboard showing:
+
+competitor inventory  
+crawler status  
+data freshness  
+crawl queue  
+evidence coverage  
+
+Users must never see the raw database.
+
+---------------------------------------------------------------------
+
+13. STRESS TEST REQUIREMENT
+
+Before final deployment, the system must pass a stress test simulating heavy usage.
+
+Simulate scenarios such as:
+
+500 simultaneous MI requests  
+1000 queued jobs  
+high crawler workload  
+
+Verify that:
+
+queue behavior remains stable  
+crawler pacing is respected  
+no scraping bursts occur  
+system continues producing snapshots using cached data
+
+The system must remain operational under load.
+
+---------------------------------------------------------------------
+
+FINAL OBJECTIVE
+
+The result should be a Market Intelligence system that:
+
+collects data gradually  
+avoids Instagram blocks  
+serves analysis instantly  
+scales to thousands of users  
+keeps scraping activity minimal and controlled  
+
+Please implement this architecture carefully and verify all safeguards before completion.
+
+Best regards,  
+Samir Fatfat

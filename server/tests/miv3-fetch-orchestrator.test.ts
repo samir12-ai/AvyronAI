@@ -1692,4 +1692,251 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(cacheFunc).not.toContain("snapshotVersion < ENGINE_VERSION");
     });
   });
+
+  describe("S) Scalability Protection — Global Job Queue", () => {
+    it("GLOBAL_MAX_CONCURRENT_JOBS constant exists and is 2-4", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      const match = source.match(/GLOBAL_MAX_CONCURRENT_JOBS\s*=\s*(\d+)/);
+      expect(match).not.toBeNull();
+      const value = parseInt(match![1]);
+      expect(value).toBeGreaterThanOrEqual(2);
+      expect(value).toBeLessThanOrEqual(4);
+    });
+
+    it("PER_ACCOUNT_JOB_BUDGET_PER_HOUR exists and is reasonable (2-10)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      const match = source.match(/PER_ACCOUNT_JOB_BUDGET_PER_HOUR\s*=\s*(\d+)/);
+      expect(match).not.toBeNull();
+      const value = parseInt(match![1]);
+      expect(value).toBeGreaterThanOrEqual(2);
+      expect(value).toBeLessThanOrEqual(10);
+    });
+
+    it("QUEUE_PROCESSOR_INTERVAL_MS exists and is 15s-60s", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      const match = source.match(/QUEUE_PROCESSOR_INTERVAL_MS\s*=\s*(\d+)/);
+      expect(match).not.toBeNull();
+      const value = parseInt(match![1]);
+      expect(value).toBeGreaterThanOrEqual(15000);
+      expect(value).toBeLessThanOrEqual(60000);
+    });
+
+    it("processJobQueue checks global running count before promoting", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("getGlobalRunningJobCount");
+      expect(source).toContain("globalRunning >= GLOBAL_MAX_CONCURRENT_JOBS");
+    });
+
+    it("queue promotion is atomic (WHERE status=QUEUED)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain('eq(miFetchJobs.status, "QUEUED")');
+      expect(source).toContain("Atomically promoted QUEUED");
+      expect(source).toContain("already promoted by another process");
+    });
+
+    it("processJobQueue enforces per-account budget", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("checkAccountBudget");
+      expect(source).toContain("incrementAccountBudget");
+      expect(source).toContain("exceeded hourly budget");
+    });
+
+    it("processJobQueue respects per-account concurrency limit when promoting", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      const queueFunc = source.slice(source.indexOf("async function processJobQueue"), source.indexOf("async function processJobQueue") + 2000);
+      expect(queueFunc).toContain("getRunningJobCountForAccount");
+      expect(queueFunc).toContain("MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT");
+    });
+
+    it("startQueueProcessor and stopQueueProcessor are exported", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("export function startQueueProcessor");
+      expect(source).toContain("export function stopQueueProcessor");
+    });
+
+    it("getQueueDiagnostics returns required fields", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("export async function getQueueDiagnostics");
+      expect(source).toContain("globalRunning");
+      expect(source).toContain("globalMaxConcurrent");
+      expect(source).toContain("queuedJobs");
+      expect(source).toContain("perAccountBudget");
+      expect(source).toContain("accountTrackers");
+    });
+
+    it("Queue processor is started on server boot", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/index.ts", "utf-8")
+      );
+      expect(source).toContain("startQueueProcessor");
+      expect(source).toContain("import { startQueueProcessor }");
+    });
+
+    it("QUEUED jobs are selected FIFO (ordered by createdAt)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      const queueFunc = source.slice(source.indexOf("async function processJobQueue"), source.indexOf("async function processJobQueue") + 1500);
+      expect(queueFunc).toContain("QUEUED");
+      expect(queueFunc).toContain("orderBy");
+      expect(queueFunc).toContain("createdAt");
+    });
+
+    it("account budget tracker resets hourly", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("3600000");
+      expect(source).toContain("resetAt");
+    });
+  });
+
+  describe("T) Admin Market Database — Routes", () => {
+    it("admin routes file exists and registers 4 endpoints", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/admin-routes.ts", "utf-8")
+      );
+      expect(source).toContain("/api/admin/market/overview");
+      expect(source).toContain("/api/admin/market/competitors");
+      expect(source).toContain("/api/admin/market/freshness");
+      expect(source).toContain("/api/admin/market/crawler-status");
+    });
+
+    it("admin routes are registered in index.ts", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/index.ts", "utf-8")
+      );
+      expect(source).toContain("registerAdminMarketRoutes");
+      expect(source).toContain("import { registerAdminMarketRoutes }");
+    });
+
+    it("overview endpoint returns inventory + queue + recentJobs", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/admin-routes.ts", "utf-8")
+      );
+      const overviewFunc = source.slice(source.indexOf("/api/admin/market/overview"), source.indexOf("/api/admin/market/competitors"));
+      expect(overviewFunc).toContain("inventory");
+      expect(overviewFunc).toContain("queue");
+      expect(overviewFunc).toContain("recentJobs");
+      expect(overviewFunc).toContain("getQueueDiagnostics");
+    });
+
+    it("freshness endpoint computes age and isFresh flag", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/admin-routes.ts", "utf-8")
+      );
+      expect(source).toContain("ageHours");
+      expect(source).toContain("isFresh");
+    });
+
+    it("crawler-status returns running + queued + last24h stats", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/admin-routes.ts", "utf-8")
+      );
+      const crawlerFunc = source.slice(source.indexOf("/api/admin/market/crawler-status"));
+      expect(crawlerFunc).toContain("running");
+      expect(crawlerFunc).toContain("queued");
+      expect(crawlerFunc).toContain("last24h");
+    });
+
+    it("MarketDatabaseAdmin component exists in frontend", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("components/MarketDatabaseAdmin.tsx", "utf-8")
+      );
+      expect(source).toContain("MarketDatabaseAdmin");
+      expect(source).toContain("/api/admin/market/overview");
+      expect(source).toContain("/api/admin/market/competitors");
+      expect(source).toContain("/api/admin/market/freshness");
+      expect(source).toContain("/api/admin/market/crawler-status");
+    });
+
+    it("Market DB tab is registered in AI Management (admin-only)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("app/(tabs)/ai-management.tsx", "utf-8")
+      );
+      expect(source).toContain("'marketdb'");
+      expect(source).toContain("Market DB");
+      expect(source).toContain("MarketDatabaseAdmin");
+      expect(source).toContain("marketdb");
+      const marketDbLine = source.split('\n').find((l: string) => l.includes("'marketdb'") && l.includes("advanced"));
+      expect(marketDbLine).toBeDefined();
+      expect(marketDbLine).toContain("advanced: true");
+    });
+  });
+
+  describe("U) Stress Simulation — Queue Safety", () => {
+    it("STAGGER_DELAY prevents burst starts for same account", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("STAGGER_DELAY_MS");
+      expect(source).toContain("lastJobStartByAccount");
+      const match = source.match(/STAGGER_DELAY_MS\s*=\s*(\d+)/);
+      expect(match).not.toBeNull();
+      const value = parseInt(match![1]);
+      expect(value).toBeGreaterThanOrEqual(3000);
+    });
+
+    it("creationLocks prevent duplicate job creation", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("creationLocks");
+      expect(source).toContain("creationLocks.has(lockKey)");
+      expect(source).toContain("creationLocks.add(lockKey)");
+      expect(source).toContain("creationLocks.delete(lockKey)");
+    });
+
+    it("MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT is strictly 1", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      const match = source.match(/MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT\s*=\s*(\d+)/);
+      expect(match).not.toBeNull();
+      expect(parseInt(match![1])).toBe(1);
+    });
+
+    it("cache reuse window prevents re-scraping within 12h", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
+      );
+      expect(source).toContain("CACHE_REUSE_WINDOW_MS");
+      const match = source.match(/CACHE_REUSE_WINDOW_MS\s*=\s*([\d*\s]+)/);
+      expect(match).not.toBeNull();
+    });
+
+    it("multiple simultaneous requests reuse existing RUNNING job", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("Reusing active DB job");
+      expect(source).toContain("existingRunning.length > 0");
+    });
+
+    it("queue processor limits promoted jobs to available global slots", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("slotsAvailable = GLOBAL_MAX_CONCURRENT_JOBS - globalRunning");
+      expect(source).toContain(".limit(slotsAvailable)");
+    });
+  });
 });

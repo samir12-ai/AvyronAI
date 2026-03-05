@@ -31,6 +31,7 @@ import StrategicPipeline from '@/components/StrategicPipeline';
 import BuildThePlan from '@/components/BuildThePlan';
 import CompetitiveIntelligence from '@/components/CompetitiveIntelligence';
 import ControlCenter from '@/components/ControlCenter';
+import MarketDatabaseAdmin from '@/components/MarketDatabaseAdmin';
 import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
 
 interface AIAudience {
@@ -50,7 +51,7 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'control' | 'publisher' | 'audience' | 'leads';
+type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'control' | 'marketdb' | 'publisher' | 'audience' | 'leads';
 
 interface AIMgmtPersistedState {
   activeTab: TabView;
@@ -622,6 +623,7 @@ export default function AIManagementScreen() {
             { key: 'pipeline' as TabView, icon: 'git-merge-outline' as const, label: 'Pipeline', color: '#8B5CF6', advanced: false },
             { key: 'intelligence' as TabView, icon: 'telescope-outline' as const, label: 'Intelligence', color: '#3B82F6', advanced: false },
             { key: 'control' as TabView, icon: 'shield-checkmark-outline' as const, label: 'Control', color: '#8B5CF6', advanced: false },
+            { key: 'marketdb' as TabView, icon: 'server-outline' as const, label: 'Market DB', color: '#F97316', advanced: true },
             { key: 'publisher' as TabView, icon: 'send-outline' as const, label: 'Publish', color: colors.primary, advanced: false },
             { key: 'audience' as TabView, icon: 'people-outline' as const, label: 'Audience', color: colors.primary, advanced: true },
             { key: 'leads' as TabView, icon: 'magnet-outline' as const, label: 'Leads', color: '#8B5CF6', advanced: true },
@@ -648,6 +650,7 @@ export default function AIManagementScreen() {
           : activeTab === 'pipeline' ? <StrategicPipeline onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />
           : activeTab === 'intelligence' ? renderIntelligence()
           : activeTab === 'control' ? renderControlCenter()
+          : activeTab === 'marketdb' ? <MarketDatabaseAdmin />
           : activeTab === 'publisher' ? renderPublisher()
           : activeTab === 'audience' ? <CampaignGuard>{renderAudienceManager()}</CampaignGuard>
           : <CampaignGuard><LeadControlPanel /></CampaignGuard>}

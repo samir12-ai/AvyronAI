@@ -37,6 +37,16 @@ Client-side data is stored using AsyncStorage, while server-side data, including
 - **Backend Stabilization**: Includes AI cost management, extensive database indexing, worker hardening with decision caps and circuit breakers, safety gate registry, and robust memory scoping for account and campaign isolation. It also features per-account proxy pools with sticky sessions, intelligent backoff for retries, and Zod-based request validation.
 - **Final System Lock**: Ensures unified business profiles, dashboard metrics derived from campaign-scoped data, evidence-bound AI actions, and explicit campaign ID scoping for multi-campaign management. All AI creation outputs are saved to `studio_items` triggering background AI analysis.
 
+### Audit & Control System
+- Backend endpoints for audit feeds, AI usage, gate status, decisions, publish history, and job management.
+- Frontend 5-panel dashboard for System Gates, AI Token Budget, Recent Activity, Decisions, and Worker/Jobs.
+
+### Scalability Protection
+- **Global Job Queue**: `GLOBAL_MAX_CONCURRENT_JOBS=3` limits system-wide concurrent crawl jobs. `QUEUE_PROCESSOR_INTERVAL_MS=30000` polls every 30s. FIFO ordering by `createdAt`. Auto-promotes QUEUED jobs when slots open.
+- **Per-Account Job Budget**: `PER_ACCOUNT_JOB_BUDGET_PER_HOUR=4` — hourly rolling budget per account, resets automatically. Prevents single account from monopolizing crawler capacity.
+- **Shared Market Data Cache**: 12h cache reuse window, duplicate post dedup, stale-data tolerance for serving cached snapshots instantly.
+- **Admin Market Database Dashboard** (`admin-routes.ts`): 4 endpoints — `/api/admin/market/overview` (inventory + queue + recent jobs), `/api/admin/market/competitors` (inventory with post counts), `/api/admin/market/freshness` (age + isFresh flags), `/api/admin/market/crawler-status` (running/queued/24h stats). Frontend component `MarketDatabaseAdmin.tsx` with 4-tab UI (Overview, Inventory, Freshness, Crawler). Admin-only — raw market data never exposed to users.
+
 ## External Dependencies
 
 ### AI Services
