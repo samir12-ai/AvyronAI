@@ -76,6 +76,14 @@ interface CrawlerData {
     globalMaxConcurrent: number;
     queuedJobs: number;
     perAccountBudget: number;
+    health: {
+      backpressureActive: boolean;
+      backpressureThreshold: number;
+      promotionsThisMinute: number;
+      maxPromotionsPerMinute: number;
+      rateGateActive: boolean;
+      queueProcessorRunning: boolean;
+    };
   };
   running: Array<{
     id: string;
@@ -359,6 +367,36 @@ export default function MarketDatabaseAdmin() {
             </Text>
           </View>
         </View>
+
+        {crawler.queue.health && (
+          <>
+            <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 20 }]}>Queue Health</Text>
+            <View style={[styles.queueCard, { backgroundColor: isDark ? '#1E1E2E' : '#F8FAFC' }]}>
+              <View style={styles.queueRow}>
+                <Text style={[styles.queueLabel, { color: colors.textSecondary }]}>Processor</Text>
+                <View style={[styles.statusBadge, { backgroundColor: crawler.queue.health.queueProcessorRunning ? '#22C55E20' : '#EF444420' }]}>
+                  <Text style={{ color: crawler.queue.health.queueProcessorRunning ? '#22C55E' : '#EF4444', fontSize: 11, fontWeight: '700' as const }}>
+                    {crawler.queue.health.queueProcessorRunning ? 'ACTIVE' : 'STOPPED'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.queueRow}>
+                <Text style={[styles.queueLabel, { color: colors.textSecondary }]}>Backpressure</Text>
+                <View style={[styles.statusBadge, { backgroundColor: crawler.queue.health.backpressureActive ? '#EF444420' : '#22C55E20' }]}>
+                  <Text style={{ color: crawler.queue.health.backpressureActive ? '#EF4444' : '#22C55E', fontSize: 11, fontWeight: '700' as const }}>
+                    {crawler.queue.health.backpressureActive ? `ACTIVE (>${crawler.queue.health.backpressureThreshold})` : 'NORMAL'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.queueRow}>
+                <Text style={[styles.queueLabel, { color: colors.textSecondary }]}>Rate Gate</Text>
+                <Text style={[styles.queueValue, { color: crawler.queue.health.rateGateActive ? '#EF4444' : colors.text }]}>
+                  {crawler.queue.health.promotionsThisMinute} / {crawler.queue.health.maxPromotionsPerMinute} per min
+                </Text>
+              </View>
+            </View>
+          </>
+        )}
 
         {crawler.running.length > 0 && (
           <>

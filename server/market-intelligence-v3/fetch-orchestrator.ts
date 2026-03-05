@@ -94,15 +94,18 @@ export async function startFetchJob(accountId: string, campaignId: string): Prom
   const lockKey = `${accountId}:${campaignId}`;
 
   if (creationLocks.has(lockKey)) {
-    const existingRunning = await db.select().from(miFetchJobs)
+    const existingActive = await db.select().from(miFetchJobs)
       .where(and(
         eq(miFetchJobs.accountId, accountId),
         eq(miFetchJobs.campaignId, campaignId),
-        eq(miFetchJobs.status, "RUNNING"),
+        sql`${miFetchJobs.status} IN ('RUNNING', 'QUEUED')`,
       ))
       .orderBy(desc(miFetchJobs.createdAt))
       .limit(1);
-    if (existingRunning.length > 0) return existingRunning[0].id;
+    if (existingActive.length > 0) {
+      console.log(`[FetchOrch] DEDUP (lock-path): Reusing ${existingActive[0].status} job ${existingActive[0].id} for ${lockKey}`);
+      return existingActive[0].id;
+    }
     throw new Error("Job creation already in progress. Please wait.");
   }
 
@@ -141,18 +144,31 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
   }));
   const hash = computeCompetitorHash(competitorInputs);
 
-  const existingRunning = await db.select().from(miFetchJobs)
+  const existingActive = await db.select().from(miFetchJobs)
     .where(and(
       eq(miFetchJobs.accountId, accountId),
       eq(miFetchJobs.campaignId, campaignId),
-      eq(miFetchJobs.status, "RUNNING"),
+      sql`${miFetchJobs.status} IN ('RUNNING', 'QUEUED')`,
     ))
     .orderBy(desc(miFetchJobs.createdAt))
     .limit(1);
 
-  if (existingRunning.length > 0) {
-    console.log(`[FetchOrch] Reusing active DB job ${existingRunning[0].id} for ${lockKey}`);
-    return existingRunning[0].id;
+  if (existingActive.length > 0) {
+    console.log(`[FetchOrch] DEDUP: Reusing active ${existingActive[0].status} job ${existingActive[0].id} for ${lockKey} (competitorHash=${hash})`);
+    return existingActive[0].id;
+  }
+
+  const existingDupHash = await db.select().from(miFetchJobs)
+    .where(and(
+      eq(miFetchJobs.competitorHash, hash),
+      sql`${miFetchJobs.status} IN ('RUNNING', 'QUEUED')`,
+    ))
+    .orderBy(desc(miFetchJobs.createdAt))
+    .limit(1);
+
+  if (existingDupHash.length > 0) {
+    console.log(`[FetchOrch] DEDUP: Reusing job ${existingDupHash[0].id} with same competitorHash=${hash} (different account/campaign but same competitor set)`);
+    return existingDupHash[0].id;
   }
 
   const runningCount = await getRunningJobCountForAccount(accountId);
@@ -178,13 +194,14 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
       campaignId,
       competitorHash: hash,
       status: "QUEUED",
+      priority: PRIORITY_FAST_PASS,
       stageStatuses: JSON.stringify(initialStages),
       fetchLimitReasons: JSON.stringify([]),
       totalPostsFetched: 0,
       totalCommentsFetched: 0,
       competitorCount: competitors.length,
     });
-    console.log(`[FetchOrch] QUEUED job ${jobId} | account=${accountId} | runningJobs=${runningCount} >= ceiling=${MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT}`);
+    console.log(`[FetchOrch] QUEUED job ${jobId} | priority=FAST_PASS(${PRIORITY_FAST_PASS}) | account=${accountId} | runningJobs=${runningCount} >= ceiling=${MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT}`);
     return jobId;
   }
 
@@ -1021,8 +1038,15 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
 const GLOBAL_MAX_CONCURRENT_JOBS = 3;
 const QUEUE_PROCESSOR_INTERVAL_MS = 30000;
 const PER_ACCOUNT_JOB_BUDGET_PER_HOUR = 4;
+const BACKPRESSURE_QUEUE_THRESHOLD = 20;
+const MAX_PROMOTIONS_PER_MINUTE = 6;
+
+const PRIORITY_FAST_PASS = 0;
+const PRIORITY_DEEP_PASS = 5;
+const PRIORITY_BACKGROUND = 10;
 
 const accountJobTracker = new Map<string, { count: number; resetAt: number }>();
+const promotionTracker = { count: 0, windowStart: Date.now() };
 
 function checkAccountBudget(accountId: string): boolean {
   const now = Date.now();
@@ -1045,6 +1069,19 @@ async function getGlobalRunningJobCount(): Promise<number> {
   return Number(result[0]?.count ?? 0);
 }
 
+function checkPromotionRateGate(): boolean {
+  const now = Date.now();
+  if (now - promotionTracker.windowStart > 60000) {
+    promotionTracker.count = 0;
+    promotionTracker.windowStart = now;
+  }
+  return promotionTracker.count < MAX_PROMOTIONS_PER_MINUTE;
+}
+
+function recordPromotion(): void {
+  promotionTracker.count++;
+}
+
 async function processJobQueue(): Promise<void> {
   try {
     const globalRunning = await getGlobalRunningJobCount();
@@ -1052,11 +1089,26 @@ async function processJobQueue(): Promise<void> {
       return;
     }
 
-    const slotsAvailable = GLOBAL_MAX_CONCURRENT_JOBS - globalRunning;
+    if (!checkPromotionRateGate()) {
+      console.log(`[QueueProcessor] RATE_GATE: ${promotionTracker.count} promotions in current minute window, max=${MAX_PROMOTIONS_PER_MINUTE}, deferring`);
+      return;
+    }
+
+    const queueDepth = await db.select({ count: sql<number>`count(*)` }).from(miFetchJobs)
+      .where(eq(miFetchJobs.status, "QUEUED"));
+    const totalQueued = Number(queueDepth[0]?.count ?? 0);
+
+    if (totalQueued > BACKPRESSURE_QUEUE_THRESHOLD) {
+      console.log(`[QueueProcessor] BACKPRESSURE: queue depth ${totalQueued} exceeds threshold ${BACKPRESSURE_QUEUE_THRESHOLD}, limiting to 1 promotion this cycle`);
+    }
+
+    const slotsAvailable = totalQueued > BACKPRESSURE_QUEUE_THRESHOLD
+      ? 1
+      : GLOBAL_MAX_CONCURRENT_JOBS - globalRunning;
 
     const queuedJobs = await db.select().from(miFetchJobs)
       .where(eq(miFetchJobs.status, "QUEUED"))
-      .orderBy(miFetchJobs.createdAt)
+      .orderBy(miFetchJobs.priority, miFetchJobs.createdAt)
       .limit(slotsAvailable);
 
     if (queuedJobs.length === 0) return;
@@ -1080,6 +1132,11 @@ async function processJobQueue(): Promise<void> {
         continue;
       }
 
+      if (!checkPromotionRateGate()) {
+        console.log(`[QueueProcessor] RATE_GATE: reached ${MAX_PROMOTIONS_PER_MINUTE} promotions/min mid-cycle, stopping promotions`);
+        break;
+      }
+
       const promoted = await db.update(miFetchJobs)
         .set({ status: "RUNNING" })
         .where(and(eq(miFetchJobs.id, job.id), eq(miFetchJobs.status, "QUEUED")))
@@ -1091,9 +1148,10 @@ async function processJobQueue(): Promise<void> {
       }
 
       incrementAccountBudget(job.accountId);
+      recordPromotion();
 
       const lockKey = `${job.accountId}:${job.campaignId}`;
-      console.log(`[QueueProcessor] Atomically promoted QUEUED→RUNNING job ${job.id} | account=${job.accountId} | globalSlots=${slotsAvailable}`);
+      console.log(`[QueueProcessor] Atomically promoted QUEUED→RUNNING job ${job.id} | priority=${job.priority} | account=${job.accountId} | globalSlots=${slotsAvailable}`);
 
       const promise = executeFetchJob(job.id, job.accountId, job.campaignId, competitors).catch(err => {
         console.error(`[QueueProcessor] Job ${job.id} fatal error:`, err.message);
@@ -1128,10 +1186,19 @@ export async function getQueueDiagnostics(): Promise<{
   queuedJobs: number;
   perAccountBudget: number;
   accountTrackers: Record<string, { count: number; resetIn: number }>;
+  health: {
+    backpressureActive: boolean;
+    backpressureThreshold: number;
+    promotionsThisMinute: number;
+    maxPromotionsPerMinute: number;
+    rateGateActive: boolean;
+    queueProcessorRunning: boolean;
+  };
 }> {
   const globalRunning = await getGlobalRunningJobCount();
   const queued = await db.select({ count: sql<number>`count(*)` }).from(miFetchJobs)
     .where(eq(miFetchJobs.status, "QUEUED"));
+  const totalQueued = Number(queued[0]?.count ?? 0);
 
   const trackers: Record<string, { count: number; resetIn: number }> = {};
   const now = Date.now();
@@ -1139,12 +1206,23 @@ export async function getQueueDiagnostics(): Promise<{
     trackers[acct] = { count: t.count, resetIn: Math.max(0, Math.round((t.resetAt - now) / 1000)) };
   }
 
+  const minuteElapsed = now - promotionTracker.windowStart > 60000;
+  const currentPromotions = minuteElapsed ? 0 : promotionTracker.count;
+
   return {
     globalRunning,
     globalMaxConcurrent: GLOBAL_MAX_CONCURRENT_JOBS,
-    queuedJobs: Number(queued[0]?.count ?? 0),
+    queuedJobs: totalQueued,
     perAccountBudget: PER_ACCOUNT_JOB_BUDGET_PER_HOUR,
     accountTrackers: trackers,
+    health: {
+      backpressureActive: totalQueued > BACKPRESSURE_QUEUE_THRESHOLD,
+      backpressureThreshold: BACKPRESSURE_QUEUE_THRESHOLD,
+      promotionsThisMinute: currentPromotions,
+      maxPromotionsPerMinute: MAX_PROMOTIONS_PER_MINUTE,
+      rateGateActive: currentPromotions >= MAX_PROMOTIONS_PER_MINUTE,
+      queueProcessorRunning: queueProcessorHandle !== null,
+    },
   };
 }
 

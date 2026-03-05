@@ -1,0 +1,142 @@
+Hi Replit Team,
+
+Thank you for the detailed implementation update. The two-speed collection system, cache-first logic, sticky sessions, and self-updating MI are all solid improvements.
+
+However, after reviewing the response carefully, there is one critical scalability safeguard that was not explicitly addressed and must be implemented before the system is exposed to larger user volumes.
+
+This is Global Crawl Queue and Load Protection.
+
+Without it, the system will work correctly under light load but will become unstable once multiple users trigger Market Intelligence simultaneously.
+
+Please review the following requirement carefully.
+
+---------------------------------------------------------------------
+
+CRITICAL ISSUE: THUNDERING HERD RISK
+
+Currently, if multiple users trigger Market Intelligence at the same time, each request could potentially initiate a Fast Pass collection job.
+
+Even with request pacing, this creates the following risks:
+
+• simultaneous scraping bursts  
+• proxy pool exhaustion  
+• increased Instagram block probability  
+• crawler instability  
+• exponential proxy cost increases  
+
+For example:
+
+100 users triggering MI within a short period could create 100 Fast Pass scraping jobs.
+
+Even if each job is “safe” individually, the combined load will break the system.
+
+This is commonly known as the Thundering Herd problem in distributed systems.
+
+---------------------------------------------------------------------
+
+REQUIRED SOLUTION: GLOBAL CRAWL QUEUE
+
+All crawling operations must pass through a centralized job queue.
+
+User-triggered Market Intelligence requests must never directly trigger crawler execution.
+
+Instead, the workflow must be:
+
+User Request  
+→ Market Intelligence Service  
+→ Crawl Queue  
+→ Worker Pool  
+→ Crawler Execution
+
+Key requirements:
+
+1. A centralized queue must hold all crawl tasks.
+
+2. Workers must process jobs gradually according to capacity limits.
+
+3. Worker concurrency must remain strictly controlled (for example 2–4 workers globally).
+
+4. Duplicate crawl requests for the same competitor set must be deduplicated when possible.
+
+---------------------------------------------------------------------
+
+REQUEST DEDUPLICATION
+
+If two users request analysis of the same competitor accounts within a short timeframe, the system should:
+
+• reuse the existing crawl job  
+• reuse cached data if still fresh  
+• avoid creating duplicate crawling work
+
+This significantly reduces proxy usage and protects system stability.
+
+---------------------------------------------------------------------
+
+QUEUE PRIORITY RULES
+
+To maintain responsiveness:
+
+High Priority:
+Fast Pass jobs for active user sessions.
+
+Medium Priority:
+Deep Pass enrichment tasks.
+
+Low Priority:
+Background market refresh jobs.
+
+Workers should always prioritize Fast Pass jobs so that user-facing responses remain fast.
+
+---------------------------------------------------------------------
+
+LOAD PROTECTION RULES
+
+Implement the following protections:
+
+• Maximum concurrent crawl workers globally  
+• Maximum crawl tasks per minute  
+• Backpressure when queue grows beyond threshold  
+• Queue health monitoring metrics
+
+If the system becomes overloaded, the queue should delay jobs rather than allowing crawler bursts.
+
+---------------------------------------------------------------------
+
+STRESS TEST REQUIREMENT
+
+Before finalizing deployment, please run a simulated stress test with conditions such as:
+
+• 200+ simultaneous MI requests  
+• large queue depth  
+• crawler running continuously
+
+Verify that:
+
+• crawler pacing remains stable  
+• queue distributes load correctly  
+• no burst scraping occurs  
+• the system continues to produce snapshots from cached data
+
+---------------------------------------------------------------------
+
+EXPECTED RESULT
+
+After implementing this safeguard, the system should be able to:
+
+• handle large user volumes safely  
+• avoid Instagram block cascades  
+• control proxy costs  
+• maintain fast Fast Pass responses  
+• keep crawler activity gradual and predictable
+
+---------------------------------------------------------------------
+
+Please confirm whether a global crawl queue already exists internally.  
+If not, this must be implemented before scaling the system further.
+
+This safeguard is critical for long-term stability.
+
+Thank you.
+
+Best regards,  
+Samir Fatfat

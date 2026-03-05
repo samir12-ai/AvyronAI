@@ -543,12 +543,12 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
   });
 
   describe("J) Crash/Restart Recovery", () => {
-    it("should recover RUNNING jobs from DB after backend restart", async () => {
+    it("should recover RUNNING/QUEUED jobs from DB after backend restart", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
       );
-      expect(source).toContain('eq(miFetchJobs.status, "RUNNING")');
-      expect(source).toContain("Reusing active DB job");
+      expect(source).toContain("IN ('RUNNING', 'QUEUED')");
+      expect(source).toContain("DEDUP: Reusing active");
     });
 
     it("should return stable stageStatuses from DB (not memory)", async () => {
@@ -1790,13 +1790,14 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("import { startQueueProcessor }");
     });
 
-    it("QUEUED jobs are selected FIFO (ordered by createdAt)", async () => {
+    it("QUEUED jobs are selected by priority then FIFO (ordered by priority, createdAt)", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
       );
-      const queueFunc = source.slice(source.indexOf("async function processJobQueue"), source.indexOf("async function processJobQueue") + 1500);
+      const queueFunc = source.slice(source.indexOf("async function processJobQueue"), source.indexOf("async function processJobQueue") + 2000);
       expect(queueFunc).toContain("QUEUED");
       expect(queueFunc).toContain("orderBy");
+      expect(queueFunc).toContain("priority");
       expect(queueFunc).toContain("createdAt");
     });
 
@@ -1806,6 +1807,131 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       );
       expect(source).toContain("3600000");
       expect(source).toContain("resetAt");
+    });
+
+    it("priority constants exist (FAST_PASS=0, DEEP_PASS=5, BACKGROUND=10)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("PRIORITY_FAST_PASS = 0");
+      expect(source).toContain("PRIORITY_DEEP_PASS = 5");
+      expect(source).toContain("PRIORITY_BACKGROUND = 10");
+    });
+
+    it("priority column exists in schema", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("shared/schema.ts", "utf-8")
+      );
+      const miFetchSection = source.slice(source.indexOf('mi_fetch_jobs'), source.indexOf('mi_fetch_jobs') + 1000);
+      expect(miFetchSection).toContain("priority");
+    });
+
+    it("QUEUED jobs are created with FAST_PASS priority", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("priority: PRIORITY_FAST_PASS");
+    });
+  });
+
+  describe("S2) Request Deduplication", () => {
+    it("deduplicates by account+campaign (reuses RUNNING or QUEUED jobs)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("DEDUP: Reusing active");
+      expect(source).toContain("IN ('RUNNING', 'QUEUED')");
+    });
+
+    it("deduplicates by competitorHash across different accounts", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("DEDUP: Reusing job");
+      expect(source).toContain("same competitorHash");
+      expect(source).toContain("existingDupHash");
+    });
+  });
+
+  describe("S3) Backpressure & Rate Gate", () => {
+    it("BACKPRESSURE_QUEUE_THRESHOLD exists and is reasonable (10-50)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      const match = source.match(/BACKPRESSURE_QUEUE_THRESHOLD\s*=\s*(\d+)/);
+      expect(match).not.toBeNull();
+      const value = parseInt(match![1]);
+      expect(value).toBeGreaterThanOrEqual(10);
+      expect(value).toBeLessThanOrEqual(50);
+    });
+
+    it("backpressure limits promotions to 1 per cycle when queue exceeds threshold", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("BACKPRESSURE: queue depth");
+      expect(source).toContain("limiting to 1 promotion");
+      expect(source).toContain("totalQueued > BACKPRESSURE_QUEUE_THRESHOLD");
+    });
+
+    it("MAX_PROMOTIONS_PER_MINUTE exists and is reasonable (4-10)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      const match = source.match(/MAX_PROMOTIONS_PER_MINUTE\s*=\s*(\d+)/);
+      expect(match).not.toBeNull();
+      const value = parseInt(match![1]);
+      expect(value).toBeGreaterThanOrEqual(4);
+      expect(value).toBeLessThanOrEqual(10);
+    });
+
+    it("rate gate defers promotions when limit reached", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("checkPromotionRateGate");
+      expect(source).toContain("RATE_GATE:");
+      expect(source).toContain("recordPromotion");
+    });
+
+    it("rate gate is checked per-promotion inside loop (not just once per cycle)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      const queueFunc = source.slice(source.indexOf("for (const job of queuedJobs)"), source.indexOf("for (const job of queuedJobs)") + 1500);
+      expect(queueFunc).toContain("checkPromotionRateGate");
+      expect(queueFunc).toContain("stopping promotions");
+      expect(queueFunc).toContain("break");
+    });
+
+    it("creationLocks path deduplicates QUEUED jobs (not just RUNNING)", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      const lockSection = source.slice(source.indexOf("if (creationLocks.has(lockKey))"), source.indexOf("if (creationLocks.has(lockKey))") + 500);
+      expect(lockSection).toContain("IN ('RUNNING', 'QUEUED')");
+      expect(lockSection).toContain("DEDUP (lock-path)");
+    });
+
+    it("promotion tracker resets every 60 seconds", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      const rateGateFunc = source.slice(source.indexOf("function checkPromotionRateGate"), source.indexOf("function checkPromotionRateGate") + 300);
+      expect(rateGateFunc).toContain("60000");
+      expect(rateGateFunc).toContain("promotionTracker.count = 0");
+    });
+
+    it("queue health monitoring in diagnostics", async () => {
+      const source = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
+      );
+      expect(source).toContain("backpressureActive");
+      expect(source).toContain("backpressureThreshold");
+      expect(source).toContain("promotionsThisMinute");
+      expect(source).toContain("maxPromotionsPerMinute");
+      expect(source).toContain("rateGateActive");
+      expect(source).toContain("queueProcessorRunning");
     });
   });
 
@@ -1923,20 +2049,21 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(match).not.toBeNull();
     });
 
-    it("multiple simultaneous requests reuse existing RUNNING job", async () => {
+    it("multiple simultaneous requests reuse existing RUNNING/QUEUED job", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
       );
-      expect(source).toContain("Reusing active DB job");
-      expect(source).toContain("existingRunning.length > 0");
+      expect(source).toContain("DEDUP: Reusing active");
+      expect(source).toContain("existingActive.length > 0");
     });
 
-    it("queue processor limits promoted jobs to available global slots", async () => {
+    it("queue processor limits promoted jobs to available global slots with backpressure", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
       );
-      expect(source).toContain("slotsAvailable = GLOBAL_MAX_CONCURRENT_JOBS - globalRunning");
+      expect(source).toContain("GLOBAL_MAX_CONCURRENT_JOBS - globalRunning");
       expect(source).toContain(".limit(slotsAvailable)");
+      expect(source).toContain("BACKPRESSURE_QUEUE_THRESHOLD");
     });
   });
 });

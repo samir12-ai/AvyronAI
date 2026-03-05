@@ -1515,6 +1515,7 @@ export const miFetchJobs = pgTable("mi_fetch_jobs", {
   durationMs: integer("duration_ms"),
   collectionMode: text("collection_mode").default("FAST_PASS"),
   dataStatus: text("data_status").default("LIVE"),
+  priority: integer("priority").default(1),
   createdAt: timestamp("created_at").defaultNow(),
   completedAt: timestamp("completed_at"),
 });

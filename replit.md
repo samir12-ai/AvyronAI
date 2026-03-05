@@ -47,6 +47,13 @@ Client-side data is stored using AsyncStorage, while server-side data, including
 - **Shared Market Data Cache**: 12h cache reuse window, duplicate post dedup, stale-data tolerance for serving cached snapshots instantly.
 - **Admin Market Database Dashboard** (`admin-routes.ts`): 4 endpoints — `/api/admin/market/overview` (inventory + queue + recent jobs), `/api/admin/market/competitors` (inventory with post counts), `/api/admin/market/freshness` (age + isFresh flags), `/api/admin/market/crawler-status` (running/queued/24h stats). Frontend component `MarketDatabaseAdmin.tsx` with 4-tab UI (Overview, Inventory, Freshness, Crawler). Admin-only — raw market data never exposed to users.
 
+### Thundering Herd Protection
+- **Request Deduplication**: Same account+campaign reuses existing RUNNING/QUEUED jobs. Cross-account deduplication by `competitorHash` — if two users analyze the same competitor set, the second request reuses the first's crawl job.
+- **Queue Priority**: `PRIORITY_FAST_PASS=0` (highest), `PRIORITY_DEEP_PASS=5`, `PRIORITY_BACKGROUND=10`. Queue processor selects by `priority ASC, createdAt ASC` — Fast Pass jobs always execute first.
+- **Backpressure**: `BACKPRESSURE_QUEUE_THRESHOLD=20` — when queue depth exceeds threshold, promotions throttle to 1 per cycle instead of filling all available slots. Prevents burst scraping under heavy load.
+- **Rate Gate**: `MAX_PROMOTIONS_PER_MINUTE=6` — sliding 60-second window limits how many jobs can be promoted per minute, preventing crawler saturation even when many slots are available.
+- **Queue Health Monitoring**: Diagnostics expose `backpressureActive`, `promotionsThisMinute`, `rateGateActive`, `queueProcessorRunning` flags. Visible in Admin Market Database dashboard under "Queue Health" section.
+
 ## External Dependencies
 
 ### AI Services
