@@ -1,0 +1,103 @@
+Positioning engine v3
+
+id="48372"}
+Subject: Positioning Engine V3 Final Hardening and Logic Improvements
+
+Hello Replit,
+
+We need to perform a final hardening pass on Positioning Engine V3.
+
+Important constraint:  
+Do NOT add new layers or change the engine contract.  
+The engine must remain a 12-layer pipeline and keep full compatibility with downstream engines.
+
+The goal is to improve scoring accuracy while keeping the architecture stable.
+
+Please implement the following improvements.
+
+--------------------------------------------------
+
+1. Weighted Narrative Saturation (Layer 3)
+
+Current behavior:
+Narrative saturation is calculated as the number of competitors using a narrative divided by total competitors.
+
+Problem:
+All competitors currently have equal weight, which misrepresents markets where one dominant competitor controls the narrative.
+
+Required change:
+Modify the saturation calculation to use authority-weighted saturation.
+
+New formula:
+
+weightedSaturation =
+SUM(narrativeUsage × competitorAuthorityScore)
+/
+SUM(competitorAuthorityScore)
+
+Where competitorAuthorityScore comes from Market Power Analysis.
+
+This change must remain inside Layer 3 and must not affect the engine interface.
+
+--------------------------------------------------
+
+2. Category Control Index (Layer 6)
+
+Extend the Market Power Analysis layer with a new internal metric called:
+
+CategoryControlIndex
+
+This metric should estimate how much narrative ownership a competitor has within the detected category.
+
+Suggested calculation:
+
+CategoryControlIndex =
+(narrativeOwnership × 0.6) +
+(contentDominance × 0.4)
+
+This value should be used to improve Flanking Mode detection.
+
+Do not expose this as a new output field unless it already fits within the existing Market Power structure.
+
+--------------------------------------------------
+
+3. Narrative Collision Guard (Layer 12)
+
+Enhance the Stability Guard to prevent pseudo-differentiation.
+
+Add a validation check:
+
+If narrativeDistance < 0.25
+then mark the territory as unstable.
+
+This prevents the engine from selecting positioning territories that are too similar to competitor narratives.
+
+This check should run alongside the existing three stability checks:
+- saturation check
+- dominance check
+- pain alignment check
+
+--------------------------------------------------
+
+4. Engine Safety Validation
+
+After implementing the changes, verify that:
+
+- The engine still runs all 12 layers.
+- No new dependencies were introduced.
+- Output schema in positioning_snapshots remains unchanged.
+- All existing unit tests still pass.
+
+If any test fails, update the test logic only if required by the improved scoring behavior.
+
+--------------------------------------------------
+
+5. Final Validation Report
+
+After the implementation, provide a short report including:
+
+- Confirmation that all layers remain intact.
+- Description of the three logic improvements implemented.
+- Confirmation that downstream engine compatibility is preserved.
+
+This change should harden the engine logic without modifying the ar

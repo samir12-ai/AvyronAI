@@ -101,22 +101,38 @@ function layer2_marketNarrativeMap(miData: any): Record<string, string[]> {
   return narrativeMap;
 }
 
-function layer3_narrativeSaturationDetection(narrativeMap: Record<string, string[]>): Record<string, number> {
-  const narrativeCounts: Record<string, number> = {};
-  const totalCompetitors = Object.keys(narrativeMap).length || 1;
+function layer3_narrativeSaturationDetection(
+  narrativeMap: Record<string, string[]>,
+  miData?: any,
+): Record<string, number> {
+  const dominanceData = miData ? safeJsonParse(miData.dominanceData, []) : [];
+  const authorityScores: Record<string, number> = {};
+  for (const d of dominanceData) {
+    const name = d.competitor || d.competitorName || "";
+    if (name) {
+      authorityScores[name] = Math.min(1.0, (d.dominanceScore || d.score || 0) / 100);
+    }
+  }
 
-  for (const narratives of Object.values(narrativeMap)) {
+  const totalAuthorityWeight = Object.keys(narrativeMap).reduce((sum, comp) => {
+    return sum + (authorityScores[comp] || 0.1);
+  }, 0) || 1;
+
+  const narrativeWeights: Record<string, number> = {};
+
+  for (const [comp, narratives] of Object.entries(narrativeMap)) {
+    const compWeight = authorityScores[comp] || 0.1;
     for (const n of narratives) {
       const key = n.toLowerCase().trim();
       if (key) {
-        narrativeCounts[key] = (narrativeCounts[key] || 0) + 1;
+        narrativeWeights[key] = (narrativeWeights[key] || 0) + compWeight;
       }
     }
   }
 
   const saturation: Record<string, number> = {};
-  for (const [narrative, count] of Object.entries(narrativeCounts)) {
-    saturation[narrative] = Math.min(1.0, count / totalCompetitors);
+  for (const [narrative, weight] of Object.entries(narrativeWeights)) {
+    saturation[narrative] = Math.min(1.0, weight / totalAuthorityWeight);
   }
   return saturation;
 }
@@ -210,7 +226,15 @@ function layer6_marketPowerAnalysis(miData: any, competitors: any[]): {
     ? entries.reduce((s, e) => s + e.authorityScore, 0) / entries.length
     : 0;
   const authorityGap = topAuthority - avgAuthority;
-  const flankingMode = authorityGap >= POSITIONING_THRESHOLDS.AUTHORITY_GAP_FLANKING_THRESHOLD;
+
+  const topEntry = entries[0];
+  const categoryControlIndex = topEntry
+    ? (topEntry.narrativeOwnershipIndex * 0.6) + (topEntry.contentDominanceScore * 0.4)
+    : 0;
+
+  const flankingMode =
+    authorityGap >= POSITIONING_THRESHOLDS.AUTHORITY_GAP_FLANKING_THRESHOLD ||
+    categoryControlIndex >= 0.70;
 
   return { entries, authorityGap, flankingMode };
 }
@@ -482,6 +506,7 @@ function layer12_stabilityGuard(
   narrativeSaturation: Record<string, number>,
   marketPower: MarketPowerEntry[],
   segmentPriority: { segment: string; priority: number; painAlignment: number }[],
+  narrativeMap?: Record<string, string[]>,
 ): { territories: Territory[]; stabilityResult: StabilityResult } {
   const checks: StabilityResult["checks"] = [];
   let fallbackApplied = false;
@@ -516,6 +541,17 @@ function layer12_stabilityGuard(
         ? "Audience pain alignment sufficient"
         : `Pain alignment ${topSegment?.painAlignment} below minimum ${POSITIONING_THRESHOLDS.MIN_PAIN_ALIGNMENT}`,
     });
+
+    if (narrativeMap) {
+      const narrativeDistance = layer9_narrativeDistanceScoring(territory.name, narrativeMap);
+      const collisionPassed = narrativeDistance >= POSITIONING_THRESHOLDS.NARRATIVE_COLLISION_MIN_DISTANCE;
+      territoryChecks.push({
+        passed: collisionPassed,
+        reason: collisionPassed
+          ? `Narrative distance ${(narrativeDistance * 100).toFixed(0)}% — sufficiently differentiated`
+          : `Narrative distance ${(narrativeDistance * 100).toFixed(0)}% below ${POSITIONING_THRESHOLDS.NARRATIVE_COLLISION_MIN_DISTANCE * 100}% — pseudo-differentiation risk`,
+      });
+    }
 
     const allPassed = territoryChecks.every(c => c.passed);
     territory.isStable = allPassed;
@@ -630,8 +666,8 @@ export async function runPositioningEngine(
   const narrativeMap = layer2_marketNarrativeMap(miSnapshot);
   console.log(`[PositioningEngine-V3] L2 Narratives: ${Object.keys(narrativeMap).length} competitors mapped`);
 
-  const narrativeSaturation = layer3_narrativeSaturationDetection(narrativeMap);
-  console.log(`[PositioningEngine-V3] L3 Saturation: ${Object.keys(narrativeSaturation).length} narratives scored`);
+  const narrativeSaturation = layer3_narrativeSaturationDetection(narrativeMap, miSnapshot);
+  console.log(`[PositioningEngine-V3] L3 Saturation: ${Object.keys(narrativeSaturation).length} narratives scored (authority-weighted)`);
 
   const { trustGaps, trustGapScore } = layer4_trustGapDetection(audienceSnapshot);
   console.log(`[PositioningEngine-V3] L4 Trust gaps: ${trustGaps.length} (score: ${trustGapScore.toFixed(2)})`);
@@ -658,7 +694,7 @@ export async function runPositioningEngine(
   console.log(`[PositioningEngine-V3] L11 Statements generated`);
 
   const { territories: finalTerritories, stabilityResult } = layer12_stabilityGuard(
-    territories, narrativeSaturation, marketPower, segmentPriority,
+    territories, narrativeSaturation, marketPower, segmentPriority, narrativeMap,
   );
   console.log(`[PositioningEngine-V3] L12 Stability: ${stabilityResult.isStable ? "STABLE" : "UNSTABLE"} | fallback=${stabilityResult.fallbackApplied}`);
 
