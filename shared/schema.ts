@@ -798,6 +798,8 @@ export const ciCompetitors = pgTable("ci_competitors", {
   notes: text("notes"),
   isDemo: boolean("is_demo").default(false),
   isActive: boolean("is_active").default(true),
+  lastCheckedAt: timestamp("last_checked_at"),
+  analysisLevel: text("analysis_level").default("FAST_PASS"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

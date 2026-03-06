@@ -626,6 +626,8 @@ async function _executeFetch(
       engagementRatio: engagementRate || competitor.engagementRatio,
       ctaPatterns: ctaPatternStr || competitor.ctaPatterns,
       contentTypeRatio: contentMix || competitor.contentTypeRatio,
+      lastCheckedAt: new Date(),
+      analysisLevel: collectionMode === "DEEP_PASS" ? "DEEP_PASS" : "FAST_PASS",
       updatedAt: new Date(),
     })
     .where(eq(ciCompetitors.id, competitorId));

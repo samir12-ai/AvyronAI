@@ -1,0 +1,235 @@
+
+Subject: Full Database Hardening, Performance Fixes, and Structural Validation
+
+Hello Replit,
+
+Please perform a complete database hardening, performance optimization, and structural validation for the Market Intelligence system powering this AI application.
+
+The system relies on structured scraping and analysis with two collection levels:
+	•	FAST_PASS (light scraping)
+	•	DEEP_PASS (extended scraping)
+
+The database must support:
+	•	competitor intelligence
+	•	Instagram content analysis
+	•	content DNA extraction
+	•	AI engine signals
+	•	scalable data growth
+
+Please run the following validation checks and return PASS or FAIL for each item.
+
+If any item returns FAIL, automatically fix the issue and report the correction.
+
+⸻
+
+SECTION 1 — COMPETITOR CORE STRUCTURE
+
+Verify that the ci_competitors table includes the following fields:
+	•	competitor name
+	•	platform (Instagram, website, etc.)
+	•	profile link
+	•	campaignId (market context)
+	•	businessType or category
+	•	created timestamp
+	•	lastCheckedAt timestamp
+	•	analysisLevel (FAST_PASS or DEEP_PASS)
+
+PASS if these fields exist and allow engines to determine the competitor state quickly.
+FAIL if lastCheckedAt or analysisLevel are missing.
+
+If FAIL → add these fields and backfill values where possible.
+
+⸻
+
+SECTION 2 — FAST CHECK VS DEEP CHECK STATE
+
+Verify that the system can determine the latest analysis depth for each competitor without heavy joins.
+
+PASS if the competitor record itself contains the latest analysis level and timestamp.
+FAIL if engines must join miFetchJobs to determine competitor analysis depth.
+
+If FAIL → persist latest analysis state directly on the competitor record.
+
+⸻
+
+SECTION 3 — INSTAGRAM PAGE DATA STRUCTURE
+
+Verify that Instagram metrics are stored in a dedicated structure such as ci_competitor_metrics_snapshot.
+
+Each snapshot should include:
+	•	competitorId
+	•	followers
+	•	postsCollected
+	•	engagement metrics if available
+	•	lastFetchAt
+	•	fetchMethod
+	•	dataFreshnessDays
+
+PASS if Instagram page metrics are stored separately and linked to competitors.
+FAIL if metrics are mixed with competitor core data.
+
+⸻
+
+SECTION 4 — POST DATA STORAGE
+
+Verify that Instagram posts are stored in ci_competitor_posts with structured fields:
+	•	competitorId
+	•	postId
+	•	caption
+	•	mediaType
+	•	likes
+	•	comments
+	•	hashtags
+	•	timestamp
+
+PASS if post data supports content pattern analysis.
+FAIL if posts are partially stored or unstructured.
+
+⸻
+
+SECTION 5 — COMMENT SAMPLING (DEEP CHECK)
+
+Verify that comments are stored in a separate table such as ci_competitor_comments.
+
+Requirements:
+	•	linked via postId
+	•	stored only during DEEP_PASS
+	•	optional during FAST_PASS
+
+PASS if comment scraping follows this rule.
+FAIL if comments are always collected or mixed with posts.
+
+⸻
+
+SECTION 6 — CONTENT DNA STORAGE
+
+Verify that Content DNA is stored and linked to scraped evidence.
+
+Expected structure:
+	•	content angles
+	•	hook archetypes
+	•	messaging patterns
+	•	narrative frameworks
+	•	tone style
+	•	CTA structures
+	•	engagement patterns
+
+Content DNA entries should reference:
+	•	competitorId
+	•	postId evidence where applicable
+
+PASS if Content DNA exists and connects to scraped data.
+FAIL if Content DNA is missing or disconnected.
+
+⸻
+
+SECTION 7 — DATA FRESHNESS SYSTEM
+
+Verify that the system tracks freshness correctly using:
+	•	lastFetchAt
+	•	lastCheckedAt
+	•	dataFreshnessDays
+	•	refresh scheduling
+	•	confidence decay based on age
+
+PASS if engines can detect stale data quickly.
+FAIL if freshness cannot be determined efficiently.
+
+⸻
+
+SECTION 8 — DUPLICATE PROTECTION
+
+Verify that the database enforces duplicate protection at the database level.
+
+Add unique constraints where appropriate:
+
+Competitors:
+(accountId, campaignId, profileLink)
+
+Posts:
+(competitorId, postId)
+
+Metrics snapshots:
+(competitorId, lastFetchAt)
+
+Comments:
+(postId, commentId) if available
+
+PASS if duplicates are prevented at DB level.
+FAIL if protection exists only in application code.
+
+⸻
+
+SECTION 9 — INDEXING FOR HIGH-FREQUENCY QUERIES
+
+Verify that indexes exist for high-frequency queries.
+
+Add indexes where missing for:
+	•	competitor lookup by (accountId, campaignId)
+	•	posts by competitorId
+	•	metrics by competitorId
+	•	content DNA by competitorId
+	•	studio items by campaignId
+	•	calendar entries by campaignId + status
+	•	performance snapshots by accountId
+	•	published posts by campaignId + status
+
+PASS if these queries avoid full table scans.
+FAIL if queries require scanning entire tables.
+
+⸻
+
+SECTION 10 — FLASHLIST / PRIORITY DATA ACCESS
+
+Verify that frequently accessed data can be retrieved quickly.
+
+High priority datasets include:
+	•	competitors
+	•	recent posts
+	•	latest metrics snapshots
+	•	content DNA summaries
+
+PASS if these datasets can be accessed efficiently.
+FAIL if every request requires heavy joins or large scans.
+
+⸻
+
+SECTION 11 — QUERY PERFORMANCE
+
+Check that common queries do not cause full table scans.
+
+Focus on queries used by:
+	•	Market Intelligence Engine
+	•	Audience Engine
+	•	Positioning Engine
+	•	Dashboard metrics
+	•	Build a Plan
+
+PASS if queries are optimized and indexed.
+FAIL if query execution scales poorly with dataset growth.
+
+⸻
+
+SECTION 12 — DATA GROWTH SCALABILITY
+
+Verify that the database can scale for large datasets including:
+	•	thousands of competitors
+	•	hundreds of thousands of posts
+	•	millions of comments
+	•	expanding content DNA records
+
+PASS if the schema and indexing strategy support growth.
+FAIL if the current design will degrade under scale.
+
+⸻
+
+FINAL TASK
+
+After completing the validation:
+	1.	Return PASS / FAIL for each section.
+	2.	Automatically fix any FAIL conditions.
+	3.	List all structural changes applied (columns, indexes, constraints).
+	4.	Provide a summary of the optimized database architecture.
+
+The goal is to ensure the database is robust, scalable, and efficient for AI-driven market intelligence engines.
+:::
