@@ -1,0 +1,234 @@
+Subject: Full Database Architecture and Data Performance Audit
+
+Hello Replit,
+
+Please run a full audit of the current database architecture and data performance system used in this AI application.
+
+This system powers multiple analytical engines such as:
+- Market Intelligence
+- Audience Engine
+- Positioning Engine
+- Future Strategy Engines
+
+Because these engines depend on structured data, the database must be optimized for reliability, performance, scalability, and clean data access.
+
+Please perform the following checks.  
+For each item return PASS or FAIL.
+
+If any item returns FAIL, automatically correct the issue and report the adjustment.
+
+--------------------------------------------------
+
+DATABASE STRUCTURE VALIDATION
+
+1. Domain Separation
+
+Verify that the database separates the following domains clearly:
+
+- markets  
+- competitors  
+- audience insights  
+- content data  
+- Instagram pages  
+- posts  
+- comments  
+- engagement metrics  
+- offers  
+- ads data  
+- content DNA
+
+PASS if domains are separated into logical structures.  
+FAIL if domains are mixed or unclear.
+
+If FAIL → reorganize the database structure.
+
+--------------------------------------------------
+
+2. Competitor Data Structure
+
+Verify that competitor records include:
+
+- competitor name
+- platform links (Instagram / website / etc.)
+- market reference
+- category
+- data source
+- last_updated timestamp
+
+PASS if competitors are structured and linked to markets.  
+FAIL if competitor records are incomplete or loosely stored.
+
+--------------------------------------------------
+
+3. Instagram Content Storage
+
+Verify that Instagram data is stored in structured format.
+
+Each post should support:
+
+- page name
+- post id
+- caption
+- post type (post / reel / carousel)
+- likes
+- comment count
+- hashtags
+- posting date
+
+PASS if content can be analyzed for patterns.  
+FAIL if data is partially stored or unstructured.
+
+--------------------------------------------------
+
+4. Comment and Engagement Data
+
+Verify that comments are stored separately and linked to posts.
+
+PASS if comment data is queryable and structured.  
+FAIL if comment data is mixed with post data.
+
+--------------------------------------------------
+
+CONTENT DNA VALIDATION
+
+5. Content DNA Layer
+
+Verify the existence of a Content DNA structure capable of storing:
+
+- content angles
+- messaging patterns
+- tone style
+- hook structures
+- engagement patterns
+- content themes
+
+PASS if Content DNA can connect to competitors or markets.  
+FAIL if Content DNA is missing or disconnected.
+
+--------------------------------------------------
+
+MARKET INTELLIGENCE DATA HUB
+
+6. Market Intelligence Storage
+
+Verify that Market Intelligence acts as a central data hub.
+
+The database should store reusable intelligence including:
+
+- competitor data
+- content patterns
+- offers
+- category insights
+- ads signals
+- engagement patterns
+
+PASS if engines reuse stored data instead of repeated scraping.  
+FAIL if engines repeatedly fetch raw data.
+
+--------------------------------------------------
+
+PERFORMANCE AND DATA OPTIMIZATION
+
+7. Flashlist / Priority Data Layer
+
+Verify that the system contains a fast-access layer for frequently used data.
+
+PASS if high-frequency data is cached or prioritized.  
+FAIL if engines must query full datasets repeatedly.
+
+If FAIL → implement a priority-based fast access layer.
+
+--------------------------------------------------
+
+8. Data Freshness Tracking
+
+Verify that key datasets include freshness metadata:
+
+- last_updated
+- source
+- confidence score
+
+PASS if the system can validate data recency.  
+FAIL if freshness cannot be tracked.
+
+--------------------------------------------------
+
+9. Duplicate Data Protection
+
+Verify that the database prevents duplicates for:
+
+- competitors
+- posts
+- comments
+- content DNA entries
+
+PASS if duplicate protection exists.  
+FAIL if duplicates are possible.
+
+--------------------------------------------------
+
+10. Engine Compatibility
+
+Verify that the database structure supports deterministic analysis by engines.
+
+Engines must be able to retrieve:
+
+- structured datasets
+- clean signals
+- consistent records
+
+PASS if engines can operate without heavy data cleaning.  
+FAIL if engines must restructure data every time.
+
+--------------------------------------------------
+
+DATA PERFORMANCE OPTIMIZATION
+
+11. Query Efficiency
+
+Check whether database queries are optimized.
+
+PASS if queries avoid scanning entire datasets unnecessarily.  
+FAIL if queries create heavy load.
+
+If FAIL → optimize query structure.
+
+--------------------------------------------------
+
+12. Indexing
+
+Verify that indexing exists for high-frequency queries such as:
+
+- competitor lookup
+- post retrieval
+- content analysis
+- engagement queries
+
+PASS if indexing improves performance.  
+FAIL if indexing is missing.
+
+--------------------------------------------------
+
+13. Data Growth Scalability
+
+Verify that the database structure can handle growth for:
+
+- competitors
+- Instagram posts
+- comments
+- content DNA records
+
+PASS if the system can scale without structural changes.  
+FAIL if the architecture will degrade with large datasets.
+
+--------------------------------------------------
+
+FINAL TASK
+
+After completing the audit:
+
+1. Provide a PASS / FAIL result for each check.  
+2. Automatically correct any FAIL conditions.  
+3. Provide a summary of the optimized database architecture.
+
+The database must support a scalable AI intelligence system where engines rely on fast, structured, and reliable data.
