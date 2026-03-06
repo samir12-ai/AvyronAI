@@ -593,16 +593,18 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   let comments: { commentText: string | null }[] = [];
 
   if (competitorIds.length > 0) {
+    const idList = sql.join(competitorIds.map(id => sql`${id}`), sql`, `);
+
     posts = await db.select({ caption: ciCompetitorPosts.caption })
       .from(ciCompetitorPosts)
-      .where(sql`${ciCompetitorPosts.competitorId} IN (${sql.join(competitorIds.map(id => sql`${id}`), sql`, `)})`)
-      .orderBy(desc(ciCompetitorPosts.scrapedAt))
+      .where(sql`${ciCompetitorPosts.competitorId} IN (${idList})`)
+      .orderBy(desc(ciCompetitorPosts.createdAt))
       .limit(AUDIENCE_THRESHOLDS.MAX_POSTS_TO_ANALYZE);
 
     comments = await db.select({ commentText: ciCompetitorComments.commentText })
       .from(ciCompetitorComments)
-      .where(sql`${ciCompetitorComments.competitorId} IN (${sql.join(competitorIds.map(id => sql`${id}`), sql`, `)})`)
-      .orderBy(desc(ciCompetitorComments.scrapedAt))
+      .where(sql`${ciCompetitorComments.competitorId} IN (${idList})`)
+      .orderBy(desc(ciCompetitorComments.createdAt))
       .limit(AUDIENCE_THRESHOLDS.MAX_COMMENTS_TO_ANALYZE);
   }
 
