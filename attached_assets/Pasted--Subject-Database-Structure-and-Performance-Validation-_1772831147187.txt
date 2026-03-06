@@ -1,0 +1,168 @@
+"}
+Subject: Database Structure and Performance Validation for Market Intelligence System
+
+Hello Replit,
+
+Please perform a strict validation of the current database structure used by the Market Intelligence system.
+
+This system collects competitor and content data using scraping with two analysis levels:
+- Fast Check
+- Deep Check
+
+The database must support these workflows efficiently while avoiding unnecessary scraping and heavy queries.
+
+For each item below, return PASS or FAIL.
+
+If any item returns FAIL, please correct the database structure automatically and report what was fixed.
+
+----------------------------------------
+
+1. Market and Competitor Structure
+
+Verify that the database stores markets and competitors clearly.
+
+Each competitor should support:
+- competitor name
+- platform links (Instagram or website)
+- market reference
+- category (if available)
+- last_checked timestamp
+- analysis_level (fast_check or deep_check)
+
+PASS if competitors are clearly linked to markets.  
+FAIL if competitors are stored without market references.
+
+----------------------------------------
+
+2. Instagram Page Data
+
+Verify that Instagram pages are stored separately and linked to competitors.
+
+Each page should store:
+- page name
+- follower count
+- post count
+- last_checked timestamp
+
+PASS if page data is structured and queryable.  
+FAIL if Instagram data is mixed with other records.
+
+----------------------------------------
+
+3. Post Data Storage
+
+Verify that posts are stored in structured format.
+
+Each post should support:
+- page reference
+- post id or unique identifier
+- caption
+- post type (post, reel, carousel if detectable)
+- likes count
+- comment count
+- hashtags
+- posting date
+
+PASS if post data supports pattern analysis.  
+FAIL if posts are partially stored or unstructured.
+
+----------------------------------------
+
+4. Comment Sampling
+
+Verify that comment data is stored only when Deep Check runs.
+
+PASS if comments are optional and linked to posts.  
+FAIL if comments are mixed with posts or stored inefficiently.
+
+----------------------------------------
+
+5. Fast Check vs Deep Check Tracking
+
+Verify that each competitor or page has an analysis level indicator:
+
+- fast_check
+- deep_check
+
+PASS if engines can detect analysis depth.  
+FAIL if analysis level is missing.
+
+----------------------------------------
+
+6. Content DNA Storage
+
+Verify the existence of a Content DNA structure.
+
+Content DNA should store patterns such as:
+- common hooks
+- messaging angles
+- tone style
+- content themes
+- engagement patterns
+
+PASS if Content DNA can connect to competitors or markets.  
+FAIL if Content DNA is missing or not connected to scraped data.
+
+----------------------------------------
+
+7. Flashlist / Priority Data Layer
+
+Verify that frequently accessed data (competitors, pages, recent posts) uses a fast access layer.
+
+PASS if high priority data can be retrieved quickly.  
+FAIL if every engine request scans full datasets.
+
+If FAIL → implement a priority data layer.
+
+----------------------------------------
+
+8. Data Freshness Tracking
+
+Verify that key records include freshness metadata:
+
+- last_checked
+- source
+- confidence (if applicable)
+
+PASS if engines can detect outdated data.  
+FAIL if freshness tracking is missing.
+
+----------------------------------------
+
+9. Duplicate Protection
+
+Verify that the database prevents duplicates for:
+
+- competitors
+- pages
+- posts
+- comments
+
+PASS if duplicate protection exists.  
+FAIL if duplicate entries are possible.
+
+----------------------------------------
+
+10. Query Performance
+
+Verify that the database structure supports efficient queries for:
+
+- competitor lookup
+- page retrieval
+- recent posts
+- content analysis
+
+PASS if queries avoid scanning entire datasets.  
+FAIL if queries are inefficient.
+
+----------------------------------------
+
+FINAL TASK
+
+After completing the validation:
+
+1. Return PASS or FAIL for each item.  
+2. Automatically correct any FAIL conditions.  
+3. Provide a short summary of the optimized database structure.
+
+This database must support a scalable Market Intelligence system used by AI engines that analyze competitors, content patterns, and content DN
