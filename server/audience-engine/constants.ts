@@ -25,10 +25,27 @@ export const SYNTHETIC_FILTERS = [
   "bot-generated",
 ] as const;
 
+export type MarketScope = "universal" | "fitness" | "health" | "marketing" | "ecommerce" | "education" | "finance" | "tech" | "beauty" | "food";
+
 export interface PatternCluster {
   canonical: string;
   patterns: string[];
+  marketScope?: MarketScope[];
 }
+
+export const OBJECTION_CONTEXT_RULES: Record<string, { requireKeywords: string[]; fallbackCanonical: string }> = {
+  "physical limitations": {
+    requireKeywords: [
+      "injury", "pain", "rehab", "recovery", "medical", "disability", "physical therapy",
+      "back pain", "knee pain", "surgery", "chronic", "mobility", "wheelchair", "postpartum",
+      "pregnant", "elderly", "senior", "arthritis", "fibromyalgia", "inflammation",
+      "إصابة", "ألم", "علاج", "عملية",
+    ],
+    fallbackCanonical: "complexity / too hard",
+  },
+};
+
+export const MIN_EVIDENCE_PER_SIGNAL = 3;
 
 export const PAIN_CLUSTERS: PatternCluster[] = [
   { canonical: "frustration with lack of results", patterns: [
@@ -73,7 +90,7 @@ export const PAIN_CLUSTERS: PatternCluster[] = [
     "nervous about starting", "don't want to fail", "scared to invest", "risky",
     "what if i waste", "too afraid", "fear of commitment", "hesitant", "doubt myself",
   ]},
-  { canonical: "body image struggles", patterns: [
+  { canonical: "body image struggles", marketScope: ["fitness", "health", "beauty"], patterns: [
     "belly fat", "stomach fat", "love handles", "waist won't shrink", "body fat",
     "overweight", "flabby", "skinny fat", "loose skin", "stubborn fat",
     "كرش", "وزن زايد", "دهون", "جسمي مش حلو",
@@ -87,14 +104,14 @@ export const PAIN_CLUSTERS: PatternCluster[] = [
     "inconsistent", "on and off", "yo-yo", "start and stop", "procrastinate",
     "keep falling off", "can't stick with it", "always quit", "unmotivated", "burned out",
   ]},
-  { canonical: "injury or health limitations", patterns: [
+  { canonical: "injury or health limitations", marketScope: ["fitness", "health"], patterns: [
     "injury", "bad knee", "back pain", "joint pain", "can't exercise", "health condition",
     "limited mobility", "chronic pain", "recovery", "doctor said",
     "إصابة", "ألم", "ما بقدر أتمرن", "مشاكل صحية",
     "herniated disc", "torn ligament", "surgery recovery", "physical therapy",
     "medical condition", "disabled", "arthritis", "fibromyalgia", "inflammation",
   ]},
-  { canonical: "diet and nutrition confusion", patterns: [
+  { canonical: "diet and nutrition confusion", marketScope: ["fitness", "health", "food"], patterns: [
     "what to eat", "diet plan", "meal prep", "macros", "calories", "nutrition",
     "carbs", "protein intake", "keto", "fasting", "diet confusion", "eating right",
     "شو آكل", "حمية", "دايت", "سعرات", "أكل صحي",
@@ -118,21 +135,21 @@ export const PAIN_CLUSTERS: PatternCluster[] = [
 ];
 
 export const DESIRE_CLUSTERS: PatternCluster[] = [
-  { canonical: "lose weight / fat loss", patterns: [
+  { canonical: "lose weight / fat loss", marketScope: ["fitness", "health"], patterns: [
     "lose weight", "fat loss", "burn fat", "shed pounds", "slim down", "get lean",
     "drop weight", "weight loss", "lose belly fat", "cut fat",
     "بدي أنحف", "خس", "حرق دهون", "نزل وزن",
     "shred", "tone down", "lean out", "drop body fat", "lose inches",
     "flatten stomach", "reduce waist", "body recomp", "cut weight", "trim down",
   ]},
-  { canonical: "build muscle / get stronger", patterns: [
+  { canonical: "build muscle / get stronger", marketScope: ["fitness", "health"], patterns: [
     "build muscle", "gain muscle", "get stronger", "bulk up", "muscle growth",
     "muscle gain", "tone up", "get toned", "get fit", "body building",
     "بدي عضلات", "أقوى", "تضخيم",
     "pack on muscle", "hypertrophy", "strength training", "powerlifting", "lift heavier",
     "add size", "muscular", "gains", "mass building", "ripped",
   ]},
-  { canonical: "look better / aesthetic goals", patterns: [
+  { canonical: "look better / aesthetic goals", marketScope: ["fitness", "health", "beauty"], patterns: [
     "look good", "look better", "look athletic", "physique", "aesthetic",
     "beach body", "six pack", "abs", "attractive", "transform my body",
     "شكلي", "حلو", "رشيق", "جسم حلو",
@@ -146,7 +163,7 @@ export const DESIRE_CLUSTERS: PatternCluster[] = [
     "self-worth", "empowered", "own it", "stand tall", "walk with confidence",
     "love myself", "self-love", "body confidence", "feel powerful", "inner strength",
   ]},
-  { canonical: "improve health", patterns: [
+  { canonical: "improve health", marketScope: ["fitness", "health"], patterns: [
     "healthier", "better health", "improve health", "healthy lifestyle", "longevity",
     "feel better", "more energy", "sleep better", "reduce stress",
     "صحة", "أحسن", "طاقة", "نوم أحسن",
@@ -174,7 +191,7 @@ export const DESIRE_CLUSTERS: PatternCluster[] = [
     "30 minute workout", "busy schedule friendly", "at home workout",
     "no gym needed", "minimal equipment", "time efficient", "productive",
   ]},
-  { canonical: "financial improvement", patterns: [
+  { canonical: "financial improvement", marketScope: ["marketing", "ecommerce", "finance", "tech"], patterns: [
     "make money", "earn more", "side hustle", "passive income", "financial freedom",
     "grow business", "revenue", "profit", "monetize",
     "مصاري", "دخل", "ربح", "عمل",
@@ -247,7 +264,7 @@ export const OBJECTION_CLUSTERS: PatternCluster[] = [
     "customer service", "response time", "live chat", "phone support",
     "FAQ only", "no human", "automated response", "ticket system",
   ]},
-  { canonical: "physical limitations", patterns: [
+  { canonical: "physical limitations", marketScope: ["fitness", "health"], patterns: [
     "injury", "health issue", "age", "too old", "condition", "disability",
     "can't physically", "limited", "pain",
     "إصابة", "كبير بالعمر", "مش قادر",
