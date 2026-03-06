@@ -698,44 +698,46 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).not.toContain("fetchJobStatus");
     });
 
-    it("should have per-competitor fetch button inside competitor card", async () => {
+    it("should have campaign-level fetch button (not per-competitor)", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
       );
-      expect(source).toContain("fetchDataMutation.mutate({ id: comp.id })");
-      expect(source).toContain("fetchingCompetitorId");
+      expect(source).toContain("fetchDataMutation.mutate()");
+      expect(source).toContain("isFetchingCampaign");
+      expect(source).not.toContain("fetchingCompetitorId");
     });
 
-    it("should enforce sequential fetching — disable all fetch buttons when any fetch in progress", async () => {
+    it("should enforce sequential fetching — disable all fetch buttons when campaign fetch in progress", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
       );
       expect(source).toContain("anyFetchInProgress");
-      expect(source).toContain("fetchingCompetitorId !== null");
+      expect(source).toContain("isFetchingCampaign");
       expect(source).toContain("disabled={anyFetchInProgress");
     });
 
-    it("should show 'Wait...' on non-active competitor cards during fetch", async () => {
+    it("should show 'Collecting...' on all competitor cards during campaign fetch", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
       );
-      expect(source).toContain("Wait...");
+      expect(source).toContain("Collecting...");
     });
 
-    it("should handle COOLDOWN status in per-competitor fetch response", async () => {
+    it("should handle queue-based job status in fetch response (RUNNING/QUEUED)", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
       );
-      expect(source).toContain("COOLDOWN");
-      expect(source).toContain("Cooldown Active");
+      expect(source).toContain("RUNNING");
+      expect(source).toContain("QUEUED");
+      expect(source).toContain("Collection Queued");
     });
 
-    it("should handle BLOCKED status in per-competitor fetch response", async () => {
+    it("should handle already-in-progress dedup in fetch response", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
       );
-      expect(source).toContain("BLOCKED");
-      expect(source).toContain("Fetch Blocked");
+      expect(source).toContain("already in progress");
+      expect(source).toContain("Already Running");
     });
 
     it("should include remainingCooldownSeconds and existingCoverage in stage metadata", async () => {
@@ -805,12 +807,14 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(fetchAllRoute).toContain("DEPRECATED");
     });
 
-    it("per-competitor fetch route should still be active", async () => {
+    it("per-competitor fetch route should be deprecated (410) — all collection via queue", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/data-acquisition-routes.ts", "utf-8")
       );
       expect(source).toContain('"/api/ci/competitors/:id/fetch-data"');
-      expect(source).toContain("fetchCompetitorData");
+      expect(source).toContain("410");
+      expect(source).toContain("DEPRECATED");
+      expect(source).not.toContain("fetchCompetitorData");
     });
   });
 
@@ -978,16 +982,20 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(coverageCheck).toContain("MIN_COMMENTS_THRESHOLD");
     });
 
-    it("cooldown only applies when posts >= 14 AND comments >= 50", async () => {
+    it("cooldown thresholds are sourced from central MI_THRESHOLDS (14 posts, 50 comments)", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
       );
-      const thresholdLine = source.match(/const MIN_POSTS_THRESHOLD\s*=\s*(\d+)/);
-      const commentLine = source.match(/const MIN_COMMENTS_THRESHOLD\s*=\s*(\d+)/);
-      expect(thresholdLine).not.toBeNull();
-      expect(commentLine).not.toBeNull();
-      expect(parseInt(thresholdLine![1])).toBe(14);
-      expect(parseInt(commentLine![1])).toBe(50);
+      expect(source).toContain("MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR");
+      expect(source).toContain("MI_THRESHOLDS.MIN_COMMENTS_SAMPLE");
+      expect(source).not.toMatch(/const MIN_POSTS_THRESHOLD\s*=\s*\d+/);
+      expect(source).not.toMatch(/const MIN_COMMENTS_THRESHOLD\s*=\s*\d+/);
+
+      const constants = await import("fs").then(fs =>
+        fs.readFileSync("server/market-intelligence-v3/constants.ts", "utf-8")
+      );
+      expect(constants).toContain("MIN_POSTS_PER_COMPETITOR: 14");
+      expect(constants).toContain("MIN_COMMENTS_SAMPLE: 50");
     });
 
     it("job status must be PARTIAL_COMPLETE when coverage below thresholds (not COMPLETE)", async () => {
@@ -1010,12 +1018,13 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("Below thresholds");
     });
 
-    it("UI must show per-competitor PARTIAL status in fetch response handler", async () => {
+    it("UI must use queue-based fetch-job route (not direct per-competitor fetch)", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8")
       );
-      expect(source).toContain("PARTIAL");
-      expect(source).toContain("Data Collected");
+      expect(source).toContain("/api/ci/mi-v3/fetch-job");
+      expect(source).not.toContain("/api/ci/competitors/${id}/fetch-data");
+      expect(source).toContain("Two-Speed");
     });
   });
 
@@ -1125,15 +1134,14 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(maxPossible).toBeGreaterThanOrEqual(50);
     });
 
-    it("post threshold must be 14 (not 12) — 12 is page ceiling, not sufficiency", async () => {
+    it("post threshold must be 14 (not 12) — sourced from central MI_THRESHOLDS", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
       );
       expect(source).toContain("INSTAGRAM_PUBLIC_API_POST_CEILING = 12");
-      const thresholdMatch = source.match(/const MIN_POSTS_THRESHOLD\s*=\s*(\d+)/);
-      expect(thresholdMatch).not.toBeNull();
-      expect(parseInt(thresholdMatch![1])).toBe(14);
+      expect(source).toContain("MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR");
       expect(source).not.toContain("MIN_POSTS_THRESHOLD = INSTAGRAM_PUBLIC_API_POST_CEILING");
+      expect(source).not.toContain("MIN_POSTS_THRESHOLD = 12");
     });
 
     it("fetch orchestrator must use 14 as post target (not 12)", async () => {
@@ -1153,11 +1161,9 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       );
       expect(source).toContain("INSUFFICIENT_DATA");
       expect(source).toContain("coverageSufficient");
-      const thresholdMatch = source.match(/const MIN_POSTS_THRESHOLD\s*=\s*(\d+)/);
-      expect(parseInt(thresholdMatch![1])).toBe(14);
+      expect(source).toContain("MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR");
       expect(source).toContain("persistedPostCount >= postsTarget");
       expect(source).toContain("persistedCommentCount >= commentsTarget");
-      expect(source).toContain("INSUFFICIENT_DATA");
     });
 
     it("REGRESSION GUARD: paginationAttempted must be true when has_next_page is true", async () => {
@@ -1182,9 +1188,8 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(daSource).not.toContain("MIN_POSTS_THRESHOLD = INSTAGRAM_PUBLIC_API_POST_CEILING");
       expect(foSource).not.toContain("MIN_POSTS_TARGET = 12");
       expect(foSource).not.toContain("MIN_POSTS_TARGET = INSTAGRAM_PUBLIC_API_POST_CEILING");
-      const daThreshold = daSource.match(/const MIN_POSTS_THRESHOLD\s*=\s*(\d+)/);
+      expect(daSource).toContain("MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR");
       const foTarget = foSource.match(/const MIN_POSTS_TARGET\s*=\s*(\d+)/);
-      expect(parseInt(daThreshold![1])).toBeGreaterThanOrEqual(14);
       expect(parseInt(foTarget![1])).toBeGreaterThanOrEqual(14);
     });
 

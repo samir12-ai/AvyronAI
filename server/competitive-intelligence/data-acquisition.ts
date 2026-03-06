@@ -4,6 +4,7 @@ import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { scrapeInstagramProfile, type ScrapedPost } from "./profile-scraper";
 import { acquireStickySession, releaseStickySession, type StickySessionContext } from "./proxy-pool-manager";
 import * as crypto from "crypto";
+import { MI_THRESHOLDS } from "../market-intelligence-v3/constants";
 
 const EXPLICIT_CTA_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /\b(dm|message|inbox)\s*(us|me|now)?\b/i, label: "DM" },
@@ -248,8 +249,8 @@ const MAX_POSTS_TO_STORE = 60;
 const MAX_COMMENTS_PER_POST = 20;
 const MAX_COMMENT_POSTS = 30;
 const INSTAGRAM_PUBLIC_API_POST_CEILING = 12;
-const MIN_POSTS_THRESHOLD = 14;
-const MIN_COMMENTS_THRESHOLD = 50;
+const MIN_POSTS_THRESHOLD = MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR;
+const MIN_COMMENTS_THRESHOLD = MI_THRESHOLDS.MIN_COMMENTS_SAMPLE;
 
 export { TARGET_POSTS_FAST, TARGET_POSTS_DEEP, MAX_COMMENT_POSTS_DEEP, MAX_COMMENTS_PER_POST_DEEP, CACHE_REUSE_WINDOW_MS };
 

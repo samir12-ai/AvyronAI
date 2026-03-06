@@ -2,9 +2,7 @@ import type { Express } from "express";
 import { db } from "../db";
 import { ciCompetitors } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
-import { fetchCompetitorData, getCompetitorDataCoverage } from "./data-acquisition";
-import { acquireStickySession, releaseStickySession } from "./proxy-pool-manager";
-import * as crypto from "crypto";
+import { getCompetitorDataCoverage } from "./data-acquisition";
 
 async function validateCompetitorOwnership(competitorId: string, accountId: string, campaignId: string): Promise<boolean> {
   const [comp] = await db.select({ id: ciCompetitors.id }).from(ciCompetitors)
@@ -13,41 +11,12 @@ async function validateCompetitorOwnership(competitorId: string, accountId: stri
 }
 
 export function registerDataAcquisitionRoutes(app: Express) {
-  app.post("/api/ci/competitors/:id/fetch-data", async (req, res) => {
-    let proxyCtx: ReturnType<typeof acquireStickySession> = null;
-    try {
-      const { id } = req.params;
-      const accountId = (req.body.accountId as string) || "default";
-      const campaignId = req.body.campaignId as string;
-      if (!campaignId) {
-        return res.status(400).json({ error: "campaignId is required" });
-      }
-
-      const owned = await validateCompetitorOwnership(id, accountId, campaignId);
-      if (!owned) {
-        return res.status(403).json({ error: "Competitor does not belong to this campaign" });
-      }
-
-      const competitorHash = crypto.createHash("sha256").update(id).digest("hex").slice(0, 16);
-      proxyCtx = acquireStickySession(accountId, campaignId, competitorHash);
-      if (proxyCtx) {
-        console.log(`[DataAcq Route] Pool session acquired: session=${proxyCtx.session.sessionId}`);
-      }
-
-      const forceRefresh = req.body.forceRefresh === true;
-      console.log(`[DataAcq Route] Auto-fetch for competitor ${id}, campaign=${campaignId}, force=${forceRefresh}`);
-      const result = await fetchCompetitorData(id, accountId, forceRefresh, proxyCtx ?? undefined);
-      res.json(result);
-    } catch (error: any) {
-      console.error(`[DataAcq Route] Fetch error:`, error.message);
-      res.status(500).json({ error: error.message, status: "BLOCKED" });
-    } finally {
-      if (proxyCtx) releaseStickySession(proxyCtx);
-    }
+  app.post("/api/ci/competitors/:id/fetch-data", async (_req, res) => {
+    return res.status(410).json({ error: "DEPRECATED: Direct competitor fetch removed. All data collection now flows through the queue-based Two-Speed system. Use POST /api/ci/mi-v3/fetch-job to trigger collection via the global job queue." });
   });
 
   app.post("/api/ci/competitors/fetch-all", async (_req, res) => {
-    return res.status(410).json({ error: "DEPRECATED: Batch fetch removed to prevent proxy blocks. Use per-competitor fetch: POST /api/ci/competitors/:id/fetch-data" });
+    return res.status(410).json({ error: "DEPRECATED: Batch fetch removed. All data collection now flows through the queue-based Two-Speed system. Use POST /api/ci/mi-v3/fetch-job to trigger collection via the global job queue." });
   });
 
   app.get("/api/ci/competitors/:id/data-coverage", async (req, res) => {

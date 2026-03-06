@@ -5,7 +5,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { MarketIntelligenceV3, validateEngineIsolation, rejectBlockedEngine, assertNoPlanWrites, assertNoOrchestrator, assertNoAutopilot, buildResultFromSnapshot } from "./engine";
 import { logAudit } from "../audit";
 import { requireCampaign } from "../campaign-routes";
-import { getFetchJobStatus } from "./fetch-orchestrator";
+import { getFetchJobStatus, startFetchJob } from "./fetch-orchestrator";
 import type { MIv3Mode } from "./types";
 
 const ALLOWED_MODES: MIv3Mode[] = ["overview", "dominance", "threats", "history"];
@@ -180,8 +180,28 @@ export function registerMIv3Routes(app: Express) {
     }
   });
 
+  app.post("/api/ci/mi-v3/fetch-job", requireCampaign, async (req, res) => {
+    try {
+      const accountId = (req.body.accountId as string) || "default";
+      const campaignId = req.body.campaignId as string;
+      if (!campaignId) {
+        return res.status(400).json({ error: "campaignId is required" });
+      }
+
+      const jobId = await startFetchJob(accountId, campaignId);
+      const status = await getFetchJobStatus(jobId);
+      return res.json({ jobId, status: status?.status || "QUEUED", message: "Data collection job queued via Two-Speed system" });
+    } catch (err: any) {
+      console.error("[MIv3-Route] Fetch-job error:", err.message);
+      if (err.message.includes("already in progress") || err.message.includes("DEDUP")) {
+        return res.status(409).json({ error: err.message });
+      }
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/ci/mi-v3/fetch", requireCampaign, async (_req, res) => {
-    return res.status(410).json({ error: "DEPRECATED: Batch fetch removed to prevent proxy blocks. Use per-competitor fetch: POST /api/ci/competitors/:id/fetch-data" });
+    return res.status(410).json({ error: "DEPRECATED: Batch fetch removed. Use POST /api/ci/mi-v3/fetch-job to trigger collection via the global job queue." });
   });
 
   app.get("/api/ci/mi-v3/fetch-status/:jobId", async (req, res) => {

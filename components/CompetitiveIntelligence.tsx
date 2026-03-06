@@ -233,36 +233,42 @@ export default function CompetitiveIntelligence() {
     onError: (err: any) => Alert.alert('Error', err.message || 'Failed to remove competitor'),
   });
 
-  const [fetchingCompetitorId, setFetchingCompetitorId] = useState<string | null>(null);
+  const [isFetchingCampaign, setIsFetchingCampaign] = useState(false);
 
   const fetchDataMutation = useMutation({
-    mutationFn: async ({ id, forceRefresh }: { id: string; forceRefresh?: boolean }) => {
-      setFetchingCompetitorId(id);
-      const res = await fetch(new URL(`/api/ci/competitors/${id}/fetch-data`, baseUrl).toString(), {
+    mutationFn: async () => {
+      setIsFetchingCampaign(true);
+      const res = await fetch(new URL(`/api/ci/mi-v3/fetch-job`, baseUrl).toString(), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accountId: 'default', campaignId: activeCampaignId, forceRefresh: forceRefresh || false }),
+        body: JSON.stringify({ accountId: 'default', campaignId: activeCampaignId }),
       });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Fetch failed'); }
+      if (!res.ok) {
+        const err = await res.json();
+        if (res.status === 409) throw new Error(`DEDUP: ${err.error}`);
+        throw new Error(err.error || 'Fetch failed');
+      }
       return res.json();
     },
     onSuccess: (data: any) => {
-      setFetchingCompetitorId(null);
+      setIsFetchingCampaign(false);
       queryClient.invalidateQueries({ queryKey: ['ci-competitors', activeCampaignId] });
-      if (data.status === 'SUCCESS' || data.status === 'PARTIAL') {
+      if (data.status === 'RUNNING' || data.status === 'QUEUED') {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        Alert.alert('Data Collected', `${data.postsCollected} posts, ${data.commentsCollected} comments collected.${data.followers ? ` Followers: ${data.followers.toLocaleString()}` : ''}`);
-      } else if (data.status === 'COOLDOWN') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        Alert.alert('Cooldown Active', data.message);
-      } else if (data.status === 'BLOCKED') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        Alert.alert('Fetch Blocked', 'All scraping methods failed. Instagram may be blocking requests. Try again later.');
+        Alert.alert('Collection Queued', `Data collection job ${data.status.toLowerCase()}. The system will collect data for all competitors using the Two-Speed pipeline (Fast Pass → Deep Pass).`);
+      } else if (data.status === 'COMPLETED') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('Data Ready', 'Collection complete. Refresh intelligence to see updated analysis.');
       }
     },
     onError: (err: any) => {
-      setFetchingCompetitorId(null);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Fetch Error', err.message);
+      setIsFetchingCampaign(false);
+      if (err.message?.includes('already in progress') || err.message?.includes('DEDUP')) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        Alert.alert('Already Running', 'A data collection job is already active for this campaign.');
+      } else {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert('Fetch Error', err.message);
+      }
     },
   });
 
@@ -384,8 +390,8 @@ export default function CompetitiveIntelligence() {
       ) : (
         competitors.map((comp: Competitor) => {
           const dc = comp.dataCoverage;
-          const isFetching = fetchingCompetitorId === comp.id;
-          const anyFetchInProgress = fetchingCompetitorId !== null;
+          const isFetching = isFetchingCampaign;
+          const anyFetchInProgress = isFetchingCampaign;
           return (
           <View key={comp.id} style={[s.breakdownItem, { borderBottomWidth: 1, borderBottomColor: isDark ? '#1A2030' : '#F0F0F0' }]}>
             <Pressable onPress={() => { Haptics.selectionAsync(); setExpandedCompetitor(expandedCompetitor === comp.id ? null : comp.id); }} style={s.compHeader}>
@@ -447,7 +453,7 @@ export default function CompetitiveIntelligence() {
 
                 <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
                   <Pressable
-                    onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); fetchDataMutation.mutate({ id: comp.id }); }}
+                    onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); fetchDataMutation.mutate(); }}
                     disabled={anyFetchInProgress || fetchDataMutation.isPending}
                     style={[s.fetchBtn, { flex: 1, opacity: (anyFetchInProgress || fetchDataMutation.isPending) ? 0.6 : 1 }]}
                   >
@@ -456,7 +462,7 @@ export default function CompetitiveIntelligence() {
                     ) : (
                       <Ionicons name="cloud-download-outline" size={14} color="#fff" />
                     )}
-                    <Text style={s.fetchBtnText}>{isFetching ? 'Fetching...' : !isFetching && anyFetchInProgress ? 'Wait...' : (dc?.postsCollected || 0) > 0 ? 'Refresh Data' : 'Fetch Data'}</Text>
+                    <Text style={s.fetchBtnText}>{isFetching ? 'Collecting...' : (dc?.postsCollected || 0) > 0 ? 'Refresh All Data' : 'Collect All Data'}</Text>
                   </Pressable>
                   <Pressable
                     onPress={() => { Haptics.selectionAsync(); openEditModal(comp); }}
