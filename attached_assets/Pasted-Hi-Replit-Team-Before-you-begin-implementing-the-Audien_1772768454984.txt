@@ -1,0 +1,116 @@
+Hi Replit Team,
+
+Before you begin implementing the Audience Engine V3 plan I sent earlier, please add the following clarifications and adjustments to the specification. These are architectural safeguards to ensure the engine remains stable, evidence-driven, and scalable.
+
+Please incorporate these items directly into the implementation plan.
+
+---------------------------------------------------------------------
+
+SECTION 1 — FULL COVERAGE OF ALL 12 LAYERS IN THE SCHEMA
+
+The database schema must explicitly support all 12 intelligence layers, not a partial approximation.
+
+Please verify that the schema stores structured outputs for the following layers individually:
+
+1. Language Signals  
+2. Pain Map  
+3. Desire Map  
+4. Objection Map  
+5. Transformation Map  
+6. Emotional Drivers  
+7. Audience Segments  
+8. Segment Density  
+9. Awareness Level  
+10. Maturity Index  
+11. Buying Intent Distribution  
+12. Ads Targeting Intelligence
+
+If any existing columns already represent some of these layers, reuse them.  
+However, every layer must have a clear storage representation.
+
+---------------------------------------------------------------------
+
+SECTION 2 — DETERMINISTIC ANALYSIS MUST NOT BE NAIVE KEYWORD MATCHING
+
+For the deterministic layers, please avoid simple keyword matching only.
+
+Instead implement rule-based pattern grouping with normalization, for example:
+
+Different expressions such as:
+
+“belly fat”  
+“stomach fat”  
+“waist won't shrink”
+
+should map to the same cluster:
+
+Belly Fat Frustration
+
+Use pattern sets, phrase normalization, and signal grouping rather than isolated keywords.
+
+This ensures the system captures real audience language variation.
+
+---------------------------------------------------------------------
+
+SECTION 3 — EVIDENCE METADATA AT ITEM LEVEL
+
+Evidence metadata must not exist only at the layer level.
+
+Each individual insight must carry its own evidence metadata.
+
+Examples:
+
+Each Pain item must store:
+• evidenceCount  
+• confidenceScore  
+• sourceSignals  
+• inputSnapshotId  
+
+The same rule applies to:
+
+• Desire items  
+• Objection items  
+• Emotional drivers  
+• Audience segments  
+
+This ensures the system remains evidence-driven and traceable.
+
+---------------------------------------------------------------------
+
+SECTION 4 — STRICT SIGNAL OUTPUT
+
+Audience Engine V3 must continue producing audienceSignals only.
+
+It must not generate:
+
+• campaign strategies  
+• messaging decisions  
+• offer recommendations  
+
+Strategic interpretation will happen later in Positioning and Build-a-Plan engines.
+
+This keeps the engine aligned with the system's signal-based architecture.
+
+---------------------------------------------------------------------
+
+SECTION 5 — PERFORMANCE TARGET
+
+Even with the additional layers, the execution time should remain within:
+
+3–10 seconds per run.
+
+No additional scraping or external data calls should be introduced.
+
+All computation must rely on:
+
+• Market Intelligence snapshots  
+• stored competitor data  
+• sampled comments  
+• internal business context
+
+---------------------------------------------------------------------
+
+Once these additions are integrated into the plan, you can proceed with the implementation of Audience Engine V3.
+
+Best regards,  
+Samir Fatfat

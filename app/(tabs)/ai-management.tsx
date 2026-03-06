@@ -572,6 +572,62 @@ export default function AIManagementScreen() {
     </View>
   );
 
+  const renderSignalItems = (items: any[], colorKey: string) => {
+    if (!items || items.length === 0) {
+      return <Text style={[styles.aeEmptyText, { color: colors.textMuted }]}>No signals detected — more data needed</Text>;
+    }
+    const tagColor = colorKey === 'error' ? colors.error : colorKey === 'success' ? colors.success : colorKey === 'accent' ? colors.accent : colors.primary;
+    return items.map((item: any, i: number) => (
+      <View key={i} style={[styles.aePainRow, { borderColor: colors.divider }]}>
+        <View style={styles.aePainHeader}>
+          <Text style={[styles.aePainCategory, { color: colors.text }]}>{item.canonical}</Text>
+          <View style={[styles.aePainBadge, { backgroundColor: tagColor + '15' }]}>
+            <Text style={[styles.aePainFreq, { color: tagColor }]}>{item.frequency}x</Text>
+          </View>
+        </View>
+        {item.confidenceScore != null && (
+          <View style={[styles.aeConfidenceRow]}>
+            <View style={[styles.aeIntentTrack, { backgroundColor: colors.divider, flex: 1 }]}>
+              <View style={[styles.aeIntentFill, { width: `${Math.round(item.confidenceScore * 100)}%`, backgroundColor: tagColor }]} />
+            </View>
+            <Text style={[styles.aeConfidenceText, { color: colors.textMuted }]}>{Math.round(item.confidenceScore * 100)}%</Text>
+          </View>
+        )}
+        {item.evidence && item.evidence.length > 0 && (
+          <Text style={[styles.aePainEvidence, { color: colors.textSecondary }]} numberOfLines={2}>
+            &quot;{item.evidence[0]}&quot;
+          </Text>
+        )}
+      </View>
+    ));
+  };
+
+  const renderIntentBars = (data: any) => {
+    if (!data) return null;
+    const intentKeys = ['curiosity', 'learning', 'comparison', 'purchaseIntent'];
+    const intentColors: Record<string, string> = {
+      curiosity: colors.accent,
+      learning: colors.primary,
+      comparison: '#F59E0B',
+      purchaseIntent: colors.success,
+    };
+    return intentKeys.filter(k => data[k] != null).map(key => {
+      const pct = typeof data[key] === 'number' ? data[key] : 0;
+      const label = key.replace(/([A-Z])/g, ' $1').replace(/\b\w/g, c => c.toUpperCase()).trim();
+      return (
+        <View key={key} style={styles.aeIntentRow}>
+          <View style={styles.aeIntentLabel}>
+            <Text style={[styles.aeIntentText, { color: colors.text }]}>{label}</Text>
+            <Text style={[styles.aeIntentPct, { color: colors.textMuted }]}>{pct}%</Text>
+          </View>
+          <View style={[styles.aeIntentTrack, { backgroundColor: colors.divider }]}>
+            <View style={[styles.aeIntentFill, { width: `${pct}%`, backgroundColor: intentColors[key] || colors.primary }]} />
+          </View>
+        </View>
+      );
+    });
+  };
+
   const renderAudienceManager = () => {
     const ae = audienceEngineData;
     const hasCachedData = !!ae;
@@ -597,7 +653,7 @@ export default function AIManagementScreen() {
                 {audienceEngineLoading ? 'Analyzing...' : hasCachedData ? 'Re-Analyze Audience' : 'Analyze Audience'}
               </Text>
               <Text style={styles.audienceCTADesc}>
-                {audienceEngineLoading ? 'Processing competitor data (2-10s)' : 'Signal-based analysis from competitor data'}
+                {audienceEngineLoading ? 'Processing 12 intelligence layers (3-10s)' : 'V3 — 12-layer audience intelligence engine'}
               </Text>
             </View>
             {!audienceEngineLoading && (
@@ -631,7 +687,7 @@ export default function AIManagementScreen() {
             </View>
             {ae.executionTimeMs && (
               <Text style={[styles.aeTimestamp, { color: colors.textMuted }]}>
-                Completed in {(ae.executionTimeMs / 1000).toFixed(1)}s
+                V3 • {(ae.executionTimeMs / 1000).toFixed(1)}s
                 {ae.createdAt ? ` • ${new Date(ae.createdAt).toLocaleDateString()}` : ''}
               </Text>
             )}
@@ -640,95 +696,58 @@ export default function AIManagementScreen() {
 
         {hasCachedData && (
           <>
-            {renderAudienceSection('Pain Clusters', 'medkit-outline', 'pains', (
+            {renderAudienceSection('Language Signals', 'chatbubbles-outline', 'language', (
               <>
-                {(ae.audiencePains || []).length === 0 ? (
-                  <Text style={[styles.aeEmptyText, { color: colors.textMuted }]}>No pain signals detected — more data needed</Text>
-                ) : (
-                  (ae.audiencePains || []).map((pain: any, i: number) => (
-                    <View key={i} style={[styles.aePainRow, { borderColor: colors.divider }]}>
-                      <View style={styles.aePainHeader}>
-                        <Text style={[styles.aePainCategory, { color: colors.text }]}>{pain.category}</Text>
-                        <View style={[styles.aePainBadge, { backgroundColor: colors.error + '15' }]}>
-                          <Text style={[styles.aePainFreq, { color: colors.error }]}>{pain.frequency}x</Text>
+                {ae.languageSignals && (
+                  <View>
+                    {[
+                      { label: 'Problem Expressions', count: ae.languageSignals.problemExpressions?.count || 0, color: colors.error },
+                      { label: 'Question Patterns', count: ae.languageSignals.questionPatterns?.count || 0, color: colors.accent },
+                      { label: 'Goal Expressions', count: ae.languageSignals.goalExpressions?.count || 0, color: colors.success },
+                    ].map((item, i) => (
+                      <View key={i} style={[styles.aePainRow, { borderColor: colors.divider }]}>
+                        <View style={styles.aePainHeader}>
+                          <Text style={[styles.aePainCategory, { color: colors.text }]}>{item.label}</Text>
+                          <View style={[styles.aePainBadge, { backgroundColor: item.color + '15' }]}>
+                            <Text style={[styles.aePainFreq, { color: item.color }]}>{item.count}</Text>
+                          </View>
                         </View>
                       </View>
-                      {pain.evidence && pain.evidence.length > 0 && (
-                        <Text style={[styles.aePainEvidence, { color: colors.textSecondary }]} numberOfLines={2}>
-                          "{pain.evidence[0]}"
-                        </Text>
-                      )}
-                    </View>
-                  ))
-                )}
-              </>
-            ))}
-
-            {renderAudienceSection('Sophistication Level', 'school-outline', 'sophistication', (
-              <>
-                {ae.audienceSophisticationLevel && (
-                  <View>
-                    <View style={styles.aeSophRow}>
-                      <Text style={[styles.aeSophLabel, { color: colors.text }]}>Level</Text>
-                      <View style={[styles.aeSophBadge, {
-                        backgroundColor: ae.audienceSophisticationLevel.level === 'sophisticated' ? colors.success + '20'
-                          : ae.audienceSophisticationLevel.level === 'informed' ? colors.accent + '20' : colors.warning + '20',
-                      }]}>
-                        <Text style={[styles.aeSophValue, {
-                          color: ae.audienceSophisticationLevel.level === 'sophisticated' ? colors.success
-                            : ae.audienceSophisticationLevel.level === 'informed' ? colors.accent : colors.warning,
-                        }]}>
-                          {(ae.audienceSophisticationLevel.level || 'unknown').toUpperCase()}
-                        </Text>
-                      </View>
-                    </View>
-                    {ae.audienceSophisticationLevel.indicators && ae.audienceSophisticationLevel.indicators.length > 0 && (
-                      <View style={styles.aeSophIndicators}>
-                        {ae.audienceSophisticationLevel.indicators.slice(0, 5).map((ind: string, i: number) => (
-                          <View key={i} style={[styles.audienceTag, { backgroundColor: colors.primary + '12' }]}>
-                            <Text style={[styles.audienceTagText, { color: colors.primary }]}>{ind}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    )}
+                    ))}
+                    <Text style={[styles.aeConfidenceText, { color: colors.textMuted, marginTop: 6 }]}>
+                      {ae.languageSignals.totalAnalyzed || 0} texts analyzed
+                    </Text>
                   </View>
                 )}
               </>
             ))}
 
-            {renderAudienceSection('Intent Distribution', 'pie-chart-outline', 'intents', (
-              <>
-                {ae.audienceIntentDistribution && (
-                  <View>
-                    {Object.entries(ae.audienceIntentDistribution).filter(([key]) => key !== 'totalClassified').map(([key, val]: [string, any]) => {
-                      const pct = typeof val === 'number' ? val : 0;
-                      const label = key.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
-                      const barColor = key === 'purchaseIntent' || key === 'purchase_intent' ? colors.success
-                        : key === 'problemSeeking' || key === 'problem_seeking' ? colors.error
-                        : key === 'curiosity' ? colors.accent : colors.primary;
-                      return (
-                        <View key={key} style={styles.aeIntentRow}>
-                          <View style={styles.aeIntentLabel}>
-                            <Text style={[styles.aeIntentText, { color: colors.text }]}>{label}</Text>
-                            <Text style={[styles.aeIntentPct, { color: colors.textMuted }]}>{pct}%</Text>
-                          </View>
-                          <View style={[styles.aeIntentTrack, { backgroundColor: colors.divider }]}>
-                            <View style={[styles.aeIntentFill, { width: `${pct}%`, backgroundColor: barColor }]} />
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </View>
-                )}
-              </>
+            {renderAudienceSection('Pain Map', 'medkit-outline', 'pains', (
+              <>{renderSignalItems(ae.painMap || ae.audiencePains || [], 'error')}</>
             ))}
 
-            {renderAudienceSection('Audience Personas', 'body-outline', 'personas', (
+            {renderAudienceSection('Desire Map', 'heart-outline', 'desires', (
+              <>{renderSignalItems(ae.desireMap || [], 'success')}</>
+            ))}
+
+            {renderAudienceSection('Objection Map', 'hand-left-outline', 'objections', (
+              <>{renderSignalItems(ae.objectionMap || [], 'accent')}</>
+            ))}
+
+            {renderAudienceSection('Transformation Map', 'swap-horizontal-outline', 'transformation', (
+              <>{renderSignalItems(ae.transformationMap || [], 'primary')}</>
+            ))}
+
+            {renderAudienceSection('Emotional Drivers', 'flame-outline', 'emotions', (
+              <>{renderSignalItems(ae.emotionalDrivers || [], 'error')}</>
+            ))}
+
+            {renderAudienceSection('Audience Segments', 'people-outline', 'segments', (
               <>
-                {(ae.audiencePersonas || []).length === 0 ? (
-                  <Text style={[styles.aeEmptyText, { color: colors.textMuted }]}>No personas generated</Text>
+                {(ae.audienceSegments || []).length === 0 ? (
+                  <Text style={[styles.aeEmptyText, { color: colors.textMuted }]}>No segments generated</Text>
                 ) : (
-                  (ae.audiencePersonas || []).map((persona: any, i: number) => (
+                  (ae.audienceSegments || []).map((seg: any, i: number) => (
                     <Pressable
                       key={i}
                       onPress={() => setExpandedPersona(expandedPersona === i ? null : i)}
@@ -736,47 +755,73 @@ export default function AIManagementScreen() {
                     >
                       <View style={styles.aePersonaHeader}>
                         <View style={[styles.aePersonaIcon, { backgroundColor: colors.accent + '15' }]}>
-                          <Ionicons name="person" size={16} color={colors.accent} />
+                          <Ionicons name="people" size={16} color={colors.accent} />
                         </View>
                         <View style={{ flex: 1 }}>
-                          <Text style={[styles.aePersonaName, { color: colors.text }]}>{persona.name}</Text>
-                          {persona.estimatedPercentage && (
-                            <Text style={[styles.aePersonaPct, { color: colors.textMuted }]}>{persona.estimatedPercentage}% of audience</Text>
+                          <Text style={[styles.aePersonaName, { color: colors.text }]}>{seg.name}</Text>
+                          {seg.estimatedPercentage != null && (
+                            <Text style={[styles.aePersonaPct, { color: colors.textMuted }]}>{seg.estimatedPercentage}% of audience</Text>
                           )}
                         </View>
                         <Ionicons name={expandedPersona === i ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} />
                       </View>
                       {expandedPersona === i && (
                         <View style={styles.aePersonaBody}>
-                          {persona.motivation && (
+                          {seg.description && (
+                            <Text style={[styles.aePersonaFieldValue, { color: colors.textSecondary, marginBottom: 8 }]}>{seg.description}</Text>
+                          )}
+                          {seg.painProfile && seg.painProfile.length > 0 && (
+                            <View style={styles.aePersonaField}>
+                              <Text style={[styles.aePersonaFieldLabel, { color: colors.textMuted }]}>Pain Profile</Text>
+                              <View style={styles.audienceTags}>
+                                {seg.painProfile.map((p: string, j: number) => (
+                                  <View key={j} style={[styles.audienceTag, { backgroundColor: colors.error + '12' }]}>
+                                    <Text style={[styles.audienceTagText, { color: colors.error }]}>{p}</Text>
+                                  </View>
+                                ))}
+                              </View>
+                            </View>
+                          )}
+                          {seg.desireProfile && seg.desireProfile.length > 0 && (
+                            <View style={styles.aePersonaField}>
+                              <Text style={[styles.aePersonaFieldLabel, { color: colors.textMuted }]}>Desire Profile</Text>
+                              <View style={styles.audienceTags}>
+                                {seg.desireProfile.map((d: string, j: number) => (
+                                  <View key={j} style={[styles.audienceTag, { backgroundColor: colors.success + '12' }]}>
+                                    <Text style={[styles.audienceTagText, { color: colors.success }]}>{d}</Text>
+                                  </View>
+                                ))}
+                              </View>
+                            </View>
+                          )}
+                          {seg.objectionProfile && seg.objectionProfile.length > 0 && (
+                            <View style={styles.aePersonaField}>
+                              <Text style={[styles.aePersonaFieldLabel, { color: colors.textMuted }]}>Objection Profile</Text>
+                              <View style={styles.audienceTags}>
+                                {seg.objectionProfile.map((o: string, j: number) => (
+                                  <View key={j} style={[styles.audienceTag, { backgroundColor: colors.accent + '12' }]}>
+                                    <Text style={[styles.audienceTagText, { color: colors.accent }]}>{o}</Text>
+                                  </View>
+                                ))}
+                              </View>
+                            </View>
+                          )}
+                          {seg.motivationProfile && seg.motivationProfile.length > 0 && (
                             <View style={styles.aePersonaField}>
                               <Text style={[styles.aePersonaFieldLabel, { color: colors.textMuted }]}>Motivation</Text>
-                              <Text style={[styles.aePersonaFieldValue, { color: colors.text }]}>{persona.motivation}</Text>
+                              <View style={styles.audienceTags}>
+                                {seg.motivationProfile.map((m: string, j: number) => (
+                                  <View key={j} style={[styles.audienceTag, { backgroundColor: colors.primary + '12' }]}>
+                                    <Text style={[styles.audienceTagText, { color: colors.primary }]}>{m}</Text>
+                                  </View>
+                                ))}
+                              </View>
                             </View>
                           )}
-                          {persona.primaryPain && (
-                            <View style={styles.aePersonaField}>
-                              <Text style={[styles.aePersonaFieldLabel, { color: colors.textMuted }]}>Primary Pain</Text>
-                              <Text style={[styles.aePersonaFieldValue, { color: colors.text }]}>{persona.primaryPain}</Text>
-                            </View>
-                          )}
-                          {persona.barriers && persona.barriers.length > 0 && (
-                            <View style={styles.aePersonaField}>
-                              <Text style={[styles.aePersonaFieldLabel, { color: colors.textMuted }]}>Barriers</Text>
-                              <Text style={[styles.aePersonaFieldValue, { color: colors.text }]}>{persona.barriers.join(', ')}</Text>
-                            </View>
-                          )}
-                          {persona.desiredTransformation && (
-                            <View style={styles.aePersonaField}>
-                              <Text style={[styles.aePersonaFieldLabel, { color: colors.textMuted }]}>Desired Transformation</Text>
-                              <Text style={[styles.aePersonaFieldValue, { color: colors.text }]}>{persona.desiredTransformation}</Text>
-                            </View>
-                          )}
-                          {persona.demographicHints && (
-                            <View style={styles.aePersonaField}>
-                              <Text style={[styles.aePersonaFieldLabel, { color: colors.textMuted }]}>Demographics</Text>
-                              <Text style={[styles.aePersonaFieldValue, { color: colors.text }]}>{persona.demographicHints}</Text>
-                            </View>
+                          {seg.confidenceScore != null && (
+                            <Text style={[styles.aeConfidenceText, { color: colors.textMuted, marginTop: 4 }]}>
+                              Confidence: {Math.round(seg.confidenceScore * 100)}% • Evidence: {seg.evidenceCount || 0} signals
+                            </Text>
                           )}
                         </View>
                       )}
@@ -786,7 +831,97 @@ export default function AIManagementScreen() {
               </>
             ))}
 
-            {renderAudienceSection('Ads Targeting Hints', 'megaphone-outline', 'ads', (
+            {renderAudienceSection('Segment Density', 'bar-chart-outline', 'density', (
+              <>
+                {(ae.segmentDensity || []).length === 0 ? (
+                  <Text style={[styles.aeEmptyText, { color: colors.textMuted }]}>No density data</Text>
+                ) : (
+                  (ae.segmentDensity || []).map((item: any, i: number) => (
+                    <View key={i} style={styles.aeIntentRow}>
+                      <View style={styles.aeIntentLabel}>
+                        <Text style={[styles.aeIntentText, { color: colors.text }]} numberOfLines={1}>{item.segment}</Text>
+                        <Text style={[styles.aeIntentPct, { color: colors.textMuted }]}>{item.densityScore}%</Text>
+                      </View>
+                      <View style={[styles.aeIntentTrack, { backgroundColor: colors.divider }]}>
+                        <View style={[styles.aeIntentFill, { width: `${item.densityScore}%`, backgroundColor: colors.accent }]} />
+                      </View>
+                    </View>
+                  ))
+                )}
+              </>
+            ))}
+
+            {renderAudienceSection('Awareness Level', 'eye-outline', 'awareness', (
+              <>
+                {ae.awarenessLevel && (
+                  <View>
+                    <View style={styles.aeSophRow}>
+                      <Text style={[styles.aeSophLabel, { color: colors.text }]}>Dominant Level</Text>
+                      <View style={[styles.aeSophBadge, { backgroundColor: colors.accent + '20' }]}>
+                        <Text style={[styles.aeSophValue, { color: colors.accent }]}>
+                          {(ae.awarenessLevel.level || '').replace(/_/g, ' ').toUpperCase()}
+                        </Text>
+                      </View>
+                    </View>
+                    {ae.awarenessLevel.distribution && Object.entries(ae.awarenessLevel.distribution).map(([key, val]: [string, any]) => {
+                      const pct = typeof val === 'number' ? val : 0;
+                      return (
+                        <View key={key} style={styles.aeIntentRow}>
+                          <View style={styles.aeIntentLabel}>
+                            <Text style={[styles.aeIntentText, { color: colors.text }]}>{key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</Text>
+                            <Text style={[styles.aeIntentPct, { color: colors.textMuted }]}>{pct}%</Text>
+                          </View>
+                          <View style={[styles.aeIntentTrack, { backgroundColor: colors.divider }]}>
+                            <View style={[styles.aeIntentFill, { width: `${pct}%`, backgroundColor: colors.primary }]} />
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </>
+            ))}
+
+            {renderAudienceSection('Maturity Index', 'school-outline', 'maturity', (
+              <>
+                {ae.maturityIndex && (
+                  <View>
+                    <View style={styles.aeSophRow}>
+                      <Text style={[styles.aeSophLabel, { color: colors.text }]}>Market Maturity</Text>
+                      <View style={[styles.aeSophBadge, {
+                        backgroundColor: ae.maturityIndex.level === 'mature' ? colors.success + '20'
+                          : ae.maturityIndex.level === 'developing' ? colors.accent + '20' : colors.warning + '20',
+                      }]}>
+                        <Text style={[styles.aeSophValue, {
+                          color: ae.maturityIndex.level === 'mature' ? colors.success
+                            : ae.maturityIndex.level === 'developing' ? colors.accent : colors.warning,
+                        }]}>
+                          {(ae.maturityIndex.level || 'unknown').toUpperCase()}
+                        </Text>
+                      </View>
+                    </View>
+                    {ae.maturityIndex.indicators && ae.maturityIndex.indicators.length > 0 && (
+                      <View style={styles.aeSophIndicators}>
+                        {ae.maturityIndex.indicators.slice(0, 5).map((ind: string, i: number) => (
+                          <View key={i} style={[styles.audienceTag, { backgroundColor: colors.primary + '12' }]}>
+                            <Text style={[styles.audienceTagText, { color: colors.primary }]}>{ind}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                    <Text style={[styles.aeConfidenceText, { color: colors.textMuted, marginTop: 6 }]}>
+                      Confidence: {Math.round((ae.maturityIndex.confidenceScore || 0) * 100)}% • Evidence: {ae.maturityIndex.evidenceCount || 0}
+                    </Text>
+                  </View>
+                )}
+              </>
+            ))}
+
+            {renderAudienceSection('Buying Intent', 'cart-outline', 'intents', (
+              <View>{renderIntentBars(ae.intentDistribution || ae.audienceIntentDistribution)}</View>
+            ))}
+
+            {renderAudienceSection('Ads Targeting', 'megaphone-outline', 'ads', (
               <>
                 {(ae.adsTargetingHints || []).length === 0 ? (
                   <Text style={[styles.aeEmptyText, { color: colors.textMuted }]}>No targeting hints generated</Text>
@@ -838,13 +973,20 @@ export default function AIManagementScreen() {
 
         {!hasCachedData && !audienceEngineLoading && (
           <View style={styles.audienceInfoSection}>
-            <Text style={[styles.sectionLabel, { color: colors.text }]}>Signal-Based Analysis</Text>
+            <Text style={[styles.sectionLabel, { color: colors.text }]}>12-Layer Audience Intelligence</Text>
             {[
-              { icon: 'medkit-outline' as const, title: 'Pain Extraction', desc: 'Identifies recurring problems from competitor comments' },
-              { icon: 'school-outline' as const, title: 'Sophistication Detection', desc: 'Assesses audience knowledge level from language patterns' },
-              { icon: 'pie-chart-outline' as const, title: 'Intent Classification', desc: 'Categorizes audience intent: problem, curiosity, purchase, validation' },
-              { icon: 'body-outline' as const, title: 'Persona Construction', desc: 'Builds structured audience personas from evidence' },
-              { icon: 'megaphone-outline' as const, title: 'Ads Targeting', desc: 'Translates insights into Meta Ads targeting suggestions' },
+              { icon: 'chatbubbles-outline' as const, title: 'Language Analysis', desc: 'Detects problem, question, and goal expressions' },
+              { icon: 'medkit-outline' as const, title: 'Pain Intelligence', desc: 'Extracts recurring pain clusters with evidence' },
+              { icon: 'heart-outline' as const, title: 'Desire Intelligence', desc: 'Identifies transformation desires from audience' },
+              { icon: 'hand-left-outline' as const, title: 'Objection Intelligence', desc: 'Detects purchase barriers and resistance' },
+              { icon: 'swap-horizontal-outline' as const, title: 'Transformation Map', desc: 'Maps before/after transformation states' },
+              { icon: 'flame-outline' as const, title: 'Emotional Drivers', desc: 'Extracts emotional motivations from language' },
+              { icon: 'people-outline' as const, title: 'Audience Segments', desc: 'Builds structured audience segments' },
+              { icon: 'bar-chart-outline' as const, title: 'Segment Density', desc: 'Estimates segment dominance in market' },
+              { icon: 'eye-outline' as const, title: 'Awareness Level', desc: 'Classifies audience awareness stage' },
+              { icon: 'school-outline' as const, title: 'Maturity Index', desc: 'Determines market sophistication level' },
+              { icon: 'cart-outline' as const, title: 'Buying Intent', desc: 'Classifies engagement into intent levels' },
+              { icon: 'megaphone-outline' as const, title: 'Ads Targeting', desc: 'Translates insights into targeting suggestions' },
             ].map((step, i) => (
               <View key={i} style={[styles.stepCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
                 <View style={[styles.stepNum, { backgroundColor: colors.primary + '15' }]}>
@@ -1505,6 +1647,8 @@ const styles = StyleSheet.create({
   aeAdsInline: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
   aeAdsInlineText: { fontSize: 13, fontFamily: 'Inter_400Regular' },
   aeAdsRationale: { fontSize: 12, fontFamily: 'Inter_400Regular', fontStyle: 'italic' as const, lineHeight: 17, marginTop: 4 },
+  aeConfidenceRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  aeConfidenceText: { fontSize: 11, fontFamily: 'Inter_400Regular' },
   aeSecondaryBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: 14, borderWidth: 1, marginTop: 10 },
   aeSecondaryBtnText: { fontSize: 14, fontFamily: 'Inter_500Medium', flex: 1 },
 });

@@ -24,7 +24,7 @@ Client-side data is stored using AsyncStorage, while server-side data, including
 - **Dashboard**: Displays revenue-focused KPIs, AI action summaries, and campaign metrics.
 - **Content Creation**: AI Writer for text and AI Designer for image generation.
 - **Calendar**: AI Calendar Assistant for content scheduling.
-- **AI Management**: Auto-Publisher for Meta platforms, AI Audience Engine, and a Performance Intelligence Layer.
+- **AI Management**: Auto-Publisher for Meta platforms, AI Audience Engine V3 (12-layer intelligence: Language Analysis, Pain/Desire/Objection/Transformation/Emotional signal extraction, AI Segment Construction, Segment Density, Awareness Level, Maturity Index, Buying Intent, Ads Targeting — 10 deterministic + 2 AI layers, all outputs with evidence metadata), and a Performance Intelligence Layer.
 - **Studio**: Media library with AI Auto-Fill metadata, AI Video Editor, and AI Video Analysis Assist, including integration with Google Veo 3.1 for text-to-video and image-to-video generation.
 - **Lead Engine**: Modular lead generation system with AI Lead Optimization.
 - **Competitive Intelligence (MIv3)**: Provides real-data competitor analysis through a 6-layer pipeline (Signals → ContentDNA → Intent → Trajectory → Confidence → Dominance) for data processing and signal generation, with robust data integrity checks, cooldown mechanisms, and dynamic time window adjustments. It includes a two-speed data collection (Fast Pass, Deep Pass) and features market activity vs. market demand analysis.
