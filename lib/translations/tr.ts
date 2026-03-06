@@ -8,6 +8,7 @@ const tr: TranslationKeys = {
     calendar: 'Takvim',
     aiManagement: 'AI Yönetim',
     photography: 'Fotoğraf',
+    strategy: 'Strategy',
     settings: 'Ayarlar',
   },
   login: {

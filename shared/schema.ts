@@ -1548,3 +1548,35 @@ export const audienceSnapshots = pgTable("audience_snapshots", {
 });
 
 export type AudienceSnapshot = typeof audienceSnapshots.$inferSelect;
+
+export const positioningSnapshots = pgTable("positioning_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  miSnapshotId: varchar("mi_snapshot_id").notNull(),
+  audienceSnapshotId: varchar("audience_snapshot_id").notNull(),
+  engineVersion: integer("engine_version").notNull().default(3),
+  status: text("status").notNull().default("COMPLETE"),
+  statusMessage: text("status_message"),
+  territory: text("territory"),
+  enemyDefinition: text("enemy_definition"),
+  contrastAxis: text("contrast_axis"),
+  narrativeDirection: text("narrative_direction"),
+  differentiationVector: text("differentiation_vector"),
+  proofSignals: text("proof_signals"),
+  strategyCards: text("strategy_cards"),
+  territories: text("territories"),
+  stabilityResult: text("stability_result"),
+  marketPowerAnalysis: text("market_power_analysis"),
+  opportunityGaps: text("opportunity_gaps"),
+  narrativeSaturation: text("narrative_saturation"),
+  segmentPriority: text("segment_priority"),
+  inputSummary: text("input_summary"),
+  confidenceScore: doublePrecision("confidence_score"),
+  executionTimeMs: integer("execution_time_ms"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type PositioningSnapshot = typeof positioningSnapshots.$inferSelect;

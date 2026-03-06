@@ -8,6 +8,7 @@ const ar: TranslationKeys = {
     calendar: 'التقويم',
     aiManagement: 'إدارة AI',
     photography: 'صور',
+    strategy: 'Strategy',
     settings: 'الإعدادات',
   },
   login: {

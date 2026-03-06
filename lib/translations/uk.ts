@@ -8,6 +8,7 @@ const uk: TranslationKeys = {
     calendar: 'Календар',
     aiManagement: 'AI Керування',
     photography: 'Фото',
+    strategy: 'Strategy',
     settings: 'Налаштування',
   },
   login: {

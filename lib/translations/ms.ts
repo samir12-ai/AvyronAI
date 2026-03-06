@@ -8,6 +8,7 @@ const ms: TranslationKeys = {
     calendar: 'Kalendar',
     aiManagement: 'Urus AI',
     photography: 'Foto',
+    strategy: 'Strategy',
     settings: 'Tetapan',
   },
   login: {

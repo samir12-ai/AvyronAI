@@ -8,6 +8,7 @@ const zh: TranslationKeys = {
     calendar: '日历',
     aiManagement: 'AI管理',
     photography: '摄影',
+    strategy: 'Strategy',
     settings: '设置',
   },
   login: {

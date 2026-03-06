@@ -8,6 +8,7 @@ const sv: TranslationKeys = {
     calendar: 'Kalender',
     aiManagement: 'AI Hantering',
     photography: 'Foto',
+    strategy: 'Strategy',
     settings: 'Inställningar',
   },
   login: {

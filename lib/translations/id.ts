@@ -8,6 +8,7 @@ const id: TranslationKeys = {
     calendar: 'Kalender',
     aiManagement: 'Kelola AI',
     photography: 'Foto',
+    strategy: 'Strategy',
     settings: 'Pengaturan',
   },
   login: {

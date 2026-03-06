@@ -8,6 +8,7 @@ const lang: TranslationKeys = {
     calendar: 'Kalenda',
     aiManagement: 'Usimamizi AI',
     photography: 'Picha',
+    strategy: 'Strategy',
     settings: 'Mipangilio',
   },
   login: {

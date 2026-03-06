@@ -8,6 +8,7 @@ const ru: TranslationKeys = {
     calendar: 'Календарь',
     aiManagement: 'AI Управление',
     photography: 'Фото',
+    strategy: 'Strategy',
     settings: 'Настройки',
   },
   login: {

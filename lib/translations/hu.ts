@@ -8,6 +8,7 @@ const lang: TranslationKeys = {
     calendar: 'Naptár',
     aiManagement: 'AI Kezelés',
     photography: 'Fotó',
+    strategy: 'Strategy',
     settings: 'Beállítások',
   },
   login: {

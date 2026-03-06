@@ -8,6 +8,7 @@ const ko: TranslationKeys = {
     calendar: '캘린더',
     aiManagement: 'AI 관리',
     photography: '사진',
+    strategy: 'Strategy',
     settings: '설정',
   },
   login: {

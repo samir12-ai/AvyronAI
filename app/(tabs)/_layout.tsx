@@ -34,6 +34,10 @@ function NativeTabLayout() {
         <Icon sf={{ default: "checkmark.shield", selected: "checkmark.shield.fill" }} />
         <Label>{t('tabs.aiManagement')}</Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="strategy">
+        <Icon sf={{ default: "target", selected: "target" }} />
+        <Label>{t('tabs.strategy')}</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="photography">
         <Icon sf={{ default: "camera", selected: "camera.fill" }} />
         <Label>{t('tabs.photography')}</Label>
@@ -128,6 +132,15 @@ function ClassicTabLayout() {
           title: t('tabs.aiManagement'),
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "shield-checkmark" : "shield-checkmark-outline"} size={22} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="strategy"
+        options={{
+          title: t('tabs.strategy'),
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "compass" : "compass-outline"} size={22} color={color} />
           ),
         }}
       />

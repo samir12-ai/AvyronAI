@@ -8,6 +8,7 @@ const ro: TranslationKeys = {
     calendar: 'Calendar',
     aiManagement: 'Gestionare AI',
     photography: 'Foto',
+    strategy: 'Strategy',
     settings: 'Setări',
   },
   login: {

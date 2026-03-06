@@ -1,0 +1,821 @@
+import { db } from "../db";
+import {
+  positioningSnapshots,
+  miSnapshots,
+  audienceSnapshots,
+  ciCompetitors,
+} from "@shared/schema";
+import { eq, and, desc } from "drizzle-orm";
+import { aiChat } from "../ai-client";
+import {
+  POSITIONING_ENGINE_VERSION,
+  POSITIONING_THRESHOLDS,
+  type PositioningStatus,
+  type Territory,
+  type StrategyCard,
+  type MarketPowerEntry,
+  type OpportunityGap,
+  type StabilityResult,
+  FLANKING_STRATEGIES,
+} from "./constants";
+
+interface PositioningEngineResult {
+  status: PositioningStatus;
+  statusMessage: string | null;
+  territory: Territory | null;
+  territories: Territory[];
+  strategyCards: StrategyCard[];
+  marketPowerAnalysis: MarketPowerEntry[];
+  opportunityGaps: OpportunityGap[];
+  narrativeSaturation: Record<string, number>;
+  segmentPriority: { segment: string; priority: number; painAlignment: number }[];
+  stabilityResult: StabilityResult;
+  enemyDefinition: string;
+  contrastAxis: string;
+  narrativeDirection: string;
+  differentiationVector: string[];
+  proofSignals: string[];
+  confidenceScore: number;
+  inputSummary: {
+    miSnapshotId: string;
+    audienceSnapshotId: string;
+    competitorCount: number;
+    signalCount: number;
+    executionTimeMs: number;
+    flankingMode: boolean;
+    detectedCategory: string;
+  };
+  snapshotId: string;
+  executionTimeMs: number;
+  createdAt: string;
+}
+
+function layer1_categoryDetection(miData: any): string {
+  const marketState = miData.marketState || "";
+  const diagnosis = miData.marketDiagnosis || "";
+  const narrative = miData.narrativeSynthesis || "";
+
+  const combined = `${marketState} ${diagnosis} ${narrative}`.toLowerCase();
+
+  const categories: Record<string, string[]> = {
+    fitness: ["fitness", "workout", "gym", "exercise", "weight", "muscle", "body"],
+    health: ["health", "wellness", "nutrition", "diet", "medical", "therapy"],
+    marketing: ["marketing", "brand", "audience", "content", "social media", "ads", "campaign"],
+    ecommerce: ["ecommerce", "store", "product", "shop", "dropship", "retail"],
+    education: ["education", "course", "learn", "student", "training", "certification"],
+    finance: ["finance", "invest", "trading", "crypto", "wealth", "money"],
+    tech: ["tech", "software", "app", "saas", "startup", "developer"],
+    beauty: ["beauty", "skin", "makeup", "cosmetic", "skincare"],
+    food: ["food", "recipe", "restaurant", "cook", "chef"],
+  };
+
+  let best = "general";
+  let bestScore = 0;
+  for (const [cat, keywords] of Object.entries(categories)) {
+    let score = 0;
+    for (const kw of keywords) {
+      if (combined.includes(kw)) score++;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = cat;
+    }
+  }
+  return best;
+}
+
+function layer2_marketNarrativeMap(miData: any): Record<string, string[]> {
+  const narrativeMap: Record<string, string[]> = {};
+
+  const contentDna = safeJsonParse(miData.contentDnaData, []);
+  for (const entry of contentDna) {
+    const compName = entry.competitorName || entry.competitor || "Unknown";
+    const hooks = entry.hookArchetypes || [];
+    const narratives = entry.narrativeFrameworks || [];
+    narrativeMap[compName] = [
+      ...hooks.map((h: any) => typeof h === "string" ? h : h.type || h.name || ""),
+      ...narratives.map((n: any) => typeof n === "string" ? n : n.type || n.name || ""),
+    ].filter(Boolean);
+  }
+
+  return narrativeMap;
+}
+
+function layer3_narrativeSaturationDetection(narrativeMap: Record<string, string[]>): Record<string, number> {
+  const narrativeCounts: Record<string, number> = {};
+  const totalCompetitors = Object.keys(narrativeMap).length || 1;
+
+  for (const narratives of Object.values(narrativeMap)) {
+    for (const n of narratives) {
+      const key = n.toLowerCase().trim();
+      if (key) {
+        narrativeCounts[key] = (narrativeCounts[key] || 0) + 1;
+      }
+    }
+  }
+
+  const saturation: Record<string, number> = {};
+  for (const [narrative, count] of Object.entries(narrativeCounts)) {
+    saturation[narrative] = Math.min(1.0, count / totalCompetitors);
+  }
+  return saturation;
+}
+
+function layer4_trustGapDetection(audienceData: any): { trustGaps: string[]; trustGapScore: number } {
+  const objections = safeJsonParse(audienceData.objectionMap, []);
+  const awareness = safeJsonParse(audienceData.awarenessLevel, {});
+
+  const trustGaps: string[] = [];
+  let trustGapScore = 0;
+
+  for (const obj of objections) {
+    if (obj.canonical && obj.frequency > 0) {
+      trustGaps.push(obj.canonical);
+      trustGapScore += obj.frequency;
+    }
+  }
+
+  if (awareness.level === "UNAWARE" || awareness.level === "PROBLEM_AWARE") {
+    trustGapScore *= 1.3;
+  }
+
+  return { trustGaps, trustGapScore: Math.min(1.0, trustGapScore / 100) };
+}
+
+function layer5_segmentPriorityResolution(audienceData: any): { segment: string; priority: number; painAlignment: number }[] {
+  const segments = safeJsonParse(audienceData.audienceSegments, []);
+  const density = safeJsonParse(audienceData.segmentDensity, []);
+  const pains = safeJsonParse(audienceData.audiencePains, []);
+
+  return segments.map((seg: any, i: number) => {
+    const densityItem = density.find((d: any) => d.segment === seg.name);
+    const densityScore = densityItem?.densityScore || 0;
+
+    let painAlignment = 0;
+    if (seg.painProfile && pains.length > 0) {
+      const matchedPains = seg.painProfile.filter((p: string) =>
+        pains.some((pain: any) => pain.canonical.toLowerCase().includes(p.toLowerCase()))
+      );
+      painAlignment = seg.painProfile.length > 0 ? matchedPains.length / seg.painProfile.length : 0;
+    }
+
+    return {
+      segment: seg.name,
+      priority: densityScore,
+      painAlignment: Math.round(painAlignment * 100) / 100,
+    };
+  }).sort((a: any, b: any) => b.priority - a.priority);
+}
+
+function layer6_marketPowerAnalysis(miData: any, competitors: any[]): {
+  entries: MarketPowerEntry[];
+  authorityGap: number;
+  flankingMode: boolean;
+} {
+  const dominanceData = safeJsonParse(miData.dominanceData, []);
+  const contentDna = safeJsonParse(miData.contentDnaData, []);
+
+  const entries: MarketPowerEntry[] = [];
+
+  for (const comp of competitors) {
+    const domEntry = dominanceData.find((d: any) =>
+      d.competitor === comp.name || d.competitorName === comp.name
+    );
+    const dnaEntry = contentDna.find((d: any) =>
+      d.competitor === comp.name || d.competitorName === comp.name
+    );
+
+    const authorityScore = domEntry?.dominanceScore || domEntry?.score || 0;
+    const engagementStrength = comp.engagementRatio || 0;
+
+    const contentVolume = dnaEntry?.hookArchetypes?.length || 0;
+    const contentDominanceScore = Math.min(1.0, contentVolume / 10);
+
+    const narrativeOwnership = dnaEntry?.narrativeFrameworks?.length || 0;
+    const narrativeOwnershipIndex = Math.min(1.0, narrativeOwnership / 5);
+
+    entries.push({
+      competitorName: comp.name,
+      authorityScore: Math.min(1.0, authorityScore / 100),
+      contentDominanceScore,
+      narrativeOwnershipIndex,
+      engagementStrength: Math.min(1.0, engagementStrength * 10),
+    });
+  }
+
+  entries.sort((a, b) => b.authorityScore - a.authorityScore);
+
+  const topAuthority = entries[0]?.authorityScore || 0;
+  const avgAuthority = entries.length > 0
+    ? entries.reduce((s, e) => s + e.authorityScore, 0) / entries.length
+    : 0;
+  const authorityGap = topAuthority - avgAuthority;
+  const flankingMode = authorityGap >= POSITIONING_THRESHOLDS.AUTHORITY_GAP_FLANKING_THRESHOLD;
+
+  return { entries, authorityGap, flankingMode };
+}
+
+function layer7_opportunityGapDetection(
+  narrativeSaturation: Record<string, number>,
+  audienceData: any,
+  marketPower: MarketPowerEntry[],
+): OpportunityGap[] {
+  const pains = safeJsonParse(audienceData.audiencePains, []);
+  const desires = safeJsonParse(audienceData.desireMap, []);
+
+  const painTerritories = pains.slice(0, 8).map((p: any) => ({
+    name: p.canonical,
+    demand: Math.min(1.0, p.frequency / 20),
+    signals: p.evidence || [],
+    type: "pain" as const,
+  }));
+
+  const desireTerritories = desires.slice(0, 8).map((d: any) => ({
+    name: d.canonical,
+    demand: Math.min(1.0, d.frequency / 20),
+    signals: d.evidence || [],
+    type: "desire" as const,
+  }));
+
+  const allTerritories = [...painTerritories, ...desireTerritories];
+  const avgCompAuthority = marketPower.length > 0
+    ? marketPower.reduce((s, e) => s + e.authorityScore, 0) / marketPower.length
+    : 0;
+
+  const opportunities: OpportunityGap[] = allTerritories.map(t => {
+    const satLevel = narrativeSaturation[t.name.toLowerCase()] || 0;
+    const compAuth = avgCompAuthority;
+
+    const opportunityScore =
+      (1 - satLevel) * 0.40 +
+      t.demand * 0.40 +
+      (1 - compAuth) * 0.20;
+
+    return {
+      territory: t.name,
+      saturationLevel: satLevel,
+      audienceDemand: t.demand,
+      competitorAuthority: compAuth,
+      opportunityScore: Math.round(opportunityScore * 100) / 100,
+      painSignals: t.type === "pain" ? t.signals.slice(0, 3) : [],
+      desireSignals: t.type === "desire" ? t.signals.slice(0, 3) : [],
+    };
+  });
+
+  return opportunities
+    .filter(o => o.opportunityScore >= POSITIONING_THRESHOLDS.OPPORTUNITY_SCORE_THRESHOLD)
+    .sort((a, b) => b.opportunityScore - a.opportunityScore);
+}
+
+function layer8_differentiationAxisConstruction(
+  opportunities: OpportunityGap[],
+  trustGaps: string[],
+  flankingMode: boolean,
+): string[] {
+  const axes: string[] = [];
+
+  if (flankingMode) {
+    axes.push("niche_expertise");
+    axes.push("underserved_audience_focus");
+  }
+
+  if (trustGaps.includes("skepticism / doesn't believe it works")) {
+    axes.push("proof_and_transparency");
+  }
+  if (trustGaps.includes("too expensive")) {
+    axes.push("value_accessibility");
+  }
+  if (trustGaps.includes("complexity / too hard")) {
+    axes.push("simplicity_and_ease");
+  }
+  if (trustGaps.includes("no time")) {
+    axes.push("speed_and_efficiency");
+  }
+
+  const topOpp = opportunities[0];
+  if (topOpp) {
+    if (topOpp.saturationLevel < 0.3) axes.push("whitespace_positioning");
+    if (topOpp.audienceDemand > 0.7) axes.push("demand_driven_authority");
+  }
+
+  return [...new Set(axes)].slice(0, 5);
+}
+
+function layer9_narrativeDistanceScoring(
+  territory: string,
+  narrativeMap: Record<string, string[]>,
+): number {
+  const territoryLower = territory.toLowerCase();
+  let minDistance = 1.0;
+
+  for (const narratives of Object.values(narrativeMap)) {
+    for (const n of narratives) {
+      const nLower = n.toLowerCase();
+      const tokens1 = new Set(territoryLower.split(/\s+/));
+      const tokens2 = new Set(nLower.split(/\s+/));
+      let overlap = 0;
+      for (const t of tokens1) {
+        if (tokens2.has(t)) overlap++;
+      }
+      const union = new Set([...tokens1, ...tokens2]).size;
+      const similarity = union > 0 ? overlap / union : 0;
+      const distance = 1 - similarity;
+      if (distance < minDistance) minDistance = distance;
+    }
+  }
+
+  return Math.round(minDistance * 100) / 100;
+}
+
+function layer10_strategicTerritorySelection(
+  opportunities: OpportunityGap[],
+  narrativeMap: Record<string, string[]>,
+  narrativeSaturation: Record<string, number>,
+  marketPower: MarketPowerEntry[],
+  differentiationAxes: string[],
+  segmentPriority: { segment: string; priority: number; painAlignment: number }[],
+  trustGaps: string[],
+  flankingMode: boolean,
+): Territory[] {
+  const topSegments = segmentPriority.slice(0, 2);
+
+  const rawTerritories: Territory[] = opportunities.slice(0, 8).map(opp => {
+    const narrativeDistance = layer9_narrativeDistanceScoring(opp.territory, narrativeMap);
+
+    const painAlignment = opp.painSignals.length > 0 ? opp.painSignals : [];
+    const desireAlignment = opp.desireSignals.length > 0 ? opp.desireSignals : [];
+
+    let enemyDefinition = "The status quo";
+    if (opp.saturationLevel > 0.5) {
+      enemyDefinition = "Oversaturated generic advice";
+    } else if (flankingMode) {
+      enemyDefinition = "Dominant players who ignore underserved audiences";
+    }
+
+    let contrastAxis = differentiationAxes[0] || "unique_approach";
+    let narrativeDirection = `Position around ${opp.territory} with ${contrastAxis} differentiation`;
+
+    return {
+      name: opp.territory,
+      opportunityScore: opp.opportunityScore,
+      narrativeDistanceScore: narrativeDistance,
+      painAlignment,
+      desireAlignment,
+      enemyDefinition,
+      contrastAxis,
+      narrativeDirection,
+      isStable: true,
+      stabilityNotes: [],
+      evidenceSignals: [...opp.painSignals, ...opp.desireSignals].slice(0, 5),
+      confidenceScore: Math.round(opp.opportunityScore * narrativeDistance * 100) / 100,
+    };
+  });
+
+  const deduped = deduplicateTerritories(rawTerritories);
+
+  const filtered = deduped.filter(t => {
+    const sat = narrativeSaturation[t.name.toLowerCase()] || 0;
+    if (sat >= POSITIONING_THRESHOLDS.DOMINANT_COMPETITOR_THRESHOLD) return false;
+    return true;
+  });
+
+  const sorted = filtered.sort((a, b) => b.opportunityScore - a.opportunityScore);
+
+  if (sorted.length > POSITIONING_THRESHOLDS.MAX_TERRITORIES) {
+    return sorted.slice(0, POSITIONING_THRESHOLDS.MAX_TERRITORIES);
+  }
+
+  return sorted;
+}
+
+function deduplicateTerritories(territories: Territory[]): Territory[] {
+  const result: Territory[] = [];
+
+  for (const t of territories) {
+    let isDuplicate = false;
+    for (const existing of result) {
+      const tokens1 = new Set(t.name.toLowerCase().split(/\s+/));
+      const tokens2 = new Set(existing.name.toLowerCase().split(/\s+/));
+      let overlap = 0;
+      for (const tok of tokens1) {
+        if (tokens2.has(tok)) overlap++;
+      }
+      const union = new Set([...tokens1, ...tokens2]).size;
+      if (union > 0 && overlap / union >= POSITIONING_THRESHOLDS.TERRITORY_OVERLAP_THRESHOLD) {
+        isDuplicate = true;
+        if (t.opportunityScore > existing.opportunityScore) {
+          Object.assign(existing, t);
+        }
+        break;
+      }
+    }
+    if (!isDuplicate) {
+      result.push({ ...t });
+    }
+  }
+
+  return result;
+}
+
+async function layer11_positioningStatementGeneration(
+  territories: Territory[],
+  category: string,
+  segmentPriority: { segment: string; priority: number }[],
+  accountId: string,
+): Promise<Territory[]> {
+  if (territories.length === 0) return territories;
+
+  try {
+    const topSegment = segmentPriority[0]?.segment || "target audience";
+
+    const prompt = `You are a strategic positioning analyst. Generate precise positioning statements for each territory.
+
+MARKET CATEGORY: ${category}
+PRIMARY AUDIENCE SEGMENT: ${topSegment}
+
+TERRITORIES:
+${territories.map((t, i) => `${i + 1}. "${t.name}" (opportunity: ${t.opportunityScore}, distance: ${t.narrativeDistanceScore})
+   Pain alignment: ${t.painAlignment.join(", ") || "general"}
+   Enemy: ${t.enemyDefinition}
+   Contrast axis: ${t.contrastAxis}`).join("\n\n")}
+
+For each territory, return a JSON array with objects containing:
+{
+  "index": number,
+  "enemyDefinition": "precise enemy statement",
+  "narrativeDirection": "one-sentence positioning narrative",
+  "contrastAxis": "clear contrast axis statement"
+}
+
+Keep statements concise, strategic, and evidence-grounded. Return ONLY the JSON array.`;
+
+    const response = await aiChat({
+      model: "gpt-4.1-mini",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.3,
+      max_tokens: 1500,
+      endpoint: "positioning-engine-v3-statements",
+      accountId,
+    });
+
+    const content = response.choices[0]?.message?.content?.trim() || "[]";
+    const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const parsed = JSON.parse(cleaned) as any[];
+
+    for (const item of parsed) {
+      const idx = (item.index || 1) - 1;
+      if (idx >= 0 && idx < territories.length) {
+        if (item.enemyDefinition) territories[idx].enemyDefinition = item.enemyDefinition;
+        if (item.narrativeDirection) territories[idx].narrativeDirection = item.narrativeDirection;
+        if (item.contrastAxis) territories[idx].contrastAxis = item.contrastAxis;
+      }
+    }
+  } catch (err: any) {
+    console.error("[PositioningEngine-V3] Statement generation failed:", err.message);
+  }
+
+  return territories;
+}
+
+function layer12_stabilityGuard(
+  territories: Territory[],
+  narrativeSaturation: Record<string, number>,
+  marketPower: MarketPowerEntry[],
+  segmentPriority: { segment: string; priority: number; painAlignment: number }[],
+): { territories: Territory[]; stabilityResult: StabilityResult } {
+  const checks: StabilityResult["checks"] = [];
+  let fallbackApplied = false;
+  let fallbackReason: string | undefined;
+
+  for (const territory of territories) {
+    const territoryChecks: { passed: boolean; reason: string }[] = [];
+
+    const sat = narrativeSaturation[territory.name.toLowerCase()] || 0;
+    const satPassed = sat < POSITIONING_THRESHOLDS.STABILITY_SATURATION_LIMIT;
+    territoryChecks.push({
+      passed: satPassed,
+      reason: satPassed
+        ? `Saturation ${(sat * 100).toFixed(0)}% below limit`
+        : `Saturation ${(sat * 100).toFixed(0)}% exceeds ${POSITIONING_THRESHOLDS.STABILITY_SATURATION_LIMIT * 100}% limit`,
+    });
+
+    const topComp = marketPower[0];
+    const dominancePassed = !topComp || topComp.authorityScore < POSITIONING_THRESHOLDS.DOMINANT_COMPETITOR_THRESHOLD;
+    territoryChecks.push({
+      passed: dominancePassed,
+      reason: dominancePassed
+        ? "No dominant competitor blocking territory"
+        : `Dominant competitor ${topComp?.competitorName} (authority: ${(topComp?.authorityScore * 100).toFixed(0)}%)`,
+    });
+
+    const topSegment = segmentPriority[0];
+    const painPassed = !topSegment || topSegment.painAlignment >= POSITIONING_THRESHOLDS.MIN_PAIN_ALIGNMENT;
+    territoryChecks.push({
+      passed: painPassed,
+      reason: painPassed
+        ? "Audience pain alignment sufficient"
+        : `Pain alignment ${topSegment?.painAlignment} below minimum ${POSITIONING_THRESHOLDS.MIN_PAIN_ALIGNMENT}`,
+    });
+
+    const allPassed = territoryChecks.every(c => c.passed);
+    territory.isStable = allPassed;
+    territory.stabilityNotes = territoryChecks.filter(c => !c.passed).map(c => c.reason);
+
+    for (const check of territoryChecks) {
+      checks.push({
+        name: `${territory.name}`,
+        passed: check.passed,
+        detail: check.reason,
+      });
+    }
+  }
+
+  const stableTerritories = territories.filter(t => t.isStable);
+  const unstableTerritories = territories.filter(t => !t.isStable);
+
+  if (stableTerritories.length === 0 && territories.length > 0) {
+    fallbackApplied = true;
+    fallbackReason = "All territories failed stability checks — using best available with warning";
+    const best = territories.sort((a, b) => b.opportunityScore - a.opportunityScore)[0];
+    best.stabilityNotes.push("FALLBACK: Selected despite stability concerns due to no better alternatives");
+    stableTerritories.push(best);
+  }
+
+  const finalTerritories = [...stableTerritories, ...unstableTerritories.slice(0, POSITIONING_THRESHOLDS.MAX_TERRITORIES - stableTerritories.length)];
+
+  return {
+    territories: finalTerritories,
+    stabilityResult: {
+      isStable: !fallbackApplied && stableTerritories.length > 0,
+      checks,
+      fallbackApplied,
+      fallbackReason,
+    },
+  };
+}
+
+function generateStrategyCards(territories: Territory[]): StrategyCard[] {
+  return territories.map((t, i) => ({
+    territoryName: t.name,
+    enemyDefinition: t.enemyDefinition,
+    narrativeDirection: t.narrativeDirection,
+    evidenceSignals: t.evidenceSignals,
+    confidenceScore: t.confidenceScore,
+    isPrimary: i === 0,
+  }));
+}
+
+function safeJsonParse(data: string | null | undefined, fallback: any): any {
+  if (!data) return fallback;
+  try {
+    return JSON.parse(data);
+  } catch {
+    return fallback;
+  }
+}
+
+export async function runPositioningEngine(
+  accountId: string,
+  campaignId: string,
+  miSnapshotId: string,
+  audienceSnapshotId: string,
+): Promise<PositioningEngineResult> {
+  const startTime = Date.now();
+
+  const [miSnapshot] = await db.select().from(miSnapshots)
+    .where(eq(miSnapshots.id, miSnapshotId))
+    .limit(1);
+
+  if (!miSnapshot) {
+    const executionTimeMs = Date.now() - startTime;
+    return buildEmptyResult("MISSING_DEPENDENCY", `Market Intelligence snapshot ${miSnapshotId} not found`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+  }
+
+  if (miSnapshot.campaignId !== campaignId) {
+    const executionTimeMs = Date.now() - startTime;
+    return buildEmptyResult("MISSING_DEPENDENCY", `MI snapshot ${miSnapshotId} belongs to campaign ${miSnapshot.campaignId}, not ${campaignId}`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+  }
+
+  const [audienceSnapshot] = await db.select().from(audienceSnapshots)
+    .where(eq(audienceSnapshots.id, audienceSnapshotId))
+    .limit(1);
+
+  if (!audienceSnapshot) {
+    const executionTimeMs = Date.now() - startTime;
+    return buildEmptyResult("MISSING_DEPENDENCY", `Audience Intelligence snapshot ${audienceSnapshotId} not found`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+  }
+
+  if (audienceSnapshot.campaignId !== campaignId) {
+    const executionTimeMs = Date.now() - startTime;
+    return buildEmptyResult("MISSING_DEPENDENCY", `Audience snapshot ${audienceSnapshotId} belongs to campaign ${audienceSnapshot.campaignId}, not ${campaignId}`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+  }
+
+  const competitors = await db.select().from(ciCompetitors)
+    .where(eq(ciCompetitors.campaignId, campaignId));
+
+  const audiencePains = safeJsonParse(audienceSnapshot.audiencePains, []);
+  const audienceDesires = safeJsonParse(audienceSnapshot.desireMap, []);
+  const totalSignals = audiencePains.length + audienceDesires.length;
+
+  if (totalSignals < POSITIONING_THRESHOLDS.MIN_AUDIENCE_SIGNALS) {
+    const executionTimeMs = Date.now() - startTime;
+    return buildEmptyResult("INSUFFICIENT_SIGNALS", `Insufficient audience signals (${totalSignals}) for positioning — need ≥${POSITIONING_THRESHOLDS.MIN_AUDIENCE_SIGNALS}`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+  }
+
+  console.log(`[PositioningEngine-V3] Starting 12-layer analysis | MI=${miSnapshotId} | Audience=${audienceSnapshotId} | Competitors=${competitors.length}`);
+
+  const category = layer1_categoryDetection(miSnapshot);
+  console.log(`[PositioningEngine-V3] L1 Category: ${category}`);
+
+  const narrativeMap = layer2_marketNarrativeMap(miSnapshot);
+  console.log(`[PositioningEngine-V3] L2 Narratives: ${Object.keys(narrativeMap).length} competitors mapped`);
+
+  const narrativeSaturation = layer3_narrativeSaturationDetection(narrativeMap);
+  console.log(`[PositioningEngine-V3] L3 Saturation: ${Object.keys(narrativeSaturation).length} narratives scored`);
+
+  const { trustGaps, trustGapScore } = layer4_trustGapDetection(audienceSnapshot);
+  console.log(`[PositioningEngine-V3] L4 Trust gaps: ${trustGaps.length} (score: ${trustGapScore.toFixed(2)})`);
+
+  const segmentPriority = layer5_segmentPriorityResolution(audienceSnapshot);
+  console.log(`[PositioningEngine-V3] L5 Segments: ${segmentPriority.length} prioritized`);
+
+  const { entries: marketPower, authorityGap, flankingMode } = layer6_marketPowerAnalysis(miSnapshot, competitors);
+  console.log(`[PositioningEngine-V3] L6 Market power: ${marketPower.length} competitors | gap=${authorityGap.toFixed(2)} | flanking=${flankingMode}`);
+
+  const opportunityGaps = layer7_opportunityGapDetection(narrativeSaturation, audienceSnapshot, marketPower);
+  console.log(`[PositioningEngine-V3] L7 Opportunities: ${opportunityGaps.length} viable territories`);
+
+  const differentiationAxes = layer8_differentiationAxisConstruction(opportunityGaps, trustGaps, flankingMode);
+  console.log(`[PositioningEngine-V3] L8 Differentiation: ${differentiationAxes.join(", ")}`);
+
+  let territories = layer10_strategicTerritorySelection(
+    opportunityGaps, narrativeMap, narrativeSaturation,
+    marketPower, differentiationAxes, segmentPriority, trustGaps, flankingMode,
+  );
+  console.log(`[PositioningEngine-V3] L10 Territories: ${territories.length} selected`);
+
+  territories = await layer11_positioningStatementGeneration(territories, category, segmentPriority, accountId);
+  console.log(`[PositioningEngine-V3] L11 Statements generated`);
+
+  const { territories: finalTerritories, stabilityResult } = layer12_stabilityGuard(
+    territories, narrativeSaturation, marketPower, segmentPriority,
+  );
+  console.log(`[PositioningEngine-V3] L12 Stability: ${stabilityResult.isStable ? "STABLE" : "UNSTABLE"} | fallback=${stabilityResult.fallbackApplied}`);
+
+  const strategyCards = generateStrategyCards(finalTerritories);
+
+  const primaryTerritory = finalTerritories[0] || null;
+  const executionTimeMs = Date.now() - startTime;
+
+  const overallConfidence = primaryTerritory
+    ? Math.round(primaryTerritory.confidenceScore * 100) / 100
+    : 0;
+
+  const status: PositioningStatus = !stabilityResult.isStable ? "UNSTABLE" : "COMPLETE";
+  const statusMessage = !stabilityResult.isStable
+    ? "Positioning generated but stability checks failed — review recommended"
+    : null;
+
+  const inputSummary = {
+    miSnapshotId,
+    audienceSnapshotId,
+    competitorCount: competitors.length,
+    signalCount: totalSignals,
+    executionTimeMs,
+    flankingMode,
+    detectedCategory: category,
+  };
+
+  const [inserted] = await db.insert(positioningSnapshots).values({
+    accountId,
+    campaignId,
+    miSnapshotId,
+    audienceSnapshotId,
+    engineVersion: POSITIONING_ENGINE_VERSION,
+    status,
+    statusMessage,
+    territory: JSON.stringify(primaryTerritory),
+    enemyDefinition: primaryTerritory?.enemyDefinition || "",
+    contrastAxis: primaryTerritory?.contrastAxis || "",
+    narrativeDirection: primaryTerritory?.narrativeDirection || "",
+    differentiationVector: JSON.stringify(differentiationAxes),
+    proofSignals: JSON.stringify(primaryTerritory?.evidenceSignals || []),
+    strategyCards: JSON.stringify(strategyCards),
+    territories: JSON.stringify(finalTerritories),
+    stabilityResult: JSON.stringify(stabilityResult),
+    marketPowerAnalysis: JSON.stringify(marketPower),
+    opportunityGaps: JSON.stringify(opportunityGaps),
+    narrativeSaturation: JSON.stringify(narrativeSaturation),
+    segmentPriority: JSON.stringify(segmentPriority),
+    inputSummary: JSON.stringify(inputSummary),
+    confidenceScore: overallConfidence,
+    executionTimeMs,
+  }).returning({ id: positioningSnapshots.id });
+
+  console.log(`[PositioningEngine-V3] ${status} in ${executionTimeMs}ms | snapshot=${inserted.id} | territories=${finalTerritories.length} | confidence=${overallConfidence}`);
+
+  return {
+    status,
+    statusMessage,
+    territory: primaryTerritory,
+    territories: finalTerritories,
+    strategyCards,
+    marketPowerAnalysis: marketPower,
+    opportunityGaps,
+    narrativeSaturation,
+    segmentPriority,
+    stabilityResult,
+    enemyDefinition: primaryTerritory?.enemyDefinition || "",
+    contrastAxis: primaryTerritory?.contrastAxis || "",
+    narrativeDirection: primaryTerritory?.narrativeDirection || "",
+    differentiationVector: differentiationAxes,
+    proofSignals: primaryTerritory?.evidenceSignals || [],
+    confidenceScore: overallConfidence,
+    inputSummary,
+    snapshotId: inserted.id,
+    executionTimeMs,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function buildEmptyResult(
+  status: PositioningStatus,
+  message: string,
+  executionTimeMs: number,
+  miSnapshotId: string,
+  audienceSnapshotId: string,
+): PositioningEngineResult {
+  return {
+    status,
+    statusMessage: message,
+    territory: null,
+    territories: [],
+    strategyCards: [],
+    marketPowerAnalysis: [],
+    opportunityGaps: [],
+    narrativeSaturation: {},
+    segmentPriority: [],
+    stabilityResult: { isStable: false, checks: [], fallbackApplied: false },
+    enemyDefinition: "",
+    contrastAxis: "",
+    narrativeDirection: "",
+    differentiationVector: [],
+    proofSignals: [],
+    confidenceScore: 0,
+    inputSummary: {
+      miSnapshotId,
+      audienceSnapshotId,
+      competitorCount: 0,
+      signalCount: 0,
+      executionTimeMs,
+      flankingMode: false,
+      detectedCategory: "unknown",
+    },
+    snapshotId: "",
+    executionTimeMs,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+export async function getLatestPositioningSnapshot(accountId: string, campaignId: string) {
+  const [snapshot] = await db.select().from(positioningSnapshots)
+    .where(and(
+      eq(positioningSnapshots.accountId, accountId),
+      eq(positioningSnapshots.campaignId, campaignId),
+    ))
+    .orderBy(desc(positioningSnapshots.createdAt))
+    .limit(1);
+
+  if (!snapshot) return null;
+
+  return {
+    ...snapshot,
+    territory: safeJsonParse(snapshot.territory, null),
+    differentiationVector: safeJsonParse(snapshot.differentiationVector, []),
+    proofSignals: safeJsonParse(snapshot.proofSignals, []),
+    strategyCards: safeJsonParse(snapshot.strategyCards, []),
+    territories: safeJsonParse(snapshot.territories, []),
+    stabilityResult: safeJsonParse(snapshot.stabilityResult, {}),
+    marketPowerAnalysis: safeJsonParse(snapshot.marketPowerAnalysis, []),
+    opportunityGaps: safeJsonParse(snapshot.opportunityGaps, []),
+    narrativeSaturation: safeJsonParse(snapshot.narrativeSaturation, {}),
+    segmentPriority: safeJsonParse(snapshot.segmentPriority, []),
+    inputSummary: safeJsonParse(snapshot.inputSummary, {}),
+  };
+}
+
+export {
+  layer1_categoryDetection,
+  layer2_marketNarrativeMap,
+  layer3_narrativeSaturationDetection,
+  layer4_trustGapDetection,
+  layer5_segmentPriorityResolution,
+  layer6_marketPowerAnalysis,
+  layer7_opportunityGapDetection,
+  layer8_differentiationAxisConstruction,
+  layer9_narrativeDistanceScoring,
+  layer10_strategicTerritorySelection,
+  layer12_stabilityGuard,
+  deduplicateTerritories,
+  generateStrategyCards,
+};

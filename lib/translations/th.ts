@@ -8,6 +8,7 @@ const th: TranslationKeys = {
     calendar: 'ปฏิทิน',
     aiManagement: 'จัดการ AI',
     photography: 'ภาพถ่าย',
+    strategy: 'Strategy',
     settings: 'ตั้งค่า',
   },
   login: {

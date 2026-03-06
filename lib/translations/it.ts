@@ -8,6 +8,7 @@ const it: TranslationKeys = {
     calendar: 'Calendario',
     aiManagement: 'Gestione AI',
     photography: 'Foto',
+    strategy: 'Strategy',
     settings: 'Impostazioni',
   },
   login: {

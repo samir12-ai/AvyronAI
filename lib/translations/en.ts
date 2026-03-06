@@ -6,6 +6,7 @@ const en = {
     calendar: 'Calendar',
     aiManagement: 'AI Control',
     photography: 'Photo',
+    strategy: 'Strategy',
     settings: 'Settings',
   },
   login: {

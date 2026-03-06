@@ -8,6 +8,7 @@ const lang: TranslationKeys = {
     calendar: 'Kalenteri',
     aiManagement: 'AI Hallinta',
     photography: 'Valokuva',
+    strategy: 'Strategy',
     settings: 'Asetukset',
   },
   login: {

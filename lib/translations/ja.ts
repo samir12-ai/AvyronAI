@@ -8,6 +8,7 @@ const ja: TranslationKeys = {
     calendar: 'カレンダー',
     aiManagement: 'AI管理',
     photography: '写真',
+    strategy: 'Strategy',
     settings: '設定',
   },
   login: {

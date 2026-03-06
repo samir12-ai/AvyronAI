@@ -8,6 +8,7 @@ const vi: TranslationKeys = {
     calendar: 'Lịch',
     aiManagement: 'Quản lý AI',
     photography: 'Ảnh',
+    strategy: 'Strategy',
     settings: 'Cài đặt',
   },
   login: {
