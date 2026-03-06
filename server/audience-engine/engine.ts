@@ -614,7 +614,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   console.log(`[AudienceEngine-V3] Data: ${competitorIds.length} competitors, ${captions.length} captions, ${commentTexts.length} comments`);
 
   const [campaign] = await db.select().from(growthCampaigns)
-    .where(and(eq(growthCampaigns.id, campaignId), eq(growthCampaigns.accountId, accountId)))
+    .where(eq(growthCampaigns.id, campaignId))
     .limit(1);
 
   const businessContext = {
