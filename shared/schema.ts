@@ -1521,3 +1521,23 @@ export const miFetchJobs = pgTable("mi_fetch_jobs", {
 });
 
 export type MiFetchJob = typeof miFetchJobs.$inferSelect;
+
+export const audienceSnapshots = pgTable("audience_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  miSnapshotId: varchar("mi_snapshot_id"),
+  engineVersion: integer("engine_version").notNull().default(1),
+  audiencePains: text("audience_pains"),
+  audienceSophisticationLevel: text("audience_sophistication_level"),
+  audienceIntentDistribution: text("audience_intent_distribution"),
+  audiencePersonas: text("audience_personas"),
+  adsTargetingHints: text("ads_targeting_hints"),
+  inputSummary: text("input_summary"),
+  executionTimeMs: integer("execution_time_ms"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type AudienceSnapshot = typeof audienceSnapshots.$inferSelect;

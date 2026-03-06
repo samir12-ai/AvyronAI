@@ -119,6 +119,12 @@ export default function AIManagementScreen() {
   const [audiences, setAudiences] = useState<AIAudience[]>(ps.generatedAudiences);
   const [audienceError, setAudienceError] = useState('');
   const [expandedAudience, setExpandedAudience] = useState<number | null>(null);
+
+  const [audienceEngineData, setAudienceEngineData] = useState<any>(null);
+  const [audienceEngineLoading, setAudienceEngineLoading] = useState(false);
+  const [audienceEngineError, setAudienceEngineError] = useState('');
+  const [expandedPersona, setExpandedPersona] = useState<number | null>(null);
+  const [expandedSection, setExpandedSection] = useState<string | null>('pains');
   const [controlData, setControlData] = useState<any>(null);
   const [nextActions, setNextActions] = useState<{action: string; why: string; risk: string}[]>([]);
 
@@ -134,7 +140,27 @@ export default function AIManagementScreen() {
       setGeneratingAudience(false);
       setAudienceError('');
       setExpandedAudience(null);
+      setAudienceEngineData(null);
+      setAudienceEngineError('');
+      setExpandedPersona(null);
+      setExpandedSection('pains');
     }
+  }, [selectedCampaignId]);
+
+  useEffect(() => {
+    if (!selectedCampaignId) return;
+    const loadLatestAudience = async () => {
+      try {
+        const baseUrl = getApiUrl();
+        const url = new URL(`/api/audience-engine/latest?campaignId=${selectedCampaignId}`, baseUrl);
+        const res = await fetch(url.toString());
+        if (res.ok) {
+          const data = await res.json();
+          setAudienceEngineData(data);
+        }
+      } catch {}
+    };
+    loadLatestAudience();
   }, [selectedCampaignId]);
 
   const lastHydrationRef = useRef(0);
@@ -223,6 +249,35 @@ export default function AIManagementScreen() {
     } finally {
       setPublishing(false);
       setSelectedPosts(new Set());
+    }
+  };
+
+  const handleRunAudienceEngine = async () => {
+    if (!selectedCampaignId) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    setAudienceEngineLoading(true);
+    setAudienceEngineError('');
+
+    try {
+      const baseUrl = getApiUrl();
+      const url = new URL('/api/audience-engine/analyze', baseUrl);
+      const response = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaignId: selectedCampaignId }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: 'Analysis failed' }));
+        throw new Error(err.error || 'Analysis failed');
+      }
+
+      const data = await response.json();
+      setAudienceEngineData(data);
+    } catch (err: any) {
+      setAudienceEngineError(err.message || 'Audience analysis failed');
+    } finally {
+      setAudienceEngineLoading(false);
     }
   };
 
@@ -493,94 +548,337 @@ export default function AIManagementScreen() {
     </View>
   );
 
-  const renderAudienceManager = () => (
-    <View style={styles.tabContent}>
+  const renderAudienceSection = (title: string, icon: keyof typeof Ionicons.glyphMap, sectionKey: string, children: React.ReactNode) => (
+    <View style={[styles.aeSection, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
       <Pressable
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          setShowAudienceModal(true);
-          setAudienceGoal('');
-          setAudienceProduct('');
-          setAudienceBudget('');
-          setAudiences([]);
-          setAudienceError('');
-          setExpandedAudience(null);
-        }}
+        onPress={() => setExpandedSection(expandedSection === sectionKey ? null : sectionKey)}
+        style={styles.aeSectionHeader}
       >
-        <LinearGradient
-          colors={[colors.accent, '#0EA5E9']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={styles.audienceCTA}
-        >
-          <View style={styles.audienceCTAIcon}>
-            <Ionicons name="people" size={24} color="#fff" />
+        <View style={styles.aeSectionLeft}>
+          <View style={[styles.aeSectionIcon, { backgroundColor: colors.primary + '15' }]}>
+            <Ionicons name={icon} size={16} color={colors.primary} />
           </View>
-          <View style={styles.audienceCTAText}>
-            <Text style={styles.audienceCTATitle}>{t('aiManagement.findAudience')}</Text>
-            <Text style={styles.audienceCTADesc}>{t('aiManagement.findAudienceDesc')}</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />
-        </LinearGradient>
-      </Pressable>
-
-      <View style={styles.audienceInfoSection}>
-        <Text style={[styles.sectionLabel, { color: colors.text }]}>
-          {t('aiManagement.howItWorks')}
-        </Text>
-        
-        {[
-          { icon: 'flag-outline' as const, title: t('aiManagement.step1Title'), desc: t('aiManagement.step1Desc') },
-          { icon: 'sparkles-outline' as const, title: t('aiManagement.step2Title'), desc: t('aiManagement.step2Desc') },
-          { icon: 'people-outline' as const, title: t('aiManagement.step3Title'), desc: t('aiManagement.step3Desc') },
-        ].map((step, i) => (
-          <View key={i} style={[styles.stepCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <View style={[styles.stepNum, { backgroundColor: colors.primary + '15' }]}>
-              <Ionicons name={step.icon} size={20} color={colors.primary} />
-            </View>
-            <View style={styles.stepInfo}>
-              <Text style={[styles.stepTitle, { color: colors.text }]}>{step.title}</Text>
-              <Text style={[styles.stepDesc, { color: colors.textSecondary }]}>{step.desc}</Text>
-            </View>
-          </View>
-        ))}
-      </View>
-
-      {campaigns.length > 0 && (
-        <View style={styles.campaignsOverview}>
-          <Text style={[styles.sectionLabel, { color: colors.text }]}>
-            {t('aiManagement.activeCampaigns')}
-          </Text>
-          {campaigns.filter(c => c.status === 'active').slice(0, 3).map(campaign => (
-            <View key={campaign.id} style={[styles.campaignMiniCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-              <View style={styles.campaignMiniLeft}>
-                <Ionicons name="megaphone" size={18} color={colors.primary} />
-                <View>
-                  <Text style={[styles.campaignMiniName, { color: colors.text }]}>{campaign.name}</Text>
-                  <Text style={[styles.campaignMiniMeta, { color: colors.textMuted }]}>
-                    {campaign.platform} • ${campaign.spent}/${campaign.budget}
-                  </Text>
-                </View>
-              </View>
-              <Pressable
-                onPress={() => {
-                  setAudienceGoal(`Optimize ${campaign.name} campaign for better reach and conversions`);
-                  setAudienceProduct(brandProfile.industry || '');
-                  setAudienceBudget(`$${campaign.budget}`);
-                  setShowAudienceModal(true);
-                  setAudiences([]);
-                  setAudienceError('');
-                }}
-                style={[styles.optimizeBtn, { backgroundColor: colors.primary + '15' }]}
-              >
-                <Ionicons name="sparkles" size={14} color={colors.primary} />
-              </Pressable>
-            </View>
-          ))}
+          <Text style={[styles.aeSectionTitle, { color: colors.text }]}>{title}</Text>
         </View>
+        <Ionicons
+          name={expandedSection === sectionKey ? 'chevron-up' : 'chevron-down'}
+          size={18}
+          color={colors.textMuted}
+        />
+      </Pressable>
+      {expandedSection === sectionKey && (
+        <View style={styles.aeSectionBody}>{children}</View>
       )}
     </View>
   );
+
+  const renderAudienceManager = () => {
+    const ae = audienceEngineData;
+    const hasCachedData = !!ae;
+
+    return (
+      <View style={styles.tabContent}>
+        <Pressable onPress={handleRunAudienceEngine} disabled={audienceEngineLoading}>
+          <LinearGradient
+            colors={audienceEngineLoading ? [colors.textMuted, colors.textMuted] : [colors.accent, '#0EA5E9']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={[styles.audienceCTA, { flexDirection: 'row', alignItems: 'center', padding: 16 }]}
+          >
+            <View style={styles.audienceCTAIcon}>
+              {audienceEngineLoading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name="analytics" size={24} color="#fff" />
+              )}
+            </View>
+            <View style={styles.audienceCTAText}>
+              <Text style={styles.audienceCTATitle}>
+                {audienceEngineLoading ? 'Analyzing...' : hasCachedData ? 'Re-Analyze Audience' : 'Analyze Audience'}
+              </Text>
+              <Text style={styles.audienceCTADesc}>
+                {audienceEngineLoading ? 'Processing competitor data (2-10s)' : 'Signal-based analysis from competitor data'}
+              </Text>
+            </View>
+            {!audienceEngineLoading && (
+              <Ionicons name="arrow-forward" size={20} color="rgba(255,255,255,0.7)" />
+            )}
+          </LinearGradient>
+        </Pressable>
+
+        {audienceEngineError ? (
+          <View style={[styles.errorBox, { backgroundColor: colors.error + '15' }]}>
+            <Ionicons name="alert-circle" size={16} color={colors.error} />
+            <Text style={[styles.errorText, { color: colors.error }]}>{audienceEngineError}</Text>
+          </View>
+        ) : null}
+
+        {hasCachedData && ae.inputSummary && (
+          <View style={[styles.aeInputSummary, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <View style={styles.aeInputSummaryRow}>
+              <View style={styles.aeInputStat}>
+                <Text style={[styles.aeInputStatNum, { color: colors.primary }]}>{ae.inputSummary.competitorsAnalyzed}</Text>
+                <Text style={[styles.aeInputStatLabel, { color: colors.textMuted }]}>Competitors</Text>
+              </View>
+              <View style={styles.aeInputStat}>
+                <Text style={[styles.aeInputStatNum, { color: colors.primary }]}>{ae.inputSummary.postsAnalyzed}</Text>
+                <Text style={[styles.aeInputStatLabel, { color: colors.textMuted }]}>Posts</Text>
+              </View>
+              <View style={styles.aeInputStat}>
+                <Text style={[styles.aeInputStatNum, { color: colors.primary }]}>{ae.inputSummary.commentsAnalyzed}</Text>
+                <Text style={[styles.aeInputStatLabel, { color: colors.textMuted }]}>Comments</Text>
+              </View>
+            </View>
+            {ae.executionTimeMs && (
+              <Text style={[styles.aeTimestamp, { color: colors.textMuted }]}>
+                Completed in {(ae.executionTimeMs / 1000).toFixed(1)}s
+                {ae.createdAt ? ` • ${new Date(ae.createdAt).toLocaleDateString()}` : ''}
+              </Text>
+            )}
+          </View>
+        )}
+
+        {hasCachedData && (
+          <>
+            {renderAudienceSection('Pain Clusters', 'medkit-outline', 'pains', (
+              <>
+                {(ae.audiencePains || []).length === 0 ? (
+                  <Text style={[styles.aeEmptyText, { color: colors.textMuted }]}>No pain signals detected — more data needed</Text>
+                ) : (
+                  (ae.audiencePains || []).map((pain: any, i: number) => (
+                    <View key={i} style={[styles.aePainRow, { borderColor: colors.divider }]}>
+                      <View style={styles.aePainHeader}>
+                        <Text style={[styles.aePainCategory, { color: colors.text }]}>{pain.category}</Text>
+                        <View style={[styles.aePainBadge, { backgroundColor: colors.error + '15' }]}>
+                          <Text style={[styles.aePainFreq, { color: colors.error }]}>{pain.frequency}x</Text>
+                        </View>
+                      </View>
+                      {pain.evidence && pain.evidence.length > 0 && (
+                        <Text style={[styles.aePainEvidence, { color: colors.textSecondary }]} numberOfLines={2}>
+                          "{pain.evidence[0]}"
+                        </Text>
+                      )}
+                    </View>
+                  ))
+                )}
+              </>
+            ))}
+
+            {renderAudienceSection('Sophistication Level', 'school-outline', 'sophistication', (
+              <>
+                {ae.audienceSophisticationLevel && (
+                  <View>
+                    <View style={styles.aeSophRow}>
+                      <Text style={[styles.aeSophLabel, { color: colors.text }]}>Level</Text>
+                      <View style={[styles.aeSophBadge, {
+                        backgroundColor: ae.audienceSophisticationLevel.level === 'sophisticated' ? colors.success + '20'
+                          : ae.audienceSophisticationLevel.level === 'informed' ? colors.accent + '20' : colors.warning + '20',
+                      }]}>
+                        <Text style={[styles.aeSophValue, {
+                          color: ae.audienceSophisticationLevel.level === 'sophisticated' ? colors.success
+                            : ae.audienceSophisticationLevel.level === 'informed' ? colors.accent : colors.warning,
+                        }]}>
+                          {(ae.audienceSophisticationLevel.level || 'unknown').toUpperCase()}
+                        </Text>
+                      </View>
+                    </View>
+                    {ae.audienceSophisticationLevel.indicators && ae.audienceSophisticationLevel.indicators.length > 0 && (
+                      <View style={styles.aeSophIndicators}>
+                        {ae.audienceSophisticationLevel.indicators.slice(0, 5).map((ind: string, i: number) => (
+                          <View key={i} style={[styles.audienceTag, { backgroundColor: colors.primary + '12' }]}>
+                            <Text style={[styles.audienceTagText, { color: colors.primary }]}>{ind}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                )}
+              </>
+            ))}
+
+            {renderAudienceSection('Intent Distribution', 'pie-chart-outline', 'intents', (
+              <>
+                {ae.audienceIntentDistribution && (
+                  <View>
+                    {Object.entries(ae.audienceIntentDistribution).filter(([key]) => key !== 'totalClassified').map(([key, val]: [string, any]) => {
+                      const pct = typeof val === 'number' ? val : 0;
+                      const label = key.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
+                      const barColor = key === 'purchaseIntent' || key === 'purchase_intent' ? colors.success
+                        : key === 'problemSeeking' || key === 'problem_seeking' ? colors.error
+                        : key === 'curiosity' ? colors.accent : colors.primary;
+                      return (
+                        <View key={key} style={styles.aeIntentRow}>
+                          <View style={styles.aeIntentLabel}>
+                            <Text style={[styles.aeIntentText, { color: colors.text }]}>{label}</Text>
+                            <Text style={[styles.aeIntentPct, { color: colors.textMuted }]}>{pct}%</Text>
+                          </View>
+                          <View style={[styles.aeIntentTrack, { backgroundColor: colors.divider }]}>
+                            <View style={[styles.aeIntentFill, { width: `${pct}%`, backgroundColor: barColor }]} />
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </>
+            ))}
+
+            {renderAudienceSection('Audience Personas', 'body-outline', 'personas', (
+              <>
+                {(ae.audiencePersonas || []).length === 0 ? (
+                  <Text style={[styles.aeEmptyText, { color: colors.textMuted }]}>No personas generated</Text>
+                ) : (
+                  (ae.audiencePersonas || []).map((persona: any, i: number) => (
+                    <Pressable
+                      key={i}
+                      onPress={() => setExpandedPersona(expandedPersona === i ? null : i)}
+                      style={[styles.aePersonaCard, { borderColor: colors.divider }]}
+                    >
+                      <View style={styles.aePersonaHeader}>
+                        <View style={[styles.aePersonaIcon, { backgroundColor: colors.accent + '15' }]}>
+                          <Ionicons name="person" size={16} color={colors.accent} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.aePersonaName, { color: colors.text }]}>{persona.name}</Text>
+                          {persona.estimatedPercentage && (
+                            <Text style={[styles.aePersonaPct, { color: colors.textMuted }]}>{persona.estimatedPercentage}% of audience</Text>
+                          )}
+                        </View>
+                        <Ionicons name={expandedPersona === i ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} />
+                      </View>
+                      {expandedPersona === i && (
+                        <View style={styles.aePersonaBody}>
+                          {persona.motivation && (
+                            <View style={styles.aePersonaField}>
+                              <Text style={[styles.aePersonaFieldLabel, { color: colors.textMuted }]}>Motivation</Text>
+                              <Text style={[styles.aePersonaFieldValue, { color: colors.text }]}>{persona.motivation}</Text>
+                            </View>
+                          )}
+                          {persona.primaryPain && (
+                            <View style={styles.aePersonaField}>
+                              <Text style={[styles.aePersonaFieldLabel, { color: colors.textMuted }]}>Primary Pain</Text>
+                              <Text style={[styles.aePersonaFieldValue, { color: colors.text }]}>{persona.primaryPain}</Text>
+                            </View>
+                          )}
+                          {persona.barriers && persona.barriers.length > 0 && (
+                            <View style={styles.aePersonaField}>
+                              <Text style={[styles.aePersonaFieldLabel, { color: colors.textMuted }]}>Barriers</Text>
+                              <Text style={[styles.aePersonaFieldValue, { color: colors.text }]}>{persona.barriers.join(', ')}</Text>
+                            </View>
+                          )}
+                          {persona.desiredTransformation && (
+                            <View style={styles.aePersonaField}>
+                              <Text style={[styles.aePersonaFieldLabel, { color: colors.textMuted }]}>Desired Transformation</Text>
+                              <Text style={[styles.aePersonaFieldValue, { color: colors.text }]}>{persona.desiredTransformation}</Text>
+                            </View>
+                          )}
+                          {persona.demographicHints && (
+                            <View style={styles.aePersonaField}>
+                              <Text style={[styles.aePersonaFieldLabel, { color: colors.textMuted }]}>Demographics</Text>
+                              <Text style={[styles.aePersonaFieldValue, { color: colors.text }]}>{persona.demographicHints}</Text>
+                            </View>
+                          )}
+                        </View>
+                      )}
+                    </Pressable>
+                  ))
+                )}
+              </>
+            ))}
+
+            {renderAudienceSection('Ads Targeting Hints', 'megaphone-outline', 'ads', (
+              <>
+                {(ae.adsTargetingHints || []).length === 0 ? (
+                  <Text style={[styles.aeEmptyText, { color: colors.textMuted }]}>No targeting hints generated</Text>
+                ) : (
+                  (ae.adsTargetingHints || []).map((hint: any, i: number) => (
+                    <View key={i} style={[styles.aeAdsCard, { borderColor: colors.divider }]}>
+                      {hint.suggestedInterests && hint.suggestedInterests.length > 0 && (
+                        <View style={styles.aeAdsField}>
+                          <Text style={[styles.aeAdsFieldLabel, { color: colors.textMuted }]}>Interests</Text>
+                          <View style={styles.audienceTags}>
+                            {hint.suggestedInterests.slice(0, 8).map((interest: string, j: number) => (
+                              <View key={j} style={[styles.audienceTag, { backgroundColor: colors.primary + '12' }]}>
+                                <Text style={[styles.audienceTagText, { color: colors.primary }]}>{interest}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        </View>
+                      )}
+                      {hint.suggestedBehaviors && hint.suggestedBehaviors.length > 0 && (
+                        <View style={styles.aeAdsField}>
+                          <Text style={[styles.aeAdsFieldLabel, { color: colors.textMuted }]}>Behaviors</Text>
+                          <View style={styles.audienceTags}>
+                            {hint.suggestedBehaviors.slice(0, 6).map((b: string, j: number) => (
+                              <View key={j} style={[styles.audienceTag, { backgroundColor: colors.accent + '12' }]}>
+                                <Text style={[styles.audienceTagText, { color: colors.accent }]}>{b}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        </View>
+                      )}
+                      {hint.suggestedAgeRange && (
+                        <View style={styles.aeAdsInline}>
+                          <Ionicons name="calendar-outline" size={14} color={colors.textMuted} />
+                          <Text style={[styles.aeAdsInlineText, { color: colors.text }]}>
+                            Age {hint.suggestedAgeRange.min}-{hint.suggestedAgeRange.max} • {hint.suggestedGender || 'all'}
+                          </Text>
+                        </View>
+                      )}
+                      {hint.rationale && (
+                        <Text style={[styles.aeAdsRationale, { color: colors.textSecondary }]}>{hint.rationale}</Text>
+                      )}
+                    </View>
+                  ))
+                )}
+              </>
+            ))}
+          </>
+        )}
+
+        {!hasCachedData && !audienceEngineLoading && (
+          <View style={styles.audienceInfoSection}>
+            <Text style={[styles.sectionLabel, { color: colors.text }]}>Signal-Based Analysis</Text>
+            {[
+              { icon: 'medkit-outline' as const, title: 'Pain Extraction', desc: 'Identifies recurring problems from competitor comments' },
+              { icon: 'school-outline' as const, title: 'Sophistication Detection', desc: 'Assesses audience knowledge level from language patterns' },
+              { icon: 'pie-chart-outline' as const, title: 'Intent Classification', desc: 'Categorizes audience intent: problem, curiosity, purchase, validation' },
+              { icon: 'body-outline' as const, title: 'Persona Construction', desc: 'Builds structured audience personas from evidence' },
+              { icon: 'megaphone-outline' as const, title: 'Ads Targeting', desc: 'Translates insights into Meta Ads targeting suggestions' },
+            ].map((step, i) => (
+              <View key={i} style={[styles.stepCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <View style={[styles.stepNum, { backgroundColor: colors.primary + '15' }]}>
+                  <Ionicons name={step.icon} size={20} color={colors.primary} />
+                </View>
+                <View style={styles.stepInfo}>
+                  <Text style={[styles.stepTitle, { color: colors.text }]}>{step.title}</Text>
+                  <Text style={[styles.stepDesc, { color: colors.textSecondary }]}>{step.desc}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
+        <Pressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            setShowAudienceModal(true);
+            setAudienceGoal('');
+            setAudienceProduct('');
+            setAudienceBudget('');
+            setAudiences([]);
+            setAudienceError('');
+            setExpandedAudience(null);
+          }}
+          style={[styles.aeSecondaryBtn, { borderColor: colors.cardBorder }]}
+        >
+          <Ionicons name="people-outline" size={18} color={colors.textSecondary} />
+          <Text style={[styles.aeSecondaryBtnText, { color: colors.textSecondary }]}>Manual Audience Builder</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+        </Pressable>
+      </View>
+    );
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -1162,4 +1460,51 @@ const styles = StyleSheet.create({
   controlActionWhy: { fontSize: 12, fontFamily: 'Inter_400Regular', marginLeft: 32, lineHeight: 17 },
   emergencyBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 12, borderWidth: 1.5, borderColor: '#EF4444', paddingVertical: 14 },
   emergencyBtnText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: '#EF4444' },
+  aeSection: { borderRadius: 14, borderWidth: 1, marginBottom: 10, overflow: 'hidden' as const },
+  aeSectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14 },
+  aeSectionLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  aeSectionIcon: { width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  aeSectionTitle: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  aeSectionBody: { paddingHorizontal: 14, paddingBottom: 14 },
+  aeInputSummary: { borderRadius: 14, borderWidth: 1, padding: 14, marginBottom: 14 },
+  aeInputSummaryRow: { flexDirection: 'row', justifyContent: 'space-around' },
+  aeInputStat: { alignItems: 'center' },
+  aeInputStatNum: { fontSize: 20, fontFamily: 'Inter_700Bold' },
+  aeInputStatLabel: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2 },
+  aeTimestamp: { fontSize: 11, fontFamily: 'Inter_400Regular', textAlign: 'center' as const, marginTop: 8 },
+  aeEmptyText: { fontSize: 13, fontFamily: 'Inter_400Regular', fontStyle: 'italic' as const },
+  aePainRow: { borderBottomWidth: 1, paddingVertical: 10 },
+  aePainHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  aePainCategory: { fontSize: 14, fontFamily: 'Inter_500Medium', flex: 1 },
+  aePainBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
+  aePainFreq: { fontSize: 12, fontFamily: 'Inter_700Bold' },
+  aePainEvidence: { fontSize: 12, fontFamily: 'Inter_400Regular', fontStyle: 'italic' as const, marginTop: 4, lineHeight: 17 },
+  aeSophRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  aeSophLabel: { fontSize: 14, fontFamily: 'Inter_500Medium' },
+  aeSophBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8 },
+  aeSophValue: { fontSize: 12, fontFamily: 'Inter_700Bold' },
+  aeSophIndicators: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  aeIntentRow: { marginBottom: 12 },
+  aeIntentLabel: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+  aeIntentText: { fontSize: 13, fontFamily: 'Inter_500Medium' },
+  aeIntentPct: { fontSize: 13, fontFamily: 'Inter_700Bold' },
+  aeIntentTrack: { height: 6, borderRadius: 3, overflow: 'hidden' as const },
+  aeIntentFill: { height: '100%', borderRadius: 3 },
+  aePersonaCard: { borderBottomWidth: 1, paddingVertical: 10 },
+  aePersonaHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  aePersonaIcon: { width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  aePersonaName: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  aePersonaPct: { fontSize: 11, fontFamily: 'Inter_400Regular' },
+  aePersonaBody: { marginTop: 10, marginLeft: 42 },
+  aePersonaField: { marginBottom: 8 },
+  aePersonaFieldLabel: { fontSize: 11, fontFamily: 'Inter_500Medium', textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 2 },
+  aePersonaFieldValue: { fontSize: 13, fontFamily: 'Inter_400Regular', lineHeight: 18 },
+  aeAdsCard: { borderBottomWidth: 1, paddingVertical: 10 },
+  aeAdsField: { marginBottom: 10 },
+  aeAdsFieldLabel: { fontSize: 11, fontFamily: 'Inter_500Medium', textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 6 },
+  aeAdsInline: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  aeAdsInlineText: { fontSize: 13, fontFamily: 'Inter_400Regular' },
+  aeAdsRationale: { fontSize: 12, fontFamily: 'Inter_400Regular', fontStyle: 'italic' as const, lineHeight: 17, marginTop: 4 },
+  aeSecondaryBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: 14, borderWidth: 1, marginTop: 10 },
+  aeSecondaryBtnText: { fontSize: 14, fontFamily: 'Inter_500Medium', flex: 1 },
 });

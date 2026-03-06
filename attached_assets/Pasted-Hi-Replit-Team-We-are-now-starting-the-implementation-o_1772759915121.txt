@@ -1,0 +1,195 @@
+Hi Replit Team,
+
+We are now starting the implementation of the next engine in the system architecture: Audience Engine.
+
+This engine must follow the same architectural principles already established with Market Intelligence v3. It must remain signal-based, modular, and non-conflicting with other engines in the system.
+
+Please read the full specification carefully before implementation.
+
+---------------------------------------------------------------------
+
+ENGINE PURPOSE
+
+The Audience Engine transforms Market Intelligence signals into structured Audience Signals.
+
+It does NOT generate campaigns or strategies.  
+It does NOT modify Market Intelligence signals.
+
+Its responsibility is to produce a clear understanding of the target audience based on market evidence.
+
+Output from this engine will later be consumed by:
+
+• Positioning Engine  
+• Build a Plan Engine  
+• Creative / Storytelling Engines  
+
+---------------------------------------------------------------------
+
+INPUT SOURCES
+
+The Audience Engine must NOT perform any scraping.
+
+It consumes data from existing system layers:
+
+1. Market Intelligence Signals
+2. Competitor post data stored in Market Database
+3. Sampled comments collected during Deep Pass
+4. Business profile data provided by the user
+5. Campaign context (objective, platform, geography)
+
+All inputs must come from the internal database only.
+
+---------------------------------------------------------------------
+
+PRIMARY ANALYSIS OBJECTIVE
+
+The engine must infer:
+
+• Who the real audience is  
+• What problems they are expressing  
+• What stage they are in (awareness level)  
+• What type of messaging they respond to  
+
+The output must remain evidence-driven.
+
+---------------------------------------------------------------------
+
+CORE ANALYSIS MODULES
+
+1. Audience Pain Extraction
+
+Analyze comment samples and captions to identify recurring problems.
+
+Examples:
+• weight loss frustration  
+• beginner workout confusion  
+• diet adherence struggles  
+
+Return structured pain clusters.
+
+---------------------------------------------------------------------
+
+2. Audience Sophistication Detection
+
+Identify whether the market is:
+
+• beginner audience  
+• informed audience  
+• highly sophisticated audience
+
+Signals may include:
+
+• terminology usage
+• advanced training discussion
+• product comparison language
+
+---------------------------------------------------------------------
+
+3. Audience Intent Classification
+
+From comments and engagement signals classify intent types:
+
+• problem seeking help
+• curiosity / learning
+• purchase intent
+• validation / social proof
+
+Each intent type should have a percentage distribution.
+
+---------------------------------------------------------------------
+
+4. Audience Persona Construction
+
+Construct structured personas based on the evidence.
+
+Each persona should include:
+
+• demographic hints (if detectable)
+• motivation
+• primary pain
+• barriers
+• desired transformation
+
+This must remain probabilistic and signal-based, not speculative.
+
+---------------------------------------------------------------------
+
+5. Ads Targeting Translation Layer
+
+Translate audience insights into Ads Manager compatible targeting suggestions.
+
+Examples:
+
+Suggested interests  
+Suggested behaviors  
+Suggested demographic ranges  
+
+These are suggestions only, not final campaign settings.
+
+---------------------------------------------------------------------
+
+OUTPUT FORMAT
+
+The engine must output structured Audience Signals such as:
+
+audiencePains  
+audienceIntentDistribution  
+audienceSophisticationLevel  
+audiencePersonas  
+adsTargetingHints  
+
+These outputs must be stored as signals for downstream engines.
+
+---------------------------------------------------------------------
+
+ARCHITECTURAL RULES
+
+The Audience Engine must:
+
+• never modify Market Intelligence signals  
+• never generate final marketing strategy  
+• only produce audience-level signals  
+
+The system must maintain a clean signal contract between engines.
+
+---------------------------------------------------------------------
+
+PERFORMANCE REQUIREMENTS
+
+The Audience Engine should run quickly because it uses internal data.
+
+Target execution time:
+
+2–10 seconds per run.
+
+No external data collection must occur.
+
+---------------------------------------------------------------------
+
+LOGGING
+
+Each run must store:
+
+• input snapshot reference  
+• generated audience signals  
+• engine version  
+• timestamp
+
+This ensures traceability and future optimization.
+
+---------------------------------------------------------------------
+
+FINAL OBJECTIVE
+
+The result should be a structured understanding of the market audience, derived entirely from Market Intelligence signals and stored data.
+
+This engine prepares the foundation for:
+
+• Positioning decisions  
+• Messaging strategy  
+• Creative planning  
+
+Please confirm implementation plan and begin development.
+
+Best regards,  
+Samir Fatfat
