@@ -1,0 +1,288 @@
+Hi Replit Team,
+
+We are moving into the next major strategic component of the platform: Positioning Engine V3.
+
+This engine is not a copywriting generator and not a simple AI suggestion system. It is a strategic intelligence engine that sits between Audience Intelligence and Build-a-Plan. Because every downstream component (Offer Engine, Messaging Engine, Creative System, and Build-a-Plan) will depend on it, the architecture must be implemented with strict structure, deterministic rules, and strong validation safeguards.
+
+Please read and implement the following requirements carefully.
+
+---
+
+### 1. Mandatory Engine Order (No Bypass Allowed)
+
+The system must enforce the following execution order:
+
+Market Intelligence Snapshot  
+↓  
+Audience Intelligence Snapshot  
+↓  
+Positioning Engine  
+↓  
+Strategy Snapshot  
+↓  
+Build-a-Plan
+
+The Positioning Engine must never run independently.
+
+It must require:
+
+• Market Snapshot ID  
+• Audience Snapshot ID  
+
+If either dependency is missing, the engine must stop and return a missing dependency status.
+
+This prevents engines from generating strategy without verified intelligence inputs.
+
+---
+
+### 2. Snapshot Linking (Critical Anti-Drift Safeguard)
+
+Every Positioning result must be tied to the exact intelligence snapshots used to generate it.
+
+Each positioning snapshot must store:
+
+• Positioning Snapshot ID  
+• Market Snapshot ID  
+• Audience Snapshot ID  
+• Engine Version  
+• Timestamp
+
+This ensures Build-a-Plan always reads a coherent and stable strategic state.
+
+No part of the system should implicitly read the “latest” intelligence because that causes strategy drift.
+
+---
+
+### 3. Strategy Snapshot Output
+
+The Positioning Engine must not output unstructured strategy text.
+
+Instead it must produce a structured Strategy Snapshot that other engines consume.
+
+The Strategy Snapshot must include:
+
+• Positioning Territory  
+• Enemy Definition  
+• Strategic Contrast Axis  
+• Narrative Direction  
+• Differentiation Vector  
+• Proof Signals  
+• Confidence Score  
+• Source Signals  
+• Linked Market Snapshot  
+• Linked Audience Snapshot
+
+This snapshot becomes the single source of truth for strategy across the system.
+
+---
+
+### 4. Positioning Engine V3 — Intelligence Layers
+
+The engine must operate as a layered intelligence system instead of a single AI generation.
+
+Required layers:
+
+1. Category Detection  
+2. Market Narrative Map  
+3. Narrative Saturation Detection  
+4. Trust Gap Detection  
+5. Segment Priority Resolution  
+6. Market Power Analysis  
+7. Opportunity Gap Detection  
+8. Differentiation Axis Construction  
+9. Narrative Distance Scoring  
+10. Strategic Territory Selection  
+11. Positioning Statement Generation  
+12. Stability Guard
+
+Most of these layers should be deterministic analysis. AI should only assist with synthesis and formatting.
+
+---
+
+### 5. Market Power Analysis Layer (Critical Layer)
+
+Most AI positioning systems fail because they ignore market power.
+
+Before suggesting positioning, the engine must evaluate competitor dominance using signals such as:
+
+• Follower scale  
+• Engagement strength  
+• Content volume  
+• Narrative ownership  
+• Authority indicators  
+
+The engine should compute:
+
+• Competitor Authority Score  
+• Content Dominance Score  
+• Narrative Ownership Index  
+• Authority Gap
+
+If the authority gap is large, the engine must automatically switch to a flanking strategy mode rather than suggesting direct competition.
+
+This prevents recommending positioning that cannot realistically win in the market.
+
+---
+
+### 6. Opportunity Gap Detection
+
+Positioning opportunities must be identified using signals from:
+
+• Market Intelligence  
+• Audience Pain and Desire maps  
+• Narrative saturation analysis
+
+Opportunity should be calculated using a combination of:
+
+• Low narrative saturation  
+• High audience demand  
+• Low competitor authority
+
+Only territories above the opportunity threshold should be considered viable.
+
+---
+
+### 7. Strategic Territory Selection
+
+The engine must generate between two and four positioning territories maximum.
+
+Each territory must include:
+
+• Territory name  
+• Opportunity score  
+• Narrative distance score  
+
+Territories already dominated by strong competitors must be rejected automatically.
+
+---
+
+### 8. Stability Guard
+
+Before returning the final positioning snapshot, the engine must verify:
+
+• The territory is not owned by a dominant competitor  
+• Narrative saturation is below the defined threshold  
+• Audience pain alignment is sufficiently strong  
+• Authority gap is manageable
+
+If any rule fails, the system must mark the positioning as unstable and switch to a secondary territory.
+
+---
+
+### 9. Strategy Card Generation (User Interface)
+
+The Positioning Engine must generate Strategy Cards for the application interface.
+
+Each Strategy Card must contain:
+
+• Territory name  
+• Enemy definition  
+• Core narrative direction  
+• Supporting evidence signals  
+• Confidence score  
+
+These cards allow the user to clearly understand the strategic territory selected by the engine.
+
+Cards must always be:
+
+• Deterministic  
+• Linked to snapshot IDs  
+• Reproducible from the same dataset
+
+---
+
+### 10. Build-a-Plan Integration
+
+Build-a-Plan must only read Strategy Snapshots.
+
+It must never:
+
+• Re-analyze the audience  
+• Re-analyze the market  
+• Generate new positioning
+
+This prevents AI orchestration bottlenecks and ensures the plan generation layer remains fast and deterministic.
+
+---
+
+### 11. Defensive Testing Requirements
+
+Before the engine is approved, it must pass the following validation tests.
+
+Snapshot Consistency Test  
+Confirm that every positioning snapshot references valid Market and Audience snapshots.
+
+Competitor Dominance Test  
+Inject a dominant competitor scenario and confirm the engine switches to flanking mode.
+
+Narrative Saturation Test  
+If multiple competitors share identical narratives, the system must reject that territory.
+
+Segment Alignment Test  
+The positioning must align with the highest priority audience segments.
+
+Determinism Test  
+Running the engine twice on the same dataset must produce identical positioning output.
+
+Adversarial Input Tests  
+The engine must remain stable under empty signals, multilingual data, spam comments, and contradictory signals.
+
+---
+
+### 12. Performance Targets
+
+Execution time target: 3–8 seconds
+
+Recommended structure:
+
+• 80% deterministic analysis  
+• 20% AI synthesis
+
+AI should only be used for narrative synthesis and strategy card formatting.
+
+---
+
+### 13. Strategy Integrity Safeguards (Additional Notes)
+
+To ensure the engine remains stable as the system grows, please also include the following safeguards:
+
+• Territory Overlap Detection  
+The engine should prevent territories that are semantically identical or too close.
+
+• Strategy Snapshot Locking  
+Once a strategy snapshot is created, downstream systems must reference that snapshot instead of regenerating positioning.
+
+• Signal Evidence Threshold  
+Positioning should only be generated if the audience signals and market signals pass minimum evidence thresholds.
+
+• Segment Alignment Verification  
+Positioning should align with the top audience segments produced by the Audience Engine.
+
+These safeguards ensure the system does not produce unstable or contradictory strategies.
+
+---
+
+### 14. System Architecture Rule
+
+All engines in the platform must follow the same architecture:
+
+Signals  
+→ Intelligence Engines  
+→ Strategy Snapshots  
+→ Build-a-Plan  
+→ Execution
+
+No engine should bypass this structure.
+
+---
+
+Once implemented correctly, Positioning Engine V3 becomes the core strategic brain of the platform, powering:
+
+• Offer Engine  
+• Messaging Engine  
+• Creative Engines  
+• Build-a-Plan
+
+Please implement the architecture exactly as described and validate it thoroughly before marking the engine complete.
+
+Thank you.
