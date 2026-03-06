@@ -669,6 +669,42 @@ export default function AIManagementScreen() {
           </View>
         ) : null}
 
+        {hasCachedData && ae.status === 'DATASET_TOO_SMALL' && (
+          <View style={[styles.aeStatusBanner, { backgroundColor: '#F59E0B' + '18', borderColor: '#F59E0B' + '40' }]}>
+            <Ionicons name="warning-outline" size={20} color="#F59E0B" />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.aeStatusTitle, { color: '#F59E0B' }]}>Dataset Too Small</Text>
+              <Text style={[styles.aeStatusDesc, { color: colors.textSecondary }]}>
+                {ae.statusMessage || 'Need more competitors, posts, and comments for reliable analysis.'}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {hasCachedData && ae.status === 'INSUFFICIENT_SIGNALS' && (
+          <View style={[styles.aeStatusBanner, { backgroundColor: colors.error + '12', borderColor: colors.error + '30' }]}>
+            <Ionicons name="alert-circle-outline" size={20} color={colors.error} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.aeStatusTitle, { color: colors.error }]}>Insufficient Signals</Text>
+              <Text style={[styles.aeStatusDesc, { color: colors.textSecondary }]}>
+                {ae.statusMessage || 'Not enough signal matches for AI-powered audience segmentation.'}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {hasCachedData && ae.defensiveMode && ae.status !== 'DATASET_TOO_SMALL' && (
+          <View style={[styles.aeStatusBanner, { backgroundColor: colors.accent + '12', borderColor: colors.accent + '30' }]}>
+            <Ionicons name="shield-outline" size={20} color={colors.accent} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.aeStatusTitle, { color: colors.accent }]}>Defensive Mode</Text>
+              <Text style={[styles.aeStatusDesc, { color: colors.textSecondary }]}>
+                Low signal environment detected. Audience intelligence limited. More market data required.
+              </Text>
+            </View>
+          </View>
+        )}
+
         {hasCachedData && ae.inputSummary && (
           <View style={[styles.aeInputSummary, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             <View style={styles.aeInputSummaryRow}>
@@ -688,6 +724,7 @@ export default function AIManagementScreen() {
             {ae.executionTimeMs && (
               <Text style={[styles.aeTimestamp, { color: colors.textMuted }]}>
                 V3 • {(ae.executionTimeMs / 1000).toFixed(1)}s
+                {ae.inputSummary?.sanitizedCount > 0 ? ` • ${ae.inputSummary.sanitizedCount} synthetic filtered` : ''}
                 {ae.createdAt ? ` • ${new Date(ae.createdAt).toLocaleDateString()}` : ''}
               </Text>
             )}
@@ -1649,6 +1686,9 @@ const styles = StyleSheet.create({
   aeAdsRationale: { fontSize: 12, fontFamily: 'Inter_400Regular', fontStyle: 'italic' as const, lineHeight: 17, marginTop: 4 },
   aeConfidenceRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
   aeConfidenceText: { fontSize: 11, fontFamily: 'Inter_400Regular' },
+  aeStatusBanner: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 14, borderRadius: 12, borderWidth: 1, marginBottom: 12 },
+  aeStatusTitle: { fontSize: 14, fontFamily: 'Inter_600SemiBold', marginBottom: 2 },
+  aeStatusDesc: { fontSize: 12, fontFamily: 'Inter_400Regular', lineHeight: 17 },
   aeSecondaryBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: 14, borderWidth: 1, marginTop: 10 },
   aeSecondaryBtnText: { fontSize: 14, fontFamily: 'Inter_500Medium', flex: 1 },
 });

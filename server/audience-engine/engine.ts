@@ -13,6 +13,8 @@ import {
   MATURITY_KEYWORDS,
   INTENT_KEYWORDS,
   LANGUAGE_PATTERNS,
+  SYNTHETIC_FILTERS,
+  CONFIDENCE_WEIGHTS,
   type PatternCluster,
 } from "./constants";
 import { aiChat } from "../ai-client";
@@ -38,12 +40,12 @@ interface LanguageSignals extends EvidenceMeta {
 }
 
 interface AwarenessResult extends EvidenceMeta {
-  level: "unaware" | "problem_aware" | "solution_aware" | "product_aware" | "most_aware";
+  level: "unaware" | "problem_aware" | "solution_aware" | "product_aware" | "most_aware" | "insufficient_signals";
   distribution: Record<string, number>;
 }
 
 interface MaturityResult extends EvidenceMeta {
-  level: "beginner" | "developing" | "mature";
+  level: "beginner" | "developing" | "mature" | "insufficient_signals";
   distribution: Record<string, number>;
   indicators: string[];
 }
@@ -81,10 +83,81 @@ interface AdsTargetingHint extends EvidenceMeta {
   rationale: string;
 }
 
+export type EngineStatus = "COMPLETE" | "DATASET_TOO_SMALL" | "INSUFFICIENT_SIGNALS" | "DEFENSIVE_MODE";
+
+export interface AudienceEngineV3Result {
+  status: EngineStatus;
+  statusMessage: string | null;
+  defensiveMode: boolean;
+  languageSignals: LanguageSignals;
+  painMap: SignalItem[];
+  desireMap: SignalItem[];
+  objectionMap: SignalItem[];
+  transformationMap: SignalItem[];
+  emotionalDrivers: SignalItem[];
+  audienceSegments: AudienceSegment[];
+  segmentDensity: SegmentDensityItem[];
+  awarenessLevel: AwarenessResult;
+  maturityIndex: MaturityResult;
+  intentDistribution: IntentDistribution;
+  adsTargetingHints: AdsTargetingHint[];
+  inputSummary: {
+    postsAnalyzed: number;
+    commentsAnalyzed: number;
+    competitorsAnalyzed: number;
+    sanitizedCount: number;
+    miSnapshotId: string | null;
+    miSnapshotAge: string | null;
+  };
+  engineVersion: number;
+  executionTimeMs: number;
+  snapshotId: string;
+}
+
+function sanitizeTexts(texts: string[]): { clean: string[]; removed: number } {
+  let removed = 0;
+  const clean: string[] = [];
+  for (const text of texts) {
+    const lower = text.toLowerCase();
+    let isSynthetic = false;
+    for (const filter of SYNTHETIC_FILTERS) {
+      if (lower.includes(filter)) {
+        isSynthetic = true;
+        removed++;
+        break;
+      }
+    }
+    if (!isSynthetic) {
+      clean.push(text);
+    }
+  }
+  return { clean, removed };
+}
+
+function computeCalibratedConfidence(
+  frequency: number,
+  totalTexts: number,
+  sourceTypes: string[],
+  competitorCount: number,
+): number {
+  const freqScore = totalTexts > 0 ? Math.min(1, frequency / Math.max(totalTexts * 0.1, 1)) : 0;
+  const diversityScore = Math.min(1, sourceTypes.length / 3);
+  const competitorScore = Math.min(1, competitorCount / 5);
+
+  const raw =
+    freqScore * CONFIDENCE_WEIGHTS.SIGNAL_FREQUENCY +
+    diversityScore * CONFIDENCE_WEIGHTS.SOURCE_DIVERSITY +
+    competitorScore * CONFIDENCE_WEIGHTS.COMPETITOR_OVERLAP;
+
+  return Math.min(0.95, Math.max(0.05, raw));
+}
+
 function matchPatternClusters(
   texts: string[],
   clusters: PatternCluster[],
   inputSnapshotId: string | null,
+  sourceTypes: string[],
+  competitorCount: number,
 ): SignalItem[] {
   const results: Map<string, { count: number; evidence: string[]; matchedPatterns: Set<string> }> = new Map();
 
@@ -117,7 +190,7 @@ function matchPatternClusters(
       frequency: data.count,
       evidence: data.evidence,
       evidenceCount: data.count,
-      confidenceScore: Math.min(0.95, 0.3 + (data.count / Math.max(texts.length, 1)) * 2),
+      confidenceScore: computeCalibratedConfidence(data.count, texts.length, sourceTypes, competitorCount),
       sourceSignals: Array.from(data.matchedPatterns),
       inputSnapshotId,
     }));
@@ -127,6 +200,7 @@ function analyzeLanguage(
   comments: string[],
   captions: string[],
   inputSnapshotId: string | null,
+  competitorCount: number,
 ): LanguageSignals {
   const allText = [...comments, ...captions];
   const result: LanguageSignals = {
@@ -176,8 +250,11 @@ function analyzeLanguage(
 
   const total = result.problemExpressions.count + result.questionPatterns.count + result.goalExpressions.count;
   result.evidenceCount = total;
-  result.confidenceScore = Math.min(0.95, total > 0 ? 0.4 + (total / Math.max(allText.length, 1)) : 0.2);
-  result.sourceSignals = ["comments", "captions"];
+  const sourceTypes = [];
+  if (comments.length > 0) sourceTypes.push("comments");
+  if (captions.length > 0) sourceTypes.push("captions");
+  result.confidenceScore = computeCalibratedConfidence(total, allText.length, sourceTypes, competitorCount);
+  result.sourceSignals = sourceTypes;
 
   return result;
 }
@@ -185,6 +262,7 @@ function analyzeLanguage(
 function detectAwareness(
   comments: string[],
   inputSnapshotId: string | null,
+  competitorCount: number,
 ): AwarenessResult {
   const distribution: Record<string, number> = {
     unaware: 0,
@@ -220,6 +298,17 @@ function detectAwareness(
     }
   }
 
+  if (totalMatched < 3) {
+    return {
+      level: "insufficient_signals",
+      distribution: {},
+      evidenceCount: totalMatched,
+      confidenceScore: 0,
+      sourceSignals: ["comments"],
+      inputSnapshotId,
+    };
+  }
+
   let dominantLevel = "problem_aware";
   let maxCount = 0;
   for (const [level, count] of Object.entries(distribution)) {
@@ -231,14 +320,14 @@ function detectAwareness(
 
   const pct: Record<string, number> = {};
   for (const [level, count] of Object.entries(distribution)) {
-    pct[level] = totalMatched > 0 ? Math.round((count / totalMatched) * 100) : 20;
+    pct[level] = Math.round((count / totalMatched) * 100);
   }
 
   return {
     level: dominantLevel as AwarenessResult["level"],
     distribution: pct,
     evidenceCount: totalMatched,
-    confidenceScore: totalMatched > 5 ? Math.min(0.9, 0.4 + (totalMatched / Math.max(comments.length, 1))) : 0.3,
+    confidenceScore: computeCalibratedConfidence(totalMatched, comments.length, ["comments"], competitorCount),
     sourceSignals: ["comments"],
     inputSnapshotId,
   };
@@ -248,6 +337,7 @@ function detectMaturity(
   comments: string[],
   captions: string[],
   inputSnapshotId: string | null,
+  competitorCount: number,
 ): MaturityResult {
   const allText = [...comments, ...captions];
   const signals = { beginner: 0, developing: 0, mature: 0 };
@@ -272,23 +362,40 @@ function detectMaturity(
   }
 
   const total = signals.beginner + signals.developing + signals.mature;
+
+  if (total < 3) {
+    return {
+      level: "insufficient_signals",
+      distribution: {},
+      indicators: [],
+      evidenceCount: total,
+      confidenceScore: 0,
+      sourceSignals: ["comments", "captions"],
+      inputSnapshotId,
+    };
+  }
+
   const dist: Record<string, number> = {
-    beginner: total > 0 ? Math.round((signals.beginner / total) * 100) : 34,
-    developing: total > 0 ? Math.round((signals.developing / total) * 100) : 33,
-    mature: total > 0 ? Math.round((signals.mature / total) * 100) : 33,
+    beginner: Math.round((signals.beginner / total) * 100),
+    developing: Math.round((signals.developing / total) * 100),
+    mature: Math.round((signals.mature / total) * 100),
   };
 
   let level: "beginner" | "developing" | "mature" = "beginner";
   if (signals.mature > signals.developing && signals.mature > signals.beginner) level = "mature";
   else if (signals.developing > signals.beginner) level = "developing";
 
+  const sourceTypes = [];
+  if (comments.length > 0) sourceTypes.push("comments");
+  if (captions.length > 0) sourceTypes.push("captions");
+
   return {
     level,
     distribution: dist,
     indicators,
     evidenceCount: total,
-    confidenceScore: total > 5 ? Math.min(0.95, 0.4 + (total / Math.max(allText.length, 1))) : 0.3,
-    sourceSignals: ["comments", "captions"],
+    confidenceScore: computeCalibratedConfidence(total, allText.length, sourceTypes, competitorCount),
+    sourceSignals: sourceTypes,
     inputSnapshotId,
   };
 }
@@ -296,6 +403,7 @@ function detectMaturity(
 function classifyIntents(
   comments: string[],
   inputSnapshotId: string | null,
+  competitorCount: number,
 ): IntentDistribution {
   let curiosity = 0;
   let learning = 0;
@@ -330,10 +438,10 @@ function classifyIntents(
 
   if (totalClassified === 0) {
     return {
-      curiosity: 25, learning: 25, comparison: 25, purchaseIntent: 25,
+      curiosity: 0, learning: 0, comparison: 0, purchaseIntent: 0,
       totalClassified: 0,
       evidenceCount: 0,
-      confidenceScore: 0.2,
+      confidenceScore: 0,
       sourceSignals: ["comments"],
       inputSnapshotId,
     };
@@ -346,7 +454,7 @@ function classifyIntents(
     purchaseIntent: Math.round((purchaseIntent / totalClassified) * 100),
     totalClassified,
     evidenceCount: totalClassified,
-    confidenceScore: Math.min(0.95, 0.4 + (totalClassified / Math.max(comments.length, 1))),
+    confidenceScore: computeCalibratedConfidence(totalClassified, comments.length, ["comments"], competitorCount),
     sourceSignals: ["comments"],
     inputSnapshotId,
   };
@@ -372,13 +480,13 @@ function computeSegmentDensity(
         signalCount += desire.frequency;
       }
     }
-    const densityScore = totalSignals > 0 ? Math.round((signalCount / totalSignals) * 100) : Math.round(100 / Math.max(segments.length, 1));
+    const densityScore = totalSignals > 0 ? Math.round((signalCount / totalSignals) * 100) : 0;
     return {
       segment: seg.name,
       densityScore,
       signalCount,
       evidenceCount: signalCount,
-      confidenceScore: totalSignals > 0 ? Math.min(0.95, 0.3 + (signalCount / totalSignals) * 2) : 0.2,
+      confidenceScore: totalSignals > 0 ? Math.min(0.95, signalCount / totalSignals) : 0,
       sourceSignals: ["painMap", "desireMap"],
       inputSnapshotId,
     };
@@ -537,29 +645,35 @@ Return ONLY a JSON array matching the segments count. Use real Meta Ads targetin
   }
 }
 
-export interface AudienceEngineV3Result {
-  languageSignals: LanguageSignals;
-  painMap: SignalItem[];
-  desireMap: SignalItem[];
-  objectionMap: SignalItem[];
-  transformationMap: SignalItem[];
-  emotionalDrivers: SignalItem[];
-  audienceSegments: AudienceSegment[];
-  segmentDensity: SegmentDensityItem[];
-  awarenessLevel: AwarenessResult;
-  maturityIndex: MaturityResult;
-  intentDistribution: IntentDistribution;
-  adsTargetingHints: AdsTargetingHint[];
-  inputSummary: {
-    postsAnalyzed: number;
-    commentsAnalyzed: number;
-    competitorsAnalyzed: number;
-    miSnapshotId: string | null;
-    miSnapshotAge: string | null;
+function buildEmptyResult(
+  status: EngineStatus,
+  statusMessage: string,
+  inputSummary: AudienceEngineV3Result["inputSummary"],
+  executionTimeMs: number,
+  snapshotId: string,
+): AudienceEngineV3Result {
+  const emptyMeta: EvidenceMeta = { evidenceCount: 0, confidenceScore: 0, sourceSignals: [], inputSnapshotId: inputSummary.miSnapshotId };
+  return {
+    status,
+    statusMessage,
+    defensiveMode: status === "DEFENSIVE_MODE",
+    languageSignals: { ...emptyMeta, problemExpressions: { count: 0, samples: [] }, questionPatterns: { count: 0, samples: [] }, goalExpressions: { count: 0, samples: [] }, totalAnalyzed: 0 },
+    painMap: [],
+    desireMap: [],
+    objectionMap: [],
+    transformationMap: [],
+    emotionalDrivers: [],
+    audienceSegments: [],
+    segmentDensity: [],
+    awarenessLevel: { ...emptyMeta, level: "insufficient_signals", distribution: {} },
+    maturityIndex: { ...emptyMeta, level: "insufficient_signals", distribution: {}, indicators: [] },
+    intentDistribution: { ...emptyMeta, curiosity: 0, learning: 0, comparison: 0, purchaseIntent: 0, totalClassified: 0 },
+    adsTargetingHints: [],
+    inputSummary,
+    engineVersion: AUDIENCE_ENGINE_VERSION,
+    executionTimeMs,
+    snapshotId,
   };
-  engineVersion: number;
-  executionTimeMs: number;
-  snapshotId: string;
 }
 
 export async function runAudienceEngine(accountId: string, campaignId: string): Promise<AudienceEngineV3Result> {
@@ -588,9 +702,10 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     ));
 
   const competitorIds = competitors.map(c => c.id);
+  const competitorCount = competitorIds.length;
 
   let posts: { caption: string | null }[] = [];
-  let comments: { commentText: string | null }[] = [];
+  let rawComments: { commentText: string | null }[] = [];
 
   if (competitorIds.length > 0) {
     const idList = sql.join(competitorIds.map(id => sql`${id}`), sql`, `);
@@ -601,17 +716,51 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
       .orderBy(desc(ciCompetitorPosts.createdAt))
       .limit(AUDIENCE_THRESHOLDS.MAX_POSTS_TO_ANALYZE);
 
-    comments = await db.select({ commentText: ciCompetitorComments.commentText })
+    rawComments = await db.select({ commentText: ciCompetitorComments.commentText })
       .from(ciCompetitorComments)
       .where(sql`${ciCompetitorComments.competitorId} IN (${idList})`)
       .orderBy(desc(ciCompetitorComments.createdAt))
       .limit(AUDIENCE_THRESHOLDS.MAX_COMMENTS_TO_ANALYZE);
   }
 
-  const captions = posts.map(p => p.caption).filter((c): c is string => !!c && c.length > 5);
-  const commentTexts = comments.map(c => c.commentText).filter((c): c is string => !!c && c.length > 3);
+  const rawCaptions = posts.map(p => p.caption).filter((c): c is string => !!c && c.length > 5);
+  const rawCommentTexts = rawComments.map(c => c.commentText).filter((c): c is string => !!c && c.length > 3);
 
-  console.log(`[AudienceEngine-V3] Data: ${competitorIds.length} competitors, ${captions.length} captions, ${commentTexts.length} comments`);
+  const captionSanitized = sanitizeTexts(rawCaptions);
+  const commentSanitized = sanitizeTexts(rawCommentTexts);
+  const captions = captionSanitized.clean;
+  const commentTexts = commentSanitized.clean;
+  const totalSanitized = captionSanitized.removed + commentSanitized.removed;
+
+  console.log(`[AudienceEngine-V3] Data: ${competitorCount} competitors, ${captions.length} captions, ${commentTexts.length} comments (sanitized ${totalSanitized} synthetic signals)`);
+
+  const baseInputSummary = {
+    postsAnalyzed: captions.length,
+    commentsAnalyzed: commentTexts.length,
+    competitorsAnalyzed: competitorCount,
+    sanitizedCount: totalSanitized,
+    miSnapshotId,
+    miSnapshotAge,
+  };
+
+  if (
+    competitorCount < AUDIENCE_THRESHOLDS.MIN_COMPETITORS_FOR_ANALYSIS ||
+    captions.length < AUDIENCE_THRESHOLDS.MIN_POSTS_FOR_ANALYSIS ||
+    commentTexts.length < AUDIENCE_THRESHOLDS.MIN_COMMENTS_FOR_ANALYSIS
+  ) {
+    const msg = `DATASET TOO SMALL FOR RELIABLE AUDIENCE INTELLIGENCE — Need ≥${AUDIENCE_THRESHOLDS.MIN_COMPETITORS_FOR_ANALYSIS} competitors (have ${competitorCount}), ≥${AUDIENCE_THRESHOLDS.MIN_POSTS_FOR_ANALYSIS} posts (have ${captions.length}), ≥${AUDIENCE_THRESHOLDS.MIN_COMMENTS_FOR_ANALYSIS} comments (have ${commentTexts.length})`;
+    console.log(`[AudienceEngine-V3] ${msg}`);
+
+    const executionTimeMs = Date.now() - startTime;
+    const [inserted] = await db.insert(audienceSnapshots).values({
+      accountId, campaignId, miSnapshotId,
+      engineVersion: AUDIENCE_ENGINE_VERSION,
+      inputSummary: JSON.stringify({ ...baseInputSummary, status: "DATASET_TOO_SMALL", statusMessage: msg }),
+      executionTimeMs,
+    }).returning({ id: audienceSnapshots.id });
+
+    return buildEmptyResult("DATASET_TOO_SMALL", msg, baseInputSummary, executionTimeMs, inserted.id);
+  }
 
   const [campaign] = await db.select().from(growthCampaigns)
     .where(eq(growthCampaigns.id, campaignId))
@@ -625,43 +774,67 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   };
 
   const allText = [...commentTexts, ...captions];
+  const sourceTypes = [];
+  if (commentTexts.length > 0) sourceTypes.push("comments");
+  if (captions.length > 0) sourceTypes.push("captions");
 
-  const languageSignals = analyzeLanguage(commentTexts, captions, miSnapshotId);
-  const painMap = matchPatternClusters(allText, PAIN_CLUSTERS, miSnapshotId);
-  const desireMap = matchPatternClusters(allText, DESIRE_CLUSTERS, miSnapshotId);
-  const objectionMap = matchPatternClusters(allText, OBJECTION_CLUSTERS, miSnapshotId);
-  const transformationMap = matchPatternClusters(allText, TRANSFORMATION_PATTERNS, miSnapshotId);
-  const emotionalDrivers = matchPatternClusters(allText, EMOTIONAL_DRIVER_PATTERNS, miSnapshotId);
-  const awarenessLevel = detectAwareness(commentTexts, miSnapshotId);
-  const maturityIndex = detectMaturity(commentTexts, captions, miSnapshotId);
-  const intentDistribution = classifyIntents(commentTexts, miSnapshotId);
+  const languageSignals = analyzeLanguage(commentTexts, captions, miSnapshotId, competitorCount);
+  const painMap = matchPatternClusters(allText, PAIN_CLUSTERS, miSnapshotId, sourceTypes, competitorCount);
+  const desireMap = matchPatternClusters(allText, DESIRE_CLUSTERS, miSnapshotId, sourceTypes, competitorCount);
+  const objectionMap = matchPatternClusters(allText, OBJECTION_CLUSTERS, miSnapshotId, sourceTypes, competitorCount);
+  const transformationMap = matchPatternClusters(allText, TRANSFORMATION_PATTERNS, miSnapshotId, sourceTypes, competitorCount);
+  const emotionalDrivers = matchPatternClusters(allText, EMOTIONAL_DRIVER_PATTERNS, miSnapshotId, sourceTypes, competitorCount);
+  const awarenessLevel = detectAwareness(commentTexts, miSnapshotId, competitorCount);
+  const maturityIndex = detectMaturity(commentTexts, captions, miSnapshotId, competitorCount);
+  const intentDistribution = classifyIntents(commentTexts, miSnapshotId, competitorCount);
 
-  const audienceSegments = await constructSegments(
-    painMap, desireMap, objectionMap, emotionalDrivers,
-    maturityIndex, awarenessLevel,
-    businessContext, commentTexts, accountId, miSnapshotId,
-  );
+  const totalSignalMatches = painMap.length + desireMap.length + objectionMap.length + transformationMap.length + emotionalDrivers.length;
+  const totalSignalFrequency = [painMap, desireMap, objectionMap, transformationMap, emotionalDrivers]
+    .flat().reduce((sum, s) => sum + s.frequency, 0);
+
+  const isDefensiveMode = totalSignalFrequency < AUDIENCE_THRESHOLDS.DEFENSIVE_MODE_SIGNAL_THRESHOLD;
+
+  let audienceSegments: AudienceSegment[] = [];
+  let adsTargetingHints: AdsTargetingHint[] = [];
+
+  if (totalSignalMatches < AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI) {
+    console.log(`[AudienceEngine-V3] INSUFFICIENT SIGNALS for AI layers — ${totalSignalMatches} signal matches (need ≥${AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI})`);
+  } else if (isDefensiveMode) {
+    console.log(`[AudienceEngine-V3] DEFENSIVE MODE — signal density too low (${totalSignalFrequency} total frequency), skipping AI layers`);
+  } else {
+    audienceSegments = await constructSegments(
+      painMap, desireMap, objectionMap, emotionalDrivers,
+      maturityIndex, awarenessLevel,
+      businessContext, commentTexts, accountId, miSnapshotId,
+    );
+
+    adsTargetingHints = await translateToAdsTargeting(
+      audienceSegments, maturityIndex, businessContext, accountId, miSnapshotId,
+    );
+  }
 
   const segmentDensity = computeSegmentDensity(painMap, desireMap, audienceSegments, miSnapshotId);
 
-  const adsTargetingHints = await translateToAdsTargeting(
-    audienceSegments, maturityIndex, businessContext, accountId, miSnapshotId,
-  );
-
   const executionTimeMs = Date.now() - startTime;
 
-  const inputSummary = {
-    postsAnalyzed: captions.length,
-    commentsAnalyzed: commentTexts.length,
-    competitorsAnalyzed: competitorIds.length,
-    miSnapshotId,
-    miSnapshotAge,
-  };
+  let status: EngineStatus = "COMPLETE";
+  let statusMessage: string | null = null;
+
+  if (totalSignalMatches < AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI) {
+    status = "INSUFFICIENT_SIGNALS";
+    statusMessage = "INSUFFICIENT DATA FOR RELIABLE AUDIENCE INTELLIGENCE — AI layers skipped due to weak signal coverage";
+  } else if (awarenessLevel?.level === "insufficient_signals" && intentDistribution?.totalClassified === 0) {
+    status = "INSUFFICIENT_SIGNALS";
+    statusMessage = "Key classifiers returned insufficient signals — awareness and intent data unreliable";
+  } else if (isDefensiveMode) {
+    status = "DEFENSIVE_MODE";
+    statusMessage = "Low signal environment detected — Audience intelligence limited — More market data required";
+  }
+
+  const inputSummary = { ...baseInputSummary };
 
   const [inserted] = await db.insert(audienceSnapshots).values({
-    accountId,
-    campaignId,
-    miSnapshotId,
+    accountId, campaignId, miSnapshotId,
     engineVersion: AUDIENCE_ENGINE_VERSION,
     languageSignals: JSON.stringify(languageSignals),
     audiencePains: JSON.stringify(painMap),
@@ -679,9 +852,12 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     executionTimeMs,
   }).returning({ id: audienceSnapshots.id });
 
-  console.log(`[AudienceEngine-V3] Complete in ${executionTimeMs}ms | snapshot=${inserted.id} | pains=${painMap.length} | desires=${desireMap.length} | segments=${audienceSegments.length}`);
+  console.log(`[AudienceEngine-V3] ${status} in ${executionTimeMs}ms | snapshot=${inserted.id} | signals=${totalSignalMatches} | freq=${totalSignalFrequency} | segments=${audienceSegments.length} | defensive=${isDefensiveMode}`);
 
   return {
+    status,
+    statusMessage,
+    defensiveMode: isDefensiveMode,
     languageSignals,
     painMap,
     desireMap,
