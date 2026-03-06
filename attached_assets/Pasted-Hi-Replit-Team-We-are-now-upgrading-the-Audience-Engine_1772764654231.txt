@@ -1,0 +1,359 @@
+Hi Replit Team,
+
+We are now upgrading the Audience Engine from V1 to Audience Engine V3.  
+This is not a cosmetic upgrade — it is a structural evolution of the engine so that the Audience section becomes a true Audience Intelligence system driven entirely by Market Intelligence data.
+
+Please follow this specification carefully. The goal is to keep the architecture clean, stable, and fully compatible with the existing system.
+
+---------------------------------------------------------------------
+
+SECTION 1 — CORE ARCHITECTURE PRINCIPLE
+
+Audience Engine V3 becomes the authority engine of the Audience section.
+
+All other audience-related modules must depend on this engine and must not run independently.
+
+Hierarchy:
+
+Audience Section  
+→ Audience Engine V3 (Core Authority)  
+→ Sub-modules (Segments, Intent, Targeting, etc.)
+
+No other engine may generate audience insights without passing through Audience Engine V3.
+
+---------------------------------------------------------------------
+
+SECTION 2 — DATA SOURCES (STRICT RULE)
+
+Audience Engine V3 must use only internal system data.
+
+Allowed sources:
+
+• Market Intelligence signals  
+• Competitor posts stored in the Market Database  
+• Sampled comments collected by Deep Pass  
+• Engagement counts  
+• Business profile data  
+• Campaign context (platform, geography, objective)
+
+The engine must NOT introduce any new external data sources or scraping.
+
+All analysis must operate on the existing Market Intelligence layer.
+
+---------------------------------------------------------------------
+
+SECTION 3 — SIGNAL AUTHORITY RULE
+
+Each engine must remain isolated.
+
+Audience Engine may produce:
+
+audienceSignals
+
+It must NOT modify:
+
+• marketSignals (from Market Intelligence)  
+• positioningSignals  
+• creativeSignals
+
+Signal merging happens only later in Build a Plan Engine.
+
+This prevents cross-engine contamination.
+
+---------------------------------------------------------------------
+
+SECTION 4 — EVIDENCE-DRIVEN OUTPUT
+
+All conclusions produced by the engine must include evidence metadata.
+
+Each audience insight must store:
+
+• evidenceCount  
+• confidenceScore  
+• sourceSignals  
+• inputSnapshotId  
+
+Example:
+
+Pain: Belly Fat Frustration  
+Evidence Count: 63 comments  
+Confidence Score: 82%
+
+This ensures the system remains evidence-based and avoids AI hallucination.
+
+---------------------------------------------------------------------
+
+SECTION 5 — ENGINE VERSIONING
+
+All runs must record:
+
+• engineVersion  
+• inputSnapshot  
+• executionTimestamp
+
+Example:
+
+engineVersion: AudienceEngine_v3  
+inputSnapshot: MI_snapshot_42
+
+This guarantees traceability and allows future upgrades without breaking prior runs.
+
+---------------------------------------------------------------------
+
+SECTION 6 — ANALYSIS LAYERS
+
+Audience Engine V3 must operate through the following intelligence layers.
+
+Layer 1 — Audience Language Analysis
+
+Analyze comment language and captions to detect:
+
+problem expressions  
+question patterns  
+goal expressions  
+
+Output:
+
+languageSignals
+
+---------------------------------------------------------------------
+
+Layer 2 — Pain Intelligence
+
+Extract recurring pain clusters from audience language.
+
+Examples:
+
+belly fat frustration  
+lack of time for training  
+diet confusion  
+beginner anxiety
+
+Each pain must include:
+
+frequency  
+engagement weight  
+confidence score
+
+Output:
+
+Pain Map
+
+---------------------------------------------------------------------
+
+Layer 3 — Desire Intelligence
+
+Identify transformation desires expressed by the audience.
+
+Examples:
+
+lose belly fat  
+build muscle  
+look athletic  
+increase confidence
+
+Output:
+
+Desire Map
+
+---------------------------------------------------------------------
+
+Layer 4 — Objection Intelligence
+
+Detect barriers preventing purchase.
+
+Examples:
+
+too expensive  
+no time  
+tried before  
+doesn't work
+
+Output:
+
+Objection Map
+
+---------------------------------------------------------------------
+
+Layer 5 — Transformation Map
+
+Identify the transformation state the audience wants to achieve.
+
+Examples:
+
+fat loss transformation  
+body recomposition  
+confidence improvement
+
+This map becomes a key input for Creative and Positioning engines.
+
+---------------------------------------------------------------------
+
+Layer 6 — Emotional Drivers
+
+Extract emotional motivations expressed in comments.
+
+Examples:
+
+shame  
+confidence  
+attractiveness  
+fear of failure  
+status improvement
+
+Output:
+
+Emotional Driver Map
+
+---------------------------------------------------------------------
+
+Layer 7 — Audience Segmentation
+
+Identify distinct audience segments based on combined signals.
+
+Example segments:
+
+Busy professionals seeking fat loss  
+Gym beginners starting fitness journey  
+Body recomposition enthusiasts
+
+Each segment must include:
+
+pain profile  
+desire profile  
+objection profile  
+motivation profile
+
+Output:
+
+Audience Segments
+
+---------------------------------------------------------------------
+
+Layer 8 — Segment Density
+
+Estimate how dominant each segment is within the market.
+
+Signals used:
+
+comment frequency  
+engagement patterns  
+competitor content focus
+
+Output:
+
+Segment Density Score
+
+---------------------------------------------------------------------
+
+Layer 9 — Market Awareness Level
+
+Classify audience awareness stage.
+
+Possible values:
+
+Unaware  
+Problem Aware  
+Solution Aware  
+Product Aware  
+Most Aware
+
+Output:
+
+Audience Awareness Level
+
+---------------------------------------------------------------------
+
+Layer 10 — Audience Maturity Index
+
+Determine how sophisticated the audience is.
+
+Signals include:
+
+terminology complexity  
+solution comparisons  
+experience level
+
+Output:
+
+Beginner Market  
+Developing Market  
+Mature Market
+
+---------------------------------------------------------------------
+
+Layer 11 — Buying Intent Signals
+
+Classify engagement into intent levels.
+
+Examples:
+
+curiosity  
+learning  
+comparison  
+purchase intent
+
+Output:
+
+Intent Distribution
+
+---------------------------------------------------------------------
+
+Layer 12 — Ads Targeting Intelligence
+
+Translate audience insights into structured targeting suggestions.
+
+Examples:
+
+interest suggestions  
+behavior hints  
+demographic patterns
+
+These remain suggestions only and must not create campaign strategy.
+
+---------------------------------------------------------------------
+
+SECTION 7 — PERFORMANCE TARGET
+
+Because the engine uses internal data only, execution time should remain within:
+
+3–10 seconds per run.
+
+No new crawling or external requests are allowed.
+
+---------------------------------------------------------------------
+
+SECTION 8 — STORAGE
+
+Audience Engine V3 outputs must be stored in the database as structured signals linked to:
+
+• MI snapshot  
+• accountId  
+• campaign context
+
+This ensures downstream engines can reuse the signals without recomputation.
+
+---------------------------------------------------------------------
+
+FINAL OBJECTIVE
+
+Audience Engine V3 must transform Market Intelligence data into a complete Audience Intelligence layer that includes:
+
+Pain Map  
+Desire Map  
+Objection Map  
+Transformation Map  
+Emotional Drivers  
+Audience Segments  
+Segment Density  
+Awareness Level  
+Maturity Index  
+Buying Intent  
+Ads Targeting Intelligence
+
+This engine becomes the official authority of the Audience section and provides the foundation for Positioning, Creative, and Build-a-Plan engines.
+
+Please review the implementation plan and confirm before development begins.
+
+Best regards,  
+Samir Fatfat
