@@ -152,6 +152,10 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
   const [businessDataComplete, setBusinessDataComplete] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showPlanDocument, setShowPlanDocument] = useState(false);
+  const [miReady, setMiReady] = useState(false);
+  const [miEngineState, setMiEngineState] = useState<string | null>(null);
+  const [miFreshnessDays, setMiFreshnessDays] = useState<number | null>(null);
+  const [miChecking, setMiChecking] = useState(true);
 
   const isMetaReal = metaConnection?.isConnected === true;
   const profileCampaignId = selectedCampaign?.selectedCampaignId;
@@ -184,6 +188,37 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     checkProfileCompleteness();
   }, [checkProfileCompleteness]);
 
+  const checkMIReadiness = useCallback(async () => {
+    if (!profileCampaignId) {
+      setMiReady(false);
+      setMiEngineState(null);
+      setMiChecking(false);
+      return;
+    }
+    setMiChecking(true);
+    try {
+      const res = await fetch(getApiUrl(`/api/ci/mi-v3/snapshot/${profileCampaignId}`));
+      if (res.ok) {
+        const data = await res.json();
+        const state = data.engineState || null;
+        const freshness = data.engineDiagnostics?.freshnessDays ?? null;
+        setMiEngineState(state);
+        setMiFreshnessDays(freshness);
+        setMiReady(state === 'READY');
+      } else {
+        setMiReady(false);
+        setMiEngineState('NO_DATA');
+      }
+    } catch {
+      setMiReady(false);
+      setMiEngineState('ERROR');
+    }
+    setMiChecking(false);
+  }, [profileCampaignId]);
+
+  useEffect(() => {
+    checkMIReadiness();
+  }, [checkMIReadiness]);
 
   const pulseAnim = useRef(new RNAnimated.Value(0)).current;
 
@@ -251,6 +286,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
           competitorUrls: validUrls,
           averageSellingPrice: parseFloat(avgPrice),
           metaConnected: false,
+          campaignId: profileCampaignId,
         }),
       });
       console.log('[BuildThePlan] Gate response status:', res.status);
@@ -810,7 +846,41 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
           </Pressable>
         )}
 
-        <Text style={[s.sectionLabel, { color: colors.text }]}>Competitors</Text>
+        <Text style={[s.sectionLabel, { color: colors.text }]}>Market Intelligence</Text>
+        {miChecking ? (
+          <View style={s.ciLoadingWrap}>
+            <ActivityIndicator size="small" color={colors.accent} />
+            <Text style={[s.ciLoadingText, { color: colors.textSecondary }]}>Checking MI status...</Text>
+          </View>
+        ) : miReady ? (
+          <View style={[s.profileCompleteBadge, { backgroundColor: '#10B98112', borderColor: '#10B98130' }]}>
+            <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+            <View style={{ flex: 1 }}>
+              <Text style={[s.profileCompleteText, { color: '#10B981' }]}>
+                Market Intelligence Ready{miFreshnessDays !== null ? ` (${miFreshnessDays}d fresh)` : ''}
+              </Text>
+            </View>
+          </View>
+        ) : (
+          <View style={[s.profileIncompleteBanner, { backgroundColor: '#EF444412', borderColor: '#EF444430' }]}>
+            <Ionicons name="alert-circle" size={22} color="#EF4444" />
+            <View style={{ flex: 1 }}>
+              <Text style={[s.profileIncompleteTitle, { color: '#EF4444' }]}>MI Not Ready</Text>
+              <Text style={[s.profileIncompleteDesc, { color: colors.textMuted }]}>
+                {miEngineState === 'REFRESH_REQUIRED' ? 'Data is stale — run MI analysis to refresh' :
+                 miEngineState === 'REFRESHING' ? 'Analysis in progress — please wait' :
+                 'Run Market Intelligence in the Intelligence tab first'}
+              </Text>
+            </View>
+            {onNavigateToCI && (
+              <Pressable onPress={onNavigateToCI}>
+                <Ionicons name="chevron-forward" size={18} color="#EF4444" />
+              </Pressable>
+            )}
+          </View>
+        )}
+
+        <Text style={[s.sectionLabel, { color: colors.text, marginTop: 16 }]}>Competitors</Text>
         {ciLoading ? (
           <View style={s.ciLoadingWrap}>
             <ActivityIndicator size="small" color={colors.accent} />
@@ -884,14 +954,18 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
 
         <Pressable
           onPress={passGate}
-          disabled={loading || !businessDataComplete}
-          style={[s.actionBtn, { opacity: (loading || !businessDataComplete) ? 0.5 : 1 }]}
+          disabled={loading || !businessDataComplete || !miReady}
+          style={[s.actionBtn, { opacity: (loading || !businessDataComplete || !miReady) ? 0.5 : 1 }]}
         >
-          <LinearGradient colors={businessDataComplete ? ['#8B5CF6', '#6366F1'] : ['#6B7280', '#4B5563']} style={s.actionBtnGrad}>
+          <LinearGradient colors={(businessDataComplete && miReady) ? ['#8B5CF6', '#6366F1'] : ['#6B7280', '#4B5563']} style={s.actionBtnGrad}>
             {loading ? <ActivityIndicator color="#fff" size="small" /> : (
               <>
-                <Ionicons name={businessDataComplete ? 'lock-open' : 'lock-closed'} size={18} color="#fff" />
-                <Text style={s.actionBtnText}>{businessDataComplete ? 'Unlock Analysis' : 'Complete Business Profile First'}</Text>
+                <Ionicons name={(businessDataComplete && miReady) ? 'lock-open' : 'lock-closed'} size={18} color="#fff" />
+                <Text style={s.actionBtnText}>
+                  {!businessDataComplete ? 'Complete Business Profile First' :
+                   !miReady ? 'Run Market Intelligence First' :
+                   'Unlock Analysis'}
+                </Text>
               </>
             )}
           </LinearGradient>

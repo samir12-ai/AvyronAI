@@ -1,8 +1,10 @@
 import type { Express, Request, Response } from "express";
 import { db } from "../db";
-import { strategicBlueprints, strategicPlans, blueprintCompetitors, blueprintVersions, campaignSelections } from "@shared/schema";
+import { strategicBlueprints, strategicPlans, blueprintCompetitors, blueprintVersions, campaignSelections, miSnapshots } from "@shared/schema";
 import { eq, and, desc, ne } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
+import { verifySnapshotIntegrity, getEngineReadinessState } from "../market-intelligence-v3/engine-state";
+import { ENGINE_VERSION } from "../market-intelligence-v3/constants";
 
 interface CampaignContextObject {
   campaignId: string;
@@ -111,6 +113,32 @@ export function registerGateRoutes(app: Express) {
         return res.status(400).json({
           error: "CAMPAIGN_CONTEXT_REQUIRED",
           message: campaignError,
+        });
+      }
+
+      const resolvedCampaignId = campaignContext!.campaignId;
+      const [latestMiSnapshot] = await db.select().from(miSnapshots)
+        .where(and(
+          eq(miSnapshots.accountId, accountId),
+          eq(miSnapshots.campaignId, resolvedCampaignId),
+        ))
+        .orderBy(desc(miSnapshots.createdAt))
+        .limit(1);
+
+      const miReadiness = getEngineReadinessState(
+        latestMiSnapshot || null,
+        resolvedCampaignId,
+        ENGINE_VERSION,
+        14,
+      );
+
+      if (miReadiness.state !== "READY") {
+        return res.status(400).json({
+          error: "MI_NOT_READY",
+          field: "marketIntelligence",
+          message: "Market Intelligence must be run before building a plan. Go to Intelligence tab and run analysis first.",
+          engineState: miReadiness.state,
+          diagnostics: miReadiness.diagnostics,
         });
       }
 
