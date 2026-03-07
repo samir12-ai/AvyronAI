@@ -841,8 +841,15 @@ export async function getCompetitorDataCoverage(competitorId: string, accountId:
   const postsResult = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
     .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
 
-  const commentsResult = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
+  const totalCommentsResult = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
     .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
+
+  const realCommentsResult = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
+    .where(and(
+      eq(ciCompetitorComments.competitorId, competitorId),
+      eq(ciCompetitorComments.accountId, accountId),
+      eq(ciCompetitorComments.isSynthetic, false),
+    ));
 
   const latestMetrics = await db.select().from(ciCompetitorMetricsSnapshot)
     .where(and(eq(ciCompetitorMetricsSnapshot.competitorId, competitorId), eq(ciCompetitorMetricsSnapshot.accountId, accountId)))
@@ -850,17 +857,29 @@ export async function getCompetitorDataCoverage(competitorId: string, accountId:
     .limit(1);
 
   const postsCount = Number(postsResult[0]?.count || 0);
-  const commentsCount = Number(commentsResult[0]?.count || 0);
+  const commentsCount = Number(totalCommentsResult[0]?.count || 0);
+  const realCommentsCount = Number(realCommentsResult[0]?.count || 0);
+  const syntheticCommentsCount = commentsCount - realCommentsCount;
   const metrics = latestMetrics[0] || null;
 
   let dataFreshnessDays = 999;
-  if (metrics?.lastFetchAt) {
+  const newestPost = await db.select({ ts: ciCompetitorPosts.timestamp })
+    .from(ciCompetitorPosts)
+    .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)))
+    .orderBy(desc(ciCompetitorPosts.timestamp))
+    .limit(1);
+
+  if (newestPost.length > 0 && newestPost[0].ts) {
+    dataFreshnessDays = Math.max(0, Math.round((Date.now() - new Date(newestPost[0].ts).getTime()) / (1000 * 60 * 60 * 24)));
+  } else if (metrics?.lastFetchAt) {
     dataFreshnessDays = Math.round((Date.now() - new Date(metrics.lastFetchAt).getTime()) / (1000 * 60 * 60 * 24));
   }
 
   return {
     postsCollected: postsCount,
     commentsCollected: commentsCount,
+    realCommentsCount,
+    syntheticCommentsCount,
     ctaCoverage: metrics?.ctaCoverage || 0,
     ctaTypes: metrics?.ctaTypes || "",
     followers: metrics?.followers || null,

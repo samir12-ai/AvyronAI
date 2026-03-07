@@ -32,6 +32,8 @@ interface DataCoverage {
   engagementRate: number | null;
   postingFrequency: number | null;
   contentMix: string | null;
+  realCommentsCount: number;
+  syntheticCommentsCount: number;
   dataFreshnessDays: number;
   lastFetchAt: string | null;
   fetchStatus: string;
@@ -423,8 +425,8 @@ export default function CompetitiveIntelligence() {
                     <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.postsCollected || 0) >= 14 ? '#10B981' : '#F97316' }}>{dc?.postsCollected || 0} / 14</Text>
                   </View>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                    <Text style={{ fontSize: 11, color: colors.textMuted }}>Comments collected</Text>
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.commentsCollected || 0) >= 50 ? '#10B981' : '#F97316' }}>{dc?.commentsCollected || 0} / 50</Text>
+                    <Text style={{ fontSize: 11, color: colors.textMuted }}>Comments (real / enriched)</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.commentsCollected || 0) >= 50 ? '#10B981' : '#F97316' }}>{dc?.realCommentsCount || 0} / {dc?.syntheticCommentsCount || 0}</Text>
                   </View>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                     <Text style={{ fontSize: 11, color: colors.textMuted }}>CTA coverage</Text>
@@ -432,7 +434,7 @@ export default function CompetitiveIntelligence() {
                   </View>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                     <Text style={{ fontSize: 11, color: colors.textMuted }}>Data freshness</Text>
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.dataFreshnessDays || 999) <= 7 ? '#10B981' : '#F59E0B' }}>{dc?.lastFetchAt ? `${dc.dataFreshnessDays}d ago` : 'Never fetched'}</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.dataFreshnessDays || 999) <= 7 ? '#10B981' : '#F59E0B' }}>{dc?.postsCollected > 0 ? `${dc.dataFreshnessDays}d ago` : 'No data'}</Text>
                   </View>
                   {dc?.followers != null && (
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>

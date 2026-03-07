@@ -963,7 +963,7 @@ describe("Post-Deployment Audit Safeguards", () => {
       const uiSrc = fs.readFileSync("components/CompetitiveIntelligence.tsx", "utf-8");
       expect(uiSrc).toContain("dataFreshnessDays");
       expect(uiSrc).toContain("d ago");
-      expect(uiSrc).toContain("Never fetched");
+      expect(uiSrc).toContain("No data");
     });
 
     it("A6.4) Fetch failure paths maintain PARTIAL status not COMPLETE", () => {
