@@ -2336,5 +2336,52 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(orchSource).toContain('analysisLevel: "DEEP_PASS"');
       expect(orchSource).toContain("analysisLevel=DEEP_PASS");
     });
+
+    it("FP-34) FAST_PASS resets enrichmentStatus to PENDING so DEEP_PASS can re-run", () => {
+      expect(orchSource).toContain('enrichmentStatus: "PENDING"');
+      expect(orchSource).toContain('analysisLevel: "FAST_PASS"');
+      const fastPassSection = orchSource.slice(
+        orchSource.indexOf("stage.POSTS_FETCH = \"COMPLETE\""),
+        orchSource.indexOf("stage.POSTS_FETCH = \"COMPLETE\"") + 800
+      );
+      expect(fastPassSection).toContain('enrichmentStatus: "PENDING"');
+      expect(fastPassSection).toContain('analysisLevel: "FAST_PASS"');
+    });
+
+    it("FP-35) Full FAST_PASS→DEEP_PASS cycle: FAST_PASS sets PENDING, DEEP_PASS promotes to ENRICHED", () => {
+      const fastPassUpdate = orchSource.slice(
+        orchSource.indexOf("stage.POSTS_FETCH = \"COMPLETE\""),
+        orchSource.indexOf("stage.POSTS_FETCH = \"COMPLETE\"") + 800
+      );
+      expect(fastPassUpdate).toContain('enrichmentStatus: "PENDING"');
+      expect(fastPassUpdate).toContain('fetchMethod: "FAST_PASS"');
+
+      const deepPassPromotion = orchSource.slice(
+        orchSource.indexOf("competitor promoted to DEEP_PASS"),
+        orchSource.indexOf("competitor promoted to DEEP_PASS") + 500
+      );
+      expect(deepPassPromotion).toContain("analysisLevel=DEEP_PASS");
+
+      const deepPassUpdate = orchSource.slice(
+        orchSource.indexOf("competitor promoted to DEEP_PASS") - 500,
+        orchSource.indexOf("competitor promoted to DEEP_PASS")
+      );
+      expect(deepPassUpdate).toContain('analysisLevel: "DEEP_PASS"');
+      expect(deepPassUpdate).toContain('enrichmentStatus: "ENRICHED"');
+      expect(deepPassUpdate).toContain('fetchMethod: "DEEP_PASS"');
+    });
+
+    it("FP-36) Recovery path updates analysisLevel + fetchMethod on success", () => {
+      expect(orchSource).toContain("[DeepPassRecovery]");
+      expect(orchSource).toContain("analysis_level = ${finalLevel}");
+      expect(orchSource).toContain("fetch_method = ${finalLevel}");
+      expect(orchSource).toContain('const finalLevel = isSuccess ? "DEEP_PASS" : "FAST_PASS"');
+    });
+
+    it("FP-37) DEEP_PASS auto-triggers after FAST_PASS when fetch executed", () => {
+      expect(orchSource).toContain("willRunDeepPass = anyFetchExecuted && !allCooldown");
+      expect(orchSource).toContain("Auto-queuing Deep Pass");
+      expect(orchSource).toContain("queueDeepPass(accountId, campaignId, competitors)");
+    });
   });
 });

@@ -627,6 +627,8 @@ async function executeFetchJob(
       try {
         await db.update(ciCompetitors)
           .set({
+            analysisLevel: "FAST_PASS",
+            enrichmentStatus: "PENDING",
             fetchMethod: "FAST_PASS",
             postsCollected: fetchResult.postsCollected,
             commentsCollected: fetchResult.commentsCollected,
@@ -634,7 +636,7 @@ async function executeFetchJob(
             updatedAt: new Date(),
           })
           .where(eq(ciCompetitors.id, comp.id));
-        console.log(`[FetchOrch] FAST_PASS completed | competitor=${comp.name} | posts=${fetchResult.postsCollected} | comments=${fetchResult.commentsCollected}`);
+        console.log(`[FetchOrch] FAST_PASS completed | competitor=${comp.name} | analysisLevel=FAST_PASS | enrichmentStatus=PENDING | posts=${fetchResult.postsCollected} | comments=${fetchResult.commentsCollected}`);
       } catch (invErr: any) {
         console.error(`[FetchOrch] Failed to update inventory for ${comp.name}: ${invErr.message}`);
       }
@@ -1392,9 +1394,11 @@ async function recoverStuckDeepPass(): Promise<void> {
         try {
           await db.execute(sql`UPDATE ci_competitors SET enrichment_status = 'ENRICHING', updated_at = NOW() WHERE id = ${row.id}`);
           const result = await enrichCompetitorWithComments(row.id as string, row.account_id as string);
-          const finalStatus = (result.status === "ENRICHED" || result.status === "ALREADY_ENRICHED" || result.status === "REAL_DATA_SUFFICIENT") ? "ENRICHED" : "FAILED";
-          await db.execute(sql`UPDATE ci_competitors SET enrichment_status = ${finalStatus}, updated_at = NOW() WHERE id = ${row.id}`);
-          console.log(`[DeepPassRecovery] Enriched ${row.name}: ${result.commentsGenerated} comments, status=${result.status}, enrichmentStatus=${finalStatus}`);
+          const isSuccess = result.status === "ENRICHED" || result.status === "ALREADY_ENRICHED" || result.status === "REAL_DATA_SUFFICIENT";
+          const finalStatus = isSuccess ? "ENRICHED" : "FAILED";
+          const finalLevel = isSuccess ? "DEEP_PASS" : "FAST_PASS";
+          await db.execute(sql`UPDATE ci_competitors SET analysis_level = ${finalLevel}, enrichment_status = ${finalStatus}, fetch_method = ${finalLevel}, updated_at = NOW() WHERE id = ${row.id}`);
+          console.log(`[DeepPassRecovery] Enriched ${row.name}: ${result.commentsGenerated} comments, status=${result.status}, analysisLevel=${finalLevel}, enrichmentStatus=${finalStatus}`);
         } catch (err: any) {
           console.error(`[DeepPassRecovery] Failed to enrich ${row.name}: ${err.message}`);
           try { await db.execute(sql`UPDATE ci_competitors SET enrichment_status = 'FAILED', updated_at = NOW() WHERE id = ${row.id}`); } catch {}
