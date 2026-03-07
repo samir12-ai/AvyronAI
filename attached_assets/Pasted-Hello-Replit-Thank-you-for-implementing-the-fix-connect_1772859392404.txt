@@ -1,0 +1,158 @@
+Hello Replit,
+
+Thank you for implementing the fix connecting the **Strategic Gate (Phase 0)** with **MI v3 readiness**. The architectural direction is correct and the implementation looks solid. Before we consider this area fully closed, we want to run a final hardening validation to ensure the integration is **complete, consistent, and future-proof (10/10 reliability)**.
+
+Please verify the following points carefully.
+
+---
+
+**1. Single Source of Truth for Engine Readiness**
+
+Confirm that **all modules use the same readiness logic** via:
+
+`getEngineReadinessState()`
+
+This must be the only mechanism used to determine MI readiness across:
+
+* Strategic Gate (`/api/strategic/init`)
+* Build-The-Plan routes
+* Positioning Engine
+* Frontend readiness indicators
+* Any other orchestration or planning logic
+
+No module should implement its own readiness checks.
+
+---
+
+**2. Complete MI Validation (Not Only READY Flag)**
+
+The Strategic Gate must validate the full MI state, not just `READY`.
+
+The readiness helper should confirm:
+
+* Snapshot exists
+* Snapshot UUID valid
+* Snapshot `campaignId` matches current campaign
+* Snapshot `engine_version` compatible
+* Snapshot output present and valid
+* Freshness within allowed threshold (≤ 14 days)
+* Snapshot integrity validation passes
+
+If any of these fail, the gate must return:
+
+`MI_NOT_READY`
+
+with clear diagnostics.
+
+---
+
+**3. Campaign Isolation Verification**
+
+Ensure the readiness check always evaluates MI **for the correct campaignId**.
+
+Verify that:
+
+* The frontend sends `campaignId`
+* Backend gate uses it in `getEngineReadinessState`
+* Cross-campaign snapshot usage is impossible
+
+This prevents plan generation from reading another campaign’s MI snapshot.
+
+---
+
+**4. Strategic Gate Failure Behavior**
+
+If MI is not ready, the system must:
+
+* Return `MI_NOT_READY`
+* Include diagnostic information (freshness, integrity, snapshot existence)
+* Never allow Phase 1 to proceed silently
+
+The gate should fail deterministically rather than allowing partial analysis.
+
+---
+
+**5. Frontend Status Accuracy**
+
+Confirm that the Phase 0 UI status indicator uses the **normalized engine state** returned by the backend.
+
+Expected behavior:
+
+* READY → Green indicator
+* REFRESHING → Informational status
+* REFRESH_REQUIRED → Instruction to refresh MI
+* BLOCKED / REFRESH_FAILED → Error state
+
+The UI must reflect backend truth, not infer readiness locally.
+
+---
+
+**6. Snapshot Normalization Consistency**
+
+Verify that the frontend always consumes snapshots through:
+
+`normalizeEngineSnapshot()`
+
+No component should access raw API response shapes.
+
+This prevents future issues caused by nested responses like:
+
+`{ snapshot: {...}, output: {...} }`
+
+---
+
+**7. Gate Protection Against Silent MI Absence**
+
+Confirm that Phase 1 (extraction / blueprint generation):
+
+* Cannot execute without MI readiness
+* Does not attempt to read MI signals if MI state ≠ READY
+
+This ensures the system never produces plans based on missing intelligence.
+
+---
+
+**8. Diagnostics and Logging**
+
+Add structured logging when the gate evaluates MI readiness.
+
+Example:
+
+MI Gate Diagnostics
+snapshotFound: true
+freshnessDays: 4
+integrityValid: true
+campaignMatch: true
+engineState: READY
+
+This helps quickly diagnose future issues.
+
+---
+
+**9. End-to-End Flow Verification**
+
+Please run verification scenarios:
+
+1. MI READY → Gate passes normally
+2. MI stale (>14 days) → Gate blocks and instructs refresh
+3. MI snapshot missing → Gate blocks
+4. MI campaign mismatch → Gate blocks
+5. MI refreshing → Gate waits / instructs user
+
+The system must behave deterministically in all cases.
+
+---
+
+**Objective**
+
+The Strategic Gate must act as a **true dependency checkpoint** for the MI → Audience → Positioning → Build-Plan pipeline.
+
+After this validation we want to confirm that:
+
+* Phase 0 cannot bypass Market Intelligence
+* Plans are never generated without validated MI data
+* UI and backend states remain perfectly synchronized
+
+Please confirm once these checks are verified.
+
+Thank you.

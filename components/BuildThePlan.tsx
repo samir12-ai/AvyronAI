@@ -21,6 +21,7 @@ import { useApp } from '@/context/AppContext';
 import { useCampaign } from '@/context/CampaignContext';
 import { BusinessProfileModal } from '@/components/BusinessProfile';
 import PlanDocumentView from '@/components/PlanDocumentView';
+import { normalizeEngineSnapshot, isEngineReady } from '@/lib/engine-snapshot';
 
 type Phase = 0 | 1 | 2 | 3 | 4 | 5;
 type BlueprintStatus = 'DRAFT' | 'GATE_PASSED' | 'EXTRACTION_COMPLETE' | 'EXTRACTION_FALLBACK' | 'CONFIRMED' | 'ANALYSIS_COMPLETE' | 'VALIDATED' | 'ORCHESTRATED';
@@ -202,9 +203,10 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
         const data = await res.json();
         const state = data.engineState || null;
         const freshness = data.engineDiagnostics?.freshnessDays ?? null;
+        const normalized = normalizeEngineSnapshot(data, 'mi');
         setMiEngineState(state);
         setMiFreshnessDays(freshness);
-        setMiReady(state === 'READY');
+        setMiReady(isEngineReady(normalized, profileCampaignId, state));
       } else {
         setMiReady(false);
         setMiEngineState('NO_DATA');
@@ -232,9 +234,10 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
   }, []);
 
   const fetchCICompetitors = useCallback(async () => {
+    if (!profileCampaignId) return;
     setCiLoading(true);
     try {
-      const res = await fetch(getApiUrl('/api/ci/competitors?accountId=default'));
+      const res = await fetch(getApiUrl(`/api/ci/competitors?accountId=default&campaignId=${profileCampaignId}`));
       const data = await res.json();
       if (data.competitors && Array.isArray(data.competitors)) {
         setCiCompetitors(data.competitors);
@@ -246,7 +249,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     } finally {
       setCiLoading(false);
     }
-  }, []);
+  }, [profileCampaignId]);
 
   useEffect(() => {
     fetchCICompetitors();
@@ -869,6 +872,8 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
               <Text style={[s.profileIncompleteDesc, { color: colors.textMuted }]}>
                 {miEngineState === 'REFRESH_REQUIRED' ? 'Data is stale — run MI analysis to refresh' :
                  miEngineState === 'REFRESHING' ? 'Analysis in progress — please wait' :
+                 miEngineState === 'REFRESH_FAILED' ? 'MI refresh failed — try running analysis again' :
+                 miEngineState === 'BLOCKED' ? 'MI data integrity issue — re-run Market Intelligence' :
                  'Run Market Intelligence in the Intelligence tab first'}
               </Text>
             </View>

@@ -4,6 +4,8 @@ import { db } from "../db";
 import { strategicBlueprints, businessDataLayer, miSnapshots } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
+import { getEngineReadinessState } from "../market-intelligence-v3/engine-state";
+import { ENGINE_VERSION } from "../market-intelligence-v3/constants";
 
 const CREATIVE_BLUEPRINT_PROMPT = `You are a marketing creative strategist. Given campaign context, business data, competitor intelligence, and market signals, generate a structured Creative Blueprint that will guide content creation.
 
@@ -126,16 +128,45 @@ export function registerExtractionRoutes(app: Express) {
       const competitorUrls = blueprint.competitorUrls ? JSON.parse(blueprint.competitorUrls) : [];
       const asp = blueprint.averageSellingPrice;
 
+      const resolvedCampaignId = campaignContext?.campaignId || blueprint.campaignId;
+
+      const [latestMiForCheck] = await db.select().from(miSnapshots)
+        .where(and(
+          eq(miSnapshots.accountId, blueprint.accountId),
+          eq(miSnapshots.campaignId, resolvedCampaignId),
+        ))
+        .orderBy(desc(miSnapshots.createdAt))
+        .limit(1);
+
+      const miReadiness = getEngineReadinessState(
+        latestMiForCheck || null,
+        resolvedCampaignId,
+        ENGINE_VERSION,
+        14,
+      );
+
+      console.log(`[StrategicCore] Phase 1 MI readiness check: state=${miReadiness.state} | campaign=${resolvedCampaignId} | blueprint=${blueprintId}`);
+
+      if (miReadiness.state !== "READY") {
+        console.log(`[StrategicCore] Phase 1 blocked — MI not ready: ${JSON.stringify(miReadiness.diagnostics)}`);
+        return res.status(400).json({
+          error: "MI_NOT_READY",
+          message: "Market Intelligence data is no longer valid. Please refresh MI before generating a blueprint.",
+          engineState: miReadiness.state,
+          diagnostics: miReadiness.diagnostics,
+        });
+      }
+
       let businessData: any = null;
-      if (campaignContext?.campaignId) {
+      if (resolvedCampaignId) {
         const [bd] = await db.select().from(businessDataLayer)
-          .where(eq(businessDataLayer.campaignId, campaignContext.campaignId))
+          .where(eq(businessDataLayer.campaignId, resolvedCampaignId))
           .limit(1);
         if (bd) businessData = bd;
       }
 
       let marketSignals: any = null;
-      if (campaignContext?.campaignId) {
+      if (resolvedCampaignId) {
         const [latestSnapshot] = await db.select({
           marketDiagnosis: miSnapshots.marketDiagnosis,
           threatSignals: miSnapshots.threatSignals,
@@ -144,7 +175,7 @@ export function registerExtractionRoutes(app: Express) {
         }).from(miSnapshots)
           .where(and(
             eq(miSnapshots.accountId, blueprint.accountId),
-            eq(miSnapshots.campaignId, campaignContext.campaignId),
+            eq(miSnapshots.campaignId, resolvedCampaignId),
             eq(miSnapshots.status, "COMPLETE"),
           ))
           .orderBy(desc(miSnapshots.createdAt))

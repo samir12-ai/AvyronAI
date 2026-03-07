@@ -132,6 +132,8 @@ export function registerGateRoutes(app: Express) {
         14,
       );
 
+      console.log(`[StrategicGate] MI Gate Diagnostics | snapshotFound=${miReadiness.diagnostics.snapshotFound} | freshnessDays=${miReadiness.diagnostics.freshnessDays ?? 'N/A'} | freshnessValid=${miReadiness.diagnostics.freshnessValid} | integrityValid=${miReadiness.diagnostics.integrityValid} | campaignMatch=${miReadiness.diagnostics.campaignIdMatch} | engineState=${miReadiness.state} | campaign=${resolvedCampaignId}`);
+
       if (miReadiness.state !== "READY") {
         return res.status(400).json({
           error: "MI_NOT_READY",
