@@ -1,0 +1,25 @@
+Hello Replit,
+
+After reviewing the current competitor dataset coverage across campaigns, we would like to introduce a final optimization to the data acquisition pipeline in order to strengthen analytical depth while keeping the system efficient and stable.
+
+The current system is working well, but some competitors are still analyzed with only 10–12 posts. This limits signal density for several intelligence layers such as Content DNA analysis, narrative saturation detection, and trajectory signals.
+
+To improve the strength of market intelligence without significantly increasing load, please implement the following adjustments.
+
+First, update the Fast Pass behavior so that it collects up to 12 posts per competitor instead of the current lower limit. The Fast Pass should remain lightweight and fast. It should still avoid comment scraping and maintain minimal request usage, but collecting 12 posts will provide a stronger base dataset for initial analysis and allow Content DNA detection to start with better signal coverage.
+
+Second, expand the Deep Pass logic so that it increases the total stored posts per competitor to approximately 30 posts whenever possible. If a competitor currently has fewer than 30 stored posts, the Deep Pass should fetch additional posts until the dataset reaches this level. This will significantly improve pattern detection for narrative frameworks, hook archetypes, CTA frameworks, engagement trends, and trajectory analysis.
+
+Third, Deep Pass should also ensure meaningful comment coverage. The goal is not simply to increase comment quantity, but to provide enough comment signals for downstream engines. Comments should preferably be collected from five to eight posts that have meaningful engagement, and the total comment sample should reach a reasonable range that supports analysis. Real comments should always be preferred, while synthetic enrichment should only be used when necessary and must continue to follow the existing tagging and lifecycle rules already implemented.
+
+Fourth, the fetching strategy should remain efficient. Deep Pass should only fetch additional posts when the stored dataset is below the thirty-post target. If a competitor already has thirty or more posts stored, the system should skip additional post collection to avoid unnecessary scraping. Existing cooldown rules and enrichment safeguards should remain active.
+
+Fifth, comment sampling should prioritize posts with the highest engagement, the most recent posts, and posts with meaningful caption content. Posts with minimal engagement or empty captions should not be used for comment sampling whenever possible.
+
+Finally, please ensure that these adjustments remain fully compatible with the current system architecture, including MI v3, Audience Engine V3, Positioning Engine V3, the Deep Pass enrichment system, and the synthetic comment lifecycle controls. No database schema changes should be required.
+
+Please also add validation tests to confirm that Fast Pass collects up to twelve posts, Deep Pass expands datasets toward thirty posts where available, comment coverage meets the minimum analytical threshold, and competitors already above the post threshold are correctly skipped.
+
+Once implemented, this adjustment will ensure that each competitor dataset reaches a stronger analytical baseline with approximately thirty posts and sufficient comment coverage. This will significantly improve signal density and overall intelligence quality, allowing the system to operate at a fully saturated analytical level.
+
+Thank you.

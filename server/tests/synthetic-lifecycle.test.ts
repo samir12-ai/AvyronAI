@@ -468,4 +468,84 @@ describe("Synthetic Comment Lifecycle — Deep Pass Integrity", () => {
       expect(realCheckIdx).toBeLessThan(enrichCallIdx);
     });
   });
+
+  describe("Section 8: Data Acquisition Targets", () => {
+
+    it("8.1) Fast Pass collects up to 12 posts per competitor", () => {
+      const source = readSource();
+      const match = source.match(/TARGET_POSTS_FAST\s*=\s*(\d+)/);
+      expect(match).not.toBeNull();
+      expect(parseInt(match![1])).toBe(12);
+    });
+
+    it("8.2) Deep Pass targets 30 posts per competitor", () => {
+      const source = readSource();
+      const match = source.match(/TARGET_POSTS_DEEP\s*=\s*(\d+)/);
+      expect(match).not.toBeNull();
+      expect(parseInt(match![1])).toBe(30);
+    });
+
+    it("8.3) Deep Pass samples comments from 5-8 posts with highest engagement", () => {
+      const source = readSource();
+      const match = source.match(/MAX_COMMENT_POSTS_DEEP\s*=\s*(\d+)/);
+      expect(match).not.toBeNull();
+      const limit = parseInt(match![1]);
+      expect(limit).toBeGreaterThanOrEqual(5);
+      expect(limit).toBeLessThanOrEqual(8);
+    });
+
+    it("8.4) Comment sampling prioritizes engagement then recency", () => {
+      const source = readSource();
+      const fetchFnStart = source.indexOf("if (collectionMode !== \"FAST_PASS\")");
+      const fetchFnBody = source.slice(fetchFnStart, fetchFnStart + 1000);
+      expect(fetchFnBody).toContain("engA");
+      expect(fetchFnBody).toContain("engB");
+      expect(fetchFnBody).toContain("tsA");
+      expect(fetchFnBody).toContain("tsB");
+      const engCheckIdx = fetchFnBody.indexOf("engB !== engA");
+      const tsCheckIdx = fetchFnBody.indexOf("tsB - tsA");
+      expect(engCheckIdx).toBeGreaterThan(-1);
+      expect(tsCheckIdx).toBeGreaterThan(-1);
+      expect(engCheckIdx).toBeLessThan(tsCheckIdx);
+    });
+
+    it("8.5) Deep Pass skips additional post collection when already at target", () => {
+      const source = readSource();
+      expect(source).toContain("DEEP_PASS_SKIP");
+      expect(source).toContain("TARGET_POSTS_DEEP");
+      expect(source).toContain("Skipping additional post collection");
+      const skipBlock = source.slice(source.indexOf("DEEP_PASS_SKIP"), source.indexOf("DEEP_PASS_SKIP") + 1100);
+      expect(skipBlock).toContain("return {");
+      expect(skipBlock).toContain("Post collection skipped");
+    });
+
+    it("8.6) Fast Pass still skips comment generation", () => {
+      const source = readSource();
+      expect(source).toContain("FAST_PASS: Skipping comment generation");
+    });
+
+    it("8.7) MIN_COMMENTS_THRESHOLD remains at 50 for Deep Pass qualification", () => {
+      const constants = fs.readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
+      const match = constants.match(/MIN_COMMENTS_SAMPLE:\s*(\d+)/);
+      expect(match).not.toBeNull();
+      expect(parseInt(match![1])).toBe(50);
+    });
+
+    it("8.8) enrichCompetitorWithComments uses same engagement-first sorting", () => {
+      const fnBody = getEnrichBody();
+      expect(fnBody).toContain("engA");
+      expect(fnBody).toContain("engB");
+      expect(fnBody).toContain("likes");
+    });
+
+    it("8.9) Comment sampling filters out posts with no engagement and empty captions", () => {
+      const source = readSource();
+      const sortBlocks = source.split("postsNeedingComments = ");
+      expect(sortBlocks.length).toBeGreaterThanOrEqual(3);
+      for (let i = 1; i < sortBlocks.length; i++) {
+        const block = sortBlocks[i].slice(0, 400);
+        expect(block).toContain("caption");
+      }
+    });
+  });
 });

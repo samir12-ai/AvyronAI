@@ -237,10 +237,10 @@ function computeBasicSentiment(text: string): number {
 
 export type CollectionMode = "FAST_PASS" | "DEEP_PASS";
 
-const TARGET_POSTS_FAST = 10;
+const TARGET_POSTS_FAST = 12;
 
-const TARGET_POSTS_DEEP = 25;
-const MAX_COMMENT_POSTS_DEEP = 3;
+const TARGET_POSTS_DEEP = 30;
+const MAX_COMMENT_POSTS_DEEP = 8;
 const MAX_COMMENTS_PER_POST_DEEP = 50;
 
 const FETCH_COOLDOWN_MS = 72 * 60 * 60 * 1000;
@@ -391,6 +391,31 @@ async function _executeFetch(
   }
 
   const maxPosts = collectionMode === "FAST_PASS" ? TARGET_POSTS_FAST : TARGET_POSTS_DEEP;
+
+  if (collectionMode === "DEEP_PASS") {
+    const storedPostCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
+      .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+    const existingStoredPostTotal = Number(storedPostCount[0]?.count || 0);
+    if (existingStoredPostTotal >= TARGET_POSTS_DEEP) {
+      console.log(`[DataAcq] DEEP_PASS_SKIP: ${competitor.name} already has ${existingStoredPostTotal} posts (>= ${TARGET_POSTS_DEEP}). Skipping additional post collection.`);
+
+      const existingCommentCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
+        .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
+      const existingComments = Number(existingCommentCount[0]?.count || 0);
+
+      return {
+        competitorId,
+        postsCollected: existingStoredPostTotal,
+        commentsCollected: existingComments,
+        ctaCoverage: 0, ctaTypes: [],
+        followers: null, engagementRate: null, postingFrequency: null, contentMix: null,
+        fetchMethod: "DEEP_PASS_SKIP" as any,
+        status: existingStoredPostTotal >= MIN_POSTS_THRESHOLD && existingComments >= MIN_COMMENTS_THRESHOLD ? "COMPLETE" : "PARTIAL_COMPLETE",
+        message: `Already has ${existingStoredPostTotal} posts. Post collection skipped.`,
+      };
+    }
+  }
+
   console.log(`[DataAcq] Starting ${collectionMode} fetch for ${competitor.name} (${competitor.profileLink})${proxyCtx ? ` | session=${proxyCtx.session.sessionId}` : ""} | maxPosts=${maxPosts}`);
 
   const scrapeResult = await scrapeInstagramProfile(competitor.profileLink, proxyCtx, maxPosts);
@@ -526,7 +551,14 @@ async function _executeFetch(
     const postsNeedingComments = postsToStore
       .filter(p => !existingPostIdsWithComments.has(p.postId))
       .filter(p => (p.comments && p.comments > 0) || (p.caption && p.caption.length > 10))
-      .sort((a, b) => (b.comments || 0) - (a.comments || 0))
+      .sort((a, b) => {
+        const engA = (a.likes || 0) + (a.comments || 0);
+        const engB = (b.likes || 0) + (b.comments || 0);
+        if (engB !== engA) return engB - engA;
+        const tsA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        const tsB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        return tsB - tsA;
+      })
       .slice(0, commentPostLimit);
 
     for (const post of postsNeedingComments) {
@@ -784,7 +816,14 @@ export async function enrichCompetitorWithComments(competitorId: string, account
   const postsNeedingComments = storedPosts
     .filter(p => !existingPostIdsWithComments.has(p.postId))
     .filter(p => (p.comments && p.comments > 0) || (p.caption && p.caption.length > 10))
-    .sort((a, b) => (b.comments || 0) - (a.comments || 0))
+    .sort((a, b) => {
+      const engA = (a.likes || 0) + (a.comments || 0);
+      const engB = (b.likes || 0) + (b.comments || 0);
+      if (engB !== engA) return engB - engA;
+      const tsA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+      const tsB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+      return tsB - tsA;
+    })
     .slice(0, MAX_COMMENT_POSTS_DEEP);
 
   if (postsNeedingComments.length === 0) {
