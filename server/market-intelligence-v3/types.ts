@@ -202,6 +202,10 @@ export interface MIDiagnostics {
   competitorWeights: { competitorId: string; competitorName: string; authorityWeight: number; lifecycle: CompetitorLifecycle }[];
   sampleBiasFlag: boolean;
   realCommentRatio: number;
+  demandPressureScore: number;
+  narrativeConvergenceScore: number;
+  audiencePressureSignal: number;
+  echoChamberRisk: number;
 }
 
 export type CacheInvalidationReason = "ENGINE_UPGRADE" | "COMPETITOR_SET_CHANGED" | "INCOMPLETE_SNAPSHOT" | "STALE" | null;

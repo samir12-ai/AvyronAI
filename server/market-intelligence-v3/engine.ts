@@ -2,6 +2,8 @@ import { db } from "../db";
 import { miSnapshots, miSignalLogs, miTelemetry, ciCompetitors, growthCampaigns } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { computeAllSignals, aggregateMissingFlags, classifyEngagementQuality, detectAudienceIntentSignals, detectSampleBias, computeRealDataRatio } from "./signal-engine";
+import { computeDemandPressure } from "./demand-pressure";
+import { detectEchoChamber } from "./narrative-clustering";
 import { classifyAllIntents, computeDominantMarketIntent } from "./intent-engine";
 import { computeTrajectory, deriveTrajectoryDirection, deriveMarketState, deriveCompetitionIntensityLevel } from "./trajectory-engine";
 import { computeConfidence } from "./confidence-engine";
@@ -679,13 +681,24 @@ export class MarketIntelligenceV3 {
     if (sampleBias.hasBias) {
       console.log(`[MIv3] SAMPLE_BIAS_DETECTED | flags=${sampleBias.biasFlags.join("; ")} | biasScore=${sampleBias.biasScore}`);
     }
+    const demandPressure = computeDemandPressure(allComments, engagementQuality, audienceIntentSignals);
+    const echoChamber = detectEchoChamber(signalResults);
+    if (echoChamber.isEchoChamber) {
+      console.log(`[MIv3] ECHO_CHAMBER_DETECTED | risk=${echoChamber.echoChamberRisk} | convergence=${echoChamber.convergenceScore} | diversity=${echoChamber.diversityScore} | penalty=${echoChamber.penalty}`);
+    }
+    console.log(`[MIv3] DEMAND_PRESSURE | score=${demandPressure.score} | level=${demandPressure.level} | engagement=${demandPressure.components.engagementDensity} | intent=${demandPressure.components.intentSignalStrength} | purchase=${demandPressure.components.purchaseIntentDensity}`);
     const trajectory = computeTrajectory(signalResults, intents, engagementQuality);
+    if (echoChamber.penalty > 0) {
+      trajectory.angleSaturationLevel = Math.max(0, trajectory.angleSaturationLevel - echoChamber.penalty);
+      trajectory.narrativeConvergenceScore = Math.min(1, trajectory.narrativeConvergenceScore + echoChamber.penalty);
+      console.log(`[MIv3] ECHO_CHAMBER_PENALTY_APPLIED | saturation=${trajectory.angleSaturationLevel.toFixed(3)} | convergence=${trajectory.narrativeConvergenceScore.toFixed(3)}`);
+    }
     const confidence = computeConfidence(signalResults, dataFreshnessDays, realDataRatio);
     const dominanceResults = computeAllDominance(signalResults, confidence, goalMode);
     const missingFlags = aggregateMissingFlags(signalResults);
     const volatilityIndex = computeVolatilityIndex(signalResults);
-    const trajectoryDirection = deriveTrajectoryDirection(trajectory);
-    const marketState = deriveMarketState(trajectory, confidence.level);
+    const trajectoryDirection = deriveTrajectoryDirection(trajectory, demandPressure.score);
+    const marketState = deriveMarketState(trajectory, confidence.level, demandPressure.score);
     const marketDiagnosis = buildMarketDiagnosis(confidence, trajectory, dominantIntent);
     const marketBaseline = await computeMarketBaseline(accountId, campaignId);
     const signalNoiseRatio = computeSignalNoiseRatio(signalResults, confidence);
@@ -839,6 +852,12 @@ export class MarketIntelligenceV3 {
       refreshReason: telemetry.refreshReason,
     });
 
+    const audiencePressureSignal = Math.round(
+      (demandPressure.components.intentSignalStrength * 0.4 +
+       demandPressure.components.objectionDensity * 0.3 +
+       demandPressure.components.purchaseIntentDensity * 0.3) * 1000
+    ) / 1000;
+
     const diagnostics: MIDiagnostics = {
       activityScore: trajectory.marketActivityLevel,
       competitionIntensityScore: trajectory.competitionIntensityScore,
@@ -852,8 +871,12 @@ export class MarketIntelligenceV3 {
       })),
       sampleBiasFlag: sampleBias.hasBias,
       realCommentRatio: realDataRatio,
+      demandPressureScore: demandPressure.score,
+      narrativeConvergenceScore: echoChamber.convergenceScore,
+      audiencePressureSignal,
+      echoChamberRisk: echoChamber.echoChamberRisk,
     };
-    console.log(`[MIv3] DIAGNOSTICS | activity=${diagnostics.activityScore.toFixed(3)} | intensity=${diagnostics.competitionIntensityScore.toFixed(3)} | demand=${diagnostics.demandScore.toFixed(3)} | saturation=${diagnostics.narrativeSaturationScore.toFixed(3)} | sampleBias=${diagnostics.sampleBiasFlag} | realRatio=${diagnostics.realCommentRatio}`);
+    console.log(`[MIv3] DIAGNOSTICS | activity=${diagnostics.activityScore.toFixed(3)} | intensity=${diagnostics.competitionIntensityScore.toFixed(3)} | demand=${diagnostics.demandScore.toFixed(3)} | saturation=${diagnostics.narrativeSaturationScore.toFixed(3)} | sampleBias=${diagnostics.sampleBiasFlag} | realRatio=${diagnostics.realCommentRatio} | demandPressure=${diagnostics.demandPressureScore} | echoChamber=${diagnostics.echoChamberRisk}`);
 
     const output: MIv3Output = {
       marketState,

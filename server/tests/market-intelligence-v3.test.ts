@@ -13,7 +13,8 @@ import { buildResultFromSnapshot, validateSnapshotCompleteness, buildMarketDiagn
 import { computeAllDeviations, computeDeviation, computeDynamicThreshold, FALLBACK_BASELINE, TIME_WEIGHTS, BASELINE_WINDOW, MIN_SNAPSHOTS_FOR_CALIBRATION, type MarketBaseline, type DeviationResult, type CalibrationContext } from "../market-intelligence-v3/market-baselines";
 import type { CompetitorInput, PostData, CompetitorSignalResult, ExecutionMode, GoalMode } from "../market-intelligence-v3/types";
 import { MI_THRESHOLDS, MI_COST_LIMITS, MI_CONFIDENCE, MI_REVIVAL_CAP, GOAL_MODE_WEIGHTS, ENGAGEMENT_BIAS_THRESHOLD, MI_TOKEN_BUDGET } from "../market-intelligence-v3/constants";
-import { clusterNarratives, computeClusteredSaturation } from "../market-intelligence-v3/narrative-clustering";
+import { clusterNarratives, computeClusteredSaturation, detectEchoChamber } from "../market-intelligence-v3/narrative-clustering";
+import { computeDemandPressure } from "../market-intelligence-v3/demand-pressure";
 
 function makePost(overrides: Partial<PostData> = {}): PostData {
   return {
@@ -1571,9 +1572,9 @@ describe("Layer-0 Signal-Only Contract", () => {
     expect(a.isDepressed).toBe(b.isDepressed);
   });
 
-  it("ENGINE_VERSION is 14", () => {
+  it("ENGINE_VERSION is 15", () => {
     const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
-    expect(source).toContain("export const ENGINE_VERSION = 14;");
+    expect(source).toContain("export const ENGINE_VERSION = 15;");
   });
 
   it("schema uses market_diagnosis and threat_signals columns (not old names)", () => {
@@ -1794,9 +1795,9 @@ describe("Layer-0 Signal-Only Contract", () => {
       expect(deriveCompetitionIntensityLevel(intensity)).not.toBe("MINIMAL");
     });
 
-    it("CI-18) ENGINE_VERSION is 14 after hardening pass", () => {
+    it("CI-18) ENGINE_VERSION is 15 after demand pressure hardening", () => {
       const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
-      expect(source).toContain("export const ENGINE_VERSION = 14;");
+      expect(source).toContain("export const ENGINE_VERSION = 15;");
     });
   });
 
@@ -2083,9 +2084,257 @@ describe("Layer-0 Signal-Only Contract", () => {
       expect(source).toContain("lifecycle: CompetitorLifecycle");
     });
 
-    it("EC-4) ENGINE_VERSION = 14 matches hardening pass", () => {
+    it("EC-4) ENGINE_VERSION = 15 matches demand pressure hardening", () => {
       const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
-      expect(source).toContain("export const ENGINE_VERSION = 14;");
+      expect(source).toContain("export const ENGINE_VERSION = 15;");
+    });
+  });
+
+  describe("Demand Pressure Layer (v15)", () => {
+    const makeComments = (texts: string[]) => texts.map((text, i) => ({ id: `c${i}`, text, timestamp: "2025-01-01" }));
+    const defaultEQ = { highIntentCount: 5, lowValueCount: 10, engagementQualityRatio: 0.33 };
+
+    it("DP-1) computeDemandPressure returns 0 for empty comments", () => {
+      const result = computeDemandPressure([], defaultEQ, []);
+      expect(result.score).toBe(0);
+      expect(result.level).toBe("LOW");
+    });
+
+    it("DP-2) High purchase intent comments → HIGH demand pressure", () => {
+      const comments = makeComments([
+        "where can i buy this?", "how much does it cost?", "send me the link",
+        "i want to buy this", "link in bio?", "how do i sign up?",
+        "i'm interested", "price please", "can i get this?", "need this",
+        "where do i order?", "take my money", "how to purchase?",
+        "waiting for this", "i'm ready to buy",
+      ]);
+      const result = computeDemandPressure(comments, { highIntentCount: 10, lowValueCount: 2, engagementQualityRatio: 0.83 }, ["price_sensitivity", "results_seeking"]);
+      expect(result.score).toBeGreaterThan(0);
+      expect(result.level).not.toBe("LOW");
+      expect(result.components.purchaseIntentDensity).toBeGreaterThan(0);
+    });
+
+    it("DP-3) Low-value-only comments → LOW demand pressure", () => {
+      const comments = makeComments(["nice", "fire", "lol", "haha", "🔥", "cool"]);
+      const result = computeDemandPressure(comments, { highIntentCount: 0, lowValueCount: 6, engagementQualityRatio: 0 }, []);
+      expect(result.level).toBe("LOW");
+    });
+
+    it("DP-4) Demand pressure is independent from competitor signals", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/demand-pressure.ts", "utf-8");
+      expect(source).not.toContain("CompetitorSignalResult");
+      expect(source).not.toContain("postingFrequencyTrend");
+      expect(source).not.toContain("signal-engine");
+    });
+
+    it("DP-5) MI_DEMAND_PRESSURE constants defined", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
+      expect(source).toContain("MI_DEMAND_PRESSURE");
+      expect(source).toContain("SUPPRESSED_DEMAND_ACTIVITY_CEILING");
+      expect(source).toContain("SUPPRESSED_DEMAND_PRESSURE_FLOOR");
+    });
+
+    it("DP-6) Score components are all 0-1 range", () => {
+      const comments = makeComments([
+        "how much?", "where can i buy?", "is this legit?", "too expensive",
+        "does this work?", "help me", "i need advice", "struggling with this",
+      ]);
+      const result = computeDemandPressure(comments, defaultEQ, ["price_sensitivity", "trust_concerns"]);
+      for (const [key, val] of Object.entries(result.components)) {
+        expect(val).toBeGreaterThanOrEqual(0);
+        expect(val).toBeLessThanOrEqual(1);
+      }
+      expect(result.score).toBeGreaterThanOrEqual(0);
+      expect(result.score).toBeLessThanOrEqual(1);
+    });
+  });
+
+  describe("Echo Chamber Detection (v15)", () => {
+    const makeEchoSignals = (count: number, hashtagDrift: number, experimentRate: number) =>
+      Array.from({ length: count }, (_, i) => ({
+        competitorId: `comp_${i}`,
+        signals: { hashtagDriftScore: hashtagDrift, contentExperimentRate: experimentRate },
+        signalCoverageScore: 0.7,
+      }));
+
+    it("ECH-1) No echo chamber for diverse signals", () => {
+      const signals = [
+        { competitorId: "c1", signals: { hashtagDriftScore: 0.8, contentExperimentRate: 0.7 }, signalCoverageScore: 0.9 },
+        { competitorId: "c2", signals: { hashtagDriftScore: 0.2, contentExperimentRate: 0.3 }, signalCoverageScore: 0.6 },
+        { competitorId: "c3", signals: { hashtagDriftScore: 0.5, contentExperimentRate: 0.5 }, signalCoverageScore: 0.7 },
+      ];
+      const result = detectEchoChamber(signals);
+      expect(result.isEchoChamber).toBe(false);
+      expect(result.penalty).toBe(0);
+    });
+
+    it("ECH-2) Echo chamber detected for identical low-diversity signals", () => {
+      const signals = makeEchoSignals(5, 0.1, 0.1);
+      const result = detectEchoChamber(signals);
+      expect(result.convergenceScore).toBeGreaterThanOrEqual(0.65);
+      expect(result.diversityScore).toBeLessThan(0.30);
+      expect(result.isEchoChamber).toBe(true);
+      expect(result.penalty).toBeGreaterThan(0);
+    });
+
+    it("ECH-3) Single competitor → no echo chamber", () => {
+      const result = detectEchoChamber([{ competitorId: "c1", signals: { hashtagDriftScore: 0.1, contentExperimentRate: 0.1 }, signalCoverageScore: 0.5 }]);
+      expect(result.isEchoChamber).toBe(false);
+      expect(result.echoChamberRisk).toBe(0);
+    });
+
+    it("ECH-4) Echo chamber penalty is bounded", () => {
+      const signals = makeEchoSignals(10, 0.05, 0.05);
+      const result = detectEchoChamber(signals);
+      expect(result.penalty).toBeLessThanOrEqual(0.35);
+    });
+
+    it("ECH-5) Echo chamber penalty is applied to trajectory in engine", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+      expect(source).toContain("ECHO_CHAMBER_PENALTY_APPLIED");
+      expect(source).toContain("trajectory.angleSaturationLevel = Math.max(0, trajectory.angleSaturationLevel - echoChamber.penalty)");
+      expect(source).toContain("trajectory.narrativeConvergenceScore = Math.min(1, trajectory.narrativeConvergenceScore + echoChamber.penalty)");
+    });
+
+    it("ECH-6) Echo chamber constants defined", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
+      expect(source).toContain("ECHO_CHAMBER_CONVERGENCE_THRESHOLD");
+      expect(source).toContain("ECHO_CHAMBER_DIVERSITY_FLOOR");
+      expect(source).toContain("ECHO_CHAMBER_PENALTY_MAX");
+    });
+  });
+
+  describe("Demand-Weighted Trajectory (v15)", () => {
+    it("TA-1) Low activity + high demand → SUPPRESSED_DEMAND, not COOLING", () => {
+      const trajectory = {
+        marketHeatingIndex: 0.1,
+        narrativeConvergenceScore: 0.3,
+        offerCompressionIndex: 0.2,
+        angleSaturationLevel: 0.3,
+        revivalPotential: 0.3,
+        marketActivityLevel: 0.15,
+        demandConfidence: 0.7,
+        marketCompressionScore: 0.2,
+        competitionIntensityScore: 0.2,
+      };
+      const direction = deriveTrajectoryDirection(trajectory, 0.65);
+      expect(direction).toBe("SUPPRESSED_DEMAND");
+      expect(direction).not.toBe("COOLING");
+    });
+
+    it("TA-2) Low activity + low demand → still COOLING", () => {
+      const trajectory = {
+        marketHeatingIndex: 0.1,
+        narrativeConvergenceScore: 0.3,
+        offerCompressionIndex: 0.2,
+        angleSaturationLevel: 0.3,
+        revivalPotential: 0.3,
+        marketActivityLevel: 0.15,
+        demandConfidence: 0.2,
+        marketCompressionScore: 0.2,
+        competitionIntensityScore: 0.2,
+      };
+      const direction = deriveTrajectoryDirection(trajectory, 0.1);
+      expect(direction).toBe("COOLING");
+    });
+
+    it("TA-3) SUPPRESSED_DEMAND maps to SUPPRESSED_DEMAND_MARKET state", () => {
+      const trajectory = {
+        marketHeatingIndex: 0.1,
+        narrativeConvergenceScore: 0.3,
+        offerCompressionIndex: 0.2,
+        angleSaturationLevel: 0.3,
+        revivalPotential: 0.3,
+        marketActivityLevel: 0.15,
+        demandConfidence: 0.7,
+        marketCompressionScore: 0.2,
+        competitionIntensityScore: 0.2,
+      };
+      const state = deriveMarketState(trajectory, "STRONG", 0.65);
+      expect(state).toBe("SUPPRESSED_DEMAND_MARKET");
+      expect(state).not.toBe("LOW_ACTIVITY");
+    });
+
+    it("TA-4) High intensity always wins over demand pressure (STABLE_COMPETITIVE)", () => {
+      const trajectory = {
+        marketHeatingIndex: 0.1,
+        narrativeConvergenceScore: 0.3,
+        offerCompressionIndex: 0.2,
+        angleSaturationLevel: 0.3,
+        revivalPotential: 0.3,
+        marketActivityLevel: 0.15,
+        demandConfidence: 0.7,
+        marketCompressionScore: 0.2,
+        competitionIntensityScore: 0.55,
+      };
+      const direction = deriveTrajectoryDirection(trajectory, 0.65);
+      expect(direction).toBe("STABLE_COMPETITIVE");
+    });
+  });
+
+  describe("Diagnostics Expansion (v15)", () => {
+    it("DX-1) MIDiagnostics includes all v15 fields", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/types.ts", "utf-8");
+      expect(source).toContain("demandPressureScore: number");
+      expect(source).toContain("narrativeConvergenceScore: number");
+      expect(source).toContain("audiencePressureSignal: number");
+      expect(source).toContain("echoChamberRisk: number");
+    });
+
+    it("DX-2) Engine wires demand pressure into diagnostics", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+      expect(source).toContain("demandPressureScore: demandPressure.score");
+      expect(source).toContain("echoChamberRisk: echoChamber.echoChamberRisk");
+      expect(source).toContain("narrativeConvergenceScore: echoChamber.convergenceScore");
+    });
+
+    it("DX-3) Engine uses demand pressure in trajectory derivation", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+      expect(source).toContain("deriveTrajectoryDirection(trajectory, demandPressure.score)");
+      expect(source).toContain("deriveMarketState(trajectory, confidence.level, demandPressure.score)");
+    });
+
+    it("DX-4) Demand pressure engine does NOT import signal-engine (independence)", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/demand-pressure.ts", "utf-8");
+      expect(source).not.toContain("from \"./signal-engine\"");
+      expect(source).not.toContain("from './signal-engine'");
+    });
+  });
+
+  describe("Cross-Engine Version Consistency (v15)", () => {
+    it("VER-1) Positioning engine checks MI ENGINE_VERSION", () => {
+      const source = require("fs").readFileSync("server/positioning-engine/engine.ts", "utf-8");
+      expect(source).toContain("MI_ENGINE_VERSION");
+      expect(source).toContain("verifySnapshotIntegrity");
+    });
+
+    it("VER-2) Audience engine validates MI snapshot version", () => {
+      const source = require("fs").readFileSync("server/audience-engine/engine.ts", "utf-8");
+      expect(source).toContain("MI snapshot version mismatch");
+    });
+
+    it("VER-3) Old v14 code replaced — no ENGINE_VERSION = 14 reference in constants", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
+      expect(source).not.toContain("export const ENGINE_VERSION = 14;");
+      expect(source).toContain("export const ENGINE_VERSION = 15;");
+    });
+
+    it("VER-4) deriveTrajectoryDirection uses new demand pressure parameter", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/trajectory-engine.ts", "utf-8");
+      expect(source).toContain("demandPressureScore?: number");
+      expect(source).toContain("SUPPRESSED_DEMAND");
+    });
+
+    it("VER-5) deriveMarketState uses new demand pressure parameter", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/trajectory-engine.ts", "utf-8");
+      expect(source).toContain("demandPressureScore?: number");
+      expect(source).toContain("SUPPRESSED_DEMAND_MARKET");
+    });
+
+    it("VER-6) Old COOLING-only path replaced — SUPPRESSED_DEMAND intercepts high demand", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/trajectory-engine.ts", "utf-8");
+      expect(source).toContain("SUPPRESSED_DEMAND_PRESSURE_FLOOR");
+      expect(source).toContain("SUPPRESSED_DEMAND_ACTIVITY_CEILING");
     });
   });
 });

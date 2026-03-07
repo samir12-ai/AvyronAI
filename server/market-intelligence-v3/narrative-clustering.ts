@@ -103,6 +103,60 @@ export function clusterNarratives(narratives: string[]): NarrativeCluster[] {
   return clusters;
 }
 
+export interface EchoChamberResult {
+  isEchoChamber: boolean;
+  echoChamberRisk: number;
+  convergenceScore: number;
+  diversityScore: number;
+  penalty: number;
+}
+
+export function detectEchoChamber(
+  signals: { competitorId: string; signals: { hashtagDriftScore: number; contentExperimentRate: number }; signalCoverageScore: number }[],
+): EchoChamberResult {
+  if (signals.length < 2) {
+    return { isEchoChamber: false, echoChamberRisk: 0, convergenceScore: 0, diversityScore: 1, penalty: 0 };
+  }
+
+  const hashtagDrifts = signals.map(s => s.signals.hashtagDriftScore);
+  const experimentRates = signals.map(s => s.signals.contentExperimentRate);
+
+  const avgHashtagDrift = hashtagDrifts.reduce((a, b) => a + b, 0) / hashtagDrifts.length;
+  const avgExperiment = experimentRates.reduce((a, b) => a + b, 0) / experimentRates.length;
+
+  const hashtagVariance = hashtagDrifts.reduce((sum, v) => sum + Math.pow(v - avgHashtagDrift, 2), 0) / hashtagDrifts.length;
+  const experimentVariance = experimentRates.reduce((sum, v) => sum + Math.pow(v - avgExperiment, 2), 0) / experimentRates.length;
+
+  const convergenceScore = Math.max(0, Math.min(1, 1 - Math.sqrt(hashtagVariance) - Math.sqrt(experimentVariance)));
+  const diversityScore = Math.max(0, Math.min(1, avgHashtagDrift * 0.5 + avgExperiment * 0.5));
+
+  const isEchoChamber =
+    convergenceScore >= MI_NARRATIVE_CLUSTERING.ECHO_CHAMBER_CONVERGENCE_THRESHOLD &&
+    diversityScore < MI_NARRATIVE_CLUSTERING.ECHO_CHAMBER_DIVERSITY_FLOOR;
+
+  let echoChamberRisk = 0;
+  if (convergenceScore >= MI_NARRATIVE_CLUSTERING.ECHO_CHAMBER_CONVERGENCE_THRESHOLD) {
+    echoChamberRisk = Math.min(1,
+      (convergenceScore - MI_NARRATIVE_CLUSTERING.ECHO_CHAMBER_CONVERGENCE_THRESHOLD) /
+      (1 - MI_NARRATIVE_CLUSTERING.ECHO_CHAMBER_CONVERGENCE_THRESHOLD) +
+      Math.max(0, MI_NARRATIVE_CLUSTERING.ECHO_CHAMBER_DIVERSITY_FLOOR - diversityScore)
+    );
+  }
+  echoChamberRisk = Math.round(echoChamberRisk * 1000) / 1000;
+
+  const penalty = isEchoChamber
+    ? Math.round(Math.min(MI_NARRATIVE_CLUSTERING.ECHO_CHAMBER_PENALTY_MAX, echoChamberRisk * 0.5) * 1000) / 1000
+    : 0;
+
+  return {
+    isEchoChamber,
+    echoChamberRisk,
+    convergenceScore: Math.round(convergenceScore * 1000) / 1000,
+    diversityScore: Math.round(diversityScore * 1000) / 1000,
+    penalty,
+  };
+}
+
 export function computeClusteredSaturation(
   narrativeSaturation: Record<string, number>,
 ): Record<string, number> {

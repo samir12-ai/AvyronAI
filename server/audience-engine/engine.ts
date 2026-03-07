@@ -1034,6 +1034,12 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   const miSnapshotAge = latestSnapshot?.createdAt
     ? `${Math.round((Date.now() - new Date(latestSnapshot.createdAt).getTime()) / 3600000)}h ago`
     : null;
+  if (latestSnapshot && latestSnapshot.analysisVersion !== undefined) {
+    const { ENGINE_VERSION: MI_EV } = await import("../market-intelligence-v3/constants");
+    if (latestSnapshot.analysisVersion !== MI_EV) {
+      console.log(`[AudienceEngine-V3] MI snapshot version mismatch: got v${latestSnapshot.analysisVersion}, expected v${MI_EV} — results may use stale MI data`);
+    }
+  }
 
   const competitors = await db.select().from(ciCompetitors)
     .where(and(

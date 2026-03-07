@@ -1,0 +1,140 @@
+Hello Replit,
+
+After reviewing the recent MI v3 hardening (ENGINE_VERSION 14) and validating the new diagnostics layer, there is one remaining structural issue that needs to be addressed to ensure the Market Intelligence system produces reliable strategic signals for downstream engines.
+
+This is not a bug in the implementation — the system is technically stable — but a market interpretation gap that can produce misleading classifications such as "LOW_ACTIVITY / COOLING" even in structurally competitive markets.
+
+Because MI feeds Audience → Positioning → Differentiation → Plan, this must be corrected before we proceed further.
+
+The objective of this update is to ensure that MI reflects real market pressure rather than only competitor motion.
+
+Please implement the following hardening adjustments.
+
+---
+
+1. Introduce a Demand Pressure Layer
+
+Currently MI derives market dynamics primarily from competitor signals (posting frequency, CTA shifts, experimentation rate, etc.).
+
+This can create a situation where:
+
+• competitors reduce activity temporarily  
+• but the market demand remains strong
+
+The engine then incorrectly interprets the market as "cooling".
+
+To correct this, MI must compute a Demand Pressure Score using:
+
+• engagement density  
+• comment intensity  
+• audience language signals  
+• objection density  
+• purchase-intent patterns  
+
+Demand Pressure must remain independent from competitor activity.
+
+Final trajectory classification should consider both:
+
+Market Activity (competitor behavior)  
+Demand Pressure (audience demand)
+
+Example:
+
+Market Activity: Low  
+Demand Pressure: High  
+Interpretation: Suppressed Demand Market
+
+This prevents false cooling classifications.
+
+---
+
+2. Prevent Competitor Echo Chamber Bias
+
+A known issue in intelligence systems is when competitors copy each other, creating the illusion of a market trend.
+
+To prevent this:
+
+• detect narrative convergence clusters  
+• detect low narrative diversity across competitors  
+• apply a penalty to narrative authority if convergence exceeds the threshold
+
+This ensures narrative saturation reflects true market saturation, not imitation.
+
+---
+
+3. Integrate Audience Signals into MI Interpretation
+
+Audience Engine already produces:
+
+• pain density  
+• desire signals  
+• objections  
+• intent distribution
+
+MI should consume a lightweight aggregated audience pressure signal to adjust trajectory interpretation.
+
+This does not change the dependency chain (MI → Audience remains intact) but allows MI to refine its interpretation when demand pressure contradicts competitor behavior.
+
+---
+
+4. Demand-Weighted Trajectory Adjustment
+
+Trajectory classification should combine three components:
+
+• competitor activity  
+• competition intensity  
+• demand pressure
+
+This prevents misclassification of competitive but temporarily quiet markets.
+
+---
+
+5. Diagnostics Expansion
+
+Extend MIDiagnostics with the following fields:
+
+• demandPressureScore  
+• narrativeConvergenceScore  
+• audiencePressureSignal  
+• echoChamberRisk
+
+These diagnostics are essential for validating market reasoning.
+
+---
+
+6. Cross-Engine Consistency Requirement
+
+Because MI feeds the entire strategy system, please verify that:
+
+• Audience Engine  
+• Positioning Engine  
+• Differentiation Engine  
+
+all read the latest snapshot version and do not continue referencing older snapshot structures or cached outputs.
+
+This has previously been a common source of silent inconsistencies.
+
+Ensure that:
+
+• snapshot readers respect engine_version  
+• cached reads refresh correctly  
+• downstream engines always use the latest MI snapshot
+
+---
+
+7. Acceptance Criteria
+
+The task is complete only when:
+
+• MI distinguishes Market Activity from Demand Pressure  
+• cooling classifications cannot occur in high-demand markets  
+• narrative convergence bias is mitigated  
+• demand signals influence trajectory interpretation  
+• diagnostics expose the new demand metrics  
+• downstream engines correctly read the updated MI snapshot  
+• no stale snapshot references remain active  
+• the full test suite passes successfully
+
+Once implemented, MI v3 can be considered fully hardened as the strategic intelligence layer for the system.
+
+Thank you.

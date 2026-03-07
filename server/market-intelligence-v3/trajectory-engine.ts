@@ -1,5 +1,5 @@
 import type { CompetitorSignalResult, IntentResult, TrajectoryData, EngagementQuality } from "./types";
-import { MI_REVIVAL_CAP, MI_COMPETITION_INTENSITY, MI_LIFECYCLE } from "./constants";
+import { MI_REVIVAL_CAP, MI_COMPETITION_INTENSITY, MI_LIFECYCLE, MI_DEMAND_PRESSURE } from "./constants";
 
 function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
@@ -207,18 +207,21 @@ export function computeTrajectory(
   };
 }
 
-export function deriveTrajectoryDirection(trajectory: TrajectoryData): string {
+export function deriveTrajectoryDirection(trajectory: TrajectoryData, demandPressureScore?: number): string {
   const { marketHeatingIndex, offerCompressionIndex, angleSaturationLevel, competitionIntensityScore } = trajectory;
   const highIntensity = competitionIntensityScore >= 0.45;
+  const dp = demandPressureScore ?? 0;
 
   if (marketHeatingIndex > 0.7 && offerCompressionIndex > 0.5) return "HEATING_COMPRESSED";
   if (marketHeatingIndex > 0.7) return "HEATING";
   if (marketHeatingIndex < 0.3 && angleSaturationLevel > 0.7) {
     if (highIntensity) return "STABLE_COMPETITIVE";
+    if (dp >= MI_DEMAND_PRESSURE.SUPPRESSED_DEMAND_PRESSURE_FLOOR) return "SUPPRESSED_DEMAND";
     return "STAGNANT_SATURATED";
   }
-  if (marketHeatingIndex < 0.3) {
+  if (marketHeatingIndex < MI_DEMAND_PRESSURE.SUPPRESSED_DEMAND_ACTIVITY_CEILING) {
     if (highIntensity) return "STABLE_COMPETITIVE";
+    if (dp >= MI_DEMAND_PRESSURE.SUPPRESSED_DEMAND_PRESSURE_FLOOR) return "SUPPRESSED_DEMAND";
     return "COOLING";
   }
   if (offerCompressionIndex > 0.6) return "COMPRESSING";
@@ -226,11 +229,11 @@ export function deriveTrajectoryDirection(trajectory: TrajectoryData): string {
   return "STABLE";
 }
 
-export function deriveMarketState(trajectory: TrajectoryData, confidenceLevel: string): string {
+export function deriveMarketState(trajectory: TrajectoryData, confidenceLevel: string, demandPressureScore?: number): string {
   if (confidenceLevel === "INSUFFICIENT") {
     return "INSUFFICIENT_DATA";
   }
-  const direction = deriveTrajectoryDirection(trajectory);
+  const direction = deriveTrajectoryDirection(trajectory, demandPressureScore);
   switch (direction) {
     case "HEATING_COMPRESSED": return "HIGH_COMPETITION";
     case "HEATING": return "GROWING_COMPETITION";
@@ -239,6 +242,7 @@ export function deriveMarketState(trajectory: TrajectoryData, confidenceLevel: s
     case "COMPRESSING": return "PRICE_PRESSURE";
     case "SATURATED": return "CONTENT_SATURATION";
     case "STABLE_COMPETITIVE": return "ESTABLISHED_COMPETITION";
+    case "SUPPRESSED_DEMAND": return "SUPPRESSED_DEMAND_MARKET";
     default: return "MODERATE_ACTIVITY";
   }
 }
