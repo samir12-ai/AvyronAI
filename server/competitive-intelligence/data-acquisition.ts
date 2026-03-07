@@ -727,12 +727,27 @@ function generateSyntheticCommentSamples(post: ScrapedPost): { text: string; sen
   return samples;
 }
 
-export async function enrichCompetitorWithComments(competitorId: string, accountId: string): Promise<{ commentsGenerated: number; status: string }> {
+export async function enrichCompetitorWithComments(competitorId: string, accountId: string, options?: { skipCooldown?: boolean }): Promise<{ commentsGenerated: number; status: string }> {
   const [competitor] = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId)));
 
   if (!competitor) {
     return { commentsGenerated: 0, status: "COMPETITOR_NOT_FOUND" };
+  }
+
+  if (!options?.skipCooldown && isSyntheticCooldownActive(competitor.lastSyntheticEnrichmentAt)) {
+    const daysSince = ((Date.now() - new Date(competitor.lastSyntheticEnrichmentAt!).getTime()) / (1000 * 60 * 60 * 24)).toFixed(1);
+    console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — cooldown active (${daysSince}d since last enrichment, cooldown=${SYNTHETIC_ENRICHMENT_COOLDOWN_DAYS}d). Skipping.`);
+    return { commentsGenerated: 0, status: "COOLDOWN_ACTIVE" };
+  }
+
+  const realCommentCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
+    .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId), eq(ciCompetitorComments.isSynthetic, false)));
+  const realComments = Number(realCommentCount[0]?.count || 0);
+
+  if (realComments >= MIN_COMMENTS_THRESHOLD) {
+    console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} has ${realComments} real comments (>= ${MIN_COMMENTS_THRESHOLD}). Real data sufficient — skipping synthetic.`);
+    return { commentsGenerated: realComments, status: "REAL_DATA_SUFFICIENT" };
   }
 
   const existingCommentCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
@@ -824,15 +839,25 @@ export async function enrichCompetitorWithComments(competitorId: string, account
   const totalComments = existingComments + commentsGenerated;
   const coverageMet = totalComments >= MIN_COMMENTS_THRESHOLD;
 
+  const newEnrichmentCount = (competitor.syntheticEnrichmentCount || 0) + 1;
+  const isHighChurn = detectHighSyntheticChurn(newEnrichmentCount, competitor.lastSyntheticEnrichmentAt, competitor.createdAt);
+
   await db.update(ciCompetitors)
     .set({
       analysisLevel: coverageMet ? "DEEP_PASS" : "FAST_PASS",
+      lastSyntheticEnrichmentAt: new Date(),
+      syntheticEnrichmentCount: newEnrichmentCount,
+      syntheticChurnFlag: isHighChurn ? "HIGH_SYNTHETIC_CHURN" : null,
       updatedAt: new Date(),
     })
     .where(eq(ciCompetitors.id, competitorId));
 
+  if (isHighChurn) {
+    console.log(`[DataAcq] CHURN_WARNING: ${competitor.name} flagged HIGH_SYNTHETIC_CHURN (${newEnrichmentCount} enrichments within ${SYNTHETIC_CHURN_WINDOW_DAYS}d)`);
+  }
+
   const status = coverageMet ? "ENRICHED" : "INSUFFICIENT_COMMENTS";
-  console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — generated ${commentsGenerated} comments for ${postsNeedingComments.length} posts (total now: ${totalComments}, coverage=${coverageMet ? "MET" : "BELOW_THRESHOLD"})`);
+  console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — generated ${commentsGenerated} comments for ${postsNeedingComments.length} posts (total now: ${totalComments}, coverage=${coverageMet ? "MET" : "BELOW_THRESHOLD"}, enrichmentCount=${newEnrichmentCount})`);
 
   return { commentsGenerated: totalComments, status };
 }
@@ -934,9 +959,56 @@ function computeCompetitorHash(profileLink: string): string {
 }
 
 export const SYNTHETIC_RETENTION_DAYS = 30;
+export const SYNTHETIC_ENRICHMENT_COOLDOWN_DAYS = 5;
+export const SYNTHETIC_CHURN_WINDOW_DAYS = 14;
+export const SYNTHETIC_CHURN_THRESHOLD = 2;
 
-export async function cleanupExpiredSyntheticComments(): Promise<{ deleted: number; competitorsAffected: string[]; reEnriched: number }> {
+export interface SyntheticLifecycleDiagnostics {
+  syntheticGeneratedCount: number;
+  syntheticExpiredCount: number;
+  syntheticRegeneratedCount: number;
+  competitorsReEnriched: number;
+  highChurnCompetitors: string[];
+  cooldownBlockedCount: number;
+  realDataSufficientCount: number;
+  averageDaysBetweenSyntheticRegeneration: number | null;
+}
+
+function isSyntheticCooldownActive(lastEnrichmentAt: Date | null): boolean {
+  if (!lastEnrichmentAt) return false;
+  const daysSinceEnrichment = (Date.now() - new Date(lastEnrichmentAt).getTime()) / (1000 * 60 * 60 * 24);
+  return daysSinceEnrichment < SYNTHETIC_ENRICHMENT_COOLDOWN_DAYS;
+}
+
+function detectHighSyntheticChurn(enrichmentCount: number, lastSyntheticEnrichmentAt: Date | null, firstEnrichmentApproxAt: Date | null): boolean {
+  if (enrichmentCount <= SYNTHETIC_CHURN_THRESHOLD) return false;
+  if (!lastSyntheticEnrichmentAt) return false;
+  const referenceDate = firstEnrichmentApproxAt || lastSyntheticEnrichmentAt;
+  const daysSinceReference = (Date.now() - new Date(referenceDate).getTime()) / (1000 * 60 * 60 * 24);
+  if (daysSinceReference <= SYNTHETIC_CHURN_WINDOW_DAYS) {
+    return true;
+  }
+  const avgDaysBetween = daysSinceReference / Math.max(enrichmentCount - 1, 1);
+  return avgDaysBetween < (SYNTHETIC_CHURN_WINDOW_DAYS / SYNTHETIC_CHURN_THRESHOLD);
+}
+
+export async function cleanupExpiredSyntheticComments(): Promise<{ deleted: number; competitorsAffected: string[]; reEnriched: number; diagnostics: SyntheticLifecycleDiagnostics }> {
   const cutoffDate = new Date(Date.now() - SYNTHETIC_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+
+  const diagnostics: SyntheticLifecycleDiagnostics = {
+    syntheticGeneratedCount: 0,
+    syntheticExpiredCount: 0,
+    syntheticRegeneratedCount: 0,
+    competitorsReEnriched: 0,
+    highChurnCompetitors: [],
+    cooldownBlockedCount: 0,
+    realDataSufficientCount: 0,
+    averageDaysBetweenSyntheticRegeneration: null,
+  };
+
+  const totalSyntheticResult = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
+    .where(eq(ciCompetitorComments.isSynthetic, true));
+  diagnostics.syntheticGeneratedCount = Number(totalSyntheticResult[0]?.count || 0);
 
   const expiredRows = await db.select({
     competitorId: ciCompetitorComments.competitorId,
@@ -948,7 +1020,11 @@ export async function cleanupExpiredSyntheticComments(): Promise<{ deleted: numb
     ));
 
   if (expiredRows.length === 0) {
-    return { deleted: 0, competitorsAffected: [], reEnriched: 0 };
+    const churnFlaggedResult = await db.select({ id: ciCompetitors.id }).from(ciCompetitors)
+      .where(eq(ciCompetitors.syntheticChurnFlag, "HIGH_SYNTHETIC_CHURN"));
+    diagnostics.highChurnCompetitors = churnFlaggedResult.map(r => r.id);
+
+    return { deleted: 0, competitorsAffected: [], reEnriched: 0, diagnostics };
   }
 
   const affectedCompetitors = new Map<string, string>();
@@ -963,35 +1039,94 @@ export async function cleanupExpiredSyntheticComments(): Promise<{ deleted: numb
 
   const deleted = Number((deleteResult as any).rowCount || expiredRows.length);
   const competitorsAffected = Array.from(affectedCompetitors.keys());
+  diagnostics.syntheticExpiredCount = deleted;
 
   console.log(`[SyntheticCleanup] Deleted ${deleted} expired synthetic comments from ${competitorsAffected.length} competitors (retention=${SYNTHETIC_RETENTION_DAYS}d)`);
 
   let reEnriched = 0;
   for (const [competitorId, accountId] of affectedCompetitors.entries()) {
+    const [comp] = await db.select().from(ciCompetitors)
+      .where(eq(ciCompetitors.id, competitorId));
+
+    if (!comp || !comp.isActive) continue;
+
+    const realCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
+      .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId), eq(ciCompetitorComments.isSynthetic, false)));
+    const realComments = Number(realCount[0]?.count || 0);
+
+    if (realComments >= MIN_COMMENTS_THRESHOLD) {
+      console.log(`[SyntheticCleanup] ${competitorId}: real comments (${realComments}) now sufficient — no re-enrichment needed`);
+      diagnostics.realDataSufficientCount++;
+      continue;
+    }
+
+    if (isSyntheticCooldownActive(comp.lastSyntheticEnrichmentAt)) {
+      console.log(`[SyntheticCleanup] ${competitorId}: cooldown active — skipping re-enrichment`);
+      diagnostics.cooldownBlockedCount++;
+      continue;
+    }
+
     const remainingCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
       .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
     const remaining = Number(remainingCount[0]?.count || 0);
 
-    if (remaining < MIN_COMMENTS_THRESHOLD) {
-      const hasPosts = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
-        .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+    if (remaining >= MIN_COMMENTS_THRESHOLD) {
+      continue;
+    }
 
-      if (Number(hasPosts[0]?.count || 0) > 0) {
-        try {
-          const result = await enrichCompetitorWithComments(competitorId, accountId);
+    const hasPosts = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
+      .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+
+    if (Number(hasPosts[0]?.count || 0) > 0) {
+      try {
+        const result = await enrichCompetitorWithComments(competitorId, accountId);
+        if (result.status === "COOLDOWN_ACTIVE") {
+          diagnostics.cooldownBlockedCount++;
+        } else if (result.status === "REAL_DATA_SUFFICIENT") {
+          diagnostics.realDataSufficientCount++;
+        } else {
           console.log(`[SyntheticCleanup] Re-enriched ${competitorId}: ${result.commentsGenerated} comments, status=${result.status}`);
+          diagnostics.syntheticRegeneratedCount += result.commentsGenerated;
           reEnriched++;
-        } catch (err: any) {
-          console.error(`[SyntheticCleanup] Re-enrichment failed for ${competitorId}: ${err.message}`);
         }
-      } else {
-        await db.update(ciCompetitors)
-          .set({ analysisLevel: "FAST_PASS", updatedAt: new Date() })
-          .where(eq(ciCompetitors.id, competitorId));
-        console.log(`[SyntheticCleanup] Demoted ${competitorId} to FAST_PASS (no posts for re-enrichment)`);
+      } catch (err: any) {
+        console.error(`[SyntheticCleanup] Re-enrichment failed for ${competitorId}: ${err.message}`);
       }
+    } else {
+      await db.update(ciCompetitors)
+        .set({ analysisLevel: "FAST_PASS", updatedAt: new Date() })
+        .where(eq(ciCompetitors.id, competitorId));
+      console.log(`[SyntheticCleanup] Demoted ${competitorId} to FAST_PASS (no posts for re-enrichment)`);
     }
   }
+
+  diagnostics.competitorsReEnriched = reEnriched;
+
+  const enrichedCompetitors = await db.select({
+    id: ciCompetitors.id,
+    syntheticEnrichmentCount: ciCompetitors.syntheticEnrichmentCount,
+    lastSyntheticEnrichmentAt: ciCompetitors.lastSyntheticEnrichmentAt,
+    createdAt: ciCompetitors.createdAt,
+  }).from(ciCompetitors)
+    .where(sql`${ciCompetitors.syntheticEnrichmentCount} > 1`);
+
+  if (enrichedCompetitors.length > 0) {
+    let totalAvgDays = 0;
+    let validCount = 0;
+    for (const comp of enrichedCompetitors) {
+      if (comp.lastSyntheticEnrichmentAt && comp.createdAt && comp.syntheticEnrichmentCount > 1) {
+        const spanDays = (new Date(comp.lastSyntheticEnrichmentAt).getTime() - new Date(comp.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+        const avgDays = spanDays / (comp.syntheticEnrichmentCount - 1);
+        totalAvgDays += avgDays;
+        validCount++;
+      }
+    }
+    diagnostics.averageDaysBetweenSyntheticRegeneration = validCount > 0 ? Math.round((totalAvgDays / validCount) * 10) / 10 : null;
+  }
+
+  const churnFlaggedResult = await db.select({ id: ciCompetitors.id }).from(ciCompetitors)
+    .where(eq(ciCompetitors.syntheticChurnFlag, "HIGH_SYNTHETIC_CHURN"));
+  diagnostics.highChurnCompetitors = churnFlaggedResult.map(r => r.id);
 
   const orphanCheck = await db.execute(sql`
     SELECT cc.id FROM ci_competitor_comments cc
@@ -1007,7 +1142,9 @@ export async function cleanupExpiredSyntheticComments(): Promise<{ deleted: numb
     console.log(`[SyntheticCleanup] Removed ${orphanCount} orphaned comment references`);
   }
 
-  return { deleted, competitorsAffected, reEnriched };
+  console.log(`[SyntheticCleanup] Diagnostics: expired=${diagnostics.syntheticExpiredCount}, reEnriched=${reEnriched}, cooldownBlocked=${diagnostics.cooldownBlockedCount}, realSufficient=${diagnostics.realDataSufficientCount}, highChurn=${diagnostics.highChurnCompetitors.length}`);
+
+  return { deleted, competitorsAffected, reEnriched, diagnostics };
 }
 
 export async function fetchAllCompetitors(accountId: string = "default", campaignId: string): Promise<FetchResult[]> {

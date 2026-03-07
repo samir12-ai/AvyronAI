@@ -800,6 +800,9 @@ export const ciCompetitors = pgTable("ci_competitors", {
   isActive: boolean("is_active").default(true),
   lastCheckedAt: timestamp("last_checked_at"),
   analysisLevel: text("analysis_level").default("FAST_PASS"),
+  lastSyntheticEnrichmentAt: timestamp("last_synthetic_enrichment_at"),
+  syntheticEnrichmentCount: integer("synthetic_enrichment_count").notNull().default(0),
+  syntheticChurnFlag: text("synthetic_churn_flag"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

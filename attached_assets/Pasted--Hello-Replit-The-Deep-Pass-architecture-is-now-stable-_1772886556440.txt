@@ -1,0 +1,123 @@
+}
+Hello Replit,
+
+The Deep Pass architecture is now stable, protected, and fully tested. Before we close this area completely, we need one final optimization to prevent unnecessary long-term churn from synthetic comment generation.
+
+The current lifecycle is correct, but as campaigns scale, the system may enter a repeated pattern of:
+
+generate synthetic comments  
+→ expire them  
+→ regenerate them  
+→ expire them again
+
+This can create unnecessary write load, cleanup churn, and database overhead.
+
+Please implement the following safeguards.
+
+---
+
+1. Synthetic Generation Cooldown Per Competitor / Post
+
+Do not regenerate synthetic comments immediately after cleanup unless the competitor truly requires enrichment again.
+
+Add a cooldown such as:
+
+- per competitor synthetic regeneration cooldown
+- recommended: 3 to 7 days minimum before re-enrichment
+- store lastSyntheticEnrichmentAt
+
+This prevents repeated generate/delete loops.
+
+---
+
+2. Regenerate Only When Operationally Needed
+
+Synthetic comments should only be regenerated if all of the following are true:
+
+- competitor is still below the required Deep Pass comment threshold
+- real comments are still insufficient
+- no recent synthetic enrichment was already performed
+- the competitor is being used in an active refresh / analysis cycle
+
+Do not regenerate synthetic comments just because old synthetic comments were cleaned up.
+
+---
+
+3. Prefer Real Data Over Re-Enrichment
+
+Before generating synthetic comments again, verify whether:
+
+- new real comments were collected
+- new posts were collected
+- real comment coverage improved naturally
+
+If real data is now sufficient, skip synthetic regeneration entirely.
+
+---
+
+4. Churn Monitoring
+
+Add structured diagnostics for synthetic lifecycle activity:
+
+- syntheticGeneratedCount
+- syntheticExpiredCount
+- syntheticRegeneratedCount
+- competitorsReEnriched
+- averageDaysBetweenSyntheticRegeneration
+
+This should make synthetic churn visible and measurable.
+
+---
+
+5. Abnormal Churn Detection
+
+Add a simple guard:
+
+If the same competitor receives synthetic enrichment repeatedly within a short time window, flag it in diagnostics.
+
+Example:
+
+- more than 2 synthetic regenerations within 14 days
+- mark competitor as HIGH_SYNTHETIC_CHURN
+
+This helps identify unstable data acquisition patterns.
+
+---
+
+6. Cleanup / Regeneration Coordination
+
+Ensure cleanup and regeneration work together correctly:
+
+- cleanup removes expired synthetic comments
+- regeneration does not immediately recreate them unless analysis truly requires it
+- cleanup alone must not trigger regeneration
+
+This avoids unnecessary churn loops.
+
+---
+
+7. Validation Tests
+
+Please add tests covering:
+
+- synthetic cleanup without immediate regeneration
+- cooldown enforcement
+- regeneration only when below threshold
+- no regeneration when real comments are now sufficient
+- repeated enrichment churn detection
+
+---
+
+Objective
+
+We want synthetic comments to remain:
+
+- temporary
+- controlled
+- low-frequency
+- operationally useful
+- non-disruptive to database performance
+
+After this optimization, the synthetic comment system should be considered fully closed and production-grade.
+
+Thank you

@@ -1381,8 +1381,8 @@ export function startQueueProcessor(): void {
   setTimeout(async () => {
     try {
       const result = await cleanupExpiredSyntheticComments();
-      if (result.deleted > 0) {
-        console.log(`[SyntheticLifecycle] Cleanup complete: ${result.deleted} expired, ${result.reEnriched} re-enriched, ${result.competitorsAffected.length} competitors affected`);
+      if (result.deleted > 0 || result.diagnostics.highChurnCompetitors.length > 0) {
+        console.log(`[SyntheticLifecycle] Cleanup complete: ${result.deleted} expired, ${result.reEnriched} re-enriched, ${result.competitorsAffected.length} competitors affected, cooldownBlocked=${result.diagnostics.cooldownBlockedCount}, realSufficient=${result.diagnostics.realDataSufficientCount}, highChurn=${result.diagnostics.highChurnCompetitors.length}`);
       }
     } catch (err: any) {
       console.error(`[SyntheticLifecycle] Cleanup error: ${err.message}`);
