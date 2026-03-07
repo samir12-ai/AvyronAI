@@ -66,8 +66,8 @@ export function registerCiCompetitorRoutes(app: Express) {
 
       const existing = await db.select().from(ciCompetitors)
         .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
-      if (existing.length >= 5) {
-        return res.status(400).json({ error: "Maximum 5 competitors allowed per campaign" });
+      if (existing.length >= 12) {
+        return res.status(400).json({ error: "Maximum 12 competitors allowed per campaign" });
       }
 
       const { name, platform, profileLink, businessType, primaryObjective,
