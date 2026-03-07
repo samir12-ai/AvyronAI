@@ -1,5 +1,5 @@
 import type { CompetitorSignalResult, IntentResult, TrajectoryData, EngagementQuality } from "./types";
-import { MI_REVIVAL_CAP, MI_COMPETITION_INTENSITY } from "./constants";
+import { MI_REVIVAL_CAP, MI_COMPETITION_INTENSITY, MI_LIFECYCLE } from "./constants";
 
 function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
@@ -86,8 +86,25 @@ export function computeRevivalPotential(
 
 export function computeMarketActivityLevel(signals: CompetitorSignalResult[]): number {
   if (signals.length === 0) return 0;
-  const avgFrequency = mean(signals.map(s => Math.max(0, s.signals.postingFrequencyTrend)));
-  const avgExperiment = mean(signals.map(s => s.signals.contentExperimentRate));
+
+  let weightedFrequencySum = 0;
+  let weightedExperimentSum = 0;
+  let totalWeight = 0;
+
+  for (const s of signals) {
+    let lifecycleWeight = 1.0;
+    if (s.lifecycle === "DORMANT") lifecycleWeight = MI_LIFECYCLE.DORMANT_ACTIVITY_WEIGHT;
+    else if (s.lifecycle === "LOW_SIGNAL") lifecycleWeight = MI_LIFECYCLE.LOW_SIGNAL_ACTIVITY_WEIGHT;
+
+    const w = (s.authorityWeight ?? 1.0) * lifecycleWeight;
+    weightedFrequencySum += Math.max(0, s.signals.postingFrequencyTrend) * w;
+    weightedExperimentSum += s.signals.contentExperimentRate * w;
+    totalWeight += w;
+  }
+
+  if (totalWeight === 0) return 0;
+  const avgFrequency = weightedFrequencySum / totalWeight;
+  const avgExperiment = weightedExperimentSum / totalWeight;
   return clamp01(avgFrequency * 0.6 + avgExperiment * 0.4);
 }
 

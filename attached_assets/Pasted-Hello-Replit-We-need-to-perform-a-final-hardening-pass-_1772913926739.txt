@@ -1,0 +1,213 @@
+Hello Replit,
+
+We need to perform a final hardening pass on MI v3 to fully stabilize the intelligence layer before continuing with the next engines. This adjustment is important because MI feeds Audience, Positioning, Differentiation, and Build-The-Plan, so any misclassification at this level propagates through the entire strategy pipeline.
+
+This request is not about redesigning the system, but about closing the remaining interpretation gaps and ensuring engine consistency without breaking the existing architecture.
+
+Please implement the following improvements carefully.
+
+---
+
+## 1 — Separate Market Activity from Competition Intensity
+
+The current MI interpretation sometimes reports LOW_ACTIVITY / COOLING even in structurally competitive markets.
+
+The issue is that the engine currently evaluates short-term competitor motion (posting changes, CTA intensity shifts, experimentation) but does not separately model structural competition intensity.
+
+Add an internal metric:
+
+Competition Intensity Score
+
+This should consider factors such as:
+
+- number of competitors analyzed
+- total content volume across competitors
+- engagement density
+- narrative diversity
+- baseline posting activity
+
+The MI output should distinguish between:
+
+Market Activity → short-term competitor movement  
+Competition Intensity → structural crowdedness of the category
+
+Example of correct interpretation:
+
+Market Activity: Low  
+Competition Intensity: High  
+Trajectory: Cooling
+
+This prevents the system from misclassifying crowded markets as weak.
+
+---
+
+## 2 — Activity Guardrails
+
+Add logical guardrails so the system cannot interpret a market as structurally weak when:
+
+- competitor count exceeds the high-density threshold
+- competitors have an established posting baseline
+
+These conditions must enforce a minimum competition intensity floor.
+
+---
+
+## 3 — Demand Signal Stabilization
+
+Demand should not collapse when competitor motion is temporarily stable.
+
+Demand estimation must incorporate:
+
+- engagement density
+- audience language signals
+- comment activity
+- content output patterns
+- narrative demand indicators
+
+Competitor inactivity alone must not reduce demand signals to unrealistic levels.
+
+---
+
+## 4 — Competitor Weighting System
+
+Competitors should not contribute equally to market signals.
+
+Introduce a Competitor Authority Weight based on:
+
+- engagement strength
+- follower scale
+- content output frequency
+- dominance indicators
+
+Example weighting tiers:
+
+Small competitor → lower weight  
+Mid-tier competitor → medium weight  
+Dominant competitor → full weight
+
+This weighting must apply to:
+
+- narrative saturation
+- intent detection
+- market activity
+- dominance analysis
+
+---
+
+## 5 — Sample Bias Detection
+
+Add a diagnostic safeguard that detects when the competitor sample does not represent the market correctly.
+
+Trigger a Sample Bias Warning if:
+
+- the number of competitors is low relative to category size
+- authority distribution is highly skewed
+- signal density is insufficient
+
+Expose this in diagnostics but do not break the pipeline.
+
+---
+
+## 6 — Real Data Ratio Guard
+
+Synthetic comments are already properly tagged and filtered, but we should add an additional safeguard.
+
+Introduce a minimum real data ratio check before signal extraction.
+
+If the real comment ratio falls below the defined threshold, the system should reduce signal confidence accordingly.
+
+This protects Audience and Positioning engines from synthetic signal leakage.
+
+---
+
+## 7 — Narrative Semantic Clustering
+
+Current narrative saturation relies heavily on pattern detection.
+
+Introduce a lightweight semantic clustering layer so similar narratives expressed with different wording are grouped together.
+
+Example:
+
+“grow faster”, “scale your business”, and “increase revenue quickly” should be recognized as the same narrative cluster.
+
+This will significantly improve saturation detection and opportunity gap accuracy.
+
+---
+
+## 8 — Competitor Lifecycle Detection
+
+Inactive competitors should not distort market activity calculations.
+
+Add lifecycle classification:
+
+Active competitor  
+Dormant competitor  
+Low-signal competitor
+
+Only active competitors should strongly influence activity scoring.
+
+---
+
+## 9 — MI Diagnostics Transparency
+
+Expose additional telemetry values for internal auditing:
+
+- activityScore  
+- competitionIntensityScore  
+- demandScore  
+- narrativeSaturationScore  
+- competitorWeights  
+- sampleBiasFlag  
+- realCommentRatio  
+
+These diagnostics help verify that MI reasoning is correct.
+
+---
+
+## 10 — Engine Compatibility and Dependency Safety
+
+This hardening must not break downstream engines.
+
+Please confirm compatibility with:
+
+- Audience Engine V3
+- Positioning Engine V3
+- Differentiation Engine
+- Build-The-Plan pipeline
+
+No schema changes should be required.
+
+---
+
+## 11 — Critical Requirement: Engine Connection Refresh
+
+One important issue we have observed previously with updates is that downstream engines sometimes continue reading old snapshot structures or cached outputs.
+
+After this update is implemented, please ensure that:
+
+- all engines reconnect to the latest MI snapshot structure
+- dependency readers refresh their references
+- no component continues using stale snapshot outputs
+
+This is critical because stale connections can cause silent inconsistencies across the pipeline.
+
+---
+
+## 12 — Acceptance Criteria
+
+This task should be considered complete only when:
+
+- MI clearly separates activity from competition intensity
+- demand signals remain stable in crowded markets
+- competitor weighting is applied
+- sample bias detection is active
+- semantic narrative clustering improves saturation accuracy
+- lifecycle detection prevents inactive competitors from distorting signals
+- diagnostics expose all internal reasoning metrics
+- downstream engines correctly read the updated MI outputs
+- no cached or legacy snapshot connections remain active
+- the full test suite passes successfully
+
+Once these safeguards are implemented and verified, MI v3 can be considered fully hardened and production-grade.
+
+Thank you.

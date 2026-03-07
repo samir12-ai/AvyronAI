@@ -82,7 +82,7 @@ export function classifyAllIntents(signalResults: CompetitorSignalResult[]): Int
   return signalResults.map(classifyCompetitorIntent);
 }
 
-export function computeDominantMarketIntent(intents: IntentResult[]): IntentCategory {
+export function computeDominantMarketIntent(intents: IntentResult[], authorityWeights?: Record<string, number>): IntentCategory {
   if (intents.length === 0) return "STABLE_DOMINANT";
 
   const nonDegraded = intents.filter(i => !i.degraded);
@@ -99,7 +99,8 @@ export function computeDominantMarketIntent(intents: IntentResult[]): IntentCate
   };
 
   for (const intent of pool) {
-    categoryVotes[intent.intentCategory] += intent.intentScore;
+    const weight = authorityWeights?.[intent.competitorId] ?? 1;
+    categoryVotes[intent.intentCategory] += intent.intentScore * Math.max(0.3, weight);
   }
 
   return selectDominantIntent(categoryVotes);

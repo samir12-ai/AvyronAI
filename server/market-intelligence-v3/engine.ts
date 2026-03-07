@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { miSnapshots, miSignalLogs, miTelemetry, ciCompetitors, growthCampaigns } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
-import { computeAllSignals, aggregateMissingFlags, classifyEngagementQuality, detectAudienceIntentSignals } from "./signal-engine";
+import { computeAllSignals, aggregateMissingFlags, classifyEngagementQuality, detectAudienceIntentSignals, detectSampleBias, computeRealDataRatio } from "./signal-engine";
 import { classifyAllIntents, computeDominantMarketIntent } from "./intent-engine";
 import { computeTrajectory, deriveTrajectoryDirection, deriveMarketState, deriveCompetitionIntensityLevel } from "./trajectory-engine";
 import { computeConfidence } from "./confidence-engine";
@@ -14,6 +14,7 @@ import type {
   MIv3Mode,
   MIv3Output,
   MIv3DiagnosticResult,
+  MIDiagnostics,
   CompetitorInput,
   TelemetryRecord,
   TwoRunConfirmation,
@@ -665,12 +666,21 @@ export class MarketIntelligenceV3 {
     const contentDnaResults = computeAllContentDNA(competitors);
     const dataFreshnessDays = computeDataFreshnessDays(competitors);
     const intents = classifyAllIntents(signalResults);
-    const dominantIntent = computeDominantMarketIntent(intents);
+    const authorityWeightMap: Record<string, number> = {};
+    for (const sr of signalResults) {
+      authorityWeightMap[sr.competitorId] = sr.authorityWeight;
+    }
+    const dominantIntent = computeDominantMarketIntent(intents, authorityWeightMap);
     const allComments = competitors.flatMap(c => c.comments || []);
     const engagementQuality = classifyEngagementQuality(allComments);
     const audienceIntentSignals = detectAudienceIntentSignals(allComments);
+    const realDataRatio = computeRealDataRatio(allComments);
+    const sampleBias = detectSampleBias(signalResults);
+    if (sampleBias.hasBias) {
+      console.log(`[MIv3] SAMPLE_BIAS_DETECTED | flags=${sampleBias.biasFlags.join("; ")} | biasScore=${sampleBias.biasScore}`);
+    }
     const trajectory = computeTrajectory(signalResults, intents, engagementQuality);
-    const confidence = computeConfidence(signalResults, dataFreshnessDays);
+    const confidence = computeConfidence(signalResults, dataFreshnessDays, realDataRatio);
     const dominanceResults = computeAllDominance(signalResults, confidence, goalMode);
     const missingFlags = aggregateMissingFlags(signalResults);
     const volatilityIndex = computeVolatilityIndex(signalResults);
@@ -785,6 +795,7 @@ export class MarketIntelligenceV3 {
       similarityData: JSON.stringify(similarityData),
       contentDnaData: JSON.stringify(contentDnaResults),
       deltaReport: deltaReport ? JSON.stringify(deltaReport) : null,
+      diagnosticsData: JSON.stringify(diagnostics),
       volatilityIndex,
       dataFreshnessDays,
       overallConfidence: confidence.overall,
@@ -828,6 +839,22 @@ export class MarketIntelligenceV3 {
       refreshReason: telemetry.refreshReason,
     });
 
+    const diagnostics: MIDiagnostics = {
+      activityScore: trajectory.marketActivityLevel,
+      competitionIntensityScore: trajectory.competitionIntensityScore,
+      demandScore: trajectory.demandConfidence,
+      narrativeSaturationScore: trajectory.angleSaturationLevel,
+      competitorWeights: signalResults.map(sr => ({
+        competitorId: sr.competitorId,
+        competitorName: sr.competitorName,
+        authorityWeight: sr.authorityWeight,
+        lifecycle: sr.lifecycle,
+      })),
+      sampleBiasFlag: sampleBias.hasBias,
+      realCommentRatio: realDataRatio,
+    };
+    console.log(`[MIv3] DIAGNOSTICS | activity=${diagnostics.activityScore.toFixed(3)} | intensity=${diagnostics.competitionIntensityScore.toFixed(3)} | demand=${diagnostics.demandScore.toFixed(3)} | saturation=${diagnostics.narrativeSaturationScore.toFixed(3)} | sampleBias=${diagnostics.sampleBiasFlag} | realRatio=${diagnostics.realCommentRatio}`);
+
     const output: MIv3Output = {
       marketState,
       dominantIntentType: dominantIntent,
@@ -868,6 +895,7 @@ export class MarketIntelligenceV3 {
       similarityData,
       contentDnaData: contentDnaResults,
       deltaReport,
+      diagnostics,
       cached: false,
       cacheInvalidationReason,
       snapshotSource: "FRESH_DATA" as const,
@@ -976,6 +1004,7 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
     similarityData,
     contentDnaData: parseJsonSafe(snapshot.contentDnaData, null),
     deltaReport: deltaReportData,
+    diagnostics: parseJsonSafe(snapshot.diagnosticsData, null),
     cached: true,
     cacheInvalidationReason: null,
     snapshotSource: (snapshot.snapshotSource as "FRESH_DATA" | "CACHED_DATA") || "FRESH_DATA",

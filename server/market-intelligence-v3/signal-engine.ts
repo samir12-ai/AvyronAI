@@ -1,5 +1,5 @@
-import type { CompetitorInput, CompetitorSignalResult, SignalData, PostData, CommentData, EngagementQuality } from "./types";
-import { MI_THRESHOLDS, MI_COST_LIMITS } from "./constants";
+import type { CompetitorInput, CompetitorSignalResult, CompetitorLifecycle, SignalData, PostData, CommentData, EngagementQuality, SampleBiasResult } from "./types";
+import { MI_THRESHOLDS, MI_COST_LIMITS, MI_AUTHORITY_WEIGHT, MI_SAMPLE_BIAS, MI_LIFECYCLE } from "./constants";
 
 function clamp(v: number, min = -1, max = 1): number {
   return Math.max(min, Math.min(max, v));
@@ -231,6 +231,91 @@ export function detectAudienceIntentSignals(comments: CommentData[]): string[] {
   return signals;
 }
 
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
+export function computeCompetitorAuthorityWeight(
+  signals: SignalData,
+  sampleSize: number,
+  signalCoverageScore: number,
+): number {
+  const engagementStability = clamp01(1 - Math.abs(signals.engagementVolatility));
+  const sampleStrength = clamp01(sampleSize / 80);
+  const frequencyStrength = clamp01((signals.postingFrequencyTrend + 1) / 2);
+  const coverageStrength = signalCoverageScore;
+
+  const weight =
+    engagementStability * MI_AUTHORITY_WEIGHT.ENGAGEMENT_COMPONENT +
+    sampleStrength * MI_AUTHORITY_WEIGHT.SAMPLE_SIZE_COMPONENT +
+    frequencyStrength * MI_AUTHORITY_WEIGHT.FREQUENCY_COMPONENT +
+    coverageStrength * MI_AUTHORITY_WEIGHT.COVERAGE_COMPONENT;
+
+  return Math.round(clamp01(weight) * 1000) / 1000;
+}
+
+export function classifyCompetitorLifecycle(
+  signals: SignalData,
+  sampleSize: number,
+  signalCoverageScore: number,
+): CompetitorLifecycle {
+  if (sampleSize < MI_LIFECYCLE.LOW_SIGNAL_SAMPLE_THRESHOLD) {
+    return "LOW_SIGNAL";
+  }
+  if (
+    signals.postingFrequencyTrend < MI_LIFECYCLE.DORMANT_FREQUENCY_THRESHOLD &&
+    signalCoverageScore < MI_LIFECYCLE.DORMANT_COVERAGE_THRESHOLD
+  ) {
+    return "DORMANT";
+  }
+  return "ACTIVE";
+}
+
+export function detectSampleBias(signalResults: CompetitorSignalResult[]): SampleBiasResult {
+  const flags: string[] = [];
+  let biasScore = 0;
+
+  if (signalResults.length < MI_SAMPLE_BIAS.MIN_COMPETITORS_FOR_COVERAGE) {
+    flags.push(`Low competitor count (${signalResults.length} < ${MI_SAMPLE_BIAS.MIN_COMPETITORS_FOR_COVERAGE})`);
+    biasScore += 0.35;
+  }
+
+  if (signalResults.length >= 2) {
+    const weights = signalResults.map(r => r.authorityWeight).sort((a, b) => b - a);
+    const top = weights[0];
+    const rest = weights.slice(1);
+    const avgRest = rest.reduce((s, v) => s + v, 0) / rest.length;
+    const skew = avgRest > 0 ? top / avgRest : 0;
+    if (skew > (1 / (1 - MI_SAMPLE_BIAS.SKEW_THRESHOLD))) {
+      flags.push(`Skewed authority distribution (top=${top.toFixed(2)}, avg_rest=${avgRest.toFixed(2)})`);
+      biasScore += 0.30;
+    }
+  }
+
+  const avgCoverage = signalResults.length > 0
+    ? signalResults.reduce((s, r) => s + r.signalCoverageScore, 0) / signalResults.length
+    : 0;
+  if (avgCoverage < MI_SAMPLE_BIAS.LOW_SIGNAL_DENSITY_THRESHOLD) {
+    flags.push(`Low signal density (avg coverage=${avgCoverage.toFixed(2)})`);
+    biasScore += 0.25;
+  }
+
+  return {
+    hasBias: flags.length > 0,
+    biasFlags: flags,
+    biasScore: Math.round(Math.min(1, biasScore) * 100) / 100,
+  };
+}
+
+export function computeRealDataRatio(comments: CommentData[]): number {
+  if (comments.length === 0) return 1.0;
+  const realCount = comments.filter(c => {
+    const text = (c.text || "").toLowerCase();
+    return !text.startsWith("[synthetic]");
+  }).length;
+  return Math.round((realCount / comments.length) * 100) / 100;
+}
+
 export function computeCompetitorSignals(competitor: CompetitorInput): CompetitorSignalResult {
   const posts = (competitor.posts || []).slice(0, MI_COST_LIMITS.MAX_POSTS_PER_COMPETITOR);
   const comments = (competitor.comments || []).slice(0, MI_COST_LIMITS.MAX_COMMENTS_PER_COMPETITOR);
@@ -277,6 +362,9 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
   const signalValues = Object.values(signals);
   const varianceScore = Math.round(variance(signalValues) * 1000) / 1000;
 
+  const authorityWeight = computeCompetitorAuthorityWeight(signals, sampleSize, signalCoverageScore);
+  const lifecycle = classifyCompetitorLifecycle(signals, sampleSize, signalCoverageScore);
+
   return {
     competitorId: competitor.id,
     competitorName: competitor.name,
@@ -288,6 +376,8 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
     varianceScore,
     dominantSourceRatio: 0,
     missingFields,
+    authorityWeight,
+    lifecycle,
   };
 }
 

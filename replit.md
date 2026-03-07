@@ -29,7 +29,7 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 - **Lead Engine**: Modular lead generation system with AI Lead Optimization.
 - **Positioning Engine V3**: A 12-layer strategic positioning engine for generating strategic insights and positioning statements.
 - **Differentiation Engine V3**: A 12-layer proof-backed differentiation engine for identifying and articulating unique selling propositions.
-- **Competitive Intelligence (MIv3)**: Provides real-data competitor analysis through a 6-layer pipeline for data processing and signal generation, including robust data integrity checks and synthetic comment management.
+- **Competitive Intelligence (MIv3)**: Provides real-data competitor analysis through a 6-layer pipeline for data processing and signal generation, including robust data integrity checks, synthetic comment management, competitor authority weighting, lifecycle classification (ACTIVE/DORMANT/LOW_SIGNAL), sample bias detection, real data ratio guard, narrative semantic clustering, and MI diagnostics transparency. ENGINE_VERSION=14.
 - **Creative Capture Layer**: Analyzes reels for deterministic signals and AI interpretation.
 - **Plan Documents**: Generates and stores strategic marketing plans.
 - **Strategic Execution Machine**: A pipeline for transforming strategic blueprints into published content with approval gates.

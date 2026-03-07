@@ -1369,6 +1369,7 @@ export const miSnapshots = pgTable("mi_snapshots", {
   goalMode: text("goal_mode").default("STRATEGY_MODE"),
   contentDnaData: text("content_dna_data"),
   deltaReport: text("delta_report"),
+  diagnosticsData: text("diagnostics_data"),
   dataStatus: text("data_status").default("LIVE"),
   createdAt: timestamp("created_at").defaultNow(),
   expiresAt: timestamp("expires_at"),

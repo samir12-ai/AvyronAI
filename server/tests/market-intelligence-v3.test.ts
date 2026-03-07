@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeAllSignals, aggregateMissingFlags } from "../market-intelligence-v3/signal-engine";
+import { computeAllSignals, aggregateMissingFlags, computeCompetitorAuthorityWeight, classifyCompetitorLifecycle, detectSampleBias, computeRealDataRatio } from "../market-intelligence-v3/signal-engine";
 import { classifyAllIntents, computeDominantMarketIntent } from "../market-intelligence-v3/intent-engine";
 import { computeTrajectory, deriveTrajectoryDirection, deriveMarketState, computeCompetitionIntensity, deriveCompetitionIntensityLevel } from "../market-intelligence-v3/trajectory-engine";
 import { computeConfidence, evaluateSignalStabilityGuard } from "../market-intelligence-v3/confidence-engine";
@@ -13,6 +13,7 @@ import { buildResultFromSnapshot, validateSnapshotCompleteness, buildMarketDiagn
 import { computeAllDeviations, computeDeviation, computeDynamicThreshold, FALLBACK_BASELINE, TIME_WEIGHTS, BASELINE_WINDOW, MIN_SNAPSHOTS_FOR_CALIBRATION, type MarketBaseline, type DeviationResult, type CalibrationContext } from "../market-intelligence-v3/market-baselines";
 import type { CompetitorInput, PostData, CompetitorSignalResult, ExecutionMode, GoalMode } from "../market-intelligence-v3/types";
 import { MI_THRESHOLDS, MI_COST_LIMITS, MI_CONFIDENCE, MI_REVIVAL_CAP, GOAL_MODE_WEIGHTS, ENGAGEMENT_BIAS_THRESHOLD, MI_TOKEN_BUDGET } from "../market-intelligence-v3/constants";
+import { clusterNarratives, computeClusteredSaturation } from "../market-intelligence-v3/narrative-clustering";
 
 function makePost(overrides: Partial<PostData> = {}): PostData {
   return {
@@ -1570,9 +1571,9 @@ describe("Layer-0 Signal-Only Contract", () => {
     expect(a.isDepressed).toBe(b.isDepressed);
   });
 
-  it("ENGINE_VERSION is 13", () => {
+  it("ENGINE_VERSION is 14", () => {
     const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
-    expect(source).toContain("export const ENGINE_VERSION = 13;");
+    expect(source).toContain("export const ENGINE_VERSION = 14;");
   });
 
   it("schema uses market_diagnosis and threat_signals columns (not old names)", () => {
@@ -1617,6 +1618,8 @@ describe("Layer-0 Signal-Only Contract", () => {
         varianceScore: 0.05,
         dominantSourceRatio: 1 / count,
         missingFields: [],
+        authorityWeight: 0.6,
+        lifecycle: "ACTIVE",
       }));
     };
 
@@ -1791,9 +1794,298 @@ describe("Layer-0 Signal-Only Contract", () => {
       expect(deriveCompetitionIntensityLevel(intensity)).not.toBe("MINIMAL");
     });
 
-    it("CI-18) ENGINE_VERSION is 13 after competition intensity addition", () => {
+    it("CI-18) ENGINE_VERSION is 14 after hardening pass", () => {
       const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
-      expect(source).toContain("export const ENGINE_VERSION = 13;");
+      expect(source).toContain("export const ENGINE_VERSION = 14;");
+    });
+  });
+
+  describe("Hardening — Competitor Authority Weights", () => {
+    it("AW-1) computeCompetitorAuthorityWeight returns 0-1 range", () => {
+      const signals = {
+        postingFrequencyTrend: 0.5, engagementVolatility: 0.2, ctaIntensityShift: 0.1,
+        offerLanguageChange: 0.05, hashtagDriftScore: 0.1, bioModificationFrequency: 0.1,
+        sentimentDrift: 0.05, reviewVelocityChange: 0, contentExperimentRate: 0.3,
+      };
+      const weight = computeCompetitorAuthorityWeight(signals, 60, 0.8);
+      expect(weight).toBeGreaterThanOrEqual(0);
+      expect(weight).toBeLessThanOrEqual(1);
+    });
+
+    it("AW-2) High engagement + large sample → high authority weight", () => {
+      const high = computeCompetitorAuthorityWeight(
+        { postingFrequencyTrend: 0.5, engagementVolatility: 0.1, ctaIntensityShift: 0.1, offerLanguageChange: 0, hashtagDriftScore: 0, bioModificationFrequency: 0, sentimentDrift: 0, reviewVelocityChange: 0, contentExperimentRate: 0.2 },
+        80, 0.9,
+      );
+      const low = computeCompetitorAuthorityWeight(
+        { postingFrequencyTrend: -0.3, engagementVolatility: 0.8, ctaIntensityShift: 0, offerLanguageChange: 0, hashtagDriftScore: 0, bioModificationFrequency: 0, sentimentDrift: 0, reviewVelocityChange: 0, contentExperimentRate: 0 },
+        5, 0.3,
+      );
+      expect(high).toBeGreaterThan(low);
+    });
+
+    it("AW-3) computeAllSignals populates authorityWeight on every result", () => {
+      const competitors = [
+        { id: "c1", name: "C1", platform: "instagram", profileLink: "", businessType: "test", postingFrequency: null, contentTypeRatio: null, engagementRatio: null, ctaPatterns: null, discountFrequency: null, hookStyles: null, messagingTone: null, socialProofPresence: null, posts: Array.from({ length: 15 }, (_, i) => ({ id: `p${i}`, caption: "test", likes: 100, comments: 10, mediaType: "image", hashtags: ["test"], timestamp: new Date(Date.now() - i * 86400000).toISOString(), hasCTA: false, hasOffer: false })), comments: [] },
+      ];
+      const results = computeAllSignals(competitors);
+      expect(results[0].authorityWeight).toBeGreaterThanOrEqual(0);
+      expect(results[0].authorityWeight).toBeLessThanOrEqual(1);
+    });
+
+    it("AW-4) Authority weight is used in intent voting", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/intent-engine.ts", "utf-8");
+      expect(source).toContain("authorityWeights");
+    });
+
+    it("AW-5) MI_AUTHORITY_WEIGHT constants defined", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
+      expect(source).toContain("MI_AUTHORITY_WEIGHT");
+      expect(source).toContain("ENGAGEMENT_COMPONENT");
+      expect(source).toContain("SAMPLE_SIZE_COMPONENT");
+    });
+  });
+
+  describe("Hardening — Competitor Lifecycle Detection", () => {
+    it("LC-1) ACTIVE for normal competitors", () => {
+      const lc = classifyCompetitorLifecycle(
+        { postingFrequencyTrend: 0.1, engagementVolatility: 0.2, ctaIntensityShift: 0, offerLanguageChange: 0, hashtagDriftScore: 0, bioModificationFrequency: 0, sentimentDrift: 0, reviewVelocityChange: 0, contentExperimentRate: 0.1 },
+        30, 0.7,
+      );
+      expect(lc).toBe("ACTIVE");
+    });
+
+    it("LC-2) DORMANT for declining + low coverage", () => {
+      const lc = classifyCompetitorLifecycle(
+        { postingFrequencyTrend: -0.4, engagementVolatility: 0, ctaIntensityShift: 0, offerLanguageChange: 0, hashtagDriftScore: 0, bioModificationFrequency: 0, sentimentDrift: 0, reviewVelocityChange: 0, contentExperimentRate: 0 },
+        20, 0.3,
+      );
+      expect(lc).toBe("DORMANT");
+    });
+
+    it("LC-3) LOW_SIGNAL for tiny sample", () => {
+      const lc = classifyCompetitorLifecycle(
+        { postingFrequencyTrend: 0.5, engagementVolatility: 0, ctaIntensityShift: 0, offerLanguageChange: 0, hashtagDriftScore: 0, bioModificationFrequency: 0, sentimentDrift: 0, reviewVelocityChange: 0, contentExperimentRate: 0 },
+        5, 0.8,
+      );
+      expect(lc).toBe("LOW_SIGNAL");
+    });
+
+    it("LC-4) Lifecycle classification appears on signal results", () => {
+      const competitors = [
+        { id: "c1", name: "C1", platform: "instagram", profileLink: "", businessType: "test", postingFrequency: null, contentTypeRatio: null, engagementRatio: null, ctaPatterns: null, discountFrequency: null, hookStyles: null, messagingTone: null, socialProofPresence: null, posts: Array.from({ length: 15 }, (_, i) => ({ id: `p${i}`, caption: "test", likes: 100, comments: 10, mediaType: "image", hashtags: ["test"], timestamp: new Date(Date.now() - i * 86400000).toISOString(), hasCTA: false, hasOffer: false })), comments: [] },
+      ];
+      const results = computeAllSignals(competitors);
+      expect(results[0].lifecycle).toBe("ACTIVE");
+    });
+
+    it("LC-5) MI_LIFECYCLE constants defined", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
+      expect(source).toContain("MI_LIFECYCLE");
+      expect(source).toContain("DORMANT_FREQUENCY_THRESHOLD");
+      expect(source).toContain("DORMANT_ACTIVITY_WEIGHT");
+    });
+
+    it("LC-6) Market activity uses lifecycle weighting", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/trajectory-engine.ts", "utf-8");
+      expect(source).toContain("lifecycleWeight");
+      expect(source).toContain("DORMANT_ACTIVITY_WEIGHT");
+    });
+  });
+
+  describe("Hardening — Sample Bias Detection", () => {
+    const makeBiasSignals = (count: number, overrides: Partial<any> = {}): any[] => {
+      return Array.from({ length: count }, (_, i) => ({
+        competitorId: `comp_${i}`,
+        competitorName: `Competitor ${i}`,
+        signals: {
+          postingFrequencyTrend: 0.05, engagementVolatility: 0.3, ctaIntensityShift: 0.05,
+          offerLanguageChange: 0.02, hashtagDriftScore: 0.2, bioModificationFrequency: 0.1,
+          sentimentDrift: 0.05, reviewVelocityChange: 0, contentExperimentRate: 0.1,
+        },
+        signalCoverageScore: 0.7,
+        sourceReliabilityScore: 0.75,
+        sampleSize: 30,
+        timeWindowDays: 30,
+        varianceScore: 0.05,
+        dominantSourceRatio: 1 / count,
+        missingFields: [],
+        authorityWeight: 0.6,
+        lifecycle: "ACTIVE" as const,
+        ...overrides,
+      }));
+    };
+
+    it("SB-1) No bias for adequate sample", () => {
+      const signals = makeBiasSignals(5);
+      const bias = detectSampleBias(signals);
+      expect(bias.hasBias).toBe(false);
+      expect(bias.biasScore).toBe(0);
+    });
+
+    it("SB-2) Bias detected for small competitor count", () => {
+      const signals = makeBiasSignals(2);
+      const bias = detectSampleBias(signals);
+      expect(bias.hasBias).toBe(true);
+      expect(bias.biasFlags.some((f: string) => f.includes("Low competitor count"))).toBe(true);
+    });
+
+    it("SB-3) Bias detected for low signal density", () => {
+      const signals = makeBiasSignals(4).map((s: any) => ({ ...s, signalCoverageScore: 0.2 }));
+      const bias = detectSampleBias(signals);
+      expect(bias.hasBias).toBe(true);
+      expect(bias.biasFlags.some((f: string) => f.includes("Low signal density"))).toBe(true);
+    });
+
+    it("SB-4) MI_SAMPLE_BIAS constants defined", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
+      expect(source).toContain("MI_SAMPLE_BIAS");
+      expect(source).toContain("MIN_COMPETITORS_FOR_COVERAGE");
+    });
+  });
+
+  describe("Hardening — Real Data Ratio Guard", () => {
+    it("RD-1) Pure real data → ratio = 1.0", () => {
+      const comments = [
+        { id: "c1", text: "great post", timestamp: "2025-01-01" },
+        { id: "c2", text: "love this", timestamp: "2025-01-01" },
+      ];
+      expect(computeRealDataRatio(comments)).toBe(1.0);
+    });
+
+    it("RD-2) All synthetic → ratio = 0.0", () => {
+      const comments = [
+        { id: "c1", text: "[synthetic] generated comment", timestamp: "2025-01-01" },
+        { id: "c2", text: "[synthetic] another one", timestamp: "2025-01-01" },
+      ];
+      expect(computeRealDataRatio(comments)).toBe(0);
+    });
+
+    it("RD-3) Mixed data → correct ratio", () => {
+      const comments = [
+        { id: "c1", text: "real comment", timestamp: "2025-01-01" },
+        { id: "c2", text: "[synthetic] fake", timestamp: "2025-01-01" },
+        { id: "c3", text: "another real", timestamp: "2025-01-01" },
+        { id: "c4", text: "[synthetic] fake 2", timestamp: "2025-01-01" },
+      ];
+      expect(computeRealDataRatio(comments)).toBe(0.5);
+    });
+
+    it("RD-4) Empty comments → ratio = 1.0", () => {
+      expect(computeRealDataRatio([])).toBe(1.0);
+    });
+
+    it("RD-5) Low real ratio reduces confidence", () => {
+      const signals = Array.from({ length: 5 }, (_, i) => ({
+        competitorId: `comp_${i}`,
+        competitorName: `Competitor ${i}`,
+        signals: {
+          postingFrequencyTrend: 0.05, engagementVolatility: 0.3, ctaIntensityShift: 0.05,
+          offerLanguageChange: 0.02, hashtagDriftScore: 0.2, bioModificationFrequency: 0.1,
+          sentimentDrift: 0.05, reviewVelocityChange: 0, contentExperimentRate: 0.1,
+        },
+        signalCoverageScore: 0.7,
+        sourceReliabilityScore: 0.75,
+        sampleSize: 30,
+        timeWindowDays: 30,
+        varianceScore: 0.05,
+        dominantSourceRatio: 0.2,
+        missingFields: [],
+        authorityWeight: 0.6,
+        lifecycle: "ACTIVE" as const,
+      }));
+      const highReal = computeConfidence(signals, 1, 1.0);
+      const lowReal = computeConfidence(signals, 1, 0.3);
+      expect(lowReal.overall).toBeLessThan(highReal.overall);
+    });
+
+    it("RD-6) MI_REAL_DATA_RATIO constants defined", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
+      expect(source).toContain("MI_REAL_DATA_RATIO");
+      expect(source).toContain("MIN_REAL_RATIO");
+    });
+  });
+
+  describe("Hardening — Narrative Semantic Clustering", () => {
+    it("NC-1) clusterNarratives groups similar phrases", () => {
+      const clusters = clusterNarratives(["grow your business faster", "scale your business quickly", "unique branding strategy"]);
+      expect(clusters.length).toBeLessThan(3);
+      const growCluster = clusters.find((c: any) => c.members.some((m: string) => m.includes("grow")));
+      expect(growCluster?.members.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("NC-2) Different narratives stay separate", () => {
+      const clusters = clusterNarratives(["healthy meal prep tips", "financial advisor marketing"]);
+      expect(clusters.length).toBe(2);
+    });
+
+    it("NC-3) computeClusteredSaturation raises saturation for clustered narratives", () => {
+      const input = {
+        "grow your business faster": 0.3,
+        "scale your business quickly": 0.5,
+        "unique branding strategy": 0.2,
+      };
+      const result = computeClusteredSaturation(input);
+      expect(result["grow your business faster"]).toBeGreaterThanOrEqual(0.3);
+    });
+
+    it("NC-4) MI_NARRATIVE_CLUSTERING constants defined", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
+      expect(source).toContain("MI_NARRATIVE_CLUSTERING");
+      expect(source).toContain("TOKEN_OVERLAP_THRESHOLD");
+    });
+  });
+
+  describe("Hardening — MI Diagnostics Transparency", () => {
+    it("DG-1) MIDiagnostics type has all required fields", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/types.ts", "utf-8");
+      expect(source).toContain("activityScore: number");
+      expect(source).toContain("competitionIntensityScore: number");
+      expect(source).toContain("demandScore: number");
+      expect(source).toContain("narrativeSaturationScore: number");
+      expect(source).toContain("competitorWeights:");
+      expect(source).toContain("sampleBiasFlag: boolean");
+      expect(source).toContain("realCommentRatio: number");
+    });
+
+    it("DG-2) MIv3DiagnosticResult includes diagnostics field", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/types.ts", "utf-8");
+      expect(source).toContain("diagnostics: MIDiagnostics | null");
+    });
+
+    it("DG-3) Engine builds diagnostics in _executeRun", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+      expect(source).toContain("const diagnostics: MIDiagnostics");
+      expect(source).toContain("DIAGNOSTICS |");
+    });
+
+    it("DG-4) buildResultFromSnapshot restores diagnostics from snapshot", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+      expect(source).toContain("parseJsonSafe(snapshot.diagnosticsData, null)");
+    });
+  });
+
+  describe("Hardening — Engine Compatibility", () => {
+    it("EC-1) Positioning Engine reads competitionIntensityScore from MI trajectory", () => {
+      const source = require("fs").readFileSync("server/positioning-engine/engine.ts", "utf-8");
+      expect(source).toContain("competitionIntensityFromMI");
+      expect(source).toContain("intensityPenalty");
+    });
+
+    it("EC-2) SampleBiasResult type exported", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/types.ts", "utf-8");
+      expect(source).toContain("export interface SampleBiasResult");
+    });
+
+    it("EC-3) CompetitorSignalResult includes authorityWeight and lifecycle", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/types.ts", "utf-8");
+      expect(source).toContain("authorityWeight: number");
+      expect(source).toContain("lifecycle: CompetitorLifecycle");
+    });
+
+    it("EC-4) ENGINE_VERSION = 14 matches hardening pass", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
+      expect(source).toContain("export const ENGINE_VERSION = 14;");
     });
   });
 });

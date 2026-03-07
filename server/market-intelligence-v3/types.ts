@@ -34,6 +34,8 @@ export interface SignalData {
   contentExperimentRate: number;
 }
 
+export type CompetitorLifecycle = "ACTIVE" | "DORMANT" | "LOW_SIGNAL";
+
 export interface CompetitorSignalResult {
   competitorId: string;
   competitorName: string;
@@ -45,6 +47,8 @@ export interface CompetitorSignalResult {
   varianceScore: number;
   dominantSourceRatio: number;
   missingFields: string[];
+  authorityWeight: number;
+  lifecycle: CompetitorLifecycle;
 }
 
 export type IntentConfidenceBand = "STRONG" | "MODERATE" | "UNCERTAIN" | "DEGRADED";
@@ -184,6 +188,22 @@ export interface MIv3Output {
   audienceIntentSignals: string[];
 }
 
+export interface SampleBiasResult {
+  hasBias: boolean;
+  biasFlags: string[];
+  biasScore: number;
+}
+
+export interface MIDiagnostics {
+  activityScore: number;
+  competitionIntensityScore: number;
+  demandScore: number;
+  narrativeSaturationScore: number;
+  competitorWeights: { competitorId: string; competitorName: string; authorityWeight: number; lifecycle: CompetitorLifecycle }[];
+  sampleBiasFlag: boolean;
+  realCommentRatio: number;
+}
+
 export type CacheInvalidationReason = "ENGINE_UPGRADE" | "COMPETITOR_SET_CHANGED" | "INCOMPLETE_SNAPSHOT" | "STALE" | null;
 
 export interface MIv3DiagnosticResult {
@@ -200,6 +220,7 @@ export interface MIv3DiagnosticResult {
   similarityData: SimilarityResult | null;
   contentDnaData: CompetitorContentDNA[] | null;
   deltaReport: DeltaReport | null;
+  diagnostics: MIDiagnostics | null;
   cached: boolean;
   cacheInvalidationReason: CacheInvalidationReason;
   snapshotSource: "FRESH_DATA" | "CACHED_DATA";

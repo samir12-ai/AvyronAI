@@ -1,5 +1,5 @@
 import type { CompetitorSignalResult, ConfidenceFactors, ConfidenceLevel, ConfidenceResult, GuardDecision, SignalStabilityGuard } from "./types";
-import { MI_CONFIDENCE, MI_THRESHOLDS } from "./constants";
+import { MI_CONFIDENCE, MI_THRESHOLDS, MI_REAL_DATA_RATIO } from "./constants";
 
 function mean(arr: number[]): number {
   if (arr.length === 0) return 0;
@@ -135,10 +135,11 @@ export function evaluateSignalStabilityGuard(signalResults: CompetitorSignalResu
 export function computeConfidence(
   signalResults: CompetitorSignalResult[],
   dataAgeDays: number,
+  realDataRatio: number = 1.0,
 ): ConfidenceResult {
   const factors = computeConfidenceFactors(signalResults, dataAgeDays);
 
-  const overall = Math.round((
+  let overall = Math.round((
     factors.dataCompleteness * 0.25 +
     factors.freshnessDecay * 0.15 +
     factors.sourceReliability * 0.15 +
@@ -146,6 +147,11 @@ export function computeConfidence(
     factors.crossCompetitorConsistency * 0.10 +
     factors.signalStability * 0.15
   ) * 1000) / 1000;
+
+  if (realDataRatio < MI_REAL_DATA_RATIO.MIN_REAL_RATIO) {
+    const penalty = (MI_REAL_DATA_RATIO.MIN_REAL_RATIO - realDataRatio) * MI_REAL_DATA_RATIO.CONFIDENCE_PENALTY_FACTOR;
+    overall = Math.round(Math.max(0, overall - penalty) * 1000) / 1000;
+  }
 
   const level = getConfidenceLevel(overall);
 
