@@ -514,7 +514,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
       );
-      expect(source).toContain("PARTIAL_CONFIDENCE_PENALTY");
+      expect(source).toContain("coveragePenalty");
       expect(source).toContain("PARTIAL_COVERAGE:");
     });
 
@@ -523,7 +523,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
         fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
       );
       expect(source).toContain('"PARTIAL_COVERAGE"');
-      expect(source).toContain("Coverage is incomplete");
+      expect(source).toContain("Data collection stopped early");
     });
 
     it("should set marketState to PARTIAL_DATA when partial", async () => {

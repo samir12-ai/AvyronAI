@@ -244,7 +244,7 @@ describe("Section 6: Cost Guard Test — Hard Execution Ceilings", () => {
     );
     expect(source).toContain("MAX_REQUESTS_PER_JOB = 120");
     expect(source).toContain("checkRequestCeiling");
-    expect(source).toContain("totalRequests >= MAX_REQUESTS_PER_JOB");
+    expect(source).toContain("totalRequests >= dynamicRequestBudget");
   });
 
   it("MAX_RUNTIME_MS is enforced", async () => {
@@ -403,5 +403,193 @@ describe("Section 8: Global Request Ceiling — Account-Level Concurrency Limit"
     expect(ceilingCheckPos).toBeGreaterThan(0);
     expect(jobInsertPos).toBeGreaterThan(0);
     expect(ceilingCheckPos).toBeLessThan(jobInsertPos);
+  });
+});
+
+describe("Section 7: Fetch Hardening — Fair Allocation, Coverage, Dynamic Budgets, Diagnostics", () => {
+  const readSource = async () => {
+    const fs = await import("fs");
+    return fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8");
+  };
+
+  it("per-competitor request cap is computed from budget / competitorCount", async () => {
+    const source = await readSource();
+    expect(source).toContain("perCompetitorRequestCap");
+    expect(source).toContain("Math.ceil(dynamicRequestBudget / competitors.length)");
+    expect(source).toContain("stage.requestsUsed >= perCompetitorRequestCap");
+  });
+
+  it("fair allocation: each competitor has requestsUsed tracked", async () => {
+    const source = await readSource();
+    expect(source).toContain("requestsUsed: 0");
+    expect(source).toContain("stage.requestsUsed++");
+    expect(source).toContain("PER_COMPETITOR_CAP");
+  });
+
+  it("explicit per-competitor fetchStatus values are defined", async () => {
+    const source = await readSource();
+    const requiredStatuses = [
+      "FETCH_SUCCESS",
+      "FETCH_FAILED",
+      "RATE_LIMITED",
+      "NO_POSTS_FOUND",
+      "SKIPPED_DUE_TO_BUDGET",
+      "SKIPPED_DUE_TO_RUNTIME",
+      "SKIPPED_DUE_TO_PAGES_CEILING",
+      "COOLDOWN_ACTIVE",
+      "BLOCKED_BY_PLATFORM",
+      "PENDING",
+    ];
+    for (const status of requiredStatuses) {
+      expect(source).toContain(`"${status}"`);
+    }
+  });
+
+  it("per-competitor fetchStatus is set at each decision point", async () => {
+    const source = await readSource();
+    expect(source).toContain('s.fetchStatus = skipReason');
+    expect(source).toContain('s.fetchStatus = "SKIPPED_DUE_TO_PAGES_CEILING"');
+    expect(source).toContain('stage.fetchStatus = "COOLDOWN_ACTIVE"');
+    expect(source).toContain('stage.fetchStatus = "BLOCKED_BY_PLATFORM"');
+    expect(source).toContain('stage.fetchStatus = "FETCH_FAILED"');
+    expect(source).toContain('stage.fetchStatus = fetchResult.postsCollected > 0 ? "FETCH_SUCCESS" : "NO_POSTS_FOUND"');
+  });
+
+  it("coverage ratio is computed: competitorsProcessed / competitorsTotal", async () => {
+    const source = await readSource();
+    expect(source).toContain("competitorsProcessed");
+    expect(source).toContain("competitorsFailed");
+    expect(source).toContain("competitorsSkipped");
+    expect(source).toContain("coverageRatio");
+    expect(source).toContain("competitorsProcessed / competitors.length");
+  });
+
+  it("coverage data is included in getFetchJobStatus response", async () => {
+    const source = await readSource();
+    const getStatusFn = source.substring(
+      source.indexOf("export async function getFetchJobStatus"),
+      source.indexOf("export async function getFetchJobStatus") + 2000
+    );
+    expect(getStatusFn).toContain("coverage:");
+    expect(getStatusFn).toContain("competitorsTotal");
+    expect(getStatusFn).toContain("competitorsProcessed");
+    expect(getStatusFn).toContain("competitorsFailed");
+    expect(getStatusFn).toContain("competitorsSkipped");
+    expect(getStatusFn).toContain("coverageRatio");
+  });
+
+  it("confidence penalty scales with coverage ratio (not flat 0.3)", async () => {
+    const source = await readSource();
+    expect(source).toContain("(1 - coverageRatio) * 0.5");
+    expect(source).not.toContain("PARTIAL_CONFIDENCE_PENALTY = 0.3");
+  });
+
+  it("dynamic budget scaling: computeDynamicBudgets is exported and scales with competitor count", async () => {
+    const { computeDynamicBudgets } = await import("../market-intelligence-v3/fetch-orchestrator");
+    expect(typeof computeDynamicBudgets).toBe("function");
+
+    const budget3 = computeDynamicBudgets(3);
+    const budget6 = computeDynamicBudgets(6);
+    const budget12 = computeDynamicBudgets(12);
+
+    expect(budget3.requestBudget).toBeLessThan(budget12.requestBudget);
+    expect(budget6.requestBudget).toBeLessThan(budget12.requestBudget);
+    expect(budget3.runtimeBudget).toBeLessThanOrEqual(budget12.runtimeBudget);
+
+    expect(budget3.requestBudget).toBe(30);
+    expect(budget6.requestBudget).toBe(60);
+    expect(budget12.requestBudget).toBe(120);
+
+    expect(budget3.runtimeBudget).toBe(10 * 60 * 1000);
+    expect(budget12.runtimeBudget).toBeLessThanOrEqual(25 * 60 * 1000);
+  });
+
+  it("dynamic budgets are used in the fetch loop (not static MAX constants)", async () => {
+    const source = await readSource();
+    expect(source).toContain("dynamicRequestBudget");
+    expect(source).toContain("dynamicRuntimeBudget");
+    expect(source).toContain("totalRequests >= dynamicRequestBudget");
+    expect(source).toContain("Date.now() - startTime >= dynamicRuntimeBudget");
+  });
+
+  it("structured diagnostics are logged as JOB_DIAGNOSTICS JSON", async () => {
+    const source = await readSource();
+    expect(source).toContain("JOB_DIAGNOSTICS");
+    expect(source).toContain("JSON.stringify(jobDiagnostics)");
+    expect(source).toContain("interface FetchJobDiagnostics");
+  });
+
+  it("diagnostics include all required fields", async () => {
+    const source = await readSource();
+    const diagnosticsInterface = source.substring(
+      source.indexOf("interface FetchJobDiagnostics"),
+      source.indexOf("interface FetchJobDiagnostics") + 800
+    );
+    const requiredFields = [
+      "competitorCount",
+      "requestsUsed",
+      "requestBudget",
+      "runtimeUsedMs",
+      "runtimeBudget",
+      "coverageRatio",
+      "competitorsTotal",
+      "competitorsProcessed",
+      "competitorsFailed",
+      "competitorsSkipped",
+      "skippedCompetitors",
+      "rateLimitEvents",
+      "perCompetitorStatus",
+      "perCompetitorRequestCap",
+    ];
+    for (const field of requiredFields) {
+      expect(diagnosticsInterface).toContain(field);
+    }
+  });
+
+  it("rateLimitEvents are tracked and counted", async () => {
+    const source = await readSource();
+    expect(source).toContain("rateLimitEvents++");
+    expect(source).toContain("rateLimitEvents");
+  });
+
+  it("coverage ratio logged in job completion message", async () => {
+    const source = await readSource();
+    expect(source).toContain("coverage=");
+  });
+
+  it("audit log includes coverage and diagnostics data", async () => {
+    const source = await readSource();
+    const auditSection = source.substring(
+      source.indexOf("MI_FETCH_JOB_COMPLETE"),
+      source.indexOf("MI_FETCH_JOB_COMPLETE") + 800
+    );
+    expect(auditSection).toContain("coverage:");
+    expect(auditSection).toContain("diagnostics:");
+  });
+
+  it("supports 10-12 competitors: MAX_PAGES_PER_COMPETITOR=12, dynamic budgets scale", async () => {
+    const source = await readSource();
+    const match = source.match(/MAX_PAGES_PER_COMPETITOR\s*=\s*(\d+)/);
+    expect(match).not.toBeNull();
+    expect(Number(match![1])).toBe(12);
+
+    const { computeDynamicBudgets } = await import("../market-intelligence-v3/fetch-orchestrator");
+    const budget10 = computeDynamicBudgets(10);
+    expect(budget10.requestBudget).toBe(100);
+    expect(budget10.runtimeBudget).toBeLessThanOrEqual(25 * 60 * 1000);
+    expect(budget10.runtimeBudget).toBeGreaterThanOrEqual(10 * 60 * 1000);
+
+    const budget12 = computeDynamicBudgets(12);
+    expect(budget12.requestBudget).toBe(120);
+  });
+
+  it("partial fetch success: analysis continues with available data + confidence penalty", async () => {
+    const source = await readSource();
+    expect(source).toContain("anyAnalysisRan");
+    expect(source).toContain("isPartialCoverage");
+    expect(source).toContain("coveragePenalty");
+    expect(source).toContain("persistSnapshotAfterFetch");
+    const penaltyCalcPresent = source.includes("(1 - coverageRatio) * 0.5");
+    expect(penaltyCalcPresent).toBe(true);
   });
 });

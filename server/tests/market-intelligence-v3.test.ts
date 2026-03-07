@@ -970,7 +970,7 @@ describe("Post-Deployment Audit Safeguards", () => {
       const fs = require("fs");
       const orchestratorSrc = fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8");
       expect(orchestratorSrc).toContain("PARTIAL_COMPLETE");
-      expect(orchestratorSrc).toContain("PARTIAL_CONFIDENCE_PENALTY");
+      expect(orchestratorSrc).toContain("coveragePenalty");
     });
   });
 

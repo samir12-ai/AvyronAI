@@ -1,0 +1,112 @@
+Hello Replit,
+
+Thank you for increasing the execution ceilings to support up to 12 competitors. The adjustments to request limits, runtime, and token budgets are correct and should resolve the immediate issue where some competitors were skipped due to the job hitting its ceilings.
+
+Before we close this topic completely, we want to perform a final hardening pass to ensure the fetch system scales reliably and avoids similar issues as campaigns grow.
+
+Please review and implement the following safeguards.
+
+--------------------------------------------------
+
+1. Fair Request Allocation Per Competitor
+
+Ensure the fetch system distributes requests fairly across competitors rather than allowing one competitor to consume the majority of the job budget.
+
+Recommended behavior:
+
+• Each competitor receives an initial fetch attempt before retries are applied to earlier competitors  
+• Retries and fallback methods should not monopolize the request budget  
+• Sequential fairness or round-robin scheduling is preferred
+
+This ensures later competitors are never skipped due to earlier competitors consuming the request ceiling.
+
+--------------------------------------------------
+
+2. Explicit Per-Competitor Fetch Status
+
+Instead of showing only “No data collected”, the system should record the exact reason a competitor produced no data.
+
+Add structured status values such as:
+
+• FETCH_SUCCESS  
+• FETCH_FAILED  
+• RATE_LIMITED  
+• NO_POSTS_FOUND  
+• SKIPPED_DUE_TO_BUDGET  
+• SKIPPED_DUE_TO_RUNTIME
+
+This will significantly improve diagnostics and make debugging easier when analyzing fetch results.
+
+--------------------------------------------------
+
+3. Partial Completion Awareness
+
+When a job runs with multiple competitors, the engine should explicitly track coverage ratio.
+
+Example:
+
+competitorsTotal: 12  
+competitorsProcessed: 9  
+competitorsFailed: 3  
+
+This coverage information should be available for:
+
+• MI confidence calculations  
+• diagnostics logs  
+• UI status indicators
+
+The analysis engine should continue running with available data while applying a confidence penalty when coverage is incomplete.
+
+--------------------------------------------------
+
+4. Dynamic Budget Scaling (Future Safety)
+
+Execution ceilings should ideally scale based on the number of competitors rather than relying only on fixed limits.
+
+For example:
+
+RequestBudget = BaseRequests × CompetitorCount  
+RuntimeBudget = BaseRuntime × CompetitorCountFactor  
+TokenBudget = BaseTokenLimit × CompetitorCountFactor
+
+This prevents future scaling issues if the competitor limit changes again or if deep-check modes require more requests.
+
+--------------------------------------------------
+
+5. Structured Diagnostics Logging
+
+Please add structured logs for each fetch job including:
+
+FetchJobDiagnostics
+competitorCount  
+requestsUsed  
+runtimeUsed  
+coverageRatio  
+skippedCompetitors  
+rateLimitEvents  
+
+These logs will help identify bottlenecks and maintain stability as the system scales.
+
+--------------------------------------------------
+
+6. Validation Tests
+
+Please add tests verifying:
+
+• fair request allocation across competitors  
+• correct reporting of per-competitor status  
+• correct coverage ratio calculation  
+• correct handling of partial fetch success  
+• stable operation with 10–12 competitors
+
+The goal is to guarantee that no competitor is silently skipped due to execution ceilings.
+
+--------------------------------------------------
+
+Objective
+
+With these safeguards implemented, the fetch system will reliably support 10–12 competitors per campaign while maintaining stable data collection and clear diagnostics.
+
+Please confirm once these improvements are verified.
+
+Thank you.

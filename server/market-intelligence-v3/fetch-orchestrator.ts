@@ -39,6 +39,8 @@ type StopReason = "MAX_PAGES_REACHED" | "MAX_REQUESTS_REACHED" | "MAX_RUNTIME_RE
 
 type StageStatus = "PENDING" | "RUNNING" | "COMPLETE" | "FAILED" | "SKIPPED" | "SKIPPED_FETCH_COOLDOWN" | "CACHED_ANALYSIS" | "BLOCKED_INSUFFICIENT_DATA";
 
+type CompetitorFetchStatus = "FETCH_SUCCESS" | "FETCH_FAILED" | "RATE_LIMITED" | "NO_POSTS_FOUND" | "SKIPPED_DUE_TO_BUDGET" | "SKIPPED_DUE_TO_RUNTIME" | "SKIPPED_DUE_TO_PAGES_CEILING" | "COOLDOWN_ACTIVE" | "BLOCKED_BY_PLATFORM" | "PENDING";
+
 interface CompetitorStage {
   competitorId: string;
   competitorName: string;
@@ -48,6 +50,8 @@ interface CompetitorStage {
   SIGNAL_COMPUTE: StageStatus;
   postsFetched: number;
   commentsFetched: number;
+  fetchStatus: CompetitorFetchStatus;
+  requestsUsed: number;
   cooldownRemainingHours?: number;
   remainingCooldownSeconds?: number;
   lastFetchTimestamp?: string;
@@ -58,6 +62,38 @@ interface CompetitorStage {
   rawFetchedCount?: number;
   paginationPages?: number;
   paginationStopReason?: string;
+}
+
+interface FetchJobDiagnostics {
+  competitorCount: number;
+  requestsUsed: number;
+  requestBudget: number;
+  runtimeUsedMs: number;
+  runtimeBudget: number;
+  coverageRatio: number;
+  competitorsTotal: number;
+  competitorsProcessed: number;
+  competitorsFailed: number;
+  competitorsSkipped: number;
+  skippedCompetitors: { name: string; reason: CompetitorFetchStatus }[];
+  rateLimitEvents: number;
+  perCompetitorStatus: { name: string; fetchStatus: CompetitorFetchStatus; requestsUsed: number; postsCollected: number; commentsCollected: number }[];
+  perCompetitorRequestCap: number;
+}
+
+export function computeDynamicBudgets(competitorCount: number): { requestBudget: number; runtimeBudget: number } {
+  const BASE_REQUESTS_PER_COMPETITOR = 10;
+  const BASE_RUNTIME_PER_COMPETITOR_MS = 100_000;
+  const MIN_RUNTIME_MS = 10 * 60 * 1000;
+  const MAX_RUNTIME_CEILING_MS = 25 * 60 * 1000;
+
+  const requestBudget = Math.min(BASE_REQUESTS_PER_COMPETITOR * competitorCount, MAX_REQUESTS_PER_JOB);
+  const runtimeBudget = Math.min(
+    Math.max(BASE_RUNTIME_PER_COMPETITOR_MS * competitorCount, MIN_RUNTIME_MS),
+    MAX_RUNTIME_CEILING_MS
+  );
+
+  return { requestBudget, runtimeBudget };
 }
 
 interface FetchLimitReason {
@@ -85,6 +121,14 @@ export interface FetchJobStatus {
   completedAt?: string;
   collectionMode?: string;
   dataStatus?: string;
+  coverage?: {
+    competitorsTotal: number;
+    competitorsProcessed: number;
+    competitorsFailed: number;
+    competitorsSkipped: number;
+    coverageRatio: number;
+  };
+  diagnostics?: FetchJobDiagnostics;
 }
 
 const activeJobs = new Map<string, Promise<void>>();
@@ -284,7 +328,13 @@ async function executeFetchJob(
   let totalComments = 0;
   let totalRequests = 0;
   let cooldownCount = 0;
+  let rateLimitEvents = 0;
   let stopReason: StopReason = "COMPLETE";
+
+  const { requestBudget: dynamicRequestBudget, runtimeBudget: dynamicRuntimeBudget } = computeDynamicBudgets(competitors.length);
+  const perCompetitorRequestCap = Math.ceil(dynamicRequestBudget / competitors.length);
+
+  console.log(`[FetchOrch] Dynamic budgets | competitors=${competitors.length} | requestBudget=${dynamicRequestBudget} | runtimeBudget=${dynamicRuntimeBudget}ms | perCompetitorCap=${perCompetitorRequestCap}`);
 
   const poolBefore = getPoolDiagnostics(accountId);
   console.log(`[FetchOrch] ProxyPool state at job start | account=${accountId} | active=${poolBefore.activeSessions} | quarantined=${poolBefore.quarantinedSessions} | stickyBindings=${poolBefore.stickyBindings}`);
@@ -299,23 +349,25 @@ async function executeFetchJob(
       SIGNAL_COMPUTE: "PENDING",
       postsFetched: 0,
       commentsFetched: 0,
+      fetchStatus: "PENDING",
+      requestsUsed: 0,
       fetchExecuted: false,
     };
   }
 
   function checkRuntimeCeiling(): boolean {
-    if (Date.now() - startTime >= MAX_RUNTIME_MS) {
+    if (Date.now() - startTime >= dynamicRuntimeBudget) {
       stopReason = "MAX_RUNTIME_REACHED";
-      console.log(`[FetchOrch] HARD CEILING: MAX_RUNTIME ${MAX_RUNTIME_MS}ms reached`);
+      console.log(`[FetchOrch] HARD CEILING: MAX_RUNTIME ${dynamicRuntimeBudget}ms reached`);
       return true;
     }
     return false;
   }
 
   function checkRequestCeiling(): boolean {
-    if (totalRequests >= MAX_REQUESTS_PER_JOB) {
+    if (totalRequests >= dynamicRequestBudget) {
       stopReason = "MAX_REQUESTS_REACHED";
-      console.log(`[FetchOrch] HARD CEILING: MAX_REQUESTS ${MAX_REQUESTS_PER_JOB} reached`);
+      console.log(`[FetchOrch] HARD CEILING: MAX_REQUESTS ${dynamicRequestBudget} reached`);
       return true;
     }
     return false;
@@ -326,12 +378,14 @@ async function executeFetchJob(
 
     for (const comp of competitors) {
       if (checkRuntimeCeiling() || checkRequestCeiling()) {
+        const skipReason: CompetitorFetchStatus = stopReason === "MAX_RUNTIME_REACHED" ? "SKIPPED_DUE_TO_RUNTIME" : "SKIPPED_DUE_TO_BUDGET";
         for (const s of Object.values(stages)) {
           if (s.POSTS_FETCH === "PENDING") {
             s.POSTS_FETCH = "SKIPPED";
             s.COMMENTS_FETCH = "SKIPPED";
             s.CTA_ANALYSIS = "SKIPPED";
             s.SIGNAL_COMPUTE = "SKIPPED";
+            s.fetchStatus = skipReason;
           }
         }
         limitReasons.push({
@@ -353,6 +407,7 @@ async function executeFetchJob(
             s.COMMENTS_FETCH = "SKIPPED";
             s.CTA_ANALYSIS = "SKIPPED";
             s.SIGNAL_COMPUTE = "SKIPPED";
+            s.fetchStatus = "SKIPPED_DUE_TO_PAGES_CEILING";
           }
         }
         limitReasons.push({
@@ -383,8 +438,14 @@ async function executeFetchJob(
       let attempt = 1;
       while (attempt <= MAX_RETRIES) {
         if (checkRuntimeCeiling() || checkRequestCeiling()) break;
+        if (stage.requestsUsed >= perCompetitorRequestCap) {
+          console.log(`[FetchOrch] PER_COMPETITOR_CAP: ${comp.name} hit cap of ${perCompetitorRequestCap} requests, moving to next competitor`);
+          stage.fetchStatus = "SKIPPED_DUE_TO_BUDGET";
+          break;
+        }
         await acquireToken(accountId, campaignId, `POSTS_FETCH:${comp.name}`);
         totalRequests++;
+        stage.requestsUsed++;
         const startMs = Date.now();
         try {
           fetchResult = await fetchCompetitorData(comp.id, accountId, attempt > 1, proxyCtx || undefined, "FAST_PASS");
@@ -402,6 +463,9 @@ async function executeFetchJob(
           if (attempt > MAX_RETRIES) {
             stage.POSTS_FETCH = "FAILED";
             stage.error = err.message;
+            if (blockClass === "RATE_LIMIT") stage.fetchStatus = "RATE_LIMITED";
+            else if (blockClass === "PROXY_BLOCKED") stage.fetchStatus = "BLOCKED_BY_PLATFORM";
+            else stage.fetchStatus = "FETCH_FAILED";
             limitReasons.push({
               competitorId: comp.id, competitorName: comp.name,
               stage: "POSTS_FETCH", reason: blockClass === "PROXY_BLOCKED" ? "BLOCKED_BY_PLATFORM" : "ERROR",
@@ -411,6 +475,7 @@ async function executeFetchJob(
           }
 
           if (blockClass === "RATE_LIMIT") {
+            rateLimitEvents++;
             const backoffIdx = Math.max(0, Math.min(attempt - 2, 2));
             const backoffMs = [10000, 30000, 60000][backoffIdx];
             console.log(`[FetchOrch] RATE_LIMIT backoff ${backoffMs}ms for ${comp.name} | attempt=${attempt}`);
@@ -460,6 +525,7 @@ async function executeFetchJob(
         stage.COMMENTS_FETCH = "SKIPPED";
         stage.CTA_ANALYSIS = "SKIPPED";
         stage.SIGNAL_COMPUTE = "SKIPPED";
+        if (stage.fetchStatus === "PENDING") stage.fetchStatus = "FETCH_FAILED";
         await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
         continue;
       }
@@ -471,6 +537,7 @@ async function executeFetchJob(
 
         stage.POSTS_FETCH = "SKIPPED_FETCH_COOLDOWN";
         stage.COMMENTS_FETCH = "SKIPPED_FETCH_COOLDOWN";
+        stage.fetchStatus = "COOLDOWN_ACTIVE";
         stage.fetchExecuted = false;
         stage.cooldownRemainingHours = remainingHours;
         stage.remainingCooldownSeconds = remainingCooldownSeconds;
@@ -536,6 +603,7 @@ async function executeFetchJob(
         stage.COMMENTS_FETCH = "SKIPPED";
         stage.CTA_ANALYSIS = "SKIPPED";
         stage.SIGNAL_COMPUTE = "SKIPPED";
+        stage.fetchStatus = "BLOCKED_BY_PLATFORM";
         const reason = classifyBlockReason(fetchResult);
         limitReasons.push({
           competitorId: comp.id, competitorName: comp.name,
@@ -549,6 +617,7 @@ async function executeFetchJob(
       stage.postsFetched = fetchResult.postsCollected;
       stage.analysisSource = "FRESH_DATA";
       stage.fetchExecuted = true;
+      stage.fetchStatus = fetchResult.postsCollected > 0 ? "FETCH_SUCCESS" : "NO_POSTS_FOUND";
       stage.rawFetchedCount = fetchResult.rawFetchedCount;
       stage.paginationPages = fetchResult.paginationPages;
       stage.paginationStopReason = fetchResult.paginationStopReason;
@@ -612,22 +681,28 @@ async function executeFetchJob(
       await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
     }
 
-    const anyAnalysisRan = Object.values(stages).some(
+    const stageValues = Object.values(stages);
+    const competitorsProcessed = stageValues.filter(s => s.fetchStatus === "FETCH_SUCCESS" || s.fetchStatus === "NO_POSTS_FOUND" || s.fetchStatus === "COOLDOWN_ACTIVE").length;
+    const competitorsFailed = stageValues.filter(s => s.fetchStatus === "FETCH_FAILED" || s.fetchStatus === "BLOCKED_BY_PLATFORM" || s.fetchStatus === "RATE_LIMITED").length;
+    const competitorsSkipped = stageValues.filter(s => s.fetchStatus === "SKIPPED_DUE_TO_BUDGET" || s.fetchStatus === "SKIPPED_DUE_TO_RUNTIME" || s.fetchStatus === "SKIPPED_DUE_TO_PAGES_CEILING" || s.fetchStatus === "PENDING").length;
+    const coverageRatio = competitors.length > 0 ? competitorsProcessed / competitors.length : 0;
+
+    const anyAnalysisRan = stageValues.some(
       s => s.SIGNAL_COMPUTE === "COMPLETE" || s.SIGNAL_COMPUTE === "CACHED_ANALYSIS"
     );
     const allCooldown = cooldownCount === competitors.length && competitors.length > 0;
     if (allCooldown) stopReason = "COOLDOWN_ACTIVE";
     const isPartialCoverage = stopReason !== "COMPLETE" && stopReason !== "COOLDOWN_ACTIVE";
 
-    const anyFetchExecuted = Object.values(stages).some(s => s.fetchExecuted === true);
+    const anyFetchExecuted = stageValues.some(s => s.fetchExecuted === true);
     const snapshotSourceType = anyFetchExecuted ? "FRESH_DATA" : "CACHED_DATA";
 
     if (anyAnalysisRan) {
       const willRunDeepPass = anyFetchExecuted && !allCooldown;
       const fastPassDataStatus = willRunDeepPass ? "LIVE" : "COMPLETE";
       try {
-        await persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverage, stopReason, snapshotSourceType, anyFetchExecuted, fastPassDataStatus as "LIVE" | "ENRICHING" | "COMPLETE");
-        console.log(`[FetchOrch] Snapshot persisted for ${accountId}/${campaignId} | partial=${isPartialCoverage} | allCooldown=${allCooldown} | snapshotSource=${snapshotSourceType} | fetchExecuted=${anyFetchExecuted} | dataStatus=${fastPassDataStatus}`);
+        await persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverage, stopReason, snapshotSourceType, anyFetchExecuted, fastPassDataStatus as "LIVE" | "ENRICHING" | "COMPLETE", coverageRatio);
+        console.log(`[FetchOrch] Snapshot persisted for ${accountId}/${campaignId} | partial=${isPartialCoverage} | allCooldown=${allCooldown} | snapshotSource=${snapshotSourceType} | fetchExecuted=${anyFetchExecuted} | dataStatus=${fastPassDataStatus} | coverageRatio=${coverageRatio.toFixed(2)}`);
       } catch (err: any) {
         console.error(`[FetchOrch] Snapshot persistence failed:`, err.message);
       }
@@ -641,7 +716,7 @@ async function executeFetchJob(
     }
 
     const durationMs = Date.now() - startTime;
-    const allFailed = Object.values(stages).every(s => s.POSTS_FETCH === "FAILED");
+    const allFailed = stageValues.every(s => s.POSTS_FETCH === "FAILED");
     if (allFailed && !allCooldown) stopReason = "ALL_FAILED";
 
     let snapshotIdCreated: string | null = null;
@@ -656,7 +731,7 @@ async function executeFetchJob(
       } catch { }
     }
 
-    const anyInsufficientData = Object.values(stages).some(
+    const anyInsufficientData = stageValues.some(
       s => s.postsFetched !== undefined && (s.postsFetched < MIN_POSTS_TARGET || (s.commentsFetched || 0) < MIN_COMMENTS_TARGET)
     );
 
@@ -674,6 +749,37 @@ async function executeFetchJob(
 
     const finalStopReason = stopReason !== "COMPLETE" ? stopReason : (anyInsufficientData ? "COMPLETE" : null);
 
+    const skippedCompetitors = stageValues
+      .filter(s => s.fetchStatus.startsWith("SKIPPED_"))
+      .map(s => ({ name: s.competitorName, reason: s.fetchStatus }));
+
+    const perCompetitorStatus = stageValues.map(s => ({
+      name: s.competitorName,
+      fetchStatus: s.fetchStatus,
+      requestsUsed: s.requestsUsed,
+      postsCollected: s.postsFetched,
+      commentsCollected: s.commentsFetched,
+    }));
+
+    const jobDiagnostics: FetchJobDiagnostics = {
+      competitorCount: competitors.length,
+      requestsUsed: totalRequests,
+      requestBudget: dynamicRequestBudget,
+      runtimeUsedMs: durationMs,
+      runtimeBudget: dynamicRuntimeBudget,
+      coverageRatio,
+      competitorsTotal: competitors.length,
+      competitorsProcessed,
+      competitorsFailed,
+      competitorsSkipped,
+      skippedCompetitors,
+      rateLimitEvents,
+      perCompetitorStatus,
+      perCompetitorRequestCap,
+    };
+
+    console.log(`[FetchOrch] JOB_DIAGNOSTICS: ${JSON.stringify(jobDiagnostics)}`);
+
     await db.update(miFetchJobs).set({
       status: finalJobStatus,
       stageStatuses: JSON.stringify(stages),
@@ -687,7 +793,7 @@ async function executeFetchJob(
       error: finalStopReason ? `STOP_REASON: ${finalStopReason}` : null,
     }).where(eq(miFetchJobs.id, jobId));
 
-    console.log(`[FetchOrch] Job ${jobId} completed in ${durationMs}ms | posts=${totalPosts} comments=${totalComments} | requests=${totalRequests} | stopReason=${stopReason}`);
+    console.log(`[FetchOrch] Job ${jobId} completed in ${durationMs}ms | posts=${totalPosts} comments=${totalComments} | requests=${totalRequests} | stopReason=${stopReason} | coverage=${competitorsProcessed}/${competitors.length} (${(coverageRatio * 100).toFixed(0)}%)`);
 
     const rateBucketState = getBucketState(accountId, campaignId);
     console.log(`[FetchOrch] Rate bucket state at job end | tokens=${rateBucketState.tokens}/${rateBucketState.maxBurst} | consumed=${rateBucketState.totalConsumed} | waited=${rateBucketState.totalWaited} | refillMs=${rateBucketState.refillIntervalMs}`);
@@ -701,6 +807,8 @@ async function executeFetchJob(
         cooldownCount,
         status: finalJobStatus,
         rateBucket: rateBucketState,
+        coverage: { competitorsTotal: competitors.length, competitorsProcessed, competitorsFailed, competitorsSkipped, coverageRatio },
+        diagnostics: jobDiagnostics,
         hardCeilings: {
           maxPagesPerCompetitor: MAX_PAGES_PER_COMPETITOR,
           maxRequestsPerJob: MAX_REQUESTS_PER_JOB,
@@ -748,7 +856,7 @@ function classifyBlockReason(result: FetchResult): "RATE_LIMIT" | "PROXY_BLOCKED
   return "ERROR";
 }
 
-async function persistSnapshotAfterFetch(accountId: string, campaignId: string, isPartialCoverage: boolean = false, jobStopReason: StopReason = "COMPLETE", snapshotSource: "FRESH_DATA" | "CACHED_DATA" = "FRESH_DATA", fetchExecuted: boolean = true, dataStatus: "LIVE" | "ENRICHING" | "COMPLETE" = "LIVE"): Promise<void> {
+async function persistSnapshotAfterFetch(accountId: string, campaignId: string, isPartialCoverage: boolean = false, jobStopReason: StopReason = "COMPLETE", snapshotSource: "FRESH_DATA" | "CACHED_DATA" = "FRESH_DATA", fetchExecuted: boolean = true, dataStatus: "LIVE" | "ENRICHING" | "COMPLETE" = "LIVE", coverageRatio: number = 1.0): Promise<void> {
   const competitors = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
 
@@ -801,27 +909,28 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   const marketState = deriveMarketState(trajectory, confidence.level);
 
   if (isPartialCoverage) {
-    const PARTIAL_CONFIDENCE_PENALTY = 0.3;
-    confidence.overall = Math.max(0, Math.round((confidence.overall - PARTIAL_CONFIDENCE_PENALTY) * 100) / 100);
+    const coveragePenalty = Math.round((1 - coverageRatio) * 0.5 * 100) / 100;
+    confidence.overall = Math.max(0, Math.round((confidence.overall - coveragePenalty) * 100) / 100);
     if (confidence.overall < 0.3) {
       confidence.level = "INSUFFICIENT";
       confidence.guardDecision = "BLOCK";
-      confidence.guardReasons = [...(confidence.guardReasons || []), `PARTIAL_COVERAGE: ${jobStopReason}`];
+      confidence.guardReasons = [...(confidence.guardReasons || []), `PARTIAL_COVERAGE: ${jobStopReason} (coverage=${(coverageRatio * 100).toFixed(0)}%)`];
     } else if (confidence.overall < 0.5) {
       confidence.level = "LOW";
       confidence.guardDecision = "DOWNGRADE";
-      confidence.guardReasons = [...(confidence.guardReasons || []), `PARTIAL_COVERAGE: ${jobStopReason}`];
+      confidence.guardReasons = [...(confidence.guardReasons || []), `PARTIAL_COVERAGE: ${jobStopReason} (coverage=${(coverageRatio * 100).toFixed(0)}%)`];
     }
 
     const partialFlags: any = Array.isArray(missingFlags) ? [...missingFlags] : [];
     partialFlags.push({
       type: "PARTIAL_COVERAGE",
       reason: jobStopReason,
-      message: `Data collection stopped early due to ${jobStopReason.replace(/_/g, " ").toLowerCase()}. Coverage is incomplete.`,
+      coverageRatio,
+      message: `Data collection stopped early due to ${jobStopReason.replace(/_/g, " ").toLowerCase()}. Coverage: ${(coverageRatio * 100).toFixed(0)}% (${Math.round(coverageRatio * competitorInputs.length)}/${competitorInputs.length} competitors).`,
     });
     missingFlags = partialFlags;
 
-    console.log(`[FetchOrch] Partial coverage snapshot: confidence downgraded to ${confidence.overall} (${confidence.level}), stopReason=${jobStopReason}`);
+    console.log(`[FetchOrch] Partial coverage snapshot: confidence downgraded by ${coveragePenalty} to ${confidence.overall} (${confidence.level}), coverageRatio=${coverageRatio.toFixed(2)}, stopReason=${jobStopReason}`);
   }
 
   const volatilityIndex = computeVolatilityIndex(signalResults);
@@ -963,10 +1072,17 @@ export async function getFetchJobStatus(jobId: string): Promise<FetchJobStatus |
 
   if (!job) return null;
 
+  const parsedStages = job.stageStatuses ? JSON.parse(job.stageStatuses) : {};
+  const stageVals = Object.values(parsedStages) as CompetitorStage[];
+  const total = stageVals.length;
+  const processed = stageVals.filter((s: CompetitorStage) => s.fetchStatus === "FETCH_SUCCESS" || s.fetchStatus === "NO_POSTS_FOUND" || s.fetchStatus === "COOLDOWN_ACTIVE").length;
+  const failed = stageVals.filter((s: CompetitorStage) => s.fetchStatus === "FETCH_FAILED" || s.fetchStatus === "BLOCKED_BY_PLATFORM" || s.fetchStatus === "RATE_LIMITED").length;
+  const skipped = stageVals.filter((s: CompetitorStage) => s.fetchStatus?.startsWith("SKIPPED_") || s.fetchStatus === "PENDING").length;
+
   return {
     jobId: job.id,
     status: job.status as FetchJobStatus["status"],
-    stageStatuses: job.stageStatuses ? JSON.parse(job.stageStatuses) : {},
+    stageStatuses: parsedStages,
     fetchLimitReasons: job.fetchLimitReasons ? JSON.parse(job.fetchLimitReasons) : [],
     totalPostsFetched: job.totalPostsFetched || 0,
     totalCommentsFetched: job.totalCommentsFetched || 0,
@@ -979,6 +1095,13 @@ export async function getFetchJobStatus(jobId: string): Promise<FetchJobStatus |
     completedAt: job.completedAt?.toISOString(),
     collectionMode: job.collectionMode || "FAST_PASS",
     dataStatus: job.dataStatus || "LIVE",
+    coverage: {
+      competitorsTotal: total,
+      competitorsProcessed: processed,
+      competitorsFailed: failed,
+      competitorsSkipped: skipped,
+      coverageRatio: total > 0 ? processed / total : 0,
+    },
   };
 }
 
