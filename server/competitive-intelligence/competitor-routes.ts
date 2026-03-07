@@ -97,6 +97,7 @@ export function registerCiCompetitorRoutes(app: Express) {
         socialProofPresence: socialProofPresence || null,
         screenshotUrls: screenshotUrls || null,
         notes: notes || null,
+        isDemo: false,
       }).returning();
 
       const validation = validateEvidence(competitor);
