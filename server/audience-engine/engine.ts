@@ -150,10 +150,28 @@ const MARKET_DETECTION_KEYWORDS: Record<MarketScope, string[]> = {
   universal: [],
 };
 
+interface MarketScopeMetadata {
+  scopeConfidence: number;
+  matchedKeywordDensity: number;
+  scopeAmbiguityFlag: boolean;
+}
+
+let _lastMarketScopeMetadata: MarketScopeMetadata = {
+  scopeConfidence: 0,
+  matchedKeywordDensity: 0,
+  scopeAmbiguityFlag: false,
+};
+
+function getMarketScopeMetadata(): MarketScopeMetadata {
+  return { ..._lastMarketScopeMetadata };
+}
+
 function detectMarketScope(texts: string[], businessContext: { industry: string; coreOffer: string }): MarketScope[] {
   const allText = [...texts.slice(0, 200), businessContext.industry, businessContext.coreOffer].join(" ").toLowerCase();
+  const totalWords = allText.split(/\s+/).length || 1;
   const scores: Record<MarketScope, number> = {} as any;
 
+  let totalKeywordMatches = 0;
   for (const [scope, keywords] of Object.entries(MARKET_DETECTION_KEYWORDS)) {
     if (scope === "universal") continue;
     let count = 0;
@@ -163,12 +181,28 @@ function detectMarketScope(texts: string[], businessContext: { industry: string;
       if (matches) count += matches.length;
     }
     scores[scope as MarketScope] = count;
+    totalKeywordMatches += count;
   }
 
+  const matchedKeywordDensity = Math.min(1, totalKeywordMatches / totalWords);
+
   const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]).filter(([, v]) => v > 0);
-  if (sorted.length === 0) return ["universal"];
+  if (sorted.length === 0) {
+    _lastMarketScopeMetadata = { scopeConfidence: 0, matchedKeywordDensity: 0, scopeAmbiguityFlag: false };
+    return ["universal"];
+  }
 
   const topScore = sorted[0][1];
+  const secondScore = sorted[1]?.[1] || 0;
+
+  const scopeAmbiguityFlag = secondScore > 0 && (topScore - secondScore) / topScore < 0.20;
+
+  const separationFactor = secondScore > 0 ? (topScore - secondScore) / topScore : 1;
+  const densityFactor = Math.min(1, totalKeywordMatches / 10);
+  const scopeConfidence = Math.round(Math.min(1, Math.max(0, separationFactor * 0.5 + densityFactor * 0.5)) * 1000) / 1000;
+
+  _lastMarketScopeMetadata = { scopeConfidence, matchedKeywordDensity, scopeAmbiguityFlag };
+
   const detected = sorted.filter(([, v]) => v >= topScore * 0.3).map(([k]) => k as MarketScope);
   return detected.length > 0 ? detected : ["universal"];
 }
@@ -659,6 +693,25 @@ function classifyIntents(
   };
 }
 
+type IntentTemperature = "cold" | "warm" | "hot" | "very_hot";
+
+function deriveIntentTemperature(intentDist: IntentDistribution): IntentTemperature {
+  if (intentDist.totalClassified === 0) return "cold";
+
+  const weighted =
+    intentDist.curiosity * 0.1 +
+    intentDist.learning * 0.3 +
+    intentDist.comparison * 0.6 +
+    intentDist.purchaseIntent * 1.0;
+
+  const normalizedTemp = weighted / 100;
+
+  if (normalizedTemp >= 0.55) return "very_hot";
+  if (normalizedTemp >= 0.35) return "hot";
+  if (normalizedTemp >= 0.20) return "warm";
+  return "cold";
+}
+
 function computeSegmentDensity(
   painMap: SignalItem[],
   desireMap: SignalItem[],
@@ -772,13 +825,53 @@ Return ONLY the JSON array, no markdown.`;
     const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const parsed = JSON.parse(cleaned) as any[];
 
-    return parsed.map(seg => ({
-      ...seg,
-      evidenceCount: painMap.length + desireMap.length + objectionMap.length,
-      confidenceScore: Math.min(0.9, 0.5 + (painMap.length + desireMap.length) * 0.03),
-      sourceSignals: ["painMap", "desireMap", "objectionMap", "emotionalDrivers"],
-      inputSnapshotId,
-    }));
+    return parsed.map(seg => {
+      const segPains = (seg.painProfile || []) as string[];
+      const segDesires = (seg.desireProfile || []) as string[];
+      const segObjections = (seg.objectionProfile || []) as string[];
+
+      let painDesireMatchCount = 0;
+      for (const p of segPains) {
+        if (painMap.some(pm => pm.canonical.toLowerCase().includes(p.toLowerCase()))) painDesireMatchCount++;
+      }
+      for (const d of segDesires) {
+        if (desireMap.some(dm => dm.canonical.toLowerCase().includes(d.toLowerCase()))) painDesireMatchCount++;
+      }
+      const totalProfileItems = segPains.length + segDesires.length;
+      const signalCoverage = totalProfileItems > 0 ? Math.min(1, painDesireMatchCount / totalProfileItems) : 0;
+      const painDesireDensity = Math.min(1, (painMap.length + desireMap.length) / 10);
+
+      const allOtherSegments = parsed.filter((s: any) => s.name !== seg.name);
+      let avgSim = 0;
+      if (allOtherSegments.length > 0) {
+        let simSum = 0;
+        for (const other of allOtherSegments) {
+          const overlap = [...segPains, ...segDesires].filter(
+            t => [...(other.painProfile || []), ...(other.desireProfile || [])].some(
+              (o: string) => o.toLowerCase() === t.toLowerCase()
+            )
+          ).length;
+          const totalTokens = new Set([...segPains, ...segDesires, ...(other.painProfile || []), ...(other.desireProfile || [])]).size;
+          simSum += totalTokens > 0 ? overlap / totalTokens : 0;
+        }
+        avgSim = simSum / allOtherSegments.length;
+      }
+      const segmentDistinctiveness = 1 - avgSim;
+
+      const evidenceSupport = Math.min(1, (segObjections.length > 0 ? 0.5 : 0) + (segPains.length >= 2 ? 0.3 : 0.1) + (segDesires.length >= 2 ? 0.2 : 0.1));
+
+      const segmentConfidence = Math.round(Math.min(0.95, Math.max(0.05,
+        signalCoverage * 0.40 + painDesireDensity * 0.30 + segmentDistinctiveness * 0.20 + evidenceSupport * 0.10
+      )) * 1000) / 1000;
+
+      return {
+        ...seg,
+        evidenceCount: painMap.length + desireMap.length + objectionMap.length,
+        confidenceScore: segmentConfidence,
+        sourceSignals: ["painMap", "desireMap", "objectionMap", "emotionalDrivers"],
+        inputSnapshotId,
+      };
+    });
   } catch (err: any) {
     console.error("[AudienceEngine-V3] Segment construction failed:", err.message);
     return [{
@@ -795,6 +888,35 @@ Return ONLY the JSON array, no markdown.`;
       inputSnapshotId,
     }];
   }
+}
+
+const ADS_PRESCRIPTIVE_PATTERNS = [
+  /\bset (?:your |the )?budget\b/i,
+  /\ballocate \$?\d/i,
+  /\bspend \$?\d/i,
+  /\bdaily budget\b/i,
+  /\blifetime budget\b/i,
+  /\bcreate (?:a |an )?(?:ad set|campaign|ad group)\b/i,
+  /\bgo to ads manager\b/i,
+  /\bselect (?:conversion|traffic|reach) objective\b/i,
+  /\bconfigure (?:the |your )?pixel\b/i,
+  /\benable (?:CBO|ABO|advantage\+)\b/i,
+  /\boptimize for (?:conversions|clicks|reach|impressions)\b/i,
+  /\buse (?:automatic|manual) placements\b/i,
+  /\bscale (?:the |your )?campaign\b/i,
+  /\bincrease (?:the |your )?budget\b/i,
+  /\ba\/b test (?:the |your )/i,
+];
+
+function sanitizeAdsTargetingHint(hint: AdsTargetingHint): AdsTargetingHint {
+  if (hint.rationale) {
+    for (const pattern of ADS_PRESCRIPTIVE_PATTERNS) {
+      if (pattern.test(hint.rationale)) {
+        hint.rationale = hint.rationale.replace(pattern, "[hint]").trim();
+      }
+    }
+  }
+  return hint;
 }
 
 async function translateToAdsTargeting(
@@ -839,7 +961,7 @@ Return ONLY a JSON array matching the segments count. Use real Meta Ads targetin
     const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const parsed = JSON.parse(cleaned) as any[];
 
-    return parsed.map(hint => ({
+    return parsed.map(hint => sanitizeAdsTargetingHint({
       ...hint,
       evidenceCount: segments.length,
       confidenceScore: 0.6,
@@ -999,7 +1121,8 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
 
   const detectedMarkets = detectMarketScope(allText, businessContext);
   baseInputSummary.detectedMarkets = detectedMarkets;
-  console.log(`[AudienceEngine-V3] Market scope detected: ${detectedMarkets.join(", ")}`);
+  const scopeMetadata = getMarketScopeMetadata();
+  console.log(`[AudienceEngine-V3] Market scope detected: ${detectedMarkets.join(", ")} | scopeConfidence=${scopeMetadata.scopeConfidence} | ambiguity=${scopeMetadata.scopeAmbiguityFlag}`);
 
   const scopedPainClusters = filterClustersByMarket(PAIN_CLUSTERS, detectedMarkets);
   const scopedDesireClusters = filterClustersByMarket(DESIRE_CLUSTERS, detectedMarkets);
@@ -1023,6 +1146,8 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   const awarenessLevel = detectAwareness(commentTexts, miSnapshotId, competitorCount);
   const maturityIndex = detectMaturity(commentTexts, captions, miSnapshotId, competitorCount);
   const intentDistribution = classifyIntents(commentTexts, miSnapshotId, competitorCount);
+  const intentTemperature = deriveIntentTemperature(intentDistribution);
+  console.log(`[AudienceEngine-V3] Intent temperature: ${intentTemperature} (curiosity=${intentDistribution.curiosity}% learning=${intentDistribution.learning}% comparison=${intentDistribution.comparison}% purchase=${intentDistribution.purchaseIntent}%)`);
 
   const totalSignalMatches = painMap.length + desireMap.length + objectionMap.length + transformationMap.length + emotionalDrivers.length;
   const totalSignalFrequency = [painMap, desireMap, objectionMap, transformationMap, emotionalDrivers]
@@ -1147,10 +1272,12 @@ export async function getLatestAudienceSnapshot(accountId: string, campaignId: s
 
 export {
   detectMarketScope,
+  getMarketScopeMetadata,
   filterClustersByMarket,
   applyObjectionContextRules,
   applyEvidenceIntegrityFilter,
   computeSegmentSimilarity,
   canonicalizeSegments,
   computeSegmentDensity,
+  deriveIntentTemperature,
 };

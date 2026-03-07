@@ -1,0 +1,119 @@
+Subject: Audience Engine V3 Final Hardening Pass
+
+Hello Replit,
+
+We need to perform a final hardening pass on Audience Engine V3.
+
+Important constraints:
+- Do NOT add new layers.
+- Do NOT change the existing 12-layer pipeline.
+- Do NOT modify the snapshot schema structure or API responses.
+- Maintain full compatibility with downstream engines (Positioning V3 and Build The Plan).
+
+The goal is to improve signal reliability, segment grounding, and interpretation clarity while preserving the current architecture.
+
+Please implement the following improvements.
+
+--------------------------------------------------
+
+1. Market Scope Confidence (Layer 2 — Market Scope Detection)
+
+Extend the market scope detection with internal confidence metadata.
+
+Add the following internal values:
+
+- scopeConfidence
+- matchedKeywordDensity
+- scopeAmbiguityFlag
+
+Suggested logic:
+
+scopeConfidence should represent the density and consistency of detected market keywords within the analyzed dataset.
+
+scopeAmbiguityFlag should activate when two or more market scopes have very similar keyword densities.
+
+These values are used internally for pattern filtering reliability but must not alter the existing scope output structure.
+
+--------------------------------------------------
+
+2. Segment Confidence (Layers 10–11 — AI Segment Construction & Canonicalization)
+
+Add a confidence metric for each generated audience segment.
+
+New internal metric:
+
+segmentConfidence
+
+Suggested calculation:
+
+segmentConfidence =
+(signalCoverage × 0.40)
++ (painDesireDensity × 0.30)
++ (segmentDistinctiveness × 0.20)
++ (evidenceSupport × 0.10)
+
+Range: 0 → 1
+
+Each segment should retain clear evidence links to the pains, desires, objections, and comment samples that generated it.
+
+This ensures AI segments remain grounded in deterministic signals.
+
+Do NOT change the segment schema structure — simply enrich the internal scoring logic.
+
+--------------------------------------------------
+
+3. Intent Temperature (Layer 9 — Buying Intent Distribution)
+
+Add a derived scalar metric summarizing the overall purchase readiness of the audience.
+
+New internal metric:
+
+intentTemperature
+
+Suggested interpretation:
+
+- Curiosity dominant → "cold"
+- Learning dominant → "warm"
+- Comparison dominant → "hot"
+- Purchase intent dominant → "very_hot"
+
+This metric should be calculated using the weighted distribution of the four existing intent categories.
+
+It must remain a derived internal signal and should not modify the existing intent distribution structure.
+
+--------------------------------------------------
+
+4. Ads Targeting Translation Guardrail (Layer 12)
+
+Ensure the Ads Targeting Translation layer remains strictly a "hint generation" layer.
+
+Allowed outputs:
+- Suggested interests
+- Likely behaviors
+- General demographic patterns
+- Custom audience hints
+
+Disallowed outputs:
+- Final campaign setup instructions
+- Budget recommendations
+- Exact ad set configurations
+- Platform-specific optimization logic
+
+This layer must remain advisory only and should never generate prescriptive campaign strategies.
+
+--------------------------------------------------
+
+5. Validation Requirements
+
+After implementing these improvements, confirm that:
+
+- The pipeline remains exactly 12 layers.
+- No new layers were introduced.
+- The audience_snapshots schema remains unchanged.
+- API responses remain unchanged.
+- All downstream engine compatibility is preserved.
+- Existing system tests continue to pass.
+
+Please provide a brief confirmation summary once the hardening pass is complete.
+
+The goal is to strengthen reliability and interpretation clarity without modifying the engine architecture.
