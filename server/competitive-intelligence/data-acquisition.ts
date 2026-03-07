@@ -933,6 +933,83 @@ function computeCompetitorHash(profileLink: string): string {
   return crypto.createHash("sha256").update(profileLink).digest("hex").slice(0, 16);
 }
 
+export const SYNTHETIC_RETENTION_DAYS = 30;
+
+export async function cleanupExpiredSyntheticComments(): Promise<{ deleted: number; competitorsAffected: string[]; reEnriched: number }> {
+  const cutoffDate = new Date(Date.now() - SYNTHETIC_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+
+  const expiredRows = await db.select({
+    competitorId: ciCompetitorComments.competitorId,
+    accountId: ciCompetitorComments.accountId,
+  }).from(ciCompetitorComments)
+    .where(and(
+      eq(ciCompetitorComments.isSynthetic, true),
+      sql`${ciCompetitorComments.createdAt} < ${cutoffDate}`,
+    ));
+
+  if (expiredRows.length === 0) {
+    return { deleted: 0, competitorsAffected: [], reEnriched: 0 };
+  }
+
+  const affectedCompetitors = new Map<string, string>();
+  for (const row of expiredRows) {
+    affectedCompetitors.set(row.competitorId, row.accountId);
+  }
+
+  const deleteResult = await db.execute(sql`
+    DELETE FROM ci_competitor_comments
+    WHERE is_synthetic = true AND created_at < ${cutoffDate}
+  `);
+
+  const deleted = Number((deleteResult as any).rowCount || expiredRows.length);
+  const competitorsAffected = Array.from(affectedCompetitors.keys());
+
+  console.log(`[SyntheticCleanup] Deleted ${deleted} expired synthetic comments from ${competitorsAffected.length} competitors (retention=${SYNTHETIC_RETENTION_DAYS}d)`);
+
+  let reEnriched = 0;
+  for (const [competitorId, accountId] of affectedCompetitors.entries()) {
+    const remainingCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
+      .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
+    const remaining = Number(remainingCount[0]?.count || 0);
+
+    if (remaining < MIN_COMMENTS_THRESHOLD) {
+      const hasPosts = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
+        .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+
+      if (Number(hasPosts[0]?.count || 0) > 0) {
+        try {
+          const result = await enrichCompetitorWithComments(competitorId, accountId);
+          console.log(`[SyntheticCleanup] Re-enriched ${competitorId}: ${result.commentsGenerated} comments, status=${result.status}`);
+          reEnriched++;
+        } catch (err: any) {
+          console.error(`[SyntheticCleanup] Re-enrichment failed for ${competitorId}: ${err.message}`);
+        }
+      } else {
+        await db.update(ciCompetitors)
+          .set({ analysisLevel: "FAST_PASS", updatedAt: new Date() })
+          .where(eq(ciCompetitors.id, competitorId));
+        console.log(`[SyntheticCleanup] Demoted ${competitorId} to FAST_PASS (no posts for re-enrichment)`);
+      }
+    }
+  }
+
+  const orphanCheck = await db.execute(sql`
+    SELECT cc.id FROM ci_competitor_comments cc
+    LEFT JOIN ci_competitors c ON cc.competitor_id = c.id
+    WHERE c.id IS NULL
+  `);
+  const orphanCount = (orphanCheck.rows || []).length;
+  if (orphanCount > 0) {
+    await db.execute(sql`
+      DELETE FROM ci_competitor_comments
+      WHERE competitor_id NOT IN (SELECT id FROM ci_competitors)
+    `);
+    console.log(`[SyntheticCleanup] Removed ${orphanCount} orphaned comment references`);
+  }
+
+  return { deleted, competitorsAffected, reEnriched };
+}
+
 export async function fetchAllCompetitors(accountId: string = "default", campaignId: string): Promise<FetchResult[]> {
   const competitors = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));

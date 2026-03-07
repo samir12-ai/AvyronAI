@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { miFetchJobs, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, miSnapshots, miSignalLogs, miTelemetry, growthCampaigns } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { fetchCompetitorData, enrichCompetitorWithComments, type FetchResult, type CollectionMode } from "../competitive-intelligence/data-acquisition";
+import { fetchCompetitorData, enrichCompetitorWithComments, cleanupExpiredSyntheticComments, type FetchResult, type CollectionMode } from "../competitive-intelligence/data-acquisition";
 import { computeAllSignals, aggregateMissingFlags } from "./signal-engine";
 import { classifyAllIntents, computeDominantMarketIntent } from "./intent-engine";
 import { computeTrajectory, deriveTrajectoryDirection, deriveMarketState } from "./trajectory-engine";
@@ -1377,6 +1377,17 @@ export function startQueueProcessor(): void {
   console.log(`[QueueProcessor] Started — interval=${QUEUE_PROCESSOR_INTERVAL_MS}ms, globalMax=${GLOBAL_MAX_CONCURRENT_JOBS}, perAccountBudget=${PER_ACCOUNT_JOB_BUDGET_PER_HOUR}/hr`);
 
   setTimeout(() => recoverStuckDeepPass(), 15000);
+
+  setTimeout(async () => {
+    try {
+      const result = await cleanupExpiredSyntheticComments();
+      if (result.deleted > 0) {
+        console.log(`[SyntheticLifecycle] Cleanup complete: ${result.deleted} expired, ${result.reEnriched} re-enriched, ${result.competitorsAffected.length} competitors affected`);
+      }
+    } catch (err: any) {
+      console.error(`[SyntheticLifecycle] Cleanup error: ${err.message}`);
+    }
+  }, 30000);
 }
 
 export function stopQueueProcessor(): void {
