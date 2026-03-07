@@ -47,11 +47,22 @@ export function classifyCompetitorIntent(signalResult: CompetitorSignalResult): 
   }
 
   const maxScore = Math.max(...Object.values(scores));
-  const secondMax = Object.values(scores).sort((a, b) => b - a)[1] || 0;
+  const sortedScores = Object.values(scores).sort((a, b) => b - a);
+  const secondMax = sortedScores[1] || 0;
   if (maxScore - secondMax < 0.05) {
     degraded = true;
     degradeReason = `Ambiguous intent: top scores too close (${maxScore.toFixed(3)} vs ${secondMax.toFixed(3)})`;
   }
+
+  const signalConsistencyFactor = Math.min(1, signalResult.signalCoverageScore * (1 - signalResult.varianceScore));
+  const rawIntentConfidence = (maxScore - secondMax) + signalConsistencyFactor * 0.5;
+  const intentConfidence = Math.round(Math.max(0, Math.min(1, rawIntentConfidence)) * 1000) / 1000;
+
+  let intentConfidenceBand: "STRONG" | "MODERATE" | "UNCERTAIN" | "DEGRADED";
+  if (intentConfidence > 0.75) intentConfidenceBand = "STRONG";
+  else if (intentConfidence >= 0.55) intentConfidenceBand = "MODERATE";
+  else if (intentConfidence >= 0.40) intentConfidenceBand = "UNCERTAIN";
+  else intentConfidenceBand = "DEGRADED";
 
   return {
     competitorId: signalResult.competitorId,
@@ -61,6 +72,9 @@ export function classifyCompetitorIntent(signalResult: CompetitorSignalResult): 
     scores,
     degraded,
     degradeReason,
+    topIntentScore: maxScore,
+    intentConfidence,
+    intentConfidenceBand,
   };
 }
 

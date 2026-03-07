@@ -47,6 +47,8 @@ export interface CompetitorSignalResult {
   missingFields: string[];
 }
 
+export type IntentConfidenceBand = "STRONG" | "MODERATE" | "UNCERTAIN" | "DEGRADED";
+
 export interface IntentResult {
   competitorId: string;
   competitorName: string;
@@ -55,6 +57,9 @@ export interface IntentResult {
   scores: Record<IntentCategory, number>;
   degraded: boolean;
   degradeReason?: string;
+  topIntentScore: number;
+  intentConfidence: number;
+  intentConfidenceBand: IntentConfidenceBand;
 }
 
 export interface TrajectoryData {
@@ -65,6 +70,12 @@ export interface TrajectoryData {
   revivalPotential: number;
   marketActivityLevel: number;
   demandConfidence: number;
+  marketCompressionScore: number;
+}
+
+export interface DominanceModeMetadata {
+  mode: GoalMode;
+  weights: Record<string, number>;
 }
 
 export interface DominanceResult {
@@ -75,6 +86,7 @@ export interface DominanceResult {
   weaknesses: string[];
   strengths: string[];
   engagementWeightBiasRisk?: string | null;
+  dominanceModeMetadata: DominanceModeMetadata;
 }
 
 export interface ConfidenceFactors {

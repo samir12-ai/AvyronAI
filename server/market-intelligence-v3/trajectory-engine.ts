@@ -100,20 +100,36 @@ export function computeDemandConfidence(engagementQuality: EngagementQuality, si
   return clamp01(qualityWeight + dataWeight + sentimentWeight);
 }
 
+export function computeMarketCompressionScore(
+  narrativeConvergence: number,
+  angleSaturation: number,
+  marketHeating: number,
+): number {
+  return clamp01(
+    Math.round(
+      (narrativeConvergence * 0.45 + angleSaturation * 0.35 + marketHeating * 0.20) * 1000,
+    ) / 1000,
+  );
+}
+
 export function computeTrajectory(
   signals: CompetitorSignalResult[],
   intents: IntentResult[],
   engagementQuality?: EngagementQuality,
 ): TrajectoryData {
   const eq: EngagementQuality = engagementQuality || { highIntentCount: 0, lowValueCount: 0, engagementQualityRatio: 0 };
+  const marketHeatingIndex = computeMarketHeatingIndex(signals, intents);
+  const narrativeConvergenceScore = computeNarrativeConvergenceScore(signals);
+  const angleSaturationLevel = computeAngleSaturationLevel(signals);
   return {
-    marketHeatingIndex: computeMarketHeatingIndex(signals, intents),
-    narrativeConvergenceScore: computeNarrativeConvergenceScore(signals),
+    marketHeatingIndex,
+    narrativeConvergenceScore,
     offerCompressionIndex: computeOfferCompressionIndex(signals),
-    angleSaturationLevel: computeAngleSaturationLevel(signals),
+    angleSaturationLevel,
     revivalPotential: computeRevivalPotential(signals, intents),
     marketActivityLevel: computeMarketActivityLevel(signals),
     demandConfidence: computeDemandConfidence(eq, signals),
+    marketCompressionScore: computeMarketCompressionScore(narrativeConvergenceScore, angleSaturationLevel, marketHeatingIndex),
   };
 }
 

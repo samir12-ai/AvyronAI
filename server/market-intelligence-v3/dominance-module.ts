@@ -1,4 +1,4 @@
-import type { CompetitorSignalResult, ConfidenceResult, DominanceResult, GoalMode } from "./types";
+import type { CompetitorSignalResult, ConfidenceResult, DominanceResult, DominanceModeMetadata, GoalMode } from "./types";
 import { GOAL_MODE_WEIGHTS, ENGAGEMENT_BIAS_THRESHOLD } from "./constants";
 
 function clamp01(v: number): number {
@@ -82,6 +82,11 @@ export function computeDominanceForCompetitor(
 
   const engagementBiasRisk = detectEngagementBiasRisk(engagementScore, rawScore, goalMode);
 
+  const dominanceModeMetadata: DominanceModeMetadata = {
+    mode: goalMode,
+    weights: { ...weights },
+  };
+
   return {
     competitorId: signal.competitorId,
     competitorName: signal.competitorName,
@@ -90,6 +95,7 @@ export function computeDominanceForCompetitor(
     weaknesses: identifyWeaknesses(signal),
     strengths: identifyStrengths(signal),
     engagementWeightBiasRisk: engagementBiasRisk,
+    dominanceModeMetadata,
   };
 }
 

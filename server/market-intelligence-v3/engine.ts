@@ -392,7 +392,31 @@ export function buildOpportunitySignals(confidence: any, trajectory: any, intent
     opportunities.push("No dormant competitor re-entry signals detected — market entrant activity is stable");
   }
 
-  return opportunities;
+  return sanitizeOpportunitySignals(opportunities);
+}
+
+const OPPORTUNITY_PRESCRIPTIVE_PATTERNS = [
+  /\byou should\b/i,
+  /\brecommend\b/i,
+  /\btry (?:to |using )/i,
+  /\bconsider (?:targeting|positioning|using|shifting)/i,
+  /\bfocus (?:on |your )/i,
+  /\btarget (?:this|these|the|your)/i,
+  /\bposition (?:yourself|your brand)/i,
+  /\bleverage (?:this|these)/i,
+  /\bcreate (?:content|campaigns|ads) (?:that|to|for)/i,
+  /\bswitch (?:to|your)/i,
+  /\badjust your/i,
+  /\boptimize (?:for|your)/i,
+];
+
+function sanitizeOpportunitySignals(signals: string[]): string[] {
+  return signals.filter(signal => {
+    for (const pattern of OPPORTUNITY_PRESCRIPTIVE_PATTERNS) {
+      if (pattern.test(signal)) return false;
+    }
+    return true;
+  });
 }
 
 function fmt(val: number): string {
