@@ -21,6 +21,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCreativeContext } from '@/context/CreativeContext';
 import { useApp } from '@/context/AppContext';
 import { useCampaign } from '@/context/CampaignContext';
+import { normalizeEngineSnapshot } from '@/lib/engine-snapshot';
 
 interface DataCoverage {
   postsCollected: number;
@@ -113,6 +114,8 @@ export default function CompetitiveIntelligence() {
     queryFn: async () => {
       const res = await fetch(new URL(`/api/ci/mi-v3/snapshot/${activeCampaignId}?accountId=default`, baseUrl).toString());
       const data = await res.json();
+      const normalized = normalizeEngineSnapshot(data, 'mi');
+      if (normalized && data.output) return { ...data, snapshot: normalized.snapshot };
       if (data.snapshot && data.output) return data;
       return null;
     },

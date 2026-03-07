@@ -6,6 +6,8 @@ import { MarketIntelligenceV3, validateEngineIsolation, rejectBlockedEngine, ass
 import { logAudit } from "../audit";
 import { requireCampaign } from "../campaign-routes";
 import { getFetchJobStatus, startFetchJob } from "./fetch-orchestrator";
+import { getEngineReadinessState, verifySnapshotIntegrity } from "./engine-state";
+import { ENGINE_VERSION } from "./constants";
 import type { MIv3Mode } from "./types";
 
 const ALLOWED_MODES: MIv3Mode[] = ["overview", "dominance", "threats", "history"];
@@ -70,11 +72,13 @@ export function registerMIv3Routes(app: Express) {
         .limit(1);
 
       if (snapshots.length === 0) {
-        return res.json({ snapshot: null, message: "No snapshot available. Run analysis first." });
+        return res.json({ snapshot: null, engineState: "REFRESH_REQUIRED", message: "No snapshot available. Run analysis first." });
       }
 
-      const result = buildResultFromSnapshot(snapshots[0]);
-      return res.json({ snapshot: snapshots[0], ...result });
+      const snapshot = snapshots[0];
+      const readiness = getEngineReadinessState(snapshot, campaignId, ENGINE_VERSION);
+      const result = buildResultFromSnapshot(snapshot);
+      return res.json({ snapshot, ...result, engineState: readiness.state, engineDiagnostics: readiness.diagnostics });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }

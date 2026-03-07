@@ -219,7 +219,7 @@ async function getCachedSnapshot(accountId: string, campaignId: string, competit
   return { snapshot, invalidationReason: null };
 }
 
-function computeDataFreshnessDays(competitors: CompetitorInput[]): number {
+export function computeDataFreshnessDays(competitors: CompetitorInput[]): number {
   if (competitors.length === 0) return 999;
   const now = Date.now();
   let newest = 0;
@@ -228,9 +228,45 @@ function computeDataFreshnessDays(competitors: CompetitorInput[]): number {
       const t = new Date(p.timestamp).getTime();
       if (!isNaN(t) && t > newest) newest = t;
     }
+    for (const cm of c.comments || []) {
+      const t = new Date(cm.timestamp).getTime();
+      if (!isNaN(t) && t > newest) newest = t;
+    }
   }
   if (newest === 0) return 999;
-  return Math.round((now - newest) / (1000 * 60 * 60 * 24));
+  const days = Math.max(0, Math.round((now - newest) / (1000 * 60 * 60 * 24)));
+  if (days > 365) {
+    let recentSignalExists = false;
+    const recentThreshold = now - 365 * 24 * 60 * 60 * 1000;
+    for (const c of competitors) {
+      for (const p of c.posts || []) {
+        const t = new Date(p.timestamp).getTime();
+        if (!isNaN(t) && t > recentThreshold) { recentSignalExists = true; break; }
+      }
+      if (recentSignalExists) break;
+      for (const cm of c.comments || []) {
+        const t = new Date(cm.timestamp).getTime();
+        if (!isNaN(t) && t > recentThreshold) { recentSignalExists = true; break; }
+      }
+      if (recentSignalExists) break;
+    }
+    if (recentSignalExists) {
+      console.log(`[MIv3] FRESHNESS_ANOMALY_GUARD: computed ${days}d but recent signals exist — recomputing`);
+      let corrected = 0;
+      for (const c of competitors) {
+        for (const p of c.posts || []) {
+          const t = new Date(p.timestamp).getTime();
+          if (!isNaN(t) && t > corrected && t <= now) corrected = t;
+        }
+        for (const cm of c.comments || []) {
+          const t = new Date(cm.timestamp).getTime();
+          if (!isNaN(t) && t > corrected && t <= now) corrected = t;
+        }
+      }
+      if (corrected > 0) return Math.round((now - corrected) / (1000 * 60 * 60 * 24));
+    }
+  }
+  return days;
 }
 
 export function computeVolatilityIndex(signalResults: any[]): number {
@@ -585,7 +621,18 @@ export class MarketIntelligenceV3 {
       caller: ISOLATION_ALLOWED_CALLER,
     }).catch(() => {});
 
-    const competitors = await getCompetitorData(accountId, campaignId);
+    const allCompetitors = await getCompetitorData(accountId, campaignId);
+    const competitors = allCompetitors.filter(c => {
+      const postCount = c.posts?.length || 0;
+      if (postCount === 0) {
+        console.log(`[MIv3] SCRAPING_RESILIENCE: skipping competitor ${c.name} (${c.id.slice(0, 8)}) — 0 posts, marked temporarily unavailable`);
+        return false;
+      }
+      return true;
+    });
+    if (competitors.length === 0 && allCompetitors.length > 0) {
+      console.log(`[MIv3] SCRAPING_RESILIENCE: all ${allCompetitors.length} competitors have 0 posts — cannot proceed`);
+    }
     const competitorHash = computeCompetitorHash(competitors);
 
     let cacheInvalidationReason: import("./types").CacheInvalidationReason = null;

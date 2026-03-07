@@ -18,6 +18,8 @@ import {
   type StabilityResult,
   FLANKING_STRATEGIES,
 } from "./constants";
+import { verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
+import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/constants";
 
 interface PositioningEngineResult {
   status: PositioningStatus;
@@ -630,6 +632,20 @@ export async function runPositioningEngine(
   if (miSnapshot.campaignId !== campaignId) {
     const executionTimeMs = Date.now() - startTime;
     return buildEmptyResult("MISSING_DEPENDENCY", `MI snapshot ${miSnapshotId} belongs to campaign ${miSnapshot.campaignId}, not ${campaignId}`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+  }
+
+  const miIntegrity = verifySnapshotIntegrity(miSnapshot, MI_ENGINE_VERSION, campaignId);
+  if (!miIntegrity.valid) {
+    console.log(`[PositioningEngine-V3] MI snapshot integrity failed: ${miIntegrity.failures.join(", ")}`);
+    const executionTimeMs = Date.now() - startTime;
+    return buildEmptyResult("MISSING_DEPENDENCY", `MI snapshot integrity verification failed: ${miIntegrity.failures.join("; ")}`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+  }
+
+  const miFreshness = miSnapshot.dataFreshnessDays;
+  if (miFreshness !== null && miFreshness !== undefined && miFreshness > 14) {
+    console.log(`[PositioningEngine-V3] MI data stale: ${miFreshness}d exceeds 14d threshold — requires MI refresh first`);
+    const executionTimeMs = Date.now() - startTime;
+    return buildEmptyResult("MISSING_DEPENDENCY", `MI data is stale (${miFreshness}d) — refresh Market Intelligence before running Positioning`, executionTimeMs, miSnapshotId, audienceSnapshotId);
   }
 
   const [audienceSnapshot] = await db.select().from(audienceSnapshots)

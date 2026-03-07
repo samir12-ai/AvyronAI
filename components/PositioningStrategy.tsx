@@ -13,6 +13,7 @@ import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl } from '@/lib/query-client';
+import { normalizeEngineSnapshot, isEngineReady } from '@/lib/engine-snapshot';
 import { useColorScheme } from 'react-native';
 
 interface Territory {
@@ -95,8 +96,9 @@ export default function PositioningStrategy() {
   const { selectedCampaignId } = useCampaign();
 
   const [snapshot, setSnapshot] = useState<PositioningSnapshot | null>(null);
-  const [miSnapshot, setMiSnapshot] = useState<any>(null);
-  const [audienceSnapshot, setAudienceSnapshot] = useState<any>(null);
+  const [miNormalized, setMiNormalized] = useState<ReturnType<typeof normalizeEngineSnapshot>>(null);
+  const [audNormalized, setAudNormalized] = useState<ReturnType<typeof normalizeEngineSnapshot>>(null);
+  const [miEngineState, setMiEngineState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
 
@@ -110,17 +112,28 @@ export default function PositioningStrategy() {
         fetch(new URL(`/api/ci/mi-v3/snapshot/${selectedCampaignId}`, baseUrl).toString()),
         fetch(new URL(`/api/audience-engine/latest?campaignId=${selectedCampaignId}`, baseUrl).toString()),
       ]);
-      if (posRes.ok) { const d = await posRes.json(); setSnapshot(d); }
-      if (miRes.ok) { const d = await miRes.json(); setMiSnapshot(d?.snapshot || d); }
-      if (audRes.ok) { const d = await audRes.json(); setAudienceSnapshot(d); }
+      if (posRes.ok) {
+        const d = await posRes.json();
+        const norm = normalizeEngineSnapshot(d, 'positioning');
+        setSnapshot(norm?.snapshot || d);
+      }
+      if (miRes.ok) {
+        const d = await miRes.json();
+        setMiEngineState(d.engineState || null);
+        setMiNormalized(normalizeEngineSnapshot(d, 'mi'));
+      }
+      if (audRes.ok) {
+        const d = await audRes.json();
+        setAudNormalized(normalizeEngineSnapshot(d, 'audience'));
+      }
     } catch {}
     setLoading(false);
   }, [selectedCampaignId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const hasMI = !!miSnapshot?.id;
-  const hasAudience = !!audienceSnapshot?.id;
+  const hasMI = isEngineReady(miNormalized, selectedCampaignId, miEngineState);
+  const hasAudience = isEngineReady(audNormalized, selectedCampaignId);
   const hasDependencies = hasMI && hasAudience;
 
   const runAnalysis = async () => {
@@ -132,8 +145,8 @@ export default function PositioningStrategy() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           campaignId: selectedCampaignId,
-          miSnapshotId: miSnapshot.id,
-          audienceSnapshotId: audienceSnapshot.id,
+          miSnapshotId: miNormalized?.metadata.id,
+          audienceSnapshotId: audNormalized?.metadata.id,
         }),
       });
       if (!res.ok) {

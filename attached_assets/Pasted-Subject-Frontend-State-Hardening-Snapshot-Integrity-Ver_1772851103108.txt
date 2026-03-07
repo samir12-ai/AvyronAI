@@ -1,0 +1,217 @@
+Subject: Frontend State Hardening & Snapshot Integrity Verification (MI / Audience / Positioning)
+
+Hello Replit,
+
+Now that the MI v3 status bug has been fixed and verified, we need to perform a final frontend state hardening pass to guarantee long-term reliability of the engine orchestration system.
+
+The goal is to eliminate any possibility of false engine states, stale snapshot interpretation, or UI/backend desynchronization.
+
+This is not a cosmetic change — it is a system integrity check to ensure the AI Control Center always reflects the real engine state.
+
+Please complete the following verification and improvements.
+
+--------------------------------------------------
+
+1. Central Snapshot Normalization Layer
+
+Create a single frontend adapter responsible for normalizing all snapshot API responses before they reach UI components.
+
+Problem observed:
+Some endpoints return responses structured like:
+
+{ snapshot: { id: "...", ... }, output: {...} }
+
+while some components expect:
+
+{ id: "...", ... }
+
+Solution:
+
+Implement a normalization helper such as:
+
+normalizeEngineSnapshot(response)
+
+Expected output structure:
+
+{
+  snapshot,
+  output,
+  metadata
+}
+
+All engine components must consume normalized data only.
+
+Apply this normalization to:
+
+• MI v3 snapshot endpoint  
+• Audience v3 snapshot endpoint  
+• Positioning snapshot endpoint  
+• Any future strategy engine snapshot endpoints
+
+No component should read raw API responses directly.
+
+--------------------------------------------------
+
+2. Engine Readiness State Validation
+
+Replace simple checks like:
+
+hasMI = !!miSnapshot?.id
+
+with a strict readiness validation layer.
+
+Create a helper such as:
+
+getEngineReadinessState()
+
+An engine should only be considered READY if all conditions are met:
+
+MI Engine:
+• Snapshot exists
+• Status = COMPLETE
+• Freshness within allowed window
+• Snapshot campaignId matches current campaign
+• Confidence above minimal threshold
+
+Audience Engine:
+• Snapshot exists
+• Dataset validation passed
+• Signals sufficient
+• Not in DEFENSIVE_MODE
+
+Positioning Engine:
+• MI dependency satisfied
+• Audience dependency satisfied
+• Snapshot exists
+• Stability guard passed
+
+The UI status indicators must rely only on this readiness helper.
+
+--------------------------------------------------
+
+3. Snapshot Integrity Verification
+
+Add validation logic to detect corrupted or incomplete snapshot responses.
+
+Verification checks:
+
+• snapshot.id exists and is a valid UUID
+• snapshot.campaignId matches active campaign
+• snapshot.engine_version matches expected version
+• snapshot.createdAt is a valid timestamp
+• output payload exists and is non-empty
+
+If any of these checks fail:
+
+• Mark snapshot as INVALID
+• Prevent downstream engines from running
+• Display diagnostic warning in logs
+
+--------------------------------------------------
+
+4. Freshness and Cache Safety
+
+Ensure cached snapshots cannot bypass freshness gates.
+
+Required checks:
+
+• If data age exceeds the freshness threshold, cached snapshots must not be used
+• The UI must not display stale snapshots as valid engine states
+• A refresh must be triggered automatically when stale data is detected
+
+Confirm that:
+
+cached snapshots never override freshness validation.
+
+--------------------------------------------------
+
+5. Engine Dependency Graph Validation
+
+Implement a runtime dependency validation layer before allowing any engine execution.
+
+Dependencies must be enforced as:
+
+MI v3 → Audience v3 → Positioning v3
+
+Before running Positioning:
+
+Verify:
+
+• MI readiness state = READY
+• Audience readiness state = READY
+• Both snapshots belong to the same campaign
+• Both snapshots were generated from compatible engine versions
+
+If any dependency fails, the UI must block execution.
+
+--------------------------------------------------
+
+6. Cross-Engine Consistency Check
+
+Add a verification step to confirm that:
+
+• Audience snapshot references the correct MI snapshot ID
+• Positioning snapshot references the correct Audience and MI snapshot IDs
+• No cross-campaign data leakage exists
+
+Any mismatch must invalidate the downstream engine state.
+
+--------------------------------------------------
+
+7. Defensive Frontend Logging
+
+Add structured console diagnostics for engine state resolution.
+
+Example debug output:
+
+Engine Status Resolution:
+
+MI:
+  snapshotFound: true
+  freshnessValid: true
+  campaignMatch: true
+  readiness: READY
+
+Audience:
+  snapshotFound: true
+  signalDensity: sufficient
+  readiness: READY
+
+Positioning:
+  dependencyCheck: passed
+  readiness: READY
+
+This logging is only for development and debugging.
+
+--------------------------------------------------
+
+8. Hard Validation Test Pass
+
+After implementing these safeguards, perform verification tests covering:
+
+• Nested snapshot response structures
+• Missing snapshot IDs
+• Invalid campaignId mismatches
+• Stale snapshot behavior
+• Cached snapshot overrides
+• Engine dependency violations
+• Partial or corrupted snapshot payloads
+
+All scenarios must resolve to correct UI state behavior.
+
+--------------------------------------------------
+
+9. Final Confirmation
+
+Please confirm that:
+
+• Snapshot normalization is implemented centrally
+• Engine readiness checks use strict validation logic
+• Freshness gates cannot be bypassed by cache
+• Engine dependency graph enforcement is active
+• Snapshot integrity validation is implemented
+• All verification tests pass successfully
+
+The objective is to ensure that the frontend state system becomes fully deterministic and resistant to silent failures.
+
+Thank you.
