@@ -437,6 +437,7 @@ function layer7_opportunityGapDetection(
   category: string = "general",
   narrativeMap: Record<string, string[]> = {},
   contentDna: any[] = [],
+  competitionIntensityScore: number = 0,
 ): OpportunityGap[] {
   const pains = safeJsonParse(audienceData.audiencePains, []);
   const desires = safeJsonParse(audienceData.desireMap, []);
@@ -469,11 +470,15 @@ function layer7_opportunityGapDetection(
 
     const specificity = computeSpecificityScore(t.name, category);
 
+    const intensityPenalty = competitionIntensityScore >= 0.45
+      ? Math.min(0.10, competitionIntensityScore * 0.15)
+      : 0;
     const opportunityScore =
       (1 - satLevel) * 0.40 +
       t.demand * 0.35 +
       (1 - compAuth) * 0.15 +
-      specificity * 0.10;
+      specificity * 0.10 -
+      intensityPenalty;
 
     return {
       territory: t.name,
@@ -921,7 +926,9 @@ export async function runPositioningEngine(
   console.log(`[PositioningEngine-V3] L6 Market power: ${marketPower.length} competitors | gap=${authorityGap.toFixed(2)} | flanking=${flankingMode}`);
 
   const contentDna = safeJsonParse(miSnapshot.contentDnaData, []);
-  const opportunityGaps = layer7_opportunityGapDetection(narrativeSaturation, audienceSnapshot, marketPower, category, narrativeMap, contentDna);
+  const miTrajectory = safeJsonParse(miSnapshot.trajectoryData, {});
+  const competitionIntensityFromMI = miTrajectory.competitionIntensityScore || 0;
+  const opportunityGaps = layer7_opportunityGapDetection(narrativeSaturation, audienceSnapshot, marketPower, category, narrativeMap, contentDna, competitionIntensityFromMI);
   console.log(`[PositioningEngine-V3] L7 Opportunities: ${opportunityGaps.length} viable territories`);
 
   const differentiationAxes = layer8_differentiationAxisConstruction(opportunityGaps, trustGaps, flankingMode);

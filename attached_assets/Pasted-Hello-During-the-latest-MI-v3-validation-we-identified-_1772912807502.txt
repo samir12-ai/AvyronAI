@@ -1,0 +1,87 @@
+Hello,
+
+During the latest MI v3 validation we identified a structural interpretation issue that must be corrected to guarantee analytical reliability for downstream engines (Audience v3, Positioning v3, and the upcoming Differentiation Engine).
+
+The system currently classified the market as LOW_ACTIVITY / COOLING despite the campaign containing 10 competitors in a structurally competitive agency market. Confidence and freshness were correct, which confirms the issue is not data quality but how market activity is interpreted.
+
+The root cause appears to be that the MI engine evaluates short-term competitor motion (posting shifts, engagement volatility, CTA changes, experimentation) but does not separately model structural competition intensity of the category. As a result, a crowded market with temporarily stable competitors can be incorrectly interpreted as a weak or cooling market.
+
+This misclassification propagates risk to downstream systems:
+- Audience Engine may underestimate demand intensity
+- Positioning Engine may assume artificial whitespace
+- Differentiation Engine may build strategies on incorrect market pressure assumptions
+
+To close this permanently, the MI system must distinguish between Market Activity and Market Competition Intensity.
+
+Required Improvements
+
+1. Structural Competition Metric  
+Add a persistent internal metric representing Category Competition Intensity based on:
+- number of competitors analyzed
+- content volume across competitors
+- narrative diversity
+- engagement density
+- posting baseline frequency
+
+This metric should remain stable even if short-term motion is low.
+
+2. Activity vs Competition Separation  
+The MI output should represent two different realities:
+
+Market Activity → short-term competitor motion  
+Market Competition Intensity → structural market crowdedness
+
+A valid outcome example would be:
+Market Activity: Low  
+Competition Intensity: High  
+Trajectory: Cooling  
+
+3. Trajectory Guardrail  
+The trajectory engine must not classify a market as structurally weak if:
+- competitor count exceeds the high-density threshold
+- content volume indicates active category presence
+
+4. Demand Signal Stabilization  
+Demand estimation should not collapse when competitor behavior is stable. Demand should incorporate:
+- language signals
+- audience signals from comments
+- engagement density
+- content output
+
+5. Downstream Protection  
+Ensure the following engines consume the corrected signal model:
+- Audience Engine (signal weighting)
+- Positioning Engine (opportunity gap scoring)
+- Differentiation Engine (territory validation)
+
+No downstream engine should interpret “low activity” as “low competition”.
+
+6. Diagnostics Transparency  
+Expose internal diagnostics in MI telemetry so we can audit:
+- activityScore
+- competitionIntensityScore
+- trajectoryReason
+- signalCoverage
+
+7. Regression Protection  
+Add validation tests ensuring the following scenario passes:
+
+If competitorCount ≥ high-density threshold AND posting baseline exists →  
+competitionIntensity must not evaluate as low even if short-term activity drops.
+
+Acceptance Criteria
+
+The fix is considered complete only when:
+
+- MI correctly separates structural competition from motion
+- Markets with many competitors cannot appear structurally weak
+- Demand and trajectory calculations remain logically consistent
+- Audience and Positioning engines receive corrected signals
+- Full regression tests pass without schema changes
+- Existing snapshots remain backward compatible
+
+This correction is critical because MI v3 is the foundational intelligence layer feeding the rest of the strategy pipeline.
+
+Please implement the adjustments and confirm once verified.
+
+Thank you.

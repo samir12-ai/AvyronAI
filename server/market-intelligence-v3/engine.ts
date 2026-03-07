@@ -3,7 +3,7 @@ import { miSnapshots, miSignalLogs, miTelemetry, ciCompetitors, growthCampaigns 
 import { eq, and, desc } from "drizzle-orm";
 import { computeAllSignals, aggregateMissingFlags, classifyEngagementQuality, detectAudienceIntentSignals } from "./signal-engine";
 import { classifyAllIntents, computeDominantMarketIntent } from "./intent-engine";
-import { computeTrajectory, deriveTrajectoryDirection, deriveMarketState } from "./trajectory-engine";
+import { computeTrajectory, deriveTrajectoryDirection, deriveMarketState, deriveCompetitionIntensityLevel } from "./trajectory-engine";
 import { computeConfidence } from "./confidence-engine";
 import { computeAllDominance } from "./dominance-module";
 import { computeTokenBudget, applySampling } from "./token-budget";
@@ -314,6 +314,8 @@ export function buildMarketDiagnosis(confidence: any, trajectory: any, dominantI
       return "Competitor activity levels are rising. Posting frequency and engagement signals show upward movement across the tracked set.";
     case "COOLING":
       return "Market activity density is currently low. Consistent publisher presence is uncommon across analyzed competitors.";
+    case "STABLE_COMPETITIVE":
+      return "Short-term competitor motion is low but structural competition is high. The market has multiple established competitors with active content presence. Low activity does not indicate low competition.";
     case "SATURATED":
       return "Content angle overlap is high across competitors. Format experimentation is limited. Most creators are using similar hooks and narratives.";
     case "COMPRESSING":
@@ -740,7 +742,7 @@ export class MarketIntelligenceV3 {
     let narrativeSynthesis: string | null = null;
     if (executionMode !== "LIGHT" && confidence.guardDecision !== "BLOCK") {
       try {
-        narrativeSynthesis = buildMarketSummary(marketState, trajectoryDirection, dominantIntent, confidence, intents);
+        narrativeSynthesis = buildMarketSummary(marketState, trajectoryDirection, dominantIntent, confidence, intents, deriveCompetitionIntensityLevel(trajectory.competitionIntensityScore));
         telemetry.actualTokensUsed = 0;
       } catch (err) {
         console.error(`[MIv3] Narrative synthesis failed, returning deterministic only:`, err);
@@ -845,6 +847,8 @@ export class MarketIntelligenceV3 {
       engagementQuality,
       marketActivityLevel: trajectory.marketActivityLevel,
       demandConfidence: trajectory.demandConfidence,
+      competitionIntensityScore: trajectory.competitionIntensityScore,
+      competitionIntensityLevel: deriveCompetitionIntensityLevel(trajectory.competitionIntensityScore),
       audienceIntentSignals,
     };
 
@@ -885,6 +889,7 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
     revivalPotential: 0,
     marketActivityLevel: 0,
     demandConfidence: 0,
+    competitionIntensityScore: 0,
   });
   const dominanceData = parseJsonSafe(snapshot.dominanceData, []);
   const confidenceData = parseJsonSafe(snapshot.confidenceData, {
@@ -936,6 +941,8 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
     engagementQuality: { highIntentCount: 0, lowValueCount: 0, engagementQualityRatio: 0 },
     marketActivityLevel: trajectoryData.marketActivityLevel || 0,
     demandConfidence: trajectoryData.demandConfidence || 0,
+    competitionIntensityScore: trajectoryData.competitionIntensityScore || 0,
+    competitionIntensityLevel: deriveCompetitionIntensityLevel(trajectoryData.competitionIntensityScore || 0),
     audienceIntentSignals: [],
   };
 
@@ -984,11 +991,15 @@ export function buildMarketSummary(
   dominantIntent: string,
   confidence: any,
   intents: any[],
+  competitionIntensityLevel?: string,
 ): string {
   const parts: string[] = [];
 
   parts.push(`Market State: ${marketState}.`);
   parts.push(`Trajectory: ${direction}.`);
+  if (competitionIntensityLevel) {
+    parts.push(`Competition Intensity: ${competitionIntensityLevel}.`);
+  }
   parts.push(`Dominant competitor intent: ${dominantIntent}.`);
   parts.push(`Confidence: ${confidence.level} (${(confidence.overall * 100).toFixed(1)}%).`);
 

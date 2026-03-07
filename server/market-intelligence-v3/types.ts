@@ -71,6 +71,7 @@ export interface TrajectoryData {
   marketActivityLevel: number;
   demandConfidence: number;
   marketCompressionScore: number;
+  competitionIntensityScore: number;
 }
 
 export interface DominanceModeMetadata {
@@ -178,6 +179,8 @@ export interface MIv3Output {
   engagementQuality: EngagementQuality;
   marketActivityLevel: number;
   demandConfidence: number;
+  competitionIntensityScore: number;
+  competitionIntensityLevel: string;
   audienceIntentSignals: string[];
 }
 

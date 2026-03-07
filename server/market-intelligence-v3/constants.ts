@@ -17,7 +17,7 @@
  * All snapshots with analysisVersion !== ENGINE_VERSION are cache-rejected
  * and recomputed on next access. Unnecessary bumps cause recompute storms.
  */
-export const ENGINE_VERSION = 12;
+export const ENGINE_VERSION = 13;
 
 export const MI_THRESHOLDS = {
   MIN_POSTS_PER_COMPETITOR: 14,
@@ -74,6 +74,14 @@ export const MI_REFRESH = {
 } as const;
 
 export const MI_REVIVAL_CAP = 0.7;
+
+export const MI_COMPETITION_INTENSITY = {
+  HIGH_DENSITY_COMPETITOR_THRESHOLD: 5,
+  MODERATE_DENSITY_COMPETITOR_THRESHOLD: 3,
+  HIGH_CONTENT_VOLUME_PER_COMPETITOR: 10,
+  ENGAGEMENT_DENSITY_FLOOR: 0.15,
+  POSTING_BASELINE_FLOOR: 0.10,
+} as const;
 
 export const GOAL_MODE_WEIGHTS = {
   REACH_MODE: {

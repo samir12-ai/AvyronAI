@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { computeAllSignals, aggregateMissingFlags } from "../market-intelligence-v3/signal-engine";
 import { classifyAllIntents, computeDominantMarketIntent } from "../market-intelligence-v3/intent-engine";
-import { computeTrajectory, deriveTrajectoryDirection, deriveMarketState } from "../market-intelligence-v3/trajectory-engine";
+import { computeTrajectory, deriveTrajectoryDirection, deriveMarketState, computeCompetitionIntensity, deriveCompetitionIntensityLevel } from "../market-intelligence-v3/trajectory-engine";
 import { computeConfidence, evaluateSignalStabilityGuard } from "../market-intelligence-v3/confidence-engine";
 import { computeAllDominance } from "../market-intelligence-v3/dominance-module";
 import { computeTokenBudget, applySampling } from "../market-intelligence-v3/token-budget";
@@ -1570,9 +1570,9 @@ describe("Layer-0 Signal-Only Contract", () => {
     expect(a.isDepressed).toBe(b.isDepressed);
   });
 
-  it("ENGINE_VERSION is 12", () => {
+  it("ENGINE_VERSION is 13", () => {
     const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
-    expect(source).toContain("export const ENGINE_VERSION = 12;");
+    expect(source).toContain("export const ENGINE_VERSION = 13;");
   });
 
   it("schema uses market_diagnosis and threat_signals columns (not old names)", () => {
@@ -1591,5 +1591,209 @@ describe("Layer-0 Signal-Only Contract", () => {
     expect(source).not.toContain("label: 'Actions'");
     expect(source).toContain("renderThreats");
     expect(source).not.toContain("renderRecommendations");
+  });
+
+  describe("Competition Intensity — Activity vs Structure Separation", () => {
+    const makeSignals = (count: number, overrides: Partial<any> = {}): any[] => {
+      return Array.from({ length: count }, (_, i) => ({
+        competitorId: `comp_${i}`,
+        competitorName: `Competitor ${i}`,
+        signals: {
+          postingFrequencyTrend: 0.05,
+          engagementVolatility: 0.3,
+          ctaIntensityShift: 0.05,
+          offerLanguageChange: 0.02,
+          hashtagDriftScore: 0.2,
+          bioModificationFrequency: 0.1,
+          sentimentDrift: 0.05,
+          reviewVelocityChange: 0,
+          contentExperimentRate: 0.1,
+          ...overrides,
+        },
+        signalCoverageScore: 0.7,
+        sourceReliabilityScore: 0.75,
+        sampleSize: 30,
+        timeWindowDays: 30,
+        varianceScore: 0.05,
+        dominantSourceRatio: 1 / count,
+        missingFields: [],
+      }));
+    };
+
+    const defaultEQ = { highIntentCount: 5, lowValueCount: 10, engagementQualityRatio: 0.33 };
+
+    it("CI-1) High competitor count produces high competition intensity score", () => {
+      const signals = makeSignals(8);
+      const intensity = computeCompetitionIntensity(signals, defaultEQ);
+      expect(intensity).toBeGreaterThanOrEqual(0.45);
+      expect(deriveCompetitionIntensityLevel(intensity)).not.toBe("MINIMAL");
+    });
+
+    it("CI-2) Low competitor count produces low competition intensity score", () => {
+      const signals = makeSignals(2);
+      const intensity = computeCompetitionIntensity(signals, defaultEQ);
+      expect(intensity).toBeLessThan(0.70);
+    });
+
+    it("CI-3) competitionIntensityScore exists in TrajectoryData", () => {
+      const signals = makeSignals(6);
+      const intents = classifyAllIntents(signals);
+      const trajectory = computeTrajectory(signals, intents, defaultEQ);
+      expect(trajectory).toHaveProperty("competitionIntensityScore");
+      expect(typeof trajectory.competitionIntensityScore).toBe("number");
+    });
+
+    it("CI-4) deriveCompetitionIntensityLevel returns correct levels", () => {
+      expect(deriveCompetitionIntensityLevel(0.80)).toBe("HIGH");
+      expect(deriveCompetitionIntensityLevel(0.55)).toBe("MODERATE");
+      expect(deriveCompetitionIntensityLevel(0.30)).toBe("LOW");
+      expect(deriveCompetitionIntensityLevel(0.10)).toBe("MINIMAL");
+    });
+
+    it("CI-5) Market with many competitors + low short-term activity → NOT COOLING", () => {
+      const signals = makeSignals(8, {
+        postingFrequencyTrend: 0.05,
+        contentExperimentRate: 0.05,
+        ctaIntensityShift: 0.02,
+      });
+      const intents = classifyAllIntents(signals);
+      const trajectory = computeTrajectory(signals, intents, defaultEQ);
+      const direction = deriveTrajectoryDirection(trajectory);
+      expect(direction).not.toBe("COOLING");
+      expect(direction).not.toBe("STAGNANT_SATURATED");
+    });
+
+    it("CI-6) Market with many competitors → NOT LOW_ACTIVITY state", () => {
+      const signals = makeSignals(8, {
+        postingFrequencyTrend: 0.05,
+        contentExperimentRate: 0.05,
+      });
+      const intents = classifyAllIntents(signals);
+      const trajectory = computeTrajectory(signals, intents, defaultEQ);
+      const marketState = deriveMarketState(trajectory, "MODERATE");
+      expect(marketState).not.toBe("LOW_ACTIVITY");
+      expect(marketState).not.toBe("SATURATED_MARKET");
+    });
+
+    it("CI-7) STABLE_COMPETITIVE direction maps to ESTABLISHED_COMPETITION state", () => {
+      const signals = makeSignals(8, {
+        postingFrequencyTrend: 0.05,
+        contentExperimentRate: 0.05,
+      });
+      const intents = classifyAllIntents(signals);
+      const trajectory = computeTrajectory(signals, intents, defaultEQ);
+      const direction = deriveTrajectoryDirection(trajectory);
+      if (direction === "STABLE_COMPETITIVE") {
+        const state = deriveMarketState(trajectory, "MODERATE");
+        expect(state).toBe("ESTABLISHED_COMPETITION");
+      }
+    });
+
+    it("CI-8) Low competitor count + low activity → COOLING is still valid", () => {
+      const signals = makeSignals(2, {
+        postingFrequencyTrend: 0.02,
+        contentExperimentRate: 0.02,
+        ctaIntensityShift: 0.01,
+      });
+      const intents = classifyAllIntents(signals);
+      const intensity = computeCompetitionIntensity(signals, { highIntentCount: 0, lowValueCount: 0, engagementQualityRatio: 0 });
+      expect(deriveCompetitionIntensityLevel(intensity)).not.toBe("HIGH");
+    });
+
+    it("CI-9) MIv3Output includes competitionIntensityScore and competitionIntensityLevel", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/types.ts", "utf-8");
+      expect(source).toContain("competitionIntensityScore: number");
+      expect(source).toContain("competitionIntensityLevel: string");
+    });
+
+    it("CI-10) buildResultFromSnapshot provides competitionIntensityScore fallback for old snapshots", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+      expect(source).toContain("competitionIntensityScore: trajectoryData.competitionIntensityScore || 0");
+      expect(source).toContain("competitionIntensityLevel: deriveCompetitionIntensityLevel");
+    });
+
+    it("CI-11) MI_COMPETITION_INTENSITY constants are defined", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
+      expect(source).toContain("MI_COMPETITION_INTENSITY");
+      expect(source).toContain("HIGH_DENSITY_COMPETITOR_THRESHOLD");
+      expect(source).toContain("MODERATE_DENSITY_COMPETITOR_THRESHOLD");
+    });
+
+    it("CI-12) Positioning Engine reads competitionIntensityScore from MI trajectory", () => {
+      const source = require("fs").readFileSync("server/positioning-engine/engine.ts", "utf-8");
+      expect(source).toContain("competitionIntensityScore");
+      expect(source).toContain("competitionIntensityFromMI");
+      expect(source).toContain("intensityPenalty");
+    });
+
+    it("CI-13) buildMarketDiagnosis handles STABLE_COMPETITIVE direction", () => {
+      const trajectory = {
+        marketHeatingIndex: 0.2,
+        narrativeConvergenceScore: 0.5,
+        offerCompressionIndex: 0.3,
+        angleSaturationLevel: 0.4,
+        revivalPotential: 0.3,
+        marketActivityLevel: 0.2,
+        demandConfidence: 0.5,
+        marketCompressionScore: 0.3,
+        competitionIntensityScore: 0.7,
+      };
+      const confidence = { overall: 0.7, level: "MODERATE", guardDecision: "PROCEED" };
+      const diagnosis = buildMarketDiagnosis(confidence, trajectory, "STABLE_DOMINANT");
+      expect(diagnosis).toContain("structural competition is high");
+    });
+
+    it("CI-14) Demand confidence does not collapse when competitor behavior is stable", () => {
+      const signals = makeSignals(8, {
+        postingFrequencyTrend: 0.02,
+        engagementVolatility: 0.25,
+        sentimentDrift: 0.01,
+      });
+      const eq = { highIntentCount: 3, lowValueCount: 8, engagementQualityRatio: 0.27 };
+      const trajectory = computeTrajectory(signals, classifyAllIntents(signals), eq);
+      expect(trajectory.demandConfidence).toBeGreaterThan(0.15);
+    });
+
+    it("CI-15) Competition intensity is stable even when short-term motion drops", () => {
+      const highMotion = makeSignals(8, { postingFrequencyTrend: 0.5, contentExperimentRate: 0.4 });
+      const lowMotion = makeSignals(8, { postingFrequencyTrend: 0.05, contentExperimentRate: 0.05 });
+
+      const highIntensity = computeCompetitionIntensity(highMotion, defaultEQ);
+      const lowIntensity = computeCompetitionIntensity(lowMotion, defaultEQ);
+
+      expect(Math.abs(highIntensity - lowIntensity)).toBeLessThan(0.30);
+      expect(lowIntensity).toBeGreaterThanOrEqual(0.40);
+    });
+
+    it("CI-16) High competitor count + posting data guarantees ≥MODERATE intensity floor", () => {
+      const signals = makeSignals(6, {
+        postingFrequencyTrend: 0.01,
+        contentExperimentRate: 0.01,
+        engagementVolatility: 0.05,
+        hashtagDriftScore: 0.01,
+      });
+      const eq = { highIntentCount: 0, lowValueCount: 0, engagementQualityRatio: 0 };
+      const intensity = computeCompetitionIntensity(signals, eq);
+      expect(intensity).toBeGreaterThanOrEqual(0.45);
+      expect(deriveCompetitionIntensityLevel(intensity)).not.toBe("LOW");
+      expect(deriveCompetitionIntensityLevel(intensity)).not.toBe("MINIMAL");
+    });
+
+    it("CI-17) Moderate competitor count with posts guarantees ≥LOW intensity floor", () => {
+      const signals = makeSignals(3, {
+        postingFrequencyTrend: 0.01,
+        contentExperimentRate: 0.01,
+        engagementVolatility: 0.05,
+      });
+      const eq = { highIntentCount: 0, lowValueCount: 0, engagementQualityRatio: 0 };
+      const intensity = computeCompetitionIntensity(signals, eq);
+      expect(intensity).toBeGreaterThanOrEqual(0.25);
+      expect(deriveCompetitionIntensityLevel(intensity)).not.toBe("MINIMAL");
+    });
+
+    it("CI-18) ENGINE_VERSION is 13 after competition intensity addition", () => {
+      const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
+      expect(source).toContain("export const ENGINE_VERSION = 13;");
+    });
   });
 });

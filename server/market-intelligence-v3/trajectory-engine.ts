@@ -1,5 +1,5 @@
 import type { CompetitorSignalResult, IntentResult, TrajectoryData, EngagementQuality } from "./types";
-import { MI_REVIVAL_CAP } from "./constants";
+import { MI_REVIVAL_CAP, MI_COMPETITION_INTENSITY } from "./constants";
 
 function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
@@ -97,7 +97,62 @@ export function computeDemandConfidence(engagementQuality: EngagementQuality, si
   const avgSentimentStrength = mean(signals.map(s => Math.abs(s.signals.sentimentDrift)));
   const dataWeight = Math.min(1, (engagementQuality.highIntentCount + engagementQuality.lowValueCount) / 20) * 0.3;
   const sentimentWeight = avgSentimentStrength * 0.2;
-  return clamp01(qualityWeight + dataWeight + sentimentWeight);
+
+  let base = clamp01(qualityWeight + dataWeight + sentimentWeight);
+
+  const avgEngagementVolatility = mean(signals.map(s => s.signals.engagementVolatility));
+  const engagementDensitySignal = clamp01(avgEngagementVolatility * 0.5 + (engagementQuality.highIntentCount > 0 ? 0.2 : 0));
+  const totalContent = signals.reduce((s, r) => s + r.sampleSize, 0);
+  const contentOutputSignal = clamp01(totalContent / (signals.length * 15));
+  const stabilizer = (engagementDensitySignal + contentOutputSignal) * 0.15;
+  base = clamp01(base + stabilizer);
+
+  return base;
+}
+
+export function computeCompetitionIntensity(signals: CompetitorSignalResult[], engagementQuality: EngagementQuality): number {
+  if (signals.length === 0) return 0;
+
+  const competitorCount = signals.length;
+  const competitorDensity = clamp01(competitorCount / MI_COMPETITION_INTENSITY.HIGH_DENSITY_COMPETITOR_THRESHOLD);
+
+  const avgPostsPerCompetitor = mean(signals.map(s => s.sampleSize > 0 ? Math.min(s.sampleSize, 40) : 0));
+  const contentVolume = clamp01(avgPostsPerCompetitor / MI_COMPETITION_INTENSITY.HIGH_CONTENT_VOLUME_PER_COMPETITOR);
+
+  const avgEngagementVolatility = mean(signals.map(s => s.signals.engagementVolatility));
+  const engagementDensity = clamp01(Math.max(avgEngagementVolatility, engagementQuality.engagementQualityRatio));
+
+  const avgFrequencyTrend = mean(signals.map(s => Math.abs(s.signals.postingFrequencyTrend)));
+  const postingBaseline = clamp01(avgFrequencyTrend + (avgPostsPerCompetitor > 0 ? 0.3 : 0));
+
+  const hashtagDrifts = signals.map(s => s.signals.hashtagDriftScore);
+  const avgDrift = mean(hashtagDrifts);
+  const experimentRates = signals.map(s => s.signals.contentExperimentRate);
+  const avgExperiment = mean(experimentRates);
+  const narrativeDiversity = clamp01(avgDrift * 0.5 + avgExperiment * 0.5);
+
+  let intensity = clamp01(
+    competitorDensity * 0.30 +
+    contentVolume * 0.25 +
+    engagementDensity * 0.15 +
+    postingBaseline * 0.15 +
+    narrativeDiversity * 0.15
+  );
+
+  if (competitorCount >= MI_COMPETITION_INTENSITY.HIGH_DENSITY_COMPETITOR_THRESHOLD && (avgPostsPerCompetitor > 0 || avgFrequencyTrend >= MI_COMPETITION_INTENSITY.POSTING_BASELINE_FLOOR)) {
+    intensity = Math.max(intensity, 0.45);
+  } else if (competitorCount >= MI_COMPETITION_INTENSITY.MODERATE_DENSITY_COMPETITOR_THRESHOLD && avgPostsPerCompetitor > 0) {
+    intensity = Math.max(intensity, 0.25);
+  }
+
+  return Math.round(intensity * 1000) / 1000;
+}
+
+export function deriveCompetitionIntensityLevel(score: number): string {
+  if (score >= 0.70) return "HIGH";
+  if (score >= 0.45) return "MODERATE";
+  if (score >= 0.25) return "LOW";
+  return "MINIMAL";
 }
 
 export function computeMarketCompressionScore(
@@ -121,6 +176,7 @@ export function computeTrajectory(
   const marketHeatingIndex = computeMarketHeatingIndex(signals, intents);
   const narrativeConvergenceScore = computeNarrativeConvergenceScore(signals);
   const angleSaturationLevel = computeAngleSaturationLevel(signals);
+  const competitionIntensityScore = computeCompetitionIntensity(signals, eq);
   return {
     marketHeatingIndex,
     narrativeConvergenceScore,
@@ -130,16 +186,24 @@ export function computeTrajectory(
     marketActivityLevel: computeMarketActivityLevel(signals),
     demandConfidence: computeDemandConfidence(eq, signals),
     marketCompressionScore: computeMarketCompressionScore(narrativeConvergenceScore, angleSaturationLevel, marketHeatingIndex),
+    competitionIntensityScore,
   };
 }
 
 export function deriveTrajectoryDirection(trajectory: TrajectoryData): string {
-  const { marketHeatingIndex, offerCompressionIndex, angleSaturationLevel } = trajectory;
+  const { marketHeatingIndex, offerCompressionIndex, angleSaturationLevel, competitionIntensityScore } = trajectory;
+  const highIntensity = competitionIntensityScore >= 0.45;
 
   if (marketHeatingIndex > 0.7 && offerCompressionIndex > 0.5) return "HEATING_COMPRESSED";
   if (marketHeatingIndex > 0.7) return "HEATING";
-  if (marketHeatingIndex < 0.3 && angleSaturationLevel > 0.7) return "STAGNANT_SATURATED";
-  if (marketHeatingIndex < 0.3) return "COOLING";
+  if (marketHeatingIndex < 0.3 && angleSaturationLevel > 0.7) {
+    if (highIntensity) return "STABLE_COMPETITIVE";
+    return "STAGNANT_SATURATED";
+  }
+  if (marketHeatingIndex < 0.3) {
+    if (highIntensity) return "STABLE_COMPETITIVE";
+    return "COOLING";
+  }
   if (offerCompressionIndex > 0.6) return "COMPRESSING";
   if (angleSaturationLevel > 0.7) return "SATURATED";
   return "STABLE";
@@ -157,6 +221,7 @@ export function deriveMarketState(trajectory: TrajectoryData, confidenceLevel: s
     case "COOLING": return "LOW_ACTIVITY";
     case "COMPRESSING": return "PRICE_PRESSURE";
     case "SATURATED": return "CONTENT_SATURATION";
+    case "STABLE_COMPETITIVE": return "ESTABLISHED_COMPETITION";
     default: return "MODERATE_ACTIVITY";
   }
 }
