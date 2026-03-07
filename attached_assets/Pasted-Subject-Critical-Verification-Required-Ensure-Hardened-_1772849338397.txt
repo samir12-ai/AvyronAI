@@ -1,0 +1,81 @@
+Subject: Critical Verification Required — Ensure Hardened Engine Versions Are Actually Active
+
+Hello Replit,
+
+We need to address an important issue in the deployment process.
+
+Recent hardening updates for the engines (MI v3 and currently Audience v3) appear to be implemented in the codebase, but the system behavior suggests that the previous logic may still be running at runtime.
+
+This means the updated logic might not be the active version being executed by the backend.
+
+Please perform a strict verification of the following points.
+
+--------------------------------------------------
+
+1. Runtime Code Verification
+
+Confirm that the currently running backend process is executing the latest engine code, not a cached or previously compiled version.
+
+Specifically verify:
+
+- The running server process has been fully restarted after code changes.
+- No stale build artifacts or cached modules are being used.
+- The runtime environment is loading the updated engine files.
+
+If necessary, force a full restart of the backend service.
+
+--------------------------------------------------
+
+2. Build / Cache Reset
+
+Ensure that any build or runtime cache is cleared before starting the server again.
+
+Verify that:
+
+- No compiled artifacts from older versions remain active.
+- The runtime is not using cached modules from a previous deployment.
+
+If required, rebuild the project from a clean state.
+
+--------------------------------------------------
+
+3. Engine Version Confirmation
+
+Explicitly confirm that the active engine versions at runtime match the intended hardened versions.
+
+Verify:
+
+- MI Engine → Version 12 (with hardening updates applied)
+- Audience Engine → Version 3 (with hardening updates applied)
+- Positioning Engine → Version 3
+
+These versions must be confirmed from the running backend, not only from the source files.
+
+--------------------------------------------------
+
+4. Functional Verification
+
+Run a test execution of each engine and verify that the new logic is actually being used.
+
+For MI v3 specifically confirm the presence of:
+
+- intentConfidence
+- marketCompressionScore
+- dominanceModeMetadata
+- opportunity signal guardrail filtering
+
+For Audience v3 confirm that the latest hardening logic is active once the implementation completes.
+
+--------------------------------------------------
+
+5. Final Confirmation
+
+Provide a short confirmation that includes:
+
+- Confirmation that the backend was restarted
+- Confirmation that no cached code is running
+- Confirmation that the active runtime logic reflects the latest hardened engine implementations
+
+The goal is to ensure that the system is actually running the latest engine logic and not an older cached version.
+
+Thank you.
