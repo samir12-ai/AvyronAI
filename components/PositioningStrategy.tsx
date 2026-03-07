@@ -111,7 +111,7 @@ export default function PositioningStrategy() {
         fetch(new URL(`/api/audience-engine/latest?campaignId=${selectedCampaignId}`, baseUrl).toString()),
       ]);
       if (posRes.ok) { const d = await posRes.json(); setSnapshot(d); }
-      if (miRes.ok) { const d = await miRes.json(); setMiSnapshot(d); }
+      if (miRes.ok) { const d = await miRes.json(); setMiSnapshot(d?.snapshot || d); }
       if (audRes.ok) { const d = await audRes.json(); setAudienceSnapshot(d); }
     } catch {}
     setLoading(false);
