@@ -292,3 +292,77 @@ describe("checkMIDependencyForDownstream", () => {
     expect(result.ready).toBe(false);
   });
 });
+
+describe("Strategic Gate ↔ MI v3 regression tests", () => {
+  const validSnapshot = {
+    id: "ad2d651a-1271-4a11-b9b7-031f5be03b4a",
+    createdAt: new Date().toISOString(),
+    campaignId: "campaign_gate_test",
+    analysisVersion: ENGINE_VERSION,
+    analysisOutput: { confidence: { overall: 0.8 } },
+    signalData: "{}",
+    dataFreshnessDays: 4,
+  };
+
+  it("gate passes when MI snapshot is valid and fresh", () => {
+    const result = getEngineReadinessState(validSnapshot, "campaign_gate_test", ENGINE_VERSION, 14);
+    expect(result.state).toBe("READY");
+    expect(result.diagnostics.integrityValid).toBe(true);
+    expect(result.diagnostics.freshnessValid).toBe(true);
+    expect(result.diagnostics.campaignIdMatch).toBe(true);
+  });
+
+  it("gate blocks when MI snapshot is missing", () => {
+    const result = getEngineReadinessState(null, "campaign_gate_test", ENGINE_VERSION, 14);
+    expect(result.state).not.toBe("READY");
+    expect(result.diagnostics.snapshotFound).toBe(false);
+  });
+
+  it("gate blocks when MI data is stale (>14 days)", () => {
+    const stale = { ...validSnapshot, dataFreshnessDays: 16 };
+    const result = getEngineReadinessState(stale, "campaign_gate_test", ENGINE_VERSION, 14);
+    expect(result.state).not.toBe("READY");
+    expect(result.diagnostics.freshnessValid).toBe(false);
+  });
+
+  it("gate blocks on campaign mismatch — prevents cross-campaign snapshot use", () => {
+    const result = getEngineReadinessState(validSnapshot, "different_campaign", ENGINE_VERSION, 14);
+    expect(result.state).not.toBe("READY");
+    expect(result.diagnostics.campaignIdMatch).toBe(false);
+  });
+
+  it("gate blocks on engine version mismatch — snapshot compatibility guard", () => {
+    const outdated = { ...validSnapshot, analysisVersion: ENGINE_VERSION - 1 };
+    const result = getEngineReadinessState(outdated, "campaign_gate_test", ENGINE_VERSION, 14);
+    expect(result.state).not.toBe("READY");
+    expect(result.diagnostics.versionMatch).toBe(false);
+  });
+
+  it("gate blocks on future engine version — forward compatibility guard", () => {
+    const futureVersion = { ...validSnapshot, analysisVersion: ENGINE_VERSION + 5 };
+    const result = getEngineReadinessState(futureVersion, "campaign_gate_test", ENGINE_VERSION, 14);
+    expect(result.state).not.toBe("READY");
+    expect(result.diagnostics.versionMatch).toBe(false);
+  });
+
+  it("gate blocks when output is missing — integrity failure", () => {
+    const noOutput = { ...validSnapshot, analysisOutput: null, signalData: null, confidenceData: null, marketState: null };
+    const result = getEngineReadinessState(noOutput, "campaign_gate_test", ENGINE_VERSION, 14);
+    expect(result.state).toBe("BLOCKED");
+    expect(result.diagnostics.integrityValid).toBe(false);
+  });
+
+  it("diagnostics always surface failure reasons for transparency", () => {
+    const bad = {
+      id: "not-a-uuid",
+      createdAt: null,
+      campaignId: "wrong",
+      analysisVersion: 0,
+      analysisOutput: null,
+      signalData: null,
+    };
+    const result = getEngineReadinessState(bad, "campaign_gate_test", ENGINE_VERSION, 14);
+    expect(result.state).not.toBe("READY");
+    expect(result.diagnostics.integrityFailures.length).toBeGreaterThan(0);
+  });
+});
