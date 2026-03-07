@@ -98,6 +98,11 @@ export function registerCiCompetitorRoutes(app: Express) {
         screenshotUrls: screenshotUrls || null,
         notes: notes || null,
         isDemo: false,
+        enrichmentStatus: "PENDING",
+        fetchMethod: null,
+        postsCollected: 0,
+        commentsCollected: 0,
+        dataFreshnessDays: null,
       }).returning();
 
       const validation = validateEvidence(competitor);
@@ -184,6 +189,14 @@ export function registerCiCompetitorRoutes(app: Express) {
         evidenceComplete: validation.complete,
         missingFields: validation.missing,
         requiredFields: REQUIRED_EVIDENCE_FIELDS,
+        inventory: {
+          analysisLevel: competitor.analysisLevel || "FAST_PASS",
+          enrichmentStatus: competitor.enrichmentStatus || "PENDING",
+          fetchMethod: competitor.fetchMethod,
+          postsCollected: competitor.postsCollected || 0,
+          commentsCollected: competitor.commentsCollected || 0,
+          dataFreshnessDays: competitor.dataFreshnessDays,
+        },
         data: {
           profileLink: competitor.profileLink,
           postingFrequency: competitor.postingFrequency,

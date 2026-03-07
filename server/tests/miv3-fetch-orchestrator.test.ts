@@ -958,7 +958,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       );
       const coverageFn = source.slice(
         source.indexOf("export async function getCompetitorDataCoverage"),
-        source.indexOf("export async function getCompetitorDataCoverage") + 500
+        source.indexOf("export async function getCompetitorDataCoverage") + 1000
       );
       expect(coverageFn).toContain("count(*)");
       expect(coverageFn).toContain("ciCompetitorPosts");
@@ -1211,7 +1211,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       );
       const coverageFn = source.slice(
         source.indexOf("export async function getCompetitorDataCoverage"),
-        source.indexOf("export async function getCompetitorDataCoverage") + 500
+        source.indexOf("export async function getCompetitorDataCoverage") + 1000
       );
       expect(coverageFn).toContain("count(*)");
       expect(coverageFn).toContain("ciCompetitorPosts");
@@ -2265,6 +2265,76 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(engineSource).toContain("ENGINE_VERSION");
       expect(engineSource).toContain("analysisVersion");
       expect(engineSource).toContain("SNAPSHOT_COMPLETION_CONTRACT_VIOLATED");
+    });
+
+    it("FP-25) New competitor creation initializes enrichmentStatus=PENDING", () => {
+      const routeSource = require("fs").readFileSync("server/competitive-intelligence/competitor-routes.ts", "utf-8");
+      expect(routeSource).toContain('enrichmentStatus: "PENDING"');
+      expect(routeSource).toContain("postsCollected: 0");
+      expect(routeSource).toContain("commentsCollected: 0");
+    });
+
+    it("FP-26) Admin route includes all inventory fields", () => {
+      const adminSource = require("fs").readFileSync("server/market-intelligence-v3/admin-routes.ts", "utf-8");
+      expect(adminSource).toContain("ciCompetitors.enrichmentStatus");
+      expect(adminSource).toContain("ciCompetitors.fetchMethod");
+      expect(adminSource).toContain("ciCompetitors.postsCollected");
+      expect(adminSource).toContain("ciCompetitors.commentsCollected");
+      expect(adminSource).toContain("ciCompetitors.dataFreshnessDays");
+      expect(adminSource).toContain("ciCompetitors.lastCheckedAt");
+      expect(adminSource).toContain("ciCompetitors.analysisLevel");
+    });
+
+    it("FP-27) Evidence endpoint returns inventory block", () => {
+      const routeSource = require("fs").readFileSync("server/competitive-intelligence/competitor-routes.ts", "utf-8");
+      expect(routeSource).toContain("inventory:");
+      expect(routeSource).toContain("competitor.enrichmentStatus");
+      expect(routeSource).toContain("competitor.fetchMethod");
+      expect(routeSource).toContain("competitor.postsCollected");
+      expect(routeSource).toContain("competitor.commentsCollected");
+      expect(routeSource).toContain("competitor.dataFreshnessDays");
+    });
+
+    it("FP-28) MIv3 engine logs INVENTORY_STATUS with enrichmentStatus counts", () => {
+      const engineSource = require("fs").readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+      expect(engineSource).toContain("INVENTORY_STATUS");
+      expect(engineSource).toContain('enrichmentStatus === "ENRICHED"');
+      expect(engineSource).toContain('enrichmentStatus === "PENDING"');
+    });
+
+    it("FP-29) AudienceEngine logs INVENTORY_STATUS", () => {
+      const aeSource = require("fs").readFileSync("server/audience-engine/engine.ts", "utf-8");
+      expect(aeSource).toContain("INVENTORY_STATUS");
+      expect(aeSource).toContain('enrichmentStatus === "ENRICHED"');
+    });
+
+    it("FP-30) PositioningEngine logs INVENTORY_STATUS and filters active only", () => {
+      const peSource = require("fs").readFileSync("server/positioning-engine/engine.ts", "utf-8");
+      expect(peSource).toContain("INVENTORY_STATUS");
+      expect(peSource).toContain("enrichmentStatus");
+      expect(peSource).toContain("isActive, true");
+    });
+
+    it("FP-31) Context kernel uses enrichmentStatus for data quality weighting", () => {
+      const ckSource = require("fs").readFileSync("server/engine-contracts/context-kernel.ts", "utf-8");
+      expect(ckSource).toContain('enrichmentStatus === "ENRICHED"');
+      expect(ckSource).toContain("enrichmentRatio");
+    });
+
+    it("FP-32) getCompetitorDataCoverage returns inventory fields from competitor record", () => {
+      const coverageSource = require("fs").readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8");
+      const fnStart = coverageSource.indexOf("export async function getCompetitorDataCoverage");
+      const fn = coverageSource.slice(fnStart, fnStart + 4000);
+      expect(fn).toContain("competitor?.analysisLevel");
+      expect(fn).toContain("competitor?.enrichmentStatus");
+      expect(fn).toContain("competitor?.fetchMethod");
+      expect(fn).toContain("competitor?.dataFreshnessDays");
+      expect(fn).toContain("lastCheckedAt");
+    });
+
+    it("FP-33) analysisLevel promoted to DEEP_PASS in normal DEEP_PASS path (not just recovery)", () => {
+      expect(orchSource).toContain('analysisLevel: "DEEP_PASS"');
+      expect(orchSource).toContain("analysisLevel=DEEP_PASS");
     });
   });
 });

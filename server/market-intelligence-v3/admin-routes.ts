@@ -60,24 +60,21 @@ export function registerAdminMarketRoutes(app: Express) {
         accountId: ciCompetitors.accountId,
         campaignId: ciCompetitors.campaignId,
         createdAt: ciCompetitors.createdAt,
+        analysisLevel: ciCompetitors.analysisLevel,
+        enrichmentStatus: ciCompetitors.enrichmentStatus,
+        fetchMethod: ciCompetitors.fetchMethod,
+        postsCollected: ciCompetitors.postsCollected,
+        commentsCollected: ciCompetitors.commentsCollected,
+        dataFreshnessDays: ciCompetitors.dataFreshnessDays,
+        lastCheckedAt: ciCompetitors.lastCheckedAt,
       }).from(ciCompetitors)
         .orderBy(desc(ciCompetitors.createdAt))
         .limit(100);
 
-      const competitorPostCounts = await db.select({
-        competitorId: ciCompetitorPosts.competitorId,
-        count: sql<number>`count(*)`,
-      }).from(ciCompetitorPosts)
-        .groupBy(ciCompetitorPosts.competitorId);
-
-      const postCountMap: Record<string, number> = {};
-      for (const row of competitorPostCounts) {
-        postCountMap[row.competitorId] = Number(row.count);
-      }
-
       const enriched = competitors.map(c => ({
         ...c,
-        postCount: postCountMap[c.id] || 0,
+        postCount: c.postsCollected || 0,
+        commentCount: c.commentsCollected || 0,
       }));
 
       return res.json({ competitors: enriched });

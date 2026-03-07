@@ -1048,6 +1048,12 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
       eq(ciCompetitors.isActive, true),
     ));
 
+  const enrichedCount = competitors.filter(c => c.enrichmentStatus === "ENRICHED").length;
+  const pendingCount = competitors.filter(c => c.enrichmentStatus === "PENDING" || !c.enrichmentStatus).length;
+  if (competitors.length > 0) {
+    console.log(`[AudienceEngine-V3] INVENTORY_STATUS | total=${competitors.length} | enriched=${enrichedCount} | pending=${pendingCount}`);
+  }
+
   const competitorIds = competitors.map(c => c.id);
   const competitorCount = competitorIds.length;
 

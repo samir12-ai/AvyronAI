@@ -154,6 +154,13 @@ async function getCompetitorData(accountId: string, campaignId: string): Promise
   const competitors = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
 
+  const pendingCount = competitors.filter(c => c.enrichmentStatus === "PENDING" || !c.enrichmentStatus).length;
+  const enrichedCount = competitors.filter(c => c.enrichmentStatus === "ENRICHED").length;
+  const fastPassOnly = competitors.filter(c => (c.analysisLevel || "FAST_PASS") === "FAST_PASS" && c.enrichmentStatus !== "ENRICHED").length;
+  if (competitors.length > 0) {
+    console.log(`[MIv3] INVENTORY_STATUS | total=${competitors.length} | enriched=${enrichedCount} | pending=${pendingCount} | fastPassOnly=${fastPassOnly}`);
+  }
+
   const results: CompetitorInput[] = [];
   for (const c of competitors) {
     const posts = await getStoredPostsForMIv3(c.id, accountId);

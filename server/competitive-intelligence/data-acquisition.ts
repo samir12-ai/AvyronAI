@@ -931,6 +931,9 @@ export async function enrichCompetitorWithComments(competitorId: string, account
 }
 
 export async function getCompetitorDataCoverage(competitorId: string, accountId: string = "default") {
+  const [competitor] = await db.select().from(ciCompetitors)
+    .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId)));
+
   const postsResult = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
     .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
 
@@ -955,20 +958,25 @@ export async function getCompetitorDataCoverage(competitorId: string, accountId:
   const syntheticCommentsCount = commentsCount - realCommentsCount;
   const metrics = latestMetrics[0] || null;
 
-  let dataFreshnessDays = 999;
-  const newestPost = await db.select({ ts: ciCompetitorPosts.timestamp })
-    .from(ciCompetitorPosts)
-    .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)))
-    .orderBy(desc(ciCompetitorPosts.timestamp))
-    .limit(1);
+  let dataFreshnessDays = competitor?.dataFreshnessDays ?? 999;
+  if (dataFreshnessDays === 999 || dataFreshnessDays === null) {
+    const newestPost = await db.select({ ts: ciCompetitorPosts.timestamp })
+      .from(ciCompetitorPosts)
+      .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)))
+      .orderBy(desc(ciCompetitorPosts.timestamp))
+      .limit(1);
 
-  if (newestPost.length > 0 && newestPost[0].ts) {
-    dataFreshnessDays = Math.max(0, Math.round((Date.now() - new Date(newestPost[0].ts).getTime()) / (1000 * 60 * 60 * 24)));
-  } else if (metrics?.lastFetchAt) {
-    dataFreshnessDays = Math.round((Date.now() - new Date(metrics.lastFetchAt).getTime()) / (1000 * 60 * 60 * 24));
+    if (newestPost.length > 0 && newestPost[0].ts) {
+      dataFreshnessDays = Math.max(0, Math.round((Date.now() - new Date(newestPost[0].ts).getTime()) / (1000 * 60 * 60 * 24)));
+    } else if (metrics?.lastFetchAt) {
+      dataFreshnessDays = Math.round((Date.now() - new Date(metrics.lastFetchAt).getTime()) / (1000 * 60 * 60 * 24));
+    }
   }
 
   return {
+    analysisLevel: competitor?.analysisLevel || "FAST_PASS",
+    enrichmentStatus: competitor?.enrichmentStatus || "PENDING",
+    fetchMethod: competitor?.fetchMethod || metrics?.fetchMethod || null,
     postsCollected: postsCount,
     commentsCollected: commentsCount,
     realCommentsCount,
@@ -982,7 +990,7 @@ export async function getCompetitorDataCoverage(competitorId: string, accountId:
     dataFreshnessDays,
     lastFetchAt: metrics?.lastFetchAt?.toISOString() || null,
     fetchStatus: metrics?.fetchStatus || "PENDING",
-    fetchMethod: metrics?.fetchMethod || null,
+    lastCheckedAt: competitor?.lastCheckedAt?.toISOString() || null,
   };
 }
 

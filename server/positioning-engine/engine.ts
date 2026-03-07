@@ -894,7 +894,12 @@ export async function runPositioningEngine(
   }
 
   const competitors = await db.select().from(ciCompetitors)
-    .where(eq(ciCompetitors.campaignId, campaignId));
+    .where(and(eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
+
+  const enrichedCount = competitors.filter(c => c.enrichmentStatus === "ENRICHED").length;
+  if (competitors.length > 0) {
+    console.log(`[PositioningEngine-V3] INVENTORY_STATUS | total=${competitors.length} | enriched=${enrichedCount}`);
+  }
 
   const audiencePains = safeJsonParse(audienceSnapshot.audiencePains, []);
   const audienceDesires = safeJsonParse(audienceSnapshot.desireMap, []);

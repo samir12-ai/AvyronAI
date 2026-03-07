@@ -151,6 +151,7 @@ export async function buildStrategicContext(
   const spend = metrics?.spend || 0;
   const roas = spend > 0 ? revenue / spend : 0;
 
+  const enrichedCompetitors = competitors.filter(c => c.enrichmentStatus === "ENRICHED");
   const avgEngagement = competitors.length > 0
     ? competitors.reduce((sum, c) => sum + (c.engagementRatio || 0), 0) / competitors.length
     : 0;
@@ -166,7 +167,8 @@ export async function buildStrategicContext(
     return total + filled;
   }, 0);
   const maxFields = competitors.length * 6;
-  const competitorDataQuality = maxFields > 0 ? (competitorFieldCount / maxFields) * 100 : 0;
+  const enrichmentRatio = competitors.length > 0 ? enrichedCompetitors.length / competitors.length : 0;
+  const competitorDataQuality = maxFields > 0 ? ((competitorFieldCount / maxFields) * 100) * (0.5 + 0.5 * enrichmentRatio) : 0;
 
   const dataConfidence = computeDataConfidence({
     hasBusinessData: !!bdl,
