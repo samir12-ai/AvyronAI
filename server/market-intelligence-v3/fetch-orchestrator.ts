@@ -10,8 +10,8 @@ import { computeAllDominance } from "./dominance-module";
 import { computeTokenBudget, applySampling } from "./token-budget";
 import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
 import { computeCompetitorHash } from "./utils";
-import { computeVolatilityIndex, buildMarketDiagnosis, buildThreatSignals, buildOpportunitySignals, buildMarketSummary, computeSignalNoiseRatio, computeEvidenceCoverage, persistValidatedSnapshot, ENGINE_VERSION } from "./engine";
-import { MI_THRESHOLDS } from "./constants";
+import { computeVolatilityIndex, buildMarketDiagnosis, buildThreatSignals, buildOpportunitySignals, buildMarketSummary, computeSignalNoiseRatio, computeEvidenceCoverage, persistValidatedSnapshot, ENGINE_VERSION, computeDataFreshnessDays } from "./engine";
+import { MI_THRESHOLDS, MI_CONFIDENCE } from "./constants";
 import { computeMarketBaseline, computeAllDeviations, type CalibrationContext } from "./market-baselines";
 import { computeSimilarityDiagnosis } from "./similarity-engine";
 import type { CompetitorInput, GoalMode } from "./types";
@@ -895,7 +895,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   }
 
   const signalResults = computeAllSignals(competitorInputs);
-  let dataFreshnessDays = signalResults.length > 0 ? Math.max(...signalResults.map(r => r.timeWindowDays || 0)) : 0;
+  let dataFreshnessDays = computeDataFreshnessDays(competitorInputs);
   if (totalPosts < MIN_POSTS_TARGET && dataFreshnessDays <= DEFAULT_TIME_WINDOW_DAYS) {
     dataFreshnessDays = EXPANDED_TIME_WINDOW_DAYS;
     console.log(`[FetchOrch] Dynamic time window expanded to ${EXPANDED_TIME_WINDOW_DAYS} days due to insufficient posts (${totalPosts}/${MIN_POSTS_TARGET})`);
@@ -1310,16 +1310,17 @@ async function recoverStuckDeepPass(): Promise<void> {
     `);
 
     const rows = stuckCompetitors.rows || [];
-    if (rows.length === 0) return;
 
-    console.log(`[DeepPassRecovery] Found ${rows.length} competitors stuck at FAST_PASS with posts but insufficient comments`);
+    if (rows.length > 0) {
+      console.log(`[DeepPassRecovery] Found ${rows.length} competitors stuck at FAST_PASS with posts but insufficient comments`);
 
-    for (const row of rows) {
-      try {
-        const result = await enrichCompetitorWithComments(row.id as string, row.account_id as string);
-        console.log(`[DeepPassRecovery] Enriched ${row.name}: ${result.commentsGenerated} comments, status=${result.status}`);
-      } catch (err: any) {
-        console.error(`[DeepPassRecovery] Failed to enrich ${row.name}: ${err.message}`);
+      for (const row of rows) {
+        try {
+          const result = await enrichCompetitorWithComments(row.id as string, row.account_id as string);
+          console.log(`[DeepPassRecovery] Enriched ${row.name}: ${result.commentsGenerated} comments, status=${result.status}`);
+        } catch (err: any) {
+          console.error(`[DeepPassRecovery] Failed to enrich ${row.name}: ${err.message}`);
+        }
       }
     }
 
@@ -1328,6 +1329,29 @@ async function recoverStuckDeepPass(): Promise<void> {
       const key = `${row.account_id}:${row.campaign_id}`;
       if (!campaignGroups.has(key)) {
         campaignGroups.set(key, { accountId: row.account_id as string, campaignId: row.campaign_id as string });
+      }
+    }
+
+    const staleSnapshots = await db.execute(sql`
+      SELECT DISTINCT s.account_id, s.campaign_id, s.data_freshness_days
+      FROM mi_snapshots s
+      WHERE s.status = 'COMPLETE'
+        AND s.data_freshness_days > ${MI_CONFIDENCE.FRESHNESS_HARD_GATE_DAYS}
+        AND s.created_at > NOW() - INTERVAL '7 days'
+        AND EXISTS (
+          SELECT 1 FROM ci_competitor_posts p
+          JOIN ci_competitors c ON c.id = p.competitor_id
+          WHERE c.campaign_id = s.campaign_id AND c.account_id = s.account_id AND c.is_active = true
+          AND p.timestamp > NOW() - INTERVAL '30 days'
+        )
+    `);
+
+    const staleRows = staleSnapshots.rows || [];
+    for (const row of staleRows) {
+      const key = `${row.account_id}:${row.campaign_id}`;
+      if (!campaignGroups.has(key)) {
+        campaignGroups.set(key, { accountId: row.account_id as string, campaignId: row.campaign_id as string });
+        console.log(`[DeepPassRecovery] Stale freshness detected for ${key} (stored=${row.data_freshness_days}d). Scheduling recompute.`);
       }
     }
 
