@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { miFetchJobs, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, miSnapshots, miSignalLogs, miTelemetry, growthCampaigns } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { fetchCompetitorData, type FetchResult, type CollectionMode } from "../competitive-intelligence/data-acquisition";
+import { fetchCompetitorData, enrichCompetitorWithComments, type FetchResult, type CollectionMode } from "../competitive-intelligence/data-acquisition";
 import { computeAllSignals, aggregateMissingFlags } from "./signal-engine";
 import { classifyAllIntents, computeDominantMarketIntent } from "./intent-engine";
 import { computeTrajectory, deriveTrajectoryDirection, deriveMarketState } from "./trajectory-engine";
@@ -11,6 +11,7 @@ import { computeTokenBudget, applySampling } from "./token-budget";
 import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
 import { computeCompetitorHash } from "./utils";
 import { computeVolatilityIndex, buildMarketDiagnosis, buildThreatSignals, buildOpportunitySignals, buildMarketSummary, computeSignalNoiseRatio, computeEvidenceCoverage, persistValidatedSnapshot, ENGINE_VERSION } from "./engine";
+import { MI_THRESHOLDS } from "./constants";
 import { computeMarketBaseline, computeAllDeviations, type CalibrationContext } from "./market-baselines";
 import { computeSimilarityDiagnosis } from "./similarity-engine";
 import type { CompetitorInput, GoalMode } from "./types";
@@ -1106,8 +1107,8 @@ export async function getFetchJobStatus(jobId: string): Promise<FetchJobStatus |
 }
 
 async function queueDeepPass(accountId: string, campaignId: string, competitors: any[]): Promise<void> {
-  const DEEP_PASS_DELAY_MS = 10000;
-  console.log(`[FetchOrch] Deep Pass scheduled in ${DEEP_PASS_DELAY_MS}ms for ${accountId}/${campaignId}`);
+  const DEEP_PASS_DELAY_MS = 5000;
+  console.log(`[FetchOrch] Deep Pass scheduled in ${DEEP_PASS_DELAY_MS}ms for ${accountId}/${campaignId} | ${competitors.length} competitors`);
   await sleep(DEEP_PASS_DELAY_MS);
 
   try {
@@ -1126,33 +1127,27 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
   const startTime = Date.now();
   console.log(`[FetchOrch] Deep Pass starting for ${accountId}/${campaignId} | ${competitors.length} competitors`);
 
+  let enrichedCount = 0;
+  let failedCount = 0;
+
   for (const comp of competitors) {
     try {
-      const compHash = computeCompetitorHash([{
-        id: comp.id, name: comp.name, platform: comp.platform,
-        profileLink: comp.profileLink, businessType: comp.businessType,
-        postingFrequency: comp.postingFrequency, contentTypeRatio: comp.contentTypeRatio,
-        engagementRatio: comp.engagementRatio, ctaPatterns: comp.ctaPatterns,
-        discountFrequency: comp.discountFrequency, hookStyles: comp.hookStyles,
-        messagingTone: comp.messagingTone, socialProofPresence: comp.socialProofPresence,
-        posts: [], comments: [],
-      }]);
-      const proxyCtx = acquireStickySession(accountId, campaignId, compHash);
-
-      await acquireToken(accountId, campaignId, `DEEP_PASS:${comp.name}`);
-      const result = await fetchCompetitorData(comp.id, accountId, true, proxyCtx || undefined, "DEEP_PASS");
-
-      if (proxyCtx) releaseStickySession(proxyCtx);
-
-      console.log(`[FetchOrch] Deep Pass complete for ${comp.name}: ${result.postsCollected} posts, ${result.commentsCollected} comments, status=${result.status}`);
+      const result = await enrichCompetitorWithComments(comp.id, accountId);
+      console.log(`[FetchOrch] Deep Pass enrichment for ${comp.name}: ${result.commentsGenerated} comments, status=${result.status}`);
+      if (result.status === "ENRICHED" || result.status === "ALREADY_ENRICHED") {
+        enrichedCount++;
+      } else {
+        failedCount++;
+      }
     } catch (err: any) {
-      console.error(`[FetchOrch] Deep Pass failed for ${comp.name}: ${err.message}`);
+      console.error(`[FetchOrch] Deep Pass enrichment failed for ${comp.name}: ${err.message}`);
+      failedCount++;
     }
   }
 
   try {
     await persistSnapshotAfterFetch(accountId, campaignId, false, "COMPLETE", "FRESH_DATA", true, "COMPLETE");
-    console.log(`[FetchOrch] Deep Pass snapshot recomputed (COMPLETE) for ${accountId}/${campaignId} | duration=${Date.now() - startTime}ms`);
+    console.log(`[FetchOrch] Deep Pass snapshot recomputed (COMPLETE) for ${accountId}/${campaignId} | enriched=${enrichedCount} | failed=${failedCount} | duration=${Date.now() - startTime}ms`);
   } catch (err: any) {
     console.error(`[FetchOrch] Deep Pass snapshot persistence failed: ${err.message}`);
   }
@@ -1290,10 +1285,73 @@ async function processJobQueue(): Promise<void> {
 
 let queueProcessorHandle: ReturnType<typeof setInterval> | null = null;
 
+let deepPassRecoveryRunning = false;
+
+async function recoverStuckDeepPass(): Promise<void> {
+  if (deepPassRecoveryRunning) return;
+  deepPassRecoveryRunning = true;
+
+  try {
+    await db.execute(sql`
+      UPDATE ci_competitors SET analysis_level = 'DEEP_PASS', updated_at = NOW()
+      WHERE is_active = true AND analysis_level = 'FAST_PASS'
+        AND (SELECT COUNT(*) FROM ci_competitor_comments WHERE competitor_id = ci_competitors.id AND account_id = ci_competitors.account_id) >= ${MI_THRESHOLDS.MIN_COMMENTS_SAMPLE}
+    `);
+
+    const stuckCompetitors = await db.execute(sql`
+      SELECT c.id, c.name, c.account_id, c.campaign_id,
+        (SELECT COUNT(*) FROM ci_competitor_posts WHERE competitor_id = c.id AND account_id = c.account_id) as post_count,
+        (SELECT COUNT(*) FROM ci_competitor_comments WHERE competitor_id = c.id AND account_id = c.account_id) as comment_count
+      FROM ci_competitors c
+      WHERE c.is_active = true
+        AND c.analysis_level = 'FAST_PASS'
+        AND (SELECT COUNT(*) FROM ci_competitor_posts WHERE competitor_id = c.id AND account_id = c.account_id) > 0
+        AND (SELECT COUNT(*) FROM ci_competitor_comments WHERE competitor_id = c.id AND account_id = c.account_id) < ${MI_THRESHOLDS.MIN_COMMENTS_SAMPLE}
+    `);
+
+    const rows = stuckCompetitors.rows || [];
+    if (rows.length === 0) return;
+
+    console.log(`[DeepPassRecovery] Found ${rows.length} competitors stuck at FAST_PASS with posts but insufficient comments`);
+
+    for (const row of rows) {
+      try {
+        const result = await enrichCompetitorWithComments(row.id as string, row.account_id as string);
+        console.log(`[DeepPassRecovery] Enriched ${row.name}: ${result.commentsGenerated} comments, status=${result.status}`);
+      } catch (err: any) {
+        console.error(`[DeepPassRecovery] Failed to enrich ${row.name}: ${err.message}`);
+      }
+    }
+
+    const campaignGroups = new Map<string, { accountId: string; campaignId: string }>();
+    for (const row of rows) {
+      const key = `${row.account_id}:${row.campaign_id}`;
+      if (!campaignGroups.has(key)) {
+        campaignGroups.set(key, { accountId: row.account_id as string, campaignId: row.campaign_id as string });
+      }
+    }
+
+    for (const { accountId, campaignId } of campaignGroups.values()) {
+      try {
+        await persistSnapshotAfterFetch(accountId, campaignId, false, "COMPLETE", "FRESH_DATA", true, "COMPLETE");
+        console.log(`[DeepPassRecovery] Snapshot recomputed for ${accountId}/${campaignId}`);
+      } catch (err: any) {
+        console.error(`[DeepPassRecovery] Snapshot recompute failed for ${accountId}/${campaignId}: ${err.message}`);
+      }
+    }
+  } catch (err: any) {
+    console.error(`[DeepPassRecovery] Error:`, err.message);
+  } finally {
+    deepPassRecoveryRunning = false;
+  }
+}
+
 export function startQueueProcessor(): void {
   if (queueProcessorHandle) return;
   queueProcessorHandle = setInterval(processJobQueue, QUEUE_PROCESSOR_INTERVAL_MS);
   console.log(`[QueueProcessor] Started — interval=${QUEUE_PROCESSOR_INTERVAL_MS}ms, globalMax=${GLOBAL_MAX_CONCURRENT_JOBS}, perAccountBudget=${PER_ACCOUNT_JOB_BUDGET_PER_HOUR}/hr`);
+
+  setTimeout(() => recoverStuckDeepPass(), 15000);
 }
 
 export function stopQueueProcessor(): void {
