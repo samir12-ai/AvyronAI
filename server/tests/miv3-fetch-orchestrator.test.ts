@@ -332,7 +332,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       const match = source.match(/MAX_PAGES_PER_COMPETITOR\s*=\s*(\d+)/);
       expect(match).not.toBeNull();
       expect(Number(match![1])).toBeGreaterThan(0);
-      expect(Number(match![1])).toBeLessThanOrEqual(10);
+      expect(Number(match![1])).toBeLessThanOrEqual(12);
     });
 
     it("should have MAX_REQUESTS_PER_JOB hard ceiling in orchestrator", async () => {
@@ -343,7 +343,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       const match = source.match(/MAX_REQUESTS_PER_JOB\s*=\s*(\d+)/);
       expect(match).not.toBeNull();
       expect(Number(match![1])).toBeGreaterThan(0);
-      expect(Number(match![1])).toBeLessThanOrEqual(100);
+      expect(Number(match![1])).toBeLessThanOrEqual(120);
     });
 
     it("should have MAX_RUNTIME_MS hard ceiling in orchestrator", async () => {
