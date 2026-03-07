@@ -12,7 +12,7 @@ import { computeDominanceForCompetitor } from "../market-intelligence-v3/dominan
 import { buildResultFromSnapshot, validateSnapshotCompleteness, buildMarketDiagnosis, buildThreatSignals, buildOpportunitySignals } from "../market-intelligence-v3/engine";
 import { computeAllDeviations, computeDeviation, computeDynamicThreshold, FALLBACK_BASELINE, TIME_WEIGHTS, BASELINE_WINDOW, MIN_SNAPSHOTS_FOR_CALIBRATION, type MarketBaseline, type DeviationResult, type CalibrationContext } from "../market-intelligence-v3/market-baselines";
 import type { CompetitorInput, PostData, CompetitorSignalResult, ExecutionMode, GoalMode } from "../market-intelligence-v3/types";
-import { MI_THRESHOLDS, MI_COST_LIMITS, MI_CONFIDENCE, MI_REVIVAL_CAP, GOAL_MODE_WEIGHTS, ENGAGEMENT_BIAS_THRESHOLD } from "../market-intelligence-v3/constants";
+import { MI_THRESHOLDS, MI_COST_LIMITS, MI_CONFIDENCE, MI_REVIVAL_CAP, GOAL_MODE_WEIGHTS, ENGAGEMENT_BIAS_THRESHOLD, MI_TOKEN_BUDGET } from "../market-intelligence-v3/constants";
 
 function makePost(overrides: Partial<PostData> = {}): PostData {
   return {
@@ -528,8 +528,8 @@ describe("Market Intelligence V3 - Token Budget Guard", () => {
   });
 
   it("M3) Large data downgrades to REDUCED or LIGHT", () => {
-    const budget = computeTokenBudget(5, 2000, 500);
-    if (budget.projectedTokens > 25000) {
+    const budget = computeTokenBudget(12, 5000, 1000);
+    if (budget.projectedTokens > MI_TOKEN_BUDGET.FULL_MODE_CEILING) {
       expect(budget.selectedMode).not.toBe("FULL");
       expect(budget.downgradeReason).not.toBeNull();
     }

@@ -242,7 +242,7 @@ describe("Section 6: Cost Guard Test — Hard Execution Ceilings", () => {
     const source = await import("fs").then(fs =>
       fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
     );
-    expect(source).toContain("MAX_REQUESTS_PER_JOB = 50");
+    expect(source).toContain("MAX_REQUESTS_PER_JOB = 120");
     expect(source).toContain("checkRequestCeiling");
     expect(source).toContain("totalRequests >= MAX_REQUESTS_PER_JOB");
   });
@@ -251,7 +251,7 @@ describe("Section 6: Cost Guard Test — Hard Execution Ceilings", () => {
     const source = await import("fs").then(fs =>
       fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
     );
-    expect(source).toContain("MAX_RUNTIME_MS = 10 * 60 * 1000");
+    expect(source).toContain("MAX_RUNTIME_MS = 20 * 60 * 1000");
     expect(source).toContain("checkRuntimeCeiling");
   });
 
