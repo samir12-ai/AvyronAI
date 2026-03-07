@@ -1,0 +1,124 @@
+"73418"}
+Subject: Market Intelligence V3 Final Hardening Pass
+
+Hello Replit,
+
+We need to perform a final hardening pass on Market Intelligence Engine V3.
+
+Important constraint:  
+Do NOT add new layers, do NOT change the pipeline order, and do NOT modify the existing API or snapshot schema.
+
+The engine must remain a 6-layer pipeline and maintain full compatibility with downstream engines (Audience V3, Positioning V3, Build The Plan).
+
+The goal is to improve signal clarity and interpretation stability without altering architecture.
+
+Please implement the following improvements.
+
+--------------------------------------------------
+
+1. Intent Confidence (Layer 3 — Intent Engine)
+
+Extend the intent classification logic with an internal confidence measure.
+
+Add two internal values:
+- topIntentScore
+- intentConfidence
+
+intentConfidence should represent the separation between the top two intent scores plus signal stability.
+
+Suggested logic:
+
+intentConfidence =  
+(topIntentScore − secondIntentScore)  
++ signalConsistencyFactor
+
+Normalize to a 0–1 scale.
+
+Confidence interpretation bands:
+
+> 0.75 → STRONG  
+0.55–0.75 → MODERATE  
+0.40–0.55 → UNCERTAIN  
+< 0.40 → DEGRADED
+
+This must remain an internal signal and should not change the existing intent category output.
+
+--------------------------------------------------
+
+2. Market Compression Score (Layer 4 — Trajectory Engine)
+
+Add a scalar metric to complement the existing trajectory labels.
+
+New internal metric:
+
+marketCompressionScore
+
+Suggested calculation:
+
+marketCompressionScore =
+(narrativeConvergenceScore × 0.45)
++ (angleSaturationLevel × 0.35)
++ (marketHeatingIndex × 0.20)
+
+Range: 0 → 1
+
+This value should help quantify how crowded the narrative space is, without altering the existing trajectory classification outputs.
+
+--------------------------------------------------
+
+3. Dominance Mode Metadata (Layer 6 — Dominance Engine)
+
+Expose minimal metadata describing how dominance scores were calculated.
+
+Add the following fields internally:
+
+- dominanceModeUsed
+- dominanceWeights
+
+Example structure:
+
+{
+  "mode": "STRATEGY_MODE",
+  "weights": {
+    "ctaIntensity": 0.30,
+    "narrativeOwnership": 0.30,
+    "engagement": 0.20,
+    "postingFrequency": 0.20
+  }
+}
+
+This must not alter existing dominance scoring or ranking logic.
+
+--------------------------------------------------
+
+4. Opportunity Signal Guardrail
+
+Ensure that Opportunity Signals generated in MI remain strictly diagnostic.
+
+Allowed outputs:
+- descriptive observations about market gaps
+- signal-based anomalies
+- behavioral changes across competitors
+
+Disallowed outputs:
+- strategic recommendations
+- positioning instructions
+- audience targeting suggestions
+
+The MI engine must remain Layer-0 intelligence only.
+
+--------------------------------------------------
+
+5. Final Validation
+
+After implementing these improvements, verify that:
+
+- The engine remains a 6-layer pipeline.
+- Snapshot schema in mi_snapshots remains unchanged.
+- API responses remain unchanged.
+- All existing tests continue to pass.
+- No new dependencies were introduced.
+
+Provide a short summary confirming the successful hardening.
+
+The goal is to strengthen signal interpretation without modifying archi
