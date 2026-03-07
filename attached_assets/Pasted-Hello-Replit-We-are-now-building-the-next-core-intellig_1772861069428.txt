@@ -1,0 +1,511 @@
+Hello Replit,
+
+We are now building the next core intelligence engine in the strategy pipeline:
+
+**Differentiation Engine V3**
+
+This engine must be delivered as a **10/10 production-grade system**, with **strict boundaries**, **zero role overlap**, **high-confidence outputs**, and **very high acceptance criteria**.
+
+This is not a draft implementation.
+This is a core engine and must be built with the same rigor as:
+
+* MI v3
+* Audience v3
+* Positioning v3
+
+The pipeline must remain:
+
+**MI v3 → Audience v3 → Positioning v3 → Differentiation Engine V3 → Build The Plan**
+
+The role of this engine is extremely specific:
+
+> Convert validated positioning territories into **proof-backed differentiation structures**
+> without changing strategy, market analysis, audience segmentation, offer design, channel logic, or execution planning.
+
+This engine must be **architecturally clean**, **downstream-safe**, and **fully compatible** with future Build-The-Plan orchestration.
+
+---
+
+1. NON-NEGOTIABLE ROLE DEFINITION
+
+---
+
+Differentiation Engine V3 must answer only this question:
+
+**Why is this brand distinct and believable inside the positioning territory already selected?**
+
+It must NOT decide:
+
+* market diagnosis
+* competitor intelligence from scratch
+* audience segmentation
+* pains / objections extraction
+* positioning territory selection
+* enemy selection
+* narrative direction changes
+* offer creation
+* pricing / packaging / guarantee logic
+* channel selection
+* content calendar
+* posting frequency
+* budget allocation
+* media buying logic
+* final copywriting assets
+
+If the engine starts doing any of the above, it is out of scope and must be corrected.
+
+---
+
+2. REQUIRED INPUTS
+
+---
+
+The engine must consume only validated upstream data from:
+
+**MI v3**
+
+* dominance data
+* narrative saturation / compression
+* competitor content DNA
+* market diagnosis
+* opportunity signals
+* threat signals
+
+**Audience v3**
+
+* objection map
+* emotional drivers
+* maturity index
+* awareness level
+* pains / desires
+* audience segments
+* intent distribution
+
+**Positioning v3**
+
+* selected territories
+* differentiation axes
+* enemy definitions
+* contrast axes
+* narrative directions
+* flanking mode
+* stability status
+
+It must not recreate those layers itself.
+
+---
+
+3. REQUIRED OUTPUTS
+
+---
+
+The engine must output only differentiation-level artifacts.
+
+Required output families:
+
+1. **Differentiation Pillars**
+
+   * the core dimensions of distinctiveness
+
+2. **Proof Architecture**
+
+   * what type of proof is required to make the difference believable
+
+3. **Claim Structures**
+
+   * how the brand’s difference can be stated safely and credibly
+
+4. **Authority Mode**
+
+   * how the brand should appear:
+
+     * expert
+     * operator
+     * transparent guide
+     * contrarian specialist
+     * niche authority
+
+5. **Mechanism Framing**
+
+   * whether the difference can be expressed through a named framework, process, system, or unique method
+
+6. **Trust Priority Map**
+
+   * which objections must be resolved first to make differentiation believable
+
+7. **Differentiation Confidence**
+
+   * how strong, defensible, and market-relevant the difference actually is
+
+The engine must NOT output:
+
+* new positioning territories
+* new audience definitions
+* offer designs
+* channel plans
+* content plans
+* ad strategies
+* final scripts or copy
+
+---
+
+4. DIFFERENTIATION ENGINE V3 PIPELINE
+
+---
+
+Build this as a **12-layer engine**:
+
+* **10 deterministic layers**
+* **1 AI refinement layer**
+* **1 validation / stability layer**
+
+Required structure:
+
+**Layer 1 — Positioning Intake Lock**
+
+* Accept only territories already selected by Positioning v3
+* Reject any out-of-scope territory
+* Enforce dependency correctness
+
+**Layer 2 — Competitor Claim Surface Mapping**
+
+* Extract what competitors are already claiming from MI content DNA / narratives
+* Build a claim surface map
+* Do not rerun MI logic; only consume MI outputs
+
+**Layer 3 — Claim Collision Detection**
+
+* Detect whether candidate differentiation claims are too similar to competitor claims
+* Output collision risk diagnostics
+
+**Layer 4 — Proof Demand Mapping**
+
+* Determine what type of proof is required given:
+
+  * objections
+  * awareness
+  * maturity
+  * territory type
+
+**Layer 5 — Trust Gap Prioritization**
+
+* Rank the trust barriers most relevant to differentiation credibility
+* Must use Audience objections as input, not recreate them
+
+**Layer 6 — Authority Mode Selection**
+
+* Select the correct authority expression mode for the territory
+* Must not alter positioning direction
+
+**Layer 7 — Proof Asset Architecture**
+
+* Determine what proof categories are needed:
+
+  * case proof
+  * process proof
+  * transparency proof
+  * comparative proof
+  * framework proof
+  * mechanism proof
+  * outcome proof
+
+**Layer 8 — Mechanism Construction**
+
+* Determine whether a unique mechanism / named process / branded method can be supported
+* Must not invent offer structure or packaging
+
+**Layer 9 — Differentiation Pillar Scoring**
+
+* Score candidate pillars using:
+
+  * uniqueness
+  * proofability
+  * trust alignment
+  * territory alignment
+  * objection coverage
+
+**Layer 10 — Claim Strength Scoring**
+
+* Score each claim structure for:
+
+  * distinctiveness
+  * believability
+  * defensibility
+  * relevance
+
+**Layer 11 — AI Refinement**
+
+* AI may only refine wording of:
+
+  * pillars
+  * claims
+  * mechanism phrasing
+  * authority framing
+* AI must not invent new strategy, audience, offer, or execution logic
+
+**Layer 12 — Stability Guard**
+
+* Validate that the final differentiation is:
+
+  * inside the approved territory
+  * low collision
+  * sufficiently provable
+  * trust-aligned
+  * objection-aware
+
+---
+
+5. CORE FORMULAS
+
+---
+
+Implement the following scoring logic or a close equivalent.
+
+**Differentiation Score**
+DifferentiationScore =
+(uniqueness × 0.30)
+
+* (proofability × 0.25)
+* (trustAlignment × 0.20)
+* (positioningAlignment × 0.15)
+* (objectionCoverage × 0.10)
+
+**Claim Collision Risk**
+ClaimCollisionRisk =
+(similarityToCompetitorClaims × 0.60)
+
+* (narrativeProximity × 0.40)
+
+**Proofability Score**
+Proofability =
+(evidenceAvailability × 0.40)
+
+* (mechanismClarity × 0.30)
+* (objectionResolutionPotential × 0.30)
+
+Normalize all scoring to 0–1.
+
+---
+
+6. HARD GUARDRAILS — ZERO OVERLAP
+
+---
+
+These guardrails are mandatory.
+
+**Guardrail A — No New Territories**
+If any layer or AI output introduces a territory not present in Positioning v3, reject it.
+
+**Guardrail B — No Offer Logic**
+If output contains:
+
+* pricing
+* packaging
+* guarantee
+* bonus stack
+* CTA design
+  reject or sanitize it.
+
+**Guardrail C — No Channel Logic**
+If output starts deciding:
+
+* Instagram
+* ads
+* reels
+* funnel cadence
+* content mix
+  reject it.
+
+**Guardrail D — No Audience Recreation**
+If the engine starts producing new audience segments or rewriting personas, reject it.
+
+**Guardrail E — No Final Copywriting**
+The engine may define claim structures and phrasing logic, but must not produce:
+
+* ad copy
+* post scripts
+* landing page copy
+* full messaging assets
+
+---
+
+7. STATUS SYSTEM
+
+---
+
+Implement the following status states:
+
+**COMPLETE**
+All layers passed and outputs are stable
+
+**MISSING_DEPENDENCY**
+MI / Audience / Positioning snapshot missing or invalid
+
+**INSUFFICIENT_SIGNALS**
+Not enough trust / objection / proof / territory signal density
+
+**UNSTABLE**
+Output exists but fails stability thresholds
+
+**COLLISION_RISK**
+Claims are too close to competitors to be safely considered differentiated
+
+---
+
+8. DATABASE REQUIREMENTS
+
+---
+
+Create a dedicated table:
+
+**differentiation_snapshots**
+
+Required fields:
+
+* campaignId
+* miSnapshotId
+* audienceSnapshotId
+* positioningSnapshotId
+* differentiationPillars
+* proofArchitecture
+* claimStructures
+* authorityMode
+* mechanismFraming
+* trustPriorityMap
+* claimScores
+* collisionDiagnostics
+* stabilityStatus
+* confidenceScore
+* engine_version
+* createdAt
+
+All dependency references must be explicit.
+
+---
+
+9. FRONTEND / PRODUCT REQUIREMENTS
+
+---
+
+Expose the engine in a way that makes its role clear.
+
+The UI should show:
+
+* dependency status for MI / Audience / Positioning
+* run button
+* differentiation pillars
+* proof architecture
+* authority mode
+* mechanism framing
+* collision warnings
+* confidence
+* stability status
+
+The UI must not present this as an offer builder or content planner.
+
+---
+
+10. ACCEPTANCE CRITERIA — VERY HIGH BAR
+
+---
+
+This engine is accepted only if all of the following are true:
+
+1. **No architectural overlap**
+
+   * MI remains MI
+   * Audience remains Audience
+   * Positioning remains Positioning
+   * Differentiation stays inside its role
+
+2. **No dependency drift**
+
+   * The engine cannot run if upstream dependencies are not READY
+   * campaignId and snapshot lineage must match
+
+3. **No strategy mutation**
+
+   * The engine cannot invent new territories or rewrite positioning
+
+4. **No offer leakage**
+
+   * The engine cannot design price / package / guarantee / CTA
+
+5. **No execution leakage**
+
+   * The engine cannot decide channels, content cadence, or planning tasks
+
+6. **Claims are evidence-backed**
+
+   * Every accepted claim structure must be supported by trust / proof / objection logic
+
+7. **Collision protection works**
+
+   * Claims too close to competitors must be flagged or rejected
+
+8. **AI remains bounded**
+
+   * AI only refines language, never expands role
+
+9. **Output is usable downstream**
+
+   * Build-The-Plan must be able to consume this engine safely without ambiguity
+
+10. **Test coverage is serious**
+
+* Must include deterministic layer tests
+* boundary / guardrail tests
+* dependency validation tests
+* collision tests
+* AI output sanitization tests
+* full integration tests
+
+---
+
+11. REQUIRED TESTING
+
+---
+
+Please create a strong test suite covering at minimum:
+
+* dependency missing cases
+* cross-campaign mismatch
+* no MI / no Audience / no Positioning
+* territory lock enforcement
+* collision detection
+* proofability scoring
+* authority mode selection
+* mechanism construction boundaries
+* AI refinement guardrails
+* no offer leakage
+* no channel leakage
+* no audience recreation
+* unstable claim scenarios
+* full successful run
+
+Testing must be strict enough that this engine cannot silently drift out of role in future refactors.
+
+---
+
+12. FINAL DELIVERY REQUIREMENT
+
+---
+
+After implementation, provide a final validation report including:
+
+* confirmation that the engine is V3
+* confirmation that the pipeline is 12 layers
+* confirmation that no role overlap exists
+* confirmation that dependency lineage is enforced
+* confirmation that guardrails are active
+* confirmation that output schema is stable
+* number of tests written and passed
+* any remaining risks
+
+This engine should be delivered as:
+
+**Differentiation Engine V3 — production-safe, boundary-safe, downstream-safe, and rated 10/10**
+
+Please build it with maximum rigor.
+
+Thank you.

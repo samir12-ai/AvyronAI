@@ -1582,3 +1582,31 @@ export const positioningSnapshots = pgTable("positioning_snapshots", {
 });
 
 export type PositioningSnapshot = typeof positioningSnapshots.$inferSelect;
+
+export const differentiationSnapshots = pgTable("differentiation_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  miSnapshotId: varchar("mi_snapshot_id").notNull(),
+  audienceSnapshotId: varchar("audience_snapshot_id").notNull(),
+  positioningSnapshotId: varchar("positioning_snapshot_id").notNull(),
+  engineVersion: integer("engine_version").notNull().default(3),
+  status: text("status").notNull().default("COMPLETE"),
+  statusMessage: text("status_message"),
+  differentiationPillars: text("differentiation_pillars"),
+  proofArchitecture: text("proof_architecture"),
+  claimStructures: text("claim_structures"),
+  authorityMode: text("authority_mode"),
+  mechanismFraming: text("mechanism_framing"),
+  trustPriorityMap: text("trust_priority_map"),
+  claimScores: text("claim_scores"),
+  collisionDiagnostics: text("collision_diagnostics"),
+  stabilityResult: text("stability_result"),
+  confidenceScore: doublePrecision("confidence_score"),
+  executionTimeMs: integer("execution_time_ms"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type DifferentiationSnapshot = typeof differentiationSnapshots.$inferSelect;

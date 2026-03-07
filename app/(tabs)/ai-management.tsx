@@ -33,6 +33,7 @@ import CompetitiveIntelligence from '@/components/CompetitiveIntelligence';
 import ControlCenter from '@/components/ControlCenter';
 import MarketDatabaseAdmin from '@/components/MarketDatabaseAdmin';
 import PositioningStrategy from '@/components/PositioningStrategy';
+import DifferentiationEngine from '@/components/DifferentiationEngine';
 import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
 
 interface AIAudience {
@@ -52,7 +53,7 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'strategy' | 'control' | 'marketdb' | 'publisher' | 'audience' | 'leads';
+type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'positioning' | 'differentiation' | 'control' | 'marketdb' | 'publisher' | 'audience' | 'leads';
 
 interface AIMgmtPersistedState {
   activeTab: TabView;
@@ -1100,7 +1101,8 @@ export default function AIManagementScreen() {
             { key: 'buildplan' as TabView, icon: 'construct-outline' as const, label: 'Build Plan', color: '#EC4899', advanced: false },
             { key: 'pipeline' as TabView, icon: 'git-merge-outline' as const, label: 'Pipeline', color: '#8B5CF6', advanced: false },
             { key: 'intelligence' as TabView, icon: 'telescope-outline' as const, label: 'Intelligence', color: '#3B82F6', advanced: false },
-            { key: 'strategy' as TabView, icon: 'compass-outline' as const, label: 'Strategy', color: '#10B981', advanced: false },
+            { key: 'positioning' as TabView, icon: 'compass-outline' as const, label: 'Positioning', color: '#10B981', advanced: false },
+            { key: 'differentiation' as TabView, icon: 'layers-outline' as const, label: 'Differentiation', color: '#8B5CF6', advanced: false },
             { key: 'control' as TabView, icon: 'shield-checkmark-outline' as const, label: 'Control', color: '#8B5CF6', advanced: false },
             { key: 'marketdb' as TabView, icon: 'server-outline' as const, label: 'Market DB', color: '#F97316', advanced: true },
             { key: 'publisher' as TabView, icon: 'send-outline' as const, label: 'Publish', color: colors.primary, advanced: false },
@@ -1128,7 +1130,8 @@ export default function AIManagementScreen() {
         {activeTab === 'buildplan' ? <BuildThePlan onNavigateToCI={() => { setActiveTab('intelligence'); updateState({ activeTab: 'intelligence' }); }} onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />
           : activeTab === 'pipeline' ? <StrategicPipeline onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />
           : activeTab === 'intelligence' ? renderIntelligence()
-          : activeTab === 'strategy' ? <CampaignGuard><PositioningStrategy /></CampaignGuard>
+          : activeTab === 'positioning' ? <CampaignGuard><PositioningStrategy /></CampaignGuard>
+          : activeTab === 'differentiation' ? <CampaignGuard><DifferentiationEngine /></CampaignGuard>
           : activeTab === 'control' ? renderControlCenter()
           : activeTab === 'marketdb' ? <MarketDatabaseAdmin />
           : activeTab === 'publisher' ? renderPublisher()
