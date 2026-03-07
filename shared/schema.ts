@@ -1465,6 +1465,8 @@ export const ciCompetitorComments = pgTable("ci_competitor_comments", {
   sentiment: doublePrecision("sentiment"),
   timestamp: timestamp("timestamp"),
   batchId: varchar("batch_id"),
+  isSynthetic: boolean("is_synthetic").notNull().default(false),
+  source: varchar("source", { length: 64 }).default("scraped"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

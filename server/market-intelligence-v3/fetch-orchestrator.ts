@@ -895,15 +895,16 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   }
 
   const signalResults = computeAllSignals(competitorInputs);
-  let dataFreshnessDays = computeDataFreshnessDays(competitorInputs);
+  const dataFreshnessDays = computeDataFreshnessDays(competitorInputs);
+  let confidenceFreshnessDays = dataFreshnessDays;
   if (totalPosts < MIN_POSTS_TARGET && dataFreshnessDays <= DEFAULT_TIME_WINDOW_DAYS) {
-    dataFreshnessDays = EXPANDED_TIME_WINDOW_DAYS;
-    console.log(`[FetchOrch] Dynamic time window expanded to ${EXPANDED_TIME_WINDOW_DAYS} days due to insufficient posts (${totalPosts}/${MIN_POSTS_TARGET})`);
+    confidenceFreshnessDays = EXPANDED_TIME_WINDOW_DAYS;
+    console.log(`[FetchOrch] Dynamic time window expanded to ${EXPANDED_TIME_WINDOW_DAYS} days for confidence (actual freshness=${dataFreshnessDays}d, posts=${totalPosts}/${MIN_POSTS_TARGET})`);
   }
   const intents = classifyAllIntents(signalResults);
   const dominantIntent = computeDominantMarketIntent(intents);
   const trajectory = computeTrajectory(signalResults, intents);
-  const confidence = computeConfidence(signalResults, dataFreshnessDays);
+  const confidence = computeConfidence(signalResults, confidenceFreshnessDays);
   const dominanceResults = computeAllDominance(signalResults, confidence, campaignGoalMode);
   let missingFlags = aggregateMissingFlags(signalResults);
   const trajectoryDirection = deriveTrajectoryDirection(trajectory);

@@ -540,6 +540,8 @@ async function _executeFetch(
           sentiment: comment.sentiment,
           timestamp: post.timestamp ? new Date(post.timestamp) : null,
           batchId,
+          isSynthetic: true,
+          source: "synthetic_enrichment",
         });
         commentsCollected++;
       }
@@ -687,7 +689,7 @@ function generateSyntheticCommentSamples(post: ScrapedPost): { text: string; sen
     const sentences = post.caption.split(/[.!?\n]+/).filter(s => s.trim().length > 10);
     for (const sentence of sentences) {
       const sentiment = computeBasicSentiment(sentence);
-      samples.push({ text: sentence.trim().substring(0, 200), sentiment });
+      samples.push({ text: `[synthetic] ${sentence.trim().substring(0, 200)}`, sentiment });
     }
   }
 
@@ -700,17 +702,15 @@ function generateSyntheticCommentSamples(post: ScrapedPost): { text: string; sen
     const phrases = post.caption.split(/[,;:—–\-\n]+/).filter(s => s.trim().length > 8);
     for (const phrase of phrases) {
       if (samples.length >= targetSamples) break;
-      const isDuplicate = samples.some(s => s.text === phrase.trim().substring(0, 200));
+      const prefixed = `[synthetic] ${phrase.trim().substring(0, 200)}`;
+      const isDuplicate = samples.some(s => s.text === prefixed);
       if (!isDuplicate) {
-        samples.push({ text: phrase.trim().substring(0, 200), sentiment: computeBasicSentiment(phrase) });
+        samples.push({ text: prefixed, sentiment: computeBasicSentiment(phrase) });
       }
     }
   }
 
   if (samples.length < targetSamples) {
-    const baseSentiment = samples.length > 0
-      ? samples.reduce((s, c) => s + c.sentiment, 0) / samples.length
-      : 0.5;
     const sentimentVariants = [0.8, 0.6, 0.4, 0.7, 0.3, 0.9, 0.5, 0.65, 0.35, 0.75];
     let i = 0;
     while (samples.length < targetSamples) {
@@ -806,6 +806,8 @@ export async function enrichCompetitorWithComments(competitorId: string, account
         sentiment: comment.sentiment,
         timestamp: post.timestamp || null,
         batchId,
+        isSynthetic: true,
+        source: "synthetic_enrichment",
       });
       commentsGenerated++;
     }
@@ -903,6 +905,8 @@ export async function getStoredCommentsForMIv3(competitorId: string, accountId: 
     text: c.commentText || "",
     sentiment: c.sentiment || undefined,
     timestamp: c.timestamp?.toISOString() || new Date().toISOString(),
+    isSynthetic: c.isSynthetic ?? false,
+    source: c.source ?? "scraped",
   }));
 }
 

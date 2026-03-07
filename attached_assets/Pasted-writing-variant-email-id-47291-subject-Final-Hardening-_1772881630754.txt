@@ -1,0 +1,136 @@
+writing{variant=“email” id=“47291” subject=“Final Hardening Request — Deep Pass Integrity + Freshness System Verification”}
+
+Hello Replit,
+
+Thank you for the recent fixes regarding both the Deep Pass recovery system and the freshness calculation bug. The system behavior has significantly improved and the engines are now running in READY state with correct freshness values.
+
+Before we close these issues completely, we need to perform a final hardening verification to ensure both fixes are production-safe and maintain long-term data integrity.
+
+Please review and confirm the following points.
+
+⸻
+
+1 — Deep Pass Architecture Integrity
+
+The new Deep Pass implementation replaces external re-scraping with the enrichCompetitorWithComments() function that generates comment samples from existing stored posts.
+
+This greatly improves reliability by eliminating:
+
+• proxy failures
+• Instagram rate limits
+• scraping instability
+• lost async jobs after server restarts
+
+However we must ensure data purity for downstream engines (MI / Audience / Positioning).
+
+Please confirm the following safeguards:
+
+Synthetic Comment Tagging
+
+All generated comments must include explicit metadata:
+	•	isSynthetic = true
+	•	source = synthetic_enrichment
+
+This allows downstream engines to distinguish real audience comments from synthetic enrichment data.
+
+⸻
+
+Signal Protection
+
+Synthetic comments must not influence audience intelligence signals, including:
+
+• pain detection
+• desire signals
+• objection extraction
+• awareness classification
+• emotional driver extraction
+• language signal analysis
+
+Only real comments should affect these systems.
+
+Synthetic comments should be used only for technical enrichment, never for behavioral inference.
+
+⸻
+
+Deep Pass Qualification Rules
+
+Please confirm that a competitor is promoted to DEEP_PASS only when:
+
+• comment thresholds are reached
+• comment coverage is valid
+
+Synthetic comments must not incorrectly inflate the confidence of intelligence layers.
+
+⸻
+
+Startup Recovery Safety
+
+The recoverStuckDeepPass() system should remain limited to:
+
+• promoting competitors that already have sufficient real comments
+• enriching competitors missing comment coverage
+• recomputing MI snapshots afterward
+
+Please confirm that this recovery process cannot overwrite valid comment data or duplicate enrichment.
+
+⸻
+
+2 — Market Intelligence Freshness System
+
+The root cause of the freshness bug was correctly identified:
+persistSnapshotAfterFetch() used signalResults.timeWindowDays instead of actual data timestamps.
+
+This has now been replaced with:
+
+computeDataFreshnessDays(competitorInputs)
+
+which correctly evaluates freshness using the newest post or comment timestamp across competitors.
+
+To finalize this fix, please confirm the following.
+
+⸻
+
+Single Source of Truth
+
+computeDataFreshnessDays() must be the only function used across the system to determine data freshness.
+
+Please verify it is used consistently in:
+
+• MI snapshot persistence
+• engine readiness state
+• Strategic Gate validation
+• Positioning freshness gate
+• frontend status indicators
+
+No component should rely on cached or alternative freshness calculations.
+
+⸻
+
+Self-Healing Verification
+
+The startup recovery logic that recomputes stale snapshots should verify:
+
+• snapshot freshness > 14 days
+• database contains posts/comments within 30 days
+
+If both conditions occur, the system recomputes the snapshot using the corrected freshness logic.
+
+Please confirm that this process is idempotent and cannot produce duplicate snapshots.
+
+⸻
+
+3 — Final Stability Verification
+
+Please run a final validation confirming:
+
+• Deep Pass recovery runs successfully after server restart
+• synthetic enrichment does not pollute audience intelligence signals
+• freshness values match actual post/comment timestamps
+• engine readiness transitions correctly to READY when data is fresh
+• positioning and strategy engines operate normally after recovery
+
+Once these confirmations are verified, both the Deep Pass issue and the freshness miscalculation bug can be considered fully closed.
+
+Thank you.
+
+:::

@@ -1059,7 +1059,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
 
     rawComments = await db.select({ commentText: ciCompetitorComments.commentText })
       .from(ciCompetitorComments)
-      .where(sql`${ciCompetitorComments.competitorId} IN (${idList})`)
+      .where(sql`${ciCompetitorComments.competitorId} IN (${idList}) AND (${ciCompetitorComments.isSynthetic} = false OR ${ciCompetitorComments.isSynthetic} IS NULL)`)
       .orderBy(desc(ciCompetitorComments.createdAt))
       .limit(AUDIENCE_THRESHOLDS.MAX_COMMENTS_TO_ANALYZE);
   }
