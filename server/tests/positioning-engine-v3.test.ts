@@ -12,6 +12,10 @@ import {
   deduplicateTerritories,
   generateStrategyCards,
   layer5_segmentPriorityResolution,
+  computeSpecificityScore,
+  validateNarrativeOutput,
+  computeSemanticSaturation,
+  checkCrossCampaignDiversity,
 } from '../positioning-engine/engine';
 
 describe('Positioning Engine V3 — Layer Tests', () => {
@@ -383,6 +387,237 @@ describe('Positioning Engine V3 — Layer Tests', () => {
 
       const segments = layer5_segmentPriorityResolution(audience);
       expect(segments).toHaveLength(0);
+    });
+  });
+
+  describe('Generic Territory Penalty (Hardening Item 1)', () => {
+    it('should penalize generic cross-industry territories', () => {
+      const genericScore = computeSpecificityScore('financial improvement', 'fitness');
+      const specificScore = computeSpecificityScore('revenue-driven marketing vs vanity metrics', 'marketing');
+      expect(specificScore).toBeGreaterThan(genericScore);
+    });
+
+    it('should penalize single-word territories', () => {
+      const singleWord = computeSpecificityScore('efficiency', 'marketing');
+      const multiWord = computeSpecificityScore('content efficiency framework', 'marketing');
+      expect(multiWord).toBeGreaterThan(singleWord);
+    });
+
+    it('should reward category-specific territories', () => {
+      const noCategory = computeSpecificityScore('better outcomes for clients', 'fitness');
+      const withCategory = computeSpecificityScore('fitness transformation methodology', 'fitness');
+      expect(withCategory).toBeGreaterThan(noCategory);
+    });
+
+    it('should reward contrast-phrased territories', () => {
+      const plain = computeSpecificityScore('data nutrition approach', 'health');
+      const contrast = computeSpecificityScore('evidence-driven nutrition vs fad diets', 'health');
+      expect(contrast).toBeGreaterThan(plain);
+    });
+
+    it('should detect known generic patterns', () => {
+      const patterns = ['save time', 'social recognition', 'personal growth', 'wellness', 'lifestyle'];
+      for (const p of patterns) {
+        const score = computeSpecificityScore(p, 'general');
+        expect(score).toBeLessThan(1.0);
+      }
+    });
+
+    it('should integrate specificity into opportunity scoring', () => {
+      const audience = {
+        audiencePains: JSON.stringify([
+          { canonical: 'revenue-driven marketing methodology', frequency: 15, evidence: ['e1'] },
+          { canonical: 'financial improvement', frequency: 15, evidence: ['e2'] },
+        ]),
+        desireMap: JSON.stringify([]),
+      };
+      const sat = {};
+      const mp = [{ competitorName: 'A', authorityScore: 0.3, contentDominanceScore: 0.2, narrativeOwnershipIndex: 0.1, engagementStrength: 0.1 }];
+      const gaps = layer7_opportunityGapDetection(sat, audience, mp, 'marketing');
+      const specific = gaps.find(g => g.territory.includes('revenue-driven'));
+      const generic = gaps.find(g => g.territory.includes('financial improvement'));
+      if (specific && generic) {
+        expect(specific.opportunityScore).toBeGreaterThanOrEqual(generic.opportunityScore);
+      }
+    });
+  });
+
+  describe('Narrative Validation Filter (Hardening Item 2)', () => {
+    it('should reject first-person promotional language', () => {
+      expect(validateNarrativeOutput('We elevate your professional status').valid).toBe(false);
+      expect(validateNarrativeOutput('We help businesses grow faster').valid).toBe(false);
+      expect(validateNarrativeOutput('We transform lives daily').valid).toBe(false);
+    });
+
+    it('should reject imperative CTAs', () => {
+      expect(validateNarrativeOutput('Get started with our platform today').valid).toBe(false);
+      expect(validateNarrativeOutput('Join thousands of happy customers').valid).toBe(false);
+      expect(validateNarrativeOutput('Discover the secret to success').valid).toBe(false);
+    });
+
+    it('should reject unsubstantiated superlatives', () => {
+      expect(validateNarrativeOutput('The best fitness coaching in the world').valid).toBe(false);
+      expect(validateNarrativeOutput('World-class nutrition program').valid).toBe(false);
+      expect(validateNarrativeOutput('Guaranteed results in 30 days').valid).toBe(false);
+    });
+
+    it('should reject promotional CTA patterns', () => {
+      expect(validateNarrativeOutput('Your transformation awaits').valid).toBe(false);
+      expect(validateNarrativeOutput('Your journey starts here').valid).toBe(false);
+    });
+
+    it('should accept strategic framing', () => {
+      expect(validateNarrativeOutput('Performance-driven marketing that replaces vanity metrics with measurable revenue outcomes').valid).toBe(true);
+      expect(validateNarrativeOutput('Data-backed methodology targeting underserved audience segments in competitive fitness markets').valid).toBe(true);
+      expect(validateNarrativeOutput('Strategic positioning against commoditized coaching through evidence-based differentiation').valid).toBe(true);
+    });
+
+    it('should reject too-short outputs', () => {
+      expect(validateNarrativeOutput('Buy now').valid).toBe(false);
+      expect(validateNarrativeOutput('Click here').valid).toBe(false);
+    });
+  });
+
+  describe('Improved Saturation Detection (Hardening Item 3)', () => {
+    it('should detect saturation via semantic similarity, not just exact match', () => {
+      const narrativeMap = {
+        'Comp1': ['fitness coaching transformation'],
+        'Comp2': ['body transformation program'],
+      };
+      const contentDna = [
+        { competitorName: 'Comp1', hookArchetypes: ['transformation'], topCaptions: ['Transform your body with our fitness coaching'] },
+        { competitorName: 'Comp2', hookArchetypes: ['results'], topCaptions: ['Get real body transformation results'] },
+      ];
+      const sat = computeSemanticSaturation('body transformation coaching', narrativeMap, contentDna, 2);
+      expect(sat).toBeGreaterThan(0);
+    });
+
+    it('should apply minimum saturation floor based on competitor count', () => {
+      const sat = computeSemanticSaturation('completely unique niche xyz123', {}, [], 5);
+      expect(sat).toBeGreaterThan(0);
+      expect(sat).toBeGreaterThanOrEqual(5 * 0.03);
+    });
+
+    it('should not report 0% saturation in markets with 3+ competitors', () => {
+      const narrativeMap = {
+        'C1': ['content strategy'],
+        'C2': ['marketing approach'],
+        'C3': ['audience growth'],
+      };
+      const sat = computeSemanticSaturation('marketing strategy', narrativeMap, [], 3);
+      expect(sat).toBeGreaterThan(0);
+    });
+
+    it('should handle empty inputs gracefully', () => {
+      const sat = computeSemanticSaturation('test', {}, [], 0);
+      expect(sat).toBe(0);
+    });
+  });
+
+  describe('Narrative Distance Realism (Hardening Item 4)', () => {
+    it('should cap distance at 0.75 when keyword overlap exceeds 25%', () => {
+      const distance = layer9_narrativeDistanceScoring('fitness coaching program', {
+        'Comp1': ['fitness coaching methodology', 'training program design'],
+      });
+      expect(distance).toBeLessThanOrEqual(0.75);
+    });
+
+    it('should not produce 100% distance for overlapping terms', () => {
+      const distance = layer9_narrativeDistanceScoring('marketing strategy framework', {
+        'Comp1': ['strategic marketing approach', 'marketing framework for growth'],
+      });
+      expect(distance).toBeLessThan(1.0);
+    });
+
+    it('should detect substring matches', () => {
+      const distance = layer9_narrativeDistanceScoring('personalized nutrition coaching', {
+        'Comp1': ['nutrition programs', 'personalization in health'],
+      });
+      expect(distance).toBeLessThan(1.0);
+    });
+
+    it('should still return 1.0 for truly unrelated narratives', () => {
+      const distance = layer9_narrativeDistanceScoring('quantum computing', {
+        'Comp1': ['organic farming', 'sustainable agriculture'],
+      });
+      expect(distance).toBe(1.0);
+    });
+  });
+
+  describe('Flanking Mode Sensitivity (Hardening Item 5)', () => {
+    it('should trigger flanking when competitor has multi-signal dominance', () => {
+      const mi = {
+        dominanceData: JSON.stringify([
+          { competitor: 'DomPlayer', dominanceScore: 40 },
+          { competitor: 'SmallOne', dominanceScore: 35 },
+        ]),
+        contentDnaData: JSON.stringify([
+          { competitorName: 'DomPlayer', hookArchetypes: ['a', 'b', 'c', 'd', 'e', 'f'], narrativeFrameworks: ['x', 'y', 'z', 'w'] },
+          { competitorName: 'SmallOne', hookArchetypes: ['a'], narrativeFrameworks: ['x'] },
+        ]),
+      };
+      const competitors = [
+        { name: 'DomPlayer', engagementRatio: 0.08 },
+        { name: 'SmallOne', engagementRatio: 0.01 },
+      ];
+      const { flankingMode } = layer6_marketPowerAnalysis(mi, competitors);
+      expect(flankingMode).toBe(true);
+    });
+
+    it('should not trigger flanking for low-signal competitors', () => {
+      const mi = {
+        dominanceData: JSON.stringify([
+          { competitor: 'A', dominanceScore: 40 },
+          { competitor: 'B', dominanceScore: 35 },
+        ]),
+        contentDnaData: JSON.stringify([
+          { competitorName: 'A', hookArchetypes: ['a'], narrativeFrameworks: ['x'] },
+          { competitorName: 'B', hookArchetypes: ['b'], narrativeFrameworks: ['y'] },
+        ]),
+      };
+      const competitors = [
+        { name: 'A', engagementRatio: 0.02 },
+        { name: 'B', engagementRatio: 0.02 },
+      ];
+      const { flankingMode } = layer6_marketPowerAnalysis(mi, competitors);
+      expect(flankingMode).toBe(false);
+    });
+  });
+
+  describe('Cross-Campaign Territory Diversity (Hardening Item 6)', () => {
+    it('should penalize territories similar to recent campaign territories', () => {
+      const territories = [
+        { name: 'fitness coaching methodology', opportunityScore: 0.8 },
+        { name: 'quantum nutrition science', opportunityScore: 0.7 },
+      ];
+      const recent = ['fitness coaching methodology', 'body transformation system'];
+      const penalties = checkCrossCampaignDiversity(territories, recent);
+      const fitnessPenalty = penalties.find(p => p.name.includes('fitness'));
+      const quantumPenalty = penalties.find(p => p.name.includes('quantum'));
+      expect(fitnessPenalty?.penalty).toBeGreaterThan(0);
+      expect(quantumPenalty?.penalty).toBe(0);
+    });
+
+    it('should not penalize unique territories', () => {
+      const territories = [{ name: 'completely unique positioning xyz', opportunityScore: 0.7 }];
+      const recent = ['fitness coaching', 'marketing strategy', 'nutrition program'];
+      const penalties = checkCrossCampaignDiversity(territories, recent);
+      expect(penalties[0].penalty).toBe(0);
+    });
+
+    it('should use Jaccard similarity for comparison', () => {
+      const territories = [
+        { name: 'a b c d', opportunityScore: 0.7 },
+      ];
+      const recent = ['a b c d'];
+      const penalties = checkCrossCampaignDiversity(territories, recent);
+      expect(penalties[0].penalty).toBeGreaterThan(0);
+    });
+
+    it('should handle empty recent territory list', () => {
+      const territories = [{ name: 'test territory', opportunityScore: 0.7 }];
+      const penalties = checkCrossCampaignDiversity(territories, []);
+      expect(penalties[0].penalty).toBe(0);
     });
   });
 });

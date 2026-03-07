@@ -10,6 +10,7 @@ import { aiChat } from "../ai-client";
 import {
   POSITIONING_ENGINE_VERSION,
   POSITIONING_THRESHOLDS,
+  GENERIC_TERRITORY_PATTERNS,
   type PositioningStatus,
   type Territory,
   type StrategyCard,
@@ -234,20 +235,212 @@ function layer6_marketPowerAnalysis(miData: any, competitors: any[]): {
     ? (topEntry.narrativeOwnershipIndex * 0.6) + (topEntry.contentDominanceScore * 0.4)
     : 0;
 
+  const multiSignalDominance = topEntry
+    ? (topEntry.engagementStrength >= POSITIONING_THRESHOLDS.FLANKING_ENGAGEMENT_THRESHOLD &&
+       topEntry.narrativeOwnershipIndex >= POSITIONING_THRESHOLDS.FLANKING_NARRATIVE_OWNERSHIP_THRESHOLD &&
+       topEntry.contentDominanceScore >= POSITIONING_THRESHOLDS.FLANKING_CONTENT_VOLUME_THRESHOLD)
+    : false;
+
   const flankingMode =
     authorityGap >= POSITIONING_THRESHOLDS.AUTHORITY_GAP_FLANKING_THRESHOLD ||
-    categoryControlIndex >= 0.70;
+    categoryControlIndex >= 0.70 ||
+    multiSignalDominance;
 
   return { entries, authorityGap, flankingMode };
+}
+
+export function computeSpecificityScore(territory: string, category: string): number {
+  const lower = territory.toLowerCase().trim();
+  const tokens = lower.split(/\s+/).filter(Boolean);
+
+  let penalty = 0;
+  for (const pattern of GENERIC_TERRITORY_PATTERNS) {
+    const patternTokens = pattern.toLowerCase().split(/\s+/);
+    const overlap = patternTokens.filter(pt => tokens.some(t => t.includes(pt) || pt.includes(t))).length;
+    const similarity = patternTokens.length > 0 ? overlap / patternTokens.length : 0;
+    if (similarity >= 0.5) {
+      const dilution = tokens.length > patternTokens.length ? patternTokens.length / tokens.length : 1;
+      penalty = Math.max(penalty, similarity * dilution * POSITIONING_THRESHOLDS.GENERIC_TERRITORY_PENALTY);
+    }
+  }
+
+  if (tokens.length <= 1) {
+    penalty = Math.max(penalty, 0.20);
+  } else if (tokens.length === 2) {
+    penalty = Math.max(penalty, 0.10);
+  }
+
+  const categoryTokens = category.toLowerCase().split(/\s+/);
+  const hasCategoryContext = tokens.some(t => categoryTokens.some(ct => t === ct || (t.length >= 4 && ct.length >= 4 && (t.includes(ct) || ct.includes(t)))));
+  const categoryBonus = hasCategoryContext ? 0.10 : 0;
+
+  const hasContrast = lower.includes(" vs ") || lower.includes(" versus ") || lower.includes(" over ") ||
+    lower.includes("-driven") || lower.includes("-backed") || lower.includes("-focused");
+  const contrastBonus = hasContrast ? 0.15 : 0;
+
+  const lengthBonus = tokens.length >= 4 ? 0.05 : 0;
+  return Math.max(0, Math.min(1.15, 1 - penalty + categoryBonus + contrastBonus + lengthBonus));
+}
+
+export function validateNarrativeOutput(text: string): { valid: boolean; reason?: string } {
+  if (!text || typeof text !== "string") return { valid: false, reason: "Empty or non-string input" };
+  const lower = text.toLowerCase().trim();
+
+  if (/^we\s/i.test(text.trim()) || /\bwe (help|elevate|transform|empower|deliver|create|provide|offer|guarantee)\b/i.test(lower)) {
+    return { valid: false, reason: "First-person promotional language" };
+  }
+
+  if (/^(get|join|start|discover|unlock|experience|try|buy|sign up|subscribe)\s/i.test(text.trim())) {
+    return { valid: false, reason: "Imperative CTA detected" };
+  }
+
+  if (/\b(best|#1|number one|world-class|unrivaled|unmatched|guaranteed|absolutely|incredible|amazing|revolutionary)\b/i.test(lower)) {
+    return { valid: false, reason: "Unsubstantiated superlative" };
+  }
+
+  if (/^your\s.*(awaits|starts here|begins now|is here|deserves)/i.test(text.trim())) {
+    return { valid: false, reason: "Promotional CTA pattern" };
+  }
+
+  if (lower.length < 15) {
+    return { valid: false, reason: "Too short for strategic framing" };
+  }
+
+  return { valid: true };
+}
+
+export function computeSemanticSaturation(
+  territory: string,
+  narrativeMap: Record<string, string[]>,
+  contentDna: any[],
+  competitorCount: number,
+): number {
+  const tLower = territory.toLowerCase();
+  const tTokens = new Set(tLower.split(/\s+/).filter(t => t.length > 2));
+  if (tTokens.size === 0) return 0;
+
+  let matchSignals = 0;
+  let totalSignals = 0;
+
+  for (const narratives of Object.values(narrativeMap)) {
+    for (const n of narratives) {
+      totalSignals++;
+      const nTokens = new Set(n.toLowerCase().split(/\s+/));
+      let overlap = 0;
+      for (const t of tTokens) {
+        for (const nt of nTokens) {
+          if (t.includes(nt) || nt.includes(t)) { overlap++; break; }
+        }
+      }
+      if (tTokens.size > 0 && overlap / tTokens.size >= 0.3) {
+        matchSignals++;
+      }
+    }
+  }
+
+  for (const entry of contentDna) {
+    const hooks = entry.hookArchetypes || [];
+    const captions = entry.topCaptions || entry.sampleCaptions || [];
+    const ctas = entry.ctaPatterns || [];
+    const frameworks = entry.narrativeFrameworks || [];
+
+    for (const fw of frameworks) {
+      totalSignals++;
+      const fwLower = (typeof fw === "string" ? fw : fw.name || "").toLowerCase();
+      const fwTokens = new Set(fwLower.split(/\s+/).filter((t: string) => t.length > 2));
+      let fwOverlap = 0;
+      for (const t of tTokens) {
+        for (const ft of fwTokens) {
+          if (t.includes(ft) || ft.includes(t)) { fwOverlap++; break; }
+        }
+      }
+      if (tTokens.size > 0 && fwOverlap / tTokens.size >= 0.25) {
+        matchSignals++;
+      }
+    }
+
+    for (const h of hooks) {
+      totalSignals++;
+      const hText = (typeof h === "string" ? h : h.type || h.name || "").toLowerCase();
+      if (tLower.includes(hText) || hText.includes(tLower.split(/\s+/)[0] || "___")) {
+        matchSignals++;
+      }
+    }
+
+    for (const caption of captions) {
+      totalSignals++;
+      const cLower = (typeof caption === "string" ? caption : "").toLowerCase();
+      let tokenOverlap = 0;
+      for (const t of tTokens) {
+        if (cLower.includes(t)) tokenOverlap++;
+      }
+      if (tTokens.size > 0 && tokenOverlap / tTokens.size >= 0.25) {
+        matchSignals++;
+      }
+    }
+
+    for (const cta of ctas) {
+      totalSignals++;
+      const ctaText = (typeof cta === "string" ? cta : cta.pattern || "").toLowerCase();
+      if (tTokens.size > 0) {
+        let ctaOverlap = 0;
+        for (const t of tTokens) {
+          if (ctaText.includes(t)) ctaOverlap++;
+        }
+        if (ctaOverlap / tTokens.size >= 0.3) matchSignals++;
+      }
+    }
+  }
+
+  const semanticRatio = totalSignals > 0 ? matchSignals / totalSignals : 0;
+
+  const floor = Math.min(0.15, competitorCount * POSITIONING_THRESHOLDS.MIN_SATURATION_FLOOR_PER_COMPETITOR);
+
+  return Math.max(floor, Math.min(1.0, semanticRatio));
+}
+
+export function checkCrossCampaignDiversity(
+  territories: { name: string; opportunityScore: number }[],
+  recentTerritoryNames: string[],
+): { name: string; penalty: number }[] {
+  const penalties: { name: string; penalty: number }[] = [];
+
+  for (const territory of territories) {
+    const tTokens = new Set(territory.name.toLowerCase().split(/\s+/).filter(Boolean));
+    let maxSimilarity = 0;
+
+    for (const recent of recentTerritoryNames) {
+      const rTokens = new Set(recent.toLowerCase().split(/\s+/).filter(Boolean));
+      let overlap = 0;
+      for (const t of tTokens) {
+        if (rTokens.has(t)) overlap++;
+      }
+      const union = new Set([...tTokens, ...rTokens]).size;
+      const similarity = union > 0 ? overlap / union : 0;
+      maxSimilarity = Math.max(maxSimilarity, similarity);
+    }
+
+    const penalty = maxSimilarity >= POSITIONING_THRESHOLDS.CROSS_CAMPAIGN_SIMILARITY_THRESHOLD
+      ? POSITIONING_THRESHOLDS.CROSS_CAMPAIGN_PENALTY
+      : 0;
+
+    penalties.push({ name: territory.name, penalty });
+  }
+
+  return penalties;
 }
 
 function layer7_opportunityGapDetection(
   narrativeSaturation: Record<string, number>,
   audienceData: any,
   marketPower: MarketPowerEntry[],
+  category: string = "general",
+  narrativeMap: Record<string, string[]> = {},
+  contentDna: any[] = [],
 ): OpportunityGap[] {
   const pains = safeJsonParse(audienceData.audiencePains, []);
   const desires = safeJsonParse(audienceData.desireMap, []);
+  const competitorCount = Object.keys(narrativeMap).length || marketPower.length;
 
   const painTerritories = pains.slice(0, 8).map((p: any) => ({
     name: p.canonical,
@@ -269,17 +462,22 @@ function layer7_opportunityGapDetection(
     : 0;
 
   const opportunities: OpportunityGap[] = allTerritories.map(t => {
-    const satLevel = narrativeSaturation[t.name.toLowerCase()] || 0;
+    const baseSatLevel = narrativeSaturation[t.name.toLowerCase()] || 0;
+    const semanticSat = computeSemanticSaturation(t.name, narrativeMap, contentDna, competitorCount);
+    const satLevel = Math.max(baseSatLevel, semanticSat);
     const compAuth = avgCompAuthority;
+
+    const specificity = computeSpecificityScore(t.name, category);
 
     const opportunityScore =
       (1 - satLevel) * 0.40 +
-      t.demand * 0.40 +
-      (1 - compAuth) * 0.20;
+      t.demand * 0.35 +
+      (1 - compAuth) * 0.15 +
+      specificity * 0.10;
 
     return {
       territory: t.name,
-      saturationLevel: satLevel,
+      saturationLevel: Math.round(satLevel * 100) / 100,
       audienceDemand: t.demand,
       competitorAuthority: compAuth,
       opportunityScore: Math.round(opportunityScore * 100) / 100,
@@ -332,22 +530,44 @@ function layer9_narrativeDistanceScoring(
   narrativeMap: Record<string, string[]>,
 ): number {
   const territoryLower = territory.toLowerCase();
+  const territoryTokens = new Set(territoryLower.split(/\s+/).filter(t => t.length > 2));
   let minDistance = 1.0;
+  let maxKeywordOverlap = 0;
 
   for (const narratives of Object.values(narrativeMap)) {
     for (const n of narratives) {
       const nLower = n.toLowerCase();
-      const tokens1 = new Set(territoryLower.split(/\s+/));
-      const tokens2 = new Set(nLower.split(/\s+/));
-      let overlap = 0;
-      for (const t of tokens1) {
-        if (tokens2.has(t)) overlap++;
+      const nTokens = new Set(nLower.split(/\s+/).filter(t => t.length > 2));
+
+      let exactOverlap = 0;
+      let substringOverlap = 0;
+
+      for (const t of territoryTokens) {
+        if (nTokens.has(t)) {
+          exactOverlap++;
+        } else {
+          for (const nt of nTokens) {
+            if (t.length >= 4 && nt.length >= 4 && (t.includes(nt) || nt.includes(t))) {
+              substringOverlap++;
+              break;
+            }
+          }
+        }
       }
-      const union = new Set([...tokens1, ...tokens2]).size;
-      const similarity = union > 0 ? overlap / union : 0;
+
+      const totalOverlap = exactOverlap + substringOverlap * 0.7;
+      const union = new Set([...territoryTokens, ...nTokens]).size;
+      const similarity = union > 0 ? totalOverlap / union : 0;
       const distance = 1 - similarity;
       if (distance < minDistance) minDistance = distance;
+
+      const keywordOverlap = territoryTokens.size > 0 ? totalOverlap / territoryTokens.size : 0;
+      maxKeywordOverlap = Math.max(maxKeywordOverlap, keywordOverlap);
     }
+  }
+
+  if (maxKeywordOverlap > POSITIONING_THRESHOLDS.KEYWORD_OVERLAP_DISTANCE_CAP_THRESHOLD) {
+    minDistance = Math.min(minDistance, POSITIONING_THRESHOLDS.NARRATIVE_DISTANCE_MAX_WITH_OVERLAP);
   }
 
   return Math.round(minDistance * 100) / 100;
@@ -491,9 +711,15 @@ Keep statements concise, strategic, and evidence-grounded. Return ONLY the JSON 
     for (const item of parsed) {
       const idx = (item.index || 1) - 1;
       if (idx >= 0 && idx < territories.length) {
-        if (item.enemyDefinition) territories[idx].enemyDefinition = item.enemyDefinition;
-        if (item.narrativeDirection) territories[idx].narrativeDirection = item.narrativeDirection;
-        if (item.contrastAxis) territories[idx].contrastAxis = item.contrastAxis;
+        if (item.enemyDefinition && validateNarrativeOutput(item.enemyDefinition).valid) {
+          territories[idx].enemyDefinition = item.enemyDefinition;
+        }
+        if (item.narrativeDirection && validateNarrativeOutput(item.narrativeDirection).valid) {
+          territories[idx].narrativeDirection = item.narrativeDirection;
+        }
+        if (item.contrastAxis && validateNarrativeOutput(item.contrastAxis).valid) {
+          territories[idx].contrastAxis = item.contrastAxis;
+        }
       }
     }
   } catch (err: any) {
@@ -694,7 +920,8 @@ export async function runPositioningEngine(
   const { entries: marketPower, authorityGap, flankingMode } = layer6_marketPowerAnalysis(miSnapshot, competitors);
   console.log(`[PositioningEngine-V3] L6 Market power: ${marketPower.length} competitors | gap=${authorityGap.toFixed(2)} | flanking=${flankingMode}`);
 
-  const opportunityGaps = layer7_opportunityGapDetection(narrativeSaturation, audienceSnapshot, marketPower);
+  const contentDna = safeJsonParse(miSnapshot.contentDnaData, []);
+  const opportunityGaps = layer7_opportunityGapDetection(narrativeSaturation, audienceSnapshot, marketPower, category, narrativeMap, contentDna);
   console.log(`[PositioningEngine-V3] L7 Opportunities: ${opportunityGaps.length} viable territories`);
 
   const differentiationAxes = layer8_differentiationAxisConstruction(opportunityGaps, trustGaps, flankingMode);
@@ -705,6 +932,46 @@ export async function runPositioningEngine(
     marketPower, differentiationAxes, segmentPriority, trustGaps, flankingMode,
   );
   console.log(`[PositioningEngine-V3] L10 Territories: ${territories.length} selected`);
+
+  try {
+    const recentSnapshots = await db.select({
+      territories: positioningSnapshots.territories,
+      inputSummary: positioningSnapshots.inputSummary,
+    })
+      .from(positioningSnapshots)
+      .where(and(
+        eq(positioningSnapshots.accountId, accountId),
+      ))
+      .orderBy(desc(positioningSnapshots.createdAt))
+      .limit(20);
+
+    const recentTerritoryNames: string[] = [];
+    for (const snap of recentSnapshots) {
+      const summary = safeJsonParse(snap.inputSummary, {});
+      if (summary.detectedCategory && summary.detectedCategory !== category) continue;
+      const parsedTerritories = safeJsonParse(snap.territories, []);
+      for (const t of parsedTerritories) {
+        if (t.name) recentTerritoryNames.push(t.name);
+      }
+    }
+
+    if (recentTerritoryNames.length > 0) {
+      const diversityPenalties = checkCrossCampaignDiversity(territories, recentTerritoryNames);
+      for (const dp of diversityPenalties) {
+        if (dp.penalty > 0) {
+          const territory = territories.find(t => t.name === dp.name);
+          if (territory) {
+            territory.opportunityScore = Math.max(0, territory.opportunityScore - dp.penalty);
+            territory.confidenceScore = Math.max(0, territory.confidenceScore - dp.penalty);
+            territory.stabilityNotes.push(`Cross-campaign similarity penalty: -${(dp.penalty * 100).toFixed(0)}%`);
+          }
+        }
+      }
+      console.log(`[PositioningEngine-V3] Cross-campaign diversity: checked ${recentTerritoryNames.length} recent territories`);
+    }
+  } catch (err: any) {
+    console.warn(`[PositioningEngine-V3] Cross-campaign diversity check skipped: ${err.message}`);
+  }
 
   territories = await layer11_positioningStatementGeneration(territories, category, segmentPriority, accountId);
   console.log(`[PositioningEngine-V3] L11 Statements generated`);
