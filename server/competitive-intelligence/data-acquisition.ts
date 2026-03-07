@@ -636,6 +636,19 @@ async function _executeFetch(
     console.error(`[DataAcq] DATA_MISMATCH_ERROR for ${competitor.name}: expected ${expectedPostCount} posts (${existingPostIds.size} existing + ${postInserts.length} new) but DB has ${persistedPostCount}`);
   }
 
+  let dataFreshnessDays = 0;
+  const postTimestamps = postsToStore
+    .filter(p => p.timestamp)
+    .map(p => new Date(p.timestamp!).getTime());
+  const commentTimestamps = commentInserts
+    .filter((c: any) => c.timestamp)
+    .map((c: any) => new Date(c.timestamp).getTime());
+  const allTimestamps = [...postTimestamps, ...commentTimestamps];
+  const newestTs = allTimestamps.length > 0 ? Math.max(...allTimestamps) : 0;
+  if (newestTs > 0) {
+    dataFreshnessDays = Math.max(0, Math.round((Date.now() - newestTs) / (1000 * 60 * 60 * 24)));
+  }
+
   await db.insert(ciCompetitorMetricsSnapshot).values({
     competitorId,
     accountId,
@@ -648,12 +661,14 @@ async function _executeFetch(
     postingFrequency,
     contentMix,
     lastFetchAt: new Date(),
-    fetchMethod: scrapeResult.collectionMethodUsed,
+    fetchMethod: collectionMode || scrapeResult.collectionMethodUsed,
     fetchStatus: "COMPLETE",
     batchId,
+    dataFreshnessDays,
   });
 
   const ctaPatternStr = allCtaTypes.length > 0 ? allCtaTypes.join(", ") : null;
+
   await db.update(ciCompetitors)
     .set({
       postingFrequency: postingFrequency ? Math.round(postingFrequency) : competitor.postingFrequency,
@@ -662,6 +677,10 @@ async function _executeFetch(
       contentTypeRatio: contentMix || competitor.contentTypeRatio,
       lastCheckedAt: new Date(),
       analysisLevel: collectionMode === "DEEP_PASS" ? "DEEP_PASS" : "FAST_PASS",
+      fetchMethod: collectionMode || "FAST_PASS",
+      postsCollected: persistedPostCount,
+      commentsCollected: persistedCommentCount,
+      dataFreshnessDays,
       updatedAt: new Date(),
     })
     .where(eq(ciCompetitors.id, competitorId));
@@ -767,6 +786,11 @@ export async function enrichCompetitorWithComments(competitorId: string, account
     return { commentsGenerated: 0, status: "COMPETITOR_NOT_FOUND" };
   }
 
+  if (!competitor.lastCheckedAt) {
+    console.log(`[DataAcq] DEEP_PASS_BLOCKED: ${competitor.name} has no FAST_PASS data (lastCheckedAt is null). Cannot enrich before FAST_PASS completes.`);
+    return { commentsGenerated: 0, status: "FAST_PASS_INCOMPLETE" };
+  }
+
   if (!options?.skipCooldown && isSyntheticCooldownActive(competitor.lastSyntheticEnrichmentAt)) {
     const daysSince = ((Date.now() - new Date(competitor.lastSyntheticEnrichmentAt!).getTime()) / (1000 * 60 * 60 * 24)).toFixed(1);
     console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — cooldown active (${daysSince}d since last enrichment, cooldown=${SYNTHETIC_ENRICHMENT_COOLDOWN_DAYS}d). Skipping.`);
@@ -780,6 +804,11 @@ export async function enrichCompetitorWithComments(competitorId: string, account
   if (realComments >= MIN_COMMENTS_THRESHOLD) {
     console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} has ${realComments} real comments (>= ${MIN_COMMENTS_THRESHOLD}). Real data sufficient — skipping synthetic.`);
     return { commentsGenerated: realComments, status: "REAL_DATA_SUFFICIENT" };
+  }
+
+  if (competitor.enrichmentStatus === "ENRICHED" && !options?.skipCooldown) {
+    console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — already enriched (enrichmentStatus=ENRICHED). Skipping.`);
+    return { commentsGenerated: 0, status: "ALREADY_ENRICHED" };
   }
 
   const existingCommentCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)

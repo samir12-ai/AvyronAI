@@ -386,7 +386,7 @@ describe("Synthetic Comment Lifecycle — Deep Pass Integrity", () => {
       const schema = fs.readFileSync("shared/schema.ts", "utf-8");
       const competitorTable = schema.slice(
         schema.indexOf("ciCompetitors = pgTable"),
-        schema.indexOf("ciCompetitors = pgTable") + 1500
+        schema.indexOf("ciCompetitors = pgTable") + 2500
       );
       expect(competitorTable).toContain("lastSyntheticEnrichmentAt");
       expect(competitorTable).toContain("last_synthetic_enrichment_at");

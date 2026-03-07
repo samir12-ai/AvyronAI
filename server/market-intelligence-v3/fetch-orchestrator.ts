@@ -624,6 +624,21 @@ async function executeFetchJob(
       stage.paginationStopReason = fetchResult.paginationStopReason;
       totalPosts += fetchResult.postsCollected;
 
+      try {
+        await db.update(ciCompetitors)
+          .set({
+            fetchMethod: "FAST_PASS",
+            postsCollected: fetchResult.postsCollected,
+            commentsCollected: fetchResult.commentsCollected,
+            lastCheckedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(ciCompetitors.id, comp.id));
+        console.log(`[FetchOrch] FAST_PASS completed | competitor=${comp.name} | posts=${fetchResult.postsCollected} | comments=${fetchResult.commentsCollected}`);
+      } catch (invErr: any) {
+        console.error(`[FetchOrch] Failed to update inventory for ${comp.name}: ${invErr.message}`);
+      }
+
       if (fetchResult.postsCollected < MIN_POSTS_TARGET && (fetchResult.status as string) !== "COOLDOWN") {
         const paginationDetail = fetchResult.paginationStopReason ? ` (pagination: ${fetchResult.paginationStopReason}, ${fetchResult.paginationPages || 1} pages, raw=${fetchResult.rawFetchedCount || 0})` : '';
         limitReasons.push({
@@ -1109,8 +1124,31 @@ export async function getFetchJobStatus(jobId: string): Promise<FetchJobStatus |
 
 async function queueDeepPass(accountId: string, campaignId: string, competitors: any[]): Promise<void> {
   const DEEP_PASS_DELAY_MS = 5000;
-  console.log(`[FetchOrch] Deep Pass scheduled in ${DEEP_PASS_DELAY_MS}ms for ${accountId}/${campaignId} | ${competitors.length} competitors`);
+  console.log(`[FetchOrch] DEEP_PASS enrichment scheduled in ${DEEP_PASS_DELAY_MS}ms for ${accountId}/${campaignId} | ${competitors.length} competitors`);
   await sleep(DEEP_PASS_DELAY_MS);
+
+  const eligibleCompetitors = await db.select().from(ciCompetitors)
+    .where(and(
+      eq(ciCompetitors.accountId, accountId),
+      eq(ciCompetitors.campaignId, campaignId),
+      eq(ciCompetitors.isActive, true),
+    ));
+
+  const notReady = eligibleCompetitors.filter(c => !c.lastCheckedAt);
+  if (notReady.length > 0) {
+    console.log(`[FetchOrch] DEEP_PASS_BLOCKED: ${notReady.length} competitors have not completed FAST_PASS (missing lastCheckedAt). Aborting DEEP_PASS for ${accountId}/${campaignId}. Competitors: ${notReady.map(c => c.name).join(", ")}`);
+    return;
+  }
+
+  const alreadyEnriched = eligibleCompetitors.filter(c => c.enrichmentStatus === "ENRICHED");
+  const toEnrich = eligibleCompetitors.filter(c => c.enrichmentStatus !== "ENRICHED");
+
+  if (toEnrich.length === 0) {
+    console.log(`[FetchOrch] DEEP_PASS skipped: all ${eligibleCompetitors.length} competitors already enriched for ${accountId}/${campaignId}`);
+    return;
+  }
+
+  console.log(`[FetchOrch] DEEP_PASS enrichment started | ${accountId}/${campaignId} | toEnrich=${toEnrich.length} | alreadyEnriched=${alreadyEnriched.length}`);
 
   try {
     await db.update(miSnapshots)
@@ -1120,37 +1158,69 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
         eq(miSnapshots.campaignId, campaignId),
         eq(miSnapshots.status, "COMPLETE"),
       ));
-    console.log(`[FetchOrch] Snapshot dataStatus set to ENRICHING for ${accountId}/${campaignId}`);
   } catch (err: any) {
     console.error(`[FetchOrch] Failed to set ENRICHING status: ${err.message}`);
   }
 
-  const startTime = Date.now();
-  console.log(`[FetchOrch] Deep Pass starting for ${accountId}/${campaignId} | ${competitors.length} competitors`);
+  for (const comp of toEnrich) {
+    try {
+      await db.update(ciCompetitors)
+        .set({ enrichmentStatus: "ENRICHING", updatedAt: new Date() })
+        .where(eq(ciCompetitors.id, comp.id));
+    } catch {}
+  }
 
+  const startTime = Date.now();
   let enrichedCount = 0;
   let failedCount = 0;
+  let skippedCount = 0;
 
-  for (const comp of competitors) {
+  for (const comp of toEnrich) {
     try {
       const result = await enrichCompetitorWithComments(comp.id, accountId);
-      console.log(`[FetchOrch] Deep Pass enrichment for ${comp.name}: ${result.commentsGenerated} comments, status=${result.status}`);
-      if (result.status === "ENRICHED" || result.status === "ALREADY_ENRICHED") {
+      if (result.status === "ENRICHED" || result.status === "ALREADY_ENRICHED" || result.status === "REAL_DATA_SUFFICIENT") {
         enrichedCount++;
+        const newComments = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
+          .where(and(eq(ciCompetitorComments.competitorId, comp.id), eq(ciCompetitorComments.accountId, accountId)));
+        await db.update(ciCompetitors)
+          .set({
+            analysisLevel: "DEEP_PASS",
+            enrichmentStatus: "ENRICHED",
+            fetchMethod: "DEEP_PASS",
+            commentsCollected: Number(newComments[0]?.count || 0),
+            updatedAt: new Date(),
+          })
+          .where(eq(ciCompetitors.id, comp.id));
+        console.log(`[FetchOrch] competitor promoted to DEEP_PASS | ${comp.name} | analysisLevel=DEEP_PASS | comments=${result.commentsGenerated} | status=${result.status}`);
+      } else if (result.status === "COOLDOWN_ACTIVE") {
+        skippedCount++;
+        await db.update(ciCompetitors)
+          .set({ enrichmentStatus: "SKIPPED", updatedAt: new Date() })
+          .where(eq(ciCompetitors.id, comp.id));
+        console.log(`[FetchOrch] competitor skipped (cooldown active) | ${comp.name}`);
       } else {
         failedCount++;
+        await db.update(ciCompetitors)
+          .set({ enrichmentStatus: "FAILED", updatedAt: new Date() })
+          .where(eq(ciCompetitors.id, comp.id));
+        console.log(`[FetchOrch] DEEP_PASS enrichment incomplete | ${comp.name} | status=${result.status}`);
       }
     } catch (err: any) {
-      console.error(`[FetchOrch] Deep Pass enrichment failed for ${comp.name}: ${err.message}`);
+      console.error(`[FetchOrch] DEEP_PASS enrichment failed for ${comp.name}: ${err.message}`);
       failedCount++;
+      try {
+        await db.update(ciCompetitors)
+          .set({ enrichmentStatus: "FAILED", updatedAt: new Date() })
+          .where(eq(ciCompetitors.id, comp.id));
+      } catch {}
     }
   }
 
   try {
     await persistSnapshotAfterFetch(accountId, campaignId, false, "COMPLETE", "FRESH_DATA", true, "COMPLETE");
-    console.log(`[FetchOrch] Deep Pass snapshot recomputed (COMPLETE) for ${accountId}/${campaignId} | enriched=${enrichedCount} | failed=${failedCount} | duration=${Date.now() - startTime}ms`);
+    console.log(`[FetchOrch] DEEP_PASS snapshot recomputed (COMPLETE) for ${accountId}/${campaignId} | enriched=${enrichedCount} | failed=${failedCount} | skipped=${skippedCount} | duration=${Date.now() - startTime}ms`);
   } catch (err: any) {
-    console.error(`[FetchOrch] Deep Pass snapshot persistence failed: ${err.message}`);
+    console.error(`[FetchOrch] DEEP_PASS snapshot persistence failed: ${err.message}`);
   }
 }
 
@@ -1294,8 +1364,9 @@ async function recoverStuckDeepPass(): Promise<void> {
 
   try {
     await db.execute(sql`
-      UPDATE ci_competitors SET analysis_level = 'DEEP_PASS', updated_at = NOW()
+      UPDATE ci_competitors SET analysis_level = 'DEEP_PASS', enrichment_status = 'ENRICHED', updated_at = NOW()
       WHERE is_active = true AND analysis_level = 'FAST_PASS'
+        AND enrichment_status != 'ENRICHED'
         AND (SELECT COUNT(*) FROM ci_competitor_comments WHERE competitor_id = ci_competitors.id AND account_id = ci_competitors.account_id) >= ${MI_THRESHOLDS.MIN_COMMENTS_SAMPLE}
     `);
 
@@ -1306,6 +1377,8 @@ async function recoverStuckDeepPass(): Promise<void> {
       FROM ci_competitors c
       WHERE c.is_active = true
         AND c.analysis_level = 'FAST_PASS'
+        AND c.enrichment_status NOT IN ('ENRICHED', 'ENRICHING')
+        AND c.last_checked_at IS NOT NULL
         AND (SELECT COUNT(*) FROM ci_competitor_posts WHERE competitor_id = c.id AND account_id = c.account_id) > 0
         AND (SELECT COUNT(*) FROM ci_competitor_comments WHERE competitor_id = c.id AND account_id = c.account_id) < ${MI_THRESHOLDS.MIN_COMMENTS_SAMPLE}
     `);
@@ -1317,10 +1390,14 @@ async function recoverStuckDeepPass(): Promise<void> {
 
       for (const row of rows) {
         try {
+          await db.execute(sql`UPDATE ci_competitors SET enrichment_status = 'ENRICHING', updated_at = NOW() WHERE id = ${row.id}`);
           const result = await enrichCompetitorWithComments(row.id as string, row.account_id as string);
-          console.log(`[DeepPassRecovery] Enriched ${row.name}: ${result.commentsGenerated} comments, status=${result.status}`);
+          const finalStatus = (result.status === "ENRICHED" || result.status === "ALREADY_ENRICHED" || result.status === "REAL_DATA_SUFFICIENT") ? "ENRICHED" : "FAILED";
+          await db.execute(sql`UPDATE ci_competitors SET enrichment_status = ${finalStatus}, updated_at = NOW() WHERE id = ${row.id}`);
+          console.log(`[DeepPassRecovery] Enriched ${row.name}: ${result.commentsGenerated} comments, status=${result.status}, enrichmentStatus=${finalStatus}`);
         } catch (err: any) {
           console.error(`[DeepPassRecovery] Failed to enrich ${row.name}: ${err.message}`);
+          try { await db.execute(sql`UPDATE ci_competitors SET enrichment_status = 'FAILED', updated_at = NOW() WHERE id = ${row.id}`); } catch {}
         }
       }
     }

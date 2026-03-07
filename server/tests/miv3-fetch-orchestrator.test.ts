@@ -2071,4 +2071,200 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("BACKPRESSURE_QUEUE_THRESHOLD");
     });
   });
+
+  describe("FAST_PASS / DEEP_PASS Architecture Hardening", () => {
+    let orchSource: string;
+    let dataAcqSource: string;
+    let schemaSource: string;
+
+    beforeAll(() => {
+      orchSource = require("fs").readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8");
+      dataAcqSource = require("fs").readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8");
+      schemaSource = require("fs").readFileSync("shared/schema.ts", "utf-8");
+    });
+
+    it("FP-1) Schema has enrichmentStatus field on ciCompetitors", () => {
+      const tableBlock = schemaSource.slice(
+        schemaSource.indexOf("ciCompetitors = pgTable"),
+        schemaSource.indexOf("ciCompetitors = pgTable") + 2500
+      );
+      expect(tableBlock).toContain('enrichmentStatus');
+      expect(tableBlock).toContain('enrichment_status');
+      expect(tableBlock).toContain('.default("PENDING")');
+    });
+
+    it("FP-2) Schema has fetchMethod, postsCollected, commentsCollected, dataFreshnessDays on ciCompetitors", () => {
+      const tableBlock = schemaSource.slice(
+        schemaSource.indexOf("ciCompetitors = pgTable"),
+        schemaSource.indexOf("ciCompetitors = pgTable") + 2500
+      );
+      expect(tableBlock).toContain("fetchMethod");
+      expect(tableBlock).toContain("fetch_method");
+      expect(tableBlock).toContain("postsCollected");
+      expect(tableBlock).toContain("posts_collected");
+      expect(tableBlock).toContain("commentsCollected");
+      expect(tableBlock).toContain("comments_collected");
+      expect(tableBlock).toContain("dataFreshnessDays");
+      expect(tableBlock).toContain("data_freshness_days");
+    });
+
+    it("FP-3) FAST_PASS updates competitor inventory after fetch", () => {
+      expect(orchSource).toContain('fetchMethod: "FAST_PASS"');
+      expect(orchSource).toContain("postsCollected: fetchResult.postsCollected");
+      expect(orchSource).toContain("commentsCollected: fetchResult.commentsCollected");
+      expect(orchSource).toContain("FAST_PASS completed | competitor=");
+    });
+
+    it("FP-4) DEEP_PASS gate: blocks when FAST_PASS incomplete (missing lastCheckedAt)", () => {
+      expect(orchSource).toContain("DEEP_PASS_BLOCKED");
+      expect(orchSource).toContain("!c.lastCheckedAt");
+      expect(orchSource).toContain("have not completed FAST_PASS");
+    });
+
+    it("FP-5) DEEP_PASS gate: skips already-enriched competitors", () => {
+      expect(orchSource).toContain('c.enrichmentStatus === "ENRICHED"');
+      expect(orchSource).toContain('enrichmentStatus !== "ENRICHED"');
+      expect(orchSource).toContain("DEEP_PASS skipped: all");
+    });
+
+    it("FP-6) DEEP_PASS sets enrichmentStatus transitions: ENRICHING → ENRICHED/FAILED/SKIPPED", () => {
+      expect(orchSource).toContain('enrichmentStatus: "ENRICHING"');
+      expect(orchSource).toContain('enrichmentStatus: "ENRICHED"');
+      expect(orchSource).toContain('enrichmentStatus: "FAILED"');
+      expect(orchSource).toContain('enrichmentStatus: "SKIPPED"');
+    });
+
+    it("FP-7) DEEP_PASS updates fetchMethod and analysisLevel to DEEP_PASS on promotion", () => {
+      expect(orchSource).toContain('fetchMethod: "DEEP_PASS"');
+      expect(orchSource).toContain('analysisLevel: "DEEP_PASS"');
+      expect(orchSource).toContain("competitor promoted to DEEP_PASS");
+      expect(orchSource).toContain("analysisLevel=DEEP_PASS");
+    });
+
+    it("FP-8) enrichCompetitorWithComments blocks when FAST_PASS incomplete", () => {
+      expect(dataAcqSource).toContain("FAST_PASS_INCOMPLETE");
+      expect(dataAcqSource).toContain("!competitor.lastCheckedAt");
+      expect(dataAcqSource).toContain("Cannot enrich before FAST_PASS completes");
+    });
+
+    it("FP-9) enrichCompetitorWithComments uses enrichmentStatus guard", () => {
+      expect(dataAcqSource).toContain('enrichmentStatus === "ENRICHED"');
+      expect(dataAcqSource).toContain("ALREADY_ENRICHED");
+    });
+
+    it("FP-10) DATA_DEGRADATION_GUARD prevents DEEP_PASS from overwriting FAST_PASS data", () => {
+      expect(dataAcqSource).toContain("DATA_DEGRADATION_GUARD");
+      expect(dataAcqSource).toContain("Keeping existing data");
+    });
+
+    it("FP-11) Duplicate post protection active (postId + shortcode dedup)", () => {
+      expect(dataAcqSource).toContain("existingPostIds.has(post.postId)");
+      expect(dataAcqSource).toContain("existingShortcodes.has(post.shortcode)");
+      expect(dataAcqSource).toContain("isDuplicate");
+    });
+
+    it("FP-12) FAST_PASS skips comment generation", () => {
+      expect(dataAcqSource).toContain('collectionMode !== "FAST_PASS"');
+      expect(dataAcqSource).toContain("FAST_PASS: Skipping comment generation");
+    });
+
+    it("FP-13) recoverStuckDeepPass respects enrichmentStatus", () => {
+      expect(orchSource).toContain("enrichment_status != 'ENRICHED'");
+      expect(orchSource).toContain("enrichment_status NOT IN ('ENRICHED', 'ENRICHING')");
+      expect(orchSource).toContain("last_checked_at IS NOT NULL");
+    });
+
+    it("FP-14) Data freshness calculated from newest post or comment timestamp", () => {
+      expect(dataAcqSource).toContain("postTimestamps");
+      expect(dataAcqSource).toContain("commentTimestamps");
+      expect(dataAcqSource).toContain("allTimestamps");
+      expect(dataAcqSource).toContain("newestTs");
+      expect(dataAcqSource).toContain("dataFreshnessDays");
+      const dataCoverage = require("fs").readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8");
+      const coverageFn = dataCoverage.slice(
+        dataCoverage.indexOf("async function getCompetitorDataCoverage") || dataCoverage.indexOf("export async function getCompetitorDataCoverage"),
+        (dataCoverage.indexOf("async function getCompetitorDataCoverage") || dataCoverage.indexOf("export async function getCompetitorDataCoverage")) + 2000
+      );
+      expect(coverageFn).toContain("newestPost");
+    });
+
+    it("FP-15) Synthetic comments tagged as synthetic and excluded from real signal counts", () => {
+      expect(dataAcqSource).toContain("isSynthetic: true");
+      expect(dataAcqSource).toContain('source: "synthetic_enrichment"');
+      expect(dataAcqSource).toContain("isSynthetic, false");
+    });
+
+    it("FP-16) Cooldown enforcement blocks repeated enrichment", () => {
+      expect(dataAcqSource).toContain("SYNTHETIC_ENRICHMENT_COOLDOWN_DAYS");
+      expect(dataAcqSource).toContain("isSyntheticCooldownActive");
+      expect(dataAcqSource).toContain("COOLDOWN_ACTIVE");
+    });
+
+    it("FP-17) Pipeline order enforced: FAST_PASS → snapshot → DEEP_PASS → enriched snapshot", () => {
+      const fastPassSnapshotIdx = orchSource.indexOf("persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverage");
+      const deepPassQueueIdx = orchSource.indexOf("queueDeepPass(accountId, campaignId, competitors)");
+      const deepPassSnapshotIdx = orchSource.indexOf("DEEP_PASS snapshot recomputed");
+      expect(fastPassSnapshotIdx).toBeLessThan(deepPassQueueIdx);
+      expect(deepPassQueueIdx).toBeLessThan(deepPassSnapshotIdx);
+    });
+
+    it("FP-18) FAST_PASS priority=0 always higher than DEEP_PASS priority=5", () => {
+      expect(orchSource).toContain("PRIORITY_FAST_PASS = 0");
+      expect(orchSource).toContain("PRIORITY_DEEP_PASS = 5");
+      const fpMatch = orchSource.match(/PRIORITY_FAST_PASS\s*=\s*(\d+)/);
+      const dpMatch = orchSource.match(/PRIORITY_DEEP_PASS\s*=\s*(\d+)/);
+      expect(Number(fpMatch![1])).toBeLessThan(Number(dpMatch![1]));
+    });
+
+    it("FP-19) Structured logging for all stage transitions", () => {
+      expect(orchSource).toContain("FAST_PASS completed");
+      expect(orchSource).toContain("DEEP_PASS enrichment started");
+      expect(orchSource).toContain("competitor promoted to DEEP_PASS");
+      expect(orchSource).toContain("competitor skipped");
+      expect(orchSource).toContain("DEEP_PASS_BLOCKED");
+    });
+
+    it("FP-20) DEEP_PASS cannot run repeatedly: enrichmentStatus + cooldown double-guard", () => {
+      const enrichFn = dataAcqSource.slice(
+        dataAcqSource.indexOf("export async function enrichCompetitorWithComments"),
+        dataAcqSource.indexOf("export async function enrichCompetitorWithComments") + 3000
+      );
+      expect(enrichFn).toContain("FAST_PASS_INCOMPLETE");
+      expect(enrichFn).toContain("isSyntheticCooldownActive");
+      expect(enrichFn).toContain("COOLDOWN_ACTIVE");
+      expect(enrichFn).toContain("REAL_DATA_SUFFICIENT");
+      expect(enrichFn).toContain("ALREADY_ENRICHED");
+    });
+
+    it("FP-21) fetchCompetitorData stores inventory fields (fetchMethod, postsCollected, dataFreshnessDays)", () => {
+      const fetchFn = dataAcqSource.slice(
+        dataAcqSource.indexOf("export async function fetchCompetitorData"),
+        dataAcqSource.indexOf("export async function fetchCompetitorData") + 25000
+      );
+      expect(fetchFn).toContain('fetchMethod: collectionMode || "FAST_PASS"');
+      expect(fetchFn).toContain("postsCollected: persistedPostCount");
+      expect(fetchFn).toContain("commentsCollected: persistedCommentCount");
+      expect(fetchFn).toContain("dataFreshnessDays");
+    });
+
+    it("FP-22) New system uses enrichmentStatus (not only analysisLevel) for stage tracking", () => {
+      expect(orchSource).toContain("enrichmentStatus");
+      expect(dataAcqSource).toContain("enrichmentStatus");
+      const enrichmentStatusCount = (orchSource.match(/enrichmentStatus/g) || []).length;
+      expect(enrichmentStatusCount).toBeGreaterThanOrEqual(8);
+    });
+
+    it("FP-23) Snapshot integrity: FAST_PASS generates baseline, DEEP_PASS generates enriched", () => {
+      expect(orchSource).toContain('fastPassDataStatus');
+      expect(orchSource).toContain('"ENRICHING"');
+      expect(orchSource).toContain("DEEP_PASS snapshot recomputed (COMPLETE)");
+    });
+
+    it("FP-24) Engine version compatibility checks remain active", () => {
+      const engineSource = require("fs").readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+      expect(engineSource).toContain("ENGINE_VERSION");
+      expect(engineSource).toContain("analysisVersion");
+      expect(engineSource).toContain("SNAPSHOT_COMPLETION_CONTRACT_VIOLATED");
+    });
+  });
 });

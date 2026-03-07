@@ -1,0 +1,235 @@
+:::writing{variant=“email” id=“64291” subject=“FINAL HARDENING — FAST_PASS / DEEP_PASS Architecture, Inventory Segmentation, and Pipeline Safeguards”}
+
+Hello Replit,
+
+We need to fully close and harden the FAST_PASS / DEEP_PASS system across the entire data acquisition and MI pipeline. The objective is to eliminate ambiguity, prevent data corruption, and ensure the inventory processing behaves deterministically at scale.
+
+This email consolidates all requirements, safeguards, and edge cases so the system becomes fully stable and production-grade. Please review and verify the following items.
+
+⸻
+
+1. Strict Two-Stage Inventory Architecture
+
+The competitor inventory must operate in two clearly separated stages.
+
+FAST_PASS — Baseline Collection
+
+Purpose
+Provide a fast, reliable dataset so the Market Intelligence pipeline can run immediately.
+
+Requirements
+
+• Collect baseline posts for every competitor
+• Do NOT collect comments
+• Do NOT run enrichment
+• Store analysisLevel = FAST_PASS
+• Record postsCollected
+• Record lastCheckedAt
+• Mark fetchMethod = FAST_PASS
+
+FAST_PASS must prioritize speed, stability, and guaranteed coverage of all competitors.
+
+⸻
+
+DEEP_PASS — Enrichment Stage
+
+Purpose
+Strengthen the dataset for deeper signal extraction after FAST_PASS completes.
+
+Requirements
+
+• Runs only after FAST_PASS completes
+• Must enrich the existing dataset (no full re-scrape)
+• Collect additional posts beyond baseline
+• Collect comment samples where available
+• Promote competitor to analysisLevel = DEEP_PASS only after thresholds are met
+• Preserve existing FAST_PASS data
+
+DEEP_PASS must prioritize signal strength and completeness.
+
+⸻
+
+2. Mandatory Execution Order
+
+Pipeline must always follow this order:
+
+FAST_PASS
+→ MI snapshot (baseline)
+→ DEEP_PASS enrichment
+→ enriched MI snapshot
+
+DEEP_PASS must never run before FAST_PASS.
+
+If FAST_PASS fails or has not completed, DEEP_PASS must not execute.
+
+⸻
+
+3. Competitor Inventory Segmentation
+
+The system must clearly track the state of each competitor.
+
+Required fields:
+
+• analysisLevel (FAST_PASS / DEEP_PASS)
+• postsCollected
+• commentsCollected
+• lastCheckedAt
+• dataFreshnessDays
+• fetchMethod
+• enrichmentStatus
+
+This allows immediate verification of processing state.
+
+⸻
+
+4. Data Safety Guarantees
+
+DEEP_PASS must never damage or overwrite baseline data.
+
+Confirm the following safeguards:
+
+• DEEP_PASS cannot delete FAST_PASS posts
+• DEEP_PASS cannot overwrite existing posts
+• DEEP_PASS only enriches missing fields
+• duplicate protection remains active
+• postId uniqueness constraints remain enforced
+
+⸻
+
+5. Deep Pass Promotion Conditions
+
+Competitors must only be promoted to DEEP_PASS when real thresholds are met.
+
+Required checks:
+
+• sufficient posts collected
+• comment threshold met
+• dataset integrity verified
+
+If thresholds are not met:
+
+competitor remains FAST_PASS.
+
+⸻
+
+6. Re-Execution Protection
+
+The system must prevent unnecessary repeated enrichment.
+
+Safeguards
+
+• DEEP_PASS cannot run repeatedly on the same competitor
+• enrichment cooldown must be enforced
+• thresholds must be checked before every run
+• competitors already enriched must be skipped
+
+⸻
+
+7. Fetch Queue Integrity
+
+Confirm the job system respects inventory segmentation.
+
+Requirements
+
+• FAST_PASS jobs always have highest priority
+• DEEP_PASS jobs run only after FAST_PASS completion
+• queue logs show which stage processed each competitor
+• failures cannot corrupt competitor state
+
+⸻
+
+8. Snapshot Integrity
+
+MI snapshots must reflect the correct inventory state.
+
+Verify
+
+• FAST_PASS generates baseline snapshot
+• DEEP_PASS generates enriched snapshot
+• snapshot versioning remains intact
+• snapshot integrity validation remains active
+
+⸻
+
+9. Data Freshness and Refresh Behavior
+
+Ensure that freshness calculations are based on the newest post or comment timestamp, not historical signal windows.
+
+Confirm that
+
+• freshness reflects real data recency
+• stale data triggers refresh
+• cached snapshots remain valid when data is fresh
+
+⸻
+
+10. Synthetic Comment Safeguards
+
+Synthetic comments must never contaminate signal analysis.
+
+Confirm
+
+• synthetic comments are tagged
+• synthetic comments are excluded from audience signal extraction
+• synthetic lifecycle cleanup works correctly
+• regeneration cooldown remains enforced
+
+⸻
+
+11. Engine Compatibility and Version Safety
+
+Because the system relies on multiple engines, confirm the following:
+
+• engines read the latest snapshot schema
+• engine version compatibility checks remain active
+• no downstream engine reads outdated snapshot structures
+
+This prevents silent pipeline inconsistencies.
+
+⸻
+
+12. Diagnostics and Logging
+
+The system must provide structured logs for both stages.
+
+Examples
+
+FAST_PASS completed
+DEEP_PASS enrichment started
+competitor promoted to DEEP_PASS
+competitor skipped (already enriched)
+
+Diagnostics must allow quick verification of the pipeline.
+
+⸻
+
+13. Runtime Verification
+
+Please confirm the following after implementation:
+
+• all competitors reach FAST_PASS baseline
+• eligible competitors are enriched to DEEP_PASS
+• analysisLevel reflects final state accurately
+• MI snapshots reflect enriched datasets
+• no competitors remain stuck between stages
+
+⸻
+
+14. Acceptance Criteria
+
+This task is considered complete only when:
+
+• competitor inventory is cleanly segmented into FAST_PASS and DEEP_PASS
+• pipeline order is strictly enforced
+• enrichment cannot overwrite baseline data
+• inventory states are fully visible in diagnostics
+• queue processing respects stage priority
+• MI snapshots reflect the enriched dataset
+• no stale schema or version conflicts exist
+• all automated tests pass successfully
+
+Once verified, the FAST_PASS / DEEP_PASS architecture can be considered fully hardened and stable for production use.
+
+Thank you.
+
+:::
