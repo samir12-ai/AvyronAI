@@ -249,7 +249,7 @@ export default function PositioningStrategy() {
           {snapshot.marketPowerAnalysis.length > 0 && (
             <View style={s.section}>
               <Text style={[s.sectionTitle, { color: colors.text }]}>Market Power</Text>
-              {snapshot.marketPowerAnalysis.slice(0, 5).map((entry, i) => (
+              {snapshot.marketPowerAnalysis.slice(0, 12).map((entry, i) => (
                 <MarketPowerRow key={i} entry={entry} colors={colors} isDark={isDark} />
               ))}
             </View>

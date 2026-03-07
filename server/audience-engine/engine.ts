@@ -20,6 +20,7 @@ import {
   type PatternCluster,
   type MarketScope,
 } from "./constants";
+import { MI_COST_LIMITS } from "../market-intelligence-v3/constants";
 import { aiChat } from "../ai-client";
 
 interface EvidenceMeta {
@@ -375,7 +376,7 @@ function computeCalibratedConfidence(
 ): number {
   const freqScore = totalTexts > 0 ? Math.min(1, frequency / Math.max(totalTexts * 0.1, 1)) : 0;
   const diversityScore = Math.min(1, sourceTypes.length / 3);
-  const competitorScore = Math.min(1, competitorCount / 5);
+  const competitorScore = Math.min(1, competitorCount / MI_COST_LIMITS.MAX_COMPETITORS);
 
   const raw =
     freqScore * CONFIDENCE_WEIGHTS.SIGNAL_FREQUENCY +
