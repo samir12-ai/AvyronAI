@@ -222,15 +222,15 @@ async function getCachedSnapshot(accountId: string, campaignId: string, competit
 function computeDataFreshnessDays(competitors: CompetitorInput[]): number {
   if (competitors.length === 0) return 999;
   const now = Date.now();
-  let oldest = now;
+  let newest = 0;
   for (const c of competitors) {
     for (const p of c.posts || []) {
       const t = new Date(p.timestamp).getTime();
-      if (!isNaN(t) && t < oldest) oldest = t;
+      if (!isNaN(t) && t > newest) newest = t;
     }
   }
-  if (oldest === now) return 0;
-  return Math.round((now - oldest) / (1000 * 60 * 60 * 24));
+  if (newest === 0) return 999;
+  return Math.round((now - newest) / (1000 * 60 * 60 * 24));
 }
 
 export function computeVolatilityIndex(signalResults: any[]): number {

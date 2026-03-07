@@ -1,0 +1,89 @@
+:::writing{variant=“standard” id=“76104”}
+Subject: Immediate Investigation Required — Stale Market Intelligence Snapshot Blocking Analysis
+
+Hello Replit,
+
+We need an urgent investigation regarding the Market Intelligence system behavior.
+
+The dashboard is currently showing the following state:
+	•	Freshness: 744 days
+	•	Status: BLOCKED
+	•	Reason: DATA_STALE_HARD_GATE (data older than 14 days requires refresh)
+	•	Cached: yes
+	•	Competitors: 3
+
+This indicates that the system is using very old snapshot data instead of executing a fresh analysis, even though the engines have already been hardened and updated.
+
+Please perform the following checks immediately.
+
+⸻
+
+	1.	Verify Snapshot Age and Source
+
+Check whether the dashboard is loading an old cached snapshot instead of triggering a new MI v3 analysis.
+
+Specifically confirm:
+	•	What is the actual timestamp of the latest entry in mi_snapshots for this campaign?
+	•	Is the UI loading a cached snapshot instead of requesting a new analysis run?
+	•	Is the snapshot shown on the dashboard truly the latest snapshot in the database?
+
+⸻
+
+	2.	Verify Fetch Job Execution
+
+Confirm whether data collection jobs are actually running for the competitors.
+
+Check the following:
+	•	Are mi_fetch_jobs being created when the analysis is triggered?
+	•	Are these jobs completing successfully or failing?
+	•	Are there errors related to scraping blocks or rate limits?
+
+If fetch jobs are failing, provide the failure reason.
+
+⸻
+
+	3.	Verify Competitor Freshness State
+
+Inspect the competitor records in ci_competitors.
+
+Confirm:
+	•	last_checked_at timestamps
+	•	analysis_level values
+	•	Whether competitors are stuck in an outdated state from before the hardening updates
+
+If competitors are stuck with stale states, reset them and trigger a fresh fetch cycle.
+
+⸻
+
+	4.	Check Cache Behavior
+
+Confirm that the system is not serving a stale cached snapshot when the data is beyond the freshness threshold.
+
+Specifically verify:
+	•	If data age > 14 days, the system must force a refresh instead of returning cached data.
+	•	Cached results must not bypass the DATA_STALE_HARD_GATE.
+
+⸻
+
+	5.	Trigger a Clean Refresh
+
+If stale data is confirmed, perform a clean refresh:
+	•	Reset the affected competitor fetch states if necessary
+	•	Trigger a fresh MI v3 Fast Pass + Deep Pass cycle
+	•	Ensure new snapshots are written to mi_snapshots
+	•	Confirm that freshness is recalculated correctly after the run
+
+⸻
+
+	6.	Final Confirmation
+
+Please report back with:
+	•	The actual snapshot timestamp currently used by the dashboard
+	•	Whether cached data was incorrectly served
+	•	The status of the fetch jobs
+	•	Confirmation that a new snapshot has been generated successfully
+
+The system must not rely on extremely old cached snapshots when the freshness gate is active.
+
+Thank you.
+:::
