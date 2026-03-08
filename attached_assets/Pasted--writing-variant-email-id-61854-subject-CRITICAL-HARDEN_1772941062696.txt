@@ -1,0 +1,242 @@
+:::writing{variant=“email” id=“61854” subject=“CRITICAL HARDENING — MI v3 / FAST_PASS–DEEP_PASS Integrity, Dataset Reliability, and Market Signal Accuracy”}
+
+Hello Replit Team,
+
+Thank you for the recent fixes and improvements to the Market Intelligence v3 pipeline. The work done so far on DEEP_PASS orchestration, promotion gating, freshness correction, and synthetic comment lifecycle is appreciated.
+
+However, because MI v3 is the foundation for Audience, Positioning, and Differentiation engines, we must close the remaining architectural gaps to ensure the system is fully reliable, deterministic, and safe for downstream strategic engines.
+
+The goal of this message is to finalize the MI pipeline so that no false signals, false promotions, or misleading diagnostics can occur.
+
+Please review and implement the following hardening safeguards.
+
+⸻
+
+1. FAST_PASS → DEEP_PASS Dataset Growth Verification
+
+DEEP_PASS must never report completion if the dataset did not actually grow.
+
+Before promoting a competitor to DEEP_PASS, the orchestrator must verify:
+
+• additional posts were fetched beyond the FAST_PASS baseline
+• comments were actually collected or generated
+• the dataset size increased compared to the baseline snapshot
+
+If the dataset did not change, the system must mark the result as:
+
+ENRICHMENT_NO_CHANGE
+
+and keep the competitor in FAST_PASS / PENDING.
+
+Verification condition:
+
+deepPassPostCount > fastPassPostCount
+OR
+deepPassCommentCount > fastPassCommentCount
+
+If neither condition is true → promotion must be blocked.
+
+⸻
+
+2. Mandatory Post Expansion in DEEP_PASS
+
+FAST_PASS baseline collects roughly 12 posts.
+
+DEEP_PASS must explicitly attempt post expansion before comment enrichment.
+
+Expected pipeline behavior:
+
+FAST_PASS → ~12 posts
+DEEP_PASS → attempt expansion up to ~30 posts
+
+If the system cannot fetch additional posts and the count remains identical to FAST_PASS, it must log:
+
+POST_EXPANSION_FAILED
+
+and skip promotion.
+
+⸻
+
+3. Promotion Integrity Gate
+
+Promotion to analysisLevel = DEEP_PASS must require all three conditions simultaneously:
+
+• posts >= minimum threshold
+• comments >= minimum threshold
+• dataset growth verified vs FAST_PASS baseline
+
+Promotion must never occur based solely on enrichment status.
+
+Only the orchestrator may control:
+
+• analysisLevel updates
+• enrichmentStatus transitions
+• promotion decisions
+
+Helper functions must not modify these fields.
+
+⸻
+
+4. Real vs Synthetic Comment Transparency
+
+Synthetic comments are acceptable as enrichment but must never obscure real data signals.
+
+Diagnostics must clearly expose:
+
+• realCommentCount
+• syntheticCommentCount
+• totalCommentCount
+
+Promotion logs must display these values so the dataset composition remains transparent.
+
+Downstream engines (Audience / Positioning / Differentiation) must continue ignoring synthetic comments during signal extraction.
+
+⸻
+
+5. Synthetic Comment Lifecycle Safety
+
+Synthetic comments must remain temporary enrichment artifacts, not permanent dataset pollution.
+
+Please confirm the following safeguards remain active:
+
+• synthetic comments contain explicit markers
+• synthetic comments automatically expire after the configured retention window
+• cleanup does not trigger uncontrolled regeneration
+• cooldown safeguards prevent synthetic churn loops
+
+⸻
+
+6. Dataset Uniformity Safeguard
+
+Competitor datasets currently vary significantly in size (some competitors have 30+ posts while others have ~10).
+
+To prevent signal imbalance, implement a diagnostic:
+
+LOW_SAMPLE_COMPETITOR
+
+Competitors flagged as LOW_SAMPLE must have reduced analytical weight in signal aggregation.
+
+This prevents smaller datasets from distorting market interpretation.
+
+⸻
+
+7. Market Activity Signal Accuracy
+
+We observed cases where the engine reports:
+
+Low Activity
+Cooling Market
+
+even when competitors are actively posting.
+
+Please confirm the market activity calculation correctly incorporates:
+
+• posting frequency signals
+• competitor lifecycle classification (ACTIVE / DORMANT / LOW_SIGNAL)
+• authority weighting
+• dataset completeness
+
+Dormant or low-signal competitors must not artificially lower the market activity score.
+
+⸻
+
+8. Snapshot Baseline Comparison
+
+Every DEEP_PASS execution must compare the dataset against the FAST_PASS baseline snapshot.
+
+Validation must confirm:
+
+• post count increased OR
+• comment count increased
+
+If neither metric changed, the system must log:
+
+ENRICHMENT_NO_CHANGE
+
+and avoid promotion.
+
+⸻
+
+9. Inventory Consistency Validation
+
+After each pipeline cycle, perform an integrity check ensuring:
+
+• FAST_PASS competitors contain only baseline datasets
+• DEEP_PASS competitors meet enrichment thresholds
+• no competitor is incorrectly labeled DEEP_PASS
+
+If inconsistencies are detected, log:
+
+INVENTORY_INCONSISTENCY.
+
+⸻
+
+10. Recovery Path Integrity
+
+Startup recovery jobs must follow the exact same promotion rules.
+
+Recovery must never bypass:
+
+• dataset growth verification
+• promotion thresholds
+• orchestrator ownership of state changes
+
+⸻
+
+11. Diagnostics Visibility
+
+Each competitor should emit the following diagnostics after DEEP_PASS:
+
+• baselinePostCount
+• deepPassPostCount
+• realCommentCount
+• syntheticCommentCount
+• promotionDecision
+• enrichmentResult
+
+This allows immediate validation that enrichment actually occurred.
+
+⸻
+
+12. Market Intelligence Architectural Safeguard (Critical)
+
+To prevent long-term MI errors, please implement a single authoritative source for market activity calculation.
+
+Currently, market activity signals may be influenced by:
+
+• low-sample competitors
+• dormant accounts
+• inconsistent dataset sizes
+
+The market activity index must therefore be calculated using only ACTIVE competitors with sufficient datasets, with weighting applied by authority and dataset completeness.
+
+Inactive or low-signal competitors should contribute minimal weight to market activity calculations.
+
+This safeguard prevents false classifications such as:
+
+Low Activity
+Cooling Market
+
+when the actual market is active.
+
+⸻
+
+Acceptance Criteria
+
+The MI v3 pipeline should be considered fully hardened only when:
+
+• DEEP_PASS cannot report success without dataset growth
+• post expansion beyond FAST_PASS baseline is verified
+• promotion requires both post and comment thresholds
+• synthetic comments remain transparent and temporary
+• orchestrator exclusively controls promotion state
+• dataset imbalance cannot distort signals
+• market activity calculations reflect real competitor behavior
+• recovery paths respect identical safeguards
+• diagnostics confirm real enrichment occurred
+
+Once these safeguards are verified, the MI pipeline can be considered fully reliable for downstream strategic engines (Audience, Positioning, Differentiation).
+
+Thank you.
+
+:::

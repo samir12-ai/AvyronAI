@@ -49,6 +49,7 @@ export interface CompetitorSignalResult {
   missingFields: string[];
   authorityWeight: number;
   lifecycle: CompetitorLifecycle;
+  lowSample: boolean;
 }
 
 export type IntentConfidenceBand = "STRONG" | "MODERATE" | "UNCERTAIN" | "DEGRADED";

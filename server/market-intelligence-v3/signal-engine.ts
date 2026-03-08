@@ -280,6 +280,12 @@ export function detectSampleBias(signalResults: CompetitorSignalResult[]): Sampl
     biasScore += 0.35;
   }
 
+  const lowSampleCompetitors = signalResults.filter(r => r.lowSample);
+  if (lowSampleCompetitors.length > 0) {
+    flags.push(`LOW_SAMPLE_COMPETITOR: ${lowSampleCompetitors.length} competitors have insufficient posts (${lowSampleCompetitors.map(r => r.competitorName).join(", ")})`);
+    biasScore += 0.15 * (lowSampleCompetitors.length / Math.max(1, signalResults.length));
+  }
+
   if (signalResults.length >= 2) {
     const weights = signalResults.map(r => r.authorityWeight).sort((a, b) => b - a);
     const top = weights[0];
@@ -362,8 +368,10 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
   const signalValues = Object.values(signals);
   const varianceScore = Math.round(variance(signalValues) * 1000) / 1000;
 
-  const authorityWeight = computeCompetitorAuthorityWeight(signals, sampleSize, signalCoverageScore);
+  const rawAuthorityWeight = computeCompetitorAuthorityWeight(signals, sampleSize, signalCoverageScore);
   const lifecycle = classifyCompetitorLifecycle(signals, sampleSize, signalCoverageScore);
+  const lowSample = posts.length < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR;
+  const authorityWeight = lowSample ? Math.round(rawAuthorityWeight * MI_LIFECYCLE.LOW_SAMPLE_WEIGHT_FACTOR * 1000) / 1000 : rawAuthorityWeight;
 
   return {
     competitorId: competitor.id,
@@ -378,6 +386,7 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
     missingFields,
     authorityWeight,
     lifecycle,
+    lowSample,
   };
 }
 

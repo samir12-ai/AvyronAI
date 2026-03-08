@@ -87,14 +87,19 @@ export function computeRevivalPotential(
 export function computeMarketActivityLevel(signals: CompetitorSignalResult[]): number {
   if (signals.length === 0) return 0;
 
+  const activeWithSufficientData = signals.filter(s => s.lifecycle === "ACTIVE" && !s.lowSample);
+  const useActiveOnly = activeWithSufficientData.length >= 2;
+  const signalsToUse = useActiveOnly ? activeWithSufficientData : signals;
+
   let weightedFrequencySum = 0;
   let weightedExperimentSum = 0;
   let totalWeight = 0;
 
-  for (const s of signals) {
+  for (const s of signalsToUse) {
     let lifecycleWeight = 1.0;
     if (s.lifecycle === "DORMANT") lifecycleWeight = MI_LIFECYCLE.DORMANT_ACTIVITY_WEIGHT;
     else if (s.lifecycle === "LOW_SIGNAL") lifecycleWeight = MI_LIFECYCLE.LOW_SIGNAL_ACTIVITY_WEIGHT;
+    if (s.lowSample) lifecycleWeight *= MI_LIFECYCLE.LOW_SAMPLE_ACTIVITY_WEIGHT;
 
     const w = (s.authorityWeight ?? 1.0) * lifecycleWeight;
     weightedFrequencySum += Math.max(0, s.signals.postingFrequencyTrend) * w;
@@ -105,6 +110,12 @@ export function computeMarketActivityLevel(signals: CompetitorSignalResult[]): n
   if (totalWeight === 0) return 0;
   const avgFrequency = weightedFrequencySum / totalWeight;
   const avgExperiment = weightedExperimentSum / totalWeight;
+
+  const lowSampleCount = signals.filter(s => s.lowSample).length;
+  if (lowSampleCount > 0) {
+    console.log(`[MIv3] LOW_SAMPLE_COMPETITOR: ${lowSampleCount}/${signals.length} competitors flagged as LOW_SAMPLE | marketActivity calculated from ${signalsToUse.length} ${useActiveOnly ? "ACTIVE-only" : "all"} competitors`);
+  }
+
   return clamp01(avgFrequency * 0.6 + avgExperiment * 0.4);
 }
 

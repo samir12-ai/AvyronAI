@@ -2404,33 +2404,35 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(deepPassFn).toContain("DEEP_PASS post target already met");
     });
 
-    it("FP-39) DEEP_PASS promotion requires both post AND comment thresholds", () => {
+    it("FP-39) DEEP_PASS promotion requires both post AND comment thresholds + dataset growth", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
-        orchSource.indexOf("async function queueDeepPass") + 7000
+        orchSource.indexOf("async function queueDeepPass") + 9000
       );
-      expect(deepPassFn).toContain("postsMet = finalPosts >= MIN_POSTS_TARGET");
-      expect(deepPassFn).toContain("commentsMet = totalComments >= MIN_COMMENTS_TARGET");
-      expect(deepPassFn).toContain("enrichmentSucceeded && postsMet && commentsMet");
+      expect(deepPassFn).toContain("postsMet = deepPassPostCount >= MIN_POSTS_TARGET");
+      expect(deepPassFn).toContain("commentsMet = deepPassCommentCount >= MIN_COMMENTS_TARGET");
+      expect(deepPassFn).toContain("enrichmentSucceeded && postsMet && commentsMet && datasetGrew");
       expect(deepPassFn).toContain("DEEP_PASS thresholds NOT met");
+      expect(deepPassFn).toContain("ENRICHMENT_NO_CHANGE");
     });
 
     it("FP-40) DEEP_PASS updates postsCollected on promotion", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
-        orchSource.indexOf("async function queueDeepPass") + 5000
+        orchSource.indexOf("async function queueDeepPass") + 9000
       );
-      expect(deepPassFn).toContain("postsCollected: finalPosts");
-      expect(deepPassFn).toContain("commentsCollected: totalComments");
+      expect(deepPassFn).toContain("postsCollected: deepPassPostCount");
+      expect(deepPassFn).toContain("commentsCollected: deepPassCommentCount");
     });
 
     it("FP-41) DEEP_PASS tracks real vs synthetic comment counts", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
-        orchSource.indexOf("async function queueDeepPass") + 7000
+        orchSource.indexOf("async function queueDeepPass") + 9000
       );
       expect(deepPassFn).toContain("isSynthetic, false");
-      expect(deepPassFn).toContain("realComments");
+      expect(deepPassFn).toContain("realCommentCount");
+      expect(deepPassFn).toContain("syntheticCommentCount");
       const deepPassLog = orchSource.slice(
         orchSource.indexOf("competitor promoted to DEEP_PASS"),
         orchSource.indexOf("competitor promoted to DEEP_PASS") + 500
@@ -2458,6 +2460,138 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(recoveryQuery).toContain("ci_competitor_posts");
       expect(recoveryQuery).toContain("MIN_POSTS_TARGET");
       expect(recoveryQuery).toContain("MIN_COMMENTS_SAMPLE");
+    });
+
+    it("FP-44) Dataset growth verification: ENRICHMENT_NO_CHANGE blocks promotion when dataset unchanged", () => {
+      const deepPassFn = orchSource.slice(
+        orchSource.indexOf("async function queueDeepPass"),
+        orchSource.indexOf("async function queueDeepPass") + 9000
+      );
+      expect(deepPassFn).toContain("datasetGrew = deepPassPostCount > baselinePostCount || deepPassCommentCount > baselineCommentCount");
+      expect(deepPassFn).toContain("ENRICHMENT_NO_CHANGE");
+      expect(deepPassFn).toContain("dataset did not grow");
+      expect(deepPassFn).toContain("promotion blocked");
+      expect(deepPassFn).toContain("!datasetGrew && enrichmentSucceeded");
+    });
+
+    it("FP-45) POST_EXPANSION_FAILED logged when post count doesn't increase", () => {
+      expect(orchSource).toContain("POST_EXPANSION_FAILED");
+      expect(orchSource).toContain("no new posts collected");
+      expect(orchSource).toContain("postExpansionSucceeded = afterFetchPosts > baselinePostCount");
+    });
+
+    it("FP-46) DEEP_PASS_DIAGNOSTICS emitted for every competitor after processing", () => {
+      const deepPassFn = orchSource.slice(
+        orchSource.indexOf("async function queueDeepPass"),
+        orchSource.indexOf("async function queueDeepPass") + 12000
+      );
+      expect(deepPassFn).toContain("DEEP_PASS_DIAGNOSTICS");
+      expect(deepPassFn).toContain("baselinePostCount=");
+      expect(deepPassFn).toContain("deepPassPostCount=");
+      expect(deepPassFn).toContain("realCommentCount=");
+      expect(deepPassFn).toContain("syntheticCommentCount=");
+      expect(deepPassFn).toContain("totalCommentCount=");
+      expect(deepPassFn).toContain("datasetGrew=");
+      expect(deepPassFn).toContain("postExpansionAttempted=");
+      expect(deepPassFn).toContain("postExpansionSucceeded=");
+      expect(deepPassFn).toContain("promotionDecision=");
+      expect(deepPassFn).toContain("enrichmentResult=");
+    });
+
+    it("FP-47) Inventory consistency validation runs after DEEP_PASS", () => {
+      expect(orchSource).toContain("validateInventoryConsistency(accountId, campaignId)");
+      expect(orchSource).toContain("INVENTORY_INCONSISTENCY");
+      expect(orchSource).toContain("INVENTORY_VALIDATION");
+      expect(orchSource).toContain("demoting to FAST_PASS/PENDING");
+    });
+
+    it("FP-48) validateInventoryConsistency demotes DEEP_PASS competitors below thresholds", () => {
+      const validationFn = orchSource.slice(
+        orchSource.indexOf("async function validateInventoryConsistency"),
+        orchSource.indexOf("async function validateInventoryConsistency") + 4000
+      );
+      expect(validationFn).toContain("MIN_POSTS_TARGET");
+      expect(validationFn).toContain("MIN_COMMENTS_TARGET");
+      expect(validationFn).toContain('analysisLevel: "FAST_PASS"');
+      expect(validationFn).toContain('enrichmentStatus: "PENDING"');
+      expect(validationFn).toContain("inconsistencies corrected");
+    });
+
+    it("FP-49) Recovery path includes dataset growth verification (ENRICHMENT_NO_CHANGE)", () => {
+      const recoverySection = orchSource.slice(
+        orchSource.indexOf("[DeepPassRecovery]"),
+        orchSource.lastIndexOf("[DeepPassRecovery]") + 2000
+      );
+      expect(recoverySection).toContain("ENRICHMENT_NO_CHANGE");
+      expect(recoverySection).toContain("datasetGrew");
+      expect(recoverySection).toContain("baselinePostCount");
+      expect(recoverySection).toContain("DEEP_PASS_DIAGNOSTICS");
+    });
+
+    it("FP-50) Recovery path logs real+synthetic comment breakdown", () => {
+      const recoverySection = orchSource.slice(
+        orchSource.indexOf("recoverStuckDeepPass"),
+        orchSource.indexOf("recoverStuckDeepPass") + 8000
+      );
+      expect(recoverySection).toContain("realCommentCount");
+      expect(recoverySection).toContain("syntheticComments");
+      expect(recoverySection).toContain("isSynthetic, false");
+    });
+  });
+
+  describe("LOW_SAMPLE + Market Activity Hardening", () => {
+    let signalSource: string;
+    let trajectorySource: string;
+    let constantsSource: string;
+    let typesSource: string;
+
+    beforeAll(() => {
+      signalSource = require("fs").readFileSync("server/market-intelligence-v3/signal-engine.ts", "utf-8");
+      trajectorySource = require("fs").readFileSync("server/market-intelligence-v3/trajectory-engine.ts", "utf-8");
+      constantsSource = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
+      typesSource = require("fs").readFileSync("server/market-intelligence-v3/types.ts", "utf-8");
+    });
+
+    it("FP-51) CompetitorSignalResult includes lowSample boolean field", () => {
+      expect(typesSource).toContain("lowSample: boolean");
+    });
+
+    it("FP-52) computeCompetitorSignals flags lowSample when posts < MIN_POSTS_PER_COMPETITOR", () => {
+      expect(signalSource).toContain("lowSample = posts.length < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR");
+      expect(signalSource).toContain("LOW_SAMPLE_WEIGHT_FACTOR");
+    });
+
+    it("FP-53) LOW_SAMPLE competitors get reduced authority weight", () => {
+      const signalFn = signalSource.slice(
+        signalSource.indexOf("export function computeCompetitorSignals"),
+        signalSource.indexOf("export function computeCompetitorSignals") + 4000
+      );
+      expect(signalFn).toContain("lowSample ?");
+      expect(signalFn).toContain("LOW_SAMPLE_WEIGHT_FACTOR");
+      expect(signalFn).toContain("rawAuthorityWeight");
+    });
+
+    it("FP-54) computeMarketActivityLevel prioritizes ACTIVE competitors with sufficient data", () => {
+      expect(trajectorySource).toContain("activeWithSufficientData");
+      expect(trajectorySource).toContain("!s.lowSample");
+      expect(trajectorySource).toContain("useActiveOnly");
+      expect(trajectorySource).toContain("LOW_SAMPLE_ACTIVITY_WEIGHT");
+      expect(trajectorySource).toContain("LOW_SAMPLE_COMPETITOR");
+    });
+
+    it("FP-55) detectSampleBias flags LOW_SAMPLE_COMPETITOR competitors", () => {
+      expect(signalSource).toContain("LOW_SAMPLE_COMPETITOR");
+      expect(signalSource).toContain("lowSampleCompetitors");
+      expect(signalSource).toContain("r.lowSample");
+    });
+
+    it("FP-56) MI_LIFECYCLE constants include LOW_SAMPLE thresholds", () => {
+      expect(constantsSource).toContain("LOW_SAMPLE_WEIGHT_FACTOR");
+      expect(constantsSource).toContain("LOW_SAMPLE_ACTIVITY_WEIGHT");
+      const weightMatch = constantsSource.match(/LOW_SAMPLE_WEIGHT_FACTOR:\s*([\d.]+)/);
+      expect(weightMatch).toBeTruthy();
+      expect(Number(weightMatch![1])).toBeLessThan(1.0);
+      expect(Number(weightMatch![1])).toBeGreaterThan(0);
     });
   });
 });
