@@ -1,6 +1,5 @@
 import type { Express } from "express";
-import type { GoogleGenAI } from "@google/genai";
-import { getGemini } from "./ai-client";
+import { GoogleGenAI } from "@google/genai";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
@@ -19,12 +18,15 @@ const upload = multer({
   },
 });
 
+let veoClientInstance: GoogleGenAI | null = null;
+
 function getVeoClient(): GoogleGenAI | null {
-  try {
-    return getGemini();
-  } catch {
-    return null;
+  const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
+  if (!apiKey) return null;
+  if (!veoClientInstance) {
+    veoClientInstance = new GoogleGenAI({ apiKey });
   }
+  return veoClientInstance;
 }
 
 export function registerVeoRoutes(app: Express) {
@@ -178,12 +180,23 @@ export function registerVeoRoutes(app: Express) {
       }
 
       const videoUrl = req.query.url as string;
-      if (!videoUrl || !videoUrl.includes("generativelanguage.googleapis.com")) {
+      if (!videoUrl) {
         return res.status(400).json({ error: "Invalid video URL" });
       }
 
-      const separator = videoUrl.includes("?") ? "&" : "?";
-      const authedUrl = `${videoUrl}${separator}key=${apiKey}`;
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(videoUrl);
+      } catch {
+        return res.status(400).json({ error: "Invalid video URL format" });
+      }
+
+      if (parsedUrl.protocol !== "https:" || parsedUrl.hostname !== "generativelanguage.googleapis.com") {
+        return res.status(400).json({ error: "Only Google Generative Language API URLs are allowed" });
+      }
+
+      parsedUrl.searchParams.set("key", apiKey);
+      const authedUrl = parsedUrl.toString();
       const videoResponse = await fetch(authedUrl);
 
       if (!videoResponse.ok) {
