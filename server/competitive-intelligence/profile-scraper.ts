@@ -592,6 +592,9 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
         "X-Requested-With": "XMLHttpRequest",
         "Accept": "*/*",
         "Referer": `https://www.instagram.com/${handle}/`,
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
       };
 
       const gqlFetchOptions: any = { headers: gqlHeaders, redirect: "follow" };
@@ -712,6 +715,10 @@ async function attemptHtmlPageParse(profileUrl: string, handle: string, proxyCtx
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
     "Cache-Control": "no-cache",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
   };
 
   const dispatcher = proxyCtx?.session.dispatcher ?? undefined;
