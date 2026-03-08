@@ -339,8 +339,7 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
   };
 
   const missingFields: string[] = [];
-  const postsAtApiCeiling = posts.length >= MI_THRESHOLDS.MIN_POSTS_API_CEILING && posts.length < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR;
-  if (posts.length < MI_THRESHOLDS.MIN_POSTS_API_CEILING) missingFields.push(`posts (have ${posts.length}, need ${MI_THRESHOLDS.MIN_POSTS_API_CEILING})`);
+  if (posts.length < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR) missingFields.push(`posts (have ${posts.length}, need ${MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR})`);
   if (comments.length < MI_THRESHOLDS.MIN_COMMENTS_SAMPLE) missingFields.push(`comments (have ${comments.length}, need ${MI_THRESHOLDS.MIN_COMMENTS_SAMPLE})`);
   if (!competitor.postingFrequency && posts.length < MI_THRESHOLDS.MIN_ENGAGEMENT_POSTS) missingFields.push("postingFrequency");
   if (!competitor.contentTypeRatio) missingFields.push("contentTypeRatio");
@@ -350,7 +349,7 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
 
   const totalExpectedFields = 9;
   const availableFields = totalExpectedFields - [
-    posts.length < MI_THRESHOLDS.MIN_POSTS_API_CEILING,
+    posts.length < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR,
     comments.length < MI_THRESHOLDS.MIN_COMMENTS_SAMPLE,
     !competitor.engagementRatio && posts.length < MI_THRESHOLDS.MIN_ENGAGEMENT_POSTS,
     !competitor.ctaPatterns,
@@ -371,7 +370,7 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
 
   const rawAuthorityWeight = computeCompetitorAuthorityWeight(signals, sampleSize, signalCoverageScore);
   const lifecycle = classifyCompetitorLifecycle(signals, sampleSize, signalCoverageScore);
-  const lowSample = posts.length < MI_THRESHOLDS.MIN_POSTS_API_CEILING;
+  const lowSample = posts.length < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR;
   const authorityWeight = lowSample ? Math.round(rawAuthorityWeight * MI_LIFECYCLE.LOW_SAMPLE_WEIGHT_FACTOR * 1000) / 1000 : rawAuthorityWeight;
 
   return {

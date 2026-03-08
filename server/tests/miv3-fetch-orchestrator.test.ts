@@ -1000,7 +1000,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       const constants = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/constants.ts", "utf-8")
       );
-      expect(constants).toContain("MIN_POSTS_PER_COMPETITOR: 14");
+      expect(constants).toContain("MIN_POSTS_PER_COMPETITOR: BASELINE_POSTS_PER_COMPETITOR");
       expect(constants).toContain("MIN_COMMENTS_SAMPLE: 50");
     });
 
@@ -1049,7 +1049,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
 
       const targetMatch = source.match(/const TARGET_POSTS\s*=\s*(\d+)/);
       expect(targetMatch).not.toBeNull();
-      expect(parseInt(targetMatch![1])).toBeGreaterThanOrEqual(14);
+      expect(parseInt(targetMatch![1])).toBe(12);
 
       const ceilingMatch = source.match(/const INSTAGRAM_PUBLIC_API_CEILING\s*=\s*(\d+)/);
       expect(ceilingMatch).not.toBeNull();
@@ -2373,19 +2373,17 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(deepPassUpdate).toContain('fetchMethod: "DEEP_PASS"');
     });
 
-    it("FP-36) Recovery path enforces post+comment thresholds before promotion", () => {
+    it("FP-36) Recovery path enforces comment thresholds before promotion (enrichment-only)", () => {
       expect(orchSource).toContain("[DeepPassRecovery]");
       expect(orchSource).toContain("Promoted");
-      expect(orchSource).toContain("Thresholds NOT met");
+      expect(orchSource).toContain("Enrichment-only for");
       const recoverySection = orchSource.slice(
         orchSource.indexOf("[DeepPassRecovery]"),
         orchSource.indexOf("[DeepPassRecovery]") + 3000
       );
-      expect(recoverySection).toContain("postsMet");
       expect(recoverySection).toContain("commentsMet");
-      expect(recoverySection).toContain("MIN_POSTS_TARGET");
-      expect(recoverySection).toContain("fetchCompetitorData");
-      expect(recoverySection).toContain("TARGET_POSTS_DEEP");
+      expect(recoverySection).toContain("commentGrew");
+      expect(recoverySection).toContain("NO post expansion");
     });
 
     it("FP-37) DEEP_PASS auto-triggers after FAST_PASS when fetch executed", () => {
@@ -2394,30 +2392,27 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(orchSource).toContain("queueDeepPass(accountId, campaignId, competitors)");
     });
 
-    it("FP-38) DEEP_PASS collects additional posts before enrichment", () => {
+    it("FP-38) DEEP_PASS is enrichment-only — never fetches additional posts", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
         orchSource.indexOf("async function queueDeepPass") + 9000
       );
-      expect(deepPassFn).toContain("TARGET_POSTS_DEEP");
-      expect(deepPassFn).toContain("fetchCompetitorData");
-      expect(deepPassFn).toContain('"DEEP_PASS"');
-      expect(deepPassFn).toContain("DEEP_PASS collecting additional posts");
-      expect(deepPassFn).toContain("DEEP_PASS post target already met");
+      expect(deepPassFn).toContain("ENRICHMENT_ONLY");
+      expect(deepPassFn).toContain("enrichCompetitorWithComments");
+      expect(deepPassFn).toContain("NO post expansion");
+      expect(deepPassFn).not.toContain("DEEP_PASS collecting additional posts");
+      expect(deepPassFn).not.toContain("DEEP_PASS post target already met");
     });
 
-    it("FP-39) DEEP_PASS promotion requires both post AND comment thresholds + dataset growth (with API ceiling fallback)", () => {
+    it("FP-39) DEEP_PASS promotion requires comment threshold (enrichment-only architecture)", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
         orchSource.indexOf("async function queueDeepPass") + 16000
       );
-      expect(deepPassFn).toContain("postsMet = deepPassPostCount >= MIN_POSTS_TARGET");
       expect(deepPassFn).toContain("commentsMet = deepPassCommentCount >= MIN_COMMENTS_TARGET");
-      expect(deepPassFn).toContain("effectivePostsMet && commentsMet");
-      expect(deepPassFn).toContain("DEEP_PASS thresholds NOT met");
       expect(deepPassFn).toContain("ENRICHMENT_NO_CHANGE");
-      expect(deepPassFn).toContain("API_CEILING_ACKNOWLEDGED");
-      expect(deepPassFn).toContain("postsMetWithCeiling");
+      expect(deepPassFn).toContain("PROMOTED_PARTIAL");
+      expect(deepPassFn).toContain("commentGrew");
     });
 
     it("FP-40) DEEP_PASS updates postsCollected on promotion", () => {
@@ -2425,7 +2420,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
         orchSource.indexOf("async function queueDeepPass"),
         orchSource.indexOf("async function queueDeepPass") + 14000
       );
-      expect(deepPassFn).toContain("postsCollected: deepPassPostCount");
+      expect(deepPassFn).toContain("postsCollected: baselinePostCount");
       expect(deepPassFn).toContain("commentsCollected: deepPassCommentCount");
     });
 
@@ -2466,22 +2461,23 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(recoveryQuery).toContain("MIN_COMMENTS_SAMPLE");
     });
 
-    it("FP-44) Dataset growth verification: ENRICHMENT_NO_CHANGE blocks promotion when dataset unchanged (unless API ceiling)", () => {
+    it("FP-44) ENRICHMENT_NO_CHANGE blocks promotion when comments didn't grow", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
         orchSource.indexOf("async function queueDeepPass") + 16000
       );
-      expect(deepPassFn).toContain("datasetGrew = deepPassPostCount > baselinePostCount || deepPassCommentCount > baselineCommentCount");
       expect(deepPassFn).toContain("ENRICHMENT_NO_CHANGE");
-      expect(deepPassFn).toContain("dataset did not grow");
-      expect(deepPassFn).toContain("promotion blocked");
-      expect(deepPassFn).toContain("!effectiveDatasetGrew && enrichmentSucceeded && !apiCeilingConfirmed");
+      expect(deepPassFn).toContain("comment threshold not met");
     });
 
-    it("FP-45) POST_EXPANSION_FAILED logged when post count doesn't increase with reason", () => {
-      expect(orchSource).toContain("POST_EXPANSION_FAILED");
-      expect(orchSource).toContain("postExpansionReason");
-      expect(orchSource).toContain("postExpansionSucceeded = afterFetchPosts > baselinePostCount");
+    it("FP-45) Post expansion is disabled in 12-post architecture", () => {
+      const deepPassFn = orchSource.slice(
+        orchSource.indexOf("async function queueDeepPass"),
+        orchSource.indexOf("async function queueDeepPass") + 16000
+      );
+      expect(deepPassFn).toContain("postExpansionAttempted=false");
+      expect(deepPassFn).toContain("DISABLED_12_POST_ARCHITECTURE");
+      expect(deepPassFn).not.toContain("POST_EXPANSION_FAILED");
     });
 
     it("FP-46) DEEP_PASS_DIAGNOSTICS emitted for every competitor after processing", () => {
@@ -2495,9 +2491,8 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(deepPassFn).toContain("realCommentCount=");
       expect(deepPassFn).toContain("syntheticCommentCount=");
       expect(deepPassFn).toContain("totalCommentCount=");
-      expect(deepPassFn).toContain("datasetGrew=");
-      expect(deepPassFn).toContain("postExpansionAttempted=");
-      expect(deepPassFn).toContain("postExpansionSucceeded=");
+      expect(deepPassFn).toContain("commentGrew=");
+      expect(deepPassFn).toContain("postExpansionAttempted=false");
       expect(deepPassFn).toContain("promotionDecision=");
       expect(deepPassFn).toContain("enrichmentResult=");
     });
@@ -2514,31 +2509,31 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
         orchSource.indexOf("async function validateInventoryConsistency"),
         orchSource.indexOf("async function validateInventoryConsistency") + 4000
       );
-      expect(validationFn).toContain("MIN_POSTS_TARGET");
-      expect(validationFn).toContain("MIN_COMMENTS_TARGET");
+      expect(validationFn).toContain("INSTAGRAM_API_CEILING");
+      expect(validationFn).toContain("postsAcceptable");
       expect(validationFn).toContain('analysisLevel: "FAST_PASS"');
       expect(validationFn).toContain('enrichmentStatus: "PENDING"');
       expect(validationFn).toContain("inconsistencies corrected");
     });
 
-    it("FP-49) Recovery path includes dataset growth verification (ENRICHMENT_NO_CHANGE)", () => {
+    it("FP-49) Recovery path includes comment growth verification (ENRICHMENT_NO_CHANGE)", () => {
       const recoverySection = orchSource.slice(
         orchSource.indexOf("[DeepPassRecovery]"),
         orchSource.lastIndexOf("[DeepPassRecovery]") + 2000
       );
       expect(recoverySection).toContain("ENRICHMENT_NO_CHANGE");
-      expect(recoverySection).toContain("datasetGrew");
+      expect(recoverySection).toContain("commentGrew");
       expect(recoverySection).toContain("baselinePostCount");
       expect(recoverySection).toContain("DEEP_PASS_DIAGNOSTICS");
     });
 
-    it("FP-50) Recovery path logs real+synthetic comment breakdown", () => {
+    it("FP-50) Recovery path logs real comment counts", () => {
       const recoverySection = orchSource.slice(
         orchSource.indexOf("recoverStuckDeepPass"),
         orchSource.indexOf("recoverStuckDeepPass") + 8000
       );
+      expect(recoverySection).toContain("realComments");
       expect(recoverySection).toContain("realCommentCount");
-      expect(recoverySection).toContain("syntheticComments");
       expect(recoverySection).toContain("isSynthetic, false");
     });
   });
@@ -2560,8 +2555,8 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(typesSource).toContain("lowSample: boolean");
     });
 
-    it("FP-52) computeCompetitorSignals flags lowSample when posts < MIN_POSTS_API_CEILING", () => {
-      expect(signalSource).toContain("lowSample = posts.length < MI_THRESHOLDS.MIN_POSTS_API_CEILING");
+    it("FP-52) computeCompetitorSignals flags lowSample when posts < MIN_POSTS_PER_COMPETITOR", () => {
+      expect(signalSource).toContain("lowSample = posts.length < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR");
       expect(signalSource).toContain("LOW_SAMPLE_WEIGHT_FACTOR");
     });
 
@@ -2737,21 +2732,29 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(dataAcqSource).toContain('collectionMode !== "DEEP_PASS"');
     });
 
-    it("FP-75) API ceiling awareness — DEEP_PASS promotion with Instagram API ceiling", () => {
-      expect(orchSource).toContain("API_CEILING_ACKNOWLEDGED");
+    it("FP-75) 12-post baseline = API ceiling — no separate ceiling logic needed in DEEP_PASS", () => {
       expect(orchSource).toContain("INSTAGRAM_API_CEILING");
-      expect(orchSource).toContain("postsMetWithCeiling");
-      expect(orchSource).toContain("effectivePostsMet");
-      expect(orchSource).toContain("PROMOTED_API_CEILING");
+      const deepPassFn = orchSource.slice(
+        orchSource.indexOf("async function queueDeepPass"),
+        orchSource.indexOf("async function queueDeepPass") + 16000
+      );
+      expect(deepPassFn).not.toContain("postsMetWithCeiling");
+      expect(deepPassFn).not.toContain("effectivePostsMet");
+      expect(deepPassFn).not.toContain("PROMOTED_API_CEILING");
+      expect(deepPassFn).toContain("PROMOTED_PARTIAL");
     });
 
-    it("FP-76) POST_EXPANSION_FAILED includes explicit reason", () => {
-      expect(orchSource).toContain("postExpansionReason");
-      expect(orchSource).toContain("API_CEILING: Instagram public API limited to");
-      expect(orchSource).toContain("NO_NEW_POSTS_RETURNED");
+    it("FP-76) Post expansion is fully disabled — no expansion failure logging", () => {
+      const deepPassFn = orchSource.slice(
+        orchSource.indexOf("async function queueDeepPass"),
+        orchSource.indexOf("async function queueDeepPass") + 16000
+      );
+      expect(deepPassFn).not.toContain("POST_EXPANSION_FAILED");
+      expect(deepPassFn).not.toContain("NO_NEW_POSTS_RETURNED");
+      expect(deepPassFn).toContain("DISABLED_12_POST_ARCHITECTURE");
     });
 
-    it("FP-77) validateInventoryConsistency accepts API-ceiling-limited competitors", () => {
+    it("FP-77) validateInventoryConsistency uses INSTAGRAM_API_CEILING for 12-post baseline", () => {
       const validationFn = orchSource.slice(
         orchSource.indexOf("async function validateInventoryConsistency"),
         orchSource.indexOf("async function validateInventoryConsistency") + 2000
@@ -2760,29 +2763,33 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(validationFn).toContain("postsAcceptable");
     });
 
-    it("FP-78) Recovery path uses API ceiling logic", () => {
+    it("FP-78) Recovery path is enrichment-only — no post expansion", () => {
       expect(orchSource).toContain("INSTAGRAM_API_CEILING");
-      expect(orchSource).toContain("[DeepPassRecovery] API_CEILING_ACKNOWLEDGED");
-      expect(orchSource).toContain("PROMOTED_API_CEILING");
+      const recoveryFn = orchSource.slice(
+        orchSource.indexOf("async function recoverStuckDeepPass"),
+        orchSource.indexOf("async function recoverStuckDeepPass") + 5000
+      );
+      expect(recoveryFn).toContain("Enrichment-only for");
+      expect(recoveryFn).toContain("NO post expansion");
+      expect(recoveryFn).toContain("PROMOTED_PARTIAL");
     });
 
-    it("FP-79) API_CEILING_INFERRED when posts at ceiling and expansion returns no new posts", () => {
-      expect(orchSource).toContain("API_CEILING_INFERRED");
+    it("FP-79) Recovery path DEEP_PASS_DIAGNOSTICS includes postExpansionAttempted=false", () => {
+      const recoveryFn = orchSource.slice(
+        orchSource.indexOf("async function recoverStuckDeepPass"),
+        orchSource.indexOf("async function recoverStuckDeepPass") + 8000
+      );
+      expect(recoveryFn).toContain("postExpansionAttempted=false");
+      expect(recoveryFn).toContain("commentGrew=");
+    });
+
+    it("FP-80) No API_CEILING_INFERRED logic needed (12-post = ceiling = baseline)", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
         orchSource.indexOf("async function queueDeepPass") + 16000
       );
-      expect(deepPassFn).toContain("!apiCeilingConfirmed && !postExpansionSucceeded && afterFetchPosts >= INSTAGRAM_API_CEILING && afterFetchPosts === baselinePostCount");
-      expect(deepPassFn).toContain("ceiling confirmed by inference");
-    });
-
-    it("FP-80) API_CEILING_INFERRED_ON_ERROR when fetch fails but posts at ceiling", () => {
-      expect(orchSource).toContain("API_CEILING_INFERRED_ON_ERROR");
-      const deepPassFn = orchSource.slice(
-        orchSource.indexOf("async function queueDeepPass"),
-        orchSource.indexOf("async function queueDeepPass") + 16000
-      );
-      expect(deepPassFn).toContain("baselinePostCount >= INSTAGRAM_API_CEILING && baselinePostCount < MIN_POSTS_TARGET");
+      expect(deepPassFn).not.toContain("API_CEILING_INFERRED");
+      expect(deepPassFn).not.toContain("API_CEILING_INFERRED_ON_ERROR");
     });
 
     it("FP-81) DATA_DEGRADATION_GUARD early return includes paginationStopReason", () => {
@@ -2794,17 +2801,17 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(guardSection).toContain("paginationStopReason");
     });
 
-    it("FP-82) Recovery auto-promote SQL uses INSTAGRAM_API_CEILING (not MIN_POSTS_TARGET) for API-ceiling-aware promotion", () => {
+    it("FP-82) Recovery auto-promote SQL uses INSTAGRAM_API_CEILING for 12-post baseline", () => {
       const recoveryFn = orchSource.slice(
         orchSource.indexOf("async function recoverStuckDeepPass"),
         orchSource.indexOf("async function recoverStuckDeepPass") + 5000
       );
       expect(recoveryFn).toContain("INSTAGRAM_API_CEILING");
-      expect(recoveryFn).not.toContain(">= ${MIN_POSTS_TARGET}");
     });
 
-    it("FP-71) DEEP_PASS additive-only guard for posts and comments", () => {
-      expect(orchSource).toContain("DATA_DEGRADATION_GUARD");
+    it("FP-71) DATA_DEGRADATION_GUARD exists in data-acquisition (post fetch level)", () => {
+      const dataAcqSource = require("fs").readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8");
+      expect(dataAcqSource).toContain("DATA_DEGRADATION_GUARD");
     });
 
     it("FP-72) INTENT_STATUS_SUMMARY logged in persistSnapshotAfterFetch", () => {
@@ -2824,15 +2831,16 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
     const engineSrc = require("fs").readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
     const orchSrc = require("fs").readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8");
 
-    it("constants.ts exports INSTAGRAM_API_CEILING = 12 and MIN_POSTS_API_CEILING", () => {
-      expect(constantsSource).toContain("export const INSTAGRAM_API_CEILING = 12");
-      expect(constantsSource).toContain("MIN_POSTS_API_CEILING: INSTAGRAM_API_CEILING");
+    it("constants.ts exports BASELINE_POSTS_PER_COMPETITOR = 12 and INSTAGRAM_API_CEILING", () => {
+      expect(constantsSource).toContain("export const BASELINE_POSTS_PER_COMPETITOR = 12");
+      expect(constantsSource).toContain("export const INSTAGRAM_API_CEILING = BASELINE_POSTS_PER_COMPETITOR");
+      expect(constantsSource).toContain("MIN_POSTS_API_CEILING: BASELINE_POSTS_PER_COMPETITOR");
     });
 
-    it("signal-engine uses MIN_POSTS_API_CEILING for missing fields and LOW_SAMPLE", () => {
-      expect(signalEngineSource).toContain("MI_THRESHOLDS.MIN_POSTS_API_CEILING");
-      expect(signalEngineSource).toContain("postsAtApiCeiling");
-      expect(signalEngineSource).not.toContain("lowSample = posts.length < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR");
+    it("signal-engine uses MIN_POSTS_PER_COMPETITOR for missing fields and LOW_SAMPLE (unified with baseline)", () => {
+      expect(signalEngineSource).toContain("MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR");
+      expect(signalEngineSource).toContain("lowSample = posts.length < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR");
+      expect(signalEngineSource).not.toContain("postsAtApiCeiling");
     });
 
     it("content-dna uses MIN_POSTS_API_CEILING for activation threshold", () => {

@@ -213,8 +213,8 @@ function extractCommentsFromNode(node: any, postId: string, shortcode: string): 
   return comments;
 }
 
-const TARGET_POSTS = 14;
-const MAX_PAGINATION_PAGES = 6;
+const TARGET_POSTS = 12;
+const MAX_PAGINATION_PAGES = 1;
 const INSTAGRAM_PUBLIC_API_CEILING = 12;
 
 export type PaginationStopReason =

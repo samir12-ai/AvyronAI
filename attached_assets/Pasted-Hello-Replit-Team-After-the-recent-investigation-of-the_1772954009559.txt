@@ -1,0 +1,173 @@
+Hello Replit Team,
+
+After the recent investigation of the Instagram collection pipeline and the repeated instability of post pagination, we are finalizing a system-wide architectural decision for the Market Intelligence engine.
+
+This update must be treated as a global architecture change, not a local fix. The goal is to stabilize the MI system so that the entire intelligence pipeline runs reliably in production.
+
+Please read carefully and apply the update across the full system.
+
+---
+
+# 1. Baseline Dataset Decision (Permanent Rule)
+
+Instagram public endpoints reliably return 12 posts per page, while unauthenticated pagination is inconsistent.
+
+Therefore the MI engine must standardize on the following rule:
+
+Each competitor dataset is based on 12 posts only.
+
+This means:
+
+• FAST_PASS collects exactly 12 posts per competitor  
+• DEEP_PASS must not attempt to fetch additional posts  
+• The entire system must assume 12 posts as the canonical dataset size
+
+This change eliminates scraping instability and prevents repeated failures caused by blocked pagination.
+
+---
+
+# 2. Deep Pass Redefinition
+
+DEEP_PASS must no longer attempt to expand the post dataset.
+
+Instead, DEEP_PASS becomes a data enrichment and signal extraction phase operating on the same 12-post dataset.
+
+DEEP_PASS responsibilities include:
+
+• extracting comment text samples  
+• strengthening signal extraction  
+• stabilizing Content DNA analysis  
+• improving intent confidence  
+• generating MI diagnostics
+
+DEEP_PASS must never attempt post expansion anymore.
+
+---
+
+# 3. Critical Requirement — Comment Text Extraction
+
+This point is extremely important.
+
+The system must collect comment text, not only comment counts.
+
+Currently the system appears to retrieve comment counts, which is not sufficient for Market Intelligence or Audience analysis.
+
+The correct requirement is:
+
+• collect comment text samples  
+• store the actual comment text  
+• comment counts alone are not useful for signal extraction
+
+Comment text is required for:
+
+• audience pain detection  
+• desire signals  
+• objection signals  
+• language pattern extraction  
+• sentiment analysis
+
+Without comment text, the intelligence layer loses critical information.
+
+---
+
+# 4. Comment Sampling Limits (For Stability)
+
+To keep scraping stable while still enabling analysis:
+
+Each competitor should collect a limited sample of comment text, not full comment threads.
+
+Recommended target:
+
+• approximately 30–50 comment texts per competitor
+
+This is sufficient for signal extraction and avoids excessive scraping load.
+
+---
+
+# 5. System-Wide Update Requirement
+
+One recurring issue in previous updates has been partial deployment, where some modules are updated but others continue using older logic.
+
+This must not happen again.
+
+The 12-post baseline architecture must be applied to every relevant module, including:
+
+• fetch orchestrator  
+• signal engine  
+• content DNA module  
+• intent engine  
+• trajectory engine  
+• dominance engine  
+• confidence engine  
+• snapshot persistence  
+• MI diagnostics  
+• engine readiness checks  
+• Strategic Gate validation  
+• Positioning engine input layer  
+• Audience engine input layer  
+• Differentiation engine input layer
+
+All engines must assume:
+
+dataset size per competitor = 12 posts
+
+No module should attempt to fetch more posts.
+
+---
+
+# 6. Confidence Model Adjustment
+
+Since the dataset size is fixed, confidence calculations must rely on:
+
+• number of competitors analyzed  
+• signal density across posts  
+• comment text signals  
+• cross-competitor consistency
+
+Confidence must not depend on expanding the post dataset.
+
+---
+
+# 7. Migration of Existing Data
+
+Existing competitors that currently expect larger datasets must be normalized.
+
+Required migration:
+
+• mark 12-post datasets as complete  
+• stop pending post expansion jobs  
+• recompute MI snapshots using the 12-post baseline
+
+This ensures that all campaigns operate under the same architecture.
+
+---
+
+# 8. Stability Goal
+
+This architecture change is designed to guarantee:
+
+• deterministic scraping  
+• stable pipeline execution  
+• predictable compute cost  
+• consistent MI snapshots  
+• reliable downstream inputs for Positioning, Audience, and Differentiation engines
+
+---
+
+# 9. Validation Requirements
+
+Before closing this update, please confirm:
+
+1. FAST_PASS consistently collects 12 posts per competitor.  
+2. DEEP_PASS no longer attempts to fetch additional posts.  
+3. Comment text (not just counts) is collected and stored.  
+4. Approximately 30–50 comment texts are collected per competitor.  
+5. All MI engines operate correctly with the 12-post dataset.  
+6. Downstream engines receive stable MI snapshots.  
+7. The full test suite passes after the architecture change.
+
+---
+
+Once this update is applied across the entire system, the Market Intelligence layer should operate as a stable foundation for the rest of the strategic pipeline.
+
+Please confirm when the 12-post architecture with comment text extraction is fully deployed across the system.
