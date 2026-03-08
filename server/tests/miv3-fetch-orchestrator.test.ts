@@ -2218,7 +2218,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
 
     it("FP-19) Structured logging for all stage transitions", () => {
       expect(orchSource).toContain("FAST_PASS completed");
-      expect(orchSource).toContain("DEEP_PASS enrichment started");
+      expect(orchSource).toContain("DEEP_PASS started");
       expect(orchSource).toContain("competitor promoted to DEEP_PASS");
       expect(orchSource).toContain("competitor skipped");
       expect(orchSource).toContain("DEEP_PASS_BLOCKED");
@@ -2371,17 +2371,93 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(deepPassUpdate).toContain('fetchMethod: "DEEP_PASS"');
     });
 
-    it("FP-36) Recovery path updates analysisLevel + fetchMethod on success", () => {
+    it("FP-36) Recovery path enforces post+comment thresholds before promotion", () => {
       expect(orchSource).toContain("[DeepPassRecovery]");
-      expect(orchSource).toContain("analysis_level = ${finalLevel}");
-      expect(orchSource).toContain("fetch_method = ${finalLevel}");
-      expect(orchSource).toContain('const finalLevel = isSuccess ? "DEEP_PASS" : "FAST_PASS"');
+      expect(orchSource).toContain("Promoted");
+      expect(orchSource).toContain("Thresholds NOT met");
+      const recoverySection = orchSource.slice(
+        orchSource.indexOf("[DeepPassRecovery]"),
+        orchSource.indexOf("[DeepPassRecovery]") + 3000
+      );
+      expect(recoverySection).toContain("postsMet");
+      expect(recoverySection).toContain("commentsMet");
+      expect(recoverySection).toContain("MIN_POSTS_TARGET");
+      expect(recoverySection).toContain("fetchCompetitorData");
+      expect(recoverySection).toContain("TARGET_POSTS_DEEP");
     });
 
     it("FP-37) DEEP_PASS auto-triggers after FAST_PASS when fetch executed", () => {
       expect(orchSource).toContain("willRunDeepPass = anyFetchExecuted && !allCooldown");
       expect(orchSource).toContain("Auto-queuing Deep Pass");
       expect(orchSource).toContain("queueDeepPass(accountId, campaignId, competitors)");
+    });
+
+    it("FP-38) DEEP_PASS collects additional posts before enrichment", () => {
+      const deepPassFn = orchSource.slice(
+        orchSource.indexOf("async function queueDeepPass"),
+        orchSource.indexOf("async function queueDeepPass") + 5000
+      );
+      expect(deepPassFn).toContain("TARGET_POSTS_DEEP");
+      expect(deepPassFn).toContain("fetchCompetitorData");
+      expect(deepPassFn).toContain('"DEEP_PASS"');
+      expect(deepPassFn).toContain("DEEP_PASS collecting additional posts");
+      expect(deepPassFn).toContain("DEEP_PASS post target already met");
+    });
+
+    it("FP-39) DEEP_PASS promotion requires both post AND comment thresholds", () => {
+      const deepPassFn = orchSource.slice(
+        orchSource.indexOf("async function queueDeepPass"),
+        orchSource.indexOf("async function queueDeepPass") + 7000
+      );
+      expect(deepPassFn).toContain("postsMet = finalPosts >= MIN_POSTS_TARGET");
+      expect(deepPassFn).toContain("commentsMet = totalComments >= MIN_COMMENTS_TARGET");
+      expect(deepPassFn).toContain("enrichmentSucceeded && postsMet && commentsMet");
+      expect(deepPassFn).toContain("DEEP_PASS thresholds NOT met");
+    });
+
+    it("FP-40) DEEP_PASS updates postsCollected on promotion", () => {
+      const deepPassFn = orchSource.slice(
+        orchSource.indexOf("async function queueDeepPass"),
+        orchSource.indexOf("async function queueDeepPass") + 5000
+      );
+      expect(deepPassFn).toContain("postsCollected: finalPosts");
+      expect(deepPassFn).toContain("commentsCollected: totalComments");
+    });
+
+    it("FP-41) DEEP_PASS tracks real vs synthetic comment counts", () => {
+      const deepPassFn = orchSource.slice(
+        orchSource.indexOf("async function queueDeepPass"),
+        orchSource.indexOf("async function queueDeepPass") + 7000
+      );
+      expect(deepPassFn).toContain("isSynthetic, false");
+      expect(deepPassFn).toContain("realComments");
+      const deepPassLog = orchSource.slice(
+        orchSource.indexOf("competitor promoted to DEEP_PASS"),
+        orchSource.indexOf("competitor promoted to DEEP_PASS") + 500
+      );
+      expect(deepPassLog).toContain("real=");
+    });
+
+    it("FP-42) enrichCompetitorWithComments does NOT set analysisLevel (orchestrator owns promotion)", () => {
+      const enrichFn = dataAcqSource.slice(
+        dataAcqSource.indexOf("export async function enrichCompetitorWithComments"),
+        dataAcqSource.indexOf("export async function enrichCompetitorWithComments") + 3000
+      );
+      const updateSection = enrichFn.slice(
+        enrichFn.indexOf("lastSyntheticEnrichmentAt: new Date()") - 100,
+        enrichFn.indexOf("lastSyntheticEnrichmentAt: new Date()") + 300
+      );
+      expect(updateSection).not.toContain("analysisLevel");
+    });
+
+    it("FP-43) Recovery auto-promote SQL requires BOTH post and comment thresholds", () => {
+      const recoveryQuery = orchSource.slice(
+        orchSource.indexOf("UPDATE ci_competitors SET analysis_level = 'DEEP_PASS', enrichment_status = 'ENRICHED'"),
+        orchSource.indexOf("UPDATE ci_competitors SET analysis_level = 'DEEP_PASS', enrichment_status = 'ENRICHED'") + 1200
+      );
+      expect(recoveryQuery).toContain("ci_competitor_posts");
+      expect(recoveryQuery).toContain("MIN_POSTS_TARGET");
+      expect(recoveryQuery).toContain("MIN_COMMENTS_SAMPLE");
     });
   });
 });

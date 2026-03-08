@@ -912,7 +912,6 @@ export async function enrichCompetitorWithComments(competitorId: string, account
 
   await db.update(ciCompetitors)
     .set({
-      analysisLevel: coverageMet ? "DEEP_PASS" : "FAST_PASS",
       lastSyntheticEnrichmentAt: new Date(),
       syntheticEnrichmentCount: newEnrichmentCount,
       syntheticChurnFlag: isHighChurn ? "HIGH_SYNTHETIC_CHURN" : null,
