@@ -464,6 +464,9 @@ async function _executeFetch(
       fetchMethod: scrapeResult.collectionMethodUsed,
       status: existingPosts >= MIN_POSTS_THRESHOLD && existingComments >= MIN_COMMENTS_THRESHOLD ? "PARTIAL_COMPLETE" : "INSUFFICIENT_DATA",
       message: `Kept existing ${existingPosts} posts (new fetch got only ${scrapeResult.posts.length}). Pagination limited by Instagram API ceiling.`,
+      paginationStopReason: scrapeResult.paginationStopReason || "INSTAGRAM_API_CEILING",
+      rawFetchedCount: scrapeResult.rawFetchedCount,
+      paginationPages: scrapeResult.paginationPages,
     };
   }
 

@@ -2456,13 +2456,13 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(updateSection).not.toContain("analysisLevel");
     });
 
-    it("FP-43) Recovery auto-promote SQL requires BOTH post and comment thresholds", () => {
+    it("FP-43) Recovery auto-promote SQL uses INSTAGRAM_API_CEILING for post threshold (API-ceiling-aware)", () => {
       const recoveryQuery = orchSource.slice(
         orchSource.indexOf("UPDATE ci_competitors SET analysis_level = 'DEEP_PASS', enrichment_status = 'ENRICHED'"),
         orchSource.indexOf("UPDATE ci_competitors SET analysis_level = 'DEEP_PASS', enrichment_status = 'ENRICHED'") + 1200
       );
       expect(recoveryQuery).toContain("ci_competitor_posts");
-      expect(recoveryQuery).toContain("MIN_POSTS_TARGET");
+      expect(recoveryQuery).toContain("INSTAGRAM_API_CEILING");
       expect(recoveryQuery).toContain("MIN_COMMENTS_SAMPLE");
     });
 
@@ -2487,7 +2487,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
     it("FP-46) DEEP_PASS_DIAGNOSTICS emitted for every competitor after processing", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
-        orchSource.indexOf("async function queueDeepPass") + 14000
+        orchSource.indexOf("async function queueDeepPass") + 16000
       );
       expect(deepPassFn).toContain("DEEP_PASS_DIAGNOSTICS");
       expect(deepPassFn).toContain("baselinePostCount=");
@@ -2764,6 +2764,43 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(orchSource).toContain("INSTAGRAM_API_CEILING");
       expect(orchSource).toContain("[DeepPassRecovery] API_CEILING_ACKNOWLEDGED");
       expect(orchSource).toContain("PROMOTED_API_CEILING");
+    });
+
+    it("FP-79) API_CEILING_INFERRED when posts at ceiling and expansion returns no new posts", () => {
+      expect(orchSource).toContain("API_CEILING_INFERRED");
+      const deepPassFn = orchSource.slice(
+        orchSource.indexOf("async function queueDeepPass"),
+        orchSource.indexOf("async function queueDeepPass") + 16000
+      );
+      expect(deepPassFn).toContain("!apiCeilingConfirmed && !postExpansionSucceeded && afterFetchPosts >= INSTAGRAM_API_CEILING && afterFetchPosts === baselinePostCount");
+      expect(deepPassFn).toContain("ceiling confirmed by inference");
+    });
+
+    it("FP-80) API_CEILING_INFERRED_ON_ERROR when fetch fails but posts at ceiling", () => {
+      expect(orchSource).toContain("API_CEILING_INFERRED_ON_ERROR");
+      const deepPassFn = orchSource.slice(
+        orchSource.indexOf("async function queueDeepPass"),
+        orchSource.indexOf("async function queueDeepPass") + 16000
+      );
+      expect(deepPassFn).toContain("baselinePostCount >= INSTAGRAM_API_CEILING && baselinePostCount < MIN_POSTS_TARGET");
+    });
+
+    it("FP-81) DATA_DEGRADATION_GUARD early return includes paginationStopReason", () => {
+      const daSource = require("fs").readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8");
+      const guardSection = daSource.slice(
+        daSource.indexOf("DATA_DEGRADATION_GUARD"),
+        daSource.indexOf("DATA_DEGRADATION_GUARD") + 1500
+      );
+      expect(guardSection).toContain("paginationStopReason");
+    });
+
+    it("FP-82) Recovery auto-promote SQL uses INSTAGRAM_API_CEILING (not MIN_POSTS_TARGET) for API-ceiling-aware promotion", () => {
+      const recoveryFn = orchSource.slice(
+        orchSource.indexOf("async function recoverStuckDeepPass"),
+        orchSource.indexOf("async function recoverStuckDeepPass") + 5000
+      );
+      expect(recoveryFn).toContain("INSTAGRAM_API_CEILING");
+      expect(recoveryFn).not.toContain(">= ${MIN_POSTS_TARGET}");
     });
 
     it("FP-71) DEEP_PASS additive-only guard for posts and comments", () => {

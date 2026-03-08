@@ -1322,6 +1322,11 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
             apiCeilingConfirmed = true;
           }
 
+          if (!apiCeilingConfirmed && !postExpansionSucceeded && afterFetchPosts >= INSTAGRAM_API_CEILING && afterFetchPosts === baselinePostCount) {
+            apiCeilingConfirmed = true;
+            console.log(`[FetchOrch] API_CEILING_INFERRED: ${comp.name} | posts=${afterFetchPosts} at INSTAGRAM_API_CEILING=${INSTAGRAM_API_CEILING} | expansion returned no new posts | ceiling confirmed by inference`);
+          }
+
           if (!postExpansionSucceeded) {
             postExpansionReason = apiCeilingConfirmed
               ? `API_CEILING: Instagram public API limited to ${INSTAGRAM_API_CEILING} posts. Pagination requires authenticated session.`
@@ -1334,6 +1339,10 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
         } catch (fetchErr: any) {
           postExpansionReason = `FETCH_ERROR: ${fetchErr.message}`;
           console.error(`[FetchOrch] DEEP_PASS post collection failed for ${comp.name}: ${fetchErr.message} — proceeding with existing ${baselinePostCount} posts`);
+          if (baselinePostCount >= INSTAGRAM_API_CEILING && baselinePostCount < MIN_POSTS_TARGET) {
+            apiCeilingConfirmed = true;
+            console.log(`[FetchOrch] API_CEILING_INFERRED_ON_ERROR: ${comp.name} | posts=${baselinePostCount} at ceiling despite fetch error | ceiling confirmed`);
+          }
         }
       } else {
         postExpansionSucceeded = true;
@@ -1659,7 +1668,7 @@ async function recoverStuckDeepPass(): Promise<void> {
         updated_at = NOW()
       WHERE is_active = true AND analysis_level = 'FAST_PASS'
         AND enrichment_status != 'ENRICHED'
-        AND (SELECT COUNT(*) FROM ci_competitor_posts WHERE competitor_id = ci_competitors.id AND account_id = ci_competitors.account_id) >= ${MIN_POSTS_TARGET}
+        AND (SELECT COUNT(*) FROM ci_competitor_posts WHERE competitor_id = ci_competitors.id AND account_id = ci_competitors.account_id) >= ${INSTAGRAM_API_CEILING}
         AND (SELECT COUNT(*) FROM ci_competitor_comments WHERE competitor_id = ci_competitors.id AND account_id = ci_competitors.account_id) >= ${MI_THRESHOLDS.MIN_COMMENTS_SAMPLE}
     `);
 
