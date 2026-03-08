@@ -24,6 +24,9 @@ import { useCampaign } from '@/context/CampaignContext';
 import { normalizeEngineSnapshot } from '@/lib/engine-snapshot';
 
 interface DataCoverage {
+  analysisLevel: string;
+  enrichmentStatus: string;
+  fetchMethod: string | null;
   postsCollected: number;
   commentsCollected: number;
   ctaCoverage: number;
@@ -37,7 +40,7 @@ interface DataCoverage {
   dataFreshnessDays: number;
   lastFetchAt: string | null;
   fetchStatus: string;
-  fetchMethod: string | null;
+  lastCheckedAt: string | null;
 }
 
 interface Competitor {
@@ -375,6 +378,33 @@ export default function CompetitiveIntelligence() {
         </Pressable>
       </View>
 
+      {competitors.length > 0 && (() => {
+        const enrichedCount = competitors.filter(c => c.dataCoverage?.enrichmentStatus === 'ENRICHED').length;
+        const pendingCount = competitors.filter(c => !c.dataCoverage?.enrichmentStatus || c.dataCoverage?.enrichmentStatus === 'PENDING').length;
+        const enrichingCount = competitors.filter(c => c.dataCoverage?.enrichmentStatus === 'ENRICHING').length;
+        const failedCount = competitors.filter(c => c.dataCoverage?.enrichmentStatus === 'FAILED').length;
+        const skippedCount = competitors.filter(c => c.dataCoverage?.enrichmentStatus === 'SKIPPED').length;
+        const enrichedPct = Math.round((enrichedCount / competitors.length) * 100);
+        return (
+          <View style={{ backgroundColor: isDark ? '#1A2030' : '#F0F4FF', borderRadius: 8, padding: 10, marginBottom: 10, gap: 6 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6' }}>PIPELINE STATUS</Text>
+              <Text style={{ fontSize: 10, fontWeight: '600', color: enrichedPct === 100 ? '#10B981' : '#F59E0B' }}>{enrichedPct}% enriched</Text>
+            </View>
+            <View style={{ height: 4, borderRadius: 2, backgroundColor: isDark ? '#0F1419' : '#E2E8F0', overflow: 'hidden' as const }}>
+              <View style={{ height: 4, borderRadius: 2, backgroundColor: '#10B981', width: `${enrichedPct}%` as any }} />
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {enrichedCount > 0 && <Text style={{ fontSize: 10, color: '#10B981', fontWeight: '600' }}>{enrichedCount} Deep Pass</Text>}
+              {enrichingCount > 0 && <Text style={{ fontSize: 10, color: '#3B82F6', fontWeight: '600' }}>{enrichingCount} Enriching</Text>}
+              {pendingCount > 0 && <Text style={{ fontSize: 10, color: '#F59E0B', fontWeight: '600' }}>{pendingCount} Fast Pass</Text>}
+              {failedCount > 0 && <Text style={{ fontSize: 10, color: '#EF4444', fontWeight: '600' }}>{failedCount} Failed</Text>}
+              {skippedCount > 0 && <Text style={{ fontSize: 10, color: '#6B7280', fontWeight: '600' }}>{skippedCount} Skipped</Text>}
+            </View>
+          </View>
+        );
+      })()}
+
       {hasInsufficientData && (
         <View style={{ backgroundColor: '#F59E0B' + '15', borderRadius: 8, padding: 10, marginBottom: 10, flexDirection: 'row', gap: 8, alignItems: 'center' }}>
           <Ionicons name="warning" size={16} color="#F59E0B" />
@@ -403,11 +433,29 @@ export default function CompetitiveIntelligence() {
               <View style={s.compInfo}>
                 <View style={s.compNameRow}>
                   <Text style={[s.compName, { color: colors.text }]}>{comp.name}</Text>
-                  <View style={[s.evidenceDot, { backgroundColor: (dc?.postsCollected || 0) >= 10 ? '#10B981' : '#F59E0B' }]} />
+                  {dc?.enrichmentStatus === 'ENRICHED' ? (
+                    <View style={{ backgroundColor: '#10B981', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
+                      <Text style={{ fontSize: 9, fontWeight: '700', color: '#fff' }}>DEEP PASS</Text>
+                    </View>
+                  ) : dc?.enrichmentStatus === 'ENRICHING' ? (
+                    <View style={{ backgroundColor: '#3B82F6', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
+                      <Text style={{ fontSize: 9, fontWeight: '700', color: '#fff' }}>ENRICHING</Text>
+                    </View>
+                  ) : dc?.enrichmentStatus === 'FAILED' ? (
+                    <View style={{ backgroundColor: '#EF4444', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
+                      <Text style={{ fontSize: 9, fontWeight: '700', color: '#fff' }}>FAILED</Text>
+                    </View>
+                  ) : (dc?.postsCollected || 0) > 0 ? (
+                    <View style={{ backgroundColor: '#F59E0B', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
+                      <Text style={{ fontSize: 9, fontWeight: '700', color: '#fff' }}>FAST PASS</Text>
+                    </View>
+                  ) : (
+                    <View style={[s.evidenceDot, { backgroundColor: '#6B7280' }]} />
+                  )}
                 </View>
                 <Text style={[s.compMeta, { color: colors.textMuted }]}>
                   {(dc?.postsCollected || 0) > 0
-                    ? `${comp.platform} • ${comp.businessType || 'Unknown type'} • ${dc?.postsCollected || 0} posts`
+                    ? `${comp.platform} • ${comp.businessType || 'Unknown type'} • ${dc?.postsCollected || 0} posts • ${dc?.commentsCollected || 0} comments`
                     : `${comp.platform} • ${comp.businessType || 'Unknown type'} • No data collected`}
                 </Text>
               </View>
@@ -419,7 +467,13 @@ export default function CompetitiveIntelligence() {
             {expandedCompetitor === comp.id && (
               <View style={s.compDetails}>
                 <View style={{ backgroundColor: isDark ? '#1A2030' : '#F8F9FA', borderRadius: 8, padding: 10, gap: 6, marginBottom: 8 }}>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6', marginBottom: 2 }}>DATA COVERAGE</Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6' }}>DATA COVERAGE</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dc?.enrichmentStatus === 'ENRICHED' ? '#10B981' : dc?.enrichmentStatus === 'ENRICHING' ? '#3B82F6' : dc?.enrichmentStatus === 'FAILED' ? '#EF4444' : '#F59E0B' }} />
+                      <Text style={{ fontSize: 10, fontWeight: '600', color: colors.textMuted }}>{dc?.analysisLevel || 'PENDING'}</Text>
+                    </View>
+                  </View>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                     <Text style={{ fontSize: 11, color: colors.textMuted }}>Posts collected</Text>
                     <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.postsCollected || 0) >= 14 ? '#10B981' : '#F97316' }}>{dc?.postsCollected || 0} / 14</Text>
