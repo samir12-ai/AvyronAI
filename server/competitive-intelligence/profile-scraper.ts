@@ -161,7 +161,7 @@ function parsePostFromGraphQL(node: any, handle: string): ScrapedPost {
 }
 
 const TARGET_POSTS = 14;
-const MAX_PAGINATION_PAGES = 4;
+const MAX_PAGINATION_PAGES = 6;
 const INSTAGRAM_PUBLIC_API_CEILING = 12;
 
 export type PaginationStopReason =
@@ -196,7 +196,7 @@ interface PaginationDiagnostics {
   proxyUsed: boolean;
 }
 
-async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionContext): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number; paginationPages: number; rawFetchedCount: number; paginationStopReason: PaginationStopReason; diagnostics: PaginationDiagnostics }> {
+async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionContext, maxPosts: number = TARGET_POSTS): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number; paginationPages: number; rawFetchedCount: number; paginationStopReason: PaginationStopReason; diagnostics: PaginationDiagnostics }> {
   const apiUrl = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`;
 
   const headers: Record<string, string> = {
@@ -341,7 +341,7 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
     return { posts, followers, profileName, bytesReceived, paginationPages: 1, rawFetchedCount: posts.length, paginationStopReason: "NO_MORE_PAGES", diagnostics: diag };
   }
 
-  if (posts.length >= TARGET_POSTS) {
+  if (posts.length >= maxPosts) {
     diag.stopReason = "TARGET_REACHED";
     diag.totalPostsFetched = posts.length;
     return { posts, followers, profileName, bytesReceived, paginationPages: 1, rawFetchedCount: posts.length, paginationStopReason: "TARGET_REACHED", diagnostics: diag };
@@ -358,7 +358,7 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
   let paginationPages = 1;
   let paginationSuccess = false;
 
-  console.log(`[CI Scraper] WEB_API: PAGE_1 has ${posts.length}/${TARGET_POSTS} posts with has_next_page=true. Attempting v1 feed pagination...`);
+  console.log(`[CI Scraper] WEB_API: PAGE_1 has ${posts.length}/${maxPosts} posts with has_next_page=true. Attempting v1 feed pagination...`);
 
   const lastPostNode = edges[edges.length - 1]?.node;
   const lastPostId = lastPostNode?.id;
@@ -413,12 +413,12 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
             paginationSuccess = true;
 
             let nextMaxId = feedData?.next_max_id;
-            while (feedData?.more_available && nextMaxId && posts.length < TARGET_POSTS && paginationPages < MAX_PAGINATION_PAGES) {
+            while (feedData?.more_available && nextMaxId && posts.length < maxPosts && paginationPages < MAX_PAGINATION_PAGES) {
               paginationPages++;
               await randomDelay();
 
               const nextFeedUrl = `https://i.instagram.com/api/v1/feed/user/${userId}/?count=50&max_id=${nextMaxId}`;
-              console.log(`[CI Scraper] WEB_API: PAGINATION_PAGE_${paginationPages} | have=${posts.length}/${TARGET_POSTS} | for ${handle}`);
+              console.log(`[CI Scraper] WEB_API: PAGINATION_PAGE_${paginationPages} | have=${posts.length}/${maxPosts} | for ${handle}`);
 
               try {
                 if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `V1_FEED:page${paginationPages + 1}:${handle}`);
@@ -487,15 +487,95 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
     }
   }
 
+  if (!paginationSuccess && posts.length < maxPosts && userId && mediaData?.page_info?.end_cursor) {
+    console.log(`[CI Scraper] WEB_API: V1_FEED failed — trying GraphQL pagination fallback | posts=${posts.length}/${maxPosts} | for ${handle}`);
+    diag.paginationMethod = "GRAPHQL_FALLBACK";
+
+    const endCursor = mediaData.page_info.end_cursor;
+    const queryHash = "69cba40317214236af40e7efa697781d";
+    let gqlCursor = endCursor;
+    let gqlPageNum = 1;
+
+    while (posts.length < maxPosts && gqlPageNum <= MAX_PAGINATION_PAGES && gqlCursor) {
+      gqlPageNum++;
+      await randomDelay();
+
+      const gqlVars = JSON.stringify({ id: userId, first: 50, after: gqlCursor });
+      const gqlUrl = `https://www.instagram.com/graphql/query/?query_hash=${queryHash}&variables=${encodeURIComponent(gqlVars)}`;
+
+      const gqlHeaders: Record<string, string> = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "X-IG-App-ID": "936619743392459",
+        "X-Requested-With": "XMLHttpRequest",
+        "Accept": "*/*",
+        "Referer": `https://www.instagram.com/${handle}/`,
+      };
+
+      const gqlFetchOptions: any = { headers: gqlHeaders, redirect: "follow" };
+      if (dispatcher) gqlFetchOptions.dispatcher = dispatcher;
+
+      console.log(`[CI Scraper] WEB_API: GRAPHQL_PAGE_${gqlPageNum} | have=${posts.length}/${maxPosts} | cursor=${gqlCursor.substring(0, 20)}... | for ${handle}`);
+
+      try {
+        if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `GRAPHQL:page${gqlPageNum}:${handle}`);
+        const gqlStartMs = Date.now();
+        const gqlResp = await fetch(gqlUrl, gqlFetchOptions);
+
+        if (!gqlResp.ok) {
+          const gqlErrBody = await gqlResp.text().catch(() => "");
+          if (proxyCtx) logProxyTelemetry(proxyCtx, `GRAPHQL_PAGE_${gqlPageNum}`, gqlResp.status, classifyBlock(gqlResp.status, gqlErrBody), Date.now() - gqlStartMs, false);
+          console.log(`[CI Scraper] WEB_API: GRAPHQL_PAGE_${gqlPageNum} HTTP ${gqlResp.status} | ${gqlErrBody.substring(0, 100)} | for ${handle}`);
+          break;
+        }
+
+        const gqlText = await gqlResp.text();
+        bytesReceived += Buffer.byteLength(gqlText, "utf-8");
+
+        const gqlData = JSON.parse(gqlText);
+        const gqlMedia = gqlData?.data?.user?.edge_owner_to_timeline_media;
+        const gqlEdges = gqlMedia?.edges || [];
+
+        if (proxyCtx) logProxyTelemetry(proxyCtx, `GRAPHQL_PAGE_${gqlPageNum}`, gqlResp.status, null, Date.now() - gqlStartMs, gqlEdges.length > 0);
+        console.log(`[CI Scraper] WEB_API: GRAPHQL_PAGE_${gqlPageNum} | items=${gqlEdges.length} | has_next=${gqlMedia?.page_info?.has_next_page} | for ${handle}`);
+
+        if (gqlEdges.length === 0) break;
+
+        for (const edge of gqlEdges) {
+          const post = parsePostFromGraphQL(edge.node, handle);
+          if (!seenIds.has(post.postId)) {
+            seenIds.add(post.postId);
+            posts.push(post);
+          }
+        }
+
+        paginationPages = 1 + gqlPageNum;
+        paginationSuccess = true;
+
+        gqlCursor = gqlMedia?.page_info?.has_next_page ? gqlMedia?.page_info?.end_cursor : null;
+        if (!gqlCursor) break;
+      } catch (gqlErr: any) {
+        if (proxyCtx) logProxyTelemetry(proxyCtx, `GRAPHQL_PAGE_${gqlPageNum}`, null, classifyBlock(null, gqlErr.message), 0, false);
+        console.log(`[CI Scraper] WEB_API: GRAPHQL_PAGE_${gqlPageNum} error: ${gqlErr.message} | for ${handle}`);
+        break;
+      }
+    }
+
+    if (paginationSuccess) {
+      console.log(`[CI Scraper] WEB_API: GRAPHQL_PAGINATION_SUCCESS | ${posts.length} posts across ${paginationPages} pages | for ${handle}`);
+    } else {
+      console.log(`[CI Scraper] WEB_API: GRAPHQL_PAGINATION_FAILED | stuck at ${posts.length} posts | for ${handle}`);
+    }
+  }
+
   if (paginationSuccess) {
-    diag.stopReason = posts.length >= TARGET_POSTS ? "TARGET_REACHED" :
+    diag.stopReason = posts.length >= maxPosts ? "TARGET_REACHED" :
       paginationPages >= MAX_PAGINATION_PAGES ? "MAX_PAGES_REACHED" :
       "FEED_PAGINATION_SUCCESS";
     console.log(`[CI Scraper] WEB_API: PAGINATION_SUCCESS | ${posts.length} posts across ${paginationPages} pages | stopReason=${diag.stopReason} | for ${handle}`);
   } else if (diag.stopReason === "UNKNOWN_FAILURE" || diag.stopReason === "FEED_PAGINATION_AUTH_REQUIRED" || diag.stopReason === "FEED_PAGINATION_BLOCKED") {
     if (posts.length === INSTAGRAM_PUBLIC_API_CEILING && (diag.totalMediaCount ?? 0) > INSTAGRAM_PUBLIC_API_CEILING) {
       diag.stopReason = "INSTAGRAM_API_CEILING" as PaginationStopReason;
-      console.log(`[CI Scraper] WEB_API: INSTAGRAM_API_CEILING | Profile has ${diag.totalMediaCount} posts but Instagram public API returns max ${INSTAGRAM_PUBLIC_API_CEILING} per request. Pagination requires authenticated session (login). | ${diag.paginationErrorDetail || "No error detail"} | for ${handle}`);
+      console.log(`[CI Scraper] WEB_API: INSTAGRAM_API_CEILING | Profile has ${diag.totalMediaCount} posts but Instagram public API returns max ${INSTAGRAM_PUBLIC_API_CEILING} per request. Both v1/feed and GraphQL pagination failed. | ${diag.paginationErrorDetail || "No error detail"} | for ${handle}`);
     }
   }
 
@@ -795,7 +875,7 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
   attempts.push("WEB_API");
   try {
     const startMs = Date.now();
-    const result = await attemptWebProfileApi(handle, proxyCtx);
+    const result = await attemptWebProfileApi(handle, proxyCtx, maxPosts);
     if (proxyCtx) {
       logProxyTelemetry(proxyCtx, "WEB_API", 200, null, Date.now() - startMs, result.posts.length > 0);
     }
