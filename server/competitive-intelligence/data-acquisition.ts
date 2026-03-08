@@ -235,6 +235,85 @@ function computeBasicSentiment(text: string): number {
   return Math.max(0, Math.min(1, 0.5 + (positiveCount - negativeCount) * 0.15));
 }
 
+const SPAM_BOT_PATTERNS = [
+  /\bfollow\s*(me|back|4follow|for\s*follow)\b/i,
+  /\b(dm|message)\s*(me|for)\s*(promo|collab|deal|info)\b/i,
+  /\bcheck\s*(my|out\s*my)\s*(page|profile|bio|link)\b/i,
+  /\blink\s*in\s*(my\s*)?bio\b/i,
+  /\b(free|earn)\s*(money|cash|gift|followers|likes)\b/i,
+  /\bgrow\s*your\s*(account|followers|page)\b/i,
+  /\b(buy|get)\s*(followers|likes|views)\b/i,
+  /\bI\s*can\s*help\s*you\s*(grow|get|gain)\b/i,
+  /\b(promo|promote)\s*(available|dm|prices?)\b/i,
+  /\bwant\s*to\s*be\s*featured\b/i,
+  /\bcongrat[sz]?\s*you\s*(won|are\s*selected)\b/i,
+  /\b(click|tap)\s*(the\s*)?(link|here)\b/i,
+];
+
+const EMOJI_ONLY_RE = /^[\s\p{Emoji}\p{Emoji_Presentation}\p{Emoji_Modifier}\p{Emoji_Modifier_Base}\p{Emoji_Component}\u200d\ufe0f\u2764\u2665\u2600-\u26FF\u2700-\u27BF]*$/u;
+const MIN_MEANINGFUL_CHARS = 3;
+
+interface SpamFilterResult {
+  filtered: { text: string; [key: string]: any }[];
+  spamCount: number;
+  spamReasons: Record<string, number>;
+}
+
+export function filterSpamComments<T extends { text?: string; commentText?: string }>(comments: T[]): SpamFilterResult & { filtered: T[] } {
+  const filtered: T[] = [];
+  let spamCount = 0;
+  const spamReasons: Record<string, number> = {};
+
+  function countReason(reason: string) {
+    spamReasons[reason] = (spamReasons[reason] || 0) + 1;
+    spamCount++;
+  }
+
+  for (const comment of comments) {
+    const text = (comment.text || comment.commentText || "").trim();
+
+    if (!text || text.length === 0) {
+      countReason("empty");
+      continue;
+    }
+
+    const strippedText = text.replace(/[\s@#\p{Emoji}\p{Emoji_Presentation}\p{Emoji_Modifier}\p{Emoji_Modifier_Base}\p{Emoji_Component}\u200d\ufe0f\u2764\u2665\u2600-\u26FF\u2700-\u27BF]/gu, "");
+    if (strippedText.length < MIN_MEANINGFUL_CHARS) {
+      if (EMOJI_ONLY_RE.test(text)) {
+        countReason("emoji_only");
+      } else {
+        countReason("too_short");
+      }
+      continue;
+    }
+
+    const tagStripped = text.replace(/@[\w.]+/g, "").replace(/#[\w\u0600-\u06FF]+/g, "").trim();
+    if (tagStripped.length < MIN_MEANINGFUL_CHARS) {
+      countReason("tag_only");
+      continue;
+    }
+
+    if (/^(.)\1{4,}$/.test(strippedText)) {
+      countReason("repeated_chars");
+      continue;
+    }
+
+    let isSpam = false;
+    for (const pattern of SPAM_BOT_PATTERNS) {
+      if (pattern.test(text)) {
+        countReason("bot_spam");
+        isSpam = true;
+        break;
+      }
+    }
+    if (isSpam) continue;
+
+    filtered.push(comment);
+  }
+
+  return { filtered, spamCount, spamReasons };
+}
+
 export type CollectionMode = "FAST_PASS" | "DEEP_PASS";
 
 const TARGET_POSTS_FAST = 12;
@@ -552,7 +631,13 @@ async function _executeFetch(
     console.log(`[DataAcq] CACHE_FIRST: ${cachedPostsReused} existing posts reused, ${postInserts.length} new posts to insert for ${competitor.name}`);
   }
 
-  const realComments = scrapeResult.embeddedComments || [];
+  const rawEmbeddedComments = scrapeResult.embeddedComments || [];
+  const spamResult = filterSpamComments(rawEmbeddedComments);
+  const realComments = spamResult.filtered;
+  if (spamResult.spamCount > 0) {
+    console.log(`[DataAcq] SPAM_FILTER: Filtered ${spamResult.spamCount} spam comments from embedded preview for ${competitor.name} | reasons: ${JSON.stringify(spamResult.spamReasons)}`);
+  }
+
   const existingCommentIds = new Set<string>();
   if (realComments.length > 0) {
     const existingCRows = await db.select({ commentId: ciCompetitorComments.commentId })
@@ -583,7 +668,7 @@ async function _executeFetch(
     commentsCollected++;
     realCommentsInserted++;
   }
-  console.log(`[DataAcq] EMBEDDED_COMMENTS: ${realCommentsInserted} real comments from profile scrape for ${competitor.name} (${realComments.length} total extracted, ${realComments.length - realCommentsInserted} duplicates skipped)`);
+  console.log(`[DataAcq] EMBEDDED_COMMENTS: ${realCommentsInserted} real comments from profile scrape for ${competitor.name} (${rawEmbeddedComments.length} total extracted, ${spamResult.spamCount} spam filtered, ${rawEmbeddedComments.length - spamResult.spamCount - realCommentsInserted} duplicates skipped)`);
 
   const postsWithRealComments = new Set(realComments.map(c => c.postId));
 
@@ -918,6 +1003,12 @@ export async function enrichCompetitorWithComments(competitorId: string, account
     const embeddedComments = profileRescrape.embeddedComments || [];
 
     if (embeddedComments.length > 0) {
+      const embSpamResult = filterSpamComments(embeddedComments);
+      const cleanEmbedded = embSpamResult.filtered;
+      if (embSpamResult.spamCount > 0) {
+        console.log(`[DataAcq] SPAM_FILTER: Filtered ${embSpamResult.spamCount} spam from DEEP_PASS embedded for ${competitor.name} | reasons: ${JSON.stringify(embSpamResult.spamReasons)}`);
+      }
+
       const existingCIds = new Set<string>();
       const existingCRows = await db.select({ commentId: ciCompetitorComments.commentId })
         .from(ciCompetitorComments)
@@ -926,7 +1017,7 @@ export async function enrichCompetitorWithComments(competitorId: string, account
         if (r.commentId) existingCIds.add(r.commentId);
       }
 
-      for (const rc of embeddedComments) {
+      for (const rc of cleanEmbedded) {
         if (existingCIds.has(rc.commentId)) continue;
         commentInserts.push({
           competitorId,
@@ -955,23 +1046,27 @@ export async function enrichCompetitorWithComments(competitorId: string, account
       const commentsNeeded = Math.max(MIN_COMMENTS_THRESHOLD - existingComments, 50);
       const scrapeResult = await scrapeCommentsForPosts(postsForScraping, proxyCtx, commentsNeeded);
 
-      for (const result of scrapeResult.results) {
-        for (const comment of result.comments) {
-          commentInserts.push({
-            competitorId,
-            accountId,
-            postId: comment.postId,
-            commentId: comment.commentId,
-            username: comment.username,
-            commentText: comment.text,
-            sentiment: computeBasicSentiment(comment.text),
-            timestamp: comment.timestamp ? new Date(comment.timestamp) : null,
-            batchId,
-            isSynthetic: false,
-            source: "real_scrape",
-          });
-          realCommentsScraped++;
-        }
+      const allScrapedComments = scrapeResult.results.flatMap(r => r.comments);
+      const scrapeSpamResult = filterSpamComments(allScrapedComments);
+      if (scrapeSpamResult.spamCount > 0) {
+        console.log(`[DataAcq] SPAM_FILTER: Filtered ${scrapeSpamResult.spamCount} spam from DEEP_PASS direct scrape for ${competitor.name} | reasons: ${JSON.stringify(scrapeSpamResult.spamReasons)}`);
+      }
+
+      for (const comment of scrapeSpamResult.filtered) {
+        commentInserts.push({
+          competitorId,
+          accountId,
+          postId: comment.postId,
+          commentId: comment.commentId,
+          username: comment.username,
+          commentText: comment.text,
+          sentiment: computeBasicSentiment(comment.text),
+          timestamp: comment.timestamp ? new Date(comment.timestamp) : null,
+          batchId,
+          isSynthetic: false,
+          source: "real_scrape",
+        });
+        realCommentsScraped++;
       }
     }
 
@@ -1098,6 +1193,18 @@ export async function enrichCompetitorWithComments(competitorId: string, account
   }
 
   const status = coverageMet ? "ENRICHED" : "INSUFFICIENT_COMMENTS";
+
+  const postDistribution: Record<string, { real: number; synthetic: number }> = {};
+  for (const ci of commentInserts) {
+    const pid = ci.postId;
+    if (!postDistribution[pid]) postDistribution[pid] = { real: 0, synthetic: 0 };
+    if (ci.isSynthetic) postDistribution[pid].synthetic++;
+    else postDistribution[pid].real++;
+  }
+  const postsWithNewComments = Object.keys(postDistribution).length;
+  const distributionSummary = Object.entries(postDistribution).map(([pid, counts]) => `${pid.slice(0, 8)}:R${counts.real}/S${counts.synthetic}`).join(", ");
+  console.log(`[DataAcq] COMMENT_DISTRIBUTION: ${competitor.name} — ${postsWithNewComments} posts with comments | ${distributionSummary}`);
+
   console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — real=${realCommentsScraped}, synthetic_fallback=${syntheticFallbackCount}, existing=${existingComments}, total=${totalComments} | coverage=${coverageMet ? "MET" : "BELOW"} | status=${status}`);
 
   return { commentsGenerated: totalComments, status };

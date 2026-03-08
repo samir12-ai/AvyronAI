@@ -539,4 +539,83 @@ describe("Synthetic Comment Lifecycle — Deep Pass Integrity", () => {
       }
     });
   });
+
+  describe("Section 12: Spam/Quality Comment Filtering", () => {
+    it("12.1) filterSpamComments function exists and is exported", () => {
+      const source = readSource();
+      expect(source).toContain("export function filterSpamComments");
+    });
+
+    it("12.2) Spam filter catches emoji-only comments", () => {
+      const source = readSource();
+      expect(source).toContain("emoji_only");
+      expect(source).toMatch(/EMOJI_ONLY/i);
+    });
+
+    it("12.3) Spam filter catches bot/spam patterns", () => {
+      const source = readSource();
+      expect(source).toContain("SPAM_BOT_PATTERNS");
+      expect(source).toContain("bot_spam");
+      expect(source).toContain("follow");
+      expect(source).toContain("check");
+      expect(source).toContain("link");
+      expect(source).toContain("promo");
+    });
+
+    it("12.4) Spam filter catches tag-only comments", () => {
+      const source = readSource();
+      expect(source).toContain("tag_only");
+      expect(source).toMatch(/@[\w.]+/);
+    });
+
+    it("12.5) Spam filter catches ultra-short comments", () => {
+      const source = readSource();
+      expect(source).toContain("too_short");
+      expect(source).toContain("MIN_MEANINGFUL_CHARS");
+    });
+
+    it("12.6) Spam filter catches repeated characters", () => {
+      const source = readSource();
+      expect(source).toContain("repeated_chars");
+    });
+
+    it("12.7) Spam filter applied to FAST_PASS embedded comments", () => {
+      const source = readSource();
+      expect(source).toContain("SPAM_FILTER: Filtered");
+      expect(source).toContain("spam comments from embedded preview");
+    });
+
+    it("12.8) Spam filter applied to DEEP_PASS embedded comments", () => {
+      const source = readSource();
+      expect(source).toContain("spam from DEEP_PASS embedded");
+    });
+
+    it("12.9) Spam filter applied to DEEP_PASS direct scrape", () => {
+      const source = readSource();
+      expect(source).toContain("spam from DEEP_PASS direct scrape");
+    });
+
+    it("12.10) Comment distribution diagnostic is logged", () => {
+      const source = readSource();
+      expect(source).toContain("COMMENT_DISTRIBUTION:");
+      expect(source).toContain("posts with comments");
+    });
+
+    it("12.11) filterSpamComments returns spamReasons breakdown", () => {
+      const source = readSource();
+      const fnStart = source.indexOf("export function filterSpamComments");
+      const fnBody = source.slice(fnStart, fnStart + 2000);
+      expect(fnBody).toContain("spamReasons");
+      expect(fnBody).toContain("spamCount");
+      expect(fnBody).toContain("filtered");
+    });
+
+    it("12.12) Spam filter handles both text and commentText fields", () => {
+      const source = readSource();
+      const fnStart = source.indexOf("export function filterSpamComments");
+      const fnBody = source.slice(fnStart, fnStart + 1000);
+      expect(fnBody).toContain("comment.text");
+      expect(fnBody).toContain("comment.commentText");
+    });
+  });
 });
