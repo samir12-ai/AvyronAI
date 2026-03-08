@@ -298,6 +298,9 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
     "X-IG-WWW-Claim": "0",
     "Accept": "*/*",
     "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
   };
   const iFetchOptions: any = { headers: iHeaders, redirect: "follow" };
   if (dispatcher) iFetchOptions.dispatcher = dispatcher;
@@ -438,6 +441,9 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
       "X-IG-WWW-Claim": "0",
       "Accept": "*/*",
       "Accept-Language": "en-US,en;q=0.9",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-origin",
     };
     const feedFetchOptions: any = { headers: feedHeaders, redirect: "follow" };
     if (dispatcher) feedFetchOptions.dispatcher = dispatcher;
@@ -944,18 +950,12 @@ export async function scrapePostComments(
     "X-Requested-With": "XMLHttpRequest",
     "Accept": "*/*",
     "Referer": `https://www.instagram.com/p/${shortcode}/`,
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
   };
 
-  let dispatcher: any;
-  if (proxyCtx) {
-    const proxyConfig = getProxyConfig();
-    if (proxyConfig) {
-      dispatcher = new ProxyAgent({
-        uri: `http://${proxyConfig.username}-session-${proxyCtx.session.sessionId}:${proxyConfig.password}@${proxyConfig.host}:${proxyConfig.port}`,
-        requestTls: { rejectUnauthorized: false },
-      });
-    }
-  }
+  const dispatcher = proxyCtx?.session.dispatcher ?? undefined;
 
   const fetchOptions: any = { headers, redirect: "follow" };
   if (dispatcher) fetchOptions.dispatcher = dispatcher;
@@ -971,12 +971,8 @@ export async function scrapePostComments(
     if (!resp.ok) {
       const errBody = await resp.text().catch(() => "");
       if (proxyCtx) logProxyTelemetry(proxyCtx, `COMMENTS_GRAPHQL`, resp.status, classifyBlock(resp.status, errBody), Date.now() - startMs, false);
-      console.log(`[CI Scraper] COMMENTS: GraphQL HTTP ${resp.status} for ${shortcode} | ${errBody.substring(0, 100)}`);
-
-      if (resp.status === 401 || resp.status === 429) {
-        return await scrapePostCommentsV1(shortcode, postId, proxyCtx, dispatcher);
-      }
-      return { success: false, comments: [], shortcode, totalAvailable: null };
+      console.log(`[CI Scraper] COMMENTS: GraphQL HTTP ${resp.status} for ${shortcode}, falling back to V1/HTML | ${errBody.substring(0, 100)}`);
+      return await scrapePostCommentsV1(shortcode, postId, proxyCtx, dispatcher);
     }
 
     const text = await resp.text();
@@ -1002,11 +998,136 @@ export async function scrapePostComments(
       });
     }
 
+    if (comments.length === 0) {
+      console.log(`[CI Scraper] COMMENTS: GraphQL returned 200 but 0 edges for ${shortcode}, falling back to V1/HTML`);
+      return await scrapePostCommentsV1(shortcode, postId, proxyCtx, dispatcher);
+    }
+
     console.log(`[CI Scraper] COMMENTS: ${comments.length} real comments scraped for ${shortcode} (${totalAvailable} total available)`);
+    return { success: true, comments, shortcode, totalAvailable };
+  } catch (err: any) {
+    console.log(`[CI Scraper] COMMENTS: GraphQL error for ${shortcode}: ${err.message}, falling back to V1/HTML`);
+    return await scrapePostCommentsV1(shortcode, postId, proxyCtx, dispatcher);
+  }
+}
+
+async function scrapePostCommentsFromHTML(
+  shortcode: string,
+  postId: string,
+  proxyCtx?: StickySessionContext,
+  existingDispatcher?: any,
+): Promise<CommentScrapeResult> {
+  const postPageUrl = `https://www.instagram.com/p/${shortcode}/`;
+
+  const headers: Record<string, string> = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+  };
+
+  const dispatcher = existingDispatcher ?? proxyCtx?.session.dispatcher ?? undefined;
+
+  const fetchOptions: any = { headers, redirect: "follow" };
+  if (dispatcher) fetchOptions.dispatcher = dispatcher;
+
+  try {
+    if (proxyCtx) {
+      await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `COMMENTS_HTML:${shortcode}`);
+    }
+
+    const startMs = Date.now();
+    const resp = await fetch(postPageUrl, fetchOptions);
+
+    if (!resp.ok) {
+      if (proxyCtx) logProxyTelemetry(proxyCtx, `COMMENTS_HTML`, resp.status, classifyBlock(resp.status, ""), Date.now() - startMs, false);
+      console.log(`[CI Scraper] COMMENTS_HTML: HTTP ${resp.status} for ${shortcode}`);
+      return { success: false, comments: [], shortcode, totalAvailable: null };
+    }
+
+    const html = await resp.text();
+    if (proxyCtx) logProxyTelemetry(proxyCtx, `COMMENTS_HTML`, resp.status, null, Date.now() - startMs, html.length > 10000);
+
+    const comments: ScrapedComment[] = [];
+    const seenIds = new Set<string>();
+    let totalAvailable: number | null = null;
+
+    const previewMatch = html.match(/"preview_comments"\s*:\s*\[([^\]]+)\]/);
+    if (previewMatch) {
+      try {
+        const previewArr = JSON.parse(`[${previewMatch[1]}]`);
+        for (const c of previewArr) {
+          if (!c.text) continue;
+          const cid = c.pk?.toString() || c.id || `html_${postId}_${comments.length}`;
+          if (seenIds.has(cid)) continue;
+          seenIds.add(cid);
+          comments.push({
+            commentId: cid,
+            postId,
+            shortcode,
+            text: String(c.text).substring(0, 2000),
+            username: c.user?.username || c.owner?.username || "unknown",
+            timestamp: c.created_at ? new Date(c.created_at * 1000).toISOString() : null,
+            likes: c.comment_like_count ?? 0,
+          });
+        }
+      } catch {
+        console.log(`[CI Scraper] COMMENTS_HTML: Failed to parse preview_comments JSON for ${shortcode}`);
+      }
+    }
+
+    const countMatch = html.match(/"comment_count"\s*:\s*(\d+)/);
+    if (countMatch) {
+      totalAvailable = parseInt(countMatch[1]);
+    }
+
+    const sharedDataMatch = html.match(/window\._sharedData\s*=\s*({.+?})\s*;/s);
+    if (sharedDataMatch && comments.length === 0) {
+      try {
+        const shared = JSON.parse(sharedDataMatch[1]);
+        const media = shared?.entry_data?.PostPage?.[0]?.graphql?.shortcode_media;
+        if (media) {
+          const edgeSources = [
+            media.edge_media_to_parent_comment?.edges,
+            media.edge_media_to_comment?.edges,
+            media.edge_media_preview_comment?.edges,
+          ];
+          for (const edges of edgeSources) {
+            if (!Array.isArray(edges)) continue;
+            for (const edge of edges) {
+              const node = edge.node || edge;
+              if (!node?.text) continue;
+              const cid = node.id || node.pk?.toString() || `sd_${postId}_${comments.length}`;
+              if (seenIds.has(cid)) continue;
+              seenIds.add(cid);
+              comments.push({
+                commentId: cid,
+                postId,
+                shortcode,
+                text: String(node.text).substring(0, 2000),
+                username: node.owner?.username || node.user?.username || "unknown",
+                timestamp: node.created_at ? new Date(node.created_at * 1000).toISOString() : null,
+                likes: node.edge_liked_by?.count ?? node.comment_like_count ?? 0,
+              });
+            }
+          }
+          if (!totalAvailable) {
+            totalAvailable = media.edge_media_to_parent_comment?.count ?? media.edge_media_to_comment?.count ?? null;
+          }
+        }
+      } catch {
+        console.log(`[CI Scraper] COMMENTS_HTML: Failed to parse _sharedData for ${shortcode}`);
+      }
+    }
+
+    console.log(`[CI Scraper] COMMENTS_HTML: ${comments.length} real comments from HTML for ${shortcode} (${totalAvailable ?? "?"} total available)`);
     return { success: comments.length > 0, comments, shortcode, totalAvailable };
   } catch (err: any) {
-    console.log(`[CI Scraper] COMMENTS: GraphQL error for ${shortcode}: ${err.message}`);
-    return await scrapePostCommentsV1(shortcode, postId, proxyCtx, dispatcher);
+    console.log(`[CI Scraper] COMMENTS_HTML: Error for ${shortcode}: ${err.message}`);
+    return { success: false, comments: [], shortcode, totalAvailable: null };
   }
 }
 
@@ -1022,18 +1143,12 @@ async function scrapePostCommentsV1(
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
     "X-IG-App-ID": "936619743392459",
     "Accept": "*/*",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
   };
 
-  let dispatcher = existingDispatcher;
-  if (!dispatcher && proxyCtx) {
-    const proxyConfig = getProxyConfig();
-    if (proxyConfig) {
-      dispatcher = new ProxyAgent({
-        uri: `http://${proxyConfig.username}-session-${proxyCtx.session.sessionId}:${proxyConfig.password}@${proxyConfig.host}:${proxyConfig.port}`,
-        requestTls: { rejectUnauthorized: false },
-      });
-    }
-  }
+  const dispatcher = existingDispatcher ?? proxyCtx?.session.dispatcher ?? undefined;
 
   const fetchOptions: any = { headers, redirect: "follow" };
   if (dispatcher) fetchOptions.dispatcher = dispatcher;
@@ -1048,16 +1163,16 @@ async function scrapePostCommentsV1(
 
     if (!resp.ok) {
       if (proxyCtx) logProxyTelemetry(proxyCtx, `COMMENTS_V1`, resp.status, classifyBlock(resp.status, ""), Date.now() - startMs, false);
-      console.log(`[CI Scraper] COMMENTS_V1: HTTP ${resp.status} for ${shortcode}`);
-      return { success: false, comments: [], shortcode, totalAvailable: null };
+      console.log(`[CI Scraper] COMMENTS_V1: HTTP ${resp.status} for ${shortcode}, falling back to HTML scrape`);
+      return await scrapePostCommentsFromHTML(shortcode, postId, proxyCtx, dispatcher);
     }
 
     const text = await resp.text();
     const data = JSON.parse(text);
     const item = data?.items?.[0] || data?.graphql?.shortcode_media;
     if (!item) {
-      console.log(`[CI Scraper] COMMENTS_V1: No media data for ${shortcode}`);
-      return { success: false, comments: [], shortcode, totalAvailable: null };
+      console.log(`[CI Scraper] COMMENTS_V1: No media data for ${shortcode}, falling back to HTML scrape`);
+      return await scrapePostCommentsFromHTML(shortcode, postId, proxyCtx, dispatcher);
     }
 
     const commentEdges = item.edge_media_to_parent_comment?.edges
@@ -1107,11 +1222,16 @@ async function scrapePostCommentsV1(
       });
     }
 
+    if (comments.length === 0) {
+      console.log(`[CI Scraper] COMMENTS_V1: 0 comments from V1 API for ${shortcode}, falling back to HTML scrape`);
+      return await scrapePostCommentsFromHTML(shortcode, postId, proxyCtx, dispatcher);
+    }
+
     console.log(`[CI Scraper] COMMENTS_V1: ${comments.length} real comments for ${shortcode} (${totalAvailable} total available)`);
     return { success: comments.length > 0, comments, shortcode, totalAvailable };
   } catch (err: any) {
-    console.log(`[CI Scraper] COMMENTS_V1: Error for ${shortcode}: ${err.message}`);
-    return { success: false, comments: [], shortcode, totalAvailable: null };
+    console.log(`[CI Scraper] COMMENTS_V1: Error for ${shortcode}: ${err.message}, falling back to HTML scrape`);
+    return await scrapePostCommentsFromHTML(shortcode, postId, proxyCtx, dispatcher);
   }
 }
 
