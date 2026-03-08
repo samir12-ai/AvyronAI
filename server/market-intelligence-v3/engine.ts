@@ -31,7 +31,7 @@ import type {
   EvidenceCoverage,
   EngagementQuality,
 } from "./types";
-import { MI_CONFIDENCE, ENGINE_VERSION } from "./constants";
+import { MI_CONFIDENCE, ENGINE_VERSION, INSTAGRAM_API_CEILING } from "./constants";
 import { validateEngineIsolation, validateNoStrategyWrite } from "./isolation-guard";
 import { logAudit } from "../audit";
 import { computeCompetitorHash, parseJsonSafe } from "./utils";
@@ -334,7 +334,7 @@ export function computeSignalNoiseRatio(signalResults: any[], confidence: any): 
 export function computeEvidenceCoverage(signalResults: any[], totalCompetitors: number): EvidenceCoverage {
   const postsAnalyzed = signalResults.reduce((s: number, r: any) => s + (r.sampleSize || 0), 0);
   const commentsAnalyzed = signalResults.reduce((s: number, r: any) => s + (r.commentCount || 0), 0);
-  const competitorsWithSufficientData = signalResults.filter((r: any) => (r.sampleSize || 0) >= 14).length;
+  const competitorsWithSufficientData = signalResults.filter((r: any) => (r.sampleSize || 0) >= INSTAGRAM_API_CEILING).length;
   return { postsAnalyzed, commentsAnalyzed, competitorsWithSufficientData, totalCompetitors };
 }
 

@@ -1144,21 +1144,18 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
       );
-      expect(source).toContain("INSTAGRAM_PUBLIC_API_POST_CEILING = 12");
       expect(source).toContain("MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR");
-      expect(source).not.toContain("MIN_POSTS_THRESHOLD = INSTAGRAM_PUBLIC_API_POST_CEILING");
       expect(source).not.toContain("MIN_POSTS_THRESHOLD = 12");
+      expect(source).not.toContain("INSTAGRAM_PUBLIC_API_POST_CEILING");
     });
 
-    it("fetch orchestrator must use 14 as post target (not 12)", async () => {
+    it("fetch orchestrator must derive MIN_POSTS_TARGET from MI_THRESHOLDS", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
       );
-      expect(source).toContain("INSTAGRAM_PUBLIC_API_POST_CEILING = 12");
-      const targetMatch = source.match(/const MIN_POSTS_TARGET\s*=\s*(\d+)/);
-      expect(targetMatch).not.toBeNull();
-      expect(parseInt(targetMatch![1])).toBe(14);
-      expect(source).not.toContain("MIN_POSTS_TARGET = INSTAGRAM_PUBLIC_API_POST_CEILING");
+      expect(source).toContain("MIN_POSTS_TARGET = MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR");
+      expect(source).not.toContain("MIN_POSTS_TARGET = 14");
+      expect(source).not.toContain("INSTAGRAM_PUBLIC_API_POST_CEILING");
     });
 
     it("REGRESSION GUARD: 12 posts with totalMediaCount > 12 must be INSUFFICIENT_DATA", async () => {
@@ -1191,12 +1188,11 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
         fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
       );
       expect(daSource).not.toContain("MIN_POSTS_THRESHOLD = 12");
-      expect(daSource).not.toContain("MIN_POSTS_THRESHOLD = INSTAGRAM_PUBLIC_API_POST_CEILING");
+      expect(daSource).not.toContain("INSTAGRAM_PUBLIC_API_POST_CEILING");
       expect(foSource).not.toContain("MIN_POSTS_TARGET = 12");
-      expect(foSource).not.toContain("MIN_POSTS_TARGET = INSTAGRAM_PUBLIC_API_POST_CEILING");
+      expect(foSource).not.toContain("INSTAGRAM_PUBLIC_API_POST_CEILING");
       expect(daSource).toContain("MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR");
-      const foTarget = foSource.match(/const MIN_POSTS_TARGET\s*=\s*(\d+)/);
-      expect(parseInt(foTarget![1])).toBeGreaterThanOrEqual(14);
+      expect(foSource).toContain("MIN_POSTS_TARGET = MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR");
     });
 
     it("data atomicity: cache-first insert wrapped in transaction", async () => {
@@ -2564,8 +2560,8 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(typesSource).toContain("lowSample: boolean");
     });
 
-    it("FP-52) computeCompetitorSignals flags lowSample when posts < MIN_POSTS_PER_COMPETITOR", () => {
-      expect(signalSource).toContain("lowSample = posts.length < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR");
+    it("FP-52) computeCompetitorSignals flags lowSample when posts < MIN_POSTS_API_CEILING", () => {
+      expect(signalSource).toContain("lowSample = posts.length < MI_THRESHOLDS.MIN_POSTS_API_CEILING");
       expect(signalSource).toContain("LOW_SAMPLE_WEIGHT_FACTOR");
     });
 
@@ -2760,12 +2756,12 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
         orchSource.indexOf("async function validateInventoryConsistency"),
         orchSource.indexOf("async function validateInventoryConsistency") + 2000
       );
-      expect(validationFn).toContain("INSTAGRAM_API_CEILING_CHECK");
+      expect(validationFn).toContain("INSTAGRAM_API_CEILING");
       expect(validationFn).toContain("postsAcceptable");
     });
 
     it("FP-78) Recovery path uses API ceiling logic", () => {
-      expect(orchSource).toContain("RECOVERY_API_CEILING");
+      expect(orchSource).toContain("INSTAGRAM_API_CEILING");
       expect(orchSource).toContain("[DeepPassRecovery] API_CEILING_ACKNOWLEDGED");
       expect(orchSource).toContain("PROMOTED_API_CEILING");
     });
@@ -2780,6 +2776,48 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
         orchSource.indexOf("async function persistSnapshotAfterFetch") + 12000
       );
       expect(persistFn).toContain("INTENT_STATUS_SUMMARY");
+    });
+  });
+
+  describe("Cross-Engine API Ceiling Consistency", () => {
+    const constantsSource = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
+    const signalEngineSource = require("fs").readFileSync("server/market-intelligence-v3/signal-engine.ts", "utf-8");
+    const contentDnaSource = require("fs").readFileSync("server/market-intelligence-v3/content-dna.ts", "utf-8");
+    const confidenceSource = require("fs").readFileSync("server/market-intelligence-v3/confidence-engine.ts", "utf-8");
+    const engineSrc = require("fs").readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+    const orchSrc = require("fs").readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8");
+
+    it("constants.ts exports INSTAGRAM_API_CEILING = 12 and MIN_POSTS_API_CEILING", () => {
+      expect(constantsSource).toContain("export const INSTAGRAM_API_CEILING = 12");
+      expect(constantsSource).toContain("MIN_POSTS_API_CEILING: INSTAGRAM_API_CEILING");
+    });
+
+    it("signal-engine uses MIN_POSTS_API_CEILING for missing fields and LOW_SAMPLE", () => {
+      expect(signalEngineSource).toContain("MI_THRESHOLDS.MIN_POSTS_API_CEILING");
+      expect(signalEngineSource).toContain("postsAtApiCeiling");
+      expect(signalEngineSource).not.toContain("lowSample = posts.length < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR");
+    });
+
+    it("content-dna uses MIN_POSTS_API_CEILING for activation threshold", () => {
+      expect(contentDnaSource).toContain("MI_THRESHOLDS.MIN_POSTS_API_CEILING");
+      expect(contentDnaSource).not.toContain("CONTENT_DNA_ACTIVATION_THRESHOLD = MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR");
+    });
+
+    it("confidence-engine uses MIN_POSTS_API_CEILING for sample calculations", () => {
+      expect(confidenceSource).toContain("MI_THRESHOLDS.MIN_POSTS_API_CEILING");
+      expect(confidenceSource).not.toContain("MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR * signalResults.length");
+    });
+
+    it("engine.ts uses INSTAGRAM_API_CEILING for evidence coverage", () => {
+      expect(engineSrc).toContain("INSTAGRAM_API_CEILING");
+      expect(engineSrc).not.toContain('>= 14).length');
+    });
+
+    it("fetch-orchestrator imports centralized INSTAGRAM_API_CEILING from constants", () => {
+      expect(orchSrc).toContain('INSTAGRAM_API_CEILING } from "./constants"');
+      expect(orchSrc).not.toContain("const INSTAGRAM_API_CEILING = 12");
+      expect(orchSrc).not.toContain("INSTAGRAM_API_CEILING_CHECK");
+      expect(orchSrc).not.toContain("RECOVERY_API_CEILING");
     });
   });
 });

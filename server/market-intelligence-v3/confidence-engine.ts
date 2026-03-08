@@ -32,7 +32,7 @@ export function computeFreshnessDecay(dataAgeDays: number): number {
 export function computeSampleStrength(signalResults: CompetitorSignalResult[]): number {
   if (signalResults.length === 0) return 0;
   const totalSamples = signalResults.reduce((s, r) => s + r.sampleSize, 0);
-  const idealSamples = MI_THRESHOLDS.MIN_COMPETITORS * (MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR + MI_THRESHOLDS.MIN_COMMENTS_SAMPLE);
+  const idealSamples = MI_THRESHOLDS.MIN_COMPETITORS * (MI_THRESHOLDS.MIN_POSTS_API_CEILING + MI_THRESHOLDS.MIN_COMMENTS_SAMPLE);
   return Math.min(1, totalSamples / idealSamples);
 }
 
@@ -113,7 +113,7 @@ export function evaluateSignalStabilityGuard(signalResults: CompetitorSignalResu
     reasons.push(`Dominant source ratio too high: ${maxDominantRatio.toFixed(2)} > ${MI_CONFIDENCE.DOWNGRADE_DOMINANT_SOURCE}`);
   }
 
-  const minSample = MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR * signalResults.length;
+  const minSample = MI_THRESHOLDS.MIN_POSTS_API_CEILING * signalResults.length;
   if (totalSampleSize < minSample) {
     if (decision !== "BLOCK") decision = "DOWNGRADE";
     reasons.push(`Sample size insufficient: ${totalSampleSize} < ${minSample}`);

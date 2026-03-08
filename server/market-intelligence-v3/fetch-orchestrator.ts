@@ -11,7 +11,7 @@ import { computeTokenBudget, applySampling } from "./token-budget";
 import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
 import { computeCompetitorHash } from "./utils";
 import { computeVolatilityIndex, buildMarketDiagnosis, buildThreatSignals, buildOpportunitySignals, buildMarketSummary, computeSignalNoiseRatio, computeEvidenceCoverage, persistValidatedSnapshot, ENGINE_VERSION, computeDataFreshnessDays } from "./engine";
-import { MI_THRESHOLDS, MI_CONFIDENCE } from "./constants";
+import { MI_THRESHOLDS, MI_CONFIDENCE, INSTAGRAM_API_CEILING } from "./constants";
 import { computeAllContentDNA } from "./content-dna";
 import { computeMarketBaseline, computeAllDeviations, type CalibrationContext } from "./market-baselines";
 import { computeSimilarityDiagnosis } from "./similarity-engine";
@@ -21,8 +21,7 @@ import { acquireStickySession, releaseStickySession, rotateSessionOnBlock, class
 import { acquireToken, getBucketState } from "../competitive-intelligence/rate-limiter";
 
 const FETCH_COOLDOWN_MS = 72 * 60 * 60 * 1000;
-const INSTAGRAM_PUBLIC_API_POST_CEILING = 12;
-const MIN_POSTS_TARGET = 14;
+const MIN_POSTS_TARGET = MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR;
 const MIN_COMMENTS_TARGET = 50;
 const DEFAULT_TIME_WINDOW_DAYS = 60;
 const EXPANDED_TIME_WINDOW_DAYS = 120;
@@ -1306,7 +1305,6 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
       let postExpansionSucceeded = false;
       let postExpansionReason = "";
       let apiCeilingConfirmed = false;
-      const INSTAGRAM_API_CEILING = 12;
 
       if (baselinePostCount < TARGET_POSTS_DEEP) {
         postExpansionAttempted = true;
@@ -1478,8 +1476,7 @@ async function validateInventoryConsistency(accountId: string, campaignId: strin
       const actualComments = Number(commentResult[0]?.count || 0);
 
       if (comp.analysisLevel === "DEEP_PASS") {
-        const INSTAGRAM_API_CEILING_CHECK = 12;
-        const postsAcceptable = actualPosts >= MIN_POSTS_TARGET || (actualPosts >= INSTAGRAM_API_CEILING_CHECK && actualPosts <= MIN_POSTS_TARGET);
+        const postsAcceptable = actualPosts >= MIN_POSTS_TARGET || (actualPosts >= INSTAGRAM_API_CEILING && actualPosts <= MIN_POSTS_TARGET);
         if ((!postsAcceptable) || actualComments < MIN_COMMENTS_TARGET) {
           console.log(`[FetchOrch] INVENTORY_INCONSISTENCY: ${comp.name} labeled DEEP_PASS but posts=${actualPosts}/${MIN_POSTS_TARGET} comments=${actualComments}/${MIN_COMMENTS_TARGET} — demoting to FAST_PASS/PENDING`);
           await db.update(ciCompetitors)
@@ -1716,15 +1713,14 @@ async function recoverStuckDeepPass(): Promise<void> {
           const syntheticComments = finalComments - realComments;
 
           const datasetGrew = finalPosts > baselinePostCount || finalComments > baselineCommentCount;
-          const RECOVERY_API_CEILING = 12;
           const postsMet = finalPosts >= MIN_POSTS_TARGET;
-          const postsMetWithCeiling = finalPosts >= RECOVERY_API_CEILING && finalPosts < MIN_POSTS_TARGET;
+          const postsMetWithCeiling = finalPosts >= INSTAGRAM_API_CEILING && finalPosts < MIN_POSTS_TARGET;
           const effectivePostsMet = postsMet || postsMetWithCeiling;
           const commentsMet = finalComments >= MIN_COMMENTS_TARGET;
           const effectiveDatasetGrew = datasetGrew || (postsMetWithCeiling && finalComments > baselineCommentCount);
 
           if (postsMetWithCeiling && !postsMet) {
-            console.log(`[DeepPassRecovery] API_CEILING_ACKNOWLEDGED: ${row.name} | posts=${finalPosts} < ${MIN_POSTS_TARGET} but at Instagram API ceiling (${RECOVERY_API_CEILING}) | using relaxed threshold`);
+            console.log(`[DeepPassRecovery] API_CEILING_ACKNOWLEDGED: ${row.name} | posts=${finalPosts} < ${MIN_POSTS_TARGET} but at Instagram API ceiling (${INSTAGRAM_API_CEILING}) | using relaxed threshold`);
           }
 
           let promotionDecision: string;
