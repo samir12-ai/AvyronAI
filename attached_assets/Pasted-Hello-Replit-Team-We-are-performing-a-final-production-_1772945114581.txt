@@ -1,0 +1,165 @@
+Hello Replit Team,
+
+We are performing a final production hardening and closure pass for MI V3 (Market Intelligence Engine) to ensure the system operates at full reliability and reaches a complete 10/10 stable architecture.
+
+This request is to close all remaining gaps and prevent future failures while ensuring zero conflicts with any other engines in the system.
+
+Please implement the following final safeguards.
+
+---
+
+### 1. Enforced Two-Stage Pipeline (No Exceptions)
+
+The system must always follow this pipeline:
+
+FAST_PASS  
+→ Baseline Snapshot  
+→ DEEP_PASS Enrichment  
+→ Enriched Snapshot
+
+DEEP_PASS must automatically execute if any of the following conditions occur:
+
+- postsCollected < 14  
+- commentsCollected < 50  
+- signalCoverage < 85%  
+- contentDNA unavailable  
+- intentConfidence unstable  
+
+DEEP_PASS must expand datasets toward:
+
+- ~30 posts per competitor  
+- sufficient real comments for engagement signals
+
+The pipeline must never terminate at FAST_PASS when signal thresholds are not satisfied.
+
+---
+
+### 2. Content DNA Activation
+
+Once a competitor reaches:
+
+postsCollected ≥ 14
+
+The system must automatically run:
+
+- Content DNA extraction  
+- Narrative clustering  
+- Hook style classification  
+- CTA intent detection  
+- Offer language pattern detection  
+- Narrative saturation scoring  
+
+This step must run only as intelligence extraction and must not generate strategy outputs.
+
+---
+
+### 3. Intent Engine Stabilization
+
+Intent classification must follow a two-stage rule.
+
+If dataset is incomplete:
+
+- posts < 20  
+- comments < 50  
+
+Intent must be marked PROVISIONAL.
+
+After DEEP_PASS enrichment:
+
+- recompute intent classification
+- resolve ambiguous scores
+- finalize intent labels
+
+This prevents unstable intent detection.
+
+---
+
+### 4. Automatic Missing Signal Completion
+
+Whenever MI detects missing signals (posts, engagement, frequency, etc.), the system must automatically:
+
+1. trigger targeted enrichment
+2. queue DEEP_PASS collection
+3. update competitor inventory
+4. recompute diagnostics
+
+No manual intervention should be required.
+
+---
+
+### 5. Strict Engine Boundary Enforcement
+
+MI V3 must remain a pure intelligence engine.
+
+MI is allowed to:
+
+- collect data
+- detect signals
+- analyze market structure
+- generate diagnostics
+
+MI must never perform responsibilities of downstream engines, including:
+
+- Positioning decisions
+- Offer generation
+- Funnel logic
+- Audience targeting
+- Financial calculations
+
+Those remain exclusively handled by:
+
+Positioning Engine  
+Differentiation Engine  
+Audience Engine  
+Offer Engine  
+Funnel Engine  
+Financial Governor  
+Beast Execution Layer
+
+MI outputs must remain read-only intelligence signals.
+
+---
+
+### 6. Snapshot Integrity Protection
+
+Ensure the following protections:
+
+- FAST_PASS baseline snapshots cannot be overwritten
+- DEEP_PASS may only enrich datasets
+- post and comment records cannot be deleted during enrichment
+- snapshot versioning remains active
+
+This preserves historical analysis accuracy.
+
+---
+
+### 7. Deployment State Refresh (Prevent Old Engine Execution)
+
+To avoid common Replit update issues:
+
+- reload the signal engine on deployment
+- refresh schema and engine version
+- invalidate cached MI snapshots generated before this update
+- reconnect the pipeline to the latest engine version
+
+This ensures the system never runs on outdated logic after updates.
+
+---
+
+### Expected Result
+
+After implementation:
+
+- FAST_PASS collects baseline market data
+- DEEP_PASS enriches all competitors automatically
+- Content DNA activates correctly
+- Intent classification stabilizes
+- Missing signals resolve automatically
+- Engine boundaries remain protected
+- No architectural conflicts occur with any other engine
+
+MI V3 will then operate as a fully hardened market intelligence layer suitable for downstream strategic engines.
+
+Please confirm once the system completes a full FAST_PASS → DEEP_PASS cycle successfully.
+
+Thank you.
