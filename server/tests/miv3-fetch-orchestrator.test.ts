@@ -2410,16 +2410,18 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(deepPassFn).toContain("DEEP_PASS post target already met");
     });
 
-    it("FP-39) DEEP_PASS promotion requires both post AND comment thresholds + dataset growth", () => {
+    it("FP-39) DEEP_PASS promotion requires both post AND comment thresholds + dataset growth (with API ceiling fallback)", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
-        orchSource.indexOf("async function queueDeepPass") + 14000
+        orchSource.indexOf("async function queueDeepPass") + 16000
       );
       expect(deepPassFn).toContain("postsMet = deepPassPostCount >= MIN_POSTS_TARGET");
       expect(deepPassFn).toContain("commentsMet = deepPassCommentCount >= MIN_COMMENTS_TARGET");
-      expect(deepPassFn).toContain("enrichmentSucceeded && postsMet && commentsMet && datasetGrew");
+      expect(deepPassFn).toContain("effectivePostsMet && commentsMet");
       expect(deepPassFn).toContain("DEEP_PASS thresholds NOT met");
       expect(deepPassFn).toContain("ENRICHMENT_NO_CHANGE");
+      expect(deepPassFn).toContain("API_CEILING_ACKNOWLEDGED");
+      expect(deepPassFn).toContain("postsMetWithCeiling");
     });
 
     it("FP-40) DEEP_PASS updates postsCollected on promotion", () => {
@@ -2468,21 +2470,21 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(recoveryQuery).toContain("MIN_COMMENTS_SAMPLE");
     });
 
-    it("FP-44) Dataset growth verification: ENRICHMENT_NO_CHANGE blocks promotion when dataset unchanged", () => {
+    it("FP-44) Dataset growth verification: ENRICHMENT_NO_CHANGE blocks promotion when dataset unchanged (unless API ceiling)", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
-        orchSource.indexOf("async function queueDeepPass") + 14000
+        orchSource.indexOf("async function queueDeepPass") + 16000
       );
       expect(deepPassFn).toContain("datasetGrew = deepPassPostCount > baselinePostCount || deepPassCommentCount > baselineCommentCount");
       expect(deepPassFn).toContain("ENRICHMENT_NO_CHANGE");
       expect(deepPassFn).toContain("dataset did not grow");
       expect(deepPassFn).toContain("promotion blocked");
-      expect(deepPassFn).toContain("!datasetGrew && enrichmentSucceeded");
+      expect(deepPassFn).toContain("!effectiveDatasetGrew && enrichmentSucceeded && !apiCeilingConfirmed");
     });
 
-    it("FP-45) POST_EXPANSION_FAILED logged when post count doesn't increase", () => {
+    it("FP-45) POST_EXPANSION_FAILED logged when post count doesn't increase with reason", () => {
       expect(orchSource).toContain("POST_EXPANSION_FAILED");
-      expect(orchSource).toContain("no new posts collected");
+      expect(orchSource).toContain("postExpansionReason");
       expect(orchSource).toContain("postExpansionSucceeded = afterFetchPosts > baselinePostCount");
     });
 
@@ -2731,6 +2733,41 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(persistFn).toContain("positioningOutput");
       expect(persistFn).toContain("differentiationOutput");
       expect(engineSource).toContain('import { validateEngineIsolation, validateNoStrategyWrite } from "./isolation-guard"');
+    });
+
+    it("FP-74) DEEP_PASS cache bypass — DEEP_PASS skips cache/cooldown checks", () => {
+      const dataAcqSource = require("fs").readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8");
+      expect(dataAcqSource).toContain("DEEP_PASS_CACHE_BYPASS");
+      expect(dataAcqSource).toContain('collectionMode !== "DEEP_PASS"');
+    });
+
+    it("FP-75) API ceiling awareness — DEEP_PASS promotion with Instagram API ceiling", () => {
+      expect(orchSource).toContain("API_CEILING_ACKNOWLEDGED");
+      expect(orchSource).toContain("INSTAGRAM_API_CEILING");
+      expect(orchSource).toContain("postsMetWithCeiling");
+      expect(orchSource).toContain("effectivePostsMet");
+      expect(orchSource).toContain("PROMOTED_API_CEILING");
+    });
+
+    it("FP-76) POST_EXPANSION_FAILED includes explicit reason", () => {
+      expect(orchSource).toContain("postExpansionReason");
+      expect(orchSource).toContain("API_CEILING: Instagram public API limited to");
+      expect(orchSource).toContain("NO_NEW_POSTS_RETURNED");
+    });
+
+    it("FP-77) validateInventoryConsistency accepts API-ceiling-limited competitors", () => {
+      const validationFn = orchSource.slice(
+        orchSource.indexOf("async function validateInventoryConsistency"),
+        orchSource.indexOf("async function validateInventoryConsistency") + 2000
+      );
+      expect(validationFn).toContain("INSTAGRAM_API_CEILING_CHECK");
+      expect(validationFn).toContain("postsAcceptable");
+    });
+
+    it("FP-78) Recovery path uses API ceiling logic", () => {
+      expect(orchSource).toContain("RECOVERY_API_CEILING");
+      expect(orchSource).toContain("[DeepPassRecovery] API_CEILING_ACKNOWLEDGED");
+      expect(orchSource).toContain("PROMOTED_API_CEILING");
     });
 
     it("FP-71) DEEP_PASS additive-only guard for posts and comments", () => {

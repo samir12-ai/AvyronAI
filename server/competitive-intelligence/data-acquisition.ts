@@ -313,7 +313,11 @@ async function _executeFetch(
     return { competitorId, postsCollected: 0, commentsCollected: 0, ctaCoverage: 0, ctaTypes: [], followers: null, engagementRate: null, postingFrequency: null, contentMix: null, fetchMethod: "NONE", status: "BLOCKED", message: "Competitor not found" };
   }
 
-  if (!forceRefresh) {
+  if (collectionMode === "DEEP_PASS") {
+    console.log(`[DataAcq] DEEP_PASS_CACHE_BYPASS: ${competitor.name} — skipping cache/cooldown checks for DEEP_PASS post expansion`);
+  }
+
+  if (!forceRefresh && collectionMode !== "DEEP_PASS") {
     const latestMetrics = await db.select().from(ciCompetitorMetricsSnapshot)
       .where(and(eq(ciCompetitorMetricsSnapshot.competitorId, competitorId), eq(ciCompetitorMetricsSnapshot.accountId, accountId)))
       .orderBy(desc(ciCompetitorMetricsSnapshot.createdAt))

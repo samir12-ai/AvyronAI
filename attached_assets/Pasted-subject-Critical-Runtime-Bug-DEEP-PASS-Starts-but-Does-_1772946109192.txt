@@ -1,0 +1,113 @@
+subject=“Critical Runtime Bug — DEEP_PASS Starts but Does Not Expand Posts Beyond FAST_PASS”}
+Hello Replit Team,
+
+The current issue is no longer architectural. The safeguards, thresholds, and hardening appear to be in place. The problem is now a runtime execution bug:
+
+DEEP_PASS is not actually completing its intended job.
+
+Evidence from the current competitor inventory:
+	•	multiple competitors remain at FAST_PASS
+	•	those same competitors already show large comment counts
+	•	but they remain stuck at exactly 12 posts
+
+This indicates a critical contradiction:
+
+FAST_PASS should not be the final state once enrichment has already started, and DEEP_PASS should not stop at the FAST_PASS baseline post count.
+
+The most likely failure is:
+
+comment enrichment is happening, but DEEP_PASS post expansion is not actually executing or not actually increasing the dataset.
+
+Please investigate and fix the full DEEP_PASS runtime path end-to-end.
+
+⸻
+
+Required Runtime Verification
+
+For one stuck competitor (for example: knine, media solutions, or mutanafes media), trace the full DEEP_PASS flow step by step:
+	1.	DEEP_PASS job queued
+	2.	DEEP_PASS job started
+	3.	fetchCompetitorData(..., DEEP_PASS) actually invoked
+	4.	post expansion attempted beyond FAST_PASS baseline
+	5.	returned post count verified
+	6.	comment enrichment executed
+	7.	competitor inventory updated
+	8.	promotion decision evaluated
+
+We need exact confirmation of where the process stops or silently fails.
+
+⸻
+
+Critical Checks to Verify
+
+1. DEEP_PASS post expansion must actually run
+
+Confirm that DEEP_PASS is using a post target greater than FAST_PASS.
+
+If FAST_PASS collects 12 posts, DEEP_PASS must attempt expansion beyond 12.
+
+Please verify there is no hidden reuse of the FAST_PASS limit in the DEEP_PASS fetch path.
+
+⸻
+
+2. Post expansion failure must not be silent
+
+If DEEP_PASS attempts post expansion but the post count remains unchanged, the system must log an explicit failure reason such as:
+	•	POST_EXPANSION_FAILED
+	•	NO_NEW_POSTS_RETURNED
+	•	DEEP_PASS_FETCH_FELL_BACK_TO_BASELINE
+
+This must be visible per competitor.
+
+⸻
+
+3. Comment enrichment must not mask failed DEEP_PASS
+
+If comments are enriched but post count remains at 12, the job must not appear partially successful without a clear failure classification.
+
+Right now the inventory suggests that comments are being added while post expansion is not happening.
+
+That means DEEP_PASS is functionally incomplete even if enrichment logs exist.
+
+⸻
+
+4. Promotion blocking reason must be explicit
+
+For every competitor stuck at FAST_PASS, expose the exact reason:
+	•	blocked because post count still 12
+	•	blocked because post expansion failed
+	•	blocked because threshold unmet
+	•	blocked because no new data returned
+
+We need runtime transparency, not only safeguards.
+
+⸻
+
+5. Inventory must reflect actual execution state
+
+A competitor with:
+	•	12 posts
+	•	many comments
+	•	FAST_PASS label
+
+indicates a mismatched state.
+
+Please add an explicit intermediate execution status if needed, but the current state should not remain misleading.
+
+⸻
+
+Expected Correct Behavior
+
+For any competitor entering DEEP_PASS:
+	1.	attempt post expansion beyond 12
+	2.	verify dataset growth
+	3.	enrich comments
+	4.	recompute inventory
+	5.	promote only if thresholds are met
+	6.	otherwise log exact failure reason
+
+At the moment, the system appears to be doing step 3 without reliably completing step 1.
+
+Please investigate this as a runtime bug, not a design issue, and confirm the exact failure point.
+
+Thank you.
