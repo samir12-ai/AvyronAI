@@ -1,0 +1,31 @@
+Hi Replit Team,
+
+We need to close the Instagram comments issue completely and permanently so the system can move forward without instability. The repeated failures in extracting comment text from Instagram APIs confirm that this source is unreliable and cannot remain a structural dependency for Market Intelligence.
+
+From this point onward, the architecture must be adjusted so that comment counts become the engagement signal, while comment text becomes optional enrichment only. The pipeline must continue to function fully even when comment text is unavailable.
+
+Below are the final directives to implement.
+
+---
+
+First, remove comment text as a dependency across the MI pipeline. Comment text extraction must no longer be required for FAST_PASS, DEEP_PASS, or snapshot creation. If comment text cannot be retrieved, the system must proceed normally without interruption. Comment text should be treated as optional enrichment only, not as a requirement for signal generation.
+
+Second, the system must rely on engagement metrics instead of comment text. Comment counts should now be used alongside likes and engagement ratios to support the following calculations: competitor authority weighting, engagement strength scoring, market activity scoring, and signal confidence evaluation. Comment text should no longer influence core signal calculations in the intelligence layer.
+
+Third, adjust the FAST_PASS and DEEP_PASS behavior accordingly. FAST_PASS should collect the twelve baseline posts per competitor and gather engagement metrics including comment counts and likes. FAST_PASS should not attempt to scrape comment text. DEEP_PASS should remain an enrichment layer only. It may attempt comment text extraction if possible, but if extraction fails it must simply log the situation and continue without blocking any part of the pipeline.
+
+Fourth, ensure that the entire system is aligned with this new architecture. Review the Market Intelligence engine, the Audience engine, the Positioning engine, the Differentiation engine, the fetch orchestrator, and the diagnostics and confidence layers to confirm that none of them assume comment text is required. All engines must operate correctly using engagement counts and content signals only.
+
+Fifth, run strict validation tests to confirm stability. The system must successfully complete the MI pipeline when competitors have comment counts but no comment text. It must continue functioning even if all comment extraction endpoints fail. It must compute market signals using only engagement metrics and post content. It must operate normally with twelve-post competitor datasets containing only engagement counts. Finally, if comment text becomes available again in the future, the system should accept it as enrichment data without affecting the baseline logic.
+
+Sixth, perform a full system refresh after implementation. This is important because changes are often applied to the code but not activated in the running system. After the update, restart the backend, invalidate stale snapshots, rebuild MI snapshots, and verify that the running system is using the updated architecture.
+
+Seventh, confirm final verification before closing the task. The MI pipeline must complete successfully using comment counts only. There must be no remaining dependencies on comment text. DEEP_PASS must behave strictly as an enrichment stage. All engines must run without interruption, and diagnostics must reflect the new engagement-based signal logic.
+
+---
+
+The goal of this change is to guarantee that the Market Intelligence system remains stable even when Instagram changes or restricts comment endpoints. Engagement counts and content signals are reliable and sufficient for market analysis, while comment text scraping should remain optional.
+
+Please implement the above adjustments, run the validation tests, refresh the system to activate the changes, and confirm once everything is stable and verified.
+
+Best regards

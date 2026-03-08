@@ -74,14 +74,13 @@ export function classifyCompetitorIntent(signalResult: CompetitorSignalResult): 
   if (postCount < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR) {
     provisionalReasons.push(`posts < ${MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR} (have ${postCount})`);
   }
-  if (commentCount < MI_THRESHOLDS.MIN_COMMENTS_SAMPLE) {
-    provisionalReasons.push(`comments < ${MI_THRESHOLDS.MIN_COMMENTS_SAMPLE} (have ${commentCount})`);
-  }
 
   if (provisionalReasons.length > 0) {
     intentStatus = "PROVISIONAL";
     intentStatusReason = provisionalReasons.join("; ");
     console.log(`[IntentEngine] PROVISIONAL intent for ${signalResult.competitorName}: ${intentStatusReason}`);
+  } else if (commentCount < MI_THRESHOLDS.MIN_COMMENTS_SAMPLE) {
+    console.log(`[IntentEngine] LOW_COMMENT_TEXT for ${signalResult.competitorName}: comments=${commentCount} < ${MI_THRESHOLDS.MIN_COMMENTS_SAMPLE} — classifying from post signals only`);
   }
 
   return {

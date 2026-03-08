@@ -174,7 +174,7 @@ const LOW_VALUE_PATTERNS = [
   /^[.!]+$/,
 ];
 
-export function classifyEngagementQuality(comments: CommentData[]): EngagementQuality {
+export function classifyEngagementQuality(comments: CommentData[], posts?: PostData[]): EngagementQuality {
   let highIntentCount = 0;
   let lowValueCount = 0;
 
@@ -190,6 +190,19 @@ export function classifyEngagementQuality(comments: CommentData[]): EngagementQu
   }
 
   const total = highIntentCount + lowValueCount;
+
+  if (total === 0 && posts && posts.length > 0) {
+    const totalLikes = posts.reduce((s, p) => s + (p.likes || 0), 0);
+    const totalCommentCounts = posts.reduce((s, p) => s + (p.comments || 0), 0);
+    const totalEngagement = totalLikes + totalCommentCounts;
+    const avgEngagementPerPost = totalEngagement / posts.length;
+    const commentToLikeRatio = totalLikes > 0 ? totalCommentCounts / totalLikes : 0;
+    const engagementQualityRatio = clamp01(commentToLikeRatio * 2);
+    const estimatedHighIntent = Math.round(avgEngagementPerPost > 50 ? commentToLikeRatio * totalCommentCounts * 0.3 : 0);
+    const estimatedLowValue = Math.round(totalCommentCounts * 0.5);
+    return { highIntentCount: estimatedHighIntent, lowValueCount: estimatedLowValue, engagementQualityRatio };
+  }
+
   const engagementQualityRatio = total > 0 ? highIntentCount / total : 0;
 
   return { highIntentCount, lowValueCount, engagementQualityRatio };
@@ -338,19 +351,23 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
     contentExperimentRate: computeContentExperimentRate(posts),
   };
 
+  const postCommentCounts = posts.reduce((s, p) => s + (p.comments || 0), 0);
+
   const missingFields: string[] = [];
   if (posts.length < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR) missingFields.push(`posts (have ${posts.length}, need ${MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR})`);
-  if (comments.length < MI_THRESHOLDS.MIN_COMMENTS_SAMPLE) missingFields.push(`comments (have ${comments.length}, need ${MI_THRESHOLDS.MIN_COMMENTS_SAMPLE})`);
+  if (comments.length < MI_THRESHOLDS.MIN_COMMENTS_SAMPLE && postCommentCounts < MI_THRESHOLDS.MIN_COMMENTS_SAMPLE) missingFields.push(`comments (have ${comments.length} text, ${postCommentCounts} counted, need ${MI_THRESHOLDS.MIN_COMMENTS_SAMPLE})`);
   if (!competitor.postingFrequency && posts.length < MI_THRESHOLDS.MIN_ENGAGEMENT_POSTS) missingFields.push("postingFrequency");
   if (!competitor.contentTypeRatio) missingFields.push("contentTypeRatio");
   if (!competitor.engagementRatio && posts.length < MI_THRESHOLDS.MIN_ENGAGEMENT_POSTS) missingFields.push("engagementRatio");
   if (!competitor.ctaPatterns) missingFields.push("ctaPatterns");
   if (!competitor.profileLink) missingFields.push("profileLink (bio/CTA detection)");
 
+  const hasCommentSignal = comments.length >= MI_THRESHOLDS.MIN_COMMENTS_SAMPLE || postCommentCounts >= MI_THRESHOLDS.MIN_COMMENTS_SAMPLE;
+
   const totalExpectedFields = 9;
   const availableFields = totalExpectedFields - [
     posts.length < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR,
-    comments.length < MI_THRESHOLDS.MIN_COMMENTS_SAMPLE,
+    !hasCommentSignal,
     !competitor.engagementRatio && posts.length < MI_THRESHOLDS.MIN_ENGAGEMENT_POSTS,
     !competitor.ctaPatterns,
     !competitor.profileLink,
@@ -359,7 +376,7 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
   const signalCoverageScore = Math.round((availableFields / totalExpectedFields) * 100) / 100;
   const sourceReliabilityScore = 0.75;
 
-  const sampleSize = posts.length + comments.length;
+  const sampleSize = posts.length + Math.max(comments.length, postCommentCounts);
   const now = Date.now();
   const postTimestamps = posts.map(p => new Date(p.timestamp).getTime()).filter(t => !isNaN(t));
   const oldestPost = postTimestamps.length > 0 ? Math.min(...postTimestamps) : now;
@@ -387,7 +404,7 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
     authorityWeight,
     lifecycle,
     lowSample,
-    commentCount: comments.length,
+    commentCount: Math.max(comments.length, postCommentCounts),
   };
 }
 

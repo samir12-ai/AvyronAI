@@ -80,8 +80,36 @@ export function computeDemandPressure(
   comments: CommentData[],
   engagementQuality: EngagementQuality,
   audienceIntentSignals: string[],
+  commentCount?: number,
 ): DemandPressureResult {
   if (comments.length === 0) {
+    const metadataCommentCount = commentCount ?? 0;
+    if (metadataCommentCount > 0) {
+      const engagementDensity = clamp01(engagementQuality.engagementQualityRatio);
+      const commentIntensity = clamp01(metadataCommentCount / MI_DEMAND_PRESSURE.COMMENT_INTENSITY_NORMALIZATION);
+      const intentSignalStrength = clamp01(audienceIntentSignals.length / MI_DEMAND_PRESSURE.INTENT_SIGNAL_NORMALIZATION * 0.5);
+      const score = clamp01(
+        engagementDensity * MI_DEMAND_PRESSURE.WEIGHT_ENGAGEMENT +
+        commentIntensity * MI_DEMAND_PRESSURE.WEIGHT_COMMENT_INTENSITY +
+        intentSignalStrength * MI_DEMAND_PRESSURE.WEIGHT_INTENT_SIGNAL
+      );
+      const roundedScore = Math.round(score * 1000) / 1000;
+      let level: DemandPressureLevel = "LOW";
+      if (roundedScore >= MI_DEMAND_PRESSURE.HIGH_THRESHOLD) level = "HIGH";
+      else if (roundedScore >= MI_DEMAND_PRESSURE.MODERATE_THRESHOLD) level = "MODERATE";
+      console.log(`[DemandPressure] NO_COMMENT_TEXT — using engagement counts: commentCount=${metadataCommentCount}, score=${roundedScore}`);
+      return {
+        score: roundedScore,
+        level,
+        components: {
+          engagementDensity: Math.round(engagementDensity * 1000) / 1000,
+          commentIntensity: Math.round(commentIntensity * 1000) / 1000,
+          intentSignalStrength: Math.round(intentSignalStrength * 1000) / 1000,
+          objectionDensity: 0,
+          purchaseIntentDensity: 0,
+        },
+      };
+    }
     return {
       score: 0,
       level: "LOW",
@@ -94,7 +122,8 @@ export function computeDemandPressure(
 
   const engagementDensity = clamp01(engagementQuality.engagementQualityRatio);
 
-  const commentIntensity = clamp01(totalTexts / MI_DEMAND_PRESSURE.COMMENT_INTENSITY_NORMALIZATION);
+  const effectiveCount = Math.max(totalTexts, commentCount ?? 0);
+  const commentIntensity = clamp01(effectiveCount / MI_DEMAND_PRESSURE.COMMENT_INTENSITY_NORMALIZATION);
 
   let purchaseIntentCount = 0;
   let objectionCount = 0;

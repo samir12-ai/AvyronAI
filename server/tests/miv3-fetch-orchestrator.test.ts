@@ -973,7 +973,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
   });
 
   describe("N) Coverage-Aware Cooldown & State Machine Honesty", () => {
-    it("cooldown must NOT block when posts < 14 or comments < 50", async () => {
+    it("cooldown must NOT block when posts below threshold", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
       );
@@ -985,7 +985,6 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("coverageMet");
       const coverageCheck = source.slice(source.indexOf("coverageMet"), source.indexOf("coverageMet") + 200);
       expect(coverageCheck).toContain("MIN_POSTS_THRESHOLD");
-      expect(coverageCheck).toContain("MIN_COMMENTS_THRESHOLD");
     });
 
     it("cooldown thresholds are sourced from central MI_THRESHOLDS (14 posts, 50 comments)", async () => {
@@ -1166,7 +1165,6 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("coverageSufficient");
       expect(source).toContain("MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR");
       expect(source).toContain("persistedPostCount >= postsTarget");
-      expect(source).toContain("persistedCommentCount >= commentsTarget");
     });
 
     it("REGRESSION GUARD: paginationAttempted must be true when has_next_page is true", async () => {
@@ -2373,7 +2371,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(deepPassUpdate).toContain('fetchMethod: "DEEP_PASS"');
     });
 
-    it("FP-36) Recovery path enforces comment thresholds before promotion (enrichment-only)", () => {
+    it("FP-36) Recovery path promotes on enrichment success (comment text optional)", () => {
       expect(orchSource).toContain("[DeepPassRecovery]");
       expect(orchSource).toContain("Promoted");
       expect(orchSource).toContain("Enrichment-only for");
@@ -2381,9 +2379,9 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
         orchSource.indexOf("[DeepPassRecovery]"),
         orchSource.indexOf("[DeepPassRecovery]") + 3000
       );
-      expect(recoverySection).toContain("commentsMet");
-      expect(recoverySection).toContain("commentGrew");
+      expect(recoverySection).toContain("enrichOk");
       expect(recoverySection).toContain("NO post expansion");
+      expect(recoverySection).toContain("COMMENT_TEXT_OPTIONAL");
     });
 
     it("FP-37) DEEP_PASS auto-triggers after FAST_PASS when fetch executed", () => {
@@ -2404,15 +2402,15 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(deepPassFn).not.toContain("DEEP_PASS post target already met");
     });
 
-    it("FP-39) DEEP_PASS promotion requires comment threshold (enrichment-only architecture)", () => {
+    it("FP-39) DEEP_PASS promotion based on enrichment success (comment text optional)", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
         orchSource.indexOf("async function queueDeepPass") + 16000
       );
-      expect(deepPassFn).toContain("commentsMet = deepPassCommentCount >= MIN_COMMENTS_TARGET");
-      expect(deepPassFn).toContain("ENRICHMENT_NO_CHANGE");
-      expect(deepPassFn).toContain("PROMOTED_PARTIAL");
-      expect(deepPassFn).toContain("commentGrew");
+      expect(deepPassFn).toContain("enrichmentSucceeded");
+      expect(deepPassFn).toContain("PROMOTED");
+      expect(deepPassFn).toContain("ENRICHMENT_FAILED");
+      expect(deepPassFn).toContain("COMMENT_TEXT_OPTIONAL");
     });
 
     it("FP-40) DEEP_PASS updates postsCollected on promotion", () => {
@@ -2458,16 +2456,16 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       );
       expect(recoveryQuery).toContain("ci_competitor_posts");
       expect(recoveryQuery).toContain("INSTAGRAM_API_CEILING");
-      expect(recoveryQuery).toContain("MIN_COMMENTS_SAMPLE");
     });
 
-    it("FP-44) ENRICHMENT_NO_CHANGE blocks promotion when comments didn't grow", () => {
+    it("FP-44) DEEP_PASS promotion uses enrichment success status (comment text optional)", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
         orchSource.indexOf("async function queueDeepPass") + 16000
       );
-      expect(deepPassFn).toContain("ENRICHMENT_NO_CHANGE");
-      expect(deepPassFn).toContain("comment threshold not met");
+      expect(deepPassFn).toContain("enrichmentSucceeded");
+      expect(deepPassFn).toContain("ENRICHMENT_FAILED");
+      expect(deepPassFn).toContain("COMMENT_TEXT_OPTIONAL=true");
     });
 
     it("FP-45) Post expansion is disabled in 12-post architecture", () => {
@@ -2491,10 +2489,10 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(deepPassFn).toContain("realCommentCount=");
       expect(deepPassFn).toContain("syntheticCommentCount=");
       expect(deepPassFn).toContain("totalCommentCount=");
-      expect(deepPassFn).toContain("commentGrew=");
       expect(deepPassFn).toContain("postExpansionAttempted=false");
       expect(deepPassFn).toContain("promotionDecision=");
       expect(deepPassFn).toContain("enrichmentResult=");
+      expect(deepPassFn).toContain("COMMENT_TEXT_OPTIONAL=true");
     });
 
     it("FP-47) Inventory consistency validation runs after DEEP_PASS", () => {
@@ -2516,15 +2514,15 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(validationFn).toContain("inconsistencies corrected");
     });
 
-    it("FP-49) Recovery path includes comment growth verification (ENRICHMENT_NO_CHANGE)", () => {
+    it("FP-49) Recovery path includes diagnostics and enrichment verification", () => {
       const recoverySection = orchSource.slice(
         orchSource.indexOf("[DeepPassRecovery]"),
         orchSource.lastIndexOf("[DeepPassRecovery]") + 2000
       );
-      expect(recoverySection).toContain("ENRICHMENT_NO_CHANGE");
-      expect(recoverySection).toContain("commentGrew");
+      expect(recoverySection).toContain("enrichOk");
       expect(recoverySection).toContain("baselinePostCount");
       expect(recoverySection).toContain("DEEP_PASS_DIAGNOSTICS");
+      expect(recoverySection).toContain("COMMENT_TEXT_OPTIONAL");
     });
 
     it("FP-50) Recovery path logs real comment counts", () => {
@@ -2617,14 +2615,13 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       indexSource = require("fs").readFileSync("server/index.ts", "utf-8");
     });
 
-    it("FP-57) SIGNAL_DEFICIENCY_ESCALATION re-queues enriched competitors below thresholds", () => {
+    it("FP-57) SIGNAL_DEFICIENCY_ESCALATION re-queues enriched competitors below post thresholds", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
         orchSource.indexOf("async function queueDeepPass") + 3000
       );
       expect(deepPassFn).toContain("SIGNAL_DEFICIENCY_ESCALATION");
       expect(deepPassFn).toContain("MIN_POSTS_TARGET");
-      expect(deepPassFn).toContain("MIN_COMMENTS_TARGET");
       expect(deepPassFn).toContain("isSignalDeficient");
       expect(deepPassFn).toContain('enrichmentStatus: "PENDING"');
       expect(deepPassFn).toContain("re-queuing for DEEP_PASS");
@@ -2741,7 +2738,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(deepPassFn).not.toContain("postsMetWithCeiling");
       expect(deepPassFn).not.toContain("effectivePostsMet");
       expect(deepPassFn).not.toContain("PROMOTED_API_CEILING");
-      expect(deepPassFn).toContain("PROMOTED_PARTIAL");
+      expect(deepPassFn).toContain("PROMOTED");
     });
 
     it("FP-76) Post expansion is fully disabled — no expansion failure logging", () => {
@@ -2771,7 +2768,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       );
       expect(recoveryFn).toContain("Enrichment-only for");
       expect(recoveryFn).toContain("NO post expansion");
-      expect(recoveryFn).toContain("PROMOTED_PARTIAL");
+      expect(recoveryFn).toContain("PROMOTED");
     });
 
     it("FP-79) Recovery path DEEP_PASS_DIAGNOSTICS includes postExpansionAttempted=false", () => {
@@ -2780,7 +2777,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
         orchSource.indexOf("async function recoverStuckDeepPass") + 8000
       );
       expect(recoveryFn).toContain("postExpansionAttempted=false");
-      expect(recoveryFn).toContain("commentGrew=");
+      expect(recoveryFn).toContain("COMMENT_TEXT_OPTIONAL=true");
     });
 
     it("FP-80) No API_CEILING_INFERRED logic needed (12-post = ceiling = baseline)", () => {
@@ -2936,6 +2933,121 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
     it("EC-12) FAST_PASS stores embedded comments but skips synthetic generation", () => {
       expect(dataAcqSource).toContain("FAST_PASS: Skipping synthetic comment generation");
       expect(dataAcqSource).toContain("real comments already stored");
+    });
+  });
+
+  describe("Comment Text Optional Architecture", () => {
+    let ctoOrchSource: string;
+    let ctoDataAcqSource: string;
+
+    beforeAll(() => {
+      ctoOrchSource = require("fs").readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8");
+      ctoDataAcqSource = require("fs").readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8");
+    });
+
+    it("CTO-1) COMMENT_TEXT_OPTIONAL constant is set to true", () => {
+      const constants = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
+      expect(constants).toContain("COMMENT_TEXT_OPTIONAL = true");
+    });
+
+    it("CTO-2) FAST_PASS does not attempt comment text scraping", () => {
+      const orchFn = ctoOrchSource.slice(
+        ctoOrchSource.indexOf("function executeFetchJob"),
+        ctoOrchSource.indexOf("function executeFetchJob") + 8000
+      );
+      expect(orchFn).not.toContain("scrapePostComments");
+      expect(orchFn).not.toContain("enrichCompetitorWithComments");
+    });
+
+    it("CTO-3) DEEP_PASS promotion does not require comment threshold", () => {
+      const deepPassFn = ctoOrchSource.slice(
+        ctoOrchSource.indexOf("async function queueDeepPass"),
+        ctoOrchSource.indexOf("async function queueDeepPass") + 16000
+      );
+      expect(deepPassFn).not.toContain("commentsMet = deepPassCommentCount >= MIN_COMMENTS_TARGET");
+      expect(deepPassFn).not.toContain("PROMOTED_PARTIAL");
+      expect(deepPassFn).toContain("enrichmentSucceeded");
+      expect(deepPassFn).toContain("COMMENT_TEXT_OPTIONAL=true");
+    });
+
+    it("CTO-4) Signal engine classifyEngagementQuality handles empty comments with post data", () => {
+      const signalSource = require("fs").readFileSync("server/market-intelligence-v3/signal-engine.ts", "utf-8");
+      const classifyFn = signalSource.slice(
+        signalSource.indexOf("export function classifyEngagementQuality"),
+        signalSource.indexOf("export function classifyEngagementQuality") + 1500
+      );
+      expect(classifyFn).toContain("posts");
+    });
+
+    it("CTO-5) Demand pressure computes non-zero scores from engagement counts alone", () => {
+      const dpSource = require("fs").readFileSync("server/market-intelligence-v3/demand-pressure.ts", "utf-8");
+      expect(dpSource).toContain("commentCount");
+      const dpFn = dpSource.slice(
+        dpSource.indexOf("export function computeDemandPressure"),
+        dpSource.indexOf("export function computeDemandPressure") + 3000
+      );
+      expect(dpFn).toContain("commentCount");
+    });
+
+    it("CTO-6) validateInventoryConsistency does not demote on 0 comments", () => {
+      const validationFn = ctoOrchSource.slice(
+        ctoOrchSource.indexOf("async function validateInventoryConsistency"),
+        ctoOrchSource.indexOf("async function validateInventoryConsistency") + 4000
+      );
+      expect(validationFn).toContain("postsAcceptable");
+      expect(validationFn).not.toContain("actualComments < 1");
+    });
+
+    it("CTO-7) autoSignalCompletion does not use comment count as deficiency trigger", () => {
+      const autoFn = ctoOrchSource.slice(
+        ctoOrchSource.indexOf("async function autoSignalCompletion"),
+        ctoOrchSource.indexOf("async function autoSignalCompletion") + 5000
+      );
+      expect(autoFn).not.toContain("commentCount < MIN_COMMENTS_TARGET");
+    });
+
+    it("CTO-8) Signal deficiency escalation only checks posts, not comments", () => {
+      const deepPassFn = ctoOrchSource.slice(
+        ctoOrchSource.indexOf("async function queueDeepPass"),
+        ctoOrchSource.indexOf("async function queueDeepPass") + 3000
+      );
+      expect(deepPassFn).toContain("isSignalDeficient");
+      expect(deepPassFn).not.toContain("comments < MIN_COMMENTS_TARGET");
+    });
+
+    it("CTO-9) enrichCompetitorWithComments returns ENRICHED even when 0 comments scraped", () => {
+      const enrichFn = ctoDataAcqSource.slice(
+        ctoDataAcqSource.indexOf("export async function enrichCompetitorWithComments"),
+        ctoDataAcqSource.lastIndexOf("return { commentsGenerated") + 200
+      );
+      expect(enrichFn).toContain('status = "ENRICHED"');
+    });
+
+    it("CTO-10) MI pipeline operates with engagement counts and content signals only", () => {
+      const engineSource = require("fs").readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+      expect(engineSource).toContain("totalCommentCount");
+      const signalSource = require("fs").readFileSync("server/market-intelligence-v3/signal-engine.ts", "utf-8");
+      expect(signalSource).toContain("postCommentCounts");
+    });
+
+    it("CTO-11) Recovery path promotes on enrichment success regardless of comment counts", () => {
+      const recoveryFn = ctoOrchSource.slice(
+        ctoOrchSource.indexOf("async function recoverStuckDeepPass"),
+        ctoOrchSource.indexOf("async function recoverStuckDeepPass") + 8000
+      );
+      expect(recoveryFn).toContain("enrichOk");
+      expect(recoveryFn).not.toContain("commentsMet");
+      expect(recoveryFn).not.toContain("commentGrew");
+      expect(recoveryFn).toContain("COMMENT_TEXT_OPTIONAL=true");
+    });
+
+    it("CTO-12) Coverage check in data-acquisition only requires post threshold", () => {
+      const coverageSection = ctoDataAcqSource.slice(
+        ctoDataAcqSource.indexOf("coverageMet"),
+        ctoDataAcqSource.indexOf("coverageMet") + 200
+      );
+      expect(coverageSection).toContain("MIN_POSTS_THRESHOLD");
+      expect(coverageSection).not.toContain("MIN_COMMENTS_THRESHOLD");
     });
   });
 });

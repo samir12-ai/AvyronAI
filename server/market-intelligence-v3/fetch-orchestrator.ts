@@ -551,7 +551,7 @@ async function executeFetchJob(
 
         cooldownCount++;
 
-        const coverageMeetsThresholds = fetchResult.postsCollected >= MIN_POSTS_TARGET && fetchResult.commentsCollected >= MIN_COMMENTS_TARGET;
+        const coverageMeetsThresholds = fetchResult.postsCollected >= MIN_POSTS_TARGET;
 
         if (coverageMeetsThresholds) {
           stage.analysisSource = "CACHED_DATA";
@@ -587,7 +587,7 @@ async function executeFetchJob(
           stage.CTA_ANALYSIS = "BLOCKED_INSUFFICIENT_DATA";
           stage.SIGNAL_COMPUTE = "BLOCKED_INSUFFICIENT_DATA";
           stage.analysisSource = undefined;
-          console.log(`[FetchOrch] COVERAGE_VALIDATION_FAILED: Cached analysis blocked for ${comp.name} | posts=${fetchResult.postsCollected}/${MIN_POSTS_TARGET} comments=${fetchResult.commentsCollected}/${MIN_COMMENTS_TARGET} | cooldown active, coverage insufficient for analysis`);
+          console.log(`[FetchOrch] COVERAGE_VALIDATION_FAILED: Cached analysis blocked for ${comp.name} | posts=${fetchResult.postsCollected}/${MIN_POSTS_TARGET} | cooldown active, coverage insufficient for analysis`);
         }
 
         limitReasons.push({
@@ -658,11 +658,7 @@ async function executeFetchJob(
       totalComments += fetchResult.commentsCollected;
 
       if (fetchResult.commentsCollected < MIN_COMMENTS_TARGET) {
-        limitReasons.push({
-          competitorId: comp.id, competitorName: comp.name,
-          stage: "COMMENTS_FETCH", reason: "INSUFFICIENT_DATA",
-          details: `Only ${fetchResult.commentsCollected} comments collected (target: ${MIN_COMMENTS_TARGET})`,
-        });
+        console.log(`[FetchOrch] Comment text below target for ${comp.name} (${fetchResult.commentsCollected}/${MIN_COMMENTS_TARGET}) — continuing without comment text (COMMENT_TEXT_OPTIONAL=true)`);
       }
 
       stage.CTA_ANALYSIS = "RUNNING";
@@ -750,7 +746,7 @@ async function executeFetchJob(
     }
 
     const anyInsufficientData = stageValues.some(
-      s => s.postsFetched !== undefined && (s.postsFetched < MIN_POSTS_TARGET || (s.commentsFetched || 0) < MIN_COMMENTS_TARGET)
+      s => s.postsFetched !== undefined && s.postsFetched < MIN_POSTS_TARGET
     );
 
     let finalJobStatus: string;
@@ -1115,9 +1111,6 @@ async function autoSignalCompletion(accountId: string, campaignId: string, signa
     if (postCount < MIN_POSTS_TARGET) {
       reasons.push(`posts=${postCount}/${MIN_POSTS_TARGET}`);
     }
-    if (commentCount < MIN_COMMENTS_TARGET) {
-      reasons.push(`comments=${commentCount}/${MIN_COMMENTS_TARGET}`);
-    }
     if (sr.signalCoverageScore < 0.85) {
       reasons.push(`signalCoverage=${sr.signalCoverageScore}/0.85`);
     }
@@ -1234,10 +1227,10 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
     if (c.enrichmentStatus === "ENRICHED") {
       const posts = Number(c.postsCollected || 0);
       const comments = Number(c.commentsCollected || 0);
-      const isSignalDeficient = posts < MIN_POSTS_TARGET || comments < MIN_COMMENTS_TARGET;
+      const isSignalDeficient = posts < MIN_POSTS_TARGET;
       if (isSignalDeficient) {
         signalDeficientCompetitors.push(c);
-        console.log(`[FetchOrch] SIGNAL_DEFICIENCY_ESCALATION: ${c.name} | posts=${posts}/${MIN_POSTS_TARGET} | comments=${comments}/${MIN_COMMENTS_TARGET} | re-queuing for DEEP_PASS`);
+        console.log(`[FetchOrch] SIGNAL_DEFICIENCY_ESCALATION: ${c.name} | posts=${posts}/${MIN_POSTS_TARGET} | re-queuing for DEEP_PASS`);
         await db.update(ciCompetitors)
           .set({ enrichmentStatus: "PENDING", updatedAt: new Date() })
           .where(eq(ciCompetitors.id, c.id));
@@ -1314,9 +1307,7 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
       const realCommentCount = Number(realCommentResult[0]?.count || 0);
       const syntheticCommentCount = deepPassCommentCount - realCommentCount;
 
-      const commentsMet = deepPassCommentCount >= MIN_COMMENTS_TARGET;
       const enrichmentSucceeded = result.status === "ENRICHED" || result.status === "ALREADY_ENRICHED" || result.status === "REAL_DATA_SUFFICIENT" || result.status === "NO_ELIGIBLE_POSTS";
-      const commentGrew = deepPassCommentCount > baselineCommentCount;
 
       let promotionDecision: string;
 
@@ -1327,7 +1318,7 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
           .set({ enrichmentStatus: "SKIPPED", updatedAt: new Date() })
           .where(eq(ciCompetitors.id, comp.id));
         console.log(`[FetchOrch] competitor skipped (cooldown active) | ${comp.name}`);
-      } else if (enrichmentSucceeded && commentsMet) {
+      } else if (enrichmentSucceeded) {
         promotionDecision = "PROMOTED";
         enrichedCount++;
         await db.update(ciCompetitors)
@@ -1340,33 +1331,7 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
             updatedAt: new Date(),
           })
           .where(eq(ciCompetitors.id, comp.id));
-        console.log(`[FetchOrch] competitor promoted to DEEP_PASS | ${comp.name} | analysisLevel=DEEP_PASS | posts=${baselinePostCount} (fixed) | comments=${deepPassCommentCount} (real=${realCommentCount}, synthetic=${syntheticCommentCount}) | status=${result.status}`);
-      } else if (enrichmentSucceeded && !commentsMet && commentGrew) {
-        promotionDecision = "PROMOTED_PARTIAL";
-        enrichedCount++;
-        await db.update(ciCompetitors)
-          .set({
-            analysisLevel: "DEEP_PASS",
-            enrichmentStatus: "ENRICHED",
-            fetchMethod: "DEEP_PASS",
-            postsCollected: baselinePostCount,
-            commentsCollected: deepPassCommentCount,
-            updatedAt: new Date(),
-          })
-          .where(eq(ciCompetitors.id, comp.id));
-        console.log(`[FetchOrch] competitor promoted to DEEP_PASS (partial comments) | ${comp.name} | posts=${baselinePostCount} | comments=${deepPassCommentCount}/${MIN_COMMENTS_TARGET} (real=${realCommentCount}) | status=${result.status}`);
-      } else if (enrichmentSucceeded && !commentsMet) {
-        promotionDecision = "ENRICHMENT_NO_CHANGE";
-        failedCount++;
-        await db.update(ciCompetitors)
-          .set({
-            enrichmentStatus: "PENDING",
-            postsCollected: baselinePostCount,
-            commentsCollected: deepPassCommentCount,
-            updatedAt: new Date(),
-          })
-          .where(eq(ciCompetitors.id, comp.id));
-        console.log(`[FetchOrch] ENRICHMENT_NO_CHANGE: ${comp.name} | comments=${deepPassCommentCount}/${MIN_COMMENTS_TARGET} | enrichment succeeded but comment threshold not met`);
+        console.log(`[FetchOrch] competitor promoted to DEEP_PASS | ${comp.name} | analysisLevel=DEEP_PASS | posts=${baselinePostCount} (fixed) | comments=${deepPassCommentCount} (real=${realCommentCount}, synthetic=${syntheticCommentCount}) | status=${result.status} | COMMENT_TEXT_OPTIONAL=true`);
       } else {
         promotionDecision = "ENRICHMENT_FAILED";
         failedCount++;
@@ -1376,7 +1341,7 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
         console.log(`[FetchOrch] DEEP_PASS enrichment failed | ${comp.name} | posts=${baselinePostCount} | comments=${deepPassCommentCount} | status=${result.status}`);
       }
 
-      console.log(`[FetchOrch] DEEP_PASS_DIAGNOSTICS: ${comp.name} | baselinePostCount=${baselinePostCount} | deepPassPostCount=${baselinePostCount} | realCommentCount=${realCommentCount} | syntheticCommentCount=${syntheticCommentCount} | totalCommentCount=${deepPassCommentCount} | commentGrew=${commentGrew} | promotionDecision=${promotionDecision} | enrichmentResult=${result.status} | postExpansionAttempted=false | postExpansionReason=DISABLED_12_POST_ARCHITECTURE`);
+      console.log(`[FetchOrch] DEEP_PASS_DIAGNOSTICS: ${comp.name} | baselinePostCount=${baselinePostCount} | deepPassPostCount=${baselinePostCount} | realCommentCount=${realCommentCount} | syntheticCommentCount=${syntheticCommentCount} | totalCommentCount=${deepPassCommentCount} | promotionDecision=${promotionDecision} | enrichmentResult=${result.status} | postExpansionAttempted=false | postExpansionReason=DISABLED_12_POST_ARCHITECTURE | COMMENT_TEXT_OPTIONAL=true`);
     } catch (err: any) {
       console.error(`[FetchOrch] DEEP_PASS enrichment failed for ${comp.name}: ${err.message}`);
       failedCount++;
@@ -1420,8 +1385,8 @@ async function validateInventoryConsistency(accountId: string, campaignId: strin
 
       if (comp.analysisLevel === "DEEP_PASS") {
         const postsAcceptable = actualPosts >= INSTAGRAM_API_CEILING;
-        if (!postsAcceptable || actualComments < 1) {
-          console.log(`[FetchOrch] INVENTORY_INCONSISTENCY: ${comp.name} labeled DEEP_PASS but posts=${actualPosts}/${INSTAGRAM_API_CEILING} comments=${actualComments} — demoting to FAST_PASS/PENDING`);
+        if (!postsAcceptable) {
+          console.log(`[FetchOrch] INVENTORY_INCONSISTENCY: ${comp.name} labeled DEEP_PASS but posts=${actualPosts}/${INSTAGRAM_API_CEILING} — demoting to FAST_PASS/PENDING`);
           await db.update(ciCompetitors)
             .set({
               analysisLevel: "FAST_PASS",
@@ -1603,7 +1568,6 @@ async function recoverStuckDeepPass(): Promise<void> {
       WHERE is_active = true AND analysis_level = 'FAST_PASS'
         AND enrichment_status != 'ENRICHED'
         AND (SELECT COUNT(*) FROM ci_competitor_posts WHERE competitor_id = ci_competitors.id AND account_id = ci_competitors.account_id) >= ${INSTAGRAM_API_CEILING}
-        AND (SELECT COUNT(*) FROM ci_competitor_comments WHERE competitor_id = ci_competitors.id AND account_id = ci_competitors.account_id) >= ${MI_THRESHOLDS.MIN_COMMENTS_SAMPLE}
     `);
 
     const stuckCompetitors = await db.execute(sql`
@@ -1616,13 +1580,12 @@ async function recoverStuckDeepPass(): Promise<void> {
         AND c.enrichment_status NOT IN ('ENRICHED', 'ENRICHING')
         AND c.last_checked_at IS NOT NULL
         AND (SELECT COUNT(*) FROM ci_competitor_posts WHERE competitor_id = c.id AND account_id = c.account_id) > 0
-        AND (SELECT COUNT(*) FROM ci_competitor_comments WHERE competitor_id = c.id AND account_id = c.account_id) < ${MI_THRESHOLDS.MIN_COMMENTS_SAMPLE}
     `);
 
     const rows = stuckCompetitors.rows || [];
 
     if (rows.length > 0) {
-      console.log(`[DeepPassRecovery] Found ${rows.length} competitors stuck at FAST_PASS with posts but insufficient comments`);
+      console.log(`[DeepPassRecovery] Found ${rows.length} competitors stuck at FAST_PASS with posts needing enrichment`);
 
       for (const row of rows) {
         try {
@@ -1644,30 +1607,19 @@ async function recoverStuckDeepPass(): Promise<void> {
             .where(and(eq(ciCompetitorComments.competitorId, row.id as string), eq(ciCompetitorComments.accountId, row.account_id as string), eq(ciCompetitorComments.isSynthetic, false)));
           const realComments = Number(realCommentResult[0]?.count || 0);
 
-          const commentGrew = finalComments > baselineCommentCount;
-          const commentsMet = finalComments >= MIN_COMMENTS_TARGET;
-
           let promotionDecision: string;
 
-          if (enrichOk && commentsMet) {
+          if (enrichOk) {
             promotionDecision = "PROMOTED";
             await db.execute(sql`UPDATE ci_competitors SET analysis_level = 'DEEP_PASS', enrichment_status = 'ENRICHED', fetch_method = 'DEEP_PASS', posts_collected = ${baselinePostCount}, comments_collected = ${finalComments}, updated_at = NOW() WHERE id = ${row.id}`);
-            console.log(`[DeepPassRecovery] Promoted ${row.name} to DEEP_PASS | posts=${baselinePostCount} (fixed) | comments=${finalComments} (real=${realComments}) | status=${result.status}`);
-          } else if (enrichOk && commentGrew && !commentsMet) {
-            promotionDecision = "PROMOTED_PARTIAL";
-            await db.execute(sql`UPDATE ci_competitors SET analysis_level = 'DEEP_PASS', enrichment_status = 'ENRICHED', fetch_method = 'DEEP_PASS', posts_collected = ${baselinePostCount}, comments_collected = ${finalComments}, updated_at = NOW() WHERE id = ${row.id}`);
-            console.log(`[DeepPassRecovery] Promoted ${row.name} to DEEP_PASS (partial) | posts=${baselinePostCount} | comments=${finalComments}/${MIN_COMMENTS_TARGET} (real=${realComments}) | status=${result.status}`);
-          } else if (!commentGrew && enrichOk) {
-            promotionDecision = "ENRICHMENT_NO_CHANGE";
-            await db.execute(sql`UPDATE ci_competitors SET enrichment_status = 'PENDING', posts_collected = ${baselinePostCount}, comments_collected = ${finalComments}, updated_at = NOW() WHERE id = ${row.id}`);
-            console.log(`[DeepPassRecovery] ENRICHMENT_NO_CHANGE: ${row.name} | comments=${finalComments} unchanged | enrichStatus=PENDING`);
+            console.log(`[DeepPassRecovery] Promoted ${row.name} to DEEP_PASS | posts=${baselinePostCount} (fixed) | comments=${finalComments} (real=${realComments}) | status=${result.status} | COMMENT_TEXT_OPTIONAL=true`);
           } else {
             promotionDecision = "ENRICHMENT_FAILED";
             await db.execute(sql`UPDATE ci_competitors SET enrichment_status = 'FAILED', posts_collected = ${baselinePostCount}, comments_collected = ${finalComments}, updated_at = NOW() WHERE id = ${row.id}`);
-            console.log(`[DeepPassRecovery] Enrichment failed for ${row.name} | comments=${finalComments}/${MIN_COMMENTS_TARGET} | status=${result.status}`);
+            console.log(`[DeepPassRecovery] Enrichment failed for ${row.name} | comments=${finalComments} | status=${result.status}`);
           }
 
-          console.log(`[DeepPassRecovery] DEEP_PASS_DIAGNOSTICS: ${row.name} | baselinePostCount=${baselinePostCount} | realCommentCount=${realComments} | totalCommentCount=${finalComments} | commentGrew=${commentGrew} | promotionDecision=${promotionDecision} | enrichmentResult=${result.status} | postExpansionAttempted=false`);
+          console.log(`[DeepPassRecovery] DEEP_PASS_DIAGNOSTICS: ${row.name} | baselinePostCount=${baselinePostCount} | realCommentCount=${realComments} | totalCommentCount=${finalComments} | promotionDecision=${promotionDecision} | enrichmentResult=${result.status} | postExpansionAttempted=false | COMMENT_TEXT_OPTIONAL=true`);
         } catch (err: any) {
           console.error(`[DeepPassRecovery] Failed to enrich ${row.name}: ${err.message}`);
           try { await db.execute(sql`UPDATE ci_competitors SET enrichment_status = 'FAILED', updated_at = NOW() WHERE id = ${row.id}`); } catch {}

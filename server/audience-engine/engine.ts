@@ -1099,10 +1099,9 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
 
   if (
     competitorCount < AUDIENCE_THRESHOLDS.MIN_COMPETITORS_FOR_ANALYSIS ||
-    captions.length < AUDIENCE_THRESHOLDS.MIN_POSTS_FOR_ANALYSIS ||
-    commentTexts.length < AUDIENCE_THRESHOLDS.MIN_COMMENTS_FOR_ANALYSIS
+    captions.length < AUDIENCE_THRESHOLDS.MIN_POSTS_FOR_ANALYSIS
   ) {
-    const msg = `DATASET TOO SMALL FOR RELIABLE AUDIENCE INTELLIGENCE — Need ≥${AUDIENCE_THRESHOLDS.MIN_COMPETITORS_FOR_ANALYSIS} competitors (have ${competitorCount}), ≥${AUDIENCE_THRESHOLDS.MIN_POSTS_FOR_ANALYSIS} posts (have ${captions.length}), ≥${AUDIENCE_THRESHOLDS.MIN_COMMENTS_FOR_ANALYSIS} comments (have ${commentTexts.length})`;
+    const msg = `DATASET TOO SMALL FOR RELIABLE AUDIENCE INTELLIGENCE — Need ≥${AUDIENCE_THRESHOLDS.MIN_COMPETITORS_FOR_ANALYSIS} competitors (have ${competitorCount}), ≥${AUDIENCE_THRESHOLDS.MIN_POSTS_FOR_ANALYSIS} posts (have ${captions.length}), comments available: ${commentTexts.length}`;
     console.log(`[AudienceEngine-V3] ${msg}`);
 
     const executionTimeMs = Date.now() - startTime;
@@ -1114,6 +1113,10 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     }).returning({ id: audienceSnapshots.id });
 
     return buildEmptyResult("DATASET_TOO_SMALL", msg, baseInputSummary, executionTimeMs, inserted.id);
+  }
+
+  if (commentTexts.length === 0) {
+    console.log(`[AudienceEngine-V3] NO_COMMENT_TEXT — proceeding with ${captions.length} captions only`);
   }
 
   const [campaign] = await db.select().from(growthCampaigns)
@@ -1156,9 +1159,11 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   const transformationMap = applyEvidenceIntegrityFilter(rawTransformationMap);
   const emotionalDrivers = applyEvidenceIntegrityFilter(rawEmotionalDrivers);
 
-  const awarenessLevel = detectAwareness(commentTexts, miSnapshotId, competitorCount);
+  const awarenessInput = commentTexts.length > 0 ? commentTexts : captions;
+  const awarenessLevel = detectAwareness(awarenessInput, miSnapshotId, competitorCount);
   const maturityIndex = detectMaturity(commentTexts, captions, miSnapshotId, competitorCount);
-  const intentDistribution = classifyIntents(commentTexts, miSnapshotId, competitorCount);
+  const intentInput = commentTexts.length > 0 ? commentTexts : captions;
+  const intentDistribution = classifyIntents(intentInput, miSnapshotId, competitorCount);
   const intentTemperature = deriveIntentTemperature(intentDistribution);
   console.log(`[AudienceEngine-V3] Intent temperature: ${intentTemperature} (curiosity=${intentDistribution.curiosity}% learning=${intentDistribution.learning}% comparison=${intentDistribution.comparison}% purchase=${intentDistribution.purchaseIntent}%)`);
 

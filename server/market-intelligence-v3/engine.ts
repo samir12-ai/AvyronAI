@@ -335,7 +335,7 @@ export function computeEvidenceCoverage(signalResults: any[], totalCompetitors: 
   const postsAnalyzed = signalResults.reduce((s: number, r: any) => s + (r.sampleSize || 0), 0);
   const commentsAnalyzed = signalResults.reduce((s: number, r: any) => s + (r.commentCount || 0), 0);
   const competitorsWithSufficientData = signalResults.filter((r: any) => (r.sampleSize || 0) >= INSTAGRAM_API_CEILING).length;
-  return { postsAnalyzed, commentsAnalyzed, competitorsWithSufficientData, totalCompetitors };
+  return { postsAnalyzed, commentsAnalyzed: commentsAnalyzed, competitorsWithSufficientData, totalCompetitors };
 }
 
 export function buildMarketDiagnosis(confidence: any, trajectory: any, dominantIntent: string): string | null {
@@ -712,14 +712,16 @@ export class MarketIntelligenceV3 {
     }
     const dominantIntent = computeDominantMarketIntent(intents, authorityWeightMap);
     const allComments = competitors.flatMap(c => c.comments || []);
-    const engagementQuality = classifyEngagementQuality(allComments);
+    const allPosts = competitors.flatMap(c => c.posts || []);
+    const engagementQuality = classifyEngagementQuality(allComments, allPosts);
     const audienceIntentSignals = detectAudienceIntentSignals(allComments);
-    const realDataRatio = computeRealDataRatio(allComments);
+    const realDataRatio = allComments.length > 0 ? computeRealDataRatio(allComments) : (allPosts.length > 0 ? 1.0 : 0);
     const sampleBias = detectSampleBias(signalResults);
     if (sampleBias.hasBias) {
       console.log(`[MIv3] SAMPLE_BIAS_DETECTED | flags=${sampleBias.biasFlags.join("; ")} | biasScore=${sampleBias.biasScore}`);
     }
-    const demandPressure = computeDemandPressure(allComments, engagementQuality, audienceIntentSignals);
+    const totalCommentCount = allPosts.reduce((sum, p) => sum + (p.comments || 0), 0);
+    const demandPressure = computeDemandPressure(allComments, engagementQuality, audienceIntentSignals, totalCommentCount);
     const echoChamber = detectEchoChamber(signalResults);
     if (echoChamber.isEchoChamber) {
       console.log(`[MIv3] ECHO_CHAMBER_DETECTED | risk=${echoChamber.echoChamberRisk} | convergence=${echoChamber.convergenceScore} | diversity=${echoChamber.diversityScore} | penalty=${echoChamber.penalty}`);

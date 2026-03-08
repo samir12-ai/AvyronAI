@@ -170,11 +170,11 @@ describe("Synthetic Comment Lifecycle — Deep Pass Integrity", () => {
       expect(fnBody).toContain("MIN_COMMENTS_THRESHOLD");
     });
 
-    it("3.5) enrichCompetitorWithComments only promotes to DEEP_PASS when threshold met", () => {
+    it("3.5) enrichCompetitorWithComments returns ENRICHED status (comment text optional)", () => {
       const fnBody = getEnrichBody();
       expect(fnBody).toContain("DEEP_PASS");
       expect(fnBody).toContain("FAST_PASS");
-      expect(fnBody).toContain("coverageMet");
+      expect(fnBody).toContain("ENRICHED");
     });
 
     it("3.6) enrichCompetitorWithComments avoids duplicate comments for same posts", () => {
