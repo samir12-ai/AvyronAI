@@ -1,0 +1,143 @@
+Hello Replit Team,
+
+We need an immediate system-wide correction to the Market Intelligence pipeline.
+
+The architecture has already been standardized around a 12-post baseline per competitor, but some parts of the system are still behaving as if the minimum valid dataset is 14 posts. This is causing incorrect “missing signals” errors and is blocking the pipeline even though the intended dataset size is already complete.
+
+At the same time, comment extraction is still not functioning correctly. We need the system to stop fighting the old assumptions and begin operating fully on the new 12-post model so we can move forward.
+
+Please apply the following fixes across the entire system.
+
+---
+
+## 1. Lock the Entire System to 12 Posts
+
+The canonical dataset size is now:
+
+12 posts per competitor
+
+This must be treated as the valid baseline everywhere.
+
+Please update all thresholds, validation rules, signal requirements, and diagnostics so that the system no longer expects 14 posts anywhere.
+
+Any logic that currently says:
+
+- posts < 14
+- need 14 posts
+- insufficient posts below 14
+- missing signal because posts are below 14
+
+must be replaced so that 12 posts is considered complete, not incomplete.
+
+This update must be applied globally across:
+
+- fetch orchestrator
+- signal engine
+- content DNA activation
+- intent engine
+- confidence engine
+- trajectory engine
+- diagnostics
+- readiness checks
+- snapshot generation
+- downstream MI consumers
+
+No module should still reference 14 as the minimum valid dataset.
+
+---
+
+## 2. Remove False “Missing Signals” Conditions
+
+The system must stop reporting missing signals when a competitor already has 12 valid posts.
+
+If signal extraction still requires more than 12 posts, then the extraction logic itself must be adjusted to work correctly on the 12-post architecture.
+
+The system must align with the new baseline instead of continuing to behave as if it is still in the old deep-pagination model.
+
+---
+
+## 3. Make Comment Extraction Actually Work
+
+This is now the critical operational priority.
+
+We no longer need more posts.
+We need real comment text extraction to start working reliably on top of the 12-post dataset.
+
+Please make DEEP_PASS do the following:
+
+- keep the 12 posts fixed
+- extract real comment text samples
+- collect comment text from multiple posts, not only one post
+- store the comment text properly for signal extraction
+- stop relying on comment counts alone
+
+The system should no longer be blocked by post thresholds.
+The key enrichment step now is comment text extraction.
+
+---
+
+## 4. DEEP_PASS Must Be Enrichment-Only
+
+Please confirm and enforce:
+
+- DEEP_PASS does not try to fetch more posts
+- DEEP_PASS only enriches the existing 12-post dataset
+- DEEP_PASS focuses on comment text extraction, signal strengthening, and diagnostics
+
+This must be applied consistently everywhere.
+
+---
+
+## 5. Apply the Update Across the Full System
+
+A frequent issue in previous updates has been partial deployment, where one module is updated but the rest of the system still uses old assumptions.
+
+This must not happen here.
+
+Please ensure this update is applied across the full pipeline, including:
+
+- constants
+- validators
+- thresholds
+- MI diagnostics
+- content DNA activation
+- intent stabilization
+- confidence calculation
+- missing signal detection
+- DEEP_PASS orchestration
+- snapshot persistence
+- readiness state
+
+Everything must now operate on the same rule:
+
+12 posts = valid complete baseline dataset
+
+---
+
+## 6. Validation Requirements
+
+Please verify and confirm the following after implementation:
+
+1. A competitor with 12 posts no longer triggers “missing signals” due to the old 14-post rule.
+2. All references to 14-post minimums are removed or updated.
+3. DEEP_PASS no longer attempts post expansion.
+4. DEEP_PASS successfully extracts real comment text.
+5. Comment text is collected from multiple posts.
+6. The MI pipeline runs correctly using 12 posts + comment text enrichment.
+7. The full test suite passes after the update.
+
+---
+
+## Final Goal
+
+We want the MI system to stop being blocked by old assumptions and start functioning on the architecture we have already chosen:
+
+- 12 posts fixed
+- DEEP_PASS enrichment only
+- real comment text extraction working
+- no false missing-signal errors
+- full system alignment
+
+Please treat this as a priority correction so we can move forward with the next engines.
+
+Thank you.

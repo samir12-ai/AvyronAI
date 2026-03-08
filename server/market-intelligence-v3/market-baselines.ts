@@ -120,7 +120,7 @@ export function computeDynamicThreshold(baseThreshold: number, ctx?: Calibration
 
   let modifier = 0;
 
-  if (ctx.postsAnalyzed < 20) modifier += 0.15;
+  if (ctx.postsAnalyzed < 12) modifier += 0.15;
   else if (ctx.postsAnalyzed < 50) modifier += 0.08;
   else if (ctx.postsAnalyzed >= 100) modifier -= 0.05;
 
