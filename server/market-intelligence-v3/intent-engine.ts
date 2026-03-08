@@ -1,4 +1,4 @@
-import type { CompetitorSignalResult, IntentCategory, IntentResult, SignalData } from "./types";
+import type { CompetitorSignalResult, IntentCategory, IntentResult, IntentStatus, SignalData } from "./types";
 import { MI_INTENT_WEIGHTS, MI_CONFIDENCE } from "./constants";
 
 function computeIntentScores(signals: SignalData): Record<IntentCategory, number> {
@@ -64,6 +64,26 @@ export function classifyCompetitorIntent(signalResult: CompetitorSignalResult): 
   else if (intentConfidence >= 0.40) intentConfidenceBand = "UNCERTAIN";
   else intentConfidenceBand = "DEGRADED";
 
+  let intentStatus: IntentStatus = "FINAL";
+  let intentStatusReason: string | undefined;
+
+  const postCount = signalResult.sampleSize - (signalResult.commentCount ?? 0);
+  const commentCount = signalResult.commentCount ?? 0;
+
+  const provisionalReasons: string[] = [];
+  if (postCount < 20) {
+    provisionalReasons.push(`posts < 20 (have ${postCount})`);
+  }
+  if (commentCount < 50) {
+    provisionalReasons.push(`comments < 50 (have ${commentCount})`);
+  }
+
+  if (provisionalReasons.length > 0) {
+    intentStatus = "PROVISIONAL";
+    intentStatusReason = provisionalReasons.join("; ");
+    console.log(`[IntentEngine] PROVISIONAL intent for ${signalResult.competitorName}: ${intentStatusReason}`);
+  }
+
   return {
     competitorId: signalResult.competitorId,
     competitorName: signalResult.competitorName,
@@ -75,6 +95,8 @@ export function classifyCompetitorIntent(signalResult: CompetitorSignalResult): 
     topIntentScore: maxScore,
     intentConfidence,
     intentConfidenceBand,
+    intentStatus,
+    intentStatusReason,
   };
 }
 

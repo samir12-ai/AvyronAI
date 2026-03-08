@@ -251,14 +251,20 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(domains.length).toBe(8);
     });
 
-    it("should block all 8 engines", () => {
+    it("should block all downstream engines (14 total)", () => {
       const blocked = getBlockedEngines();
       expect(blocked).toContain("BUILD_A_PLAN_ORCHESTRATOR");
       expect(blocked).toContain("AUTOPILOT");
       expect(blocked).toContain("CREATIVE_ENGINE");
       expect(blocked).toContain("LEAD_ENGINE");
       expect(blocked).toContain("FULFILLMENT_ENGINE");
-      expect(blocked.length).toBe(8);
+      expect(blocked).toContain("FUNNEL_ENGINE");
+      expect(blocked).toContain("FINANCIAL_GOVERNOR");
+      expect(blocked).toContain("BEAST_EXECUTION_LAYER");
+      expect(blocked).toContain("POSITIONING_ENGINE");
+      expect(blocked).toContain("DIFFERENTIATION_ENGINE");
+      expect(blocked).toContain("AUDIENCE_ENGINE");
+      expect(blocked.length).toBe(14);
     });
   });
 
@@ -1264,7 +1270,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("export async function persistValidatedSnapshot");
       const gatewayFunc = source.slice(
         source.indexOf("export async function persistValidatedSnapshot"),
-        source.indexOf("export async function persistValidatedSnapshot") + 600
+        source.indexOf("export async function persistValidatedSnapshot") + 3000
       );
       expect(gatewayFunc).toContain("validateSnapshotCompleteness");
       expect(gatewayFunc).toContain("SNAPSHOT_COMPLETION_CONTRACT_VIOLATED");
@@ -2395,7 +2401,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
     it("FP-38) DEEP_PASS collects additional posts before enrichment", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
-        orchSource.indexOf("async function queueDeepPass") + 5000
+        orchSource.indexOf("async function queueDeepPass") + 9000
       );
       expect(deepPassFn).toContain("TARGET_POSTS_DEEP");
       expect(deepPassFn).toContain("fetchCompetitorData");
@@ -2407,7 +2413,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
     it("FP-39) DEEP_PASS promotion requires both post AND comment thresholds + dataset growth", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
-        orchSource.indexOf("async function queueDeepPass") + 9000
+        orchSource.indexOf("async function queueDeepPass") + 14000
       );
       expect(deepPassFn).toContain("postsMet = deepPassPostCount >= MIN_POSTS_TARGET");
       expect(deepPassFn).toContain("commentsMet = deepPassCommentCount >= MIN_COMMENTS_TARGET");
@@ -2419,7 +2425,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
     it("FP-40) DEEP_PASS updates postsCollected on promotion", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
-        orchSource.indexOf("async function queueDeepPass") + 9000
+        orchSource.indexOf("async function queueDeepPass") + 14000
       );
       expect(deepPassFn).toContain("postsCollected: deepPassPostCount");
       expect(deepPassFn).toContain("commentsCollected: deepPassCommentCount");
@@ -2428,7 +2434,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
     it("FP-41) DEEP_PASS tracks real vs synthetic comment counts", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
-        orchSource.indexOf("async function queueDeepPass") + 9000
+        orchSource.indexOf("async function queueDeepPass") + 14000
       );
       expect(deepPassFn).toContain("isSynthetic, false");
       expect(deepPassFn).toContain("realCommentCount");
@@ -2465,7 +2471,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
     it("FP-44) Dataset growth verification: ENRICHMENT_NO_CHANGE blocks promotion when dataset unchanged", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
-        orchSource.indexOf("async function queueDeepPass") + 9000
+        orchSource.indexOf("async function queueDeepPass") + 14000
       );
       expect(deepPassFn).toContain("datasetGrew = deepPassPostCount > baselinePostCount || deepPassCommentCount > baselineCommentCount");
       expect(deepPassFn).toContain("ENRICHMENT_NO_CHANGE");
@@ -2483,7 +2489,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
     it("FP-46) DEEP_PASS_DIAGNOSTICS emitted for every competitor after processing", () => {
       const deepPassFn = orchSource.slice(
         orchSource.indexOf("async function queueDeepPass"),
-        orchSource.indexOf("async function queueDeepPass") + 12000
+        orchSource.indexOf("async function queueDeepPass") + 14000
       );
       expect(deepPassFn).toContain("DEEP_PASS_DIAGNOSTICS");
       expect(deepPassFn).toContain("baselinePostCount=");
@@ -2592,6 +2598,151 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(weightMatch).toBeTruthy();
       expect(Number(weightMatch![1])).toBeLessThan(1.0);
       expect(Number(weightMatch![1])).toBeGreaterThan(0);
+    });
+  });
+
+  describe("Production Hardening — Final Pass (FP-57+)", () => {
+    let orchSource: string;
+    let engineSource: string;
+    let engineStateSource: string;
+    let isolationSource: string;
+    let contentDnaSource: string;
+    let intentSource: string;
+    let signalSource: string;
+    let typesSource: string;
+    let indexSource: string;
+
+    beforeAll(() => {
+      orchSource = require("fs").readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8");
+      engineSource = require("fs").readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
+      engineStateSource = require("fs").readFileSync("server/market-intelligence-v3/engine-state.ts", "utf-8");
+      isolationSource = require("fs").readFileSync("server/market-intelligence-v3/isolation-guard.ts", "utf-8");
+      contentDnaSource = require("fs").readFileSync("server/market-intelligence-v3/content-dna.ts", "utf-8");
+      intentSource = require("fs").readFileSync("server/market-intelligence-v3/intent-engine.ts", "utf-8");
+      signalSource = require("fs").readFileSync("server/market-intelligence-v3/signal-engine.ts", "utf-8");
+      typesSource = require("fs").readFileSync("server/market-intelligence-v3/types.ts", "utf-8");
+      indexSource = require("fs").readFileSync("server/index.ts", "utf-8");
+    });
+
+    it("FP-57) SIGNAL_DEFICIENCY_ESCALATION re-queues enriched competitors below thresholds", () => {
+      const deepPassFn = orchSource.slice(
+        orchSource.indexOf("async function queueDeepPass"),
+        orchSource.indexOf("async function queueDeepPass") + 3000
+      );
+      expect(deepPassFn).toContain("SIGNAL_DEFICIENCY_ESCALATION");
+      expect(deepPassFn).toContain("MIN_POSTS_TARGET");
+      expect(deepPassFn).toContain("MIN_COMMENTS_TARGET");
+      expect(deepPassFn).toContain("isSignalDeficient");
+      expect(deepPassFn).toContain('enrichmentStatus: "PENDING"');
+      expect(deepPassFn).toContain("re-queuing for DEEP_PASS");
+    });
+
+    it("FP-58) SIGNAL_DEFICIENCY_ESCALATION_SUMMARY logged when competitors are re-queued", () => {
+      expect(orchSource).toContain("SIGNAL_DEFICIENCY_ESCALATION_SUMMARY");
+      expect(orchSource).toContain("previously-enriched competitors re-queued due to signal deficiency");
+    });
+
+    it("FP-59) AUTO_SIGNAL_COMPLETION routine detects, queues, and refreshes inventory", () => {
+      expect(orchSource).toContain("async function autoSignalCompletion");
+      expect(orchSource).toContain("AUTO_SIGNAL_COMPLETION");
+      expect(orchSource).toContain("signalCoverageScore < 0.85");
+      expect(orchSource).toContain("missingFields");
+      expect(orchSource).toContain("AUTO_SIGNAL_COMPLETION_COMPLETE");
+      expect(orchSource).toContain("inventory refreshed for");
+      expect(orchSource).toContain("postsCollected: actualPosts");
+      expect(orchSource).toContain("commentsCollected: actualComments");
+    });
+
+    it("FP-60) AUTO_SIGNAL_COMPLETION called after snapshot persistence", () => {
+      const persistFn = orchSource.slice(
+        orchSource.indexOf("async function persistSnapshotAfterFetch"),
+        orchSource.indexOf("async function persistSnapshotAfterFetch") + 12000
+      );
+      expect(persistFn).toContain("autoSignalCompletion(accountId, campaignId, signalResults, competitorInputs)");
+    });
+
+    it("FP-61) Content DNA activation gate logs CONTENT_DNA_ACTIVATED at ≥14 posts", () => {
+      expect(contentDnaSource).toContain("CONTENT_DNA_ACTIVATED");
+      expect(contentDnaSource).toContain("CONTENT_DNA_DEFERRED");
+      expect(contentDnaSource).toContain("CONTENT_DNA_ACTIVATION_THRESHOLD");
+    });
+
+    it("FP-62) Content DNA computed in persistSnapshotAfterFetch (not just engine._executeRun)", () => {
+      const persistFn = orchSource.slice(
+        orchSource.indexOf("async function persistSnapshotAfterFetch"),
+        orchSource.indexOf("async function persistSnapshotAfterFetch") + 4000
+      );
+      expect(persistFn).toContain("computeAllContentDNA");
+    });
+
+    it("FP-63) IntentResult includes intentStatus (PROVISIONAL | FINAL)", () => {
+      expect(typesSource).toContain('intentStatus: IntentStatus');
+      expect(typesSource).toContain('"PROVISIONAL"');
+      expect(typesSource).toContain('"FINAL"');
+    });
+
+    it("FP-64) Intent engine sets PROVISIONAL when sample too small", () => {
+      expect(intentSource).toContain("PROVISIONAL");
+      expect(intentSource).toContain("intentStatus");
+      expect(intentSource).toContain("intentStatusReason");
+    });
+
+    it("FP-65) CompetitorSignalResult includes commentCount for intent stabilization", () => {
+      expect(typesSource).toContain("commentCount: number");
+      expect(signalSource).toContain("commentCount:");
+    });
+
+    it("FP-66) Snapshot immutability protection in persistValidatedSnapshot", () => {
+      expect(engineSource).toContain("SNAPSHOT_IMMUTABILITY_VIOLATION");
+    });
+
+    it("FP-67) Startup invalidation of old-version snapshots", () => {
+      expect(engineStateSource).toContain("invalidateStaleSnapshots");
+      expect(engineStateSource).toContain("ENGINE_VERSION_REFRESH");
+      expect(engineStateSource).toContain("STARTUP_INVALIDATION_COMPLETE");
+    });
+
+    it("FP-68) invalidateStaleSnapshots called on server startup", () => {
+      expect(indexSource).toContain("invalidateStaleSnapshots");
+    });
+
+    it("FP-69) All downstream engines blocked in isolation guard (14 engines)", () => {
+      expect(isolationSource).toContain("FUNNEL_ENGINE");
+      expect(isolationSource).toContain("FINANCIAL_GOVERNOR");
+      expect(isolationSource).toContain("BEAST_EXECUTION_LAYER");
+      expect(isolationSource).toContain("POSITIONING_ENGINE");
+      expect(isolationSource).toContain("DIFFERENTIATION_ENGINE");
+      expect(isolationSource).toContain("AUDIENCE_ENGINE");
+    });
+
+    it("FP-70) assertNoStrategyWrites prevents MI from generating strategies", () => {
+      expect(isolationSource).toContain("assertNoStrategyWrites");
+      expect(isolationSource).toContain("STRATEGY_WRITE_DOMAINS");
+      expect(isolationSource).toContain("STRATEGY_WRITE_ATTEMPT");
+    });
+
+    it("FP-73) persistValidatedSnapshot actively guards against strategy domain writes", () => {
+      const persistFn = engineSource.slice(
+        engineSource.indexOf("export async function persistValidatedSnapshot"),
+        engineSource.indexOf("export async function persistValidatedSnapshot") + 1500
+      );
+      expect(persistFn).toContain("validateNoStrategyWrite");
+      expect(persistFn).toContain("strategyDomainFields");
+      expect(persistFn).toContain("positioningOutput");
+      expect(persistFn).toContain("differentiationOutput");
+      expect(engineSource).toContain('import { validateEngineIsolation, validateNoStrategyWrite } from "./isolation-guard"');
+    });
+
+    it("FP-71) DEEP_PASS additive-only guard for posts and comments", () => {
+      expect(orchSource).toContain("DATA_DEGRADATION_GUARD");
+    });
+
+    it("FP-72) INTENT_STATUS_SUMMARY logged in persistSnapshotAfterFetch", () => {
+      const persistFn = orchSource.slice(
+        orchSource.indexOf("async function persistSnapshotAfterFetch"),
+        orchSource.indexOf("async function persistSnapshotAfterFetch") + 12000
+      );
+      expect(persistFn).toContain("INTENT_STATUS_SUMMARY");
     });
   });
 });

@@ -1,0 +1,163 @@
+Hello Replit Team,
+
+We need to complete a final architectural hardening pass for MI V3 (Market Intelligence Engine) to ensure the system operates at full production reliability and reaches a 10/10 stable state.  
+
+The goal of this request is to close all remaining gaps while preventing any conflict with other engines in the system architecture (Positioning, Differentiation, Audience, Financial Governor, and downstream strategy engines).
+
+Please implement the following fixes and safeguards.
+
+---
+
+## 1. Automatic FAST_PASS → DEEP_PASS Escalation
+
+Currently FAST_PASS works correctly but DEEP_PASS does not always activate when signal coverage is incomplete.
+
+The pipeline must strictly enforce the following sequence:
+
+FAST_PASS  
+→ baseline snapshot  
+→ DEEP_PASS enrichment  
+→ enriched snapshot
+
+DEEP_PASS must automatically trigger if any competitor fails minimum signal thresholds.
+
+Trigger conditions:
+
+- postsCollected < 14  
+- commentsCollected < 50  
+- contentDNA unavailable  
+- signalCoverage < 85%
+
+DEEP_PASS objectives:
+
+- Expand dataset to ~30 posts per competitor
+- Collect sufficient real comments
+- Complete narrative extraction and engagement signals
+
+This ensures the system does not remain stuck in FAST_PASS-level intelligence.
+
+---
+
+## 2. Content DNA Activation After Post Threshold
+
+The Content DNA / Narrative Extraction engine must activate automatically once a competitor reaches sufficient post coverage.
+
+Activation condition:
+
+postsCollected ≥ 14
+
+When this threshold is met, run:
+
+- contentDNA extraction
+- narrative clustering
+- hook style detection
+- CTA intent extraction
+- offer language patterns
+- narrative saturation scoring
+
+This step is essential for enabling downstream engines but must remain strictly informational within MI.
+
+---
+
+## 3. Intent Engine Stabilization
+
+Intent classification should not finalize on small datasets.
+
+If:
+
+- posts < 20  
+- comments < 50  
+
+Intent status should remain PROVISIONAL.
+
+Once DEEP_PASS enrichment completes:
+
+- recompute intent classification
+- resolve ambiguous intent states
+- upgrade provisional results to final intent labels
+
+This prevents unstable classifications caused by FAST_PASS-only data.
+
+---
+
+## 4. Automatic Resolution of Missing Signals
+
+When MI detects missing signals (for example insufficient posts or missing posting frequency), the system should automatically queue enrichment.
+
+Implement an AUTO_SIGNAL_COMPLETION routine that:
+
+1. detects missing signals
+2. queues targeted DEEP_PASS collection
+3. refreshes the competitor inventory
+4. recomputes MI diagnostics
+
+No manual intervention should be required.
+
+---
+
+## 5. Strict Engine Boundary Protection
+
+To prevent architectural conflicts, MI must remain a pure intelligence layer.
+
+Please enforce the following rules:
+
+- MI V3 only collects and analyzes market signals
+- MI does not generate positioning strategies
+- MI does not modify offer, pricing, or funnel outputs
+- MI outputs are consumed by downstream engines only
+
+Downstream engines include:
+
+- Positioning Engine
+- Differentiation Engine
+- Audience Engine
+- Offer Engine
+- Funnel Engine
+- Financial Governor
+- Beast Execution Layer
+
+MI must only produce diagnostics, signals, and market structure analysis.
+
+---
+
+## 6. Snapshot Integrity Protection
+
+Ensure that:
+
+- FAST_PASS baseline snapshots cannot be overwritten
+- DEEP_PASS only enriches data (never deletes or replaces baseline records)
+- snapshot versioning remains active
+
+This protects analysis reproducibility.
+
+---
+
+## 7. Deployment Safety — Prevent Old Engine State
+
+A common issue occurs when the system continues running on a previous engine state after updates.
+
+Please ensure that after deployment:
+
+- the signal engine reloads the latest schema
+- engine version refreshes on startup
+- cached MI snapshots generated before this update are invalidated
+- the pipeline reconnects to the updated engine version
+
+---
+
+## Expected Result
+
+After these changes:
+
+- FAST_PASS gathers baseline market data
+- DEEP_PASS enriches all competitors automatically
+- Content DNA and narrative signals activate correctly
+- Intent classification stabilizes
+- Missing signals resolve automatically
+- MI remains fully isolated from strategy engines
+
+This will bring MI V3 to full production stability without any cross-engine conflicts.
+
+Please confirm once the system completes a full FAST_PASS → DEEP_PASS cycle successfully.
+
+Thank you.

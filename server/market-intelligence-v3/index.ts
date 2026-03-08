@@ -12,5 +12,6 @@ export function registerMarketIntelligenceV3(app: Express) {
 
 export { MarketIntelligenceV3 } from "./engine";
 export { validateEngineIsolation, assertNoPlanWrites, assertNoOrchestrator, assertNoAutopilot } from "./engine";
+export { invalidateStaleSnapshots } from "./engine-state";
 export * from "./types";
 export * from "./constants";

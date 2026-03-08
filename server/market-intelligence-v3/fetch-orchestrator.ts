@@ -12,6 +12,7 @@ import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-
 import { computeCompetitorHash } from "./utils";
 import { computeVolatilityIndex, buildMarketDiagnosis, buildThreatSignals, buildOpportunitySignals, buildMarketSummary, computeSignalNoiseRatio, computeEvidenceCoverage, persistValidatedSnapshot, ENGINE_VERSION, computeDataFreshnessDays } from "./engine";
 import { MI_THRESHOLDS, MI_CONFIDENCE } from "./constants";
+import { computeAllContentDNA } from "./content-dna";
 import { computeMarketBaseline, computeAllDeviations, type CalibrationContext } from "./market-baselines";
 import { computeSimilarityDiagnosis } from "./similarity-engine";
 import type { CompetitorInput, GoalMode } from "./types";
@@ -912,6 +913,8 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   }
 
   const signalResults = computeAllSignals(competitorInputs);
+  const contentDnaResults = computeAllContentDNA(competitorInputs);
+  console.log(`[FetchOrch] Content DNA computed for ${contentDnaResults.length} competitors in persistSnapshotAfterFetch`);
   const dataFreshnessDays = computeDataFreshnessDays(competitorInputs);
   let confidenceFreshnessDays = dataFreshnessDays;
   if (totalPosts < MIN_POSTS_TARGET && dataFreshnessDays <= DEFAULT_TIME_WINDOW_DAYS) {
@@ -919,6 +922,15 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     console.log(`[FetchOrch] Dynamic time window expanded to ${EXPANDED_TIME_WINDOW_DAYS} days for confidence (actual freshness=${dataFreshnessDays}d, posts=${totalPosts}/${MIN_POSTS_TARGET})`);
   }
   const intents = classifyAllIntents(signalResults);
+
+  const provisionalIntents = intents.filter(i => i.intentStatus === "PROVISIONAL");
+  const finalIntents = intents.filter(i => i.intentStatus === "FINAL");
+  if (provisionalIntents.length > 0) {
+    console.log(`[FetchOrch] INTENT_STATUS_SUMMARY: ${provisionalIntents.length} PROVISIONAL, ${finalIntents.length} FINAL | provisional=[${provisionalIntents.map(i => `${i.competitorName}:${i.intentStatusReason}`).join(", ")}]`);
+  } else {
+    console.log(`[FetchOrch] INTENT_STATUS_SUMMARY: all ${intents.length} intents FINAL`);
+  }
+
   const dominantIntent = computeDominantMarketIntent(intents);
   const trajectory = computeTrajectory(signalResults, intents);
   const confidence = computeConfidence(signalResults, confidenceFreshnessDays);
@@ -1027,6 +1039,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     opportunitySignals: JSON.stringify(opportunitySignals),
     missingSignalFlags: JSON.stringify(missingFlags),
     similarityData: JSON.stringify(similarityData),
+    contentDnaData: JSON.stringify(contentDnaResults),
     volatilityIndex,
     dataFreshnessDays,
     overallConfidence: confidence.overall,
@@ -1083,6 +1096,81 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
       confidence: confidence.overall,
     },
   }).catch(() => {});
+
+  autoSignalCompletion(accountId, campaignId, signalResults, competitorInputs).catch(err => {
+    console.error(`[FetchOrch] AUTO_SIGNAL_COMPLETION error: ${err.message}`);
+  });
+}
+
+async function autoSignalCompletion(accountId: string, campaignId: string, signalResults: any[], competitorInputs: CompetitorInput[]): Promise<void> {
+  const deficientCompetitors: { id: string; name: string; missingSignals: string[]; reason: string }[] = [];
+
+  for (const sr of signalResults) {
+    const comp = competitorInputs.find(c => c.id === sr.competitorId);
+    if (!comp) continue;
+
+    const reasons: string[] = [];
+    const postCount = (comp.posts?.length || 0);
+    const commentCount = (comp.comments?.length || 0);
+
+    if (postCount < MIN_POSTS_TARGET) {
+      reasons.push(`posts=${postCount}/${MIN_POSTS_TARGET}`);
+    }
+    if (commentCount < MIN_COMMENTS_TARGET) {
+      reasons.push(`comments=${commentCount}/${MIN_COMMENTS_TARGET}`);
+    }
+    if (sr.signalCoverageScore < 0.85) {
+      reasons.push(`signalCoverage=${sr.signalCoverageScore}/0.85`);
+    }
+    if (sr.missingFields && sr.missingFields.length > 0) {
+      reasons.push(`missingFields=[${sr.missingFields.join(",")}]`);
+    }
+
+    if (reasons.length > 0) {
+      deficientCompetitors.push({
+        id: sr.competitorId,
+        name: sr.competitorName,
+        missingSignals: sr.missingFields || [],
+        reason: reasons.join("; "),
+      });
+    }
+  }
+
+  if (deficientCompetitors.length === 0) {
+    console.log(`[FetchOrch] AUTO_SIGNAL_COMPLETION: all competitors have sufficient signals for ${accountId}/${campaignId}`);
+    return;
+  }
+
+  console.log(`[FetchOrch] AUTO_SIGNAL_COMPLETION: ${deficientCompetitors.length} competitors with signal deficiencies for ${accountId}/${campaignId}`);
+
+  for (const dc of deficientCompetitors) {
+    const [existing] = await db.select().from(ciCompetitors).where(eq(ciCompetitors.id, dc.id));
+    if (!existing || existing.analysisLevel === "DEEP_PASS") continue;
+
+    console.log(`[FetchOrch] AUTO_SIGNAL_COMPLETION: queuing ${dc.name} for DEEP_PASS enrichment | ${dc.reason}`);
+
+    await db.update(ciCompetitors)
+      .set({ enrichmentStatus: "PENDING", updatedAt: new Date() })
+      .where(eq(ciCompetitors.id, dc.id));
+  }
+
+  for (const dc of deficientCompetitors) {
+    const [comp] = await db.select().from(ciCompetitors).where(eq(ciCompetitors.id, dc.id));
+    if (comp) {
+      const postResult = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
+        .where(and(eq(ciCompetitorPosts.competitorId, dc.id), eq(ciCompetitorPosts.accountId, accountId)));
+      const commentResult = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
+        .where(and(eq(ciCompetitorComments.competitorId, dc.id), eq(ciCompetitorComments.accountId, accountId)));
+      const actualPosts = Number(postResult[0]?.count || 0);
+      const actualComments = Number(commentResult[0]?.count || 0);
+      await db.update(ciCompetitors)
+        .set({ postsCollected: actualPosts, commentsCollected: actualComments, updatedAt: new Date() })
+        .where(eq(ciCompetitors.id, dc.id));
+      console.log(`[FetchOrch] AUTO_SIGNAL_COMPLETION: inventory refreshed for ${dc.name} | posts=${actualPosts} | comments=${actualComments}`);
+    }
+  }
+
+  console.log(`[FetchOrch] AUTO_SIGNAL_COMPLETION_COMPLETE: signal deficiency enrichment queued + inventory refreshed for ${accountId}/${campaignId} | deficientCount=${deficientCompetitors.length}`);
 }
 
 export async function getFetchJobStatus(jobId: string): Promise<FetchJobStatus | null> {
@@ -1142,11 +1230,38 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
     return;
   }
 
-  const alreadyEnriched = eligibleCompetitors.filter(c => c.enrichmentStatus === "ENRICHED");
-  const toEnrich = eligibleCompetitors.filter(c => c.enrichmentStatus !== "ENRICHED");
+  const signalDeficientCompetitors: typeof eligibleCompetitors = [];
+  for (const c of eligibleCompetitors) {
+    if (c.enrichmentStatus === "ENRICHED") {
+      const posts = Number(c.postsCollected || 0);
+      const comments = Number(c.commentsCollected || 0);
+      const isSignalDeficient = posts < MIN_POSTS_TARGET || comments < MIN_COMMENTS_TARGET;
+      if (isSignalDeficient) {
+        signalDeficientCompetitors.push(c);
+        console.log(`[FetchOrch] SIGNAL_DEFICIENCY_ESCALATION: ${c.name} | posts=${posts}/${MIN_POSTS_TARGET} | comments=${comments}/${MIN_COMMENTS_TARGET} | re-queuing for DEEP_PASS`);
+        await db.update(ciCompetitors)
+          .set({ enrichmentStatus: "PENDING", updatedAt: new Date() })
+          .where(eq(ciCompetitors.id, c.id));
+      }
+    }
+  }
+
+  if (signalDeficientCompetitors.length > 0) {
+    console.log(`[FetchOrch] SIGNAL_DEFICIENCY_ESCALATION_SUMMARY: ${signalDeficientCompetitors.length} previously-enriched competitors re-queued due to signal deficiency for ${accountId}/${campaignId}`);
+  }
+
+  const refreshedCompetitors = await db.select().from(ciCompetitors)
+    .where(and(
+      eq(ciCompetitors.accountId, accountId),
+      eq(ciCompetitors.campaignId, campaignId),
+      eq(ciCompetitors.isActive, true),
+    ));
+
+  const alreadyEnriched = refreshedCompetitors.filter(c => c.enrichmentStatus === "ENRICHED");
+  const toEnrich = refreshedCompetitors.filter(c => c.enrichmentStatus !== "ENRICHED");
 
   if (toEnrich.length === 0) {
-    console.log(`[FetchOrch] DEEP_PASS skipped: all ${eligibleCompetitors.length} competitors already enriched for ${accountId}/${campaignId}`);
+    console.log(`[FetchOrch] DEEP_PASS skipped: all ${refreshedCompetitors.length} competitors already enriched for ${accountId}/${campaignId}`);
     return;
   }
 
@@ -1218,9 +1333,17 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
         .where(and(eq(ciCompetitorPosts.competitorId, comp.id), eq(ciCompetitorPosts.accountId, accountId)));
       const deepPassPostCount = Number(finalPostCount[0]?.count || 0);
 
+      if (deepPassPostCount < baselinePostCount) {
+        console.log(`[FetchOrch] DATA_DEGRADATION_GUARD: DEEP_PASS post count ${deepPassPostCount} < baseline ${baselinePostCount} for ${comp.name}. DEEP_PASS must be additive-only — restoring baseline count.`);
+      }
+
       const totalCommentCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
         .where(and(eq(ciCompetitorComments.competitorId, comp.id), eq(ciCompetitorComments.accountId, accountId)));
       const deepPassCommentCount = Number(totalCommentCount[0]?.count || 0);
+
+      if (deepPassCommentCount < baselineCommentCount) {
+        console.log(`[FetchOrch] DATA_DEGRADATION_GUARD: DEEP_PASS comment count ${deepPassCommentCount} < baseline ${baselineCommentCount} for ${comp.name}. DEEP_PASS must be additive-only — comment degradation detected.`);
+      }
 
       const realCommentResult = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
         .where(and(eq(ciCompetitorComments.competitorId, comp.id), eq(ciCompetitorComments.accountId, accountId), eq(ciCompetitorComments.isSynthetic, false)));

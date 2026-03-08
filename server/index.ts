@@ -4,6 +4,7 @@ import { registerRoutes } from "./routes";
 import { startAutonomousWorker, stopAutonomousWorker } from "./autonomous-worker";
 import { startPublishWorker, stopPublishWorker } from "./publish-worker";
 import { runAllHealthChecks } from "./meta-token-manager";
+import { invalidateStaleSnapshots } from "./market-intelligence-v3/engine-state";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -263,6 +264,8 @@ function setupErrorHandler(app: express.Application) {
       log(`express server serving on port ${port}`);
       startAutonomousWorker();
       startPublishWorker();
+
+      invalidateStaleSnapshots().catch(err => console.error("[MIv3] Startup snapshot invalidation error:", err));
 
       setTimeout(() => {
         runAllHealthChecks().catch(err => console.error("[MetaHealth] Initial health check error:", err));

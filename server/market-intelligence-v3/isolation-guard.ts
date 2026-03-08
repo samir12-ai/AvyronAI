@@ -24,6 +24,22 @@ const BLOCKED_ENGINES = [
   "CREATIVE_ENGINE",
   "LEAD_ENGINE",
   "FULFILLMENT_ENGINE",
+  "FUNNEL_ENGINE",
+  "FINANCIAL_GOVERNOR",
+  "BEAST_EXECUTION_LAYER",
+  "POSITIONING_ENGINE",
+  "DIFFERENTIATION_ENGINE",
+  "AUDIENCE_ENGINE",
+] as const;
+
+const STRATEGY_WRITE_DOMAINS = [
+  "POSITIONING",
+  "DIFFERENTIATION",
+  "AUDIENCE",
+  "OFFER",
+  "PRICING",
+  "FUNNEL",
+  "STRATEGY",
 ] as const;
 
 export function validateEngineIsolation(caller: string): void {
@@ -113,10 +129,44 @@ export function assertNoComputeFromExternal(caller: string, computeFunction: str
   }
 }
 
+export function assertNoStrategyWrites(operation?: string): void {
+  const op = operation || "UNKNOWN";
+  console.error(`[MIv3] STRATEGY_WRITE_VIOLATION | operation=${op}`);
+  logAudit("system", "CI_ENGINE_ISOLATION_VIOLATION", {
+    details: {
+      type: "STRATEGY_WRITE_ATTEMPT",
+      operation: op,
+      blockedDomains: [...STRATEGY_WRITE_DOMAINS],
+    },
+    riskLevel: "CRITICAL",
+  }).catch(() => {});
+  throw new Error(
+    `ISOLATION VIOLATION: Market Intelligence V3 must NOT generate or modify strategy outputs. Blocked domains: ${STRATEGY_WRITE_DOMAINS.join(", ")}. MI is a pure intelligence layer — it produces data, not strategies.`
+  );
+}
+
+export function validateNoStrategyWrite(caller: string, targetDomain: string): void {
+  const isStrategyDomain = (STRATEGY_WRITE_DOMAINS as readonly string[]).includes(targetDomain.toUpperCase());
+  if (isStrategyDomain && caller === ISOLATION_ALLOWED_CALLER) {
+    console.error(`[MIv3] STRATEGY_DOMAIN_WRITE_BLOCKED | caller=${caller} | target=${targetDomain}`);
+    logAudit("system", "CI_ENGINE_ISOLATION_VIOLATION", {
+      details: { type: "MI_STRATEGY_WRITE_BLOCKED", caller, targetDomain },
+      riskLevel: "CRITICAL",
+    }).catch(() => {});
+    throw new Error(
+      `ISOLATION VIOLATION: MIv3 attempted to write to strategy domain '${targetDomain}'. MI must not generate positioning strategies, modify offer/pricing/funnel, or write audience/differentiation outputs.`
+    );
+  }
+}
+
 export function getProtectedDomains(): readonly string[] {
   return MIV3_PROTECTED_DOMAINS;
 }
 
 export function getBlockedEngines(): readonly string[] {
   return BLOCKED_ENGINES;
+}
+
+export function getStrategyWriteDomains(): readonly string[] {
+  return STRATEGY_WRITE_DOMAINS;
 }

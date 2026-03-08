@@ -50,9 +50,12 @@ export interface CompetitorSignalResult {
   authorityWeight: number;
   lifecycle: CompetitorLifecycle;
   lowSample: boolean;
+  commentCount: number;
 }
 
 export type IntentConfidenceBand = "STRONG" | "MODERATE" | "UNCERTAIN" | "DEGRADED";
+
+export type IntentStatus = "PROVISIONAL" | "FINAL";
 
 export interface IntentResult {
   competitorId: string;
@@ -65,6 +68,8 @@ export interface IntentResult {
   topIntentScore: number;
   intentConfidence: number;
   intentConfidenceBand: IntentConfidenceBand;
+  intentStatus: IntentStatus;
+  intentStatusReason?: string;
 }
 
 export interface TrajectoryData {

@@ -7,9 +7,10 @@ import type {
   NarrativeFramework,
   CTAFramework,
 } from "./types";
-import { SIMILARITY_MIN_EVIDENCE_THRESHOLD } from "./constants";
+import { SIMILARITY_MIN_EVIDENCE_THRESHOLD, MI_THRESHOLDS } from "./constants";
 
 const MIN_CAPTION_LENGTH = 15;
+const CONTENT_DNA_ACTIVATION_THRESHOLD = MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR;
 
 const HOOK_PATTERNS: Record<HookArchetype, RegExp[]> = {
   shock: [
@@ -192,6 +193,18 @@ function detectCTAFrameworks(posts: PostData[]): { frameworks: CTAFramework[]; e
 export function computeContentDNA(competitor: CompetitorInput): CompetitorContentDNA {
   const posts = competitor.posts || [];
   const missingSignalFlags: string[] = [];
+
+  if (posts.length >= CONTENT_DNA_ACTIVATION_THRESHOLD) {
+    console.log(`[ContentDNA] CONTENT_DNA_ACTIVATED | competitor=${competitor.name} | posts=${posts.length} | threshold=${CONTENT_DNA_ACTIVATION_THRESHOLD}`);
+  } else {
+    const reasons: string[] = [];
+    if (posts.length === 0) {
+      reasons.push("no posts available");
+    } else {
+      reasons.push(`posts=${posts.length} < threshold=${CONTENT_DNA_ACTIVATION_THRESHOLD}`);
+    }
+    console.log(`[ContentDNA] CONTENT_DNA_DEFERRED | competitor=${competitor.name} | reason=${reasons.join(", ")}`);
+  }
 
   if (posts.length < SIMILARITY_MIN_EVIDENCE_THRESHOLD) {
     missingSignalFlags.push(

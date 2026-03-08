@@ -1,5 +1,8 @@
 import { ENGINE_VERSION } from "./constants";
 import { MI_CONFIDENCE } from "./constants";
+import { db } from "../db";
+import { miSnapshots } from "@shared/schema";
+import { ne, eq } from "drizzle-orm";
 
 export type EngineState = "READY" | "REFRESH_REQUIRED" | "REFRESHING" | "REFRESH_FAILED" | "BLOCKED";
 
@@ -157,4 +160,28 @@ export function checkMIDependencyForDownstream(
     return { ready: true, state: "READY" };
   }
   return { ready: false, state: readiness.state, reason: readiness.reason };
+}
+
+export async function invalidateStaleSnapshots(): Promise<{ invalidatedCount: number }> {
+  console.log(`[MIv3] ENGINE_VERSION_REFRESH | currentVersion=${ENGINE_VERSION} | action=startup_invalidation`);
+
+  try {
+    const staleSnapshots = await db.update(miSnapshots)
+      .set({ status: "STALE" })
+      .where(ne(miSnapshots.analysisVersion, ENGINE_VERSION))
+      .returning({ id: miSnapshots.id });
+
+    const invalidatedCount = staleSnapshots.length;
+
+    if (invalidatedCount > 0) {
+      console.log(`[MIv3] STARTUP_INVALIDATION_COMPLETE | invalidated=${invalidatedCount} | reason=ENGINE_VERSION_MISMATCH | currentVersion=${ENGINE_VERSION}`);
+    } else {
+      console.log(`[MIv3] STARTUP_INVALIDATION_COMPLETE | invalidated=0 | allSnapshotsCurrentVersion=${ENGINE_VERSION}`);
+    }
+
+    return { invalidatedCount };
+  } catch (error) {
+    console.error(`[MIv3] STARTUP_INVALIDATION_ERROR | version=${ENGINE_VERSION} | error=${error}`);
+    return { invalidatedCount: 0 };
+  }
 }

@@ -32,7 +32,7 @@ import type {
   EngagementQuality,
 } from "./types";
 import { MI_CONFIDENCE, ENGINE_VERSION } from "./constants";
-import { validateEngineIsolation } from "./isolation-guard";
+import { validateEngineIsolation, validateNoStrategyWrite } from "./isolation-guard";
 import { logAudit } from "../audit";
 import { computeCompetitorHash, parseJsonSafe } from "./utils";
 import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
@@ -134,6 +134,13 @@ function isSnapshotAnalyticallyComplete(snapshot: any): boolean {
 }
 
 export async function persistValidatedSnapshot(snapshotPayload: any, caller: string): Promise<any> {
+  const strategyDomainFields = ["positioningOutput", "differentiationOutput", "audienceOutput", "offerOutput", "pricingOutput", "funnelOutput", "strategyOutput"];
+  for (const field of strategyDomainFields) {
+    if (snapshotPayload[field]) {
+      validateNoStrategyWrite("MARKET_INTELLIGENCE_V3", field.replace("Output", "").toUpperCase());
+    }
+  }
+
   if (!snapshotPayload.analysisVersion) {
     snapshotPayload.analysisVersion = ENGINE_VERSION;
   }
@@ -143,6 +150,30 @@ export async function persistValidatedSnapshot(snapshotPayload: any, caller: str
     if (!completionCheck.valid) {
       console.log(`[MIv3] SNAPSHOT_COMPLETION_CONTRACT_VIOLATED | caller=${caller} | failures=${completionCheck.failures.join(", ")}`);
       snapshotPayload.status = "PARTIAL";
+    }
+  }
+
+  if (snapshotPayload.accountId && snapshotPayload.campaignId) {
+    const existingBaseline = await db.select({ id: miSnapshots.id, dataStatus: miSnapshots.dataStatus, version: miSnapshots.version, snapshotSource: miSnapshots.snapshotSource })
+      .from(miSnapshots)
+      .where(and(
+        eq(miSnapshots.accountId, snapshotPayload.accountId),
+        eq(miSnapshots.campaignId, snapshotPayload.campaignId),
+        eq(miSnapshots.status, "COMPLETE"),
+      ))
+      .orderBy(desc(miSnapshots.createdAt))
+      .limit(1);
+
+    if (existingBaseline.length > 0) {
+      const baseline = existingBaseline[0];
+      const baselineIsLive = baseline.dataStatus === "LIVE";
+      const newIsAlsoLive = snapshotPayload.dataStatus === "LIVE";
+      const newSourceIsFresh = snapshotPayload.snapshotSource === "FRESH_DATA";
+
+      if (baselineIsLive && newIsAlsoLive && newSourceIsFresh && snapshotPayload.version === baseline.version) {
+        console.log(`[MIv3] SNAPSHOT_IMMUTABILITY_VIOLATION | caller=${caller} | existingSnapshotId=${baseline.id} | existingVersion=${baseline.version} | reason=FAST_PASS baseline cannot be overwritten, only new DEEP_PASS snapshots can be added alongside`);
+        snapshotPayload.version = (baseline.version || 0) + 1;
+      }
     }
   }
 

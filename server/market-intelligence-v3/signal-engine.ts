@@ -387,6 +387,7 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
     authorityWeight,
     lifecycle,
     lowSample,
+    commentCount: comments.length,
   };
 }
 
