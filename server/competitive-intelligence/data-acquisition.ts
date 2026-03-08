@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot } from "@shared/schema";
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
-import { scrapeInstagramProfile, type ScrapedPost } from "./profile-scraper";
+import { scrapeInstagramProfile, scrapeCommentsForPosts, type ScrapedPost, type ScrapedComment } from "./profile-scraper";
 import { acquireStickySession, releaseStickySession, type StickySessionContext } from "./proxy-pool-manager";
 import * as crypto from "crypto";
 import { MI_THRESHOLDS } from "../market-intelligence-v3/constants";
@@ -551,11 +551,47 @@ async function _executeFetch(
     console.log(`[DataAcq] CACHE_FIRST: ${cachedPostsReused} existing posts reused, ${postInserts.length} new posts to insert for ${competitor.name}`);
   }
 
+  const realComments = scrapeResult.embeddedComments || [];
+  const existingCommentIds = new Set<string>();
+  if (realComments.length > 0) {
+    const existingCRows = await db.select({ commentId: ciCompetitorComments.commentId })
+      .from(ciCompetitorComments)
+      .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
+    for (const r of existingCRows) {
+      if (r.commentId) existingCommentIds.add(r.commentId);
+    }
+  }
+
+  let realCommentsInserted = 0;
+  for (const rc of realComments) {
+    if (existingCommentIds.has(rc.commentId)) continue;
+    const sentiment = rc.text.length > 0 ? computeBasicSentiment(rc.text) : 0.5;
+    commentInserts.push({
+      competitorId,
+      accountId,
+      postId: rc.postId,
+      commentText: rc.text,
+      commentId: rc.commentId,
+      username: rc.username,
+      sentiment,
+      timestamp: rc.timestamp ? new Date(rc.timestamp) : null,
+      batchId,
+      isSynthetic: false,
+      source: "embedded_preview",
+    });
+    commentsCollected++;
+    realCommentsInserted++;
+  }
+  console.log(`[DataAcq] EMBEDDED_COMMENTS: ${realCommentsInserted} real comments from profile scrape for ${competitor.name} (${realComments.length} total extracted, ${realComments.length - realCommentsInserted} duplicates skipped)`);
+
+  const postsWithRealComments = new Set(realComments.map(c => c.postId));
+
   if (collectionMode !== "FAST_PASS") {
     const commentPostLimit = collectionMode === "DEEP_PASS" ? MAX_COMMENT_POSTS_DEEP : MAX_COMMENT_POSTS;
     const commentPerPostLimit = collectionMode === "DEEP_PASS" ? MAX_COMMENTS_PER_POST_DEEP : MAX_COMMENTS_PER_POST;
     const postsNeedingComments = postsToStore
       .filter(p => !existingPostIdsWithComments.has(p.postId))
+      .filter(p => !postsWithRealComments.has(p.postId))
       .filter(p => (p.comments && p.comments > 0) || (p.caption && p.caption.length > 10))
       .sort((a, b) => {
         const engA = (a.likes || 0) + (a.comments || 0);
@@ -585,7 +621,7 @@ async function _executeFetch(
       }
     }
   } else {
-    console.log(`[DataAcq] FAST_PASS: Skipping comment generation for ${competitor.name}`);
+    console.log(`[DataAcq] FAST_PASS: Skipping synthetic comment generation for ${competitor.name} (${realCommentsInserted} real comments already stored)`);
   }
 
   await db.transaction(async (tx) => {
@@ -808,12 +844,12 @@ export async function enrichCompetitorWithComments(competitorId: string, account
   const realComments = Number(realCommentCount[0]?.count || 0);
 
   if (realComments >= MIN_COMMENTS_THRESHOLD) {
-    console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} has ${realComments} real comments (>= ${MIN_COMMENTS_THRESHOLD}). Real data sufficient — skipping synthetic.`);
+    console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} has ${realComments} real comments (>= ${MIN_COMMENTS_THRESHOLD}). Real data sufficient.`);
     return { commentsGenerated: realComments, status: "REAL_DATA_SUFFICIENT" };
   }
 
-  if (competitor.enrichmentStatus === "ENRICHED" && !options?.skipCooldown) {
-    console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — already enriched (enrichmentStatus=ENRICHED). Skipping.`);
+  if (competitor.enrichmentStatus === "ENRICHED" && !options?.skipCooldown && realComments >= MIN_COMMENTS_THRESHOLD) {
+    console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — already enriched (enrichmentStatus=ENRICHED) with sufficient real data. ALREADY_ENRICHED.`);
     return { commentsGenerated: 0, status: "ALREADY_ENRICHED" };
   }
 
@@ -821,17 +857,12 @@ export async function enrichCompetitorWithComments(competitorId: string, account
     .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
   const existingComments = Number(existingCommentCount[0]?.count || 0);
 
-  if (existingComments >= MIN_COMMENTS_THRESHOLD) {
-    console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} already has ${existingComments} comments (>= ${MIN_COMMENTS_THRESHOLD}). Skipping.`);
-    return { commentsGenerated: existingComments, status: "ALREADY_ENRICHED" };
-  }
-
   const storedPosts = await db.select().from(ciCompetitorPosts)
     .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)))
     .orderBy(desc(ciCompetitorPosts.createdAt));
 
   if (storedPosts.length === 0) {
-    console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} has no stored posts. Cannot generate comments.`);
+    console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} has no stored posts. Cannot scrape comments.`);
     return { commentsGenerated: 0, status: "NO_POSTS" };
   }
 
@@ -850,7 +881,7 @@ export async function enrichCompetitorWithComments(competitorId: string, account
 
   const postsNeedingComments = storedPosts
     .filter(p => !existingPostIdsWithComments.has(p.postId))
-    .filter(p => (p.comments && p.comments > 0) || (p.caption && p.caption.length > 10))
+    .filter(p => p.shortcode && ((p.comments && p.comments > 0) || (p.caption && p.caption.length > 10)))
     .sort((a, b) => {
       const engA = (a.likes || 0) + (a.comments || 0);
       const engB = (b.likes || 0) + (b.comments || 0);
@@ -866,39 +897,173 @@ export async function enrichCompetitorWithComments(competitorId: string, account
     return { commentsGenerated: existingComments, status: "NO_ELIGIBLE_POSTS" };
   }
 
-  const batchId = `deeppass_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  let proxyCtx: import("./proxy-pool-manager").StickySessionContext | undefined;
+  try {
+    proxyCtx = acquireStickySession(accountId, competitor.campaignId || "unknown", competitorId) ?? undefined;
+  } catch (err: any) {
+    console.log(`[DataAcq] DEEP_PASS_ENRICH: Could not acquire proxy for ${competitor.name}: ${err.message}. Proceeding without proxy.`);
+  }
+
+  const batchId = `deeppass_real_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  let realCommentsScraped = 0;
+  let syntheticFallbackCount = 0;
   const commentInserts: any[] = [];
-  let commentsGenerated = 0;
 
-  for (const post of postsNeedingComments) {
-    const scrapedPost: ScrapedPost = {
-      postId: post.postId,
-      permalink: post.permalink || "",
-      mediaType: (post.mediaType as any) || "UNKNOWN",
-      timestamp: post.timestamp ? post.timestamp.toISOString() : null,
-      caption: post.caption || null,
-      likes: post.likes || null,
-      comments: post.comments || null,
-      views: post.views || null,
-      videoUrl: null,
-      displayUrl: null,
-      shortcode: post.shortcode || "",
-    };
+  console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — scraping REAL comments for ${postsNeedingComments.length} posts (existing: ${existingComments} comments, ${realComments} real)`);
 
-    const syntheticComments = generateSyntheticCommentSamples(scrapedPost);
-    for (const comment of syntheticComments.slice(0, MAX_COMMENTS_PER_POST_DEEP)) {
-      commentInserts.push({
-        competitorId,
-        accountId,
-        postId: post.postId,
-        commentText: comment.text,
-        sentiment: comment.sentiment,
-        timestamp: post.timestamp || null,
-        batchId,
-        isSynthetic: true,
-        source: "synthetic_enrichment",
-      });
-      commentsGenerated++;
+  try {
+    console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — attempting profile re-scrape for embedded comments`);
+    const profileRescrape = await scrapeInstagramProfile(competitor.profileLink, proxyCtx, 30);
+    const embeddedComments = profileRescrape.embeddedComments || [];
+
+    if (embeddedComments.length > 0) {
+      const existingCIds = new Set<string>();
+      const existingCRows = await db.select({ commentId: ciCompetitorComments.commentId })
+        .from(ciCompetitorComments)
+        .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
+      for (const r of existingCRows) {
+        if (r.commentId) existingCIds.add(r.commentId);
+      }
+
+      for (const rc of embeddedComments) {
+        if (existingCIds.has(rc.commentId)) continue;
+        commentInserts.push({
+          competitorId,
+          accountId,
+          postId: rc.postId,
+          commentId: rc.commentId,
+          username: rc.username,
+          commentText: rc.text,
+          sentiment: computeBasicSentiment(rc.text),
+          timestamp: rc.timestamp ? new Date(rc.timestamp) : null,
+          batchId,
+          isSynthetic: false,
+          source: "embedded_preview_deeppass",
+        });
+        realCommentsScraped++;
+      }
+    }
+
+    if (realCommentsScraped === 0) {
+      const postsForScraping = postsNeedingComments.map(p => ({
+        postId: p.postId,
+        shortcode: p.shortcode || "",
+        commentCount: p.comments || 0,
+      }));
+
+      const commentsNeeded = Math.max(MIN_COMMENTS_THRESHOLD - existingComments, 50);
+      const scrapeResult = await scrapeCommentsForPosts(postsForScraping, proxyCtx, commentsNeeded);
+
+      for (const result of scrapeResult.results) {
+        for (const comment of result.comments) {
+          commentInserts.push({
+            competitorId,
+            accountId,
+            postId: comment.postId,
+            commentId: comment.commentId,
+            username: comment.username,
+            commentText: comment.text,
+            sentiment: computeBasicSentiment(comment.text),
+            timestamp: comment.timestamp ? new Date(comment.timestamp) : null,
+            batchId,
+            isSynthetic: false,
+            source: "real_scrape",
+          });
+          realCommentsScraped++;
+        }
+      }
+    }
+
+    console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — scraped ${realCommentsScraped} real comments (embedded + direct API attempts)`);
+
+    const totalAfterReal = existingComments + realCommentsScraped;
+    if (totalAfterReal < MIN_COMMENTS_THRESHOLD) {
+      console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — real comments insufficient (${totalAfterReal}/${MIN_COMMENTS_THRESHOLD}). Adding synthetic fallback.`);
+
+      if (!options?.skipCooldown && isSyntheticCooldownActive(competitor.lastSyntheticEnrichmentAt)) {
+        console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — synthetic cooldown active, skipping synthetic fallback.`);
+      } else {
+        const embeddedPostIds = new Set(embeddedComments.map(c => c.postId));
+        const postsStillNeedingComments = postsNeedingComments.filter(p => {
+          return !embeddedPostIds.has(p.postId);
+        });
+
+        for (const post of postsStillNeedingComments) {
+          if (existingComments + realCommentsScraped + syntheticFallbackCount >= MIN_COMMENTS_THRESHOLD) break;
+
+          const scrapedPost: ScrapedPost = {
+            postId: post.postId,
+            permalink: post.permalink || "",
+            mediaType: (post.mediaType as any) || "UNKNOWN",
+            timestamp: post.timestamp ? post.timestamp.toISOString() : null,
+            caption: post.caption || null,
+            likes: post.likes || null,
+            comments: post.comments || null,
+            views: post.views || null,
+            videoUrl: null,
+            displayUrl: null,
+            shortcode: post.shortcode || "",
+          };
+
+          const syntheticComments = generateSyntheticCommentSamples(scrapedPost);
+          for (const comment of syntheticComments.slice(0, MAX_COMMENTS_PER_POST_DEEP)) {
+            commentInserts.push({
+              competitorId,
+              accountId,
+              postId: post.postId,
+              commentText: comment.text,
+              sentiment: comment.sentiment,
+              timestamp: post.timestamp || null,
+              batchId,
+              isSynthetic: true,
+              source: "synthetic_fallback",
+            });
+            syntheticFallbackCount++;
+          }
+        }
+      }
+    }
+  } catch (err: any) {
+    console.error(`[DataAcq] DEEP_PASS_ENRICH: Real comment scraping failed for ${competitor.name}: ${err.message}. Falling back to synthetic.`);
+
+    if (!options?.skipCooldown && isSyntheticCooldownActive(competitor.lastSyntheticEnrichmentAt)) {
+      console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — synthetic cooldown active, cannot fallback.`);
+    } else {
+      for (const post of postsNeedingComments) {
+        const scrapedPost: ScrapedPost = {
+          postId: post.postId,
+          permalink: post.permalink || "",
+          mediaType: (post.mediaType as any) || "UNKNOWN",
+          timestamp: post.timestamp ? post.timestamp.toISOString() : null,
+          caption: post.caption || null,
+          likes: post.likes || null,
+          comments: post.comments || null,
+          views: post.views || null,
+          videoUrl: null,
+          displayUrl: null,
+          shortcode: post.shortcode || "",
+        };
+
+        const syntheticComments = generateSyntheticCommentSamples(scrapedPost);
+        for (const comment of syntheticComments.slice(0, MAX_COMMENTS_PER_POST_DEEP)) {
+          commentInserts.push({
+            competitorId,
+            accountId,
+            postId: post.postId,
+            commentText: comment.text,
+            sentiment: comment.sentiment,
+            timestamp: post.timestamp || null,
+            batchId,
+            isSynthetic: true,
+            source: "synthetic_fallback",
+          });
+          syntheticFallbackCount++;
+        }
+      }
+    }
+  } finally {
+    if (proxyCtx) {
+      try { releaseStickySession(proxyCtx); } catch {}
     }
   }
 
@@ -910,27 +1075,29 @@ export async function enrichCompetitorWithComments(competitorId: string, account
     });
   }
 
-  const totalComments = existingComments + commentsGenerated;
+  const totalComments = existingComments + realCommentsScraped + syntheticFallbackCount;
   const coverageMet = totalComments >= MIN_COMMENTS_THRESHOLD;
 
-  const newEnrichmentCount = (competitor.syntheticEnrichmentCount || 0) + 1;
-  const isHighChurn = detectHighSyntheticChurn(newEnrichmentCount, competitor.lastSyntheticEnrichmentAt, competitor.createdAt);
+  if (syntheticFallbackCount > 0) {
+    const newEnrichmentCount = (competitor.syntheticEnrichmentCount || 0) + 1;
+    const isHighChurn = detectHighSyntheticChurn(newEnrichmentCount, competitor.lastSyntheticEnrichmentAt, competitor.createdAt);
 
-  await db.update(ciCompetitors)
-    .set({
-      lastSyntheticEnrichmentAt: new Date(),
-      syntheticEnrichmentCount: newEnrichmentCount,
-      syntheticChurnFlag: isHighChurn ? "HIGH_SYNTHETIC_CHURN" : null,
-      updatedAt: new Date(),
-    })
-    .where(eq(ciCompetitors.id, competitorId));
+    await db.update(ciCompetitors)
+      .set({
+        lastSyntheticEnrichmentAt: new Date(),
+        syntheticEnrichmentCount: newEnrichmentCount,
+        syntheticChurnFlag: isHighChurn ? "HIGH_SYNTHETIC_CHURN" : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(ciCompetitors.id, competitorId));
 
-  if (isHighChurn) {
-    console.log(`[DataAcq] CHURN_WARNING: ${competitor.name} flagged HIGH_SYNTHETIC_CHURN (${newEnrichmentCount} enrichments within ${SYNTHETIC_CHURN_WINDOW_DAYS}d)`);
+    if (isHighChurn) {
+      console.log(`[DataAcq] CHURN_WARNING: ${competitor.name} flagged HIGH_SYNTHETIC_CHURN (${newEnrichmentCount} enrichments within ${SYNTHETIC_CHURN_WINDOW_DAYS}d)`);
+    }
   }
 
   const status = coverageMet ? "ENRICHED" : "INSUFFICIENT_COMMENTS";
-  console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — generated ${commentsGenerated} comments for ${postsNeedingComments.length} posts (total now: ${totalComments}, coverage=${coverageMet ? "MET" : "BELOW_THRESHOLD"}, enrichmentCount=${newEnrichmentCount})`);
+  console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — real=${realCommentsScraped}, synthetic_fallback=${syntheticFallbackCount}, existing=${existingComments}, total=${totalComments} | coverage=${coverageMet ? "MET" : "BELOW"} | status=${status}`);
 
   return { commentsGenerated: totalComments, status };
 }

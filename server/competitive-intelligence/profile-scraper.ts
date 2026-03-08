@@ -48,6 +48,7 @@ export interface ScrapedPost {
 export interface ScrapeResult {
   success: boolean;
   posts: ScrapedPost[];
+  embeddedComments: ScrapedComment[];
   followers: number | null;
   profileName: string | null;
   collectionMethodUsed: "WEB_API" | "HTML_PARSE" | "HEADLESS_RENDER" | "NONE";
@@ -160,6 +161,58 @@ function parsePostFromGraphQL(node: any, handle: string): ScrapedPost {
   };
 }
 
+function extractCommentsFromNode(node: any, postId: string, shortcode: string): ScrapedComment[] {
+  const comments: ScrapedComment[] = [];
+  const seenIds = new Set<string>();
+
+  const commentSources = [
+    node.edge_media_to_parent_comment?.edges,
+    node.edge_media_to_comment?.edges,
+    node.edge_media_preview_comment?.edges,
+  ];
+
+  for (const edges of commentSources) {
+    if (!Array.isArray(edges)) continue;
+    for (const edge of edges) {
+      const cn = edge.node || edge;
+      if (!cn || !cn.text) continue;
+      const cid = cn.id || cn.pk?.toString() || `ec_${postId}_${comments.length}`;
+      if (seenIds.has(cid)) continue;
+      seenIds.add(cid);
+      comments.push({
+        commentId: cid,
+        postId,
+        shortcode,
+        text: String(cn.text).substring(0, 2000),
+        username: cn.owner?.username || cn.user?.username || "unknown",
+        timestamp: cn.created_at ? new Date(cn.created_at * 1000).toISOString() : null,
+        likes: cn.edge_liked_by?.count ?? cn.comment_like_count ?? 0,
+      });
+    }
+  }
+
+  const previewComments = node.preview_comments || node.comments || [];
+  if (Array.isArray(previewComments)) {
+    for (const pc of previewComments) {
+      if (!pc.text && !pc.comment_text) continue;
+      const cid = pc.pk?.toString() || pc.id || `pc_${postId}_${comments.length}`;
+      if (seenIds.has(cid)) continue;
+      seenIds.add(cid);
+      comments.push({
+        commentId: cid,
+        postId,
+        shortcode,
+        text: String(pc.text || pc.comment_text).substring(0, 2000),
+        username: pc.user?.username || pc.owner?.username || "unknown",
+        timestamp: pc.created_at ? new Date(pc.created_at * 1000).toISOString() : null,
+        likes: pc.comment_like_count ?? 0,
+      });
+    }
+  }
+
+  return comments;
+}
+
 const TARGET_POSTS = 14;
 const MAX_PAGINATION_PAGES = 6;
 const INSTAGRAM_PUBLIC_API_CEILING = 12;
@@ -196,7 +249,7 @@ interface PaginationDiagnostics {
   proxyUsed: boolean;
 }
 
-async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionContext, maxPosts: number = TARGET_POSTS): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number; paginationPages: number; rawFetchedCount: number; paginationStopReason: PaginationStopReason; diagnostics: PaginationDiagnostics }> {
+async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionContext, maxPosts: number = TARGET_POSTS): Promise<{ posts: ScrapedPost[]; embeddedComments: ScrapedComment[]; followers: number | null; profileName: string | null; bytesReceived: number; paginationPages: number; rawFetchedCount: number; paginationStopReason: PaginationStopReason; diagnostics: PaginationDiagnostics }> {
   const apiUrl = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`;
 
   const headers: Record<string, string> = {
@@ -306,7 +359,7 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
   if (user.is_private === true) {
     console.log(`[CI Scraper] WEB_API: ACCOUNT_PRIVATE for ${handle}`);
     diag.stopReason = "ACCOUNT_PRIVATE";
-    return { posts: [], followers: user.edge_followed_by?.count ?? null, profileName: user.full_name || handle, bytesReceived, paginationPages: 1, rawFetchedCount: 0, paginationStopReason: "ACCOUNT_PRIVATE", diagnostics: diag };
+    return { posts: [], embeddedComments: [], followers: user.edge_followed_by?.count ?? null, profileName: user.full_name || handle, bytesReceived, paginationPages: 1, rawFetchedCount: 0, paginationStopReason: "ACCOUNT_PRIVATE", diagnostics: diag };
   }
 
   const profileName = user.full_name || user.username || handle;
@@ -317,13 +370,23 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
   const mediaData = user.edge_owner_to_timeline_media;
   const edges = mediaData?.edges || [];
   const posts: ScrapedPost[] = [];
+  const embeddedComments: ScrapedComment[] = [];
   const seenIds = new Set<string>();
+  const seenCommentIds = new Set<string>();
 
   for (const edge of edges) {
     const post = parsePostFromGraphQL(edge.node, handle);
     if (!seenIds.has(post.postId)) {
       seenIds.add(post.postId);
       posts.push(post);
+
+      const nodeComments = extractCommentsFromNode(edge.node, post.postId, post.shortcode);
+      for (const c of nodeComments) {
+        if (!seenCommentIds.has(c.commentId)) {
+          seenCommentIds.add(c.commentId);
+          embeddedComments.push(c);
+        }
+      }
     }
   }
 
@@ -338,20 +401,20 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
     diag.stopReason = posts.length <= INSTAGRAM_PUBLIC_API_CEILING ? "NO_MORE_PAGES" : "NO_MORE_PAGES";
     diag.totalPostsFetched = posts.length;
     console.log(`[CI Scraper] WEB_API: NO_MORE_PAGES — profile has ${diag.totalMediaCount ?? "unknown"} total posts, API returned ${posts.length}. No pagination available.`);
-    return { posts, followers, profileName, bytesReceived, paginationPages: 1, rawFetchedCount: posts.length, paginationStopReason: "NO_MORE_PAGES", diagnostics: diag };
+    return { posts, embeddedComments, followers, profileName, bytesReceived, paginationPages: 1, rawFetchedCount: posts.length, paginationStopReason: "NO_MORE_PAGES", diagnostics: diag };
   }
 
   if (posts.length >= maxPosts) {
     diag.stopReason = "TARGET_REACHED";
     diag.totalPostsFetched = posts.length;
-    return { posts, followers, profileName, bytesReceived, paginationPages: 1, rawFetchedCount: posts.length, paginationStopReason: "TARGET_REACHED", diagnostics: diag };
+    return { posts, embeddedComments, followers, profileName, bytesReceived, paginationPages: 1, rawFetchedCount: posts.length, paginationStopReason: "TARGET_REACHED", diagnostics: diag };
   }
 
   if (!userId) {
     diag.stopReason = "NO_USER_ID";
     diag.totalPostsFetched = posts.length;
     console.log(`[CI Scraper] WEB_API: NO_USER_ID — cannot paginate without userId`);
-    return { posts, followers, profileName, bytesReceived, paginationPages: 1, rawFetchedCount: posts.length, paginationStopReason: "NO_USER_ID", diagnostics: diag };
+    return { posts, embeddedComments, followers, profileName, bytesReceived, paginationPages: 1, rawFetchedCount: posts.length, paginationStopReason: "NO_USER_ID", diagnostics: diag };
   }
 
   diag.paginationAttempted = true;
@@ -407,6 +470,13 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
               if (!seenIds.has(post.postId)) {
                 seenIds.add(post.postId);
                 posts.push(post);
+                const itemComments = extractCommentsFromNode(item, post.postId, post.shortcode);
+                for (const c of itemComments) {
+                  if (!seenCommentIds.has(c.commentId)) {
+                    seenCommentIds.add(c.commentId);
+                    embeddedComments.push(c);
+                  }
+                }
               }
             }
             paginationPages = 2;
@@ -442,6 +512,13 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
                   if (!seenIds.has(post.postId)) {
                     seenIds.add(post.postId);
                     posts.push(post);
+                    const itemComments = extractCommentsFromNode(item, post.postId, post.shortcode);
+                    for (const c of itemComments) {
+                      if (!seenCommentIds.has(c.commentId)) {
+                        seenCommentIds.add(c.commentId);
+                        embeddedComments.push(c);
+                      }
+                    }
                   }
                 }
                 nextMaxId = nextData?.next_max_id;
@@ -545,6 +622,13 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
           if (!seenIds.has(post.postId)) {
             seenIds.add(post.postId);
             posts.push(post);
+            const edgeComments = extractCommentsFromNode(edge.node, post.postId, post.shortcode);
+            for (const c of edgeComments) {
+              if (!seenCommentIds.has(c.commentId)) {
+                seenCommentIds.add(c.commentId);
+                embeddedComments.push(c);
+              }
+            }
           }
         }
 
@@ -587,7 +671,8 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
 
   console.log(`[CI Scraper] WEB_API: FINAL_AUDIT | posts=${posts.length} | pages=${paginationPages} | stopReason=${finalStopReason} | totalMediaOnProfile=${diag.totalMediaCount} | paginationAttempted=${diag.paginationAttempted} | paginationMethod=${diag.paginationMethod || "NONE"} | paginationHTTP=${diag.paginationHttpStatus || "N/A"} | error=${diag.paginationErrorDetail || "NONE"} | for ${handle}`);
 
-  return { posts, followers, profileName, bytesReceived, paginationPages, rawFetchedCount, paginationStopReason: finalStopReason, diagnostics: diag };
+  console.log(`[CI Scraper] WEB_API: EMBEDDED_COMMENTS | ${embeddedComments.length} real comments extracted from ${posts.length} posts | for ${handle}`);
+  return { posts, embeddedComments, followers, profileName, bytesReceived, paginationPages, rawFetchedCount, paginationStopReason: finalStopReason, diagnostics: diag };
 }
 
 function parsePostFromV1Feed(item: any, handle: string): ScrapedPost {
@@ -821,6 +906,242 @@ async function attemptHeadlessRender(profileUrl: string, handle: string, proxyCt
   }
 }
 
+export interface ScrapedComment {
+  commentId: string;
+  postId: string;
+  shortcode: string;
+  text: string;
+  username: string;
+  timestamp: string | null;
+  likes: number;
+}
+
+export interface CommentScrapeResult {
+  success: boolean;
+  comments: ScrapedComment[];
+  shortcode: string;
+  totalAvailable: number | null;
+}
+
+const COMMENT_QUERY_HASH = "97b41c52301f77ce508f55e66d17620e";
+const MAX_COMMENTS_PER_POST = 30;
+
+export async function scrapePostComments(
+  shortcode: string,
+  postId: string,
+  proxyCtx?: StickySessionContext,
+): Promise<CommentScrapeResult> {
+  if (!shortcode) {
+    return { success: false, comments: [], shortcode, totalAvailable: null };
+  }
+
+  const variables = JSON.stringify({ shortcode, first: MAX_COMMENTS_PER_POST });
+  const url = `https://www.instagram.com/graphql/query/?query_hash=${COMMENT_QUERY_HASH}&variables=${encodeURIComponent(variables)}`;
+
+  const headers: Record<string, string> = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "X-IG-App-ID": "936619743392459",
+    "X-Requested-With": "XMLHttpRequest",
+    "Accept": "*/*",
+    "Referer": `https://www.instagram.com/p/${shortcode}/`,
+  };
+
+  let dispatcher: any;
+  if (proxyCtx) {
+    const proxyConfig = getProxyConfig();
+    if (proxyConfig) {
+      dispatcher = new ProxyAgent({
+        uri: `http://${proxyConfig.username}-session-${proxyCtx.session.sessionId}:${proxyConfig.password}@${proxyConfig.host}:${proxyConfig.port}`,
+        requestTls: { rejectUnauthorized: false },
+      });
+    }
+  }
+
+  const fetchOptions: any = { headers, redirect: "follow" };
+  if (dispatcher) fetchOptions.dispatcher = dispatcher;
+
+  try {
+    if (proxyCtx) {
+      await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `COMMENTS:${shortcode}`);
+    }
+
+    const startMs = Date.now();
+    const resp = await fetch(url, fetchOptions);
+
+    if (!resp.ok) {
+      const errBody = await resp.text().catch(() => "");
+      if (proxyCtx) logProxyTelemetry(proxyCtx, `COMMENTS_GRAPHQL`, resp.status, classifyBlock(resp.status, errBody), Date.now() - startMs, false);
+      console.log(`[CI Scraper] COMMENTS: GraphQL HTTP ${resp.status} for ${shortcode} | ${errBody.substring(0, 100)}`);
+
+      if (resp.status === 401 || resp.status === 429) {
+        return await scrapePostCommentsV1(shortcode, postId, proxyCtx, dispatcher);
+      }
+      return { success: false, comments: [], shortcode, totalAvailable: null };
+    }
+
+    const text = await resp.text();
+    const data = JSON.parse(text);
+    const commentEdge = data?.data?.shortcode_media?.edge_media_to_parent_comment;
+    const totalAvailable = commentEdge?.count ?? null;
+    const edges = commentEdge?.edges || [];
+
+    if (proxyCtx) logProxyTelemetry(proxyCtx, `COMMENTS_GRAPHQL`, resp.status, null, Date.now() - startMs, edges.length > 0);
+
+    const comments: ScrapedComment[] = [];
+    for (const edge of edges) {
+      const node = edge.node;
+      if (!node || !node.text) continue;
+      comments.push({
+        commentId: node.id || `comment_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+        postId,
+        shortcode,
+        text: String(node.text).substring(0, 2000),
+        username: node.owner?.username || "unknown",
+        timestamp: node.created_at ? new Date(node.created_at * 1000).toISOString() : null,
+        likes: node.edge_liked_by?.count ?? node.comment_like_count ?? 0,
+      });
+    }
+
+    console.log(`[CI Scraper] COMMENTS: ${comments.length} real comments scraped for ${shortcode} (${totalAvailable} total available)`);
+    return { success: comments.length > 0, comments, shortcode, totalAvailable };
+  } catch (err: any) {
+    console.log(`[CI Scraper] COMMENTS: GraphQL error for ${shortcode}: ${err.message}`);
+    return await scrapePostCommentsV1(shortcode, postId, proxyCtx, dispatcher);
+  }
+}
+
+async function scrapePostCommentsV1(
+  shortcode: string,
+  postId: string,
+  proxyCtx?: StickySessionContext,
+  existingDispatcher?: any,
+): Promise<CommentScrapeResult> {
+  const mediaInfoUrl = `https://www.instagram.com/p/${shortcode}/?__a=1&__d=dis`;
+
+  const headers: Record<string, string> = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "X-IG-App-ID": "936619743392459",
+    "Accept": "*/*",
+  };
+
+  let dispatcher = existingDispatcher;
+  if (!dispatcher && proxyCtx) {
+    const proxyConfig = getProxyConfig();
+    if (proxyConfig) {
+      dispatcher = new ProxyAgent({
+        uri: `http://${proxyConfig.username}-session-${proxyCtx.session.sessionId}:${proxyConfig.password}@${proxyConfig.host}:${proxyConfig.port}`,
+        requestTls: { rejectUnauthorized: false },
+      });
+    }
+  }
+
+  const fetchOptions: any = { headers, redirect: "follow" };
+  if (dispatcher) fetchOptions.dispatcher = dispatcher;
+
+  try {
+    if (proxyCtx) {
+      await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `COMMENTS_V1:${shortcode}`);
+    }
+
+    const startMs = Date.now();
+    const resp = await fetch(mediaInfoUrl, fetchOptions);
+
+    if (!resp.ok) {
+      if (proxyCtx) logProxyTelemetry(proxyCtx, `COMMENTS_V1`, resp.status, classifyBlock(resp.status, ""), Date.now() - startMs, false);
+      console.log(`[CI Scraper] COMMENTS_V1: HTTP ${resp.status} for ${shortcode}`);
+      return { success: false, comments: [], shortcode, totalAvailable: null };
+    }
+
+    const text = await resp.text();
+    const data = JSON.parse(text);
+    const item = data?.items?.[0] || data?.graphql?.shortcode_media;
+    if (!item) {
+      console.log(`[CI Scraper] COMMENTS_V1: No media data for ${shortcode}`);
+      return { success: false, comments: [], shortcode, totalAvailable: null };
+    }
+
+    const commentEdges = item.edge_media_to_parent_comment?.edges
+      || item.edge_media_to_comment?.edges
+      || [];
+    const previewComments = item.preview_comments || item.comments || [];
+    const totalAvailable = item.edge_media_to_parent_comment?.count
+      ?? item.edge_media_to_comment?.count
+      ?? item.comment_count
+      ?? null;
+
+    if (proxyCtx) logProxyTelemetry(proxyCtx, `COMMENTS_V1`, resp.status, null, Date.now() - startMs, commentEdges.length > 0 || previewComments.length > 0);
+
+    const comments: ScrapedComment[] = [];
+    const seenIds = new Set<string>();
+
+    for (const edge of commentEdges) {
+      const node = edge.node || edge;
+      if (!node || !node.text) continue;
+      const cid = node.id || node.pk?.toString() || `c_${comments.length}`;
+      if (seenIds.has(cid)) continue;
+      seenIds.add(cid);
+      comments.push({
+        commentId: cid,
+        postId,
+        shortcode,
+        text: String(node.text).substring(0, 2000),
+        username: node.owner?.username || node.user?.username || "unknown",
+        timestamp: node.created_at ? new Date(node.created_at * 1000).toISOString() : null,
+        likes: node.edge_liked_by?.count ?? node.comment_like_count ?? 0,
+      });
+    }
+
+    for (const c of previewComments) {
+      if (!c.text) continue;
+      const cid = c.pk?.toString() || c.id || `pc_${comments.length}`;
+      if (seenIds.has(cid)) continue;
+      seenIds.add(cid);
+      comments.push({
+        commentId: cid,
+        postId,
+        shortcode,
+        text: String(c.text).substring(0, 2000),
+        username: c.user?.username || "unknown",
+        timestamp: c.created_at ? new Date(c.created_at * 1000).toISOString() : null,
+        likes: c.comment_like_count ?? 0,
+      });
+    }
+
+    console.log(`[CI Scraper] COMMENTS_V1: ${comments.length} real comments for ${shortcode} (${totalAvailable} total available)`);
+    return { success: comments.length > 0, comments, shortcode, totalAvailable };
+  } catch (err: any) {
+    console.log(`[CI Scraper] COMMENTS_V1: Error for ${shortcode}: ${err.message}`);
+    return { success: false, comments: [], shortcode, totalAvailable: null };
+  }
+}
+
+export async function scrapeCommentsForPosts(
+  posts: Array<{ postId: string; shortcode: string; commentCount: number | null }>,
+  proxyCtx?: StickySessionContext,
+  maxTotalComments: number = 200,
+): Promise<{ totalScraped: number; results: CommentScrapeResult[] }> {
+  const sortedPosts = [...posts]
+    .filter(p => p.shortcode && (p.commentCount === null || p.commentCount > 0))
+    .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0));
+
+  const results: CommentScrapeResult[] = [];
+  let totalScraped = 0;
+
+  for (const post of sortedPosts) {
+    if (totalScraped >= maxTotalComments) break;
+
+    await randomDelay();
+    const result = await scrapePostComments(post.shortcode, post.postId, proxyCtx);
+    results.push(result);
+    totalScraped += result.comments.length;
+
+    console.log(`[CI Scraper] COMMENTS_BATCH: ${post.shortcode} → ${result.comments.length} comments | running total: ${totalScraped}/${maxTotalComments}`);
+  }
+
+  console.log(`[CI Scraper] COMMENTS_BATCH_COMPLETE: ${totalScraped} real comments from ${results.length} posts`);
+  return { totalScraped, results };
+}
+
 export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySessionContext, maxPosts: number = TARGET_POSTS): Promise<ScrapeResult> {
   const profileUrl = normalizeInstagramUrl(rawUrl);
   const handle = extractHandleFromUrl(rawUrl);
@@ -845,6 +1166,7 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
     return {
       success: false,
       posts: [],
+      embeddedComments: [],
       followers: null,
       profileName: handle,
       collectionMethodUsed: "NONE",
@@ -871,6 +1193,7 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
   let paginationPages = 0;
   let rawFetchedCount = 0;
   let paginationStopReason = "";
+  let embeddedComments: ScrapedComment[] = [];
 
   attempts.push("WEB_API");
   try {
@@ -880,6 +1203,7 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
       logProxyTelemetry(proxyCtx, "WEB_API", 200, null, Date.now() - startMs, result.posts.length > 0);
     }
     posts = result.posts;
+    embeddedComments = result.embeddedComments || [];
     followers = result.followers;
     profileName = result.profileName;
     paginationPages = result.paginationPages;
@@ -957,9 +1281,12 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
     paginationStopReason = posts.length >= maxPosts ? "TARGET_REACHED" : "INSTAGRAM_API_CEILING";
   }
 
+  console.log(`[CI Scraper] EMBEDDED_COMMENT_SUMMARY | ${embeddedComments.length} real comments from profile scrape | ${posts.length} posts | for ${handle}`);
+
   const result: ScrapeResult = {
     success: posts.length > 0,
     posts: posts.slice(0, maxPosts > 60 ? 60 : maxPosts),
+    embeddedComments,
     followers,
     profileName: profileName || handle,
     collectionMethodUsed,

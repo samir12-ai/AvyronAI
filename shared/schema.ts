@@ -1470,6 +1470,8 @@ export const ciCompetitorComments = pgTable("ci_competitor_comments", {
   competitorId: varchar("competitor_id").notNull(),
   accountId: varchar("account_id").notNull().default("default"),
   postId: text("post_id").notNull(),
+  commentId: varchar("comment_id", { length: 128 }),
+  username: varchar("username", { length: 255 }),
   commentText: text("comment_text"),
   sentiment: doublePrecision("sentiment"),
   timestamp: timestamp("timestamp"),

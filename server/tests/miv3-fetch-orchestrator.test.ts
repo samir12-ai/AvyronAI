@@ -2165,9 +2165,9 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(dataAcqSource).toContain("isDuplicate");
     });
 
-    it("FP-12) FAST_PASS skips comment generation", () => {
+    it("FP-12) FAST_PASS skips synthetic comment generation (real embedded comments still stored)", () => {
       expect(dataAcqSource).toContain('collectionMode !== "FAST_PASS"');
-      expect(dataAcqSource).toContain("FAST_PASS: Skipping comment generation");
+      expect(dataAcqSource).toContain("FAST_PASS: Skipping synthetic comment generation");
     });
 
     it("FP-13) recoverStuckDeepPass respects enrichmentStatus", () => {
@@ -2855,6 +2855,79 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(orchSrc).not.toContain("const INSTAGRAM_API_CEILING = 12");
       expect(orchSrc).not.toContain("INSTAGRAM_API_CEILING_CHECK");
       expect(orchSrc).not.toContain("RECOVERY_API_CEILING");
+    });
+  });
+
+  describe("Embedded Comment Extraction", () => {
+    let scraperSource: string;
+    let dataAcqSource: string;
+
+    beforeAll(() => {
+      scraperSource = require("fs").readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8");
+      dataAcqSource = require("fs").readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8");
+    });
+    it("EC-1) ScrapeResult includes embeddedComments field", () => {
+      expect(scraperSource).toContain("embeddedComments: ScrapedComment[]");
+      expect(scraperSource).toContain("embeddedComments");
+    });
+
+    it("EC-2) extractCommentsFromNode extracts from edge_media_to_comment, edge_media_to_parent_comment, edge_media_preview_comment", () => {
+      expect(scraperSource).toContain("edge_media_to_parent_comment");
+      expect(scraperSource).toContain("edge_media_to_comment");
+      expect(scraperSource).toContain("edge_media_preview_comment");
+    });
+
+    it("EC-3) extractCommentsFromNode also reads preview_comments (v1 feed format)", () => {
+      expect(scraperSource).toContain("preview_comments");
+      expect(scraperSource).toContain("comment_text");
+    });
+
+    it("EC-4) extractCommentsFromNode deduplicates by commentId", () => {
+      expect(scraperSource).toContain("seenIds.has(cid)");
+    });
+
+    it("EC-5) attemptWebProfileApi returns embeddedComments in return type", () => {
+      expect(scraperSource).toContain("embeddedComments: ScrapedComment[]");
+      expect(scraperSource).toContain("EMBEDDED_COMMENTS");
+    });
+
+    it("EC-6) data-acquisition persists embedded comments as isSynthetic=false", () => {
+      expect(dataAcqSource).toContain("embeddedComments");
+      expect(dataAcqSource).toContain('isSynthetic: false');
+      expect(dataAcqSource).toContain('source: "embedded_preview"');
+    });
+
+    it("EC-7) embedded comments are persisted during ALL passes (not just DEEP_PASS)", () => {
+      const embeddedSection = dataAcqSource.indexOf("EMBEDDED_COMMENTS:");
+      const fastPassCheck = dataAcqSource.indexOf('collectionMode !== "FAST_PASS"');
+      expect(embeddedSection).toBeGreaterThan(-1);
+      expect(fastPassCheck).toBeGreaterThan(-1);
+      expect(embeddedSection).toBeLessThan(fastPassCheck);
+    });
+
+    it("EC-8) synthetic comments skip posts that already have real embedded comments", () => {
+      expect(dataAcqSource).toContain("postsWithRealComments");
+      expect(dataAcqSource).toContain("!postsWithRealComments.has(p.postId)");
+    });
+
+    it("EC-9) enrichCompetitorWithComments attempts profile re-scrape for embedded comments", () => {
+      expect(dataAcqSource).toContain("profile re-scrape for embedded comments");
+      expect(dataAcqSource).toContain('source: "embedded_preview_deeppass"');
+    });
+
+    it("EC-10) embedded comment dedup uses commentId to prevent duplicates", () => {
+      expect(dataAcqSource).toContain("existingCommentIds.has(rc.commentId)");
+    });
+
+    it("EC-11) schema includes commentId and username columns for real comment attribution", () => {
+      const schemaSource = require("fs").readFileSync("shared/schema.ts", "utf-8");
+      expect(schemaSource).toContain('commentId: varchar("comment_id"');
+      expect(schemaSource).toContain('username: varchar("username"');
+    });
+
+    it("EC-12) FAST_PASS stores embedded comments but skips synthetic generation", () => {
+      expect(dataAcqSource).toContain("FAST_PASS: Skipping synthetic comment generation");
+      expect(dataAcqSource).toContain("real comments already stored");
     });
   });
 });
