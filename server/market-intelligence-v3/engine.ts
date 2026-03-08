@@ -822,6 +822,32 @@ export class MarketIntelligenceV3 {
       }
     );
 
+    const audiencePressureSignal = Math.round(
+      (demandPressure.components.intentSignalStrength * 0.4 +
+       demandPressure.components.objectionDensity * 0.3 +
+       demandPressure.components.purchaseIntentDensity * 0.3) * 1000
+    ) / 1000;
+
+    const diagnostics: MIDiagnostics = {
+      activityScore: trajectory.marketActivityLevel,
+      competitionIntensityScore: trajectory.competitionIntensityScore,
+      demandScore: trajectory.demandConfidence,
+      narrativeSaturationScore: trajectory.angleSaturationLevel,
+      competitorWeights: signalResults.map(sr => ({
+        competitorId: sr.competitorId,
+        competitorName: sr.competitorName,
+        authorityWeight: sr.authorityWeight,
+        lifecycle: sr.lifecycle,
+      })),
+      sampleBiasFlag: sampleBias.hasBias,
+      realCommentRatio: realDataRatio,
+      demandPressureScore: demandPressure.score,
+      narrativeConvergenceScore: echoChamber.convergenceScore,
+      audiencePressureSignal,
+      echoChamberRisk: echoChamber.echoChamberRisk,
+    };
+    console.log(`[MIv3] DIAGNOSTICS | activity=${diagnostics.activityScore.toFixed(3)} | intensity=${diagnostics.competitionIntensityScore.toFixed(3)} | demand=${diagnostics.demandScore.toFixed(3)} | saturation=${diagnostics.narrativeSaturationScore.toFixed(3)} | sampleBias=${diagnostics.sampleBiasFlag} | realRatio=${diagnostics.realCommentRatio} | demandPressure=${diagnostics.demandPressureScore} | echoChamber=${diagnostics.echoChamberRisk}`);
+
     const snapshotPayload = {
       accountId,
       campaignId,
@@ -889,32 +915,6 @@ export class MarketIntelligenceV3 {
       commentsProcessed: telemetry.commentsProcessed,
       refreshReason: telemetry.refreshReason,
     });
-
-    const audiencePressureSignal = Math.round(
-      (demandPressure.components.intentSignalStrength * 0.4 +
-       demandPressure.components.objectionDensity * 0.3 +
-       demandPressure.components.purchaseIntentDensity * 0.3) * 1000
-    ) / 1000;
-
-    const diagnostics: MIDiagnostics = {
-      activityScore: trajectory.marketActivityLevel,
-      competitionIntensityScore: trajectory.competitionIntensityScore,
-      demandScore: trajectory.demandConfidence,
-      narrativeSaturationScore: trajectory.angleSaturationLevel,
-      competitorWeights: signalResults.map(sr => ({
-        competitorId: sr.competitorId,
-        competitorName: sr.competitorName,
-        authorityWeight: sr.authorityWeight,
-        lifecycle: sr.lifecycle,
-      })),
-      sampleBiasFlag: sampleBias.hasBias,
-      realCommentRatio: realDataRatio,
-      demandPressureScore: demandPressure.score,
-      narrativeConvergenceScore: echoChamber.convergenceScore,
-      audiencePressureSignal,
-      echoChamberRisk: echoChamber.echoChamberRisk,
-    };
-    console.log(`[MIv3] DIAGNOSTICS | activity=${diagnostics.activityScore.toFixed(3)} | intensity=${diagnostics.competitionIntensityScore.toFixed(3)} | demand=${diagnostics.demandScore.toFixed(3)} | saturation=${diagnostics.narrativeSaturationScore.toFixed(3)} | sampleBias=${diagnostics.sampleBiasFlag} | realRatio=${diagnostics.realCommentRatio} | demandPressure=${diagnostics.demandPressureScore} | echoChamber=${diagnostics.echoChamberRisk}`);
 
     const output: MIv3Output = {
       marketState,

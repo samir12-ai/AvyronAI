@@ -1,5 +1,5 @@
 import type { CompetitorSignalResult, IntentCategory, IntentResult, IntentStatus, SignalData } from "./types";
-import { MI_INTENT_WEIGHTS, MI_CONFIDENCE } from "./constants";
+import { MI_INTENT_WEIGHTS, MI_CONFIDENCE, MI_THRESHOLDS } from "./constants";
 
 function computeIntentScores(signals: SignalData): Record<IntentCategory, number> {
   const categories = Object.keys(MI_INTENT_WEIGHTS) as IntentCategory[];
@@ -71,11 +71,11 @@ export function classifyCompetitorIntent(signalResult: CompetitorSignalResult): 
   const commentCount = signalResult.commentCount ?? 0;
 
   const provisionalReasons: string[] = [];
-  if (postCount < 20) {
-    provisionalReasons.push(`posts < 20 (have ${postCount})`);
+  if (postCount < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR) {
+    provisionalReasons.push(`posts < ${MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR} (have ${postCount})`);
   }
-  if (commentCount < 50) {
-    provisionalReasons.push(`comments < 50 (have ${commentCount})`);
+  if (commentCount < MI_THRESHOLDS.MIN_COMMENTS_SAMPLE) {
+    provisionalReasons.push(`comments < ${MI_THRESHOLDS.MIN_COMMENTS_SAMPLE} (have ${commentCount})`);
   }
 
   if (provisionalReasons.length > 0) {
