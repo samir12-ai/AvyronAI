@@ -399,6 +399,8 @@ export function layer7_proofAssetArchitecture(
 export function layer8_mechanismConstruction(
   positioning: PositioningInput,
   proofDemands: ProofDemand[],
+  claims?: ClaimStructure[],
+  pillars?: DifferentiationPillar[],
 ): MechanismCandidate {
   const hasFrameworkDemand = proofDemands.some(d => d.category === "framework_proof" || d.category === "mechanism_proof");
   const hasProcessDemand = proofDemands.some(d => d.category === "process_proof");
@@ -411,7 +413,12 @@ export function layer8_mechanismConstruction(
     (a?.axis || a?.name || "").toLowerCase().match(/method|process|framework|system/)
   );
 
-  if (hasFrameworkDemand || hasMethodAxis) {
+  const validatedClaimCount = claims ? claims.filter(c => c.overallScore >= MIN_PILLAR_SCORE).length : 0;
+  const avgProofability = pillars && pillars.length > 0
+    ? pillars.reduce((s, p) => s + p.proofability, 0) / pillars.length : 0;
+  const hasStructuralSupport = validatedClaimCount >= 2 && avgProofability >= 0.50;
+
+  if ((hasFrameworkDemand || hasMethodAxis) && hasStructuralSupport) {
     return {
       name: null,
       description: "Framework-based differentiation mechanism supported by proof demands and positioning axes",
@@ -421,13 +428,23 @@ export function layer8_mechanismConstruction(
     };
   }
 
-  if (hasProcessDemand) {
+  if (hasProcessDemand && hasStructuralSupport) {
     return {
       name: null,
       description: "Process-based differentiation supported by methodology proof demands",
       supported: true,
       proofBasis: proofDemands.filter(d => d.category === "process_proof").map(d => d.rationale),
       type: "named_process",
+    };
+  }
+
+  if (hasFrameworkDemand || hasMethodAxis || hasProcessDemand) {
+    return {
+      name: null,
+      description: "Differentiation direction identified but insufficient structural support for formal mechanism framing",
+      supported: false,
+      proofBasis: proofDemands.filter(d => d.category === "process_proof" || d.category === "framework_proof").map(d => d.rationale),
+      type: "none",
     };
   }
 
@@ -446,16 +463,44 @@ export function layer9_differentiationPillarScoring(
   trustGaps: TrustGap[],
   proofDemands: ProofDemand[],
   audience: AudienceInput,
+  mi?: MIInput,
 ): DifferentiationPillar[] {
   const pillars: DifferentiationPillar[] = [];
   const objections = Object.keys(audience.objectionMap || {});
 
+  const dominanceData = mi ? (typeof mi.dominanceData === "string" ? safeJsonParse(mi.dominanceData) : mi.dominanceData) : [];
+  const competitorAuthorities: number[] = Array.isArray(dominanceData)
+    ? dominanceData.map((d: any) => {
+        const raw = d.dominanceScore || d.score || 0;
+        return clamp(raw > 1 ? raw / 100 : raw);
+      })
+    : [];
+
   for (const territory of territories) {
     const tName = territory.name;
     const tLower = tName.toLowerCase();
+    const tTokens = new Set(tokenize(tName));
 
     const claimOverlap = competitorClaims.filter(c => jaccardSimilarity(c.claim, tName) > 0.15);
-    const uniqueness = clamp(1 - (claimOverlap.length * 0.15));
+    const narrativeDistance = claimOverlap.length > 0
+      ? 1 - (claimOverlap.reduce((s, c) => s + jaccardSimilarity(c.claim, tName), 0) / claimOverlap.length)
+      : 0.9;
+
+    const totalClaims = competitorClaims.length || 1;
+    const signalRarity = clamp(1 - (claimOverlap.length / totalClaims));
+
+    const competitorNarratives = competitorClaims.map(c => c.claim.toLowerCase());
+    let saturationCount = 0;
+    for (const narrative of competitorNarratives) {
+      const nTokens = new Set(tokenize(narrative));
+      let overlap = 0;
+      for (const t of tTokens) { if (nTokens.has(t)) overlap++; }
+      if (tTokens.size > 0 && overlap / tTokens.size >= 0.3) saturationCount++;
+    }
+    const territorySaturation = clamp(saturationCount / Math.max(competitorNarratives.length, 1));
+
+    const rawUniqueness = (narrativeDistance * 0.40) + (signalRarity * 0.35) + ((1 - territorySaturation) * 0.25);
+    const uniqueness = clamp(Math.min(rawUniqueness, 0.95));
 
     const relevantProof = proofDemands.filter(d => d.requiredFor.includes(tName));
     const proofability = clamp(relevantProof.length > 0 ? relevantProof.reduce((s, d) => s + d.priority, 0) / relevantProof.length : 0.3);
@@ -463,7 +508,14 @@ export function layer9_differentiationPillarScoring(
     const relevantGaps = trustGaps.filter(g => jaccardSimilarity(g.objection, tLower) > 0.10);
     const trustAlignment = clamp(relevantGaps.length > 0 ? relevantGaps.reduce((s, g) => s + g.relevanceToTerritory, 0) / relevantGaps.length : 0.3);
 
-    const positioningAlignment = clamp(territory.confidenceScore || territory.opportunityScore || 0.5);
+    const avgCompetitorAuthority = competitorAuthorities.length > 0
+      ? competitorAuthorities.reduce((s, a) => s + a, 0) / competitorAuthorities.length : 0;
+    const narrativeOverlapPressure = claimOverlap.length > 0
+      ? claimOverlap.reduce((s, c) => s + jaccardSimilarity(c.claim, tName), 0) / claimOverlap.length : 0;
+    const positioningPressure = clamp(
+      (avgCompetitorAuthority * 0.40) + (narrativeOverlapPressure * 0.35) + (territorySaturation * 0.25)
+    );
+    const positioningAlignment = clamp(1 - positioningPressure);
 
     const objectionCoverage = clamp(
       objections.filter(o => jaccardSimilarity(o, tLower) > 0.10).length / Math.max(objections.length, 1)
@@ -548,6 +600,9 @@ STRICT RULES:
 - Do NOT invent new strategy, audience segments, offers, or execution plans
 - Do NOT change the meaning or direction of any pillar or claim
 - Do NOT add pricing, packaging, guarantees, CTAs, or channel recommendations
+- Do NOT generate strategic decisions, funnel structures, offer designs, or execution plans
+- Do NOT reference downstream engines (Strategy, Offer, Funnel, Financial, Execution)
+- ONLY output differentiation territories, claim strength, proof architecture, and mechanism framing
 - ONLY refine the language to be clearer, more distinctive, and more compelling
 - Respond with ONLY valid JSON, no markdown
 
@@ -620,8 +675,60 @@ export function sanitizeGuardrail(text: string): boolean {
   const channelPatterns = /\b(instagram|facebook|tiktok|linkedin|youtube|reels|stories|carousel|ad campaign|media buy|content calendar|posting schedule)\b/;
   const audiencePatterns = /\b(new segment|new persona|audience definition|target demographic|age group \d)/;
   const copyPatterns = /\b(ad copy|landing page|email sequence|sales page|headline:\s|body copy|cta button)\b/;
+  const strategyPatterns = /\b(strategic plan|execution plan|funnel stage|funnel step|offer structure|revenue model|financial forecast|budget allocation|campaign strategy)\b/;
+  const executionPatterns = /\b(publish now|schedule post|send email|launch campaign|deploy funnel|activate sequence|run campaign)\b/;
 
-  return offerPatterns.test(lower) || channelPatterns.test(lower) || audiencePatterns.test(lower) || copyPatterns.test(lower);
+  return offerPatterns.test(lower) || channelPatterns.test(lower) || audiencePatterns.test(lower) || copyPatterns.test(lower) || strategyPatterns.test(lower) || executionPatterns.test(lower);
+}
+
+export function validateTerritoryEvidenceDensity(
+  pillars: DifferentiationPillar[],
+  proofDemands: ProofDemand[],
+  trustGaps: TrustGap[],
+  competitorClaims: CompetitorClaim[],
+): { validatedPillars: DifferentiationPillar[]; downgradedCount: number } {
+  let downgradedCount = 0;
+
+  const validatedPillars = pillars.map(pillar => {
+    const tName = pillar.name;
+    const tLower = tName.toLowerCase();
+
+    const proofClusters = new Set(
+      proofDemands
+        .filter(d => d.requiredFor.includes(tName))
+        .map(d => d.category)
+    );
+    const trustClusters = trustGaps.filter(g => jaccardSimilarity(g.objection, tLower) > 0.10);
+    const competitorEvidence = competitorClaims.filter(c => jaccardSimilarity(c.claim, tName) > 0.10);
+
+    const semanticClusterCount = proofClusters.size;
+
+    let sourceCount = 0;
+    if (proofClusters.size > 0) sourceCount++;
+    if (trustClusters.length > 0) sourceCount++;
+    if (competitorEvidence.length > 0) sourceCount++;
+
+    const hasMinClusters = semanticClusterCount >= 2;
+    const hasMinSources = sourceCount >= 2;
+
+    if (!hasMinClusters || !hasMinSources) {
+      downgradedCount++;
+      const factor = 0.6;
+      return {
+        ...pillar,
+        uniqueness: clamp(pillar.uniqueness * factor),
+        proofability: clamp(pillar.proofability * factor),
+        trustAlignment: clamp(pillar.trustAlignment * factor),
+        positioningAlignment: clamp(pillar.positioningAlignment * factor),
+        overallScore: clamp(pillar.overallScore * factor),
+        description: pillar.description + " [exploratory — low evidence density]",
+      };
+    }
+
+    return pillar;
+  });
+
+  return { validatedPillars, downgradedCount };
 }
 
 export function layer12_stabilityGuard(
@@ -719,9 +826,6 @@ export async function runDifferentiationEngine(
   const l7ProofAssets = layer7_proofAssetArchitecture(l4ProofDemands, l5TrustGaps, l1.territories);
   diagnostics.layer7 = { assetCount: l7ProofAssets.length };
 
-  const l8Mechanism = layer8_mechanismConstruction(positioning, l4ProofDemands);
-  diagnostics.layer8 = { supported: l8Mechanism.supported, type: l8Mechanism.type };
-
   const lowObjectionDensity = originalObjectionCount === 0;
   diagnostics.objectionDerivation = {
     originalCount: originalObjectionCount,
@@ -730,11 +834,16 @@ export async function runDifferentiationEngine(
     lowDensity: lowObjectionDensity,
   };
 
-  const l9Pillars = layer9_differentiationPillarScoring(l1.territories, l2Claims, l5TrustGaps, l4ProofDemands, enrichedAudience);
-  diagnostics.layer9 = { pillarCount: l9Pillars.length, topScore: l9Pillars[0]?.overallScore ?? 0 };
+  const l9RawPillars = layer9_differentiationPillarScoring(l1.territories, l2Claims, l5TrustGaps, l4ProofDemands, enrichedAudience, mi);
+  const evidenceDensity = validateTerritoryEvidenceDensity(l9RawPillars, l4ProofDemands, l5TrustGaps, l2Claims);
+  const l9Pillars = evidenceDensity.validatedPillars.sort((a, b) => b.overallScore - a.overallScore);
+  diagnostics.layer9 = { pillarCount: l9Pillars.length, topScore: l9Pillars[0]?.overallScore ?? 0, downgradedPillars: evidenceDensity.downgradedCount };
 
   const l10Claims = layer10_claimStrengthScoring(l9Pillars, l3Collisions, l1.territories);
   diagnostics.layer10 = { claimCount: l10Claims.length, avgScore: l10Claims.length > 0 ? l10Claims.reduce((s, c) => s + c.overallScore, 0) / l10Claims.length : 0 };
+
+  const l8Mechanism = layer8_mechanismConstruction(positioning, l4ProofDemands, l10Claims, l9Pillars);
+  diagnostics.layer8 = { supported: l8Mechanism.supported, type: l8Mechanism.type };
 
   let finalPillars = l9Pillars;
   let finalClaims = l10Claims;

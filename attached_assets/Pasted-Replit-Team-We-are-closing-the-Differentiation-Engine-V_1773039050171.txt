@@ -1,0 +1,139 @@
+Replit Team,
+
+We are closing the Differentiation Engine V3 phase of the system and need a final hardening pass to ensure the engine is fully stable, logically correct, and free of future architectural conflicts.
+
+The engine is already operational and producing results, but several calibration and boundary protections must be finalized so the system can be considered closed at a 10/10 reliability level.
+
+This request focuses on four areas:
+
+• scoring calibration  
+• evidence validation  
+• engine boundary protection  
+• deployment verification  
+
+The goal is to prevent future logical inflation, false differentiation territories, and cross-engine conflicts with other components of the master architecture.
+
+--------------------------------
+1) Uniqueness Score Calibration
+--------------------------------
+
+Currently several differentiation pillars return Uniqueness values close to or equal to 100%.
+
+This creates unrealistic differentiation strength and can distort downstream strategic decisions.
+
+Uniqueness must be recalibrated using three weighted inputs:
+
+• narrative distance from competitors  
+• rarity of the underlying signal cluster  
+• territory saturation across competitors  
+
+Uniqueness should be clamped below 95% so that perfect differentiation is extremely rare.
+
+This prevents artificial inflation and keeps the model aligned with real market conditions.
+
+--------------------------------
+2) Positioning Pressure Logic
+--------------------------------
+
+Positioning scores currently drop sharply without clearly reflecting competitor strength.
+
+Positioning pressure must be derived from:
+
+• competitor authority weight  
+• narrative overlap between competitors and proposed territory  
+• market saturation level  
+
+Positioning score should be calculated as the inverse of this pressure so the score reflects true competitive difficulty rather than arbitrary penalties.
+
+--------------------------------
+3) Territory Evidence Density Protection
+--------------------------------
+
+Differentiation territories must never be created from weak or repetitive evidence.
+
+Before finalizing a pillar, the engine must verify:
+
+• at least two distinct semantic signal clusters  
+• evidence coming from at least two different sources (MI, Audience, or Competitor analysis)
+
+If these conditions are not met, the territory must be downgraded to a weak or exploratory signal rather than a confirmed differentiation pillar.
+
+This prevents the system from generating artificial or low-confidence territories.
+
+--------------------------------
+4) Mechanism Framing Guard
+--------------------------------
+
+The engine currently outputs mechanism types such as "Named Process."
+
+This output must only appear when sufficient structural support exists.
+
+Mechanism framing should require:
+
+• at least two validated claim structures  
+• proofability score of at least 50
+
+If these conditions are not met, the mechanism should fall back to a generic differentiation structure rather than presenting a formal methodology.
+
+--------------------------------
+5) Engine Boundary Enforcement (Critical)
+
+To avoid architectural conflicts within the master system, confirm that the Differentiation Engine only performs differentiation analysis and does NOT generate strategic decisions.
+
+The engine must remain strictly limited to:
+
+• differentiation territories  
+• claim strength analysis  
+• proof architecture suggestions  
+• mechanism framing recommendations
+
+It must not write or modify outputs belonging to:
+
+• Strategy / Build-The-Plan engine  
+• Offer Engine  
+• Funnel Engine  
+• Financial Governor  
+• Execution engines
+
+This boundary must be protected to avoid cross-engine logic contamination.
+
+--------------------------------
+6) Conflict Prevention With Downstream Engines
+
+Verify that Differentiation outputs remain advisory inputs only.
+
+Strategy, Offer, and Funnel engines must consume differentiation results but retain full authority over final strategic decisions.
+
+This ensures the system architecture remains layered and modular.
+
+--------------------------------
+7) Stability Guard Confirmation
+
+Confirm that Stability Guard continues to fail only for genuine structural issues such as:
+
+• market saturation  
+• insufficient demand  
+• narrative overlap
+
+Differentiation signal density should not trigger structural instability by itself.
+
+--------------------------------
+8) System Deployment Verification (Important)
+
+Please verify that all updates are fully applied across the running environment.
+
+After implementing the changes:
+
+• rebuild the affected modules  
+• restart the runtime environment  
+• confirm that the live system is running the updated logic
+
+A common issue is implementing code changes without refreshing the running environment, leaving the system executing an older version.
+
+Please explicitly confirm that the updated logic is the version currently deployed and running.
+
+--------------------------------
+
+Once these adjustments are implemented and verified, the Differentiation Engine V3 can be considered fully hardened and closed as a stable component of the master architecture.
+
+Thank you.
