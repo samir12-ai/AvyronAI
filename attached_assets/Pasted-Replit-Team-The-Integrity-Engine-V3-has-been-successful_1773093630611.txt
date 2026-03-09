@@ -1,0 +1,198 @@
+Replit Team,
+
+The Integrity Engine V3 has been successfully implemented and verified. With this milestone, the strategic layer of the system is now structurally complete. At this stage, the priority is no longer feature expansion, but operational hardening and system stability.
+
+This message outlines the required actions to ensure the system is fully reliable, conflict-free, and aligned with the Master Plan architecture before continuing development.
+
+Please read carefully and implement the following safeguards.
+
+---
+
+## 1. MASTER PLAN ARCHITECTURE MUST REMAIN INTACT
+
+The system is designed as a layered marketing operating system, and each engine must remain strictly within its role.
+
+Strategic layer engines:
+
+- Market Intelligence  
+- Audience  
+- Positioning  
+- Differentiation  
+- Offer  
+- Funnel  
+- Integrity
+
+Execution layer engines (to come later):
+
+- Awareness  
+- Persuasion  
+- Channels  
+- Financial Governor  
+- Beast Execution
+
+Important rule:  
+No engine is allowed to generate outputs belonging to another engine.
+
+Cross-engine contamination is the most common structural failure in complex AI systems and must be prevented at the code level.
+
+Boundary enforcement must remain active across all engines.
+
+---
+
+## 2. STRICT ENGINE BOUNDARY PROTECTION
+
+Every engine must only produce the outputs assigned to it.
+
+Examples of violations that must be blocked:
+
+Positioning engine must not generate:
+- offers
+- funnels
+- messaging
+
+Offer engine must not generate:
+- funnel structure
+- strategy narratives
+- ad messaging
+
+Funnel engine must not generate:
+- content strategy
+- marketing copy
+- positioning narratives
+
+Integrity engine must not generate:
+- strategy
+- messaging
+- execution steps
+
+If any engine attempts to output content outside its domain, the request must trigger INTEGRITY_FAILED and return no snapshot.
+
+---
+
+## 3. SYSTEM RELIABILITY SAFEGUARDS
+
+Please implement or confirm the following safeguards across all engines.
+
+### Version Integrity
+Every engine must verify the version of upstream snapshots before running analysis.
+
+If upstream snapshots are incompatible or outdated, the engine should refuse execution.
+
+### Snapshot Traceability
+Each engine snapshot must include:
+
+- accountId  
+- campaignId  
+- upstream snapshot IDs  
+- engine version  
+- timestamp
+
+This ensures full traceability and prevents analysis conflicts.
+
+### Account Isolation
+All queries must be scoped by:
+
+accountId + campaignId
+
+This prevents data leakage between users and ensures system isolation.
+
+---
+
+## 4. ROUTE STABILITY AND CONNECTION CONSISTENCY
+
+A recurring issue has previously occurred where routes appear implemented but are not properly connected to the running system.
+
+Before closing any implementation task, please verify the following:
+
+1. Routes are active and reachable
+2. Backend runtime is restarted after changes
+3. The deployed server is running the latest ENGINE_VERSION
+4. Routes return correct data when tested with real snapshot chains
+5. Frontend components correctly read the route responses
+
+This verification step is mandatory.
+
+---
+
+## 5. PRACTICALITY GUARD (ANTI-HALLUCINATION)
+
+All engines must prioritize practical operational outputs, not theoretical explanations.
+
+Common failure pattern in AI systems:
+
+- overly abstract analysis  
+- verbose narrative outputs  
+- speculative reasoning without data support
+
+The engines must remain:
+
+- structured  
+- data-anchored  
+- concise  
+- operationally useful
+
+The goal is decision support, not philosophical analysis.
+
+---
+
+## 6. CONFLICT PREVENTION BETWEEN ENGINES
+
+Another common system failure occurs when downstream engines contradict upstream engines.
+
+Example conflicts to prevent:
+
+- funnel contradicting positioning  
+- offer contradicting differentiation mechanism  
+- messaging contradicting audience insights  
+- trust path inconsistent with buyer readiness
+
+Integrity Engine must continue acting as the final validation gate before downstream execution engines are allowed to run.
+
+---
+
+## 7. DEPLOYMENT VERIFICATION (IMPORTANT)
+
+Please ensure that all changes are actually applied to the running environment.
+
+A frequent mistake occurs when:
+
+- code is written
+- but the running server is not restarted
+- or the deployed runtime still uses an older build
+
+After any structural update:
+
+1. Rebuild backend
+2. Restart runtime
+3. Confirm routes are active
+4. Confirm ENGINE_VERSION is updated
+5. Test with real data
+
+Do not close the task until the live environment is verified.
+
+---
+
+## 8. ACCEPTANCE CRITERIA
+
+The system will be considered stable when:
+
+- all engines respect Master Plan boundaries  
+- no cross-engine outputs are generated  
+- snapshot chains remain intact  
+- route connections are stable  
+- deployment is confirmed active  
+- Integrity Engine successfully validates system coherence
+
+At that point, the strategic system can be considered fully operational and safe for continued expansion.
+
+---
+
+## 9. NEXT DEVELOPMENT PHASE
+
+Once these safeguards are confirmed, development can proceed to the execution layer engines, starting with the Awareness Engine.
+
+The priority moving forward remains the same:
+
+maintain architectural discipline, avoid cross-engine conflicts, and keep the system practical and reliable.
+
+Thank you for your work on implementing and stabilizing the system.

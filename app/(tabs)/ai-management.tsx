@@ -374,6 +374,7 @@ export default function AIManagementScreen() {
     { key: 'differentiation', icon: 'layers-outline', label: 'Differentiation', color: '#8B5CF6', description: '12-layer proof-backed differentiation analysis' },
     { key: 'offers', icon: 'pricetag-outline', label: 'Offer Engine', color: '#F97316', description: '5-layer structured offer construction' },
     { key: 'funnels', icon: 'funnel-outline', label: 'Funnel Engine', color: '#14B8A6', description: '8-layer funnel decision with trust path and proof placement' },
+    { key: 'integrity', icon: 'shield-checkmark-outline', label: 'Integrity Engine', color: '#6366F1', description: 'Final validation gate — 8-layer strategic consistency check before execution' },
   ];
 
   const renderStrategiesBranch = () => (
@@ -1164,7 +1165,6 @@ export default function AIManagementScreen() {
             { key: 'pipeline' as TabView, icon: 'git-merge-outline' as const, label: 'Pipeline', color: '#8B5CF6', advanced: false },
             { key: 'intelligence' as TabView, icon: 'telescope-outline' as const, label: 'Intelligence', color: '#3B82F6', advanced: false },
             { key: 'strategies' as TabView, icon: 'map-outline' as const, label: 'Strategies', color: '#F97316', advanced: false },
-            { key: 'integrity' as TabView, icon: 'shield-outline' as const, label: 'Integrity', color: '#6366F1', advanced: false },
             { key: 'control' as TabView, icon: 'shield-checkmark-outline' as const, label: 'Control', color: '#8B5CF6', advanced: false },
             { key: 'marketdb' as TabView, icon: 'server-outline' as const, label: 'Market DB', color: '#F97316', advanced: true },
             { key: 'publisher' as TabView, icon: 'send-outline' as const, label: 'Publish', color: colors.primary, advanced: false },
