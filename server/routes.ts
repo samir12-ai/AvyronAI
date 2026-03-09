@@ -25,6 +25,7 @@ import { registerDashboardRoutes } from "./dashboard-routes";
 import { registerUIStateRoutes } from "./ui-state-routes";
 import { registerDifferentiationRoutes } from "./differentiation-engine/routes";
 import { registerOfferEngineRoutes } from "./offer-engine/routes";
+import { registerFunnelEngineRoutes } from "./funnel-engine/routes";
 import { storeTokensAfterOAuth, runAllHealthChecks } from "./meta-token-manager";
 import { redactToken } from "./meta-crypto";
 import { initMetaMetrics } from "./meta-metrics";
@@ -1341,6 +1342,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerUIStateRoutes(app);
   registerDifferentiationRoutes(app);
   registerOfferEngineRoutes(app);
+  registerFunnelEngineRoutes(app);
 
   initMetaMetrics();
 

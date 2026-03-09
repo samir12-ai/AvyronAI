@@ -1,0 +1,198 @@
+Replit Team,
+
+We are now moving to Funnel Engine V3.
+
+This engine must be built with the same production-grade discipline as the previous engines. The goal is to create a strong, non-superficial Funnel Decision Engine that stays fully aligned with the master plan, does not branch into other engine responsibilities, and does not create route or connection instability.
+
+Please follow the requirements below strictly.
+
+--------------------------------------------------
+1) MASTER PLAN ALIGNMENT (NON-NEGOTIABLE)
+--------------------------------------------------
+
+Funnel Engine V3 must consume only the approved upstream outputs:
+
+• Market Intelligence Engine  
+• Audience Engine  
+• Positioning Engine  
+• Differentiation Engine  
+• Offer Engine  
+
+It must produce outputs only for downstream use by later engines.
+
+It must not rewrite, reinterpret, or override upstream engines.
+
+--------------------------------------------------
+2) STRICT BOUNDARY PROTECTIONS
+--------------------------------------------------
+
+Funnel Engine must never produce outputs belonging to other engines.
+
+Blocked output domains include:
+
+• strategy decisions  
+• strategic repositioning  
+• offer redesign  
+• pricing logic  
+• budget recommendations  
+• channel selection  
+• media buying  
+• awareness messaging  
+• persuasion copy  
+• scripts  
+• campaign tasks  
+• financial planning  
+• execution plans  
+
+If any of these appear, the engine must hard-fail with integrity protection.
+
+--------------------------------------------------
+3) REDUCE STRATEGY BRANCHING INSIDE FUNNEL ENGINE
+--------------------------------------------------
+
+This is important.
+
+Do not let Funnel Engine over-branch inside the strategy section or behave like a Strategy Engine.
+
+Its role is not to create broad strategic trees or strategic exploration paths.
+
+Its role is only to answer:
+
+• what funnel type fits this offer and market  
+• what trust path is required  
+• what conversion path is appropriate  
+• what proof placement is needed  
+• what friction risks exist  
+
+Please keep the funnel logic focused and disciplined.
+
+The Funnel Engine must not create unnecessary strategic branching or expand into strategic planning logic.
+
+--------------------------------------------------
+4) FUNNEL ENGINE CORE RESPONSIBILITY
+--------------------------------------------------
+
+Funnel Engine V3 must determine:
+
+• primary funnel type  
+• alternative funnel type  
+• rejected funnel type with reason  
+• funnel stage map  
+• trust progression path  
+• proof placement logic  
+• commitment level  
+• friction map  
+• funnel strength score  
+
+It must behave as a Funnel Decision Engine, not a generator of vague funnel templates.
+
+--------------------------------------------------
+5) CORE FUNNEL LOGIC LAYERS
+--------------------------------------------------
+
+Build Funnel Engine V3 using the following internal layers:
+
+1. Funnel Eligibility Detection  
+2. Offer-to-Funnel Fit  
+3. Audience Friction Modeling  
+4. Trust Path Construction  
+5. Proof Placement Logic  
+6. Commitment Level Matching  
+7. Funnel Integrity Guard  
+8. Funnel Strength Scoring  
+
+All layers must remain inside the Funnel Engine boundary only.
+
+--------------------------------------------------
+6) REQUIRED SAFEGUARDS
+--------------------------------------------------
+
+Please include the following safeguards from the start:
+
+• Funnel Boundary Guard  
+• Trust-Before-Ask Guard  
+• Commitment Mismatch Guard  
+• Proof Placement Guard  
+• Generic Funnel Detector  
+• Complexity Compression Guard  
+• Offer Fit Guard  
+• Audience Readiness Guard  
+
+These are required to prevent shallow, template-like funnels.
+
+--------------------------------------------------
+7) OFFER AND FUNNEL USER SELECTION UPDATE
+--------------------------------------------------
+
+Add a user-facing selection update to the workflow.
+
+When multiple offers exist, the client must be able to select which offer they want to continue with before the plan proceeds.
+
+The same must apply to funnels.
+
+Requirements:
+
+• In the Offer section, allow the client to select the preferred offer option  
+• In the Funnel section, allow the client to select the preferred funnel option  
+• Once selected, the system must update the downstream plan to use the chosen option  
+• The selected offer and selected funnel must become the active inputs for later engines  
+• This update must be persistent and must not break the existing snapshot chain
+
+This is important because the user may want to continue the plan using a different valid offer or funnel than the system’s default primary recommendation.
+
+--------------------------------------------------
+8) ROUTES AND CONNECTION STABILITY
+--------------------------------------------------
+
+Please pay special attention here.
+
+A recurring issue in previous work has been route disconnections, missing endpoint alignment, or engines being implemented correctly in code but not connected properly in the running system.
+
+For Funnel Engine V3:
+
+• verify route registration  
+• verify endpoint consistency  
+• verify account and campaign scoping  
+• verify snapshot dependency wiring  
+• verify downstream handoff compatibility  
+• verify that Offer selection and Funnel selection updates do not break route connections
+
+No disconnected routes, no broken endpoint wiring, and no partial pipeline connections.
+
+--------------------------------------------------
+9) COMMON REPLIT ISSUE — DEPLOYMENT / LIVE SYSTEM VERIFICATION
+--------------------------------------------------
+
+Please do not repeat the common mistake where code is updated but the live system continues running old logic.
+
+After implementation, you must:
+
+• rebuild affected modules  
+• restart the backend/runtime  
+• confirm the live environment is running the new Funnel Engine logic  
+• confirm the new selection update is active in the live system  
+• confirm that routes are live and connected  
+• confirm downstream engines receive the updated selected offer and selected funnel correctly
+
+Do not close the task unless deployment is actually applied system-wide and verified in the running environment.
+
+--------------------------------------------------
+10) ACCEPTANCE CRITERIA
+--------------------------------------------------
+
+Funnel Engine V3 is complete only when:
+
+• it stays fully inside Funnel Engine boundaries  
+• it does not branch into Strategy Engine responsibilities  
+• it does not generate offer, channel, pricing, persuasion, or execution outputs  
+• it produces primary / alternative / rejected funnel outputs  
+• it explains why the primary funnel was selected  
+• it explains why the rejected funnel was rejected  
+• it supports user selection of offer and funnel  
+• the selected option updates the downstream plan correctly  
+• route connections remain stable  
+• live deployment is verified and running the new logic
+
+Please implement carefully and close only after full system verification.
+
+Thank you.

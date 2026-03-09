@@ -1,0 +1,835 @@
+import { aiChat } from "../ai-client";
+import {
+  ENGINE_VERSION,
+  FUNNEL_STRENGTH_WEIGHTS,
+  GENERIC_FUNNEL_PATTERNS,
+  GENERIC_PENALTY,
+  BOUNDARY_BLOCKED_PATTERNS,
+  AWARENESS_TO_FUNNEL_MAP,
+  STATUS,
+} from "./constants";
+import type {
+  FunnelMIInput,
+  FunnelAudienceInput,
+  FunnelOfferInput,
+  FunnelPositioningInput,
+  FunnelDifferentiationInput,
+  FunnelCandidate,
+  FunnelStage,
+  TrustPathStep,
+  ProofPlacement,
+  FrictionPoint,
+  FunnelResult,
+} from "./types";
+
+function clamp(v: number, min = 0, max = 1): number {
+  return Math.max(min, Math.min(max, v));
+}
+
+export function detectGenericFunnel(text: string): boolean {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  return GENERIC_FUNNEL_PATTERNS.some(p => p.test(lower));
+}
+
+export function sanitizeBoundary(text: string): { clean: boolean; violations: string[] } {
+  if (!text) return { clean: true, violations: [] };
+  const lower = text.toLowerCase();
+  const violations: string[] = [];
+
+  for (const [domain, pattern] of Object.entries(BOUNDARY_BLOCKED_PATTERNS)) {
+    if (pattern.test(lower)) {
+      violations.push(`Boundary violation: ${domain} domain detected`);
+    }
+  }
+
+  return { clean: violations.length === 0, violations };
+}
+
+export function layer1_funnelEligibilityDetection(
+  audience: FunnelAudienceInput,
+  offer: FunnelOfferInput,
+): { eligible: boolean; eligibilityScore: number; reasons: string[] } {
+  const reasons: string[] = [];
+  let score = 0;
+
+  const pains = audience.audiencePains || [];
+  const desires = Object.entries(audience.desireMap || {});
+  const segments = audience.audienceSegments || [];
+
+  if (pains.length > 0) {
+    score += 0.2;
+    reasons.push(`${pains.length} audience pain points identified`);
+  }
+  if (desires.length > 0) {
+    score += 0.15;
+    reasons.push(`${desires.length} desire vectors mapped`);
+  }
+  if (segments.length > 0) {
+    score += 0.1;
+    reasons.push(`${segments.length} audience segments defined`);
+  }
+
+  if (offer.completeness.complete) {
+    score += 0.25;
+    reasons.push("Offer construction complete");
+  } else {
+    reasons.push(`Offer incomplete: ${offer.completeness.missingLayers.join(", ")}`);
+  }
+
+  if (offer.offerStrengthScore > 0.5) {
+    score += 0.15;
+    reasons.push(`Offer strength above threshold: ${offer.offerStrengthScore.toFixed(2)}`);
+  }
+
+  if (audience.maturityIndex !== null && audience.maturityIndex > 0.3) {
+    score += 0.1;
+    reasons.push("Audience maturity sufficient for funnel engagement");
+  }
+
+  if (audience.awarenessLevel) {
+    score += 0.05;
+    reasons.push(`Awareness level identified: ${audience.awarenessLevel}`);
+  }
+
+  score = clamp(score);
+  const eligible = score >= 0.3;
+
+  return { eligible, eligibilityScore: score, reasons };
+}
+
+export function layer2_offerToFunnelFit(
+  offer: FunnelOfferInput,
+  audience: FunnelAudienceInput,
+): { funnelType: string; fitScore: number; rationale: string } {
+  const awareness = audience.awarenessLevel || "problem_aware";
+  const maturity = audience.maturityIndex ?? 0.5;
+  const offerStrength = offer.offerStrengthScore;
+
+  const candidateTypes = AWARENESS_TO_FUNNEL_MAP[awareness] || AWARENESS_TO_FUNNEL_MAP["problem_aware"];
+
+  let funnelType = candidateTypes[0];
+  let fitScore = 0.5;
+
+  if (offerStrength > 0.7 && maturity > 0.6) {
+    funnelType = "direct";
+    fitScore = 0.85;
+  } else if (offerStrength > 0.5 && offer.deliverables.length > 3) {
+    funnelType = candidateTypes.includes("webinar") ? "webinar" : candidateTypes[0];
+    fitScore = 0.7;
+  } else if (offer.frictionLevel > 0.6) {
+    funnelType = candidateTypes.includes("challenge") ? "challenge" : "webinar";
+    fitScore = 0.6;
+  } else if (maturity < 0.3) {
+    funnelType = "challenge";
+    fitScore = 0.55;
+  }
+
+  if (offer.genericFlag) {
+    fitScore = clamp(fitScore - 0.15);
+  }
+
+  const rationale = `${funnelType} funnel selected for ${awareness} audience (maturity: ${maturity.toFixed(2)}, offer strength: ${offerStrength.toFixed(2)})`;
+
+  return { funnelType, fitScore: clamp(fitScore), rationale };
+}
+
+export function layer3_audienceFrictionModeling(
+  audience: FunnelAudienceInput,
+  funnelType: string,
+): { frictionPoints: FrictionPoint[]; audienceFrictionScore: number } {
+  const frictionPoints: FrictionPoint[] = [];
+  const awareness = audience.awarenessLevel || "unaware";
+  const maturity = audience.maturityIndex ?? 0.5;
+  const objections = Object.entries(audience.objectionMap || {});
+
+  if (awareness === "unaware" || awareness === "problem_aware") {
+    frictionPoints.push({
+      stage: "entry",
+      frictionType: "awareness_gap",
+      severity: awareness === "unaware" ? 0.9 : 0.6,
+      mitigation: "Add education layer before commitment request",
+    });
+  }
+
+  if (maturity < 0.4) {
+    frictionPoints.push({
+      stage: "consideration",
+      frictionType: "maturity_deficit",
+      severity: clamp(1 - maturity),
+      mitigation: "Include guided discovery steps to build readiness",
+    });
+  }
+
+  for (const [objection] of objections.slice(0, 3)) {
+    frictionPoints.push({
+      stage: "decision",
+      frictionType: "objection_barrier",
+      severity: 0.5,
+      mitigation: `Address objection: ${objection}`,
+    });
+  }
+
+  if (funnelType === "direct" && awareness !== "most_aware" && awareness !== "product_aware") {
+    frictionPoints.push({
+      stage: "conversion",
+      frictionType: "commitment_mismatch",
+      severity: 0.7,
+      mitigation: "Direct funnel requires higher awareness — add intermediate step",
+    });
+  }
+
+  if (funnelType === "application" || funnelType === "consultation") {
+    frictionPoints.push({
+      stage: "application",
+      frictionType: "high_commitment_barrier",
+      severity: 0.6,
+      mitigation: "Reduce application friction with pre-qualification",
+    });
+  }
+
+  const totalSeverity = frictionPoints.reduce((sum, fp) => sum + fp.severity, 0);
+  const audienceFrictionScore = frictionPoints.length > 0
+    ? clamp(1 - (totalSeverity / (frictionPoints.length * 1.5)))
+    : 0.8;
+
+  return { frictionPoints, audienceFrictionScore };
+}
+
+export function layer4_trustPathConstruction(
+  audience: FunnelAudienceInput,
+  differentiation: FunnelDifferentiationInput,
+  funnelType: string,
+): { trustPath: TrustPathStep[]; trustPathScore: number } {
+  const trustPath: TrustPathStep[] = [];
+  const awareness = audience.awarenessLevel || "problem_aware";
+  const proofArch = differentiation.proofArchitecture || [];
+  const pillars = differentiation.pillars || [];
+
+  let stepNum = 1;
+
+  if (awareness === "unaware" || awareness === "problem_aware") {
+    trustPath.push({
+      step: stepNum++,
+      action: "Deliver problem awareness content",
+      proofType: "transparency_proof",
+      audienceState: "Recognizing the problem exists",
+    });
+  }
+
+  trustPath.push({
+    step: stepNum++,
+    action: "Present mechanism credibility",
+    proofType: "process_proof",
+    audienceState: "Understanding how the solution works",
+  });
+
+  if (proofArch.some((p: any) => p.category === "case_proof")) {
+    trustPath.push({
+      step: stepNum++,
+      action: "Show validated case outcomes",
+      proofType: "case_proof",
+      audienceState: "Seeing evidence from others",
+    });
+  }
+
+  if (pillars.length > 0) {
+    trustPath.push({
+      step: stepNum++,
+      action: "Demonstrate differentiation pillars",
+      proofType: "framework_proof",
+      audienceState: "Understanding unique advantage",
+    });
+  }
+
+  if (proofArch.some((p: any) => p.category === "outcome_proof")) {
+    trustPath.push({
+      step: stepNum++,
+      action: "Deliver outcome evidence",
+      proofType: "outcome_proof",
+      audienceState: "Believing in the promised result",
+    });
+  }
+
+  trustPath.push({
+    step: stepNum++,
+    action: "Present commitment opportunity",
+    proofType: "transparency_proof",
+    audienceState: "Ready to commit",
+  });
+
+  const hasCase = proofArch.some((p: any) => p.category === "case_proof");
+  const hasOutcome = proofArch.some((p: any) => p.category === "outcome_proof");
+  const hasProcess = proofArch.some((p: any) => p.category === "process_proof");
+  const proofCoverage = [hasCase, hasOutcome, hasProcess].filter(Boolean).length / 3;
+  const trustPathScore = clamp(0.3 + (proofCoverage * 0.4) + (trustPath.length >= 4 ? 0.2 : 0.1) + (pillars.length > 0 ? 0.1 : 0));
+
+  return { trustPath, trustPathScore };
+}
+
+export function layer5_proofPlacementLogic(
+  differentiation: FunnelDifferentiationInput,
+  stages: FunnelStage[],
+): { proofPlacements: ProofPlacement[]; proofPlacementScore: number; missingPlacements: string[] } {
+  const proofPlacements: ProofPlacement[] = [];
+  const proofArch = differentiation.proofArchitecture || [];
+  const availableProofTypes = new Set<string>();
+
+  for (const asset of proofArch) {
+    if (asset.category) availableProofTypes.add(asset.category);
+  }
+
+  for (const pillar of differentiation.pillars || []) {
+    for (const p of pillar.supportingProof || []) {
+      availableProofTypes.add(p);
+    }
+  }
+
+  const placementMap: Record<string, { proofType: string; purpose: string }[]> = {
+    entry: [
+      { proofType: "transparency_proof", purpose: "Build initial credibility" },
+      { proofType: "case_proof", purpose: "Show social proof at entry" },
+    ],
+    education: [
+      { proofType: "process_proof", purpose: "Demonstrate methodology" },
+      { proofType: "framework_proof", purpose: "Show structured approach" },
+    ],
+    consideration: [
+      { proofType: "outcome_proof", purpose: "Provide outcome evidence" },
+      { proofType: "case_proof", purpose: "Reinforce with case studies" },
+    ],
+    decision: [
+      { proofType: "comparative_proof", purpose: "Show competitive advantage" },
+      { proofType: "outcome_proof", purpose: "Final outcome validation" },
+    ],
+    conversion: [
+      { proofType: "transparency_proof", purpose: "Remove final objections" },
+      { proofType: "case_proof", purpose: "Last-mile social proof" },
+    ],
+  };
+
+  const missingPlacements: string[] = [];
+
+  for (const stage of stages) {
+    const stageName = stage.name.toLowerCase();
+    const mappings = placementMap[stageName] || placementMap["consideration"] || [];
+
+    for (const mapping of mappings) {
+      if (availableProofTypes.has(mapping.proofType)) {
+        proofPlacements.push({
+          stage: stage.name,
+          proofType: mapping.proofType,
+          placement: `${mapping.proofType} at ${stage.name} stage`,
+          purpose: mapping.purpose,
+        });
+      } else {
+        missingPlacements.push(`Missing ${mapping.proofType} at ${stage.name}`);
+      }
+    }
+  }
+
+  const totalPossible = stages.length * 2;
+  const proofPlacementScore = totalPossible > 0
+    ? clamp(proofPlacements.length / totalPossible)
+    : 0.2;
+
+  return { proofPlacements, proofPlacementScore, missingPlacements };
+}
+
+export function layer6_commitmentLevelMatching(
+  audience: FunnelAudienceInput,
+  offer: FunnelOfferInput,
+  funnelType: string,
+): { commitmentLevel: string; commitmentMatchScore: number; analysis: string } {
+  const awareness = audience.awarenessLevel || "problem_aware";
+  const maturity = audience.maturityIndex ?? 0.5;
+  const offerStrength = offer.offerStrengthScore;
+
+  const commitmentLevels: Record<string, number> = {
+    micro: 0.1,
+    low: 0.3,
+    medium: 0.5,
+    high: 0.7,
+    very_high: 0.9,
+  };
+
+  const funnelCommitmentRequirement: Record<string, string> = {
+    direct: "high",
+    webinar: "medium",
+    challenge: "medium",
+    vsl: "medium",
+    application: "very_high",
+    consultation: "very_high",
+    tripwire: "micro",
+    "product-launch": "low",
+    membership: "high",
+    hybrid: "medium",
+  };
+
+  const requiredLevel = funnelCommitmentRequirement[funnelType] || "medium";
+  const requiredScore = commitmentLevels[requiredLevel] || 0.5;
+
+  let audienceReadiness = 0.5;
+  if (awareness === "most_aware") audienceReadiness = 0.9;
+  else if (awareness === "product_aware") audienceReadiness = 0.7;
+  else if (awareness === "solution_aware") audienceReadiness = 0.55;
+  else if (awareness === "problem_aware") audienceReadiness = 0.35;
+  else audienceReadiness = 0.2;
+
+  audienceReadiness = clamp(audienceReadiness + (maturity * 0.2));
+
+  const gap = Math.abs(requiredScore - audienceReadiness);
+  const commitmentMatchScore = clamp(1 - gap);
+
+  let commitmentLevel: string;
+  if (audienceReadiness >= 0.7) commitmentLevel = "high";
+  else if (audienceReadiness >= 0.5) commitmentLevel = "medium";
+  else if (audienceReadiness >= 0.3) commitmentLevel = "low";
+  else commitmentLevel = "micro";
+
+  const analysis = gap > 0.3
+    ? `Commitment mismatch: ${funnelType} requires ${requiredLevel} commitment but audience readiness is ${commitmentLevel} (gap: ${gap.toFixed(2)})`
+    : `Commitment aligned: ${funnelType} commitment level matches audience readiness (${commitmentLevel})`;
+
+  return { commitmentLevel, commitmentMatchScore, analysis };
+}
+
+export function layer7_funnelIntegrityGuard(
+  candidate: FunnelCandidate,
+  audience: FunnelAudienceInput,
+  offer: FunnelOfferInput,
+  positioning: FunnelPositioningInput,
+  differentiation: FunnelDifferentiationInput,
+): { passed: boolean; failures: string[] } {
+  const failures: string[] = [];
+
+  if (candidate.trustPath.length < 2) {
+    failures.push("Trust-before-ask violation: trust path has fewer than 2 steps");
+  }
+
+  const trustBeforeCommit = candidate.trustPath.some(
+    (s) => s.step < candidate.trustPath.length && s.proofType !== "transparency_proof"
+  );
+  if (!trustBeforeCommit && candidate.trustPath.length > 1) {
+    failures.push("Trust-before-ask: no substantive proof before commitment request");
+  }
+
+  if (candidate.commitmentMatchScore < 0.4) {
+    failures.push(`Commitment mismatch: score ${candidate.commitmentMatchScore.toFixed(2)} below threshold`);
+  }
+
+  if (candidate.proofPlacementScore < 0.3) {
+    failures.push(`Proof placement insufficient: score ${candidate.proofPlacementScore.toFixed(2)} below threshold`);
+  }
+
+  const isGeneric = detectGenericFunnel(candidate.funnelName) || detectGenericFunnel(candidate.funnelType);
+  if (isGeneric) {
+    failures.push("Generic funnel detected — lacks specificity");
+  }
+
+  if (candidate.stageMap.length > 7) {
+    failures.push(`Complexity compression needed: ${candidate.stageMap.length} stages exceeds maximum`);
+  }
+
+  if (candidate.offerFitScore < 0.35) {
+    failures.push(`Offer-funnel fit too low: ${candidate.offerFitScore.toFixed(2)}`);
+  }
+
+  if (candidate.audienceFrictionScore < 0.3) {
+    failures.push(`Audience readiness too low: friction score ${candidate.audienceFrictionScore.toFixed(2)}`);
+  }
+
+  return { passed: failures.length === 0, failures };
+}
+
+export function layer8_funnelStrengthScoring(candidate: FunnelCandidate): number {
+  const raw =
+    candidate.eligibilityScore * FUNNEL_STRENGTH_WEIGHTS.eligibility +
+    candidate.offerFitScore * FUNNEL_STRENGTH_WEIGHTS.offerFit +
+    candidate.audienceFrictionScore * FUNNEL_STRENGTH_WEIGHTS.audienceFriction +
+    candidate.trustPathScore * FUNNEL_STRENGTH_WEIGHTS.trustPath +
+    candidate.proofPlacementScore * FUNNEL_STRENGTH_WEIGHTS.proofPlacement +
+    candidate.commitmentMatchScore * FUNNEL_STRENGTH_WEIGHTS.commitmentMatch +
+    (candidate.integrityResult.passed ? 1 : 0.4) * FUNNEL_STRENGTH_WEIGHTS.integrity;
+
+  let score = clamp(raw);
+
+  if (candidate.genericFlag) {
+    score = clamp(score - GENERIC_PENALTY);
+  }
+
+  if (!candidate.integrityResult.passed) {
+    score = clamp(score * 0.75);
+  }
+
+  return score;
+}
+
+function buildStageMap(funnelType: string, awareness: string): FunnelStage[] {
+  const stages: FunnelStage[] = [];
+
+  if (awareness === "unaware" || awareness === "problem_aware") {
+    stages.push({
+      name: "entry",
+      purpose: "Capture attention and establish problem awareness",
+      contentType: "educational_content",
+      conversionGoal: "opt_in",
+    });
+  }
+
+  stages.push({
+    name: "education",
+    purpose: "Build understanding of the solution approach",
+    contentType: "mechanism_demonstration",
+    conversionGoal: "engagement",
+  });
+
+  if (funnelType === "webinar" || funnelType === "challenge") {
+    stages.push({
+      name: "engagement",
+      purpose: funnelType === "webinar" ? "Deliver value through live presentation" : "Guide through structured challenge",
+      contentType: funnelType === "webinar" ? "webinar_content" : "challenge_content",
+      conversionGoal: "commitment",
+    });
+  }
+
+  stages.push({
+    name: "consideration",
+    purpose: "Present proof and build conviction",
+    contentType: "proof_content",
+    conversionGoal: "intent",
+  });
+
+  stages.push({
+    name: "decision",
+    purpose: "Remove final objections and present offer",
+    contentType: "offer_presentation",
+    conversionGoal: "decision",
+  });
+
+  stages.push({
+    name: "conversion",
+    purpose: "Facilitate commitment and purchase",
+    contentType: "conversion_content",
+    conversionGoal: "purchase",
+  });
+
+  return stages;
+}
+
+function buildFunnelCandidate(
+  name: string,
+  funnelType: string,
+  audience: FunnelAudienceInput,
+  offer: FunnelOfferInput,
+  positioning: FunnelPositioningInput,
+  differentiation: FunnelDifferentiationInput,
+): FunnelCandidate {
+  const awareness = audience.awarenessLevel || "problem_aware";
+  const stageMap = buildStageMap(funnelType, awareness);
+
+  const eligibility = layer1_funnelEligibilityDetection(audience, offer);
+  const fitResult = layer2_offerToFunnelFit(offer, audience);
+  const frictionResult = layer3_audienceFrictionModeling(audience, funnelType);
+  const trustResult = layer4_trustPathConstruction(audience, differentiation, funnelType);
+  const proofResult = layer5_proofPlacementLogic(differentiation, stageMap);
+  const commitResult = layer6_commitmentLevelMatching(audience, offer, funnelType);
+
+  const isGeneric = detectGenericFunnel(name) || detectGenericFunnel(funnelType);
+
+  const candidate: FunnelCandidate = {
+    funnelName: name,
+    funnelType,
+    stageMap,
+    trustPath: trustResult.trustPath,
+    proofPlacements: proofResult.proofPlacements,
+    commitmentLevel: commitResult.commitmentLevel,
+    frictionMap: frictionResult.frictionPoints,
+    funnelStrengthScore: 0,
+    eligibilityScore: eligibility.eligibilityScore,
+    offerFitScore: fitResult.fitScore,
+    audienceFrictionScore: frictionResult.audienceFrictionScore,
+    trustPathScore: trustResult.trustPathScore,
+    proofPlacementScore: proofResult.proofPlacementScore,
+    commitmentMatchScore: commitResult.commitmentMatchScore,
+    integrityResult: { passed: true, failures: [] },
+    genericFlag: isGeneric,
+  };
+
+  const integrityResult = layer7_funnelIntegrityGuard(candidate, audience, offer, positioning, differentiation);
+  candidate.integrityResult = integrityResult;
+
+  candidate.funnelStrengthScore = layer8_funnelStrengthScoring(candidate);
+
+  return candidate;
+}
+
+function buildEmptyFunnel(): FunnelCandidate {
+  return {
+    funnelName: "No Funnel",
+    funnelType: "none",
+    stageMap: [],
+    trustPath: [],
+    proofPlacements: [],
+    commitmentLevel: "none",
+    frictionMap: [],
+    funnelStrengthScore: 0,
+    eligibilityScore: 0,
+    offerFitScore: 0,
+    audienceFrictionScore: 0,
+    trustPathScore: 0,
+    proofPlacementScore: 0,
+    commitmentMatchScore: 0,
+    integrityResult: { passed: false, failures: ["No data"] },
+    genericFlag: false,
+  };
+}
+
+export async function aiFunnelGeneration(
+  audience: FunnelAudienceInput,
+  offer: FunnelOfferInput,
+  positioning: FunnelPositioningInput,
+  differentiation: FunnelDifferentiationInput,
+  accountId: string,
+): Promise<{ primary: { name: string; type: string }; alternative: { name: string; type: string }; rejected: { name: string; type: string; rejectionReason: string } }> {
+  const pains = audience.audiencePains || [];
+  const desires = Object.entries(audience.desireMap || {});
+  const pillars = differentiation.pillars || [];
+  const mechanism = differentiation.mechanismFraming || {};
+
+  const prompt = `You are a Funnel Architect. Generate three funnel concepts based on the market intelligence below.
+
+STRICT RULES:
+- Do NOT generate strategy decisions, strategic repositioning, offer redesign, pricing logic, budget recommendations, channel selection, media buying, awareness messaging, persuasion copy, scripts, campaign tasks, financial planning, or execution plans
+- ONLY output funnel definitions: name, type (direct, webinar, challenge, vsl, application, consultation, tripwire, product-launch, membership, hybrid)
+- Funnels must be specific and non-generic. Avoid "standard funnel" or "basic sales funnel"
+- Each funnel must define the JOURNEY the buyer takes from awareness to commitment
+- Respond with ONLY valid JSON, no markdown
+
+Market Context:
+- Offer: ${offer.offerName} — ${offer.coreOutcome}
+- Top Pains: ${JSON.stringify(pains.slice(0, 5).map((p: any) => typeof p === "string" ? p : p?.pain || p?.name))}
+- Top Desires: ${JSON.stringify(desires.slice(0, 5).map(([k]) => k))}
+- Awareness Level: ${audience.awarenessLevel || "unknown"}
+- Maturity Index: ${audience.maturityIndex ?? "unknown"}
+- Differentiation Pillars: ${JSON.stringify(pillars.slice(0, 3).map((p: any) => p.name))}
+- Mechanism: ${mechanism.description || "No validated mechanism"}
+- Enemy: ${positioning.enemyDefinition || "Not defined"}
+- Narrative: ${positioning.narrativeDirection || "Not defined"}
+- Offer Strength: ${offer.offerStrengthScore.toFixed(2)}
+
+Return JSON:
+{
+  "primary": { "name": "Specific funnel name", "type": "funnel_type" },
+  "alternative": { "name": "Alternative funnel name", "type": "funnel_type" },
+  "rejected": { "name": "Rejected funnel name", "type": "funnel_type", "rejectionReason": "Why this funnel fails" }
+}`;
+
+  try {
+    const completion = await aiChat({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 800,
+      temperature: 0.7,
+      accountId,
+      endpoint: "funnel-engine",
+    });
+    const response = completion.choices?.[0]?.message?.content || "{}";
+    const cleanedResponse = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+    const parsed = JSON.parse(cleanedResponse);
+
+    return {
+      primary: {
+        name: parsed.primary?.name || "Primary Conversion Funnel",
+        type: parsed.primary?.type || "webinar",
+      },
+      alternative: {
+        name: parsed.alternative?.name || "Alternative Engagement Funnel",
+        type: parsed.alternative?.type || "challenge",
+      },
+      rejected: {
+        name: parsed.rejected?.name || "Rejected Generic Funnel",
+        type: parsed.rejected?.type || "direct",
+        rejectionReason: parsed.rejected?.rejectionReason || "Does not match audience readiness level",
+      },
+    };
+  } catch (err: any) {
+    console.error(`[FunnelEngine] AI generation failed: ${err.message}`);
+    return {
+      primary: { name: "Structured Conversion Journey", type: "webinar" },
+      alternative: { name: "Progressive Engagement Path", type: "challenge" },
+      rejected: { name: "Generic Direct Funnel", type: "direct", rejectionReason: "Generic funnel — no audience-specific journey design" },
+    };
+  }
+}
+
+export async function runFunnelEngine(
+  mi: FunnelMIInput,
+  audience: FunnelAudienceInput,
+  offer: FunnelOfferInput,
+  positioning: FunnelPositioningInput,
+  differentiation: FunnelDifferentiationInput,
+  accountId: string,
+): Promise<FunnelResult> {
+  const startTime = Date.now();
+  const diagnostics: Record<string, any> = {};
+
+  console.log(`[FunnelEngine-V3] Starting 8-layer pipeline`);
+
+  const pillars = differentiation.pillars || [];
+  const proofArch = differentiation.proofArchitecture || [];
+
+  if (!offer.offerName && pillars.length === 0) {
+    console.log(`[FunnelEngine-V3] Insufficient data — no offer or differentiation`);
+    const emptyFunnel = buildEmptyFunnel();
+    return {
+      status: STATUS.INSUFFICIENT_SIGNALS,
+      statusMessage: "Offer and differentiation data insufficient to construct funnel",
+      primaryFunnel: emptyFunnel,
+      alternativeFunnel: emptyFunnel,
+      rejectedFunnel: { funnel: emptyFunnel, rejectionReason: "No data to construct funnel" },
+      funnelStrengthScore: 0,
+      trustPathAnalysis: { score: 0, steps: 0, gaps: ["No data available"] },
+      proofPlacementLogic: { score: 0, placements: 0, missingPlacements: ["All placements missing"] },
+      frictionMap: { totalFriction: 1, criticalPoints: 0, mitigations: 0 },
+      boundaryCheck: { passed: true, violations: [] },
+      confidenceScore: 0,
+      executionTimeMs: Date.now() - startTime,
+      engineVersion: ENGINE_VERSION,
+      layerDiagnostics: diagnostics,
+    };
+  }
+
+  const l1Eligibility = layer1_funnelEligibilityDetection(audience, offer);
+  diagnostics.layer1 = { eligible: l1Eligibility.eligible, score: l1Eligibility.eligibilityScore, reasons: l1Eligibility.reasons };
+
+  const l2Fit = layer2_offerToFunnelFit(offer, audience);
+  diagnostics.layer2 = { funnelType: l2Fit.funnelType, fitScore: l2Fit.fitScore, rationale: l2Fit.rationale };
+
+  const l3Friction = layer3_audienceFrictionModeling(audience, l2Fit.funnelType);
+  diagnostics.layer3 = { frictionPoints: l3Friction.frictionPoints.length, score: l3Friction.audienceFrictionScore };
+
+  const awareness = audience.awarenessLevel || "problem_aware";
+  const stageMap = buildStageMap(l2Fit.funnelType, awareness);
+
+  const l4Trust = layer4_trustPathConstruction(audience, differentiation, l2Fit.funnelType);
+  diagnostics.layer4 = { steps: l4Trust.trustPath.length, score: l4Trust.trustPathScore };
+
+  const l5Proof = layer5_proofPlacementLogic(differentiation, stageMap);
+  diagnostics.layer5 = { placements: l5Proof.proofPlacements.length, score: l5Proof.proofPlacementScore, missing: l5Proof.missingPlacements };
+
+  const l6Commitment = layer6_commitmentLevelMatching(audience, offer, l2Fit.funnelType);
+  diagnostics.layer6 = { level: l6Commitment.commitmentLevel, score: l6Commitment.commitmentMatchScore, analysis: l6Commitment.analysis };
+
+  let aiFunnels;
+  try {
+    aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId);
+    diagnostics.aiGeneration = { success: true };
+  } catch (err: any) {
+    diagnostics.aiGeneration = { success: false, error: err.message };
+    aiFunnels = {
+      primary: { name: "Structured Conversion Journey", type: l2Fit.funnelType },
+      alternative: { name: "Progressive Engagement Path", type: "challenge" },
+      rejected: { name: "Generic Direct Funnel", type: "direct", rejectionReason: "Generic — no audience-specific design" },
+    };
+  }
+
+  const primaryFunnel = buildFunnelCandidate(
+    aiFunnels.primary.name, aiFunnels.primary.type,
+    audience, offer, positioning, differentiation,
+  );
+  diagnostics.layer7_primary = primaryFunnel.integrityResult;
+  diagnostics.layer8_primary = { strength: primaryFunnel.funnelStrengthScore };
+
+  const alternativeFunnel = buildFunnelCandidate(
+    aiFunnels.alternative.name, aiFunnels.alternative.type,
+    audience, offer, positioning, differentiation,
+  );
+  diagnostics.layer7_alternative = alternativeFunnel.integrityResult;
+  diagnostics.layer8_alternative = { strength: alternativeFunnel.funnelStrengthScore };
+
+  const rejectedFunnel = buildFunnelCandidate(
+    aiFunnels.rejected.name, aiFunnels.rejected.type,
+    audience, offer, positioning, differentiation,
+  );
+  diagnostics.layer7_rejected = rejectedFunnel.integrityResult;
+
+  const collectFunnelText = (f: FunnelCandidate) => [
+    f.funnelName, f.funnelType, f.commitmentLevel,
+    ...f.stageMap.map(s => `${s.name} ${s.purpose} ${s.contentType} ${s.conversionGoal}`),
+    ...f.trustPath.map(t => `${t.action} ${t.proofType} ${t.audienceState}`),
+    ...f.proofPlacements.map(p => `${p.stage} ${p.proofType} ${p.placement} ${p.purpose}`),
+    ...f.frictionMap.map(fp => `${fp.stage} ${fp.frictionType} ${fp.mitigation}`),
+  ];
+  const allFunnelText = [
+    ...collectFunnelText(primaryFunnel),
+    ...collectFunnelText(alternativeFunnel),
+    ...collectFunnelText(rejectedFunnel),
+    aiFunnels.rejected.rejectionReason || "",
+  ].join(" ");
+  const boundaryRaw = sanitizeBoundary(allFunnelText);
+  const boundaryCheck = { passed: boundaryRaw.clean, violations: boundaryRaw.violations };
+  diagnostics.boundaryCheck = boundaryCheck;
+
+  let status: string = STATUS.COMPLETE;
+  let statusMessage: string | null = null;
+
+  if (!boundaryCheck.passed) {
+    status = STATUS.INTEGRITY_FAILED;
+    statusMessage = `Boundary violation — cross-engine output detected: ${boundaryCheck.violations.join("; ")}`;
+    console.log(`[FunnelEngine-V3] BOUNDARY_VIOLATION | ${boundaryCheck.violations.join("; ")}`);
+  }
+
+  if (status === STATUS.COMPLETE && !primaryFunnel.integrityResult.passed) {
+    status = STATUS.INTEGRITY_FAILED;
+    statusMessage = `Integrity check failed: ${primaryFunnel.integrityResult.failures.join("; ")}`;
+  }
+
+  const trustPathGaps: string[] = [];
+  const mandatoryProofInPath = ["process_proof", "case_proof"];
+  for (const required of mandatoryProofInPath) {
+    if (!primaryFunnel.trustPath.some(t => t.proofType === required)) {
+      trustPathGaps.push(`Missing ${required} in trust path`);
+    }
+  }
+
+  const criticalFrictionPoints = primaryFunnel.frictionMap.filter(f => f.severity > 0.7).length;
+
+  const confidenceScore = clamp(
+    primaryFunnel.funnelStrengthScore *
+    (boundaryCheck.passed ? 1 : 0) *
+    (primaryFunnel.integrityResult.passed ? 1 : 0.6) *
+    (l1Eligibility.eligible ? 1 : 0.5)
+  );
+
+  console.log(`[FunnelEngine-V3] Complete | status=${status} | strength=${primaryFunnel.funnelStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | generic=${primaryFunnel.genericFlag} | boundary=${boundaryCheck.passed}`);
+
+  return {
+    status,
+    statusMessage,
+    primaryFunnel,
+    alternativeFunnel,
+    rejectedFunnel: { funnel: rejectedFunnel, rejectionReason: aiFunnels.rejected.rejectionReason },
+    funnelStrengthScore: primaryFunnel.funnelStrengthScore,
+    trustPathAnalysis: {
+      score: primaryFunnel.trustPathScore,
+      steps: primaryFunnel.trustPath.length,
+      gaps: trustPathGaps,
+    },
+    proofPlacementLogic: {
+      score: primaryFunnel.proofPlacementScore,
+      placements: primaryFunnel.proofPlacements.length,
+      missingPlacements: l5Proof.missingPlacements,
+    },
+    frictionMap: {
+      totalFriction: primaryFunnel.frictionMap.reduce((s, f) => s + f.severity, 0),
+      criticalPoints: criticalFrictionPoints,
+      mitigations: primaryFunnel.frictionMap.filter(f => f.mitigation).length,
+    },
+    boundaryCheck,
+    confidenceScore,
+    executionTimeMs: Date.now() - startTime,
+    engineVersion: ENGINE_VERSION,
+    layerDiagnostics: diagnostics,
+  };
+}

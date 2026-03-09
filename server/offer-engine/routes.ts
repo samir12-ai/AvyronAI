@@ -194,6 +194,7 @@ export function registerOfferEngineRoutes(app: Express) {
         positioningConsistency: safeJsonParse(latest.positioningConsistency),
         boundaryCheck: safeJsonParse(latest.boundaryCheck),
         confidenceScore: latest.confidenceScore,
+        selectedOption: latest.selectedOption,
         executionTimeMs: latest.executionTimeMs,
         createdAt: latest.createdAt,
         differentiationSnapshotId: latest.differentiationSnapshotId,

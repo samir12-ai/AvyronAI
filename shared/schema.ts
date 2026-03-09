@@ -1644,8 +1644,39 @@ export const offerSnapshots = pgTable("offer_snapshots", {
   positioningConsistency: text("positioning_consistency"),
   boundaryCheck: text("boundary_check"),
   confidenceScore: doublePrecision("confidence_score"),
+  selectedOption: varchar("selected_option"),
   executionTimeMs: integer("execution_time_ms"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
 export type OfferSnapshot = typeof offerSnapshots.$inferSelect;
+
+export const funnelSnapshots = pgTable("funnel_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  offerSnapshotId: varchar("offer_snapshot_id").notNull(),
+  miSnapshotId: varchar("mi_snapshot_id").notNull(),
+  audienceSnapshotId: varchar("audience_snapshot_id").notNull(),
+  positioningSnapshotId: varchar("positioning_snapshot_id").notNull(),
+  differentiationSnapshotId: varchar("differentiation_snapshot_id").notNull(),
+  engineVersion: integer("engine_version").notNull().default(1),
+  status: text("status").notNull().default("COMPLETE"),
+  statusMessage: text("status_message"),
+  primaryFunnel: text("primary_funnel"),
+  alternativeFunnel: text("alternative_funnel"),
+  rejectedFunnel: text("rejected_funnel"),
+  funnelStrengthScore: doublePrecision("funnel_strength_score"),
+  trustPathAnalysis: text("trust_path_analysis"),
+  proofPlacementLogic: text("proof_placement_logic"),
+  frictionMap: text("friction_map"),
+  boundaryCheck: text("boundary_check"),
+  confidenceScore: doublePrecision("confidence_score"),
+  selectedOption: varchar("selected_option"),
+  executionTimeMs: integer("execution_time_ms"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type FunnelSnapshot = typeof funnelSnapshots.$inferSelect;
