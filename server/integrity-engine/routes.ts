@@ -1,0 +1,288 @@
+import type { Express, Request, Response } from "express";
+import { db } from "../db";
+import {
+  integritySnapshots,
+  funnelSnapshots,
+  offerSnapshots,
+  differentiationSnapshots,
+  positioningSnapshots,
+  audienceSnapshots,
+  miSnapshots,
+} from "@shared/schema";
+import { eq, and, desc } from "drizzle-orm";
+import { runIntegrityEngine } from "./engine";
+import { ENGINE_VERSION } from "./constants";
+import { ENGINE_VERSION as FUNNEL_ENGINE_VERSION } from "../funnel-engine/constants";
+import { ENGINE_VERSION as OFFER_ENGINE_VERSION } from "../offer-engine/constants";
+import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/constants";
+import { getEngineReadinessState, verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
+
+function safeJsonParse(text: any): any {
+  if (!text) return null;
+  if (typeof text !== "string") return text;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+function safeNumber(v: any, fallback: number): number {
+  if (typeof v === "number" && !isNaN(v)) return v;
+  const parsed = Number(v);
+  return isNaN(parsed) ? fallback : parsed;
+}
+
+export function registerIntegrityEngineRoutes(app: Express) {
+  app.post("/api/integrity-engine/analyze", async (req: Request, res: Response) => {
+    try {
+      const { campaignId, accountId = "default", funnelSnapshotId } = req.body;
+
+      if (!campaignId) {
+        return res.status(400).json({ error: "campaignId is required" });
+      }
+
+      if (!funnelSnapshotId) {
+        return res.status(400).json({ error: "funnelSnapshotId is required" });
+      }
+
+      const [funnelSnapshot] = await db.select().from(funnelSnapshots)
+        .where(and(
+          eq(funnelSnapshots.id, funnelSnapshotId),
+          eq(funnelSnapshots.campaignId, campaignId),
+          eq(funnelSnapshots.accountId, accountId),
+        ))
+        .limit(1);
+
+      if (!funnelSnapshot) {
+        return res.status(400).json({
+          error: "MISSING_DEPENDENCY",
+          message: "Funnel snapshot not found or campaign mismatch",
+        });
+      }
+
+      if (funnelSnapshot.engineVersion !== FUNNEL_ENGINE_VERSION) {
+        return res.status(400).json({
+          error: "VERSION_MISMATCH",
+          message: `Funnel snapshot version ${funnelSnapshot.engineVersion} does not match current version ${FUNNEL_ENGINE_VERSION}`,
+        });
+      }
+
+      const offerSnapshotId = funnelSnapshot.offerSnapshotId;
+      const miSnapshotId = funnelSnapshot.miSnapshotId;
+      const audienceSnapshotId = funnelSnapshot.audienceSnapshotId;
+      const positioningSnapshotId = funnelSnapshot.positioningSnapshotId;
+      const differentiationSnapshotId = funnelSnapshot.differentiationSnapshotId;
+
+      const [miSnapshot] = await db.select().from(miSnapshots)
+        .where(and(eq(miSnapshots.id, miSnapshotId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId)))
+        .limit(1);
+
+      if (!miSnapshot) {
+        return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "MI snapshot not found" });
+      }
+
+      const integrityResult = verifySnapshotIntegrity(miSnapshot, MI_ENGINE_VERSION, campaignId);
+      if (!integrityResult.valid) {
+        return res.status(400).json({
+          error: "MI_INTEGRITY_FAILED",
+          message: "MI snapshot integrity check failed",
+          failures: integrityResult.failures,
+        });
+      }
+
+      const [audSnapshot] = await db.select().from(audienceSnapshots)
+        .where(and(eq(audienceSnapshots.id, audienceSnapshotId), eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.accountId, accountId)))
+        .limit(1);
+
+      if (!audSnapshot) {
+        return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Audience snapshot not found" });
+      }
+
+      const [posSnapshot] = await db.select().from(positioningSnapshots)
+        .where(and(eq(positioningSnapshots.id, positioningSnapshotId), eq(positioningSnapshots.campaignId, campaignId), eq(positioningSnapshots.accountId, accountId)))
+        .limit(1);
+
+      if (!posSnapshot) {
+        return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Positioning snapshot not found" });
+      }
+
+      const [diffSnapshot] = await db.select().from(differentiationSnapshots)
+        .where(and(eq(differentiationSnapshots.id, differentiationSnapshotId), eq(differentiationSnapshots.campaignId, campaignId), eq(differentiationSnapshots.accountId, accountId)))
+        .limit(1);
+
+      if (!diffSnapshot) {
+        return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Differentiation snapshot not found" });
+      }
+
+      const [offerSnapshot] = await db.select().from(offerSnapshots)
+        .where(and(eq(offerSnapshots.id, offerSnapshotId), eq(offerSnapshots.campaignId, campaignId), eq(offerSnapshots.accountId, accountId)))
+        .limit(1);
+
+      if (!offerSnapshot) {
+        return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Offer snapshot not found" });
+      }
+
+      const miInput = {
+        marketDiagnosis: miSnapshot.marketDiagnosis,
+        overallConfidence: safeNumber(miSnapshot.overallConfidence, 0),
+        opportunitySignals: safeJsonParse(miSnapshot.opportunitySignals) || [],
+        threatSignals: safeJsonParse(miSnapshot.threatSignals) || [],
+      };
+
+      const audienceInput = {
+        objectionMap: safeJsonParse(audSnapshot.objectionMap) || {},
+        emotionalDrivers: safeJsonParse(audSnapshot.emotionalDrivers) || [],
+        maturityIndex: safeNumber(audSnapshot.maturityIndex, 0.5),
+        awarenessLevel: audSnapshot.awarenessLevel,
+        audiencePains: safeJsonParse(audSnapshot.audiencePains) || [],
+        desireMap: safeJsonParse(audSnapshot.desireMap) || {},
+        audienceSegments: safeJsonParse(audSnapshot.audienceSegments) || [],
+      };
+
+      const positioningInput = {
+        territories: safeJsonParse(posSnapshot.territories) || [],
+        enemyDefinition: posSnapshot.enemyDefinition,
+        contrastAxis: posSnapshot.contrastAxis,
+        narrativeDirection: posSnapshot.narrativeDirection,
+        confidenceScore: safeNumber(posSnapshot.confidenceScore, 0),
+      };
+
+      const differentiationInput = {
+        pillars: safeJsonParse(diffSnapshot.differentiationPillars) || [],
+        mechanismFraming: safeJsonParse(diffSnapshot.mechanismFraming),
+        authorityMode: safeJsonParse(diffSnapshot.authorityMode)?.mode || null,
+        claimStructures: safeJsonParse(diffSnapshot.claimStructures) || [],
+        proofArchitecture: safeJsonParse(diffSnapshot.proofArchitecture) || [],
+        confidenceScore: safeNumber(diffSnapshot.confidenceScore, 0),
+      };
+
+      const selectedOfferKey = offerSnapshot.selectedOption || "primary";
+      const offerData = safeJsonParse(
+        selectedOfferKey === "alternative" ? offerSnapshot.alternativeOffer : offerSnapshot.primaryOffer
+      );
+
+      const offerInput = {
+        offerName: offerData?.offerName || "Primary Offer",
+        coreOutcome: offerData?.coreOutcome || "",
+        mechanismDescription: offerData?.mechanismDescription || "",
+        deliverables: offerData?.deliverables || [],
+        proofAlignment: offerData?.proofAlignment || [],
+        offerStrengthScore: safeNumber(offerData?.offerStrengthScore, 0),
+        riskNotes: offerData?.riskNotes || [],
+        completeness: offerData?.completeness || { complete: false, missingLayers: [] },
+        genericFlag: offerData?.genericFlag || false,
+        frictionLevel: safeNumber(offerData?.frictionLevel, 0),
+      };
+
+      const selectedFunnelKey = funnelSnapshot.selectedOption || "primary";
+      const funnelData = safeJsonParse(
+        selectedFunnelKey === "alternative" ? funnelSnapshot.alternativeFunnel : funnelSnapshot.primaryFunnel
+      );
+
+      const funnelInput = {
+        funnelName: funnelData?.funnelName || "Primary Funnel",
+        funnelType: funnelData?.funnelType || "webinar",
+        stageMap: funnelData?.stageMap || [],
+        trustPath: funnelData?.trustPath || [],
+        proofPlacements: funnelData?.proofPlacements || [],
+        commitmentLevel: funnelData?.commitmentLevel || "medium",
+        frictionMap: funnelData?.frictionMap || [],
+        entryTrigger: funnelData?.entryTrigger || { mechanismType: "none", purpose: "" },
+        funnelStrengthScore: safeNumber(funnelData?.funnelStrengthScore, 0),
+        compressionApplied: funnelData?.compressionApplied || false,
+      };
+
+      const result = runIntegrityEngine(miInput, audienceInput, positioningInput, differentiationInput, offerInput, funnelInput);
+
+      if (result.status === "INTEGRITY_FAILED") {
+        console.error(`[IntegrityEngine] HARD-FAIL: Boundary violation — not persisting`);
+        return res.status(422).json({
+          success: false,
+          error: "INTEGRITY_FAILED",
+          message: result.statusMessage || "Integrity output violated boundary protections",
+          boundaryCheck: result.boundaryCheck,
+          executionTimeMs: result.executionTimeMs,
+        });
+      }
+
+      const [saved] = await db.insert(integritySnapshots).values({
+        accountId,
+        campaignId,
+        funnelSnapshotId,
+        offerSnapshotId,
+        miSnapshotId,
+        audienceSnapshotId,
+        positioningSnapshotId,
+        differentiationSnapshotId,
+        engineVersion: ENGINE_VERSION,
+        status: result.status,
+        statusMessage: result.statusMessage,
+        overallIntegrityScore: result.overallIntegrityScore,
+        safeToExecute: result.safeToExecute,
+        layerResults: JSON.stringify(result.layerResults),
+        structuralWarnings: JSON.stringify(result.structuralWarnings),
+        flaggedInconsistencies: JSON.stringify(result.flaggedInconsistencies),
+        boundaryCheck: JSON.stringify(result.boundaryCheck),
+        executionTimeMs: result.executionTimeMs,
+      }).returning();
+
+      res.json({
+        success: true,
+        snapshotId: saved.id,
+        ...result,
+      });
+    } catch (error: any) {
+      console.error("[IntegrityEngine] Analysis error:", error.message);
+      res.status(500).json({ error: "Integrity analysis failed" });
+    }
+  });
+
+  app.get("/api/integrity-engine/latest", async (req: Request, res: Response) => {
+    try {
+      const campaignId = req.query.campaignId as string;
+      const accountId = (req.query.accountId as string) || "default";
+
+      if (!campaignId) {
+        return res.status(400).json({ error: "campaignId is required" });
+      }
+
+      const [latest] = await db.select().from(integritySnapshots)
+        .where(and(
+          eq(integritySnapshots.campaignId, campaignId),
+          eq(integritySnapshots.accountId, accountId),
+          eq(integritySnapshots.engineVersion, ENGINE_VERSION),
+        ))
+        .orderBy(desc(integritySnapshots.createdAt))
+        .limit(1);
+
+      if (!latest) {
+        return res.json({ exists: false });
+      }
+
+      res.json({
+        exists: true,
+        id: latest.id,
+        campaignId: latest.campaignId,
+        status: latest.status,
+        statusMessage: latest.statusMessage,
+        engineVersion: latest.engineVersion,
+        overallIntegrityScore: latest.overallIntegrityScore,
+        safeToExecute: latest.safeToExecute,
+        layerResults: safeJsonParse(latest.layerResults),
+        structuralWarnings: safeJsonParse(latest.structuralWarnings),
+        flaggedInconsistencies: safeJsonParse(latest.flaggedInconsistencies),
+        boundaryCheck: safeJsonParse(latest.boundaryCheck),
+        executionTimeMs: latest.executionTimeMs,
+        createdAt: latest.createdAt,
+        funnelSnapshotId: latest.funnelSnapshotId,
+        offerSnapshotId: latest.offerSnapshotId,
+        differentiationSnapshotId: latest.differentiationSnapshotId,
+        positioningSnapshotId: latest.positioningSnapshotId,
+        miSnapshotId: latest.miSnapshotId,
+        audienceSnapshotId: latest.audienceSnapshotId,
+      });
+    } catch (error: any) {
+      console.error("[IntegrityEngine] Latest fetch error:", error.message);
+      res.status(500).json({ error: "Failed to fetch integrity snapshot" });
+    }
+  });
+
+  console.log("[IntegrityEngine-V3] Routes registered: POST /api/integrity-engine/analyze, GET /api/integrity-engine/latest");
+}

@@ -1,0 +1,284 @@
+Replit Team,
+
+We are now moving to the next engine in the system: Integrity Engine V3.
+
+This engine is critical because it sits after all strategic engines and before all execution engines. Its role is to verify that the strategy produced by the system is internally consistent, structurally sound, and free from cross-engine contradictions before downstream engines begin execution planning.
+
+This engine must be implemented carefully with strict adherence to the Master Plan architecture and with protections against the common implementation mistakes we have previously encountered.
+
+Please follow the requirements below precisely.
+
+--------------------------------------------------
+1. POSITION IN THE MASTER PLAN
+--------------------------------------------------
+
+Integrity Engine must sit after the strategic layer and before execution layers.
+
+Upstream inputs:
+
+• Market Intelligence Engine  
+• Audience Engine  
+• Positioning Engine  
+• Differentiation Engine  
+• Offer Engine  
+• Funnel Engine  
+
+Downstream engines (must NOT be affected or overridden):
+
+• Awareness Engine  
+• Persuasion Engine  
+• Channels Engine  
+• Financial Governor  
+• Beast Execution Layer  
+
+Integrity Engine does not generate strategy.  
+It only validates the integrity of the strategy produced by upstream engines.
+
+--------------------------------------------------
+2. CORE PURPOSE OF INTEGRITY ENGINE
+--------------------------------------------------
+
+The engine answers one question:
+
+“Is the strategic system internally consistent and safe to move forward into execution?”
+
+It must detect:
+
+• contradictions between engines  
+• unrealistic claims or outcomes  
+• structural misalignment in the customer journey  
+• trust gaps between stages  
+• broken strategic dependencies  
+
+If issues are found, the engine must flag them clearly without modifying upstream outputs.
+
+--------------------------------------------------
+3. STRICT BOUNDARY ENFORCEMENT
+--------------------------------------------------
+
+Integrity Engine must never produce new strategic content.
+
+It must NOT generate:
+
+• new positioning  
+• new differentiation ideas  
+• new offers  
+• new funnels  
+• marketing copy  
+• messaging  
+• persuasion frameworks  
+• channel recommendations  
+• financial calculations  
+• campaign steps  
+
+If any of these appear, integrity scanning must trigger failure.
+
+The engine must remain a validation and diagnostic engine only.
+
+--------------------------------------------------
+4. INTEGRITY VALIDATION LAYERS
+--------------------------------------------------
+
+Integrity Engine must operate through structured validation layers.
+
+Required validation layers:
+
+1. Strategic Consistency Check  
+2. Audience–Offer Alignment Check  
+3. Positioning–Differentiation Compatibility Check  
+4. Offer–Funnel Compatibility Check  
+5. Trust Path Continuity Check  
+6. Proof Sufficiency Verification  
+7. Conversion Feasibility Check  
+8. System Coherence Scoring  
+
+Each layer must return structured diagnostics explaining why a check passed or failed.
+
+--------------------------------------------------
+5. STRATEGIC CONSISTENCY CHECK
+--------------------------------------------------
+
+Verify that:
+
+• positioning narrative aligns with differentiation pillars  
+• differentiation mechanism aligns with the offer mechanism  
+• offer outcome aligns with audience pain/desire signals  
+• funnel structure supports the trust requirements of the offer  
+
+No component should contradict another.
+
+--------------------------------------------------
+6. AUDIENCE–OFFER ALIGNMENT CHECK
+--------------------------------------------------
+
+Confirm that:
+
+• the offer addresses the audience’s actual pain/desire signals  
+• buyer readiness matches the funnel commitment level  
+• objections identified in the Audience Engine are addressed somewhere in the funnel path  
+
+If not, flag a misalignment warning.
+
+--------------------------------------------------
+7. POSITIONING–DIFFERENTIATION COMPATIBILITY
+--------------------------------------------------
+
+Ensure the differentiation territory does not contradict positioning narrative.
+
+Example contradictions to detect:
+
+• positioning claims authority but differentiation relies on price competition  
+• positioning claims strategic expertise but offer is purely tactical  
+• positioning enemy narrative contradicts differentiation mechanism
+
+--------------------------------------------------
+8. OFFER–FUNNEL COMPATIBILITY
+--------------------------------------------------
+
+Verify the funnel matches the offer’s complexity and trust requirements.
+
+Examples:
+
+• high-trust offers must not use low-trust funnels  
+• complex offers must not use overly short conversion paths  
+• high-friction audiences must not receive immediate hard conversion asks
+
+--------------------------------------------------
+9. TRUST PATH CONTINUITY
+--------------------------------------------------
+
+Ensure the funnel builds trust logically.
+
+Checks must verify:
+
+• proof appears before high commitment stages  
+• trust signals appear before conversion  
+• objections are resolved before purchase stages  
+
+Funnels that request commitment before trust is established must be flagged.
+
+--------------------------------------------------
+10. PROOF SUFFICIENCY VERIFICATION
+--------------------------------------------------
+
+Ensure proof types are sufficient relative to the promise.
+
+Proof types may include:
+
+• process proof  
+• case proof  
+• outcome proof  
+• transparency proof  
+
+If the offer promise is large but proof architecture is weak, confidence must be downgraded.
+
+--------------------------------------------------
+11. CONVERSION FEASIBILITY CHECK
+--------------------------------------------------
+
+Ensure the conversion path is realistically achievable.
+
+Detect:
+
+• excessive funnel complexity  
+• unrealistic commitment steps  
+• large cognitive load for the user  
+• too many trust requirements without sufficient proof
+
+If detected, downgrade the feasibility score.
+
+--------------------------------------------------
+12. SYSTEM COHERENCE SCORE
+--------------------------------------------------
+
+Integrity Engine must output a final structured result:
+
+• overall integrity score  
+• structural warnings (if any)  
+• flagged inconsistencies  
+• safe-to-execute boolean status  
+
+This score determines whether downstream engines may proceed.
+
+--------------------------------------------------
+13. ROUTES AND SYSTEM CONNECTION STABILITY
+--------------------------------------------------
+
+Please verify route stability carefully.
+
+Required routes:
+
+POST /api/integrity-engine/analyze  
+GET /api/integrity-engine/latest  
+
+Confirm:
+
+• correct campaignId and accountId scoping  
+• correct snapshot dependency chain  
+• correct reading of upstream snapshots  
+• downstream engines can read the integrity result
+
+This must not break existing route structures.
+
+--------------------------------------------------
+14. SNAPSHOT INTEGRITY
+--------------------------------------------------
+
+Create an integrity_snapshots table containing:
+
+• upstream snapshot IDs  
+• validation layer results  
+• system coherence score  
+• integrity warnings  
+• execution safety flag  
+
+Maintain full traceability to upstream engines.
+
+--------------------------------------------------
+15. COMMON REPLIT ISSUE — DEPLOYMENT VERIFICATION
+--------------------------------------------------
+
+Please avoid the recurring issue where updates are written in code but not applied in the running system.
+
+After implementation:
+
+• rebuild the backend environment  
+• restart the runtime  
+• verify the new engine routes are live  
+• confirm the engine is using the latest ENGINE_VERSION  
+• confirm integrity analysis works with real snapshot chains
+
+Do not close the task until the live system is confirmed running the new logic.
+
+--------------------------------------------------
+16. PRACTICALITY GUARD (ANTI-HALLUCINATION)
+--------------------------------------------------
+
+Integrity Engine must favor practical validation over theoretical reasoning.
+
+It must avoid:
+
+• speculative conclusions  
+• narrative generation  
+• strategic imagination  
+
+It must rely strictly on existing upstream data.
+
+The goal is to make the system operationally reliable, not creatively verbose.
+
+--------------------------------------------------
+17. FINAL ACCEPTANCE CONDITIONS
+--------------------------------------------------
+
+Integrity Engine V3 will be considered complete only when:
+
+• it respects Master Plan boundaries  
+• it does not generate strategy or execution outputs  
+• all validation layers operate correctly  
+• route connections remain stable  
+• snapshot integrity is preserved  
+• deployment is confirmed on the live system
+
+Once implemented correctly, Integrity Engine becomes the final gatekeeper of the strategic layer, ensuring the system produces coherent, executable marketing strategies.
+
+Thank you.

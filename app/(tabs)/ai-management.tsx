@@ -36,6 +36,7 @@ import PositioningStrategy from '@/components/PositioningStrategy';
 import DifferentiationEngine from '@/components/DifferentiationEngine';
 import OfferEngine from '@/components/OfferEngine';
 import FunnelEngine from '@/components/FunnelEngine';
+import IntegrityEngine from '@/components/IntegrityEngine';
 import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
 
 interface AIAudience {
@@ -55,7 +56,7 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'strategies' | 'positioning' | 'differentiation' | 'offers' | 'funnels' | 'control' | 'marketdb' | 'publisher' | 'audience' | 'leads';
+type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'strategies' | 'positioning' | 'differentiation' | 'offers' | 'funnels' | 'integrity' | 'control' | 'marketdb' | 'publisher' | 'audience' | 'leads';
 
 interface AIMgmtPersistedState {
   activeTab: TabView;
@@ -373,6 +374,7 @@ export default function AIManagementScreen() {
     { key: 'differentiation', icon: 'layers-outline', label: 'Differentiation', color: '#8B5CF6', description: '12-layer proof-backed differentiation analysis' },
     { key: 'offers', icon: 'pricetag-outline', label: 'Offer Engine', color: '#F97316', description: '5-layer structured offer construction' },
     { key: 'funnels', icon: 'funnel-outline', label: 'Funnel Engine', color: '#14B8A6', description: '8-layer funnel decision with trust path and proof placement' },
+    { key: 'integrity', icon: 'shield-checkmark-outline', label: 'Integrity Engine', color: '#6366F1', description: 'Strategic consistency validation — the final gate before execution' },
   ];
 
   const renderStrategiesBranch = () => (
@@ -1195,6 +1197,7 @@ export default function AIManagementScreen() {
           : activeTab === 'differentiation' ? <CampaignGuard><DifferentiationEngine /></CampaignGuard>
           : activeTab === 'offers' ? <CampaignGuard><OfferEngine /></CampaignGuard>
           : activeTab === 'funnels' ? <CampaignGuard><FunnelEngine /></CampaignGuard>
+          : activeTab === 'integrity' ? <CampaignGuard><IntegrityEngine /></CampaignGuard>
           : activeTab === 'control' ? renderControlCenter()
           : activeTab === 'marketdb' ? <MarketDatabaseAdmin />
           : activeTab === 'publisher' ? renderPublisher()

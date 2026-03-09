@@ -1680,3 +1680,30 @@ export const funnelSnapshots = pgTable("funnel_snapshots", {
 });
 
 export type FunnelSnapshot = typeof funnelSnapshots.$inferSelect;
+
+export const integritySnapshots = pgTable("integrity_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  funnelSnapshotId: varchar("funnel_snapshot_id").notNull(),
+  offerSnapshotId: varchar("offer_snapshot_id").notNull(),
+  miSnapshotId: varchar("mi_snapshot_id").notNull(),
+  audienceSnapshotId: varchar("audience_snapshot_id").notNull(),
+  positioningSnapshotId: varchar("positioning_snapshot_id").notNull(),
+  differentiationSnapshotId: varchar("differentiation_snapshot_id").notNull(),
+  engineVersion: integer("engine_version").notNull().default(1),
+  status: text("status").notNull().default("COMPLETE"),
+  statusMessage: text("status_message"),
+  overallIntegrityScore: doublePrecision("overall_integrity_score"),
+  safeToExecute: boolean("safe_to_execute").default(false),
+  layerResults: text("layer_results"),
+  structuralWarnings: text("structural_warnings"),
+  flaggedInconsistencies: text("flagged_inconsistencies"),
+  boundaryCheck: text("boundary_check"),
+  executionTimeMs: integer("execution_time_ms"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type IntegritySnapshot = typeof integritySnapshots.$inferSelect;
