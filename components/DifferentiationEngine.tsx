@@ -118,7 +118,7 @@ export default function DifferentiationEngine() {
 
       const posRes = await fetch(new URL(`/api/positioning-engine/latest?campaignId=${campaignId}`, base).toString());
       const posData = await posRes.json();
-      const posReady = posData && posData.id && posData.status === 'COMPLETE';
+      const posReady = posData && posData.id && (posData.status === 'COMPLETE' || posData.status === 'UNSTABLE');
       setPosStatus(posReady ? 'ready' : 'not_ready');
       if (posReady) setPosSnapshotId(posData.id);
     } catch {
