@@ -158,6 +158,7 @@ export function registerDifferentiationRoutes(app: Express) {
         .where(and(
           eq(differentiationSnapshots.campaignId, campaignId),
           eq(differentiationSnapshots.accountId, accountId),
+          eq(differentiationSnapshots.engineVersion, ENGINE_VERSION),
         ))
         .orderBy(desc(differentiationSnapshots.createdAt))
         .limit(1);

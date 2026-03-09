@@ -1470,6 +1470,7 @@ export async function getLatestPositioningSnapshot(accountId: string, campaignId
     .where(and(
       eq(positioningSnapshots.accountId, accountId),
       eq(positioningSnapshots.campaignId, campaignId),
+      eq(positioningSnapshots.engineVersion, POSITIONING_ENGINE_VERSION),
     ))
     .orderBy(desc(positioningSnapshots.createdAt))
     .limit(1);
