@@ -89,8 +89,7 @@ type DepStatus = 'ready' | 'not_ready' | 'loading';
 export default function DifferentiationEngine() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
-  const { activeCampaign } = useCampaign();
-  const campaignId = activeCampaign?.id;
+  const { selectedCampaignId: campaignId } = useCampaign();
 
   const [data, setData] = useState<DifferentiationData | null>(null);
   const [loading, setLoading] = useState(false);
