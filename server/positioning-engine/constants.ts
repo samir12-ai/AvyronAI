@@ -101,6 +101,13 @@ export interface OpportunityGap {
   desireSignals: string[];
 }
 
+export interface StabilityAdvisory {
+  type: "dominant_competitor" | "flanking_recommended" | "niche_required";
+  message: string;
+  competitorName?: string;
+  authorityScore?: number;
+}
+
 export interface StabilityResult {
   isStable: boolean;
   checks: {
@@ -108,6 +115,7 @@ export interface StabilityResult {
     passed: boolean;
     detail: string;
   }[];
+  advisories: StabilityAdvisory[];
   fallbackApplied: boolean;
   fallbackReason?: string;
 }

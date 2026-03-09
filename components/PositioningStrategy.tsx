@@ -278,6 +278,16 @@ export default function PositioningStrategy() {
                     <Text style={[s.checkText, { color: colors.textSecondary }]} numberOfLines={2}>{check.name}: {check.detail}</Text>
                   </View>
                 ))}
+                {snapshot.stabilityResult.advisories?.length > 0 && (
+                  <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: isDark ? '#1E2A3A' : '#E8ECF0' }}>
+                    {snapshot.stabilityResult.advisories.map((adv: any, i: number) => (
+                      <View key={i} style={s.checkRow}>
+                        <Ionicons name="information-circle" size={14} color="#F59E0B" />
+                        <Text style={[s.checkText, { color: '#F59E0B' }]} numberOfLines={3}>{adv.message}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </View>
             </View>
           )}

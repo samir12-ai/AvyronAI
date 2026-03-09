@@ -1,0 +1,53 @@
+Replit,
+
+We need to fix the Positioning Engine stability logic to ensure it reflects real market dynamics and avoids false instability flags. The current behavior is technically correct in detection, but the interpretation logic needs adjustment.
+
+Right now the engine treats a dominant competitor as a stability failure, which is not strategically accurate. In real markets, the presence of a strong leader does not invalidate positioning opportunities — it simply means differentiation must be stronger.
+
+Please implement the following corrections and apply them system-wide.
+
+1. Dominant Competitor Logic
+   - A dominant competitor (high authority score) must not automatically trigger UNSTABLE.
+   - Replace the current interpretation:
+     - Dominant competitor → instability
+   - With the correct interpretation:
+     - Dominant competitor → requires stronger differentiation strategy.
+
+2. Stability Guard Adjustment
+   - Stability Guard should only fail when:
+     - Market saturation exceeds the defined threshold, or
+     - Demand signals are insufficient, or
+     - Narrative overlap indicates no differentiation.
+   - Dominance alone must never be a failure condition.
+
+3. Warning Classification
+   - When a dominant competitor is detected, show a strategic warning, not a stability failure.
+   - Example classification:
+     - “Dominant competitor detected — differentiation strategy required.”
+
+4. UI Status Correction
+   - Replace the current UNSTABLE state caused by dominance with a strategic advisory.
+   - The system must still generate the positioning but clearly indicate that a niche or differentiation angle is required.
+
+5. Signal Confidence Reinforcement
+   - If competitor count ≥ 8 and signals ≥ 6, the engine must treat the dataset as valid.
+   - Avoid unnecessary instability flags in sufficiently populated markets.
+
+6. System-Wide Consistency
+   - Apply this corrected logic to:
+     - Positioning Engine
+     - Stability Guard
+     - Opportunity Gap interpretation
+     - Strategic card evaluation
+
+7. Final Validation
+   - After implementing the changes, run a full validation pass across the system to ensure:
+     - Stability warnings behave correctly.
+     - Dominant competitor detection produces advisory guidance rather than failure.
+     - No regression occurs in other engines.
+
+The goal is to ensure the Positioning Engine reflects real competitive strategy logic, not simplistic dominance rejection.
+
+Once completed, confirm that the update is deployed across the entire system so the engine produces consistent and reliable outputs.
+
+Close this task fully after validation.

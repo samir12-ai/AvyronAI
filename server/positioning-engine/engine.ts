@@ -17,6 +17,7 @@ import {
   type MarketPowerEntry,
   type OpportunityGap,
   type StabilityResult,
+  type StabilityAdvisory,
   FLANKING_STRATEGIES,
 } from "./constants";
 import { verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
@@ -740,10 +741,32 @@ function layer12_stabilityGuard(
   marketPower: MarketPowerEntry[],
   segmentPriority: { segment: string; priority: number; painAlignment: number }[],
   narrativeMap?: Record<string, string[]>,
+  competitorCount: number = 0,
+  signalCount: number = 0,
 ): { territories: Territory[]; stabilityResult: StabilityResult } {
   const checks: StabilityResult["checks"] = [];
+  const advisories: StabilityAdvisory[] = [];
   let fallbackApplied = false;
   let fallbackReason: string | undefined;
+
+  const topComp = marketPower[0];
+  const hasDominantCompetitor = topComp && topComp.authorityScore >= POSITIONING_THRESHOLDS.DOMINANT_COMPETITOR_THRESHOLD;
+
+  if (hasDominantCompetitor) {
+    advisories.push({
+      type: "dominant_competitor",
+      message: `Dominant competitor detected (${topComp.competitorName}, authority: ${(topComp.authorityScore * 100).toFixed(0)}%) — stronger differentiation strategy required`,
+      competitorName: topComp.competitorName,
+      authorityScore: topComp.authorityScore,
+    });
+    advisories.push({
+      type: "flanking_recommended",
+      message: `Flanking or niche positioning recommended to differentiate against ${topComp.competitorName}`,
+      competitorName: topComp.competitorName,
+    });
+  }
+
+  const sufficientMarketData = competitorCount >= 8 && signalCount >= 6;
 
   for (const territory of territories) {
     const territoryChecks: { passed: boolean; reason: string }[] = [];
@@ -757,13 +780,12 @@ function layer12_stabilityGuard(
         : `Saturation ${(sat * 100).toFixed(0)}% exceeds ${POSITIONING_THRESHOLDS.STABILITY_SATURATION_LIMIT * 100}% limit`,
     });
 
-    const topComp = marketPower[0];
-    const dominancePassed = !topComp || topComp.authorityScore < POSITIONING_THRESHOLDS.DOMINANT_COMPETITOR_THRESHOLD;
-    territoryChecks.push({
-      passed: dominancePassed,
-      reason: dominancePassed
-        ? "No dominant competitor blocking territory"
-        : `Dominant competitor ${topComp?.competitorName} (authority: ${(topComp?.authorityScore * 100).toFixed(0)}%)`,
+    checks.push({
+      name: territory.name,
+      passed: true,
+      detail: hasDominantCompetitor
+        ? `Dominant competitor ${topComp.competitorName} (authority: ${(topComp.authorityScore * 100).toFixed(0)}%) — differentiation strategy recommended`
+        : "No dominant competitor blocking territory",
     });
 
     const topSegment = segmentPriority[0];
@@ -790,9 +812,21 @@ function layer12_stabilityGuard(
     territory.isStable = allPassed;
     territory.stabilityNotes = territoryChecks.filter(c => !c.passed).map(c => c.reason);
 
+    if (hasDominantCompetitor && allPassed) {
+      territory.stabilityNotes.push(`ADVISORY: Dominant competitor ${topComp.competitorName} — niche or differentiation angle required`);
+    }
+
+    if (sufficientMarketData && !allPassed) {
+      const failCount = territoryChecks.filter(c => !c.passed).length;
+      if (failCount === 1) {
+        territory.isStable = true;
+        territory.stabilityNotes.push("CONFIDENCE_BOOST: Sufficient market data (≥8 competitors, ≥6 signals) — single-check failure overridden");
+      }
+    }
+
     for (const check of territoryChecks) {
       checks.push({
-        name: `${territory.name}`,
+        name: territory.name,
         passed: check.passed,
         detail: check.reason,
       });
@@ -817,6 +851,7 @@ function layer12_stabilityGuard(
     stabilityResult: {
       isStable: !fallbackApplied && stableTerritories.length > 0,
       checks,
+      advisories,
       fallbackApplied,
       fallbackReason,
     },
@@ -990,8 +1025,15 @@ export async function runPositioningEngine(
 
   const { territories: finalTerritories, stabilityResult } = layer12_stabilityGuard(
     territories, narrativeSaturation, marketPower, segmentPriority, narrativeMap,
+    competitors.length, totalSignals,
   );
-  console.log(`[PositioningEngine-V3] L12 Stability: ${stabilityResult.isStable ? "STABLE" : "UNSTABLE"} | fallback=${stabilityResult.fallbackApplied}`);
+  const advisoryCount = stabilityResult.advisories.length;
+  console.log(`[PositioningEngine-V3] L12 Stability: ${stabilityResult.isStable ? "STABLE" : "UNSTABLE"} | fallback=${stabilityResult.fallbackApplied} | advisories=${advisoryCount}`);
+  if (advisoryCount > 0) {
+    for (const adv of stabilityResult.advisories) {
+      console.log(`[PositioningEngine-V3] ADVISORY: ${adv.message}`);
+    }
+  }
 
   const strategyCards = generateStrategyCards(finalTerritories);
 
@@ -1003,9 +1045,12 @@ export async function runPositioningEngine(
     : 0;
 
   const status: PositioningStatus = !stabilityResult.isStable ? "UNSTABLE" : "COMPLETE";
+  const hasAdvisories = stabilityResult.advisories.length > 0;
   const statusMessage = !stabilityResult.isStable
     ? "Positioning generated but stability checks failed — review recommended"
-    : null;
+    : hasAdvisories
+      ? stabilityResult.advisories.map(a => a.message).join("; ")
+      : null;
 
   const inputSummary = {
     miSnapshotId,
@@ -1086,7 +1131,7 @@ function buildEmptyResult(
     opportunityGaps: [],
     narrativeSaturation: {},
     segmentPriority: [],
-    stabilityResult: { isStable: false, checks: [], fallbackApplied: false },
+    stabilityResult: { isStable: false, checks: [], advisories: [], fallbackApplied: false },
     enemyDefinition: "",
     contrastAxis: "",
     narrativeDirection: "",
