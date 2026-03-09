@@ -85,6 +85,9 @@ interface PositioningSnapshot {
     executionTimeMs: number;
     flankingMode: boolean;
     detectedCategory: string;
+    strategicSubcategory?: string | null;
+    strategicSignalCount?: number;
+    strategicClusterCount?: number;
   };
   createdAt: string;
 }
@@ -221,7 +224,7 @@ export default function PositioningStrategy() {
 
           {snapshot.inputSummary && (
             <View style={[s.metaRow, { backgroundColor: isDark ? '#141C28' : '#F8FAF9' }]}>
-              <MetaItem label="Category" value={snapshot.inputSummary.detectedCategory} colors={colors} />
+              <MetaItem label="Category" value={snapshot.inputSummary.strategicSubcategory ? `${snapshot.inputSummary.detectedCategory} / ${snapshot.inputSummary.strategicSubcategory}` : snapshot.inputSummary.detectedCategory} colors={colors} />
               <MetaItem label="Competitors" value={String(snapshot.inputSummary.competitorCount)} colors={colors} />
               <MetaItem label="Signals" value={String(snapshot.inputSummary.signalCount)} colors={colors} />
               <MetaItem label="Flanking" value={snapshot.inputSummary.flankingMode ? 'Yes' : 'No'} colors={colors} />

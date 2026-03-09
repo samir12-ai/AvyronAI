@@ -1,0 +1,110 @@
+Hello Replit Team,
+
+The recent update to the Positioning Engine stability logic is correct and validated. Please do not modify the Stability Guard logic further.
+
+However, there are three remaining improvements required to finalize the Positioning Engine so that classification accuracy and territory validation are reliable. These changes must be implemented strictly within the defined scope below. Do not modify unrelated parts of the system.
+
+-----------------------------------
+1) Category Resolution Improvement
+-----------------------------------
+
+The engine currently collapses classification into the generic label “general”, even when sufficient competitive and signal data exists. This reduces strategic accuracy.
+
+Update the category resolution logic so the engine produces a two-level classification:
+
+• Macro Category (existing level)  
+• Strategic Subcategory (new level)
+
+Example:
+
+Macro Category: Marketing  
+Strategic Subcategory: AI Marketing System / Marketing Intelligence Platform / AI Growth Platform
+
+Rules:
+
+• If competitor count ≥ 8 and signals ≥ 6, the engine must resolve a Strategic Subcategory instead of defaulting to “general”.  
+• The macro category must remain unchanged if already detected correctly.  
+• This change must only affect classification logic inside the Positioning Engine.
+
+Do NOT modify:
+
+• competitor acquisition logic  
+• Market Intelligence engine  
+• scraping or external data sources
+
+-----------------------------------
+2) Signal Extraction Expansion
+-----------------------------------
+
+The current signal vocabulary is too narrow, which limits the signal count and reduces analytical depth.
+
+Extend the signal extraction layer so it can recognize additional strategic signals from existing competitor data. No new scraping or external data sources should be added.
+
+The engine should detect signals related to:
+
+• automation replacing manual marketing work  
+• anti-agency positioning  
+• cost reduction / operational efficiency  
+• execution speed advantages  
+• systemization or operating-system positioning  
+• authority-driven marketing narratives  
+• strategy-led vs execution-led differentiation
+
+Important:
+
+• Signals must be extracted only from already collected competitor content and existing datasets.  
+• Do not modify the data pipeline or MI engine.
+
+-----------------------------------
+3) Territory Evidence Density Validation
+-----------------------------------
+
+Currently a positioning territory may appear valid even when supported by a small number of overlapping signals.
+
+Add a validation layer before finalizing any territory called:
+
+“Territory Evidence Density Check”
+
+The territory should only be considered structurally strong if it satisfies the following:
+
+A) Unique Signal Density  
+Signals supporting the territory must represent multiple distinct semantic clusters, not repeated variations of the same concept (e.g., speed / efficiency / fast execution counted as one cluster).
+
+B) Cross-Source Confirmation  
+The territory must be supported by at least two different sources among the following:
+
+• Market Intelligence signals  
+• Audience insights  
+• Competitor positioning patterns
+
+C) Non-Redundant Evidence  
+Evidence snippets used to support the territory must not all represent the same phrasing pattern or duplicated semantic framing.
+
+If these conditions are not met, the engine should lower the confidence score of the territory rather than failing stability checks.
+
+-----------------------------------
+4) Scope Restrictions
+-----------------------------------
+
+To avoid unintended system changes, do not modify:
+
+• Market Intelligence engine  
+• competitor scraping logic  
+• Stability Guard logic (already finalized)  
+• data pipeline or signal ingestion  
+• frontend components except for displaying the Strategic Subcategory label if needed
+
+-----------------------------------
+5) Validation Requirements
+-----------------------------------
+
+After implementation, confirm the following:
+
+• category no longer defaults to “general” when sufficient signals exist  
+• signal extraction recognizes the expanded strategic vocabulary  
+• territories are validated using the new Evidence Density logic  
+• stability logic remains unchanged and functioning correctly
+
+Once these conditions are verified, the task can be closed.
+
+Thank you.

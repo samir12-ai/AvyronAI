@@ -48,16 +48,25 @@ interface PositioningEngineResult {
     executionTimeMs: number;
     flankingMode: boolean;
     detectedCategory: string;
+    strategicSubcategory: string | null;
+    strategicSignalCount: number;
+    strategicClusterCount: number;
   };
   snapshotId: string;
   executionTimeMs: number;
   createdAt: string;
 }
 
-function layer1_categoryDetection(miData: any): string {
+interface CategoryResult {
+  macro: string;
+  subcategory: string | null;
+}
+
+function layer1_categoryDetection(miData: any, competitorCount: number = 0, signalCount: number = 0): CategoryResult {
   const marketState = miData.marketState || "";
   const diagnosis = miData.marketDiagnosis || "";
   const narrative = miData.narrativeSynthesis || "";
+  const contentDna = safeJsonParse(miData.contentDnaData, []);
 
   const combined = `${marketState} ${diagnosis} ${narrative}`.toLowerCase();
 
@@ -85,7 +94,103 @@ function layer1_categoryDetection(miData: any): string {
       best = cat;
     }
   }
-  return best;
+
+  let subcategory: string | null = null;
+  const sufficientData = competitorCount >= 8 && signalCount >= 6;
+
+  if (sufficientData || bestScore >= 3) {
+    const subcategories: Record<string, { keywords: string[]; label: string }[]> = {
+      marketing: [
+        { keywords: ["ai", "automation", "machine learning", "intelligence", "algorithm"], label: "AI Marketing System" },
+        { keywords: ["analytics", "data", "intelligence", "insights", "metrics", "dashboard"], label: "Marketing Intelligence Platform" },
+        { keywords: ["growth", "scale", "roi", "revenue", "performance"], label: "Growth Marketing Platform" },
+        { keywords: ["content", "creator", "influencer", "social"], label: "Content Marketing Platform" },
+        { keywords: ["agency", "client", "service", "consulting", "done-for-you"], label: "Marketing Agency" },
+        { keywords: ["automation", "system", "workflow", "funnel", "pipeline"], label: "Marketing Automation System" },
+        { keywords: ["personal brand", "authority", "thought leader", "coaching"], label: "Authority Marketing" },
+      ],
+      tech: [
+        { keywords: ["saas", "subscription", "platform", "cloud"], label: "SaaS Platform" },
+        { keywords: ["ai", "machine learning", "automation", "intelligence"], label: "AI Technology" },
+        { keywords: ["mobile", "app", "ios", "android"], label: "Mobile Technology" },
+        { keywords: ["developer", "api", "tools", "devtools"], label: "Developer Tools" },
+      ],
+      fitness: [
+        { keywords: ["online", "coaching", "program", "transformation"], label: "Online Fitness Coaching" },
+        { keywords: ["supplement", "nutrition", "protein"], label: "Fitness Supplements" },
+        { keywords: ["gym", "studio", "facility"], label: "Fitness Facility" },
+      ],
+      finance: [
+        { keywords: ["crypto", "blockchain", "defi", "token"], label: "Crypto & Blockchain" },
+        { keywords: ["trading", "forex", "stocks", "options"], label: "Trading Platform" },
+        { keywords: ["investing", "wealth", "portfolio", "fund"], label: "Investment Management" },
+      ],
+      education: [
+        { keywords: ["online", "course", "digital", "e-learning"], label: "Online Education" },
+        { keywords: ["coaching", "mentor", "1-on-1", "consulting"], label: "Coaching & Mentorship" },
+        { keywords: ["certification", "accreditation", "professional"], label: "Professional Certification" },
+      ],
+      ecommerce: [
+        { keywords: ["dropship", "fulfillment", "supplier"], label: "Dropshipping" },
+        { keywords: ["brand", "d2c", "direct", "product"], label: "Direct-to-Consumer Brand" },
+        { keywords: ["marketplace", "platform", "vendor"], label: "E-commerce Marketplace" },
+      ],
+    };
+
+    const dnaText = contentDna.map((e: any) => {
+      const hooks = (e.hookArchetypes || []).map((h: any) => typeof h === "string" ? h : h.type || h.name || "").join(" ");
+      const frameworks = (e.narrativeFrameworks || []).map((n: any) => typeof n === "string" ? n : n.type || n.name || "").join(" ");
+      const captions = (e.topCaptions || e.sampleCaptions || []).join(" ");
+      return `${hooks} ${frameworks} ${captions}`;
+    }).join(" ").toLowerCase();
+
+    const enrichedText = `${combined} ${dnaText}`;
+
+    const subOptions = subcategories[best] || [];
+    let bestSub: string | null = null;
+    let bestSubScore = 0;
+
+    for (const sub of subOptions) {
+      let score = 0;
+      for (const kw of sub.keywords) {
+        if (enrichedText.includes(kw)) score++;
+      }
+      if (score > bestSubScore) {
+        bestSubScore = score;
+        bestSub = sub.label;
+      }
+    }
+
+    if (bestSubScore >= 2) {
+      subcategory = bestSub;
+    } else if (sufficientData) {
+      const allSubs = Object.values(subcategories).flat();
+      let topLabel: string | null = null;
+      let topScore = 0;
+      let topParent: string | null = null;
+      for (const [parentCat, subs] of Object.entries(subcategories)) {
+        for (const sub of subs) {
+          let score = 0;
+          for (const kw of sub.keywords) {
+            if (enrichedText.includes(kw)) score++;
+          }
+          if (score > topScore) {
+            topScore = score;
+            topLabel = sub.label;
+            topParent = parentCat;
+          }
+        }
+      }
+      if (topLabel) {
+        subcategory = topLabel;
+        if (best === "general" && topParent) {
+          best = topParent;
+        }
+      }
+    }
+  }
+
+  return { macro: best, subcategory };
 }
 
 function layer2_marketNarrativeMap(miData: any): Record<string, string[]> {
@@ -429,6 +534,183 @@ export function checkCrossCampaignDiversity(
   }
 
   return penalties;
+}
+
+const STRATEGIC_SIGNAL_PATTERNS: { pattern: RegExp; signal: string; cluster: string }[] = [
+  { pattern: /\b(automat|autopilot|hands-?free|set.?and.?forget|auto-?\w+)\b/i, signal: "automation_replacing_manual", cluster: "automation" },
+  { pattern: /\b(no.?agency|without.?agency|replace.?your.?agency|fire.?your.?agency|diy|in-?house)\b/i, signal: "anti_agency_positioning", cluster: "anti_agency" },
+  { pattern: /\b(cut.?costs?|save.?money|reduce.?spend|lower.?cost|affordable|budget|cost.?effective|roi|return.?on)\b/i, signal: "cost_reduction", cluster: "cost_efficiency" },
+  { pattern: /\b(efficien|streamlin|optimiz|productiv|lean|eliminat.?waste)\b/i, signal: "operational_efficiency", cluster: "cost_efficiency" },
+  { pattern: /\b(fast|speed|quick|rapid|instant|real-?time|minutes.?not.?hours|10x.?faster)\b/i, signal: "execution_speed", cluster: "speed" },
+  { pattern: /\b(system|framework|blueprint|playbook|operating.?system|method|process|sop)\b/i, signal: "systemization", cluster: "systematization" },
+  { pattern: /\b(authority|expert|thought.?leader|credib|trust|proven|track.?record)\b/i, signal: "authority_driven", cluster: "authority" },
+  { pattern: /\b(strategy|strategic|plan|roadmap|position|differentiat)\b/i, signal: "strategy_led", cluster: "strategy" },
+  { pattern: /\b(execut|implement|deploy|launch|ship|deliver|done|result)\b/i, signal: "execution_led", cluster: "execution" },
+  { pattern: /\b(ai|artificial.?intelligence|machine.?learning|smart|intelligent|predictive|algorithm)\b/i, signal: "ai_powered", cluster: "technology" },
+  { pattern: /\b(data|analytic|measur|metric|insight|dashboard|report)\b/i, signal: "data_driven", cluster: "analytics" },
+  { pattern: /\b(scale|growth|grow|expand|multiply|leverage|compound)\b/i, signal: "scalability", cluster: "growth" },
+  { pattern: /\b(personal|custom|tailor|bespoke|unique|individual|1.?on.?1)\b/i, signal: "personalization", cluster: "customization" },
+  { pattern: /\b(communit|tribe|network|ecosystem|collective|peer)\b/i, signal: "community_driven", cluster: "community" },
+  { pattern: /\b(transparen|honest|authentic|real|genuine|no.?bs|no.?fluff)\b/i, signal: "transparency_play", cluster: "transparency" },
+];
+
+function extractStrategicSignals(miData: any): { signal: string; cluster: string; source: string }[] {
+  const signals: { signal: string; cluster: string; source: string }[] = [];
+  const seen = new Set<string>();
+
+  const textSources: { text: string; source: string }[] = [];
+
+  const marketState = miData.marketState || "";
+  const diagnosis = miData.marketDiagnosis || "";
+  const narrative = miData.narrativeSynthesis || "";
+  if (marketState) textSources.push({ text: marketState, source: "market_intelligence" });
+  if (diagnosis) textSources.push({ text: diagnosis, source: "market_intelligence" });
+  if (narrative) textSources.push({ text: narrative, source: "market_intelligence" });
+
+  const contentDna = safeJsonParse(miData.contentDnaData, []);
+  for (const entry of contentDna) {
+    const hooks = (entry.hookArchetypes || []).map((h: any) => typeof h === "string" ? h : h.type || h.name || "");
+    const frameworks = (entry.narrativeFrameworks || []).map((n: any) => typeof n === "string" ? n : n.type || n.name || "");
+    const captions = entry.topCaptions || entry.sampleCaptions || [];
+    const ctas = (entry.ctaPatterns || []).map((c: any) => typeof c === "string" ? c : c.pattern || "");
+    for (const t of [...hooks, ...frameworks, ...captions, ...ctas]) {
+      if (t) textSources.push({ text: t, source: "competitor_content" });
+    }
+  }
+
+  const dominanceData = safeJsonParse(miData.dominanceData, []);
+  for (const d of dominanceData) {
+    if (d.contentThemes) textSources.push({ text: JSON.stringify(d.contentThemes), source: "competitor_positioning" });
+    if (d.narrativeStyle) textSources.push({ text: d.narrativeStyle, source: "competitor_positioning" });
+  }
+
+  for (const { text, source } of textSources) {
+    for (const { pattern, signal, cluster } of STRATEGIC_SIGNAL_PATTERNS) {
+      if (pattern.test(text)) {
+        const key = `${signal}:${source}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          signals.push({ signal, cluster, source });
+        }
+      }
+    }
+  }
+
+  return signals;
+}
+
+function extractAudienceStrategicSignals(audienceData: any): { signal: string; cluster: string; source: string }[] {
+  const signals: { signal: string; cluster: string; source: string }[] = [];
+  const seen = new Set<string>();
+
+  const pains = safeJsonParse(audienceData.audiencePains, []);
+  const desires = safeJsonParse(audienceData.desireMap, []);
+  const objections = safeJsonParse(audienceData.objectionMap, []);
+
+  const audienceTexts: string[] = [];
+  for (const p of pains) { if (p.canonical) audienceTexts.push(p.canonical); }
+  for (const d of desires) { if (d.canonical) audienceTexts.push(d.canonical); }
+  for (const o of objections) { if (o.canonical) audienceTexts.push(o.canonical); }
+
+  for (const text of audienceTexts) {
+    for (const { pattern, signal, cluster } of STRATEGIC_SIGNAL_PATTERNS) {
+      if (pattern.test(text)) {
+        const key = `${signal}:audience`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          signals.push({ signal, cluster, source: "audience_insights" });
+        }
+      }
+    }
+  }
+
+  return signals;
+}
+
+interface EvidenceDensityResult {
+  uniqueClusterCount: number;
+  crossSourceCount: number;
+  hasRedundancy: boolean;
+  densityScore: number;
+  confidencePenalty: number;
+}
+
+function validateTerritoryEvidenceDensity(
+  territory: Territory,
+  miSignals: { signal: string; cluster: string; source: string }[],
+  audienceSignals: { signal: string; cluster: string; source: string }[],
+): EvidenceDensityResult {
+  const allSignals = [...miSignals, ...audienceSignals];
+
+  const territoryTokens = new Set(territory.name.toLowerCase().split(/\s+/).filter(t => t.length > 2));
+  const evidenceTokens = new Set(
+    [...territory.painAlignment, ...territory.desireAlignment, ...territory.evidenceSignals]
+      .map(s => s.toLowerCase())
+  );
+
+  const relevantSignals = allSignals.filter(s => {
+    const signalTokens = s.signal.replace(/_/g, " ").toLowerCase().split(/\s+/);
+    const clusterTokens = s.cluster.replace(/_/g, " ").toLowerCase().split(/\s+/);
+    for (const t of territoryTokens) {
+      for (const st of [...signalTokens, ...clusterTokens]) {
+        if (t.includes(st) || st.includes(t)) return true;
+      }
+    }
+    for (const e of evidenceTokens) {
+      for (const st of [...signalTokens, ...clusterTokens]) {
+        if (e.includes(st) || st.includes(e)) return true;
+      }
+    }
+    return false;
+  });
+
+  const clusters = new Set(relevantSignals.map(s => s.cluster));
+  const uniqueClusterCount = clusters.size;
+
+  const sources = new Set(relevantSignals.map(s => s.source));
+  const crossSourceCount = sources.size;
+
+  const evidenceTexts = [...territory.painAlignment, ...territory.desireAlignment, ...territory.evidenceSignals];
+  let redundantPairs = 0;
+  let totalPairs = 0;
+  for (let i = 0; i < evidenceTexts.length; i++) {
+    for (let j = i + 1; j < evidenceTexts.length; j++) {
+      totalPairs++;
+      const a = new Set(evidenceTexts[i].toLowerCase().split(/\s+/).filter(t => t.length > 2));
+      const b = new Set(evidenceTexts[j].toLowerCase().split(/\s+/).filter(t => t.length > 2));
+      let overlap = 0;
+      for (const t of a) { if (b.has(t)) overlap++; }
+      const union = new Set([...a, ...b]).size;
+      if (union > 0 && overlap / union >= 0.6) redundantPairs++;
+    }
+  }
+  const hasRedundancy = totalPairs > 0 && redundantPairs / totalPairs >= 0.5;
+
+  let densityScore = 1.0;
+  let confidencePenalty = 0;
+
+  if (uniqueClusterCount < 2) {
+    densityScore -= 0.15;
+    confidencePenalty += 0.10;
+  }
+
+  if (crossSourceCount < 2) {
+    densityScore -= 0.10;
+    confidencePenalty += 0.08;
+  }
+
+  if (hasRedundancy) {
+    densityScore -= 0.10;
+    confidencePenalty += 0.05;
+  }
+
+  return {
+    uniqueClusterCount,
+    crossSourceCount,
+    hasRedundancy,
+    densityScore: Math.max(0, densityScore),
+    confidencePenalty,
+  };
 }
 
 function layer7_opportunityGapDetection(
@@ -947,8 +1229,9 @@ export async function runPositioningEngine(
 
   console.log(`[PositioningEngine-V3] Starting 12-layer analysis | MI=${miSnapshotId} | Audience=${audienceSnapshotId} | Competitors=${competitors.length}`);
 
-  const category = layer1_categoryDetection(miSnapshot);
-  console.log(`[PositioningEngine-V3] L1 Category: ${category}`);
+  const categoryResult = layer1_categoryDetection(miSnapshot, competitors.length, totalSignals);
+  const category = categoryResult.macro;
+  console.log(`[PositioningEngine-V3] L1 Category: ${category}${categoryResult.subcategory ? ` / ${categoryResult.subcategory}` : ""}`);
 
   const narrativeMap = layer2_marketNarrativeMap(miSnapshot);
   console.log(`[PositioningEngine-V3] L2 Narratives: ${Object.keys(narrativeMap).length} competitors mapped`);
@@ -974,11 +1257,34 @@ export async function runPositioningEngine(
   const differentiationAxes = layer8_differentiationAxisConstruction(opportunityGaps, trustGaps, flankingMode);
   console.log(`[PositioningEngine-V3] L8 Differentiation: ${differentiationAxes.join(", ")}`);
 
+  const miStrategicSignals = extractStrategicSignals(miSnapshot);
+  const audienceStrategicSignals = extractAudienceStrategicSignals(audienceSnapshot);
+  const allStrategicSignals = [...miStrategicSignals, ...audienceStrategicSignals];
+  const strategicClusters = new Set(allStrategicSignals.map(s => s.cluster));
+  console.log(`[PositioningEngine-V3] Signal extraction: ${allStrategicSignals.length} strategic signals across ${strategicClusters.size} clusters`);
+
   let territories = layer10_strategicTerritorySelection(
     opportunityGaps, narrativeMap, narrativeSaturation,
     marketPower, differentiationAxes, segmentPriority, trustGaps, flankingMode,
   );
   console.log(`[PositioningEngine-V3] L10 Territories: ${territories.length} selected`);
+
+  for (const territory of territories) {
+    const density = validateTerritoryEvidenceDensity(territory, miStrategicSignals, audienceStrategicSignals);
+    if (density.confidencePenalty > 0) {
+      territory.confidenceScore = Math.max(0, territory.confidenceScore - density.confidencePenalty);
+      if (density.uniqueClusterCount < 2) {
+        territory.stabilityNotes.push(`Low semantic cluster diversity (${density.uniqueClusterCount} clusters)`);
+      }
+      if (density.crossSourceCount < 2) {
+        territory.stabilityNotes.push(`Limited cross-source confirmation (${density.crossSourceCount} source${density.crossSourceCount === 1 ? "" : "s"})`);
+      }
+      if (density.hasRedundancy) {
+        territory.stabilityNotes.push("Evidence shows redundant semantic framing");
+      }
+    }
+  }
+  console.log(`[PositioningEngine-V3] Territory evidence density validated`);
 
   try {
     const recentSnapshots = await db.select({
@@ -1060,6 +1366,9 @@ export async function runPositioningEngine(
     executionTimeMs,
     flankingMode,
     detectedCategory: category,
+    strategicSubcategory: categoryResult.subcategory,
+    strategicSignalCount: allStrategicSignals.length,
+    strategicClusterCount: strategicClusters.size,
   };
 
   const [inserted] = await db.insert(positioningSnapshots).values({
@@ -1146,6 +1455,9 @@ function buildEmptyResult(
       executionTimeMs,
       flankingMode: false,
       detectedCategory: "unknown",
+      strategicSubcategory: null,
+      strategicSignalCount: 0,
+      strategicClusterCount: 0,
     },
     snapshotId: "",
     executionTimeMs,
