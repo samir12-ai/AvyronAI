@@ -82,6 +82,7 @@ interface PositioningSnapshot {
   inputSummary: {
     competitorCount: number;
     signalCount: number;
+    audienceSignalCount?: number;
     executionTimeMs: number;
     flankingMode: boolean;
     detectedCategory: string;

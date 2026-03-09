@@ -45,6 +45,7 @@ interface PositioningEngineResult {
     audienceSnapshotId: string;
     competitorCount: number;
     signalCount: number;
+    audienceSignalCount: number;
     executionTimeMs: number;
     flankingMode: boolean;
     detectedCategory: string;
@@ -1358,11 +1359,13 @@ export async function runPositioningEngine(
       ? stabilityResult.advisories.map(a => a.message).join("; ")
       : null;
 
+  const combinedSignalCount = totalSignals + allStrategicSignals.length;
   const inputSummary = {
     miSnapshotId,
     audienceSnapshotId,
     competitorCount: competitors.length,
-    signalCount: totalSignals,
+    signalCount: combinedSignalCount,
+    audienceSignalCount: totalSignals,
     executionTimeMs,
     flankingMode,
     detectedCategory: category,
@@ -1452,6 +1455,7 @@ function buildEmptyResult(
       audienceSnapshotId,
       competitorCount: 0,
       signalCount: 0,
+      audienceSignalCount: 0,
       executionTimeMs,
       flankingMode: false,
       detectedCategory: "unknown",
