@@ -48,7 +48,7 @@ export function registerDifferentiationRoutes(app: Express) {
         return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "MI snapshot not found or campaign mismatch" });
       }
 
-      const integrityResult = verifySnapshotIntegrity(miSnapshot, campaignId);
+      const integrityResult = verifySnapshotIntegrity(miSnapshot, MI_ENGINE_VERSION, campaignId);
       if (!integrityResult.valid) {
         return res.status(400).json({
           error: "MI_INTEGRITY_FAILED",
