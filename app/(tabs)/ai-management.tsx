@@ -34,6 +34,7 @@ import ControlCenter from '@/components/ControlCenter';
 import MarketDatabaseAdmin from '@/components/MarketDatabaseAdmin';
 import PositioningStrategy from '@/components/PositioningStrategy';
 import DifferentiationEngine from '@/components/DifferentiationEngine';
+import OfferEngine from '@/components/OfferEngine';
 import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
 
 interface AIAudience {
@@ -53,7 +54,7 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'positioning' | 'differentiation' | 'control' | 'marketdb' | 'publisher' | 'audience' | 'leads';
+type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'strategies' | 'positioning' | 'differentiation' | 'offers' | 'control' | 'marketdb' | 'publisher' | 'audience' | 'leads';
 
 interface AIMgmtPersistedState {
   activeTab: TabView;
@@ -365,6 +366,64 @@ export default function AIManagementScreen() {
     };
     loadControlData();
   }, []);
+
+  const strategyBranches: { key: TabView; icon: keyof typeof Ionicons.glyphMap; label: string; color: string; description: string }[] = [
+    { key: 'positioning', icon: 'compass-outline', label: 'Positioning', color: '#10B981', description: 'Strategic territory discovery and narrative positioning' },
+    { key: 'differentiation', icon: 'layers-outline', label: 'Differentiation', color: '#8B5CF6', description: '12-layer proof-backed differentiation analysis' },
+    { key: 'offers', icon: 'pricetag-outline', label: 'Offer Engine', color: '#F97316', description: '5-layer structured offer construction' },
+  ];
+
+  const renderStrategiesBranch = () => (
+    <View style={styles.tabContent}>
+      <LinearGradient colors={['#F97316', '#FB923C']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ borderRadius: 12, padding: 16, marginBottom: 16 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Ionicons name="map" size={20} color="#fff" />
+          <Text style={{ fontSize: 16, fontWeight: '700' as const, color: '#fff' }}>Strategies</Text>
+        </View>
+        <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 6, lineHeight: 16 }}>
+          Strategic engines for positioning, differentiation, and offer construction. Each engine builds on the outputs of the previous stage.
+        </Text>
+      </LinearGradient>
+
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, paddingHorizontal: 4 }}>
+        <View style={{ flex: 1, height: 1, backgroundColor: colors.cardBorder }} />
+        <Text style={{ fontSize: 11, fontWeight: '600' as const, color: colors.textMuted, letterSpacing: 1 }}>PIPELINE FLOW</Text>
+        <View style={{ flex: 1, height: 1, backgroundColor: colors.cardBorder }} />
+      </View>
+
+      {strategyBranches.map((branch, index) => (
+        <React.Fragment key={branch.key}>
+          {index > 0 && (
+            <View style={{ alignItems: 'center', marginVertical: 4 }}>
+              <Ionicons name="arrow-down" size={16} color={colors.textMuted} />
+            </View>
+          )}
+          <Pressable
+            onPress={() => { Haptics.selectionAsync(); setActiveTab(branch.key); updateState({ activeTab: branch.key }); }}
+            style={[{
+              backgroundColor: colors.card,
+              borderRadius: 12,
+              padding: 16,
+              borderWidth: 1,
+              borderColor: colors.cardBorder,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 14,
+            }]}
+          >
+            <View style={{ width: 42, height: 42, borderRadius: 12, backgroundColor: branch.color + '15', justifyContent: 'center', alignItems: 'center' }}>
+              <Ionicons name={branch.icon} size={20} color={branch.color} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 14, fontWeight: '600' as const, color: colors.text, marginBottom: 2 }}>{branch.label}</Text>
+              <Text style={{ fontSize: 12, color: colors.textMuted, lineHeight: 16 }}>{branch.description}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </Pressable>
+        </React.Fragment>
+      ))}
+    </View>
+  );
 
   const renderIntelligence = () => (
     <View style={styles.tabContent}>
@@ -1101,8 +1160,7 @@ export default function AIManagementScreen() {
             { key: 'buildplan' as TabView, icon: 'construct-outline' as const, label: 'Build Plan', color: '#EC4899', advanced: false },
             { key: 'pipeline' as TabView, icon: 'git-merge-outline' as const, label: 'Pipeline', color: '#8B5CF6', advanced: false },
             { key: 'intelligence' as TabView, icon: 'telescope-outline' as const, label: 'Intelligence', color: '#3B82F6', advanced: false },
-            { key: 'positioning' as TabView, icon: 'compass-outline' as const, label: 'Positioning', color: '#10B981', advanced: false },
-            { key: 'differentiation' as TabView, icon: 'layers-outline' as const, label: 'Differentiation', color: '#8B5CF6', advanced: false },
+            { key: 'strategies' as TabView, icon: 'map-outline' as const, label: 'Strategies', color: '#F97316', advanced: false },
             { key: 'control' as TabView, icon: 'shield-checkmark-outline' as const, label: 'Control', color: '#8B5CF6', advanced: false },
             { key: 'marketdb' as TabView, icon: 'server-outline' as const, label: 'Market DB', color: '#F97316', advanced: true },
             { key: 'publisher' as TabView, icon: 'send-outline' as const, label: 'Publish', color: colors.primary, advanced: false },
@@ -1130,8 +1188,10 @@ export default function AIManagementScreen() {
         {activeTab === 'buildplan' ? <BuildThePlan onNavigateToCI={() => { setActiveTab('intelligence'); updateState({ activeTab: 'intelligence' }); }} onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />
           : activeTab === 'pipeline' ? <StrategicPipeline onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />
           : activeTab === 'intelligence' ? renderIntelligence()
+          : activeTab === 'strategies' ? renderStrategiesBranch()
           : activeTab === 'positioning' ? <CampaignGuard><PositioningStrategy /></CampaignGuard>
           : activeTab === 'differentiation' ? <CampaignGuard><DifferentiationEngine /></CampaignGuard>
+          : activeTab === 'offers' ? <CampaignGuard><OfferEngine /></CampaignGuard>
           : activeTab === 'control' ? renderControlCenter()
           : activeTab === 'marketdb' ? <MarketDatabaseAdmin />
           : activeTab === 'publisher' ? renderPublisher()
