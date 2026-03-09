@@ -35,6 +35,91 @@ function clamp(v: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, v));
 }
 
+const OBJECTION_DERIVATION_PATTERNS: { painPattern: RegExp; objection: string }[] = [
+  { painPattern: /\b(low growth|no growth|slow growth|stagnant|plateau)\b/i, objection: "This solution will not actually improve growth results" },
+  { painPattern: /\b(lack of trust|trust issue|credib|skeptic|doubt)\b/i, objection: "This provider may not be credible or trustworthy" },
+  { painPattern: /\b(too expensive|cost|price|budget|afford)\b/i, objection: "The cost may not justify the expected return" },
+  { painPattern: /\b(complexity|complicated|confus|overwhelm|difficult)\b/i, objection: "This solution may be too complex to implement effectively" },
+  { painPattern: /\b(time|slow|takes too long|wait|delay)\b/i, objection: "Results may take too long to materialize" },
+  { painPattern: /\b(generic|same|commodity|undifferentiat|cookie.?cutter)\b/i, objection: "This looks like every other solution on the market" },
+  { painPattern: /\b(control|autonom|lock.?in|depend)\b/i, objection: "This solution may create unwanted dependency or loss of control" },
+  { painPattern: /\b(scale|capacity|limit|bottleneck)\b/i, objection: "This approach may not scale with business growth" },
+  { painPattern: /\b(risk|fail|uncertain|gamble|unproven)\b/i, objection: "The risk of failure outweighs the potential benefit" },
+  { painPattern: /\b(quality|inconsisten|unreliable|hit.?or.?miss)\b/i, objection: "Quality and consistency of results cannot be guaranteed" },
+];
+
+function deriveObjectionsFromAudienceData(audience: AudienceInput): Record<string, any> {
+  const derived: Record<string, any> = {};
+
+  const existingObjections = audience.objectionMap || {};
+  for (const [k, v] of Object.entries(existingObjections)) {
+    derived[k] = v;
+  }
+
+  const pains = Array.isArray(audience.audiencePains) ? audience.audiencePains : [];
+  const painTexts: string[] = pains.map((p: any) => {
+    if (typeof p === "string") return p;
+    return p.canonical || p.pain || p.description || p.text || "";
+  }).filter(Boolean);
+
+  for (const painText of painTexts) {
+    for (const { painPattern, objection } of OBJECTION_DERIVATION_PATTERNS) {
+      if (painPattern.test(painText) && !derived[objection]) {
+        derived[objection] = { frequency: 0.5, severity: 0.5, source: "derived_from_pain", originalPain: painText };
+      }
+    }
+  }
+
+  const emotionalDrivers = Array.isArray(audience.emotionalDrivers) ? audience.emotionalDrivers : [];
+  for (const driver of emotionalDrivers) {
+    const driverText = typeof driver === "string" ? driver : driver.driver || driver.text || driver.name || "";
+    if (!driverText) continue;
+    const lower = driverText.toLowerCase();
+    if (/\b(fear|anxiety|worry|concern|hesitat|reluct)\b/.test(lower) && !derived[driverText]) {
+      derived[`Hesitation: ${driverText}`] = { frequency: 0.4, severity: 0.4, source: "derived_from_emotion" };
+    }
+  }
+
+  const desireEntries = Array.isArray(audience.desireMap) ? audience.desireMap : Object.entries(audience.desireMap || {});
+  for (const entry of desireEntries) {
+    const desireText = typeof entry === "string" ? entry :
+      Array.isArray(entry) ? String(entry[0]) :
+      (entry as any).canonical || (entry as any).desire || "";
+    if (!desireText) continue;
+    const lower = desireText.toLowerCase();
+    if (/\b(proven|guarantee|evidence|certainty|assurance)\b/.test(lower)) {
+      const obj = `Demand for proof: ${desireText}`;
+      if (!derived[obj]) {
+        derived[obj] = { frequency: 0.5, severity: 0.5, source: "derived_from_desire" };
+      }
+    }
+  }
+
+  if (Object.keys(derived).length < 2 && painTexts.length > 0) {
+    for (let i = 0; i < Math.min(2, painTexts.length) && Object.keys(derived).length < 2; i++) {
+      const fallback = `Concern about: ${painTexts[i]}`;
+      if (!derived[fallback]) {
+        derived[fallback] = { frequency: 0.3, severity: 0.3, source: "synthetic_fallback" };
+      }
+    }
+  }
+
+  if (Object.keys(derived).length < 2) {
+    const defaults = [
+      "This solution may not deliver on its promises",
+      "The approach may not be suitable for my specific situation",
+    ];
+    for (const d of defaults) {
+      if (Object.keys(derived).length >= 2) break;
+      if (!derived[d]) {
+        derived[d] = { frequency: 0.2, severity: 0.2, source: "synthetic_baseline" };
+      }
+    }
+  }
+
+  return derived;
+}
+
 function tokenize(text: string): string[] {
   return text.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(Boolean);
 }
@@ -601,11 +686,19 @@ export async function runDifferentiationEngine(
     return buildEmptyResult(STATUS.MISSING_DEPENDENCY, `Positioning intake failed: ${l1.failures.join("; ")}`, Date.now() - startTime);
   }
 
-  const objectionCount = Object.keys(audience.objectionMap || {}).length;
-  if (objectionCount < MIN_OBJECTIONS) {
-    console.log(`[DifferentiationEngine-V3] Insufficient signals: ${objectionCount} objections < ${MIN_OBJECTIONS}`);
-    return buildEmptyResult(STATUS.INSUFFICIENT_SIGNALS, `Insufficient audience signals: ${objectionCount} objections`, Date.now() - startTime);
+  const originalObjectionCount = Object.keys(audience.objectionMap || {}).length;
+  const enrichedObjectionMap = deriveObjectionsFromAudienceData(audience);
+  const enrichedObjectionCount = Object.keys(enrichedObjectionMap).length;
+  const objectionWasDerived = enrichedObjectionCount > originalObjectionCount;
+
+  if (objectionWasDerived) {
+    console.log(`[DifferentiationEngine-V3] Objection derivation: ${originalObjectionCount} explicit → ${enrichedObjectionCount} total (${enrichedObjectionCount - originalObjectionCount} derived from audience data)`);
   }
+
+  const enrichedAudience: AudienceInput = {
+    ...audience,
+    objectionMap: enrichedObjectionMap,
+  };
 
   const l2Claims = layer2_competitorClaimSurfaceMapping(mi);
   diagnostics.layer2 = { claimCount: l2Claims.length };
@@ -614,13 +707,13 @@ export async function runDifferentiationEngine(
   const l3Collisions = layer3_claimCollisionDetection(candidateClaims, l2Claims);
   diagnostics.layer3 = { collisionCount: l3Collisions.length, highRisk: l3Collisions.filter(c => c.collisionRisk >= COLLISION_THRESHOLD).length };
 
-  const l4ProofDemands = layer4_proofDemandMapping(audience, l1.territories);
+  const l4ProofDemands = layer4_proofDemandMapping(enrichedAudience, l1.territories);
   diagnostics.layer4 = { proofDemandCount: l4ProofDemands.length };
 
-  const l5TrustGaps = layer5_trustGapPrioritization(audience, l1.territories);
+  const l5TrustGaps = layer5_trustGapPrioritization(enrichedAudience, l1.territories);
   diagnostics.layer5 = { trustGapCount: l5TrustGaps.length };
 
-  const l6Authority = layer6_authorityModeSelection(positioning, audience, mi);
+  const l6Authority = layer6_authorityModeSelection(positioning, enrichedAudience, mi);
   diagnostics.layer6 = { mode: l6Authority.mode, rationale: l6Authority.rationale };
 
   const l7ProofAssets = layer7_proofAssetArchitecture(l4ProofDemands, l5TrustGaps, l1.territories);
@@ -629,7 +722,15 @@ export async function runDifferentiationEngine(
   const l8Mechanism = layer8_mechanismConstruction(positioning, l4ProofDemands);
   diagnostics.layer8 = { supported: l8Mechanism.supported, type: l8Mechanism.type };
 
-  const l9Pillars = layer9_differentiationPillarScoring(l1.territories, l2Claims, l5TrustGaps, l4ProofDemands, audience);
+  const lowObjectionDensity = originalObjectionCount === 0;
+  diagnostics.objectionDerivation = {
+    originalCount: originalObjectionCount,
+    enrichedCount: enrichedObjectionCount,
+    derivedCount: enrichedObjectionCount - originalObjectionCount,
+    lowDensity: lowObjectionDensity,
+  };
+
+  const l9Pillars = layer9_differentiationPillarScoring(l1.territories, l2Claims, l5TrustGaps, l4ProofDemands, enrichedAudience);
   diagnostics.layer9 = { pillarCount: l9Pillars.length, topScore: l9Pillars[0]?.overallScore ?? 0 };
 
   const l10Claims = layer10_claimStrengthScoring(l9Pillars, l3Collisions, l1.territories);
@@ -680,7 +781,8 @@ export async function runDifferentiationEngine(
   }
 
   const avgClaimScore = finalClaims.length > 0 ? finalClaims.reduce((s, c) => s + c.overallScore, 0) / finalClaims.length : 0;
-  const confidenceScore = clamp(avgClaimScore * (l12Stability.stable ? 1 : 0.6));
+  const objectionDensityFactor = lowObjectionDensity ? 0.85 : 1.0;
+  const confidenceScore = clamp(avgClaimScore * (l12Stability.stable ? 1 : 0.6) * objectionDensityFactor);
 
   console.log(`[DifferentiationEngine-V3] Complete | status=${status} | pillars=${finalPillars.length} | claims=${finalClaims.length} | confidence=${confidenceScore.toFixed(2)} | stable=${l12Stability.stable} | collisions=${highCollisionCount}`);
 
