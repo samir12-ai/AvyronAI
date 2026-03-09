@@ -1,0 +1,228 @@
+Replit Team,
+
+Funnel Engine V3 is now implemented and operational. Before we consider this layer fully finalized, we need one final hardening pass to ensure the engine is completely aligned with the system architecture and the Master Plan rules.
+
+The objective of this request is to eliminate potential structural weaknesses, prevent cross-engine conflicts, and guarantee that Funnel Engine V3 operates strictly within its intended responsibility.
+
+Please implement the following adjustments carefully.
+
+--------------------------------------------------
+1. MASTER PLAN BOUNDARY ENFORCEMENT (CRITICAL)
+--------------------------------------------------
+
+Funnel Engine must remain strictly inside its domain.
+
+It is responsible ONLY for:
+
+• funnel type determination  
+• funnel stage architecture  
+• trust progression path  
+• proof placement logic  
+• commitment level matching  
+• friction mapping  
+• funnel integrity validation  
+• funnel strength scoring  
+
+It must NOT generate outputs related to:
+
+• strategic positioning  
+• offer design or modification  
+• pricing logic  
+• marketing messaging  
+• hooks or copywriting  
+• advertising strategy  
+• channel selection  
+• media buying  
+• content strategy  
+• persuasion frameworks  
+• campaign execution  
+• financial projections  
+
+Any detected output from these domains must trigger the existing integrity failure mechanism.
+
+Boundary enforcement must remain active across all generated fields.
+
+--------------------------------------------------
+2. ADD ENTRY TRIGGER LAYER (WITHOUT BREAKING ENGINE BOUNDARIES)
+--------------------------------------------------
+
+We need to add a new internal layer called Entry Trigger Detection.
+
+This layer exists only to determine the logical entry point into the funnel, not to generate marketing hooks or content.
+
+The layer must determine the most appropriate entry mechanism based on:
+
+• audience readiness  
+• trust level  
+• offer complexity  
+• buyer friction  
+• market maturity  
+
+Examples of entry mechanisms may include:
+
+• diagnostic / assessment entry  
+• challenge entry  
+• audit entry  
+• discovery entry  
+• content education entry  
+
+Important constraint:
+
+The engine must output only the entry mechanism type, not the messaging or promotional copy.
+
+Example of acceptable output:
+
+Entry Mechanism: Diagnostic Entry  
+Purpose: Allow users to identify their current financial growth bottleneck before entering the challenge.
+
+Example of prohibited output:
+
+Actual ad hooks, headlines, or marketing copy.
+
+This ensures the engine stays compliant with Master Plan boundaries while improving funnel realism.
+
+--------------------------------------------------
+3. PREVENT STRATEGY BRANCHING
+--------------------------------------------------
+
+The Funnel Engine must not become a secondary strategy engine.
+
+Avoid adding:
+
+• large strategic exploration trees  
+• multiple branching strategic hypotheses  
+• narrative generation logic  
+
+The engine must remain focused strictly on conversion path architecture, not strategic analysis.
+
+--------------------------------------------------
+4. FUNNEL COMPLEXITY COMPRESSION GUARD
+--------------------------------------------------
+
+Add a safeguard to prevent over-engineered funnels.
+
+If the funnel structure contains excessive stages or redundant logical steps, the engine must:
+
+• compress stages  
+• merge redundant steps  
+• or downgrade the funnel confidence score
+
+The goal is to ensure the output remains practical and executable.
+
+--------------------------------------------------
+5. ROUTE AND CONNECTION STABILITY
+--------------------------------------------------
+
+Please re-verify all Funnel Engine routes and pipeline wiring.
+
+Routes that must remain stable:
+
+POST /api/funnel-engine/analyze  
+GET /api/funnel-engine/latest  
+POST /api/funnel-engine/select  
+
+Verify the following:
+
+• route registration is correct  
+• accountId and campaignId scoping is enforced  
+• snapshot dependencies resolve correctly  
+• Offer selection flows correctly into Funnel Engine analysis  
+• Funnel selection persists correctly and is returned by /latest  
+• downstream engines will read the selected funnel correctly
+
+No route disconnections or partial wiring should remain.
+
+--------------------------------------------------
+6. OFFER AND FUNNEL SELECTION PIPELINE
+--------------------------------------------------
+
+Confirm the selection mechanism functions consistently across the system.
+
+Requirements:
+
+• user can select either primary or alternative offer  
+• user can select either primary or alternative funnel  
+• selected option becomes the active snapshot for downstream engines  
+• selections persist in database state  
+• UI reflects selection with the existing "Selected" indicator  
+
+Ensure no conflict occurs between:
+
+offer selection  
+funnel selection  
+snapshot state
+
+--------------------------------------------------
+7. SNAPSHOT DATA INTEGRITY
+--------------------------------------------------
+
+Confirm the following schema integrity:
+
+offer_snapshots  
+funnel_snapshots  
+
+Fields must include:
+
+• selected_option  
+• accountId  
+• campaignId  
+• version references for upstream engines
+
+Snapshots must maintain full upstream traceability.
+
+--------------------------------------------------
+8. HARD FAIL CONDITIONS
+--------------------------------------------------
+
+The existing integrity protection must remain active.
+
+If boundary violations occur:
+
+• status = INTEGRITY_FAILED  
+• confidence = 0  
+• HTTP response = 422  
+• snapshot must NOT be persisted
+
+Ensure the detection continues scanning across all generated text fields including:
+
+• stage names  
+• stage purposes  
+• trust path actions  
+• proof placement explanations  
+• friction mitigation descriptions  
+• rejection explanations
+
+--------------------------------------------------
+9. DEPLOYMENT AND LIVE SYSTEM VERIFICATION
+--------------------------------------------------
+
+Please avoid the common issue where code changes are implemented but not applied to the running environment.
+
+After implementing these adjustments:
+
+• rebuild affected modules  
+• restart the backend runtime  
+• verify the running environment is using the updated Funnel Engine logic  
+• confirm Entry Trigger Detection is active  
+• confirm routes remain connected  
+• confirm offer and funnel selection operate correctly in the live system
+
+Do not close the task until the updated logic is verified in the running environment.
+
+--------------------------------------------------
+10. FINAL ACCEPTANCE CONDITIONS
+--------------------------------------------------
+
+Funnel Engine V3 can be considered finalized only when:
+
+• Entry Trigger Detection is implemented without breaking boundaries  
+• no cross-engine responsibilities appear in outputs  
+• funnel compression safeguard is active  
+• route stability is confirmed  
+• offer and funnel selection flows correctly through the pipeline  
+• integrity guards remain active  
+• deployment is verified in the live system
+
+This final pass is required to ensure the engine is production-grade and fully aligned with the Master Plan architecture.
+
+Thank you.

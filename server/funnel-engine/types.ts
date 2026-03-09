@@ -45,6 +45,11 @@ export interface FunnelDifferentiationInput {
   confidenceScore: number | null;
 }
 
+export interface EntryTrigger {
+  mechanismType: string;
+  purpose: string;
+}
+
 export interface FunnelCandidate {
   funnelName: string;
   funnelType: string;
@@ -53,6 +58,7 @@ export interface FunnelCandidate {
   proofPlacements: ProofPlacement[];
   commitmentLevel: string;
   frictionMap: FrictionPoint[];
+  entryTrigger: EntryTrigger;
   funnelStrengthScore: number;
   eligibilityScore: number;
   offerFitScore: number;
@@ -61,6 +67,7 @@ export interface FunnelCandidate {
   proofPlacementScore: number;
   commitmentMatchScore: number;
   integrityResult: { passed: boolean; failures: string[] };
+  compressionApplied: boolean;
   genericFlag: boolean;
 }
 

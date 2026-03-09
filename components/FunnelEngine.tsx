@@ -43,6 +43,11 @@ interface FrictionPoint {
   mitigation: string;
 }
 
+interface EntryTrigger {
+  mechanismType: string;
+  purpose: string;
+}
+
 interface FunnelCandidate {
   funnelName: string;
   funnelType: string;
@@ -51,6 +56,7 @@ interface FunnelCandidate {
   proofPlacements: ProofPlacement[];
   commitmentLevel: string;
   frictionMap: FrictionPoint[];
+  entryTrigger?: EntryTrigger;
   funnelStrengthScore: number;
   eligibilityScore: number;
   offerFitScore: number;
@@ -59,6 +65,7 @@ interface FunnelCandidate {
   proofPlacementScore: number;
   commitmentMatchScore: number;
   integrityResult: { passed: boolean; failures: string[] };
+  compressionApplied?: boolean;
   genericFlag: boolean;
 }
 
@@ -261,6 +268,30 @@ export default function FunnelEngine() {
           <Ionicons name="git-network" size={13} color="#14B8A6" />
           <Text style={[styles.funnelTypeText, { color: colors.textSecondary }]}>{funnel.funnelType}</Text>
         </View>
+
+        {funnel.entryTrigger && funnel.entryTrigger.mechanismType !== "none" && (
+          <View style={[styles.entryTriggerBox, { backgroundColor: '#8B5CF610', borderColor: '#8B5CF630' }]}>
+            <View style={styles.entryTriggerHeader}>
+              <Ionicons name="enter-outline" size={14} color="#8B5CF6" />
+              <Text style={[styles.entryTriggerLabel, { color: '#8B5CF6' }]}>Entry Trigger</Text>
+              <View style={[styles.entryMechanismBadge, { backgroundColor: '#8B5CF620' }]}>
+                <Text style={[styles.entryMechanismText, { color: '#8B5CF6' }]}>
+                  {funnel.entryTrigger.mechanismType.replace(/_/g, ' ')}
+                </Text>
+              </View>
+            </View>
+            <Text style={[styles.entryTriggerPurpose, { color: colors.textSecondary }]}>
+              {funnel.entryTrigger.purpose}
+            </Text>
+          </View>
+        )}
+
+        {funnel.compressionApplied && (
+          <View style={[styles.compressionBadge, { backgroundColor: '#F59E0B15' }]}>
+            <Ionicons name="contract" size={12} color="#F59E0B" />
+            <Text style={[styles.compressionText, { color: '#F59E0B' }]}>Stages compressed for execution clarity</Text>
+          </View>
+        )}
 
         <View style={styles.funnelMeta}>
           <View style={styles.metaItem}>
@@ -595,6 +626,14 @@ const styles = StyleSheet.create({
   scoreValue: { fontSize: 11, fontWeight: '600' as const, width: 32, textAlign: 'right' },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
   statusText: { fontSize: 12, fontWeight: '500' as const },
+  entryTriggerBox: { borderRadius: 10, borderWidth: 1, padding: 12, marginBottom: 10 },
+  entryTriggerHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  entryTriggerLabel: { fontSize: 12, fontWeight: '600' as const },
+  entryMechanismBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+  entryMechanismText: { fontSize: 11, fontWeight: '600' as const, textTransform: 'capitalize' as const },
+  entryTriggerPurpose: { fontSize: 12, lineHeight: 17 },
+  compressionBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, marginBottom: 10 },
+  compressionText: { fontSize: 11, fontWeight: '500' as const },
   selectBtn: { marginTop: 8 },
   selectBtnSelected: { opacity: 0.8 },
   selectBtnGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 10, padding: 12 },

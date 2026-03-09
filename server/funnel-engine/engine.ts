@@ -7,6 +7,8 @@ import {
   BOUNDARY_BLOCKED_PATTERNS,
   AWARENESS_TO_FUNNEL_MAP,
   STATUS,
+  MAX_FUNNEL_STAGES,
+  ENTRY_MECHANISM_TYPES,
 } from "./constants";
 import type {
   FunnelMIInput,
@@ -20,6 +22,7 @@ import type {
   ProofPlacement,
   FrictionPoint,
   FunnelResult,
+  EntryTrigger,
 } from "./types";
 
 function clamp(v: number, min = 0, max = 1): number {
@@ -427,8 +430,8 @@ export function layer7_funnelIntegrityGuard(
     failures.push("Generic funnel detected — lacks specificity");
   }
 
-  if (candidate.stageMap.length > 7) {
-    failures.push(`Complexity compression needed: ${candidate.stageMap.length} stages exceeds maximum`);
+  if (candidate.stageMap.length > MAX_FUNNEL_STAGES) {
+    failures.push(`Complexity compression needed: ${candidate.stageMap.length} stages exceeds maximum of ${MAX_FUNNEL_STAGES}`);
   }
 
   if (candidate.offerFitScore < 0.35) {
@@ -463,6 +466,86 @@ export function layer8_funnelStrengthScoring(candidate: FunnelCandidate): number
   }
 
   return score;
+}
+
+export function layerEntryTriggerDetection(
+  audience: FunnelAudienceInput,
+  offer: FunnelOfferInput,
+  funnelType: string,
+): EntryTrigger {
+  const awareness = audience.awarenessLevel || "problem_aware";
+  const maturity = typeof audience.maturityIndex === "number" ? audience.maturityIndex : (Number(audience.maturityIndex) || 0.5);
+  const offerComplexity = offer.deliverables.length > 5 ? "high" : offer.deliverables.length > 2 ? "medium" : "low";
+  const buyerFriction = offer.frictionLevel;
+  const objectionCount = Object.keys(audience.objectionMap || {}).length;
+
+  if (awareness === "unaware" || (maturity < 0.3 && objectionCount > 3)) {
+    return {
+      mechanismType: "content_education",
+      purpose: "Provide foundational education to establish problem awareness before introducing the solution framework",
+    };
+  }
+
+  if (offerComplexity === "high" && buyerFriction > 0.6) {
+    return {
+      mechanismType: "audit",
+      purpose: "Allow prospects to evaluate their current state against a structured assessment before entering the conversion path",
+    };
+  }
+
+  if (awareness === "problem_aware" && maturity < 0.5) {
+    return {
+      mechanismType: "diagnostic",
+      purpose: "Enable prospects to identify their specific bottleneck or gap before presenting the solution mechanism",
+    };
+  }
+
+  if (funnelType === "challenge" || (maturity >= 0.4 && maturity < 0.7 && buyerFriction < 0.5)) {
+    return {
+      mechanismType: "challenge",
+      purpose: "Guide prospects through a structured experience that demonstrates capability and builds commitment progressively",
+    };
+  }
+
+  return {
+    mechanismType: "discovery",
+    purpose: "Allow prospects to explore the solution approach at their own pace and self-qualify for the next conversion step",
+  };
+}
+
+export function compressFunnelStages(stages: FunnelStage[]): { compressed: FunnelStage[]; wasCompressed: boolean } {
+  if (stages.length <= MAX_FUNNEL_STAGES) {
+    return { compressed: stages, wasCompressed: false };
+  }
+
+  console.log(`[FunnelEngine-V3] COMPRESSION | ${stages.length} stages exceed max ${MAX_FUNNEL_STAGES} — compressing`);
+
+  const priorityOrder = ["entry", "education", "engagement", "consideration", "decision", "conversion"];
+  const kept: FunnelStage[] = [];
+  const overflow: FunnelStage[] = [];
+
+  for (const stage of stages) {
+    if (priorityOrder.includes(stage.name.toLowerCase()) && kept.length < MAX_FUNNEL_STAGES) {
+      kept.push(stage);
+    } else {
+      overflow.push(stage);
+    }
+  }
+
+  if (overflow.length > 0 && kept.length < MAX_FUNNEL_STAGES) {
+    for (const extra of overflow) {
+      if (kept.length >= MAX_FUNNEL_STAGES) break;
+      kept.push(extra);
+    }
+  }
+
+  if (overflow.length > 0 && kept.length > 0) {
+    const lastKept = kept[kept.length - 1];
+    const mergedPurposes = overflow.map(s => s.purpose).join("; ");
+    lastKept.purpose = `${lastKept.purpose} (merged: ${mergedPurposes})`;
+  }
+
+  return { compressed: kept, wasCompressed: true };
 }
 
 function buildStageMap(funnelType: string, awareness: string): FunnelStage[] {
@@ -526,7 +609,10 @@ function buildFunnelCandidate(
   differentiation: FunnelDifferentiationInput,
 ): FunnelCandidate {
   const awareness = audience.awarenessLevel || "problem_aware";
-  const stageMap = buildStageMap(funnelType, awareness);
+  const rawStageMap = buildStageMap(funnelType, awareness);
+  const { compressed: stageMap, wasCompressed } = compressFunnelStages(rawStageMap);
+
+  const entryTrigger = layerEntryTriggerDetection(audience, offer, funnelType);
 
   const eligibility = layer1_funnelEligibilityDetection(audience, offer);
   const fitResult = layer2_offerToFunnelFit(offer, audience);
@@ -545,6 +631,7 @@ function buildFunnelCandidate(
     proofPlacements: proofResult.proofPlacements,
     commitmentLevel: commitResult.commitmentLevel,
     frictionMap: frictionResult.frictionPoints,
+    entryTrigger,
     funnelStrengthScore: 0,
     eligibilityScore: eligibility.eligibilityScore,
     offerFitScore: fitResult.fitScore,
@@ -553,6 +640,7 @@ function buildFunnelCandidate(
     proofPlacementScore: proofResult.proofPlacementScore,
     commitmentMatchScore: commitResult.commitmentMatchScore,
     integrityResult: { passed: true, failures: [] },
+    compressionApplied: wasCompressed,
     genericFlag: isGeneric,
   };
 
@@ -560,6 +648,10 @@ function buildFunnelCandidate(
   candidate.integrityResult = integrityResult;
 
   candidate.funnelStrengthScore = layer8_funnelStrengthScoring(candidate);
+
+  if (wasCompressed) {
+    candidate.funnelStrengthScore = clamp(candidate.funnelStrengthScore * 0.9);
+  }
 
   return candidate;
 }
@@ -573,6 +665,7 @@ function buildEmptyFunnel(): FunnelCandidate {
     proofPlacements: [],
     commitmentLevel: "none",
     frictionMap: [],
+    entryTrigger: { mechanismType: "none", purpose: "No data available" },
     funnelStrengthScore: 0,
     eligibilityScore: 0,
     offerFitScore: 0,
@@ -581,6 +674,7 @@ function buildEmptyFunnel(): FunnelCandidate {
     proofPlacementScore: 0,
     commitmentMatchScore: 0,
     integrityResult: { passed: false, failures: ["No data"] },
+    compressionApplied: false,
     genericFlag: false,
   };
 }
@@ -740,6 +834,8 @@ export async function runFunnelEngine(
   );
   diagnostics.layer7_primary = primaryFunnel.integrityResult;
   diagnostics.layer8_primary = { strength: primaryFunnel.funnelStrengthScore };
+  diagnostics.entryTrigger_primary = primaryFunnel.entryTrigger;
+  diagnostics.compression_primary = { applied: primaryFunnel.compressionApplied, stages: primaryFunnel.stageMap.length };
 
   const alternativeFunnel = buildFunnelCandidate(
     aiFunnels.alternative.name, aiFunnels.alternative.type,
@@ -756,6 +852,7 @@ export async function runFunnelEngine(
 
   const collectFunnelText = (f: FunnelCandidate) => [
     f.funnelName, f.funnelType, f.commitmentLevel,
+    f.entryTrigger.mechanismType, f.entryTrigger.purpose,
     ...f.stageMap.map(s => `${s.name} ${s.purpose} ${s.contentType} ${s.conversionGoal}`),
     ...f.trustPath.map(t => `${t.action} ${t.proofType} ${t.audienceState}`),
     ...f.proofPlacements.map(p => `${p.stage} ${p.proofType} ${p.placement} ${p.purpose}`),

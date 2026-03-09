@@ -1,4 +1,4 @@
-export const ENGINE_VERSION = 1;
+export const ENGINE_VERSION = 2;
 export const FRESHNESS_THRESHOLD_DAYS = 14;
 
 export const FUNNEL_STRENGTH_WEIGHTS = {
@@ -41,7 +41,22 @@ export const BOUNDARY_BLOCKED_PATTERNS: Record<string, RegExp> = {
   "campaign tasks": /\b(campaign execution|launch sequence|deployment plan|publish schedule|task list)\b/i,
   "financial planning": /\b(financial model|revenue projection|profit margin|break.even|financial plan)\b/i,
   "execution plans": /\b(execution plan|implementation timeline|project plan|rollout schedule)\b/i,
+  "content strategy": /\b(content strategy|content calendar|content plan|editorial calendar|content roadmap)\b/i,
+  "hooks and headlines": /\b(ad hook|headline formula|click.bait|hook template|attention grab|scroll.stop)\b/i,
+  "advertising strategy": /\b(advertising strategy|ad strategy|paid ads|ad creative|ad targeting|retargeting strategy)\b/i,
+  "marketing messaging": /\b(marketing message|brand message|tagline|slogan|value proposition statement)\b/i,
+  "strategic positioning": /\b(positioning statement|market position|competitive positioning|brand positioning)\b/i,
 };
+
+export const MAX_FUNNEL_STAGES = 6;
+
+export const ENTRY_MECHANISM_TYPES = [
+  "diagnostic",
+  "challenge",
+  "audit",
+  "discovery",
+  "content_education",
+] as const;
 
 export const FUNNEL_TYPES = [
   "direct",
