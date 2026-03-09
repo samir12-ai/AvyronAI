@@ -103,7 +103,7 @@ export function layer2_offerToFunnelFit(
   audience: FunnelAudienceInput,
 ): { funnelType: string; fitScore: number; rationale: string } {
   const awareness = audience.awarenessLevel || "problem_aware";
-  const maturity = audience.maturityIndex ?? 0.5;
+  const maturity = typeof audience.maturityIndex === "number" ? audience.maturityIndex : (Number(audience.maturityIndex) || 0.5);
   const offerStrength = offer.offerStrengthScore;
 
   const candidateTypes = AWARENESS_TO_FUNNEL_MAP[awareness] || AWARENESS_TO_FUNNEL_MAP["problem_aware"];
@@ -140,7 +140,7 @@ export function layer3_audienceFrictionModeling(
 ): { frictionPoints: FrictionPoint[]; audienceFrictionScore: number } {
   const frictionPoints: FrictionPoint[] = [];
   const awareness = audience.awarenessLevel || "unaware";
-  const maturity = audience.maturityIndex ?? 0.5;
+  const maturity = typeof audience.maturityIndex === "number" ? audience.maturityIndex : (Number(audience.maturityIndex) || 0.5);
   const objections = Object.entries(audience.objectionMap || {});
 
   if (awareness === "unaware" || awareness === "problem_aware") {
@@ -342,7 +342,7 @@ export function layer6_commitmentLevelMatching(
   funnelType: string,
 ): { commitmentLevel: string; commitmentMatchScore: number; analysis: string } {
   const awareness = audience.awarenessLevel || "problem_aware";
-  const maturity = audience.maturityIndex ?? 0.5;
+  const maturity = typeof audience.maturityIndex === "number" ? audience.maturityIndex : (Number(audience.maturityIndex) || 0.5);
   const offerStrength = offer.offerStrengthScore;
 
   const commitmentLevels: Record<string, number> = {
