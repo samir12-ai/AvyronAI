@@ -46,20 +46,15 @@ export function registerVeoRoutes(app: Express) {
         prompt,
         aspectRatio,
         duration,
-        resolution,
         negativePrompt,
         imageFileUri,
         imageMimeType,
-        lastFrameFileUri,
-        lastFrameMimeType,
-        referenceImages,
+        personGeneration,
       } = req.body;
 
       if (!prompt) {
         return res.status(400).json({ error: "Prompt is required" });
       }
-
-      console.log(`[VeoGenerate] prompt="${prompt.slice(0, 60)}..." imageFileUri=${!!imageFileUri} lastFrame=${!!lastFrameFileUri} refImages=${referenceImages?.length || 0}`);
 
       const validAspectRatios = ["16:9", "9:16"];
       const config: any = {
@@ -69,39 +64,21 @@ export function registerVeoRoutes(app: Express) {
 
       if (duration) {
         const seconds = parseInt(String(duration).replace("s", ""));
-        if (!isNaN(seconds) && [4, 6, 8].includes(seconds)) {
+        if (!isNaN(seconds) && [5, 6, 8].includes(seconds)) {
           config.durationSeconds = seconds;
         }
-      }
-
-      if (resolution && ["720p", "1080p"].includes(resolution)) {
-        config.resolution = resolution;
       }
 
       if (negativePrompt && typeof negativePrompt === "string" && negativePrompt.trim()) {
         config.negativePrompt = negativePrompt.trim();
       }
 
-      if (lastFrameFileUri && lastFrameMimeType) {
-        config.lastFrame = {
-          image: {
-            fileUri: lastFrameFileUri,
-            mimeType: lastFrameMimeType,
-          },
-        };
-      }
-
-      if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
-        config.referenceImages = referenceImages.slice(0, 3).map((img: any) => ({
-          image: {
-            fileUri: img.fileUri,
-            mimeType: img.mimeType,
-          },
-        }));
+      if (personGeneration && typeof personGeneration === "string") {
+        config.personGeneration = personGeneration;
       }
 
       const params: any = {
-        model: "veo-3.1-generate-preview",
+        model: "veo-3.0-generate-preview",
         prompt,
         config,
       };
@@ -112,6 +89,8 @@ export function registerVeoRoutes(app: Express) {
           mimeType: imageMimeType,
         };
       }
+
+      console.log(`[VeoGenerate] model=${params.model} prompt="${prompt.slice(0, 60)}..." aspectRatio=${config.aspectRatio} duration=${config.durationSeconds || 'default'} image=${!!imageFileUri}`);
 
       const operation = await client.models.generateVideos(params);
 
@@ -126,6 +105,12 @@ export function registerVeoRoutes(app: Express) {
         return res.status(403).json({
           error: "GOOGLE_API_NOT_ENABLED",
           message: "The Generative Language API is not enabled for your Google Cloud project. Enable it at console.developers.google.com, then wait a few minutes and try again.",
+        });
+      }
+      if (msg.includes("INVALID_ARGUMENT") || msg.includes("Unsupported")) {
+        return res.status(400).json({
+          error: "INVALID_REQUEST",
+          message: "Video generation request was rejected. Try adjusting your prompt or settings.",
         });
       }
       res.status(500).json({ error: msg });
