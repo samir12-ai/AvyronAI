@@ -57,7 +57,15 @@ export const GENERIC_TERRITORY_PATTERNS: string[] = [
   "lifestyle",
 ];
 
-export type PositioningStatus = "COMPLETE" | "MISSING_DEPENDENCY" | "INSUFFICIENT_SIGNALS" | "UNSTABLE";
+export type PositioningStatus = "COMPLETE" | "MISSING_DEPENDENCY" | "INSUFFICIENT_SIGNALS" | "UNSTABLE" | "INTEGRITY_FAILED";
+
+export const BOUNDARY_BLOCKED_PATTERNS: Record<string, RegExp> = {
+  "ad copy": /\b(ad copy|sales copy|copywriting|creative copy|ad creative)\b/i,
+  "funnel design": /\b(funnel design|funnel stage|funnel step|sales funnel|conversion funnel|funnel structure|funnel redesign)\b/i,
+  "offer pricing": /\b(pricing|price point|offer structure|discount|package deal|bundle pricing|revenue model|offer pricing)\b/i,
+  "content calendars": /\b(content calendar|editorial calendar|posting schedule|content plan|publishing schedule)\b/i,
+  "competitive analysis": /\b(competitive analysis|competitor analysis|competitor comparison|competitive audit|swot analysis)\b/i,
+};
 
 export interface Territory {
   name: string;

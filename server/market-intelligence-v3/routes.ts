@@ -9,6 +9,7 @@ import { getFetchJobStatus, startFetchJob } from "./fetch-orchestrator";
 import { getEngineReadinessState, verifySnapshotIntegrity } from "./engine-state";
 import { ENGINE_VERSION } from "./constants";
 import type { MIv3Mode } from "./types";
+import { checkValidationSession } from "../engine-hardening";
 
 const ALLOWED_MODES: MIv3Mode[] = ["overview", "dominance", "threats", "history"];
 
@@ -30,9 +31,18 @@ export function registerMIv3Routes(app: Express) {
       const campaignId = req.body.campaignId as string;
       const mode = (req.body.mode as MIv3Mode) || "overview";
       const forceRefresh = req.body.forceRefresh === true;
+      const validationSessionId = req.body.validationSessionId as string | undefined;
 
       if (!campaignId) {
         return res.status(422).json({ error: "campaignId is required" });
+      }
+
+      const sessionCheck = checkValidationSession(validationSessionId, "market-intelligence-v3", campaignId);
+      if (!sessionCheck.allowed) {
+        return res.status(429).json({
+          error: "REVALIDATION_LOOP_BLOCKED",
+          message: sessionCheck.warning,
+        });
       }
 
       if (!ALLOWED_MODES.includes(mode)) {
@@ -43,6 +53,13 @@ export function registerMIv3Routes(app: Express) {
 
       const goalMode = (req.body.goalMode === "REACH_MODE" ? "REACH_MODE" : "STRATEGY_MODE") as import("./types").GoalMode;
       const result = await MarketIntelligenceV3.run(mode, accountId, campaignId, forceRefresh, goalMode);
+
+      if (result.signalDiagnostics) {
+        console.log(`[MIv3-Route] SignalDiagnostics | posts=${result.signalDiagnostics.postsProcessed} detected=${result.signalDiagnostics.signalsDetected} filtered=${result.signalDiagnostics.signalsFiltered} used=${result.signalDiagnostics.signalsUsed}`);
+      }
+      if (result.narrativeOverlap?.overlapDetected) {
+        console.log(`[MIv3-Route] NarrativeOverlap | duplicates=${result.narrativeOverlap.duplicateNarratives.length} penalty=${result.narrativeOverlap.saturationPenalty}`);
+      }
 
       return res.json({
         success: true,

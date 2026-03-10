@@ -1,13 +1,23 @@
 import type { Express } from "express";
 import { runAudienceEngine, getLatestAudienceSnapshot } from "./engine";
+import { checkValidationSession } from "../engine-hardening";
 
 export function registerAudienceEngineRoutes(app: Express) {
   app.post("/api/audience-engine/analyze", async (req, res) => {
     try {
       const accountId = (req.body.accountId as string) || "default";
       const campaignId = req.body.campaignId as string;
+      const validationSessionId = req.body.validationSessionId as string | undefined;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
+      }
+
+      const sessionCheck = checkValidationSession(validationSessionId, "audience-engine", campaignId);
+      if (!sessionCheck.allowed) {
+        return res.status(429).json({
+          error: "REVALIDATION_LOOP_BLOCKED",
+          message: sessionCheck.warning,
+        });
       }
 
       console.log(`[AudienceEngine-Route] Analyze request: account=${accountId} campaign=${campaignId}`);

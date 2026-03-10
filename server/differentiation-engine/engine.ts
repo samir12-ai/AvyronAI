@@ -13,7 +13,15 @@ import {
   COLLISION_THRESHOLD,
   STABILITY_MIN_PROOFABILITY,
   STABILITY_MIN_TRUST_ALIGNMENT,
+  BOUNDARY_BLOCKED_PATTERNS,
 } from "./constants";
+import {
+  sanitizeBoundary,
+  assessDataReliability,
+  normalizeConfidence,
+  detectGenericOutput,
+  type DataReliabilityDiagnostics,
+} from "../engine-hardening";
 import type { AuthorityMode, ProofCategory } from "./constants";
 import type {
   MIInput,
@@ -810,6 +818,21 @@ export async function runDifferentiationEngine(
   const l2Claims = layer2_competitorClaimSurfaceMapping(mi);
   diagnostics.layer2 = { claimCount: l2Claims.length };
 
+  const competitorClaimCount = l2Claims.length;
+  const audienceSignalCount = (audience.audiencePains || []).length + Object.keys(enrichedObjectionMap).length + (audience.emotionalDrivers || []).length;
+  const dataReliability = assessDataReliability(
+    competitorClaimCount,
+    audienceSignalCount,
+    !!positioning.narrativeDirection,
+    !!(l1.territories.length > 0),
+    !!(audience.audiencePains && audience.audiencePains.length > 0),
+    0,
+  );
+  diagnostics.dataReliability = dataReliability;
+  if (dataReliability.isWeak) {
+    console.log(`[DifferentiationEngine-V3] WEAK_DATA | reliability=${dataReliability.overallReliability.toFixed(2)} | advisories=${dataReliability.advisories.length}`);
+  }
+
   const candidateClaims = l1.territories.map(t => t.name);
   const l3Collisions = layer3_claimCollisionDetection(candidateClaims, l2Claims);
   diagnostics.layer3 = { collisionCount: l3Collisions.length, highRisk: l3Collisions.filter(c => c.collisionRisk >= COLLISION_THRESHOLD).length };
@@ -872,6 +895,20 @@ export async function runDifferentiationEngine(
     finalMechanism = { ...finalMechanism, description: "Mechanism description redacted — guardrail violation" };
   }
 
+  const boundaryText = [
+    ...finalPillars.map(p => `${p.name} ${p.description}`),
+    ...finalClaims.map(c => c.claim),
+    finalMechanism.description,
+  ].join(" ");
+  const boundaryCheck = sanitizeBoundary(boundaryText, BOUNDARY_BLOCKED_PATTERNS);
+  if (!boundaryCheck.clean) {
+    console.error(`[DifferentiationEngine-V3] BOUNDARY VIOLATION: ${boundaryCheck.violations.join("; ")}`);
+    const result = buildEmptyResult("INTEGRITY_FAILED", `Boundary enforcement failed: ${boundaryCheck.violations.join("; ")}`, Date.now() - startTime);
+    result.confidenceScore = 0;
+    result.layerDiagnostics = diagnostics;
+    return result;
+  }
+
   const l12Stability = layer12_stabilityGuard(finalPillars, finalClaims, l3Collisions, l1.territories);
   diagnostics.layer12 = { stable: l12Stability.stable, failures: l12Stability.failures };
 
@@ -889,9 +926,27 @@ export async function runDifferentiationEngine(
     statusMessage = `Stability check failed: ${l12Stability.failures.join("; ")}`;
   }
 
+  const allDiffText = [
+    ...finalPillars.map(p => `${p.name} ${p.description}`),
+    ...finalClaims.map(c => c.claim),
+    finalMechanism.description,
+  ].join(" ");
+  const genericOutputCheck = detectGenericOutput(allDiffText);
+  diagnostics.genericOutputCheck = genericOutputCheck;
+  if (genericOutputCheck.genericDetected) {
+    console.log(`[DifferentiationEngine-V3] GENERIC_OUTPUT_PENALTY | phrases=${genericOutputCheck.genericPhrases.length} | penalty=${genericOutputCheck.penalty.toFixed(2)}`);
+  }
+
   const avgClaimScore = finalClaims.length > 0 ? finalClaims.reduce((s, c) => s + c.overallScore, 0) / finalClaims.length : 0;
   const objectionDensityFactor = lowObjectionDensity ? 0.85 : 1.0;
-  const confidenceScore = clamp(avgClaimScore * (l12Stability.stable ? 1 : 0.6) * objectionDensityFactor);
+  const genericPenaltyFactor = genericOutputCheck.genericDetected ? (1 - genericOutputCheck.penalty) : 1;
+  const rawConfidence = clamp(avgClaimScore * (l12Stability.stable ? 1 : 0.6) * objectionDensityFactor * genericPenaltyFactor);
+  const confidenceScore = normalizeConfidence(rawConfidence, dataReliability);
+  const confidenceNormalized = rawConfidence !== confidenceScore;
+  diagnostics.confidenceNormalized = confidenceNormalized;
+  if (confidenceNormalized) {
+    diagnostics.rawConfidence = rawConfidence;
+  }
 
   console.log(`[DifferentiationEngine-V3] Complete | status=${status} | pillars=${finalPillars.length} | claims=${finalClaims.length} | confidence=${confidenceScore.toFixed(2)} | stable=${l12Stability.stable} | collisions=${highCollisionCount}`);
 

@@ -231,6 +231,8 @@ export interface MIv3DiagnosticResult {
   contentDnaData: CompetitorContentDNA[] | null;
   deltaReport: DeltaReport | null;
   diagnostics: MIDiagnostics | null;
+  signalDiagnostics: import("../../server/engine-hardening/types").SignalDiagnostics | null;
+  narrativeOverlap: import("../../server/engine-hardening/types").NarrativeOverlapResult | null;
   cached: boolean;
   cacheInvalidationReason: CacheInvalidationReason;
   snapshotSource: "FRESH_DATA" | "CACHED_DATA";

@@ -21,6 +21,7 @@ import { ENGINE_VERSION as DIFF_ENGINE_VERSION } from "../differentiation-engine
 import { POSITIONING_ENGINE_VERSION } from "../positioning-engine/constants";
 import { AUDIENCE_ENGINE_VERSION } from "../audience-engine/constants";
 import { verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
+import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -37,10 +38,18 @@ function safeNumber(v: any, fallback: number): number {
 export function registerAwarenessEngineRoutes(app: Express) {
   app.post("/api/awareness-engine/analyze", async (req: Request, res: Response) => {
     try {
-      const { campaignId, accountId = "default", integritySnapshotId } = req.body;
+      const { campaignId, accountId = "default", integritySnapshotId, validationSessionId } = req.body;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
+      }
+
+      const sessionCheck = checkValidationSession(validationSessionId, "awareness-engine", campaignId);
+      if (!sessionCheck.allowed) {
+        return res.status(429).json({
+          error: "REVALIDATION_LOOP_BLOCKED",
+          message: sessionCheck.warning,
+        });
       }
 
       if (!integritySnapshotId) {
@@ -260,6 +269,8 @@ export function registerAwarenessEngineRoutes(app: Express) {
         awarenessStrengthScore: result.primaryRoute.awarenessStrengthScore,
         executionTimeMs: result.executionTimeMs,
       }).returning();
+
+      await pruneOldSnapshots(db, awarenessSnapshots, campaignId, 20, accountId);
 
       res.json({
         success: true,

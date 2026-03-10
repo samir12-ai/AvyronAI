@@ -21,6 +21,7 @@ import {
   type MarketScope,
 } from "./constants";
 import { MI_COST_LIMITS } from "../market-intelligence-v3/constants";
+import { pruneOldSnapshots } from "../engine-hardening";
 import { aiChat } from "../ai-client";
 
 interface EvidenceMeta {
@@ -1112,6 +1113,8 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
       executionTimeMs,
     }).returning({ id: audienceSnapshots.id });
 
+    await pruneOldSnapshots(db, audienceSnapshots, campaignId, 20);
+
     return buildEmptyResult("DATASET_TOO_SMALL", msg, baseInputSummary, executionTimeMs, inserted.id);
   }
 
@@ -1233,6 +1236,8 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     inputSummary: JSON.stringify(inputSummary),
     executionTimeMs,
   }).returning({ id: audienceSnapshots.id });
+
+  await pruneOldSnapshots(db, audienceSnapshots, campaignId, 20);
 
   console.log(`[AudienceEngine-V3] ${status} in ${executionTimeMs}ms | snapshot=${inserted.id} | signals=${totalSignalMatches} | freq=${totalSignalFrequency} | segments=${audienceSegments.length} | defensive=${isDefensiveMode}`);
 

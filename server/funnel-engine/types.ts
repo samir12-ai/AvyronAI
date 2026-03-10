@@ -110,6 +110,7 @@ export interface FunnelResult {
   proofPlacementLogic: { score: number; placements: number; missingPlacements: string[] };
   frictionMap: { totalFriction: number; criticalPoints: number; mitigations: number };
   boundaryCheck: { passed: boolean; violations: string[] };
+  structuralWarnings: string[];
   confidenceScore: number;
   executionTimeMs: number;
   engineVersion: number;

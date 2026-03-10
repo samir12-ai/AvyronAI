@@ -1,4 +1,5 @@
 import { aiChat } from "../ai-client";
+import { detectGenericOutput, checkCrossEngineAlignment } from "../engine-hardening";
 import {
   ENGINE_VERSION,
   OFFER_DEPTH_WEIGHTS,
@@ -11,6 +12,11 @@ import {
   FRICTION_THRESHOLD,
   STATUS,
 } from "./constants";
+import {
+  assessDataReliability,
+  normalizeConfidence,
+  type DataReliabilityDiagnostics,
+} from "../engine-hardening";
 import type {
   OfferMIInput,
   OfferAudienceInput,
@@ -551,6 +557,21 @@ export async function runOfferEngine(
   const proofArch = differentiation.proofArchitecture || [];
   const claims = differentiation.claimStructures || [];
 
+  const competitorSignals = (mi.opportunitySignals || []).length + (mi.threatSignals || []).length;
+  const audienceSignals = (audience.audiencePains || []).length + Object.keys(audience.objectionMap || {}).length + (audience.emotionalDrivers || []).length;
+  const dataReliability = assessDataReliability(
+    competitorSignals,
+    audienceSignals,
+    !!positioning.narrativeDirection,
+    !!(pillars.length > 0),
+    !!(audience.audiencePains && audience.audiencePains.length > 0),
+    differentiation.confidenceScore ?? 0,
+  );
+  diagnostics.dataReliability = dataReliability;
+  if (dataReliability.isWeak) {
+    console.log(`[OfferEngine-V3] WEAK_DATA | reliability=${dataReliability.overallReliability.toFixed(2)} | advisories=${dataReliability.advisories.length}`);
+  }
+
   if (pillars.length === 0 && claims.length === 0) {
     console.log(`[OfferEngine-V3] Insufficient differentiation data`);
     const emptyOffer = buildEmptyOffer();
@@ -563,6 +584,7 @@ export async function runOfferEngine(
       offerStrengthScore: 0,
       positioningConsistency: { consistent: false, contradictions: ["No offer data available"] },
       boundaryCheck: { passed: true, violations: [] },
+      structuralWarnings: [],
       confidenceScore: 0,
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
@@ -659,8 +681,17 @@ export async function runOfferEngine(
   const boundaryCheck = sanitizeBoundary(allOfferText);
   diagnostics.boundaryCheck = boundaryCheck;
 
-  let status = STATUS.COMPLETE;
+  const genericOutputCheck = detectGenericOutput(allOfferText);
+  diagnostics.genericOutputCheck = genericOutputCheck;
+  if (genericOutputCheck.genericDetected) {
+    primaryOffer.offerStrengthScore = clamp(primaryOffer.offerStrengthScore - genericOutputCheck.penalty);
+    alternativeOffer.offerStrengthScore = clamp(alternativeOffer.offerStrengthScore - genericOutputCheck.penalty);
+    console.log(`[OfferEngine-V3] GENERIC_OUTPUT_PENALTY | phrases=${genericOutputCheck.genericPhrases.length} | penalty=${genericOutputCheck.penalty.toFixed(2)}`);
+  }
+
+  let status: string = STATUS.COMPLETE;
   let statusMessage: string | null = null;
+  const structuralWarnings: string[] = [];
 
   if (!boundaryCheck.clean) {
     status = STATUS.INTEGRITY_FAILED;
@@ -678,14 +709,62 @@ export async function runOfferEngine(
     statusMessage = `Integrity check failed: ${primaryOffer.integrityResult.failures.join("; ")}`;
   }
 
-  const confidenceScore = clamp(
+
+    const mechanism = differentiation.mechanismFraming || {};
+    const mechanismSupported = mechanism.supported === true;
+    const mechanismType = mechanism.type || "none";
+    const pains = audience.audiencePains || [];
+    const desires = Object.entries(audience.desireMap || {});
+    const offerOutcome = primaryOffer.coreOutcome || "";
+    const offerMechDesc = primaryOffer.mechanismDescription || "";
+
+    const hasPainAlignment = pains.length > 0 && pains.some((p: any) => {
+      const painText = (typeof p === "string" ? p : p?.pain || p?.name || "").toLowerCase();
+      return painText.length > 3 && (offerOutcome.toLowerCase().includes(painText.substring(0, Math.min(painText.length, 15))) || offerMechDesc.toLowerCase().includes(painText.substring(0, Math.min(painText.length, 15))));
+    });
+    const hasDesireAlignment = desires.length > 0 && desires.some(([k]) => {
+      return k.length > 3 && (offerOutcome.toLowerCase().includes(k.toLowerCase().substring(0, Math.min(k.length, 15))) || offerMechDesc.toLowerCase().includes(k.toLowerCase().substring(0, Math.min(k.length, 15))));
+    });
+
+    const alignmentResult = checkCrossEngineAlignment([
+      {
+        name: "differentiation_mechanism_alignment",
+        aligned: mechanismSupported || mechanismType !== "none",
+        reason: !mechanismSupported && mechanismType === "none"
+          ? "Offer does not leverage a validated differentiation mechanism"
+          : "Offer mechanism aligns with differentiation engine output",
+      },
+      {
+        name: "audience_pain_alignment",
+        aligned: pains.length === 0 || hasPainAlignment || hasDesireAlignment,
+        reason: pains.length > 0 && !hasPainAlignment && !hasDesireAlignment
+          ? `Offer outcome does not reference any of the ${pains.length} identified audience pain points or ${desires.length} desire signals`
+          : "Offer addresses audience pain signals",
+      },
+    ]);
+
+    if (!alignmentResult.aligned) {
+      structuralWarnings.push(...alignmentResult.misalignments);
+      console.log(`[OfferEngine-V3] CROSS_ENGINE_MISALIGNMENT | ${alignmentResult.misalignments.join("; ")} | penalty=${alignmentResult.confidencePenalty.toFixed(2)}`);
+    }
+    diagnostics.crossEngineAlignment = alignmentResult;
+
+    const rawConfidence = clamp(
     primaryOffer.offerStrengthScore *
     (posConsistency.consistent ? 1 : 0.7) *
     (boundaryCheck.clean ? 1 : 0) *
-    (primaryOffer.completeness.complete ? 1 : 0.6)
+    (primaryOffer.completeness.complete ? 1 : 0.6) *
+    (genericOutputCheck.genericDetected ? (1 - genericOutputCheck.penalty) : 1) *
+    (1 - alignmentResult.confidencePenalty)
   );
+  const confidenceScore = normalizeConfidence(rawConfidence, dataReliability);
+  const confidenceNormalized = rawConfidence !== confidenceScore;
+  diagnostics.confidenceNormalized = confidenceNormalized;
+  if (confidenceNormalized) {
+    diagnostics.rawConfidence = rawConfidence;
+  }
 
-  console.log(`[OfferEngine-V3] Complete | status=${status} | strength=${primaryOffer.offerStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | generic=${primaryOffer.genericFlag} | boundary=${boundaryCheck.clean}`);
+  console.log(`[OfferEngine-V3] Complete | status=${status} | strength=${primaryOffer.offerStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | generic=${primaryOffer.genericFlag} | boundary=${boundaryCheck.clean} | alignmentWarnings=${structuralWarnings.length}`);
 
   return {
     status,
@@ -695,7 +774,8 @@ export async function runOfferEngine(
     rejectedOffer: { offer: rejectedOffer, rejectionReason: aiOffers.rejected.rejectionReason },
     offerStrengthScore: primaryOffer.offerStrengthScore,
     positioningConsistency: posConsistency,
-    boundaryCheck,
+    boundaryCheck: { passed: boundaryCheck.clean, violations: boundaryCheck.violations },
+    structuralWarnings,
     confidenceScore,
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,

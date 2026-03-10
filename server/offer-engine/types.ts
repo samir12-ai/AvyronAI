@@ -104,6 +104,7 @@ export interface OfferResult {
   offerStrengthScore: number;
   positioningConsistency: { consistent: boolean; contradictions: string[] };
   boundaryCheck: { passed: boolean; violations: string[] };
+  structuralWarnings: string[];
   confidenceScore: number;
   executionTimeMs: number;
   engineVersion: number;

@@ -11,6 +11,7 @@ import {
   POSITIONING_ENGINE_VERSION,
   POSITIONING_THRESHOLDS,
   GENERIC_TERRITORY_PATTERNS,
+  BOUNDARY_BLOCKED_PATTERNS,
   type PositioningStatus,
   type Territory,
   type StrategyCard,
@@ -20,6 +21,14 @@ import {
   type StabilityAdvisory,
   FLANKING_STRATEGIES,
 } from "./constants";
+import {
+  sanitizeBoundary,
+  assessDataReliability,
+  normalizeConfidence,
+  detectGenericOutput,
+  pruneOldSnapshots,
+  type DataReliabilityDiagnostics,
+} from "../engine-hardening";
 import { verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
 import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/constants";
 
@@ -1228,6 +1237,19 @@ export async function runPositioningEngine(
     return buildEmptyResult("INSUFFICIENT_SIGNALS", `Insufficient audience signals (${totalSignals}) for positioning — need ≥${POSITIONING_THRESHOLDS.MIN_AUDIENCE_SIGNALS}`, executionTimeMs, miSnapshotId, audienceSnapshotId);
   }
 
+  const miConfidenceRaw = (miSnapshot as any).confidenceScore ?? (miSnapshot as any).overallConfidence ?? 0;
+  const dataReliability = assessDataReliability(
+    competitors.length,
+    totalSignals,
+    !!miSnapshot.marketDiagnosis,
+    true,
+    audiencePains.length > 0,
+    typeof miConfidenceRaw === "number" ? miConfidenceRaw : 0,
+  );
+  if (dataReliability.isWeak) {
+    console.log(`[PositioningEngine-V3] WEAK_DATA | reliability=${dataReliability.overallReliability.toFixed(2)} | advisories=${dataReliability.advisories.length}`);
+  }
+
   console.log(`[PositioningEngine-V3] Starting 12-layer analysis | MI=${miSnapshotId} | Audience=${audienceSnapshotId} | Competitors=${competitors.length}`);
 
   const categoryResult = layer1_categoryDetection(miSnapshot, competitors.length, totalSignals);
@@ -1330,6 +1352,19 @@ export async function runPositioningEngine(
   territories = await layer11_positioningStatementGeneration(territories, category, segmentPriority, accountId);
   console.log(`[PositioningEngine-V3] L11 Statements generated`);
 
+  const boundaryText = territories.map(t =>
+    `${t.name} ${t.enemyDefinition} ${t.contrastAxis} ${t.narrativeDirection} ${t.evidenceSignals?.join(" ") || ""}`
+  ).join(" ");
+  const boundaryCheck = sanitizeBoundary(boundaryText, BOUNDARY_BLOCKED_PATTERNS);
+  if (!boundaryCheck.clean) {
+    console.error(`[PositioningEngine-V3] BOUNDARY VIOLATION: ${boundaryCheck.violations.join("; ")}`);
+    const executionTimeMs = Date.now() - startTime;
+    return {
+      ...buildEmptyResult("INTEGRITY_FAILED" as PositioningStatus, `Boundary enforcement failed: ${boundaryCheck.violations.join("; ")}`, executionTimeMs, miSnapshotId, audienceSnapshotId),
+      confidenceScore: 0,
+    };
+  }
+
   const { territories: finalTerritories, stabilityResult } = layer12_stabilityGuard(
     territories, narrativeSaturation, marketPower, segmentPriority, narrativeMap,
     competitors.length, totalSignals,
@@ -1347,9 +1382,23 @@ export async function runPositioningEngine(
   const primaryTerritory = finalTerritories[0] || null;
   const executionTimeMs = Date.now() - startTime;
 
-  const overallConfidence = primaryTerritory
+  const allPositioningText = finalTerritories.map(t => [
+    t.name, t.enemyDefinition || "", t.narrativeDirection || "", t.contrastAxis || "",
+    ...(t.evidenceSignals || []),
+  ].join(" ")).join(" ");
+  const genericOutputCheck = detectGenericOutput(allPositioningText);
+  if (genericOutputCheck.genericDetected) {
+    for (const territory of finalTerritories) {
+      territory.confidenceScore = Math.max(0, territory.confidenceScore - genericOutputCheck.penalty);
+    }
+    console.log(`[PositioningEngine-V3] GENERIC_OUTPUT_PENALTY | phrases=${genericOutputCheck.genericPhrases.length} | penalty=${genericOutputCheck.penalty.toFixed(2)}`);
+  }
+
+  const rawConfidence = primaryTerritory
     ? Math.round(primaryTerritory.confidenceScore * 100) / 100
     : 0;
+  const overallConfidence = normalizeConfidence(rawConfidence, dataReliability);
+  const confidenceNormalized = rawConfidence !== overallConfidence;
 
   const status: PositioningStatus = !stabilityResult.isStable ? "UNSTABLE" : "COMPLETE";
   const hasAdvisories = stabilityResult.advisories.length > 0;
@@ -1372,6 +1421,12 @@ export async function runPositioningEngine(
     strategicSubcategory: categoryResult.subcategory,
     strategicSignalCount: allStrategicSignals.length,
     strategicClusterCount: strategicClusters.size,
+  };
+
+  const dataReliabilityDiagnostics = {
+    dataReliability,
+    confidenceNormalized,
+    rawConfidence: confidenceNormalized ? rawConfidence : undefined,
   };
 
   const [inserted] = await db.insert(positioningSnapshots).values({
@@ -1399,6 +1454,8 @@ export async function runPositioningEngine(
     confidenceScore: overallConfidence,
     executionTimeMs,
   }).returning({ id: positioningSnapshots.id });
+
+  await pruneOldSnapshots(db, positioningSnapshots, campaignId, 20);
 
   console.log(`[PositioningEngine-V3] ${status} in ${executionTimeMs}ms | snapshot=${inserted.id} | territories=${finalTerritories.length} | confidence=${overallConfidence}`);
 

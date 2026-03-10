@@ -14,6 +14,12 @@ import type {
   LayerResult,
   IntegrityResult,
 } from "./types";
+import {
+  assessDataReliability,
+  normalizeConfidence,
+  detectGenericOutput,
+  type DataReliabilityDiagnostics,
+} from "../engine-hardening";
 
 function clamp(v: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, v));
@@ -500,6 +506,21 @@ export function runIntegrityEngine(
 
   console.log(`[IntegrityEngine-V3] Starting 8-layer validation pipeline`);
 
+  const competitorCount = (mi.opportunitySignals || []).length + (mi.threatSignals || []).length;
+  const signalCount = (audience.audiencePains || []).length + Object.keys(audience.objectionMap || {}).length + (audience.emotionalDrivers || []).length;
+  const dataReliability = assessDataReliability(
+    competitorCount,
+    signalCount,
+    !!positioning.narrativeDirection,
+    !!(differentiation.pillars && differentiation.pillars.length > 0),
+    !!(audience.audiencePains && audience.audiencePains.length > 0),
+    safeNumber(mi.overallConfidence, 0),
+  );
+  diagnostics.dataReliability = dataReliability;
+  if (dataReliability.isWeak) {
+    console.log(`[IntegrityEngine-V3] WEAK_DATA | reliability=${dataReliability.overallReliability.toFixed(2)} | advisories=${dataReliability.advisories.length}`);
+  }
+
   const l1 = layer1_strategicConsistency(positioning, differentiation, offer, funnel, audience);
   diagnostics.layer1 = { passed: l1.passed, score: l1.score, warnings: l1.warnings.length };
 
@@ -527,9 +548,16 @@ export function runIntegrityEngine(
 
   const allLayers = [...firstSevenLayers, l8];
 
-  const overallIntegrityScore = clamp(
+  let overallIntegrityScore = clamp(
     allLayers.reduce((sum, l) => sum + l.score * (LAYER_WEIGHTS[l.layerName] || 0.1), 0)
   );
+  const rawIntegrityScore = overallIntegrityScore;
+  overallIntegrityScore = normalizeConfidence(overallIntegrityScore, dataReliability);
+  const confidenceNormalized = rawIntegrityScore !== overallIntegrityScore;
+  diagnostics.confidenceNormalized = confidenceNormalized;
+  if (confidenceNormalized) {
+    diagnostics.rawIntegrityScore = rawIntegrityScore;
+  }
 
   const structuralWarnings = allLayers.flatMap(l => l.warnings);
   const flaggedInconsistencies = allLayers.filter(l => !l.passed).flatMap(l =>
@@ -540,6 +568,13 @@ export function runIntegrityEngine(
   const boundaryRaw = sanitizeBoundary(allLayerText);
   const boundaryCheck = { passed: boundaryRaw.clean, violations: boundaryRaw.violations };
   diagnostics.boundaryCheck = boundaryCheck;
+
+  const genericOutputCheck = detectGenericOutput(allLayerText);
+  diagnostics.genericOutputCheck = genericOutputCheck;
+  if (genericOutputCheck.genericDetected) {
+    overallIntegrityScore = clamp(overallIntegrityScore - genericOutputCheck.penalty);
+    console.log(`[IntegrityEngine-V3] GENERIC_OUTPUT_PENALTY | phrases=${genericOutputCheck.genericPhrases.length} | penalty=${genericOutputCheck.penalty.toFixed(2)}`);
+  }
 
   let status: string = STATUS.COMPLETE;
   let statusMessage: string | null = null;

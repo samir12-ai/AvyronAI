@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { miSnapshots, miSignalLogs, miTelemetry, ciCompetitors, growthCampaigns } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { pruneOldSnapshots } from "../engine-hardening";
 import { computeAllSignals, aggregateMissingFlags, classifyEngagementQuality, detectAudienceIntentSignals, detectSampleBias, computeRealDataRatio } from "./signal-engine";
 import { computeDemandPressure } from "./demand-pressure";
 import { detectEchoChamber } from "./narrative-clustering";
@@ -36,6 +37,7 @@ import { validateEngineIsolation, validateNoStrategyWrite } from "./isolation-gu
 import { logAudit } from "../audit";
 import { computeCompetitorHash, parseJsonSafe } from "./utils";
 import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
+import { logSignalDiagnostics, detectNarrativeOverlap } from "../engine-hardening";
 
 export { computeCompetitorHash } from "./utils";
 export { ENGINE_VERSION } from "./constants";
@@ -178,6 +180,7 @@ export async function persistValidatedSnapshot(snapshotPayload: any, caller: str
   }
 
   const [snapshot] = await db.insert(miSnapshots).values(snapshotPayload).returning();
+  await pruneOldSnapshots(db, miSnapshots, snapshotPayload.campaignId, 20);
   return snapshot;
 }
 
@@ -755,6 +758,37 @@ export class MarketIntelligenceV3 {
     const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated);
     const similarityData = computeSimilarityDiagnosis(competitors, signalResults);
 
+    const signalDiagnostics = logSignalDiagnostics("MARKET_INTELLIGENCE_V3", {
+      postsProcessed: totalPosts,
+      signalsDetected: signalResults.reduce((s, r) => s + Object.values(r.signals).filter(v => Math.abs(v) > 0.01).length, 0),
+      signalsFiltered: signalResults.reduce((s, r) => s + r.missingFields.length, 0),
+      signalsUsed: signalResults.reduce((s, r) => s + Object.values(r.signals).filter(v => Math.abs(v) > 0.01).length, 0) - signalResults.reduce((s, r) => s + r.missingFields.length, 0),
+    });
+
+    const competitorNarratives = competitors.map(c => {
+      const parts: string[] = [];
+      if (c.messagingTone) parts.push(c.messagingTone);
+      if (c.hookStyles) parts.push(c.hookStyles);
+      if (c.ctaPatterns) parts.push(c.ctaPatterns);
+      const topCaptions = (c.posts || []).slice(0, 5).map(p => p.caption || "").filter(Boolean);
+      parts.push(...topCaptions);
+      return parts.join(" ");
+    }).filter(n => n.length > 0);
+
+    const narrativeOverlap = detectNarrativeOverlap(competitorNarratives);
+    if (narrativeOverlap.overlapDetected) {
+      console.log(`[MIv3] NARRATIVE_OVERLAP | score=${narrativeOverlap.overlapScore.toFixed(3)} | duplicates=${narrativeOverlap.duplicateNarratives.length} | saturationPenalty=${narrativeOverlap.saturationPenalty.toFixed(3)}`);
+    }
+
+    if (narrativeOverlap.saturationPenalty > 0) {
+      confidence.overall = Math.max(0, confidence.overall - narrativeOverlap.saturationPenalty);
+      console.log(`[MIv3] SATURATION_PENALTY_APPLIED | newConfidence=${confidence.overall.toFixed(3)} | penalty=${narrativeOverlap.saturationPenalty.toFixed(3)}`);
+    }
+
+    if (narrativeOverlap.overlapDetected) {
+      threatSignals.push(...narrativeOverlap.warnings);
+    }
+
     const previousSnapshots = await db.select().from(miSnapshots)
       .where(and(
         eq(miSnapshots.accountId, accountId),
@@ -959,6 +993,8 @@ export class MarketIntelligenceV3 {
       contentDnaData: contentDnaResults,
       deltaReport,
       diagnostics,
+      signalDiagnostics,
+      narrativeOverlap,
       cached: false,
       cacheInvalidationReason,
       snapshotSource: "FRESH_DATA" as const,
@@ -1068,6 +1104,8 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
     contentDnaData: parseJsonSafe(snapshot.contentDnaData, null),
     deltaReport: deltaReportData,
     diagnostics: parseJsonSafe(snapshot.diagnosticsData, null),
+    signalDiagnostics: null,
+    narrativeOverlap: null,
     cached: true,
     cacheInvalidationReason: null,
     snapshotSource: (snapshot.snapshotSource as "FRESH_DATA" | "CACHED_DATA") || "FRESH_DATA",

@@ -16,6 +16,7 @@ import { ENGINE_VERSION as FUNNEL_ENGINE_VERSION } from "../funnel-engine/consta
 import { ENGINE_VERSION as OFFER_ENGINE_VERSION } from "../offer-engine/constants";
 import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/constants";
 import { getEngineReadinessState, verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
+import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -32,10 +33,18 @@ function safeNumber(v: any, fallback: number): number {
 export function registerIntegrityEngineRoutes(app: Express) {
   app.post("/api/integrity-engine/analyze", async (req: Request, res: Response) => {
     try {
-      const { campaignId, accountId = "default", funnelSnapshotId } = req.body;
+      const { campaignId, accountId = "default", funnelSnapshotId, validationSessionId } = req.body;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
+      }
+
+      const sessionCheck = checkValidationSession(validationSessionId, "integrity-engine", campaignId);
+      if (!sessionCheck.allowed) {
+        return res.status(429).json({
+          error: "REVALIDATION_LOOP_BLOCKED",
+          message: sessionCheck.warning,
+        });
       }
 
       if (!funnelSnapshotId) {
@@ -222,6 +231,8 @@ export function registerIntegrityEngineRoutes(app: Express) {
         boundaryCheck: JSON.stringify(result.boundaryCheck),
         executionTimeMs: result.executionTimeMs,
       }).returning();
+
+      await pruneOldSnapshots(db, integritySnapshots, campaignId, 20, accountId);
 
       res.json({
         success: true,

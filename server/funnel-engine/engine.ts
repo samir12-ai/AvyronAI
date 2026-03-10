@@ -1,4 +1,5 @@
 import { aiChat } from "../ai-client";
+import { detectGenericOutput, checkCrossEngineAlignment } from "../engine-hardening";
 import {
   ENGINE_VERSION,
   FUNNEL_STRENGTH_WEIGHTS,
@@ -10,6 +11,11 @@ import {
   MAX_FUNNEL_STAGES,
   ENTRY_MECHANISM_TYPES,
 } from "./constants";
+import {
+  assessDataReliability,
+  normalizeConfidence,
+  type DataReliabilityDiagnostics,
+} from "../engine-hardening";
 import type {
   FunnelMIInput,
   FunnelAudienceInput,
@@ -773,6 +779,21 @@ export async function runFunnelEngine(
   const pillars = differentiation.pillars || [];
   const proofArch = differentiation.proofArchitecture || [];
 
+  const competitorSignals = (mi.opportunitySignals || []).length + (mi.threatSignals || []).length;
+  const audienceSignals = (audience.audiencePains || []).length + Object.keys(audience.objectionMap || {}).length + (audience.emotionalDrivers || []).length;
+  const dataReliability = assessDataReliability(
+    competitorSignals,
+    audienceSignals,
+    !!positioning.narrativeDirection,
+    !!(pillars.length > 0),
+    !!(audience.audiencePains && audience.audiencePains.length > 0),
+    differentiation.confidenceScore ?? 0,
+  );
+  diagnostics.dataReliability = dataReliability;
+  if (dataReliability.isWeak) {
+    console.log(`[FunnelEngine-V3] WEAK_DATA | reliability=${dataReliability.overallReliability.toFixed(2)} | advisories=${dataReliability.advisories.length}`);
+  }
+
   if (!offer.offerName && pillars.length === 0) {
     console.log(`[FunnelEngine-V3] Insufficient data — no offer or differentiation`);
     const emptyFunnel = buildEmptyFunnel();
@@ -787,6 +808,7 @@ export async function runFunnelEngine(
       proofPlacementLogic: { score: 0, placements: 0, missingPlacements: ["All placements missing"] },
       frictionMap: { totalFriction: 1, criticalPoints: 0, mitigations: 0 },
       boundaryCheck: { passed: true, violations: [] },
+      structuralWarnings: [],
       confidenceScore: 0,
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
@@ -868,8 +890,17 @@ export async function runFunnelEngine(
   const boundaryCheck = { passed: boundaryRaw.clean, violations: boundaryRaw.violations };
   diagnostics.boundaryCheck = boundaryCheck;
 
+  const genericOutputCheck = detectGenericOutput(allFunnelText);
+  diagnostics.genericOutputCheck = genericOutputCheck;
+  if (genericOutputCheck.genericDetected) {
+    primaryFunnel.funnelStrengthScore = clamp(primaryFunnel.funnelStrengthScore - genericOutputCheck.penalty);
+    alternativeFunnel.funnelStrengthScore = clamp(alternativeFunnel.funnelStrengthScore - genericOutputCheck.penalty);
+    console.log(`[FunnelEngine-V3] GENERIC_OUTPUT_PENALTY | phrases=${genericOutputCheck.genericPhrases.length} | penalty=${genericOutputCheck.penalty.toFixed(2)}`);
+  }
+
   let status: string = STATUS.COMPLETE;
   let statusMessage: string | null = null;
+  const structuralWarnings: string[] = [];
 
   if (!boundaryCheck.passed) {
     status = STATUS.INTEGRITY_FAILED;
@@ -882,7 +913,54 @@ export async function runFunnelEngine(
     statusMessage = `Integrity check failed: ${primaryFunnel.integrityResult.failures.join("; ")}`;
   }
 
-  const trustPathGaps: string[] = [];
+  const funnelCommitmentMap: Record<string, string> = {
+      direct: "high", webinar: "medium", challenge: "medium", vsl: "medium",
+      application: "very_high", consultation: "very_high", tripwire: "micro",
+      "product-launch": "low", membership: "high", hybrid: "medium",
+    };
+    const commitmentLevelOrder: Record<string, number> = {
+      micro: 1, low: 2, medium: 3, high: 4, very_high: 5,
+    };
+    const awarenessReadinessMap: Record<string, number> = {
+      unaware: 1, problem_aware: 2, solution_aware: 3, product_aware: 4, most_aware: 5,
+    };
+
+    const funnelRequiredCommitment = funnelCommitmentMap[primaryFunnel.funnelType] || "medium";
+    const offerCommitmentLevel = offer.frictionLevel > 0.7 ? "very_high" : offer.frictionLevel > 0.5 ? "high" : offer.frictionLevel > 0.3 ? "medium" : "low";
+    const funnelCommitmentNum = commitmentLevelOrder[funnelRequiredCommitment] || 3;
+    const offerCommitmentNum = commitmentLevelOrder[offerCommitmentLevel] || 3;
+    const commitmentGap = Math.abs(funnelCommitmentNum - offerCommitmentNum);
+
+    const audienceReadinessNum = awarenessReadinessMap[awareness] || 2;
+    const funnelMinReadiness = primaryFunnel.funnelType === "direct" || primaryFunnel.funnelType === "application" ? 4
+      : primaryFunnel.funnelType === "tripwire" || primaryFunnel.funnelType === "product-launch" ? 2
+      : 3;
+    const readinessGap = funnelMinReadiness - audienceReadinessNum;
+
+    const alignmentResult = checkCrossEngineAlignment([
+      {
+        name: "offer_commitment_alignment",
+        aligned: commitmentGap <= 1,
+        reason: commitmentGap > 1
+          ? `Funnel requires ${funnelRequiredCommitment} commitment but offer friction maps to ${offerCommitmentLevel} (gap: ${commitmentGap})`
+          : "Funnel commitment level matches offer friction",
+      },
+      {
+        name: "audience_readiness_alignment",
+        aligned: readinessGap <= 1,
+        reason: readinessGap > 1
+          ? `Funnel type "${primaryFunnel.funnelType}" requires readiness level ${funnelMinReadiness} but audience is at "${awareness}" (level ${audienceReadinessNum})`
+          : "Funnel type appropriate for audience readiness stage",
+      },
+    ]);
+
+    if (!alignmentResult.aligned) {
+      structuralWarnings.push(...alignmentResult.misalignments);
+      console.log(`[FunnelEngine-V3] CROSS_ENGINE_MISALIGNMENT | ${alignmentResult.misalignments.join("; ")} | penalty=${alignmentResult.confidencePenalty.toFixed(2)}`);
+    }
+    diagnostics.crossEngineAlignment = alignmentResult;
+
+    const trustPathGaps: string[] = [];
   const mandatoryProofInPath = ["process_proof", "case_proof"];
   for (const required of mandatoryProofInPath) {
     if (!primaryFunnel.trustPath.some(t => t.proofType === required)) {
@@ -892,14 +970,22 @@ export async function runFunnelEngine(
 
   const criticalFrictionPoints = primaryFunnel.frictionMap.filter(f => f.severity > 0.7).length;
 
-  const confidenceScore = clamp(
+  const rawConfidence = clamp(
     primaryFunnel.funnelStrengthScore *
     (boundaryCheck.passed ? 1 : 0) *
     (primaryFunnel.integrityResult.passed ? 1 : 0.6) *
-    (l1Eligibility.eligible ? 1 : 0.5)
+    (l1Eligibility.eligible ? 1 : 0.5) *
+    (genericOutputCheck.genericDetected ? (1 - genericOutputCheck.penalty) : 1) *
+    (1 - alignmentResult.confidencePenalty)
   );
+  const confidenceScore = normalizeConfidence(rawConfidence, dataReliability);
+  const confidenceNormalized = rawConfidence !== confidenceScore;
+  diagnostics.confidenceNormalized = confidenceNormalized;
+  if (confidenceNormalized) {
+    diagnostics.rawConfidence = rawConfidence;
+  }
 
-  console.log(`[FunnelEngine-V3] Complete | status=${status} | strength=${primaryFunnel.funnelStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | generic=${primaryFunnel.genericFlag} | boundary=${boundaryCheck.passed}`);
+  console.log(`[FunnelEngine-V3] Complete | status=${status} | strength=${primaryFunnel.funnelStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | generic=${primaryFunnel.genericFlag} | boundary=${boundaryCheck.passed} | alignmentWarnings=${structuralWarnings.length}`);
 
   return {
     status,
@@ -924,6 +1010,7 @@ export async function runFunnelEngine(
       mitigations: primaryFunnel.frictionMap.filter(f => f.mitigation).length,
     },
     boundaryCheck,
+    structuralWarnings,
     confidenceScore,
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,

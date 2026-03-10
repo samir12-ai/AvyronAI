@@ -56,3 +56,10 @@ export const MIN_PILLAR_SCORE = 0.35;
 export const COLLISION_THRESHOLD = 0.70;
 export const STABILITY_MIN_PROOFABILITY = 0.30;
 export const STABILITY_MIN_TRUST_ALIGNMENT = 0.25;
+
+export const BOUNDARY_BLOCKED_PATTERNS: Record<string, RegExp> = {
+  "marketing copy": /\b(marketing copy|ad copy|sales copy|copywriting|creative copy)\b/i,
+  "headlines": /\b(headline|headlines|subject line|email subject|hook text)\b/i,
+  "funnel stages": /\b(funnel stage|funnel step|funnel design|sales funnel|conversion funnel|funnel structure)\b/i,
+  "financial projections": /\b(financial projection|revenue forecast|financial forecast|budget allocation|revenue model|financial plan)\b/i,
+};

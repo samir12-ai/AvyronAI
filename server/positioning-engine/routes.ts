@@ -1,15 +1,25 @@
 import type { Express } from "express";
 import { runPositioningEngine, getLatestPositioningSnapshot } from "./engine";
+import { checkValidationSession } from "../engine-hardening";
 
 export function registerPositioningEngineRoutes(app: Express) {
   app.post("/api/positioning-engine/analyze", async (req, res) => {
     try {
       const accountId = (req as any).accountId || "default";
-      const { campaignId, miSnapshotId, audienceSnapshotId } = req.body;
+      const { campaignId, miSnapshotId, audienceSnapshotId, validationSessionId } = req.body;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
+
+      const sessionCheck = checkValidationSession(validationSessionId, "positioning-engine", campaignId);
+      if (!sessionCheck.allowed) {
+        return res.status(429).json({
+          error: "REVALIDATION_LOOP_BLOCKED",
+          message: sessionCheck.warning,
+        });
+      }
+
       if (!miSnapshotId) {
         return res.status(400).json({ error: "miSnapshotId is required — run Market Intelligence first" });
       }

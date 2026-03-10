@@ -7,6 +7,7 @@ import { ENGINE_VERSION } from "./constants";
 import { ENGINE_VERSION as DIFF_ENGINE_VERSION } from "../differentiation-engine/constants";
 import { getEngineReadinessState, verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
 import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/constants";
+import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -17,10 +18,18 @@ function safeJsonParse(text: any): any {
 export function registerOfferEngineRoutes(app: Express) {
   app.post("/api/offer-engine/analyze", async (req: Request, res: Response) => {
     try {
-      const { campaignId, accountId = "default", differentiationSnapshotId } = req.body;
+      const { campaignId, accountId = "default", differentiationSnapshotId, validationSessionId } = req.body;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
+      }
+
+      const sessionCheck = checkValidationSession(validationSessionId, "offer-engine", campaignId);
+      if (!sessionCheck.allowed) {
+        return res.status(429).json({
+          error: "REVALIDATION_LOOP_BLOCKED",
+          message: sessionCheck.warning,
+        });
       }
 
       if (!differentiationSnapshotId) {
@@ -127,6 +136,16 @@ export function registerOfferEngineRoutes(app: Express) {
 
       const result = await runOfferEngine(miInput, audienceInput, positioningInput, differentiationInput, accountId);
 
+      if (result.status === "INTEGRITY_FAILED") {
+        return res.status(422).json({
+          success: false,
+          error: "INTEGRITY_FAILED",
+          message: result.statusMessage || "Offer output violated boundary protections",
+          boundaryCheck: result.boundaryCheck,
+          executionTimeMs: result.executionTimeMs,
+        });
+      }
+
       const [saved] = await db.insert(offerSnapshots).values({
         accountId,
         campaignId,
@@ -146,6 +165,8 @@ export function registerOfferEngineRoutes(app: Express) {
         confidenceScore: result.confidenceScore,
         executionTimeMs: result.executionTimeMs,
       }).returning();
+
+      await pruneOldSnapshots(db, offerSnapshots, campaignId, 20, accountId);
 
       res.json({
         success: true,

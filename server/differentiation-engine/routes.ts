@@ -6,6 +6,7 @@ import { runDifferentiationEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
 import { getEngineReadinessState, verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
 import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/constants";
+import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -16,10 +17,18 @@ function safeJsonParse(text: any): any {
 export function registerDifferentiationRoutes(app: Express) {
   app.post("/api/differentiation-engine/analyze", async (req: Request, res: Response) => {
     try {
-      const { campaignId, accountId = "default", positioningSnapshotId } = req.body;
+      const { campaignId, accountId = "default", positioningSnapshotId, validationSessionId } = req.body;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
+      }
+
+      const sessionCheck = checkValidationSession(validationSessionId, "differentiation-engine", campaignId);
+      if (!sessionCheck.allowed) {
+        return res.status(429).json({
+          error: "REVALIDATION_LOOP_BLOCKED",
+          message: sessionCheck.warning,
+        });
       }
 
       if (!positioningSnapshotId) {
@@ -112,6 +121,16 @@ export function registerDifferentiationRoutes(app: Express) {
 
       const result = await runDifferentiationEngine(miInput, audienceInput, positioningInput, accountId);
 
+      if (result.status === "INTEGRITY_FAILED") {
+        return res.status(400).json({
+          success: false,
+          error: "INTEGRITY_FAILED",
+          message: result.statusMessage,
+          ...result,
+          confidenceScore: 0,
+        });
+      }
+
       const [saved] = await db.insert(differentiationSnapshots).values({
         accountId,
         campaignId,
@@ -133,6 +152,8 @@ export function registerDifferentiationRoutes(app: Express) {
         confidenceScore: result.confidenceScore,
         executionTimeMs: result.executionTimeMs,
       }).returning();
+
+      await pruneOldSnapshots(db, differentiationSnapshots, campaignId, 20, accountId);
 
       res.json({
         success: true,
