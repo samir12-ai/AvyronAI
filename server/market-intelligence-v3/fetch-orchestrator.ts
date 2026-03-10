@@ -2,7 +2,7 @@ import { db } from "../db";
 import { miFetchJobs, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, miSnapshots, miSignalLogs, miTelemetry, growthCampaigns } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { fetchCompetitorData, enrichCompetitorWithComments, cleanupExpiredSyntheticComments, type FetchResult, type CollectionMode } from "../competitive-intelligence/data-acquisition";
-import { computeAllSignals, aggregateMissingFlags } from "./signal-engine";
+import { computeAllSignals, aggregateMissingFlags, clusterSemanticSignals } from "./signal-engine";
 import { classifyAllIntents, computeDominantMarketIntent } from "./intent-engine";
 import { computeTrajectory, deriveTrajectoryDirection, deriveMarketState } from "./trajectory-engine";
 import { computeConfidence } from "./confidence-engine";
@@ -972,8 +972,13 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   };
   const deviations = computeAllDeviations(trajectory, marketBaseline, calibrationCtx);
   console.log(`[FetchOrch] Baseline calibration: calibrated=${marketBaseline.isCalibrated}, snapshotsUsed=${marketBaseline.snapshotsUsed}, effectiveThreshold=${deviations[0]?.effectiveThreshold?.toFixed(2) ?? "N/A"}`);
-  const threatSignals = buildThreatSignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated);
-  const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated);
+
+  const signalClusters = clusterSemanticSignals(signalResults);
+  const totalSemanticSignals = signalResults.reduce((s, r) => s + r.semanticSignals.length, 0);
+  console.log(`[FetchOrch] SEMANTIC_SIGNALS | total=${totalSemanticSignals} | clusters=${signalClusters.length} | reinforced=${signalClusters.filter(c => c.reinforcedScore >= 0.3).length}`);
+
+  const threatSignals = buildThreatSignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, signalClusters);
+  const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, signalClusters);
   const similarityData = computeSimilarityDiagnosis(competitorInputs, signalResults);
 
   let narrativeSynthesis: string | null = null;

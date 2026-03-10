@@ -36,10 +36,27 @@ export interface SignalData {
 
 export type CompetitorLifecycle = "ACTIVE" | "DORMANT" | "LOW_SIGNAL";
 
+export type SemanticSignalCategory =
+  | "pain_signal"
+  | "desire_signal"
+  | "transformation_statement"
+  | "authority_positioning"
+  | "differentiation_narrative"
+  | "competitor_weakness"
+  | "audience_objection"
+  | "strategic_claim";
+
+export interface SemanticSignal {
+  category: SemanticSignalCategory;
+  snippet: string;
+  strength: number;
+}
+
 export interface CompetitorSignalResult {
   competitorId: string;
   competitorName: string;
   signals: SignalData;
+  semanticSignals: SemanticSignal[];
   signalCoverageScore: number;
   sourceReliabilityScore: number;
   sampleSize: number;
@@ -51,6 +68,21 @@ export interface CompetitorSignalResult {
   lifecycle: CompetitorLifecycle;
   lowSample: boolean;
   commentCount: number;
+}
+
+export interface SignalCluster {
+  category: SemanticSignalCategory;
+  competitorCount: number;
+  signals: Array<{ competitorName: string; snippet: string; strength: number }>;
+  reinforcedScore: number;
+}
+
+export interface SignalPipelineDiagnostics {
+  stage1_rawData: { postsProcessed: number; competitorsProcessed: number };
+  stage2_extraction: { numericalSignals: number; semanticSignals: number; audienceIntentSignals: number };
+  stage3_filtered: { signalsRemoved: number; filterReasons: string[] };
+  stage4_aggregation: { clustersFormed: number; reinforcedSignals: number };
+  stage5_final: { threatSignals: number; opportunitySignals: number; totalUsed: number };
 }
 
 export type IntentConfidenceBand = "STRONG" | "MODERATE" | "UNCERTAIN" | "DEGRADED";

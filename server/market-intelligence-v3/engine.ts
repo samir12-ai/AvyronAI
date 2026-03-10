@@ -2,7 +2,8 @@ import { db } from "../db";
 import { miSnapshots, miSignalLogs, miTelemetry, ciCompetitors, growthCampaigns } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { pruneOldSnapshots } from "../engine-hardening";
-import { computeAllSignals, aggregateMissingFlags, classifyEngagementQuality, detectAudienceIntentSignals, detectSampleBias, computeRealDataRatio } from "./signal-engine";
+import { computeAllSignals, aggregateMissingFlags, classifyEngagementQuality, detectAudienceIntentSignals, detectSampleBias, computeRealDataRatio, clusterSemanticSignals } from "./signal-engine";
+import type { SignalCluster, SignalPipelineDiagnostics } from "./types";
 import { computeDemandPressure } from "./demand-pressure";
 import { detectEchoChamber } from "./narrative-clustering";
 import { classifyAllIntents, computeDominantMarketIntent } from "./intent-engine";
@@ -369,16 +370,11 @@ export function buildMarketDiagnosis(confidence: any, trajectory: any, dominantI
   }
 }
 
-export function buildThreatSignals(confidence: any, trajectory: any, intents: any[], deviations?: DeviationResult[], baselineCalibrated?: boolean): string[] {
+export function buildThreatSignals(confidence: any, trajectory: any, intents: any[], deviations?: DeviationResult[], baselineCalibrated?: boolean, signalClusters?: SignalCluster[]): string[] {
   const threats: string[] = [];
 
   if (confidence.guardDecision === "BLOCK") {
     threats.push("INSUFFICIENT DATA: Cannot assess threat landscape reliably");
-    return threats;
-  }
-
-  if (baselineCalibrated === false) {
-    threats.push("BASELINE CALIBRATION IN PROGRESS: Collecting historical snapshots — threat signals will activate once calibration is established");
     return threats;
   }
 
@@ -388,30 +384,6 @@ export function buildThreatSignals(confidence: any, trajectory: any, intents: an
   if (aggressiveCompetitors.length > 0) {
     const names = aggressiveCompetitors.map((c: any) => c.competitorName).join(", ");
     threats.push(`${aggressiveCompetitors.length} competitor(s) showing aggressive scaling or price-war signals: ${names}`);
-  }
-
-  const narDev = deviations?.find(d => d.field === "narrativeConvergence");
-  if (narDev?.isElevated) {
-    threats.push(`Narrative convergence above baseline (${fmt(narDev.observed)} vs ${fmt(narDev.baseline)} baseline) — messaging patterns are becoming more similar`);
-  }
-
-  const angleDev = deviations?.find(d => d.field === "angleSaturation");
-  if (angleDev?.isElevated) {
-    threats.push(`Hook/angle duplication above baseline (${fmt(angleDev.observed)} vs ${fmt(angleDev.baseline)} baseline) — content differentiation is decreasing`);
-  }
-
-  const offerDev = deviations?.find(d => d.field === "offerCompression");
-  if (offerDev?.isElevated) {
-    threats.push(`Offer clustering above baseline (${fmt(offerDev.observed)} vs ${fmt(offerDev.baseline)} baseline) — pricing structures are converging`);
-  }
-
-  const heatDev = deviations?.find(d => d.field === "marketHeating");
-  if (heatDev?.isElevated) {
-    threats.push(`Market posting density above baseline (${fmt(heatDev.observed)} vs ${fmt(heatDev.baseline)} baseline) — competitive activity is elevated`);
-  }
-
-  if (heatDev?.isDepressed) {
-    threats.push(`Market posting density below baseline (${fmt(heatDev.observed)} vs ${fmt(heatDev.baseline)} baseline) — low overall competitive activity detected`);
   }
 
   const positioningShifts = intents.filter((i: any) => i.intentCategory === "POSITIONING_SHIFT");
@@ -424,29 +396,67 @@ export function buildThreatSignals(confidence: any, trajectory: any, intents: an
     threats.push(`Declining activity signals observed across ${decliningCompetitors.length} competitors — posting frequency below historical norms`);
   }
 
-  const revDev = deviations?.find(d => d.field === "revivalPotential");
-  if (revDev?.isElevated) {
-    threats.push(`Revival potential above baseline (${fmt(revDev.observed)} vs ${fmt(revDev.baseline)} baseline) — previously dormant competitors may re-enter active posting`);
+  if (trajectory.narrativeConvergenceScore > 0.6) {
+    threats.push(`High narrative convergence (${fmt(trajectory.narrativeConvergenceScore)}) — competitor messaging becoming homogeneous`);
+  }
+
+  if (trajectory.angleSaturationLevel > 0.6) {
+    threats.push(`High angle saturation (${fmt(trajectory.angleSaturationLevel)}) — content differentiation is decreasing`);
+  }
+
+  if (trajectory.competitionIntensityScore > 0.7) {
+    threats.push(`Elevated competition intensity (${fmt(trajectory.competitionIntensityScore)}) — market is highly contested`);
+  }
+
+  if (baselineCalibrated) {
+    const narDev = deviations?.find(d => d.field === "narrativeConvergence");
+    if (narDev?.isElevated) {
+      threats.push(`Narrative convergence above baseline (${fmt(narDev.observed)} vs ${fmt(narDev.baseline)} baseline)`);
+    }
+    const angleDev = deviations?.find(d => d.field === "angleSaturation");
+    if (angleDev?.isElevated) {
+      threats.push(`Hook/angle duplication above baseline (${fmt(angleDev.observed)} vs ${fmt(angleDev.baseline)} baseline)`);
+    }
+    const offerDev = deviations?.find(d => d.field === "offerCompression");
+    if (offerDev?.isElevated) {
+      threats.push(`Offer clustering above baseline (${fmt(offerDev.observed)} vs ${fmt(offerDev.baseline)} baseline)`);
+    }
+    const heatDev = deviations?.find(d => d.field === "marketHeating");
+    if (heatDev?.isElevated) {
+      threats.push(`Market posting density above baseline (${fmt(heatDev.observed)} vs ${fmt(heatDev.baseline)} baseline)`);
+    }
+    if (heatDev?.isDepressed) {
+      threats.push(`Market posting density below baseline (${fmt(heatDev.observed)} vs ${fmt(heatDev.baseline)} baseline) — low competitive activity`);
+    }
+    const revDev = deviations?.find(d => d.field === "revivalPotential");
+    if (revDev?.isElevated) {
+      threats.push(`Revival potential above baseline (${fmt(revDev.observed)} vs ${fmt(revDev.baseline)} baseline) — dormant competitors may re-enter`);
+    }
+  }
+
+  if (signalClusters && signalClusters.length > 0) {
+    const competitorWeaknessClusters = signalClusters.filter(c => c.category === "competitor_weakness" && c.reinforcedScore >= 0.3);
+    for (const cluster of competitorWeaknessClusters) {
+      threats.push(`Competitor weakness signals detected across ${cluster.competitorCount} competitor(s) — market awareness of deficiencies is spreading`);
+    }
+    const painClusters = signalClusters.filter(c => c.category === "pain_signal" && c.reinforcedScore >= 0.3);
+    for (const cluster of painClusters) {
+      threats.push(`Audience pain signals amplified across ${cluster.competitorCount} competitor(s) — unresolved market pain may indicate opportunity or churn risk`);
+    }
+    const authorityClusters = signalClusters.filter(c => c.category === "authority_positioning" && c.reinforcedScore >= 0.4);
+    for (const cluster of authorityClusters) {
+      threats.push(`Authority positioning claims from ${cluster.competitorCount} competitor(s) — authority competition intensifying`);
+    }
   }
 
   return threats;
 }
 
-export function buildOpportunitySignals(confidence: any, trajectory: any, intents: any[], deviations?: DeviationResult[], baselineCalibrated?: boolean): string[] {
+export function buildOpportunitySignals(confidence: any, trajectory: any, intents: any[], deviations?: DeviationResult[], baselineCalibrated?: boolean, signalClusters?: SignalCluster[]): string[] {
   const opportunities: string[] = [];
 
   if (confidence.guardDecision === "BLOCK") {
     return opportunities;
-  }
-
-  if (baselineCalibrated === false) {
-    opportunities.push("BASELINE CALIBRATION IN PROGRESS: Collecting historical snapshots — opportunity signals will activate once calibration is established");
-    return opportunities;
-  }
-
-  const heatDev = deviations?.find(d => d.field === "marketHeating");
-  if (heatDev?.isDepressed) {
-    opportunities.push(`Market posting density below baseline (${fmt(heatDev.observed)} vs ${fmt(heatDev.baseline)} baseline) — reduced competitive noise in this category`);
   }
 
   const decliningCompetitors = intents.filter((i: any) => i.intentCategory === "DECLINING");
@@ -454,24 +464,67 @@ export function buildOpportunitySignals(confidence: any, trajectory: any, intent
     opportunities.push(`${decliningCompetitors.length} competitor(s) showing declining activity — reduced publishing pressure observed`);
   }
 
-  const narDev = deviations?.find(d => d.field === "narrativeConvergence");
-  if (narDev?.isElevated) {
-    opportunities.push(`Narrative convergence above baseline (${fmt(narDev.observed)} vs ${fmt(narDev.baseline)} baseline) — content differentiation gaps are widening across the competitive set`);
+  if (trajectory.narrativeConvergenceScore > 0.5) {
+    opportunities.push(`Narrative convergence at ${fmt(trajectory.narrativeConvergenceScore)} — differentiation gaps are widening, unique positioning can stand out`);
   }
 
-  const angleDev = deviations?.find(d => d.field === "angleSaturation");
-  if (angleDev?.isDepressed) {
-    opportunities.push(`Creative angle diversity above baseline (${fmt(angleDev.observed)} vs ${fmt(angleDev.baseline)} baseline) — multiple content formats remain underutilized in the market`);
+  if (trajectory.angleSaturationLevel < 0.3) {
+    opportunities.push(`Low angle saturation (${fmt(trajectory.angleSaturationLevel)}) — multiple content formats remain underutilized`);
   }
 
-  const offerDev = deviations?.find(d => d.field === "offerCompression");
-  if (offerDev?.isDepressed) {
-    opportunities.push(`Offer differentiation above baseline (${fmt(offerDev.observed)} vs ${fmt(offerDev.baseline)} baseline) — low pricing convergence across competitors`);
+  if (trajectory.offerCompressionIndex < 0.3) {
+    opportunities.push(`Low offer compression (${fmt(trajectory.offerCompressionIndex)}) — pricing differentiation is feasible`);
   }
 
-  const revDev = deviations?.find(d => d.field === "revivalPotential");
-  if (revDev && !revDev.isElevated && heatDev && !heatDev.isElevated) {
-    opportunities.push("No dormant competitor re-entry signals detected — market entrant activity is stable");
+  if (trajectory.marketHeatingIndex < 0.3) {
+    opportunities.push(`Low market activity (${fmt(trajectory.marketHeatingIndex)}) — reduced competitive noise in category`);
+  }
+
+  const testingCompetitors = intents.filter((i: any) => i.intentCategory === "TESTING");
+  if (testingCompetitors.length >= 2) {
+    opportunities.push(`${testingCompetitors.length} competitor(s) in testing mode — market experimentation phase detected, early positioning advantage available`);
+  }
+
+  if (baselineCalibrated) {
+    const heatDev = deviations?.find(d => d.field === "marketHeating");
+    if (heatDev?.isDepressed) {
+      opportunities.push(`Market posting density below baseline (${fmt(heatDev.observed)} vs ${fmt(heatDev.baseline)} baseline) — reduced competitive noise`);
+    }
+    const angleDev = deviations?.find(d => d.field === "angleSaturation");
+    if (angleDev?.isDepressed) {
+      opportunities.push(`Creative angle diversity above baseline (${fmt(angleDev.observed)} vs ${fmt(angleDev.baseline)} baseline)`);
+    }
+    const offerDev = deviations?.find(d => d.field === "offerCompression");
+    if (offerDev?.isDepressed) {
+      opportunities.push(`Offer differentiation above baseline (${fmt(offerDev.observed)} vs ${fmt(offerDev.baseline)} baseline)`);
+    }
+    const revDev = deviations?.find(d => d.field === "revivalPotential");
+    if (revDev && !revDev.isElevated && heatDev && !heatDev.isElevated) {
+      opportunities.push("No dormant competitor re-entry signals — market entrant activity is stable");
+    }
+  }
+
+  if (signalClusters && signalClusters.length > 0) {
+    const desireClusters = signalClusters.filter(c => c.category === "desire_signal" && c.reinforcedScore >= 0.3);
+    for (const cluster of desireClusters) {
+      opportunities.push(`Desire signals detected across ${cluster.competitorCount} competitor audiences — validated demand for transformation outcomes`);
+    }
+    const transformClusters = signalClusters.filter(c => c.category === "transformation_statement" && c.reinforcedScore >= 0.3);
+    for (const cluster of transformClusters) {
+      opportunities.push(`Transformation proof across ${cluster.competitorCount} competitor(s) — market responds to evidence-based positioning`);
+    }
+    const objectionClusters = signalClusters.filter(c => c.category === "audience_objection" && c.reinforcedScore >= 0.3);
+    for (const cluster of objectionClusters) {
+      opportunities.push(`Common audience objections across ${cluster.competitorCount} competitor(s) — addressable trust/value gaps exist`);
+    }
+    const diffClusters = signalClusters.filter(c => c.category === "differentiation_narrative" && c.reinforcedScore >= 0.3);
+    for (const cluster of diffClusters) {
+      opportunities.push(`Differentiation narratives active across ${cluster.competitorCount} competitor(s) — market is receptive to unique positioning`);
+    }
+    const strategicClusters = signalClusters.filter(c => c.category === "strategic_claim" && c.reinforcedScore >= 0.3);
+    for (const cluster of strategicClusters) {
+      opportunities.push(`Strategic methodology claims from ${cluster.competitorCount} competitor(s) — framework-based positioning has market traction`);
+    }
   }
 
   return sanitizeOpportunitySignals(opportunities);
@@ -754,15 +807,31 @@ export class MarketIntelligenceV3 {
     };
     const deviations = computeAllDeviations(trajectory, marketBaseline, calibrationCtx);
     console.log(`[MIv3] Baseline calibration: calibrated=${marketBaseline.isCalibrated}, snapshotsUsed=${marketBaseline.snapshotsUsed}, deviations=${deviations.filter(d => d.isElevated || d.isDepressed).length} triggered, effectiveThreshold=${deviations[0]?.effectiveThreshold?.toFixed(2) ?? "N/A"}`);
-    const threatSignals = buildThreatSignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated);
-    const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated);
+
+    const signalClusters = clusterSemanticSignals(signalResults);
+    const totalSemanticSignals = signalResults.reduce((s, r) => s + r.semanticSignals.length, 0);
+    console.log(`[MIv3] SEMANTIC_SIGNALS | total=${totalSemanticSignals} | clusters=${signalClusters.length} | reinforced=${signalClusters.filter(c => c.reinforcedScore >= 0.3).length}`);
+
+    const threatSignals = buildThreatSignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, signalClusters);
+    const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, signalClusters);
     const similarityData = computeSimilarityDiagnosis(competitors, signalResults);
+
+    const numericalSignals = signalResults.reduce((s, r) => s + Object.values(r.signals).filter(v => Math.abs(v) > 0.01).length, 0);
+    const filteredSignals = signalResults.reduce((s, r) => s + r.missingFields.length, 0);
+    const pipelineDiagnostics: SignalPipelineDiagnostics = {
+      stage1_rawData: { postsProcessed: totalPosts, competitorsProcessed: competitors.length },
+      stage2_extraction: { numericalSignals, semanticSignals: totalSemanticSignals, audienceIntentSignals: audienceIntentSignals.length },
+      stage3_filtered: { signalsRemoved: filteredSignals, filterReasons: signalResults.flatMap(r => r.missingFields.map(f => `${r.competitorName}: ${f}`)).slice(0, 20) },
+      stage4_aggregation: { clustersFormed: signalClusters.length, reinforcedSignals: signalClusters.filter(c => c.reinforcedScore >= 0.3).length },
+      stage5_final: { threatSignals: threatSignals.length, opportunitySignals: opportunitySignals.length, totalUsed: Math.max(0, numericalSignals - filteredSignals) + totalSemanticSignals },
+    };
+    console.log(`[MIv3] PIPELINE_DIAGNOSTICS | stage1: ${pipelineDiagnostics.stage1_rawData.postsProcessed} posts/${pipelineDiagnostics.stage1_rawData.competitorsProcessed} competitors | stage2: ${pipelineDiagnostics.stage2_extraction.numericalSignals} numerical + ${pipelineDiagnostics.stage2_extraction.semanticSignals} semantic + ${pipelineDiagnostics.stage2_extraction.audienceIntentSignals} audience | stage3: ${pipelineDiagnostics.stage3_filtered.signalsRemoved} filtered | stage4: ${pipelineDiagnostics.stage4_aggregation.clustersFormed} clusters | stage5: ${pipelineDiagnostics.stage5_final.threatSignals} threats + ${pipelineDiagnostics.stage5_final.opportunitySignals} opportunities`);
 
     const signalDiagnostics = logSignalDiagnostics("MARKET_INTELLIGENCE_V3", {
       postsProcessed: totalPosts,
-      signalsDetected: signalResults.reduce((s, r) => s + Object.values(r.signals).filter(v => Math.abs(v) > 0.01).length, 0),
-      signalsFiltered: signalResults.reduce((s, r) => s + r.missingFields.length, 0),
-      signalsUsed: signalResults.reduce((s, r) => s + Object.values(r.signals).filter(v => Math.abs(v) > 0.01).length, 0) - signalResults.reduce((s, r) => s + r.missingFields.length, 0),
+      signalsDetected: numericalSignals + totalSemanticSignals,
+      signalsFiltered: filteredSignals,
+      signalsUsed: Math.max(0, numericalSignals - filteredSignals) + totalSemanticSignals,
     });
 
     const competitorNarratives = competitors.map(c => {

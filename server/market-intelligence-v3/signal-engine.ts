@@ -1,4 +1,4 @@
-import type { CompetitorInput, CompetitorSignalResult, CompetitorLifecycle, SignalData, PostData, CommentData, EngagementQuality, SampleBiasResult } from "./types";
+import type { CompetitorInput, CompetitorSignalResult, CompetitorLifecycle, SignalData, PostData, CommentData, EngagementQuality, SampleBiasResult, SemanticSignal, SemanticSignalCategory, SignalCluster } from "./types";
 import { MI_THRESHOLDS, MI_COST_LIMITS, MI_AUTHORITY_WEIGHT, MI_SAMPLE_BIAS, MI_LIFECYCLE } from "./constants";
 
 function clamp(v: number, min = -1, max = 1): number {
@@ -335,6 +335,113 @@ export function computeRealDataRatio(comments: CommentData[]): number {
   return Math.round((realCount / comments.length) * 100) / 100;
 }
 
+const SEMANTIC_PATTERNS: Record<SemanticSignalCategory, RegExp[]> = {
+  pain_signal: [
+    /\b(struggling|frustrated|can'?t figure out|tired of|sick of|fed up|overwhelmed|stuck|losing|failing|problem is|pain point|challenge|hard to|difficult to|impossible to)\b/i,
+    /\b(waste of time|don'?t know how|no results|not working|broken|hate|annoying|exhausting)\b/i,
+  ],
+  desire_signal: [
+    /\b(want to|wish I could|dream of|imagine|would love to|goal is|aspire to|hoping to|looking for|need to find|searching for)\b/i,
+    /\b(finally|achieve|unlock|discover|breakthrough|freedom|lifestyle|passive income|financial|scale to)\b/i,
+  ],
+  transformation_statement: [
+    /\b(before and after|went from|transformed|changed my|life changing|turned around|results in|success story|case study|testimonial)\b/i,
+    /\b(helped .{2,30} achieve|client results|grew .{2,20} to|increased .{2,20} by|boosted|doubled|tripled|10x|100k)\b/i,
+  ],
+  authority_positioning: [
+    /\b(expert in|years of experience|certified|trained .{2,20} people|worked with|featured in|as seen on|founder of|ceo of|built a)\b/i,
+    /\b(industry leader|top .{2,10} in|award|recognized|trusted by|proven method|proprietary|exclusive|only one who)\b/i,
+  ],
+  differentiation_narrative: [
+    /\b(unlike|different from|not like|what sets .{2,20} apart|unique approach|our method|the .{2,15} way|no one else|only .{2,15} that)\b/i,
+    /\b(forget everything|stop doing|wrong about|myth|misconception|outdated|traditional .{2,15} doesn'?t|new approach)\b/i,
+  ],
+  competitor_weakness: [
+    /\b(they don'?t|others fail|most .{2,15} don'?t|problem with .{2,15} is|why .{2,15} fails|missing|gap in|lack of|inferior|limited)\b/i,
+    /\b(cheap|overpriced|scam|fake|doesn'?t deliver|empty promises|overhyped|cookie.?cutter|generic|one.?size.?fits)\b/i,
+  ],
+  audience_objection: [
+    /\b(but what if|what about|how do I know|is this real|too good to be true|sounds like|skeptical|doubt|not sure|risk)\b/i,
+    /\b(can I afford|too expensive|no time|already tried|doesn'?t apply to me|my situation is different|won'?t work for)\b/i,
+  ],
+  strategic_claim: [
+    /\b(the secret|key to|formula for|framework|system|blueprint|roadmap|strategy|method|step.?by.?step|process)\b/i,
+    /\b(discover how|learn how|I'?ll show you|here'?s how|the truth about|what no one tells you|insider|hack)\b/i,
+  ],
+};
+
+export function extractSemanticSignals(posts: PostData[]): SemanticSignal[] {
+  const signals: SemanticSignal[] = [];
+  const seenSnippets = new Set<string>();
+
+  for (const post of posts) {
+    const caption = (post.caption || "").trim();
+    if (caption.length < 10) continue;
+
+    for (const [category, patterns] of Object.entries(SEMANTIC_PATTERNS) as [SemanticSignalCategory, RegExp[]][]) {
+      for (const pattern of patterns) {
+        const match = caption.match(pattern);
+        if (match) {
+          const matchStart = Math.max(0, (match.index || 0) - 20);
+          const matchEnd = Math.min(caption.length, (match.index || 0) + match[0].length + 40);
+          const snippet = caption.substring(matchStart, matchEnd).replace(/\n/g, " ").trim();
+          const snippetKey = `${category}:${snippet.substring(0, 30).toLowerCase()}`;
+
+          if (!seenSnippets.has(snippetKey)) {
+            seenSnippets.add(snippetKey);
+
+            const engagement = (post.likes || 0) + (post.comments || 0);
+            const engagementBoost = Math.min(engagement / 500, 0.3);
+            const baseStrength = 0.4;
+            const strength = Math.min(baseStrength + engagementBoost + (post.hasCTA ? 0.1 : 0) + (post.hasOffer ? 0.1 : 0), 1.0);
+
+            signals.push({ category, snippet, strength });
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  return signals;
+}
+
+export function clusterSemanticSignals(
+  allResults: CompetitorSignalResult[]
+): SignalCluster[] {
+  const categoryMap = new Map<SemanticSignalCategory, Array<{ competitorName: string; snippet: string; strength: number }>>();
+
+  for (const result of allResults) {
+    for (const signal of result.semanticSignals) {
+      if (!categoryMap.has(signal.category)) {
+        categoryMap.set(signal.category, []);
+      }
+      categoryMap.get(signal.category)!.push({
+        competitorName: result.competitorName,
+        snippet: signal.snippet,
+        strength: signal.strength,
+      });
+    }
+  }
+
+  const clusters: SignalCluster[] = [];
+  for (const [category, signals] of categoryMap.entries()) {
+    const uniqueCompetitors = new Set(signals.map(s => s.competitorName));
+    if (uniqueCompetitors.size >= 2) {
+      const avgStrength = signals.reduce((s, sig) => s + sig.strength, 0) / signals.length;
+      const reinforcementBonus = Math.min(uniqueCompetitors.size * 0.1, 0.3);
+      clusters.push({
+        category,
+        competitorCount: uniqueCompetitors.size,
+        signals,
+        reinforcedScore: Math.min(avgStrength + reinforcementBonus, 1.0),
+      });
+    }
+  }
+
+  return clusters.sort((a, b) => b.reinforcedScore - a.reinforcedScore);
+}
+
 export function computeCompetitorSignals(competitor: CompetitorInput): CompetitorSignalResult {
   const posts = (competitor.posts || []).slice(0, MI_COST_LIMITS.MAX_POSTS_PER_COMPETITOR);
   const comments = (competitor.comments || []).slice(0, MI_COST_LIMITS.MAX_COMMENTS_PER_COMPETITOR);
@@ -350,6 +457,8 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
     reviewVelocityChange: computeReviewVelocityChange(competitor),
     contentExperimentRate: computeContentExperimentRate(posts),
   };
+
+  const semanticSignals = extractSemanticSignals(posts);
 
   const postCommentCounts = posts.reduce((s, p) => s + (p.comments || 0), 0);
 
@@ -394,6 +503,7 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
     competitorId: competitor.id,
     competitorName: competitor.name,
     signals,
+    semanticSignals,
     signalCoverageScore,
     sourceReliabilityScore,
     sampleSize,

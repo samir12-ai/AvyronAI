@@ -83,13 +83,12 @@ export function assessDataReliability(
   const advisories: string[] = [];
 
   const signalDensity = Math.min(signalCount / 20, 1.0);
-  if (signalCount < 5) {
-    advisories.push(`Low signal density: only ${signalCount} signals detected — strategic conclusions may be unreliable`);
-  }
-
   const competitorValidity = Math.min(competitorCount / 5, 1.0);
-  if (competitorCount < 5) {
-    advisories.push(`Low competitor coverage: only ${competitorCount} competitors analyzed — market view may be incomplete`);
+
+  if (signalCount < 5 && competitorCount < 2) {
+    advisories.push(`Low signal density AND competitor coverage: only ${signalCount} signals from ${competitorCount} competitor(s) — strategic conclusions may be unreliable`);
+  } else if (signalCount < 3 && competitorCount < 3) {
+    advisories.push(`Very low signal density: only ${signalCount} signals from ${competitorCount} competitor(s) — insufficient data for reliable analysis`);
   }
 
   let diversityScore = 0;

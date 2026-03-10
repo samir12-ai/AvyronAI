@@ -1,0 +1,142 @@
+}
+Hi,
+
+We need to resolve the Market Intelligence signal reliability issue completely. The system already processes sufficient data (multiple competitors and many posts), but signal extraction occasionally reports extremely low signal counts. This indicates a pipeline or filtering issue rather than a data availability problem.
+
+Please implement the following fixes to fully stabilize the signal pipeline.
+
+---
+
+## 1. Signal Extraction Pipeline Audit
+
+The MI pipeline must clearly separate the following stages:
+
+1. Raw Data Collection  
+2. Signal Extraction  
+3. Signal Filtering  
+4. Signal Aggregation  
+5. Final Signals Used by Engines  
+
+Add diagnostics logging to track:
+
+- posts_processed  
+- competitors_processed  
+- signals_detected  
+- signals_filtered  
+- signals_used  
+
+This will reveal exactly where signal loss occurs.
+
+---
+
+## 2. Expand Signal Pattern Detection
+
+Current signal detection appears too narrow. Signals must be detected from multiple semantic categories, not just pain statements.
+
+Expand extraction patterns to include:
+
+- pain signals  
+- desire signals  
+- transformation statements  
+- authority positioning claims  
+- differentiation narratives  
+- competitor weaknesses  
+- audience objections  
+- strategic claims  
+
+Signals should be detected even when phrasing differs.
+
+---
+
+## 3. Replace Binary Filtering with Weighted Scoring
+
+Current filtering likely removes many signals.
+
+Instead of:
+
+signal_strength > threshold
+
+Use a weighted scoring model:
+
+signal_score =
+frequency_weight +
+semantic_strength +
+cross-competitor_confirmation
+
+Signals should only be removed if the score is extremely weak.
+
+---
+
+## 4. Cross-Competitor Signal Aggregation
+
+Signals should be reinforced when multiple competitors express similar themes.
+
+Example:
+
+If 4 competitors express similar positioning narratives, treat this as a clustered signal rather than separate weak signals.
+
+Implement basic clustering so the system recognizes repeated market narratives.
+
+---
+
+## 5. Signal Density Safeguard Adjustment
+
+Signal density warnings should trigger only when both of the following are true:
+
+- competitors analyzed < minimum threshold  
+- signals_detected < minimum threshold  
+
+If large datasets exist, the system should not downgrade signal reliability prematurely.
+
+---
+
+## 6. Signal Debug Diagnostics Panel
+
+Expose MI signal diagnostics internally:
+
+- competitors analyzed  
+- posts analyzed  
+- signals detected  
+- signals filtered  
+- final signals used  
+
+This will make debugging far easier when analyzing market datasets.
+
+---
+
+## 7. Prevent Over-Filtering
+
+Review all filtering layers to ensure signals are not removed unintentionally by:
+
+- overly strict semantic filters  
+- duplicate removal errors  
+- threshold misconfiguration  
+
+Signals should be aggregated and scored rather than aggressively removed.
+
+---
+
+## 8. Verify Awareness Engine Input
+
+Ensure Awareness Engine reads the correct signal dataset from MI snapshots.
+
+The engine must use:
+
+MI.finalSignals
+
+not intermediate signal stages.
+
+---
+
+## Deployment Verification
+
+After implementing these fixes:
+
+- restart backend services  
+- confirm MI diagnostics logs appear  
+- verify signal counts increase appropriately when large datasets exist  
+- confirm downstream engines receive full signal sets  
+
+This fix is required to ensure reliable market analysis across all engines while preserving the Master Plan architecture.
+
+Please confirm once the pipeline audit and fixes are completed
