@@ -1324,7 +1324,8 @@ export function analyzePersuasion(
     ...(offer.riskNotes || []),
   ].join(" ");
 
-  const boundaryCheck = enforceBoundaryWithSanitization(allText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
+  const rawBoundaryCheck = enforceBoundaryWithSanitization(allText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
+  const boundaryCheck = { passed: rawBoundaryCheck.clean, violations: rawBoundaryCheck.violations, sanitized: rawBoundaryCheck.sanitized, sanitizedText: rawBoundaryCheck.sanitizedText, warnings: rawBoundaryCheck.warnings };
   if (!boundaryCheck.passed) {
     return {
       status: STATUS.INTEGRITY_FAILED,
@@ -1392,7 +1393,8 @@ export function analyzePersuasion(
     routes.rejected.rejectionReason || "",
   ].join(" ");
 
-  const outputBoundaryCheck = enforceBoundaryWithSanitization(outputText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
+  const rawOutputBoundaryCheck = enforceBoundaryWithSanitization(outputText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
+  const outputBoundaryCheck = { passed: rawOutputBoundaryCheck.clean, violations: rawOutputBoundaryCheck.violations, sanitized: rawOutputBoundaryCheck.sanitized, sanitizedText: rawOutputBoundaryCheck.sanitizedText, warnings: rawOutputBoundaryCheck.warnings };
   if (!outputBoundaryCheck.passed) {
     return {
       status: STATUS.INTEGRITY_FAILED,
