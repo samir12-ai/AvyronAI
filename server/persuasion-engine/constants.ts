@@ -1,4 +1,4 @@
-export const ENGINE_VERSION = 1;
+export const ENGINE_VERSION = 2;
 
 export const STATUS = {
   COMPLETE: "COMPLETE",
@@ -15,6 +15,8 @@ export const PERSUASION_MODES = [
   "empathy_led",
   "logic_led",
   "contrast_led",
+  "education_led",
+  "diagnostic_led",
 ] as const;
 
 export const INFLUENCE_DRIVERS = [
@@ -28,16 +30,67 @@ export const INFLUENCE_DRIVERS = [
   "contrast",
   "specificity",
   "risk_reversal",
+  "education",
+  "diagnosis",
 ] as const;
 
 export const TRUST_SEQUENCE_STAGES = [
   "acknowledge_pain",
   "demonstrate_understanding",
+  "educate_on_problem",
   "present_proof",
   "establish_authority",
+  "address_objections",
   "remove_risk",
   "invite_commitment",
 ] as const;
+
+export const TRUST_BARRIER_TYPES = [
+  "low_awareness_skepticism",
+  "competitor_similarity_distrust",
+  "mechanism_disbelief",
+  "outcome_doubt",
+  "proof_sensitivity",
+  "general_market_fatigue",
+  "high_commitment_anxiety",
+] as const;
+
+export const OBJECTION_PROOF_MAP: Record<string, string> = {
+  mechanism_disbelief: "process_proof",
+  outcome_doubt: "outcome_proof",
+  applicability_doubt: "case_proof",
+  promise_distrust: "transparency_proof",
+  risk_fear: "risk_removal_proof",
+  price_resistance: "value_proof",
+  competitor_comparison: "differentiation_proof",
+  time_concern: "efficiency_proof",
+};
+
+export const LOW_READINESS_STAGES = ["unaware", "problem_aware"] as const;
+export const HIGH_READINESS_STAGES = ["product_aware", "most_aware"] as const;
+
+export const EDUCATION_FIRST_MODES = ["education_led", "diagnostic_led", "empathy_led"] as const;
+
+export const SCARCITY_BLOCKED_CONDITIONS = [
+  "low_trust",
+  "low_awareness",
+  "insufficient_proof",
+  "unresolved_objections",
+  "educational_funnel",
+  "diagnostic_funnel",
+] as const;
+
+export const FUNNEL_PERSUASION_COMPATIBILITY: Record<string, string[]> = {
+  webinar: ["authority_led", "proof_led", "education_led", "social_proof_led"],
+  challenge: ["education_led", "diagnostic_led", "empathy_led", "contrast_led"],
+  tripwire: ["proof_led", "logic_led", "contrast_led"],
+  application: ["authority_led", "proof_led", "social_proof_led"],
+  direct: ["proof_led", "authority_led", "contrast_led", "logic_led"],
+  diagnostic: ["diagnostic_led", "education_led", "empathy_led"],
+  consultation: ["authority_led", "empathy_led", "proof_led"],
+  free_resource: ["education_led", "reciprocity_led", "empathy_led"],
+  community: ["social_proof_led", "reciprocity_led", "empathy_led"],
+};
 
 export const BOUNDARY_HARD_PATTERNS: Record<string, RegExp> = {
   "marketing copy": /\b(marketing copy|ad copy|sales copy|copywriting)\b/i,
@@ -108,6 +161,10 @@ export const HYPE_PATTERNS = [
   "triple your income",
   "passive income guaranteed",
   "zero effort required",
+  "no experience needed",
+  "foolproof system",
+  "can't fail",
+  "money back no questions",
 ];
 
 export const GENERIC_PERSUASION_PHRASES = [
@@ -126,4 +183,22 @@ export const GENERIC_PERSUASION_PHRASES = [
   "create desire",
   "build rapport",
   "close the deal",
+  "nurture leads",
+  "warm up the audience",
+  "build a relationship",
+  "add value first",
+  "create a sense of belonging",
+];
+
+export const GENERIC_STRUCTURE_PATTERNS = [
+  "generic trust-building",
+  "standard proof framework",
+  "basic risk removal",
+  "general authority positioning",
+  "template empathy",
+  "stock persuasion sequence",
+  "default objection handling",
+  "placeholder proof",
+  "unspecific transformation",
+  "vague outcome promise",
 ];

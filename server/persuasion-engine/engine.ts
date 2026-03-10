@@ -7,8 +7,16 @@ import {
   PERSUASION_MODES,
   INFLUENCE_DRIVERS,
   TRUST_SEQUENCE_STAGES,
+  TRUST_BARRIER_TYPES,
   HYPE_PATTERNS,
   GENERIC_PERSUASION_PHRASES,
+  GENERIC_STRUCTURE_PATTERNS,
+  OBJECTION_PROOF_MAP,
+  LOW_READINESS_STAGES,
+  HIGH_READINESS_STAGES,
+  EDUCATION_FIRST_MODES,
+  SCARCITY_BLOCKED_CONDITIONS,
+  FUNNEL_PERSUASION_COMPATIBILITY,
 } from "./constants";
 import { enforceBoundaryWithSanitization } from "../engine-hardening";
 import type {
@@ -24,6 +32,8 @@ import type {
   PersuasionRoute,
   PersuasionResult,
   DataReliabilityDiagnostics,
+  TrustBarrierClassification,
+  ObjectionProofLink,
 } from "./types";
 
 function clamp(v: number, min = 0, max = 1): number {
@@ -39,6 +49,14 @@ function safeNumber(v: any, fallback: number): number {
 function safeString(v: any, fallback: string): string {
   if (typeof v === "string" && v.trim()) return v.trim();
   return fallback;
+}
+
+function isLowReadiness(stage: string): boolean {
+  return (LOW_READINESS_STAGES as readonly string[]).includes(stage);
+}
+
+function isHighReadiness(stage: string): boolean {
+  return (HIGH_READINESS_STAGES as readonly string[]).includes(stage);
 }
 
 function assessDataReliability(
@@ -83,8 +101,30 @@ function assessDataReliability(
     1
   );
 
+  const objectionKeys = Object.keys(audience.objectionMap || {});
+  const objectionValues = objectionKeys.map(k => (audience.objectionMap || {})[k]);
+  const hasDetailedObjections = objectionValues.some(v => {
+    if (typeof v === "string" && v.length > 10) return true;
+    if (Array.isArray(v) && v.length > 0) return true;
+    if (typeof v === "object" && v !== null && Object.keys(v).length > 0) return true;
+    return false;
+  });
+  const objectionSpecificity = objectionKeys.length === 0 ? 0.1
+    : hasDetailedObjections ? clamp(objectionKeys.length / 5, 0.3, 1.0)
+    : clamp(objectionKeys.length / 5, 0.15, 0.6);
+  if (objectionSpecificity < 0.3) advisories.push(`Weak objection specificity (${Math.round(objectionSpecificity * 100)}%) — persuasion objection handling may be imprecise`);
+
+  const trustReq = safeString(awareness.trustRequirement, "medium");
+  const hasFriction = (awareness.frictionNotes || []).length > 0;
+  const trustSpecificity = trustReq !== "unknown"
+    ? (hasFriction ? clamp(0.5 + (awareness.frictionNotes || []).length * 0.1, 0.5, 1.0) : 0.5)
+    : 0.2;
+  if (trustSpecificity < 0.4) advisories.push(`Weak trust specificity (${Math.round(trustSpecificity * 100)}%) — trust barrier mapping may be generic`);
+
   const overallReliability = clamp(
-    signalDensity * 0.2 + signalDiversity * 0.25 + narrativeStability * 0.2 + competitorValidity * 0.15 + marketMaturityConfidence * 0.2,
+    signalDensity * 0.15 + signalDiversity * 0.15 + narrativeStability * 0.15 +
+    competitorValidity * 0.10 + marketMaturityConfidence * 0.15 +
+    objectionSpecificity * 0.15 + trustSpecificity * 0.15,
     0,
     1
   );
@@ -92,7 +132,11 @@ function assessDataReliability(
   const isWeak = overallReliability < 0.4;
   if (isWeak) advisories.push("Overall data reliability is WEAK — confidence scores will be capped");
 
-  return { signalDensity, signalDiversity, narrativeStability, competitorValidity, marketMaturityConfidence, overallReliability, isWeak, advisories };
+  return {
+    signalDensity, signalDiversity, narrativeStability, competitorValidity,
+    marketMaturityConfidence, objectionSpecificity, trustSpecificity,
+    overallReliability, isWeak, advisories,
+  };
 }
 
 function normalizeConfidence(rawScore: number, reliability: DataReliabilityDiagnostics): number {
@@ -105,9 +149,244 @@ function normalizeConfidence(rawScore: number, reliability: DataReliabilityDiagn
   return clamp(rawScore, 0, 1);
 }
 
+function classifyTrustBarriers(
+  audience: PersuasionAudienceInput,
+  awareness: PersuasionAwarenessInput,
+  differentiation: PersuasionDifferentiationInput,
+  offer: PersuasionOfferInput,
+  mi: PersuasionMIInput,
+): TrustBarrierClassification[] {
+  const barriers: TrustBarrierClassification[] = [];
+  const readiness = safeString(awareness.targetReadinessStage, "unknown");
+  const trustReq = safeString(awareness.trustRequirement, "medium");
+  const maturity = safeNumber(audience.maturityIndex, 0.5);
+
+  if (isLowReadiness(readiness)) {
+    barriers.push({
+      barrierType: "low_awareness_skepticism",
+      severity: readiness === "unaware" ? "critical" : "high",
+      source: `Audience readiness: ${readiness}`,
+      persuasionImplication: "Education and problem recognition must precede any proof-based persuasion",
+    });
+  }
+
+  const competitors = (mi.threatSignals || []).length;
+  if (competitors > 2 && !differentiation.authorityMode) {
+    barriers.push({
+      barrierType: "competitor_similarity_distrust",
+      severity: competitors > 4 ? "high" : "moderate",
+      source: `${competitors} competitor threats detected without strong authority mode`,
+      persuasionImplication: "Contrast and differentiation must lead persuasion to break similarity bias",
+    });
+  }
+
+  const mechanismFraming = differentiation.mechanismFraming;
+  const hasStrongMechanism = mechanismFraming && (typeof mechanismFraming === "string" ? mechanismFraming.length > 10 : Object.keys(mechanismFraming).length > 0);
+  if (!hasStrongMechanism) {
+    barriers.push({
+      barrierType: "mechanism_disbelief",
+      severity: "high",
+      source: "Weak or missing mechanism framing in differentiation",
+      persuasionImplication: "Process proof and mechanism explanation required before outcome claims",
+    });
+  }
+
+  const proofArch = differentiation.proofArchitecture || [];
+  if (proofArch.length < 2 && trustReq === "high") {
+    barriers.push({
+      barrierType: "proof_sensitivity",
+      severity: "high",
+      source: `High trust requirement with only ${proofArch.length} proof element(s)`,
+      persuasionImplication: "Third-party validation and case studies must compensate for proof gap",
+    });
+  }
+
+  if (safeNumber(offer.frictionLevel, 0) > 0.6) {
+    barriers.push({
+      barrierType: "outcome_doubt",
+      severity: "moderate",
+      source: `High offer friction (${Math.round(safeNumber(offer.frictionLevel, 0) * 100)}%)`,
+      persuasionImplication: "Outcome proof and risk reversal must precede commitment invitation",
+    });
+  }
+
+  if (maturity > 0.6 && trustReq === "high") {
+    barriers.push({
+      barrierType: "general_market_fatigue",
+      severity: "moderate",
+      source: "High maturity audience with high trust requirement suggests market fatigue",
+      persuasionImplication: "Novel proof types and unconventional authority signals needed",
+    });
+  }
+
+  const commitLevel = safeString("", "");
+  if (safeNumber(offer.offerStrengthScore, 0) > 0.7 && trustReq === "high") {
+    barriers.push({
+      barrierType: "high_commitment_anxiety",
+      severity: "moderate",
+      source: "Strong offer with high trust requirement indicates commitment anxiety",
+      persuasionImplication: "Gradual commitment ladder and risk removal must frame the conversion path",
+    });
+  }
+
+  return barriers;
+}
+
+function buildObjectionProofLinks(
+  audience: PersuasionAudienceInput,
+  differentiation: PersuasionDifferentiationInput,
+  offer: PersuasionOfferInput,
+  awareness: PersuasionAwarenessInput,
+  mi: PersuasionMIInput,
+): ObjectionProofLink[] {
+  const links: ObjectionProofLink[] = [];
+  const proofArch = differentiation.proofArchitecture || [];
+  const proofTypes = new Set(proofArch.map((p: any) => safeString(p?.type || p?.proofType || p, "unknown").toLowerCase()));
+
+  const objectionMap = audience.objectionMap || {};
+  const objectionKeys = Object.keys(objectionMap);
+
+  for (const key of objectionKeys) {
+    const normalizedKey = key.toLowerCase().replace(/[\s-]+/g, "_");
+    let matchedCategory = "";
+    let requiredProof = "general_proof";
+
+    for (const [category, proof] of Object.entries(OBJECTION_PROOF_MAP)) {
+      if (normalizedKey.includes(category) || category.includes(normalizedKey)) {
+        matchedCategory = category;
+        requiredProof = proof;
+        break;
+      }
+    }
+
+    if (!matchedCategory) {
+      if (normalizedKey.includes("price") || normalizedKey.includes("cost") || normalizedKey.includes("expensive")) {
+        matchedCategory = "price_resistance";
+        requiredProof = "value_proof";
+      } else if (normalizedKey.includes("time") || normalizedKey.includes("busy") || normalizedKey.includes("effort")) {
+        matchedCategory = "time_concern";
+        requiredProof = "efficiency_proof";
+      } else if (normalizedKey.includes("trust") || normalizedKey.includes("scam") || normalizedKey.includes("legit")) {
+        matchedCategory = "promise_distrust";
+        requiredProof = "transparency_proof";
+      } else if (normalizedKey.includes("work") || normalizedKey.includes("result") || normalizedKey.includes("outcome")) {
+        matchedCategory = "outcome_doubt";
+        requiredProof = "outcome_proof";
+      } else if (normalizedKey.includes("compet") || normalizedKey.includes("altern") || normalizedKey.includes("better")) {
+        matchedCategory = "competitor_comparison";
+        requiredProof = "differentiation_proof";
+      } else {
+        matchedCategory = normalizedKey;
+        requiredProof = "general_proof";
+      }
+    }
+
+    const proofAvailable = proofTypes.has(requiredProof) || proofTypes.has("general") || proofArch.length >= 2;
+    const detail = typeof objectionMap[key] === "string" ? objectionMap[key] : JSON.stringify(objectionMap[key]).slice(0, 100);
+
+    links.push({
+      objectionCategory: matchedCategory,
+      objectionDetail: detail,
+      requiredProofType: requiredProof,
+      proofAvailable,
+      confidence: proofAvailable ? 0.7 : 0.3,
+    });
+  }
+
+  if (links.length === 0) {
+    const pains = audience.audiencePains || [];
+    for (const pain of pains.slice(0, 3)) {
+      const painStr = typeof pain === "string" ? pain : safeString(pain?.pain || pain?.description || "", "audience concern");
+      links.push({
+        objectionCategory: "inferred_from_pain",
+        objectionDetail: painStr.slice(0, 100),
+        requiredProofType: "outcome_proof",
+        proofAvailable: proofArch.length >= 1,
+        confidence: 0.4,
+      });
+    }
+
+    const riskNotes = offer.riskNotes || [];
+    for (const risk of riskNotes.slice(0, 2)) {
+      links.push({
+        objectionCategory: "inferred_from_risk",
+        objectionDetail: risk.slice(0, 100),
+        requiredProofType: "risk_removal_proof",
+        proofAvailable: proofArch.length >= 1,
+        confidence: 0.35,
+      });
+    }
+
+    const frictionNotes = awareness.frictionNotes || [];
+    for (const friction of frictionNotes.slice(0, 2)) {
+      links.push({
+        objectionCategory: "inferred_from_friction",
+        objectionDetail: friction.slice(0, 100),
+        requiredProofType: "transparency_proof",
+        proofAvailable: proofArch.length >= 1,
+        confidence: 0.3,
+      });
+    }
+
+    if (links.length === 0) {
+      const threats = (mi.threatSignals || []).slice(0, 2);
+      for (const threat of threats) {
+        const threatStr = typeof threat === "string" ? threat : safeString(threat?.signal || threat?.description || "", "competitive concern");
+        links.push({
+          objectionCategory: "inferred_from_competition",
+          objectionDetail: threatStr.slice(0, 100),
+          requiredProofType: "differentiation_proof",
+          proofAvailable: (differentiation.pillars || []).length > 0,
+          confidence: 0.25,
+        });
+      }
+    }
+  }
+
+  return links;
+}
+
+function validateScarcityConditions(
+  awareness: PersuasionAwarenessInput,
+  audience: PersuasionAudienceInput,
+  differentiation: PersuasionDifferentiationInput,
+  funnel: PersuasionFunnelInput,
+  objectionProofLinks: ObjectionProofLink[],
+): { allowed: boolean; blockedReasons: string[] } {
+  const blockedReasons: string[] = [];
+  const readiness = safeString(awareness.targetReadinessStage, "unknown");
+  const trustReq = safeString(awareness.trustRequirement, "medium");
+  const proofCount = (differentiation.proofArchitecture || []).length;
+  const funnelType = safeString(funnel.funnelType, "").toLowerCase();
+
+  if (trustReq === "high") {
+    blockedReasons.push("Trust is still high — scarcity damages credibility when trust is unresolved");
+  }
+
+  if (isLowReadiness(readiness)) {
+    blockedReasons.push(`Awareness is ${readiness} — scarcity is inappropriate before audience understands the problem`);
+  }
+
+  if (proofCount < 2) {
+    blockedReasons.push(`Insufficient proof (${proofCount} elements) — scarcity without proof is manipulative`);
+  }
+
+  const unresolvedObjections = objectionProofLinks.filter(l => !l.proofAvailable);
+  if (unresolvedObjections.length > 0) {
+    blockedReasons.push(`${unresolvedObjections.length} objection(s) lack proof resolution — scarcity before objection handling is premature`);
+  }
+
+  if (funnelType.includes("diagnostic") || funnelType.includes("education") || funnelType.includes("free")) {
+    blockedReasons.push(`Funnel type "${funnelType}" is educational/diagnostic — scarcity contradicts the funnel intent`);
+  }
+
+  return { allowed: blockedReasons.length === 0, blockedReasons };
+}
+
 function layer1_awarenessToPersuasionFit(
   awareness: PersuasionAwarenessInput,
   audience: PersuasionAudienceInput,
+  funnel: PersuasionFunnelInput,
 ): LayerResult {
   const findings: string[] = [];
   const warnings: string[] = [];
@@ -116,27 +395,40 @@ function layer1_awarenessToPersuasionFit(
   const entry = safeString(awareness.entryMechanismType, "unknown");
   const readiness = safeString(awareness.targetReadinessStage, "unknown");
   const trustReq = safeString(awareness.trustRequirement, "medium");
+  const funnelType = safeString(funnel.funnelType, "unknown").toLowerCase();
 
   findings.push(`Awareness entry mechanism: ${entry}`);
   findings.push(`Target readiness stage: ${readiness}`);
 
   if (entry === "proof_led_entry" || entry === "authority_entry") {
-    score += 0.2;
-    findings.push("High-trust entry mechanism detected — proof-based persuasion aligned");
+    if (isLowReadiness(readiness)) {
+      warnings.push(`DIAGNOSTIC RULE: ${entry} selected but readiness is ${readiness} — proof must support education, not lead conversion`);
+      score -= 0.05;
+    } else {
+      score += 0.2;
+      findings.push("High-trust entry mechanism detected — proof-based persuasion aligned");
+    }
   } else if (entry === "pain_entry") {
     score += 0.15;
     findings.push("Pain-based entry mechanism — empathy-led persuasion required");
   } else if (entry === "myth_breaker_entry") {
     score += 0.1;
     findings.push("Myth-breaker entry — contrast-based persuasion needed");
+  } else if (entry === "diagnostic_entry") {
+    score += 0.15;
+    findings.push("Diagnostic entry — education-first persuasion pathway");
   }
 
-  if (readiness === "unaware" || readiness === "problem_aware") {
+  if (isLowReadiness(readiness)) {
     score -= 0.1;
-    warnings.push("Low readiness stage — persuasion must focus on education before commitment");
+    warnings.push(`Low readiness stage (${readiness}) — EDUCATION-FIRST RULE: persuasion must focus on problem recognition, self-identification, and understanding before any commitment logic`);
+    findings.push("Education-first persuasion enforced: proof supports learning, not conversion");
   } else if (readiness === "most_aware") {
     score += 0.15;
     findings.push("Most aware stage — direct proof and commitment persuasion viable");
+  } else if (readiness === "solution_aware") {
+    score += 0.1;
+    findings.push("Solution aware — mechanism differentiation persuasion appropriate");
   }
 
   if (trustReq === "high") {
@@ -149,6 +441,11 @@ function layer1_awarenessToPersuasionFit(
     warnings.push(`Weak awareness strength (${Math.round(awarenessScore * 100)}%) — persuasion foundations unstable`);
   }
 
+  const compatibleModes = FUNNEL_PERSUASION_COMPATIBILITY[funnelType] || [];
+  if (compatibleModes.length > 0) {
+    findings.push(`Funnel type "${funnelType}" compatible with: ${compatibleModes.join(", ")}`);
+  }
+
   return { layerName: "awareness_to_persuasion_fit", passed: score >= 0.4, score: clamp(score), findings, warnings };
 }
 
@@ -156,6 +453,10 @@ function layer2_objectionDetection(
   audience: PersuasionAudienceInput,
   offer: PersuasionOfferInput,
   differentiation: PersuasionDifferentiationInput,
+  awareness: PersuasionAwarenessInput,
+  mi: PersuasionMIInput,
+  funnel: PersuasionFunnelInput,
+  integrity: PersuasionIntegrityInput,
 ): LayerResult {
   const findings: string[] = [];
   const warnings: string[] = [];
@@ -163,13 +464,68 @@ function layer2_objectionDetection(
 
   const objections = audience.objectionMap || {};
   const objectionKeys = Object.keys(objections);
+  let directObjectionCount = objectionKeys.length;
 
-  if (objectionKeys.length === 0) {
-    score -= 0.2;
-    warnings.push("No audience objections detected — persuasion may miss critical barriers");
+  if (directObjectionCount === 0) {
+    warnings.push("No direct audience objections detected — activating fallback objection inference");
+
+    const fallbackSources: string[] = [];
+
+    const pains = audience.audiencePains || [];
+    if (pains.length > 0) {
+      fallbackSources.push(`${pains.length} pain signal(s) → inferred objection concern`);
+    }
+
+    const trustReq = safeString(awareness.trustRequirement, "medium");
+    if (trustReq === "high") {
+      fallbackSources.push("High trust requirement → inferred credibility objection");
+    }
+
+    const frictionNotes = awareness.frictionNotes || [];
+    if (frictionNotes.length > 0) {
+      fallbackSources.push(`${frictionNotes.length} friction note(s) from awareness → inferred adoption objection`);
+    }
+
+    const proofReqs = funnel.proofPlacements || [];
+    if (proofReqs.length > 0) {
+      fallbackSources.push(`${proofReqs.length} funnel proof requirement(s) → inferred proof-gap objection`);
+    }
+
+    const integrityWarnings = integrity.structuralWarnings || [];
+    if (integrityWarnings.length > 0) {
+      fallbackSources.push(`${integrityWarnings.length} integrity warning(s) → inferred coherence objection`);
+    }
+
+    const riskNotes = offer.riskNotes || [];
+    if (riskNotes.length > 0) {
+      fallbackSources.push(`${riskNotes.length} offer risk note(s) → inferred risk objection`);
+    }
+
+    const threats = (mi.threatSignals || []).length;
+    if (threats > 0) {
+      fallbackSources.push(`${threats} competitor threat(s) → inferred comparison objection`);
+    }
+
+    const emotionalDrivers = (audience.emotionalDrivers || []).length;
+    const segments = (audience.audienceSegments || []).length;
+    if (segments > 1) {
+      fallbackSources.push(`${segments} audience segment(s) → inferred relevance objection`);
+    }
+
+    if (fallbackSources.length > 0) {
+      findings.push(`Fallback objection inference activated from ${fallbackSources.length} source(s):`);
+      for (const src of fallbackSources) {
+        findings.push(`  - ${src}`);
+      }
+      score -= 0.05;
+      warnings.push(`LOW OBJECTION CONFIDENCE: Objections inferred from fallback sources — specificity is reduced`);
+    } else {
+      score -= 0.2;
+      warnings.push("CRITICAL: No objection signals from any source — persuasion may miss critical barriers");
+    }
   } else {
-    findings.push(`${objectionKeys.length} objection category(ies) detected: ${objectionKeys.slice(0, 5).join(", ")}`);
-    score += Math.min(objectionKeys.length * 0.05, 0.2);
+    findings.push(`${directObjectionCount} direct objection category(ies) detected: ${objectionKeys.slice(0, 5).join(", ")}`);
+    score += Math.min(directObjectionCount * 0.05, 0.2);
   }
 
   const riskNotes = offer.riskNotes || [];
@@ -200,6 +556,10 @@ function layer3_trustBarrierMapping(
   audience: PersuasionAudienceInput,
   awareness: PersuasionAwarenessInput,
   integrity: PersuasionIntegrityInput,
+  differentiation: PersuasionDifferentiationInput,
+  offer: PersuasionOfferInput,
+  mi: PersuasionMIInput,
+  trustBarriers: TrustBarrierClassification[],
 ): LayerResult {
   const findings: string[] = [];
   const warnings: string[] = [];
@@ -208,8 +568,28 @@ function layer3_trustBarrierMapping(
   const trustReq = safeString(awareness.trustRequirement, "medium");
   findings.push(`Trust requirement from awareness: ${trustReq}`);
 
+  if (trustBarriers.length === 0) {
+    findings.push("No specific trust barriers classified — trust path is relatively clear");
+    score += 0.1;
+  } else {
+    findings.push(`${trustBarriers.length} trust barrier(s) classified:`);
+    for (const barrier of trustBarriers) {
+      findings.push(`  [${barrier.severity.toUpperCase()}] ${barrier.barrierType}: ${barrier.persuasionImplication}`);
+
+      if (barrier.severity === "critical") {
+        score -= 0.2;
+        warnings.push(`CRITICAL trust barrier: ${barrier.barrierType} — ${barrier.persuasionImplication}`);
+      } else if (barrier.severity === "high") {
+        score -= 0.12;
+        warnings.push(`High-severity trust barrier: ${barrier.barrierType} — requires dedicated persuasion attention`);
+      } else if (barrier.severity === "moderate") {
+        score -= 0.05;
+      }
+    }
+  }
+
   if (trustReq === "high") {
-    score -= 0.15;
+    score -= 0.05;
     warnings.push("High trust barrier — extended trust-building sequence required");
   } else if (trustReq === "low") {
     score += 0.15;
@@ -222,7 +602,7 @@ function layer3_trustBarrierMapping(
     score -= 0.1;
   } else if (maturity > 0.7) {
     findings.push(`High audience maturity (${Math.round(maturity * 100)}%) — audience receptive to direct persuasion`);
-    score += 0.1;
+    score += 0.05;
   }
 
   const integrityScore = safeNumber(integrity.overallIntegrityScore, 0);
@@ -231,31 +611,43 @@ function layer3_trustBarrierMapping(
     score -= 0.1;
   } else {
     findings.push(`Strategic integrity validated (${Math.round(integrityScore * 100)}%)`);
-    score += 0.1;
+    score += 0.05;
   }
 
-  const frictionNotes = awareness.frictionNotes || [];
-  if (frictionNotes.length > 0) {
-    warnings.push(`${frictionNotes.length} awareness friction note(s) affecting trust path`);
-    score -= 0.05;
+  const hasMechanismBarrier = trustBarriers.some(b => b.barrierType === "mechanism_disbelief");
+  const hasCompetitorBarrier = trustBarriers.some(b => b.barrierType === "competitor_similarity_distrust");
+  const hasAwarenessBarrier = trustBarriers.some(b => b.barrierType === "low_awareness_skepticism");
+
+  if (hasMechanismBarrier && hasCompetitorBarrier) {
+    warnings.push("Compound barrier: mechanism disbelief + competitor similarity — requires strong differentiation-led trust sequence");
+  }
+  if (hasAwarenessBarrier) {
+    warnings.push("Awareness-based skepticism detected — education must precede any proof deployment");
   }
 
-  return { layerName: "trust_barrier_mapping", passed: score >= 0.35, score: clamp(score), findings, warnings };
+  return { layerName: "trust_barrier_mapping", passed: score >= 0.3, score: clamp(score), findings, warnings };
 }
 
 function layer4_influenceDriverSelection(
   audience: PersuasionAudienceInput,
   differentiation: PersuasionDifferentiationInput,
   awareness: PersuasionAwarenessInput,
+  trustBarriers: TrustBarrierClassification[],
 ): LayerResult {
   const findings: string[] = [];
   const warnings: string[] = [];
   let score = 0.5;
 
   const selectedDrivers: string[] = [];
+  const readiness = safeString(awareness.targetReadinessStage, "unknown");
+
+  if (isLowReadiness(readiness)) {
+    selectedDrivers.push("education", "diagnosis");
+    findings.push(`Low readiness (${readiness}) → education + diagnosis drivers prioritized`);
+  }
 
   const proofArch = differentiation.proofArchitecture || [];
-  if (proofArch.length >= 2) {
+  if (proofArch.length >= 2 && !isLowReadiness(readiness)) {
     selectedDrivers.push("proof_of_work");
     findings.push("Strong proof architecture → proof_of_work driver selected");
   }
@@ -268,11 +660,11 @@ function layer4_influenceDriverSelection(
 
   const entry = safeString(awareness.entryMechanismType, "");
   if (entry === "pain_entry") {
-    selectedDrivers.push("contrast");
+    if (!selectedDrivers.includes("contrast")) selectedDrivers.push("contrast");
     findings.push("Pain-based entry → contrast driver selected (before/after framing)");
   }
   if (entry === "myth_breaker_entry") {
-    selectedDrivers.push("contrast");
+    if (!selectedDrivers.includes("contrast")) selectedDrivers.push("contrast");
     if (!selectedDrivers.includes("specificity")) selectedDrivers.push("specificity");
     findings.push("Myth-breaker entry → contrast + specificity drivers selected");
   }
@@ -289,12 +681,27 @@ function layer4_influenceDriverSelection(
     findings.push("Multiple audience segments → social_proof driver selected");
   }
 
+  for (const barrier of trustBarriers) {
+    if (barrier.barrierType === "mechanism_disbelief" && !selectedDrivers.includes("specificity")) {
+      selectedDrivers.push("specificity");
+      findings.push("Mechanism disbelief barrier → specificity driver added");
+    }
+    if (barrier.barrierType === "competitor_similarity_distrust" && !selectedDrivers.includes("contrast")) {
+      selectedDrivers.push("contrast");
+      findings.push("Competitor similarity barrier → contrast driver added");
+    }
+    if (barrier.barrierType === "proof_sensitivity" && !selectedDrivers.includes("proof_of_work")) {
+      selectedDrivers.push("proof_of_work");
+      findings.push("Proof sensitivity barrier → proof_of_work driver added");
+    }
+  }
+
   if (selectedDrivers.length === 0) {
     selectedDrivers.push("authority", "proof_of_work");
     warnings.push("No signals strong enough for driver selection — defaulting to authority + proof_of_work");
   }
 
-  score += Math.min(selectedDrivers.length * 0.08, 0.35);
+  score += Math.min(selectedDrivers.length * 0.06, 0.35);
 
   if (selectedDrivers.length < 2) {
     warnings.push("Only one influence driver selected — persuasion architecture may be narrow");
@@ -310,6 +717,7 @@ function layer5_proofPriorityMapping(
   differentiation: PersuasionDifferentiationInput,
   audience: PersuasionAudienceInput,
   awareness: PersuasionAwarenessInput,
+  objectionProofLinks: ObjectionProofLink[],
 ): LayerResult {
   const findings: string[] = [];
   const warnings: string[] = [];
@@ -329,7 +737,11 @@ function layer5_proofPriorityMapping(
   const trustReq = safeString(awareness.trustRequirement, "medium");
   const readiness = safeString(awareness.targetReadinessStage, "problem_aware");
 
-  if (trustReq === "high" || readiness === "unaware") {
+  if (isLowReadiness(readiness)) {
+    findings.push(`Low readiness (${readiness}) → proof must support education, not lead persuasion`);
+    findings.push("Proof role: illustrative examples and pattern recognition, not conversion evidence");
+    score += 0.05;
+  } else if (trustReq === "high") {
     findings.push("High trust need → third-party proof and case studies should lead");
     score += 0.1;
   } else if (readiness === "most_aware") {
@@ -340,10 +752,17 @@ function layer5_proofPriorityMapping(
     score += 0.1;
   }
 
-  const objections = Object.keys(audience.objectionMap || {});
-  if (objections.length > 2) {
-    findings.push("Multiple objections → proof must address each objection category");
-    score += 0.05;
+  if (objectionProofLinks.length > 0) {
+    const linkedCount = objectionProofLinks.filter(l => l.proofAvailable).length;
+    const unlinkedCount = objectionProofLinks.length - linkedCount;
+    findings.push(`Objection-to-proof linking: ${linkedCount}/${objectionProofLinks.length} objection(s) have matching proof`);
+    if (unlinkedCount > 0) {
+      warnings.push(`${unlinkedCount} objection(s) lack direct proof resolution — persuasion gaps remain`);
+      score -= unlinkedCount * 0.03;
+    }
+    if (linkedCount > 0) {
+      score += Math.min(linkedCount * 0.04, 0.15);
+    }
   }
 
   if (proofArch.length >= 3) {
@@ -359,6 +778,9 @@ function layer6_messageOrderLogic(
   audience: PersuasionAudienceInput,
   offer: PersuasionOfferInput,
   funnel: PersuasionFunnelInput,
+  differentiation: PersuasionDifferentiationInput,
+  trustBarriers: TrustBarrierClassification[],
+  objectionProofLinks: ObjectionProofLink[],
 ): LayerResult {
   const findings: string[] = [];
   const warnings: string[] = [];
@@ -367,39 +789,97 @@ function layer6_messageOrderLogic(
   const readiness = safeString(awareness.targetReadinessStage, "problem_aware");
   const trustReq = safeString(awareness.trustRequirement, "medium");
   const commitmentLevel = safeString(funnel.commitmentLevel, "medium");
+  const funnelType = safeString(funnel.funnelType, "unknown").toLowerCase();
 
   const sequence: string[] = [];
 
-  if (readiness === "unaware" || readiness === "problem_aware") {
-    sequence.push("acknowledge_pain", "demonstrate_understanding", "present_proof", "establish_authority", "remove_risk", "invite_commitment");
-    findings.push("Low awareness → full empathy-first persuasion sequence");
+  const hasMechanismBarrier = trustBarriers.some(b => b.barrierType === "mechanism_disbelief");
+  const hasCompetitorBarrier = trustBarriers.some(b => b.barrierType === "competitor_similarity_distrust");
+  const hasProofSensitivity = trustBarriers.some(b => b.barrierType === "proof_sensitivity");
+  const hasUnresolvedObjections = objectionProofLinks.some(l => !l.proofAvailable);
+  const proofCount = (differentiation.proofArchitecture || []).length;
+
+  if (isLowReadiness(readiness)) {
+    sequence.push("acknowledge_pain", "educate_on_problem", "demonstrate_understanding", "invite_self_identification");
+    if (proofCount > 0) sequence.push("illustrative_proof");
+    sequence.push("establish_authority", "remove_risk", "invite_commitment");
+    findings.push(`Low readiness (${readiness}) → education-first sequence: problem recognition before proof`);
   } else if (readiness === "solution_aware") {
-    sequence.push("demonstrate_understanding", "present_proof", "establish_authority", "remove_risk", "invite_commitment");
-    findings.push("Solution aware → understanding-first sequence (skip pain acknowledgment)");
-  } else if (readiness === "product_aware" || readiness === "most_aware") {
-    sequence.push("present_proof", "establish_authority", "remove_risk", "invite_commitment");
-    findings.push("High awareness → proof-first compressed sequence");
+    if (hasMechanismBarrier) {
+      sequence.push("demonstrate_understanding", "explain_mechanism", "present_proof", "establish_authority", "address_objections", "remove_risk", "invite_commitment");
+      findings.push("Solution aware + mechanism disbelief → mechanism explanation leads before proof");
+    } else {
+      sequence.push("demonstrate_understanding", "present_proof", "establish_authority", "address_objections", "remove_risk", "invite_commitment");
+      findings.push("Solution aware → understanding-first sequence with objection handling");
+    }
+  } else if (readiness === "product_aware") {
+    if (hasCompetitorBarrier) {
+      sequence.push("establish_contrast", "present_proof", "establish_authority", "address_objections", "remove_risk", "invite_commitment");
+      findings.push("Product aware + competitor similarity → contrast leads persuasion");
+    } else {
+      sequence.push("present_proof", "establish_authority", "address_objections", "remove_risk", "invite_commitment");
+      findings.push("Product aware → proof-first compressed sequence");
+    }
     score += 0.1;
+  } else if (readiness === "most_aware") {
+    sequence.push("present_proof", "remove_risk", "invite_commitment");
+    findings.push("Most aware → direct proof-to-commitment sequence");
+    score += 0.15;
   } else {
-    sequence.push("acknowledge_pain", "demonstrate_understanding", "present_proof", "establish_authority", "remove_risk", "invite_commitment");
-    findings.push("Unknown readiness → full persuasion sequence as safeguard");
+    sequence.push("acknowledge_pain", "educate_on_problem", "demonstrate_understanding", "present_proof", "establish_authority", "address_objections", "remove_risk", "invite_commitment");
+    findings.push("Unknown readiness → full education-first sequence as safeguard");
   }
 
   if (trustReq === "high" && !sequence.includes("establish_authority")) {
-    sequence.unshift("establish_authority");
-    findings.push("High trust requirement → authority front-loaded in sequence");
+    const proofIdx = sequence.indexOf("present_proof");
+    if (proofIdx >= 0) {
+      sequence.splice(proofIdx, 0, "establish_authority");
+    } else {
+      sequence.unshift("establish_authority");
+    }
+    findings.push("High trust requirement → authority front-loaded before proof");
+  }
+
+  if (hasProofSensitivity) {
+    const authIdx = sequence.indexOf("establish_authority");
+    const proofIdx = sequence.indexOf("present_proof");
+    if (authIdx >= 0 && proofIdx >= 0 && authIdx > proofIdx) {
+      sequence.splice(authIdx, 1);
+      sequence.splice(proofIdx, 0, "establish_authority");
+      findings.push("Proof-sensitive audience → authority positioned before proof for credibility priming");
+    }
+  }
+
+  if (hasUnresolvedObjections && !sequence.includes("address_objections")) {
+    const commitIdx = sequence.indexOf("invite_commitment");
+    if (commitIdx >= 0) {
+      sequence.splice(commitIdx, 0, "address_objections");
+    } else {
+      sequence.push("address_objections");
+    }
+    findings.push("Unresolved objections → objection handling inserted before commitment");
   }
 
   if (commitmentLevel === "high") {
     if (!sequence.includes("remove_risk")) {
-      sequence.splice(sequence.length - 1, 0, "remove_risk");
+      const commitIdx = sequence.indexOf("invite_commitment");
+      if (commitIdx >= 0) {
+        sequence.splice(commitIdx, 0, "remove_risk");
+      }
     }
     findings.push("High commitment funnel → risk removal emphasized before commitment");
     score += 0.05;
   }
 
-  findings.push(`Message order: ${sequence.join(" → ")}`);
-  score += 0.15;
+  if (funnelType.includes("diagnostic") || funnelType.includes("challenge")) {
+    if (!sequence.includes("educate_on_problem") && !sequence.includes("invite_self_identification")) {
+      sequence.unshift("educate_on_problem");
+      findings.push(`Funnel type "${funnelType}" → education step prepended to sequence`);
+    }
+  }
+
+  findings.push(`Context-sensitive message order: ${sequence.join(" → ")}`);
+  score += 0.1;
 
   const stageCount = (funnel.stageMap || []).length;
   if (stageCount > 0 && sequence.length > stageCount + 2) {
@@ -412,6 +892,8 @@ function layer6_messageOrderLogic(
 
 function layer7_antiHypeGuard(
   allText: string,
+  objectionProofLinks: ObjectionProofLink[],
+  trustBarriers: TrustBarrierClassification[],
 ): LayerResult {
   const findings: string[] = [];
   const warnings: string[] = [];
@@ -452,11 +934,40 @@ function layer7_antiHypeGuard(
     score += 0.05;
   }
 
+  let structuralGenericCount = 0;
+  for (const pattern of GENERIC_STRUCTURE_PATTERNS) {
+    if (textLower.includes(pattern.toLowerCase())) {
+      structuralGenericCount++;
+    }
+  }
+
+  if (structuralGenericCount > 0) {
+    score -= structuralGenericCount * 0.06;
+    warnings.push(`GENERIC SUPPRESSION: ${structuralGenericCount} structurally generic pattern(s) detected — persuasion logic is not rooted in upstream inputs`);
+  }
+
+  const allLinksInferred = objectionProofLinks.length > 0 && objectionProofLinks.every(l => l.confidence < 0.4);
+  if (allLinksInferred) {
+    score -= 0.08;
+    warnings.push("All objection-proof links are inferred (low confidence) — persuasion structure may be generically templated");
+  }
+
+  const allBarriersGeneric = trustBarriers.length > 0 && trustBarriers.every(b => b.severity === "moderate");
+  if (allBarriersGeneric && trustBarriers.length > 2) {
+    score -= 0.05;
+    warnings.push("All trust barriers are moderate severity — may indicate generic classification rather than genuine analysis");
+  }
+
   return { layerName: "anti_hype_guard", passed: score >= 0.5, score: clamp(score), findings, warnings };
 }
 
 function layer8_persuasionStrengthScoring(
   layerResults: LayerResult[],
+  awareness: PersuasionAwarenessInput,
+  trustBarriers: TrustBarrierClassification[],
+  objectionProofLinks: ObjectionProofLink[],
+  funnel: PersuasionFunnelInput,
+  selectedMode: string,
 ): LayerResult {
   const findings: string[] = [];
   const warnings: string[] = [];
@@ -470,20 +981,68 @@ function layer8_persuasionStrengthScoring(
     totalWeight += weight;
   }
 
-  const rawScore = totalWeight > 0 ? weightedSum / totalWeight : 0;
-  const score = clamp(rawScore);
+  const structuralScore = totalWeight > 0 ? weightedSum / totalWeight : 0;
+
+  const readiness = safeString(awareness.targetReadinessStage, "unknown");
+  const trustReq = safeString(awareness.trustRequirement, "medium");
+  const funnelType = safeString(funnel.funnelType, "unknown").toLowerCase();
+
+  let readinessMultiplier = 1.0;
+
+  if (isLowReadiness(readiness)) {
+    const isEducationMode = (EDUCATION_FIRST_MODES as readonly string[]).includes(selectedMode);
+    if (!isEducationMode) {
+      readinessMultiplier *= 0.7;
+      warnings.push(`READINESS MISMATCH: ${selectedMode} mode selected for ${readiness} audience — education-first mode would be more appropriate`);
+    } else {
+      findings.push(`Education-first mode (${selectedMode}) correctly matches ${readiness} audience`);
+      readinessMultiplier *= 1.05;
+    }
+  }
+
+  if (trustReq === "high") {
+    const criticalBarriers = trustBarriers.filter(b => b.severity === "critical" || b.severity === "high");
+    if (criticalBarriers.length > 0) {
+      readinessMultiplier *= 0.85;
+      warnings.push(`${criticalBarriers.length} high/critical trust barrier(s) reduce persuasion strength`);
+    }
+  }
+
+  const unresolvedObjections = objectionProofLinks.filter(l => !l.proofAvailable);
+  if (unresolvedObjections.length > 2) {
+    readinessMultiplier *= 0.85;
+    warnings.push(`${unresolvedObjections.length} unresolved objection(s) weaken persuasion completeness`);
+  }
+
+  const compatibleModes = FUNNEL_PERSUASION_COMPATIBILITY[funnelType] || [];
+  if (compatibleModes.length > 0 && !compatibleModes.includes(selectedMode)) {
+    readinessMultiplier *= 0.8;
+    warnings.push(`FUNNEL MISMATCH: "${selectedMode}" is not compatible with "${funnelType}" funnel type — expected: ${compatibleModes.join(", ")}`);
+  } else if (compatibleModes.length > 0) {
+    findings.push(`Persuasion mode "${selectedMode}" is compatible with "${funnelType}" funnel type`);
+  }
+
+  const lowConfidenceLinks = objectionProofLinks.filter(l => l.confidence < 0.4);
+  if (lowConfidenceLinks.length > objectionProofLinks.length * 0.5 && objectionProofLinks.length > 0) {
+    readinessMultiplier *= 0.9;
+    warnings.push("Majority of objection-proof links have low confidence — persuasion quality uncertain");
+  }
+
+  const score = clamp(structuralScore * readinessMultiplier);
 
   const passedCount = layerResults.filter(l => l.passed).length;
   const totalCount = layerResults.length;
   findings.push(`${passedCount}/${totalCount} layers passed`);
-  findings.push(`Weighted persuasion strength: ${Math.round(score * 100)}%`);
+  findings.push(`Structural score: ${Math.round(structuralScore * 100)}%`);
+  findings.push(`Readiness adjustment: ${Math.round(readinessMultiplier * 100)}%`);
+  findings.push(`Final persuasion strength: ${Math.round(score * 100)}%`);
 
   if (score < 0.4) {
-    warnings.push("Overall persuasion strength is WEAK — significant gaps in logic structure");
+    warnings.push("Overall persuasion strength is WEAK — significant gaps in logic structure or readiness alignment");
   } else if (score < 0.6) {
-    warnings.push("Moderate persuasion strength — some layers need reinforcement");
+    warnings.push("Moderate persuasion strength — some layers or readiness factors need reinforcement");
   } else {
-    findings.push("Strong persuasion architecture — logic structure is coherent");
+    findings.push("Strong persuasion architecture — logic structure and readiness alignment are coherent");
   }
 
   return { layerName: "persuasion_strength_scoring", passed: score >= 0.4, score, findings, warnings };
@@ -493,20 +1052,103 @@ function selectPersuasionMode(
   awareness: PersuasionAwarenessInput,
   audience: PersuasionAudienceInput,
   differentiation: PersuasionDifferentiationInput,
+  funnel: PersuasionFunnelInput,
 ): string {
   const entry = safeString(awareness.entryMechanismType, "");
+  const readiness = safeString(awareness.targetReadinessStage, "unknown");
   const proofCount = (differentiation.proofArchitecture || []).length;
   const authorityMode = safeString(differentiation.authorityMode, "");
   const maturity = safeNumber(audience.maturityIndex, 0.5);
+  const funnelType = safeString(funnel.funnelType, "unknown").toLowerCase();
+
+  if (isLowReadiness(readiness)) {
+    if (entry === "diagnostic_entry" || funnelType.includes("diagnostic")) return "diagnostic_led";
+    if (entry === "pain_entry") return "empathy_led";
+    return "education_led";
+  }
 
   if (entry === "authority_entry" && authorityMode) return "authority_led";
   if (entry === "proof_led_entry" && proofCount >= 2) return "proof_led";
   if (entry === "pain_entry") return "empathy_led";
   if (entry === "myth_breaker_entry") return "contrast_led";
+  if (entry === "diagnostic_entry") return "diagnostic_led";
+
+  const compatibleModes = FUNNEL_PERSUASION_COMPATIBILITY[funnelType] || [];
+  if (compatibleModes.length > 0) {
+    if (proofCount >= 3 && compatibleModes.includes("proof_led")) return "proof_led";
+    if (authorityMode && compatibleModes.includes("authority_led")) return "authority_led";
+    return compatibleModes[0];
+  }
+
   if (proofCount >= 3) return "proof_led";
   if (authorityMode) return "authority_led";
   if (maturity > 0.7) return "logic_led";
   return "authority_led";
+}
+
+function validatePersuasionRouteAgainstFunnel(
+  mode: string,
+  funnel: PersuasionFunnelInput,
+  awareness: PersuasionAwarenessInput,
+  trustBarriers: TrustBarrierClassification[],
+): { valid: boolean; warnings: string[]; suggestedMode: string | null } {
+  const funnelType = safeString(funnel.funnelType, "unknown").toLowerCase();
+  const compatibleModes = FUNNEL_PERSUASION_COMPATIBILITY[funnelType] || [];
+  const funWarnings: string[] = [];
+  const readiness = safeString(awareness.targetReadinessStage, "unknown");
+  const trustPath = funnel.trustPath || [];
+  const proofPlacements = funnel.proofPlacements || [];
+  const awarenessCompat = safeString(awareness.funnelCompatibility, "unknown");
+
+  if (compatibleModes.length === 0) {
+    if (trustPath.length > 4 && mode !== "empathy_led" && mode !== "education_led") {
+      funWarnings.push(`Extended trust path (${trustPath.length} steps) — consider empathy or education-led approach`);
+    }
+    return { valid: true, warnings: funWarnings, suggestedMode: null };
+  }
+
+  if (!compatibleModes.includes(mode)) {
+    funWarnings.push(`Persuasion mode "${mode}" is not compatible with funnel type "${funnelType}" — expected: ${compatibleModes.join(", ")}`);
+
+    if (mode === "scarcity_led") {
+      funWarnings.push("Scarcity mode rejected by funnel validation — funnel requires trust-building first");
+    }
+
+    if (trustPath.length > 3 && (mode === "proof_led" || mode === "logic_led")) {
+      funWarnings.push("Long trust path detected — proof-first mode may skip required trust-building steps");
+    }
+
+    return { valid: false, warnings: funWarnings, suggestedMode: compatibleModes[0] };
+  }
+
+  if (awarenessCompat !== "unknown" && awarenessCompat !== funnelType && !awarenessCompat.includes(funnelType)) {
+    funWarnings.push(`Awareness route compatibility ("${awarenessCompat}") does not match funnel type ("${funnelType}") — persuasion may face entry-to-funnel friction`);
+  }
+
+  if (proofPlacements.length > 0) {
+    const earlyProofNeeded = proofPlacements.some((p: any) => {
+      const stage = safeString(p?.stage || p?.placement || p, "").toLowerCase();
+      return stage.includes("entry") || stage.includes("early") || stage.includes("first");
+    });
+    if (earlyProofNeeded && (mode === "empathy_led" || mode === "education_led" || mode === "diagnostic_led")) {
+      funWarnings.push(`Funnel requires early proof placement but "${mode}" delays proof — proof-supporting content should be embedded within education sequence`);
+    }
+  }
+
+  if (trustPath.length > 4 && mode !== "empathy_led" && mode !== "education_led") {
+    funWarnings.push(`Extended trust path (${trustPath.length} steps) — consider empathy or education-led approach`);
+  }
+
+  if (isLowReadiness(readiness) && !(EDUCATION_FIRST_MODES as readonly string[]).includes(mode)) {
+    funWarnings.push(`Low readiness (${readiness}) but mode "${mode}" is not education-first — readiness-mode alignment issue`);
+  }
+
+  const criticalBarriers = trustBarriers.filter(b => b.severity === "critical");
+  if (criticalBarriers.length > 0 && mode === "proof_led") {
+    funWarnings.push("Critical trust barriers detected — proof-led mode may be premature; trust-building should precede proof presentation");
+  }
+
+  return { valid: true, warnings: funWarnings, suggestedMode: null };
 }
 
 function buildPersuasionRoutes(
@@ -515,35 +1157,60 @@ function buildPersuasionRoutes(
   differentiation: PersuasionDifferentiationInput,
   offer: PersuasionOfferInput,
   funnel: PersuasionFunnelInput,
+  mi: PersuasionMIInput,
   layerResults: LayerResult[],
+  trustBarriers: TrustBarrierClassification[],
+  objectionProofLinks: ObjectionProofLink[],
 ): { primary: PersuasionRoute; alternative: PersuasionRoute; rejected: PersuasionRoute } {
-  const l2 = layerResults.find(l => l.layerName === "objection_detection");
   const l4 = layerResults.find(l => l.layerName === "influence_driver_selection");
-  const l5 = layerResults.find(l => l.layerName === "proof_priority_mapping");
   const l6 = layerResults.find(l => l.layerName === "message_order_logic");
   const l8 = layerResults.find(l => l.layerName === "persuasion_strength_scoring");
 
-  const primaryMode = selectPersuasionMode(awareness, audience, differentiation);
+  let primaryMode = selectPersuasionMode(awareness, audience, differentiation, funnel);
+
+  const funnelValidation = validatePersuasionRouteAgainstFunnel(primaryMode, funnel, awareness, trustBarriers);
+  const routeWarnings: string[] = [...funnelValidation.warnings];
+  if (!funnelValidation.valid && funnelValidation.suggestedMode) {
+    routeWarnings.push(`Mode downgraded from "${primaryMode}" to "${funnelValidation.suggestedMode}" for funnel compatibility`);
+    primaryMode = funnelValidation.suggestedMode;
+  }
 
   const driverFindings = (l4?.findings || []).find(f => f.startsWith("Selected influence drivers:"));
   const drivers = driverFindings
     ? driverFindings.replace("Selected influence drivers: ", "").split(", ")
     : ["authority", "proof_of_work"];
 
-  const objections = Object.keys(audience.objectionMap || {}).slice(0, 5);
+  const directObjections = Object.keys(audience.objectionMap || {}).slice(0, 5);
+  const objections: string[] = [...directObjections];
+
+  if (objections.length === 0) {
+    for (const link of objectionProofLinks.slice(0, 4)) {
+      objections.push(`[inferred] ${link.objectionCategory}: ${link.objectionDetail.slice(0, 60)}`);
+    }
+  }
+
   if (objections.length === 0 && (offer.riskNotes || []).length > 0) {
     objections.push(...(offer.riskNotes || []).slice(0, 3).map(r => `risk: ${r}`));
   }
 
-  const orderFindings = (l6?.findings || []).find(f => f.startsWith("Message order:"));
+  const orderFindings = (l6?.findings || []).find(f => f.includes("message order:"));
   const messageOrder = orderFindings
-    ? orderFindings.replace("Message order: ", "").split(" → ")
+    ? orderFindings.replace(/.*message order:\s*/i, "").split(" → ")
     : [...TRUST_SEQUENCE_STAGES];
 
   const trustPath = (funnel.trustPath || []).map((tp: any) => typeof tp === "string" ? tp : tp?.stage || tp?.name || "trust_step");
   const trustSequence = trustPath.length > 0 ? trustPath.slice(0, 6) : messageOrder.slice(0, 4);
 
   const strengthScore = l8?.score || 0.5;
+  const readiness = safeString(awareness.targetReadinessStage, "unknown");
+  const isEducationFirst = isLowReadiness(readiness);
+  const scarcityValidation = validateScarcityConditions(awareness, audience, differentiation, funnel, objectionProofLinks);
+
+  const readinessAlignment = {
+    stage: readiness,
+    educationFirst: isEducationFirst,
+    proofRole: isEducationFirst ? "illustrative — supports education" : isHighReadiness(readiness) ? "primary — leads conversion" : "supporting — reinforces understanding",
+  };
 
   const primary: PersuasionRoute = {
     routeName: `${primaryMode.replace(/_/g, " ")} persuasion architecture`,
@@ -553,21 +1220,32 @@ function buildPersuasionRoutes(
     trustSequence,
     messageOrderLogic: messageOrder,
     persuasionStrengthScore: strengthScore,
-    frictionNotes: (awareness.frictionNotes || []).slice(0, 3),
+    frictionNotes: [...(awareness.frictionNotes || []).slice(0, 3), ...routeWarnings],
     rejectionReason: null,
+    trustBarriers,
+    objectionProofLinks,
+    readinessAlignment,
+    scarcityValidation,
   };
 
   const altModes: Record<string, string> = {
     authority_led: "proof_led",
     proof_led: "social_proof_led",
-    empathy_led: "authority_led",
+    empathy_led: "education_led",
+    education_led: "empathy_led",
+    diagnostic_led: "education_led",
     contrast_led: "logic_led",
     logic_led: "proof_led",
     social_proof_led: "authority_led",
     reciprocity_led: "proof_led",
     scarcity_led: "authority_led",
   };
-  const altMode = altModes[primaryMode] || "proof_led";
+  let altMode = altModes[primaryMode] || "proof_led";
+
+  const altFunnelValidation = validatePersuasionRouteAgainstFunnel(altMode, funnel, awareness, trustBarriers);
+  if (!altFunnelValidation.valid && altFunnelValidation.suggestedMode && altFunnelValidation.suggestedMode !== primaryMode) {
+    altMode = altFunnelValidation.suggestedMode;
+  }
 
   const altDrivers = INFLUENCE_DRIVERS.filter(d => !drivers.includes(d)).slice(0, 3);
   if (altDrivers.length === 0) altDrivers.push("authority", "social_proof");
@@ -575,31 +1253,212 @@ function buildPersuasionRoutes(
   const alternative: PersuasionRoute = {
     routeName: `${altMode.replace(/_/g, " ")} alternative architecture`,
     persuasionMode: altMode,
-    primaryInfluenceDrivers: altDrivers,
+    primaryInfluenceDrivers: [...altDrivers],
     objectionPriorities: objections,
     trustSequence: [...trustSequence].reverse().slice(0, trustSequence.length),
     messageOrderLogic: [...messageOrder].slice(1).concat(messageOrder.slice(0, 1)),
     persuasionStrengthScore: clamp(strengthScore * 0.85),
     frictionNotes: [`Alternative mode may require adjusted proof sequencing`],
     rejectionReason: null,
+    readinessAlignment,
+    scarcityValidation,
   };
 
-  const rejectedMode = primaryMode === "scarcity_led" ? "reciprocity_led" : "scarcity_led";
+  let rejectedMode = "scarcity_led";
+  const scarcityRejectionReasons: string[] = [];
+
+  if (!scarcityValidation.allowed) {
+    scarcityRejectionReasons.push(...scarcityValidation.blockedReasons);
+  } else {
+    scarcityRejectionReasons.push(
+      "Scarcity-based persuasion rejected: requires verified supply constraints — artificial urgency damages trust architecture",
+    );
+  }
+
+  if (primaryMode === "scarcity_led") {
+    rejectedMode = "reciprocity_led";
+    scarcityRejectionReasons.length = 0;
+    scarcityRejectionReasons.push("Reciprocity-led persuasion rejected: insufficient value-exchange evidence for reciprocity framing");
+  }
+
   const rejected: PersuasionRoute = {
     routeName: `${rejectedMode.replace(/_/g, " ")} — rejected`,
     persuasionMode: rejectedMode,
-    primaryInfluenceDrivers: ["scarcity"],
+    primaryInfluenceDrivers: [rejectedMode === "scarcity_led" ? "scarcity" : "reciprocity"],
     objectionPriorities: [],
     trustSequence: [],
     messageOrderLogic: [],
     persuasionStrengthScore: 0,
     frictionNotes: [],
-    rejectionReason: rejectedMode === "scarcity_led"
-      ? "Scarcity-led persuasion rejected — insufficient trust foundation and risk of hype escalation"
-      : "Reciprocity-led persuasion rejected — upstream data does not support reciprocity framing",
+    rejectionReason: scarcityRejectionReasons.join("; "),
+    scarcityValidation: rejectedMode === "scarcity_led" ? scarcityValidation : undefined,
   };
 
   return { primary, alternative, rejected };
+}
+
+export function analyzePersuasion(
+  mi: PersuasionMIInput,
+  audience: PersuasionAudienceInput,
+  positioning: PersuasionPositioningInput,
+  differentiation: PersuasionDifferentiationInput,
+  offer: PersuasionOfferInput,
+  funnel: PersuasionFunnelInput,
+  integrity: PersuasionIntegrityInput,
+  awareness: PersuasionAwarenessInput,
+): PersuasionResult {
+  const startTime = Date.now();
+  const structuralWarnings: string[] = [];
+
+  const allText = [
+    mi.marketDiagnosis || "",
+    ...(mi.opportunitySignals || []).map((s: any) => typeof s === "string" ? s : JSON.stringify(s)),
+    ...(audience.audiencePains || []).map((p: any) => typeof p === "string" ? p : JSON.stringify(p)),
+    ...(audience.emotionalDrivers || []).map((d: any) => typeof d === "string" ? d : JSON.stringify(d)),
+    positioning.narrativeDirection || "",
+    positioning.enemyDefinition || "",
+    ...(differentiation.pillars || []).map((p: any) => typeof p === "string" ? p : JSON.stringify(p)),
+    ...(differentiation.claimStructures || []).map((c: any) => typeof c === "string" ? c : JSON.stringify(c)),
+    offer.coreOutcome || "",
+    offer.mechanismDescription || "",
+    ...(offer.riskNotes || []),
+  ].join(" ");
+
+  const boundaryCheck = enforceBoundaryWithSanitization(allText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
+  if (!boundaryCheck.passed) {
+    return {
+      status: STATUS.INTEGRITY_FAILED,
+      statusMessage: `Boundary violation: ${boundaryCheck.violations.join(", ")}`,
+      primaryRoute: emptyRoute("Blocked — boundary violation"),
+      alternativeRoute: emptyRoute("Blocked"),
+      rejectedRoute: emptyRoute("Blocked"),
+      layerResults: [],
+      structuralWarnings: [`BOUNDARY HARD FAIL: ${boundaryCheck.violations.join(", ")}`],
+      boundaryCheck,
+      dataReliability: emptyReliability(),
+      confidenceNormalized: false,
+      executionTimeMs: Date.now() - startTime,
+      engineVersion: ENGINE_VERSION,
+    };
+  }
+
+  const reliability = assessDataReliability(mi, audience, positioning, differentiation, offer, awareness);
+
+  const trustBarriers = classifyTrustBarriers(audience, awareness, differentiation, offer, mi);
+  const objectionProofLinks = buildObjectionProofLinks(audience, differentiation, offer, awareness, mi);
+
+  const l1 = layer1_awarenessToPersuasionFit(awareness, audience, funnel);
+  const l2 = layer2_objectionDetection(audience, offer, differentiation, awareness, mi, funnel, integrity);
+  const l3 = layer3_trustBarrierMapping(audience, awareness, integrity, differentiation, offer, mi, trustBarriers);
+  const l4 = layer4_influenceDriverSelection(audience, differentiation, awareness, trustBarriers);
+  const l5 = layer5_proofPriorityMapping(differentiation, audience, awareness, objectionProofLinks);
+  const l6 = layer6_messageOrderLogic(awareness, audience, offer, funnel, differentiation, trustBarriers, objectionProofLinks);
+  const l7 = layer7_antiHypeGuard(allText, objectionProofLinks, trustBarriers);
+
+  const preFinalLayers = [l1, l2, l3, l4, l5, l6, l7];
+
+  const selectedMode = selectPersuasionMode(awareness, audience, differentiation, funnel);
+  const l8 = layer8_persuasionStrengthScoring(preFinalLayers, awareness, trustBarriers, objectionProofLinks, funnel, selectedMode);
+
+  const allLayers = [...preFinalLayers, l8];
+
+  for (const layer of allLayers) {
+    if (!layer.passed) {
+      structuralWarnings.push(`Layer "${layer.layerName}" did not pass (score: ${Math.round(layer.score * 100)}%)`);
+    }
+    structuralWarnings.push(...layer.warnings);
+  }
+
+  if (reliability.objectionSpecificity < 0.3) {
+    structuralWarnings.push("WARNING: Objection specificity is weak — persuasion objection handling may be generic");
+  }
+  if (reliability.trustSpecificity < 0.4) {
+    structuralWarnings.push("WARNING: Trust specificity is weak — trust barrier mapping may lack precision");
+  }
+
+  const routes = buildPersuasionRoutes(audience, awareness, differentiation, offer, funnel, mi, allLayers, trustBarriers, objectionProofLinks);
+
+  const outputText = [
+    routes.primary.routeName,
+    routes.primary.persuasionMode,
+    ...routes.primary.primaryInfluenceDrivers,
+    ...routes.primary.objectionPriorities,
+    ...routes.primary.messageOrderLogic,
+    ...routes.primary.trustSequence,
+    ...routes.primary.frictionNotes,
+    routes.alternative.routeName,
+    ...routes.alternative.primaryInfluenceDrivers,
+    ...routes.alternative.frictionNotes,
+    routes.rejected.rejectionReason || "",
+  ].join(" ");
+
+  const outputBoundaryCheck = enforceBoundaryWithSanitization(outputText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
+  if (!outputBoundaryCheck.passed) {
+    return {
+      status: STATUS.INTEGRITY_FAILED,
+      statusMessage: `Output boundary violation: ${outputBoundaryCheck.violations.join(", ")}`,
+      primaryRoute: emptyRoute("Blocked — output boundary violation"),
+      alternativeRoute: emptyRoute("Blocked"),
+      rejectedRoute: emptyRoute("Blocked"),
+      layerResults: allLayers,
+      structuralWarnings: [`OUTPUT BOUNDARY HARD FAIL: ${outputBoundaryCheck.violations.join(", ")}`],
+      boundaryCheck: outputBoundaryCheck,
+      dataReliability: reliability,
+      confidenceNormalized: false,
+      executionTimeMs: Date.now() - startTime,
+      engineVersion: ENGINE_VERSION,
+    };
+  }
+
+  if (reliability.isWeak || reliability.overallReliability < 0.6) {
+    routes.primary.persuasionStrengthScore = normalizeConfidence(routes.primary.persuasionStrengthScore, reliability);
+    routes.alternative.persuasionStrengthScore = normalizeConfidence(routes.alternative.persuasionStrengthScore, reliability);
+  }
+
+  if (boundaryCheck.sanitized && boundaryCheck.warnings) {
+    structuralWarnings.push(...boundaryCheck.warnings);
+  }
+  if (outputBoundaryCheck.sanitized && outputBoundaryCheck.warnings) {
+    structuralWarnings.push(...outputBoundaryCheck.warnings);
+  }
+
+  return {
+    status: STATUS.COMPLETE,
+    statusMessage: null,
+    primaryRoute: routes.primary,
+    alternativeRoute: routes.alternative,
+    rejectedRoute: routes.rejected,
+    layerResults: allLayers,
+    structuralWarnings,
+    boundaryCheck,
+    dataReliability: reliability,
+    confidenceNormalized: reliability.isWeak || reliability.overallReliability < 0.6,
+    executionTimeMs: Date.now() - startTime,
+    engineVersion: ENGINE_VERSION,
+  };
+}
+
+function emptyRoute(name: string): PersuasionRoute {
+  return {
+    routeName: name,
+    persuasionMode: "none",
+    primaryInfluenceDrivers: [],
+    objectionPriorities: [],
+    trustSequence: [],
+    messageOrderLogic: [],
+    persuasionStrengthScore: 0,
+    frictionNotes: [],
+    rejectionReason: null,
+  };
+}
+
+function emptyReliability(): DataReliabilityDiagnostics {
+  return {
+    signalDensity: 0, signalDiversity: 0, narrativeStability: 0,
+    competitorValidity: 0, marketMaturityConfidence: 0,
+    objectionSpecificity: 0, trustSpecificity: 0,
+    overallReliability: 0, isWeak: true, advisories: [],
+  };
 }
 
 export async function runPersuasionEngine(
@@ -611,91 +1470,7 @@ export async function runPersuasionEngine(
   funnel: PersuasionFunnelInput,
   integrity: PersuasionIntegrityInput,
   awareness: PersuasionAwarenessInput,
-  accountId: string,
+  _accountId?: string,
 ): Promise<PersuasionResult> {
-  const startTime = Date.now();
-
-  const reliability = assessDataReliability(mi, audience, positioning, differentiation, offer, awareness);
-
-  const l1 = layer1_awarenessToPersuasionFit(awareness, audience);
-  const l2 = layer2_objectionDetection(audience, offer, differentiation);
-  const l3 = layer3_trustBarrierMapping(audience, awareness, integrity);
-  const l4 = layer4_influenceDriverSelection(audience, differentiation, awareness);
-  const l5 = layer5_proofPriorityMapping(differentiation, audience, awareness);
-  const l6 = layer6_messageOrderLogic(awareness, audience, offer, funnel);
-
-  const allFindings = [l1, l2, l3, l4, l5, l6].flatMap(l => [...l.findings, ...l.warnings]).join(" ");
-  const l7 = layer7_antiHypeGuard(allFindings);
-
-  const layersBeforeScoring = [l1, l2, l3, l4, l5, l6, l7];
-  const l8 = layer8_persuasionStrengthScoring(layersBeforeScoring);
-
-  const allLayers = [...layersBeforeScoring, l8];
-
-  const routes = buildPersuasionRoutes(audience, awareness, differentiation, offer, funnel, allLayers);
-
-  let confidenceNormalized = false;
-  if (reliability.isWeak || reliability.overallReliability < 0.6) {
-    routes.primary.persuasionStrengthScore = normalizeConfidence(routes.primary.persuasionStrengthScore, reliability);
-    routes.alternative.persuasionStrengthScore = normalizeConfidence(routes.alternative.persuasionStrengthScore, reliability);
-    confidenceNormalized = true;
-  }
-
-  const structuralWarnings: string[] = [];
-  if (!integrity.safeToExecute) {
-    structuralWarnings.push("Upstream integrity check flagged safe-to-execute as FALSE");
-  }
-  if (reliability.isWeak) {
-    structuralWarnings.push("Data reliability is weak — persuasion confidence has been normalized down");
-  }
-  for (const lr of allLayers) {
-    if (!lr.passed) {
-      structuralWarnings.push(`Layer ${lr.layerName} did not pass (score: ${Math.round(lr.score * 100)}%)`);
-    }
-  }
-
-  const textToCheck = [
-    routes.primary.routeName,
-    routes.primary.persuasionMode,
-    ...routes.primary.objectionPriorities,
-    ...routes.primary.messageOrderLogic,
-    ...routes.primary.trustSequence,
-    ...routes.primary.primaryInfluenceDrivers,
-    routes.alternative.routeName,
-    ...routes.alternative.objectionPriorities,
-  ].join(" ");
-
-  const boundaryResult = enforceBoundaryWithSanitization(textToCheck, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
-
-  if (!boundaryResult.passed && (boundaryResult.violations || []).length > 0) {
-    return {
-      status: STATUS.INTEGRITY_FAILED,
-      statusMessage: `Boundary violation: ${(boundaryResult.violations || []).join(", ")}`,
-      primaryRoute: routes.primary,
-      alternativeRoute: routes.alternative,
-      rejectedRoute: routes.rejected,
-      layerResults: allLayers,
-      structuralWarnings,
-      boundaryCheck: boundaryResult,
-      dataReliability: reliability,
-      confidenceNormalized,
-      executionTimeMs: Date.now() - startTime,
-      engineVersion: ENGINE_VERSION,
-    };
-  }
-
-  return {
-    status: STATUS.COMPLETE,
-    statusMessage: null,
-    primaryRoute: routes.primary,
-    alternativeRoute: routes.alternative,
-    rejectedRoute: routes.rejected,
-    layerResults: allLayers,
-    structuralWarnings,
-    boundaryCheck: boundaryResult,
-    dataReliability: reliability,
-    confidenceNormalized,
-    executionTimeMs: Date.now() - startTime,
-    engineVersion: ENGINE_VERSION,
-  };
+  return analyzePersuasion(mi, audience, positioning, differentiation, offer, funnel, integrity, awareness);
 }

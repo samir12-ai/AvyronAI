@@ -73,6 +73,34 @@ export interface PersuasionAwarenessInput {
   frictionNotes: string[];
 }
 
+export interface TrustBarrierClassification {
+  barrierType: string;
+  severity: "low" | "moderate" | "high" | "critical";
+  source: string;
+  persuasionImplication: string;
+}
+
+export interface ObjectionProofLink {
+  objectionCategory: string;
+  objectionDetail: string;
+  requiredProofType: string;
+  proofAvailable: boolean;
+  confidence: number;
+}
+
+export interface PersuasionReliabilityComponents {
+  signalDensity: number;
+  signalDiversity: number;
+  narrativeStability: number;
+  competitorValidity: number;
+  marketMaturityConfidence: number;
+  objectionSpecificity: number;
+  trustSpecificity: number;
+  overallReliability: number;
+  isWeak: boolean;
+  advisories: string[];
+}
+
 export interface LayerResult {
   layerName: string;
   passed: boolean;
@@ -91,6 +119,17 @@ export interface PersuasionRoute {
   persuasionStrengthScore: number;
   frictionNotes: string[];
   rejectionReason: string | null;
+  trustBarriers?: TrustBarrierClassification[];
+  objectionProofLinks?: ObjectionProofLink[];
+  readinessAlignment?: {
+    stage: string;
+    educationFirst: boolean;
+    proofRole: string;
+  };
+  scarcityValidation?: {
+    allowed: boolean;
+    blockedReasons: string[];
+  };
 }
 
 export interface DataReliabilityDiagnostics {
@@ -99,6 +138,8 @@ export interface DataReliabilityDiagnostics {
   narrativeStability: number;
   competitorValidity: number;
   marketMaturityConfidence: number;
+  objectionSpecificity: number;
+  trustSpecificity: number;
   overallReliability: number;
   isWeak: boolean;
   advisories: string[];

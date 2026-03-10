@@ -23,6 +23,21 @@ interface LayerResult {
   warnings: string[];
 }
 
+interface TrustBarrier {
+  barrierType: string;
+  severity: string;
+  source: string;
+  persuasionImplication: string;
+}
+
+interface ObjectionProofLink {
+  objectionCategory: string;
+  objectionDetail: string;
+  requiredProofType: string;
+  proofAvailable: boolean;
+  confidence: number;
+}
+
 interface PersuasionRoute {
   routeName: string;
   persuasionMode: string;
@@ -33,6 +48,17 @@ interface PersuasionRoute {
   persuasionStrengthScore: number;
   frictionNotes: string[];
   rejectionReason: string | null;
+  trustBarriers?: TrustBarrier[];
+  objectionProofLinks?: ObjectionProofLink[];
+  readinessAlignment?: {
+    stage: string;
+    educationFirst: boolean;
+    proofRole: string;
+  };
+  scarcityValidation?: {
+    allowed: boolean;
+    blockedReasons: string[];
+  };
 }
 
 interface PersuasionData {
@@ -54,7 +80,7 @@ interface PersuasionData {
 }
 
 const LAYER_LABELS: Record<string, string> = {
-  awareness_to_persuasion_fit: "Awareness → Persuasion Fit",
+  awareness_to_persuasion_fit: "Awareness \u2192 Persuasion Fit",
   objection_detection: "Objection Detection",
   trust_barrier_mapping: "Trust Barrier Mapping",
   influence_driver_selection: "Influence Driver Selection",
@@ -84,6 +110,8 @@ const MODE_LABELS: Record<string, string> = {
   empathy_led: "Empathy-Led",
   logic_led: "Logic-Led",
   contrast_led: "Contrast-Led",
+  education_led: "Education-Led",
+  diagnostic_led: "Diagnostic-Led",
 };
 
 const MODE_COLORS: Record<string, string> = {
@@ -95,6 +123,8 @@ const MODE_COLORS: Record<string, string> = {
   empathy_led: "#EC4899",
   logic_led: "#6366F1",
   contrast_led: "#F97316",
+  education_led: "#14B8A6",
+  diagnostic_led: "#06B6D4",
 };
 
 const DRIVER_LABELS: Record<string, string> = {
@@ -108,6 +138,15 @@ const DRIVER_LABELS: Record<string, string> = {
   contrast: "Contrast",
   specificity: "Specificity",
   risk_reversal: "Risk Reversal",
+  education: "Education",
+  diagnosis: "Diagnosis",
+};
+
+const SEVERITY_COLORS: Record<string, string> = {
+  critical: "#DC2626",
+  high: "#EF4444",
+  moderate: "#F59E0B",
+  low: "#10B981",
 };
 
 export default function PersuasionEngine() {
@@ -120,6 +159,7 @@ export default function PersuasionEngine() {
   const [awarenessSnapshotId, setAwarenessSnapshotId] = useState<string | null>(null);
   const [expandedLayer, setExpandedLayer] = useState<string | null>(null);
   const [expandedRoute, setExpandedRoute] = useState<string | null>(null);
+  const [expandedSection, setExpandedSection] = useState<string | null>(null);
 
   const fetchLatest = useCallback(async () => {
     if (!selectedCampaignId) return;
@@ -191,6 +231,103 @@ export default function PersuasionEngine() {
     return '#EF4444';
   };
 
+  const renderTrustBarriers = (barriers: TrustBarrier[]) => {
+    if (!barriers || barriers.length === 0) return null;
+    const isExpanded = expandedSection === 'trust_barriers';
+    return (
+      <View style={[styles.routeSection]}>
+        <Pressable onPress={() => { Haptics.selectionAsync(); setExpandedSection(isExpanded ? null : 'trust_barriers'); }} style={styles.collapsibleHeader}>
+          <View style={styles.sectionHeaderLeft}>
+            <Ionicons name="shield" size={14} color="#EF4444" />
+            <Text style={[styles.routeSectionTitle, { color: colors.textMuted }]}>Trust Barriers ({barriers.length})</Text>
+          </View>
+          <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={14} color={colors.textMuted} />
+        </Pressable>
+        {isExpanded && barriers.map((b, i) => (
+          <View key={i} style={[styles.barrierCard, { backgroundColor: (SEVERITY_COLORS[b.severity] || '#6B7280') + '08', borderLeftColor: SEVERITY_COLORS[b.severity] || '#6B7280' }]}>
+            <View style={styles.barrierHeader}>
+              <View style={[styles.severityBadge, { backgroundColor: (SEVERITY_COLORS[b.severity] || '#6B7280') + '20' }]}>
+                <Text style={[styles.severityText, { color: SEVERITY_COLORS[b.severity] || '#6B7280' }]}>{b.severity.toUpperCase()}</Text>
+              </View>
+              <Text style={[styles.barrierType, { color: colors.text }]}>{b.barrierType.replace(/_/g, ' ')}</Text>
+            </View>
+            <Text style={[styles.barrierSource, { color: colors.textMuted }]}>{b.source}</Text>
+            <Text style={[styles.barrierImplication, { color: colors.text }]}>{b.persuasionImplication}</Text>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
+  const renderObjectionProofLinks = (links: ObjectionProofLink[]) => {
+    if (!links || links.length === 0) return null;
+    const isExpanded = expandedSection === 'objection_proof';
+    return (
+      <View style={styles.routeSection}>
+        <Pressable onPress={() => { Haptics.selectionAsync(); setExpandedSection(isExpanded ? null : 'objection_proof'); }} style={styles.collapsibleHeader}>
+          <View style={styles.sectionHeaderLeft}>
+            <Ionicons name="link" size={14} color="#8B5CF6" />
+            <Text style={[styles.routeSectionTitle, { color: colors.textMuted }]}>Objection \u2192 Proof Links ({links.length})</Text>
+          </View>
+          <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={14} color={colors.textMuted} />
+        </Pressable>
+        {isExpanded && links.map((link, i) => (
+          <View key={i} style={[styles.proofLinkCard, { backgroundColor: colors.background }]}>
+            <View style={styles.proofLinkRow}>
+              <View style={styles.proofLinkLeft}>
+                <Ionicons name="alert-circle" size={12} color="#F59E0B" />
+                <Text style={[styles.proofLinkCategory, { color: colors.text }]}>{link.objectionCategory.replace(/_/g, ' ')}</Text>
+              </View>
+              <Ionicons name="arrow-forward" size={12} color={colors.textMuted} />
+              <View style={styles.proofLinkRight}>
+                <Ionicons name={link.proofAvailable ? "checkmark-circle" : "close-circle"} size={12} color={link.proofAvailable ? '#10B981' : '#EF4444'} />
+                <Text style={[styles.proofLinkType, { color: link.proofAvailable ? '#10B981' : '#EF4444' }]}>{link.requiredProofType.replace(/_/g, ' ')}</Text>
+              </View>
+            </View>
+            <Text style={[styles.proofLinkDetail, { color: colors.textMuted }]} numberOfLines={2}>{link.objectionDetail}</Text>
+            <View style={[styles.confidenceBar, { backgroundColor: colors.cardBorder }]}>
+              <View style={[styles.confidenceBarFill, { width: `${Math.round(link.confidence * 100)}%`, backgroundColor: scoreColor(link.confidence) }]} />
+            </View>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
+  const renderReadinessAlignment = (alignment: PersuasionRoute['readinessAlignment']) => {
+    if (!alignment) return null;
+    return (
+      <View style={[styles.readinessCard, { backgroundColor: alignment.educationFirst ? '#14B8A6' + '10' : '#10B981' + '10' }]}>
+        <View style={styles.readinessRow}>
+          <Ionicons name={alignment.educationFirst ? "school" : "checkmark-done"} size={14} color={alignment.educationFirst ? '#14B8A6' : '#10B981'} />
+          <Text style={[styles.readinessStage, { color: colors.text }]}>
+            {alignment.stage.replace(/_/g, ' ')} {alignment.educationFirst ? '(Education-First)' : ''}
+          </Text>
+        </View>
+        <Text style={[styles.readinessProofRole, { color: colors.textMuted }]}>Proof role: {alignment.proofRole}</Text>
+      </View>
+    );
+  };
+
+  const renderScarcityValidation = (validation: PersuasionRoute['scarcityValidation'], isRejected: boolean) => {
+    if (!validation) return null;
+    if (validation.allowed && !isRejected) return null;
+    return (
+      <View style={[styles.scarcityCard, { backgroundColor: '#EF4444' + '08' }]}>
+        <View style={styles.scarcityHeader}>
+          <Ionicons name="ban" size={14} color="#EF4444" />
+          <Text style={[styles.scarcityTitle, { color: '#EF4444' }]}>Scarcity Protection</Text>
+        </View>
+        {validation.blockedReasons.map((reason, i) => (
+          <View key={i} style={styles.listItem}>
+            <Ionicons name="close" size={10} color="#EF4444" />
+            <Text style={[styles.findingText, { color: colors.textMuted }]}>{reason}</Text>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
   const renderRouteCard = (route: PersuasionRoute, type: 'primary' | 'alternative' | 'rejected') => {
     const isExpanded = expandedRoute === type;
     const isRejected = type === 'rejected';
@@ -204,7 +341,7 @@ export default function PersuasionEngine() {
     return (
       <View key={type} style={[styles.routeCard, { backgroundColor: colors.card, borderColor: cardColor + '30' }]}>
         <Pressable
-          onPress={() => { Haptics.selectionAsync(); setExpandedRoute(isExpanded ? null : type); }}
+          onPress={() => { Haptics.selectionAsync(); setExpandedRoute(isExpanded ? null : type); setExpandedSection(null); }}
           style={styles.routeHeader}
         >
           <View style={styles.routeHeaderLeft}>
@@ -250,6 +387,8 @@ export default function PersuasionEngine() {
               </View>
             </View>
 
+            {type === 'primary' && renderReadinessAlignment(route.readinessAlignment)}
+
             {route.primaryInfluenceDrivers.length > 0 && (
               <View style={styles.routeSection}>
                 <Text style={[styles.routeSectionTitle, { color: colors.textMuted }]}>Influence Drivers</Text>
@@ -274,6 +413,9 @@ export default function PersuasionEngine() {
                 ))}
               </View>
             )}
+
+            {type === 'primary' && renderTrustBarriers(route.trustBarriers || [])}
+            {type === 'primary' && renderObjectionProofLinks(route.objectionProofLinks || [])}
 
             {route.trustSequence.length > 0 && (
               <View style={styles.routeSection}>
@@ -313,6 +455,8 @@ export default function PersuasionEngine() {
                 <Text style={[styles.rejectionText, { color: '#EF4444' }]}>{route.rejectionReason}</Text>
               </View>
             )}
+
+            {renderScarcityValidation(route.scarcityValidation, isRejected)}
 
             {route.frictionNotes.length > 0 && !isRejected && (
               <View style={styles.routeSection}>
@@ -470,6 +614,8 @@ export default function PersuasionEngine() {
                     { label: 'Signal Density', value: data.dataReliability.signalDensity },
                     { label: 'Signal Diversity', value: data.dataReliability.signalDiversity },
                     { label: 'Narrative Stability', value: data.dataReliability.narrativeStability },
+                    { label: 'Objection Specificity', value: data.dataReliability.objectionSpecificity },
+                    { label: 'Trust Specificity', value: data.dataReliability.trustSpecificity },
                     { label: 'Overall Reliability', value: data.dataReliability.overallReliability },
                   ].map((item, i) => (
                     <View key={i} style={styles.reliabilityItem}>
@@ -537,49 +683,74 @@ const styles = StyleSheet.create({
   routeCard: { borderRadius: 10, borderWidth: 1, marginBottom: 10, overflow: 'hidden' },
   routeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12 },
   routeHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
-  routeHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   routeTypeLabel: { fontSize: 11, fontWeight: '600' as const, textTransform: 'uppercase' as const, letterSpacing: 0.5 },
   routeName: { fontSize: 13, fontWeight: '500' as const, marginTop: 2 },
-  routeDetails: { padding: 12, paddingTop: 0 },
-  routeDivider: { height: 1, marginBottom: 12 },
-  routeMetaGrid: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  routeMetaItem: { flex: 1, borderRadius: 8, padding: 10 },
-  routeMetaLabel: { fontSize: 10, fontWeight: '600' as const, textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 6 },
-  routeMetaBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, alignSelf: 'flex-start' },
+  routeHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  scorePill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 },
+  scorePillText: { fontSize: 12, fontWeight: '700' as const },
+  routeDetails: { paddingHorizontal: 12, paddingBottom: 12 },
+  routeDivider: { height: 1, marginBottom: 10 },
+  routeMetaGrid: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  routeMetaItem: { flex: 1, padding: 8, borderRadius: 8 },
+  routeMetaLabel: { fontSize: 10, marginBottom: 4 },
+  routeMetaBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, alignSelf: 'flex-start' as const },
   routeMetaBadgeText: { fontSize: 11, fontWeight: '600' as const },
   routeSection: { marginTop: 10 },
   routeSectionTitle: { fontSize: 11, fontWeight: '600' as const, textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 6 },
-  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  tag: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-  tagText: { fontSize: 12, fontWeight: '500' as const },
+  tagRow: { flexDirection: 'row', flexWrap: 'wrap' as const, gap: 4 },
+  tag: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  tagText: { fontSize: 11, fontWeight: '500' as const },
   listItem: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 4 },
   listItemText: { fontSize: 12, flex: 1, lineHeight: 16 },
-  sequenceItem: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  sequenceItem: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
   sequenceNumber: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   sequenceNumberText: { fontSize: 11, fontWeight: '700' as const },
-  rejectionBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 10, borderRadius: 8, marginTop: 10 },
+  rejectionBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, padding: 10, borderRadius: 8, marginTop: 10 },
   rejectionText: { fontSize: 12, flex: 1, lineHeight: 16 },
-  scorePill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
-  scorePillText: { fontSize: 12, fontWeight: '700' as const },
   layerCard: { borderRadius: 8, marginBottom: 6, borderLeftWidth: 3, overflow: 'hidden' },
   layerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 10 },
   layerHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
-  layerHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   layerLabel: { fontSize: 13, fontWeight: '500' as const },
+  layerHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   layerScorePill: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
   layerScoreText: { fontSize: 11, fontWeight: '600' as const },
-  layerDetails: { paddingHorizontal: 10, paddingBottom: 10, paddingTop: 4 },
-  findingRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 3 },
-  findingText: { fontSize: 12, flex: 1, lineHeight: 16 },
-  reliabilityCard: { borderRadius: 10, padding: 14, marginBottom: 12 },
-  reliabilityGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  reliabilityItem: { width: '47%', marginBottom: 8 },
-  reliabilityLabel: { fontSize: 10, fontWeight: '600' as const, textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 2 },
-  reliabilityValue: { fontSize: 18, fontWeight: '700' as const },
-  advisories: { marginTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.05)', paddingTop: 8 },
+  layerDetails: { paddingHorizontal: 10, paddingBottom: 10 },
+  findingRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 4 },
+  findingText: { fontSize: 11, flex: 1, lineHeight: 15 },
+  reliabilityCard: { borderRadius: 10, padding: 12, marginBottom: 10 },
+  reliabilityGrid: { flexDirection: 'row', flexWrap: 'wrap' as const, gap: 8 },
+  reliabilityItem: { width: '30%' as any, minWidth: 90 },
+  reliabilityLabel: { fontSize: 10, marginBottom: 2 },
+  reliabilityValue: { fontSize: 16, fontWeight: '700' as const },
+  advisories: { marginTop: 10 },
   metaInfo: { borderRadius: 8, padding: 10, marginTop: 8, marginBottom: 20 },
   metaText: { fontSize: 11, textAlign: 'center' as const },
-  emptyState: { borderRadius: 12, padding: 32, alignItems: 'center', marginTop: 20 },
-  emptyTitle: { fontSize: 16, fontWeight: '600' as const, marginTop: 12 },
-  emptySubtitle: { fontSize: 13, textAlign: 'center' as const, marginTop: 6, lineHeight: 18 },
+  emptyState: { borderRadius: 12, padding: 32, alignItems: 'center', gap: 8, marginTop: 20 },
+  emptyTitle: { fontSize: 16, fontWeight: '600' as const },
+  emptySubtitle: { fontSize: 13, textAlign: 'center' as const, lineHeight: 18 },
+  collapsibleHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  sectionHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  barrierCard: { borderRadius: 8, padding: 10, marginBottom: 6, borderLeftWidth: 3 },
+  barrierHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  severityBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  severityText: { fontSize: 9, fontWeight: '700' as const, letterSpacing: 0.5 },
+  barrierType: { fontSize: 12, fontWeight: '600' as const, textTransform: 'capitalize' as const },
+  barrierSource: { fontSize: 11, marginBottom: 4 },
+  barrierImplication: { fontSize: 11, lineHeight: 15, fontStyle: 'italic' as const },
+  proofLinkCard: { borderRadius: 8, padding: 8, marginBottom: 6 },
+  proofLinkRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  proofLinkLeft: { flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1 },
+  proofLinkRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  proofLinkCategory: { fontSize: 11, fontWeight: '600' as const, textTransform: 'capitalize' as const },
+  proofLinkType: { fontSize: 11, fontWeight: '500' as const },
+  proofLinkDetail: { fontSize: 10, marginBottom: 4 },
+  confidenceBar: { height: 3, borderRadius: 2, overflow: 'hidden' },
+  confidenceBarFill: { height: '100%', borderRadius: 2 },
+  readinessCard: { borderRadius: 8, padding: 10, marginBottom: 8 },
+  readinessRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  readinessStage: { fontSize: 12, fontWeight: '600' as const, textTransform: 'capitalize' as const },
+  readinessProofRole: { fontSize: 11, fontStyle: 'italic' as const },
+  scarcityCard: { borderRadius: 8, padding: 10, marginTop: 8 },
+  scarcityHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  scarcityTitle: { fontSize: 12, fontWeight: '600' as const },
 });
