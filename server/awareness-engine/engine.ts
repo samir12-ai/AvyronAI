@@ -36,6 +36,91 @@ function safeString(v: any, fallback: string): string {
   return fallback;
 }
 
+export interface DataReliabilityAssessment {
+  signalDensity: number;
+  signalDiversity: number;
+  narrativeStability: number;
+  competitorValidity: number;
+  marketMaturityConfidence: number;
+  overallReliability: number;
+  isWeak: boolean;
+  advisories: string[];
+}
+
+export function assessDataReliability(
+  mi: AwarenessMIInput,
+  audience: AwarenessAudienceInput,
+  positioning: AwarenessPositioningInput,
+  differentiation: AwarenessDifferentiationInput,
+  offer: AwarenessOfferInput,
+  integrity: AwarenessIntegrityInput,
+): DataReliabilityAssessment {
+  const advisories: string[] = [];
+
+  const opportunities = (mi.opportunitySignals || []).length;
+  const threats = (mi.threatSignals || []).length;
+  const totalMISignals = opportunities + threats;
+  const signalDensity = clamp(totalMISignals / 8, 0, 1);
+  if (totalMISignals < 3) advisories.push(`Low MI signal density: only ${totalMISignals} signal(s) detected`);
+
+  const sourceDiversity: Set<string> = new Set();
+  if ((audience.audiencePains || []).length > 0) sourceDiversity.add("pains");
+  if ((audience.emotionalDrivers || []).length > 0) sourceDiversity.add("drivers");
+  if (Object.keys(audience.objectionMap || {}).length > 0) sourceDiversity.add("objections");
+  if ((audience.audienceSegments || []).length > 0) sourceDiversity.add("segments");
+  if (mi.marketDiagnosis) sourceDiversity.add("diagnosis");
+  if (positioning.narrativeDirection) sourceDiversity.add("narrative");
+  if ((differentiation.pillars || []).length > 0) sourceDiversity.add("pillars");
+  if (offer.coreOutcome) sourceDiversity.add("offer_outcome");
+  const signalDiversity = clamp(sourceDiversity.size / 6, 0, 1);
+  if (sourceDiversity.size < 3) advisories.push(`Low signal diversity: only ${sourceDiversity.size}/8 data sources populated`);
+
+  const hasNarrative = !!positioning.narrativeDirection;
+  const hasEnemy = !!positioning.enemyDefinition;
+  const hasMechanism = !!differentiation.mechanismFraming;
+  const narrativeStability = (hasNarrative ? 0.4 : 0) + (hasEnemy ? 0.3 : 0) + (hasMechanism ? 0.3 : 0);
+  if (narrativeStability < 0.5) advisories.push("Weak narrative stability: positioning or differentiation incomplete");
+
+  const miConfidence = safeNumber(mi.overallConfidence, 0);
+  const competitorValidity = clamp(miConfidence, 0, 1);
+  if (miConfidence < 0.4) advisories.push(`Low competitor data validity: MI confidence ${miConfidence.toFixed(2)}`);
+
+  const maturity = safeNumber(audience.maturityIndex, 0.5);
+  const marketMaturityConfidence = maturity > 0.1 ? clamp(0.5 + maturity * 0.5, 0, 1) : 0.3;
+
+  const overallReliability = (
+    signalDensity * 0.25 +
+    signalDiversity * 0.25 +
+    narrativeStability * 0.20 +
+    competitorValidity * 0.20 +
+    marketMaturityConfidence * 0.10
+  );
+
+  const isWeak = overallReliability < 0.45;
+  if (isWeak) advisories.push(`Data reliability is WEAK (${overallReliability.toFixed(2)}) — confidence will be capped`);
+
+  return {
+    signalDensity,
+    signalDiversity,
+    narrativeStability,
+    competitorValidity,
+    marketMaturityConfidence,
+    overallReliability,
+    isWeak,
+    advisories,
+  };
+}
+
+export function normalizeConfidence(rawScore: number, reliability: DataReliabilityAssessment): number {
+  if (reliability.isWeak) {
+    return clamp(rawScore * 0.6, 0, 0.65);
+  }
+  if (reliability.overallReliability < 0.6) {
+    return clamp(rawScore * 0.8, 0, 0.80);
+  }
+  return clamp(rawScore, 0, 1);
+}
+
 export function sanitizeBoundary(text: string): { clean: boolean; violations: string[] } {
   if (!text) return { clean: true, violations: [] };
   const violations: string[] = [];
@@ -596,9 +681,16 @@ export async function runAwarenessEngine(
       layerResults: [],
       structuralWarnings: [`Integrity score ${integrity.overallIntegrityScore.toFixed(2)} below minimum threshold 0.50`],
       boundaryCheck: { passed: false, violations: ["Upstream integrity check failed"] },
+      dataReliability: { signalDensity: 0, signalDiversity: 0, narrativeStability: 0, competitorValidity: 0, marketMaturityConfidence: 0, overallReliability: 0, isWeak: true, advisories: ["Blocked before reliability assessment"] },
+      confidenceNormalized: false,
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
     };
+  }
+
+  const reliability = assessDataReliability(mi, audience, positioning, differentiation, offer, integrity);
+  if (reliability.advisories.length > 0) {
+    structuralWarnings.push(...reliability.advisories);
   }
 
   const l1 = layer1_marketEntryDetection(audience, mi, positioning, differentiation);
@@ -625,6 +717,9 @@ export async function runAwarenessEngine(
     overallScore += lr.score * weight;
   }
 
+  const confidenceNormalized = reliability.overallReliability < 0.6;
+  overallScore = normalizeConfidence(overallScore, reliability);
+
   const trustLevel = detectTrustLevel(audience, mi);
 
   const primaryRoute: AwarenessRoute = {
@@ -648,7 +743,7 @@ export async function runAwarenessEngine(
     triggerClass: alt.trigger,
     trustRequirement: buildTrustRequirement(alt.entry, trustLevel),
     funnelCompatibility: buildFunnelCompatibility(alt.entry, funnel),
-    awarenessStrengthScore: clamp(overallScore * 0.85),
+    awarenessStrengthScore: clamp(normalizeConfidence(overallScore * 0.85, reliability)),
     frictionNotes: altL7.warnings.slice(0, 3),
     rejectionReason: null,
   };
@@ -684,6 +779,8 @@ export async function runAwarenessEngine(
       layerResults,
       structuralWarnings: boundary.violations,
       boundaryCheck: boundary,
+      dataReliability: reliability,
+      confidenceNormalized,
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
     };
@@ -697,13 +794,17 @@ export async function runAwarenessEngine(
 
   return {
     status: STATUS.COMPLETE,
-    statusMessage: null,
+    statusMessage: confidenceNormalized
+      ? `Analysis complete — confidence normalized due to data reliability (${reliability.overallReliability.toFixed(2)})`
+      : null,
     primaryRoute,
     alternativeRoute,
     rejectedRoute,
     layerResults,
     structuralWarnings,
     boundaryCheck: boundary,
+    dataReliability: reliability,
+    confidenceNormalized,
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,
   };

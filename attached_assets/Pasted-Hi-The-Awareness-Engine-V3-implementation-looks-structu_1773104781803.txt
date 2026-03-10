@@ -1,0 +1,137 @@
+Hi,
+
+The Awareness Engine V3 implementation looks structurally correct and the core layers appear to be functioning. However, we need to verify whether the hardening safeguards that were specified earlier—particularly the trust and confidence protections—have been fully implemented across the system.
+
+Please run a full verification pass and confirm the following items explicitly.
+
+---
+
+## 1. Confidence Normalization (Trust Safeguard)
+
+Confirm that the Awareness Engine does not produce high-confidence outputs when the underlying signal density is weak.
+
+The engine should automatically reduce confidence when:
+- competitor count is low  
+- signal extraction density is weak  
+- audience evidence is insufficient  
+- trigger validation comes from only one source  
+
+If this logic is not yet implemented, add a confidence normalization layer so that the Awareness score cannot exceed safe bounds when data quality is low.
+
+---
+
+## 2. Cross-Engine Consistency Validation
+
+The Awareness Engine must validate its output against upstream engines before finalizing routes.
+
+Please confirm the following checks exist:
+
+- Awareness narrative must align with Positioning narrative
+- Entry mechanism must not contradict the Offer transformation
+- Trigger logic must remain compatible with the Funnel entry stage
+- Awareness framing must not conflict with Differentiation territories
+
+If any of these validations are missing, implement a cross-engine alignment guard before the final scoring layer.
+
+---
+
+## 3. Low-Data Trust Guard
+
+If the dataset is weak, the engine should not produce strong strategic conclusions.
+
+Required behavior:
+
+When:
+- signal density is below the threshold  
+- audience evidence is incomplete  
+- competitor dataset is thin  
+
+Then the engine must:
+
+- reduce awareness confidence
+- add a diagnostic advisory explaining the weakness
+- avoid producing overly confident recommendations
+
+---
+
+## 4. Generic Awareness Detection
+
+We must prevent the system from producing generic or market-noise awareness strategies.
+
+Please confirm the Generic Awareness Detector blocks patterns such as:
+
+- generic educational awareness
+- “grow your business” type framing
+- vague opportunity statements with no supporting signals
+- awareness routes not backed by MI or audience evidence
+
+If necessary, strengthen the generic detector so that unsupported awareness routes are downgraded or rejected.
+
+---
+
+## 5. Upstream Snapshot Version Validation
+
+The Awareness Engine must ensure it is reading compatible upstream snapshots before analysis.
+
+Please confirm version checks exist for:
+
+- Market Intelligence snapshot
+- Audience snapshot
+- Positioning snapshot
+- Differentiation snapshot
+- Offer snapshot
+- Funnel snapshot
+- Integrity snapshot
+
+If the engine encounters outdated versions, it should fail gracefully or request a refresh instead of analyzing stale data.
+
+---
+
+## 6. Boundary Protection Verification
+
+Please confirm that the Awareness Engine cannot generate outputs belonging to other engines.
+
+It must not produce:
+
+- advertising strategies  
+- content calendars  
+- hooks or copywriting  
+- funnel restructuring  
+- offer redesign  
+- positioning narratives  
+
+Boundary enforcement must remain active with hard-fail behavior if violations appear.
+
+---
+
+## 7. Deployment Validation (Important)
+
+After applying any changes:
+
+- ensure the backend is restarted
+- confirm the new logic is deployed system-wide
+- verify routes still work
+- confirm snapshots are created correctly
+- confirm no engine compatibility issues occur
+
+This step is important because a frequent mistake is implementing the fix in code but not applying the update across the running system.
+
+---
+
+## Acceptance Criteria
+
+The Awareness Engine will be considered fully hardened only if:
+
+- confidence normalization is active  
+- cross-engine alignment checks are enforced  
+- low-data trust guards reduce weak conclusions  
+- generic awareness detection prevents market noise  
+- upstream snapshot version checks are validated  
+- boundary enforcement remains intact  
+- the system is redeployed and verified operational
+
+---
+
+Once the verification and hardening pass is complete, please confirm the final status.
+
+Thank you.

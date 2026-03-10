@@ -83,6 +83,17 @@ export interface AwarenessRoute {
   rejectionReason: string | null;
 }
 
+export interface DataReliabilityDiagnostics {
+  signalDensity: number;
+  signalDiversity: number;
+  narrativeStability: number;
+  competitorValidity: number;
+  marketMaturityConfidence: number;
+  overallReliability: number;
+  isWeak: boolean;
+  advisories: string[];
+}
+
 export interface AwarenessResult {
   status: string;
   statusMessage: string | null;
@@ -92,6 +103,8 @@ export interface AwarenessResult {
   layerResults: LayerResult[];
   structuralWarnings: string[];
   boundaryCheck: { passed: boolean; violations: string[] };
+  dataReliability: DataReliabilityDiagnostics;
+  confidenceNormalized: boolean;
   executionTimeMs: number;
   engineVersion: number;
 }

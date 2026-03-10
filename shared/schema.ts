@@ -1730,6 +1730,8 @@ export const awarenessSnapshots = pgTable("awareness_snapshots", {
   layerResults: text("layer_results"),
   structuralWarnings: text("structural_warnings"),
   boundaryCheck: text("boundary_check"),
+  dataReliability: text("data_reliability"),
+  confidenceNormalized: boolean("confidence_normalized").default(false),
   awarenessStrengthScore: doublePrecision("awareness_strength_score"),
   executionTimeMs: integer("execution_time_ms"),
   createdAt: timestamp("created_at").defaultNow(),

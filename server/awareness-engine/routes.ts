@@ -15,6 +15,11 @@ import { runAwarenessEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
 import { ENGINE_VERSION as INTEGRITY_ENGINE_VERSION } from "../integrity-engine/constants";
 import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/constants";
+import { ENGINE_VERSION as FUNNEL_ENGINE_VERSION } from "../funnel-engine/constants";
+import { ENGINE_VERSION as OFFER_ENGINE_VERSION } from "../offer-engine/constants";
+import { ENGINE_VERSION as DIFF_ENGINE_VERSION } from "../differentiation-engine/constants";
+import { POSITIONING_ENGINE_VERSION } from "../positioning-engine/constants";
+import { AUDIENCE_ENGINE_VERSION } from "../audience-engine/constants";
 import { verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
 
 function safeJsonParse(text: any): any {
@@ -95,6 +100,9 @@ export function registerAwarenessEngineRoutes(app: Express) {
       if (!audSnapshot) {
         return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Audience snapshot not found" });
       }
+      if (audSnapshot.engineVersion !== AUDIENCE_ENGINE_VERSION) {
+        return res.status(400).json({ error: "VERSION_MISMATCH", message: `Audience snapshot version ${audSnapshot.engineVersion} does not match current version ${AUDIENCE_ENGINE_VERSION} — please re-run Audience Engine` });
+      }
 
       const [posSnapshot] = await db.select().from(positioningSnapshots)
         .where(and(eq(positioningSnapshots.id, positioningSnapshotId), eq(positioningSnapshots.campaignId, campaignId), eq(positioningSnapshots.accountId, accountId)))
@@ -102,6 +110,9 @@ export function registerAwarenessEngineRoutes(app: Express) {
 
       if (!posSnapshot) {
         return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Positioning snapshot not found" });
+      }
+      if (posSnapshot.engineVersion !== POSITIONING_ENGINE_VERSION) {
+        return res.status(400).json({ error: "VERSION_MISMATCH", message: `Positioning snapshot version ${posSnapshot.engineVersion} does not match current version ${POSITIONING_ENGINE_VERSION} — please re-run Positioning Engine` });
       }
 
       const [diffSnapshot] = await db.select().from(differentiationSnapshots)
@@ -111,6 +122,9 @@ export function registerAwarenessEngineRoutes(app: Express) {
       if (!diffSnapshot) {
         return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Differentiation snapshot not found" });
       }
+      if (diffSnapshot.engineVersion !== DIFF_ENGINE_VERSION) {
+        return res.status(400).json({ error: "VERSION_MISMATCH", message: `Differentiation snapshot version ${diffSnapshot.engineVersion} does not match current version ${DIFF_ENGINE_VERSION} — please re-run Differentiation Engine` });
+      }
 
       const [offerSnapshot] = await db.select().from(offerSnapshots)
         .where(and(eq(offerSnapshots.id, offerSnapshotId), eq(offerSnapshots.campaignId, campaignId), eq(offerSnapshots.accountId, accountId)))
@@ -119,6 +133,9 @@ export function registerAwarenessEngineRoutes(app: Express) {
       if (!offerSnapshot) {
         return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Offer snapshot not found" });
       }
+      if (offerSnapshot.engineVersion !== OFFER_ENGINE_VERSION) {
+        return res.status(400).json({ error: "VERSION_MISMATCH", message: `Offer snapshot version ${offerSnapshot.engineVersion} does not match current version ${OFFER_ENGINE_VERSION} — please re-run Offer Engine` });
+      }
 
       const [funnelSnapshot] = await db.select().from(funnelSnapshots)
         .where(and(eq(funnelSnapshots.id, funnelSnapshotId), eq(funnelSnapshots.campaignId, campaignId), eq(funnelSnapshots.accountId, accountId)))
@@ -126,6 +143,9 @@ export function registerAwarenessEngineRoutes(app: Express) {
 
       if (!funnelSnapshot) {
         return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Funnel snapshot not found" });
+      }
+      if (funnelSnapshot.engineVersion !== FUNNEL_ENGINE_VERSION) {
+        return res.status(400).json({ error: "VERSION_MISMATCH", message: `Funnel snapshot version ${funnelSnapshot.engineVersion} does not match current version ${FUNNEL_ENGINE_VERSION} — please re-run Funnel Engine` });
       }
 
       const miInput = {
@@ -235,6 +255,8 @@ export function registerAwarenessEngineRoutes(app: Express) {
         layerResults: JSON.stringify(result.layerResults),
         structuralWarnings: JSON.stringify(result.structuralWarnings),
         boundaryCheck: JSON.stringify(result.boundaryCheck),
+        dataReliability: JSON.stringify(result.dataReliability),
+        confidenceNormalized: result.confidenceNormalized,
         awarenessStrengthScore: result.primaryRoute.awarenessStrengthScore,
         executionTimeMs: result.executionTimeMs,
       }).returning();
@@ -285,6 +307,8 @@ export function registerAwarenessEngineRoutes(app: Express) {
         layerResults: safeJsonParse(latest.layerResults),
         structuralWarnings: safeJsonParse(latest.structuralWarnings),
         boundaryCheck: safeJsonParse(latest.boundaryCheck),
+        dataReliability: safeJsonParse(latest.dataReliability),
+        confidenceNormalized: latest.confidenceNormalized,
         awarenessStrengthScore: latest.awarenessStrengthScore,
         executionTimeMs: latest.executionTimeMs,
         createdAt: latest.createdAt,
