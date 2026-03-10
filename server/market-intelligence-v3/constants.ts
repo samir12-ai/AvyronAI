@@ -17,7 +17,7 @@
  * All snapshots with analysisVersion !== ENGINE_VERSION are cache-rejected
  * and recomputed on next access. Unnecessary bumps cause recompute storms.
  */
-export const ENGINE_VERSION = 17;
+export const ENGINE_VERSION = 18;
 
 export const COMMENT_TEXT_OPTIONAL = true;
 
