@@ -61,6 +61,8 @@ export interface AwarenessMIInput {
   overallConfidence: number;
   opportunitySignals: any[];
   threatSignals: any[];
+  narrativeObjectionCount: number;
+  narrativeObjectionDensity: number;
 }
 
 export interface LayerResult {

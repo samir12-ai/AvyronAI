@@ -3,6 +3,7 @@ import { miSnapshots, miSignalLogs, miTelemetry, ciCompetitors, growthCampaigns 
 import { eq, and, desc } from "drizzle-orm";
 import { pruneOldSnapshots } from "../engine-hardening";
 import { computeAllSignals, aggregateMissingFlags, classifyEngagementQuality, detectAudienceIntentSignals, detectSampleBias, computeRealDataRatio, clusterSemanticSignals } from "./signal-engine";
+import { extractNarrativeObjections } from "./narrative-objection-extractor";
 import type { SignalCluster, SignalPipelineDiagnostics } from "./types";
 import { computeDemandPressure } from "./demand-pressure";
 import { detectEchoChamber } from "./narrative-clustering";
@@ -812,6 +813,9 @@ export class MarketIntelligenceV3 {
     const totalSemanticSignals = signalResults.reduce((s, r) => s + r.semanticSignals.length, 0);
     console.log(`[MIv3] SEMANTIC_SIGNALS | total=${totalSemanticSignals} | clusters=${signalClusters.length} | reinforced=${signalClusters.filter(c => c.reinforcedScore >= 0.3).length}`);
 
+    const narrativeObjectionMap = extractNarrativeObjections(competitors);
+    console.log(`[MIv3] NARRATIVE_OBJECTIONS | total=${narrativeObjectionMap.totalObjectionsDetected} | multiCompetitor=${narrativeObjectionMap.objectionsFromMultipleCompetitors} | density=${narrativeObjectionMap.objectionDensity} | captions=${narrativeObjectionMap.captionsScanned}`);
+
     const threatSignals = buildThreatSignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, signalClusters);
     const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, signalClusters);
     const similarityData = computeSimilarityDiagnosis(competitors, signalResults);
@@ -978,6 +982,7 @@ export class MarketIntelligenceV3 {
       contentDnaData: JSON.stringify(contentDnaResults),
       deltaReport: deltaReport ? JSON.stringify(deltaReport) : null,
       diagnosticsData: JSON.stringify(diagnostics),
+      objectionMapData: JSON.stringify(narrativeObjectionMap),
       volatilityIndex,
       dataFreshnessDays,
       overallConfidence: confidence.overall,
@@ -1064,6 +1069,7 @@ export class MarketIntelligenceV3 {
       diagnostics,
       signalDiagnostics,
       narrativeOverlap,
+      narrativeObjectionMap,
       cached: false,
       cacheInvalidationReason,
       snapshotSource: "FRESH_DATA" as const,
@@ -1175,6 +1181,7 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
     diagnostics: parseJsonSafe(snapshot.diagnosticsData, null),
     signalDiagnostics: null,
     narrativeOverlap: null,
+    narrativeObjectionMap: parseJsonSafe(snapshot.objectionMapData, null),
     cached: true,
     cacheInvalidationReason: null,
     snapshotSource: (snapshot.snapshotSource as "FRESH_DATA" | "CACHED_DATA") || "FRESH_DATA",

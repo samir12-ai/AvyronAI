@@ -1376,6 +1376,7 @@ export const miSnapshots = pgTable("mi_snapshots", {
   deltaReport: text("delta_report"),
   diagnosticsData: text("diagnostics_data"),
   dataStatus: text("data_status").default("LIVE"),
+  objectionMapData: text("objection_map_data"),
   createdAt: timestamp("created_at").defaultNow(),
   expiresAt: timestamp("expires_at"),
 });

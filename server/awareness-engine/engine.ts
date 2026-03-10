@@ -247,6 +247,14 @@ export function layer2_awarenessReadinessMapping(
     mappedStage = "solution_aware";
   }
 
+  if (mappedStage === "unaware" && mi.narrativeObjectionCount >= 3 && mi.narrativeObjectionDensity > 0.15) {
+    const solutionSignals = (audience.objectionMap ? Object.keys(audience.objectionMap).length : 0) >= 3;
+    const overrideTo = solutionSignals ? "solution_aware" : "problem_aware";
+    mappedStage = overrideTo;
+    warnings.push(`Awareness overridden from unaware to ${overrideTo} — MI detected ${mi.narrativeObjectionCount} narrative objections (density=${mi.narrativeObjectionDensity})`);
+    score -= 0.05;
+  }
+
   findings.push(`Audience mapped to readiness stage: ${mappedStage} [selected:${mappedStage}]`);
 
   const maturity = safeNumber(audience.maturityIndex, 0.5);

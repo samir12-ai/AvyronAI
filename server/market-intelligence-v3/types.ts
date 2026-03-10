@@ -265,6 +265,7 @@ export interface MIv3DiagnosticResult {
   diagnostics: MIDiagnostics | null;
   signalDiagnostics: import("../../server/engine-hardening/types").SignalDiagnostics | null;
   narrativeOverlap: import("../../server/engine-hardening/types").NarrativeOverlapResult | null;
+  narrativeObjectionMap: import("./narrative-objection-extractor").NarrativeObjectionMap | null;
   cached: boolean;
   cacheInvalidationReason: CacheInvalidationReason;
   snapshotSource: "FRESH_DATA" | "CACHED_DATA";

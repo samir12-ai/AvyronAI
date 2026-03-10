@@ -498,6 +498,8 @@ function detectAwareness(
   comments: string[],
   inputSnapshotId: string | null,
   competitorCount: number,
+  miObjectionDensity: number = 0,
+  miObjectionCount: number = 0,
 ): AwarenessResult {
   const distribution: Record<string, number> = {
     unaware: 0,
@@ -534,6 +536,16 @@ function detectAwareness(
   }
 
   if (totalMatched < 3) {
+    if (miObjectionCount >= 3 && miObjectionDensity > 0.1) {
+      return {
+        level: "problem_aware",
+        distribution: { problem_aware: 100 },
+        evidenceCount: miObjectionCount,
+        confidenceScore: Math.min(miObjectionDensity + 0.1, 0.6),
+        sourceSignals: ["mi_narrative_objections"],
+        inputSnapshotId,
+      };
+    }
     return {
       level: "insufficient_signals",
       distribution: {},
@@ -551,6 +563,17 @@ function detectAwareness(
       maxCount = count;
       dominantLevel = level;
     }
+  }
+
+  if (dominantLevel === "unaware" && miObjectionCount >= 3 && miObjectionDensity > 0.15) {
+    const problemAwareCount = distribution["problem_aware"] || 0;
+    const solutionAwareCount = distribution["solution_aware"] || 0;
+    if (solutionAwareCount > problemAwareCount && solutionAwareCount > 0) {
+      dominantLevel = "solution_aware";
+    } else {
+      dominantLevel = "problem_aware";
+    }
+    console.log(`[AudienceEngine-V3] OBJECTION_DENSITY_OVERRIDE | miObjections=${miObjectionCount} | density=${miObjectionDensity} | overrideFrom=unaware | overrideTo=${dominantLevel}`);
   }
 
   const pct: Record<string, number> = {};
@@ -1162,8 +1185,21 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   const transformationMap = applyEvidenceIntegrityFilter(rawTransformationMap);
   const emotionalDrivers = applyEvidenceIntegrityFilter(rawEmotionalDrivers);
 
+  let miObjectionDensity = 0;
+  let miObjectionCount = 0;
+  if (latestSnapshot?.objectionMapData) {
+    try {
+      const miObjMap = JSON.parse(latestSnapshot.objectionMapData);
+      miObjectionDensity = miObjMap?.objectionDensity || 0;
+      miObjectionCount = miObjMap?.totalObjectionsDetected || 0;
+      if (miObjectionCount > 0) {
+        console.log(`[AudienceEngine-V3] MI_NARRATIVE_OBJECTIONS | count=${miObjectionCount} | density=${miObjectionDensity} | multiCompetitor=${miObjMap?.objectionsFromMultipleCompetitors || 0}`);
+      }
+    } catch {}
+  }
+
   const awarenessInput = commentTexts.length > 0 ? commentTexts : captions;
-  const awarenessLevel = detectAwareness(awarenessInput, miSnapshotId, competitorCount);
+  const awarenessLevel = detectAwareness(awarenessInput, miSnapshotId, competitorCount, miObjectionDensity, miObjectionCount);
   const maturityIndex = detectMaturity(commentTexts, captions, miSnapshotId, competitorCount);
   const intentInput = commentTexts.length > 0 ? commentTexts : captions;
   const intentDistribution = classifyIntents(intentInput, miSnapshotId, competitorCount);

@@ -1,0 +1,139 @@
+Hello Replit Team,
+
+We need to resolve a structural gap in the Market Intelligence engine that became visible during the recent Persuasion Engine diagnostics. The issue is not a failure of the Persuasion Engine itself — the root cause is that the Market Intelligence pipeline is not currently extracting market objections from the available data sources.
+
+Important clarification about our system architecture:
+
+Our platform does not scrape or process Instagram comments, and it must remain that way. The system only analyzes:
+
+• Post captions  
+• Hook lines  
+• CTA language  
+• Narrative framing  
+• Competitor comparison statements  
+• Positioning language within posts  
+
+Therefore, the objection extraction solution must be built entirely from caption-level narrative analysis, not from comments.
+
+---
+
+### 1. Implement a Caption-Level Objection Extraction Layer (Inside MI Only)
+
+Add a new internal module within the Market Intelligence engine called:
+
+Narrative Objection Extraction Layer
+
+This module must detect objections indirectly through narrative patterns in captions and hooks. Many markets reveal objections through the way competitors frame their messaging, even when objections are not explicitly written.
+
+Examples of linguistic signals to detect:
+
+Comparison patterns
+• “Unlike most agencies…”  
+• “Most agencies focus on vanity metrics…”  
+
+Anti-pattern framing
+• “Stop wasting money on agencies that…”  
+• “Why most agencies fail their clients.”  
+
+Trust repair language
+• “Tired of agencies overpromising results?”  
+• “What agencies don’t tell you about growth.”
+
+Problem framing language
+• “The reason most businesses struggle with marketing…”  
+
+These patterns reveal market objections indirectly and should be captured as objection signals.
+
+---
+
+### 2. Generate a Structured Objection Map
+
+The module must output a structured objection map such as:
+
+Top objections detected in market:
+
+• Agencies overpromise results  
+• Agencies charge high retainers  
+• Agencies use generic strategies  
+• Agencies lack niche understanding  
+
+Each objection should include:
+
+• frequency score  
+• narrative confidence  
+• supporting caption evidence  
+• competitor sources
+
+This objection map must be passed downstream to:
+
+• Audience Engine  
+• Positioning Engine  
+• Persuasion Engine
+
+---
+
+### 3. Awareness Classification Correction
+
+When objection density is high, the system must re-evaluate awareness classification.
+
+Markets with strong objection narratives should typically classify as:
+
+• Problem aware  
+• Solution aware
+
+They should not default to “Unaware.”
+
+Please adjust the awareness classification logic so objection density influences awareness stage selection.
+
+---
+
+### 4. Dataset Scope Validation
+
+The system currently analyzes approximately:
+
+• 12 posts per competitor  
+• captions and narrative text only  
+
+This dataset is sufficient for narrative analysis if extraction logic is robust.
+
+Ensure that the objection extraction layer scans:
+
+• captions  
+• hook lines  
+• CTA framing  
+• positioning statements  
+• competitor comparison language
+
+The system should detect semantic patterns, not rely only on explicit objection phrases.
+
+---
+
+### 5. Preserve Master Plan Architecture
+
+This improvement must remain inside the Market Intelligence engine.
+
+Do NOT create a new engine.
+
+Do NOT modify downstream engines.
+
+The architecture must remain:
+
+Market Intelligence → Audience → Positioning → Differentiation → Offer → Funnel → Integrity → Awareness → Persuasion
+
+The objection extraction module is strictly a sub-layer of Market Intelligence.
+
+---
+
+### 6. System-Wide Deployment Verification
+
+After implementation, please confirm:
+
+• objection maps are generated correctly from caption-level analysis  
+• awareness classification adjusts based on objection density  
+• downstream engines receive objection data correctly  
+• the module runs across the entire system  
+• all updates are deployed, not only written in code
+
+Please confirm once this is implemented and applied system-wide.
+
+Thank you.

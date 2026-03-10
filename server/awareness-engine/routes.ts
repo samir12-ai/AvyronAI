@@ -272,11 +272,23 @@ export function registerAwarenessEngineRoutes(app: Express) {
         }
       }
 
+      let miNarrativeObjectionCount = 0;
+      let miNarrativeObjectionDensity = 0;
+      if (miSnapshot.objectionMapData) {
+        try {
+          const objMap = JSON.parse(miSnapshot.objectionMapData as string);
+          miNarrativeObjectionCount = objMap?.totalObjectionsDetected || 0;
+          miNarrativeObjectionDensity = objMap?.objectionDensity || 0;
+        } catch {}
+      }
+
       const miInput = {
         marketDiagnosis: miSnapshot.marketDiagnosis,
         overallConfidence: safeNumber(miSnapshot.overallConfidence, 0),
         opportunitySignals: safeJsonParse(miSnapshot.opportunitySignals) || [],
         threatSignals: safeJsonParse(miSnapshot.threatSignals) || [],
+        narrativeObjectionCount: miNarrativeObjectionCount,
+        narrativeObjectionDensity: miNarrativeObjectionDensity,
       };
 
       const audienceInput = {
