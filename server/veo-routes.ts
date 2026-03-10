@@ -46,9 +46,12 @@ export function registerVeoRoutes(app: Express) {
         prompt,
         aspectRatio,
         duration,
+        resolution,
         negativePrompt,
         imageFileUri,
         imageMimeType,
+        lastFrameFileUri,
+        lastFrameMimeType,
         personGeneration,
       } = req.body;
 
@@ -64,9 +67,13 @@ export function registerVeoRoutes(app: Express) {
 
       if (duration) {
         const seconds = parseInt(String(duration).replace("s", ""));
-        if (!isNaN(seconds) && [5, 6, 8].includes(seconds)) {
+        if (!isNaN(seconds) && seconds >= 5 && seconds <= 8) {
           config.durationSeconds = seconds;
         }
+      }
+
+      if (resolution && ["720p", "1080p", "4k"].includes(resolution)) {
+        config.resolution = resolution;
       }
 
       if (negativePrompt && typeof negativePrompt === "string" && negativePrompt.trim()) {
@@ -77,8 +84,17 @@ export function registerVeoRoutes(app: Express) {
         config.personGeneration = personGeneration;
       }
 
+      if (lastFrameFileUri && lastFrameMimeType) {
+        config.lastFrame = {
+          image: {
+            fileUri: lastFrameFileUri,
+            mimeType: lastFrameMimeType,
+          },
+        };
+      }
+
       const params: any = {
-        model: "veo-3.0-generate-preview",
+        model: "veo-3.1-generate-preview",
         prompt,
         config,
       };
@@ -90,7 +106,7 @@ export function registerVeoRoutes(app: Express) {
         };
       }
 
-      console.log(`[VeoGenerate] model=${params.model} prompt="${prompt.slice(0, 60)}..." aspectRatio=${config.aspectRatio} duration=${config.durationSeconds || 'default'} image=${!!imageFileUri}`);
+      console.log(`[VeoGenerate] model=${params.model} prompt="${prompt.slice(0, 60)}..." aspectRatio=${config.aspectRatio} duration=${config.durationSeconds || 'default'} resolution=${config.resolution || 'default'} image=${!!imageFileUri} lastFrame=${!!lastFrameFileUri}`);
 
       const operation = await client.models.generateVideos(params);
 

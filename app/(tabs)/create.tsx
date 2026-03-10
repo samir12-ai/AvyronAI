@@ -137,6 +137,7 @@ interface CreatePersistedState {
   veoMode: 'text-to-video' | 'image-to-video';
   videoAspect: string;
   videoDuration: string;
+  videoResolution: string;
   videoNegativePrompt: string;
 }
 
@@ -163,6 +164,7 @@ const defaultCreateState: CreatePersistedState = {
   veoMode: 'text-to-video',
   videoAspect: '16:9',
   videoDuration: '8s',
+  videoResolution: '720p',
   videoNegativePrompt: '',
 };
 
@@ -349,6 +351,7 @@ export default function CreateScreen() {
   const [videoPrompt, setVideoPrompt] = useState(ps.videoPrompt);
   const [videoAspect, setVideoAspect] = useState(ps.videoAspect);
   const [videoDuration, setVideoDuration] = useState(ps.videoDuration);
+  const [videoResolution, setVideoResolution] = useState(ps.videoResolution);
   const [videoNegativePrompt, setVideoNegativePrompt] = useState(ps.videoNegativePrompt);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
   const [videoOperationName, setVideoOperationName] = useState<string | null>(null);
@@ -358,6 +361,7 @@ export default function CreateScreen() {
   const [videoError, setVideoError] = useState<string | null>(null);
   const [videoPolling, setVideoPolling] = useState(false);
   const [videoStartImage, setVideoStartImage] = useState<ImagePicker.ImagePickerAsset | null>(null);
+  const [videoLastFrame, setVideoLastFrame] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(ps.generatedImageUrl);
   const [showAdvancedVideo, setShowAdvancedVideo] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'analyzing' | 'done' | 'error'>('idle');
@@ -389,6 +393,7 @@ export default function CreateScreen() {
       setVideoPrompt(ps.videoPrompt);
       setVideoAspect(ps.videoAspect);
       setVideoDuration(ps.videoDuration);
+      setVideoResolution(ps.videoResolution);
       setVideoNegativePrompt(ps.videoNegativePrompt);
       setVideoUrl(ps.videoUrl);
       setGeneratedImageUrl(ps.generatedImageUrl);
@@ -403,14 +408,14 @@ export default function CreateScreen() {
       aiEngine, contentType, platform, reelDuration, reelGoal, genMode,
       posterStyle, aspectRatio, mood, generatedContent, reelScript,
       generatedPoster, videoUrl, generatedImageUrl, veoMode, videoAspect,
-      videoDuration, videoNegativePrompt,
+      videoDuration, videoResolution, videoNegativePrompt,
     });
   }, [
     activeTab, topic, posterTopic, videoPrompt, posterText,
     aiEngine, contentType, platform, reelDuration, reelGoal, genMode,
     posterStyle, aspectRatio, mood, generatedContent, reelScript,
     generatedPoster, videoUrl, generatedImageUrl, veoMode, videoAspect,
-    videoDuration, videoNegativePrompt,
+    videoDuration, videoResolution, videoNegativePrompt,
   ]);
 
   useEffect(() => {
@@ -925,6 +930,7 @@ export default function CreateScreen() {
         prompt: videoPrompt,
         aspectRatio: videoAspect,
         duration: videoDuration,
+        resolution: videoResolution,
       };
 
       if (videoNegativePrompt.trim()) {
@@ -941,6 +947,18 @@ export default function CreateScreen() {
         }
         body.imageFileUri = uploaded.fileUri;
         body.imageMimeType = uploaded.mimeType;
+      }
+
+      if (videoLastFrame?.uri) {
+        setVideoStatus('uploading last frame...');
+        const uploadedLast = await uploadImageForVeo(videoLastFrame);
+        if (!uploadedLast) {
+          setVideoError('Failed to upload last frame image');
+          setIsGeneratingVideo(false);
+          return;
+        }
+        body.lastFrameFileUri = uploadedLast.fileUri;
+        body.lastFrameMimeType = uploadedLast.mimeType;
       }
 
       setVideoStatus('generating');
@@ -1046,6 +1064,11 @@ export default function CreateScreen() {
     { id: '5s', label: '5s' },
     { id: '6s', label: '6s' },
     { id: '8s', label: '8s' },
+  ];
+
+  const videoResolutionOptions = [
+    { id: '720p', label: '720p' },
+    { id: '1080p', label: '1080p' },
   ];
 
   const veoModeTabs = [
@@ -2251,9 +2274,9 @@ export default function CreateScreen() {
                     <Ionicons name="videocam" size={20} color="#fff" />
                   </LinearGradient>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.cardTitle, { color: colors.text, marginBottom: 0 }]}>Veo Video Studio</Text>
+                    <Text style={[styles.cardTitle, { color: colors.text, marginBottom: 0 }]}>Veo 3.1 Video Studio</Text>
                     <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginTop: 2 }}>
-                      Google Veo AI Video Generation
+                      Google Veo 3.1 AI Video Generation
                     </Text>
                   </View>
                 </View>
@@ -2352,6 +2375,20 @@ export default function CreateScreen() {
                       ))}
                     </View>
                   </View>
+                  <View style={{ flex: 1, marginLeft: 8 }}>
+                    <Text style={[styles.cardTitle, { color: colors.text, marginBottom: 6 }]}>Resolution</Text>
+                    <View style={styles.reelOptionRow}>
+                      {videoResolutionOptions.map(r => (
+                        <Pressable
+                          key={r.id}
+                          onPress={() => { Haptics.selectionAsync(); setVideoResolution(r.id); }}
+                          style={[styles.reelChip, { backgroundColor: videoResolution === r.id ? '#7C3AED20' : colors.inputBackground, borderColor: videoResolution === r.id ? '#7C3AED' : 'transparent' }]}
+                        >
+                          <Text style={[styles.reelChipText, { color: videoResolution === r.id ? '#7C3AED' : colors.textMuted }]}>{r.label}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
                 </View>
               </View>
 
@@ -2394,7 +2431,25 @@ export default function CreateScreen() {
                     />
                   </View>
 
-
+                  <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                    <Text style={[styles.cardTitle, { color: colors.text }]}>Last Frame (Interpolation)</Text>
+                    <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'Inter_400Regular', marginBottom: 12 }}>
+                      Define the ending frame — Veo fills the transition between start and end
+                    </Text>
+                    {videoLastFrame ? (
+                      <View style={{ borderRadius: 14, overflow: 'hidden', marginBottom: 8 }}>
+                        <Image source={{ uri: videoLastFrame.uri }} style={{ width: '100%', height: 140, borderRadius: 14 }} resizeMode="cover" />
+                        <Pressable onPress={() => setVideoLastFrame(null)} style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 14, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}>
+                          <Ionicons name="close" size={18} color="#fff" />
+                        </Pressable>
+                      </View>
+                    ) : (
+                      <Pressable onPress={() => pickVeoImage(setVideoLastFrame)} style={{ borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: '#7C3AED40', borderRadius: 14, padding: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.inputBackground, gap: 6 }}>
+                        <Ionicons name="image-outline" size={28} color="#7C3AED" />
+                        <Text style={{ fontSize: 13, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>Choose Last Frame</Text>
+                      </Pressable>
+                    )}
+                  </View>
                 </>
               )}
 
@@ -2505,7 +2560,7 @@ export default function CreateScreen() {
                             contentType: 'VIDEO',
                             title: videoPrompt?.slice(0, 80) || 'AI Video',
                             mediaUrl: videoUrls[0] || videoUrl || undefined,
-                            engineName: 'Veo',
+                            engineName: 'Veo 3.1',
                             generationId: videoGenIdRef.current || undefined,
                           });
                           setSaveState('analyzing');
@@ -2583,7 +2638,7 @@ export default function CreateScreen() {
 
               <View style={styles.poweredBy}>
                 <Text style={[styles.poweredByText, { color: colors.textMuted }]}>
-                  Powered by Google Veo
+                  Powered by Google Veo 3.1
                 </Text>
               </View>
             </>
