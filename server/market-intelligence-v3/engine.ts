@@ -181,7 +181,7 @@ export async function persistValidatedSnapshot(snapshotPayload: any, caller: str
   }
 
   const [snapshot] = await db.insert(miSnapshots).values(snapshotPayload).returning();
-  await pruneOldSnapshots(db, miSnapshots, snapshotPayload.campaignId, 20);
+  await pruneOldSnapshots(db, miSnapshots, snapshotPayload.campaignId, 20, snapshotPayload.accountId || "default");
   return snapshot;
 }
 

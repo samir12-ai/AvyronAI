@@ -1455,7 +1455,7 @@ export async function runPositioningEngine(
     executionTimeMs,
   }).returning({ id: positioningSnapshots.id });
 
-  await pruneOldSnapshots(db, positioningSnapshots, campaignId, 20);
+  await pruneOldSnapshots(db, positioningSnapshots, campaignId, 20, accountId);
 
   console.log(`[PositioningEngine-V3] ${status} in ${executionTimeMs}ms | snapshot=${inserted.id} | territories=${finalTerritories.length} | confidence=${overallConfidence}`);
 

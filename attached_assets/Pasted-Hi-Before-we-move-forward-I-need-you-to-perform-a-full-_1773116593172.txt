@@ -1,0 +1,110 @@
+Hi,
+
+Before we move forward, I need you to perform a full verification pass to ensure that all updates from the last 4–5 hardening directives have actually been applied across the running system, not just implemented in code.
+
+We have repeatedly seen a common issue where fixes are written but not fully deployed or not propagated across all engines and runtime services, which leads to inconsistent behavior.
+
+Please confirm the following carefully.
+
+---
+
+## 1. System-Wide Update Verification
+
+Confirm that every hardening change from the recent directives has been applied to the running system, including:
+
+- engine boundary enforcement  
+- signal diagnostics logging  
+- signal density safeguards  
+- cross-engine alignment guards  
+- confidence normalization  
+- snapshot integrity fields  
+- snapshot lifecycle pruning  
+- engine version compatibility checks  
+- generic output detection  
+- trust readiness safeguards  
+- validation loop protection  
+- narrative overlap detection  
+
+These protections must be active across all engines, not just one.
+
+---
+
+## 2. Confirm All Engines Use the Updated Logic
+
+Please verify the following engines are running with the latest hardened logic:
+
+- Positioning Engine  
+- Differentiation Engine  
+- Offer Engine  
+- Funnel Engine  
+- Integrity Engine  
+- Awareness Engine  
+- Market Intelligence processing
+
+Each engine should confirm:
+
+- updated validation layers active  
+- boundary enforcement active  
+- confidence normalization applied  
+- snapshot version checks enabled
+
+---
+
+## 3. Deployment Confirmation (Important)
+
+One recurring problem is implementing fixes without applying them to the active runtime.
+
+Please confirm:
+
+• backend services restarted  
+• new engine versions loaded  
+• routes verified operational  
+• snapshots being created with updated fields  
+• signal diagnostics logging visible in runtime logs
+
+The running system must reflect the latest logic, not the previous version.
+
+---
+
+## 4. Signal Pipeline Verification
+
+Since signal extraction was recently hardened, confirm the diagnostics show:
+
+- competitors_processed  
+- posts_processed  
+- signals_detected  
+- signals_filtered  
+- signals_used  
+
+These logs should appear during MI processing.
+
+---
+
+## 5. End-to-End Validation
+
+Run a full pipeline test:
+
+MI → Audience → Positioning → Differentiation → Offer → Funnel → Integrity → Awareness
+
+Confirm:
+
+- no boundary violations
+- no version conflicts
+- no snapshot errors
+- consistent confidence scaling
+
+---
+
+## Final Confirmation
+
+Once the verification pass is complete, please confirm that:
+
+- all hardening updates from the last directives are active
+- the running backend reflects the updated code
+- the entire pipeline operates with the new safeguards
+
+This step is important to avoid situations where updates exist in code but the system is still running older logic.
+
+Please confirm once the full verification is complete.
+
+Thank you.

@@ -21,7 +21,7 @@ import {
   type MarketScope,
 } from "./constants";
 import { MI_COST_LIMITS } from "../market-intelligence-v3/constants";
-import { pruneOldSnapshots } from "../engine-hardening";
+import { pruneOldSnapshots, assessDataReliability as sharedAssessDataReliability, normalizeConfidence as sharedNormalizeConfidence, detectGenericOutput } from "../engine-hardening";
 import { aiChat } from "../ai-client";
 
 interface EvidenceMeta {
@@ -1113,7 +1113,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
       executionTimeMs,
     }).returning({ id: audienceSnapshots.id });
 
-    await pruneOldSnapshots(db, audienceSnapshots, campaignId, 20);
+    await pruneOldSnapshots(db, audienceSnapshots, campaignId, 20, accountId);
 
     return buildEmptyResult("DATASET_TOO_SMALL", msg, baseInputSummary, executionTimeMs, inserted.id);
   }
@@ -1173,6 +1173,23 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   const totalSignalMatches = painMap.length + desireMap.length + objectionMap.length + transformationMap.length + emotionalDrivers.length;
   const totalSignalFrequency = [painMap, desireMap, objectionMap, transformationMap, emotionalDrivers]
     .flat().reduce((sum, s) => sum + s.frequency, 0);
+
+  const dataReliability = sharedAssessDataReliability(
+    competitorCount,
+    totalSignalMatches,
+    false,
+    false,
+    true,
+    0.5,
+  );
+  if (dataReliability.isWeak) {
+    console.log(`[AudienceEngine-V3] DATA_RELIABILITY_WEAK | reliability=${dataReliability.overallReliability.toFixed(3)} | advisories=${dataReliability.advisories.join("; ")}`);
+  }
+
+  const genericCheck = detectGenericOutput(allText.join(" ").substring(0, 2000));
+  if (genericCheck.genericDetected) {
+    console.log(`[AudienceEngine-V3] GENERIC_OUTPUT_DETECTED | penalty=${genericCheck.penalty.toFixed(3)} | matches=${genericCheck.genericPhrases.join(", ")}`);
+  }
 
   const isDefensiveMode = totalSignalFrequency < AUDIENCE_THRESHOLDS.DEFENSIVE_MODE_SIGNAL_THRESHOLD;
 
@@ -1237,7 +1254,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     executionTimeMs,
   }).returning({ id: audienceSnapshots.id });
 
-  await pruneOldSnapshots(db, audienceSnapshots, campaignId, 20);
+  await pruneOldSnapshots(db, audienceSnapshots, campaignId, 20, accountId);
 
   console.log(`[AudienceEngine-V3] ${status} in ${executionTimeMs}ms | snapshot=${inserted.id} | signals=${totalSignalMatches} | freq=${totalSignalFrequency} | segments=${audienceSegments.length} | defensive=${isDefensiveMode}`);
 
