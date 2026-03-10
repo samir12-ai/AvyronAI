@@ -752,17 +752,17 @@ export default function CreateScreen() {
         return;
       }
 
-      const { status } = await MediaLibrary.requestPermissionsAsync();
+      const { status, canAskAgain } = await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') {
+        const buttons: any[] = [{ text: 'Cancel', style: 'cancel' }];
+        if (!canAskAgain) {
+          const Linking = await import('expo-linking');
+          buttons.push({ text: 'Open Settings', onPress: () => Linking.openSettings() });
+        }
         Alert.alert(
           'Permission Needed',
           'Please allow access to your photo gallery to save designs.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            ...(Platform.OS !== 'web' ? [{ text: 'Open Settings', onPress: () => {
-              try { MediaLibrary.requestPermissionsAsync(); } catch {}
-            }}] : []),
-          ]
+          buttons
         );
         return;
       }
@@ -770,21 +770,35 @@ export default function CreateScreen() {
       const filename = `MarketMind_${Date.now()}.png`;
       const fileUri = `${FileSystem.cacheDirectory}${filename}`;
 
-      if (imageUri.startsWith('data:image')) {
+      if (imageUri.startsWith('data:')) {
         const base64Data = imageUri.split(',')[1];
+        if (!base64Data) throw new Error('Invalid data URI');
         await FileSystem.writeAsStringAsync(fileUri, base64Data, {
           encoding: FileSystem.EncodingType.Base64,
         });
+      } else if (imageUri.startsWith('http://') || imageUri.startsWith('https://')) {
+        const downloadResult = await FileSystem.downloadAsync(imageUri, fileUri);
+        if (!downloadResult || downloadResult.status !== 200) {
+          throw new Error(`Download failed with status ${downloadResult?.status}`);
+        }
+      } else if (imageUri.startsWith('file://') || imageUri.startsWith('/')) {
+        await FileSystem.copyAsync({ from: imageUri, to: fileUri });
       } else {
-        await FileSystem.downloadAsync(imageUri, fileUri);
+        throw new Error('Unsupported image format');
+      }
+
+      const fileInfo = await FileSystem.getInfoAsync(fileUri);
+      if (!fileInfo.exists) {
+        throw new Error('File was not saved to cache');
       }
 
       await MediaLibrary.saveToLibraryAsync(fileUri);
+      try { await FileSystem.deleteAsync(fileUri, { idempotent: true }); } catch {}
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert('Saved to Gallery!', 'Your design has been saved to your photo gallery.');
     } catch (error: any) {
       console.error('Save to gallery error:', error);
-      Alert.alert('Save Failed', 'Could not save to gallery. Please try again.');
+      Alert.alert('Save Failed', error.message || 'Could not save to gallery. Please try again.');
     }
   };
 
@@ -1071,6 +1085,11 @@ export default function CreateScreen() {
 
   const saveVideoToGallery = async (videoProxyUrl: string) => {
     try {
+      if (!videoProxyUrl) {
+        Alert.alert('No Video', 'No video URL available to save.');
+        return;
+      }
+
       if (Platform.OS === 'web') {
         const link = document.createElement('a');
         link.href = videoProxyUrl;
@@ -1100,17 +1119,29 @@ export default function CreateScreen() {
 
       const filename = `MarketMind_Video_${Date.now()}.mp4`;
       const fileUri = `${FileSystem.cacheDirectory}${filename}`;
-      const downloadResult = await FileSystem.downloadAsync(videoProxyUrl, fileUri);
-      if (!downloadResult || downloadResult.status !== 200) {
-        throw new Error('Download failed');
+
+      let downloadUrl = videoProxyUrl;
+      if (downloadUrl.startsWith('/')) {
+        downloadUrl = `${getApiUrl()}${downloadUrl}`;
       }
+
+      const downloadResult = await FileSystem.downloadAsync(downloadUrl, fileUri);
+      if (!downloadResult || downloadResult.status !== 200) {
+        throw new Error(`Download failed with status ${downloadResult?.status}`);
+      }
+
+      const fileInfo = await FileSystem.getInfoAsync(fileUri);
+      if (!fileInfo.exists || (fileInfo as any).size === 0) {
+        throw new Error('Downloaded file is empty or missing');
+      }
+
       await MediaLibrary.saveToLibraryAsync(fileUri);
       try { await FileSystem.deleteAsync(fileUri, { idempotent: true }); } catch {}
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert('Saved to Gallery!', 'Your video has been saved to your gallery.');
     } catch (error: any) {
       console.error('Save video to gallery error:', error);
-      Alert.alert('Save Failed', 'Could not save video to gallery. Please try again.');
+      Alert.alert('Save Failed', error.message || 'Could not save video to gallery. Please try again.');
     }
   };
 

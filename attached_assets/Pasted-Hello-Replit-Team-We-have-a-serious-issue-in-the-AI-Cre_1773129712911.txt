@@ -1,0 +1,60 @@
+Hello Replit Team,
+
+We have a serious issue in the AI Creation system on mobile that must be resolved urgently.
+
+The problem is consistent across multiple creation modules, including:
+
+• AI Video generation (VEO)  
+• AI Designer outputs  
+• Other AI creation outputs inside the app  
+
+When the user presses “Save to Gallery”, the system shows the following error:
+
+“Save Failed – Could not save video to gallery.”
+
+This means that the generated file exists and the video is ready, but the application fails to export it to the phone gallery.
+
+This is a core functionality failure because the entire purpose of AI creation is to allow users to generate and download their assets.
+
+Currently the flow is:
+
+1. User generates AI video or design  
+2. Output is successfully created  
+3. User presses Save to Gallery  
+4. System fails with a save error  
+
+So the generation works, but the file export pipeline is broken.
+
+This issue appears across all AI creation branches, which strongly suggests a shared save/export handler problem.
+
+Please investigate the following areas immediately:
+
+Mobile file system permissions  
+Download/export handler  
+Blob or file buffer conversion  
+Content-Disposition headers for downloads  
+Mobile storage write permissions  
+React Native / Expo file handling if used  
+Incorrect route handling when exporting generated media  
+
+Most likely the save handler is either:
+
+• not requesting device storage permission  
+• not converting the generated file correctly to a downloadable object  
+• or failing during the write-to-gallery step.
+
+This must be fixed system-wide, not only for the video generator, since the same failure appears in designer outputs.
+
+After implementing the fix, please:
+
+1. Restart the backend and ensure the new code is deployed.
+2. Verify that the running system actually uses the updated save logic.
+3. Test saving both a generated video and a design asset directly to the phone gallery.
+
+Expected behavior:
+
+User generates AI content → taps “Save to Gallery” → file is saved to device gallery immediately.
+
+Please confirm once this issue has been fixed and verified in the running system.
+
+Thank you.
