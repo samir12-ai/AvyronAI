@@ -67,6 +67,18 @@ export const BOUNDARY_SOFT_PATTERNS = [
   { pattern: /\bstrategic master plan\b/gi, domain: "strategy", replacement: "strategic framework" },
   { pattern: /\bexecution plan\b/gi, domain: "strategy", replacement: "implementation framework" },
   { pattern: /\bgo.to.market strategy\b/gi, domain: "strategy", replacement: "market approach" },
+  { pattern: /\b(increase|grow|build)\s+(your\s+)?net worth\b/gi, domain: "financial", replacement: "improve financial decision clarity" },
+  { pattern: /\beliminating?\s+debt\b/gi, domain: "financial", replacement: "strengthening financial discipline" },
+  { pattern: /\b(eliminate|reduce|cut)\s+(your\s+)?debt\b/gi, domain: "financial", replacement: "strengthen financial discipline" },
+  { pattern: /\bincrease\s+(your\s+)?savings?\b/gi, domain: "financial", replacement: "improve financial planning confidence" },
+  { pattern: /\bfinancial freedom\b/gi, domain: "financial", replacement: "financial planning confidence" },
+  { pattern: /\bwealth building\b/gi, domain: "financial", replacement: "financial clarity building" },
+  { pattern: /\bwealth creation\b/gi, domain: "financial", replacement: "financial clarity development" },
+  { pattern: /\bget rich\b/gi, domain: "financial", replacement: "improve financial outcomes" },
+  { pattern: /\bmake money\b/gi, domain: "financial", replacement: "generate value" },
+  { pattern: /\bsave money\b/gi, domain: "financial", replacement: "optimize resource allocation" },
+  { pattern: /\bdebt.free\b/gi, domain: "financial", replacement: "financially disciplined" },
+  { pattern: /\bfinancial independence\b/gi, domain: "financial", replacement: "financial planning autonomy" },
 ];
 
 export const MIN_PROOF_STRENGTH = 0.30;

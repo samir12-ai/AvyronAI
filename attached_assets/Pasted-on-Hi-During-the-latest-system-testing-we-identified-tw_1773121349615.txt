@@ -1,0 +1,99 @@
+on"}
+
+Hi,
+
+During the latest system testing we identified two structural issues inside the Offer Engine that must be fixed to preserve the Master Plan architecture and prevent recurring boundary violations.
+
+Both issues appear in the current Offer Engine output and indicate that the engine sometimes generates outputs that are not fully aligned with upstream strategic logic.
+
+I will outline the problems and the required fixes below.
+
+---
+
+First issue: Mechanism misalignment with Differentiation Engine.
+
+The system reported a positioning inconsistency warning stating that the Offer mechanism does not align with the Differentiation mechanism framing.
+
+This indicates that the Offer Engine is sometimes generating a mechanism that differs from the mechanism defined by the Differentiation Engine.
+
+In the Master Plan architecture the mechanism defined by the Differentiation Engine must remain authoritative.
+
+Offer Engine is allowed to build the offer around that mechanism, but it must not replace or redefine it.
+
+Example of a problematic situation:
+
+If the Differentiation Engine defines the mechanism as a structured system or framework, the Offer Engine must not generate a bootcamp, course, or workshop mechanism unless it is explicitly derived from that framework.
+
+To fix this, please implement a mechanism lock rule.
+
+The Offer Engine must read the mechanism framing directly from the Differentiation snapshot and enforce that the offer mechanism remains within that same framing category.
+
+If a generated offer mechanism falls outside that structure, the engine should regenerate the offer instead of returning a misaligned result.
+
+---
+
+Second issue: Boundary violations triggered by financial claims.
+
+The current offer output contains phrases such as eliminating debt or increasing savings within a defined time frame.
+
+These phrases can be interpreted by the boundary guard as financial advisory claims or investment outcomes, which fall outside the domain of the Offer Engine.
+
+However, these phrases are appearing as part of transformation statements rather than execution instructions.
+
+Instead of rejecting the output completely, the system should sanitize these phrases.
+
+For example:
+
+Phrases such as increasing net worth, eliminating debt, or financial freedom promises should be normalized into safer strategic outcomes such as improving financial decision clarity, strengthening financial discipline, or improving financial planning confidence.
+
+Please add a boundary sanitization layer before triggering a boundary violation.
+
+The system should only trigger a full violation when the engine clearly generates content belonging to another domain such as advertising instructions, funnel construction, or campaign execution.
+
+---
+
+Third issue: Offer alignment validation before saving snapshots.
+
+Before an Offer snapshot is saved, the engine should validate the following alignment conditions:
+
+The offer mechanism must match the Differentiation mechanism category.
+
+The outcome statement must reflect the audience pain signals identified earlier in the pipeline.
+
+The deliverables must logically support the defined mechanism.
+
+If any of these conditions fail, the engine should regenerate the offer instead of persisting an inconsistent snapshot.
+
+---
+
+Fourth requirement: Preserve strict engine boundaries.
+
+While adding sanitization, the system must still block true cross engine violations.
+
+The Offer Engine must never generate:
+
+Advertising instructions.
+
+Marketing copy or hooks.
+
+Channel recommendations.
+
+Funnel structure.
+
+Campaign execution instructions.
+
+If any of these appear, the system must still trigger the integrity failure response and prevent snapshot persistence.
+
+---
+
+Finally, after implementing these changes please verify that the updates are actually applied to the running system.
+
+Please restart the backend services, confirm that the updated Offer Engine logic is active, and run a full pipeline test across the entire system.
+
+The pipeline should be tested from Market Intelligence through Audience, Positioning, Differentiation, Offer, Funnel, Integrity, and Awareness.
+
+This verification step is important to ensure that the fixes are not only implemented in code but are also running in the live system.
+
+Please confirm once these changes are implemented and deployed.
+
+Thank
