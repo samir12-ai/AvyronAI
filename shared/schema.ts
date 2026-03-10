@@ -1738,3 +1738,35 @@ export const awarenessSnapshots = pgTable("awareness_snapshots", {
 });
 
 export type AwarenessSnapshot = typeof awarenessSnapshots.$inferSelect;
+
+export const persuasionSnapshots = pgTable("persuasion_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  awarenessSnapshotId: varchar("awareness_snapshot_id").notNull(),
+  integritySnapshotId: varchar("integrity_snapshot_id").notNull(),
+  funnelSnapshotId: varchar("funnel_snapshot_id").notNull(),
+  offerSnapshotId: varchar("offer_snapshot_id").notNull(),
+  miSnapshotId: varchar("mi_snapshot_id").notNull(),
+  audienceSnapshotId: varchar("audience_snapshot_id").notNull(),
+  positioningSnapshotId: varchar("positioning_snapshot_id").notNull(),
+  differentiationSnapshotId: varchar("differentiation_snapshot_id").notNull(),
+  engineVersion: integer("engine_version").notNull().default(1),
+  status: text("status").notNull().default("COMPLETE"),
+  statusMessage: text("status_message"),
+  primaryRoute: text("primary_route"),
+  alternativeRoute: text("alternative_route"),
+  rejectedRoute: text("rejected_route"),
+  layerResults: text("layer_results"),
+  structuralWarnings: text("structural_warnings"),
+  boundaryCheck: text("boundary_check"),
+  dataReliability: text("data_reliability"),
+  confidenceNormalized: boolean("confidence_normalized").default(false),
+  persuasionStrengthScore: doublePrecision("persuasion_strength_score"),
+  executionTimeMs: integer("execution_time_ms"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type PersuasionSnapshot = typeof persuasionSnapshots.$inferSelect;

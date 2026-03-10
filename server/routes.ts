@@ -28,6 +28,7 @@ import { registerOfferEngineRoutes } from "./offer-engine/routes";
 import { registerFunnelEngineRoutes } from "./funnel-engine/routes";
 import { registerIntegrityEngineRoutes } from "./integrity-engine/routes";
 import { registerAwarenessEngineRoutes } from "./awareness-engine/routes";
+import { registerPersuasionEngineRoutes } from "./persuasion-engine/routes";
 import { storeTokensAfterOAuth, runAllHealthChecks } from "./meta-token-manager";
 import { redactToken } from "./meta-crypto";
 import { initMetaMetrics } from "./meta-metrics";
@@ -1347,6 +1348,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerFunnelEngineRoutes(app);
   registerIntegrityEngineRoutes(app);
   registerAwarenessEngineRoutes(app);
+  registerPersuasionEngineRoutes(app);
 
   initMetaMetrics();
 

@@ -1,0 +1,234 @@
+Hello Replit Team,
+
+We are ready to implement the next engine in the Master Plan execution layer:
+
+Engine Name: Persuasion Layer Engine V3
+
+This engine must be implemented with the same architectural discipline and hardening standards used in the previous engines. The goal is to produce a practical persuasion logic system, not a copywriting generator, and to ensure it never breaks or mutates the upstream strategy defined by the Master Plan.
+
+This engine must be operationally and structurally locked, meaning it should prevent common architectural mistakes that frequently appear in marketing AI systems.
+
+Below are the requirements.
+
+---
+
+## 1. Role of the Persuasion Layer Engine
+
+This engine determines how the audience should be persuaded once awareness has been achieved.
+
+It does NOT generate ads, copy, hooks, or content.
+
+Instead, it produces the persuasion logic structure that will guide downstream systems.
+
+Its outputs should include:
+
+• Persuasion mode  
+• Objection map  
+• Trust-building sequence  
+• Influence drivers  
+• Message priority order
+
+This engine converts strategy into persuasion architecture.
+
+---
+
+## 2. Master Plan Preservation Rules
+
+The Persuasion Engine must never modify upstream engines.
+
+It may read only from:
+
+• Market Intelligence snapshot  
+• Audience snapshot  
+• Positioning snapshot  
+• Differentiation snapshot  
+• Offer snapshot  
+• Funnel snapshot  
+• Integrity snapshot  
+• Awareness snapshot
+
+Under no circumstances may it mutate or overwrite these values.
+
+If upstream snapshots are missing or incompatible versions are detected, the engine must hard fail and return an integrity error.
+
+---
+
+## 3. Strict Scope Boundary
+
+The engine must not perform any of the following:
+
+• Generate marketing copy  
+• Generate ad hooks  
+• Write sales scripts  
+• Change offer mechanisms  
+• Change funnel stages  
+• Select channels  
+• Generate content ideas  
+• Rewrite positioning
+
+These tasks belong to other engines.
+
+Any attempt by the AI model to output execution-level content should trigger Boundary Enforcement.
+
+---
+
+## 4. Persuasion Analysis Layers
+
+The engine should run the following validation layers:
+
+1. Awareness-to-Persuasion Fit  
+   Ensures persuasion logic matches the awareness route selected earlier.
+
+2. Objection Detection  
+   Identifies the most probable trust and decision barriers.
+
+3. Trust Barrier Mapping  
+   Detects whether trust deficits exist and where they must be resolved.
+
+4. Influence Driver Selection  
+   Chooses the relevant persuasion principles (authority, proof, reciprocity, etc.).
+
+5. Proof Priority Mapping  
+   Determines which type of proof must appear first.
+
+6. Message Order Logic  
+   Determines the correct persuasion sequence.
+
+7. Anti-Hype Guard  
+   Prevents unrealistic claims or exaggerated persuasion tactics.
+
+8. Persuasion Strength Scoring  
+   Evaluates the coherence of the persuasion structure.
+
+---
+
+## 5. Input Sources
+
+Inputs must include:
+
+• Audience pain signals  
+• audience objections  
+• awareness stage  
+• trust level  
+• differentiation mechanism  
+• offer mechanism  
+• funnel structure  
+• proof architecture
+
+If signal density is low, confidence must be reduced accordingly.
+
+---
+
+## 6. Output Format
+
+The engine should produce:
+
+• Primary persuasion route  
+• Alternative persuasion route  
+• Rejected persuasion route
+
+Each route must include:
+
+• persuasion mode  
+• primary influence drivers  
+• objection priorities  
+• trust sequence  
+• message order logic
+
+No marketing text should be generated.
+
+---
+
+## 7. System Hardening
+
+The engine must include:
+
+• Boundary enforcement rules  
+• Snapshot integrity validation  
+• Version compatibility checks  
+• Confidence normalization  
+• Generic persuasion pattern detection  
+• AI hallucination suppression
+
+If any integrity rule fails, the engine must return:
+
+INTEGRITY_FAILED (HTTP 422)  
+Snapshot must not be saved.
+
+---
+
+## 8. Persistence Rules
+
+Create a new table:
+
+persuasion_snapshots
+
+Each snapshot must store:
+
+• accountId  
+• campaignId  
+• engineVersion  
+• timestamp  
+• upstream_snapshot_ids  
+• persuasion routes  
+• confidence score
+
+Snapshot retention must be capped per campaign to prevent database bloat.
+
+---
+
+## 9. Routes
+
+The engine should expose:
+
+POST /api/persuasion-engine/analyze  
+GET /api/persuasion-engine/latest
+
+Ensure correct accountId and campaignId scoping.
+
+---
+
+## 10. UI Integration
+
+Add the engine as the next step in the Strategies pipeline after Awareness:
+
+Positioning → Differentiation → Offer → Funnel → Integrity → Awareness → Persuasion
+
+UI should display:
+
+• persuasion routes  
+• persuasion mode badge  
+• objection map  
+• trust sequence  
+• confidence score
+
+---
+
+## 11. Critical Engineering Safeguards
+
+Please ensure the following mistakes are avoided:
+
+• AI generating ad copy instead of persuasion logic  
+• mutation of upstream strategic decisions  
+• hallucinated persuasion structures not grounded in inputs  
+• weak signal data producing false high confidence  
+• persuasion routes conflicting with awareness route  
+• snapshot corruption across campaigns
+
+These failures must be prevented at the engine level.
+
+---
+
+## 12. Deployment Verification
+
+After implementation:
+
+1. Restart backend services  
+2. Confirm new routes are active  
+3. Run end-to-end pipeline test  
+4. Verify snapshot persistence  
+5. Ensure no upstream engine values were modified
+
+Please confirm once the engine is fully implemented and verified in the running system.
+
+Thank you.

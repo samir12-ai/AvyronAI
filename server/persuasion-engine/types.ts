@@ -1,0 +1,120 @@
+export interface PersuasionMIInput {
+  marketDiagnosis: string | null;
+  overallConfidence: number;
+  opportunitySignals: any[];
+  threatSignals: any[];
+}
+
+export interface PersuasionAudienceInput {
+  objectionMap: Record<string, any>;
+  emotionalDrivers: any[];
+  maturityIndex: number | null;
+  awarenessLevel: string | null;
+  audiencePains: any[];
+  desireMap: Record<string, any>;
+  audienceSegments: any[];
+}
+
+export interface PersuasionPositioningInput {
+  territories: any[];
+  enemyDefinition: string | null;
+  contrastAxis: string | null;
+  narrativeDirection: string | null;
+  confidenceScore: number | null;
+}
+
+export interface PersuasionDifferentiationInput {
+  pillars: any[];
+  mechanismFraming: any;
+  authorityMode: string | null;
+  claimStructures: any[];
+  proofArchitecture: any[];
+  confidenceScore: number | null;
+}
+
+export interface PersuasionOfferInput {
+  offerName: string;
+  coreOutcome: string;
+  mechanismDescription: string;
+  deliverables: string[];
+  proofAlignment: string[];
+  offerStrengthScore: number;
+  riskNotes: string[];
+  frictionLevel: number;
+}
+
+export interface PersuasionFunnelInput {
+  funnelName: string;
+  funnelType: string;
+  stageMap: any[];
+  trustPath: any[];
+  proofPlacements: any[];
+  commitmentLevel: string;
+  frictionMap: any[];
+  entryTrigger: { mechanismType: string; purpose: string };
+  funnelStrengthScore: number;
+}
+
+export interface PersuasionIntegrityInput {
+  overallIntegrityScore: number;
+  safeToExecute: boolean;
+  layerResults: any[];
+  structuralWarnings: string[];
+  flaggedInconsistencies: string[];
+}
+
+export interface PersuasionAwarenessInput {
+  entryMechanismType: string;
+  targetReadinessStage: string;
+  triggerClass: string;
+  trustRequirement: string;
+  funnelCompatibility: string;
+  awarenessStrengthScore: number;
+  frictionNotes: string[];
+}
+
+export interface LayerResult {
+  layerName: string;
+  passed: boolean;
+  score: number;
+  findings: string[];
+  warnings: string[];
+}
+
+export interface PersuasionRoute {
+  routeName: string;
+  persuasionMode: string;
+  primaryInfluenceDrivers: string[];
+  objectionPriorities: string[];
+  trustSequence: string[];
+  messageOrderLogic: string[];
+  persuasionStrengthScore: number;
+  frictionNotes: string[];
+  rejectionReason: string | null;
+}
+
+export interface DataReliabilityDiagnostics {
+  signalDensity: number;
+  signalDiversity: number;
+  narrativeStability: number;
+  competitorValidity: number;
+  marketMaturityConfidence: number;
+  overallReliability: number;
+  isWeak: boolean;
+  advisories: string[];
+}
+
+export interface PersuasionResult {
+  status: string;
+  statusMessage: string | null;
+  primaryRoute: PersuasionRoute;
+  alternativeRoute: PersuasionRoute;
+  rejectedRoute: PersuasionRoute;
+  layerResults: LayerResult[];
+  structuralWarnings: string[];
+  boundaryCheck: { passed: boolean; violations: string[]; sanitized?: boolean; sanitizedText?: string; warnings?: string[] };
+  dataReliability: DataReliabilityDiagnostics;
+  confidenceNormalized: boolean;
+  executionTimeMs: number;
+  engineVersion: number;
+}

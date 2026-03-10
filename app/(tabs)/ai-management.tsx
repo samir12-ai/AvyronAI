@@ -38,6 +38,7 @@ import OfferEngine from '@/components/OfferEngine';
 import FunnelEngine from '@/components/FunnelEngine';
 import IntegrityEngine from '@/components/IntegrityEngine';
 import AwarenessEngine from '@/components/AwarenessEngine';
+import PersuasionEngine from '@/components/PersuasionEngine';
 import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
 
 interface AIAudience {
@@ -57,7 +58,7 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'strategies' | 'positioning' | 'differentiation' | 'offers' | 'funnels' | 'integrity' | 'awareness' | 'control' | 'marketdb' | 'publisher' | 'audience' | 'leads';
+type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'strategies' | 'positioning' | 'differentiation' | 'offers' | 'funnels' | 'integrity' | 'awareness' | 'persuasion' | 'control' | 'marketdb' | 'publisher' | 'audience' | 'leads';
 
 interface AIMgmtPersistedState {
   activeTab: TabView;
@@ -377,6 +378,7 @@ export default function AIManagementScreen() {
     { key: 'funnels', icon: 'funnel-outline', label: 'Funnel Engine', color: '#14B8A6', description: '8-layer funnel decision with trust path and proof placement' },
     { key: 'integrity', icon: 'shield-checkmark-outline', label: 'Integrity Engine', color: '#6366F1', description: 'Final validation gate — 8-layer strategic consistency check before execution' },
     { key: 'awareness', icon: 'eye-outline', label: 'Awareness Engine', color: '#F97316', description: '8-layer awareness architecture — entry routes, readiness mapping, and trigger classes' },
+    { key: 'persuasion', icon: 'megaphone-outline', label: 'Persuasion Engine', color: '#EC4899', description: '8-layer persuasion logic — influence drivers, objection mapping, and trust sequencing' },
   ];
 
   const renderStrategiesBranch = () => (
@@ -1201,6 +1203,7 @@ export default function AIManagementScreen() {
           : activeTab === 'funnels' ? <CampaignGuard><FunnelEngine /></CampaignGuard>
           : activeTab === 'integrity' ? <CampaignGuard><IntegrityEngine /></CampaignGuard>
           : activeTab === 'awareness' ? <CampaignGuard><AwarenessEngine /></CampaignGuard>
+          : activeTab === 'persuasion' ? <CampaignGuard><PersuasionEngine /></CampaignGuard>
           : activeTab === 'control' ? renderControlCenter()
 
           : activeTab === 'marketdb' ? <MarketDatabaseAdmin />
