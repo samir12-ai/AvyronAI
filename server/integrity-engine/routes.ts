@@ -51,7 +51,7 @@ export function registerIntegrityEngineRoutes(app: Express) {
         return res.status(400).json({ error: "funnelSnapshotId is required" });
       }
 
-      const [funnelSnapshot] = await db.select().from(funnelSnapshots)
+      let [funnelSnapshot] = await db.select().from(funnelSnapshots)
         .where(and(
           eq(funnelSnapshots.id, funnelSnapshotId),
           eq(funnelSnapshots.campaignId, campaignId),
@@ -67,10 +67,25 @@ export function registerIntegrityEngineRoutes(app: Express) {
       }
 
       if (funnelSnapshot.engineVersion !== FUNNEL_ENGINE_VERSION) {
-        return res.status(400).json({
-          error: "VERSION_MISMATCH",
-          message: `Funnel snapshot version ${funnelSnapshot.engineVersion} does not match current version ${FUNNEL_ENGINE_VERSION}`,
-        });
+        console.log(`[IntegrityEngine-V3] Funnel snapshot ${funnelSnapshotId} version mismatch (v${funnelSnapshot.engineVersion} vs v${FUNNEL_ENGINE_VERSION}), searching for latest valid funnel snapshot`);
+        const [latestFunnel] = await db.select().from(funnelSnapshots)
+          .where(and(
+            eq(funnelSnapshots.campaignId, campaignId),
+            eq(funnelSnapshots.accountId, accountId),
+            eq(funnelSnapshots.engineVersion, FUNNEL_ENGINE_VERSION),
+            eq(funnelSnapshots.status, "COMPLETE"),
+          ))
+          .orderBy(desc(funnelSnapshots.createdAt))
+          .limit(1);
+        if (latestFunnel) {
+          console.log(`[IntegrityEngine-V3] Using latest valid funnel snapshot ${latestFunnel.id} (v${latestFunnel.engineVersion})`);
+          funnelSnapshot = latestFunnel;
+        } else {
+          return res.status(400).json({
+            error: "VERSION_MISMATCH",
+            message: `Funnel snapshot version ${funnelSnapshot.engineVersion} does not match current version ${FUNNEL_ENGINE_VERSION} — please re-run Funnel Engine first`,
+          });
+        }
       }
 
       const offerSnapshotId = funnelSnapshot.offerSnapshotId;
@@ -241,9 +256,9 @@ export function registerIntegrityEngineRoutes(app: Express) {
       const [saved] = await db.insert(integritySnapshots).values({
         accountId,
         campaignId,
-        funnelSnapshotId,
+        funnelSnapshotId: funnelSnapshot.id,
         offerSnapshotId,
-        miSnapshotId,
+        miSnapshotId: miSnapshot.id,
         audienceSnapshotId,
         positioningSnapshotId,
         differentiationSnapshotId,

@@ -56,7 +56,7 @@ export function registerAwarenessEngineRoutes(app: Express) {
         return res.status(400).json({ error: "integritySnapshotId is required" });
       }
 
-      const [integritySnapshot] = await db.select().from(integritySnapshots)
+      let [integritySnapshot] = await db.select().from(integritySnapshots)
         .where(and(
           eq(integritySnapshots.id, integritySnapshotId),
           eq(integritySnapshots.campaignId, campaignId),
@@ -72,10 +72,24 @@ export function registerAwarenessEngineRoutes(app: Express) {
       }
 
       if (integritySnapshot.engineVersion !== INTEGRITY_ENGINE_VERSION) {
-        return res.status(400).json({
-          error: "VERSION_MISMATCH",
-          message: `Integrity snapshot version ${integritySnapshot.engineVersion} does not match current version ${INTEGRITY_ENGINE_VERSION}`,
-        });
+        console.log(`[AwarenessEngine-V3] Integrity snapshot ${integritySnapshotId} version mismatch (v${integritySnapshot.engineVersion} vs v${INTEGRITY_ENGINE_VERSION}), searching for latest valid`);
+        const [latestIntegrity] = await db.select().from(integritySnapshots)
+          .where(and(
+            eq(integritySnapshots.campaignId, campaignId),
+            eq(integritySnapshots.accountId, accountId),
+            eq(integritySnapshots.status, "COMPLETE"),
+            eq(integritySnapshots.engineVersion, INTEGRITY_ENGINE_VERSION),
+          ))
+          .orderBy(desc(integritySnapshots.createdAt))
+          .limit(1);
+        if (!latestIntegrity) {
+          return res.status(400).json({
+            error: "VERSION_MISMATCH",
+            message: `Integrity snapshot version ${integritySnapshot.engineVersion} does not match current version ${INTEGRITY_ENGINE_VERSION} — please re-run Integrity Engine`,
+          });
+        }
+        console.log(`[AwarenessEngine-V3] Using latest valid Integrity snapshot ${latestIntegrity.id}`);
+        Object.assign(integritySnapshot, latestIntegrity);
       }
 
       const funnelSnapshotId = integritySnapshot.funnelSnapshotId;
@@ -129,7 +143,7 @@ export function registerAwarenessEngineRoutes(app: Express) {
         }
       }
 
-      const [audSnapshot] = await db.select().from(audienceSnapshots)
+      let [audSnapshot] = await db.select().from(audienceSnapshots)
         .where(and(eq(audienceSnapshots.id, audienceSnapshotId), eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.accountId, accountId)))
         .limit(1);
 
@@ -137,10 +151,24 @@ export function registerAwarenessEngineRoutes(app: Express) {
         return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Audience snapshot not found" });
       }
       if (audSnapshot.engineVersion !== AUDIENCE_ENGINE_VERSION) {
-        return res.status(400).json({ error: "VERSION_MISMATCH", message: `Audience snapshot version ${audSnapshot.engineVersion} does not match current version ${AUDIENCE_ENGINE_VERSION} — please re-run Audience Engine` });
+        console.log(`[AwarenessEngine-V3] Audience snapshot ${audienceSnapshotId} version mismatch (v${audSnapshot.engineVersion} vs v${AUDIENCE_ENGINE_VERSION}), searching for latest valid`);
+        const [latestAud] = await db.select().from(audienceSnapshots)
+          .where(and(
+            eq(audienceSnapshots.campaignId, campaignId),
+            eq(audienceSnapshots.accountId, accountId),
+            eq(audienceSnapshots.engineVersion, AUDIENCE_ENGINE_VERSION),
+          ))
+          .orderBy(desc(audienceSnapshots.createdAt))
+          .limit(1);
+        if (latestAud) {
+          console.log(`[AwarenessEngine-V3] Using latest valid Audience snapshot ${latestAud.id}`);
+          audSnapshot = latestAud;
+        } else {
+          return res.status(400).json({ error: "VERSION_MISMATCH", message: `Audience snapshot version ${audSnapshot.engineVersion} does not match current version ${AUDIENCE_ENGINE_VERSION} — please re-run Audience Engine` });
+        }
       }
 
-      const [posSnapshot] = await db.select().from(positioningSnapshots)
+      let [posSnapshot] = await db.select().from(positioningSnapshots)
         .where(and(eq(positioningSnapshots.id, positioningSnapshotId), eq(positioningSnapshots.campaignId, campaignId), eq(positioningSnapshots.accountId, accountId)))
         .limit(1);
 
@@ -148,10 +176,25 @@ export function registerAwarenessEngineRoutes(app: Express) {
         return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Positioning snapshot not found" });
       }
       if (posSnapshot.engineVersion !== POSITIONING_ENGINE_VERSION) {
-        return res.status(400).json({ error: "VERSION_MISMATCH", message: `Positioning snapshot version ${posSnapshot.engineVersion} does not match current version ${POSITIONING_ENGINE_VERSION} — please re-run Positioning Engine` });
+        console.log(`[AwarenessEngine-V3] Positioning snapshot ${positioningSnapshotId} version mismatch (v${posSnapshot.engineVersion} vs v${POSITIONING_ENGINE_VERSION}), searching for latest valid`);
+        const [latestPos] = await db.select().from(positioningSnapshots)
+          .where(and(
+            eq(positioningSnapshots.campaignId, campaignId),
+            eq(positioningSnapshots.accountId, accountId),
+            eq(positioningSnapshots.status, "COMPLETE"),
+            eq(positioningSnapshots.engineVersion, POSITIONING_ENGINE_VERSION),
+          ))
+          .orderBy(desc(positioningSnapshots.createdAt))
+          .limit(1);
+        if (latestPos) {
+          console.log(`[AwarenessEngine-V3] Using latest valid Positioning snapshot ${latestPos.id}`);
+          posSnapshot = latestPos;
+        } else {
+          return res.status(400).json({ error: "VERSION_MISMATCH", message: `Positioning snapshot version ${posSnapshot.engineVersion} does not match current version ${POSITIONING_ENGINE_VERSION} — please re-run Positioning Engine` });
+        }
       }
 
-      const [diffSnapshot] = await db.select().from(differentiationSnapshots)
+      let [diffSnapshot] = await db.select().from(differentiationSnapshots)
         .where(and(eq(differentiationSnapshots.id, differentiationSnapshotId), eq(differentiationSnapshots.campaignId, campaignId), eq(differentiationSnapshots.accountId, accountId)))
         .limit(1);
 
@@ -159,10 +202,25 @@ export function registerAwarenessEngineRoutes(app: Express) {
         return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Differentiation snapshot not found" });
       }
       if (diffSnapshot.engineVersion !== DIFF_ENGINE_VERSION) {
-        return res.status(400).json({ error: "VERSION_MISMATCH", message: `Differentiation snapshot version ${diffSnapshot.engineVersion} does not match current version ${DIFF_ENGINE_VERSION} — please re-run Differentiation Engine` });
+        console.log(`[AwarenessEngine-V3] Differentiation snapshot ${differentiationSnapshotId} version mismatch (v${diffSnapshot.engineVersion} vs v${DIFF_ENGINE_VERSION}), searching for latest valid`);
+        const [latestDiff] = await db.select().from(differentiationSnapshots)
+          .where(and(
+            eq(differentiationSnapshots.campaignId, campaignId),
+            eq(differentiationSnapshots.accountId, accountId),
+            eq(differentiationSnapshots.status, "COMPLETE"),
+            eq(differentiationSnapshots.engineVersion, DIFF_ENGINE_VERSION),
+          ))
+          .orderBy(desc(differentiationSnapshots.createdAt))
+          .limit(1);
+        if (latestDiff) {
+          console.log(`[AwarenessEngine-V3] Using latest valid Differentiation snapshot ${latestDiff.id}`);
+          diffSnapshot = latestDiff;
+        } else {
+          return res.status(400).json({ error: "VERSION_MISMATCH", message: `Differentiation snapshot version ${diffSnapshot.engineVersion} does not match current version ${DIFF_ENGINE_VERSION} — please re-run Differentiation Engine` });
+        }
       }
 
-      const [offerSnapshot] = await db.select().from(offerSnapshots)
+      let [offerSnapshot] = await db.select().from(offerSnapshots)
         .where(and(eq(offerSnapshots.id, offerSnapshotId), eq(offerSnapshots.campaignId, campaignId), eq(offerSnapshots.accountId, accountId)))
         .limit(1);
 
@@ -170,10 +228,25 @@ export function registerAwarenessEngineRoutes(app: Express) {
         return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Offer snapshot not found" });
       }
       if (offerSnapshot.engineVersion !== OFFER_ENGINE_VERSION) {
-        return res.status(400).json({ error: "VERSION_MISMATCH", message: `Offer snapshot version ${offerSnapshot.engineVersion} does not match current version ${OFFER_ENGINE_VERSION} — please re-run Offer Engine` });
+        console.log(`[AwarenessEngine-V3] Offer snapshot ${offerSnapshotId} version mismatch (v${offerSnapshot.engineVersion} vs v${OFFER_ENGINE_VERSION}), searching for latest valid`);
+        const [latestOffer] = await db.select().from(offerSnapshots)
+          .where(and(
+            eq(offerSnapshots.campaignId, campaignId),
+            eq(offerSnapshots.accountId, accountId),
+            eq(offerSnapshots.status, "COMPLETE"),
+            eq(offerSnapshots.engineVersion, OFFER_ENGINE_VERSION),
+          ))
+          .orderBy(desc(offerSnapshots.createdAt))
+          .limit(1);
+        if (latestOffer) {
+          console.log(`[AwarenessEngine-V3] Using latest valid Offer snapshot ${latestOffer.id}`);
+          offerSnapshot = latestOffer;
+        } else {
+          return res.status(400).json({ error: "VERSION_MISMATCH", message: `Offer snapshot version ${offerSnapshot.engineVersion} does not match current version ${OFFER_ENGINE_VERSION} — please re-run Offer Engine` });
+        }
       }
 
-      const [funnelSnapshot] = await db.select().from(funnelSnapshots)
+      let [funnelSnapshot] = await db.select().from(funnelSnapshots)
         .where(and(eq(funnelSnapshots.id, funnelSnapshotId), eq(funnelSnapshots.campaignId, campaignId), eq(funnelSnapshots.accountId, accountId)))
         .limit(1);
 
@@ -181,7 +254,22 @@ export function registerAwarenessEngineRoutes(app: Express) {
         return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Funnel snapshot not found" });
       }
       if (funnelSnapshot.engineVersion !== FUNNEL_ENGINE_VERSION) {
-        return res.status(400).json({ error: "VERSION_MISMATCH", message: `Funnel snapshot version ${funnelSnapshot.engineVersion} does not match current version ${FUNNEL_ENGINE_VERSION} — please re-run Funnel Engine` });
+        console.log(`[AwarenessEngine-V3] Funnel snapshot ${funnelSnapshotId} version mismatch (v${funnelSnapshot.engineVersion} vs v${FUNNEL_ENGINE_VERSION}), searching for latest valid`);
+        const [latestFunnel] = await db.select().from(funnelSnapshots)
+          .where(and(
+            eq(funnelSnapshots.campaignId, campaignId),
+            eq(funnelSnapshots.accountId, accountId),
+            eq(funnelSnapshots.status, "COMPLETE"),
+            eq(funnelSnapshots.engineVersion, FUNNEL_ENGINE_VERSION),
+          ))
+          .orderBy(desc(funnelSnapshots.createdAt))
+          .limit(1);
+        if (latestFunnel) {
+          console.log(`[AwarenessEngine-V3] Using latest valid Funnel snapshot ${latestFunnel.id}`);
+          funnelSnapshot = latestFunnel;
+        } else {
+          return res.status(400).json({ error: "VERSION_MISMATCH", message: `Funnel snapshot version ${funnelSnapshot.engineVersion} does not match current version ${FUNNEL_ENGINE_VERSION} — please re-run Funnel Engine` });
+        }
       }
 
       const miInput = {
@@ -275,13 +363,13 @@ export function registerAwarenessEngineRoutes(app: Express) {
       const [saved] = await db.insert(awarenessSnapshots).values({
         accountId,
         campaignId,
-        integritySnapshotId,
-        funnelSnapshotId,
-        offerSnapshotId,
-        miSnapshotId,
-        audienceSnapshotId,
-        positioningSnapshotId,
-        differentiationSnapshotId,
+        integritySnapshotId: integritySnapshot.id,
+        funnelSnapshotId: funnelSnapshot.id,
+        offerSnapshotId: offerSnapshot.id,
+        miSnapshotId: miSnapshot.id,
+        audienceSnapshotId: audSnapshot.id,
+        positioningSnapshotId: posSnapshot.id,
+        differentiationSnapshotId: diffSnapshot.id,
         engineVersion: ENGINE_VERSION,
         status: result.status,
         statusMessage: result.statusMessage,

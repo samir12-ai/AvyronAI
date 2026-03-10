@@ -1192,14 +1192,29 @@ export async function runPositioningEngine(
     return buildEmptyResult("MISSING_DEPENDENCY", `MI snapshot ${miSnapshotId} belongs to campaign ${miSnapshot.campaignId}, not ${campaignId}`, executionTimeMs, miSnapshotId, audienceSnapshotId);
   }
 
+  let activeMiSnapshot = miSnapshot;
   const miIntegrity = verifySnapshotIntegrity(miSnapshot, MI_ENGINE_VERSION, campaignId);
   if (!miIntegrity.valid) {
-    console.log(`[PositioningEngine-V3] MI snapshot integrity failed: ${miIntegrity.failures.join(", ")}`);
-    const executionTimeMs = Date.now() - startTime;
-    return buildEmptyResult("MISSING_DEPENDENCY", `MI snapshot integrity verification failed: ${miIntegrity.failures.join("; ")}`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+    console.log(`[PositioningEngine-V3] MI snapshot integrity failed: ${miIntegrity.failures.join(", ")} — attempting self-healing`);
+    const [healed] = await db.select().from(miSnapshots)
+      .where(and(
+        eq(miSnapshots.campaignId, campaignId),
+        eq(miSnapshots.accountId, accountId),
+        eq(miSnapshots.status, "COMPLETE"),
+        eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
+      ))
+      .orderBy(desc(miSnapshots.createdAt))
+      .limit(1);
+    if (!healed) {
+      console.log(`[PositioningEngine-V3] Self-healing failed: no valid MI snapshot found for campaign ${campaignId}`);
+      const executionTimeMs = Date.now() - startTime;
+      return buildEmptyResult("MISSING_DEPENDENCY", `MI snapshot integrity verification failed and no valid fallback found: ${miIntegrity.failures.join("; ")}`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+    }
+    console.log(`[PositioningEngine-V3] Self-healed: resolved stale MI ${miSnapshotId} → ${healed.id}`);
+    activeMiSnapshot = healed;
   }
 
-  const miFreshness = miSnapshot.dataFreshnessDays;
+  const miFreshness = activeMiSnapshot.dataFreshnessDays;
   if (miFreshness !== null && miFreshness !== undefined && miFreshness > 14) {
     console.log(`[PositioningEngine-V3] MI data stale: ${miFreshness}d exceeds 14d threshold — requires MI refresh first`);
     const executionTimeMs = Date.now() - startTime;
@@ -1237,11 +1252,11 @@ export async function runPositioningEngine(
     return buildEmptyResult("INSUFFICIENT_SIGNALS", `Insufficient audience signals (${totalSignals}) for positioning — need ≥${POSITIONING_THRESHOLDS.MIN_AUDIENCE_SIGNALS}`, executionTimeMs, miSnapshotId, audienceSnapshotId);
   }
 
-  const miConfidenceRaw = (miSnapshot as any).confidenceScore ?? (miSnapshot as any).overallConfidence ?? 0;
+  const miConfidenceRaw = (activeMiSnapshot as any).confidenceScore ?? (activeMiSnapshot as any).overallConfidence ?? 0;
   const dataReliability = assessDataReliability(
     competitors.length,
     totalSignals,
-    !!miSnapshot.marketDiagnosis,
+    !!activeMiSnapshot.marketDiagnosis,
     true,
     audiencePains.length > 0,
     typeof miConfidenceRaw === "number" ? miConfidenceRaw : 0,
@@ -1252,14 +1267,14 @@ export async function runPositioningEngine(
 
   console.log(`[PositioningEngine-V3] Starting 12-layer analysis | MI=${miSnapshotId} | Audience=${audienceSnapshotId} | Competitors=${competitors.length}`);
 
-  const categoryResult = layer1_categoryDetection(miSnapshot, competitors.length, totalSignals);
+  const categoryResult = layer1_categoryDetection(activeMiSnapshot, competitors.length, totalSignals);
   const category = categoryResult.macro;
   console.log(`[PositioningEngine-V3] L1 Category: ${category}${categoryResult.subcategory ? ` / ${categoryResult.subcategory}` : ""}`);
 
-  const narrativeMap = layer2_marketNarrativeMap(miSnapshot);
+  const narrativeMap = layer2_marketNarrativeMap(activeMiSnapshot);
   console.log(`[PositioningEngine-V3] L2 Narratives: ${Object.keys(narrativeMap).length} competitors mapped`);
 
-  const narrativeSaturation = layer3_narrativeSaturationDetection(narrativeMap, miSnapshot);
+  const narrativeSaturation = layer3_narrativeSaturationDetection(narrativeMap, activeMiSnapshot);
   console.log(`[PositioningEngine-V3] L3 Saturation: ${Object.keys(narrativeSaturation).length} narratives scored (authority-weighted)`);
 
   const { trustGaps, trustGapScore } = layer4_trustGapDetection(audienceSnapshot);
@@ -1268,11 +1283,11 @@ export async function runPositioningEngine(
   const segmentPriority = layer5_segmentPriorityResolution(audienceSnapshot);
   console.log(`[PositioningEngine-V3] L5 Segments: ${segmentPriority.length} prioritized`);
 
-  const { entries: marketPower, authorityGap, flankingMode } = layer6_marketPowerAnalysis(miSnapshot, competitors);
+  const { entries: marketPower, authorityGap, flankingMode } = layer6_marketPowerAnalysis(activeMiSnapshot, competitors);
   console.log(`[PositioningEngine-V3] L6 Market power: ${marketPower.length} competitors | gap=${authorityGap.toFixed(2)} | flanking=${flankingMode}`);
 
-  const contentDna = safeJsonParse(miSnapshot.contentDnaData, []);
-  const miTrajectory = safeJsonParse(miSnapshot.trajectoryData, {});
+  const contentDna = safeJsonParse(activeMiSnapshot.contentDnaData, []);
+  const miTrajectory = safeJsonParse(activeMiSnapshot.trajectoryData, {});
   const competitionIntensityFromMI = miTrajectory.competitionIntensityScore || 0;
   const opportunityGaps = layer7_opportunityGapDetection(narrativeSaturation, audienceSnapshot, marketPower, category, narrativeMap, contentDna, competitionIntensityFromMI);
   console.log(`[PositioningEngine-V3] L7 Opportunities: ${opportunityGaps.length} viable territories`);
@@ -1280,7 +1295,7 @@ export async function runPositioningEngine(
   const differentiationAxes = layer8_differentiationAxisConstruction(opportunityGaps, trustGaps, flankingMode);
   console.log(`[PositioningEngine-V3] L8 Differentiation: ${differentiationAxes.join(", ")}`);
 
-  const miStrategicSignals = extractStrategicSignals(miSnapshot);
+  const miStrategicSignals = extractStrategicSignals(activeMiSnapshot);
   const audienceStrategicSignals = extractAudienceStrategicSignals(audienceSnapshot);
   const allStrategicSignals = [...miStrategicSignals, ...audienceStrategicSignals];
   const strategicClusters = new Set(allStrategicSignals.map(s => s.cluster));
@@ -1409,8 +1424,9 @@ export async function runPositioningEngine(
       : null;
 
   const combinedSignalCount = totalSignals + allStrategicSignals.length;
+  const resolvedMiSnapshotId = activeMiSnapshot.id;
   const inputSummary = {
-    miSnapshotId,
+    miSnapshotId: resolvedMiSnapshotId,
     audienceSnapshotId,
     competitorCount: competitors.length,
     signalCount: combinedSignalCount,
@@ -1432,7 +1448,7 @@ export async function runPositioningEngine(
   const [inserted] = await db.insert(positioningSnapshots).values({
     accountId,
     campaignId,
-    miSnapshotId,
+    miSnapshotId: resolvedMiSnapshotId,
     audienceSnapshotId,
     engineVersion: POSITIONING_ENGINE_VERSION,
     status,

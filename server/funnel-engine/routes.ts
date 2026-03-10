@@ -51,33 +51,77 @@ export function registerFunnelEngineRoutes(app: Express) {
         });
       }
 
+      let activeOfferSnapshot = offerSnapshot;
       if (offerSnapshot.engineVersion !== OFFER_ENGINE_VERSION) {
-        return res.status(400).json({
-          error: "VERSION_MISMATCH",
-          message: `Offer snapshot version ${offerSnapshot.engineVersion} does not match current version ${OFFER_ENGINE_VERSION}`,
-        });
+        console.log(`[FunnelEngine-V3] Offer snapshot ${offerSnapshotId} version mismatch (v${offerSnapshot.engineVersion} vs v${OFFER_ENGINE_VERSION}), searching for latest valid offer snapshot`);
+        const [latestOffer] = await db.select().from(offerSnapshots)
+          .where(and(
+            eq(offerSnapshots.campaignId, campaignId),
+            eq(offerSnapshots.accountId, accountId),
+            eq(offerSnapshots.status, "COMPLETE"),
+            eq(offerSnapshots.engineVersion, OFFER_ENGINE_VERSION),
+          ))
+          .orderBy(desc(offerSnapshots.createdAt))
+          .limit(1);
+        if (latestOffer) {
+          console.log(`[FunnelEngine-V3] Using latest valid offer snapshot ${latestOffer.id} (v${latestOffer.engineVersion})`);
+          activeOfferSnapshot = latestOffer;
+        } else {
+          return res.status(400).json({
+            error: "VERSION_MISMATCH",
+            message: `Offer snapshot version ${offerSnapshot.engineVersion} does not match current version ${OFFER_ENGINE_VERSION} — please re-run Offer Engine first`,
+          });
+        }
       }
 
-      const miSnapshotId = offerSnapshot.miSnapshotId;
-      const audienceSnapshotId = offerSnapshot.audienceSnapshotId;
-      const positioningSnapshotId = offerSnapshot.positioningSnapshotId;
-      const differentiationSnapshotId = offerSnapshot.differentiationSnapshotId;
+      const miSnapshotId = activeOfferSnapshot.miSnapshotId;
+      const audienceSnapshotId = activeOfferSnapshot.audienceSnapshotId;
+      const positioningSnapshotId = activeOfferSnapshot.positioningSnapshotId;
+      const differentiationSnapshotId = activeOfferSnapshot.differentiationSnapshotId;
 
-      const [miSnapshot] = await db.select().from(miSnapshots)
+      let [miSnapshot] = await db.select().from(miSnapshots)
         .where(and(eq(miSnapshots.id, miSnapshotId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId)))
         .limit(1);
 
-      if (!miSnapshot) {
-        return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "MI snapshot not found or campaign/account mismatch" });
-      }
-
-      const integrityResult = verifySnapshotIntegrity(miSnapshot, MI_ENGINE_VERSION, campaignId);
-      if (!integrityResult.valid) {
-        return res.status(400).json({
-          error: "MI_INTEGRITY_FAILED",
-          message: "MI snapshot integrity check failed",
-          failures: integrityResult.failures,
-        });
+      if (miSnapshot) {
+        const integrityResult = verifySnapshotIntegrity(miSnapshot, MI_ENGINE_VERSION, campaignId);
+        if (!integrityResult.valid) {
+          console.log(`[FunnelEngine-V3] MI snapshot ${miSnapshotId} failed integrity check (v${miSnapshot.analysisVersion} vs v${MI_ENGINE_VERSION}), searching for latest valid MI snapshot`);
+          const [latestMI] = await db.select().from(miSnapshots)
+            .where(and(
+              eq(miSnapshots.campaignId, campaignId),
+              eq(miSnapshots.accountId, accountId),
+              eq(miSnapshots.status, "COMPLETE"),
+              eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
+            ))
+            .orderBy(desc(miSnapshots.createdAt))
+            .limit(1);
+          if (latestMI) {
+            console.log(`[FunnelEngine-V3] Using latest valid MI snapshot ${latestMI.id} (v${latestMI.analysisVersion})`);
+            miSnapshot = latestMI;
+          } else {
+            return res.status(400).json({
+              error: "MI_INTEGRITY_FAILED",
+              message: `MI snapshot version ${miSnapshot.analysisVersion} does not match current version ${MI_ENGINE_VERSION} — please re-run Market Intelligence first`,
+              failures: integrityResult.failures,
+            });
+          }
+        }
+      } else {
+        const [latestMI] = await db.select().from(miSnapshots)
+          .where(and(
+            eq(miSnapshots.campaignId, campaignId),
+            eq(miSnapshots.accountId, accountId),
+            eq(miSnapshots.status, "COMPLETE"),
+            eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
+          ))
+          .orderBy(desc(miSnapshots.createdAt))
+          .limit(1);
+        if (latestMI) {
+          miSnapshot = latestMI;
+        } else {
+          return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "MI snapshot not found or campaign/account mismatch" });
+        }
       }
 
       const miReadiness = getEngineReadinessState(miSnapshot, campaignId, MI_ENGINE_VERSION, 14);
@@ -147,9 +191,9 @@ export function registerFunnelEngineRoutes(app: Express) {
         confidenceScore: diffSnapshot.confidenceScore,
       };
 
-      const selectedOfferKey = offerSnapshot.selectedOption || "primary";
+      const selectedOfferKey = activeOfferSnapshot.selectedOption || "primary";
       const offerData = safeJsonParse(
-        selectedOfferKey === "alternative" ? offerSnapshot.alternativeOffer : offerSnapshot.primaryOffer
+        selectedOfferKey === "alternative" ? activeOfferSnapshot.alternativeOffer : activeOfferSnapshot.primaryOffer
       );
 
       const offerInput = {
@@ -181,8 +225,8 @@ export function registerFunnelEngineRoutes(app: Express) {
       const [saved] = await db.insert(funnelSnapshots).values({
         accountId,
         campaignId,
-        offerSnapshotId,
-        miSnapshotId,
+        offerSnapshotId: activeOfferSnapshot.id,
+        miSnapshotId: miSnapshot.id,
         audienceSnapshotId,
         positioningSnapshotId,
         differentiationSnapshotId,

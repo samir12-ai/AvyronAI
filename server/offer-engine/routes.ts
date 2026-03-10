@@ -47,41 +47,76 @@ export function registerOfferEngineRoutes(app: Express) {
         });
       }
 
-      if (diffSnapshot.engineVersion !== DIFF_ENGINE_VERSION) {
-        return res.status(400).json({
-          error: "VERSION_MISMATCH",
-          message: `Differentiation snapshot version ${diffSnapshot.engineVersion} does not match current version ${DIFF_ENGINE_VERSION}`,
-        });
+      let activeDiffSnapshot = diffSnapshot;
+      if (activeDiffSnapshot.engineVersion !== DIFF_ENGINE_VERSION) {
+        console.log(`[OfferEngine] Diff snapshot ${differentiationSnapshotId} version mismatch (v${activeDiffSnapshot.engineVersion} vs v${DIFF_ENGINE_VERSION}), searching for latest valid diff snapshot`);
+        const [latestDiff] = await db.select().from(differentiationSnapshots)
+          .where(and(
+            eq(differentiationSnapshots.campaignId, campaignId),
+            eq(differentiationSnapshots.accountId, accountId),
+            eq(differentiationSnapshots.status, "COMPLETE"),
+            eq(differentiationSnapshots.engineVersion, DIFF_ENGINE_VERSION),
+          ))
+          .orderBy(desc(differentiationSnapshots.createdAt))
+          .limit(1);
+        if (latestDiff) {
+          console.log(`[OfferEngine] Using latest valid diff snapshot ${latestDiff.id} (v${latestDiff.engineVersion})`);
+          activeDiffSnapshot = latestDiff;
+        } else {
+          return res.status(400).json({
+            error: "VERSION_MISMATCH",
+            message: `Differentiation snapshot version ${activeDiffSnapshot.engineVersion} does not match current version ${DIFF_ENGINE_VERSION} — please re-run Differentiation Engine first`,
+          });
+        }
       }
 
-      const miSnapshotId = diffSnapshot.miSnapshotId;
-      const audienceSnapshotId = diffSnapshot.audienceSnapshotId;
-      const positioningSnapshotId = diffSnapshot.positioningSnapshotId;
+      const miSnapshotId = activeDiffSnapshot.miSnapshotId;
+      const audienceSnapshotId = activeDiffSnapshot.audienceSnapshotId;
+      const positioningSnapshotId = activeDiffSnapshot.positioningSnapshotId;
 
-      const [miSnapshot] = await db.select().from(miSnapshots)
+      let [miSnapshot] = await db.select().from(miSnapshots)
         .where(and(eq(miSnapshots.id, miSnapshotId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId)))
         .limit(1);
 
-      if (!miSnapshot) {
-        return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "MI snapshot not found or campaign/account mismatch" });
-      }
-
-      const integrityResult = verifySnapshotIntegrity(miSnapshot, MI_ENGINE_VERSION, campaignId);
-      if (!integrityResult.valid) {
-        return res.status(400).json({
-          error: "MI_INTEGRITY_FAILED",
-          message: "MI snapshot integrity check failed",
-          failures: integrityResult.failures,
-        });
-      }
-
-      const miReadiness = getEngineReadinessState(miSnapshot, campaignId, MI_ENGINE_VERSION, 14);
-      if (miReadiness.state !== "READY") {
-        return res.status(400).json({
-          error: "MI_NOT_READY",
-          message: `MI not ready: ${miReadiness.state}`,
-          diagnostics: miReadiness.diagnostics,
-        });
+      if (miSnapshot) {
+        const integrityResult = verifySnapshotIntegrity(miSnapshot, MI_ENGINE_VERSION, campaignId);
+        const miReadiness = integrityResult.valid ? getEngineReadinessState(miSnapshot, campaignId, MI_ENGINE_VERSION, 14) : null;
+        if (!integrityResult.valid || (miReadiness && miReadiness.state !== "READY")) {
+          console.log(`[OfferEngine] MI snapshot ${miSnapshotId} failed integrity/readiness check, searching for latest valid MI snapshot`);
+          const [latestMI] = await db.select().from(miSnapshots)
+            .where(and(
+              eq(miSnapshots.campaignId, campaignId),
+              eq(miSnapshots.accountId, accountId),
+              eq(miSnapshots.status, "COMPLETE"),
+              eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
+            ))
+            .orderBy(desc(miSnapshots.createdAt))
+            .limit(1);
+          if (latestMI) {
+            console.log(`[OfferEngine] Using latest valid MI snapshot ${latestMI.id} (v${latestMI.analysisVersion})`);
+            miSnapshot = latestMI;
+          } else {
+            return res.status(400).json({
+              error: "MI_INTEGRITY_FAILED",
+              message: "MI snapshot integrity check failed and no valid alternative found — please re-run Market Intelligence first",
+            });
+          }
+        }
+      } else {
+        const [latestMI] = await db.select().from(miSnapshots)
+          .where(and(
+            eq(miSnapshots.campaignId, campaignId),
+            eq(miSnapshots.accountId, accountId),
+            eq(miSnapshots.status, "COMPLETE"),
+            eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
+          ))
+          .orderBy(desc(miSnapshots.createdAt))
+          .limit(1);
+        if (latestMI) {
+          miSnapshot = latestMI;
+        } else {
+          return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid MI snapshot found — please run Market Intelligence first" });
+        }
       }
 
       const [audSnapshot] = await db.select().from(audienceSnapshots)
@@ -126,12 +161,12 @@ export function registerOfferEngineRoutes(app: Express) {
       };
 
       const differentiationInput = {
-        pillars: safeJsonParse(diffSnapshot.differentiationPillars) || [],
-        mechanismFraming: safeJsonParse(diffSnapshot.mechanismFraming),
-        authorityMode: safeJsonParse(diffSnapshot.authorityMode)?.mode || null,
-        claimStructures: safeJsonParse(diffSnapshot.claimStructures) || [],
-        proofArchitecture: safeJsonParse(diffSnapshot.proofArchitecture) || [],
-        confidenceScore: diffSnapshot.confidenceScore,
+        pillars: safeJsonParse(activeDiffSnapshot.differentiationPillars) || [],
+        mechanismFraming: safeJsonParse(activeDiffSnapshot.mechanismFraming),
+        authorityMode: safeJsonParse(activeDiffSnapshot.authorityMode)?.mode || null,
+        claimStructures: safeJsonParse(activeDiffSnapshot.claimStructures) || [],
+        proofArchitecture: safeJsonParse(activeDiffSnapshot.proofArchitecture) || [],
+        confidenceScore: activeDiffSnapshot.confidenceScore,
       };
 
       const result = await runOfferEngine(miInput, audienceInput, positioningInput, differentiationInput, accountId);
@@ -149,10 +184,10 @@ export function registerOfferEngineRoutes(app: Express) {
       const [saved] = await db.insert(offerSnapshots).values({
         accountId,
         campaignId,
-        miSnapshotId,
+        miSnapshotId: miSnapshot.id,
         audienceSnapshotId,
         positioningSnapshotId,
-        differentiationSnapshotId,
+        differentiationSnapshotId: activeDiffSnapshot.id,
         engineVersion: ENGINE_VERSION,
         status: result.status,
         statusMessage: result.statusMessage,
