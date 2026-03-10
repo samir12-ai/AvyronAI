@@ -2510,25 +2510,31 @@ export default function CreateScreen() {
                     </Text>
                   </View>
                   {videoUrls.map((url, idx) => (
-                    <Pressable
-                      key={idx}
-                      onPress={() => {
-                        if (Platform.OS === 'web') {
-                          const link = document.createElement('a');
-                          link.href = url;
-                          link.target = '_blank';
-                          link.click();
-                        } else {
-                          Alert.alert('Video URL', url);
-                        }
-                      }}
-                      style={{ backgroundColor: '#7C3AED15', borderRadius: 12, padding: 16, alignItems: 'center', gap: 8, marginBottom: videoUrls.length > 1 ? 8 : 0 }}
-                    >
-                      <Ionicons name="play-circle" size={40} color="#7C3AED" />
-                      <Text style={{ fontSize: 14, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>
-                        {videoUrls.length > 1 ? `Open Video ${idx + 1}` : 'Open Video'}
-                      </Text>
-                    </Pressable>
+                    <View key={idx} style={{ marginBottom: videoUrls.length > 1 ? 12 : 0 }}>
+                      {Platform.OS === 'web' ? (
+                        <View style={{ borderRadius: 12, overflow: 'hidden', backgroundColor: '#000' }}>
+                          <video
+                            src={url}
+                            controls
+                            playsInline
+                            preload="metadata"
+                            style={{ width: '100%', maxHeight: 400, borderRadius: 12, display: 'block' } as any}
+                          />
+                        </View>
+                      ) : (
+                        <Pressable
+                          onPress={() => {
+                            import('expo-linking').then(Linking => Linking.openURL(url)).catch(() => Alert.alert('Error', 'Could not open video'));
+                          }}
+                          style={{ backgroundColor: '#7C3AED15', borderRadius: 12, padding: 16, alignItems: 'center', gap: 8 }}
+                        >
+                          <Ionicons name="play-circle" size={40} color="#7C3AED" />
+                          <Text style={{ fontSize: 14, fontFamily: 'Inter_500Medium', color: '#7C3AED' }}>
+                            {videoUrls.length > 1 ? `Open Video ${idx + 1}` : 'Open Video'}
+                          </Text>
+                        </Pressable>
+                      )}
+                    </View>
                   ))}
                   {selectedCampaignId && (
                     <Pressable

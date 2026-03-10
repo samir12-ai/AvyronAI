@@ -197,9 +197,16 @@ export function registerVeoRoutes(app: Express) {
 
       parsedUrl.searchParams.set("key", apiKey);
       const authedUrl = parsedUrl.toString();
-      const videoResponse = await fetch(authedUrl);
 
-      if (!videoResponse.ok) {
+      const rangeHeader = req.headers.range;
+      const upstreamHeaders: Record<string, string> = {};
+      if (rangeHeader) {
+        upstreamHeaders["Range"] = rangeHeader;
+      }
+
+      const videoResponse = await fetch(authedUrl, { headers: upstreamHeaders });
+
+      if (!videoResponse.ok && videoResponse.status !== 206) {
         const errText = await videoResponse.text();
         console.error("[VeoProxy] Upstream error:", videoResponse.status, errText);
         return res.status(videoResponse.status).json({ error: "Failed to fetch video from Google" });
@@ -207,10 +214,23 @@ export function registerVeoRoutes(app: Express) {
 
       const contentType = videoResponse.headers.get("content-type") || "video/mp4";
       const contentLength = videoResponse.headers.get("content-length");
+      const contentRange = videoResponse.headers.get("content-range");
+      const acceptRanges = videoResponse.headers.get("accept-ranges");
 
       res.setHeader("Content-Type", contentType);
       if (contentLength) res.setHeader("Content-Length", contentLength);
       res.setHeader("Cache-Control", "public, max-age=3600");
+      res.setHeader("Accept-Ranges", acceptRanges || "bytes");
+
+      if (contentRange) {
+        res.setHeader("Content-Range", contentRange);
+      }
+
+      if (videoResponse.status === 206) {
+        res.status(206);
+      } else {
+        res.status(200);
+      }
 
       const reader = videoResponse.body?.getReader();
       if (!reader) {
