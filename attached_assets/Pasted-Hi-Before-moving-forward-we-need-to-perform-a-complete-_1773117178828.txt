@@ -1,0 +1,226 @@
+Hi,
+
+Before moving forward, we need to perform a complete system verification to confirm that all requested fixes, hardening updates, and architectural safeguards from the recent directives have actually been applied to the running system, not only implemented in code.
+
+Please verify the status of every layer and protection that was requested in the previous updates.
+
+---
+
+# 1 — Master Plan Architecture
+
+Confirm the system still follows the correct pipeline structure:
+
+Market Intelligence  
+→ Audience Intelligence  
+→ Positioning Engine  
+→ Differentiation Engine  
+→ Offer Engine  
+→ Funnel Engine  
+→ Integrity Engine  
+→ Awareness Engine  
+
+Each engine must:
+
+• consume upstream outputs  
+• produce only its own domain outputs  
+• never modify upstream logic
+
+Confirm that no engine violates this rule.
+
+---
+
+# 2 — Boundary Enforcement
+
+Confirm that strict boundary enforcement is active across all engines.
+
+Engines must not generate outputs belonging to other engines.
+
+Examples:
+
+Awareness must not generate  
+• ads  
+• marketing copy  
+• funnel redesign  
+• offers  
+• positioning narratives  
+
+If boundary violations occur the engine must return:
+
+INTEGRITY_FAILED  
+confidence = 0  
+snapshot not persisted.
+
+Confirm this rule is active in:
+
+• Positioning  
+• Differentiation  
+• Offer  
+• Funnel  
+• Integrity  
+• Awareness
+
+---
+
+# 3 — Signal Extraction Diagnostics
+
+Confirm that MI signal diagnostics are active and logging:
+
+• competitors_processed  
+• posts_processed  
+• signals_detected  
+• signals_filtered  
+• signals_used  
+
+These diagnostics must appear in runtime logs.
+
+---
+
+# 4 — Signal Density Safeguards
+
+Confirm the system detects weak datasets.
+
+Examples:
+
+low competitors  
+low signals
+
+When this occurs the system must:
+
+• produce structural warnings  
+• reduce confidence scores  
+• avoid strong strategic conclusions
+
+---
+
+# 5 — Cross-Engine Alignment Guards
+
+Confirm downstream engines validate upstream logic.
+
+Examples:
+
+Offer must align with  
+• differentiation mechanism  
+• audience pain signals  
+
+Funnel must align with  
+• offer commitment level  
+• audience readiness  
+
+Awareness must align with  
+• positioning narrative  
+• differentiation mechanism  
+• funnel structure
+
+---
+
+# 6 — Confidence Normalization
+
+Confirm normalized confidence scoring is applied across engines.
+
+Weak datasets should automatically cap confidence levels.
+
+---
+
+# 7 — Snapshot Integrity
+
+Confirm all snapshots include:
+
+• accountId  
+• campaignId  
+• engineVersion  
+• timestamp  
+• upstream_snapshot_ids  
+
+This ensures full pipeline traceability.
+
+---
+
+# 8 — Snapshot Lifecycle Protection
+
+Confirm snapshot pruning rules are active.
+
+Snapshots should be limited per campaign to prevent database growth.
+
+---
+
+# 9 — Engine Version Compatibility
+
+Confirm each engine validates upstream snapshot versions before running analysis.
+
+If versions are incompatible the system should warn or request re-analysis.
+
+---
+
+# 10 — Generic Output Detection
+
+Confirm generic marketing statements are detected and penalized.
+
+Examples:
+
+• grow your business  
+• scale faster  
+• improve marketing  
+
+These must trigger confidence penalties.
+
+---
+
+# 11 — Trust Readiness Safeguard
+
+Confirm trust readiness logic is active in the Awareness engine.
+
+Low-trust markets should emphasize:
+
+• authority  
+• proof  
+• diagnostics  
+
+rather than hype messaging.
+
+---
+
+# 12 — Revalidation Loop Protection
+
+Confirm protection exists against recursive engine loops.
+
+Example loops:
+
+Offer → Funnel → Integrity → Offer
+
+The system should limit repeated engine calls.
+
+---
+
+# 13 — Market Narrative Overlap Detection
+
+Confirm the system detects narrative overlap between competitors and applies saturation penalties.
+
+---
+
+# 14 — Deployment Verification (Critical)
+
+This is extremely important.
+
+Confirm that the fixes were not only implemented in code but actually deployed to the running system.
+
+Please verify:
+
+• backend services restarted  
+• updated engine versions running  
+• routes responding with new logic  
+• new snapshots created with updated logic  
+• runtime logs reflecting new diagnostics
+
+---
+
+# Final Confirmation
+
+Please provide confirmation that:
+
+• all hardening updates from the previous directives are active  
+• all engines are running the updated logic  
+• the pipeline works end-to-end using the latest system version
+
+The goal of this verification is to ensure that the system is fully updated and running the new architecture in production, not just partially updated in code.
+
+Thank you.
