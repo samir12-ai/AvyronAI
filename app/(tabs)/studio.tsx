@@ -213,8 +213,8 @@ export default function StudioScreen() {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: mediaType === 'reel' 
-          ? ImagePicker.MediaTypeOptions.Videos 
-          : ImagePicker.MediaTypeOptions.Images,
+          ? ['videos'] as ImagePicker.MediaType[]
+          : ['images'] as ImagePicker.MediaType[],
         allowsEditing: true,
         quality: 1,
       });

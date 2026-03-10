@@ -880,12 +880,15 @@ export default function CreateScreen() {
       const uri = image.uri;
       const filename = uri.split('/').pop() || 'photo.jpg';
       const match = /\.(\w+)$/.exec(filename);
-      const type = match ? `image/${match[1]}` : 'image/jpeg';
+      const ext = match ? match[1].toLowerCase() : 'jpg';
+      const mimeMap: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+      const type = mimeMap[ext] || 'image/jpeg';
 
       if (Platform.OS === 'web') {
         const response = await fetch(uri);
         const blob = await response.blob();
-        formData.append('image', blob, filename);
+        const safeFilename = filename.includes('.') ? filename : `${filename}.${ext}`;
+        formData.append('image', new File([blob], safeFilename, { type }));
       } else {
         formData.append('image', { uri, name: filename, type } as any);
       }
@@ -895,7 +898,14 @@ export default function CreateScreen() {
         body: formData,
       });
       const data = await res.json();
-      if (!res.ok) return null;
+      if (!res.ok) {
+        console.error('Upload image server error:', data.error);
+        return null;
+      }
+      if (!data.fileUri) {
+        console.error('Upload image: no fileUri returned');
+        return null;
+      }
       return { fileUri: data.fileUri, mimeType: data.mimeType };
     } catch (err) {
       console.error('Upload image error:', err);
@@ -1084,12 +1094,61 @@ export default function CreateScreen() {
 
   const pickVeoRefImage = async () => {
     if (videoRefImages.length >= 3) return;
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.9,
-    });
-    if (!result.canceled && result.assets[0]) {
-      setVideoRefImages(prev => [...prev, { uri: result.assets[0].uri }]);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'] as ImagePicker.MediaType[],
+        quality: 0.9,
+      });
+      if (!result.canceled && result.assets[0]) {
+        setVideoRefImages(prev => [...prev, { uri: result.assets[0].uri }]);
+      }
+    } catch (error) {
+      console.error('Error picking reference image:', error);
+    }
+  };
+
+  const saveVideoToGallery = async (videoProxyUrl: string) => {
+    try {
+      if (Platform.OS === 'web') {
+        const link = document.createElement('a');
+        link.href = videoProxyUrl;
+        link.download = `MarketMind_Video_${Date.now()}.mp4`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('Downloaded!', 'Video downloaded to your device.');
+        return;
+      }
+
+      const { status, canAskAgain } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        const buttons: any[] = [{ text: 'Cancel', style: 'cancel' }];
+        if (!canAskAgain) {
+          const Linking = await import('expo-linking');
+          buttons.push({ text: 'Open Settings', onPress: () => Linking.openSettings() });
+        }
+        Alert.alert(
+          'Permission Needed',
+          'Please allow access to your photo gallery to save videos.',
+          buttons
+        );
+        return;
+      }
+
+      const filename = `MarketMind_Video_${Date.now()}.mp4`;
+      const fileUri = `${FileSystem.cacheDirectory}${filename}`;
+      const downloadResult = await FileSystem.downloadAsync(videoProxyUrl, fileUri);
+      if (!downloadResult || downloadResult.status !== 200) {
+        throw new Error('Download failed');
+      }
+      await MediaLibrary.saveToLibraryAsync(fileUri);
+      try { await FileSystem.deleteAsync(fileUri, { idempotent: true }); } catch {}
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('Saved to Gallery!', 'Your video has been saved to your gallery.');
+    } catch (error: any) {
+      console.error('Save video to gallery error:', error);
+      Alert.alert('Save Failed', 'Could not save video to gallery. Please try again.');
     }
   };
 
@@ -2536,6 +2595,15 @@ export default function CreateScreen() {
                       )}
                     </View>
                   ))}
+                  <Pressable
+                    onPress={() => saveVideoToGallery(videoUrls[0] || videoUrl || '')}
+                    style={{ backgroundColor: '#10B98120', borderRadius: 12, padding: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 4 }}
+                  >
+                    <Ionicons name="download-outline" size={20} color="#10B981" />
+                    <Text style={{ fontSize: 15, fontFamily: 'Inter_600SemiBold', color: '#10B981' }}>
+                      Save to Gallery
+                    </Text>
+                  </Pressable>
                   {selectedCampaignId && (
                     <Pressable
                       onPress={async () => {

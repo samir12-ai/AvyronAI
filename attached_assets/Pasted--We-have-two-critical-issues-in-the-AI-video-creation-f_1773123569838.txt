@@ -1,0 +1,129 @@
+
+We have two critical issues in the AI video creation flow using VEO3 (Gemini) that need to be fixed properly and permanently. These are blocking normal use and appear to be related to routing and storage handling. Please resolve them carefully and ensure the fixes are applied system-wide and deployed, not only committed in code.
+
+Below is a clear description of the problems and what must be verified.
+
+⸻
+
+1. Reference Image Upload Failure (VEO3 Creation Flow)
+
+When creating an AI video and uploading a reference image, the image does not get sent to the generation request. The upload appears to succeed in the UI, but the backend request to VEO3 does not include the file.
+
+Expected Behavior
+	•	User uploads a reference image.
+	•	Image is attached to the VEO3 generation request.
+	•	VEO3 receives the image and uses it as a reference for generation.
+
+Current Behavior
+	•	Upload UI accepts the image.
+	•	Image never reaches the generation pipeline.
+	•	The request is sent without the reference file.
+
+Most Likely Cause
+
+This appears to be a routing or request handling issue:
+	•	upload route not forwarding file payload
+	•	multipart/form-data not parsed correctly
+	•	file buffer not attached to the Gemini/VEO3 request
+	•	temporary file lost between frontend → API → generation worker
+
+Please Verify
+	•	upload route correctly handles multipart/form-data
+	•	file buffer is forwarded to the VEO3 request payload
+	•	no middleware is stripping file data
+	•	request body size limits are not silently blocking images
+	•	reference image is actually passed to Gemini VEO3 as intended
+
+⸻
+
+2. Generated Video Not Saving to Phone Gallery
+
+After generating a video, pressing Save / Download does not store the video in the phone gallery.
+
+Expected Behavior
+	•	Generated video downloads correctly
+	•	File appears in the device gallery / downloads
+
+Current Behavior
+	•	Save action runs
+	•	File is not stored locally
+
+Likely Causes
+
+Please check:
+	•	incorrect download headers
+	•	missing Content-Disposition
+	•	file blob not returned correctly
+	•	incorrect MIME type
+	•	frontend download handler not triggering device save
+
+For mobile devices especially:
+	•	ensure the response is returned as a proper downloadable file
+	•	verify blob handling and download trigger
+
+⸻
+
+3. Routes Hardening (Important)
+
+Please verify that all related routes are correctly wired:
+	•	image upload route
+	•	VEO3 generation route
+	•	video retrieval route
+	•	download route
+
+Check for:
+	•	broken route connections
+	•	payload truncation
+	•	incorrect request forwarding
+	•	missing await / async handling
+
+These problems strongly suggest a routing chain break between frontend → backend → VEO3 API.
+
+⸻
+
+4. System-Wide Deployment Check
+
+This is extremely important.
+
+After applying the fixes:
+	1.	Restart the backend
+	2.	Ensure the update is actually deployed
+	3.	Confirm the running system uses the new code
+	4.	Verify both issues in production
+
+A common mistake is fixing code but not refreshing the running environment.
+
+Please confirm the deployment step was completed.
+
+⸻
+
+5. Validation Tests
+
+Please run these quick checks:
+
+Test 1 — Image Reference
+	1.	Upload reference image
+	2.	Generate video
+	3.	Confirm VEO3 receives the image
+
+Test 2 — Video Save
+	1.	Generate video
+	2.	Download/save
+	3.	Confirm it appears in phone gallery
+
+Test 3 — Route Stability
+	•	Upload → Generate → Download must run without errors
+
+⸻
+
+Goal
+
+Both issues must be fully closed:
+	•	reference images reliably reach VEO3
+	•	generated videos save correctly to device gallery
+	•	routes verified and stable
+	•	system deployed with the fixes
+
+Please confirm once the fixes are implemented and fully active on the running system.
+
+Tha

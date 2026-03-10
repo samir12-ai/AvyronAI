@@ -59,6 +59,8 @@ export function registerVeoRoutes(app: Express) {
         return res.status(400).json({ error: "Prompt is required" });
       }
 
+      console.log(`[VeoGenerate] prompt="${prompt.slice(0, 60)}..." imageFileUri=${!!imageFileUri} lastFrame=${!!lastFrameFileUri} refImages=${referenceImages?.length || 0}`);
+
       const validAspectRatios = ["16:9", "9:16"];
       const config: any = {
         aspectRatio: validAspectRatios.includes(aspectRatio) ? aspectRatio : "16:9",
@@ -221,6 +223,7 @@ export function registerVeoRoutes(app: Express) {
       if (contentLength) res.setHeader("Content-Length", contentLength);
       res.setHeader("Cache-Control", "public, max-age=3600");
       res.setHeader("Accept-Ranges", acceptRanges || "bytes");
+      res.setHeader("Content-Disposition", "inline; filename=\"MarketMind_Video.mp4\"");
 
       if (contentRange) {
         res.setHeader("Content-Range", contentRange);
@@ -254,7 +257,18 @@ export function registerVeoRoutes(app: Express) {
     }
   });
 
-  app.post("/api/veo/upload-image", upload.single("image"), async (req, res) => {
+  app.post("/api/veo/upload-image", (req, res, next) => {
+    upload.single("image")(req, res, (err: any) => {
+      if (err) {
+        console.error("[VeoUpload] Multer error:", err.message);
+        if (err.code === "LIMIT_FILE_SIZE") {
+          return res.status(413).json({ error: "Image file is too large. Maximum size is 20MB." });
+        }
+        return res.status(400).json({ error: err.message || "File upload failed" });
+      }
+      next();
+    });
+  }, async (req, res) => {
     try {
       const client = getVeoClient();
       if (!client) {
@@ -262,8 +276,10 @@ export function registerVeoRoutes(app: Express) {
       }
 
       if (!req.file) {
-        return res.status(400).json({ error: "No image file provided" });
+        return res.status(400).json({ error: "No image file provided. Ensure the form field is named 'image'." });
       }
+
+      console.log(`[VeoUpload] Received file: ${req.file.originalname} (${req.file.mimetype}, ${req.file.size} bytes)`);
 
       const filePath = req.file.path;
       const mimeType = req.file.mimetype || "image/jpeg";
@@ -275,14 +291,16 @@ export function registerVeoRoutes(app: Express) {
 
       try { fs.unlinkSync(filePath); } catch {}
 
+      console.log(`[VeoUpload] Uploaded to Google: uri=${uploaded.uri}`);
+
       res.json({
         fileUri: uploaded.uri,
         mimeType: uploaded.mimeType,
       });
     } catch (error: any) {
-      console.error("Veo image upload error:", error);
+      console.error("[VeoUpload] Upload error:", error);
       try { if (req.file?.path) fs.unlinkSync(req.file.path); } catch {}
-      res.status(500).json({ error: error.message || "Failed to upload image" });
+      res.status(500).json({ error: error.message || "Failed to upload image to Google" });
     }
   });
 }
