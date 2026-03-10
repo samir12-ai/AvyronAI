@@ -1,0 +1,95 @@
+Hi Replit Team,
+
+We need an immediate fix for a critical issue in the AI video creation system using Google VEO 3.1. The image-to-video generation pipeline is consistently failing, and the system keeps returning the same error:
+
+“Video generation failed. Please try a different prompt or settings.”
+
+This is happening even with valid prompts and valid settings, which strongly indicates a backend pipeline or routing issue, not a prompt problem.
+
+This feature must work reliably because it is a core capability of the creation system.
+
+Please investigate and resolve the following areas immediately.
+
+First — Image-to-Video Request Pipeline
+
+When a reference image is uploaded and the user presses Generate Video, the system should:
+
+1. Receive the uploaded image.
+2. Attach it to the generation request.
+3. Send both the prompt + image reference to the VEO 3.1 API.
+
+Right now the system behaves as if the image is never reaching the generation request.
+
+Please verify:
+
+- The upload route correctly receives the image file.
+- The backend forwards the image to the VEO generation request.
+- The request payload includes the image reference data.
+- No middleware or request parser is stripping the file data.
+
+This looks like a broken handoff between the upload route and the generation route.
+
+Second — Route Integrity
+
+Please check the complete routing chain:
+
+frontend → upload handler → generation route → VEO API request.
+
+Any broken step in this chain will cause the generation to fail.
+
+Verify that:
+
+- the upload route stores or forwards the image correctly
+- the generation route reads the stored image reference
+- the final API request includes the image input
+
+Third — VEO API Request Structure
+
+Confirm that the VEO request is structured correctly for image-conditioned video generation.
+
+Common failures occur when:
+
+- the request is sent as text-only
+- the image reference field is missing
+- the MIME type is incorrect
+- the image buffer is not encoded correctly
+
+If the image reference field is missing or malformed, VEO will reject the request and return a generic generation failure.
+
+Fourth — Error Handling
+
+The current UI error message is too generic and hides the real cause.
+
+Please log and expose the real error returned from the VEO API so we can see whether the failure is caused by:
+
+- invalid payload
+- missing image reference
+- request format error
+- API rejection
+
+Fifth — Deployment Verification
+
+This is extremely important.
+
+After fixing the issue:
+
+1. Restart the backend.
+2. Ensure the fix is applied to the running system.
+3. Verify that the new code is actually deployed.
+4. Run a full generation test with an uploaded reference image.
+
+Please confirm that the image-to-video generation pipeline works end-to-end after deployment.
+
+Expected behavior after the fix:
+
+- upload reference image
+- press Generate Video
+- request sent with image + prompt
+- VEO returns generated video
+- video renders in the UI
+
+This feature must be stable and reliable.
+
+Please confirm once the issue has been fixed and verified in the running system.
+
+Thank you.

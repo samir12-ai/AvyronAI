@@ -35,6 +35,46 @@ export function registerVeoRoutes(app: Express) {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
 
+  app.post("/api/veo/upload-image", (req, res, next) => {
+    upload.single("image")(req, res, (err: any) => {
+      if (err) {
+        console.error("[VeoUpload] Multer error:", err.message);
+        if (err.code === "LIMIT_FILE_SIZE") {
+          return res.status(413).json({ error: "Image file is too large. Maximum size is 20MB." });
+        }
+        return res.status(400).json({ error: err.message || "File upload failed" });
+      }
+      next();
+    });
+  }, async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No image file provided. Ensure the form field is named 'image'." });
+      }
+
+      const filePath = req.file.path;
+      const mimeType = req.file.mimetype || "image/jpeg";
+
+      console.log(`[VeoUpload] Received file: ${req.file.originalname} (${mimeType}, ${req.file.size} bytes)`);
+
+      const imageBuffer = fs.readFileSync(filePath);
+      const imageBytes = imageBuffer.toString("base64");
+
+      try { fs.unlinkSync(filePath); } catch {}
+
+      console.log(`[VeoUpload] Encoded image as base64: ${imageBytes.length} chars, mimeType=${mimeType}`);
+
+      res.json({
+        imageBytes,
+        mimeType,
+      });
+    } catch (error: any) {
+      console.error("[VeoUpload] Upload error:", error);
+      try { if (req.file?.path) fs.unlinkSync(req.file.path); } catch {}
+      res.status(500).json({ error: error.message || "Failed to process uploaded image" });
+    }
+  });
+
   app.post("/api/veo/generate-video", async (req, res) => {
     try {
       const client = getVeoClient();
@@ -48,9 +88,9 @@ export function registerVeoRoutes(app: Express) {
         duration,
         resolution,
         negativePrompt,
-        imageFileUri,
+        imageBytes,
         imageMimeType,
-        lastFrameFileUri,
+        lastFrameBytes,
         lastFrameMimeType,
         personGeneration,
       } = req.body;
@@ -84,10 +124,10 @@ export function registerVeoRoutes(app: Express) {
         config.personGeneration = personGeneration;
       }
 
-      if (lastFrameFileUri && lastFrameMimeType) {
+      if (lastFrameBytes && lastFrameMimeType) {
         config.lastFrame = {
           image: {
-            fileUri: lastFrameFileUri,
+            imageBytes: lastFrameBytes,
             mimeType: lastFrameMimeType,
           },
         };
@@ -99,23 +139,28 @@ export function registerVeoRoutes(app: Express) {
         config,
       };
 
-      if (imageFileUri && imageMimeType) {
+      if (imageBytes && imageMimeType) {
         params.image = {
-          fileUri: imageFileUri,
+          imageBytes: imageBytes,
           mimeType: imageMimeType,
         };
       }
 
-      console.log(`[VeoGenerate] model=${params.model} prompt="${prompt.slice(0, 60)}..." aspectRatio=${config.aspectRatio} duration=${config.durationSeconds || 'default'} resolution=${config.resolution || 'default'} image=${!!imageFileUri} lastFrame=${!!lastFrameFileUri}`);
+      console.log(`[VeoGenerate] model=${params.model} prompt="${prompt.slice(0, 60)}..." aspectRatio=${config.aspectRatio} duration=${config.durationSeconds || 'default'} resolution=${config.resolution || 'default'} hasImage=${!!imageBytes} imageSize=${imageBytes ? imageBytes.length : 0} lastFrame=${!!lastFrameBytes}`);
 
       const operation = await client.models.generateVideos(params);
+
+      console.log(`[VeoGenerate] Operation started: ${operation.name} done=${operation.done}`);
 
       res.json({
         operationName: operation.name,
         done: operation.done || false,
       });
     } catch (error: any) {
-      console.error("Veo video generation error:", error);
+      console.error("[VeoGenerate] Error:", error?.message || error);
+      if (error?.stack) {
+        console.error("[VeoGenerate] Stack:", error.stack.split('\n').slice(0, 3).join('\n'));
+      }
       const msg = error.message || "Failed to start video generation";
       if (msg.includes("SERVICE_DISABLED") || msg.includes("PERMISSION_DENIED") || msg.includes("has not been used in project")) {
         return res.status(403).json({
@@ -123,13 +168,13 @@ export function registerVeoRoutes(app: Express) {
           message: "The Generative Language API is not enabled for your Google Cloud project. Enable it at console.developers.google.com, then wait a few minutes and try again.",
         });
       }
-      if (msg.includes("INVALID_ARGUMENT") || msg.includes("Unsupported")) {
+      if (msg.includes("INVALID_ARGUMENT")) {
         return res.status(400).json({
           error: "INVALID_REQUEST",
-          message: "Video generation request was rejected. Try adjusting your prompt or settings.",
+          message: `Video generation rejected: ${msg.length > 200 ? msg.substring(0, 200) : msg}`,
         });
       }
-      res.status(500).json({ error: msg });
+      res.status(500).json({ error: msg.length > 300 ? msg.substring(0, 300) : msg });
     }
   });
 
@@ -150,6 +195,7 @@ export function registerVeoRoutes(app: Express) {
       const operation = await response.json() as any;
 
       if (operation.error) {
+        console.error("[VeoStatus] Operation error:", JSON.stringify(operation.error));
         return res.status(500).json({ error: operation.error.message || "Operation failed", code: operation.error.code });
       }
 
@@ -170,7 +216,7 @@ export function registerVeoRoutes(app: Express) {
         state: operation.done ? "completed" : "processing",
       });
     } catch (error: any) {
-      console.error("Veo status error:", error);
+      console.error("[VeoStatus] Error:", error);
       res.status(500).json({ error: error.message || "Failed to get generation status" });
     }
   });
@@ -255,53 +301,6 @@ export function registerVeoRoutes(app: Express) {
       if (!res.headersSent) {
         res.status(500).json({ error: error.message || "Failed to proxy video" });
       }
-    }
-  });
-
-  app.post("/api/veo/upload-image", (req, res, next) => {
-    upload.single("image")(req, res, (err: any) => {
-      if (err) {
-        console.error("[VeoUpload] Multer error:", err.message);
-        if (err.code === "LIMIT_FILE_SIZE") {
-          return res.status(413).json({ error: "Image file is too large. Maximum size is 20MB." });
-        }
-        return res.status(400).json({ error: err.message || "File upload failed" });
-      }
-      next();
-    });
-  }, async (req, res) => {
-    try {
-      const client = getVeoClient();
-      if (!client) {
-        return res.status(400).json({ error: "GOOGLE_GEMINI_API_KEY not configured." });
-      }
-
-      if (!req.file) {
-        return res.status(400).json({ error: "No image file provided. Ensure the form field is named 'image'." });
-      }
-
-      console.log(`[VeoUpload] Received file: ${req.file.originalname} (${req.file.mimetype}, ${req.file.size} bytes)`);
-
-      const filePath = req.file.path;
-      const mimeType = req.file.mimetype || "image/jpeg";
-
-      const uploaded = await client.files.upload({
-        file: filePath,
-        config: { mimeType },
-      });
-
-      try { fs.unlinkSync(filePath); } catch {}
-
-      console.log(`[VeoUpload] Uploaded to Google: uri=${uploaded.uri}`);
-
-      res.json({
-        fileUri: uploaded.uri,
-        mimeType: uploaded.mimeType,
-      });
-    } catch (error: any) {
-      console.error("[VeoUpload] Upload error:", error);
-      try { if (req.file?.path) fs.unlinkSync(req.file.path); } catch {}
-      res.status(500).json({ error: error.message || "Failed to upload image to Google" });
     }
   });
 }
