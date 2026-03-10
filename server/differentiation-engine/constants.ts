@@ -57,9 +57,19 @@ export const COLLISION_THRESHOLD = 0.70;
 export const STABILITY_MIN_PROOFABILITY = 0.30;
 export const STABILITY_MIN_TRUST_ALIGNMENT = 0.25;
 
-export const BOUNDARY_BLOCKED_PATTERNS: Record<string, RegExp> = {
+export const BOUNDARY_HARD_PATTERNS: Record<string, RegExp> = {
   "marketing copy": /\b(marketing copy|ad copy|sales copy|copywriting|creative copy)\b/i,
-  "headlines": /\b(headline|headlines|subject line|email subject|hook text)\b/i,
   "funnel stages": /\b(funnel stage|funnel step|funnel design|sales funnel|conversion funnel|funnel structure)\b/i,
   "financial projections": /\b(financial projection|revenue forecast|financial forecast|budget allocation|revenue model|financial plan)\b/i,
+};
+
+export const BOUNDARY_SOFT_PATTERNS = [
+  { pattern: /\bheadlines?\b/gi, domain: "headlines", replacement: "claim statements" },
+  { pattern: /\bsubject line\b/gi, domain: "subject line", replacement: "claim framing" },
+  { pattern: /\bemail subject\b/gi, domain: "email subject", replacement: "claim framing" },
+  { pattern: /\bhook text\b/gi, domain: "hook text", replacement: "attention claim" },
+];
+
+export const BOUNDARY_BLOCKED_PATTERNS: Record<string, RegExp> = {
+  ...BOUNDARY_HARD_PATTERNS,
 };

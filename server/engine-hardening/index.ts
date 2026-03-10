@@ -6,6 +6,8 @@ import type {
   ValidationSession,
   GenericOutputResult,
   AlignmentCheckResult,
+  SoftPattern,
+  BoundaryEnforcementResult,
 } from "./types";
 
 export type {
@@ -16,6 +18,8 @@ export type {
   ValidationSession,
   GenericOutputResult,
   AlignmentCheckResult,
+  SoftPattern,
+  BoundaryEnforcementResult,
 };
 
 const GENERIC_PHRASES = [
@@ -57,6 +61,46 @@ export function sanitizeBoundary(
     }
   }
   return { clean: violations.length === 0, violations };
+}
+
+export function enforceBoundaryWithSanitization(
+  text: string,
+  hardPatterns: Record<string, RegExp>,
+  softPatterns: SoftPattern[],
+): BoundaryEnforcementResult {
+  const violations: string[] = [];
+  const warnings: string[] = [];
+  let sanitizedText = text;
+  let sanitized = false;
+
+  for (const [domain, pattern] of Object.entries(hardPatterns)) {
+    if (pattern.test(text)) {
+      violations.push(`Hard boundary violation: "${domain}" domain content detected`);
+    }
+  }
+
+  if (violations.length > 0) {
+    return { clean: false, violations, sanitized: false, sanitizedText: text, warnings };
+  }
+
+  for (const sp of softPatterns) {
+    if (sp.pattern.test(sanitizedText)) {
+      warnings.push(`Soft boundary: "${sp.domain}" wording normalized to "${sp.replacement}"`);
+      sanitizedText = sanitizedText.replace(sp.pattern, sp.replacement);
+      sanitized = true;
+    }
+  }
+
+  return { clean: true, violations: [], sanitized, sanitizedText, warnings };
+}
+
+export function applySoftSanitization(text: string, softPatterns: SoftPattern[]): string {
+  if (!text) return text;
+  let result = text;
+  for (const sp of softPatterns) {
+    result = result.replace(sp.pattern, sp.replacement);
+  }
+  return result;
 }
 
 export function normalizeConfidence(

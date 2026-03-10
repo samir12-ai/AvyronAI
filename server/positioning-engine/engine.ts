@@ -12,6 +12,8 @@ import {
   POSITIONING_THRESHOLDS,
   GENERIC_TERRITORY_PATTERNS,
   BOUNDARY_BLOCKED_PATTERNS,
+  BOUNDARY_HARD_PATTERNS,
+  BOUNDARY_SOFT_PATTERNS,
   type PositioningStatus,
   type Territory,
   type StrategyCard,
@@ -23,6 +25,8 @@ import {
 } from "./constants";
 import {
   sanitizeBoundary,
+  enforceBoundaryWithSanitization,
+  applySoftSanitization,
   assessDataReliability,
   normalizeConfidence,
   detectGenericOutput,
@@ -1370,7 +1374,7 @@ export async function runPositioningEngine(
   const boundaryText = territories.map(t =>
     `${t.name} ${t.enemyDefinition} ${t.contrastAxis} ${t.narrativeDirection} ${t.evidenceSignals?.join(" ") || ""}`
   ).join(" ");
-  const boundaryCheck = sanitizeBoundary(boundaryText, BOUNDARY_BLOCKED_PATTERNS);
+  const boundaryCheck = enforceBoundaryWithSanitization(boundaryText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
   if (!boundaryCheck.clean) {
     console.error(`[PositioningEngine-V3] BOUNDARY VIOLATION: ${boundaryCheck.violations.join("; ")}`);
     const executionTimeMs = Date.now() - startTime;
@@ -1378,6 +1382,20 @@ export async function runPositioningEngine(
       ...buildEmptyResult("INTEGRITY_FAILED" as PositioningStatus, `Boundary enforcement failed: ${boundaryCheck.violations.join("; ")}`, executionTimeMs, miSnapshotId, audienceSnapshotId),
       confidenceScore: 0,
     };
+  }
+  if (boundaryCheck.sanitized && boundaryCheck.warnings.length > 0) {
+    for (const warning of boundaryCheck.warnings) {
+      console.log(`[PositioningEngine-V3] BOUNDARY WARNING: ${warning}`);
+    }
+    for (const t of territories) {
+      t.name = applySoftSanitization(t.name, BOUNDARY_SOFT_PATTERNS);
+      t.enemyDefinition = applySoftSanitization(t.enemyDefinition, BOUNDARY_SOFT_PATTERNS);
+      t.contrastAxis = applySoftSanitization(t.contrastAxis, BOUNDARY_SOFT_PATTERNS);
+      t.narrativeDirection = applySoftSanitization(t.narrativeDirection, BOUNDARY_SOFT_PATTERNS);
+      if (t.evidenceSignals) {
+        t.evidenceSignals = t.evidenceSignals.map((s: string) => applySoftSanitization(s, BOUNDARY_SOFT_PATTERNS));
+      }
+    }
   }
 
   const { territories: finalTerritories, stabilityResult } = layer12_stabilityGuard(

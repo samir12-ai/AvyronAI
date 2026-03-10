@@ -1,11 +1,12 @@
 import { aiChat } from "../ai-client";
-import { detectGenericOutput, checkCrossEngineAlignment } from "../engine-hardening";
+import { detectGenericOutput, checkCrossEngineAlignment, enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
 import {
   ENGINE_VERSION,
   FUNNEL_STRENGTH_WEIGHTS,
   GENERIC_FUNNEL_PATTERNS,
   GENERIC_PENALTY,
-  BOUNDARY_BLOCKED_PATTERNS,
+  BOUNDARY_HARD_PATTERNS,
+  BOUNDARY_SOFT_PATTERNS,
   AWARENESS_TO_FUNNEL_MAP,
   STATUS,
   MAX_FUNNEL_STAGES,
@@ -43,16 +44,8 @@ export function detectGenericFunnel(text: string): boolean {
 
 export function sanitizeBoundary(text: string): { clean: boolean; violations: string[] } {
   if (!text) return { clean: true, violations: [] };
-  const lower = text.toLowerCase();
-  const violations: string[] = [];
-
-  for (const [domain, pattern] of Object.entries(BOUNDARY_BLOCKED_PATTERNS)) {
-    if (pattern.test(lower)) {
-      violations.push(`Boundary violation: ${domain} domain detected`);
-    }
-  }
-
-  return { clean: violations.length === 0, violations };
+  const result = enforceBoundaryWithSanitization(text, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
+  return { clean: result.clean, violations: result.violations };
 }
 
 export function layer1_funnelEligibilityDetection(
@@ -886,9 +879,33 @@ export async function runFunnelEngine(
     ...collectFunnelText(rejectedFunnel),
     aiFunnels.rejected.rejectionReason || "",
   ].join(" ");
-  const boundaryRaw = sanitizeBoundary(allFunnelText);
-  const boundaryCheck = { passed: boundaryRaw.clean, violations: boundaryRaw.violations };
+  const boundaryResult = enforceBoundaryWithSanitization(allFunnelText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
+  const boundaryCheck = { passed: boundaryResult.clean, violations: boundaryResult.violations };
   diagnostics.boundaryCheck = boundaryCheck;
+  if (boundaryResult.sanitized && boundaryResult.warnings.length > 0) {
+    console.log(`[FunnelEngine-V3] BOUNDARY SANITIZED: ${boundaryResult.warnings.join("; ")}`);
+    diagnostics.boundarySanitization = { sanitized: boundaryResult.sanitized, warnings: boundaryResult.warnings };
+    const sanitizeFunnel = (f: FunnelCandidate) => {
+      f.funnelName = applySoftSanitization(f.funnelName, BOUNDARY_SOFT_PATTERNS);
+      f.entryTrigger.purpose = applySoftSanitization(f.entryTrigger.purpose, BOUNDARY_SOFT_PATTERNS);
+      for (const s of f.stageMap) {
+        s.purpose = applySoftSanitization(s.purpose, BOUNDARY_SOFT_PATTERNS);
+        s.conversionGoal = applySoftSanitization(s.conversionGoal, BOUNDARY_SOFT_PATTERNS);
+      }
+      for (const t of f.trustPath) {
+        t.action = applySoftSanitization(t.action, BOUNDARY_SOFT_PATTERNS);
+      }
+      for (const p of f.proofPlacements) {
+        p.purpose = applySoftSanitization(p.purpose, BOUNDARY_SOFT_PATTERNS);
+      }
+      for (const fp of f.frictionMap) {
+        fp.mitigation = applySoftSanitization(fp.mitigation, BOUNDARY_SOFT_PATTERNS);
+      }
+    };
+    sanitizeFunnel(primaryFunnel);
+    sanitizeFunnel(alternativeFunnel);
+    sanitizeFunnel(rejectedFunnel);
+  }
 
   const genericOutputCheck = detectGenericOutput(allFunnelText);
   diagnostics.genericOutputCheck = genericOutputCheck;

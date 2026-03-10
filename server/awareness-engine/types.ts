@@ -102,7 +102,7 @@ export interface AwarenessResult {
   rejectedRoute: AwarenessRoute;
   layerResults: LayerResult[];
   structuralWarnings: string[];
-  boundaryCheck: { passed: boolean; violations: string[] };
+  boundaryCheck: { passed: boolean; violations: string[]; sanitized?: boolean; sanitizedText?: string; warnings?: string[] };
   dataReliability: DataReliabilityDiagnostics;
   confidenceNormalized: boolean;
   executionTimeMs: number;

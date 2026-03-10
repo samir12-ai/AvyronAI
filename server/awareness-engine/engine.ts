@@ -1,13 +1,15 @@
 import {
   ENGINE_VERSION,
   STATUS,
-  BOUNDARY_BLOCKED_PATTERNS,
+  BOUNDARY_HARD_PATTERNS,
+  BOUNDARY_SOFT_PATTERNS,
   LAYER_WEIGHTS,
   ENTRY_ROUTES,
   READINESS_STAGES,
   TRIGGER_CLASSES,
   GENERIC_PHRASES,
 } from "./constants";
+import { enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
 import type {
   AwarenessPositioningInput,
   AwarenessDifferentiationInput,
@@ -124,7 +126,7 @@ export function normalizeConfidence(rawScore: number, reliability: DataReliabili
 export function sanitizeBoundary(text: string): { clean: boolean; violations: string[] } {
   if (!text) return { clean: true, violations: [] };
   const violations: string[] = [];
-  for (const [domain, pattern] of Object.entries(BOUNDARY_BLOCKED_PATTERNS)) {
+  for (const [domain, pattern] of Object.entries(BOUNDARY_HARD_PATTERNS)) {
     if (pattern.test(text)) {
       violations.push(`Boundary violation: ${domain} domain detected in awareness output`);
     }
@@ -768,7 +770,7 @@ export async function runAwarenessEngine(
     ...layerResults.flatMap(l => [...l.findings, ...l.warnings]),
   ].join(" ");
 
-  const boundary = sanitizeBoundary(allOutputText);
+  const boundary = enforceBoundaryWithSanitization(allOutputText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
   if (!boundary.clean) {
     return {
       status: STATUS.INTEGRITY_FAILED,
@@ -778,12 +780,23 @@ export async function runAwarenessEngine(
       rejectedRoute: emptyRoute("blocked", "Boundary enforcement triggered"),
       layerResults,
       structuralWarnings: boundary.violations,
-      boundaryCheck: boundary,
+      boundaryCheck: { passed: false, violations: boundary.violations, sanitized: boundary.sanitized, sanitizedText: boundary.sanitizedText, warnings: boundary.warnings },
       dataReliability: reliability,
       confidenceNormalized,
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
     };
+  }
+
+  if (boundary.sanitized && boundary.warnings.length > 0) {
+    structuralWarnings.push(...boundary.warnings);
+    primaryRoute.routeName = applySoftSanitization(primaryRoute.routeName, BOUNDARY_SOFT_PATTERNS);
+    primaryRoute.trustRequirement = applySoftSanitization(primaryRoute.trustRequirement, BOUNDARY_SOFT_PATTERNS);
+    primaryRoute.funnelCompatibility = applySoftSanitization(primaryRoute.funnelCompatibility, BOUNDARY_SOFT_PATTERNS);
+    primaryRoute.frictionNotes = primaryRoute.frictionNotes.map((n: string) => applySoftSanitization(n, BOUNDARY_SOFT_PATTERNS));
+    alternativeRoute.routeName = applySoftSanitization(alternativeRoute.routeName, BOUNDARY_SOFT_PATTERNS);
+    alternativeRoute.trustRequirement = applySoftSanitization(alternativeRoute.trustRequirement, BOUNDARY_SOFT_PATTERNS);
+    alternativeRoute.frictionNotes = alternativeRoute.frictionNotes.map((n: string) => applySoftSanitization(n, BOUNDARY_SOFT_PATTERNS));
   }
 
   for (const lr of layerResults) {
@@ -802,7 +815,7 @@ export async function runAwarenessEngine(
     rejectedRoute,
     layerResults,
     structuralWarnings,
-    boundaryCheck: boundary,
+    boundaryCheck: { passed: true, violations: [], sanitized: boundary.sanitized, sanitizedText: boundary.sanitizedText, warnings: boundary.warnings },
     dataReliability: reliability,
     confidenceNormalized,
     executionTimeMs: Date.now() - startTime,

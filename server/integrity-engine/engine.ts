@@ -1,7 +1,8 @@
 import {
   ENGINE_VERSION,
   STATUS,
-  BOUNDARY_BLOCKED_PATTERNS,
+  BOUNDARY_HARD_PATTERNS,
+  BOUNDARY_SOFT_PATTERNS,
   LAYER_WEIGHTS,
 } from "./constants";
 import type {
@@ -18,6 +19,7 @@ import {
   assessDataReliability,
   normalizeConfidence,
   detectGenericOutput,
+  enforceBoundaryWithSanitization,
   type DataReliabilityDiagnostics,
 } from "../engine-hardening";
 
@@ -33,14 +35,8 @@ function safeNumber(v: any, fallback: number): number {
 
 export function sanitizeBoundary(text: string): { clean: boolean; violations: string[] } {
   if (!text) return { clean: true, violations: [] };
-  const lower = text.toLowerCase();
-  const violations: string[] = [];
-  for (const [domain, pattern] of Object.entries(BOUNDARY_BLOCKED_PATTERNS)) {
-    if (pattern.test(lower)) {
-      violations.push(`Boundary violation: ${domain} domain detected in integrity output`);
-    }
-  }
-  return { clean: violations.length === 0, violations };
+  const result = enforceBoundaryWithSanitization(text, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
+  return { clean: result.clean, violations: result.violations };
 }
 
 export function layer1_strategicConsistency(

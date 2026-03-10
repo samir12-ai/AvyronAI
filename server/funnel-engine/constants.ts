@@ -27,7 +27,7 @@ export const GENERIC_FUNNEL_PATTERNS = [
 
 export const GENERIC_PENALTY = 0.35;
 
-export const BOUNDARY_BLOCKED_PATTERNS: Record<string, RegExp> = {
+export const BOUNDARY_HARD_PATTERNS: Record<string, RegExp> = {
   "strategy decisions": /\b(strategy decision|strategic repositioning|strategic pivot|strategic overhaul)\b/i,
   "strategic repositioning": /\b(reposition brand|rebrand strategy|market repositioning)\b/i,
   "offer redesign": /\b(offer redesign|redesign the offer|rebuild the offer|restructure offer)\b/i,
@@ -35,7 +35,6 @@ export const BOUNDARY_BLOCKED_PATTERNS: Record<string, RegExp> = {
   "budget recommendations": /\b(budget recommendation|budget allocation|spending plan|budget optimization)\b/i,
   "channel selection": /\b(channel selection|channel strategy|platform strategy|channel mix)\b/i,
   "media buying": /\b(media buy|ad spend|ad budget|media planning|ad campaign|media mix)\b/i,
-  "awareness messaging": /\b(awareness campaign|brand awareness|top.of.funnel awareness|awareness messaging)\b/i,
   "persuasion copy": /\b(persuasion framework|copywriting|sales copy|persuasion technique|copy template)\b/i,
   "scripts": /\b(sales script|cold call script|outreach script|email script|dm script)\b/i,
   "campaign tasks": /\b(campaign execution|launch sequence|deployment plan|publish schedule|task list)\b/i,
@@ -46,6 +45,17 @@ export const BOUNDARY_BLOCKED_PATTERNS: Record<string, RegExp> = {
   "advertising strategy": /\b(advertising strategy|ad strategy|paid ads|ad creative|ad targeting|retargeting strategy)\b/i,
   "marketing messaging": /\b(marketing message|brand message|tagline|slogan|value proposition statement)\b/i,
   "strategic positioning": /\b(positioning statement|market position|competitive positioning|brand positioning)\b/i,
+};
+
+export const BOUNDARY_SOFT_PATTERNS = [
+  { pattern: /\bawareness campaign\b/gi, domain: "awareness campaign", replacement: "awareness stage reference" },
+  { pattern: /\bbrand awareness\b/gi, domain: "brand awareness", replacement: "market awareness level" },
+  { pattern: /\btop.of.funnel awareness\b/gi, domain: "top-of-funnel awareness", replacement: "early-stage awareness" },
+  { pattern: /\bawareness messaging\b/gi, domain: "awareness messaging", replacement: "awareness stage context" },
+];
+
+export const BOUNDARY_BLOCKED_PATTERNS: Record<string, RegExp> = {
+  ...BOUNDARY_HARD_PATTERNS,
 };
 
 export const MAX_FUNNEL_STAGES = 6;

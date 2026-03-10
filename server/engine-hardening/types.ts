@@ -49,3 +49,17 @@ export interface AlignmentCheckResult {
   misalignments: string[];
   confidencePenalty: number;
 }
+
+export interface SoftPattern {
+  pattern: RegExp;
+  domain: string;
+  replacement: string;
+}
+
+export interface BoundaryEnforcementResult {
+  clean: boolean;
+  violations: string[];
+  sanitized: boolean;
+  sanitizedText: string;
+  warnings: string[];
+}

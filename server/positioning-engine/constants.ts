@@ -62,10 +62,27 @@ export type PositioningStatus = "COMPLETE" | "MISSING_DEPENDENCY" | "INSUFFICIEN
 export const BOUNDARY_BLOCKED_PATTERNS: Record<string, RegExp> = {
   "ad copy": /\b(ad copy|sales copy|copywriting|creative copy|ad creative)\b/i,
   "funnel design": /\b(funnel design|funnel stage|funnel step|sales funnel|conversion funnel|funnel structure|funnel redesign)\b/i,
-  "offer pricing": /\b(pricing|price point|offer structure|discount|package deal|bundle pricing|revenue model|offer pricing)\b/i,
   "content calendars": /\b(content calendar|editorial calendar|posting schedule|content plan|publishing schedule)\b/i,
-  "competitive analysis": /\b(competitive analysis|competitor analysis|competitor comparison|competitive audit|swot analysis)\b/i,
 };
+
+export const BOUNDARY_HARD_PATTERNS: Record<string, RegExp> = {
+  "ad copy": /\b(ad copy|sales copy|copywriting|creative copy|ad creative)\b/i,
+  "funnel design": /\b(funnel design|funnel stage|funnel step|sales funnel|conversion funnel|funnel structure|funnel redesign)\b/i,
+  "content calendars": /\b(content calendar|editorial calendar|posting schedule|content plan|publishing schedule)\b/i,
+};
+
+import type { SoftPattern } from "../engine-hardening/types";
+
+export const BOUNDARY_SOFT_PATTERNS: SoftPattern[] = [
+  { pattern: /\bpricing\b/gi, domain: "pricing", replacement: "market value context" },
+  { pattern: /\bprice point\b/gi, domain: "price point", replacement: "market value context" },
+  { pattern: /\boffer pricing\b/gi, domain: "offer pricing", replacement: "market value context" },
+  { pattern: /\bcompetitive analysis\b/gi, domain: "competitive analysis", replacement: "competitive landscape assessment" },
+  { pattern: /\bcompetitor analysis\b/gi, domain: "competitor analysis", replacement: "competitive landscape assessment" },
+  { pattern: /\bcompetitor comparison\b/gi, domain: "competitor comparison", replacement: "competitive landscape assessment" },
+  { pattern: /\bcompetitive audit\b/gi, domain: "competitive audit", replacement: "competitive landscape assessment" },
+  { pattern: /\bswot analysis\b/gi, domain: "swot analysis", replacement: "strategic assessment" },
+];
 
 export interface Territory {
   name: string;

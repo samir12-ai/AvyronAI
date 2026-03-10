@@ -44,6 +44,31 @@ export const BOUNDARY_BLOCKED_PATTERNS = {
   strategy: /\b(strategic master plan|strategic plan|execution plan|growth strategy|go.to.market strategy)\b/i,
 };
 
+export const BOUNDARY_HARD_PATTERNS: Record<string, RegExp> = {
+  funnel: /\b(funnel architecture|funnel stage|funnel step|funnel design|landing page sequence|opt.in page)\b/i,
+  advertising: /\b(ad strategy|ad campaign|media buy|ad spend|ad creative|retargeting|lookalike audience)\b/i,
+  channel: /\b(channel selection|channel strategy|instagram strategy|facebook strategy|tiktok strategy|linkedin strategy|youtube strategy|content calendar|posting schedule)\b/i,
+  media: /\b(media planning|media mix|placement strategy|impressions target)\b/i,
+  budget: /\b(budget recommendation|budget allocation|spending plan|cost per acquisition)\b/i,
+  execution: /\b(campaign execution|launch sequence|deployment plan|publish schedule|send email|activate sequence)\b/i,
+  sales: /\b(sales script|persuasion framework|closing technique|objection handling script|cold call)\b/i,
+  "financial guarantees": /\b(increase your net worth|guarantee.*return|guaranteed roi|guaranteed income|earn \d+%|make \$\d|double your money|triple your income|financial freedom guaranteed)\b/i,
+  "investment promises": /\b(investment return|roi guarantee|return on investment guarantee|\d+x your money|\d+% return|passive income guarantee)\b/i,
+};
+
+export const BOUNDARY_SOFT_PATTERNS = [
+  { pattern: /\brevenue projection\b/gi, domain: "financial", replacement: "outcome improvement" },
+  { pattern: /\bgrowth strategy\b/gi, domain: "strategy", replacement: "strategic direction" },
+  { pattern: /\bprofit margin\b/gi, domain: "financial", replacement: "value delivery" },
+  { pattern: /\bstrategic plan\b/gi, domain: "strategy", replacement: "strategic framework" },
+  { pattern: /\bfinancial model\b/gi, domain: "financial", replacement: "value model" },
+  { pattern: /\bpricing calculation\b/gi, domain: "financial", replacement: "value assessment" },
+  { pattern: /\bbreak.even\b/gi, domain: "financial", replacement: "value threshold" },
+  { pattern: /\bstrategic master plan\b/gi, domain: "strategy", replacement: "strategic framework" },
+  { pattern: /\bexecution plan\b/gi, domain: "strategy", replacement: "implementation framework" },
+  { pattern: /\bgo.to.market strategy\b/gi, domain: "strategy", replacement: "market approach" },
+];
+
 export const MIN_PROOF_STRENGTH = 0.30;
 export const MIN_OUTCOME_SPECIFICITY = 0.40;
 export const MAX_DELIVERABLES = 8;

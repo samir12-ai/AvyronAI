@@ -13,10 +13,12 @@ import {
   COLLISION_THRESHOLD,
   STABILITY_MIN_PROOFABILITY,
   STABILITY_MIN_TRUST_ALIGNMENT,
-  BOUNDARY_BLOCKED_PATTERNS,
+  BOUNDARY_HARD_PATTERNS,
+  BOUNDARY_SOFT_PATTERNS,
 } from "./constants";
 import {
-  sanitizeBoundary,
+  enforceBoundaryWithSanitization,
+  applySoftSanitization,
   assessDataReliability,
   normalizeConfidence,
   detectGenericOutput,
@@ -900,13 +902,25 @@ export async function runDifferentiationEngine(
     ...finalClaims.map(c => c.claim),
     finalMechanism.description,
   ].join(" ");
-  const boundaryCheck = sanitizeBoundary(boundaryText, BOUNDARY_BLOCKED_PATTERNS);
-  if (!boundaryCheck.clean) {
-    console.error(`[DifferentiationEngine-V3] BOUNDARY VIOLATION: ${boundaryCheck.violations.join("; ")}`);
-    const result = buildEmptyResult("INTEGRITY_FAILED", `Boundary enforcement failed: ${boundaryCheck.violations.join("; ")}`, Date.now() - startTime);
+  const boundaryResult = enforceBoundaryWithSanitization(boundaryText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
+  if (!boundaryResult.clean) {
+    console.error(`[DifferentiationEngine-V3] BOUNDARY VIOLATION: ${boundaryResult.violations.join("; ")}`);
+    const result = buildEmptyResult("INTEGRITY_FAILED", `Boundary enforcement failed: ${boundaryResult.violations.join("; ")}`, Date.now() - startTime);
     result.confidenceScore = 0;
     result.layerDiagnostics = diagnostics;
     return result;
+  }
+  if (boundaryResult.sanitized && boundaryResult.warnings.length > 0) {
+    console.log(`[DifferentiationEngine-V3] BOUNDARY SANITIZED: ${boundaryResult.warnings.join("; ")}`);
+    diagnostics.boundarySanitization = { sanitized: boundaryResult.sanitized, warnings: boundaryResult.warnings };
+    for (const p of finalPillars) {
+      p.name = applySoftSanitization(p.name, BOUNDARY_SOFT_PATTERNS);
+      p.description = applySoftSanitization(p.description, BOUNDARY_SOFT_PATTERNS);
+    }
+    for (const c of finalClaims) {
+      c.claim = applySoftSanitization(c.claim, BOUNDARY_SOFT_PATTERNS);
+    }
+    finalMechanism.description = applySoftSanitization(finalMechanism.description, BOUNDARY_SOFT_PATTERNS);
   }
 
   const l12Stability = layer12_stabilityGuard(finalPillars, finalClaims, l3Collisions, l1.territories);

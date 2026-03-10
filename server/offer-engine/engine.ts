@@ -1,11 +1,13 @@
 import { aiChat } from "../ai-client";
-import { detectGenericOutput, checkCrossEngineAlignment } from "../engine-hardening";
+import { detectGenericOutput, checkCrossEngineAlignment, enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
 import {
   ENGINE_VERSION,
   OFFER_DEPTH_WEIGHTS,
   GENERIC_OFFER_PATTERNS,
   GENERIC_PENALTY,
   BOUNDARY_BLOCKED_PATTERNS,
+  BOUNDARY_HARD_PATTERNS,
+  BOUNDARY_SOFT_PATTERNS,
   MIN_PROOF_STRENGTH,
   MIN_OUTCOME_SPECIFICITY,
   MAX_DELIVERABLES,
@@ -678,8 +680,10 @@ export async function runOfferEngine(
     ...alternativeOffer.deliverables,
     rejectedOffer.offerName, rejectedOffer.coreOutcome,
   ].join(" ");
-  const boundaryCheck = sanitizeBoundary(allOfferText);
+  const boundaryResult = enforceBoundaryWithSanitization(allOfferText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
+  const boundaryCheck = { clean: boundaryResult.clean, violations: boundaryResult.violations };
   diagnostics.boundaryCheck = boundaryCheck;
+  diagnostics.boundarySanitization = { sanitized: boundaryResult.sanitized, warnings: boundaryResult.warnings };
 
   const genericOutputCheck = detectGenericOutput(allOfferText);
   diagnostics.genericOutputCheck = genericOutputCheck;
@@ -697,6 +701,22 @@ export async function runOfferEngine(
     status = STATUS.INTEGRITY_FAILED;
     statusMessage = `Boundary violation — cross-engine output detected: ${boundaryCheck.violations.join("; ")}`;
     console.log(`[OfferEngine-V3] BOUNDARY_VIOLATION | ${boundaryCheck.violations.join("; ")}`);
+  }
+
+  if (boundaryResult.sanitized && boundaryResult.warnings.length > 0) {
+    structuralWarnings.push(...boundaryResult.warnings);
+    console.log(`[OfferEngine-V3] BOUNDARY_SANITIZED | ${boundaryResult.warnings.join("; ")}`);
+    primaryOffer.offerName = applySoftSanitization(primaryOffer.offerName, BOUNDARY_SOFT_PATTERNS);
+    primaryOffer.coreOutcome = applySoftSanitization(primaryOffer.coreOutcome, BOUNDARY_SOFT_PATTERNS);
+    primaryOffer.mechanismDescription = applySoftSanitization(primaryOffer.mechanismDescription, BOUNDARY_SOFT_PATTERNS);
+    primaryOffer.deliverables = primaryOffer.deliverables.map((d: string) => applySoftSanitization(d, BOUNDARY_SOFT_PATTERNS));
+    primaryOffer.riskNotes = primaryOffer.riskNotes.map((r: string) => applySoftSanitization(r, BOUNDARY_SOFT_PATTERNS));
+    alternativeOffer.offerName = applySoftSanitization(alternativeOffer.offerName, BOUNDARY_SOFT_PATTERNS);
+    alternativeOffer.coreOutcome = applySoftSanitization(alternativeOffer.coreOutcome, BOUNDARY_SOFT_PATTERNS);
+    alternativeOffer.mechanismDescription = applySoftSanitization(alternativeOffer.mechanismDescription, BOUNDARY_SOFT_PATTERNS);
+    alternativeOffer.deliverables = alternativeOffer.deliverables.map((d: string) => applySoftSanitization(d, BOUNDARY_SOFT_PATTERNS));
+    rejectedOffer.offerName = applySoftSanitization(rejectedOffer.offerName, BOUNDARY_SOFT_PATTERNS);
+    rejectedOffer.coreOutcome = applySoftSanitization(rejectedOffer.coreOutcome, BOUNDARY_SOFT_PATTERNS);
   }
 
   if (status === STATUS.COMPLETE && !primaryOffer.completeness.complete) {

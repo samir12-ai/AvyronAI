@@ -6,7 +6,7 @@ export const STATUS = {
   INTEGRITY_FAILED: "INTEGRITY_FAILED",
 } as const;
 
-export const BOUNDARY_BLOCKED_PATTERNS: Record<string, RegExp> = {
+export const BOUNDARY_HARD_PATTERNS: Record<string, RegExp> = {
   "new positioning": /\b(new positioning|repositioning strategy|pivot positioning|revised positioning)\b/i,
   "new differentiation": /\b(new differentiation|alternative differentiation|revised differentiation)\b/i,
   "new offers": /\b(new offer|redesign offer|revised offer|alternative offer design)\b/i,
@@ -21,6 +21,12 @@ export const BOUNDARY_BLOCKED_PATTERNS: Record<string, RegExp> = {
   "advertising strategy": /\b(ad strategy|advertising strategy|paid ads|ad creative|ad targeting)\b/i,
   "media buying": /\b(media buy|ad spend|ad budget|media planning)\b/i,
   "scripts": /\b(sales script|cold call script|outreach script|email script)\b/i,
+};
+
+export const BOUNDARY_SOFT_PATTERNS: { pattern: RegExp; domain: string; replacement: string }[] = [];
+
+export const BOUNDARY_BLOCKED_PATTERNS: Record<string, RegExp> = {
+  ...BOUNDARY_HARD_PATTERNS,
 };
 
 export const LAYER_NAMES = [

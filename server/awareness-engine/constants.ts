@@ -32,10 +32,8 @@ export const TRIGGER_CLASSES = [
   "competitor_weakness",
 ] as const;
 
-export const BOUNDARY_BLOCKED_PATTERNS: Record<string, RegExp> = {
+export const BOUNDARY_HARD_PATTERNS: Record<string, RegExp> = {
   "marketing copy": /\b(marketing copy|ad copy|sales copy|copywriting)\b/i,
-  "hooks": /\b(hook|hooks|opening hook|scroll.?stop)\b/i,
-  "headlines": /\b(headline|headlines|subject line|email subject)\b/i,
   "ad creatives": /\b(ad creative|creative asset|banner design|creative brief)\b/i,
   "content calendar": /\b(content calendar|editorial calendar|posting schedule|content plan)\b/i,
   "channel recommendations": /\b(channel recommendation|channel strategy|platform strategy|channel selection|media mix)\b/i,
@@ -48,6 +46,15 @@ export const BOUNDARY_BLOCKED_PATTERNS: Record<string, RegExp> = {
   "execution tasks": /\b(execution task|deployment plan|launch sequence|publish schedule|campaign step)\b/i,
   "scripts": /\b(sales script|cold call script|outreach script|email script)\b/i,
 };
+
+import type { SoftPattern } from "../engine-hardening/types";
+
+export const BOUNDARY_SOFT_PATTERNS: SoftPattern[] = [
+  { pattern: /\b(hook|hooks|opening hook)\b/gi, domain: "hook", replacement: "entry trigger" },
+  { pattern: /\b(headline|headlines)\b/gi, domain: "headline", replacement: "attention signal" },
+  { pattern: /\b(scroll.?stop)\b/gi, domain: "scroll stop", replacement: "attention capture" },
+  { pattern: /\b(subject line|email subject)\b/gi, domain: "subject line", replacement: "attention signal" },
+];
 
 export const LAYER_NAMES = [
   "market_entry_detection",
