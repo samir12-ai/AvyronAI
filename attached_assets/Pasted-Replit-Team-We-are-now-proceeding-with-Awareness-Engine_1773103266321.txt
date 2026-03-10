@@ -1,0 +1,349 @@
+Replit Team,
+
+We are now proceeding with Awareness Engine V3, and this implementation needs to be done carefully from the start so we avoid shallow outputs, cross-engine conflicts, noisy reasoning, and future architectural instability.
+
+This email is the full final specification for the engine, including:
+
+- the global system hardening items that must be addressed now,
+- the exact way Awareness Engine V3 should be built,
+- the Master Plan boundary protections,
+- the route and deployment precautions,
+- and the UI placement requirement.
+
+Please follow this specification strictly.
+
+---
+
+## 1) Global Reliability Hardening Before and During Awareness Engine
+
+Before treating any downstream reasoning as trustworthy, the system must protect itself against weak input data and structural drift.
+
+Please implement or finalize the following global safeguards:
+
+### A. Data Reliability Guard
+We need a unified reliability layer so downstream engines do not build strong strategic conclusions on top of weak data.
+
+This guard must evaluate:
+
+- signal density  
+- signal diversity  
+- narrative stability  
+- competitor validity  
+- market maturity  
+
+If reliability is weak, the system must:
+
+- downgrade confidence
+- attach reliability diagnostics
+- avoid overconfident strategic outputs
+
+This should work in coordination with existing protections such as:
+
+- Sample Bias Detection
+- Real Data Ratio Guard
+- Authority Weighting
+
+### B. Confidence Normalization
+Different engines currently produce confidence levels that are not fully comparable.
+
+Implement normalized confidence handling so the system evaluates cross-engine confidence consistently instead of comparing unrelated raw values.
+
+### C. Snapshot Stability Policy
+To prevent long-term database inflation and messy state growth:
+
+- define a snapshot pruning or archive policy
+- preserve upstream traceability
+- keep accountId, campaignId, engine version, timestamps, and snapshot references intact
+
+### D. Engine Compatibility Matrix
+Prevent version drift across engines.
+
+If one engine is running on incompatible upstream versions, the system must detect this and downgrade or warn rather than silently proceeding.
+
+### E. Revalidation Loop Guard
+Prevent repeated circular revalidation chains where one update keeps triggering another indefinitely.
+
+A validation session or equivalent protection should prevent endless loop behavior across Offer, Funnel, Integrity, and Awareness.
+
+### F. Route and Runtime Verification
+As always, please avoid the common failure where code is updated but the live system continues running an older build.
+
+After implementation:
+
+- rebuild affected modules
+- restart backend/runtime
+- verify engine version
+- verify routes live in the running environment
+- verify real snapshot chain behavior
+
+Do not close the task unless the live environment is confirmed to be using the new logic.
+
+---
+
+## 2) Awareness Engine V3 Position in the Master Plan
+
+Awareness Engine V3 is part of the execution layer, but it must still obey Master Plan discipline.
+
+It comes after:
+
+- Market Intelligence
+- Audience
+- Positioning
+- Differentiation
+- Offer
+- Funnel
+- Integrity
+
+It comes before:
+
+- Persuasion Engine
+- Channels Engine
+- Financial Governor
+- Beast Execution
+
+Awareness Engine must not rewrite or reinterpret upstream strategic engines. It consumes them and translates them into awareness architecture only.
+
+---
+
+## 3) Strict Boundary Protections
+
+This is critical.
+
+Awareness Engine may produce only:
+
+- awareness entry routes
+- awareness mechanism types
+- awareness readiness mapping
+- attention trigger classes
+- awareness friction notes
+- trust-entry requirements
+- funnel compatibility signals
+- awareness strength scoring
+
+It must NOT produce:
+
+- marketing copy
+- hooks
+- headlines
+- ad creatives
+- content calendar
+- channel recommendations
+- funnel redesign
+- offer redesign
+- new positioning
+- persuasion frameworks
+- media plans
+- budgets
+- execution tasks
+
+If any of these appear, the engine must hard-fail with integrity protection.
+
+Awareness Engine is not a copy engine, not a channels engine, and not a strategy engine.
+
+---
+
+## 4) How Awareness Engine V3 Must Be Built
+
+Build the engine as a structured decision engine with these layers:
+
+### Layer 1 — Market Entry Detection
+Determine the best entry route into the market.
+
+Possible entry routes may include:
+
+- pain entry
+- opportunity entry
+- myth-breaker entry
+- authority entry
+- proof-led entry
+- diagnostic entry
+
+The choice must be based on:
+
+- audience readiness
+- trust level
+- problem intensity
+- market maturity
+- competitor pressure
+
+### Layer 2 — Awareness Readiness Mapping
+Classify the audience awareness stage:
+
+- unaware
+- problem aware
+- solution aware
+- product aware
+- most aware
+
+The awareness route must match this stage correctly.
+
+### Layer 3 — Attention Trigger Mapping
+Identify the correct trigger classes such as:
+
+- hidden cost trigger
+- missed opportunity trigger
+- outdated method trigger
+- authority gap trigger
+- trust breakdown trigger
+- competitor weakness trigger
+
+These are trigger categories only, not final messaging copy.
+
+### Layer 4 — Narrative Entry Alignment
+Ensure awareness logic aligns with:
+
+- positioning narrative
+- positioning enemy
+- differentiation pillars
+- offer mechanism
+- funnel structure
+
+If awareness entry contradicts positioning or differentiation, confidence must be reduced.
+
+### Layer 5 — Awareness-to-Funnel Fit
+Verify that the awareness route logically feeds the selected funnel.
+
+Examples:
+
+- challenge funnels need curiosity or diagnostic entry
+- consultation funnels require trust or authority entry
+- application funnels require pre-qualified awareness
+
+If the awareness route does not logically feed the funnel, the system must downgrade the result.
+
+### Layer 6 — Trust Readiness Guard
+If the market requires early trust-building, the awareness path must be:
+
+- proof-led
+- authority-led
+- transparency-led
+
+It must not use hype-first awareness when trust is the real barrier.
+
+### Layer 7 — Generic Awareness Detector
+Detect and penalize weak generic awareness logic such as:
+
+- grow your business
+- scale faster
+- improve marketing
+
+If the awareness route is generic and market-noise-like, apply a score penalty.
+
+### Layer 8 — Awareness Strength Scoring
+Score the awareness architecture using dimensions such as:
+
+- audience readiness fit
+- positioning alignment
+- funnel compatibility
+- trust suitability
+- distinctiveness
+- entry clarity
+- friction reduction
+- practical deployability
+
+---
+
+## 5) Practicality and Anti-Hallucination Rules
+
+Awareness Engine must stay practical.
+
+It must not drift into:
+
+- abstract storytelling
+- vague strategic philosophy
+- verbose AI reasoning
+- speculative market fiction
+
+Outputs must remain:
+
+- structured
+- operational
+- bounded
+- data-anchored
+
+The engine should define awareness logic, not invent creative assets.
+
+---
+
+## 6) Required Output Structure
+
+Awareness Engine V3 must output exactly:
+
+- one Primary Awareness Route
+- one Alternative Awareness Route
+- one Rejected Awareness Route
+
+Each route must include:
+
+- route name
+- entry mechanism type
+- target readiness stage
+- trigger class
+- trust requirement
+- funnel compatibility
+- awareness strength score
+- friction notes
+- rejection reason where relevant
+
+No more than this. No branching explosion.
+
+---
+
+## 7) UI and Product Placement Requirement
+
+Please place Awareness Engine as its own separate branch/card inside the Strategy section pipeline, not merged into another engine and not hidden inside Funnel or Integrity.
+
+It should appear as an independent engine in the strategic/execution flow, clearly connected to the pipeline, with its own dedicated view and results.
+
+This is important for maintaining the clarity of the Master Plan structure in the product.
+
+---
+
+## 8) Routes, State, and Snapshot Integrity
+
+Please create and verify the required Awareness Engine routes and state handling.
+
+Requirements:
+
+- proper route registration
+- correct accountId and campaignId scoping
+- full upstream snapshot references
+- clean latest endpoint behavior
+- stable persistence model
+- no route disconnection issues
+
+Snapshot storage must preserve traceability to upstream engines and must not break downstream continuity.
+
+---
+
+## 9) Acceptance Criteria
+
+Awareness Engine V3 is complete only when:
+
+- all global reliability safeguards above are addressed or integrated appropriately
+- engine boundaries are strictly enforced
+- Awareness Engine builds structured awareness architecture only
+- no copywriting, channels, or persuasion outputs leak into its results
+- awareness routes align with audience readiness, positioning, differentiation, offer, and funnel
+- generic awareness logic is penalized
+- route connectivity is stable
+- live deployment is verified
+- the engine appears as its own separate branch inside the Strategy section
+
+---
+
+## 10) Final Deployment Reminder
+
+Please explicitly verify that this implementation is not only written in code but also fully applied to the running system.
+
+This includes:
+
+- rebuilding affected modules
+- restarting runtime/backend
+- confirming live engine version
+- verifying live routes
+- verifying real end-to-end behavior using actual snapshot chains
+
+Please do not mark the task complete until the running environment is confirmed to be using the updated logic.
+
+Thank you.
