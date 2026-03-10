@@ -1,0 +1,50 @@
+ent"}
+
+Hi,
+
+After the latest fixes were implemented, the Offer Engine is now returning COMPLETE and snapshots are being saved correctly. However, the interface is still displaying a Boundary Violation warning in the Offer Engine output.
+
+This suggests that the boundary guard is still triggering under certain wording conditions even when the offer passes the alignment and validation checks.
+
+From the latest output, the offer title and description include phrases such as:
+
+Economic Empowerment Framework  
+improving financial conditions
+
+These phrases are not financial guarantees or financial advisory instructions. They are only describing the context of the transformation.
+
+The current boundary filter appears to be treating general economic or financial context as a violation.
+
+The system should differentiate between the following two cases.
+
+Allowed context examples:
+
+financial stability  
+financial clarity  
+financial discipline  
+economic improvement  
+financial decision confidence
+
+These are strategic transformation descriptions and should not trigger boundary violations.
+
+Blocked examples should remain:
+
+guaranteed income  
+guaranteed ROI  
+investment return promises  
+passive income guarantee  
+specific financial return claims
+
+These should still trigger a hard boundary violation.
+
+Please review the boundary pattern matching to ensure that only true financial guarantees or advisory claims trigger the violation.
+
+Additionally, please verify that the boundary warning shown in the UI is not being pulled from a previous snapshot state. If sanitization resolves the phrase successfully, the UI should not continue displaying a violation warning.
+
+Finally, after adjusting the boundary logic, please confirm that the running system has been restarted and that the updated boundary rules are applied to the active environment.
+
+Once updated, please run a fresh Offer Engine generation to confirm that legitimate financial context phrases no longer trigger boundary violations while true financial guarantees are still blocked.
+
+Please confirm once this adjustment has been implemented and deployed.
+
+Thank

@@ -54,7 +54,7 @@ interface OfferData {
   rejectedOffer?: { offer: OfferCandidate; rejectionReason: string };
   offerStrengthScore?: number;
   positioningConsistency?: { consistent: boolean; contradictions: string[] };
-  boundaryCheck?: { clean: boolean; violations: string[] };
+  boundaryCheck?: { passed: boolean; violations: string[] };
   confidenceScore?: number;
   engineVersion?: number;
   selectedOption?: string | null;
@@ -447,7 +447,7 @@ export default function OfferEngine() {
             </View>
           )}
 
-          {data.boundaryCheck && !data.boundaryCheck.clean && (
+          {data.boundaryCheck && !data.boundaryCheck.passed && data.boundaryCheck.violations.length > 0 && (
             <View style={[styles.warningBox, { backgroundColor: '#EF444415', borderColor: '#EF444430' }]}>
               <Ionicons name="alert-circle" size={16} color="#EF4444" />
               <View style={{ flex: 1 }}>
