@@ -3,6 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 
 const upload = multer({
   dest: "/tmp/veo-uploads",
@@ -29,6 +30,39 @@ function getVeoClient(): GoogleGenAI | null {
   return veoClientInstance;
 }
 
+const pendingImages = new Map<string, { filePath: string; mimeType: string; createdAt: number }>();
+
+function cleanupOldImages() {
+  const now = Date.now();
+  for (const [id, entry] of pendingImages.entries()) {
+    if (now - entry.createdAt > 30 * 60 * 1000) {
+      try { fs.unlinkSync(entry.filePath); } catch {}
+      pendingImages.delete(id);
+    }
+  }
+}
+
+function readImageAsBase64(imageId: string): { imageBytes: string; mimeType: string } | null {
+  const entry = pendingImages.get(imageId);
+  if (!entry) return null;
+  try {
+    const buffer = fs.readFileSync(entry.filePath);
+    const imageBytes = buffer.toString("base64");
+    return { imageBytes, mimeType: entry.mimeType };
+  } catch (err) {
+    console.error(`[Veo] Failed to read image ${imageId}:`, err);
+    return null;
+  }
+}
+
+function cleanupImage(imageId: string) {
+  const entry = pendingImages.get(imageId);
+  if (entry) {
+    try { fs.unlinkSync(entry.filePath); } catch {}
+    pendingImages.delete(imageId);
+  }
+}
+
 export function registerVeoRoutes(app: Express) {
   const uploadsDir = "/tmp/veo-uploads";
   if (!fs.existsSync(uploadsDir)) {
@@ -52,22 +86,20 @@ export function registerVeoRoutes(app: Express) {
         return res.status(400).json({ error: "No image file provided. Ensure the form field is named 'image'." });
       }
 
-      const filePath = req.file.path;
       const mimeType = req.file.mimetype || "image/jpeg";
+      const imageId = crypto.randomUUID();
 
-      console.log(`[VeoUpload] Received file: ${req.file.originalname} (${mimeType}, ${req.file.size} bytes)`);
+      console.log(`[VeoUpload] Received file: ${req.file.originalname} (${mimeType}, ${req.file.size} bytes) → id=${imageId}`);
 
-      const imageBuffer = fs.readFileSync(filePath);
-      const imageBytes = imageBuffer.toString("base64");
-
-      try { fs.unlinkSync(filePath); } catch {}
-
-      console.log(`[VeoUpload] Encoded image as base64: ${imageBytes.length} chars, mimeType=${mimeType}`);
-
-      res.json({
-        imageBytes,
+      pendingImages.set(imageId, {
+        filePath: req.file.path,
         mimeType,
+        createdAt: Date.now(),
       });
+
+      cleanupOldImages();
+
+      res.json({ imageId, mimeType });
     } catch (error: any) {
       console.error("[VeoUpload] Upload error:", error);
       try { if (req.file?.path) fs.unlinkSync(req.file.path); } catch {}
@@ -88,10 +120,8 @@ export function registerVeoRoutes(app: Express) {
         duration,
         resolution,
         negativePrompt,
-        imageBytes,
-        imageMimeType,
-        lastFrameBytes,
-        lastFrameMimeType,
+        startImageId,
+        lastFrameImageId,
         personGeneration,
       } = req.body;
 
@@ -124,13 +154,19 @@ export function registerVeoRoutes(app: Express) {
         config.personGeneration = personGeneration;
       }
 
-      if (lastFrameBytes && lastFrameMimeType) {
-        config.lastFrame = {
-          image: {
-            imageBytes: lastFrameBytes,
-            mimeType: lastFrameMimeType,
-          },
-        };
+      if (lastFrameImageId) {
+        const lastFrameData = readImageAsBase64(lastFrameImageId);
+        if (lastFrameData) {
+          config.lastFrame = {
+            image: {
+              imageBytes: lastFrameData.imageBytes,
+              mimeType: lastFrameData.mimeType,
+            },
+          };
+          cleanupImage(lastFrameImageId);
+        } else {
+          console.warn(`[VeoGenerate] Last frame image ${lastFrameImageId} not found, skipping`);
+        }
       }
 
       const params: any = {
@@ -139,14 +175,20 @@ export function registerVeoRoutes(app: Express) {
         config,
       };
 
-      if (imageBytes && imageMimeType) {
-        params.image = {
-          imageBytes: imageBytes,
-          mimeType: imageMimeType,
-        };
+      if (startImageId) {
+        const imageData = readImageAsBase64(startImageId);
+        if (imageData) {
+          params.image = {
+            imageBytes: imageData.imageBytes,
+            mimeType: imageData.mimeType,
+          };
+          cleanupImage(startImageId);
+        } else {
+          return res.status(400).json({ error: "Start image not found. Please re-upload and try again." });
+        }
       }
 
-      console.log(`[VeoGenerate] model=${params.model} prompt="${prompt.slice(0, 60)}..." aspectRatio=${config.aspectRatio} duration=${config.durationSeconds || 'default'} resolution=${config.resolution || 'default'} hasImage=${!!imageBytes} imageSize=${imageBytes ? imageBytes.length : 0} lastFrame=${!!lastFrameBytes}`);
+      console.log(`[VeoGenerate] model=${params.model} prompt="${prompt.slice(0, 60)}..." aspectRatio=${config.aspectRatio} duration=${config.durationSeconds || 'default'} resolution=${config.resolution || 'default'} hasImage=${!!params.image} imageSize=${params.image?.imageBytes?.length || 0} lastFrame=${!!config.lastFrame}`);
 
       const operation = await client.models.generateVideos(params);
 

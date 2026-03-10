@@ -872,7 +872,7 @@ export default function CreateScreen() {
     }
   };
 
-  const uploadImageForVeo = async (image: ImagePicker.ImagePickerAsset): Promise<{ imageBytes: string; mimeType: string } | null> => {
+  const uploadImageForVeo = async (image: ImagePicker.ImagePickerAsset): Promise<{ imageId: string; mimeType: string } | null> => {
     try {
       const apiUrl = getApiUrl();
       const formData = new FormData();
@@ -901,11 +901,11 @@ export default function CreateScreen() {
         console.error('Upload image server error:', data.error);
         return null;
       }
-      if (!data.imageBytes) {
-        console.error('Upload image: no imageBytes returned');
+      if (!data.imageId) {
+        console.error('Upload image: no imageId returned');
         return null;
       }
-      return { imageBytes: data.imageBytes, mimeType: data.mimeType };
+      return { imageId: data.imageId, mimeType: data.mimeType };
     } catch (err) {
       console.error('Upload image error:', err);
       return null;
@@ -945,8 +945,7 @@ export default function CreateScreen() {
           setIsGeneratingVideo(false);
           return;
         }
-        body.imageBytes = uploaded.imageBytes;
-        body.imageMimeType = uploaded.mimeType;
+        body.startImageId = uploaded.imageId;
       }
 
       if (videoLastFrame?.uri) {
@@ -957,8 +956,7 @@ export default function CreateScreen() {
           setIsGeneratingVideo(false);
           return;
         }
-        body.lastFrameBytes = uploadedLast.imageBytes;
-        body.lastFrameMimeType = uploadedLast.mimeType;
+        body.lastFrameImageId = uploadedLast.imageId;
       }
 
       setVideoStatus('generating');
