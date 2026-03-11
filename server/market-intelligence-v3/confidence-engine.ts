@@ -83,7 +83,7 @@ export function getConfidenceLevel(confidence: number): ConfidenceLevel {
   return "INSUFFICIENT";
 }
 
-export function evaluateSignalStabilityGuard(signalResults: CompetitorSignalResult[]): SignalStabilityGuard {
+export function evaluateSignalStabilityGuard(signalResults: CompetitorSignalResult[], contentPrimaryMode: boolean = false): SignalStabilityGuard {
   const avgCoverage = mean(signalResults.map(r => r.signalCoverageScore));
   const avgReliability = mean(signalResults.map(r => r.sourceReliabilityScore));
   const totalSampleSize = signalResults.reduce((s, r) => s + r.sampleSize, 0);
@@ -108,9 +108,10 @@ export function evaluateSignalStabilityGuard(signalResults: CompetitorSignalResu
     reasons.push(`Source reliability critically low: ${avgReliability.toFixed(2)} < ${MI_CONFIDENCE.BLOCK_RELIABILITY}`);
   }
 
-  if (maxDominantRatio > MI_CONFIDENCE.DOWNGRADE_DOMINANT_SOURCE) {
+  const effectiveDominantThreshold = contentPrimaryMode ? 0.75 : MI_CONFIDENCE.DOWNGRADE_DOMINANT_SOURCE;
+  if (maxDominantRatio > effectiveDominantThreshold) {
     if (decision !== "BLOCK") decision = "DOWNGRADE";
-    reasons.push(`Dominant source ratio too high: ${maxDominantRatio.toFixed(2)} > ${MI_CONFIDENCE.DOWNGRADE_DOMINANT_SOURCE}`);
+    reasons.push(`Dominant source ratio too high: ${maxDominantRatio.toFixed(2)} > ${effectiveDominantThreshold}${contentPrimaryMode ? " (content-primary mode)" : ""}`);
   }
 
   const minSample = MI_THRESHOLDS.MIN_POSTS_API_CEILING * signalResults.length;
@@ -136,6 +137,7 @@ export function computeConfidence(
   signalResults: CompetitorSignalResult[],
   dataAgeDays: number,
   realDataRatio: number = 1.0,
+  contentPrimaryMode: boolean = false,
 ): ConfidenceResult {
   const factors = computeConfidenceFactors(signalResults, dataAgeDays);
 
@@ -148,14 +150,14 @@ export function computeConfidence(
     factors.signalStability * 0.15
   ) * 1000) / 1000;
 
-  if (realDataRatio < MI_REAL_DATA_RATIO.MIN_REAL_RATIO) {
+  if (realDataRatio < MI_REAL_DATA_RATIO.MIN_REAL_RATIO && !contentPrimaryMode) {
     const penalty = (MI_REAL_DATA_RATIO.MIN_REAL_RATIO - realDataRatio) * MI_REAL_DATA_RATIO.CONFIDENCE_PENALTY_FACTOR;
     overall = Math.round(Math.max(0, overall - penalty) * 1000) / 1000;
   }
 
   const level = getConfidenceLevel(overall);
 
-  const guard = evaluateSignalStabilityGuard(signalResults);
+  const guard = evaluateSignalStabilityGuard(signalResults, contentPrimaryMode);
   let guardDecision = guard.decision;
   const guardReasons = [...guard.reasons];
 

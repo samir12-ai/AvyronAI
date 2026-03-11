@@ -239,11 +239,21 @@ export function registerPersuasionEngineRoutes(app: Express) {
         funnelSnapshot = latest;
       }
 
+      let rawObjMapData = miSnapshot.objectionMapData;
+      if (!rawObjMapData) {
+        const [latestMi] = await db.select({ objectionMapData: miSnapshots.objectionMapData })
+          .from(miSnapshots)
+          .where(and(eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId), eq(miSnapshots.status, "COMPLETE")))
+          .orderBy(desc(miSnapshots.createdAt)).limit(1);
+        if (latestMi?.objectionMapData) rawObjMapData = latestMi.objectionMapData;
+      }
+      const narrativeObjMap = safeJsonParse(rawObjMapData) || null;
       const miInput = {
         marketDiagnosis: miSnapshot.marketDiagnosis,
         overallConfidence: safeNumber(miSnapshot.overallConfidence, 0),
         opportunitySignals: safeJsonParse(miSnapshot.opportunitySignals) || [],
         threatSignals: safeJsonParse(miSnapshot.threatSignals) || [],
+        narrativeObjectionCount: narrativeObjMap?.totalObjectionsDetected ?? 0,
       };
 
       const audienceInput = {

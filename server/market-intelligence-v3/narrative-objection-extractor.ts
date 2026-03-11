@@ -1,5 +1,7 @@
 import type { CompetitorInput, PostData } from "./types";
 
+export type NarrativeSignalType = "pain" | "objection" | "trust_barrier";
+
 export interface NarrativeObjectionItem {
   objection: string;
   frequencyScore: number;
@@ -7,6 +9,7 @@ export interface NarrativeObjectionItem {
   supportingEvidence: Array<{ caption: string; competitorName: string; matchedPattern: string }>;
   competitorSources: string[];
   patternCategory: string;
+  signalType: NarrativeSignalType;
 }
 
 export interface NarrativeObjectionMap {
@@ -16,7 +19,24 @@ export interface NarrativeObjectionMap {
   objectionDensity: number;
   captionsScanned: number;
   extractionTimestamp: string;
+  painCount: number;
+  objectionCount: number;
+  trustBarrierCount: number;
 }
+
+const CATEGORY_TO_SIGNAL_TYPE: Record<string, NarrativeSignalType> = {
+  problem_framing: "pain",
+  trust_repair: "trust_barrier",
+  credibility: "trust_barrier",
+  comparison: "objection",
+  anti_pattern: "objection",
+  price_value: "objection",
+  results_skepticism: "objection",
+  generic_strategy: "objection",
+  noise_rejection: "objection",
+  differentiation_signal: "objection",
+  strategy_framing: "objection",
+};
 
 interface PatternDef {
   category: string;
@@ -286,9 +306,11 @@ export function extractNarrativeObjections(competitors: CompetitorInput[]): Narr
     const frequencyScore = Math.min(totalHits / Math.max(captionsScanned, 1), 1.0);
     const multiCompetitorBonus = data.competitorNames.size >= 2 ? 0.2 : 0;
     const narrativeConfidence = Math.min(
-      0.3 + (frequencyScore * 0.4) + multiCompetitorBonus + (Math.min(totalHits, 4) * 0.05),
+      0.4 + (frequencyScore * 0.4) + multiCompetitorBonus + (Math.min(totalHits, 4) * 0.05),
       1.0,
     );
+
+    const signalType = CATEGORY_TO_SIGNAL_TYPE[data.patternCategory] || "objection";
 
     objections.push({
       objection: label,
@@ -297,6 +319,7 @@ export function extractNarrativeObjections(competitors: CompetitorInput[]): Narr
       supportingEvidence: data.evidence,
       competitorSources: Array.from(data.competitorNames),
       patternCategory: data.patternCategory,
+      signalType,
     });
   }
 
@@ -307,6 +330,10 @@ export function extractNarrativeObjections(competitors: CompetitorInput[]): Narr
     ? Math.round((objections.reduce((s, o) => s + o.frequencyScore, 0) / Math.max(objections.length, 1)) * 1000) / 1000
     : 0;
 
+  const painCount = objections.filter(o => o.signalType === "pain").length;
+  const objectionCount = objections.filter(o => o.signalType === "objection").length;
+  const trustBarrierCount = objections.filter(o => o.signalType === "trust_barrier").length;
+
   return {
     objections,
     totalObjectionsDetected: objections.length,
@@ -314,5 +341,8 @@ export function extractNarrativeObjections(competitors: CompetitorInput[]): Narr
     objectionDensity,
     captionsScanned,
     extractionTimestamp: new Date().toISOString(),
+    painCount,
+    objectionCount,
+    trustBarrierCount,
   };
 }

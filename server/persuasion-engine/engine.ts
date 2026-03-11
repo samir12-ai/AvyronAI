@@ -466,7 +466,9 @@ function layer2_objectionDetection(
   const objectionKeys = Object.keys(objections);
   let directObjectionCount = objectionKeys.length;
 
-  if (directObjectionCount === 0) {
+  const hasNarrativeObjections = (mi.narrativeObjectionCount ?? 0) > 0;
+
+  if (directObjectionCount === 0 && !hasNarrativeObjections) {
     warnings.push("No direct audience objections detected — activating fallback objection inference");
 
     const fallbackSources: string[] = [];
@@ -523,6 +525,9 @@ function layer2_objectionDetection(
       score -= 0.2;
       warnings.push("CRITICAL: No objection signals from any source — persuasion may miss critical barriers");
     }
+  } else if (directObjectionCount === 0 && hasNarrativeObjections) {
+    findings.push(`${mi.narrativeObjectionCount} content-derived narrative objection(s) detected from MI — treated as moderate confidence`);
+    score += Math.min(mi.narrativeObjectionCount * 0.04, 0.15);
   } else {
     findings.push(`${directObjectionCount} direct objection category(ies) detected: ${objectionKeys.slice(0, 5).join(", ")}`);
     score += Math.min(directObjectionCount * 0.05, 0.2);

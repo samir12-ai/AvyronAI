@@ -928,7 +928,8 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
 
   const dominantIntent = computeDominantMarketIntent(intents);
   const trajectory = computeTrajectory(signalResults, intents);
-  const confidence = computeConfidence(signalResults, confidenceFreshnessDays);
+  const contentPrimaryMode = totalComments === 0 && totalPosts > 0;
+  const confidence = computeConfidence(signalResults, confidenceFreshnessDays, 1.0, contentPrimaryMode);
   const dominanceResults = computeAllDominance(signalResults, confidence, campaignGoalMode);
   let missingFlags = aggregateMissingFlags(signalResults);
   const trajectoryDirection = deriveTrajectoryDirection(trajectory);

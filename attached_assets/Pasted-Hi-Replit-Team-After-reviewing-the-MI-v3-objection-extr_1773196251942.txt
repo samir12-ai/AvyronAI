@@ -1,0 +1,174 @@
+Hi Replit Team,
+
+After reviewing the MI v3 objection extraction behavior and the recent engine outputs, I want to finalize the architecture correction so the system operates correctly both technically and strategically. Please implement the following adjustments and ensure they are applied system-wide and actually deployed, not just updated in code.
+
+---
+
+# 1. Core Correction: Comment Counts Must NOT Be Used for Objection Detection
+
+Our platform does not scrape Instagram comment text by design. The system only receives:
+
+- comment_count (numeric)
+- no comment_text
+
+Because of this, comment data must be treated strictly as an engagement signal.
+
+Correct rule:
+
+comments_count → engagement signal only  
+NOT → objection signal  
+NOT → objection confidence input
+
+Important guardrail:
+
+comment_count must not increase OR decrease objection confidence.
+
+It should not enter the objection scoring system at all.
+
+---
+
+# 2. Correct Objection Extraction Sources
+
+The objection engine must extract signals from market messaging, not comments.
+
+Primary extraction sources:
+
+1. Captions
+2. Video hooks
+3. Offer framing
+4. CTA structure
+5. Proof usage (case studies, guarantees, results framing)
+6. Competitor messaging patterns
+
+Example:
+
+Caption  
+“Stop wasting money on ads that don’t convert”
+
+→ detected objection  
+ads don’t convert / distrust in ad ROI
+
+CTA  
+“Free audit”
+
+→ detected objection  
+trust / risk / uncertainty
+
+Offer framing  
+“Results guarantee”
+
+→ detected objection  
+outcome skepticism
+
+---
+
+# 3. Separate Pain vs Objection vs Trust Barriers
+
+The system must not mix these categories, which is a common error in market-analysis tools.
+
+Required separation:
+
+Pain signals  
+→ market problems
+
+Objections  
+→ resistance to buying the solution
+
+Trust barriers  
+→ skepticism toward the provider or mechanism
+
+Example:
+
+Pain  
+“Leads are inconsistent”
+
+Objection  
+“Agencies waste ad budgets”
+
+Trust barrier  
+“Agencies overpromise results”
+
+These must remain distinct signals in the pipeline.
+
+---
+
+# 4. Prevent False Confidence Penalties
+
+Currently when comment text is unavailable the system activates fallback inference and reduces objection reliability.
+
+This must be adjusted.
+
+Correct logic:
+
+If comment_text == null  
+AND content signals exist
+
+→ treat objections as content-derived objections
+
+→ objection confidence = moderate  
+NOT low.
+
+This prevents unnecessary penalties in:
+
+- Trust Barrier Mapping
+- Persuasion Engine
+- Differentiation Engine
+
+---
+
+# 5. Adjust Dominant Source Ratio Logic
+
+MI currently triggers exploratory mode when:
+
+dominant source ratio > 0.6
+
+However, when comment text is unavailable, content will naturally dominate signals.
+
+Content signals must be considered a valid primary market signal, not a weakness.
+
+Please adjust the dominant source logic so that strong content data does not force exploratory mode unnecessarily.
+
+---
+
+# 6. Avoid Common Industry Failures
+
+Please ensure the system explicitly avoids the most common mistakes seen in competing market-analysis tools:
+
+Mistake 1  
+Dependence on comment scraping
+
+Mistake 2  
+Treating engagement metrics as psychological signals
+
+Mistake 3  
+Over-penalizing missing signals
+
+Mistake 4  
+Mixing pain signals with objections
+
+Mistake 5  
+Reducing persuasion confidence when content signals are strong
+
+Our architecture must remain content-first, not comment-dependent.
+
+---
+
+# 7. Final Deployment Verification (Important)
+
+After implementing the fixes, please confirm the following:
+
+1. The updated logic is applied system-wide
+2. The MI pipeline has been restarted
+3. New MI snapshots reflect content-based objection extraction
+4. Objection scoring no longer references comment counts
+
+Please verify the running system, not just the repository code, to ensure the changes are active in production.
+
+---
+
+This should finalize the objection extraction architecture and prevent the reliability drops we observed in recent engine runs.
+
+Please confirm once the update is implemented and deployed.
+
+Best,  
+[Your Name]

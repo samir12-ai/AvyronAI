@@ -82,48 +82,37 @@ export function computeDemandPressure(
   audienceIntentSignals: string[],
   commentCount?: number,
 ): DemandPressureResult {
+  const engagementDensity = clamp01(engagementQuality.engagementQualityRatio);
+  const metadataCommentCount = commentCount ?? 0;
+  const commentIntensity = clamp01(metadataCommentCount / MI_DEMAND_PRESSURE.COMMENT_INTENSITY_NORMALIZATION);
+
   if (comments.length === 0) {
-    const metadataCommentCount = commentCount ?? 0;
-    if (metadataCommentCount > 0) {
-      const engagementDensity = clamp01(engagementQuality.engagementQualityRatio);
-      const commentIntensity = clamp01(metadataCommentCount / MI_DEMAND_PRESSURE.COMMENT_INTENSITY_NORMALIZATION);
-      const intentSignalStrength = clamp01(audienceIntentSignals.length / MI_DEMAND_PRESSURE.INTENT_SIGNAL_NORMALIZATION * 0.5);
-      const score = clamp01(
-        engagementDensity * MI_DEMAND_PRESSURE.WEIGHT_ENGAGEMENT +
-        commentIntensity * MI_DEMAND_PRESSURE.WEIGHT_COMMENT_INTENSITY +
-        intentSignalStrength * MI_DEMAND_PRESSURE.WEIGHT_INTENT_SIGNAL
-      );
-      const roundedScore = Math.round(score * 1000) / 1000;
-      let level: DemandPressureLevel = "LOW";
-      if (roundedScore >= MI_DEMAND_PRESSURE.HIGH_THRESHOLD) level = "HIGH";
-      else if (roundedScore >= MI_DEMAND_PRESSURE.MODERATE_THRESHOLD) level = "MODERATE";
-      console.log(`[DemandPressure] NO_COMMENT_TEXT — using engagement counts: commentCount=${metadataCommentCount}, score=${roundedScore}`);
-      return {
-        score: roundedScore,
-        level,
-        components: {
-          engagementDensity: Math.round(engagementDensity * 1000) / 1000,
-          commentIntensity: Math.round(commentIntensity * 1000) / 1000,
-          intentSignalStrength: Math.round(intentSignalStrength * 1000) / 1000,
-          objectionDensity: 0,
-          purchaseIntentDensity: 0,
-        },
-      };
-    }
+    const intentSignalStrength = clamp01(audienceIntentSignals.length / MI_DEMAND_PRESSURE.INTENT_SIGNAL_NORMALIZATION * 0.5);
+    const score = clamp01(
+      engagementDensity * (MI_DEMAND_PRESSURE.WEIGHT_ENGAGEMENT + MI_DEMAND_PRESSURE.WEIGHT_OBJECTION + MI_DEMAND_PRESSURE.WEIGHT_PURCHASE_INTENT) +
+      commentIntensity * MI_DEMAND_PRESSURE.WEIGHT_COMMENT_INTENSITY +
+      intentSignalStrength * MI_DEMAND_PRESSURE.WEIGHT_INTENT_SIGNAL
+    );
+    const roundedScore = Math.round(score * 1000) / 1000;
+    let level: DemandPressureLevel = "LOW";
+    if (roundedScore >= MI_DEMAND_PRESSURE.HIGH_THRESHOLD) level = "HIGH";
+    else if (roundedScore >= MI_DEMAND_PRESSURE.MODERATE_THRESHOLD) level = "MODERATE";
+    console.log(`[DemandPressure] NO_COMMENT_TEXT — commentCount=${metadataCommentCount} used as engagement signal only, score=${roundedScore}`);
     return {
-      score: 0,
-      level: "LOW",
-      components: { engagementDensity: 0, commentIntensity: 0, intentSignalStrength: 0, objectionDensity: 0, purchaseIntentDensity: 0 },
+      score: roundedScore,
+      level,
+      components: {
+        engagementDensity: Math.round(engagementDensity * 1000) / 1000,
+        commentIntensity: Math.round(commentIntensity * 1000) / 1000,
+        intentSignalStrength: Math.round(intentSignalStrength * 1000) / 1000,
+        objectionDensity: 0,
+        purchaseIntentDensity: 0,
+      },
     };
   }
 
   const texts = comments.map(c => (c.text || "").trim()).filter(t => t.length > 0);
   const totalTexts = texts.length;
-
-  const engagementDensity = clamp01(engagementQuality.engagementQualityRatio);
-
-  const effectiveCount = Math.max(totalTexts, commentCount ?? 0);
-  const commentIntensity = clamp01(effectiveCount / MI_DEMAND_PRESSURE.COMMENT_INTENSITY_NORMALIZATION);
 
   let purchaseIntentCount = 0;
   let objectionCount = 0;

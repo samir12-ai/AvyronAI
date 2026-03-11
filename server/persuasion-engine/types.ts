@@ -3,6 +3,7 @@ export interface PersuasionMIInput {
   overallConfidence: number;
   opportunitySignals: any[];
   threatSignals: any[];
+  narrativeObjectionCount: number;
 }
 
 export interface PersuasionAudienceInput {

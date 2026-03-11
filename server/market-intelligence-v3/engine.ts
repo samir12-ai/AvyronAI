@@ -790,7 +790,8 @@ export class MarketIntelligenceV3 {
       trajectory.narrativeConvergenceScore = Math.min(1, trajectory.narrativeConvergenceScore + echoChamber.penalty);
       console.log(`[MIv3] ECHO_CHAMBER_PENALTY_APPLIED | saturation=${trajectory.angleSaturationLevel.toFixed(3)} | convergence=${trajectory.narrativeConvergenceScore.toFixed(3)}`);
     }
-    const confidence = computeConfidence(signalResults, dataFreshnessDays, realDataRatio);
+    const contentPrimaryMode = allComments.length === 0 && allPosts.length > 0;
+    const confidence = computeConfidence(signalResults, dataFreshnessDays, realDataRatio, contentPrimaryMode);
     const dominanceResults = computeAllDominance(signalResults, confidence, goalMode);
     const missingFlags = aggregateMissingFlags(signalResults);
     const volatilityIndex = computeVolatilityIndex(signalResults);
@@ -1050,7 +1051,7 @@ export class MarketIntelligenceV3 {
       audienceIntentSignals,
     };
 
-    const guard = await import("./confidence-engine").then(m => m.evaluateSignalStabilityGuard(signalResults));
+    const guard = await import("./confidence-engine").then(m => m.evaluateSignalStabilityGuard(signalResults, contentPrimaryMode));
 
     return {
       output,

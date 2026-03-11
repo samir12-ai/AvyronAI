@@ -485,7 +485,7 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
   const signalCoverageScore = Math.round((availableFields / totalExpectedFields) * 100) / 100;
   const sourceReliabilityScore = 0.75;
 
-  const sampleSize = posts.length + Math.max(comments.length, postCommentCounts);
+  const sampleSize = posts.length + (comments.length > 0 ? Math.max(comments.length, postCommentCounts) : 0);
   const now = Date.now();
   const postTimestamps = posts.map(p => new Date(p.timestamp).getTime()).filter(t => !isNaN(t));
   const oldestPost = postTimestamps.length > 0 ? Math.min(...postTimestamps) : now;
