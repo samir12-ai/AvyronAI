@@ -1772,3 +1772,112 @@ export const persuasionSnapshots = pgTable("persuasion_snapshots", {
 });
 
 export type PersuasionSnapshot = typeof persuasionSnapshots.$inferSelect;
+
+export const strategyValidationSnapshots = pgTable("strategy_validation_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  persuasionSnapshotId: varchar("persuasion_snapshot_id"),
+  engineVersion: integer("engine_version").notNull().default(1),
+  status: text("status").notNull().default("COMPLETE"),
+  statusMessage: text("status_message"),
+  result: text("result"),
+  layerResults: text("layer_results"),
+  structuralWarnings: text("structural_warnings"),
+  boundaryCheck: text("boundary_check"),
+  dataReliability: text("data_reliability"),
+  confidenceScore: doublePrecision("confidence_score"),
+  executionTimeMs: integer("execution_time_ms"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type StrategyValidationSnapshot = typeof strategyValidationSnapshots.$inferSelect;
+
+export const budgetGovernorSnapshots = pgTable("budget_governor_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  validationSnapshotId: varchar("validation_snapshot_id"),
+  engineVersion: integer("engine_version").notNull().default(1),
+  status: text("status").notNull().default("COMPLETE"),
+  statusMessage: text("status_message"),
+  result: text("result"),
+  layerResults: text("layer_results"),
+  structuralWarnings: text("structural_warnings"),
+  boundaryCheck: text("boundary_check"),
+  dataReliability: text("data_reliability"),
+  confidenceScore: doublePrecision("confidence_score"),
+  executionTimeMs: integer("execution_time_ms"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type BudgetGovernorSnapshot = typeof budgetGovernorSnapshots.$inferSelect;
+
+export const channelSelectionSnapshots = pgTable("channel_selection_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  validationSnapshotId: varchar("validation_snapshot_id"),
+  budgetSnapshotId: varchar("budget_snapshot_id"),
+  engineVersion: integer("engine_version").notNull().default(1),
+  status: text("status").notNull().default("COMPLETE"),
+  statusMessage: text("status_message"),
+  result: text("result"),
+  layerResults: text("layer_results"),
+  structuralWarnings: text("structural_warnings"),
+  boundaryCheck: text("boundary_check"),
+  dataReliability: text("data_reliability"),
+  confidenceScore: doublePrecision("confidence_score"),
+  executionTimeMs: integer("execution_time_ms"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type ChannelSelectionSnapshot = typeof channelSelectionSnapshots.$inferSelect;
+
+export const iterationSnapshots = pgTable("iteration_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  engineVersion: integer("engine_version").notNull().default(1),
+  status: text("status").notNull().default("COMPLETE"),
+  statusMessage: text("status_message"),
+  result: text("result"),
+  layerResults: text("layer_results"),
+  structuralWarnings: text("structural_warnings"),
+  boundaryCheck: text("boundary_check"),
+  dataReliability: text("data_reliability"),
+  confidenceScore: doublePrecision("confidence_score"),
+  executionTimeMs: integer("execution_time_ms"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type IterationSnapshot = typeof iterationSnapshots.$inferSelect;
+
+export const retentionSnapshots = pgTable("retention_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  engineVersion: integer("engine_version").notNull().default(1),
+  status: text("status").notNull().default("COMPLETE"),
+  statusMessage: text("status_message"),
+  result: text("result"),
+  layerResults: text("layer_results"),
+  structuralWarnings: text("structural_warnings"),
+  boundaryCheck: text("boundary_check"),
+  dataReliability: text("data_reliability"),
+  confidenceScore: doublePrecision("confidence_score"),
+  executionTimeMs: integer("execution_time_ms"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type RetentionSnapshot = typeof retentionSnapshots.$inferSelect;

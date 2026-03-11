@@ -1,0 +1,434 @@
+import { aiChat } from "../../ai-client";
+import {
+  ENGINE_VERSION,
+  RETENTION_SCORE_WEIGHTS,
+  GUARD_THRESHOLDS,
+  BOUNDARY_BLOCKED_PATTERNS,
+  STATUS,
+} from "./constants";
+import {
+  sanitizeBoundary,
+  normalizeConfidence,
+  assessDataReliability,
+  detectGenericOutput,
+  createEmptyReliability,
+} from "../../engine-hardening";
+import { assessStrategyAcceptability } from "../../shared/strategy-acceptability";
+import type {
+  RetentionInput,
+  RetentionLoop,
+  ChurnRiskFlag,
+  LTVExpansionPath,
+  UpsellTrigger,
+  RetentionGuardResult,
+  RetentionResult,
+} from "./types";
+
+function clamp(v: number, min = 0, max = 1): number {
+  return Math.max(min, Math.min(max, v));
+}
+
+function safeJsonParse(text: any): any {
+  if (!text) return null;
+  if (typeof text !== "string") return text;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+function runGuardLayer(input: RetentionInput): RetentionGuardResult {
+  const flags: string[] = [];
+
+  let valueDeliveryClarity = 0.5;
+  if (input.offerStructure.coreOutcome && input.offerStructure.coreOutcome.length > 10) {
+    valueDeliveryClarity += 0.2;
+  }
+  if (input.offerStructure.deliverables.length > 0) {
+    valueDeliveryClarity += 0.15;
+  }
+  if (input.offerStructure.proofStrength && input.offerStructure.proofStrength > 0.5) {
+    valueDeliveryClarity += 0.15;
+  }
+  valueDeliveryClarity = clamp(valueDeliveryClarity);
+
+  if (valueDeliveryClarity < GUARD_THRESHOLDS.minValueDeliveryClarity) {
+    flags.push("Value delivery unclear — retention mechanisms cannot be anchored to clear outcomes");
+  }
+
+  let trustDecayRisk = 0.3;
+  const highSeverityObjections = input.postPurchaseObjections.filter(o => o.severity > 0.6);
+  if (highSeverityObjections.length > 3) {
+    trustDecayRisk += 0.3;
+  } else if (highSeverityObjections.length > 1) {
+    trustDecayRisk += 0.15;
+  }
+  if (!input.offerStructure.riskReducers || input.offerStructure.riskReducers.length === 0) {
+    trustDecayRisk += 0.2;
+  }
+  trustDecayRisk = clamp(trustDecayRisk);
+
+  if (trustDecayRisk > GUARD_THRESHOLDS.maxTrustDecayRisk) {
+    flags.push("Trust decays after purchase — high-severity post-purchase objections detected with insufficient risk reducers");
+  }
+
+  let retentionMechanismPresence = 0.0;
+  const journey = input.customerJourneyData;
+  if (journey.repeatPurchaseRate && journey.repeatPurchaseRate > 0.1) {
+    retentionMechanismPresence += 0.3;
+  }
+  if (journey.touchpoints.length > 2) {
+    retentionMechanismPresence += 0.2;
+  }
+  if (journey.retentionWindowDays && journey.retentionWindowDays > 0) {
+    retentionMechanismPresence += 0.2;
+  }
+  if (input.purchaseMotivations.length > 0) {
+    retentionMechanismPresence += 0.15;
+  }
+  if (journey.engagementDecayRate && journey.engagementDecayRate < 0.5) {
+    retentionMechanismPresence += 0.15;
+  }
+  retentionMechanismPresence = clamp(retentionMechanismPresence);
+
+  if (retentionMechanismPresence < GUARD_THRESHOLDS.minRetentionMechanismPresence) {
+    flags.push("Retention mechanisms missing — insufficient journey touchpoints and no repeat purchase signals detected");
+  }
+
+  return {
+    passed: flags.length === 0,
+    flags,
+    valueDeliveryClarity,
+    trustDecayRisk,
+    retentionMechanismPresence,
+  };
+}
+
+function buildRetentionPrompt(input: RetentionInput): string {
+  const journey = input.customerJourneyData;
+  const offer = input.offerStructure;
+
+  const touchpointSummary = journey.touchpoints.length > 0
+    ? journey.touchpoints.map(tp => `- ${tp.stage} (${tp.channel}): engagement=${tp.engagementScore.toFixed(2)}, dropoff=${tp.dropoffRate.toFixed(2)}`).join("\n")
+    : "No touchpoint data available";
+
+  const motivationSummary = input.purchaseMotivations.length > 0
+    ? input.purchaseMotivations.map(m => `- ${m.motivation} (strength: ${m.strength.toFixed(2)}, category: ${m.category})`).join("\n")
+    : "No purchase motivation data available";
+
+  const objectionSummary = input.postPurchaseObjections.length > 0
+    ? input.postPurchaseObjections.map(o => `- ${o.objection} (severity: ${o.severity.toFixed(2)}, frequency: ${o.frequency.toFixed(2)})`).join("\n")
+    : "No post-purchase objection data available";
+
+  return `You are a Retention Strategy Engine. Analyze the following customer retention data and produce actionable retention outputs.
+
+OFFER STRUCTURE:
+- Offer: ${offer.offerName || "Unknown"}
+- Core Outcome: ${offer.coreOutcome || "Not defined"}
+- Deliverables: ${offer.deliverables.length > 0 ? offer.deliverables.join(", ") : "None specified"}
+- Mechanism: ${offer.mechanismDescription || "Not defined"}
+- Proof Strength: ${offer.proofStrength ?? "Unknown"}
+- Risk Reducers: ${offer.riskReducers.length > 0 ? offer.riskReducers.join(", ") : "None"}
+
+CUSTOMER JOURNEY:
+- Avg Time to Conversion: ${journey.avgTimeToConversion ?? "Unknown"} days
+- Repeat Purchase Rate: ${journey.repeatPurchaseRate ?? "Unknown"}
+- Churn Rate: ${journey.churnRate ?? "Unknown"}
+- Customer LTV: ${journey.customerLifetimeValue ?? "Unknown"}
+- Retention Window: ${journey.retentionWindowDays ?? "Unknown"} days
+- Engagement Decay Rate: ${journey.engagementDecayRate ?? "Unknown"}
+
+TOUCHPOINTS:
+${touchpointSummary}
+
+PURCHASE MOTIVATIONS:
+${motivationSummary}
+
+POST-PURCHASE OBJECTIONS:
+${objectionSummary}
+
+Respond ONLY with a JSON object (no markdown, no explanation) with this exact structure:
+{
+  "retentionLoops": [
+    {
+      "name": "string",
+      "type": "string (engagement_loop|value_reinforcement|community_loop|habit_loop|reward_loop|milestone_loop|feedback_loop|referral_loop)",
+      "description": "string",
+      "triggerCondition": "string",
+      "expectedImpact": 0.0-1.0,
+      "implementationDifficulty": 0.0-1.0,
+      "priorityScore": 0.0-1.0
+    }
+  ],
+  "churnRiskFlags": [
+    {
+      "riskFactor": "string",
+      "severity": 0.0-1.0,
+      "timeframe": "string",
+      "mitigationStrategy": "string",
+      "dataConfidence": 0.0-1.0
+    }
+  ],
+  "ltvExpansionPaths": [
+    {
+      "pathName": "string",
+      "description": "string",
+      "estimatedLTVIncrease": 0.0-1.0,
+      "requiredConditions": ["string"],
+      "riskNotes": ["string"],
+      "confidenceScore": 0.0-1.0
+    }
+  ],
+  "upsellTriggers": [
+    {
+      "triggerName": "string",
+      "triggerCondition": "string",
+      "suggestedOffer": "string",
+      "timing": "string",
+      "expectedConversionRate": 0.0-1.0,
+      "priorityRank": 1
+    }
+  ]
+}`;
+}
+
+function buildFallbackResult(input: RetentionInput, guardResult: RetentionGuardResult, startTime: number): RetentionResult {
+  const retentionLoops: RetentionLoop[] = [
+    {
+      name: "Post-Purchase Value Reinforcement",
+      type: "value_reinforcement",
+      description: "Reinforce value delivery within first 7 days post-purchase through outcome reminders",
+      triggerCondition: "Customer completes purchase",
+      expectedImpact: 0.4,
+      implementationDifficulty: 0.3,
+      priorityScore: 0.7,
+    },
+    {
+      name: "Engagement Check-in Loop",
+      type: "feedback_loop",
+      description: "Periodic check-ins to gather feedback and prevent silent churn",
+      triggerCondition: "14 days since last engagement",
+      expectedImpact: 0.3,
+      implementationDifficulty: 0.2,
+      priorityScore: 0.6,
+    },
+  ];
+
+  const churnRiskFlags: ChurnRiskFlag[] = [
+    {
+      riskFactor: "Insufficient retention data — recommend running retention experiments to gather baseline metrics",
+      severity: 0.5,
+      timeframe: "30-60 days",
+      mitigationStrategy: "Implement basic engagement tracking and post-purchase feedback collection",
+      dataConfidence: 0.3,
+    },
+  ];
+
+  return {
+    status: STATUS.PROVISIONAL,
+    statusMessage: "Retention analysis is provisional — certainty is low, retention experiments recommended",
+    retentionLoops,
+    churnRiskFlags,
+    ltvExpansionPaths: [],
+    upsellTriggers: [],
+    guardResult,
+    boundaryCheck: { passed: true, violations: [] },
+    structuralWarnings: [
+      "Fallback mode activated due to guard layer flags",
+      ...guardResult.flags,
+    ],
+    confidenceScore: 0.35,
+    executionTimeMs: Date.now() - startTime,
+    engineVersion: ENGINE_VERSION,
+    dataReliability: {
+      overallReliability: 0.3,
+      isWeak: true,
+      advisories: ["Retention data insufficient for high-confidence analysis"],
+    },
+  };
+}
+
+export async function runRetentionEngine(input: RetentionInput): Promise<RetentionResult> {
+  const startTime = Date.now();
+  const warnings: string[] = [];
+
+  const guardResult = runGuardLayer(input);
+
+  if (!guardResult.passed && guardResult.flags.length >= 3) {
+    return buildFallbackResult(input, guardResult, startTime);
+  }
+
+  if (!guardResult.passed) {
+    warnings.push(...guardResult.flags);
+  }
+
+  const reliability = assessDataReliability(
+    input.customerJourneyData.touchpoints.length,
+    input.purchaseMotivations.length + input.postPurchaseObjections.length,
+    input.offerStructure.coreOutcome !== null,
+    input.offerStructure.deliverables.length > 0,
+    input.purchaseMotivations.length > 0,
+    guardResult.retentionMechanismPresence,
+  );
+
+  if (reliability.isWeak) {
+    warnings.push("Data reliability is weak — retention confidence will be capped");
+  }
+
+  const prompt = buildRetentionPrompt(input);
+
+  let retentionLoops: RetentionLoop[] = [];
+  let churnRiskFlags: ChurnRiskFlag[] = [];
+  let ltvExpansionPaths: LTVExpansionPath[] = [];
+  let upsellTriggers: UpsellTrigger[] = [];
+  let finalBoundaryCheck: { clean: boolean; violations: string[] } = { clean: true, violations: [] };
+
+  try {
+    const response = await aiChat({
+      model: "openai/gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.4,
+      max_tokens: 3000,
+    });
+
+    const rawContent = response.choices?.[0]?.message?.content || "";
+
+    finalBoundaryCheck = sanitizeBoundary(rawContent, BOUNDARY_BLOCKED_PATTERNS);
+    if (!finalBoundaryCheck.clean) {
+      warnings.push(...finalBoundaryCheck.violations);
+    }
+
+    const genericCheck = detectGenericOutput(rawContent);
+    if (genericCheck.genericDetected) {
+      warnings.push(`Generic output detected: ${genericCheck.genericPhrases.join(", ")}`);
+    }
+
+    const cleaned = rawContent.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+    const parsed = safeJsonParse(cleaned);
+
+    if (parsed) {
+      retentionLoops = Array.isArray(parsed.retentionLoops)
+        ? parsed.retentionLoops.map((loop: any) => ({
+            name: loop.name || "Unnamed Loop",
+            type: loop.type || "engagement_loop",
+            description: loop.description || "",
+            triggerCondition: loop.triggerCondition || "",
+            expectedImpact: clamp(loop.expectedImpact ?? 0.5),
+            implementationDifficulty: clamp(loop.implementationDifficulty ?? 0.5),
+            priorityScore: clamp(loop.priorityScore ?? 0.5),
+          }))
+        : [];
+
+      churnRiskFlags = Array.isArray(parsed.churnRiskFlags)
+        ? parsed.churnRiskFlags.map((flag: any) => ({
+            riskFactor: flag.riskFactor || "Unknown risk",
+            severity: clamp(flag.severity ?? 0.5),
+            timeframe: flag.timeframe || "Unknown",
+            mitigationStrategy: flag.mitigationStrategy || "",
+            dataConfidence: clamp(flag.dataConfidence ?? 0.3),
+          }))
+        : [];
+
+      ltvExpansionPaths = Array.isArray(parsed.ltvExpansionPaths)
+        ? parsed.ltvExpansionPaths.map((path: any) => ({
+            pathName: path.pathName || "Unnamed Path",
+            description: path.description || "",
+            estimatedLTVIncrease: clamp(path.estimatedLTVIncrease ?? 0),
+            requiredConditions: Array.isArray(path.requiredConditions) ? path.requiredConditions : [],
+            riskNotes: Array.isArray(path.riskNotes) ? path.riskNotes : [],
+            confidenceScore: clamp(path.confidenceScore ?? 0.3),
+          }))
+        : [];
+
+      upsellTriggers = Array.isArray(parsed.upsellTriggers)
+        ? parsed.upsellTriggers.map((trigger: any, idx: number) => ({
+            triggerName: trigger.triggerName || "Unnamed Trigger",
+            triggerCondition: trigger.triggerCondition || "",
+            suggestedOffer: trigger.suggestedOffer || "",
+            timing: trigger.timing || "Unknown",
+            expectedConversionRate: clamp(trigger.expectedConversionRate ?? 0.1),
+            priorityRank: trigger.priorityRank ?? (idx + 1),
+          }))
+        : [];
+    } else {
+      warnings.push("Failed to parse AI response — using fallback outputs");
+      return buildFallbackResult(input, guardResult, startTime);
+    }
+  } catch (error: any) {
+    console.error(`[RetentionEngine] AI call failed: ${error.message}`);
+    warnings.push(`AI processing error: ${error.message}`);
+    return buildFallbackResult(input, guardResult, startTime);
+  }
+
+  let rawConfidence =
+    guardResult.valueDeliveryClarity * RETENTION_SCORE_WEIGHTS.valueDeliveryClarity +
+    (1 - guardResult.trustDecayRisk) * RETENTION_SCORE_WEIGHTS.postPurchaseTrust +
+    guardResult.retentionMechanismPresence * RETENTION_SCORE_WEIGHTS.retentionMechanismStrength +
+    (retentionLoops.length > 0 ? 0.7 : 0.2) * RETENTION_SCORE_WEIGHTS.churnRiskMitigation +
+    (ltvExpansionPaths.length > 0 ? 0.6 : 0.2) * RETENTION_SCORE_WEIGHTS.ltvExpansionViability +
+    (upsellTriggers.length > 0 ? 0.6 : 0.2) * RETENTION_SCORE_WEIGHTS.upsellReadiness;
+
+  rawConfidence = clamp(rawConfidence);
+  const confidenceScore = normalizeConfidence(rawConfidence, reliability);
+
+  const layersPassed = [
+    guardResult.valueDeliveryClarity >= GUARD_THRESHOLDS.minValueDeliveryClarity,
+    guardResult.trustDecayRisk <= GUARD_THRESHOLDS.maxTrustDecayRisk,
+    guardResult.retentionMechanismPresence >= GUARD_THRESHOLDS.minRetentionMechanismPresence,
+    retentionLoops.length > 0,
+    churnRiskFlags.length > 0,
+  ].filter(Boolean).length;
+
+  const acceptability = assessStrategyAcceptability(
+    confidenceScore,
+    layersPassed,
+    5,
+    guardResult.passed,
+    warnings,
+  );
+
+  if (!finalBoundaryCheck.clean) {
+    return {
+      status: STATUS.GUARD_BLOCKED,
+      statusMessage: "Retention analysis blocked — boundary violations detected in AI output",
+      retentionLoops: [],
+      churnRiskFlags: [],
+      ltvExpansionPaths: [],
+      upsellTriggers: [],
+      guardResult,
+      boundaryCheck: { passed: false, violations: finalBoundaryCheck.violations },
+      structuralWarnings: warnings,
+      confidenceScore: 0,
+      executionTimeMs: Date.now() - startTime,
+      engineVersion: ENGINE_VERSION,
+      dataReliability: {
+        overallReliability: reliability.overallReliability,
+        isWeak: reliability.isWeak,
+        advisories: reliability.advisories,
+      },
+      strategyAcceptability: assessStrategyAcceptability(0, 0, 5, false, warnings),
+    };
+  }
+
+  const status = guardResult.passed ? STATUS.COMPLETE : STATUS.PROVISIONAL;
+
+  return {
+    status,
+    statusMessage: guardResult.passed
+      ? "Retention analysis complete with validated outputs"
+      : "Retention analysis provisional — guard flags present, recommend verification",
+    retentionLoops,
+    churnRiskFlags,
+    ltvExpansionPaths,
+    upsellTriggers,
+    guardResult,
+    boundaryCheck: { passed: true, violations: [] },
+    structuralWarnings: warnings,
+    confidenceScore,
+    executionTimeMs: Date.now() - startTime,
+    engineVersion: ENGINE_VERSION,
+    dataReliability: {
+      overallReliability: reliability.overallReliability,
+      isWeak: reliability.isWeak,
+      advisories: reliability.advisories,
+    },
+    strategyAcceptability: acceptability,
+  };
+}

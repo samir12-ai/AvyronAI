@@ -1,0 +1,129 @@
+import type { Express, Request, Response } from "express";
+import { db } from "../../db";
+import { retentionSnapshots } from "@shared/schema";
+import { eq, and, desc } from "drizzle-orm";
+import { runRetentionEngine } from "./engine";
+import { ENGINE_VERSION } from "./constants";
+import { pruneOldSnapshots, checkValidationSession } from "../../engine-hardening";
+
+function safeJsonParse(text: any): any {
+  if (!text) return null;
+  if (typeof text !== "string") return text;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+export function registerRetentionEngineRoutes(app: Express) {
+  app.post("/api/strategy/retention-engine/analyze", async (req: Request, res: Response) => {
+    try {
+      const { campaignId, accountId = "default", validationSessionId } = req.body;
+
+      if (!campaignId) {
+        return res.status(400).json({ error: "campaignId is required" });
+      }
+
+      const sessionCheck = checkValidationSession(validationSessionId, "retention-engine", campaignId);
+      if (!sessionCheck.allowed) {
+        return res.status(429).json({
+          error: "REVALIDATION_LOOP_BLOCKED",
+          message: sessionCheck.warning,
+        });
+      }
+
+      const input = {
+        customerJourneyData: req.body.customerJourneyData || {
+          touchpoints: [],
+          avgTimeToConversion: null,
+          repeatPurchaseRate: null,
+          churnRate: null,
+          customerLifetimeValue: null,
+          retentionWindowDays: null,
+          engagementDecayRate: null,
+        },
+        offerStructure: req.body.offerStructure || {
+          offerName: null,
+          coreOutcome: null,
+          deliverables: [],
+          proofStrength: null,
+          riskReducers: [],
+          mechanismDescription: null,
+        },
+        purchaseMotivations: Array.isArray(req.body.purchaseMotivations) ? req.body.purchaseMotivations : [],
+        postPurchaseObjections: Array.isArray(req.body.postPurchaseObjections) ? req.body.postPurchaseObjections : [],
+        campaignId,
+        accountId,
+      };
+
+      const result = await runRetentionEngine(input);
+
+      const [snapshot] = await db.insert(retentionSnapshots).values({
+        accountId,
+        campaignId,
+        engineVersion: ENGINE_VERSION,
+        status: result.status,
+        statusMessage: result.statusMessage,
+        result: JSON.stringify(result),
+        layerResults: JSON.stringify({
+          retentionLoops: result.retentionLoops,
+          churnRiskFlags: result.churnRiskFlags,
+          ltvExpansionPaths: result.ltvExpansionPaths,
+          upsellTriggers: result.upsellTriggers,
+          guardResult: result.guardResult,
+        }),
+        structuralWarnings: JSON.stringify(result.structuralWarnings),
+        boundaryCheck: JSON.stringify(result.boundaryCheck),
+        dataReliability: JSON.stringify(result.dataReliability),
+        confidenceScore: result.confidenceScore,
+        executionTimeMs: result.executionTimeMs,
+      }).returning();
+
+      await pruneOldSnapshots(db, retentionSnapshots, campaignId, 20, accountId);
+
+      return res.json({
+        success: true,
+        snapshotId: snapshot.id,
+        result,
+      });
+    } catch (error: any) {
+      console.error("[RetentionEngine] Route error:", error.message);
+      return res.status(500).json({ error: "Internal server error", details: error.message });
+    }
+  });
+
+  app.get("/api/strategy/retention-engine/latest", async (req: Request, res: Response) => {
+    try {
+      const campaignId = req.query.campaignId as string;
+      const accountId = (req.query.accountId as string) || "default";
+
+      if (!campaignId) {
+        return res.status(400).json({ error: "campaignId is required" });
+      }
+
+      const [latest] = await db.select().from(retentionSnapshots)
+        .where(and(
+          eq(retentionSnapshots.campaignId, campaignId),
+          eq(retentionSnapshots.accountId, accountId),
+        ))
+        .orderBy(desc(retentionSnapshots.createdAt))
+        .limit(1);
+
+      if (!latest) {
+        return res.json({ found: false, snapshot: null });
+      }
+
+      return res.json({
+        found: true,
+        snapshot: {
+          ...latest,
+          result: safeJsonParse(latest.result),
+          layerResults: safeJsonParse(latest.layerResults),
+          structuralWarnings: safeJsonParse(latest.structuralWarnings),
+          boundaryCheck: safeJsonParse(latest.boundaryCheck),
+          dataReliability: safeJsonParse(latest.dataReliability),
+        },
+      });
+    } catch (error: any) {
+      console.error("[RetentionEngine] Latest route error:", error.message);
+      return res.status(500).json({ error: "Internal server error", details: error.message });
+    }
+  });
+}

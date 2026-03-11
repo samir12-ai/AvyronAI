@@ -45,6 +45,12 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 - **Message Architecture Enforcement**: `validateMessageArchitecture()` enforces problem → mechanism → proof → outcome → offer ordering in persuasion message sequences. Violations logged as warnings.
 - **Strategy Acceptability Layer**: `assessStrategyAcceptability()` in `server/shared/strategy-acceptability.ts` provides graded strategy states (green/yellow/orange/red) with adaptive fallback strategies. No engine ever halts — all return an adaptive path. Integrated into Offer, Funnel, and Persuasion engines.
 - **Cross-Engine Synchronization**: Integrity Engine validates MechanismCore action verbs, offer-deliverable-to-mechanism alignment, and awareness-persuasion consistency across engines.
+- **Fortress Completion Engines (V3 Strategy Layer)**:
+    - **Statistical Validation Engine**: Evaluates evidence density, validates claims against real MI signals, detects narrative-based vs signal-driven strategies. Guard blocks/downgrades weak claims.
+    - **Budget Governor Engine**: Determines test/scale/hold/halt budget decisions based on multi-factor risk scoring. Guard prevents scaling when validation confidence low or CAC assumptions unrealistic.
+    - **Channel Selection Engine**: Scores 16 channels across 8 layers (audience density, awareness mapping, persuasion compatibility, budget constraints). Guard rejects channels with weak audience density or mode mismatch.
+    - **Iteration Engine**: Identifies optimization opportunities from campaign/funnel/creative/persuasion performance. Guard prevents random experimentation and repeating failed tests.
+    - **Retention Engine**: Detects retention leverage points, churn risks, LTV expansion paths. Guard flags unclear value delivery and missing retention mechanisms.
 
 ### Audit & Control System
 A backend and frontend system for auditing feeds, AI usage, gate status, decisions, publish history, and job management, presented in a 5-panel dashboard.
