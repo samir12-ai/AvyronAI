@@ -1,4 +1,4 @@
-export const ENGINE_VERSION = 1;
+export const ENGINE_VERSION = 2;
 export const FRESHNESS_THRESHOLD_DAYS = 14;
 
 export const OFFER_DEPTH_WEIGHTS = {

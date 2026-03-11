@@ -125,4 +125,5 @@ export interface FunnelResult {
   executionTimeMs: number;
   engineVersion: number;
   layerDiagnostics: Record<string, any>;
+  strategyAcceptability?: import("../shared/strategy-acceptability").StrategyAcceptability;
 }

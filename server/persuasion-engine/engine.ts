@@ -17,8 +17,13 @@ import {
   EDUCATION_FIRST_MODES,
   SCARCITY_BLOCKED_CONDITIONS,
   FUNNEL_PERSUASION_COMPATIBILITY,
+  AWARENESS_PERSUASION_MAP,
+  TRUST_PROOF_ESCALATION_ORDER,
+  MESSAGE_ARCHITECTURE_ORDER,
+  MESSAGE_STEP_CATEGORY_MAP,
 } from "./constants";
 import { enforceBoundaryWithSanitization } from "../engine-hardening";
+import { assessStrategyAcceptability } from "../shared/strategy-acceptability";
 import type {
   PersuasionMIInput,
   PersuasionAudienceInput,
@@ -874,6 +879,41 @@ function layer4_influenceDriverSelection(
   return { layerName: "influence_driver_selection", passed: score >= 0.4, score: clamp(score), findings, warnings };
 }
 
+function buildTrustProofSequence(
+  proofArch: any[],
+  objectionProofLinks: ObjectionProofLink[],
+): string[] {
+  const availableProofTypes = new Set<string>();
+  for (const p of proofArch) {
+    const pType = (typeof p === "string" ? p : p?.type || p?.proofType || "").toLowerCase();
+    availableProofTypes.add(pType);
+  }
+  for (const link of objectionProofLinks) {
+    if (link.proofAvailable && link.requiredProofType) {
+      availableProofTypes.add(link.requiredProofType.toLowerCase());
+    }
+  }
+
+  const sequence: string[] = [];
+  for (const escalationStep of TRUST_PROOF_ESCALATION_ORDER) {
+    const stepLower = escalationStep.toLowerCase();
+    const matched = [...availableProofTypes].some(p =>
+      p.includes(stepLower.replace("_proof", "")) || stepLower.includes(p.replace("_proof", ""))
+    );
+    if (matched) {
+      sequence.push(escalationStep);
+    }
+  }
+
+  if (sequence.length === 0) {
+    for (const p of [...availableProofTypes].slice(0, 4)) {
+      sequence.push(p);
+    }
+  }
+
+  return sequence;
+}
+
 function layer5_proofPriorityMapping(
   differentiation: PersuasionDifferentiationInput,
   audience: PersuasionAudienceInput,
@@ -894,6 +934,9 @@ function layer5_proofPriorityMapping(
   }
 
   findings.push(`${proofArch.length} proof element(s) and ${claimStructures.length} claim structure(s) available`);
+
+  const trustProofSequence = buildTrustProofSequence(proofArch, objectionProofLinks);
+  findings.push(`Trust proof escalation: ${trustProofSequence.join(" → ")}`);
 
   const trustReq = safeString(awareness.trustRequirement, "medium");
   const readiness = safeString(awareness.targetReadinessStage, "problem_aware");
@@ -929,6 +972,14 @@ function layer5_proofPriorityMapping(
   if (proofArch.length >= 3) {
     score += 0.1;
     findings.push("Rich proof architecture — multiple proof types available for sequencing");
+  }
+
+  const hasEscalationOrder = trustProofSequence.length >= 2;
+  if (hasEscalationOrder) {
+    score += 0.05;
+    findings.push("Proof assets follow deterministic trust escalation path");
+  } else if (proofArch.length > 0) {
+    warnings.push("Proof assets do not cover enough escalation stages for full trust progression");
   }
 
   return { layerName: "proof_priority_mapping", passed: score >= 0.4, score: clamp(score), findings, warnings };
@@ -1039,8 +1090,20 @@ function layer6_messageOrderLogic(
     }
   }
 
+  const architectureViolations = validateMessageArchitecture(sequence);
+  if (architectureViolations.length === 0) {
+    findings.push(`Message architecture validated: follows problem → mechanism → proof → outcome → offer`);
+    score += 0.1;
+  } else {
+    for (const violation of architectureViolations) {
+      warnings.push(violation);
+    }
+    score -= architectureViolations.length * 0.02;
+    findings.push(`Message architecture partially enforced — ${architectureViolations.length} ordering issue(s) detected`);
+    score += 0.05;
+  }
+
   findings.push(`Context-sensitive message order: ${sequence.join(" → ")}`);
-  score += 0.1;
 
   const stageCount = (funnel.stageMap || []).length;
   if (stageCount > 0 && sequence.length > stageCount + 2) {
@@ -1049,6 +1112,29 @@ function layer6_messageOrderLogic(
   }
 
   return { layerName: "message_order_logic", passed: score >= 0.4, score: clamp(score), findings, warnings };
+}
+
+function validateMessageArchitecture(sequence: string[]): string[] {
+  const violations: string[] = [];
+
+  const categories = sequence.map(step => MESSAGE_STEP_CATEGORY_MAP[step] || "unknown");
+  const knownCategories = categories.filter(c => c !== "unknown");
+
+  if (knownCategories.length < 2) return violations;
+
+  let lastArchIdx = -1;
+  for (const cat of knownCategories) {
+    const archIdx = MESSAGE_ARCHITECTURE_ORDER.indexOf(cat as any);
+    if (archIdx === -1) continue;
+    if (archIdx < lastArchIdx) {
+      const expectedPhase = MESSAGE_ARCHITECTURE_ORDER[lastArchIdx];
+      violations.push(`Architecture violation: "${cat}" phase appears after "${expectedPhase}" — expected order: problem → mechanism → proof → outcome → offer`);
+    } else {
+      lastArchIdx = archIdx;
+    }
+  }
+
+  return violations;
 }
 
 function layer7_antiHypeGuard(
@@ -1219,20 +1305,35 @@ function selectPersuasionMode(
   const readiness = safeString(awareness.targetReadinessStage, "unknown");
   const proofCount = (differentiation.proofArchitecture || []).length;
   const authorityMode = safeString(differentiation.authorityMode, "");
-  const maturity = safeNumber(audience.maturityIndex, 0.5);
   const funnelType = safeString(funnel.funnelType, "unknown").toLowerCase();
+
+  const awarenessDefault = AWARENESS_PERSUASION_MAP[readiness];
 
   if (isLowReadiness(readiness)) {
     if (entry === "diagnostic_entry" || funnelType.includes("diagnostic")) return "diagnostic_led";
     if (entry === "pain_entry") return "empathy_led";
-    return "education_led";
+    return awarenessDefault || "education_led";
   }
 
-  if (entry === "authority_entry" && authorityMode) return "authority_led";
-  if (entry === "proof_led_entry" && proofCount >= 2) return "proof_led";
-  if (entry === "pain_entry") return "empathy_led";
-  if (entry === "myth_breaker_entry") return "contrast_led";
-  if (entry === "diagnostic_entry") return "diagnostic_led";
+  if (readiness === "solution_aware") {
+    if (entry === "myth_breaker_entry") return "contrast_led";
+    if (entry === "diagnostic_entry") return "diagnostic_led";
+    return awarenessDefault || "contrast_led";
+  }
+
+  if (readiness === "product_aware") {
+    if (entry === "authority_entry" && authorityMode) return "authority_led";
+    if (proofCount >= 2) return "proof_led";
+    const compatibleModes = FUNNEL_PERSUASION_COMPATIBILITY[funnelType] || [];
+    if (compatibleModes.length > 0 && compatibleModes.includes("proof_led")) return "proof_led";
+    return awarenessDefault || "proof_led";
+  }
+
+  if (readiness === "most_aware") {
+    if (proofCount >= 3) return "proof_led";
+    if (entry === "authority_entry" && authorityMode) return "authority_led";
+    return awarenessDefault || "proof_led";
+  }
 
   const compatibleModes = FUNNEL_PERSUASION_COMPATIBILITY[funnelType] || [];
   if (compatibleModes.length > 0) {
@@ -1241,10 +1342,7 @@ function selectPersuasionMode(
     return compatibleModes[0];
   }
 
-  if (proofCount >= 3) return "proof_led";
-  if (authorityMode) return "authority_led";
-  if (maturity > 0.7) return "logic_led";
-  return "authority_led";
+  return awarenessDefault || "education_led";
 }
 
 function validatePersuasionRouteAgainstFunnel(
@@ -1504,6 +1602,7 @@ export function analyzePersuasion(
   const rawBoundaryCheck = enforceBoundaryWithSanitization(allText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
   const boundaryCheck = { passed: rawBoundaryCheck.clean, violations: rawBoundaryCheck.violations, sanitized: rawBoundaryCheck.sanitized, sanitizedText: rawBoundaryCheck.sanitizedText, warnings: rawBoundaryCheck.warnings };
   if (!boundaryCheck.passed) {
+    const boundaryWarnings = [`BOUNDARY HARD FAIL: ${boundaryCheck.violations.join(", ")}`];
     return {
       status: STATUS.INTEGRITY_FAILED,
       statusMessage: `Boundary violation: ${boundaryCheck.violations.join(", ")}`,
@@ -1511,12 +1610,13 @@ export function analyzePersuasion(
       alternativeRoute: emptyRoute("Blocked"),
       rejectedRoute: emptyRoute("Blocked"),
       layerResults: [],
-      structuralWarnings: [`BOUNDARY HARD FAIL: ${boundaryCheck.violations.join(", ")}`],
+      structuralWarnings: boundaryWarnings,
       boundaryCheck,
       dataReliability: emptyReliability(),
       confidenceNormalized: false,
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
+      strategyAcceptability: assessStrategyAcceptability(0, 0, 8, false, boundaryWarnings),
     };
   }
 
@@ -1575,6 +1675,8 @@ export function analyzePersuasion(
   const rawOutputBoundaryCheck = enforceBoundaryWithSanitization(outputText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
   const outputBoundaryCheck = { passed: rawOutputBoundaryCheck.clean, violations: rawOutputBoundaryCheck.violations, sanitized: rawOutputBoundaryCheck.sanitized, sanitizedText: rawOutputBoundaryCheck.sanitizedText, warnings: rawOutputBoundaryCheck.warnings };
   if (!outputBoundaryCheck.passed) {
+    const outputWarnings = [`OUTPUT BOUNDARY HARD FAIL: ${outputBoundaryCheck.violations.join(", ")}`];
+    const outputLayersPassed = allLayers.filter(l => l.passed).length;
     return {
       status: STATUS.INTEGRITY_FAILED,
       statusMessage: `Output boundary violation: ${outputBoundaryCheck.violations.join(", ")}`,
@@ -1582,12 +1684,13 @@ export function analyzePersuasion(
       alternativeRoute: emptyRoute("Blocked"),
       rejectedRoute: emptyRoute("Blocked"),
       layerResults: allLayers,
-      structuralWarnings: [`OUTPUT BOUNDARY HARD FAIL: ${outputBoundaryCheck.violations.join(", ")}`],
+      structuralWarnings: outputWarnings,
       boundaryCheck: outputBoundaryCheck,
       dataReliability: reliability,
       confidenceNormalized: false,
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
+      strategyAcceptability: assessStrategyAcceptability(0, outputLayersPassed, allLayers.length, false, outputWarnings),
     };
   }
 
@@ -1603,6 +1706,14 @@ export function analyzePersuasion(
     structuralWarnings.push(...outputBoundaryCheck.warnings);
   }
 
+  const finalLayersPassed = allLayers.filter(l => l.passed).length;
+  const finalConfidence = routes.primary.persuasionStrengthScore;
+  const acceptability = assessStrategyAcceptability(
+    finalConfidence, finalLayersPassed, allLayers.length,
+    boundaryCheck.passed,
+    structuralWarnings,
+  );
+
   return {
     status: STATUS.COMPLETE,
     statusMessage: null,
@@ -1616,6 +1727,7 @@ export function analyzePersuasion(
     confidenceNormalized: reliability.isWeak || reliability.overallReliability < 0.6,
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,
+    strategyAcceptability: acceptability,
   };
 }
 

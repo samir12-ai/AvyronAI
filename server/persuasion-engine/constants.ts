@@ -1,4 +1,4 @@
-export const ENGINE_VERSION = 2;
+export const ENGINE_VERSION = 3;
 
 export const STATUS = {
   COMPLETE: "COMPLETE",
@@ -79,6 +79,44 @@ export const SCARCITY_BLOCKED_CONDITIONS = [
   "educational_funnel",
   "diagnostic_funnel",
 ] as const;
+
+export const AWARENESS_PERSUASION_MAP: Record<string, string> = {
+  unaware: "education_led",
+  problem_aware: "empathy_led",
+  solution_aware: "contrast_led",
+  product_aware: "proof_led",
+  most_aware: "proof_led",
+};
+
+export const TRUST_PROOF_ESCALATION_ORDER = [
+  "process_proof",
+  "case_proof",
+  "outcome_proof",
+  "transparency_proof",
+] as const;
+
+export const MESSAGE_ARCHITECTURE_ORDER = [
+  "problem",
+  "mechanism",
+  "proof",
+  "outcome",
+  "offer",
+] as const;
+
+export const MESSAGE_STEP_CATEGORY_MAP: Record<string, string> = {
+  acknowledge_pain: "problem",
+  educate_on_problem: "problem",
+  invite_self_identification: "problem",
+  demonstrate_understanding: "problem",
+  establish_contrast: "problem",
+  explain_mechanism: "mechanism",
+  present_proof: "proof",
+  illustrative_proof: "proof",
+  establish_authority: "proof",
+  address_objections: "proof",
+  remove_risk: "outcome",
+  invite_commitment: "offer",
+};
 
 export const FUNNEL_PERSUASION_COMPATIBILITY: Record<string, string[]> = {
   webinar: ["authority_led", "proof_led", "education_led", "social_proof_led"],

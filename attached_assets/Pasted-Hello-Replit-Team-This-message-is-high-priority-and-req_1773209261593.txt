@@ -1,0 +1,176 @@
+Hello Replit Team,
+
+This message is high priority and requires immediate attention.  
+Recent testing after the latest architectural updates exposed a root-cause structural issue in the generation pipeline that must be corrected system-wide to prevent recurring failures, misalignment between engines, and unnecessary reruns that increase operational cost.
+
+This is not a localized bug. The issue originates from the architecture layer and must be fixed at the system level.
+
+Please treat this as urgent system stabilization work.
+
+---
+
+# ROOT CAUSE
+
+The current generation pipeline sometimes converts Differentiation themes directly into mechanisms.
+
+Example observed during testing:
+
+“community and belonging method”
+
+This is not a mechanism.  
+It is a conceptual theme.
+
+A valid mechanism must always represent a structured transformation process tied to solving a concrete market problem.
+
+Current pipeline behavior:
+
+theme → mechanism
+
+Correct pipeline behavior must be:
+
+theme → transformation process → mechanism
+
+Because this transformation step is missing, the system occasionally produces conceptual mechanisms rather than operational ones, which then weakens:
+
+• Differentiation Support  
+• Offer Architecture  
+• Persuasion Strength  
+
+This is the root cause that must be corrected.
+
+---
+
+# REQUIRED FIX 1  
+## Mechanism Construction Layer
+
+Insert a dedicated Mechanism Construction Layer between the Differentiation Engine and Offer Engine.
+
+This layer must convert differentiation signals or themes into a structured transformation mechanism.
+
+Each mechanism must contain:
+
+mechanismName  
+mechanismSteps  
+mechanismLogic  
+mechanismProblemLink  
+mechanismOutcomeLink  
+
+A mechanism must always describe how the transformation happens, not just what idea exists.
+
+Mechanisms must represent repeatable transformation systems.
+
+---
+
+# REQUIRED FIX 2  
+## Awareness → Persuasion Mode Alignment
+
+Testing shows persuasion mode sometimes does not match audience awareness stage.
+
+Example observed:
+
+Education-led persuasion applied to solution-aware audiences.
+
+Required architecture logic:
+
+unaware → education persuasion  
+problem aware → insight persuasion  
+solution aware → differentiation persuasion  
+product aware → offer persuasion  
+
+Persuasion architecture must automatically switch based on detected awareness stage.
+
+---
+
+# REQUIRED FIX 3  
+## Trust Proof Sequencing Layer
+
+Trust barriers are correctly detected but proof placement is not structured.
+
+Proof must follow a deterministic escalation path:
+
+process proof  
+case proof  
+outcome proof  
+transparency proof  
+
+Proof assets must appear in a logical trust progression before conversion requests.
+
+---
+
+# REQUIRED FIX 4  
+## Message Architecture Enforcement
+
+Persuasion message ordering must follow a stable structure:
+
+problem  
+mechanism  
+proof  
+outcome  
+offer  
+
+The persuasion engine should enforce this message architecture when generating persuasion routes.
+
+---
+
+# REQUIRED FIX 5  
+## Strategy Acceptability Layer (System Stability)
+
+The system must never terminate strategy generation completely.
+
+Instead introduce graded strategy acceptability states:
+
+Green → strong strategy  
+Yellow → risky but viable  
+Orange → difficult market conditions  
+Red → structurally unlikely outcome  
+
+If a scenario is difficult, the system must produce an adaptive fallback strategy instead of halting execution.
+
+The system must remain stable under all conditions.
+
+---
+
+# REQUIRED FIX 6  
+## Mandatory System-Wide Update and Rebuild
+
+This is extremely important.
+
+Recent failures occurred because fixes were applied to single engines without propagating updates across dependent engines.
+
+Every architecture change must propagate across:
+
+• Differentiation Engine  
+• Offer Engine  
+• Funnel Engine  
+• Persuasion Engine  
+• Integrity Engine  
+
+Partial updates create engine mismatches and validation failures.
+
+After implementing these corrections please perform a full system rebuild and deployment across all engines to ensure architecture synchronization.
+
+---
+
+# ACCEPTANCE CRITERIA (REQUIRED BEFORE CONFIRMATION)
+
+Before marking this task complete please verify that:
+
+1. Mechanisms are generated as structured transformation processes.  
+2. Offer deliverables align with mechanism steps.  
+3. Persuasion mode aligns with awareness stage.  
+4. Proof assets follow trust sequencing rules.  
+5. Message architecture follows problem → mechanism → proof → outcome → offer.  
+6. Strategy generation never halts and always returns an adaptive path.  
+7. All engines are rebuilt and synchronized after deployment.
+
+Only once these conditions are met should the task be considered complete.
+
+---
+
+# PRIORITY
+
+This correction is urgent because unresolved architecture drift will continue generating validation failures and unnecessary reruns.
+
+Please proceed with implementation and confirm once the system-wide update and rebuild are completed.
+
+Thank you.

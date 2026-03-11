@@ -19,6 +19,7 @@ import {
   normalizeConfidence,
   type DataReliabilityDiagnostics,
 } from "../engine-hardening";
+import { assessStrategyAcceptability } from "../shared/strategy-acceptability";
 import type {
   MarketLanguageMap,
   OfferMIInput,
@@ -863,8 +864,9 @@ export async function runOfferEngine(
   }
 
   if (pillars.length === 0 && claims.length === 0) {
-    console.log(`[OfferEngine-V3] Insufficient differentiation data`);
+    console.log(`[OfferEngine-V3] Insufficient differentiation data — returning red-grade adaptive fallback`);
     const emptyOffer = buildEmptyOffer();
+    const acceptability = assessStrategyAcceptability(0, 0, 5, false, ["Differentiation data insufficient"]);
     return {
       status: STATUS.INSUFFICIENT_SIGNALS,
       statusMessage: "Differentiation data insufficient to construct meaningful offer",
@@ -879,6 +881,7 @@ export async function runOfferEngine(
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
       layerDiagnostics: diagnostics,
+      strategyAcceptability: acceptability,
     };
   }
 
@@ -1171,7 +1174,21 @@ export async function runOfferEngine(
     diagnostics.rawConfidence = rawConfidence;
   }
 
-  console.log(`[OfferEngine-V3] Complete | status=${status} | strength=${primaryOffer.offerStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | generic=${primaryOffer.genericFlag} | boundary=${boundaryCheck.clean} | alignmentWarnings=${structuralWarnings.length}`);
+  const layersPassed = [
+    primaryOffer.completeness.complete,
+    primaryOffer.integrityResult.passed,
+    boundaryCheck.clean,
+    posConsistency.consistent,
+    offerAlignmentValidation.aligned,
+  ].filter(Boolean).length;
+  const acceptability = assessStrategyAcceptability(
+    confidenceScore, layersPassed, 5,
+    primaryOffer.integrityResult.passed && boundaryCheck.clean,
+    structuralWarnings,
+  );
+  diagnostics.strategyAcceptability = acceptability;
+
+  console.log(`[OfferEngine-V3] Complete | status=${status} | strength=${primaryOffer.offerStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | grade=${acceptability.grade} | generic=${primaryOffer.genericFlag} | boundary=${boundaryCheck.clean} | alignmentWarnings=${structuralWarnings.length}`);
 
   return {
     status,
@@ -1187,6 +1204,7 @@ export async function runOfferEngine(
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,
     layerDiagnostics: diagnostics,
+    strategyAcceptability: acceptability,
   };
 }
 

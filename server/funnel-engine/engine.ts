@@ -17,6 +17,7 @@ import {
   normalizeConfidence,
   type DataReliabilityDiagnostics,
 } from "../engine-hardening";
+import { assessStrategyAcceptability } from "../shared/strategy-acceptability";
 import type {
   FunnelMIInput,
   FunnelAudienceInput,
@@ -797,8 +798,9 @@ export async function runFunnelEngine(
   }
 
   if (!offer.offerName && pillars.length === 0) {
-    console.log(`[FunnelEngine-V3] Insufficient data — no offer or differentiation`);
+    console.log(`[FunnelEngine-V3] Insufficient data — no offer or differentiation — returning red-grade adaptive fallback`);
     const emptyFunnel = buildEmptyFunnel();
+    const acceptability = assessStrategyAcceptability(0, 0, 8, false, ["Offer and differentiation data insufficient"]);
     return {
       status: STATUS.INSUFFICIENT_SIGNALS,
       statusMessage: "Offer and differentiation data insufficient to construct funnel",
@@ -815,6 +817,7 @@ export async function runFunnelEngine(
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
       layerDiagnostics: diagnostics,
+      strategyAcceptability: acceptability,
     };
   }
 
@@ -1011,7 +1014,24 @@ export async function runFunnelEngine(
     diagnostics.rawConfidence = rawConfidence;
   }
 
-  console.log(`[FunnelEngine-V3] Complete | status=${status} | strength=${primaryFunnel.funnelStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | generic=${primaryFunnel.genericFlag} | boundary=${boundaryCheck.passed} | alignmentWarnings=${structuralWarnings.length}`);
+  const layersPassed = [
+    l1Eligibility.eligible,
+    l2Fit.fitScore >= 0.4,
+    l3Friction.audienceFrictionScore >= 0.3,
+    l4Trust.trustPathScore >= 0.3,
+    l5Proof.proofPlacementScore >= 0.3,
+    l6Commitment.commitmentMatchScore >= 0.4,
+    primaryFunnel.integrityResult.passed,
+    boundaryCheck.passed,
+  ].filter(Boolean).length;
+  const acceptability = assessStrategyAcceptability(
+    confidenceScore, layersPassed, 8,
+    primaryFunnel.integrityResult.passed && boundaryCheck.passed,
+    structuralWarnings,
+  );
+  diagnostics.strategyAcceptability = acceptability;
+
+  console.log(`[FunnelEngine-V3] Complete | status=${status} | strength=${primaryFunnel.funnelStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | grade=${acceptability.grade} | generic=${primaryFunnel.genericFlag} | boundary=${boundaryCheck.passed} | alignmentWarnings=${structuralWarnings.length}`);
 
   return {
     status,
@@ -1041,5 +1061,6 @@ export async function runFunnelEngine(
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,
     layerDiagnostics: diagnostics,
+    strategyAcceptability: acceptability,
   };
 }

@@ -462,6 +462,62 @@ export function layer7_conversionFeasibility(
   return { layerName: "conversion_feasibility", passed: score >= 0.5, score: clamp(score), findings, warnings };
 }
 
+const AWARENESS_PERSUASION_MAP: Record<string, string> = {
+  unaware: "education_led",
+  problem_aware: "empathy_led",
+  solution_aware: "contrast_led",
+  product_aware: "proof_led",
+  most_aware: "proof_led",
+};
+
+const MECHANISM_ACTION_VERBS = [
+  "identify", "build", "deploy", "analyze", "map", "extract", "transform",
+  "validate", "optimize", "implement", "execute", "design", "create", "develop",
+];
+
+function validateCrossEngineAlignment(
+  audience: IntegrityAudienceInput,
+  differentiation: IntegrityDifferentiationInput,
+  offer: IntegrityOfferInput,
+): { findings: string[]; warnings: string[] } {
+  const findings: string[] = [];
+  const warnings: string[] = [];
+
+  const awareness = audience.awarenessLevel || "problem_aware";
+  const expectedMode = AWARENESS_PERSUASION_MAP[awareness];
+  if (expectedMode) {
+    findings.push(`Awareness stage "${awareness}" → expected persuasion mode: ${expectedMode}`);
+  }
+
+  const core = differentiation.mechanismCore;
+  if (core && core.mechanismType !== "none" && core.mechanismName) {
+    const hasActionVerbs = core.mechanismSteps.some(step =>
+      MECHANISM_ACTION_VERBS.some(verb => step.toLowerCase().includes(verb))
+    );
+    if (!hasActionVerbs) {
+      warnings.push(`MechanismCore steps lack action-oriented language — steps may be themes instead of transformation processes`);
+    } else {
+      findings.push(`MechanismCore validated: steps contain action-oriented transformation language`);
+    }
+
+    const offerDeliverables = offer.deliverables || [];
+    if (offerDeliverables.length > 0 && core.mechanismSteps.length > 0) {
+      const stepWords = core.mechanismSteps.map(s => s.toLowerCase().split(/\s+/).slice(0, 3));
+      const alignedDeliverables = offerDeliverables.filter(d => {
+        const dLower = d.toLowerCase();
+        return stepWords.some(words => words.some(w => w.length > 3 && dLower.includes(w)));
+      });
+      if (alignedDeliverables.length < Math.min(core.mechanismSteps.length, 2)) {
+        warnings.push(`Offer deliverables (${offerDeliverables.length}) poorly aligned with MechanismCore steps (${core.mechanismSteps.length}) — only ${alignedDeliverables.length} match`);
+      } else {
+        findings.push(`Offer deliverables aligned with MechanismCore: ${alignedDeliverables.length}/${core.mechanismSteps.length} steps covered`);
+      }
+    }
+  }
+
+  return { findings, warnings };
+}
+
 export function layer8_systemCoherence(
   layerResults: LayerResult[],
   mi: IntegrityMIInput,
@@ -469,6 +525,7 @@ export function layer8_systemCoherence(
   differentiation: IntegrityDifferentiationInput,
   offer: IntegrityOfferInput,
   funnel: IntegrityFunnelInput,
+  audience?: IntegrityAudienceInput,
 ): LayerResult {
   const findings: string[] = [];
   const warnings: string[] = [];
@@ -499,6 +556,12 @@ export function layer8_systemCoherence(
       warnings.push(`Large confidence spread across engines: min=${minConf.toFixed(2)}, max=${maxConf.toFixed(2)}`);
     }
     findings.push(`Engine confidence range: ${minConf.toFixed(2)} to ${maxConf.toFixed(2)}`);
+  }
+
+  if (audience) {
+    const crossEngine = validateCrossEngineAlignment(audience, differentiation, offer);
+    findings.push(...crossEngine.findings);
+    warnings.push(...crossEngine.warnings);
   }
 
   const score = clamp(avgScore - (failedLayers.length * 0.05) - (totalWarnings > 8 ? 0.1 : 0));
@@ -557,7 +620,7 @@ export function runIntegrityEngine(
   diagnostics.layer7 = { passed: l7.passed, score: l7.score, warnings: l7.warnings.length };
 
   const firstSevenLayers = [l1, l2, l3, l4, l5, l6, l7];
-  const l8 = layer8_systemCoherence(firstSevenLayers, mi, positioning, differentiation, offer, funnel);
+  const l8 = layer8_systemCoherence(firstSevenLayers, mi, positioning, differentiation, offer, funnel, audience);
   diagnostics.layer8 = { passed: l8.passed, score: l8.score, warnings: l8.warnings.length };
 
   const allLayers = [...firstSevenLayers, l8];

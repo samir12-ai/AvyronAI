@@ -39,6 +39,12 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 - **Strategic Core Architecture**: A 6-phase sequential engine for comprehensive plan generation using AI Creative Blueprints.
 - **Adaptive Engine Architecture**: Provides a foundation for scalable engine integration with standardized output schemas and a Context Kernel.
 - **System Hardening**: Includes extensive indexing, unique constraints, Zod-based request validation, self-healing snapshot resolution, and a shared hardening library with features like `sanitizeBoundary`, `assessDataReliability`, and `checkCrossEngineAlignment`.
+- **Mechanism Construction Validation**: Differentiation Engine validates that MechanismCore describes structured transformation processes (not conceptual themes). `validateMechanismIsTransformation()` checks for action verbs in steps/logic. `refineMechanismFromTheme()` auto-transforms themes into operational mechanisms.
+- **Awareness → Persuasion Mode Alignment**: Persuasion Engine enforces strict awareness-to-mode mapping (unaware→education, problem_aware→empathy, solution_aware→contrast, product_aware→proof, most_aware→proof) via `AWARENESS_PERSUASION_MAP`.
+- **Trust Proof Sequencing**: `buildTrustProofSequence()` enforces deterministic escalation path: process_proof → case_proof → outcome_proof → transparency_proof. Integrated into `layer5_proofPriorityMapping`.
+- **Message Architecture Enforcement**: `validateMessageArchitecture()` enforces problem → mechanism → proof → outcome → offer ordering in persuasion message sequences. Violations logged as warnings.
+- **Strategy Acceptability Layer**: `assessStrategyAcceptability()` in `server/shared/strategy-acceptability.ts` provides graded strategy states (green/yellow/orange/red) with adaptive fallback strategies. No engine ever halts — all return an adaptive path. Integrated into Offer, Funnel, and Persuasion engines.
+- **Cross-Engine Synchronization**: Integrity Engine validates MechanismCore action verbs, offer-deliverable-to-mechanism alignment, and awareness-persuasion consistency across engines.
 
 ### Audit & Control System
 A backend and frontend system for auditing feeds, AI usage, gate status, decisions, publish history, and job management, presented in a 5-panel dashboard.

@@ -1,4 +1,4 @@
-export const ENGINE_VERSION = 2;
+export const ENGINE_VERSION = 3;
 export const FRESHNESS_THRESHOLD_DAYS = 14;
 
 export const FUNNEL_STRENGTH_WEIGHTS = {

@@ -1,4 +1,4 @@
-export const ENGINE_VERSION = 6;
+export const ENGINE_VERSION = 7;
 export const FRESHNESS_THRESHOLD_DAYS = 14;
 
 export const DIFFERENTIATION_SCORE_WEIGHTS = {

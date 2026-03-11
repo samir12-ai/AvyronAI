@@ -469,6 +469,100 @@ export function layer8_mechanismConstruction(
   };
 }
 
+const ACTION_VERBS = [
+  "identify", "build", "deploy", "analyze", "map", "extract", "validate",
+  "optimize", "transform", "implement", "assess", "design", "construct",
+  "evaluate", "integrate", "measure", "execute", "diagnose", "calibrate",
+  "audit", "prioritize", "activate", "align", "resolve", "structure",
+  "sequence", "test", "refine", "synthesize", "accelerate", "consolidate",
+  "differentiate", "establish", "formulate", "generate", "leverage",
+  "mobilize", "orchestrate", "penetrate", "quantify", "reconfigure",
+  "segment", "systematize", "uncover", "verify",
+];
+
+const THEME_ONLY_PATTERN = /^[A-Za-z\s]+\s+(approach|method|system|framework|protocol|strategy|model|process)$/i;
+
+export function validateMechanismIsTransformation(core: MechanismCore): { valid: boolean; failures: string[] } {
+  const failures: string[] = [];
+
+  if (THEME_ONLY_PATTERN.test(core.mechanismName.trim())) {
+    const words = core.mechanismName.trim().split(/\s+/);
+    const hasVerb = words.some(w => ACTION_VERBS.includes(w.toLowerCase()));
+    if (!hasVerb) {
+      failures.push(`mechanismName "${core.mechanismName}" is a theme label (noun + type) with no operational verb or process language`);
+    }
+  }
+
+  if (core.mechanismSteps.length === 0) {
+    failures.push("mechanismSteps is empty — no transformation steps defined");
+  } else {
+    const stepsWithoutActionVerbs = core.mechanismSteps.filter(step => {
+      const stepLower = step.toLowerCase();
+      return !ACTION_VERBS.some(verb => stepLower.includes(verb));
+    });
+    if (stepsWithoutActionVerbs.length === core.mechanismSteps.length) {
+      failures.push(`No mechanismSteps contain action-oriented language. Steps: [${core.mechanismSteps.join(", ")}]`);
+    } else if (stepsWithoutActionVerbs.length > 0) {
+      failures.push(`${stepsWithoutActionVerbs.length}/${core.mechanismSteps.length} mechanismSteps lack action verbs: [${stepsWithoutActionVerbs.join(", ")}]`);
+    }
+  }
+
+  if (core.mechanismLogic && !ACTION_VERBS.some(verb => core.mechanismLogic.toLowerCase().includes(verb))) {
+    failures.push("mechanismLogic does not describe HOW transformation happens — no action verbs found");
+  }
+
+  return { valid: failures.length === 0, failures };
+}
+
+export function refineMechanismFromTheme(core: MechanismCore, pillars: DifferentiationPillar[], trustGaps: TrustGap[]): MechanismCore {
+  let refinedName = core.mechanismName;
+  if (THEME_ONLY_PATTERN.test(refinedName.trim())) {
+    const parts = refinedName.trim().split(/\s+/);
+    const typePart = parts[parts.length - 1];
+    const themePart = parts.slice(0, -1).join(" ");
+    const processVerbs = ["Build", "Deploy", "Transform", "Activate", "Implement"];
+    const verb = processVerbs[Math.floor(themePart.length % processVerbs.length)];
+    refinedName = `${verb} & ${themePart} ${typePart}`;
+  }
+
+  const refinedSteps = core.mechanismSteps.map((step, idx) => {
+    const stepLower = step.toLowerCase();
+    if (ACTION_VERBS.some(verb => stepLower.includes(verb))) {
+      return step;
+    }
+    const stepVerbs = ["Identify", "Analyze", "Build", "Deploy", "Validate"];
+    const verb = stepVerbs[idx % stepVerbs.length];
+    return `${verb} ${step}`;
+  });
+
+  if (refinedSteps.length === 0 && pillars.length > 0) {
+    const stepVerbs = ["Identify", "Analyze", "Build", "Deploy", "Validate"];
+    const topPillars = pillars.filter(p => p.overallScore >= 0.3).slice(0, 5);
+    for (let i = 0; i < topPillars.length; i++) {
+      refinedSteps.push(`${stepVerbs[i % stepVerbs.length]} ${topPillars[i].name}`);
+    }
+  }
+
+  let refinedLogic = core.mechanismLogic;
+  if (refinedLogic && !ACTION_VERBS.some(verb => refinedLogic.toLowerCase().includes(verb))) {
+    const topProblem = trustGaps.length > 0
+      ? trustGaps.sort((a, b) => b.severity - a.severity)[0].objection
+      : "the core challenge";
+    refinedLogic = `${refinedName} systematically resolves ${topProblem} by executing ${refinedSteps.length} structured transformation steps: ${refinedSteps.join(" → ")}`;
+  }
+
+  console.log(`[DifferentiationEngine-V3] MECHANISM_REFINED | original="${core.mechanismName}" | refined="${refinedName}" | steps=${refinedSteps.length}`);
+
+  return {
+    mechanismName: refinedName,
+    mechanismType: core.mechanismType,
+    mechanismSteps: refinedSteps,
+    mechanismPromise: core.mechanismPromise,
+    mechanismProblem: core.mechanismProblem,
+    mechanismLogic: refinedLogic,
+  };
+}
+
 export function buildMechanismCore(
   mechanism: MechanismCandidate,
   pillars: DifferentiationPillar[],
@@ -508,7 +602,7 @@ export function buildMechanismCore(
     ? `${mechanismName} resolves ${mechanismProblem} using ${mechanismSteps.length} structured steps: ${mechanismSteps.join(" → ")}. Backed by: ${mechanism.proofBasis.slice(0, 3).join("; ")}`
     : `Differentiation direction identified but mechanism lacks structural support for formal framing`;
 
-  return {
+  let core: MechanismCore = {
     mechanismName,
     mechanismType,
     mechanismSteps,
@@ -516,6 +610,14 @@ export function buildMechanismCore(
     mechanismProblem,
     mechanismLogic,
   };
+
+  const validation = validateMechanismIsTransformation(core);
+  if (!validation.valid) {
+    console.log(`[DifferentiationEngine-V3] MECHANISM_VALIDATION_FAILED | failures=${validation.failures.length} | ${validation.failures.join(" | ")}`);
+    core = refineMechanismFromTheme(core, pillars, trustGaps);
+  }
+
+  return core;
 }
 
 export function layer9_differentiationPillarScoring(

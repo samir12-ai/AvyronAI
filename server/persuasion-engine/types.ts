@@ -189,4 +189,5 @@ export interface PersuasionResult {
   confidenceNormalized: boolean;
   executionTimeMs: number;
   engineVersion: number;
+  strategyAcceptability?: import("../shared/strategy-acceptability").StrategyAcceptability;
 }
