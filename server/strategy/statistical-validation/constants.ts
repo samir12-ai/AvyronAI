@@ -1,6 +1,6 @@
 import type { SoftPattern } from "../../engine-hardening/types";
 
-export const ENGINE_VERSION = 2;
+export const ENGINE_VERSION = 3;
 
 export const STATUS = {
   COMPLETE: "COMPLETE",
@@ -99,3 +99,5 @@ export const CLAIM_CONFIDENCE_THRESHOLDS = {
   PROVISIONAL: 0.5,
   WEAK: 0.3,
 } as const;
+
+export const SIGNAL_GROUNDING_THRESHOLD = 0.4;

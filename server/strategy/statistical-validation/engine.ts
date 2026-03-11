@@ -9,6 +9,7 @@ import {
   EVIDENCE_DENSITY_THRESHOLDS,
   CLAIM_CONFIDENCE_THRESHOLDS,
   VALIDATION_STATES,
+  SIGNAL_GROUNDING_THRESHOLD,
 } from "./constants";
 import { enforceBoundaryWithSanitization } from "../../engine-hardening";
 import { assessStrategyAcceptability } from "../../shared/strategy-acceptability";
@@ -23,6 +24,8 @@ import type {
   ClaimValidation,
   DataReliabilityDiagnostics,
   StatisticalValidationResult,
+  SignalCluster,
+  SignalProvenance,
 } from "./types";
 
 function clamp(v: number, min = 0, max = 1): number {
@@ -38,6 +41,154 @@ function safeNumber(v: any, fallback: number): number {
 function safeString(v: any, fallback: string): string {
   if (typeof v === "string" && v.trim()) return v.trim();
   return fallback;
+}
+
+function extractSignalText(item: any): string {
+  if (typeof item === "string") return item;
+  return safeString(item?.signal || item?.description || item?.pain || item?.driver || item?.desire || item?.objection || "", "");
+}
+
+function buildSignalClusters(
+  mi: ValidationMIInput,
+  audience: ValidationAudienceInput,
+): SignalCluster[] {
+  const clusters: SignalCluster[] = [];
+  let clusterIndex = 0;
+
+  const oppSignals = (mi.opportunitySignals || []).map(extractSignalText).filter(Boolean);
+  if (oppSignals.length > 0) {
+    clusters.push({
+      clusterId: `sc_${clusterIndex++}`,
+      category: "market_opportunity",
+      originEngine: "market_intelligence",
+      signals: oppSignals,
+      strength: clamp(oppSignals.length / 5, 0.2, 1),
+    });
+  }
+
+  const threatSignals = (mi.threatSignals || []).map(extractSignalText).filter(Boolean);
+  if (threatSignals.length > 0) {
+    clusters.push({
+      clusterId: `sc_${clusterIndex++}`,
+      category: "market_threat",
+      originEngine: "market_intelligence",
+      signals: threatSignals,
+      strength: clamp(threatSignals.length / 5, 0.2, 1),
+    });
+  }
+
+  const painSignals = (audience.audiencePains || []).map(extractSignalText).filter(Boolean);
+  if (painSignals.length > 0) {
+    clusters.push({
+      clusterId: `sc_${clusterIndex++}`,
+      category: "audience_pain",
+      originEngine: "audience",
+      signals: painSignals,
+      strength: clamp(painSignals.length / 5, 0.2, 1),
+    });
+  }
+
+  const desireKeys = Object.keys(audience.desireMap || {});
+  const desireSignals = desireKeys.map(k => {
+    const v = (audience.desireMap || {})[k];
+    return typeof v === "string" ? v : k;
+  }).filter(Boolean);
+  if (desireSignals.length > 0) {
+    clusters.push({
+      clusterId: `sc_${clusterIndex++}`,
+      category: "audience_desire",
+      originEngine: "audience",
+      signals: desireSignals,
+      strength: clamp(desireSignals.length / 5, 0.2, 1),
+    });
+  }
+
+  const objKeys = Object.keys(audience.objectionMap || {});
+  if (objKeys.length > 0) {
+    clusters.push({
+      clusterId: `sc_${clusterIndex++}`,
+      category: "audience_objection",
+      originEngine: "audience",
+      signals: objKeys,
+      strength: clamp(objKeys.length / 5, 0.2, 1),
+    });
+  }
+
+  const driverSignals = (audience.emotionalDrivers || []).map(extractSignalText).filter(Boolean);
+  if (driverSignals.length > 0) {
+    clusters.push({
+      clusterId: `sc_${clusterIndex++}`,
+      category: "emotional_driver",
+      originEngine: "audience",
+      signals: driverSignals,
+      strength: clamp(driverSignals.length / 4, 0.2, 1),
+    });
+  }
+
+  const narrationObjSignals = (mi.narrativeObjections || []).map(n => n.objection).filter(Boolean);
+  if (narrationObjSignals.length > 0) {
+    clusters.push({
+      clusterId: `sc_${clusterIndex++}`,
+      category: "narrative_objection",
+      originEngine: "market_intelligence",
+      signals: narrationObjSignals,
+      strength: clamp(narrationObjSignals.length / 4, 0.2, 1),
+    });
+  }
+
+  return clusters;
+}
+
+function matchClaimToSignalCluster(
+  claimText: string,
+  clusters: SignalCluster[],
+): { supporting: SignalProvenance | null; contradicting: SignalProvenance | null } {
+  const lower = claimText.toLowerCase();
+  let bestSupporting: SignalProvenance | null = null;
+  let bestSupportingScore = 0;
+  let bestContradicting: SignalProvenance | null = null;
+  let bestContradictingScore = 0;
+
+  for (const cluster of clusters) {
+    const isContradicting = cluster.category === "market_threat" || cluster.category === "audience_objection";
+
+    for (const signal of cluster.signals) {
+      const signalLower = signal.toLowerCase();
+      const overlapScore = computeOverlapScore(lower, signalLower);
+      if (overlapScore >= 2) {
+        const provenance: SignalProvenance = {
+          signalId: cluster.clusterId,
+          signalSource: cluster.category,
+          signalOriginEngine: cluster.originEngine,
+          signalStrength: cluster.strength * clamp(overlapScore / 4, 0.3, 1),
+          evidenceReference: signal.slice(0, 120),
+        };
+        if (isContradicting) {
+          if (overlapScore > bestContradictingScore) {
+            bestContradictingScore = overlapScore;
+            bestContradicting = provenance;
+          }
+        } else {
+          if (overlapScore > bestSupportingScore) {
+            bestSupportingScore = overlapScore;
+            bestSupporting = provenance;
+          }
+        }
+      }
+    }
+  }
+
+  return { supporting: bestSupporting, contradicting: bestContradicting };
+}
+
+function computeOverlapScore(a: string, b: string): number {
+  const wordsA = a.split(/\s+/).filter(w => w.length > 3);
+  const wordsB = new Set(b.split(/\s+/).filter(w => w.length > 3));
+  let matches = 0;
+  for (const w of wordsA) {
+    if (wordsB.has(w)) matches++;
+  }
+  return matches;
 }
 
 function assessDataReliability(
@@ -110,27 +261,31 @@ function extractClaims(
   offer: ValidationOfferInput,
   persuasion: ValidationPersuasionInput,
   awareness: ValidationAwarenessInput,
-): Array<{ claim: string; source: string }> {
-  const claims: Array<{ claim: string; source: string }> = [];
+  signalClusters: SignalCluster[],
+): Array<{ claim: string; source: string; signalProvenance: SignalProvenance | null; isHypothesis: boolean }> {
+  const claims: Array<{ claim: string; source: string; signalProvenance: SignalProvenance | null; isHypothesis: boolean }> = [];
 
-  if (offer.coreOutcome) {
-    claims.push({ claim: offer.coreOutcome, source: "offer_outcome" });
-  }
-  if (offer.mechanismDescription) {
-    claims.push({ claim: offer.mechanismDescription, source: "offer_mechanism" });
-  }
+  const addClaim = (claimText: string, source: string) => {
+    if (!claimText) return;
+    const { supporting } = matchClaimToSignalCluster(claimText, signalClusters);
+    claims.push({
+      claim: claimText,
+      source,
+      signalProvenance: supporting,
+      isHypothesis: supporting === null,
+    });
+  };
+
+  addClaim(offer.coreOutcome, "offer_outcome");
+  addClaim(offer.mechanismDescription, "offer_mechanism");
   for (const proof of (offer.proofAlignment || []).slice(0, 3)) {
-    if (proof) claims.push({ claim: proof, source: "offer_proof" });
+    addClaim(proof, "offer_proof");
   }
   for (const driver of (persuasion.primaryInfluenceDrivers || []).slice(0, 3)) {
-    if (driver) claims.push({ claim: `Influence driver: ${driver}`, source: "persuasion_driver" });
+    if (driver) addClaim(`Influence driver: ${driver}`, "persuasion_driver");
   }
-  if (awareness.triggerClass) {
-    claims.push({ claim: `Trigger: ${awareness.triggerClass}`, source: "awareness_trigger" });
-  }
-  if (awareness.entryMechanismType) {
-    claims.push({ claim: `Entry: ${awareness.entryMechanismType}`, source: "awareness_entry" });
-  }
+  addClaim(awareness.triggerClass ? `Trigger: ${awareness.triggerClass}` : "", "awareness_trigger");
+  addClaim(awareness.entryMechanismType ? `Entry: ${awareness.entryMechanismType}` : "", "awareness_entry");
 
   return claims;
 }
@@ -138,6 +293,8 @@ function extractClaims(
 function validateClaim(
   claim: string,
   source: string,
+  signalProvenance: SignalProvenance | null,
+  isHypothesis: boolean,
   mi: ValidationMIInput,
   audience: ValidationAudienceInput,
   offer: ValidationOfferInput,
@@ -169,7 +326,7 @@ function validateClaim(
   }
 
   for (const opp of (mi.opportunitySignals || [])) {
-    const oppStr = typeof opp === "string" ? opp : safeString(opp?.signal || opp?.description || "", "");
+    const oppStr = extractSignalText(opp);
     if (oppStr && hasOverlap(lower, oppStr.toLowerCase())) {
       supportingSignals.push(oppStr.slice(0, 100));
       evidenceStrength += 0.15;
@@ -177,7 +334,7 @@ function validateClaim(
   }
 
   for (const threat of (mi.threatSignals || [])) {
-    const threatStr = typeof threat === "string" ? threat : safeString(threat?.signal || threat?.description || "", "");
+    const threatStr = extractSignalText(threat);
     if (threatStr && hasOverlap(lower, threatStr.toLowerCase())) {
       contradictingSignals.push(threatStr.slice(0, 100));
       evidenceStrength -= 0.1;
@@ -193,7 +350,7 @@ function validateClaim(
   }
 
   for (const pain of (audience.audiencePains || []).slice(0, 5)) {
-    const painStr = typeof pain === "string" ? pain : safeString(pain?.pain || pain?.description || "", "");
+    const painStr = extractSignalText(pain);
     if (painStr && hasOverlap(lower, painStr.toLowerCase())) {
       supportingSignals.push(`Pain alignment: ${painStr.slice(0, 80)}`);
       evidenceStrength += 0.1;
@@ -284,7 +441,10 @@ function validateClaim(
     !s.startsWith("Offer ") && !s.startsWith("Funnel ")
   );
 
-  if (supportingSignals.length > 0 && !isNarrativeBased && hasMIOrAudienceSupport) {
+  if (signalProvenance && !isNarrativeBased && !isAssumptionBased) {
+    evidenceType = "signal";
+    evidenceStrength = Math.max(evidenceStrength + 0.2, signalProvenance.signalStrength);
+  } else if (supportingSignals.length > 0 && !isNarrativeBased && hasMIOrAudienceSupport) {
     evidenceType = "signal";
     evidenceStrength += 0.2;
   } else if (supportingSignals.length > 0 && !isNarrativeBased && crossEngineSignalCount > 0) {
@@ -301,8 +461,12 @@ function validateClaim(
     evidenceStrength = 0.25;
   }
 
+  if (signalProvenance) {
+    supportingSignals.unshift(`Signal: [${signalProvenance.signalSource}] ${signalProvenance.evidenceReference}`);
+  }
+
   evidenceStrength = clamp(evidenceStrength, 0, 1);
-  const validated = evidenceStrength >= CLAIM_CONFIDENCE_THRESHOLDS.PROVISIONAL && evidenceType !== "assumption";
+  const validated = evidenceStrength >= CLAIM_CONFIDENCE_THRESHOLDS.PROVISIONAL && evidenceType !== "assumption" && !isHypothesis;
 
   return {
     claim: claim.slice(0, 200),
@@ -312,6 +476,8 @@ function validateClaim(
     supportingSignals,
     contradictingSignals,
     validated,
+    isHypothesis,
+    signalProvenance,
   };
 }
 
@@ -374,14 +540,20 @@ function layer_claimSignalAlignment(
   const findings: string[] = [];
   const warnings: string[] = [];
 
-  const validatedCount = claimValidations.filter(c => c.validated).length;
-  const total = claimValidations.length || 1;
+  const scorableClaims = claimValidations.filter(c => !c.isHypothesis);
+  const validatedCount = scorableClaims.filter(c => c.validated).length;
+  const total = scorableClaims.length || 1;
   const validationRate = validatedCount / total;
+
+  const hypothesisCount = claimValidations.filter(c => c.isHypothesis).length;
+  if (hypothesisCount > 0) {
+    warnings.push(`${hypothesisCount} claim(s) classified as hypotheses (excluded from scoring — no signal chain)`);
+  }
 
   let score = validationRate;
 
   if (validationRate >= 0.7) {
-    findings.push(`${validatedCount}/${total} claims validated by real signals`);
+    findings.push(`${validatedCount}/${total} signal-backed claims validated`);
     score = 0.7 + validationRate * 0.3;
   } else if (validationRate >= 0.4) {
     findings.push(`${validatedCount}/${total} claims partially validated`);
@@ -391,7 +563,7 @@ function layer_claimSignalAlignment(
     score = Math.max(score, 0.15);
   }
 
-  const contradictedClaims = claimValidations.filter(c => c.contradictingSignals.length > 0);
+  const contradictedClaims = scorableClaims.filter(c => c.contradictingSignals.length > 0);
   if (contradictedClaims.length > 0) {
     warnings.push(`${contradictedClaims.length} claim(s) have contradicting signals`);
     score -= contradictedClaims.length * 0.05;
@@ -412,11 +584,13 @@ function layer_narrativeVsSignal(
   const findings: string[] = [];
   const warnings: string[] = [];
 
-  const narrativeClaims = claimValidations.filter(c => c.evidenceType === "narrative");
-  const signalClaims = claimValidations.filter(c => c.evidenceType === "signal");
-  const structuredInferenceClaims = claimValidations.filter(c => c.evidenceType === "structured_inference");
+  const scorableClaims = claimValidations.filter(c => !c.isHypothesis);
+  const hypothesisCount = claimValidations.filter(c => c.isHypothesis).length;
+  const narrativeClaims = scorableClaims.filter(c => c.evidenceType === "narrative");
+  const signalClaims = scorableClaims.filter(c => c.evidenceType === "signal");
+  const structuredInferenceClaims = scorableClaims.filter(c => c.evidenceType === "structured_inference");
   const evidenceBackedCount = signalClaims.length + structuredInferenceClaims.length;
-  const total = claimValidations.length || 1;
+  const total = scorableClaims.length || 1;
 
   const narrativeRatio = narrativeClaims.length / total;
   const evidenceBackedRatio = evidenceBackedCount / total;
@@ -432,6 +606,10 @@ function layer_narrativeVsSignal(
   } else {
     score = 0.5 + evidenceBackedRatio * 0.3;
     findings.push(`Mixed evidence base: ${signalClaims.length} signal-backed, ${structuredInferenceClaims.length} engine-inferred, ${narrativeClaims.length} narrative-based`);
+  }
+
+  if (hypothesisCount > 0) {
+    findings.push(`${hypothesisCount} hypothesis/hypotheses excluded from scoring`);
   }
 
   if (narrativeClaims.length > 3) {
@@ -457,8 +635,10 @@ function layer_assumptionDetection(
   const warnings: string[] = [];
   const assumptionFlags: string[] = [];
 
-  const assumptionClaims = claimValidations.filter(c => c.evidenceType === "assumption");
-  const inferredClaims = claimValidations.filter(c => c.evidenceType === "inferred");
+  const scorableClaims = claimValidations.filter(c => !c.isHypothesis);
+  const assumptionClaims = scorableClaims.filter(c => c.evidenceType === "assumption");
+  const inferredClaims = scorableClaims.filter(c => c.evidenceType === "inferred");
+  const hypothesisCount = claimValidations.filter(c => c.isHypothesis).length;
 
   let score = 0.7;
 
@@ -475,6 +655,10 @@ function layer_assumptionDetection(
     warnings.push(`${inferredClaims.length} claim(s) are inferred without direct evidence`);
   }
 
+  if (hypothesisCount > 0) {
+    warnings.push(`${hypothesisCount} hypothesis/hypotheses detected — these lack signal chains and need grounding (excluded from scoring)`);
+  }
+
   const offerText = `${offer.coreOutcome} ${offer.mechanismDescription}`.toLowerCase();
   for (const indicator of ASSUMPTION_INDICATORS) {
     if (offerText.includes(indicator)) {
@@ -483,7 +667,7 @@ function layer_assumptionDetection(
     }
   }
 
-  if (assumptionFlags.length === 0) {
+  if (assumptionFlags.length === 0 && hypothesisCount === 0) {
     findings.push("No critical assumptions detected in strategy claims");
     score = Math.max(score, 0.7);
   }
@@ -615,11 +799,12 @@ function layer_confidenceCalibration(
   let score = 0.5;
 
   const miConfidence = safeNumber(mi.overallConfidence, 0);
-  const avgClaimStrength = claimValidations.length > 0
-    ? claimValidations.reduce((sum, c) => {
+  const scorableClaims = claimValidations.filter(c => !c.isHypothesis);
+  const avgClaimStrength = scorableClaims.length > 0
+    ? scorableClaims.reduce((sum, c) => {
         const strength = c.evidenceType === "structured_inference" ? Math.max(c.evidenceStrength, 0.4) : c.evidenceStrength;
         return sum + strength;
-      }, 0) / claimValidations.length
+      }, 0) / scorableClaims.length
     : 0;
 
   const confidenceGap = Math.abs(miConfidence - avgClaimStrength);
@@ -687,11 +872,26 @@ export async function runStatisticalValidationEngine(
       confidenceNormalized: false,
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
+      signalClusters: [],
+      hypothesisCount: 0,
+      signalBackedClaimCount: 0,
+      signalBackedClaimRatio: 0,
     };
   }
 
-  const claims = extractClaims(offer, persuasion, awareness);
-  const claimValidations = claims.map(c => validateClaim(c.claim, c.source, mi, audience, offer, funnel, awareness, persuasion));
+  const signalClusters = buildSignalClusters(mi, audience);
+
+  const extractedClaims = extractClaims(offer, persuasion, awareness, signalClusters);
+  const claimValidations = extractedClaims.map(c =>
+    validateClaim(c.claim, c.source, c.signalProvenance, c.isHypothesis, mi, audience, offer, funnel, awareness, persuasion)
+  );
+
+  const signalBackedClaims = claimValidations.filter(c => !c.isHypothesis);
+  const hypotheses = claimValidations.filter(c => c.isHypothesis);
+  const signalBackedClaimCount = signalBackedClaims.length;
+  const signalBackedClaimRatio = claimValidations.length > 0
+    ? signalBackedClaimCount / claimValidations.length
+    : 0;
 
   const layers: LayerResult[] = [];
 
@@ -703,12 +903,27 @@ export async function runStatisticalValidationEngine(
   layers.push(layer_proofStrengthValidation(offer, persuasion, awareness));
   layers.push(layer_confidenceCalibration(mi, reliability, claimValidations));
 
+  const claimSupportScore = layers.find(l => l.layerName === "claim_signal_alignment")?.score || 0;
+  const evidenceDensityScore = layers.find(l => l.layerName === "evidence_density_assessment")?.score || 0;
+  const proofStrengthScore = layers.find(l => l.layerName === "proof_strength_validation")?.score || 0;
+  const crossEngineScore = layers.find(l => l.layerName === "cross_engine_consistency")?.score || 0;
+
+  const minConstrainedConfidence = Math.min(
+    claimSupportScore,
+    evidenceDensityScore,
+    proofStrengthScore,
+    crossEngineScore,
+  );
+
   let weightedScore = 0;
   for (const layer of layers) {
     const weight = LAYER_WEIGHTS[layer.layerName] || 0.1;
     weightedScore += layer.score * weight;
   }
   weightedScore = clamp(weightedScore, 0, 1);
+
+  let rawConfidence = Math.min(weightedScore, minConstrainedConfidence);
+  rawConfidence = clamp(rawConfidence, 0, 1);
 
   const structuralWarnings: string[] = [];
   for (const layer of layers) {
@@ -733,17 +948,25 @@ export async function runStatisticalValidationEngine(
     }
   }
 
+  for (const h of hypotheses) {
+    assumptionFlags.push(`Hypothesis: "${h.claim.slice(0, 80)}" — no signal chain, excluded from scoring`);
+  }
+
   let confidenceNormalized = false;
-  let claimConfidenceScore = weightedScore;
+  let claimConfidenceScore = rawConfidence;
   if (reliability.isWeak || reliability.overallReliability < 0.6) {
-    claimConfidenceScore = normalizeConfidence(weightedScore, reliability);
+    claimConfidenceScore = normalizeConfidence(rawConfidence, reliability);
     confidenceNormalized = true;
   }
 
-  const avgEvidenceStrength = claimValidations.length > 0
-    ? claimValidations.reduce((sum, c) => sum + c.evidenceStrength, 0) / claimValidations.length
+  const scorableValidations = claimValidations.filter(c => !c.isHypothesis);
+  const avgEvidenceStrength = scorableValidations.length > 0
+    ? scorableValidations.reduce((sum, c) => sum + c.evidenceStrength, 0) / scorableValidations.length
     : 0;
   const evidenceStrength = clamp(avgEvidenceStrength, 0, 1);
+
+  claimConfidenceScore = Math.min(claimConfidenceScore, evidenceStrength);
+  claimConfidenceScore = clamp(claimConfidenceScore, 0, 1);
 
   let validationState: StatisticalValidationResult["validationState"];
   if (claimConfidenceScore >= CLAIM_CONFIDENCE_THRESHOLDS.VALIDATED && evidenceStrength >= EVIDENCE_DENSITY_THRESHOLDS.MODERATE) {
@@ -754,6 +977,15 @@ export async function runStatisticalValidationEngine(
     validationState = VALIDATION_STATES.WEAK as "weak";
   } else {
     validationState = VALIDATION_STATES.REJECTED as "rejected";
+  }
+
+  if (signalBackedClaimRatio < SIGNAL_GROUNDING_THRESHOLD) {
+    if (validationState === "validated" || validationState === "weak") {
+      validationState = "provisional";
+    }
+    structuralWarnings.push(
+      `GUARD: Signal-backed claims (${Math.round(signalBackedClaimRatio * 100)}%) below ${Math.round(SIGNAL_GROUNDING_THRESHOLD * 100)}% threshold — strategy is PROVISIONAL, execution engines blocked until additional signal grounding is achieved`
+    );
   }
 
   if (validationState === "rejected" || validationState === "weak") {
@@ -772,12 +1004,12 @@ export async function runStatisticalValidationEngine(
   return {
     status: STATUS.COMPLETE,
     statusMessage: validationState === "validated"
-      ? "Strategy claims validated with sufficient evidence"
+      ? "Strategy claims validated with sufficient signal evidence"
       : validationState === "provisional"
-        ? "Strategy claims partially validated — treat as provisional"
+        ? "Strategy claims partially validated — treat as provisional until signal grounding improves"
         : validationState === "weak"
-          ? "Strategy evidence is weak — significant gaps detected"
-          : "Strategy validation failed — insufficient evidence for claims",
+          ? "Strategy evidence is weak — significant signal gaps detected"
+          : "Strategy validation failed — insufficient signal evidence for claims",
     claimConfidenceScore,
     evidenceStrength,
     validationState,
@@ -797,5 +1029,9 @@ export async function runStatisticalValidationEngine(
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,
     strategyAcceptability,
+    signalClusters,
+    hypothesisCount: hypotheses.length,
+    signalBackedClaimCount,
+    signalBackedClaimRatio,
   };
 }

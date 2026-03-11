@@ -237,6 +237,10 @@ export function registerStatisticalValidationRoutes(app: Express) {
           assumptionFlags: result.assumptionFlags,
           claimValidations: result.claimValidations,
           strategyAcceptability: result.strategyAcceptability,
+          hypothesisCount: result.hypothesisCount,
+          signalBackedClaimCount: result.signalBackedClaimCount,
+          signalBackedClaimRatio: result.signalBackedClaimRatio,
+          signalClusters: result.signalClusters,
         }),
         layerResults: JSON.stringify(result.layerResults),
         structuralWarnings: JSON.stringify(result.structuralWarnings),
@@ -304,5 +308,5 @@ export function registerStatisticalValidationRoutes(app: Express) {
     }
   });
 
-  console.log("[StatisticalValidation-V3] Routes registered: POST /api/strategy/statistical-validation/analyze, GET /api/strategy/statistical-validation/latest");
+  console.log("[StatisticalValidation-V3] Routes registered — signal grounding enforcement active");
 }

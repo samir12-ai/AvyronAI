@@ -68,6 +68,22 @@ export interface ValidationPersuasionInput {
   structuredObjections: any[];
 }
 
+export interface SignalCluster {
+  clusterId: string;
+  category: "market_opportunity" | "market_threat" | "audience_pain" | "audience_desire" | "audience_objection" | "emotional_driver" | "narrative_objection";
+  originEngine: string;
+  signals: string[];
+  strength: number;
+}
+
+export interface SignalProvenance {
+  signalId: string;
+  signalSource: string;
+  signalOriginEngine: string;
+  signalStrength: number;
+  evidenceReference: string;
+}
+
 export interface LayerResult {
   layerName: string;
   passed: boolean;
@@ -84,6 +100,8 @@ export interface ClaimValidation {
   supportingSignals: string[];
   contradictingSignals: string[];
   validated: boolean;
+  isHypothesis: boolean;
+  signalProvenance: SignalProvenance | null;
 }
 
 export interface DataReliabilityDiagnostics {
@@ -113,4 +131,8 @@ export interface StatisticalValidationResult {
   executionTimeMs: number;
   engineVersion: number;
   strategyAcceptability?: import("../../shared/strategy-acceptability").StrategyAcceptability;
+  signalClusters: SignalCluster[];
+  hypothesisCount: number;
+  signalBackedClaimCount: number;
+  signalBackedClaimRatio: number;
 }

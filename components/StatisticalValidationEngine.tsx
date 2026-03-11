@@ -23,6 +23,14 @@ interface LayerResult {
   warnings: string[];
 }
 
+interface SignalProvenance {
+  signalId: string;
+  signalSource: string;
+  signalOriginEngine: string;
+  signalStrength: number;
+  evidenceReference: string;
+}
+
 interface ClaimValidation {
   claim: string;
   source: string;
@@ -31,6 +39,8 @@ interface ClaimValidation {
   supportingSignals: string[];
   contradictingSignals: string[];
   validated: boolean;
+  isHypothesis?: boolean;
+  signalProvenance?: SignalProvenance | null;
 }
 
 interface DataReliability {
@@ -61,6 +71,9 @@ interface StatisticalValidationData {
   engineVersion?: number;
   executionTimeMs?: number;
   createdAt?: string;
+  hypothesisCount?: number;
+  signalBackedClaimCount?: number;
+  signalBackedClaimRatio?: number;
 }
 
 const LAYER_LABELS: Record<string, string> = {
@@ -96,6 +109,25 @@ const EVIDENCE_TYPE_COLORS: Record<string, string> = {
   narrative: '#3B82F6',
   assumption: '#F59E0B',
   inferred: '#8B5CF6',
+};
+
+const PROVENANCE_ENGINE_LABELS: Record<string, string> = {
+  market_intelligence: "Market Intelligence",
+  audience: "Audience Engine",
+  offer: "Offer Engine",
+  persuasion: "Persuasion Engine",
+  awareness: "Awareness Engine",
+  funnel: "Funnel Engine",
+};
+
+const PROVENANCE_SOURCE_LABELS: Record<string, string> = {
+  market_opportunity: "Market Opportunity",
+  market_threat: "Market Threat",
+  audience_pain: "Audience Pain",
+  audience_desire: "Audience Desire",
+  audience_objection: "Objection",
+  emotional_driver: "Emotional Driver",
+  narrative_objection: "Narrative Objection",
 };
 
 const PRIMARY_COLOR = '#06B6D4';
@@ -138,6 +170,9 @@ export default function StatisticalValidationEngine() {
           engineVersion: json.engineVersion,
           executionTimeMs: json.executionTimeMs,
           createdAt: json.createdAt,
+          hypothesisCount: r.hypothesisCount,
+          signalBackedClaimCount: r.signalBackedClaimCount,
+          signalBackedClaimRatio: r.signalBackedClaimRatio,
         });
       } else {
         setData(json);
@@ -188,25 +223,50 @@ export default function StatisticalValidationEngine() {
   };
 
   const renderClaimCard = (claim: ClaimValidation, index: number) => {
-    const evColor = EVIDENCE_TYPE_COLORS[claim.evidenceType] || '#6B7280';
+    const isHyp = claim.isHypothesis === true;
+    const evColor = isHyp ? '#9CA3AF' : (EVIDENCE_TYPE_COLORS[claim.evidenceType] || '#6B7280');
     const strengthPercent = Math.round(claim.evidenceStrength * 100);
 
+    const evLabel = isHyp
+      ? 'hypothesis'
+      : claim.evidenceType === 'structured_inference'
+        ? 'engine signal'
+        : claim.evidenceType;
+
     return (
-      <View key={index} style={[styles.claimCard, { backgroundColor: colors.card, borderLeftColor: claim.validated ? '#10B981' : '#EF4444' }]}>
+      <View key={index} style={[styles.claimCard, { backgroundColor: colors.card, borderLeftColor: isHyp ? '#9CA3AF' : (claim.validated ? '#10B981' : '#EF4444') }]}>
         <View style={styles.claimHeader}>
-          <Ionicons name={claim.validated ? "checkmark-circle" : "close-circle"} size={14} color={claim.validated ? '#10B981' : '#EF4444'} />
+          <Ionicons
+            name={isHyp ? "help-circle" : (claim.validated ? "checkmark-circle" : "close-circle")}
+            size={14}
+            color={isHyp ? '#9CA3AF' : (claim.validated ? '#10B981' : '#EF4444')}
+          />
           <Text style={[styles.claimText, { color: colors.text }]} numberOfLines={2}>{claim.claim}</Text>
         </View>
         <View style={styles.claimMeta}>
           <View style={[styles.evidenceTypeBadge, { backgroundColor: evColor + '15' }]}>
-            <Text style={[styles.evidenceTypeText, { color: evColor }]}>{claim.evidenceType === 'structured_inference' ? 'engine signal' : claim.evidenceType}</Text>
+            <Text style={[styles.evidenceTypeText, { color: evColor }]}>{evLabel}</Text>
           </View>
           <Text style={[styles.claimSource, { color: colors.textMuted }]}>{claim.source.replace(/_/g, ' ')}</Text>
-          <View style={[styles.strengthPill, { backgroundColor: scoreColor(claim.evidenceStrength) + '15' }]}>
-            <Text style={[styles.strengthPillText, { color: scoreColor(claim.evidenceStrength) }]}>{strengthPercent}%</Text>
-          </View>
+          {!isHyp && (
+            <View style={[styles.strengthPill, { backgroundColor: scoreColor(claim.evidenceStrength) + '15' }]}>
+              <Text style={[styles.strengthPillText, { color: scoreColor(claim.evidenceStrength) }]}>{strengthPercent}%</Text>
+            </View>
+          )}
         </View>
-        {claim.supportingSignals.length > 0 && (
+        {claim.signalProvenance && (
+          <View style={[styles.provenanceRow, { backgroundColor: '#10B98110' }]}>
+            <Ionicons name="link" size={10} color="#10B981" />
+            <Text style={[styles.provenanceText, { color: '#10B981' }]} numberOfLines={2}>
+              {PROVENANCE_ENGINE_LABELS[claim.signalProvenance.signalOriginEngine] || claim.signalProvenance.signalOriginEngine}
+              {' → '}
+              {PROVENANCE_SOURCE_LABELS[claim.signalProvenance.signalSource] || claim.signalProvenance.signalSource}
+              {': '}
+              {claim.signalProvenance.evidenceReference}
+            </Text>
+          </View>
+        )}
+        {!isHyp && claim.supportingSignals.length > 0 && (
           <View style={styles.signalSection}>
             {claim.supportingSignals.slice(0, 2).map((s, i) => (
               <View key={i} style={styles.signalRow}>
@@ -350,6 +410,14 @@ export default function StatisticalValidationEngine() {
   const passedLayers = data?.layerResults?.filter(l => l.passed).length || 0;
   const totalLayers = data?.layerResults?.length || 7;
 
+  const signalBackedClaims = (data?.claimValidations || []).filter(c => !c.isHypothesis);
+  const hypothesisClaims = (data?.claimValidations || []).filter(c => c.isHypothesis === true);
+  const signalRatioPercent = data?.signalBackedClaimRatio != null
+    ? Math.round(data.signalBackedClaimRatio * 100)
+    : (data?.claimValidations?.length
+      ? Math.round((signalBackedClaims.length / data.claimValidations.length) * 100)
+      : 0);
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <LinearGradient colors={[PRIMARY_COLOR, PRIMARY_DARK]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.headerGradient}>
@@ -379,8 +447,8 @@ export default function StatisticalValidationEngine() {
               <Text style={[styles.headerMetaValue, { color: stateConfig.color }]}>{stateConfig.label}</Text>
             </View>
             <View style={styles.headerMetaItem}>
-              <Text style={styles.headerMetaLabel}>Layers</Text>
-              <Text style={styles.headerMetaValue}>{passedLayers}/{totalLayers}</Text>
+              <Text style={styles.headerMetaLabel}>Signal %</Text>
+              <Text style={[styles.headerMetaValue, { color: signalRatioPercent >= 40 ? '#10B981' : '#EF4444' }]}>{signalRatioPercent}%</Text>
             </View>
           </View>
         )}
@@ -442,6 +510,18 @@ export default function StatisticalValidationEngine() {
             </View>
           </View>
 
+          {signalRatioPercent < 40 && (
+            <View style={[styles.warningBox, { backgroundColor: '#EF444415', borderColor: '#EF444430' }]}>
+              <Ionicons name="shield" size={16} color="#EF4444" />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.warningTitle, { color: '#EF4444' }]}>Signal Grounding Below Threshold</Text>
+                <Text style={[styles.warningDetail, { color: '#DC2626' }]}>
+                  Only {signalRatioPercent}% of claims are signal-backed (minimum 40% required). Strategy remains provisional until additional signal evidence is provided.
+                </Text>
+              </View>
+            </View>
+          )}
+
           {data.boundaryCheck && !data.boundaryCheck.passed && (
             <View style={[styles.warningBox, { backgroundColor: '#EF444415', borderColor: '#EF444430' }]}>
               <Ionicons name="alert-circle" size={16} color="#EF4444" />
@@ -469,15 +549,32 @@ export default function StatisticalValidationEngine() {
             </View>
           )}
 
-          {data.claimValidations && data.claimValidations.length > 0 && (
+          {signalBackedClaims.length > 0 && (
             <View style={styles.claimsSection}>
               <View style={styles.sectionHeader}>
-                <Ionicons name="document-text" size={16} color={colors.text} />
+                <Ionicons name="checkmark-done" size={16} color="#10B981" />
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                  Claim Validations ({data.claimValidations.filter(c => c.validated).length}/{data.claimValidations.length} verified)
+                  Signal-Backed Claims ({signalBackedClaims.filter(c => c.validated).length}/{signalBackedClaims.length} verified)
                 </Text>
               </View>
-              {data.claimValidations.map((claim, i) => renderClaimCard(claim, i))}
+              {signalBackedClaims.map((claim, i) => renderClaimCard(claim, i))}
+            </View>
+          )}
+
+          {hypothesisClaims.length > 0 && (
+            <View style={styles.claimsSection}>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="help-circle" size={16} color="#9CA3AF" />
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  Hypotheses ({hypothesisClaims.length}) — excluded from scoring
+                </Text>
+              </View>
+              <View style={[styles.hypothesisNotice, { backgroundColor: '#9CA3AF10' }]}>
+                <Text style={[styles.hypothesisNoticeText, { color: colors.textMuted }]}>
+                  These claims have no traceable signal chain and are stored as hypotheses. They do not affect validation scores. Ground them with market signals to convert them to validated claims.
+                </Text>
+              </View>
+              {hypothesisClaims.map((claim, i) => renderClaimCard(claim, i))}
             </View>
           )}
 
@@ -558,6 +655,10 @@ const styles = StyleSheet.create({
   claimSource: { fontSize: 11, flex: 1 },
   strengthPill: { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   strengthPillText: { fontSize: 11, fontWeight: '600' as const },
+  provenanceRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 6, padding: 6, borderRadius: 6 },
+  provenanceText: { fontSize: 11, flex: 1, lineHeight: 16 },
+  hypothesisNotice: { padding: 10, borderRadius: 8, marginBottom: 8 },
+  hypothesisNoticeText: { fontSize: 12, lineHeight: 17 },
   signalSection: { marginTop: 6 },
   signalRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 },
   signalText: { fontSize: 11, flex: 1 },
