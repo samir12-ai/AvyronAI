@@ -18,6 +18,27 @@ export function getApiUrl(path?: string): string {
   return base;
 }
 
+export async function safeApiJson(res: Response): Promise<any> {
+  const text = await res.text();
+  if (!text || !text.trim()) {
+    throw new Error(`Server returned an empty response (status ${res.status})`);
+  }
+  if (text.trimStart().startsWith("<")) {
+    if (res.status === 404) {
+      throw new Error("API endpoint not found (404). Please restart the app.");
+    }
+    if (res.status >= 500) {
+      throw new Error("Server error. Please try again in a moment.");
+    }
+    throw new Error("Server returned an unexpected response. Check your connection and try again.");
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error("Unable to parse server response. Please try again.");
+  }
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
