@@ -12,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, safeApiJson } from '@/lib/query-client';
 import { useColorScheme } from 'react-native';
 
 interface FunnelStage {
@@ -106,7 +106,7 @@ export default function FunnelEngine() {
       const url = new URL('/api/funnel-engine/latest', getApiUrl());
       url.searchParams.set('campaignId', selectedCampaignId);
       const res = await fetch(url.toString());
-      const json = await res.json();
+      const json = await safeApiJson(res);
       setData(json);
     } catch (err) {
       console.error('[FunnelEngine] Fetch error:', err);
@@ -121,7 +121,7 @@ export default function FunnelEngine() {
       const url = new URL('/api/offer-engine/latest', getApiUrl());
       url.searchParams.set('campaignId', selectedCampaignId);
       const res = await fetch(url.toString());
-      const json = await res.json();
+      const json = await safeApiJson(res);
       if (json.exists && json.id) {
         setOfferSnapshotId(json.id);
       }
@@ -149,7 +149,7 @@ export default function FunnelEngine() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaignId: selectedCampaignId, offerSnapshotId }),
       });
-      const json = await res.json();
+      const json = await safeApiJson(res);
       if (json.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         await fetchLatest();
@@ -174,7 +174,7 @@ export default function FunnelEngine() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ snapshotId: data.id, selectedOption: option, campaignId: selectedCampaignId }),
       });
-      const json = await res.json();
+      const json = await safeApiJson(res);
       if (json.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         setData(prev => prev ? { ...prev, selectedOption: option } : prev);

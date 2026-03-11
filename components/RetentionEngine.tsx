@@ -12,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, safeApiJson } from '@/lib/query-client';
 import { useColorScheme } from 'react-native';
 
 interface RetentionLoop {
@@ -128,7 +128,7 @@ export default function RetentionEngine() {
       const url = new URL('/api/strategy/retention-engine/latest', getApiUrl());
       url.searchParams.set('campaignId', selectedCampaignId);
       const res = await fetch(url.toString());
-      const json = await res.json();
+      const json = await safeApiJson(res);
       if (json.found && json.snapshot) {
         const s = json.snapshot;
         const r = typeof s.result === 'string' ? JSON.parse(s.result) : (s.result || {});
@@ -174,7 +174,7 @@ export default function RetentionEngine() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaignId: selectedCampaignId }),
       });
-      const json = await res.json();
+      const json = await safeApiJson(res);
       if (json.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         await fetchLatest();

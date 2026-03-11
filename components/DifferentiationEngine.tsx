@@ -13,7 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, safeApiJson } from '@/lib/query-client';
 import { normalizeEngineSnapshot, isEngineReady } from '@/lib/engine-snapshot';
 import { useColorScheme } from 'react-native';
 
@@ -108,16 +108,16 @@ export default function DifferentiationEngine() {
     try {
       const base = getApiUrl();
       const miRes = await fetch(new URL(`/api/ci/mi-v3/snapshot/${campaignId}`, base).toString());
-      const miData = await miRes.json();
+      const miData = await safeApiJson(miRes);
       const miNorm = normalizeEngineSnapshot(miData, 'mi');
       setMiStatus(isEngineReady(miNorm, campaignId, miData.engineState) ? 'ready' : 'not_ready');
 
       const audRes = await fetch(new URL(`/api/audience-engine/latest?campaignId=${campaignId}`, base).toString());
-      const audData = await audRes.json();
+      const audData = await safeApiJson(audRes);
       setAudStatus(audData && (audData.id || audData.exists) ? 'ready' : 'not_ready');
 
       const posRes = await fetch(new URL(`/api/positioning-engine/latest?campaignId=${campaignId}`, base).toString());
-      const posData = await posRes.json();
+      const posData = await safeApiJson(posRes);
       const posReady = posData && posData.id && (posData.status === 'COMPLETE' || posData.status === 'UNSTABLE');
       setPosStatus(posReady ? 'ready' : 'not_ready');
       if (posReady) setPosSnapshotId(posData.id);
@@ -134,7 +134,7 @@ export default function DifferentiationEngine() {
     try {
       const base = getApiUrl();
       const res = await fetch(new URL(`/api/differentiation-engine/latest?campaignId=${campaignId}`, base).toString());
-      const json = await res.json();
+      const json = await safeApiJson(res);
       setData(json);
     } catch {
       setData(null);
@@ -161,7 +161,7 @@ export default function DifferentiationEngine() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaignId, positioningSnapshotId: posSnapshotId }),
       });
-      const json = await res.json();
+      const json = await safeApiJson(res);
       if (!res.ok) {
         Alert.alert('Analysis Failed', json.message || json.error || 'Unknown error');
         return;

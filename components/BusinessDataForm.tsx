@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, safeApiJson } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
 
 const FUNNEL_OBJECTIVES = [
@@ -88,7 +88,7 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
       setFetching(true);
       try {
         const res = await fetch(getApiUrl(`/api/business-data/${campaignId}?accountId=default`));
-        const json = await res.json();
+        const json = await safeApiJson(res);
         if (!cancelled && json.exists && json.data) {
           const d = json.data;
           setData({
@@ -140,7 +140,7 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...data, accountId: 'default' }),
       });
-      const json = await res.json();
+      const json = await safeApiJson(res);
       if (!res.ok || !json.success) {
         setError(json.message || json.error || 'Failed to save');
         return;

@@ -18,7 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useLanguage } from '@/context/LanguageContext';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, safeApiJson } from '@/lib/query-client';
 
 type StrategyView = 'overview' | 'insights' | 'decisions' | 'memory' | 'growth' | 'reports' | 'sniper' | 'moat';
 
@@ -109,7 +109,7 @@ export default function StrategyHub() {
       setLoading(true);
       const res = await fetch(new URL('/api/strategy/dashboard', baseUrl).toString());
       if (res.ok) {
-        const data = await res.json();
+        const data = await safeApiJson(res);
         setDashboard(data);
       }
     } catch (e) {
@@ -130,7 +130,7 @@ export default function StrategyHub() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (data.success) {
         Alert.alert('Data Synced', `${data.synced} performance records loaded.`);
         fetchDashboard();
@@ -151,7 +151,7 @@ export default function StrategyHub() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (data.success) {
         setAnalysisResult(data);
         fetchDashboard();
@@ -169,42 +169,42 @@ export default function StrategyHub() {
   const fetchInsights = async () => {
     try {
       const res = await fetch(new URL('/api/strategy/insights', baseUrl).toString());
-      if (res.ok) setInsights(await res.json());
+      if (res.ok) setInsights(await safeApiJson(res));
     } catch {}
   };
 
   const fetchDecisions = async () => {
     try {
       const res = await fetch(new URL('/api/strategy/decisions', baseUrl).toString());
-      if (res.ok) setDecisions(await res.json());
+      if (res.ok) setDecisions(await safeApiJson(res));
     } catch {}
   };
 
   const fetchMemory = async () => {
     try {
       const res = await fetch(new URL('/api/strategy/memory', baseUrl).toString());
-      if (res.ok) setMemoryItems(await res.json());
+      if (res.ok) setMemoryItems(await safeApiJson(res));
     } catch {}
   };
 
   const fetchCampaigns = async () => {
     try {
       const res = await fetch(new URL('/api/strategy/growth-campaigns', baseUrl).toString());
-      if (res.ok) setCampaigns(await res.json());
+      if (res.ok) setCampaigns(await safeApiJson(res));
     } catch {}
   };
 
   const fetchReports = async () => {
     try {
       const res = await fetch(new URL('/api/strategy/weekly-reports', baseUrl).toString());
-      if (res.ok) setReports(await res.json());
+      if (res.ok) setReports(await safeApiJson(res));
     } catch {}
   };
 
   const fetchMoatDashboard = async () => {
     try {
       const res = await fetch(new URL('/api/strategy/moat-dashboard', baseUrl).toString());
-      if (res.ok) setMoatDashboard(await res.json());
+      if (res.ok) setMoatDashboard(await safeApiJson(res));
     } catch {}
   };
 
@@ -216,7 +216,7 @@ export default function StrategyHub() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (data.success) {
         setMoatScanResult(data);
         fetchMoatDashboard();
@@ -240,7 +240,7 @@ export default function StrategyHub() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ candidateId }),
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (data.success) {
         fetchMoatDashboard();
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -304,7 +304,7 @@ export default function StrategyHub() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaignGoal: sniperGoal, product: sniperProduct, budget: sniperBudget }),
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (data.success) {
         setSniperResult(data);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

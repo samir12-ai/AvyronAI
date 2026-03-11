@@ -12,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, safeApiJson } from '@/lib/query-client';
 import { useColorScheme } from 'react-native';
 
 interface LayerResult {
@@ -122,7 +122,7 @@ export default function ChannelSelectionEngine() {
         setData({ exists: false });
         return;
       }
-      const json = await res.json();
+      const json = await safeApiJson(res);
       const r = json.result || {};
       setData({
         exists: true,
@@ -164,7 +164,7 @@ export default function ChannelSelectionEngine() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaignId: selectedCampaignId }),
       });
-      const json = await res.json();
+      const json = await safeApiJson(res);
       if (res.ok && json.snapshotId) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         await fetchLatest();

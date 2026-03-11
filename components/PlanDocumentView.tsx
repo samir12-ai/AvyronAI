@@ -10,7 +10,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Colors from '@/constants/colors';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, safeApiJson } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
 
 const SECTION_META: Record<string, { label: string; icon: string; gradient: [string, string] }> = {
@@ -59,7 +59,7 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
       }
 
       const res = await fetch(url);
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (res.ok && data.success) {
         setDocument(data.document);
         setPlan(data.plan);

@@ -12,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, safeApiJson } from '@/lib/query-client';
 import { useColorScheme } from 'react-native';
 
 interface LayerResult {
@@ -146,7 +146,7 @@ export default function IterationEngine() {
       const url = new URL('/api/strategy/iteration-engine/latest', getApiUrl());
       url.searchParams.set('campaignId', selectedCampaignId);
       const res = await fetch(url.toString());
-      const json = await res.json();
+      const json = await safeApiJson(res);
       setData(json);
     } catch (err) {
       console.error('[IterationEngine] Fetch error:', err);
@@ -170,7 +170,7 @@ export default function IterationEngine() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaignId: selectedCampaignId }),
       });
-      const json = await res.json();
+      const json = await safeApiJson(res);
       if (json.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         await fetchLatest();

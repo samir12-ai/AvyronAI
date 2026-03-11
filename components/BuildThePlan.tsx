@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, safeApiJson } from '@/lib/query-client';
 import { useApp } from '@/context/AppContext';
 import { useCampaign } from '@/context/CampaignContext';
 import { BusinessProfileModal } from '@/components/BusinessProfile';
@@ -168,7 +168,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     }
     try {
       const res = await fetch(getApiUrl(`/api/business-data/${profileCampaignId}?accountId=default`));
-      const json = await res.json();
+      const json = await safeApiJson(res);
       if (json.exists && json.data) {
         const d = json.data;
         const fields = [
@@ -200,7 +200,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     try {
       const res = await fetch(getApiUrl(`/api/ci/mi-v3/snapshot/${profileCampaignId}`));
       if (res.ok) {
-        const data = await res.json();
+        const data = await safeApiJson(res);
         const state = data.engineState || null;
         const freshness = data.engineDiagnostics?.freshnessDays ?? null;
         const normalized = normalizeEngineSnapshot(data, 'mi');
@@ -238,7 +238,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     setCiLoading(true);
     try {
       const res = await fetch(getApiUrl(`/api/ci/competitors?accountId=default&campaignId=${profileCampaignId}`));
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (data.competitors && Array.isArray(data.competitors)) {
         setCiCompetitors(data.competitors);
         const allIds = new Set<string>(data.competitors.map((c: CICompetitor) => c.id));
@@ -293,7 +293,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
         }),
       });
       console.log('[BuildThePlan] Gate response status:', res.status);
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (!data.success) {
         setError(data.message || data.error || 'Gate failed');
         return;
@@ -301,7 +301,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
 
       const bpUrl = getApiUrl(`/api/strategic/blueprint/${data.blueprintId}`);
       const bpRes = await fetch(bpUrl);
-      const bpData = await bpRes.json();
+      const bpData = await safeApiJson(bpRes);
       setBlueprint(bpData.blueprint);
       setCurrentPhase(1);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -327,7 +327,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ blueprintId: blueprint.id }),
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
 
       if (!data.success) {
         setError(data.error || 'Blueprint generation failed');
@@ -362,7 +362,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
 
       if (data.needsClarification) {
         setClarifications(data.clarificationPrompts || []);
@@ -400,7 +400,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields: { [editingField]: editValue } }),
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (data.success) {
         if (data.statusReset) {
           setBlueprint(prev => prev ? {
@@ -446,7 +446,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (!data.success) {
         setError(data.message || data.error || 'Analysis failed');
         return;
@@ -484,7 +484,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
 
       let data: any;
       try {
-        data = await res.json();
+        data = await safeApiJson(res);
       } catch {
         setError(`Validation failed: server returned status ${res.status} with no body`);
         return;
@@ -540,7 +540,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
       }
 
       const res = await fetch(getApiUrl(`/api/strategic/orchestrate-status/${jId}`));
-      const data = await res.json();
+      const data = await safeApiJson(res);
 
       if (data.sectionStatuses) setSectionStatuses(data.sectionStatuses);
       if (data.jobId) setLastRequestId(data.jobId);
@@ -621,7 +621,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
 
       if (data.requestId) setLastRequestId(data.requestId);
 
@@ -670,7 +670,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (!res.ok || !data.success) {
         const statusPrefix = !res.ok ? `[HTTP ${res.status}] ` : '';
         setError(statusPrefix + (data.message || data.error || 'Approval failed'));
@@ -719,7 +719,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
               });
-              const data = await res.json();
+              const data = await safeApiJson(res);
               if (!res.ok || !data.success) {
                 setError((data.message || data.error || 'Regeneration failed'));
                 setLoading(false);
@@ -2019,7 +2019,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
       const baseUrl = getApiUrl();
       const res = await fetch(new URL('/api/strategy/dashboard', baseUrl).toString());
       if (res.ok) {
-        const data = await res.json();
+        const data = await safeApiJson(res);
         setPiData(data);
       }
     } catch (err) {

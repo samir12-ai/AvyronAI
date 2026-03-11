@@ -15,7 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useFeatureFlags, FeatureFlags } from '@/hooks/useFeatureFlags';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, safeApiJson } from '@/lib/query-client';
 import { fetch } from 'expo/fetch';
 
 interface ModuleConfig {
@@ -135,7 +135,7 @@ export default function LeadControlPanel() {
       const url = new URL('/api/leads/stats', baseUrl);
       const res = await fetch(url.toString(), { credentials: 'include' });
       if (res.ok) {
-        const data = await res.json();
+        const data = await safeApiJson(res);
         if (data.stats) setStats(data.stats);
       }
     } catch {} finally {

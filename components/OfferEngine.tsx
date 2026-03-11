@@ -13,7 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, safeApiJson } from '@/lib/query-client';
 import { normalizeEngineSnapshot, isEngineReady } from '@/lib/engine-snapshot';
 import { useColorScheme } from 'react-native';
 
@@ -79,7 +79,7 @@ export default function OfferEngine() {
       const url = new URL('/api/offer-engine/latest', getApiUrl());
       url.searchParams.set('campaignId', selectedCampaignId);
       const res = await fetch(url.toString());
-      const json = await res.json();
+      const json = await safeApiJson(res);
       setData(json);
     } catch (err) {
       console.error('[OfferEngine] Fetch error:', err);
@@ -94,7 +94,7 @@ export default function OfferEngine() {
       const url = new URL('/api/differentiation-engine/latest', getApiUrl());
       url.searchParams.set('campaignId', selectedCampaignId);
       const res = await fetch(url.toString());
-      const json = await res.json();
+      const json = await safeApiJson(res);
       if (json.exists && json.id) {
         setDiffSnapshotId(json.id);
       }
@@ -122,7 +122,7 @@ export default function OfferEngine() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaignId: selectedCampaignId, differentiationSnapshotId: diffSnapshotId }),
       });
-      const json = await res.json();
+      const json = await safeApiJson(res);
       if (json.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         await fetchLatest();
@@ -147,7 +147,7 @@ export default function OfferEngine() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ snapshotId: data.id, selectedOption: option, campaignId: selectedCampaignId }),
       });
-      const json = await res.json();
+      const json = await safeApiJson(res);
       if (json.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         setData(prev => prev ? { ...prev, selectedOption: option } : prev);

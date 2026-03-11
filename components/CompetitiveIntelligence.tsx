@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, safeApiJson } from '@/lib/query-client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCreativeContext } from '@/context/CreativeContext';
 import { useApp } from '@/context/AppContext';
@@ -103,7 +103,7 @@ export default function CompetitiveIntelligence() {
     enabled: !!activeCampaignId,
     queryFn: async () => {
       const res = await fetch(new URL(`/api/ci/competitors?accountId=default&campaignId=${activeCampaignId}`, baseUrl).toString());
-      return res.json();
+      return safeApiJson(res);
     },
   });
 
@@ -118,7 +118,7 @@ export default function CompetitiveIntelligence() {
     },
     queryFn: async () => {
       const res = await fetch(new URL(`/api/ci/mi-v3/snapshot/${activeCampaignId}?accountId=default`, baseUrl).toString());
-      const data = await res.json();
+      const data = await safeApiJson(res);
       const normalized = normalizeEngineSnapshot(data, 'mi');
       if (normalized && data.output) return { ...data, snapshot: normalized.snapshot };
       if (data.snapshot && data.output) return data;
@@ -141,7 +141,7 @@ export default function CompetitiveIntelligence() {
     enabled: !!activeCampaignId,
     queryFn: async () => {
       const res = await fetch(new URL(`/api/ci/mi-v3/history/${activeCampaignId}?accountId=default`, baseUrl).toString());
-      return res.json();
+      return safeApiJson(res);
     },
   });
 
@@ -151,8 +151,8 @@ export default function CompetitiveIntelligence() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...comp, accountId: 'default', campaignId: activeCampaignId }),
       });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
-      return res.json();
+      if (!res.ok) { const err = await safeApiJson(res); throw new Error(err.error); }
+      return safeApiJson(res);
     },
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ['ci-competitors', activeCampaignId] });
@@ -175,8 +175,8 @@ export default function CompetitiveIntelligence() {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...comp, accountId: 'default', campaignId: activeCampaignId }),
       });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
-      return res.json();
+      if (!res.ok) { const err = await safeApiJson(res); throw new Error(err.error); }
+      return safeApiJson(res);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ci-competitors', activeCampaignId] });
@@ -214,7 +214,7 @@ export default function CompetitiveIntelligence() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accountId: 'default', campaignId: activeCampaignId || 'default', mode: 'overview' }),
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (!res.ok) throw new Error(data.message || data.error);
       return data;
     },
@@ -231,8 +231,8 @@ export default function CompetitiveIntelligence() {
   const deleteCompetitorMutation = useMutation({
     mutationFn: async (id: string) => {
       const res = await fetch(new URL(`/api/ci/competitors/${id}?accountId=default&campaignId=${activeCampaignId}`, baseUrl).toString(), { method: 'DELETE' });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Delete failed'); }
-      return res.json();
+      if (!res.ok) { const err = await safeApiJson(res); throw new Error(err.error || 'Delete failed'); }
+      return safeApiJson(res);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ci-competitors', activeCampaignId] });
@@ -251,11 +251,11 @@ export default function CompetitiveIntelligence() {
         body: JSON.stringify({ accountId: 'default', campaignId: activeCampaignId }),
       });
       if (!res.ok) {
-        const err = await res.json();
+        const err = await safeApiJson(res);
         if (res.status === 409) throw new Error(`DEDUP: ${err.error}`);
         throw new Error(err.error || 'Fetch failed');
       }
-      return res.json();
+      return safeApiJson(res);
     },
     onSuccess: (data: any) => {
       setIsFetchingCampaign(false);

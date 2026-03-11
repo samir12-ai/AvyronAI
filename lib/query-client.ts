@@ -81,7 +81,7 @@ export const getQueryFn: <T>(options: {
     }
 
     await throwIfResNotOk(res);
-    return await res.json();
+    return await safeApiJson(res);
   };
 
 export const queryClient = new QueryClient({

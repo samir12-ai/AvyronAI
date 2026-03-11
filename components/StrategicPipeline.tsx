@@ -14,7 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, safeApiJson } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
 import PlanDocumentView from '@/components/PlanDocumentView';
 
@@ -145,7 +145,7 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
       let url = '/api/execution/dashboard?accountId=default';
       if (campaignId) url += `&campaignId=${encodeURIComponent(campaignId)}`;
       const res = await fetch(getApiUrl(url));
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (res.ok && data.success) {
         setPlans(data.plans || []);
         setAccount(data.account || null);
@@ -166,7 +166,7 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
         fetch(getApiUrl(`/api/execution/plans/${planId}/progress`)),
         fetch(getApiUrl(`/api/execution/plans/${planId}/calendar`)),
       ]);
-      const [progressData, calData] = await Promise.all([progressRes.json(), calRes.json()]);
+      const [progressData, calData] = await Promise.all([safeApiJson(progressRes), safeApiJson(calRes)]);
       if (progressRes.ok && progressData.success !== false) setProgress(progressData);
       if (calRes.ok && calData.success !== false) setCalendarEntries(calData.entries || []);
     } catch (err) {
@@ -244,7 +244,7 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ decidedBy: 'client' }),
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (res.ok && data.success) {
         Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert('Approved', 'Plan approved successfully.');
@@ -267,7 +267,7 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'Rejected by client', decidedBy: 'client' }),
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (res.ok && data.success) {
         Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         Alert.alert('Rejected', 'Plan has been rejected.');
@@ -309,7 +309,7 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ periodDays: 30 }),
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (res.ok && data.success) {
         Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert('Calendar Generated', `Created ${data.calendarEntries || 0} calendar entries.`);
@@ -334,7 +334,7 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'Manual emergency stop by client' }),
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (res.ok && data.success) {
         Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         Alert.alert('Stopped', 'All execution paused.');
@@ -370,7 +370,7 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (res.ok && data.success) {
         Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert('Resumed', 'Execution has been resumed.');
@@ -395,7 +395,7 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (res.ok && data.success) {
         Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert('Reset Complete', `${data.resetCount} entries reset to draft. Go to Calendar to retry.`);
@@ -435,7 +435,7 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      const data = await res.json();
+      const data = await safeApiJson(res);
       if (res.ok && data.success) {
         Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert('Plan Generated', `${data.fileName}\n\nPlan document has been generated and saved.`);

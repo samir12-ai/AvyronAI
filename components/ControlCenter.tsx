@@ -17,7 +17,7 @@ import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, safeApiJson } from '@/lib/query-client';
 
 type PanelState = 'loading' | 'empty' | 'error' | 'success';
 
@@ -85,7 +85,7 @@ async function apiFetch(path: string, method = 'GET', body?: any) {
     body: body ? JSON.stringify(body) : undefined,
     credentials: 'include',
   });
-  const json = await res.json();
+  const json = await safeApiJson(res);
   if (!json.success) throw new Error(json.message || 'Request failed');
   return json.data;
 }
@@ -142,7 +142,7 @@ export default function ControlCenter() {
       const url = getApiUrl('/api/autopilot/status');
       const res = await fetch(url, { credentials: 'include' });
       if (res.ok) {
-        const data = await res.json();
+        const data = await safeApiJson(res);
         if (data.planBinding) {
           setPlanBinding(data.planBinding);
         }

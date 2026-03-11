@@ -12,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, safeApiJson } from '@/lib/query-client';
 import { normalizeEngineSnapshot, isEngineReady } from '@/lib/engine-snapshot';
 import { useColorScheme } from 'react-native';
 
@@ -117,17 +117,17 @@ export default function PositioningStrategy() {
         fetch(new URL(`/api/audience-engine/latest?campaignId=${selectedCampaignId}`, baseUrl).toString()),
       ]);
       if (posRes.ok) {
-        const d = await posRes.json();
+        const d = await safeApiJson(posRes);
         const norm = normalizeEngineSnapshot(d, 'positioning');
         setSnapshot(norm?.snapshot || d);
       }
       if (miRes.ok) {
-        const d = await miRes.json();
+        const d = await safeApiJson(miRes);
         setMiEngineState(d.engineState || null);
         setMiNormalized(normalizeEngineSnapshot(d, 'mi'));
       }
       if (audRes.ok) {
-        const d = await audRes.json();
+        const d = await safeApiJson(audRes);
         setAudNormalized(normalizeEngineSnapshot(d, 'audience'));
       }
     } catch {}
@@ -154,10 +154,10 @@ export default function PositioningStrategy() {
         }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Analysis failed' }));
+        const err = await safeApiJson(res).catch(() => ({ error: 'Analysis failed' }));
         throw new Error(err.error || 'Analysis failed');
       }
-      const data = await res.json();
+      const data = await safeApiJson(res);
       setSnapshot(data);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err: any) {
