@@ -41,6 +41,8 @@ interface ClaimValidation {
   validated: boolean;
   isHypothesis?: boolean;
   signalProvenance?: SignalProvenance | null;
+  signalTraceId?: string | null;
+  signalPath?: string[];
 }
 
 interface DataReliability {
@@ -74,6 +76,7 @@ interface StatisticalValidationData {
   hypothesisCount?: number;
   signalBackedClaimCount?: number;
   signalBackedClaimRatio?: number;
+  unmappedSignals?: string[];
 }
 
 const LAYER_LABELS: Record<string, string> = {
@@ -173,6 +176,7 @@ export default function StatisticalValidationEngine() {
           hypothesisCount: r.hypothesisCount,
           signalBackedClaimCount: r.signalBackedClaimCount,
           signalBackedClaimRatio: r.signalBackedClaimRatio,
+          unmappedSignals: r.unmappedSignals,
         });
       } else {
         setData(json);
@@ -254,6 +258,19 @@ export default function StatisticalValidationEngine() {
             </View>
           )}
         </View>
+        {claim.signalTraceId && (
+          <View style={styles.traceIdRow}>
+            <Text style={[styles.traceIdText, { color: colors.textMuted }]}>ID: {claim.signalTraceId}</Text>
+            {claim.signalPath && claim.signalPath.length > 0 && (
+              <View style={styles.signalPathRow}>
+                <Ionicons name="git-branch" size={10} color="#8B5CF6" />
+                <Text style={[styles.signalPathText, { color: '#8B5CF6' }]}>
+                  {claim.signalPath.map(p => PROVENANCE_ENGINE_LABELS[p] || p).join(' → ')}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
         {claim.signalProvenance && (
           <View style={[styles.provenanceRow, { backgroundColor: '#10B98110' }]}>
             <Ionicons name="link" size={10} color="#10B981" />
@@ -604,6 +621,28 @@ export default function StatisticalValidationEngine() {
               ))}
             </View>
           )}
+
+          {data.unmappedSignals && data.unmappedSignals.length > 0 && (
+            <View style={[styles.warningsBox, { backgroundColor: colors.card, borderColor: '#8B5CF630' }]}>
+              <View style={styles.warningsHeader}>
+                <Ionicons name="git-branch" size={16} color="#8B5CF6" />
+                <Text style={[styles.warningsTitle, { color: '#8B5CF6' }]}>
+                  Signal Diagnostics — Unmapped ({data.unmappedSignals.length})
+                </Text>
+              </View>
+              <View style={[styles.hypothesisNotice, { backgroundColor: '#8B5CF610' }]}>
+                <Text style={[styles.hypothesisNoticeText, { color: colors.textMuted }]}>
+                  These claims could not be matched to any canonical signal cluster. They need additional market or audience signals to become grounded.
+                </Text>
+              </View>
+              {data.unmappedSignals.map((us, i) => (
+                <View key={i} style={styles.warningRow}>
+                  <View style={[styles.warningDot, { backgroundColor: '#8B5CF6' }]} />
+                  <Text style={[styles.warningText, { color: colors.textSecondary }]}>{us}</Text>
+                </View>
+              ))}
+            </View>
+          )}
         </>
       )}
     </View>
@@ -655,6 +694,10 @@ const styles = StyleSheet.create({
   claimSource: { fontSize: 11, flex: 1 },
   strengthPill: { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   strengthPillText: { fontSize: 11, fontWeight: '600' as const },
+  traceIdRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, gap: 8 },
+  traceIdText: { fontSize: 10 },
+  signalPathRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1 },
+  signalPathText: { fontSize: 10, flex: 1 },
   provenanceRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 6, padding: 6, borderRadius: 6 },
   provenanceText: { fontSize: 11, flex: 1, lineHeight: 16 },
   hypothesisNotice: { padding: 10, borderRadius: 8, marginBottom: 8 },

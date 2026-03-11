@@ -241,6 +241,7 @@ export function registerStatisticalValidationRoutes(app: Express) {
           signalBackedClaimCount: result.signalBackedClaimCount,
           signalBackedClaimRatio: result.signalBackedClaimRatio,
           signalClusters: result.signalClusters,
+          unmappedSignals: result.unmappedSignals,
         }),
         layerResults: JSON.stringify(result.layerResults),
         structuralWarnings: JSON.stringify(result.structuralWarnings),

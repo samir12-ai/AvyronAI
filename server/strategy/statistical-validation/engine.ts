@@ -10,6 +10,7 @@ import {
   CLAIM_CONFIDENCE_THRESHOLDS,
   VALIDATION_STATES,
   SIGNAL_GROUNDING_THRESHOLD,
+  SIGNAL_EQUIVALENCE_MAP,
 } from "./constants";
 import { enforceBoundaryWithSanitization } from "../../engine-hardening";
 import { assessStrategyAcceptability } from "../../shared/strategy-acceptability";
@@ -142,25 +143,33 @@ function buildSignalClusters(
 function matchClaimToSignalCluster(
   claimText: string,
   clusters: SignalCluster[],
-): { supporting: SignalProvenance | null; contradicting: SignalProvenance | null } {
+  sourceTag?: string,
+): { supporting: SignalProvenance | null; contradicting: SignalProvenance | null; mappedViaEquivalence: boolean } {
   const lower = claimText.toLowerCase();
   let bestSupporting: SignalProvenance | null = null;
   let bestSupportingScore = 0;
   let bestContradicting: SignalProvenance | null = null;
   let bestContradictingScore = 0;
+  let mappedViaEquivalence = false;
+
+  const equivalence = sourceTag ? SIGNAL_EQUIVALENCE_MAP[sourceTag] : undefined;
+  const priorityClusters = equivalence ? new Set(equivalence.canonicalClusters) : new Set<string>();
 
   for (const cluster of clusters) {
     const isContradicting = cluster.category === "market_threat" || cluster.category === "audience_objection";
+    const isPriorityCluster = priorityClusters.has(cluster.category);
+    const matchThreshold = isPriorityCluster ? 1 : 2;
 
     for (const signal of cluster.signals) {
       const signalLower = signal.toLowerCase();
       const overlapScore = computeOverlapScore(lower, signalLower);
-      if (overlapScore >= 2) {
+      if (overlapScore >= matchThreshold) {
+        const strengthMultiplier = isPriorityCluster && overlapScore < 2 ? 0.7 : 1.0;
         const provenance: SignalProvenance = {
           signalId: cluster.clusterId,
           signalSource: cluster.category,
           signalOriginEngine: cluster.originEngine,
-          signalStrength: cluster.strength * clamp(overlapScore / 4, 0.3, 1),
+          signalStrength: cluster.strength * clamp(overlapScore / 4, 0.3, 1) * strengthMultiplier,
           evidenceReference: signal.slice(0, 120),
         };
         if (isContradicting) {
@@ -172,13 +181,16 @@ function matchClaimToSignalCluster(
           if (overlapScore > bestSupportingScore) {
             bestSupportingScore = overlapScore;
             bestSupporting = provenance;
+            if (isPriorityCluster && overlapScore < 2) {
+              mappedViaEquivalence = true;
+            }
           }
         }
       }
     }
   }
 
-  return { supporting: bestSupporting, contradicting: bestContradicting };
+  return { supporting: bestSupporting, contradicting: bestContradicting, mappedViaEquivalence };
 }
 
 function computeOverlapScore(a: string, b: string): number {
@@ -257,23 +269,67 @@ function normalizeConfidence(rawScore: number, reliability: DataReliabilityDiagn
   return clamp(rawScore, 0, 1);
 }
 
+function generateSignalTraceId(source: string, index: number): string {
+  const prefix = source.toUpperCase().replace(/_/g, "_");
+  return `${prefix}_${String(index + 1).padStart(3, "0")}`;
+}
+
+function buildSignalPath(source: string, provenance: SignalProvenance | null): string[] {
+  const equivalence = SIGNAL_EQUIVALENCE_MAP[source];
+  const sourceEngine = equivalence?.traceOrigin || source.split("_")[0];
+
+  if (provenance) {
+    const originEngine = provenance.signalOriginEngine;
+    if (originEngine === sourceEngine) {
+      return [originEngine, "statistical_validation"];
+    }
+    return [originEngine, sourceEngine, "statistical_validation"];
+  }
+
+  return [sourceEngine, "statistical_validation"];
+}
+
+interface ExtractedClaim {
+  claim: string;
+  source: string;
+  signalProvenance: SignalProvenance | null;
+  isHypothesis: boolean;
+  signalTraceId: string;
+  signalPath: string[];
+  mappedViaEquivalence: boolean;
+}
+
 function extractClaims(
   offer: ValidationOfferInput,
   persuasion: ValidationPersuasionInput,
   awareness: ValidationAwarenessInput,
   signalClusters: SignalCluster[],
-): Array<{ claim: string; source: string; signalProvenance: SignalProvenance | null; isHypothesis: boolean }> {
-  const claims: Array<{ claim: string; source: string; signalProvenance: SignalProvenance | null; isHypothesis: boolean }> = [];
+): { claims: ExtractedClaim[]; unmappedSignals: string[] } {
+  const claims: ExtractedClaim[] = [];
+  const unmappedSignals: string[] = [];
+  let claimIndex = 0;
 
   const addClaim = (claimText: string, source: string) => {
     if (!claimText) return;
-    const { supporting } = matchClaimToSignalCluster(claimText, signalClusters);
+    const { supporting, mappedViaEquivalence } = matchClaimToSignalCluster(claimText, signalClusters, source);
+    const traceId = generateSignalTraceId(source, claimIndex);
+    const signalPath = buildSignalPath(source, supporting);
+    const isHypothesis = supporting === null;
+
+    if (isHypothesis) {
+      unmappedSignals.push(`[${traceId}] ${source}: "${claimText.slice(0, 80)}" — no signal cluster match found`);
+    }
+
     claims.push({
       claim: claimText,
       source,
       signalProvenance: supporting,
-      isHypothesis: supporting === null,
+      isHypothesis,
+      signalTraceId: traceId,
+      signalPath,
+      mappedViaEquivalence,
     });
+    claimIndex++;
   };
 
   addClaim(offer.coreOutcome, "offer_outcome");
@@ -287,7 +343,7 @@ function extractClaims(
   addClaim(awareness.triggerClass ? `Trigger: ${awareness.triggerClass}` : "", "awareness_trigger");
   addClaim(awareness.entryMechanismType ? `Entry: ${awareness.entryMechanismType}` : "", "awareness_entry");
 
-  return claims;
+  return { claims, unmappedSignals };
 }
 
 function validateClaim(
@@ -295,6 +351,8 @@ function validateClaim(
   source: string,
   signalProvenance: SignalProvenance | null,
   isHypothesis: boolean,
+  signalTraceId: string | null,
+  signalPath: string[],
   mi: ValidationMIInput,
   audience: ValidationAudienceInput,
   offer: ValidationOfferInput,
@@ -478,6 +536,8 @@ function validateClaim(
     validated,
     isHypothesis,
     signalProvenance,
+    signalTraceId,
+    signalPath,
   };
 }
 
@@ -876,14 +936,15 @@ export async function runStatisticalValidationEngine(
       hypothesisCount: 0,
       signalBackedClaimCount: 0,
       signalBackedClaimRatio: 0,
+      unmappedSignals: [],
     };
   }
 
   const signalClusters = buildSignalClusters(mi, audience);
 
-  const extractedClaims = extractClaims(offer, persuasion, awareness, signalClusters);
+  const { claims: extractedClaims, unmappedSignals } = extractClaims(offer, persuasion, awareness, signalClusters);
   const claimValidations = extractedClaims.map(c =>
-    validateClaim(c.claim, c.source, c.signalProvenance, c.isHypothesis, mi, audience, offer, funnel, awareness, persuasion)
+    validateClaim(c.claim, c.source, c.signalProvenance, c.isHypothesis, c.signalTraceId, c.signalPath, mi, audience, offer, funnel, awareness, persuasion)
   );
 
   const signalBackedClaims = claimValidations.filter(c => !c.isHypothesis);
@@ -949,7 +1010,14 @@ export async function runStatisticalValidationEngine(
   }
 
   for (const h of hypotheses) {
-    assumptionFlags.push(`Hypothesis: "${h.claim.slice(0, 80)}" — no signal chain, excluded from scoring`);
+    assumptionFlags.push(`Hypothesis [${h.signalTraceId}]: "${h.claim.slice(0, 80)}" — no signal chain, excluded from scoring`);
+  }
+
+  if (unmappedSignals.length > 0) {
+    structuralWarnings.push(`DIAGNOSTICS: ${unmappedSignals.length} unmapped signal(s) detected in claim extraction`);
+    for (const us of unmappedSignals) {
+      structuralWarnings.push(`Unmapped: ${us}`);
+    }
   }
 
   let confidenceNormalized = false;
@@ -1033,5 +1101,6 @@ export async function runStatisticalValidationEngine(
     hypothesisCount: hypotheses.length,
     signalBackedClaimCount,
     signalBackedClaimRatio,
+    unmappedSignals,
   };
 }

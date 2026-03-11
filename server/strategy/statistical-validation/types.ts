@@ -102,6 +102,8 @@ export interface ClaimValidation {
   validated: boolean;
   isHypothesis: boolean;
   signalProvenance: SignalProvenance | null;
+  signalTraceId: string | null;
+  signalPath: string[];
 }
 
 export interface DataReliabilityDiagnostics {
@@ -135,4 +137,5 @@ export interface StatisticalValidationResult {
   hypothesisCount: number;
   signalBackedClaimCount: number;
   signalBackedClaimRatio: number;
+  unmappedSignals: string[];
 }

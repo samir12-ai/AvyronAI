@@ -1,6 +1,33 @@
 import type { SoftPattern } from "../../engine-hardening/types";
 
-export const ENGINE_VERSION = 3;
+export const ENGINE_VERSION = 4;
+
+export const SIGNAL_EQUIVALENCE_MAP: Record<string, { canonicalClusters: string[]; traceOrigin: string }> = {
+  offer_outcome: {
+    canonicalClusters: ["audience_pain", "audience_desire", "market_opportunity"],
+    traceOrigin: "offer",
+  },
+  offer_mechanism: {
+    canonicalClusters: ["market_opportunity", "audience_pain"],
+    traceOrigin: "offer",
+  },
+  offer_proof: {
+    canonicalClusters: ["emotional_driver", "audience_pain", "audience_objection"],
+    traceOrigin: "offer",
+  },
+  persuasion_driver: {
+    canonicalClusters: ["emotional_driver", "audience_pain", "audience_desire"],
+    traceOrigin: "persuasion",
+  },
+  awareness_trigger: {
+    canonicalClusters: ["market_opportunity", "audience_pain"],
+    traceOrigin: "awareness",
+  },
+  awareness_entry: {
+    canonicalClusters: ["audience_desire", "market_opportunity"],
+    traceOrigin: "awareness",
+  },
+};
 
 export const STATUS = {
   COMPLETE: "COMPLETE",
