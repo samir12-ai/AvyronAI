@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "p_lruz88rKkRy-6mcG_ml"
+uri = "file://.local/signal-coverage-map.md"
+type = "text"
+title = "Signal Coverage Map — All Engines"
