@@ -1,0 +1,160 @@
+Hi Replit Team,
+
+After the recent architecture updates (MechanismCore, Market Language Preservation Layer, and Structured Objection Modeling), the system compiles correctly, but the Offer Engine is now failing at runtime during alignment validation.
+
+This appears to be a routing / prompt / validation synchronization issue, not a strategy issue.
+
+Below is the exact failure context and what needs to be corrected.
+
+---
+
+# Current Failure
+
+Offer Engine V3 returns:
+
+Analysis Failed  
+Pre-save alignment validation failed:
+
+1) Market language preservation failed  
+only 7 / 73 audience tokens found in offer text  
+(abstract rewrite detected)
+
+2) Deliverables do not logically support the defined differentiation mechanism
+
+Because of this the engine refuses to save the generated offer.
+
+The system is correctly enforcing the guardrails, but the generation layer is not aligned with the new architecture rules.
+
+---
+
+# Root Cause
+
+The Offer Engine generation step is not fully synchronized with the new architecture.
+
+The following objects exist correctly:
+
+• MechanismCore  
+• Market_Language_Map  
+• StructuredObjectionMap
+
+However the Offer generation prompt and routing logic are still behaving as if these layers are optional.
+
+As a result the AI is generating:
+
+• abstract outcome language  
+• generic deliverables  
+• mechanism-agnostic offer descriptions
+
+Which immediately fails the validators.
+
+---
+
+# Required Fix
+
+Please update the Offer Engine generation stage to explicitly enforce the new architecture.
+
+---
+
+## 1) Hard Bind MechanismCore to Offer Deliverables
+
+Offer deliverables must be directly derived from MechanismCore.mechanismSteps.
+
+Required rule:
+
+Each mechanism step must map to one deliverable.
+
+Example mapping logic:
+
+mechanismSteps  
+→ deliverables
+
+If mechanismSteps =
+
+Step 1 – Diagnose financial leaks  
+Step 2 – Rebuild financial habits  
+Step 3 – Install growth system
+
+Then deliverables must follow the same structure.
+
+Do NOT allow generic deliverables such as:
+
+• community  
+• coaching  
+• support
+
+unless they explicitly correspond to a mechanism step.
+
+---
+
+## 2) Force Market Language Injection
+
+The Offer prompt must explicitly embed phrases from:
+
+Market_Language_Map
+
+Specifically:
+
+• raw_pain_phrases  
+• raw_desire_phrases  
+• objection_language  
+• emotional_language
+
+Add prompt instruction:
+
+"Use the following audience phrases directly. Do not rewrite them into abstract language."
+
+Also add a generation constraint:
+
+At least 15–20% of offer tokens must originate from the Market_Language_Map.
+
+The current validator threshold (10%) is correct, but the generation step must actively enforce this.
+
+---
+
+## 3) Update Offer Prompt Structure
+
+The Offer generation prompt should follow this structure:
+
+1) Audience pain language (raw phrases)  
+2) Mechanism explanation  
+3) Mechanism-based deliverables  
+4) Outcome tied to audience desire language  
+5) Proof aligned with objections
+
+This will ensure the output satisfies both:
+
+• Market Language validator  
+• Mechanism alignment validator
+
+---
+
+## 4) Regenerate Offer Instead of Hard Failing
+
+When validation fails:
+
+Instead of returning "Analysis Failed", the engine should:
+
+1) trigger automatic regeneration
+2) inject missing elements
+3) retry generation up to 2–3 passes
+
+Only fail if all passes fail.
+
+This will dramatically improve UX.
+
+---
+
+# Expected Result
+
+After this correction the Offer Engine should:
+
+• reuse MechanismCore consistently  
+• inject real market language into the offer  
+• generate mechanism-aligned deliverables  
+• pass the pre-save validation without manual intervention
+
+This will restore the intended architecture behavior.
+
+Please confirm once the Offer Engine generation layer is updated so we can rerun the strategy pipeline.
+
+Thanks.

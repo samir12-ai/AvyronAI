@@ -205,20 +205,27 @@ export function layer3_deliveryStructure(
   const maturity = audience.maturityIndex ?? 0.5;
   const awareness = audience.awarenessLevel || "unaware";
   const pillars = differentiation.pillars || [];
+  const core = differentiation.mechanismCore;
 
   const deliverables: string[] = [];
 
-  for (const pillar of pillars.slice(0, 4)) {
-    const name = pillar.name || pillar.territory || "component";
-    deliverables.push(`${name} implementation module`);
-  }
+  if (core && core.mechanismSteps.length > 0) {
+    for (const step of core.mechanismSteps.slice(0, MAX_DELIVERABLES)) {
+      deliverables.push(`${step} — ${core.mechanismType !== "none" ? core.mechanismType : "implementation"} module`);
+    }
+  } else {
+    for (const pillar of pillars.slice(0, 4)) {
+      const name = pillar.name || pillar.territory || "component";
+      deliverables.push(`${name} implementation module`);
+    }
 
-  if (maturity < 0.4 || awareness === "unaware" || awareness === "problem_aware") {
-    deliverables.push("Foundation assessment and baseline analysis");
-  }
+    if (maturity < 0.4 || awareness === "unaware" || awareness === "problem_aware") {
+      deliverables.push("Foundation assessment and baseline analysis");
+    }
 
-  if (maturity > 0.6 || awareness === "product_aware" || awareness === "most_aware") {
-    deliverables.push("Advanced optimization and scaling framework");
+    if (maturity > 0.6 || awareness === "product_aware" || awareness === "most_aware") {
+      deliverables.push("Advanced optimization and scaling framework");
+    }
   }
 
   if (deliverables.length === 0) {
@@ -226,7 +233,9 @@ export function layer3_deliveryStructure(
   }
 
   const capped = deliverables.slice(0, MAX_DELIVERABLES);
-  const format = maturity > 0.6 ? "Advanced system with modular components" : "Guided implementation program";
+  const format = core && core.mechanismSteps.length > 0
+    ? `${core.mechanismType !== "none" ? core.mechanismType.charAt(0).toUpperCase() + core.mechanismType.slice(1) : "Structured"}-based delivery with ${core.mechanismSteps.length} modules`
+    : (maturity > 0.6 ? "Advanced system with modular components" : "Guided implementation program");
   const complexityLevel = clamp(capped.length / MAX_DELIVERABLES);
 
   return { deliverables: capped, format, complexityLevel };
@@ -695,7 +704,7 @@ export async function aiOfferGeneration(
   differentiation: OfferDifferentiationInput,
   accountId: string,
   marketLanguage?: MarketLanguageMap,
-): Promise<{ primary: { name: string; outcome: string; mechanism: string }; alternative: { name: string; outcome: string; mechanism: string }; rejected: { name: string; outcome: string; mechanism: string; rejectionReason: string } }> {
+): Promise<{ primary: { name: string; outcome: string; mechanism: string; deliverables: string[] }; alternative: { name: string; outcome: string; mechanism: string; deliverables: string[] }; rejected: { name: string; outcome: string; mechanism: string; deliverables: string[]; rejectionReason: string } }> {
   const pains = audience.audiencePains || [];
   const desires = Object.entries(audience.desireMap || {});
   const territories = positioning.territories || [];
@@ -708,58 +717,74 @@ export async function aiOfferGeneration(
     ? `\n- MECHANISM LOCK: The Differentiation Engine defines a "${mechCategory}" mechanism. All offer mechanisms MUST stay within this "${mechCategory}" framing category. Do NOT propose a bootcamp if the mechanism is a framework, or a course if the mechanism is a tool.`
     : "";
 
-  let marketLanguageBlock = "";
-  if (marketLanguage) {
-    const painPhrases = marketLanguage.rawPainPhrases.slice(0, 8);
-    const desirePhrases = marketLanguage.rawDesirePhrases.slice(0, 8);
-    const emotionalPhrases = marketLanguage.emotionalLanguage.slice(0, 5);
-    const objectionPhrases = marketLanguage.objectionLanguage.slice(0, 5);
+  const hasMechanismCore = !!(core && core.mechanismType !== "none" && core.mechanismName);
 
-    if (painPhrases.length > 0 || desirePhrases.length > 0) {
-      marketLanguageBlock = `\n\nMARKET LANGUAGE PRESERVATION (MANDATORY):
-- Offer outcome MUST reference these exact audience phrases — do NOT rewrite into abstract language
-- Raw Pain Phrases from audience: ${JSON.stringify(painPhrases)}
-- Raw Desire Phrases from audience: ${JSON.stringify(desirePhrases)}${emotionalPhrases.length > 0 ? `\n- Emotional Language: ${JSON.stringify(emotionalPhrases)}` : ""}${objectionPhrases.length > 0 ? `\n- Objection Language to address: ${JSON.stringify(objectionPhrases)}` : ""}
-- USE the audience's own words in the offer name, outcome, and mechanism description
-- Do NOT substitute with generic business jargon like "optimize", "leverage", "scale", "transform"`;
-    }
-  }
+  const painPhrases = marketLanguage?.rawPainPhrases?.slice(0, 8) || [];
+  const desirePhrases = marketLanguage?.rawDesirePhrases?.slice(0, 8) || [];
+  const emotionalPhrases = marketLanguage?.emotionalLanguage?.slice(0, 5) || [];
+  const objectionPhrases = marketLanguage?.objectionLanguage?.slice(0, 5) || [];
+  const hasMarketLanguage = painPhrases.length > 0 || desirePhrases.length > 0;
 
-  const mechanismCoreBlock = core && core.mechanismType !== "none" && core.mechanismName
-    ? `\n- MECHANISM CORE (single source of truth — do NOT invent a new mechanism):
-  - Name: ${core.mechanismName}
-  - Type: ${core.mechanismType}
-  - Steps: ${core.mechanismSteps.join(" → ")}
-  - Promise: ${core.mechanismPromise}
-  - Problem it solves: ${core.mechanismProblem}
-  - Logic: ${core.mechanismLogic}
-  - All offer mechanism descriptions MUST reference "${core.mechanismName}" and describe delivery using ONLY these steps`
-    : "";
+  const deliverableSteps = hasMechanismCore
+    ? core!.mechanismSteps.map((step, i) => `  Step ${i + 1}: "${step}"`).join("\n")
+    : pillars.slice(0, 4).map((p: any, i: number) => `  Step ${i + 1}: "${p.name || p.territory || "component"}"`).join("\n");
 
-  const prompt = `You are an Offer Architect. Generate three offer concepts based on the market intelligence below.
+  const prompt = `You are an Offer Architect. Generate three offer concepts.
 
-STRICT RULES:
+ABSOLUTE RULES:
 - Do NOT generate funnel architecture, advertising strategy, channel selection, media planning, budget recommendations, campaign execution, sales scripts, or strategic master plan decisions
-- Do NOT include financial advisory claims such as eliminating debt, increasing savings, building net worth, or financial freedom promises. Use outcome-oriented language instead.
-- ONLY output offer definitions: name, core outcome, mechanism description
-- Offers must be specific and non-generic. Avoid phrases like "grow your business", "scale faster", "get more leads"
-- Each offer must define WHAT the buyer receives and WHY the market would want it NOW
-- Respond with ONLY valid JSON, no markdown${mechLockInstruction}${mechanismCoreBlock}${marketLanguageBlock}
+- Do NOT include financial advisory claims (eliminating debt, increasing savings, building net worth, financial freedom). Use outcome-oriented language instead.
+- Respond with ONLY valid JSON, no markdown${mechLockInstruction}
 
-Market Context:
+═══ SECTION 1: AUDIENCE PAIN LANGUAGE (use these exact words) ═══
+${painPhrases.length > 0 ? `Raw Pain Phrases: ${JSON.stringify(painPhrases)}` : "No raw pain phrases available"}
+${desirePhrases.length > 0 ? `Raw Desire Phrases: ${JSON.stringify(desirePhrases)}` : "No raw desire phrases available"}
+${emotionalPhrases.length > 0 ? `Emotional Language: ${JSON.stringify(emotionalPhrases)}` : ""}
+${objectionPhrases.length > 0 ? `Objection Language to address: ${JSON.stringify(objectionPhrases)}` : ""}
+${hasMarketLanguage ? `
+MANDATORY: You MUST use the audience's own words above directly in the offer name, outcome, mechanism, and deliverables.
+- Copy exact phrases from the pain/desire lists into your output
+- At least 20% of your output words must come directly from the phrases above
+- Do NOT substitute with generic business jargon like "optimize", "leverage", "scale", "transform", "empower", "unlock"
+- If audience says "struggle with debt" → use "struggle with debt", NOT "financial optimization"
+- If audience says "want more clients" → use "get more clients", NOT "scale revenue"` : ""}
+
+═══ SECTION 2: MECHANISM (single source of truth) ═══
+${hasMechanismCore ? `Mechanism Name: "${core!.mechanismName}"
+Mechanism Type: ${core!.mechanismType}
+Mechanism Steps:
+${deliverableSteps}
+Mechanism Promise: ${core!.mechanismPromise}
+Problem it solves: ${core!.mechanismProblem}
+Logic: ${core!.mechanismLogic}
+
+MANDATORY: All offer mechanism descriptions MUST reference "${core!.mechanismName}" by name.
+Describe delivery using ONLY the steps above. Do NOT invent new steps or mechanisms.` : `Mechanism: ${mechanism.description || "No validated mechanism"}
+Differentiation Pillars:
+${deliverableSteps}`}
+
+═══ SECTION 3: DELIVERABLES (must map to mechanism steps) ═══
+Each deliverable MUST correspond to one mechanism step above.
+${hasMechanismCore ? `Required deliverables (one per step):
+${core!.mechanismSteps.map((step, i) => `  Deliverable ${i + 1}: Map to "${step}"`).join("\n")}
+Do NOT add generic deliverables like "community", "coaching", "support" unless they correspond to a mechanism step.` : `Derive deliverables from the differentiation pillars listed above.`}
+
+═══ SECTION 4: CONTEXT ═══
 - Top Pains: ${JSON.stringify(pains.slice(0, 5).map((p: any) => typeof p === "string" ? p : p?.pain || p?.name))}
 - Top Desires: ${JSON.stringify(desires.slice(0, 5).map(([k]) => k))}
 - Territories: ${JSON.stringify(territories.slice(0, 3).map((t: any) => t.name))}
-- Differentiation Pillars: ${JSON.stringify(pillars.slice(0, 3).map((p: any) => p.name))}
-- Mechanism (${mechCategory}): ${core?.mechanismLogic || mechanism.description || "No validated mechanism"}
 - Enemy: ${positioning.enemyDefinition || "Not defined"}
 - Narrative: ${positioning.narrativeDirection || "Not defined"}
 
+═══ SECTION 5: PROOF ALIGNMENT ═══
+Link proof types to the objections the audience has.
+${objectionPhrases.length > 0 ? `Audience objections to address: ${JSON.stringify(objectionPhrases)}` : "No specific objections identified"}
+
 Return JSON:
 {
-  "primary": { "name": "Specific offer name", "outcome": "What transformation the buyer gets", "mechanism": "How the mechanism delivers it" },
-  "alternative": { "name": "Alternative offer name", "outcome": "Different angle on transformation", "mechanism": "Different mechanism approach" },
-  "rejected": { "name": "Rejected offer name", "outcome": "Why this seems appealing", "mechanism": "What it promises", "rejectionReason": "Why this offer fails (generic, weak proof, contradicts positioning, etc.)" }
+  "primary": { "name": "Offer name using audience language", "outcome": "Transformation using raw pain/desire phrases", "mechanism": "How ${hasMechanismCore ? core!.mechanismName : "the mechanism"} delivers it using the exact steps", "deliverables": ["Step-mapped deliverable 1", "Step-mapped deliverable 2"] },
+  "alternative": { "name": "Alternative offer name", "outcome": "Different angle using audience language", "mechanism": "Alternative delivery approach", "deliverables": ["Alt deliverable 1", "Alt deliverable 2"] },
+  "rejected": { "name": "Rejected offer", "outcome": "Why this seems appealing", "mechanism": "What it promises", "deliverables": [], "rejectionReason": "Why this fails (generic, weak proof, contradicts positioning)" }
 }`;
 
   try {
@@ -780,25 +805,28 @@ Return JSON:
         name: parsed.primary?.name || "Primary Offer",
         outcome: parsed.primary?.outcome || "Core transformation",
         mechanism: parsed.primary?.mechanism || "Standard delivery",
+        deliverables: Array.isArray(parsed.primary?.deliverables) ? parsed.primary.deliverables : [],
       },
       alternative: {
         name: parsed.alternative?.name || "Alternative Offer",
         outcome: parsed.alternative?.outcome || "Alternative transformation",
         mechanism: parsed.alternative?.mechanism || "Standard delivery",
+        deliverables: Array.isArray(parsed.alternative?.deliverables) ? parsed.alternative.deliverables : [],
       },
       rejected: {
         name: parsed.rejected?.name || "Rejected Offer",
         outcome: parsed.rejected?.outcome || "Rejected transformation",
         mechanism: parsed.rejected?.mechanism || "Standard delivery",
+        deliverables: [],
         rejectionReason: parsed.rejected?.rejectionReason || "Did not meet specificity requirements",
       },
     };
   } catch (err: any) {
     console.error(`[OfferEngine] AI generation failed: ${err.message}`);
     return {
-      primary: { name: "Core Transformation System", outcome: "Primary market transformation based on differentiation pillars", mechanism: "Structured implementation methodology" },
-      alternative: { name: "Accelerated Implementation Program", outcome: "Rapid deployment of core transformation", mechanism: "Compressed delivery framework" },
-      rejected: { name: "Generic Growth Package", outcome: "General business improvement", mechanism: "Standard approach", rejectionReason: "Generic offer — lacks specificity and market differentiation" },
+      primary: { name: "Core Transformation System", outcome: "Primary market transformation based on differentiation pillars", mechanism: "Structured implementation methodology", deliverables: [] },
+      alternative: { name: "Accelerated Implementation Program", outcome: "Rapid deployment of core transformation", mechanism: "Compressed delivery framework", deliverables: [] },
+      rejected: { name: "Generic Growth Package", outcome: "General business improvement", mechanism: "Standard approach", deliverables: [], rejectionReason: "Generic offer — lacks specificity and market differentiation" },
     };
   }
 }
@@ -885,11 +913,28 @@ export async function runOfferEngine(
   } catch (err: any) {
     diagnostics.aiGeneration = { success: false, error: err.message };
     aiOffers = {
-      primary: { name: "Core Transformation System", outcome: l1Outcome.primaryOutcome, mechanism: l2Mechanism.mechanismDescription },
-      alternative: { name: "Alternative Implementation Program", outcome: l1Outcome.transformationStatement, mechanism: l2Mechanism.mechanismDescription },
-      rejected: { name: "Generic Growth Package", outcome: "General improvement", mechanism: "Standard approach", rejectionReason: "Generic and unspecific" },
+      primary: { name: "Core Transformation System", outcome: l1Outcome.primaryOutcome, mechanism: l2Mechanism.mechanismDescription, deliverables: [] },
+      alternative: { name: "Alternative Implementation Program", outcome: l1Outcome.transformationStatement, mechanism: l2Mechanism.mechanismDescription, deliverables: [] },
+      rejected: { name: "Generic Growth Package", outcome: "General improvement", mechanism: "Standard approach", deliverables: [], rejectionReason: "Generic and unspecific" },
     };
   }
+
+  const core = differentiation.mechanismCore;
+  const hasMechanismCore = !!(core && core.mechanismType !== "none" && core.mechanismName && core.mechanismSteps.length > 0);
+
+  const mergeDeliverables = (aiDeliverables: string[], fallbackDeliverables: string[]): string[] => {
+    if (aiDeliverables.length === 0) return fallbackDeliverables;
+    if (!hasMechanismCore) return aiDeliverables.slice(0, MAX_DELIVERABLES);
+    const stepWords = core!.mechanismSteps.map(s => s.toLowerCase().split(/\s+/).slice(0, 3).join(" "));
+    const validAiDeliverables = aiDeliverables.filter(d => {
+      const dLower = d.toLowerCase();
+      return stepWords.some(sw => dLower.includes(sw) || sw.split(" ").some(w => w.length > 3 && dLower.includes(w)));
+    });
+    if (validAiDeliverables.length >= Math.min(core!.mechanismSteps.length, 2)) {
+      return validAiDeliverables.slice(0, MAX_DELIVERABLES);
+    }
+    return fallbackDeliverables;
+  };
 
   const primaryOutcome: OutcomeLayer = {
     ...l1Outcome,
@@ -909,8 +954,13 @@ export async function runOfferEngine(
     console.log(`[OfferEngine-V3] MECHANISM_LOCK | primary mechanism category mismatch: diff="${primaryMechLock.diffCategory}" offer="${primaryMechLock.offerCategory}" — forced back to differentiation framing`);
   }
 
+  const primaryDelivery: DeliveryLayer = {
+    ...l3Delivery,
+    deliverables: mergeDeliverables(aiOffers.primary.deliverables, l3Delivery.deliverables),
+  };
+
   const primaryOffer = buildOfferCandidate(
-    aiOffers.primary.name, primaryOutcome, primaryMechanism, l3Delivery, l4Proof, l5Risk,
+    aiOffers.primary.name, primaryOutcome, primaryMechanism, primaryDelivery, l4Proof, l5Risk,
     audience, differentiation, mi, positioning,
   );
 
@@ -933,8 +983,13 @@ export async function runOfferEngine(
     console.log(`[OfferEngine-V3] MECHANISM_LOCK | alternative mechanism category mismatch: diff="${altMechLock.diffCategory}" offer="${altMechLock.offerCategory}" — forced back to differentiation framing`);
   }
 
+  const altDelivery: DeliveryLayer = {
+    ...l3Delivery,
+    deliverables: mergeDeliverables(aiOffers.alternative.deliverables, l3Delivery.deliverables),
+  };
+
   const alternativeOffer = buildOfferCandidate(
-    aiOffers.alternative.name, altOutcome, altMechanism, l3Delivery, l4Proof, l5Risk,
+    aiOffers.alternative.name, altOutcome, altMechanism, altDelivery, l4Proof, l5Risk,
     audience, differentiation, mi, positioning,
   );
 
@@ -1016,8 +1071,42 @@ export async function runOfferEngine(
     statusMessage = `Integrity check failed: ${primaryOffer.integrityResult.failures.join("; ")}`;
   }
 
-  const offerAlignmentValidation = validateOfferAlignment(primaryOffer, differentiation, audience, marketLanguage);
+  let offerAlignmentValidation = validateOfferAlignment(primaryOffer, differentiation, audience, marketLanguage);
   diagnostics.offerAlignmentValidation = offerAlignmentValidation;
+
+  if (!offerAlignmentValidation.aligned && status === STATUS.COMPLETE) {
+    console.log(`[OfferEngine-V3] ALIGNMENT_RETRY | First attempt failed: ${offerAlignmentValidation.failures.join("; ")} — regenerating AI offers`);
+    try {
+      const retryOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage);
+      diagnostics.aiGenerationRetry = { success: true, attempt: 2 };
+
+      const retryPrimaryOutcome: OutcomeLayer = { ...l1Outcome, primaryOutcome: retryOffers.primary.outcome || l1Outcome.primaryOutcome };
+      const retryMechDesc = retryOffers.primary.mechanism || l2Mechanism.mechanismDescription;
+      const retryMechLock = checkMechanismLock(retryMechDesc, differentiation);
+      const retryMechanism: MechanismLayer = { ...l2Mechanism, mechanismDescription: retryMechLock.locked ? retryMechDesc : l2Mechanism.mechanismDescription };
+      const retryDelivery: DeliveryLayer = { ...l3Delivery, deliverables: mergeDeliverables(retryOffers.primary.deliverables, l3Delivery.deliverables) };
+
+      const retryPrimary = buildOfferCandidate(
+        retryOffers.primary.name, retryPrimaryOutcome, retryMechanism, retryDelivery, l4Proof, l5Risk,
+        audience, differentiation, mi, positioning,
+      );
+
+      const retryValidation = validateOfferAlignment(retryPrimary, differentiation, audience, marketLanguage);
+      diagnostics.offerAlignmentRetryValidation = retryValidation;
+
+      if (retryValidation.aligned || retryValidation.failures.length < offerAlignmentValidation.failures.length) {
+        console.log(`[OfferEngine-V3] ALIGNMENT_RETRY_SUCCESS | Retry ${retryValidation.aligned ? "passed" : "improved"} validation`);
+        Object.assign(primaryOffer, retryPrimary);
+        offerAlignmentValidation = retryValidation;
+      } else {
+        console.log(`[OfferEngine-V3] ALIGNMENT_RETRY_NO_IMPROVEMENT | Keeping original offer`);
+      }
+    } catch (retryErr: any) {
+      console.log(`[OfferEngine-V3] ALIGNMENT_RETRY_FAILED | ${retryErr.message} — keeping original`);
+      diagnostics.aiGenerationRetry = { success: false, error: retryErr.message };
+    }
+  }
+
   if (!offerAlignmentValidation.aligned) {
     structuralWarnings.push(...offerAlignmentValidation.failures);
     console.log(`[OfferEngine-V3] ALIGNMENT_VALIDATION_FAILED | ${offerAlignmentValidation.failures.join("; ")}`);
