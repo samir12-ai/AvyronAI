@@ -1,6 +1,6 @@
 import type { SoftPattern } from "../../engine-hardening/types";
 
-export const ENGINE_VERSION = 1;
+export const ENGINE_VERSION = 2;
 
 export const STATUS = {
   COMPLETE: "COMPLETE",

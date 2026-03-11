@@ -92,6 +92,7 @@ const STATE_CONFIG: Record<string, { color: string; label: string; icon: keyof t
 
 const EVIDENCE_TYPE_COLORS: Record<string, string> = {
   signal: '#10B981',
+  structured_inference: '#06B6D4',
   narrative: '#3B82F6',
   assumption: '#F59E0B',
   inferred: '#8B5CF6',
@@ -198,7 +199,7 @@ export default function StatisticalValidationEngine() {
         </View>
         <View style={styles.claimMeta}>
           <View style={[styles.evidenceTypeBadge, { backgroundColor: evColor + '15' }]}>
-            <Text style={[styles.evidenceTypeText, { color: evColor }]}>{claim.evidenceType}</Text>
+            <Text style={[styles.evidenceTypeText, { color: evColor }]}>{claim.evidenceType === 'structured_inference' ? 'engine signal' : claim.evidenceType}</Text>
           </View>
           <Text style={[styles.claimSource, { color: colors.textMuted }]}>{claim.source.replace(/_/g, ' ')}</Text>
           <View style={[styles.strengthPill, { backgroundColor: scoreColor(claim.evidenceStrength) + '15' }]}>

@@ -79,7 +79,7 @@ export interface LayerResult {
 export interface ClaimValidation {
   claim: string;
   source: string;
-  evidenceType: "signal" | "narrative" | "assumption" | "inferred";
+  evidenceType: "signal" | "narrative" | "assumption" | "inferred" | "structured_inference";
   evidenceStrength: number;
   supportingSignals: string[];
   contradictingSignals: string[];

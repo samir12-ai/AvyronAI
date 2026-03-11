@@ -140,6 +140,10 @@ function validateClaim(
   source: string,
   mi: ValidationMIInput,
   audience: ValidationAudienceInput,
+  offer: ValidationOfferInput,
+  funnel: ValidationFunnelInput,
+  awareness: ValidationAwarenessInput,
+  persuasion: ValidationPersuasionInput,
 ): ClaimValidation {
   const lower = claim.toLowerCase();
   const supportingSignals: string[] = [];
@@ -196,9 +200,96 @@ function validateClaim(
     }
   }
 
-  if (supportingSignals.length > 0 && !isNarrativeBased) {
+  let crossEngineSignalCount = 0;
+
+  for (const driver of (persuasion.primaryInfluenceDrivers || []).slice(0, 5)) {
+    if (driver && hasOverlap(lower, driver.toLowerCase())) {
+      supportingSignals.push(`Persuasion driver: ${driver.slice(0, 80)}`);
+      evidenceStrength += 0.12;
+      crossEngineSignalCount++;
+    }
+  }
+  for (const seq of (persuasion.trustSequence || []).slice(0, 5)) {
+    const seqStr = typeof seq === "string" ? seq : safeString(seq?.step || seq?.description || "", "");
+    if (seqStr && hasOverlap(lower, seqStr.toLowerCase())) {
+      supportingSignals.push(`Trust sequence: ${seqStr.slice(0, 80)}`);
+      evidenceStrength += 0.12;
+      crossEngineSignalCount++;
+    }
+  }
+  for (const obj of (persuasion.structuredObjections || []).slice(0, 5)) {
+    const objStr = typeof obj === "string" ? obj : safeString(obj?.objection || obj?.description || "", "");
+    if (objStr && hasOverlap(lower, objStr.toLowerCase())) {
+      supportingSignals.push(`Structured objection: ${objStr.slice(0, 80)}`);
+      evidenceStrength += 0.12;
+      crossEngineSignalCount++;
+    }
+  }
+
+  const awarenessSignals = [
+    awareness.triggerClass ? `Trigger: ${awareness.triggerClass}` : "",
+    awareness.entryMechanismType ? `Entry: ${awareness.entryMechanismType}` : "",
+    awareness.targetReadinessStage ? `Readiness: ${awareness.targetReadinessStage}` : "",
+    awareness.funnelCompatibility ? `Compatibility: ${awareness.funnelCompatibility}` : "",
+  ].filter(Boolean);
+  for (const sig of awarenessSignals) {
+    if (hasOverlap(lower, sig.toLowerCase())) {
+      supportingSignals.push(`Awareness: ${sig.slice(0, 80)}`);
+      evidenceStrength += 0.12;
+      crossEngineSignalCount++;
+    }
+  }
+
+  for (const del of (offer.deliverables || []).slice(0, 5)) {
+    if (del && hasOverlap(lower, del.toLowerCase())) {
+      supportingSignals.push(`Offer deliverable: ${del.slice(0, 80)}`);
+      evidenceStrength += 0.12;
+      crossEngineSignalCount++;
+    }
+  }
+  for (const proof of (offer.proofAlignment || []).slice(0, 5)) {
+    if (proof && hasOverlap(lower, proof.toLowerCase())) {
+      supportingSignals.push(`Offer proof: ${proof.slice(0, 80)}`);
+      evidenceStrength += 0.12;
+      crossEngineSignalCount++;
+    }
+  }
+
+  for (const tp of (funnel.trustPath || []).slice(0, 5)) {
+    const tpStr = typeof tp === "string" ? tp : safeString(tp?.step || tp?.description || "", "");
+    if (tpStr && hasOverlap(lower, tpStr.toLowerCase())) {
+      supportingSignals.push(`Funnel trust path: ${tpStr.slice(0, 80)}`);
+      evidenceStrength += 0.12;
+      crossEngineSignalCount++;
+    }
+  }
+  for (const pp of (funnel.proofPlacements || []).slice(0, 5)) {
+    const ppStr = typeof pp === "string" ? pp : safeString(pp?.placement || pp?.description || "", "");
+    if (ppStr && hasOverlap(lower, ppStr.toLowerCase())) {
+      supportingSignals.push(`Funnel proof: ${ppStr.slice(0, 80)}`);
+      evidenceStrength += 0.12;
+      crossEngineSignalCount++;
+    }
+  }
+  const triggerPurpose = safeString(funnel.entryTrigger?.purpose, "");
+  if (triggerPurpose && hasOverlap(lower, triggerPurpose.toLowerCase())) {
+    supportingSignals.push(`Funnel entry: ${triggerPurpose.slice(0, 80)}`);
+    evidenceStrength += 0.12;
+    crossEngineSignalCount++;
+  }
+
+  const hasMIOrAudienceSupport = supportingSignals.some(s =>
+    !s.startsWith("Persuasion ") && !s.startsWith("Trust sequence:") &&
+    !s.startsWith("Structured objection:") && !s.startsWith("Awareness:") &&
+    !s.startsWith("Offer ") && !s.startsWith("Funnel ")
+  );
+
+  if (supportingSignals.length > 0 && !isNarrativeBased && hasMIOrAudienceSupport) {
     evidenceType = "signal";
     evidenceStrength += 0.2;
+  } else if (supportingSignals.length > 0 && !isNarrativeBased && crossEngineSignalCount > 0) {
+    evidenceType = "structured_inference";
+    evidenceStrength = Math.max(evidenceStrength, 0.45);
   } else if (isNarrativeBased) {
     evidenceType = "narrative";
     evidenceStrength = Math.min(evidenceStrength, 0.4);
@@ -323,22 +414,24 @@ function layer_narrativeVsSignal(
 
   const narrativeClaims = claimValidations.filter(c => c.evidenceType === "narrative");
   const signalClaims = claimValidations.filter(c => c.evidenceType === "signal");
+  const structuredInferenceClaims = claimValidations.filter(c => c.evidenceType === "structured_inference");
+  const evidenceBackedCount = signalClaims.length + structuredInferenceClaims.length;
   const total = claimValidations.length || 1;
 
   const narrativeRatio = narrativeClaims.length / total;
-  const signalRatio = signalClaims.length / total;
+  const evidenceBackedRatio = evidenceBackedCount / total;
 
   let score = 0.5;
 
-  if (signalRatio >= 0.6) {
+  if (evidenceBackedRatio >= 0.6) {
     score = 0.8;
-    findings.push(`Signal-driven strategy: ${Math.round(signalRatio * 100)}% of claims backed by real signals`);
+    findings.push(`Evidence-driven strategy: ${Math.round(evidenceBackedRatio * 100)}% of claims backed by signals or structured engine outputs`);
   } else if (narrativeRatio > 0.5) {
     score = 0.3;
     warnings.push(`Narrative-heavy strategy: ${Math.round(narrativeRatio * 100)}% of claims are narrative-based without signal support`);
   } else {
-    score = 0.5 + signalRatio * 0.3;
-    findings.push(`Mixed evidence base: ${signalClaims.length} signal-backed, ${narrativeClaims.length} narrative-based`);
+    score = 0.5 + evidenceBackedRatio * 0.3;
+    findings.push(`Mixed evidence base: ${signalClaims.length} signal-backed, ${structuredInferenceClaims.length} engine-inferred, ${narrativeClaims.length} narrative-based`);
   }
 
   if (narrativeClaims.length > 3) {
@@ -523,7 +616,10 @@ function layer_confidenceCalibration(
 
   const miConfidence = safeNumber(mi.overallConfidence, 0);
   const avgClaimStrength = claimValidations.length > 0
-    ? claimValidations.reduce((sum, c) => sum + c.evidenceStrength, 0) / claimValidations.length
+    ? claimValidations.reduce((sum, c) => {
+        const strength = c.evidenceType === "structured_inference" ? Math.max(c.evidenceStrength, 0.4) : c.evidenceStrength;
+        return sum + strength;
+      }, 0) / claimValidations.length
     : 0;
 
   const confidenceGap = Math.abs(miConfidence - avgClaimStrength);
@@ -595,7 +691,7 @@ export async function runStatisticalValidationEngine(
   }
 
   const claims = extractClaims(offer, persuasion, awareness);
-  const claimValidations = claims.map(c => validateClaim(c.claim, c.source, mi, audience));
+  const claimValidations = claims.map(c => validateClaim(c.claim, c.source, mi, audience, offer, funnel, awareness, persuasion));
 
   const layers: LayerResult[] = [];
 
