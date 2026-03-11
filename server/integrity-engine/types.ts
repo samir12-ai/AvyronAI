@@ -6,9 +6,19 @@ export interface IntegrityPositioningInput {
   confidenceScore: number | null;
 }
 
+export interface MechanismCore {
+  mechanismName: string;
+  mechanismType: "method" | "system" | "protocol" | "framework" | "none";
+  mechanismSteps: string[];
+  mechanismPromise: string;
+  mechanismProblem: string;
+  mechanismLogic: string;
+}
+
 export interface IntegrityDifferentiationInput {
   pillars: any[];
   mechanismFraming: any;
+  mechanismCore: MechanismCore | null;
   authorityMode: string | null;
   claimStructures: any[];
   proofArchitecture: any[];

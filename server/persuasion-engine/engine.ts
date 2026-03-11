@@ -34,6 +34,7 @@ import type {
   DataReliabilityDiagnostics,
   TrustBarrierClassification,
   ObjectionProofLink,
+  StructuredObjection,
 } from "./types";
 
 function clamp(v: number, min = 0, max = 1): number {
@@ -59,6 +60,140 @@ function isHighReadiness(stage: string): boolean {
   return (HIGH_READINESS_STAGES as readonly string[]).includes(stage);
 }
 
+const OBJECTION_TYPE_MAP: Record<string, StructuredObjection["objectionType"]> = {
+  price: "cost", cost: "cost", expensive: "cost", budget: "cost", afford: "cost", money: "cost", invest: "cost",
+  trust: "trust", scam: "trust", legit: "trust", credib: "trust", believ: "trust", honest: "trust", fake: "trust",
+  time: "feasibility", busy: "feasibility", effort: "feasibility", complic: "complexity", difficult: "complexity",
+  hard: "complexity", complex: "complexity", overwhelm: "complexity", confus: "complexity",
+  work: "feasibility", result: "feasibility", outcome: "feasibility", deliver: "feasibility",
+};
+
+const OBJECTION_PROOF_TYPE_MAP: Record<StructuredObjection["objectionType"], string> = {
+  trust: "transparency_proof",
+  feasibility: "outcome_proof",
+  cost: "value_proof",
+  complexity: "process_proof",
+};
+
+const OBJECTION_STAGE_MAP: Record<string, StructuredObjection["objectionStage"]> = {
+  comparison: "consideration",
+  anti_pattern: "awareness",
+  trust_repair: "consideration",
+  credibility: "decision",
+  price_value: "decision",
+  results_skepticism: "consideration",
+  problem_framing: "awareness",
+  generic_strategy: "awareness",
+  noise_rejection: "awareness",
+  differentiation_signal: "consideration",
+  strategy_framing: "consideration",
+};
+
+function classifyObjectionType(text: string): StructuredObjection["objectionType"] {
+  const lower = text.toLowerCase();
+  for (const [keyword, type] of Object.entries(OBJECTION_TYPE_MAP)) {
+    if (lower.includes(keyword)) return type;
+  }
+  return "trust";
+}
+
+function classifyObjectionStage(text: string, category?: string): StructuredObjection["objectionStage"] {
+  if (category && OBJECTION_STAGE_MAP[category]) return OBJECTION_STAGE_MAP[category];
+  const lower = text.toLowerCase();
+  if (lower.includes("price") || lower.includes("cost") || lower.includes("commit") || lower.includes("buy") || lower.includes("pay")) return "decision";
+  if (lower.includes("compare") || lower.includes("alternative") || lower.includes("better") || lower.includes("different")) return "consideration";
+  return "awareness";
+}
+
+function buildPersuasionResponse(objType: StructuredObjection["objectionType"], statement: string): string {
+  switch (objType) {
+    case "trust": return `Address credibility concern with third-party validation and transparency evidence for: ${statement.slice(0, 80)}`;
+    case "feasibility": return `Demonstrate proven process and real outcomes to counter doubt about: ${statement.slice(0, 80)}`;
+    case "cost": return `Reframe value proposition with ROI evidence and risk reversal for: ${statement.slice(0, 80)}`;
+    case "complexity": return `Simplify with step-by-step mechanism explanation and guided pathway for: ${statement.slice(0, 80)}`;
+    default: return `Provide specific proof addressing: ${statement.slice(0, 80)}`;
+  }
+}
+
+function buildStructuredObjectionMap(
+  audience: PersuasionAudienceInput,
+  mi: PersuasionMIInput,
+): StructuredObjection[] {
+  const structuredObjections: StructuredObjection[] = [];
+  const seen = new Set<string>();
+
+  const objectionMap = audience.objectionMap || {};
+  for (const [key, value] of Object.entries(objectionMap)) {
+    const statement = typeof value === "string" ? value : (Array.isArray(value) ? value.join("; ") : JSON.stringify(value));
+    const normalized = key.toLowerCase().replace(/[\s-]+/g, "_");
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+
+    const objType = classifyObjectionType(key + " " + statement);
+    const stage = classifyObjectionStage(key + " " + statement);
+
+    structuredObjections.push({
+      objectionStatement: statement.slice(0, 200) || key,
+      objectionTrigger: key,
+      objectionStage: stage,
+      objectionType: objType,
+      requiredProofType: OBJECTION_PROOF_TYPE_MAP[objType],
+      persuasionResponse: buildPersuasionResponse(objType, statement || key),
+      source: "audience_objection",
+      confidence: 0.8,
+    });
+  }
+
+  const narrativeObjections = mi.narrativeObjections || [];
+  for (const item of narrativeObjections) {
+    if (!item.objection) continue;
+    const normalized = item.objection.toLowerCase().replace(/[\s-]+/g, "_").slice(0, 60);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+
+    const signalType = item.signalType || "objection";
+    let objType: StructuredObjection["objectionType"] = classifyObjectionType(item.objection);
+    if (signalType === "trust_barrier") objType = "trust";
+
+    const stage = classifyObjectionStage(item.objection, item.patternCategory);
+
+    structuredObjections.push({
+      objectionStatement: item.objection.slice(0, 200),
+      objectionTrigger: `narrative_${item.patternCategory || "extracted"}`,
+      objectionStage: stage,
+      objectionType: objType,
+      requiredProofType: OBJECTION_PROOF_TYPE_MAP[objType],
+      persuasionResponse: buildPersuasionResponse(objType, item.objection),
+      source: "narrative_extraction",
+      confidence: clamp(item.narrativeConfidence * 0.9, 0.3, 0.85),
+    });
+  }
+
+  const audiencePains = audience.audiencePains || [];
+  for (const pain of audiencePains.slice(0, 5)) {
+    const painStr = typeof pain === "string" ? pain : safeString(pain?.pain || pain?.description || pain?.canonical || "", "");
+    if (!painStr) continue;
+    const normalized = painStr.toLowerCase().replace(/[\s-]+/g, "_").slice(0, 60);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+
+    const objType = classifyObjectionType(painStr);
+
+    structuredObjections.push({
+      objectionStatement: `Implied objection from pain: ${painStr.slice(0, 180)}`,
+      objectionTrigger: "pain_signal",
+      objectionStage: "awareness",
+      objectionType: objType,
+      requiredProofType: OBJECTION_PROOF_TYPE_MAP[objType],
+      persuasionResponse: buildPersuasionResponse(objType, painStr),
+      source: "pain_inference",
+      confidence: 0.5,
+    });
+  }
+
+  return structuredObjections;
+}
+
 function assessDataReliability(
   mi: PersuasionMIInput,
   audience: PersuasionAudienceInput,
@@ -66,6 +201,7 @@ function assessDataReliability(
   differentiation: PersuasionDifferentiationInput,
   offer: PersuasionOfferInput,
   awareness: PersuasionAwarenessInput,
+  structuredObjections?: StructuredObjection[],
 ): DataReliabilityDiagnostics {
   const advisories: string[] = [];
 
@@ -109,9 +245,29 @@ function assessDataReliability(
     if (typeof v === "object" && v !== null && Object.keys(v).length > 0) return true;
     return false;
   });
-  const objectionSpecificity = objectionKeys.length === 0 ? 0.1
-    : hasDetailedObjections ? clamp(objectionKeys.length / 5, 0.3, 1.0)
-    : clamp(objectionKeys.length / 5, 0.15, 0.6);
+
+  let objectionSpecificity: number;
+  if (structuredObjections && structuredObjections.length > 0) {
+    const hasStage = structuredObjections.some(o => !!o.objectionStage);
+    const hasType = structuredObjections.some(o => !!o.objectionType);
+    const hasProof = structuredObjections.some(o => !!o.requiredProofType);
+    const hasResponse = structuredObjections.some(o => !!o.persuasionResponse);
+    const fieldCompleteness = [hasStage, hasType, hasProof, hasResponse].filter(Boolean).length / 4;
+    const sourceTypes = new Set(structuredObjections.map(o => o.source));
+    const sourceDiversityBonus = clamp((sourceTypes.size - 1) * 0.1, 0, 0.2);
+    const countFactor = clamp(structuredObjections.length / 6, 0.3, 1.0);
+    objectionSpecificity = clamp(
+      countFactor * 0.4 + fieldCompleteness * 0.4 + sourceDiversityBonus + 0.1,
+      0.6,
+      1.0
+    );
+  } else if (objectionKeys.length === 0) {
+    objectionSpecificity = 0.1;
+  } else if (hasDetailedObjections) {
+    objectionSpecificity = clamp(objectionKeys.length / 5, 0.3, 1.0);
+  } else {
+    objectionSpecificity = clamp(objectionKeys.length / 5, 0.15, 0.6);
+  }
   if (objectionSpecificity < 0.3) advisories.push(`Weak objection specificity (${Math.round(objectionSpecificity * 100)}%) — persuasion objection handling may be imprecise`);
 
   const trustReq = safeString(awareness.trustRequirement, "medium");
@@ -1166,6 +1322,7 @@ function buildPersuasionRoutes(
   layerResults: LayerResult[],
   trustBarriers: TrustBarrierClassification[],
   objectionProofLinks: ObjectionProofLink[],
+  structuredObjections?: StructuredObjection[],
 ): { primary: PersuasionRoute; alternative: PersuasionRoute; rejected: PersuasionRoute } {
   const l4 = layerResults.find(l => l.layerName === "influence_driver_selection");
   const l6 = layerResults.find(l => l.layerName === "message_order_logic");
@@ -1185,17 +1342,26 @@ function buildPersuasionRoutes(
     ? driverFindings.replace("Selected influence drivers: ", "").split(", ")
     : ["authority", "proof_of_work"];
 
-  const directObjections = Object.keys(audience.objectionMap || {}).slice(0, 5);
-  const objections: string[] = [...directObjections];
+  const objections: string[] = [];
 
-  if (objections.length === 0) {
-    for (const link of objectionProofLinks.slice(0, 4)) {
-      objections.push(`[inferred] ${link.objectionCategory}: ${link.objectionDetail.slice(0, 60)}`);
+  if (structuredObjections && structuredObjections.length > 0) {
+    const sorted = [...structuredObjections].sort((a, b) => b.confidence - a.confidence);
+    for (const so of sorted.slice(0, 6)) {
+      objections.push(`[${so.objectionType}/${so.objectionStage}] ${so.objectionStatement}`);
     }
-  }
+  } else {
+    const directObjections = Object.keys(audience.objectionMap || {}).slice(0, 5);
+    objections.push(...directObjections);
 
-  if (objections.length === 0 && (offer.riskNotes || []).length > 0) {
-    objections.push(...(offer.riskNotes || []).slice(0, 3).map(r => `risk: ${r}`));
+    if (objections.length === 0) {
+      for (const link of objectionProofLinks.slice(0, 4)) {
+        objections.push(`[inferred] ${link.objectionCategory}: ${link.objectionDetail.slice(0, 60)}`);
+      }
+    }
+
+    if (objections.length === 0 && (offer.riskNotes || []).length > 0) {
+      objections.push(...(offer.riskNotes || []).slice(0, 3).map(r => `risk: ${r}`));
+    }
   }
 
   const orderFindings = (l6?.findings || []).find(f => f.includes("message order:"));
@@ -1217,8 +1383,13 @@ function buildPersuasionRoutes(
     proofRole: isEducationFirst ? "illustrative — supports education" : isHighReadiness(readiness) ? "primary — leads conversion" : "supporting — reinforces understanding",
   };
 
+  const core = differentiation.mechanismCore;
+  const mechanismRef = core && core.mechanismType !== "none" && core.mechanismName
+    ? ` via "${core.mechanismName}" (${core.mechanismType})`
+    : "";
+
   const primary: PersuasionRoute = {
-    routeName: `${primaryMode.replace(/_/g, " ")} persuasion architecture`,
+    routeName: `${primaryMode.replace(/_/g, " ")} persuasion architecture${mechanismRef}`,
     persuasionMode: primaryMode,
     primaryInfluenceDrivers: drivers.slice(0, 4),
     objectionPriorities: objections,
@@ -1229,6 +1400,7 @@ function buildPersuasionRoutes(
     rejectionReason: null,
     trustBarriers,
     objectionProofLinks,
+    structuredObjections: structuredObjections || [],
     readinessAlignment,
     scarcityValidation,
   };
@@ -1348,7 +1520,9 @@ export function analyzePersuasion(
     };
   }
 
-  const reliability = assessDataReliability(mi, audience, positioning, differentiation, offer, awareness);
+  const structuredObjections = buildStructuredObjectionMap(audience, mi);
+
+  const reliability = assessDataReliability(mi, audience, positioning, differentiation, offer, awareness, structuredObjections);
 
   const trustBarriers = classifyTrustBarriers(audience, awareness, differentiation, offer, mi);
   const objectionProofLinks = buildObjectionProofLinks(audience, differentiation, offer, awareness, mi);
@@ -1382,7 +1556,7 @@ export function analyzePersuasion(
     structuralWarnings.push("WARNING: Trust specificity is weak — trust barrier mapping may lack precision");
   }
 
-  const routes = buildPersuasionRoutes(audience, awareness, differentiation, offer, funnel, mi, allLayers, trustBarriers, objectionProofLinks);
+  const routes = buildPersuasionRoutes(audience, awareness, differentiation, offer, funnel, mi, allLayers, trustBarriers, objectionProofLinks, structuredObjections);
 
   const outputText = [
     routes.primary.routeName,

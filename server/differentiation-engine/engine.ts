@@ -36,6 +36,7 @@ import type {
   TrustGap,
   ProofAsset,
   MechanismCandidate,
+  MechanismCore,
   DifferentiationPillar,
   ClaimStructure,
   DifferentiationResult,
@@ -153,6 +154,7 @@ function buildEmptyResult(status: string, message: string, executionTimeMs: numb
     authorityMode: "expert",
     authorityRationale: "",
     mechanismFraming: { name: null, description: "", supported: false, proofBasis: [], type: "none" },
+    mechanismCore: { mechanismName: "", mechanismType: "none", mechanismSteps: [], mechanismPromise: "", mechanismProblem: "", mechanismLogic: "" },
     trustPriorityMap: [],
     claimScores: { averageScore: 0, highestCollision: 0, totalClaims: 0 },
     collisionDiagnostics: [],
@@ -464,6 +466,55 @@ export function layer8_mechanismConstruction(
     supported: false,
     proofBasis: [],
     type: "none",
+  };
+}
+
+export function buildMechanismCore(
+  mechanism: MechanismCandidate,
+  pillars: DifferentiationPillar[],
+  trustGaps: TrustGap[],
+  positioning: PositioningInput,
+): MechanismCore {
+  const MECHANISM_TYPE_MAP: Record<string, MechanismCore["mechanismType"]> = {
+    framework: "framework",
+    named_process: "method",
+    branded_method: "method",
+    system: "system",
+    none: "none",
+  };
+
+  const mechanismType = MECHANISM_TYPE_MAP[mechanism.type] || "none";
+
+  const mechanismName = mechanism.name || (pillars.length > 0 ? `${pillars[0].name} ${mechanismType !== "none" ? mechanismType : "approach"}` : "");
+
+  const mechanismSteps = pillars
+    .filter(p => p.overallScore >= 0.4)
+    .slice(0, 5)
+    .map(p => p.name);
+
+  const topPain = trustGaps.length > 0
+    ? trustGaps.sort((a, b) => b.severity - a.severity)[0].objection
+    : "";
+  const mechanismProblem = topPain || (positioning.enemyDefinition || "");
+
+  const topTerritory = positioning.territories.length > 0
+    ? positioning.territories[0].name
+    : "";
+  const mechanismPromise = topTerritory
+    ? `Achieve ${topTerritory} through a structured ${mechanismType !== "none" ? mechanismType : "approach"}`
+    : mechanism.description;
+
+  const mechanismLogic = mechanism.supported
+    ? `${mechanismName} resolves ${mechanismProblem} using ${mechanismSteps.length} structured steps: ${mechanismSteps.join(" → ")}. Backed by: ${mechanism.proofBasis.slice(0, 3).join("; ")}`
+    : `Differentiation direction identified but mechanism lacks structural support for formal framing`;
+
+  return {
+    mechanismName,
+    mechanismType,
+    mechanismSteps,
+    mechanismPromise,
+    mechanismProblem,
+    mechanismLogic,
   };
 }
 
@@ -868,7 +919,8 @@ export async function runDifferentiationEngine(
   diagnostics.layer10 = { claimCount: l10Claims.length, avgScore: l10Claims.length > 0 ? l10Claims.reduce((s, c) => s + c.overallScore, 0) / l10Claims.length : 0 };
 
   const l8Mechanism = layer8_mechanismConstruction(positioning, l4ProofDemands, l10Claims, l9Pillars);
-  diagnostics.layer8 = { supported: l8Mechanism.supported, type: l8Mechanism.type };
+  const l8MechanismCore = buildMechanismCore(l8Mechanism, l9Pillars, l5TrustGaps, positioning);
+  diagnostics.layer8 = { supported: l8Mechanism.supported, type: l8Mechanism.type, mechanismCore: l8MechanismCore };
 
   let finalPillars = l9Pillars;
   let finalClaims = l10Claims;
@@ -973,6 +1025,7 @@ export async function runDifferentiationEngine(
     authorityMode: l6Authority.mode,
     authorityRationale: l6Authority.rationale,
     mechanismFraming: finalMechanism,
+    mechanismCore: l8MechanismCore,
     trustPriorityMap: l5TrustGaps,
     claimScores: {
       averageScore: avgClaimScore,

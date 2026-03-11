@@ -111,6 +111,15 @@ export interface ClaimStructure {
   proofBasis: string[];
 }
 
+export interface MechanismCore {
+  mechanismName: string;
+  mechanismType: "method" | "system" | "protocol" | "framework" | "none";
+  mechanismSteps: string[];
+  mechanismPromise: string;
+  mechanismProblem: string;
+  mechanismLogic: string;
+}
+
 export interface DifferentiationResult {
   status: string;
   statusMessage: string | null;
@@ -120,6 +129,7 @@ export interface DifferentiationResult {
   authorityMode: AuthorityMode;
   authorityRationale: string;
   mechanismFraming: MechanismCandidate;
+  mechanismCore: MechanismCore;
   trustPriorityMap: TrustGap[];
   claimScores: { averageScore: number; highestCollision: number; totalClaims: number };
   collisionDiagnostics: ClaimCollision[];

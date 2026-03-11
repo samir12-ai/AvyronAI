@@ -1,9 +1,28 @@
+export interface StructuredObjection {
+  objectionStatement: string;
+  objectionTrigger: string;
+  objectionStage: "awareness" | "consideration" | "decision";
+  objectionType: "trust" | "feasibility" | "cost" | "complexity";
+  requiredProofType: string;
+  persuasionResponse: string;
+  source: "audience_objection" | "narrative_extraction" | "pain_inference";
+  confidence: number;
+}
+
 export interface PersuasionMIInput {
   marketDiagnosis: string | null;
   overallConfidence: number;
   opportunitySignals: any[];
   threatSignals: any[];
   narrativeObjectionCount: number;
+  narrativeObjections: Array<{
+    objection: string;
+    frequencyScore: number;
+    narrativeConfidence: number;
+    patternCategory: string;
+    signalType: string;
+    competitorSources: string[];
+  }>;
 }
 
 export interface PersuasionAudienceInput {
@@ -24,9 +43,19 @@ export interface PersuasionPositioningInput {
   confidenceScore: number | null;
 }
 
+export interface MechanismCore {
+  mechanismName: string;
+  mechanismType: "method" | "system" | "protocol" | "framework" | "none";
+  mechanismSteps: string[];
+  mechanismPromise: string;
+  mechanismProblem: string;
+  mechanismLogic: string;
+}
+
 export interface PersuasionDifferentiationInput {
   pillars: any[];
   mechanismFraming: any;
+  mechanismCore: MechanismCore | null;
   authorityMode: string | null;
   claimStructures: any[];
   proofArchitecture: any[];
@@ -122,6 +151,7 @@ export interface PersuasionRoute {
   rejectionReason: string | null;
   trustBarriers?: TrustBarrierClassification[];
   objectionProofLinks?: ObjectionProofLink[];
+  structuredObjections?: StructuredObjection[];
   readinessAlignment?: {
     stage: string;
     educationFirst: boolean;

@@ -689,6 +689,15 @@ export async function aiFunnelGeneration(
   const desires = Object.entries(audience.desireMap || {});
   const pillars = differentiation.pillars || [];
   const mechanism = differentiation.mechanismFraming || {};
+  const core = differentiation.mechanismCore;
+
+  const mechanismCoreBlock = core && core.mechanismType !== "none" && core.mechanismName
+    ? `\n- MECHANISM CORE (single source of truth):
+  - Name: ${core.mechanismName}
+  - Type: ${core.mechanismType}
+  - Steps: ${core.mechanismSteps.join(" → ")}
+  - Funnel stages MUST align with mechanism steps`
+    : "";
 
   const prompt = `You are a Funnel Architect. Generate three funnel concepts based on the market intelligence below.
 
@@ -697,7 +706,7 @@ STRICT RULES:
 - ONLY output funnel definitions: name, type (direct, webinar, challenge, vsl, application, consultation, tripwire, product-launch, membership, hybrid)
 - Funnels must be specific and non-generic. Avoid "standard funnel" or "basic sales funnel"
 - Each funnel must define the JOURNEY the buyer takes from awareness to commitment
-- Respond with ONLY valid JSON, no markdown
+- Respond with ONLY valid JSON, no markdown${mechanismCoreBlock}
 
 Market Context:
 - Offer: ${offer.offerName} — ${offer.coreOutcome}
@@ -706,7 +715,7 @@ Market Context:
 - Awareness Level: ${audience.awarenessLevel || "unknown"}
 - Maturity Index: ${audience.maturityIndex ?? "unknown"}
 - Differentiation Pillars: ${JSON.stringify(pillars.slice(0, 3).map((p: any) => p.name))}
-- Mechanism: ${mechanism.description || "No validated mechanism"}
+- Mechanism: ${core?.mechanismLogic || mechanism.description || "No validated mechanism"}
 - Enemy: ${positioning.enemyDefinition || "Not defined"}
 - Narrative: ${positioning.narrativeDirection || "Not defined"}
 - Offer Strength: ${offer.offerStrengthScore.toFixed(2)}

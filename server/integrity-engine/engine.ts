@@ -55,8 +55,26 @@ export function layer1_strategicConsistency(
   const mechanism = differentiation.mechanismFraming?.description || differentiation.mechanismFraming?.name || "";
   const pillars = differentiation.pillars || [];
   const offerMechanism = offer.mechanismDescription || "";
+  const core = differentiation.mechanismCore;
 
-  if (mechanism && offerMechanism) {
+  if (core && core.mechanismType !== "none" && core.mechanismName) {
+    const offerLower = offerMechanism.toLowerCase();
+    const coreNameLower = core.mechanismName.toLowerCase();
+    const namePresent = offerLower.includes(coreNameLower) || coreNameLower.split(/\s+/).filter(w => w.length > 3).some(w => offerLower.includes(w));
+    const stepsPresent = core.mechanismSteps.length > 0 && core.mechanismSteps.some(step => offerLower.includes(step.toLowerCase().split(/\s+/)[0]));
+
+    if (namePresent) {
+      findings.push(`MechanismCore "${core.mechanismName}" (${core.mechanismType}) referenced in offer mechanism`);
+    } else {
+      warnings.push(`MechanismCore "${core.mechanismName}" not found in offer mechanism description — mechanism continuity broken`);
+      score -= 0.15;
+    }
+
+    if (core.mechanismSteps.length > 0 && !stepsPresent) {
+      warnings.push("Offer mechanism does not reference any MechanismCore steps");
+      score -= 0.05;
+    }
+  } else if (mechanism && offerMechanism) {
     const mechanismWords = mechanism.toLowerCase().split(/\s+/).filter((w: string) => w.length > 4);
     const offerWords = offerMechanism.toLowerCase().split(/\s+/).filter((w: string) => w.length > 4);
     const overlap = mechanismWords.filter((w: string) => offerWords.includes(w)).length;

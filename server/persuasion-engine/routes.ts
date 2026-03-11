@@ -248,12 +248,22 @@ export function registerPersuasionEngineRoutes(app: Express) {
         if (latestMi?.objectionMapData) rawObjMapData = latestMi.objectionMapData;
       }
       const narrativeObjMap = safeJsonParse(rawObjMapData) || null;
+      const narrativeObjections = (narrativeObjMap?.objections || []).map((item: any) => ({
+        objection: item.objection || "",
+        frequencyScore: safeNumber(item.frequencyScore, 0),
+        narrativeConfidence: safeNumber(item.narrativeConfidence, 0),
+        patternCategory: item.patternCategory || "unknown",
+        signalType: item.signalType || "objection",
+        competitorSources: item.competitorSources || [],
+      }));
+
       const miInput = {
         marketDiagnosis: miSnapshot.marketDiagnosis,
         overallConfidence: safeNumber(miSnapshot.overallConfidence, 0),
         opportunitySignals: safeJsonParse(miSnapshot.opportunitySignals) || [],
         threatSignals: safeJsonParse(miSnapshot.threatSignals) || [],
         narrativeObjectionCount: narrativeObjMap?.totalObjectionsDetected ?? 0,
+        narrativeObjections,
       };
 
       const audienceInput = {
@@ -277,6 +287,7 @@ export function registerPersuasionEngineRoutes(app: Express) {
       const differentiationInput = {
         pillars: safeJsonParse(diffSnapshot.differentiationPillars) || [],
         mechanismFraming: safeJsonParse(diffSnapshot.mechanismFraming),
+        mechanismCore: safeJsonParse((diffSnapshot as any).mechanismCore) || null,
         authorityMode: safeJsonParse(diffSnapshot.authorityMode)?.mode || null,
         claimStructures: safeJsonParse(diffSnapshot.claimStructures) || [],
         proofArchitecture: safeJsonParse(diffSnapshot.proofArchitecture) || [],

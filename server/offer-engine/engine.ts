@@ -20,6 +20,7 @@ import {
   type DataReliabilityDiagnostics,
 } from "../engine-hardening";
 import type {
+  MarketLanguageMap,
   OfferMIInput,
   OfferAudienceInput,
   OfferPositioningInput,
@@ -42,6 +43,78 @@ function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
   try { return JSON.parse(text); } catch { return null; }
+}
+
+export function buildMarketLanguageMap(audience: OfferAudienceInput): MarketLanguageMap {
+  const rawPainPhrases: string[] = [];
+  const rawDesirePhrases: string[] = [];
+  const emotionalLanguage: string[] = [];
+  const objectionLanguage: string[] = [];
+
+  const pains = audience.audiencePains || [];
+  for (const pain of pains) {
+    if (typeof pain === "string") {
+      rawPainPhrases.push(pain);
+    } else if (pain && typeof pain === "object") {
+      if (pain.canonical) rawPainPhrases.push(pain.canonical);
+      if (pain.pain) rawPainPhrases.push(pain.pain);
+      if (pain.name && pain.name !== pain.canonical) rawPainPhrases.push(pain.name);
+      if (Array.isArray(pain.evidence)) {
+        for (const ev of pain.evidence) {
+          if (typeof ev === "string" && ev.length > 5) rawPainPhrases.push(ev);
+        }
+      }
+    }
+  }
+
+  const desires = Object.entries(audience.desireMap || {});
+  for (const [key, value] of desires) {
+    rawDesirePhrases.push(key);
+    if (value && typeof value === "object") {
+      if (value.canonical) rawDesirePhrases.push(value.canonical);
+      if (Array.isArray(value.evidence)) {
+        for (const ev of value.evidence) {
+          if (typeof ev === "string" && ev.length > 5) rawDesirePhrases.push(ev);
+        }
+      }
+    }
+  }
+
+  const emotionalDrivers = audience.emotionalDrivers || [];
+  for (const driver of emotionalDrivers) {
+    if (typeof driver === "string") {
+      emotionalLanguage.push(driver);
+    } else if (driver && typeof driver === "object") {
+      if (driver.canonical) emotionalLanguage.push(driver.canonical);
+      if (Array.isArray(driver.evidence)) {
+        for (const ev of driver.evidence) {
+          if (typeof ev === "string" && ev.length > 5) emotionalLanguage.push(ev);
+        }
+      }
+    }
+  }
+
+  const objections = Object.entries(audience.objectionMap || {});
+  for (const [key, value] of objections) {
+    objectionLanguage.push(key);
+    if (value && typeof value === "object") {
+      if (value.canonical) objectionLanguage.push(value.canonical);
+      if (Array.isArray(value.evidence)) {
+        for (const ev of value.evidence) {
+          if (typeof ev === "string" && ev.length > 5) objectionLanguage.push(ev);
+        }
+      }
+    }
+  }
+
+  const dedupe = (arr: string[]) => [...new Set(arr.filter(s => s && s.trim().length > 0))];
+
+  return {
+    rawPainPhrases: dedupe(rawPainPhrases),
+    rawDesirePhrases: dedupe(rawDesirePhrases),
+    emotionalLanguage: dedupe(emotionalLanguage),
+    objectionLanguage: dedupe(objectionLanguage),
+  };
 }
 
 export function detectGenericOffer(text: string): boolean {
@@ -68,23 +141,29 @@ export function layer1_outcomeConstruction(
   audience: OfferAudienceInput,
   positioning: OfferPositioningInput,
   differentiation: OfferDifferentiationInput,
+  marketLanguage?: MarketLanguageMap,
 ): OutcomeLayer {
   const pains = audience.audiencePains || [];
   const desires = Object.entries(audience.desireMap || {});
   const territories = positioning.territories || [];
   const pillars = differentiation.pillars || [];
 
-  const primaryPain = pains.length > 0 ? (typeof pains[0] === "string" ? pains[0] : pains[0]?.pain || pains[0]?.name || "unresolved challenge") : "unresolved challenge";
-  const primaryDesire = desires.length > 0 ? desires[0][0] : "measurable improvement";
+  const rawPainPhrase = marketLanguage?.rawPainPhrases?.[0];
+  const rawDesirePhrase = marketLanguage?.rawDesirePhrases?.[0];
+
+  const primaryPain = rawPainPhrase || (pains.length > 0 ? (typeof pains[0] === "string" ? pains[0] : pains[0]?.pain || pains[0]?.name || "unresolved challenge") : "unresolved challenge");
+  const primaryDesire = rawDesirePhrase || (desires.length > 0 ? desires[0][0] : "measurable improvement");
   const topTerritory = territories.length > 0 ? (territories[0].name || "strategic territory") : "strategic territory";
   const topPillar = pillars.length > 0 ? (pillars[0].name || "differentiation pillar") : "differentiation pillar";
 
-  const transformationStatement = `Transform ${primaryPain} into ${primaryDesire} through ${topTerritory}`;
-  const primaryOutcome = `Achieve ${primaryDesire} by leveraging ${topPillar} as the primary driver`;
+  const transformationStatement = `Transform "${primaryPain}" into "${primaryDesire}" through ${topTerritory}`;
+  const primaryOutcome = `Achieve "${primaryDesire}" by leveraging ${topPillar} as the primary driver`;
 
+  const hasMarketLanguage = !!(rawPainPhrase || rawDesirePhrase);
   const painSpecificity = pains.length > 0 ? clamp(0.4 + (Math.min(pains.length, 5) * 0.1)) : 0.2;
   const desireSpecificity = desires.length > 0 ? clamp(0.4 + (Math.min(desires.length, 5) * 0.1)) : 0.2;
-  const specificityScore = clamp((painSpecificity + desireSpecificity) / 2);
+  const baseSpecificity = clamp((painSpecificity + desireSpecificity) / 2);
+  const specificityScore = hasMarketLanguage ? clamp(baseSpecificity + 0.1) : baseSpecificity;
 
   return { primaryOutcome, transformationStatement, specificityScore };
 }
@@ -92,9 +171,19 @@ export function layer1_outcomeConstruction(
 export function layer2_mechanismAlignment(
   differentiation: OfferDifferentiationInput,
 ): MechanismLayer {
+  const core = differentiation.mechanismCore;
   const mechanism = differentiation.mechanismFraming || {};
   const pillars = differentiation.pillars || [];
   const topPillar = pillars.length > 0 ? (pillars[0].name || "core pillar") : "core pillar";
+
+  if (core && core.mechanismType !== "none" && core.mechanismName) {
+    const mechanismType = core.mechanismType;
+    const mechanismDescription = core.mechanismLogic || core.mechanismPromise || mechanism.description || "Standard delivery methodology";
+    const differentiationLink = `Mechanism "${core.mechanismName}" (${core.mechanismType}) anchored to ${topPillar} via MechanismCore`;
+    const stepsBonus = core.mechanismSteps.length > 0 ? clamp(core.mechanismSteps.length * 0.1, 0, 0.3) : 0;
+    const credibilityScore = clamp(0.7 + stepsBonus);
+    return { mechanismType, mechanismDescription, differentiationLink, credibilityScore };
+  }
 
   const mechanismType = mechanism.type || "none";
   const mechanismDescription = mechanism.description || "Standard delivery methodology";
@@ -382,6 +471,7 @@ export function validateOfferAlignment(
   offer: OfferCandidate,
   differentiation: OfferDifferentiationInput,
   audience: OfferAudienceInput,
+  marketLanguage?: MarketLanguageMap,
 ): { aligned: boolean; failures: string[] } {
   const failures: string[] = [];
 
@@ -414,6 +504,33 @@ export function validateOfferAlignment(
 
     if (!hasPainRef && !hasDesireRef) {
       failures.push("Outcome statement does not reflect any identified audience pain signals or desires");
+    }
+  }
+
+  if (marketLanguage) {
+    const combinedOfferText = `${(offer.offerName || "").toLowerCase()} ${(offer.coreOutcome || "").toLowerCase()} ${(offer.mechanismDescription || "").toLowerCase()} ${(offer.deliverables || []).join(" ").toLowerCase()}`;
+    const extractMarketTokens = (phrases: string[]): string[] => {
+      const tokens: string[] = [];
+      for (const phrase of phrases) {
+        const words = phrase.toLowerCase().split(/[\s,.\-/]+/).filter(w => w.length > 4);
+        tokens.push(...words);
+      }
+      return [...new Set(tokens)];
+    };
+
+    const painTokens = extractMarketTokens(marketLanguage.rawPainPhrases.slice(0, 5));
+    const desireTokens = extractMarketTokens(marketLanguage.rawDesirePhrases.slice(0, 5));
+    const objectionTokens = extractMarketTokens(marketLanguage.objectionLanguage.slice(0, 5));
+    const emotionalTokens = extractMarketTokens(marketLanguage.emotionalLanguage.slice(0, 3));
+    const allMarketTokens = [...painTokens, ...desireTokens, ...objectionTokens, ...emotionalTokens];
+
+    if (allMarketTokens.length > 0) {
+      const matchedTokens = allMarketTokens.filter(t => combinedOfferText.includes(t));
+      const marketLanguageRatio = matchedTokens.length / allMarketTokens.length;
+
+      if (marketLanguageRatio < 0.1 && allMarketTokens.length >= 3) {
+        failures.push(`Market language preservation failed — only ${matchedTokens.length}/${allMarketTokens.length} audience tokens found in offer text (abstract rewrite detected)`);
+      }
     }
   }
 
@@ -577,16 +694,46 @@ export async function aiOfferGeneration(
   positioning: OfferPositioningInput,
   differentiation: OfferDifferentiationInput,
   accountId: string,
+  marketLanguage?: MarketLanguageMap,
 ): Promise<{ primary: { name: string; outcome: string; mechanism: string }; alternative: { name: string; outcome: string; mechanism: string }; rejected: { name: string; outcome: string; mechanism: string; rejectionReason: string } }> {
   const pains = audience.audiencePains || [];
   const desires = Object.entries(audience.desireMap || {});
   const territories = positioning.territories || [];
   const pillars = differentiation.pillars || [];
   const mechanism = differentiation.mechanismFraming || {};
+  const core = differentiation.mechanismCore;
 
   const mechCategory = mechanism.supported ? resolveMechanismCategory(mechanism.type || "", mechanism.description || "") : "generic";
   const mechLockInstruction = mechCategory !== "generic"
     ? `\n- MECHANISM LOCK: The Differentiation Engine defines a "${mechCategory}" mechanism. All offer mechanisms MUST stay within this "${mechCategory}" framing category. Do NOT propose a bootcamp if the mechanism is a framework, or a course if the mechanism is a tool.`
+    : "";
+
+  let marketLanguageBlock = "";
+  if (marketLanguage) {
+    const painPhrases = marketLanguage.rawPainPhrases.slice(0, 8);
+    const desirePhrases = marketLanguage.rawDesirePhrases.slice(0, 8);
+    const emotionalPhrases = marketLanguage.emotionalLanguage.slice(0, 5);
+    const objectionPhrases = marketLanguage.objectionLanguage.slice(0, 5);
+
+    if (painPhrases.length > 0 || desirePhrases.length > 0) {
+      marketLanguageBlock = `\n\nMARKET LANGUAGE PRESERVATION (MANDATORY):
+- Offer outcome MUST reference these exact audience phrases — do NOT rewrite into abstract language
+- Raw Pain Phrases from audience: ${JSON.stringify(painPhrases)}
+- Raw Desire Phrases from audience: ${JSON.stringify(desirePhrases)}${emotionalPhrases.length > 0 ? `\n- Emotional Language: ${JSON.stringify(emotionalPhrases)}` : ""}${objectionPhrases.length > 0 ? `\n- Objection Language to address: ${JSON.stringify(objectionPhrases)}` : ""}
+- USE the audience's own words in the offer name, outcome, and mechanism description
+- Do NOT substitute with generic business jargon like "optimize", "leverage", "scale", "transform"`;
+    }
+  }
+
+  const mechanismCoreBlock = core && core.mechanismType !== "none" && core.mechanismName
+    ? `\n- MECHANISM CORE (single source of truth — do NOT invent a new mechanism):
+  - Name: ${core.mechanismName}
+  - Type: ${core.mechanismType}
+  - Steps: ${core.mechanismSteps.join(" → ")}
+  - Promise: ${core.mechanismPromise}
+  - Problem it solves: ${core.mechanismProblem}
+  - Logic: ${core.mechanismLogic}
+  - All offer mechanism descriptions MUST reference "${core.mechanismName}" and describe delivery using ONLY these steps`
     : "";
 
   const prompt = `You are an Offer Architect. Generate three offer concepts based on the market intelligence below.
@@ -597,14 +744,14 @@ STRICT RULES:
 - ONLY output offer definitions: name, core outcome, mechanism description
 - Offers must be specific and non-generic. Avoid phrases like "grow your business", "scale faster", "get more leads"
 - Each offer must define WHAT the buyer receives and WHY the market would want it NOW
-- Respond with ONLY valid JSON, no markdown${mechLockInstruction}
+- Respond with ONLY valid JSON, no markdown${mechLockInstruction}${mechanismCoreBlock}${marketLanguageBlock}
 
 Market Context:
 - Top Pains: ${JSON.stringify(pains.slice(0, 5).map((p: any) => typeof p === "string" ? p : p?.pain || p?.name))}
 - Top Desires: ${JSON.stringify(desires.slice(0, 5).map(([k]) => k))}
 - Territories: ${JSON.stringify(territories.slice(0, 3).map((t: any) => t.name))}
 - Differentiation Pillars: ${JSON.stringify(pillars.slice(0, 3).map((p: any) => p.name))}
-- Mechanism (${mechCategory}): ${mechanism.description || "No validated mechanism"}
+- Mechanism (${mechCategory}): ${core?.mechanismLogic || mechanism.description || "No validated mechanism"}
 - Enemy: ${positioning.enemyDefinition || "Not defined"}
 - Narrative: ${positioning.narrativeDirection || "Not defined"}
 
@@ -707,7 +854,16 @@ export async function runOfferEngine(
     };
   }
 
-  const l1Outcome = layer1_outcomeConstruction(audience, positioning, differentiation);
+  const marketLanguage = buildMarketLanguageMap(audience);
+  diagnostics.marketLanguage = {
+    painPhraseCount: marketLanguage.rawPainPhrases.length,
+    desirePhraseCount: marketLanguage.rawDesirePhrases.length,
+    emotionalCount: marketLanguage.emotionalLanguage.length,
+    objectionCount: marketLanguage.objectionLanguage.length,
+  };
+  console.log(`[OfferEngine-V3] MarketLanguageMap | pains=${marketLanguage.rawPainPhrases.length} | desires=${marketLanguage.rawDesirePhrases.length} | emotional=${marketLanguage.emotionalLanguage.length} | objections=${marketLanguage.objectionLanguage.length}`);
+
+  const l1Outcome = layer1_outcomeConstruction(audience, positioning, differentiation, marketLanguage);
   diagnostics.layer1 = { specificityScore: l1Outcome.specificityScore };
 
   const l2Mechanism = layer2_mechanismAlignment(differentiation);
@@ -724,7 +880,7 @@ export async function runOfferEngine(
 
   let aiOffers;
   try {
-    aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId);
+    aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage);
     diagnostics.aiGeneration = { success: true };
   } catch (err: any) {
     diagnostics.aiGeneration = { success: false, error: err.message };
@@ -860,7 +1016,7 @@ export async function runOfferEngine(
     statusMessage = `Integrity check failed: ${primaryOffer.integrityResult.failures.join("; ")}`;
   }
 
-  const offerAlignmentValidation = validateOfferAlignment(primaryOffer, differentiation, audience);
+  const offerAlignmentValidation = validateOfferAlignment(primaryOffer, differentiation, audience, marketLanguage);
   diagnostics.offerAlignmentValidation = offerAlignmentValidation;
   if (!offerAlignmentValidation.aligned) {
     structuralWarnings.push(...offerAlignmentValidation.failures);

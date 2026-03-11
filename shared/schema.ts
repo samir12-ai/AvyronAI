@@ -1614,6 +1614,7 @@ export const differentiationSnapshots = pgTable("differentiation_snapshots", {
   claimStructures: text("claim_structures"),
   authorityMode: text("authority_mode"),
   mechanismFraming: text("mechanism_framing"),
+  mechanismCore: text("mechanism_core"),
   trustPriorityMap: text("trust_priority_map"),
   claimScores: text("claim_scores"),
   collisionDiagnostics: text("collision_diagnostics"),

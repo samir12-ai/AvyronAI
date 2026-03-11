@@ -198,6 +198,7 @@ export function registerIntegrityEngineRoutes(app: Express) {
       const differentiationInput = {
         pillars: safeJsonParse(diffSnapshot.differentiationPillars) || [],
         mechanismFraming: safeJsonParse(diffSnapshot.mechanismFraming),
+        mechanismCore: safeJsonParse((diffSnapshot as any).mechanismCore) || null,
         authorityMode: safeJsonParse(diffSnapshot.authorityMode)?.mode || null,
         claimStructures: safeJsonParse(diffSnapshot.claimStructures) || [],
         proofArchitecture: safeJsonParse(diffSnapshot.proofArchitecture) || [],

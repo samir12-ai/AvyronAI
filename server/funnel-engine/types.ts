@@ -36,9 +36,19 @@ export interface FunnelPositioningInput {
   narrativeDirection: string | null;
 }
 
+export interface MechanismCore {
+  mechanismName: string;
+  mechanismType: "method" | "system" | "protocol" | "framework" | "none";
+  mechanismSteps: string[];
+  mechanismPromise: string;
+  mechanismProblem: string;
+  mechanismLogic: string;
+}
+
 export interface FunnelDifferentiationInput {
   pillars: any[];
   mechanismFraming: any;
+  mechanismCore: MechanismCore | null;
   authorityMode: string | null;
   claimStructures: any[];
   proofArchitecture: any[];

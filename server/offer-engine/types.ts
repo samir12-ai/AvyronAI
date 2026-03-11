@@ -1,3 +1,10 @@
+export interface MarketLanguageMap {
+  rawPainPhrases: string[];
+  rawDesirePhrases: string[];
+  emotionalLanguage: string[];
+  objectionLanguage: string[];
+}
+
 export interface OfferMIInput {
   dominanceData: any;
   contentDnaData: any;
@@ -23,9 +30,19 @@ export interface OfferPositioningInput {
   narrativeDirection: string | null;
 }
 
+export interface MechanismCore {
+  mechanismName: string;
+  mechanismType: "method" | "system" | "protocol" | "framework" | "none";
+  mechanismSteps: string[];
+  mechanismPromise: string;
+  mechanismProblem: string;
+  mechanismLogic: string;
+}
+
 export interface OfferDifferentiationInput {
   pillars: any[];
   mechanismFraming: any;
+  mechanismCore: MechanismCore | null;
   authorityMode: string | null;
   claimStructures: any[];
   proofArchitecture: any[];

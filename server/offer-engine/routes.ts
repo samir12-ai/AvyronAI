@@ -163,6 +163,7 @@ export function registerOfferEngineRoutes(app: Express) {
       const differentiationInput = {
         pillars: safeJsonParse(activeDiffSnapshot.differentiationPillars) || [],
         mechanismFraming: safeJsonParse(activeDiffSnapshot.mechanismFraming),
+        mechanismCore: safeJsonParse((activeDiffSnapshot as any).mechanismCore) || null,
         authorityMode: safeJsonParse(activeDiffSnapshot.authorityMode)?.mode || null,
         claimStructures: safeJsonParse(activeDiffSnapshot.claimStructures) || [],
         proofArchitecture: safeJsonParse(activeDiffSnapshot.proofArchitecture) || [],
