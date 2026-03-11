@@ -33,7 +33,7 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
     - **Funnel Engine**: 8-layer decision engine for generating funnel outputs with trust paths and proof placement, including hard-fail boundary enforcement.
     - **Integrity Engine**: 8-layer validation engine for cross-engine consistency and overall integrity scoring.
     - **Awareness Engine**: 8-layer execution engine for awareness routes, readiness mapping, and trigger identification.
-    - **Persuasion Engine**: 8-layer logic engine for persuasion architecture (not copy/ads), focusing on influence drivers, objection priorities, and message order.
+    - **Persuasion Engine**: 8-layer logic engine for persuasion architecture (not copy/ads), focusing on influence drivers, objection priorities, and message order. Features Auto-Correction Layer (enforces AWARENESS_PERSUASION_MAP), separated Awareness Stage Properties from Trust Barriers, decoupled Message Architecture from Funnel Structure, and credibility-score-only Anti-Hype Guard.
     - **Differentiation Engine**: 12-layer engine for identifying unique selling propositions and generating **MechanismCore** (a structured mechanism object that serves as a single source of truth across other engines).
 - **Competitive Intelligence (MIv3)**: 6-layer pipeline for real-data competitor analysis, including narrative objection extraction and signal classification.
 - **Strategic Core Architecture**: A 6-phase sequential engine for comprehensive plan generation using AI Creative Blueprints.

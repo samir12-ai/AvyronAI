@@ -110,6 +110,20 @@ export interface TrustBarrierClassification {
   persuasionImplication: string;
 }
 
+export interface AwarenessStageProperty {
+  propertyType: string;
+  readinessStage: string;
+  description: string;
+  handlingLayer: string;
+}
+
+export interface AutoCorrection {
+  wasApplied: boolean;
+  originalMode: string;
+  correctedMode: string;
+  correctionReason: string;
+}
+
 export interface ObjectionProofLink {
   objectionCategory: string;
   objectionDetail: string;
@@ -150,6 +164,7 @@ export interface PersuasionRoute {
   frictionNotes: string[];
   rejectionReason: string | null;
   trustBarriers?: TrustBarrierClassification[];
+  awarenessStageProperties?: AwarenessStageProperty[];
   objectionProofLinks?: ObjectionProofLink[];
   structuredObjections?: StructuredObjection[];
   readinessAlignment?: {
@@ -189,5 +204,6 @@ export interface PersuasionResult {
   confidenceNormalized: boolean;
   executionTimeMs: number;
   engineVersion: number;
+  autoCorrection?: AutoCorrection;
   strategyAcceptability?: import("../shared/strategy-acceptability").StrategyAcceptability;
 }

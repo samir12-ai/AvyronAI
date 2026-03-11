@@ -30,6 +30,20 @@ interface TrustBarrier {
   persuasionImplication: string;
 }
 
+interface AwarenessStageProperty {
+  propertyType: string;
+  readinessStage: string;
+  description: string;
+  handlingLayer: string;
+}
+
+interface AutoCorrection {
+  wasApplied: boolean;
+  originalMode: string;
+  correctedMode: string;
+  correctionReason: string;
+}
+
 interface ObjectionProofLink {
   objectionCategory: string;
   objectionDetail: string;
@@ -49,6 +63,7 @@ interface PersuasionRoute {
   frictionNotes: string[];
   rejectionReason: string | null;
   trustBarriers?: TrustBarrier[];
+  awarenessStageProperties?: AwarenessStageProperty[];
   objectionProofLinks?: ObjectionProofLink[];
   readinessAlignment?: {
     stage: string;
@@ -77,6 +92,8 @@ interface PersuasionData {
   persuasionStrengthScore?: number;
   executionTimeMs?: number;
   createdAt?: string;
+  autoCorrection?: AutoCorrection;
+  confidenceNormalized?: boolean;
 }
 
 const LAYER_LABELS: Record<string, string> = {
@@ -229,6 +246,59 @@ export default function PersuasionEngine() {
     if (score >= 0.7) return '#10B981';
     if (score >= 0.4) return '#F59E0B';
     return '#EF4444';
+  };
+
+  const renderAutoCorrectionBanner = (correction: AutoCorrection | undefined) => {
+    if (!correction || !correction.wasApplied) return null;
+    return (
+      <View style={[styles.autoCorrectionCard, { backgroundColor: '#F59E0B' + '12', borderColor: '#F59E0B' + '40' }]}>
+        <View style={styles.autoCorrectionHeader}>
+          <Ionicons name="refresh-circle" size={16} color="#F59E0B" />
+          <Text style={[styles.autoCorrectionTitle, { color: '#F59E0B' }]}>Auto-Correction Applied</Text>
+        </View>
+        <View style={styles.autoCorrectionModes}>
+          <View style={[styles.modeChip, { backgroundColor: '#EF4444' + '15' }]}>
+            <Ionicons name="close-circle" size={11} color="#EF4444" />
+            <Text style={[styles.modeChipText, { color: '#EF4444' }]}>{MODE_LABELS[correction.originalMode] || correction.originalMode}</Text>
+          </View>
+          <Ionicons name="arrow-forward" size={12} color={colors.textMuted} />
+          <View style={[styles.modeChip, { backgroundColor: '#10B981' + '15' }]}>
+            <Ionicons name="checkmark-circle" size={11} color="#10B981" />
+            <Text style={[styles.modeChipText, { color: '#10B981' }]}>{MODE_LABELS[correction.correctedMode] || correction.correctedMode}</Text>
+          </View>
+        </View>
+        <Text style={[styles.autoCorrectionReason, { color: colors.textMuted }]}>{correction.correctionReason}</Text>
+      </View>
+    );
+  };
+
+  const renderAwarenessStageProperties = (props: AwarenessStageProperty[] | undefined) => {
+    if (!props || props.length === 0) return null;
+    const isExpanded = expandedSection === 'awareness_stage_props';
+    return (
+      <View style={[styles.routeSection]}>
+        <Pressable onPress={() => { Haptics.selectionAsync(); setExpandedSection(isExpanded ? null : 'awareness_stage_props'); }} style={styles.collapsibleHeader}>
+          <View style={styles.sectionHeaderLeft}>
+            <Ionicons name="eye" size={14} color="#14B8A6" />
+            <Text style={[styles.routeSectionTitle, { color: colors.textMuted }]}>Awareness Stage Properties ({props.length})</Text>
+          </View>
+          <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={14} color={colors.textMuted} />
+        </Pressable>
+        {isExpanded && props.map((prop, i) => (
+          <View key={i} style={[styles.barrierCard, { backgroundColor: '#14B8A6' + '08', borderLeftColor: '#14B8A6' }]}>
+            <View style={styles.barrierHeader}>
+              <View style={[styles.severityBadge, { backgroundColor: '#14B8A6' + '20' }]}>
+                <Text style={[styles.severityText, { color: '#14B8A6' }]}>STAGE PROPERTY</Text>
+              </View>
+              <Text style={[styles.barrierType, { color: colors.text }]}>{prop.propertyType.replace(/_/g, ' ')}</Text>
+            </View>
+            <Text style={[styles.barrierSource, { color: colors.textMuted }]}>Stage: {prop.readinessStage}</Text>
+            <Text style={[styles.barrierImplication, { color: colors.text }]}>{prop.description}</Text>
+            <Text style={[styles.barrierSource, { color: '#14B8A6' }]}>Handled by: {prop.handlingLayer}</Text>
+          </View>
+        ))}
+      </View>
+    );
   };
 
   const renderTrustBarriers = (barriers: TrustBarrier[]) => {
@@ -387,6 +457,7 @@ export default function PersuasionEngine() {
               </View>
             </View>
 
+            {type === 'primary' && renderAutoCorrectionBanner(data?.autoCorrection)}
             {type === 'primary' && renderReadinessAlignment(route.readinessAlignment)}
 
             {route.primaryInfluenceDrivers.length > 0 && (
@@ -414,6 +485,7 @@ export default function PersuasionEngine() {
               </View>
             )}
 
+            {type === 'primary' && renderAwarenessStageProperties(route.awarenessStageProperties)}
             {type === 'primary' && renderTrustBarriers(route.trustBarriers || [])}
             {type === 'primary' && renderObjectionProofLinks(route.objectionProofLinks || [])}
 
@@ -753,4 +825,11 @@ const styles = StyleSheet.create({
   scarcityCard: { borderRadius: 8, padding: 10, marginTop: 8 },
   scarcityHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
   scarcityTitle: { fontSize: 12, fontWeight: '600' as const },
+  autoCorrectionCard: { borderRadius: 10, padding: 12, marginBottom: 10, borderWidth: 1 },
+  autoCorrectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  autoCorrectionTitle: { fontSize: 13, fontWeight: '700' as const },
+  autoCorrectionModes: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  modeChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  modeChipText: { fontSize: 11, fontWeight: '600' as const },
+  autoCorrectionReason: { fontSize: 11, lineHeight: 15, fontStyle: 'italic' as const },
 });

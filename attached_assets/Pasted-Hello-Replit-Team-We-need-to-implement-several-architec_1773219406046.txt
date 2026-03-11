@@ -1,0 +1,99 @@
+Hello Replit Team,
+
+We need to implement several architectural corrections in the Persuasion Engine V3 and ensure that all changes are fully deployed across the entire system, including the frontend. A recurring issue is that fixes are applied only at the backend level while the frontend still runs old logic. This must stop. Any modification must be deployed system-wide and verified end-to-end.
+
+Below are the required corrections.
+
+---
+
+### 1. Automatic Strategy Correction (Auto-Correction Layer)
+Currently the engine can detect logical conflicts but does not correct them automatically. This creates weak strategies even though the system already knows the correct rule.
+
+Example:  
+If the audience awareness stage is Unaware, the persuasion entry must be Education-Led. If another mode such as Proof-Led is selected, the system should automatically correct it rather than simply flagging it.
+
+Required action:
+- Add an Auto-Correction Layer that enforces correct persuasion modes based on awareness stage.
+- When a rule conflict appears, the engine must rewrite the persuasion route automatically.
+- Diagnostics should remain visible, but the strategy output must always be logically valid.
+
+This ensures the engine produces self-correcting strategies instead of reporting errors only.
+
+---
+
+### 2. Awareness Stage vs Trust Barrier Separation
+The engine currently treats low awareness skepticism as a trust barrier. This is conceptually incorrect.
+
+Low trust in an unaware market is not a trust barrier.  
+It is simply a stage property of the awareness level.
+
+Required action:
+- Separate Awareness Stage Properties from Trust Barriers.
+- Only real credibility issues (lack of proof, reputation risk, inconsistency) should be classified as trust barriers.
+- Awareness-related skepticism should be handled in the awareness logic layer instead.
+
+This correction will significantly improve the accuracy of trust mapping.
+
+---
+
+### 3. Message Architecture vs Funnel Architecture Separation
+The system currently assumes that persuasion message steps must match funnel stages. This is incorrect and creates false warnings.
+
+Message architecture and funnel architecture operate at different levels.
+
+Example:
+A funnel may have 5 stages while persuasion messaging may require 8 steps inside those stages.
+
+Required action:
+- Decouple Message Architecture from Funnel Structure.
+- Allow multiple persuasion steps within a single funnel stage.
+- Remove the warning that message steps exceed funnel capacity.
+
+This will prevent valid persuasion flows from being incorrectly penalized.
+
+---
+
+### 4. Maintain Anti-Hype Guard Behavior
+The current Anti-Hype Guard is working correctly by detecting exaggerated language (for example “effortless”).  
+This behavior should remain intact.
+
+However:
+- Warnings should reduce persuasion credibility scoring, not break the strategy flow.
+- Ensure the guard remains part of the persuasion integrity layer.
+
+---
+
+### 5. Mandatory Full Deployment (Backend + Frontend)
+This is critical.
+
+Every fix must be:
+
+1. Implemented in the backend logic  
+2. Reflected in the API responses  
+3. Rendered correctly in the frontend interface  
+4. Tested end-to-end
+
+We keep encountering a situation where the backend logic changes but the frontend still uses the previous structure.
+
+Required action:
+- Apply updates to all layers of the system
+- Restart services where needed
+- Confirm the frontend is using the latest engine outputs
+
+No patch should be considered complete until the frontend and backend are synchronized.
+
+---
+
+### Final Goal
+The objective is to make the Persuasion Engine:
+
+- Self-correcting instead of only diagnostic
+- Architecturally consistent with awareness logic
+- Structurally independent from funnel constraints
+- Fully synchronized between backend and frontend
+
+Once implemented, the engine should produce clean persuasion architectures without internal contradictions and the interface should reflect the corrected strategy outputs.
+
+Please confirm once the fixes are implemented and deployed system-wide.
+
+Best regards,

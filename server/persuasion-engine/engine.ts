@@ -38,6 +38,8 @@ import type {
   PersuasionResult,
   DataReliabilityDiagnostics,
   TrustBarrierClassification,
+  AwarenessStageProperty,
+  AutoCorrection,
   ObjectionProofLink,
   StructuredObjection,
 } from "./types";
@@ -316,18 +318,19 @@ function classifyTrustBarriers(
   differentiation: PersuasionDifferentiationInput,
   offer: PersuasionOfferInput,
   mi: PersuasionMIInput,
-): TrustBarrierClassification[] {
+): { trustBarriers: TrustBarrierClassification[]; awarenessStageProperties: AwarenessStageProperty[] } {
   const barriers: TrustBarrierClassification[] = [];
+  const awarenessProps: AwarenessStageProperty[] = [];
   const readiness = safeString(awareness.targetReadinessStage, "unknown");
   const trustReq = safeString(awareness.trustRequirement, "medium");
   const maturity = safeNumber(audience.maturityIndex, 0.5);
 
   if (isLowReadiness(readiness)) {
-    barriers.push({
-      barrierType: "low_awareness_skepticism",
-      severity: readiness === "unaware" ? "critical" : "high",
-      source: `Audience readiness: ${readiness}`,
-      persuasionImplication: "Education and problem recognition must precede any proof-based persuasion",
+    awarenessProps.push({
+      propertyType: "low_awareness_skepticism",
+      readinessStage: readiness,
+      description: `Skepticism in "${readiness}" audiences is a natural stage property, not a trust barrier. Audience does not yet have sufficient context to evaluate credibility claims.`,
+      handlingLayer: "awareness_to_persuasion_fit — education-first sequence required before any proof or commitment logic",
     });
   }
 
@@ -390,7 +393,7 @@ function classifyTrustBarriers(
     });
   }
 
-  return barriers;
+  return { trustBarriers: barriers, awarenessStageProperties: awarenessProps };
 }
 
 function buildObjectionProofLinks(
@@ -1106,9 +1109,8 @@ function layer6_messageOrderLogic(
   findings.push(`Context-sensitive message order: ${sequence.join(" → ")}`);
 
   const stageCount = (funnel.stageMap || []).length;
-  if (stageCount > 0 && sequence.length > stageCount + 2) {
-    warnings.push(`Persuasion sequence (${sequence.length} steps) may exceed funnel capacity (${stageCount} stages)`);
-    score -= 0.05;
+  if (stageCount > 0) {
+    findings.push(`Message architecture operates independently from funnel structure — persuasion steps (${sequence.length}) may span across ${stageCount} funnel stage(s), with multiple persuasion steps within each stage`);
   }
 
   return { layerName: "message_order_logic", passed: score >= 0.4, score: clamp(score), findings, warnings };
@@ -1160,7 +1162,7 @@ function layer7_antiHypeGuard(
     findings.push("No hype patterns detected — persuasion structure is grounded");
   } else {
     score -= hypeCount * 0.1;
-    warnings.push(`${hypeCount} hype pattern(s) detected — persuasion credibility at risk`);
+    warnings.push(`${hypeCount} hype pattern(s) detected — credibility score reduced by ${hypeCount * 10}pts; strategy flow continues with adjusted scoring`);
   }
 
   let genericCount = 0;
@@ -1345,6 +1347,31 @@ function selectPersuasionMode(
   return awarenessDefault || "education_led";
 }
 
+const AWARENESS_COMPATIBLE_MODES: Record<string, string[]> = {
+  unaware: ["education_led", "diagnostic_led"],
+  problem_aware: ["empathy_led", "diagnostic_led", "education_led"],
+  solution_aware: ["contrast_led", "logic_led", "diagnostic_led"],
+  product_aware: ["proof_led", "authority_led", "social_proof_led"],
+  most_aware: ["proof_led", "authority_led", "logic_led"],
+};
+
+function applyAutoCorrection(selectedMode: string, readiness: string): AutoCorrection {
+  const canonicalMode = AWARENESS_PERSUASION_MAP[readiness];
+  if (!canonicalMode) {
+    return { wasApplied: false, originalMode: selectedMode, correctedMode: selectedMode, correctionReason: "" };
+  }
+  const compatibleModes = AWARENESS_COMPATIBLE_MODES[readiness] || [canonicalMode];
+  if (compatibleModes.includes(selectedMode)) {
+    return { wasApplied: false, originalMode: selectedMode, correctedMode: selectedMode, correctionReason: "" };
+  }
+  return {
+    wasApplied: true,
+    originalMode: selectedMode,
+    correctedMode: canonicalMode,
+    correctionReason: `Mode "${selectedMode}" conflicts with "${readiness}" audience stage — auto-corrected to "${canonicalMode}" per Awareness-Persuasion Map rule`,
+  };
+}
+
 function validatePersuasionRouteAgainstFunnel(
   mode: string,
   funnel: PersuasionFunnelInput,
@@ -1419,7 +1446,9 @@ function buildPersuasionRoutes(
   mi: PersuasionMIInput,
   layerResults: LayerResult[],
   trustBarriers: TrustBarrierClassification[],
+  awarenessStageProperties: AwarenessStageProperty[],
   objectionProofLinks: ObjectionProofLink[],
+  autoCorrection: AutoCorrection,
   structuredObjections?: StructuredObjection[],
 ): { primary: PersuasionRoute; alternative: PersuasionRoute; rejected: PersuasionRoute } {
   const l4 = layerResults.find(l => l.layerName === "influence_driver_selection");
@@ -1428,11 +1457,19 @@ function buildPersuasionRoutes(
 
   let primaryMode = selectPersuasionMode(awareness, audience, differentiation, funnel);
 
+  if (autoCorrection.wasApplied) {
+    primaryMode = autoCorrection.correctedMode;
+  }
+
   const funnelValidation = validatePersuasionRouteAgainstFunnel(primaryMode, funnel, awareness, trustBarriers);
   const routeWarnings: string[] = [...funnelValidation.warnings];
   if (!funnelValidation.valid && funnelValidation.suggestedMode) {
     routeWarnings.push(`Mode downgraded from "${primaryMode}" to "${funnelValidation.suggestedMode}" for funnel compatibility`);
     primaryMode = funnelValidation.suggestedMode;
+  }
+
+  if (autoCorrection.wasApplied) {
+    routeWarnings.unshift(`AUTO-CORRECTION APPLIED: ${autoCorrection.correctionReason}`);
   }
 
   const driverFindings = (l4?.findings || []).find(f => f.startsWith("Selected influence drivers:"));
@@ -1497,6 +1534,7 @@ function buildPersuasionRoutes(
     frictionNotes: [...(awareness.frictionNotes || []).slice(0, 3), ...routeWarnings],
     rejectionReason: null,
     trustBarriers,
+    awarenessStageProperties,
     objectionProofLinks,
     structuredObjections: structuredObjections || [],
     readinessAlignment,
@@ -1624,7 +1662,7 @@ export function analyzePersuasion(
 
   const reliability = assessDataReliability(mi, audience, positioning, differentiation, offer, awareness, structuredObjections);
 
-  const trustBarriers = classifyTrustBarriers(audience, awareness, differentiation, offer, mi);
+  const { trustBarriers, awarenessStageProperties } = classifyTrustBarriers(audience, awareness, differentiation, offer, mi);
   const objectionProofLinks = buildObjectionProofLinks(audience, differentiation, offer, awareness, mi);
 
   const l1 = layer1_awarenessToPersuasionFit(awareness, audience, funnel);
@@ -1637,7 +1675,11 @@ export function analyzePersuasion(
 
   const preFinalLayers = [l1, l2, l3, l4, l5, l6, l7];
 
-  const selectedMode = selectPersuasionMode(awareness, audience, differentiation, funnel);
+  const rawSelectedMode = selectPersuasionMode(awareness, audience, differentiation, funnel);
+  const readinessStage = safeString(awareness.targetReadinessStage, "unknown");
+  const autoCorrection = applyAutoCorrection(rawSelectedMode, readinessStage);
+  const selectedMode = autoCorrection.wasApplied ? autoCorrection.correctedMode : rawSelectedMode;
+
   const l8 = layer8_persuasionStrengthScoring(preFinalLayers, awareness, trustBarriers, objectionProofLinks, funnel, selectedMode);
 
   const allLayers = [...preFinalLayers, l8];
@@ -1656,7 +1698,7 @@ export function analyzePersuasion(
     structuralWarnings.push("WARNING: Trust specificity is weak — trust barrier mapping may lack precision");
   }
 
-  const routes = buildPersuasionRoutes(audience, awareness, differentiation, offer, funnel, mi, allLayers, trustBarriers, objectionProofLinks, structuredObjections);
+  const routes = buildPersuasionRoutes(audience, awareness, differentiation, offer, funnel, mi, allLayers, trustBarriers, awarenessStageProperties, objectionProofLinks, autoCorrection, structuredObjections);
 
   const outputText = [
     routes.primary.routeName,
@@ -1727,6 +1769,7 @@ export function analyzePersuasion(
     confidenceNormalized: reliability.isWeak || reliability.overallReliability < 0.6,
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,
+    autoCorrection,
     strategyAcceptability: acceptability,
   };
 }
