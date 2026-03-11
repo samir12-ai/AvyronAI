@@ -39,6 +39,11 @@ import FunnelEngine from '@/components/FunnelEngine';
 import IntegrityEngine from '@/components/IntegrityEngine';
 import AwarenessEngine from '@/components/AwarenessEngine';
 import PersuasionEngine from '@/components/PersuasionEngine';
+import StatisticalValidationEngine from '@/components/StatisticalValidationEngine';
+import BudgetGovernorEngine from '@/components/BudgetGovernorEngine';
+import ChannelSelectionEngine from '@/components/ChannelSelectionEngine';
+import IterationEngine from '@/components/IterationEngine';
+import RetentionEngine from '@/components/RetentionEngine';
 import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
 
 interface AIAudience {
@@ -58,7 +63,7 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'strategies' | 'positioning' | 'differentiation' | 'offers' | 'funnels' | 'integrity' | 'awareness' | 'persuasion' | 'control' | 'marketdb' | 'publisher' | 'audience' | 'leads';
+type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'strategies' | 'positioning' | 'differentiation' | 'offers' | 'funnels' | 'integrity' | 'awareness' | 'persuasion' | 'statistical_validation' | 'budget_governor' | 'channel_selection' | 'iteration' | 'retention' | 'control' | 'marketdb' | 'publisher' | 'audience' | 'leads';
 
 interface AIMgmtPersistedState {
   activeTab: TabView;
@@ -379,6 +384,11 @@ export default function AIManagementScreen() {
     { key: 'integrity', icon: 'shield-checkmark-outline', label: 'Integrity Engine', color: '#6366F1', description: 'Final validation gate — 8-layer strategic consistency check before execution' },
     { key: 'awareness', icon: 'eye-outline', label: 'Awareness Engine', color: '#F97316', description: '8-layer awareness architecture — entry routes, readiness mapping, and trigger classes' },
     { key: 'persuasion', icon: 'megaphone-outline', label: 'Persuasion Engine', color: '#EC4899', description: '8-layer persuasion logic — influence drivers, objection mapping, and trust sequencing' },
+    { key: 'statistical_validation', icon: 'stats-chart-outline', label: 'Statistical Validation', color: '#06B6D4', description: 'Evidence density evaluation — validates claims against real MI signals' },
+    { key: 'budget_governor', icon: 'wallet-outline', label: 'Budget Governor', color: '#F59E0B', description: 'Multi-factor risk scoring — test/scale/hold/halt budget decisions' },
+    { key: 'channel_selection', icon: 'git-branch-outline', label: 'Channel Selection', color: '#3B82F6', description: '16-channel scoring across 8 layers — audience density and mode compatibility' },
+    { key: 'iteration', icon: 'repeat-outline', label: 'Iteration Engine', color: '#F43F5E', description: 'Optimization opportunities — test hypotheses and controlled experimentation' },
+    { key: 'retention', icon: 'heart-outline', label: 'Retention Engine', color: '#059669', description: 'Retention leverage points — churn risks, LTV expansion, and upsell triggers' },
   ];
 
   const renderStrategiesBranch = () => (
@@ -1204,6 +1214,11 @@ export default function AIManagementScreen() {
           : activeTab === 'integrity' ? <CampaignGuard><IntegrityEngine /></CampaignGuard>
           : activeTab === 'awareness' ? <CampaignGuard><AwarenessEngine /></CampaignGuard>
           : activeTab === 'persuasion' ? <CampaignGuard><PersuasionEngine /></CampaignGuard>
+          : activeTab === 'statistical_validation' ? <CampaignGuard><StatisticalValidationEngine /></CampaignGuard>
+          : activeTab === 'budget_governor' ? <CampaignGuard><BudgetGovernorEngine /></CampaignGuard>
+          : activeTab === 'channel_selection' ? <CampaignGuard><ChannelSelectionEngine /></CampaignGuard>
+          : activeTab === 'iteration' ? <CampaignGuard><IterationEngine /></CampaignGuard>
+          : activeTab === 'retention' ? <CampaignGuard><RetentionEngine /></CampaignGuard>
           : activeTab === 'control' ? renderControlCenter()
 
           : activeTab === 'marketdb' ? <MarketDatabaseAdmin />
