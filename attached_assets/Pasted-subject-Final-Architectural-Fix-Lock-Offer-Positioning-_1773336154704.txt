@@ -1,0 +1,71 @@
+subject=“Final Architectural Fix — Lock Offer–Positioning Alignment and Close Remaining Engine Gaps”}
+Team,
+
+Thank you for the continued progress. The recent guard correctly detected a POSITIONING_MISMATCH, which confirms the system is now catching structural inconsistencies. However, we must close this issue definitively so the Offer Engine can operate reliably without repeated regeneration cycles.
+
+After reviewing the latest output, the remaining problem is clear: the Offer Engine is still capable of generating hooks and mechanisms that originate from different strategic axes than the Positioning Engine. This must be eliminated at the architectural level.
+
+⸻
+
+Root Issue
+
+Currently the flow allows this situation:
+
+Positioning Axis → A
+Hook Axis → B
+Mechanism Axis → C
+
+This produces offers where the problem framing and the solution mechanism belong to different strategies (for example: anti-ads messaging paired with a community mechanism). The guard blocks it correctly, but the engine should never generate this configuration in the first place.
+
+⸻
+
+Required Final Correction
+
+The Offer Engine must be strictly constrained by the Positioning Engine output.
+
+Implementation requirements:
+	1.	Positioning Lock
+The Offer Engine must read the contrast axis from the Positioning Engine and treat it as a locked constraint.
+All offer elements must be generated within this axis.
+	2.	Axis Consistency Enforcement
+The following components must derive from the same axis:
+	•	Hook
+	•	Outcome
+	•	Mechanism
+	•	Proof framing
+	3.	Mechanism Framing Alignment
+Mechanism naming and description must match the differentiation mechanism framing. If the differentiation engine defines a mechanism family, the Offer Engine must not invent unrelated mechanisms.
+	4.	Pre-Generation Constraint Check
+Before generating an offer, the engine must validate that the selected hook direction, mechanism direction, and positioning axis are compatible.
+	5.	Regeneration Logic
+If incompatibility is detected:
+	•	regenerate the offer within the correct axis, or
+	•	return POSITIONING_ALIGNMENT_REQUIRED.
+
+The engine should not produce an offer that is later rejected by the guard.
+
+⸻
+
+Strict Acceptance Criteria
+
+Please treat the following as hard requirements before marking the task complete:
+
+• Hook, outcome, and mechanism must originate from the same positioning axis.
+• Mechanism framing must match the differentiation mechanism architecture.
+• No offer may pass if the positioning guard detects a mismatch.
+• Regeneration must automatically resolve the mismatch rather than repeatedly producing invalid outputs.
+• The frontend must display only offers that pass positioning integrity checks.
+
+Acceptance should be extremely strict to avoid future structural regressions.
+
+⸻
+
+Important Reminder
+
+Several previous fixes were implemented in backend logic but were not consistently reflected in the frontend snapshots or regeneration flow. Please verify that this correction is applied system-wide, including the UI layer, so that positioning guards, regeneration, and offer display remain synchronized.
+
+⸻
+
+Once these constraints are enforced, the Offer Engine should consistently produce offers that align with the system’s positioning architecture and eliminate the recurring mismatch issue.
+
+Thank you for addressing this thoroughly so we can stabilize this component and move forward.

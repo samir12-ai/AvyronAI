@@ -165,6 +165,146 @@ export function scoreOutcomePrecision(outcomeText: string): { score: number; isV
   return { score: clamp(score), isVague, hasPrecisionMarker };
 }
 
+export interface PositioningLock {
+  locked: boolean;
+  contrastAxis: string | null;
+  enemyDefinition: string | null;
+  narrativeDirection: string | null;
+  mechanismFamily: string | null;
+  mechanismName: string | null;
+  axisTokens: string[];
+  problemDomain: string | null;
+  solutionDomain: string | null;
+}
+
+export function buildPositioningLock(
+  positioning: OfferPositioningInput,
+  differentiation: OfferDifferentiationInput,
+): PositioningLock {
+  const contrastAxis = (positioning.contrastAxis || "").trim();
+  const enemyDefinition = (positioning.enemyDefinition || "").trim();
+  const narrativeDirection = (positioning.narrativeDirection || "").trim();
+
+  const mechanism = differentiation.mechanismFraming || {};
+  const core = differentiation.mechanismCore;
+  const mechanismFamily = mechanism.supported ? (mechanism.type || "none") : "none";
+  const mechanismName = core && core.mechanismType !== "none" ? core.mechanismName : null;
+
+  const extractTokens = (text: string): string[] =>
+    text.toLowerCase().split(/[\s,.\-/]+/).filter(t => t.length > 2);
+  const axisTokens = [...new Set([
+    ...extractTokens(contrastAxis),
+    ...extractTokens(enemyDefinition),
+  ])];
+
+  let problemDomain: string | null = null;
+  let solutionDomain: string | null = null;
+
+  if (contrastAxis) {
+    const vsMatch = contrastAxis.match(/(.+?)\s+(?:vs\.?|versus|instead of|not|rather than)\s+(.+)/i);
+    if (vsMatch) {
+      problemDomain = vsMatch[1].trim();
+      solutionDomain = vsMatch[2].trim();
+    } else {
+      problemDomain = contrastAxis;
+    }
+  }
+
+  if (!problemDomain && core && core.mechanismProblem) {
+    problemDomain = core.mechanismProblem;
+  }
+  if (!solutionDomain && mechanismName) {
+    solutionDomain = mechanismName;
+  }
+
+  const locked = !!(contrastAxis || enemyDefinition || mechanismName);
+
+  return {
+    locked,
+    contrastAxis: contrastAxis || null,
+    enemyDefinition: enemyDefinition || null,
+    narrativeDirection: narrativeDirection || null,
+    mechanismFamily: mechanismFamily !== "none" ? mechanismFamily : null,
+    mechanismName,
+    axisTokens,
+    problemDomain,
+    solutionDomain,
+  };
+}
+
+export function validatePreGenerationConstraints(
+  lock: PositioningLock,
+  differentiation: OfferDifferentiationInput,
+): { compatible: boolean; issues: string[] } {
+  const issues: string[] = [];
+
+  if (lock.locked && !lock.contrastAxis && !lock.mechanismName) {
+    issues.push("Positioning lock is active but has no contrast axis and no mechanism name — axis alignment cannot be enforced");
+  }
+
+  const mechanism = differentiation.mechanismFraming || {};
+  const core = differentiation.mechanismCore;
+
+  if (lock.mechanismFamily && mechanism.supported && mechanism.type) {
+    if (lock.mechanismFamily !== mechanism.type && mechanism.type !== "none") {
+      issues.push(`Mechanism family mismatch: lock="${lock.mechanismFamily}" vs differentiation="${mechanism.type}"`);
+    }
+  }
+
+  if (lock.mechanismName && core && core.mechanismName) {
+    if (lock.mechanismName !== core.mechanismName) {
+      issues.push(`Mechanism name mismatch in lock: "${lock.mechanismName}" vs core: "${core.mechanismName}"`);
+    }
+  }
+
+  return { compatible: issues.length === 0, issues };
+}
+
+export function clampOfferToAxis(
+  offerName: string,
+  coreOutcome: string,
+  mechanismDescription: string,
+  lock: PositioningLock,
+): { offerName: string; coreOutcome: string; mechanismDescription: string; clamped: boolean; clampActions: string[] } {
+  if (!lock.locked) {
+    return { offerName, coreOutcome, mechanismDescription, clamped: false, clampActions: [] };
+  }
+
+  const clampActions: string[] = [];
+  let clampedName = offerName;
+  let clampedOutcome = coreOutcome;
+  let clampedMech = mechanismDescription;
+
+  if (lock.mechanismName) {
+    const mechLower = mechanismDescription.toLowerCase();
+    const nameLower = lock.mechanismName.toLowerCase();
+    if (!mechLower.includes(nameLower)) {
+      clampedMech = `${lock.mechanismName}: ${mechanismDescription}`;
+      clampActions.push(`Mechanism clamped — prepended locked mechanism name "${lock.mechanismName}"`);
+    }
+  }
+
+  if (lock.problemDomain) {
+    const problemTokens = lock.problemDomain.toLowerCase().split(/[\s,.\-/]+/).filter(t => t.length > 3);
+    const nameHasProblem = problemTokens.some(t => clampedName.toLowerCase().includes(t));
+    const outcomeHasProblem = problemTokens.some(t => clampedOutcome.toLowerCase().includes(t));
+    const mechHasProblem = problemTokens.some(t => clampedMech.toLowerCase().includes(t));
+
+    if (!nameHasProblem && !outcomeHasProblem && !mechHasProblem && problemTokens.length > 0) {
+      clampedOutcome = `${clampedOutcome} — addressing ${lock.problemDomain}`;
+      clampActions.push(`Outcome clamped — appended problem domain "${lock.problemDomain}"`);
+    }
+  }
+
+  return {
+    offerName: clampedName,
+    coreOutcome: clampedOutcome,
+    mechanismDescription: clampedMech,
+    clamped: clampActions.length > 0,
+    clampActions,
+  };
+}
+
 export function layer1_outcomeConstruction(
   audience: OfferAudienceInput,
   positioning: OfferPositioningInput,
@@ -214,7 +354,7 @@ export function layer1_outcomeConstruction(
   const outcomePrecision = scoreOutcomePrecision(primaryOutcome);
   if (outcomePrecision.isVague) {
     specificityScore = clamp(specificityScore - 0.15);
-    console.log(`[OfferEngine-V3] OUTCOME_PRECISION | vague outcome detected — specificity penalized`);
+    console.log(`[OfferEngine-V4] OUTCOME_PRECISION | vague outcome detected — specificity penalized`);
   }
   if (outcomePrecision.hasPrecisionMarker) {
     specificityScore = clamp(specificityScore + 0.1);
@@ -274,7 +414,7 @@ export function layer2_mechanismAlignment(
     const clarityPenalty = clarity.isVague ? 0.15 : 0;
     const credibilityScore = clamp(0.7 + stepsBonus + clarityBonus - clarityPenalty);
     if (clarity.isVague) {
-      console.log(`[OfferEngine-V3] MECHANISM_CLARITY | vague mechanism description detected — credibility penalized`);
+      console.log(`[OfferEngine-V4] MECHANISM_CLARITY | vague mechanism description detected — credibility penalized`);
     }
     return { mechanismType, mechanismDescription, differentiationLink, credibilityScore };
   }
@@ -405,11 +545,11 @@ export function layer4_proofAlignment(
       }
     }
     const mappedCount = Object.keys(objectionProofMapping).length;
-    console.log(`[OfferEngine-V3] PROOF_OBJECTION_MAP | ${mappedCount} proof types mapped to specific objections: ${Object.entries(objectionProofMapping).map(([k, v]) => `${k}→[${v.length}]`).join(", ")}`);
+    console.log(`[OfferEngine-V4] PROOF_OBJECTION_MAP | ${mappedCount} proof types mapped to specific objections: ${Object.entries(objectionProofMapping).map(([k, v]) => `${k}→[${v.length}]`).join(", ")}`);
   }
 
   if (!hasObjectionSignals && proofTypes.size > 0) {
-    console.log(`[OfferEngine-V3] PROOF_SIGNAL_GATE | objection signals absent — skipped ${[...objectionRequiredProofs].filter(p => !proofTypes.has(p)).length} objection-required proof types`);
+    console.log(`[OfferEngine-V4] PROOF_SIGNAL_GATE | objection signals absent — skipped ${[...objectionRequiredProofs].filter(p => !proofTypes.has(p)).length} objection-required proof types`);
   }
 
   const alignedProofTypes = Array.from(proofTypes);
@@ -1024,6 +1164,8 @@ export async function aiOfferGeneration(
   accountId: string,
   marketLanguage?: MarketLanguageMap,
   qualifyingSignals?: QualifyingSignal[],
+  positioningLock?: PositioningLock,
+  axisCorrection?: { previousFailures: string[]; attempt: number },
 ): Promise<{ primary: { name: string; outcome: string; mechanism: string; deliverables: string[] }; alternative: { name: string; outcome: string; mechanism: string; deliverables: string[] }; rejected: { name: string; outcome: string; mechanism: string; deliverables: string[]; rejectionReason: string } }> {
   const pains = audience.audiencePains || [];
   const desires = Object.entries(audience.desireMap || {});
@@ -1049,12 +1191,42 @@ export async function aiOfferGeneration(
     ? core!.mechanismSteps.map((step, i) => `  Step ${i + 1}: "${step}"`).join("\n")
     : pillars.slice(0, 4).map((p: any, i: number) => `  Step ${i + 1}: "${p.name || p.territory || "component"}"`).join("\n");
 
+  const lockSection = positioningLock?.locked ? `
+═══ POSITIONING AXIS LOCK (IMMUTABLE — ALL OFFERS MUST COMPLY) ═══
+The following positioning axis is LOCKED. Every element you generate MUST operate within this axis.
+${positioningLock.contrastAxis ? `LOCKED CONTRAST AXIS: "${positioningLock.contrastAxis}"` : ""}
+${positioningLock.enemyDefinition ? `LOCKED ENEMY: "${positioningLock.enemyDefinition}"` : ""}
+${positioningLock.problemDomain ? `LOCKED PROBLEM DOMAIN: "${positioningLock.problemDomain}"` : ""}
+${positioningLock.solutionDomain ? `LOCKED SOLUTION DOMAIN: "${positioningLock.solutionDomain}"` : ""}
+${positioningLock.mechanismName ? `LOCKED MECHANISM: "${positioningLock.mechanismName}"` : ""}
+${positioningLock.mechanismFamily ? `LOCKED MECHANISM FAMILY: "${positioningLock.mechanismFamily}"` : ""}
+
+AXIS LOCK RULES (VIOLATION = AUTOMATIC REJECTION):
+1. The offer hook/name MUST frame the problem using the LOCKED PROBLEM DOMAIN above.
+2. The mechanism MUST solve the EXACT problem stated in the hook using the LOCKED MECHANISM.
+3. The outcome MUST describe results that directly follow from solving the LOCKED PROBLEM DOMAIN.
+4. ALL THREE (hook, mechanism, outcome) must exist on the SAME strategic axis.
+5. DO NOT introduce any problem framing, mechanism, or solution that falls outside the locked axis.
+6. EXAMPLE OF VIOLATION: Hook about "wasting money on ads" + Mechanism about "community building" = REJECTED (different axes).
+7. EXAMPLE OF COMPLIANCE: Hook about "wasting money on ads" + Mechanism that "eliminates ad waste via [locked mechanism name]" = ACCEPTED (same axis).
+` : "";
+
+  const correctionSection = axisCorrection ? `
+═══ AXIS CORRECTION (PREVIOUS ATTEMPT FAILED — READ CAREFULLY) ═══
+This is attempt ${axisCorrection.attempt}. The previous generation was REJECTED because:
+${axisCorrection.previousFailures.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}
+
+You MUST fix these specific issues. Generate offers that directly address these failures.
+Do NOT repeat the same mistake. The hook, mechanism, and outcome MUST all reference the same problem domain.
+` : "";
+
   const prompt = `You are an Offer Architect. Generate three offer concepts.
 
 ABSOLUTE RULES:
 - Do NOT generate funnel architecture, advertising strategy, channel selection, media planning, budget recommendations, campaign execution, sales scripts, or strategic master plan decisions
 - Do NOT include financial advisory claims (eliminating debt, increasing savings, building net worth, financial freedom). Use outcome-oriented language instead.
 - Respond with ONLY valid JSON, no markdown${mechLockInstruction}
+${lockSection}${correctionSection}
 
 ═══ SECTION 1: AUDIENCE PAIN LANGUAGE (use these exact words) ═══
 ${painPhrases.length > 0 ? `Raw Pain Phrases: ${JSON.stringify(painPhrases)}` : "No raw pain phrases available"}
@@ -1190,7 +1362,7 @@ export async function runOfferEngine(
   const startTime = Date.now();
   const diagnostics: Record<string, any> = {};
 
-  console.log(`[OfferEngine-V3] Starting 5-layer pipeline`);
+  console.log(`[OfferEngine-V4] Starting 5-layer pipeline`);
 
   const qualifyingSignals = extractQualifyingSignals(upstreamLineage);
   diagnostics.signalAnchoring = {
@@ -1198,10 +1370,10 @@ export async function runOfferEngine(
     qualifyingSignals: qualifyingSignals.length,
     minRequired: MIN_QUALIFYING_SIGNALS,
   };
-  console.log(`[OfferEngine-V3] SIGNAL_CHECK | upstream=${upstreamLineage.length} | qualifying=${qualifyingSignals.length} | min=${MIN_QUALIFYING_SIGNALS}`);
+  console.log(`[OfferEngine-V4] SIGNAL_CHECK | upstream=${upstreamLineage.length} | qualifying=${qualifyingSignals.length} | min=${MIN_QUALIFYING_SIGNALS}`);
 
   if (qualifyingSignals.length < MIN_QUALIFYING_SIGNALS) {
-    console.log(`[OfferEngine-V3] SIGNAL_INSUFFICIENT | qualifying=${qualifyingSignals.length} < min=${MIN_QUALIFYING_SIGNALS} — cannot generate grounded claims`);
+    console.log(`[OfferEngine-V4] SIGNAL_INSUFFICIENT | qualifying=${qualifyingSignals.length} < min=${MIN_QUALIFYING_SIGNALS} — cannot generate grounded claims`);
     const emptyOffer = buildEmptyOffer();
     const acceptability = assessStrategyAcceptability(0, 0, 5, false, ["Insufficient upstream signals for grounded claim generation"]);
     return {
@@ -1239,11 +1411,11 @@ export async function runOfferEngine(
   );
   diagnostics.dataReliability = dataReliability;
   if (dataReliability.isWeak) {
-    console.log(`[OfferEngine-V3] WEAK_DATA | reliability=${dataReliability.overallReliability.toFixed(2)} | advisories=${dataReliability.advisories.length}`);
+    console.log(`[OfferEngine-V4] WEAK_DATA | reliability=${dataReliability.overallReliability.toFixed(2)} | advisories=${dataReliability.advisories.length}`);
   }
 
   if (pillars.length === 0 && claims.length === 0) {
-    console.log(`[OfferEngine-V3] Insufficient differentiation data — returning red-grade adaptive fallback`);
+    console.log(`[OfferEngine-V4] Insufficient differentiation data — returning red-grade adaptive fallback`);
     const emptyOffer = buildEmptyOffer();
     const acceptability = assessStrategyAcceptability(0, 0, 5, false, ["Differentiation data insufficient"]);
     return {
@@ -1272,7 +1444,7 @@ export async function runOfferEngine(
     emotionalCount: marketLanguage.emotionalLanguage.length,
     objectionCount: marketLanguage.objectionLanguage.length,
   };
-  console.log(`[OfferEngine-V3] MarketLanguageMap | pains=${marketLanguage.rawPainPhrases.length} | desires=${marketLanguage.rawDesirePhrases.length} | emotional=${marketLanguage.emotionalLanguage.length} | objections=${marketLanguage.objectionLanguage.length}`);
+  console.log(`[OfferEngine-V4] MarketLanguageMap | pains=${marketLanguage.rawPainPhrases.length} | desires=${marketLanguage.rawDesirePhrases.length} | emotional=${marketLanguage.emotionalLanguage.length} | objections=${marketLanguage.objectionLanguage.length}`);
 
   const l1Outcome = layer1_outcomeConstruction(audience, positioning, differentiation, marketLanguage);
   diagnostics.layer1 = { specificityScore: l1Outcome.specificityScore };
@@ -1289,7 +1461,7 @@ export async function runOfferEngine(
   );
   const hasObjectionSignals = objectionSignals.length > 0;
   const objectionContext = objectionSignals.map(s => ({ text: s.text, category: s.category }));
-  console.log(`[OfferEngine-V3] PROOF_GATE | objectionSignals=${objectionSignals.length} | hasObjectionSignals=${hasObjectionSignals}`);
+  console.log(`[OfferEngine-V4] PROOF_GATE | objectionSignals=${objectionSignals.length} | hasObjectionSignals=${hasObjectionSignals}`);
 
   const l4Proof = layer4_proofAlignment(differentiation, hasObjectionSignals, objectionContext);
   diagnostics.layer4 = { proofTypes: l4Proof.alignedProofTypes.length, strength: l4Proof.proofStrength, gaps: l4Proof.proofGaps, objectionGated: !hasObjectionSignals, objectionMapped: objectionContext.length };
@@ -1297,9 +1469,19 @@ export async function runOfferEngine(
   const l5Risk = layer5_riskReduction(audience, l4Proof);
   diagnostics.layer5 = { reducers: l5Risk.riskReducers.length, buyerConfidence: l5Risk.buyerConfidenceScore };
 
+  const posLock = buildPositioningLock(positioning, differentiation);
+  diagnostics.positioningLock = posLock;
+  console.log(`[OfferEngine-V4] POSITIONING_LOCK | locked=${posLock.locked} | axis="${posLock.contrastAxis || "none"}" | mechanism="${posLock.mechanismName || "none"}" | problem="${posLock.problemDomain || "none"}" | solution="${posLock.solutionDomain || "none"}"`);
+
+  const preGenCheck = validatePreGenerationConstraints(posLock, differentiation);
+  diagnostics.preGenerationConstraints = preGenCheck;
+  if (!preGenCheck.compatible) {
+    console.log(`[OfferEngine-V4] PRE_GENERATION_WARNING | ${preGenCheck.issues.join("; ")}`);
+  }
+
   let aiOffers;
   try {
-    aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals);
+    aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock);
     diagnostics.aiGeneration = { success: true };
   } catch (err: any) {
     diagnostics.aiGeneration = { success: false, error: err.message };
@@ -1322,11 +1504,11 @@ export async function runOfferEngine(
     stripped: primaryGrounding.strippedClaims.length,
     ratio: primaryGrounding.groundingRatio.toFixed(2),
   };
-  console.log(`[OfferEngine-V3] GROUNDING_CHECK | primary: grounded=${primaryGrounding.groundedClaims}/${primaryGrounding.totalClaims} | ratio=${primaryGrounding.groundingRatio.toFixed(2)} | stripped=${primaryGrounding.strippedClaims.join("; ").slice(0, 100)}`);
+  console.log(`[OfferEngine-V4] GROUNDING_CHECK | primary: grounded=${primaryGrounding.groundedClaims}/${primaryGrounding.totalClaims} | ratio=${primaryGrounding.groundingRatio.toFixed(2)} | stripped=${primaryGrounding.strippedClaims.join("; ").slice(0, 100)}`);
 
   const GROUNDING_RATIO_FLOOR = 0.3;
   if (primaryGrounding.groundingRatio < GROUNDING_RATIO_FLOOR && primaryGrounding.totalClaims > 0) {
-    console.log(`[OfferEngine-V3] GROUNDING_FAILED | ratio=${primaryGrounding.groundingRatio.toFixed(2)} < floor=${GROUNDING_RATIO_FLOOR} — returning SIGNAL_INSUFFICIENT`);
+    console.log(`[OfferEngine-V4] GROUNDING_FAILED | ratio=${primaryGrounding.groundingRatio.toFixed(2)} < floor=${GROUNDING_RATIO_FLOOR} — returning SIGNAL_INSUFFICIENT`);
     const emptyOffer = buildEmptyOffer();
     const acceptability = assessStrategyAcceptability(0, 0, 5, false, ["AI-generated claims failed signal grounding"]);
     return {
@@ -1359,11 +1541,11 @@ export async function runOfferEngine(
   );
   if (primaryGrounding.strippedClaims.includes(aiOffers.primary.outcome)) {
     aiOffers.primary.outcome = l1Outcome.primaryOutcome;
-    console.log(`[OfferEngine-V3] GROUNDING_STRIP | primary outcome replaced with layer-1 fallback`);
+    console.log(`[OfferEngine-V4] GROUNDING_STRIP | primary outcome replaced with layer-1 fallback`);
   }
   if (primaryGrounding.strippedClaims.includes(aiOffers.primary.mechanism)) {
     aiOffers.primary.mechanism = l2Mechanism.mechanismDescription;
-    console.log(`[OfferEngine-V3] GROUNDING_STRIP | primary mechanism replaced with layer-2 fallback`);
+    console.log(`[OfferEngine-V4] GROUNDING_STRIP | primary mechanism replaced with layer-2 fallback`);
   }
 
   const core = differentiation.mechanismCore;
@@ -1398,7 +1580,7 @@ export async function runOfferEngine(
       : l2Mechanism.mechanismDescription,
   };
   if (!primaryMechLock.locked) {
-    console.log(`[OfferEngine-V3] MECHANISM_LOCK | primary mechanism category mismatch: diff="${primaryMechLock.diffCategory}" offer="${primaryMechLock.offerCategory}" — forced back to differentiation framing`);
+    console.log(`[OfferEngine-V4] MECHANISM_LOCK | primary mechanism category mismatch: diff="${primaryMechLock.diffCategory}" offer="${primaryMechLock.offerCategory}" — forced back to differentiation framing`);
   }
 
   const primaryDelivery: DeliveryLayer = {
@@ -1427,7 +1609,7 @@ export async function runOfferEngine(
       : l2Mechanism.mechanismDescription,
   };
   if (!altMechLock.locked) {
-    console.log(`[OfferEngine-V3] MECHANISM_LOCK | alternative mechanism category mismatch: diff="${altMechLock.diffCategory}" offer="${altMechLock.offerCategory}" — forced back to differentiation framing`);
+    console.log(`[OfferEngine-V4] MECHANISM_LOCK | alternative mechanism category mismatch: diff="${altMechLock.diffCategory}" offer="${altMechLock.offerCategory}" — forced back to differentiation framing`);
   }
 
   const altDelivery: DeliveryLayer = {
@@ -1459,6 +1641,30 @@ export async function runOfferEngine(
     audience, differentiation, mi, positioning,
   );
 
+  if (posLock.locked) {
+    const primaryClamp = clampOfferToAxis(primaryOffer.offerName, primaryOffer.coreOutcome, primaryOffer.mechanismDescription, posLock);
+    if (primaryClamp.clamped) {
+      primaryOffer.offerName = primaryClamp.offerName;
+      primaryOffer.coreOutcome = primaryClamp.coreOutcome;
+      primaryOffer.mechanismDescription = primaryClamp.mechanismDescription;
+      primaryOffer.mechanismLayer.mechanismDescription = primaryClamp.mechanismDescription;
+      primaryOffer.outcomeLayer.primaryOutcome = primaryClamp.coreOutcome;
+      console.log(`[OfferEngine-V4] AXIS_CLAMP_PRIMARY | ${primaryClamp.clampActions.join("; ")}`);
+      diagnostics.primaryAxisClamp = primaryClamp.clampActions;
+    }
+
+    const altClamp = clampOfferToAxis(alternativeOffer.offerName, alternativeOffer.coreOutcome, alternativeOffer.mechanismDescription, posLock);
+    if (altClamp.clamped) {
+      alternativeOffer.offerName = altClamp.offerName;
+      alternativeOffer.coreOutcome = altClamp.coreOutcome;
+      alternativeOffer.mechanismDescription = altClamp.mechanismDescription;
+      alternativeOffer.mechanismLayer.mechanismDescription = altClamp.mechanismDescription;
+      alternativeOffer.outcomeLayer.primaryOutcome = altClamp.coreOutcome;
+      console.log(`[OfferEngine-V4] AXIS_CLAMP_ALT | ${altClamp.clampActions.join("; ")}`);
+      diagnostics.altAxisClamp = altClamp.clampActions;
+    }
+  }
+
   const posConsistency = checkPositioningConsistency(primaryOffer, positioning, differentiation);
   diagnostics.positioningConsistency = posConsistency;
 
@@ -1467,27 +1673,28 @@ export async function runOfferEngine(
   diagnostics.hookMechanismAlignment = hookMechAlignment;
   diagnostics.altHookMechanismAlignment = altHookMechAlignment;
 
-  if (!altHookMechAlignment.aligned && hookMechAlignment.aligned) {
+  const combinedFailures: string[] = [];
+  if (!hookMechAlignment.aligned) combinedFailures.push(...hookMechAlignment.failures);
+  if (!altHookMechAlignment.aligned) combinedFailures.push(...altHookMechAlignment.failures.map(f => `[Alternative] ${f}`));
+
+  if (!hookMechAlignment.aligned || !altHookMechAlignment.aligned) {
     hookMechAlignment = {
       aligned: false,
-      failures: altHookMechAlignment.failures.map(f => `[Alternative] ${f}`),
-      hookAxis: altHookMechAlignment.hookAxis,
-      mechanismAxis: altHookMechAlignment.mechanismAxis,
-    };
-  } else if (!altHookMechAlignment.aligned && !hookMechAlignment.aligned) {
-    hookMechAlignment = {
-      aligned: false,
-      failures: [...hookMechAlignment.failures, ...altHookMechAlignment.failures.map(f => `[Alternative] ${f}`)],
-      hookAxis: hookMechAlignment.hookAxis,
-      mechanismAxis: hookMechAlignment.mechanismAxis,
+      failures: combinedFailures,
+      hookAxis: hookMechAlignment.hookAxis || altHookMechAlignment.hookAxis,
+      mechanismAxis: hookMechAlignment.mechanismAxis || altHookMechAlignment.mechanismAxis,
     };
   }
 
   if (!hookMechAlignment.aligned) {
-    console.log(`[OfferEngine-V3] HOOK_MECHANISM_MISMATCH | ${hookMechAlignment.failures.join("; ")} — attempting regeneration`);
+    console.log(`[OfferEngine-V4] HOOK_MECHANISM_MISMATCH | ${hookMechAlignment.failures.join("; ")} — attempting corrective regeneration with axis lock`);
     try {
-      const retryOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals);
-      diagnostics.hookMechanismRetry = { success: true, attempt: 2 };
+      const retryOffers = await aiOfferGeneration(
+        audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals,
+        posLock,
+        { previousFailures: hookMechAlignment.failures, attempt: 2 },
+      );
+      diagnostics.hookMechanismRetry = { success: true, attempt: 2, corrective: true };
 
       const retryPrimaryOutcome: OutcomeLayer = { ...l1Outcome, primaryOutcome: retryOffers.primary.outcome || l1Outcome.primaryOutcome };
       const retryMechDesc = retryOffers.primary.mechanism || l2Mechanism.mechanismDescription;
@@ -1500,11 +1707,22 @@ export async function runOfferEngine(
         audience, differentiation, mi, positioning,
       );
 
+      if (posLock.locked) {
+        const retryClamp = clampOfferToAxis(retryPrimary.offerName, retryPrimary.coreOutcome, retryPrimary.mechanismDescription, posLock);
+        if (retryClamp.clamped) {
+          retryPrimary.offerName = retryClamp.offerName;
+          retryPrimary.coreOutcome = retryClamp.coreOutcome;
+          retryPrimary.mechanismDescription = retryClamp.mechanismDescription;
+          retryPrimary.mechanismLayer.mechanismDescription = retryClamp.mechanismDescription;
+          retryPrimary.outcomeLayer.primaryOutcome = retryClamp.coreOutcome;
+        }
+      }
+
       const retryAlignment = checkHookMechanismAlignment(retryPrimary, positioning);
       diagnostics.hookMechanismRetryResult = retryAlignment;
 
       if (retryAlignment.aligned || retryAlignment.failures.length < hookMechAlignment.failures.length) {
-        console.log(`[OfferEngine-V3] HOOK_MECHANISM_RETRY_SUCCESS | Retry ${retryAlignment.aligned ? "passed" : "improved"} alignment`);
+        console.log(`[OfferEngine-V4] CORRECTIVE_RETRY_SUCCESS | Retry ${retryAlignment.aligned ? "passed" : "improved"} alignment`);
         Object.assign(primaryOffer, retryPrimary);
         hookMechAlignment = retryAlignment;
 
@@ -1517,12 +1735,27 @@ export async function runOfferEngine(
           retryOffers.alternative.name, retryAltOutcome, retryAltMech, retryAltDelivery, l4Proof, l5Risk,
           audience, differentiation, mi, positioning,
         );
-        Object.assign(alternativeOffer, retryAlt);
+
+        if (posLock.locked) {
+          const retryAltClamp = clampOfferToAxis(retryAlt.offerName, retryAlt.coreOutcome, retryAlt.mechanismDescription, posLock);
+          if (retryAltClamp.clamped) {
+            retryAlt.offerName = retryAltClamp.offerName;
+            retryAlt.coreOutcome = retryAltClamp.coreOutcome;
+            retryAlt.mechanismDescription = retryAltClamp.mechanismDescription;
+            retryAlt.mechanismLayer.mechanismDescription = retryAltClamp.mechanismDescription;
+            retryAlt.outcomeLayer.primaryOutcome = retryAltClamp.coreOutcome;
+          }
+        }
+
+        const retryAltAlignment = checkHookMechanismAlignment(retryAlt, positioning);
+        if (retryAltAlignment.aligned) {
+          Object.assign(alternativeOffer, retryAlt);
+        }
       } else {
-        console.log(`[OfferEngine-V3] HOOK_MECHANISM_RETRY_NO_IMPROVEMENT | Keeping original — will flag POSITIONING_MISMATCH`);
+        console.log(`[OfferEngine-V4] CORRECTIVE_RETRY_NO_IMPROVEMENT | Keeping original — will flag POSITIONING_MISMATCH`);
       }
     } catch (retryErr: any) {
-      console.log(`[OfferEngine-V3] HOOK_MECHANISM_RETRY_FAILED | ${retryErr.message} — keeping original`);
+      console.log(`[OfferEngine-V4] CORRECTIVE_RETRY_FAILED | ${retryErr.message} — keeping original`);
       diagnostics.hookMechanismRetry = { success: false, error: retryErr.message };
     }
   }
@@ -1544,7 +1777,7 @@ export async function runOfferEngine(
   if (genericOutputCheck.genericDetected) {
     primaryOffer.offerStrengthScore = clamp(primaryOffer.offerStrengthScore - genericOutputCheck.penalty);
     alternativeOffer.offerStrengthScore = clamp(alternativeOffer.offerStrengthScore - genericOutputCheck.penalty);
-    console.log(`[OfferEngine-V3] GENERIC_OUTPUT_PENALTY | phrases=${genericOutputCheck.genericPhrases.length} | penalty=${genericOutputCheck.penalty.toFixed(2)}`);
+    console.log(`[OfferEngine-V4] GENERIC_OUTPUT_PENALTY | phrases=${genericOutputCheck.genericPhrases.length} | penalty=${genericOutputCheck.penalty.toFixed(2)}`);
   }
 
   const diffStrength = checkDifferentiationStrength(primaryOffer, differentiation, positioning);
@@ -1552,9 +1785,9 @@ export async function runOfferEngine(
   if (!diffStrength.sufficient) {
     primaryOffer.offerStrengthScore = clamp(primaryOffer.offerStrengthScore * 0.85);
     alternativeOffer.offerStrengthScore = clamp(alternativeOffer.offerStrengthScore * 0.85);
-    console.log(`[OfferEngine-V3] DIFFERENTIATION_WEAK | score=${diffStrength.score.toFixed(2)} | gaps=${diffStrength.gaps.join("; ")}`);
+    console.log(`[OfferEngine-V4] DIFFERENTIATION_WEAK | score=${diffStrength.score.toFixed(2)} | gaps=${diffStrength.gaps.join("; ")}`);
   } else {
-    console.log(`[OfferEngine-V3] DIFFERENTIATION_CHECK | score=${diffStrength.score.toFixed(2)} | signals=${diffStrength.signals.length}`);
+    console.log(`[OfferEngine-V4] DIFFERENTIATION_CHECK | score=${diffStrength.score.toFixed(2)} | signals=${diffStrength.signals.length}`);
   }
 
   const outcomePrecision = scoreOutcomePrecision(primaryOffer.coreOutcome);
@@ -1563,11 +1796,11 @@ export async function runOfferEngine(
   diagnostics.mechanismClarity = mechClarity;
   if (outcomePrecision.isVague) {
     primaryOffer.offerStrengthScore = clamp(primaryOffer.offerStrengthScore - 0.1);
-    console.log(`[OfferEngine-V3] AI_OUTCOME_VAGUE | primary AI-generated outcome flagged as vague — strength penalized`);
+    console.log(`[OfferEngine-V4] AI_OUTCOME_VAGUE | primary AI-generated outcome flagged as vague — strength penalized`);
   }
   if (mechClarity.isVague) {
     primaryOffer.offerStrengthScore = clamp(primaryOffer.offerStrengthScore - 0.1);
-    console.log(`[OfferEngine-V3] AI_MECHANISM_VAGUE | primary AI-generated mechanism flagged as vague — strength penalized`);
+    console.log(`[OfferEngine-V4] AI_MECHANISM_VAGUE | primary AI-generated mechanism flagged as vague — strength penalized`);
   }
 
   let status: string = STATUS.COMPLETE;
@@ -1582,7 +1815,7 @@ export async function runOfferEngine(
     status = STATUS.POSITIONING_MISMATCH;
     statusMessage = `Positioning axis mismatch — hook and mechanism do not share the same strategic axis: ${hookMechAlignment.failures.join("; ")}`;
     structuralWarnings.push(...hookMechAlignment.failures);
-    console.log(`[OfferEngine-V3] POSITIONING_MISMATCH | ${hookMechAlignment.failures.join("; ")}`);
+    console.log(`[OfferEngine-V4] POSITIONING_MISMATCH | ${hookMechAlignment.failures.join("; ")}`);
   }
 
   if (!posConsistency.consistent) {
@@ -1596,12 +1829,12 @@ export async function runOfferEngine(
   if (!boundaryCheck.clean) {
     status = STATUS.INTEGRITY_FAILED;
     statusMessage = `Boundary violation — cross-engine output detected: ${boundaryCheck.violations.join("; ")}`;
-    console.log(`[OfferEngine-V3] BOUNDARY_VIOLATION | ${boundaryCheck.violations.join("; ")}`);
+    console.log(`[OfferEngine-V4] BOUNDARY_VIOLATION | ${boundaryCheck.violations.join("; ")}`);
   }
 
   if (boundaryResult.sanitized && boundaryResult.warnings.length > 0) {
     structuralWarnings.push(...boundaryResult.warnings);
-    console.log(`[OfferEngine-V3] BOUNDARY_SANITIZED | ${boundaryResult.warnings.join("; ")}`);
+    console.log(`[OfferEngine-V4] BOUNDARY_SANITIZED | ${boundaryResult.warnings.join("; ")}`);
     primaryOffer.offerName = applySoftSanitization(primaryOffer.offerName, BOUNDARY_SOFT_PATTERNS);
     primaryOffer.coreOutcome = applySoftSanitization(primaryOffer.coreOutcome, BOUNDARY_SOFT_PATTERNS);
     primaryOffer.mechanismDescription = applySoftSanitization(primaryOffer.mechanismDescription, BOUNDARY_SOFT_PATTERNS);
@@ -1629,9 +1862,9 @@ export async function runOfferEngine(
   diagnostics.offerAlignmentValidation = offerAlignmentValidation;
 
   if (!offerAlignmentValidation.aligned && status === STATUS.COMPLETE) {
-    console.log(`[OfferEngine-V3] ALIGNMENT_RETRY | First attempt failed: ${offerAlignmentValidation.failures.join("; ")} — regenerating AI offers`);
+    console.log(`[OfferEngine-V4] ALIGNMENT_RETRY | First attempt failed: ${offerAlignmentValidation.failures.join("; ")} — regenerating with positioning lock`);
     try {
-      const retryOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals);
+      const retryOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock);
       diagnostics.aiGenerationRetry = { success: true, attempt: 2 };
 
       const retryPrimaryOutcome: OutcomeLayer = { ...l1Outcome, primaryOutcome: retryOffers.primary.outcome || l1Outcome.primaryOutcome };
@@ -1645,25 +1878,37 @@ export async function runOfferEngine(
         audience, differentiation, mi, positioning,
       );
 
+      if (posLock.locked) {
+        const retryClamp = clampOfferToAxis(retryPrimary.offerName, retryPrimary.coreOutcome, retryPrimary.mechanismDescription, posLock);
+        if (retryClamp.clamped) {
+          retryPrimary.offerName = retryClamp.offerName;
+          retryPrimary.coreOutcome = retryClamp.coreOutcome;
+          retryPrimary.mechanismDescription = retryClamp.mechanismDescription;
+          retryPrimary.mechanismLayer.mechanismDescription = retryClamp.mechanismDescription;
+          retryPrimary.outcomeLayer.primaryOutcome = retryClamp.coreOutcome;
+          console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_CLAMP | ${retryClamp.clampActions.join("; ")}`);
+        }
+      }
+
       const retryValidation = validateOfferAlignment(retryPrimary, differentiation, audience, marketLanguage);
       diagnostics.offerAlignmentRetryValidation = retryValidation;
 
       if (retryValidation.aligned || retryValidation.failures.length < offerAlignmentValidation.failures.length) {
-        console.log(`[OfferEngine-V3] ALIGNMENT_RETRY_SUCCESS | Retry ${retryValidation.aligned ? "passed" : "improved"} validation`);
+        console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_SUCCESS | Retry ${retryValidation.aligned ? "passed" : "improved"} validation`);
         Object.assign(primaryOffer, retryPrimary);
         offerAlignmentValidation = retryValidation;
       } else {
-        console.log(`[OfferEngine-V3] ALIGNMENT_RETRY_NO_IMPROVEMENT | Keeping original offer`);
+        console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_NO_IMPROVEMENT | Keeping original offer`);
       }
     } catch (retryErr: any) {
-      console.log(`[OfferEngine-V3] ALIGNMENT_RETRY_FAILED | ${retryErr.message} — keeping original`);
+      console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_FAILED | ${retryErr.message} — keeping original`);
       diagnostics.aiGenerationRetry = { success: false, error: retryErr.message };
     }
   }
 
   if (!offerAlignmentValidation.aligned) {
     structuralWarnings.push(...offerAlignmentValidation.failures);
-    console.log(`[OfferEngine-V3] ALIGNMENT_VALIDATION_FAILED | ${offerAlignmentValidation.failures.join("; ")}`);
+    console.log(`[OfferEngine-V4] ALIGNMENT_VALIDATION_FAILED | ${offerAlignmentValidation.failures.join("; ")}`);
     if (status === STATUS.COMPLETE) {
       status = STATUS.INTEGRITY_FAILED;
       statusMessage = `Pre-save alignment validation failed: ${offerAlignmentValidation.failures.join("; ")}`;
@@ -1705,7 +1950,7 @@ export async function runOfferEngine(
 
     if (!alignmentResult.aligned) {
       structuralWarnings.push(...alignmentResult.misalignments);
-      console.log(`[OfferEngine-V3] CROSS_ENGINE_MISALIGNMENT | ${alignmentResult.misalignments.join("; ")} | penalty=${alignmentResult.confidencePenalty.toFixed(2)}`);
+      console.log(`[OfferEngine-V4] CROSS_ENGINE_MISALIGNMENT | ${alignmentResult.misalignments.join("; ")} | penalty=${alignmentResult.confidencePenalty.toFixed(2)}`);
     }
     diagnostics.crossEngineAlignment = alignmentResult;
 
@@ -1741,7 +1986,7 @@ export async function runOfferEngine(
   );
   diagnostics.strategyAcceptability = acceptability;
 
-  console.log(`[OfferEngine-V3] Complete | status=${status} | strength=${primaryOffer.offerStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | grade=${acceptability.grade} | generic=${primaryOffer.genericFlag} | boundary=${boundaryCheck.clean} | alignmentWarnings=${structuralWarnings.length} | grounded=${primaryGrounding.groundedClaims}/${primaryGrounding.totalClaims}`);
+  console.log(`[OfferEngine-V4] Complete | status=${status} | strength=${primaryOffer.offerStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | grade=${acceptability.grade} | generic=${primaryOffer.genericFlag} | boundary=${boundaryCheck.clean} | alignmentWarnings=${structuralWarnings.length} | grounded=${primaryGrounding.groundedClaims}/${primaryGrounding.totalClaims}`);
 
   return {
     status,
