@@ -1,0 +1,42 @@
+:::writing{variant=“email” id=“52941” subject=“Final Architecture Fix — Resolve Signal Grounding Failure Across Strategy Engines”}
+Team,
+
+We need to resolve the remaining signal grounding issue decisively. Despite the previous architectural fixes, validation still shows that a portion of generated claims (particularly Offer proofs, Persuasion drivers, and Awareness triggers) are being produced without a valid signal chain. This causes them to be flagged as hypotheses and excluded from scoring, keeping the strategy in a provisional state.
+
+The root of the problem is that some engines are still generating template-style outputs instead of strictly deriving them from upstream signals. This must be corrected at the architecture level.
+
+Please implement the following final corrections:
+	1.	Strict Signal-Derived Generation
+All engines must derive outputs directly from upstream signals. If no qualifying signal exists, the engine must return SIGNAL_INSUFFICIENT instead of generating placeholder or template outputs.
+	2.	Proof Generation Constraint (Offer Engine)
+Proof types such as transparency_proof, outcome_proof, and process_proof must only be generated when they are directly linked to:
+	•	Audience objections
+	•	MI narrative objections
+If no such signals exist, proof generation must be skipped.
+	3.	Persuasion Driver Constraint
+Drivers like education, diagnosis, and authority must originate from:
+	•	emotional_driver signals
+	•	audience_pain signals
+No generic persuasion templates should be produced.
+	4.	Awareness Trigger Constraint
+Awareness triggers and entry mechanisms must originate from:
+	•	market_opportunity signals
+	•	audience_pain signals
+	5.	Lineage Enforcement
+Every claim must carry a valid parent signal ID and traceable lineage. Any output without lineage must be rejected before reaching validation.
+	6.	System-Wide Guard
+Add a final guard that blocks any claim reaching the validation layer if it does not contain a valid signal lineage.
+
+Acceptance criteria must remain strict:
+	•	No claim without a parent signal
+	•	No template-generated outputs
+	•	Engines must fail safely with SIGNAL_INSUFFICIENT rather than fabricating strategy elements
+
+Once this correction is implemented, run validation again and confirm that signal-backed claims exceed the minimum threshold and that assumption flags drop accordingly.
+
+Please ensure the fix is applied system-wide and reflected in the frontend, so that lineage and grounding are correctly visible in the UI.
+
+This should be treated as the final step required to stabilize the signal-grounded architecture.
+
+Best,
+:::

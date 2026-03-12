@@ -871,8 +871,21 @@ function layer4_influenceDriverSelection(
   }
 
   if (selectedDrivers.length === 0) {
-    selectedDrivers.push("authority", "proof_of_work");
-    warnings.push("No signals strong enough for driver selection — defaulting to authority + proof_of_work");
+    const pains = audience.audiencePains || [];
+    const emotionalDrivers = audience.emotionalDrivers || [];
+    if (pains.length > 0 || emotionalDrivers.length > 0) {
+      if (pains.length > 0) {
+        selectedDrivers.push("contrast");
+        findings.push(`Pain signals present (${pains.length}) — contrast driver derived from audience pains`);
+      }
+      if (emotionalDrivers.length > 0) {
+        selectedDrivers.push("education");
+        findings.push(`Emotional drivers present (${emotionalDrivers.length}) — education driver derived from emotional signals`);
+      }
+    } else {
+      warnings.push("SIGNAL_INSUFFICIENT: No audience pain or emotional driver signals available for driver selection — no template fallback permitted");
+      score -= 0.3;
+    }
   }
 
   score += Math.min(selectedDrivers.length * 0.06, 0.35);

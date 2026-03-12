@@ -255,15 +255,20 @@ export function layer3_deliveryStructure(
 
 export function layer4_proofAlignment(
   differentiation: OfferDifferentiationInput,
+  hasObjectionSignals: boolean = false,
 ): ProofLayer {
   const proofArchitecture = differentiation.proofArchitecture || [];
   const pillars = differentiation.pillars || [];
 
   const proofTypes = new Set<string>();
   const availableTypes = ["process_proof", "outcome_proof", "transparency_proof", "case_proof", "framework_proof", "comparative_proof"];
+  const objectionRequiredProofs = new Set(["transparency_proof", "outcome_proof", "process_proof"]);
 
   for (const asset of proofArchitecture) {
     if (asset.category && availableTypes.includes(asset.category)) {
+      if (objectionRequiredProofs.has(asset.category) && !hasObjectionSignals) {
+        continue;
+      }
       proofTypes.add(asset.category);
     }
   }
@@ -271,14 +276,25 @@ export function layer4_proofAlignment(
   for (const pillar of pillars) {
     const supporting = pillar.supportingProof || [];
     for (const p of supporting) {
-      if (availableTypes.includes(p)) proofTypes.add(p);
+      if (availableTypes.includes(p)) {
+        if (objectionRequiredProofs.has(p) && !hasObjectionSignals) {
+          continue;
+        }
+        proofTypes.add(p);
+      }
     }
+  }
+
+  if (!hasObjectionSignals && proofTypes.size > 0) {
+    console.log(`[OfferEngine-V3] PROOF_SIGNAL_GATE | objection signals absent — skipped ${[...objectionRequiredProofs].filter(p => !proofTypes.has(p)).length} objection-required proof types`);
   }
 
   const alignedProofTypes = Array.from(proofTypes);
   const proofStrength = clamp(alignedProofTypes.length / 4);
 
-  const mandatoryProof = ["process_proof", "outcome_proof", "transparency_proof", "case_proof"];
+  const mandatoryProof = hasObjectionSignals
+    ? ["process_proof", "outcome_proof", "transparency_proof", "case_proof"]
+    : ["case_proof"];
   const proofGaps = mandatoryProof.filter(p => !proofTypes.has(p));
 
   return { alignedProofTypes, proofStrength, proofGaps };
@@ -315,8 +331,8 @@ export function layer5_riskReduction(
     frictionMitigations.push("Aligned with primary emotional drivers");
   }
 
-  if (riskReducers.length === 0) {
-    riskReducers.push("Standard quality assurance process");
+  if (riskReducers.length === 0 && (objections.length > 0 || emotionalDrivers.length > 0)) {
+    riskReducers.push("Risk mitigation aligned to identified audience concerns");
   }
 
   const buyerConfidenceScore = clamp(
@@ -951,8 +967,15 @@ export async function runOfferEngine(
   const l3Delivery = compressFeasibility(layer3_deliveryStructure(audience, differentiation));
   diagnostics.layer3 = { deliverableCount: l3Delivery.deliverables.length, complexity: l3Delivery.complexityLevel };
 
-  const l4Proof = layer4_proofAlignment(differentiation);
-  diagnostics.layer4 = { proofTypes: l4Proof.alignedProofTypes.length, strength: l4Proof.proofStrength, gaps: l4Proof.proofGaps };
+  const objectionSignals = qualifyingSignals.filter(s =>
+    s.category === "audience_objection" || s.category === "narrative_objection" ||
+    s.category.includes("objection")
+  );
+  const hasObjectionSignals = objectionSignals.length > 0;
+  console.log(`[OfferEngine-V3] PROOF_GATE | objectionSignals=${objectionSignals.length} | hasObjectionSignals=${hasObjectionSignals}`);
+
+  const l4Proof = layer4_proofAlignment(differentiation, hasObjectionSignals);
+  diagnostics.layer4 = { proofTypes: l4Proof.alignedProofTypes.length, strength: l4Proof.proofStrength, gaps: l4Proof.proofGaps, objectionGated: !hasObjectionSignals };
 
   const l5Risk = layer5_riskReduction(audience, l4Proof);
   diagnostics.layer5 = { reducers: l5Risk.riskReducers.length, buyerConfidence: l5Risk.buyerConfidenceScore };

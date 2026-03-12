@@ -991,11 +991,21 @@ export async function runStatisticalValidationEngine(
 
   const signalClusters = buildSignalClusters(mi, audience);
 
-  const { claims: extractedClaims, unmappedSignals } = extractClaims(offer, persuasion, awareness, signalClusters, upstreamLineage);
+  let { claims: extractedClaims, unmappedSignals } = extractClaims(offer, persuasion, awareness, signalClusters, upstreamLineage);
   if (upstreamLineage.length > 0) {
-    const lineageLinked = extractedClaims.filter(c => c.parentSignalId !== null).length;
-    console.log(`[StatisticalValidation] LINEAGE_RESOLUTION | claims=${extractedClaims.length} | lineageLinked=${lineageLinked} | orphaned=${extractedClaims.length - lineageLinked} | upstreamEntries=${upstreamLineage.length}`);
+    const orphanedClaims = extractedClaims.filter(c => c.parentSignalId === null && c.signalProvenance === null);
+    const lineageLinked = extractedClaims.length - orphanedClaims.length;
+    console.log(`[StatisticalValidation] LINEAGE_RESOLUTION | claims=${extractedClaims.length} | lineageLinked=${lineageLinked} | orphaned=${orphanedClaims.length} | upstreamEntries=${upstreamLineage.length}`);
+
+    if (orphanedClaims.length > 0) {
+      for (const oc of orphanedClaims) {
+        console.log(`[StatisticalValidation] LINEAGE_REJECTED | traceId=${oc.signalTraceId} | source=${oc.source} | claim="${oc.claim.slice(0, 60)}" — no valid signal lineage`);
+      }
+      extractedClaims = extractedClaims.filter(c => c.parentSignalId !== null || c.signalProvenance !== null);
+      console.log(`[StatisticalValidation] LINEAGE_GATE | rejected=${orphanedClaims.length} orphaned claims | remaining=${extractedClaims.length} signal-backed claims`);
+    }
   }
+
   const claimValidations = extractedClaims.map(c => {
     const hasLineageAnchor = c.parentSignalId !== null || c.originEngine !== null;
     const validated = validateClaim(c.claim, c.source, c.signalProvenance, c.isHypothesis, c.signalTraceId, c.signalPath, mi, audience, offer, funnel, awareness, persuasion, hasLineageAnchor);

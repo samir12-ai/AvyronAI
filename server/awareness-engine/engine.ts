@@ -195,7 +195,9 @@ export function layer1_marketEntryDetection(
   const maturity = detectMarketMaturity(mi, audience);
   const threats = (mi.threatSignals || []).length;
 
-  let bestEntry = "pain_entry";
+  const hasPainSignals = (audience.audiencePains || []).length > 0;
+  const hasOpportunitySignals = (mi.opportunitySignals || []).length > 0;
+  let bestEntry = hasPainSignals ? "pain_entry" : (hasOpportunitySignals ? "opportunity_entry" : "");
 
   if (readiness === "unaware" && problemIntensity > 0.6) {
     bestEntry = "myth_breaker_entry";
@@ -215,8 +217,11 @@ export function layer1_marketEntryDetection(
   } else if ((mi.opportunitySignals || []).length > 2) {
     bestEntry = "opportunity_entry";
     findings.push(`Strong opportunity signals detected — opportunity entry viable [selected:${bestEntry}]`);
+  } else if (bestEntry) {
+    findings.push(`Signal-derived entry selected based on audience readiness: ${readiness} [selected:${bestEntry}]`);
   } else {
-    findings.push(`Default pain entry selected based on audience readiness: ${readiness} [selected:${bestEntry}]`);
+    warnings.push("SIGNAL_INSUFFICIENT: No audience pain or market opportunity signals — no entry mechanism can be derived");
+    score -= 0.3;
   }
 
   if (!positioning.narrativeDirection && !positioning.enemyDefinition) {
@@ -299,7 +304,7 @@ export function layer3_attentionTriggerMapping(
   const threats = mi.threatSignals || [];
   const opportunities = mi.opportunitySignals || [];
 
-  let primaryTrigger = "hidden_cost";
+  let primaryTrigger = "";
 
   if (threats.length > 2 && pains.length > 3) {
     primaryTrigger = "trust_breakdown";
@@ -316,9 +321,16 @@ export function layer3_attentionTriggerMapping(
   } else if (threats.length > 0) {
     primaryTrigger = "competitor_weakness";
     findings.push(`Competitive threat signals present — competitor weakness trigger [selected:${primaryTrigger}]`);
-  } else {
+  } else if (pains.length > 0) {
     primaryTrigger = "hidden_cost";
-    findings.push(`Default hidden cost trigger — audience likely unaware of true costs [selected:${primaryTrigger}]`);
+    findings.push(`Audience pain signals present (${pains.length}) — hidden cost trigger derived from pain signals [selected:${primaryTrigger}]`);
+  } else if (opportunities.length > 0) {
+    primaryTrigger = "missed_opportunity";
+    findings.push(`Opportunity signals present (${opportunities.length}) — missed opportunity trigger [selected:${primaryTrigger}]`);
+  } else {
+    primaryTrigger = "";
+    warnings.push("SIGNAL_INSUFFICIENT: No pain, opportunity, or threat signals available for trigger mapping — no template trigger permitted");
+    score -= 0.3;
   }
 
   if (pains.length === 0 && drivers.length === 0) {
@@ -607,7 +619,7 @@ function extractSelected(layerResult: LayerResult, fallback: string): string {
 }
 
 function selectEntryRoute(layer1: LayerResult): string {
-  return extractSelected(layer1, "pain_entry");
+  return extractSelected(layer1, "");
 }
 
 function selectReadinessStage(layer2: LayerResult): string {
@@ -615,7 +627,7 @@ function selectReadinessStage(layer2: LayerResult): string {
 }
 
 function selectTriggerClass(layer3: LayerResult): string {
-  return extractSelected(layer3, "hidden_cost");
+  return extractSelected(layer3, "");
 }
 
 function buildAlternativeRoute(primaryEntry: string, audience: AwarenessAudienceInput, mi: AwarenessMIInput): { entry: string; trigger: string; readiness: string } {
@@ -627,7 +639,7 @@ function buildAlternativeRoute(primaryEntry: string, audience: AwarenessAudience
     proof_led_entry: "authority_entry",
     diagnostic_entry: "opportunity_entry",
   };
-  const altEntry = alternatives[primaryEntry] || "pain_entry";
+  const altEntry = alternatives[primaryEntry] || primaryEntry;
   const readiness = detectBuyerReadiness(audience);
   const altTrigger = (mi.threatSignals || []).length > 2 ? "competitor_weakness" : "missed_opportunity";
   return { entry: altEntry, trigger: altTrigger, readiness };
@@ -646,7 +658,7 @@ function buildRejectedRoute(primaryEntry: string, audience: AwarenessAudienceInp
   if (readiness === "most_aware") {
     return { entry: "myth_breaker_entry", trigger: "outdated_method", readiness: "most_aware", reason: "Most-aware audience already past myth-breaking stage — redundant approach" };
   }
-  return { entry: "pain_entry", trigger: "hidden_cost", readiness, reason: "Generic pain entry does not align with specific audience dynamics" };
+  return { entry: primaryEntry, trigger: "signal_insufficient", readiness, reason: "No signal-derived alternative — rejected route mirrors primary with insufficient signal warning" };
 }
 
 function buildTrustRequirement(entryRoute: string, trustLevel: number): string {
