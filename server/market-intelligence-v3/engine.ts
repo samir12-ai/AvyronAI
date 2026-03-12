@@ -3,7 +3,7 @@ import { miSnapshots, miSignalLogs, miTelemetry, ciCompetitors, growthCampaigns 
 import { eq, and, desc } from "drizzle-orm";
 import { pruneOldSnapshots } from "../engine-hardening";
 import { computeAllSignals, aggregateMissingFlags, classifyEngagementQuality, detectAudienceIntentSignals, detectSampleBias, computeRealDataRatio, clusterSemanticSignals } from "./signal-engine";
-import { extractNarrativeObjections } from "./narrative-objection-extractor";
+import { extractNarrativeObjections, clusterObjections, type NarrativeObjectionItem } from "./narrative-objection-extractor";
 import type { SignalCluster, SignalPipelineDiagnostics } from "./types";
 import { computeDemandPressure } from "./demand-pressure";
 import { detectEchoChamber } from "./narrative-clustering";
@@ -44,6 +44,41 @@ import { createSourceLineageEntry, type SignalLineageEntry } from "../shared/sig
 
 export { computeCompetitorHash } from "./utils";
 export { ENGINE_VERSION } from "./constants";
+
+function convertProblemStatementToObjection(snippet: string, competitorName: string): NarrativeObjectionItem | null {
+  const lower = snippet.toLowerCase();
+  let objectionLabel = "";
+
+  if (/tired of|sick of|fed up|frustrated/i.test(lower)) {
+    const matchText = lower.replace(/tired of |sick of |fed up with |frustrated with /i, "").trim();
+    objectionLabel = matchText.length > 5
+      ? `Audience objects: ${matchText.slice(0, 80)}`
+      : "Audience frustrated with current solutions";
+  } else if (/struggling|can'?t|having trouble/i.test(lower)) {
+    objectionLabel = "Audience struggles to achieve desired results";
+  } else if (/stop wasting|throwing money|wasting/i.test(lower)) {
+    objectionLabel = "Current solutions waste resources without ROI";
+  } else if (/most (agencies|companies|consultants)/i.test(lower)) {
+    objectionLabel = "Providers overpromise results but fail to deliver";
+  } else if (/\b(problem|issue|challenge|pain)\b/i.test(lower)) {
+    const matchText = lower.replace(/.*?\b(problem|issue|challenge|pain)\b[:\s]*/i, "").trim();
+    objectionLabel = matchText.length > 5
+      ? `Market problem: ${matchText.slice(0, 80)}`
+      : "Market identifies unresolved problem";
+  }
+
+  if (!objectionLabel) return null;
+
+  return {
+    objection: objectionLabel,
+    frequencyScore: 0.15,
+    narrativeConfidence: 0.45,
+    supportingEvidence: [{ caption: snippet.slice(0, 120), competitorName, matchedPattern: "content_dna_hook" }],
+    competitorSources: [competitorName],
+    patternCategory: "problem_statement",
+    signalType: "objection",
+  };
+}
 
 const SNAPSHOT_FRESHNESS_HOURS = 24;
 const ISOLATION_ALLOWED_CALLER = "MARKET_INTELLIGENCE_V3";
@@ -816,7 +851,57 @@ export class MarketIntelligenceV3 {
     console.log(`[MIv3] SEMANTIC_SIGNALS | total=${totalSemanticSignals} | clusters=${signalClusters.length} | reinforced=${signalClusters.filter(c => c.reinforcedScore >= 0.3).length}`);
 
     const narrativeObjectionMap = extractNarrativeObjections(competitors);
-    console.log(`[MIv3] NARRATIVE_OBJECTIONS | total=${narrativeObjectionMap.totalObjectionsDetected} | multiCompetitor=${narrativeObjectionMap.objectionsFromMultipleCompetitors} | density=${narrativeObjectionMap.objectionDensity} | captions=${narrativeObjectionMap.captionsScanned}`);
+
+    let contentDnaProblemObjections = 0;
+    const bridgeSnippets: Array<{ snippet: string; competitorName: string }> = [];
+    for (const dna of contentDnaResults) {
+      if (dna.hookArchetypes.includes("problem" as any)) {
+        const problemEvidence = dna.evidence.filter(e => e.detectedType === "hook:problem");
+        for (const ev of problemEvidence) {
+          const snippet = ev.snippet || "";
+          if (snippet.length >= 10) bridgeSnippets.push({ snippet, competitorName: dna.competitorName });
+        }
+      }
+      if (dna.narrativeFrameworks.includes("problem_solution" as any)) {
+        const psEvidence = dna.evidence.filter(e => e.detectedType === "narrative:problem_solution");
+        for (const ev of psEvidence) {
+          const snippet = ev.snippet || "";
+          if (snippet.length >= 10) bridgeSnippets.push({ snippet, competitorName: dna.competitorName });
+        }
+      }
+    }
+    for (const { snippet, competitorName } of bridgeSnippets) {
+      const converted = convertProblemStatementToObjection(snippet, competitorName);
+      if (!converted) continue;
+      const existing = narrativeObjectionMap.objections.find(o => o.objection === converted.objection);
+      if (existing) {
+        if (!existing.competitorSources.includes(competitorName)) {
+          existing.competitorSources.push(competitorName);
+          existing.supportingEvidence.push(...converted.supportingEvidence);
+          existing.frequencyScore = Math.min(1, existing.frequencyScore + 0.05);
+        }
+      } else {
+        narrativeObjectionMap.objections.push(converted);
+        contentDnaProblemObjections++;
+      }
+    }
+    if (contentDnaProblemObjections > 0) {
+      narrativeObjectionMap.totalObjectionsDetected = narrativeObjectionMap.objections.length;
+      narrativeObjectionMap.painCount = narrativeObjectionMap.objections.filter(o => o.signalType === "pain").length;
+      narrativeObjectionMap.objectionCount = narrativeObjectionMap.objections.filter(o => o.signalType === "objection").length;
+      narrativeObjectionMap.trustBarrierCount = narrativeObjectionMap.objections.filter(o => o.signalType === "trust_barrier").length;
+      narrativeObjectionMap.problemStatementsExtracted = narrativeObjectionMap.objections.filter(o => o.patternCategory === "problem_statement").length;
+      const multiSrcCount = narrativeObjectionMap.objections.filter(o => o.competitorSources.length > 1).length;
+      narrativeObjectionMap.objectionsFromMultipleCompetitors = multiSrcCount;
+      narrativeObjectionMap.objectionDensity = narrativeObjectionMap.captionsScanned > 0
+        ? Math.round((narrativeObjectionMap.objections.reduce((s, o) => s + o.frequencyScore, 0) / Math.max(narrativeObjectionMap.objections.length, 1)) * 1000) / 1000
+        : 0;
+
+      narrativeObjectionMap.clusteredObjections = clusterObjections(narrativeObjectionMap.objections);
+
+      console.log(`[MIv3] CONTENT_DNA_OBJECTION_BRIDGE | extracted=${contentDnaProblemObjections} problem statements from content DNA hooks/frameworks`);
+    }
+    console.log(`[MIv3] NARRATIVE_OBJECTIONS | total=${narrativeObjectionMap.totalObjectionsDetected} | multiCompetitor=${narrativeObjectionMap.objectionsFromMultipleCompetitors} | density=${narrativeObjectionMap.objectionDensity} | captions=${narrativeObjectionMap.captionsScanned} | problemStatements=${narrativeObjectionMap.problemStatementsExtracted} | clusters=${narrativeObjectionMap.clusteredObjections.length} | contentDnaBridge=${contentDnaProblemObjections}`);
 
     const threatSignals = buildThreatSignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, signalClusters);
     const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, signalClusters);

@@ -10,6 +10,7 @@ export interface NarrativeObjectionItem {
   competitorSources: string[];
   patternCategory: string;
   signalType: NarrativeSignalType;
+  clusterId?: string;
 }
 
 export interface NarrativeObjectionMap {
@@ -22,10 +23,22 @@ export interface NarrativeObjectionMap {
   painCount: number;
   objectionCount: number;
   trustBarrierCount: number;
+  clusteredObjections: ObjectionCluster[];
+  problemStatementsExtracted: number;
+}
+
+export interface ObjectionCluster {
+  clusterId: string;
+  canonicalObjection: string;
+  memberObjections: string[];
+  totalFrequency: number;
+  signalType: NarrativeSignalType;
+  competitorSources: string[];
 }
 
 const CATEGORY_TO_SIGNAL_TYPE: Record<string, NarrativeSignalType> = {
   problem_framing: "pain",
+  problem_statement: "objection",
   trust_repair: "trust_barrier",
   credibility: "trust_barrier",
   comparison: "objection",
@@ -133,6 +146,66 @@ const NARRATIVE_OBJECTION_PATTERNS: PatternDef[] = [
       /you'?re (probably|likely|still) (doing|making|wasting|missing|ignoring)/i,
     ],
     objectionLabel: "Current methods are based on common mistakes",
+  },
+  {
+    category: "problem_statement",
+    patterns: [
+      /tired of .{3,60}(that|who|which|and|but|with|without)/i,
+      /sick of .{3,60}(that|who|which|and|but|with|without)/i,
+      /fed up with .{3,40}/i,
+      /frustrated (with|by|that) .{3,40}/i,
+      /exhausted (from|by) .{3,40}/i,
+      /burnt out (on|from|by) .{3,40}/i,
+      /overwhelmed (by|with|from) .{3,40}/i,
+    ],
+    objectionLabel: "Audience frustrated with current provider results",
+  },
+  {
+    category: "problem_statement",
+    patterns: [
+      /struggling (with|to) .{3,50}/i,
+      /can'?t (seem to|figure out|get|find|afford|achieve) .{3,40}/i,
+      /having trouble .{3,40}/i,
+      /finding it (hard|difficult|impossible) to .{3,40}/i,
+    ],
+    objectionLabel: "Audience struggles to achieve desired results",
+  },
+  {
+    category: "problem_statement",
+    patterns: [
+      /stop wasting (money|time|resources|energy|effort) on .{3,40}/i,
+      /stop (paying|spending) for .{3,40}(that|which|and|without)/i,
+      /throwing (money|cash|budget) (at|into|away on) .{3,40}/i,
+      /wasting .{1,15}(money|time|budget|resources) on .{3,40}/i,
+    ],
+    objectionLabel: "Current solutions waste resources without ROI",
+  },
+  {
+    category: "problem_statement",
+    patterns: [
+      /most (agencies|companies|consultants|marketers|coaches|providers|firms|freelancers|businesses|brands) .{1,30}(but|yet|however|and then|then|without|don'?t|fail|won'?t|never|lack|miss)/i,
+      /(agencies|companies|consultants|marketers) (promise|claim|say|tell you) .{1,30}(but|yet|however)/i,
+      /(agencies|companies) that (promise|claim) .{1,30}(fail|don'?t|won'?t|never|can'?t) .{1,30}deliver/i,
+    ],
+    objectionLabel: "Providers overpromise results but fail to deliver",
+  },
+  {
+    category: "problem_statement",
+    patterns: [
+      /you'?ve (tried|been|paid|hired|invested) .{1,30}(but|and|yet|still|without|nothing)/i,
+      /i('?ve| have) (tried|been|paid|hired|worked) .{1,30}(but|and|yet|still|nothing|didn'?t)/i,
+      /(tried|tested|used) .{1,20}(everything|every|multiple|several|different|so many) .{1,30}(but|and|yet|still|nothing)/i,
+    ],
+    objectionLabel: "Previous attempts and investments yielded no results",
+  },
+  {
+    category: "problem_statement",
+    patterns: [
+      /what (nobody|no one|most) .{1,20}(tells|says|mentions|warns|admits|reveals) .{1,20}(about|is that)/i,
+      /the (ugly|harsh|inconvenient|uncomfortable|hard) truth/i,
+      /here'?s what .{1,20}(won'?t|don'?t|refuse to|hate to) (tell|admit|say|share|reveal)/i,
+    ],
+    objectionLabel: "Industry hides the real truth about results",
   },
   {
     category: "price_value",
@@ -330,6 +403,14 @@ export function extractNarrativeObjections(competitors: CompetitorInput[]): Narr
     ? Math.round((objections.reduce((s, o) => s + o.frequencyScore, 0) / Math.max(objections.length, 1)) * 1000) / 1000
     : 0;
 
+  const problemStatements = objections.filter(o => o.patternCategory === "problem_statement");
+  const problemStatementsExtracted = problemStatements.length;
+  if (problemStatementsExtracted > 0) {
+    console.log(`[NarrativeObjectionExtractor] PROBLEM_STATEMENTS | extracted=${problemStatementsExtracted} | labels=[${problemStatements.map(o => o.objection).join("; ")}]`);
+  }
+
+  const clusteredObjections = clusterObjections(objections);
+
   const painCount = objections.filter(o => o.signalType === "pain").length;
   const objectionCount = objections.filter(o => o.signalType === "objection").length;
   const trustBarrierCount = objections.filter(o => o.signalType === "trust_barrier").length;
@@ -344,5 +425,69 @@ export function extractNarrativeObjections(competitors: CompetitorInput[]): Narr
     painCount,
     objectionCount,
     trustBarrierCount,
+    clusteredObjections,
+    problemStatementsExtracted,
   };
+}
+
+const CLUSTER_KEYWORDS: Record<string, string[]> = {
+  overpromise: ["overpromise", "promise", "deliver", "fail to deliver", "results but", "underdeliver"],
+  waste: ["waste", "wasting", "throwing money", "no results", "no ROI", "without ROI"],
+  generic: ["generic", "cookie cutter", "one size", "template", "not customized", "not personalized"],
+  trust: ["trust", "transparency", "hide", "secret", "truth", "prove", "proof"],
+  struggle: ["struggle", "struggling", "can't", "frustrated", "tired of", "sick of", "exhausted"],
+  price: ["expensive", "overpriced", "retainer", "cost", "budget", "afford"],
+  results: ["results", "guarantee", "vanity metrics", "fake", "verified", "no real"],
+};
+
+export function clusterObjections(objections: NarrativeObjectionItem[]): ObjectionCluster[] {
+  const clusterMap = new Map<string, {
+    members: NarrativeObjectionItem[];
+    totalFreq: number;
+    sources: Set<string>;
+  }>();
+
+  for (const obj of objections) {
+    const lower = obj.objection.toLowerCase();
+    let bestCluster = "unclustered";
+    let bestScore = 0;
+
+    for (const [clusterId, keywords] of Object.entries(CLUSTER_KEYWORDS)) {
+      let score = 0;
+      for (const kw of keywords) {
+        if (lower.includes(kw)) score++;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestCluster = clusterId;
+      }
+    }
+
+    if (!clusterMap.has(bestCluster)) {
+      clusterMap.set(bestCluster, { members: [], totalFreq: 0, sources: new Set() });
+    }
+    const cluster = clusterMap.get(bestCluster)!;
+    cluster.members.push(obj);
+    cluster.totalFreq += obj.frequencyScore;
+    for (const src of obj.competitorSources) cluster.sources.add(src);
+    obj.clusterId = bestCluster;
+  }
+
+  const clusters: ObjectionCluster[] = [];
+  for (const [clusterId, data] of clusterMap.entries()) {
+    if (data.members.length === 0) continue;
+    const canonical = data.members.sort((a, b) => b.narrativeConfidence - a.narrativeConfidence)[0];
+    clusters.push({
+      clusterId,
+      canonicalObjection: canonical.objection,
+      memberObjections: data.members.map(m => m.objection),
+      totalFrequency: data.totalFreq,
+      signalType: canonical.signalType,
+      competitorSources: Array.from(data.sources),
+    });
+  }
+
+  clusters.sort((a, b) => b.totalFrequency - a.totalFrequency);
+  console.log(`[NarrativeObjectionExtractor] CLUSTERING | clusters=${clusters.length} | objections=${objections.length} | topCluster=${clusters[0]?.clusterId || "none"}`);
+  return clusters;
 }
