@@ -356,6 +356,19 @@ export function registerFunnelEngineRoutes(app: Express) {
         return res.status(400).json({ error: "selectedOption must be 'primary' or 'alternative'" });
       }
 
+      const [existingSnapshot] = await db.select({ status: offerSnapshots.status })
+        .from(offerSnapshots)
+        .where(and(
+          eq(offerSnapshots.id, snapshotId),
+          eq(offerSnapshots.campaignId, campaignId),
+          eq(offerSnapshots.accountId, accountId),
+        ))
+        .limit(1);
+
+      if (existingSnapshot && existingSnapshot.status === "POSITIONING_MISMATCH") {
+        return res.status(400).json({ error: "Cannot select an offer with POSITIONING_MISMATCH status. Regenerate offers to resolve the positioning axis conflict." });
+      }
+
       const [updated] = await db.update(offerSnapshots)
         .set({ selectedOption })
         .where(and(

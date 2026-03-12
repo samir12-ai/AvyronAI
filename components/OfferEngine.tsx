@@ -54,6 +54,7 @@ interface OfferData {
   rejectedOffer?: { offer: OfferCandidate; rejectionReason: string };
   offerStrengthScore?: number;
   positioningConsistency?: { consistent: boolean; contradictions: string[] };
+  hookMechanismAlignment?: { aligned: boolean; failures: string[]; hookAxis: string | null; mechanismAxis: string | null };
   boundaryCheck?: { passed: boolean; violations: string[] };
   confidenceScore?: number;
   engineVersion?: number;
@@ -319,8 +320,8 @@ export default function OfferEngine() {
         {variant !== 'rejected' && (
           <Pressable
             onPress={() => selectOption(variant)}
-            disabled={selecting || isSelected}
-            style={[styles.selectBtn, isSelected && styles.selectBtnSelected]}
+            disabled={selecting || isSelected || data.status === 'POSITIONING_MISMATCH'}
+            style={[styles.selectBtn, isSelected && styles.selectBtnSelected, data.status === 'POSITIONING_MISMATCH' && { opacity: 0.3 }]}
           >
             <LinearGradient
               colors={isSelected ? ['#10B981', '#059669'] : [borderColor, borderColor + 'CC']}
@@ -334,7 +335,7 @@ export default function OfferEngine() {
                 <>
                   <Ionicons name={isSelected ? 'checkmark-circle' : 'hand-left'} size={14} color="#fff" />
                   <Text style={styles.selectBtnText}>
-                    {isSelected ? 'Selected' : 'Select This Offer'}
+                    {isSelected ? 'Selected' : data.status === 'POSITIONING_MISMATCH' ? 'Blocked — Axis Mismatch' : 'Select This Offer'}
                   </Text>
                 </>
               )}
@@ -435,6 +436,19 @@ export default function OfferEngine() {
 
       {hasData && (
         <>
+          {data.hookMechanismAlignment && !data.hookMechanismAlignment.aligned && (
+            <View style={[styles.warningBox, { backgroundColor: '#EF444415', borderColor: '#EF444430' }]}>
+              <Ionicons name="alert-circle" size={16} color="#EF4444" />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.warningTitle, { color: '#EF4444' }]}>Positioning Mismatch</Text>
+                <Text style={[styles.warningDetail, { color: '#DC2626' }]}>Hook, outcome, and mechanism do not share the same positioning axis. Offers below may not be strategically coherent. Regenerate to attempt correction.</Text>
+                {data.hookMechanismAlignment.failures.map((f, i) => (
+                  <Text key={i} style={[styles.warningDetail, { color: '#DC2626', marginTop: 2 }]}>{f}</Text>
+                ))}
+              </View>
+            </View>
+          )}
+
           {data.positioningConsistency && !data.positioningConsistency.consistent && (
             <View style={[styles.warningBox, { backgroundColor: '#F59E0B15', borderColor: '#F59E0B30' }]}>
               <Ionicons name="warning" size={16} color="#F59E0B" />
@@ -459,18 +473,30 @@ export default function OfferEngine() {
             </View>
           )}
 
+          {data.status === 'POSITIONING_MISMATCH' && (
+            <View style={[styles.warningBox, { backgroundColor: '#7C3AED15', borderColor: '#7C3AED30' }]}>
+              <Ionicons name="shield" size={16} color="#7C3AED" />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.warningTitle, { color: '#7C3AED' }]}>Offers Blocked</Text>
+                <Text style={[styles.warningDetail, { color: '#6D28D9' }]}>These offers failed the positioning consistency guard. The hook and mechanism must share the same strategic axis before offers can be finalized. Please regenerate.</Text>
+              </View>
+            </View>
+          )}
+
           <View style={[styles.selectorRow, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             {(['primary', 'alternative', 'rejected'] as const).map(section => {
               const isActive = activeSection === section;
               const sColor = section === 'primary' ? '#10B981' : section === 'alternative' ? '#3B82F6' : '#EF4444';
+              const isBlocked = data.status === 'POSITIONING_MISMATCH' && section !== 'rejected';
               return (
                 <Pressable
                   key={section}
                   onPress={() => { Haptics.selectionAsync(); setActiveSection(section); }}
-                  style={[styles.selectorTab, isActive && { backgroundColor: sColor + '14', borderColor: sColor + '40' }]}
+                  style={[styles.selectorTab, isActive && { backgroundColor: sColor + '14', borderColor: sColor + '40' }, isBlocked && { opacity: 0.4 }]}
                 >
                   <Text style={[styles.selectorText, { color: isActive ? sColor : colors.textMuted }]}>
                     {section.charAt(0).toUpperCase() + section.slice(1)}
+                    {isBlocked ? ' ⚠' : ''}
                   </Text>
                 </Pressable>
               );

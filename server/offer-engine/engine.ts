@@ -576,6 +576,116 @@ export function checkPositioningConsistency(
   return { consistent: contradictions.length === 0, contradictions };
 }
 
+export function checkHookMechanismAlignment(
+  offer: OfferCandidate,
+  positioning: OfferPositioningInput,
+): { aligned: boolean; failures: string[]; hookAxis: string | null; mechanismAxis: string | null } {
+  const failures: string[] = [];
+
+  const hookText = (offer.offerName || "").toLowerCase();
+  const outcomeText = (offer.coreOutcome || "").toLowerCase();
+  const mechText = (offer.mechanismDescription || "").toLowerCase();
+
+  const contrastAxis = (positioning.contrastAxis || "").toLowerCase().trim();
+  const enemyDef = (positioning.enemyDefinition || "").toLowerCase().trim();
+
+  if (!contrastAxis && !enemyDef) {
+    return { aligned: true, failures: [], hookAxis: null, mechanismAxis: null };
+  }
+
+  const extractAxisTokens = (axis: string): string[] =>
+    axis.split(/[\s,.\-/]+/).filter(t => t.length > 2);
+
+  const contrastTokens = extractAxisTokens(contrastAxis);
+  const enemyTokens = extractAxisTokens(enemyDef);
+  const axisTokens = [...new Set([...contrastTokens, ...enemyTokens])];
+
+  if (axisTokens.length === 0) {
+    return { aligned: true, failures: [], hookAxis: null, mechanismAxis: null };
+  }
+
+  const hookAxisTokensFound = axisTokens.filter(t => hookText.includes(t) || outcomeText.includes(t));
+  const mechAxisTokensFound = axisTokens.filter(t => mechText.includes(t));
+
+  const hookHasAxis = hookAxisTokensFound.length > 0;
+  const mechHasAxis = mechAxisTokensFound.length > 0;
+
+  let hookAxis: string | null = null;
+  let mechanismAxis: string | null = null;
+
+  if (hookHasAxis) {
+    hookAxis = hookAxisTokensFound.join(", ");
+  }
+  if (mechHasAxis) {
+    mechanismAxis = mechAxisTokensFound.join(", ");
+  }
+
+  const PROBLEM_KEYWORDS = [
+    /wast(e|ing)\s+(money|time|budget)/i,
+    /stop\s+(paying|spending|throwing)/i,
+    /tired\s+of/i,
+    /struggling\s+with/i,
+    /\b(inefficient|ineffective|broken|failing)\b/i,
+    /\b(overpriced|expensive|costly)\b/i,
+    /\bno\s+(results|roi|return)\b/i,
+  ];
+
+  const SOLUTION_KEYWORDS = [
+    /\b(community|belonging|connection|network)\b/i,
+    /\b(framework|system|architecture|engine|protocol|method)\b/i,
+    /\b(automation|automated|ai.driven|data.driven)\b/i,
+    /\b(coaching|mentorship|advisory|consulting)\b/i,
+    /\b(platform|tool|software|dashboard)\b/i,
+  ];
+
+  const hookProblems = PROBLEM_KEYWORDS.filter(p => p.test(hookText) || p.test(outcomeText));
+  const mechSolutions = SOLUTION_KEYWORDS.filter(p => p.test(mechText));
+
+  if (hookProblems.length > 0 && mechSolutions.length > 0) {
+    const hookProblemText = hookText + " " + outcomeText;
+    const mechSolutionText = mechText;
+
+    const hookContentTokens = hookProblemText.split(/[\s,.\-/]+/).filter(t => t.length > 4);
+    const mechContentTokens = mechSolutionText.split(/[\s,.\-/]+/).filter(t => t.length > 4);
+    const sharedTokens = hookContentTokens.filter(t => mechContentTokens.includes(t));
+
+    if (sharedTokens.length < 2) {
+      const hookProblemSummary = hookProblems.map(p => {
+        const match = (hookText + " " + outcomeText).match(p);
+        return match ? match[0] : "";
+      }).filter(Boolean).join(", ");
+
+      const mechSolutionSummary = mechSolutions.map(p => {
+        const match = mechText.match(p);
+        return match ? match[0] : "";
+      }).filter(Boolean).join(", ");
+
+      failures.push(
+        `Hook-mechanism axis mismatch: hook frames problem as "${hookProblemSummary}" but mechanism solves via "${mechSolutionSummary}". The mechanism must directly address the hook's stated problem.`
+      );
+    }
+  }
+
+  if (hookHasAxis && !mechHasAxis && contrastTokens.length > 0) {
+    failures.push(
+      `Mechanism does not reflect the positioning contrast axis. Hook references the contrast axis (${hookAxis}) but mechanism does not address it.`
+    );
+  }
+
+  if (!hookHasAxis && contrastTokens.length > 0) {
+    failures.push(
+      `Hook/outcome does not reference the positioning contrast axis "${contrastAxis}". The offer hook must derive from the same axis.`
+    );
+  }
+
+  return {
+    aligned: failures.length === 0,
+    failures,
+    hookAxis,
+    mechanismAxis,
+  };
+}
+
 export function checkDifferentiationStrength(
   offer: { offerName: string; coreOutcome: string; mechanismDescription: string; deliverables: string[] },
   differentiation: OfferDifferentiationInput,
@@ -1004,7 +1114,13 @@ RULE: Each outcome, mechanism justification, and deliverable must address or bui
 - Territories: ${JSON.stringify(territories.slice(0, 3).map((t: any) => t.name))}
 - Enemy: ${positioning.enemyDefinition || "Not defined"}
 - Narrative: ${positioning.narrativeDirection || "Not defined"}
-${positioning.contrastAxis ? `- Contrast Axis: ${positioning.contrastAxis}\nMANDATORY: The primary offer MUST contrast against this axis. Show how your offer is structurally different from the common approach.` : ""}
+${positioning.contrastAxis ? `- Contrast Axis: ${positioning.contrastAxis}
+MANDATORY POSITIONING ALIGNMENT RULES:
+1. The offer hook/name, outcome, AND mechanism MUST all derive from the SAME positioning contrast axis above.
+2. If the hook references a problem (e.g., "wasting money on ads"), the mechanism MUST solve THAT EXACT problem — not a different one.
+3. DO NOT create a hook about one problem (ad waste) and a mechanism about an unrelated solution (community building). Every element must be on the same strategic axis.
+4. The mechanism must DIRECTLY address whatever problem the hook identifies.
+5. Show how your offer is structurally different from the common approach.` : ""}
 
 ═══ SECTION 7: PROOF ALIGNMENT (objection-specific) ═══
 Each proof type MUST be tied to a specific audience objection or credibility gap. Do NOT use generic proof placeholders.
@@ -1096,6 +1212,7 @@ export async function runOfferEngine(
       rejectedOffer: { offer: emptyOffer, rejectionReason: "No upstream signals to anchor claims" },
       offerStrengthScore: 0,
       positioningConsistency: { consistent: false, contradictions: ["Signal-insufficient state"] },
+      hookMechanismAlignment: { aligned: false, failures: ["Signal-insufficient state"], hookAxis: null, mechanismAxis: null },
       boundaryCheck: { passed: true, violations: [] },
       structuralWarnings: ["SIGNAL_INSUFFICIENT: No grounded claims can be generated without upstream signals"],
       confidenceScore: 0,
@@ -1137,6 +1254,7 @@ export async function runOfferEngine(
       rejectedOffer: { offer: emptyOffer, rejectionReason: "No data to construct offer" },
       offerStrengthScore: 0,
       positioningConsistency: { consistent: false, contradictions: ["No offer data available"] },
+      hookMechanismAlignment: { aligned: false, failures: ["No offer data available"], hookAxis: null, mechanismAxis: null },
       boundaryCheck: { passed: true, violations: [] },
       structuralWarnings: [],
       confidenceScore: 0,
@@ -1219,6 +1337,7 @@ export async function runOfferEngine(
       rejectedOffer: { offer: emptyOffer, rejectionReason: "Claims failed signal grounding" },
       offerStrengthScore: 0,
       positioningConsistency: { consistent: false, contradictions: ["Claims not signal-grounded"] },
+      hookMechanismAlignment: { aligned: false, failures: ["Claims not signal-grounded"], hookAxis: null, mechanismAxis: null },
       boundaryCheck: { passed: true, violations: [] },
       structuralWarnings: [`GROUNDING_FAILED: ${primaryGrounding.strippedClaims.length} claims stripped for lack of signal backing`],
       confidenceScore: 0,
@@ -1343,6 +1462,71 @@ export async function runOfferEngine(
   const posConsistency = checkPositioningConsistency(primaryOffer, positioning, differentiation);
   diagnostics.positioningConsistency = posConsistency;
 
+  let hookMechAlignment = checkHookMechanismAlignment(primaryOffer, positioning);
+  const altHookMechAlignment = checkHookMechanismAlignment(alternativeOffer, positioning);
+  diagnostics.hookMechanismAlignment = hookMechAlignment;
+  diagnostics.altHookMechanismAlignment = altHookMechAlignment;
+
+  if (!altHookMechAlignment.aligned && hookMechAlignment.aligned) {
+    hookMechAlignment = {
+      aligned: false,
+      failures: altHookMechAlignment.failures.map(f => `[Alternative] ${f}`),
+      hookAxis: altHookMechAlignment.hookAxis,
+      mechanismAxis: altHookMechAlignment.mechanismAxis,
+    };
+  } else if (!altHookMechAlignment.aligned && !hookMechAlignment.aligned) {
+    hookMechAlignment = {
+      aligned: false,
+      failures: [...hookMechAlignment.failures, ...altHookMechAlignment.failures.map(f => `[Alternative] ${f}`)],
+      hookAxis: hookMechAlignment.hookAxis,
+      mechanismAxis: hookMechAlignment.mechanismAxis,
+    };
+  }
+
+  if (!hookMechAlignment.aligned) {
+    console.log(`[OfferEngine-V3] HOOK_MECHANISM_MISMATCH | ${hookMechAlignment.failures.join("; ")} — attempting regeneration`);
+    try {
+      const retryOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals);
+      diagnostics.hookMechanismRetry = { success: true, attempt: 2 };
+
+      const retryPrimaryOutcome: OutcomeLayer = { ...l1Outcome, primaryOutcome: retryOffers.primary.outcome || l1Outcome.primaryOutcome };
+      const retryMechDesc = retryOffers.primary.mechanism || l2Mechanism.mechanismDescription;
+      const retryMechLock = checkMechanismLock(retryMechDesc, differentiation);
+      const retryMechanism: MechanismLayer = { ...l2Mechanism, mechanismDescription: retryMechLock.locked ? retryMechDesc : l2Mechanism.mechanismDescription };
+      const retryDelivery: DeliveryLayer = { ...l3Delivery, deliverables: mergeDeliverables(retryOffers.primary.deliverables, l3Delivery.deliverables) };
+
+      const retryPrimary = buildOfferCandidate(
+        retryOffers.primary.name, retryPrimaryOutcome, retryMechanism, retryDelivery, l4Proof, l5Risk,
+        audience, differentiation, mi, positioning,
+      );
+
+      const retryAlignment = checkHookMechanismAlignment(retryPrimary, positioning);
+      diagnostics.hookMechanismRetryResult = retryAlignment;
+
+      if (retryAlignment.aligned || retryAlignment.failures.length < hookMechAlignment.failures.length) {
+        console.log(`[OfferEngine-V3] HOOK_MECHANISM_RETRY_SUCCESS | Retry ${retryAlignment.aligned ? "passed" : "improved"} alignment`);
+        Object.assign(primaryOffer, retryPrimary);
+        hookMechAlignment = retryAlignment;
+
+        const retryAltOutcome: OutcomeLayer = { ...l1Outcome, primaryOutcome: retryOffers.alternative.outcome || l1Outcome.primaryOutcome };
+        const retryAltMechDesc = retryOffers.alternative.mechanism || l2Mechanism.mechanismDescription;
+        const retryAltMechLock = checkMechanismLock(retryAltMechDesc, differentiation);
+        const retryAltMech: MechanismLayer = { ...l2Mechanism, mechanismDescription: retryAltMechLock.locked ? retryAltMechDesc : l2Mechanism.mechanismDescription };
+        const retryAltDelivery: DeliveryLayer = { ...l3Delivery, deliverables: mergeDeliverables(retryOffers.alternative.deliverables, l3Delivery.deliverables) };
+        const retryAlt = buildOfferCandidate(
+          retryOffers.alternative.name, retryAltOutcome, retryAltMech, retryAltDelivery, l4Proof, l5Risk,
+          audience, differentiation, mi, positioning,
+        );
+        Object.assign(alternativeOffer, retryAlt);
+      } else {
+        console.log(`[OfferEngine-V3] HOOK_MECHANISM_RETRY_NO_IMPROVEMENT | Keeping original — will flag POSITIONING_MISMATCH`);
+      }
+    } catch (retryErr: any) {
+      console.log(`[OfferEngine-V3] HOOK_MECHANISM_RETRY_FAILED | ${retryErr.message} — keeping original`);
+      diagnostics.hookMechanismRetry = { success: false, error: retryErr.message };
+    }
+  }
+
   const allOfferText = [
     primaryOffer.offerName, primaryOffer.coreOutcome, primaryOffer.mechanismDescription,
     ...primaryOffer.deliverables, ...primaryOffer.riskNotes,
@@ -1392,6 +1576,21 @@ export async function runOfferEngine(
 
   if (!diffStrength.sufficient) {
     structuralWarnings.push(...diffStrength.gaps);
+  }
+
+  if (!hookMechAlignment.aligned) {
+    status = STATUS.POSITIONING_MISMATCH;
+    statusMessage = `Positioning axis mismatch — hook and mechanism do not share the same strategic axis: ${hookMechAlignment.failures.join("; ")}`;
+    structuralWarnings.push(...hookMechAlignment.failures);
+    console.log(`[OfferEngine-V3] POSITIONING_MISMATCH | ${hookMechAlignment.failures.join("; ")}`);
+  }
+
+  if (!posConsistency.consistent) {
+    structuralWarnings.push(...posConsistency.contradictions);
+    if (status === STATUS.COMPLETE) {
+      status = STATUS.POSITIONING_MISMATCH;
+      statusMessage = `Positioning inconsistency — ${posConsistency.contradictions.join("; ")}`;
+    }
   }
 
   if (!boundaryCheck.clean) {
@@ -1513,6 +1712,7 @@ export async function runOfferEngine(
     const rawConfidence = clamp(
     primaryOffer.offerStrengthScore *
     (posConsistency.consistent ? 1 : 0.7) *
+    (hookMechAlignment.aligned ? 1 : 0.5) *
     (boundaryCheck.clean ? 1 : 0) *
     (primaryOffer.completeness.complete ? 1 : 0.6) *
     (genericOutputCheck.genericDetected ? (1 - genericOutputCheck.penalty) : 1) *
@@ -1531,10 +1731,11 @@ export async function runOfferEngine(
     primaryOffer.integrityResult.passed,
     boundaryCheck.clean,
     posConsistency.consistent,
+    hookMechAlignment.aligned,
     offerAlignmentValidation.aligned,
   ].filter(Boolean).length;
   const acceptability = assessStrategyAcceptability(
-    confidenceScore, layersPassed, 5,
+    confidenceScore, layersPassed, 6,
     primaryOffer.integrityResult.passed && boundaryCheck.clean,
     structuralWarnings,
   );
@@ -1550,6 +1751,7 @@ export async function runOfferEngine(
     rejectedOffer: { offer: rejectedOffer, rejectionReason: aiOffers.rejected.rejectionReason },
     offerStrengthScore: primaryOffer.offerStrengthScore,
     positioningConsistency: posConsistency,
+    hookMechanismAlignment: hookMechAlignment,
     boundaryCheck: { passed: boundaryCheck.clean, violations: boundaryCheck.violations },
     structuralWarnings,
     confidenceScore,

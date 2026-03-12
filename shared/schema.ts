@@ -1646,6 +1646,7 @@ export const offerSnapshots = pgTable("offer_snapshots", {
   rejectedOffer: text("rejected_offer"),
   offerStrengthScore: doublePrecision("offer_strength_score"),
   positioningConsistency: text("positioning_consistency"),
+  hookMechanismAlignment: text("hook_mechanism_alignment"),
   boundaryCheck: text("boundary_check"),
   confidenceScore: doublePrecision("confidence_score"),
   selectedOption: varchar("selected_option"),

@@ -1,0 +1,62 @@
+Team,
+
+Thank you for the recent improvements to the Offer Engine. The outcome precision and market relevance have improved significantly. However, the latest output reveals a structural issue that must be corrected before this engine can be considered stable.
+
+Problem Identified
+
+The current offer shows a positioning inconsistency between the hook and the mechanism.
+
+Example from the latest output:
+- Hook: “Stop wasting money on ads and build community and belonging.”
+- Mechanism: Community & belonging method
+
+The issue is that the hook frames the problem as ad inefficiency, while the mechanism frames the solution as community building. These are two different positioning axes, which creates confusion in the offer narrative.
+
+As a result, the system itself correctly raised the guard:
+
+Positioning Inconsistency — Offer does not reflect positioning contrast axis
+
+This must be resolved at the engine level.
+
+---
+
+Required Architectural Correction
+
+The Offer Engine must enforce Positioning → Offer Alignment before finalizing any offer.
+
+Implementation requirements:
+
+1. Contrast Axis Enforcement
+   The offer hook, outcome, and mechanism must all derive from the same positioning contrast axis defined in the Positioning Engine.
+
+2. Hook–Mechanism Consistency Check
+   If the hook references a problem (e.g., ad inefficiency), the mechanism must clearly solve that same problem.
+
+3. Mechanism Naming Upgrade
+   Mechanisms should be expressed as clear strategic systems or frameworks, not vague method labels.
+
+4. Guard Condition
+   If the hook and mechanism do not share the same strategic axis, the engine should:
+   - regenerate the offer, or  
+   - flag it as POSITIONING_MISMATCH before completion.
+
+---
+
+Acceptance Criteria (Strict)
+
+Please treat the following as hard requirements:
+
+- Hook, outcome, and mechanism must share the same positioning axis.  
+- No offer may pass if the positioning contrast axis is violated.  
+- Mechanisms must clearly explain how the core problem is solved.  
+- The frontend should only display offers that pass the positioning consistency guard.
+
+Acceptance criteria should remain strict, as positioning integrity is critical for downstream engines.
+
+---
+
+Please implement this correction and verify that regenerated offers align with the positioning contrast axis end-to-end.
+
+Thank you for addressing this carefully.
+
+Best,

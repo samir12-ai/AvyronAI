@@ -120,6 +120,7 @@ export interface OfferResult {
   rejectedOffer: { offer: OfferCandidate; rejectionReason: string };
   offerStrengthScore: number;
   positioningConsistency: { consistent: boolean; contradictions: string[] };
+  hookMechanismAlignment: { aligned: boolean; failures: string[]; hookAxis: string | null; mechanismAxis: string | null };
   boundaryCheck: { passed: boolean; violations: string[] };
   structuralWarnings: string[];
   confidenceScore: number;
