@@ -8,6 +8,7 @@ import { ENGINE_VERSION as DIFF_ENGINE_VERSION } from "../differentiation-engine
 import { getEngineReadinessState, verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
 import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/constants";
 import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
+import { parseLineageFromSnapshot, mergeLineageArrays, findBestParentSignal, createDerivedLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -182,6 +183,25 @@ export function registerOfferEngineRoutes(app: Express) {
         });
       }
 
+      const upstreamLineage = mergeLineageArrays(
+        parseLineageFromSnapshot((miSnapshot as any).signalLineage),
+        parseLineageFromSnapshot((audSnapshot as any).signalLineage),
+      );
+      const offerLineage: SignalLineageEntry[] = [];
+      const offerClaims = [
+        result.primaryOffer?.coreOutcome,
+        result.primaryOffer?.mechanismDescription,
+        ...(result.primaryOffer?.deliverables || []),
+        ...(result.primaryOffer?.proofAlignment || []),
+      ].filter(Boolean);
+      offerClaims.forEach((claim: string, i: number) => {
+        const parent = findBestParentSignal(claim, upstreamLineage);
+        if (parent) {
+          offerLineage.push(createDerivedLineageEntry("offer_engine", "offer_claim", claim, parent, i));
+        }
+      });
+      console.log(`[OfferEngine] LINEAGE_BUILT | upstream=${upstreamLineage.length} | derived=${offerLineage.length} | claims=${offerClaims.length}`);
+
       const [saved] = await db.insert(offerSnapshots).values({
         accountId,
         campaignId,
@@ -199,6 +219,7 @@ export function registerOfferEngineRoutes(app: Express) {
         positioningConsistency: JSON.stringify(result.positioningConsistency),
         boundaryCheck: JSON.stringify(result.boundaryCheck),
         confidenceScore: result.confidenceScore,
+        signalLineage: JSON.stringify(mergeLineageArrays(upstreamLineage, offerLineage)),
         executionTimeMs: result.executionTimeMs,
       }).returning();
 

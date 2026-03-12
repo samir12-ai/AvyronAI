@@ -22,6 +22,7 @@ import { POSITIONING_ENGINE_VERSION } from "../positioning-engine/constants";
 import { AUDIENCE_ENGINE_VERSION } from "../audience-engine/constants";
 import { verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
 import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
+import { parseLineageFromSnapshot, mergeLineageArrays, findBestParentSignal, createDerivedLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -372,6 +373,26 @@ export function registerAwarenessEngineRoutes(app: Express) {
         });
       }
 
+      const upstreamLineage = mergeLineageArrays(
+        parseLineageFromSnapshot((miSnapshot as any).signalLineage),
+        parseLineageFromSnapshot((audSnapshot as any).signalLineage),
+        parseLineageFromSnapshot((offerSnapshot as any).signalLineage),
+      );
+      const awarenessLineage: SignalLineageEntry[] = [];
+      const awarenessClaims = [
+        result.primaryRoute?.entryMechanismType,
+        result.primaryRoute?.triggerClass,
+        result.primaryRoute?.targetReadinessStage,
+        ...(result.primaryRoute?.frictionNotes || []),
+      ].filter(Boolean);
+      awarenessClaims.forEach((claim: string, i: number) => {
+        const parent = findBestParentSignal(claim, upstreamLineage);
+        if (parent) {
+          awarenessLineage.push(createDerivedLineageEntry("awareness_engine", "awareness_claim", claim, parent, i));
+        }
+      });
+      console.log(`[AwarenessEngine] LINEAGE_BUILT | upstream=${upstreamLineage.length} | derived=${awarenessLineage.length} | claims=${awarenessClaims.length}`);
+
       const [saved] = await db.insert(awarenessSnapshots).values({
         accountId,
         campaignId,
@@ -394,6 +415,7 @@ export function registerAwarenessEngineRoutes(app: Express) {
         dataReliability: JSON.stringify(result.dataReliability),
         confidenceNormalized: result.confidenceNormalized,
         awarenessStrengthScore: result.primaryRoute.awarenessStrengthScore,
+        signalLineage: JSON.stringify(mergeLineageArrays(upstreamLineage, awarenessLineage)),
         executionTimeMs: result.executionTimeMs,
       }).returning();
 

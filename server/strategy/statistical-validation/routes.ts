@@ -15,6 +15,7 @@ import { runStatisticalValidationEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
 import { ENGINE_VERSION as PERSUASION_ENGINE_VERSION } from "../../persuasion-engine/constants";
 import { pruneOldSnapshots, checkValidationSession } from "../../engine-hardening";
+import { parseLineageFromSnapshot, mergeLineageArrays } from "../../shared/signal-lineage";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -208,8 +209,17 @@ export function registerStatisticalValidationRoutes(app: Express) {
         structuredObjections: primaryRoute.structuredObjections || [],
       };
 
+      const upstreamLineage = mergeLineageArrays(
+        parseLineageFromSnapshot((miSnap as any).signalLineage),
+        parseLineageFromSnapshot((audSnap as any).signalLineage),
+        parseLineageFromSnapshot((offerSnap as any).signalLineage),
+        parseLineageFromSnapshot((awarenessSnap as any).signalLineage),
+        parseLineageFromSnapshot((persuasionSnapshot as any).signalLineage),
+      );
+      console.log(`[StatisticalValidation] UPSTREAM_LINEAGE_LOADED | totalEntries=${upstreamLineage.length} | sources=${new Set(upstreamLineage.map(e => e.originEngine)).size}`);
+
       const result = await runStatisticalValidationEngine(
-        miInput, audienceInput, offerInput, funnelInput, awarenessInput, persuasionInput, accountId,
+        miInput, audienceInput, offerInput, funnelInput, awarenessInput, persuasionInput, accountId, upstreamLineage,
       );
 
       if (result.status === "INTEGRITY_FAILED") {

@@ -24,6 +24,7 @@ import { POSITIONING_ENGINE_VERSION } from "../positioning-engine/constants";
 import { AUDIENCE_ENGINE_VERSION } from "../audience-engine/constants";
 import { verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
 import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
+import { parseLineageFromSnapshot, mergeLineageArrays, findBestParentSignal, createDerivedLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -359,6 +360,27 @@ export function registerPersuasionEngineRoutes(app: Express) {
         });
       }
 
+      const upstreamLineage = mergeLineageArrays(
+        parseLineageFromSnapshot((miSnapshot as any).signalLineage),
+        parseLineageFromSnapshot((audSnapshot as any).signalLineage),
+        parseLineageFromSnapshot((offerSnapshot as any).signalLineage),
+        parseLineageFromSnapshot((awarenessSnapshot as any).signalLineage),
+      );
+      const persuasionLineage: SignalLineageEntry[] = [];
+      const persuasionClaims = [
+        result.primaryRoute?.persuasionMode,
+        ...(result.primaryRoute?.primaryInfluenceDrivers || []),
+        ...(result.primaryRoute?.objectionPriorities || []),
+        ...(result.primaryRoute?.trustSequence || []).map((s: any) => typeof s === "string" ? s : s?.step || s?.description || ""),
+      ].filter(Boolean);
+      persuasionClaims.forEach((claim: string, i: number) => {
+        const parent = findBestParentSignal(claim, upstreamLineage);
+        if (parent) {
+          persuasionLineage.push(createDerivedLineageEntry("persuasion_engine", "persuasion_claim", claim, parent, i));
+        }
+      });
+      console.log(`[PersuasionEngine] LINEAGE_BUILT | upstream=${upstreamLineage.length} | derived=${persuasionLineage.length} | claims=${persuasionClaims.length}`);
+
       const [saved] = await db.insert(persuasionSnapshots).values({
         accountId,
         campaignId,
@@ -382,6 +404,7 @@ export function registerPersuasionEngineRoutes(app: Express) {
         dataReliability: JSON.stringify(result.dataReliability),
         confidenceNormalized: result.confidenceNormalized,
         persuasionStrengthScore: result.primaryRoute.persuasionStrengthScore,
+        signalLineage: JSON.stringify(mergeLineageArrays(upstreamLineage, persuasionLineage)),
         executionTimeMs: result.executionTimeMs,
       }).returning();
 

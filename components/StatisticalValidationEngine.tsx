@@ -43,6 +43,9 @@ interface ClaimValidation {
   signalProvenance?: SignalProvenance | null;
   signalTraceId?: string | null;
   signalPath?: string[];
+  parentSignalId?: string | null;
+  originEngine?: string | null;
+  hopDepth?: number;
 }
 
 interface DataReliability {
@@ -269,6 +272,16 @@ export default function StatisticalValidationEngine() {
                 </Text>
               </View>
             )}
+          </View>
+        )}
+        {(claim.parentSignalId || claim.originEngine) && (
+          <View style={[styles.lineageRow, { backgroundColor: '#6366F110' }]}>
+            <Ionicons name="git-merge" size={10} color="#6366F1" />
+            <Text style={[styles.lineageText, { color: '#6366F1' }]} numberOfLines={1}>
+              {PROVENANCE_ENGINE_LABELS[claim.originEngine || ''] || claim.originEngine || 'unknown'}
+              {claim.parentSignalId ? ` → parent: ${claim.parentSignalId}` : ''}
+              {(claim.hopDepth ?? 0) > 0 ? ` (${claim.hopDepth} hop${(claim.hopDepth ?? 0) > 1 ? 's' : ''})` : ' (source)'}
+            </Text>
           </View>
         )}
         {claim.signalProvenance && (
@@ -698,6 +711,8 @@ const styles = StyleSheet.create({
   traceIdText: { fontSize: 10 },
   signalPathRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1 },
   signalPathText: { fontSize: 10, flex: 1 },
+  lineageRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, padding: 6, borderRadius: 6 },
+  lineageText: { fontSize: 10, flex: 1 },
   provenanceRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 6, padding: 6, borderRadius: 6 },
   provenanceText: { fontSize: 11, flex: 1, lineHeight: 16 },
   hypothesisNotice: { padding: 10, borderRadius: 8, marginBottom: 8 },

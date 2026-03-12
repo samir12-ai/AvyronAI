@@ -1,0 +1,160 @@
+Hi Replit Team,
+
+Thank you for implementing the Signal Mapping Layer and the initial Signal Trace system. The improvements are working and the validation engine now correctly recognizes upstream signals.
+
+However, one architectural step is still required to complete the signal infrastructure according to the Master Plan.
+
+Currently the signal path is inferred at the validation level, but it is not yet persisted and transmitted through the engine pipeline.
+
+To achieve a fully reliable system, we must implement true multi-hop signal lineage.
+
+Below is the required architecture upgrade.
+
+---
+
+# 1. Current Limitation
+
+At the moment:
+
+• Signal trace IDs are generated at validation  
+• Signal paths are inferred using equivalence mapping  
+• Upstream engines do not pass trace metadata
+
+This means the validation engine reconstructs signal flow instead of receiving the real path.
+
+Example today:
+
+Audience Pain  
+→ Offer Outcome  
+→ Persuasion Driver  
+
+The system infers the relationship instead of storing it.
+
+---
+
+# 2. Required Solution — Full Multi-Hop Signal Trace
+
+All engines must pass signal trace metadata forward through the pipeline.
+
+Every signal or claim must carry the following structure:
+
+Signal Metadata Fields:
+
+• signal_id  
+• origin_engine  
+• canonical_cluster  
+• signal_path  
+• parent_signal_id  
+
+Example structure:
+
+signal_id: AUD_PAIN_004  
+origin_engine: Audience  
+canonical_cluster: audience_pain  
+parent_signal_id: null  
+signal_path: Audience
+
+When Offer Engine builds an outcome:
+
+signal_id: OFFER_OUTCOME_001  
+origin_engine: Offer  
+canonical_cluster: audience_pain  
+parent_signal_id: AUD_PAIN_004  
+signal_path: Audience → Offer
+
+When Persuasion Engine generates a driver:
+
+signal_id: PERSUASION_DRIVER_002  
+origin_engine: Persuasion  
+canonical_cluster: emotional_driver  
+parent_signal_id: OFFER_OUTCOME_001  
+signal_path: Audience → Offer → Persuasion
+
+This creates true lineage instead of inferred lineage.
+
+---
+
+# 3. Engine Responsibilities
+
+Each engine must follow these rules.
+
+When consuming signals:
+
+• preserve existing trace metadata  
+• append the current engine name to signal_path  
+
+When generating derived signals:
+
+• create new signal_id  
+• assign parent_signal_id referencing the upstream signal  
+
+When forwarding outputs:
+
+• include trace metadata in the output payload
+
+No engine may remove trace information.
+
+---
+
+# 4. Validation Engine Behavior
+
+Once trace metadata exists, the Validation Engine must:
+
+• read signal_path directly from metadata  
+• confirm cluster alignment  
+• confirm origin trace  
+• verify signal lineage consistency
+
+Validation must never reconstruct signal paths when trace metadata exists.
+
+---
+
+# 5. Guardrails
+
+Please implement the following safeguards:
+
+1. Any claim without signal metadata is automatically classified as hypothesis.
+2. Any missing parent_signal_id must be logged.
+3. If signal_path breaks continuity, log a lineage warning.
+4. Engines must not modify upstream signal_id values.
+
+These protections guarantee trace consistency.
+
+---
+
+# 6. Frontend Visibility
+
+Frontend diagnostics should display:
+
+• signal_id  
+• origin_engine  
+• full signal_path  
+• parent_signal_id  
+
+This allows debugging and transparency for every claim.
+
+---
+
+# 7. Acceptance Criteria
+
+This task is complete only when:
+
+• signals persist across engine outputs  
+• signal lineage spans the full pipeline  
+• validation reads true trace paths instead of reconstructing them  
+• signal debugging becomes possible across engines  
+• frontend diagnostics display the lineage chain
+
+---
+
+# 8. Acceptance Difficulty
+
+This task affects the entire signal architecture and must be implemented carefully.
+
+Please treat this as a high-difficulty architectural acceptance task and verify the full pipeline before confirming completion.
+
+The final goal is a system where every strategic claim can be traced back to its original market or audience signal.
+
+This is essential for maintaining the integrity of the Master Plan.
+
+Best regards

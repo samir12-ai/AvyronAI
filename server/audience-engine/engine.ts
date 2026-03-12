@@ -23,6 +23,7 @@ import {
 import { MI_COST_LIMITS } from "../market-intelligence-v3/constants";
 import { pruneOldSnapshots, assessDataReliability as sharedAssessDataReliability, normalizeConfidence as sharedNormalizeConfidence, detectGenericOutput } from "../engine-hardening";
 import { aiChat } from "../ai-client";
+import { createSourceLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 
 interface EvidenceMeta {
   evidenceCount: number;
@@ -1271,6 +1272,22 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
 
   const inputSummary = { ...baseInputSummary };
 
+  const audienceLineage: SignalLineageEntry[] = [];
+  painMap.forEach((p: any, i: number) => {
+    if (p.canonical) audienceLineage.push(createSourceLineageEntry("audience", "audience_pain", p.canonical, i));
+  });
+  desireMap.forEach((d: any, i: number) => {
+    if (d.canonical) audienceLineage.push(createSourceLineageEntry("audience", "audience_desire", d.canonical, i));
+  });
+  objectionMap.forEach((o: any, i: number) => {
+    if (o.canonical) audienceLineage.push(createSourceLineageEntry("audience", "audience_objection", o.canonical, i));
+  });
+  (emotionalDrivers || []).forEach((d: any, i: number) => {
+    const text = typeof d === "string" ? d : (d?.driver || d?.description || d?.canonical || "");
+    if (text) audienceLineage.push(createSourceLineageEntry("audience", "emotional_driver", text, i));
+  });
+  console.log(`[AudienceEngine-V3] LINEAGE_GENERATED | entries=${audienceLineage.length} | pains=${painMap.length} | desires=${desireMap.length} | objections=${objectionMap.length}`);
+
   const [inserted] = await db.insert(audienceSnapshots).values({
     accountId, campaignId, miSnapshotId,
     engineVersion: AUDIENCE_ENGINE_VERSION,
@@ -1287,6 +1304,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     audienceIntentDistribution: JSON.stringify(intentDistribution),
     adsTargetingHints: JSON.stringify(adsTargetingHints),
     inputSummary: JSON.stringify(inputSummary),
+    signalLineage: JSON.stringify(audienceLineage),
     executionTimeMs,
   }).returning({ id: audienceSnapshots.id });
 

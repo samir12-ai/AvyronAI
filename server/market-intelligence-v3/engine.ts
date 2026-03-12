@@ -40,6 +40,7 @@ import { logAudit } from "../audit";
 import { computeCompetitorHash, parseJsonSafe } from "./utils";
 import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
 import { logSignalDiagnostics, detectNarrativeOverlap } from "../engine-hardening";
+import { createSourceLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 
 export { computeCompetitorHash } from "./utils";
 export { ENGINE_VERSION } from "./constants";
@@ -958,6 +959,21 @@ export class MarketIntelligenceV3 {
     };
     console.log(`[MIv3] DIAGNOSTICS | activity=${diagnostics.activityScore.toFixed(3)} | intensity=${diagnostics.competitionIntensityScore.toFixed(3)} | demand=${diagnostics.demandScore.toFixed(3)} | saturation=${diagnostics.narrativeSaturationScore.toFixed(3)} | sampleBias=${diagnostics.sampleBiasFlag} | realRatio=${diagnostics.realCommentRatio} | demandPressure=${diagnostics.demandPressureScore} | echoChamber=${diagnostics.echoChamberRisk}`);
 
+    const miLineage: SignalLineageEntry[] = [];
+    opportunitySignals.forEach((sig: any, i: number) => {
+      const text = typeof sig === "string" ? sig : (sig?.signal || sig?.description || sig?.message || "");
+      if (text) miLineage.push(createSourceLineageEntry("market_intelligence", "market_opportunity", text, i));
+    });
+    threatSignals.forEach((sig: any, i: number) => {
+      const text = typeof sig === "string" ? sig : (sig?.signal || sig?.description || sig?.message || "");
+      if (text) miLineage.push(createSourceLineageEntry("market_intelligence", "market_threat", text, i));
+    });
+    const narObjections = narrativeObjectionMap?.objections || [];
+    narObjections.forEach((obj: any, i: number) => {
+      if (obj?.objection) miLineage.push(createSourceLineageEntry("market_intelligence", "narrative_objection", obj.objection, i));
+    });
+    console.log(`[MIv3] LINEAGE_GENERATED | entries=${miLineage.length} | opportunities=${opportunitySignals.length} | threats=${threatSignals.length} | narrativeObj=${narObjections.length}`);
+
     const snapshotPayload = {
       accountId,
       campaignId,
@@ -984,6 +1000,7 @@ export class MarketIntelligenceV3 {
       deltaReport: deltaReport ? JSON.stringify(deltaReport) : null,
       diagnosticsData: JSON.stringify(diagnostics),
       objectionMapData: JSON.stringify(narrativeObjectionMap),
+      signalLineage: JSON.stringify(miLineage),
       volatilityIndex,
       dataFreshnessDays,
       overallConfidence: confidence.overall,

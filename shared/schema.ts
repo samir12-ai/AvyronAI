@@ -1377,6 +1377,7 @@ export const miSnapshots = pgTable("mi_snapshots", {
   diagnosticsData: text("diagnostics_data"),
   dataStatus: text("data_status").default("LIVE"),
   objectionMapData: text("objection_map_data"),
+  signalLineage: text("signal_lineage"),
   createdAt: timestamp("created_at").defaultNow(),
   expiresAt: timestamp("expires_at"),
 });
@@ -1559,6 +1560,7 @@ export const audienceSnapshots = pgTable("audience_snapshots", {
   audienceIntentDistribution: text("audience_intent_distribution"),
   adsTargetingHints: text("ads_targeting_hints"),
   inputSummary: text("input_summary"),
+  signalLineage: text("signal_lineage"),
   executionTimeMs: integer("execution_time_ms"),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -1647,6 +1649,7 @@ export const offerSnapshots = pgTable("offer_snapshots", {
   boundaryCheck: text("boundary_check"),
   confidenceScore: doublePrecision("confidence_score"),
   selectedOption: varchar("selected_option"),
+  signalLineage: text("signal_lineage"),
   executionTimeMs: integer("execution_time_ms"),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -1735,6 +1738,7 @@ export const awarenessSnapshots = pgTable("awareness_snapshots", {
   dataReliability: text("data_reliability"),
   confidenceNormalized: boolean("confidence_normalized").default(false),
   awarenessStrengthScore: doublePrecision("awareness_strength_score"),
+  signalLineage: text("signal_lineage"),
   executionTimeMs: integer("execution_time_ms"),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -1767,6 +1771,7 @@ export const persuasionSnapshots = pgTable("persuasion_snapshots", {
   dataReliability: text("data_reliability"),
   confidenceNormalized: boolean("confidence_normalized").default(false),
   persuasionStrengthScore: doublePrecision("persuasion_strength_score"),
+  signalLineage: text("signal_lineage"),
   executionTimeMs: integer("execution_time_ms"),
   createdAt: timestamp("created_at").defaultNow(),
 });

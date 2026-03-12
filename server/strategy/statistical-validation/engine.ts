@@ -14,6 +14,7 @@ import {
 } from "./constants";
 import { enforceBoundaryWithSanitization } from "../../engine-hardening";
 import { assessStrategyAcceptability } from "../../shared/strategy-acceptability";
+import type { SignalLineageEntry } from "../../shared/signal-lineage";
 import type {
   ValidationMIInput,
   ValidationAudienceInput,
@@ -274,7 +275,11 @@ function generateSignalTraceId(source: string, index: number): string {
   return `${prefix}_${String(index + 1).padStart(3, "0")}`;
 }
 
-function buildSignalPath(source: string, provenance: SignalProvenance | null): string[] {
+function buildSignalPath(source: string, provenance: SignalProvenance | null, lineageMatch?: SignalLineageEntry | null): string[] {
+  if (lineageMatch && lineageMatch.signalPath.length > 0) {
+    return [...lineageMatch.signalPath, "statistical_validation"];
+  }
+
   const equivalence = SIGNAL_EQUIVALENCE_MAP[source];
   const sourceEngine = equivalence?.traceOrigin || source.split("_")[0];
 
@@ -289,6 +294,30 @@ function buildSignalPath(source: string, provenance: SignalProvenance | null): s
   return [sourceEngine, "statistical_validation"];
 }
 
+function findLineageMatch(claimText: string, lineage: SignalLineageEntry[]): SignalLineageEntry | null {
+  if (lineage.length === 0) return null;
+  const lower = claimText.toLowerCase();
+  const claimWords = lower.split(/\s+/).filter(w => w.length > 3);
+  if (claimWords.length === 0) return null;
+
+  let bestMatch: SignalLineageEntry | null = null;
+  let bestScore = 0;
+
+  for (const entry of lineage) {
+    const signalWords = new Set(entry.signalText.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+    let matches = 0;
+    for (const w of claimWords) {
+      if (signalWords.has(w)) matches++;
+    }
+    if (matches >= 1 && matches > bestScore) {
+      bestScore = matches;
+      bestMatch = entry;
+    }
+  }
+
+  return bestMatch;
+}
+
 interface ExtractedClaim {
   claim: string;
   source: string;
@@ -297,6 +326,9 @@ interface ExtractedClaim {
   signalTraceId: string;
   signalPath: string[];
   mappedViaEquivalence: boolean;
+  parentSignalId: string | null;
+  originEngine: string | null;
+  hopDepth: number;
 }
 
 function extractClaims(
@@ -304,17 +336,20 @@ function extractClaims(
   persuasion: ValidationPersuasionInput,
   awareness: ValidationAwarenessInput,
   signalClusters: SignalCluster[],
+  upstreamLineage: SignalLineageEntry[] = [],
 ): { claims: ExtractedClaim[]; unmappedSignals: string[] } {
   const claims: ExtractedClaim[] = [];
   const unmappedSignals: string[] = [];
   let claimIndex = 0;
+  const hasLineage = upstreamLineage.length > 0;
 
   const addClaim = (claimText: string, source: string) => {
     if (!claimText) return;
     const { supporting, mappedViaEquivalence } = matchClaimToSignalCluster(claimText, signalClusters, source);
+    const lineageMatch = hasLineage ? findLineageMatch(claimText, upstreamLineage) : null;
     const traceId = generateSignalTraceId(source, claimIndex);
-    const signalPath = buildSignalPath(source, supporting);
-    const isHypothesis = supporting === null;
+    const signalPath = buildSignalPath(source, supporting, lineageMatch);
+    const isHypothesis = supporting === null && lineageMatch === null;
 
     if (isHypothesis) {
       unmappedSignals.push(`[${traceId}] ${source}: "${claimText.slice(0, 80)}" — no signal cluster match found`);
@@ -328,6 +363,9 @@ function extractClaims(
       signalTraceId: traceId,
       signalPath,
       mappedViaEquivalence,
+      parentSignalId: lineageMatch?.parentSignalId || null,
+      originEngine: lineageMatch?.originEngine || null,
+      hopDepth: lineageMatch?.hopDepth ?? 0,
     });
     claimIndex++;
   };
@@ -902,6 +940,7 @@ export async function runStatisticalValidationEngine(
   awareness: ValidationAwarenessInput,
   persuasion: ValidationPersuasionInput,
   accountId: string,
+  upstreamLineage: SignalLineageEntry[] = [],
 ): Promise<StatisticalValidationResult> {
   const startTime = Date.now();
 
@@ -942,10 +981,20 @@ export async function runStatisticalValidationEngine(
 
   const signalClusters = buildSignalClusters(mi, audience);
 
-  const { claims: extractedClaims, unmappedSignals } = extractClaims(offer, persuasion, awareness, signalClusters);
-  const claimValidations = extractedClaims.map(c =>
-    validateClaim(c.claim, c.source, c.signalProvenance, c.isHypothesis, c.signalTraceId, c.signalPath, mi, audience, offer, funnel, awareness, persuasion)
-  );
+  const { claims: extractedClaims, unmappedSignals } = extractClaims(offer, persuasion, awareness, signalClusters, upstreamLineage);
+  if (upstreamLineage.length > 0) {
+    const lineageLinked = extractedClaims.filter(c => c.parentSignalId !== null).length;
+    console.log(`[StatisticalValidation] LINEAGE_RESOLUTION | claims=${extractedClaims.length} | lineageLinked=${lineageLinked} | orphaned=${extractedClaims.length - lineageLinked} | upstreamEntries=${upstreamLineage.length}`);
+  }
+  const claimValidations = extractedClaims.map(c => {
+    const validated = validateClaim(c.claim, c.source, c.signalProvenance, c.isHypothesis, c.signalTraceId, c.signalPath, mi, audience, offer, funnel, awareness, persuasion);
+    return {
+      ...validated,
+      parentSignalId: c.parentSignalId,
+      originEngine: c.originEngine,
+      hopDepth: c.hopDepth,
+    };
+  });
 
   const signalBackedClaims = claimValidations.filter(c => !c.isHypothesis);
   const hypotheses = claimValidations.filter(c => c.isHypothesis);

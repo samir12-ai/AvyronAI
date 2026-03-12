@@ -104,6 +104,9 @@ export interface ClaimValidation {
   signalProvenance: SignalProvenance | null;
   signalTraceId: string | null;
   signalPath: string[];
+  parentSignalId?: string | null;
+  originEngine?: string | null;
+  hopDepth?: number;
 }
 
 export interface DataReliabilityDiagnostics {
