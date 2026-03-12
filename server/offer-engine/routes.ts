@@ -171,7 +171,13 @@ export function registerOfferEngineRoutes(app: Express) {
         confidenceScore: activeDiffSnapshot.confidenceScore,
       };
 
-      const result = await runOfferEngine(miInput, audienceInput, positioningInput, differentiationInput, accountId);
+      const upstreamLineage = mergeLineageArrays(
+        parseLineageFromSnapshot((miSnapshot as any).signalLineage),
+        parseLineageFromSnapshot((audSnapshot as any).signalLineage),
+      );
+      console.log(`[OfferEngine] UPSTREAM_LINEAGE | mi=${parseLineageFromSnapshot((miSnapshot as any).signalLineage).length} | audience=${parseLineageFromSnapshot((audSnapshot as any).signalLineage).length} | merged=${upstreamLineage.length}`);
+
+      const result = await runOfferEngine(miInput, audienceInput, positioningInput, differentiationInput, accountId, upstreamLineage);
 
       if (result.status === "INTEGRITY_FAILED") {
         return res.status(422).json({
@@ -183,10 +189,16 @@ export function registerOfferEngineRoutes(app: Express) {
         });
       }
 
-      const upstreamLineage = mergeLineageArrays(
-        parseLineageFromSnapshot((miSnapshot as any).signalLineage),
-        parseLineageFromSnapshot((audSnapshot as any).signalLineage),
-      );
+      if (result.status === "INSUFFICIENT_SIGNALS") {
+        return res.status(422).json({
+          success: false,
+          error: "SIGNAL_INSUFFICIENT",
+          message: result.statusMessage || "Insufficient upstream signals for grounded claim generation",
+          signalGrounding: result.signalGrounding,
+          executionTimeMs: result.executionTimeMs,
+        });
+      }
+
       const offerLineage: SignalLineageEntry[] = [];
       const offerClaims = [
         result.primaryOffer?.coreOutcome,
@@ -200,7 +212,7 @@ export function registerOfferEngineRoutes(app: Express) {
           offerLineage.push(createDerivedLineageEntry("offer_engine", "offer_claim", claim, parent, i));
         }
       });
-      console.log(`[OfferEngine] LINEAGE_BUILT | upstream=${upstreamLineage.length} | derived=${offerLineage.length} | claims=${offerClaims.length}`);
+      console.log(`[OfferEngine] LINEAGE_BUILT | upstream=${upstreamLineage.length} | derived=${offerLineage.length} | claims=${offerClaims.length} | grounding=${result.signalGrounding ? `${result.signalGrounding.groundedClaims}/${result.signalGrounding.totalClaims}` : 'N/A'}`);
 
       const [saved] = await db.insert(offerSnapshots).values({
         accountId,

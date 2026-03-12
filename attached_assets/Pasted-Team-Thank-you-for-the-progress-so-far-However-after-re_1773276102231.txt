@@ -1,0 +1,58 @@
+Team,
+
+Thank you for the progress so far. However, after reviewing the latest validation results and signal diagnostics, a structural issue remains in the system architecture that must be corrected immediately.
+
+The root cause is that several engines are still generating strategic claims before grounding them in upstream signals. This creates hypotheses without traceable signal chains, which is exactly why the Statistical Validation engine is correctly flagging many claims as unsupported.
+
+We are therefore enforcing the following non-negotiable architectural rule across the entire system:
+
+Signal → Reasoning → Claim
+
+No engine should generate a strategic claim unless it is anchored to an upstream signal with a traceable lineage.
+
+This rule must be applied to all claim-generating engines, including:
+
+- Offer Engine  
+- Awareness Engine  
+- Persuasion Engine  
+- Funnel logic where applicable  
+
+Each claim must be created from an existing signal, not the other way around. The system must never generate an idea first and then attempt to find supporting signals afterward.
+
+The most critical enforcement point is the Offer Engine, because it currently generates the majority of claims that later propagate into Awareness and Persuasion. If Offer produces ungrounded claims, the entire downstream chain becomes contaminated.
+
+Required implementation changes:
+
+1. Signal-Anchored Claim Generation  
+   Every claim must reference a parent signal ID originating from MI or Audience engines.
+
+2. Hard Guard at Engine Level  
+   If no parent signal exists, the engine must not generate the claim. It should return a signal-insufficient state instead.
+
+3. Mandatory Lineage Propagation  
+   When a claim is derived from a signal, the lineage must be preserved and passed forward through all downstream engines.
+
+4. Offer Engine Priority Fix  
+   Offer must first select qualifying signals (pain, desire, opportunity) and only then construct outcomes, mechanisms, or proofs derived from them.
+
+5. System-Wide Consistency  
+   Apply this logic uniformly across all engines so the architecture follows a consistent signal-anchored strategy model.
+
+Please also ensure that all fixes are applied system-wide and reflected in the frontend. We have seen multiple cases where backend logic was updated but the UI or snapshot logic was not refreshed, which causes misleading validation results.
+
+Acceptance criteria for this correction should be extremely strict:
+
+- No claim without a parent signal.
+- Full signal lineage must be visible.
+- Offer must never generate ungrounded outcomes or proofs.
+- Downstream engines must inherit lineage, not recreate claims.
+
+If the system encounters a situation where signals are insufficient, it should fail safely rather than fabricate claims.
+
+This correction is fundamental to the integrity of the entire strategy engine, so please treat it as a high-priority architectural fix and verify it thoroughly before marking the task complete.
+
+Once implemented, run validation again to confirm that signal-grounded claims increase and hypothesis flags decrease.
+
+Thank you for addressing this with precision.
+
+Best,

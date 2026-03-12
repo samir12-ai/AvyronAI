@@ -24,6 +24,11 @@ import {
 } from "./constants";
 import { enforceBoundaryWithSanitization } from "../engine-hardening";
 import { assessStrategyAcceptability } from "../shared/strategy-acceptability";
+import {
+  type SignalLineageEntry,
+  extractQualifyingSignals,
+  MIN_QUALIFYING_SIGNALS,
+} from "../shared/signal-lineage";
 import type {
   PersuasionMIInput,
   PersuasionAudienceInput,
@@ -1619,9 +1624,32 @@ export function analyzePersuasion(
   funnel: PersuasionFunnelInput,
   integrity: PersuasionIntegrityInput,
   awareness: PersuasionAwarenessInput,
+  upstreamLineage: SignalLineageEntry[] = [],
 ): PersuasionResult {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
+
+  const qualifyingSignals = extractQualifyingSignals(upstreamLineage);
+  console.log(`[PersuasionEngine-V3] SIGNAL_CHECK | upstream=${upstreamLineage.length} | qualifying=${qualifyingSignals.length} | min=${MIN_QUALIFYING_SIGNALS}`);
+
+  if (qualifyingSignals.length < MIN_QUALIFYING_SIGNALS) {
+    console.log(`[PersuasionEngine-V3] SIGNAL_INSUFFICIENT | qualifying=${qualifyingSignals.length} < min=${MIN_QUALIFYING_SIGNALS}`);
+    return {
+      status: STATUS.INTEGRITY_FAILED,
+      statusMessage: `Signal-insufficient: only ${qualifyingSignals.length} qualifying upstream signals found (minimum ${MIN_QUALIFYING_SIGNALS} required). Upstream engines must generate source signals first.`,
+      primaryRoute: emptyRoute("Signal-insufficient"),
+      alternativeRoute: emptyRoute("Signal-insufficient"),
+      rejectedRoute: emptyRoute("Signal-insufficient"),
+      layerResults: [],
+      structuralWarnings: ["SIGNAL_INSUFFICIENT: Cannot generate grounded persuasion route without upstream signals"],
+      boundaryCheck: { passed: true, violations: [], sanitized: false, sanitizedText: "", warnings: [] },
+      dataReliability: emptyReliability(),
+      confidenceNormalized: false,
+      executionTimeMs: Date.now() - startTime,
+      engineVersion: ENGINE_VERSION,
+      strategyAcceptability: assessStrategyAcceptability(0, 0, 8, false, ["Signal-insufficient state"]),
+    };
+  }
 
   const allText = [
     mi.marketDiagnosis || "",
@@ -1807,6 +1835,7 @@ export async function runPersuasionEngine(
   integrity: PersuasionIntegrityInput,
   awareness: PersuasionAwarenessInput,
   _accountId?: string,
+  upstreamLineage: SignalLineageEntry[] = [],
 ): Promise<PersuasionResult> {
-  return analyzePersuasion(mi, audience, positioning, differentiation, offer, funnel, integrity, awareness);
+  return analyzePersuasion(mi, audience, positioning, differentiation, offer, funnel, integrity, awareness, upstreamLineage);
 }

@@ -127,4 +127,10 @@ export interface OfferResult {
   engineVersion: number;
   layerDiagnostics: Record<string, any>;
   strategyAcceptability?: import("../shared/strategy-acceptability").StrategyAcceptability;
+  signalGrounding?: {
+    groundedClaims: number;
+    totalClaims: number;
+    groundingRatio: number;
+    strippedClaims: string[];
+  };
 }

@@ -10,6 +10,12 @@ import {
   GENERIC_PHRASES,
 } from "./constants";
 import { enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
+import {
+  type SignalLineageEntry,
+  extractQualifyingSignals,
+  validateClaimGrounding,
+  MIN_QUALIFYING_SIGNALS,
+} from "../shared/signal-lineage";
 import type {
   AwarenessPositioningInput,
   AwarenessDifferentiationInput,
@@ -673,9 +679,30 @@ export async function runAwarenessEngine(
   funnel: AwarenessFunnelInput,
   integrity: AwarenessIntegrityInput,
   accountId: string,
+  upstreamLineage: SignalLineageEntry[] = [],
 ): Promise<AwarenessResult> {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
+
+  const qualifyingSignals = extractQualifyingSignals(upstreamLineage);
+  console.log(`[AwarenessEngine-V3] SIGNAL_CHECK | upstream=${upstreamLineage.length} | qualifying=${qualifyingSignals.length} | min=${MIN_QUALIFYING_SIGNALS}`);
+
+  if (qualifyingSignals.length < MIN_QUALIFYING_SIGNALS) {
+    console.log(`[AwarenessEngine-V3] SIGNAL_INSUFFICIENT | qualifying=${qualifyingSignals.length} < min=${MIN_QUALIFYING_SIGNALS}`);
+    return {
+      status: STATUS.INTEGRITY_FAILED,
+      statusMessage: `Signal-insufficient: only ${qualifyingSignals.length} qualifying upstream signals found (minimum ${MIN_QUALIFYING_SIGNALS} required). Upstream engines must generate source signals first.`,
+      primaryRoute: emptyRoute("signal_insufficient"),
+      alternativeRoute: emptyRoute("signal_insufficient"),
+      rejectedRoute: emptyRoute("signal_insufficient", "No upstream signals"),
+      layerResults: [],
+      structuralWarnings: ["SIGNAL_INSUFFICIENT: Cannot generate grounded awareness route without upstream signals"],
+      boundaryCheck: { passed: true, violations: [] },
+      dataReliability: { signalDensity: 0, signalDiversity: 0, narrativeStability: 0, competitorValidity: 0, marketMaturityConfidence: 0, overallReliability: 0, isWeak: true, advisories: ["Signal-insufficient state"] },
+      confidenceNormalized: false,
+      executionTimeMs: Date.now() - startTime,
+    };
+  }
 
   if (!integrity.safeToExecute) {
     structuralWarnings.push("Upstream integrity check did not pass safe-to-execute — awareness analysis proceeding with caution");

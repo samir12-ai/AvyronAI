@@ -360,10 +360,17 @@ export function registerAwarenessEngineRoutes(app: Express) {
         flaggedInconsistencies: safeJsonParse(integritySnapshot.flaggedInconsistencies) || [],
       };
 
-      const result = await runAwarenessEngine(miInput, audienceInput, positioningInput, differentiationInput, offerInput, funnelInput, integrityInput, accountId);
+      const upstreamLineage = mergeLineageArrays(
+        parseLineageFromSnapshot((miSnapshot as any).signalLineage),
+        parseLineageFromSnapshot((audSnapshot as any).signalLineage),
+        parseLineageFromSnapshot((offerSnapshot as any).signalLineage),
+      );
+      console.log(`[AwarenessEngine] UPSTREAM_LINEAGE | mi=${parseLineageFromSnapshot((miSnapshot as any).signalLineage).length} | audience=${parseLineageFromSnapshot((audSnapshot as any).signalLineage).length} | offer=${parseLineageFromSnapshot((offerSnapshot as any).signalLineage).length} | merged=${upstreamLineage.length}`);
+
+      const result = await runAwarenessEngine(miInput, audienceInput, positioningInput, differentiationInput, offerInput, funnelInput, integrityInput, accountId, upstreamLineage);
 
       if (result.status === "INTEGRITY_FAILED") {
-        console.error(`[AwarenessEngine] HARD-FAIL: Boundary violation — not persisting`);
+        console.error(`[AwarenessEngine] HARD-FAIL: ${result.statusMessage || "Boundary violation"} — not persisting`);
         return res.status(422).json({
           success: false,
           error: "INTEGRITY_FAILED",
@@ -372,12 +379,6 @@ export function registerAwarenessEngineRoutes(app: Express) {
           executionTimeMs: result.executionTimeMs,
         });
       }
-
-      const upstreamLineage = mergeLineageArrays(
-        parseLineageFromSnapshot((miSnapshot as any).signalLineage),
-        parseLineageFromSnapshot((audSnapshot as any).signalLineage),
-        parseLineageFromSnapshot((offerSnapshot as any).signalLineage),
-      );
       const awarenessLineage: SignalLineageEntry[] = [];
       const awarenessClaims = [
         result.primaryRoute?.entryMechanismType,

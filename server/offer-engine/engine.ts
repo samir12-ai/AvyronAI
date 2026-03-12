@@ -20,6 +20,17 @@ import {
   type DataReliabilityDiagnostics,
 } from "../engine-hardening";
 import { assessStrategyAcceptability } from "../shared/strategy-acceptability";
+import {
+  type SignalLineageEntry,
+  type QualifyingSignal,
+  type SignalGroundingResult,
+  extractQualifyingSignals,
+  validateClaimGrounding,
+  findBestParentSignal,
+  createDerivedLineageEntry,
+  mergeLineageArrays,
+  MIN_QUALIFYING_SIGNALS,
+} from "../shared/signal-lineage";
 import type {
   MarketLanguageMap,
   OfferMIInput,
@@ -705,6 +716,7 @@ export async function aiOfferGeneration(
   differentiation: OfferDifferentiationInput,
   accountId: string,
   marketLanguage?: MarketLanguageMap,
+  qualifyingSignals?: QualifyingSignal[],
 ): Promise<{ primary: { name: string; outcome: string; mechanism: string; deliverables: string[] }; alternative: { name: string; outcome: string; mechanism: string; deliverables: string[] }; rejected: { name: string; outcome: string; mechanism: string; deliverables: string[]; rejectionReason: string } }> {
   const pains = audience.audiencePains || [];
   const desires = Object.entries(audience.desireMap || {});
@@ -770,14 +782,19 @@ ${hasMechanismCore ? `Required deliverables (one per step):
 ${core!.mechanismSteps.map((step, i) => `  Deliverable ${i + 1}: Map to "${step}"`).join("\n")}
 Do NOT add generic deliverables like "community", "coaching", "support" unless they correspond to a mechanism step.` : `Derive deliverables from the differentiation pillars listed above.`}
 
-═══ SECTION 4: CONTEXT ═══
+═══ SECTION 4: SIGNAL ANCHORS (MANDATORY) ═══
+${qualifyingSignals && qualifyingSignals.length > 0 ? `Every claim you generate MUST be derived from one of these upstream signals. Do NOT invent claims that cannot be traced to a signal below.
+${qualifyingSignals.slice(0, 15).map((s, i) => `  [${s.signalId}] (${s.originEngine}/${s.category}): "${s.text}"`).join("\n")}
+RULE: Each outcome, mechanism justification, and deliverable must address or build upon at least one signal above.` : "No qualifying signals provided — generate conservatively with maximum specificity."}
+
+═══ SECTION 5: CONTEXT ═══
 - Top Pains: ${JSON.stringify(pains.slice(0, 5).map((p: any) => typeof p === "string" ? p : p?.pain || p?.name))}
 - Top Desires: ${JSON.stringify(desires.slice(0, 5).map(([k]) => k))}
 - Territories: ${JSON.stringify(territories.slice(0, 3).map((t: any) => t.name))}
 - Enemy: ${positioning.enemyDefinition || "Not defined"}
 - Narrative: ${positioning.narrativeDirection || "Not defined"}
 
-═══ SECTION 5: PROOF ALIGNMENT ═══
+═══ SECTION 6: PROOF ALIGNMENT ═══
 Link proof types to the objections the audience has.
 ${objectionPhrases.length > 0 ? `Audience objections to address: ${JSON.stringify(objectionPhrases)}` : "No specific objections identified"}
 
@@ -838,11 +855,42 @@ export async function runOfferEngine(
   positioning: OfferPositioningInput,
   differentiation: OfferDifferentiationInput,
   accountId: string,
+  upstreamLineage: SignalLineageEntry[] = [],
 ): Promise<OfferResult> {
   const startTime = Date.now();
   const diagnostics: Record<string, any> = {};
 
   console.log(`[OfferEngine-V3] Starting 5-layer pipeline`);
+
+  const qualifyingSignals = extractQualifyingSignals(upstreamLineage);
+  diagnostics.signalAnchoring = {
+    upstreamLineageCount: upstreamLineage.length,
+    qualifyingSignals: qualifyingSignals.length,
+    minRequired: MIN_QUALIFYING_SIGNALS,
+  };
+  console.log(`[OfferEngine-V3] SIGNAL_CHECK | upstream=${upstreamLineage.length} | qualifying=${qualifyingSignals.length} | min=${MIN_QUALIFYING_SIGNALS}`);
+
+  if (qualifyingSignals.length < MIN_QUALIFYING_SIGNALS) {
+    console.log(`[OfferEngine-V3] SIGNAL_INSUFFICIENT | qualifying=${qualifyingSignals.length} < min=${MIN_QUALIFYING_SIGNALS} — cannot generate grounded claims`);
+    const emptyOffer = buildEmptyOffer();
+    const acceptability = assessStrategyAcceptability(0, 0, 5, false, ["Insufficient upstream signals for grounded claim generation"]);
+    return {
+      status: STATUS.INSUFFICIENT_SIGNALS,
+      statusMessage: `Signal-insufficient: only ${qualifyingSignals.length} qualifying upstream signals found (minimum ${MIN_QUALIFYING_SIGNALS} required). Run MI and Audience engines first to generate source signals.`,
+      primaryOffer: emptyOffer,
+      alternativeOffer: emptyOffer,
+      rejectedOffer: { offer: emptyOffer, rejectionReason: "No upstream signals to anchor claims" },
+      offerStrengthScore: 0,
+      positioningConsistency: { consistent: false, contradictions: ["Signal-insufficient state"] },
+      boundaryCheck: { passed: true, violations: [] },
+      structuralWarnings: ["SIGNAL_INSUFFICIENT: No grounded claims can be generated without upstream signals"],
+      confidenceScore: 0,
+      executionTimeMs: Date.now() - startTime,
+      engineVersion: ENGINE_VERSION,
+      layerDiagnostics: diagnostics,
+      strategyAcceptability: acceptability,
+    };
+  }
 
   const pillars = differentiation.pillars || [];
   const proofArch = differentiation.proofArchitecture || [];
@@ -911,7 +959,7 @@ export async function runOfferEngine(
 
   let aiOffers;
   try {
-    aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage);
+    aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals);
     diagnostics.aiGeneration = { success: true };
   } catch (err: any) {
     diagnostics.aiGeneration = { success: false, error: err.message };
@@ -920,6 +968,61 @@ export async function runOfferEngine(
       alternative: { name: "Alternative Implementation Program", outcome: l1Outcome.transformationStatement, mechanism: l2Mechanism.mechanismDescription, deliverables: [] },
       rejected: { name: "Generic Growth Package", outcome: "General improvement", mechanism: "Standard approach", deliverables: [], rejectionReason: "Generic and unspecific" },
     };
+  }
+
+  const primaryClaimsForGrounding = [
+    aiOffers.primary.outcome,
+    aiOffers.primary.mechanism,
+    ...aiOffers.primary.deliverables,
+  ].filter(Boolean);
+  const primaryGrounding = validateClaimGrounding(primaryClaimsForGrounding, upstreamLineage, "offer_engine", "offer_claim");
+  diagnostics.primaryGrounding = {
+    total: primaryGrounding.totalClaims,
+    grounded: primaryGrounding.groundedClaims,
+    stripped: primaryGrounding.strippedClaims.length,
+    ratio: primaryGrounding.groundingRatio.toFixed(2),
+  };
+  console.log(`[OfferEngine-V3] GROUNDING_CHECK | primary: grounded=${primaryGrounding.groundedClaims}/${primaryGrounding.totalClaims} | ratio=${primaryGrounding.groundingRatio.toFixed(2)} | stripped=${primaryGrounding.strippedClaims.join("; ").slice(0, 100)}`);
+
+  const GROUNDING_RATIO_FLOOR = 0.3;
+  if (primaryGrounding.groundingRatio < GROUNDING_RATIO_FLOOR && primaryGrounding.totalClaims > 0) {
+    console.log(`[OfferEngine-V3] GROUNDING_FAILED | ratio=${primaryGrounding.groundingRatio.toFixed(2)} < floor=${GROUNDING_RATIO_FLOOR} — returning SIGNAL_INSUFFICIENT`);
+    const emptyOffer = buildEmptyOffer();
+    const acceptability = assessStrategyAcceptability(0, 0, 5, false, ["AI-generated claims failed signal grounding"]);
+    return {
+      status: STATUS.INSUFFICIENT_SIGNALS,
+      statusMessage: `Signal grounding failed: only ${primaryGrounding.groundedClaims}/${primaryGrounding.totalClaims} claims are signal-anchored (${Math.round(primaryGrounding.groundingRatio * 100)}% < ${Math.round(GROUNDING_RATIO_FLOOR * 100)}% minimum). Claims cannot be generated without signal backing.`,
+      primaryOffer: emptyOffer,
+      alternativeOffer: emptyOffer,
+      rejectedOffer: { offer: emptyOffer, rejectionReason: "Claims failed signal grounding" },
+      offerStrengthScore: 0,
+      positioningConsistency: { consistent: false, contradictions: ["Claims not signal-grounded"] },
+      boundaryCheck: { passed: true, violations: [] },
+      structuralWarnings: [`GROUNDING_FAILED: ${primaryGrounding.strippedClaims.length} claims stripped for lack of signal backing`],
+      confidenceScore: 0,
+      executionTimeMs: Date.now() - startTime,
+      engineVersion: ENGINE_VERSION,
+      layerDiagnostics: diagnostics,
+      strategyAcceptability: acceptability,
+      signalGrounding: {
+        groundedClaims: primaryGrounding.groundedClaims,
+        totalClaims: primaryGrounding.totalClaims,
+        groundingRatio: primaryGrounding.groundingRatio,
+        strippedClaims: primaryGrounding.strippedClaims,
+      },
+    };
+  }
+
+  aiOffers.primary.deliverables = aiOffers.primary.deliverables.filter(d =>
+    !primaryGrounding.strippedClaims.includes(d)
+  );
+  if (primaryGrounding.strippedClaims.includes(aiOffers.primary.outcome)) {
+    aiOffers.primary.outcome = l1Outcome.primaryOutcome;
+    console.log(`[OfferEngine-V3] GROUNDING_STRIP | primary outcome replaced with layer-1 fallback`);
+  }
+  if (primaryGrounding.strippedClaims.includes(aiOffers.primary.mechanism)) {
+    aiOffers.primary.mechanism = l2Mechanism.mechanismDescription;
+    console.log(`[OfferEngine-V3] GROUNDING_STRIP | primary mechanism replaced with layer-2 fallback`);
   }
 
   const core = differentiation.mechanismCore;
@@ -1080,7 +1183,7 @@ export async function runOfferEngine(
   if (!offerAlignmentValidation.aligned && status === STATUS.COMPLETE) {
     console.log(`[OfferEngine-V3] ALIGNMENT_RETRY | First attempt failed: ${offerAlignmentValidation.failures.join("; ")} — regenerating AI offers`);
     try {
-      const retryOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage);
+      const retryOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals);
       diagnostics.aiGenerationRetry = { success: true, attempt: 2 };
 
       const retryPrimaryOutcome: OutcomeLayer = { ...l1Outcome, primaryOutcome: retryOffers.primary.outcome || l1Outcome.primaryOutcome };
@@ -1188,7 +1291,7 @@ export async function runOfferEngine(
   );
   diagnostics.strategyAcceptability = acceptability;
 
-  console.log(`[OfferEngine-V3] Complete | status=${status} | strength=${primaryOffer.offerStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | grade=${acceptability.grade} | generic=${primaryOffer.genericFlag} | boundary=${boundaryCheck.clean} | alignmentWarnings=${structuralWarnings.length}`);
+  console.log(`[OfferEngine-V3] Complete | status=${status} | strength=${primaryOffer.offerStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | grade=${acceptability.grade} | generic=${primaryOffer.genericFlag} | boundary=${boundaryCheck.clean} | alignmentWarnings=${structuralWarnings.length} | grounded=${primaryGrounding.groundedClaims}/${primaryGrounding.totalClaims}`);
 
   return {
     status,
@@ -1205,6 +1308,12 @@ export async function runOfferEngine(
     engineVersion: ENGINE_VERSION,
     layerDiagnostics: diagnostics,
     strategyAcceptability: acceptability,
+    signalGrounding: {
+      groundedClaims: primaryGrounding.groundedClaims,
+      totalClaims: primaryGrounding.totalClaims,
+      groundingRatio: primaryGrounding.groundingRatio,
+      strippedClaims: primaryGrounding.strippedClaims,
+    },
   };
 }
 

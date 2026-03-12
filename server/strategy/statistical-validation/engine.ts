@@ -397,6 +397,7 @@ function validateClaim(
   funnel: ValidationFunnelInput,
   awareness: ValidationAwarenessInput,
   persuasion: ValidationPersuasionInput,
+  hasLineageAnchor: boolean = false,
 ): ClaimValidation {
   const lower = claim.toLowerCase();
   const supportingSignals: string[] = [];
@@ -555,6 +556,15 @@ function validateClaim(
   } else if (supportingSignals.length === 0 && contradictingSignals.length === 0) {
     evidenceType = "inferred";
     evidenceStrength = 0.25;
+  }
+
+  if (hasLineageAnchor) {
+    if (evidenceType === "assumption" || evidenceType === "inferred") {
+      evidenceType = "structured_inference";
+      evidenceStrength = Math.max(evidenceStrength, 0.5);
+    }
+    evidenceStrength = Math.min(evidenceStrength + 0.1, 1);
+    supportingSignals.push("Lineage-anchored: claim traced to upstream signal via signal lineage chain");
   }
 
   if (signalProvenance) {
@@ -987,7 +997,8 @@ export async function runStatisticalValidationEngine(
     console.log(`[StatisticalValidation] LINEAGE_RESOLUTION | claims=${extractedClaims.length} | lineageLinked=${lineageLinked} | orphaned=${extractedClaims.length - lineageLinked} | upstreamEntries=${upstreamLineage.length}`);
   }
   const claimValidations = extractedClaims.map(c => {
-    const validated = validateClaim(c.claim, c.source, c.signalProvenance, c.isHypothesis, c.signalTraceId, c.signalPath, mi, audience, offer, funnel, awareness, persuasion);
+    const hasLineageAnchor = c.parentSignalId !== null || c.originEngine !== null;
+    const validated = validateClaim(c.claim, c.source, c.signalProvenance, c.isHypothesis, c.signalTraceId, c.signalPath, mi, audience, offer, funnel, awareness, persuasion, hasLineageAnchor);
     return {
       ...validated,
       parentSignalId: c.parentSignalId,
@@ -1108,6 +1119,9 @@ export async function runStatisticalValidationEngine(
   if (validationState === "rejected" || validationState === "weak") {
     structuralWarnings.push("FALLBACK: Strategy marked as provisional — evidence is weak, use conservative defaults");
   }
+
+  const lineageAnchoredCount = claimValidations.filter(c => c.parentSignalId !== null || c.originEngine !== null).length;
+  console.log(`[StatisticalValidation] GROUNDING_METRICS | total=${claimValidations.length} | signalBacked=${signalBackedClaimCount} | lineageAnchored=${lineageAnchoredCount} | hypotheses=${hypotheses.length} | ratio=${signalBackedClaimRatio.toFixed(2)} | state=${validationState}`);
 
   const layersPassed = layers.filter(l => l.passed).length;
   const strategyAcceptability = assessStrategyAcceptability(

@@ -347,10 +347,18 @@ export function registerPersuasionEngineRoutes(app: Express) {
         frictionNotes: awarenessRoute?.frictionNotes || [],
       };
 
-      const result = await runPersuasionEngine(miInput, audienceInput, positioningInput, differentiationInput, offerInput, funnelInput, integrityInput, awarenessInput, accountId);
+      const upstreamLineage = mergeLineageArrays(
+        parseLineageFromSnapshot((miSnapshot as any).signalLineage),
+        parseLineageFromSnapshot((audSnapshot as any).signalLineage),
+        parseLineageFromSnapshot((offerSnapshot as any).signalLineage),
+        parseLineageFromSnapshot((awarenessSnapshot as any).signalLineage),
+      );
+      console.log(`[PersuasionEngine] UPSTREAM_LINEAGE | mi=${parseLineageFromSnapshot((miSnapshot as any).signalLineage).length} | audience=${parseLineageFromSnapshot((audSnapshot as any).signalLineage).length} | offer=${parseLineageFromSnapshot((offerSnapshot as any).signalLineage).length} | awareness=${parseLineageFromSnapshot((awarenessSnapshot as any).signalLineage).length} | merged=${upstreamLineage.length}`);
+
+      const result = await runPersuasionEngine(miInput, audienceInput, positioningInput, differentiationInput, offerInput, funnelInput, integrityInput, awarenessInput, accountId, upstreamLineage);
 
       if (result.status === "INTEGRITY_FAILED") {
-        console.error(`[PersuasionEngine] HARD-FAIL: Boundary violation — not persisting`);
+        console.error(`[PersuasionEngine] HARD-FAIL: ${result.statusMessage || "Boundary violation"} — not persisting`);
         return res.status(422).json({
           success: false,
           error: "INTEGRITY_FAILED",
@@ -359,13 +367,6 @@ export function registerPersuasionEngineRoutes(app: Express) {
           executionTimeMs: result.executionTimeMs,
         });
       }
-
-      const upstreamLineage = mergeLineageArrays(
-        parseLineageFromSnapshot((miSnapshot as any).signalLineage),
-        parseLineageFromSnapshot((audSnapshot as any).signalLineage),
-        parseLineageFromSnapshot((offerSnapshot as any).signalLineage),
-        parseLineageFromSnapshot((awarenessSnapshot as any).signalLineage),
-      );
       const persuasionLineage: SignalLineageEntry[] = [];
       const persuasionClaims = [
         result.primaryRoute?.persuasionMode,

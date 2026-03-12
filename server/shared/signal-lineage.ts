@@ -103,3 +103,68 @@ export function parseLineageFromSnapshot(raw: string | null): SignalLineageEntry
     return [];
   }
 }
+
+export interface QualifyingSignal {
+  signalId: string;
+  originEngine: string;
+  category: string;
+  text: string;
+  hopDepth: number;
+}
+
+export function extractQualifyingSignals(lineage: SignalLineageEntry[]): QualifyingSignal[] {
+  return lineage
+    .filter(e => e.hopDepth === 0)
+    .map(e => ({
+      signalId: e.signalId,
+      originEngine: e.originEngine,
+      category: e.signalCategory,
+      text: e.signalText,
+      hopDepth: e.hopDepth,
+    }));
+}
+
+export const MIN_QUALIFYING_SIGNALS = 3;
+
+export interface SignalGroundingResult {
+  totalClaims: number;
+  groundedClaims: number;
+  ungroundedClaims: number;
+  groundingRatio: number;
+  signalSufficient: boolean;
+  groundedEntries: SignalLineageEntry[];
+  strippedClaims: string[];
+}
+
+export function validateClaimGrounding(
+  claims: string[],
+  upstreamLineage: SignalLineageEntry[],
+  engine: string,
+  category: string,
+): SignalGroundingResult {
+  const groundedEntries: SignalLineageEntry[] = [];
+  const strippedClaims: string[] = [];
+  let idx = 0;
+
+  for (const claim of claims) {
+    const parent = findBestParentSignal(claim, upstreamLineage);
+    if (parent) {
+      groundedEntries.push(createDerivedLineageEntry(engine, category, claim, parent, idx));
+      idx++;
+    } else {
+      strippedClaims.push(claim);
+    }
+  }
+
+  const totalClaims = claims.length;
+  const groundedClaims = groundedEntries.length;
+  return {
+    totalClaims,
+    groundedClaims,
+    ungroundedClaims: strippedClaims.length,
+    groundingRatio: totalClaims > 0 ? groundedClaims / totalClaims : 0,
+    signalSufficient: upstreamLineage.filter(e => e.hopDepth === 0).length >= MIN_QUALIFYING_SIGNALS,
+    groundedEntries,
+    strippedClaims,
+  };
+}
