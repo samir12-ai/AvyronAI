@@ -29,7 +29,7 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 - **Lead Engine**: Modular lead generation with AI Lead Optimization.
 - **Strategic Engines (V3)**:
     - **Positioning Engine**: 12-layer engine for strategic insights and positioning statements.
-    - **Offer Engine**: 5-layer decision engine for generating offer options, enforcing mechanism rules, and validating alignment.
+    - **Offer Engine (V3)**: 5-layer decision engine with strategic quality refinements: outcome precision enforcement (vague outcome detection + precision marker scoring), mechanism clarity enforcement (structural naming + vague mechanism detection), differentiation reinforcement check (contrast/mechanism/pillar strength gating), objection-specific proof alignment (proofs mapped to MI/audience objection signals, not generic placeholders), and market language calibration (buyer-language enforcement in AI prompt, banned abstract jargon list).
     - **Funnel Engine**: 8-layer decision engine for generating funnel outputs with trust paths and proof placement, including hard-fail boundary enforcement.
     - **Integrity Engine**: 8-layer validation engine for cross-engine consistency and overall integrity scoring.
     - **Awareness Engine**: 8-layer execution engine for awareness routes, readiness mapping, and trigger identification.

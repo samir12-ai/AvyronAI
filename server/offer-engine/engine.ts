@@ -13,6 +13,11 @@ import {
   MAX_DELIVERABLES,
   FRICTION_THRESHOLD,
   STATUS,
+  VAGUE_OUTCOME_PATTERNS,
+  OUTCOME_PRECISION_MARKERS,
+  VAGUE_MECHANISM_PATTERNS,
+  MECHANISM_CLARITY_MARKERS,
+  MIN_DIFFERENTIATION_SCORE,
 } from "./constants";
 import {
   assessDataReliability,
@@ -149,6 +154,17 @@ export function sanitizeBoundary(text: string): { clean: boolean; violations: st
   return { clean: violations.length === 0, violations };
 }
 
+export function scoreOutcomePrecision(outcomeText: string): { score: number; isVague: boolean; hasPrecisionMarker: boolean } {
+  const lower = outcomeText.toLowerCase();
+  const isVague = VAGUE_OUTCOME_PATTERNS.some(p => p.test(lower));
+  const precisionHits = OUTCOME_PRECISION_MARKERS.filter(p => p.test(lower)).length;
+  const hasPrecisionMarker = precisionHits > 0;
+  let score = 0.5;
+  if (isVague) score -= 0.25;
+  if (hasPrecisionMarker) score += Math.min(precisionHits * 0.1, 0.4);
+  return { score: clamp(score), isVague, hasPrecisionMarker };
+}
+
 export function layer1_outcomeConstruction(
   audience: OfferAudienceInput,
   positioning: OfferPositioningInput,
@@ -164,20 +180,79 @@ export function layer1_outcomeConstruction(
   const rawDesirePhrase = marketLanguage?.rawDesirePhrases?.[0];
 
   const primaryPain = rawPainPhrase || (pains.length > 0 ? (typeof pains[0] === "string" ? pains[0] : pains[0]?.pain || pains[0]?.name || "unresolved challenge") : "unresolved challenge");
-  const primaryDesire = rawDesirePhrase || (desires.length > 0 ? desires[0][0] : "measurable improvement");
-  const topTerritory = territories.length > 0 ? (territories[0].name || "strategic territory") : "strategic territory";
-  const topPillar = pillars.length > 0 ? (pillars[0].name || "differentiation pillar") : "differentiation pillar";
+  const primaryDesire = rawDesirePhrase || (desires.length > 0 ? desires[0][0] : "");
+  const topTerritory = territories.length > 0 ? (territories[0].name || "") : "";
+  const topPillar = pillars.length > 0 ? (pillars[0].name || "") : "";
 
-  const transformationStatement = `Transform "${primaryPain}" into "${primaryDesire}" through ${topTerritory}`;
-  const primaryOutcome = `Achieve "${primaryDesire}" by leveraging ${topPillar} as the primary driver`;
+  let transformationStatement: string;
+  let primaryOutcome: string;
+
+  if (primaryDesire && topTerritory) {
+    transformationStatement = `Eliminate "${primaryPain}" and deliver ${primaryDesire} through ${topTerritory}`;
+  } else if (primaryDesire) {
+    transformationStatement = `Resolve "${primaryPain}" to achieve ${primaryDesire}`;
+  } else {
+    transformationStatement = `Address "${primaryPain}" with a structured resolution path`;
+  }
+
+  if (primaryDesire && topPillar) {
+    primaryOutcome = `Deliver ${primaryDesire} using ${topPillar} as the primary performance driver`;
+  } else if (primaryDesire) {
+    primaryOutcome = `Achieve ${primaryDesire} through signal-backed strategic execution`;
+  } else if (topPillar) {
+    primaryOutcome = `Drive measurable business impact via ${topPillar}`;
+  } else {
+    primaryOutcome = `Resolve "${primaryPain}" with structured, outcome-tracked delivery`;
+  }
 
   const hasMarketLanguage = !!(rawPainPhrase || rawDesirePhrase);
   const painSpecificity = pains.length > 0 ? clamp(0.4 + (Math.min(pains.length, 5) * 0.1)) : 0.2;
   const desireSpecificity = desires.length > 0 ? clamp(0.4 + (Math.min(desires.length, 5) * 0.1)) : 0.2;
   const baseSpecificity = clamp((painSpecificity + desireSpecificity) / 2);
-  const specificityScore = hasMarketLanguage ? clamp(baseSpecificity + 0.1) : baseSpecificity;
+  let specificityScore = hasMarketLanguage ? clamp(baseSpecificity + 0.1) : baseSpecificity;
+
+  const outcomePrecision = scoreOutcomePrecision(primaryOutcome);
+  if (outcomePrecision.isVague) {
+    specificityScore = clamp(specificityScore - 0.15);
+    console.log(`[OfferEngine-V3] OUTCOME_PRECISION | vague outcome detected — specificity penalized`);
+  }
+  if (outcomePrecision.hasPrecisionMarker) {
+    specificityScore = clamp(specificityScore + 0.1);
+  }
 
   return { primaryOutcome, transformationStatement, specificityScore };
+}
+
+export function scoreMechanismClarity(mechanismDescription: string): { score: number; isVague: boolean; hasStructuralNaming: boolean } {
+  const lower = mechanismDescription.toLowerCase();
+  const isVague = VAGUE_MECHANISM_PATTERNS.some(p => p.test(lower));
+  const clarityHits = MECHANISM_CLARITY_MARKERS.filter(p => p.test(lower)).length;
+  const hasStructuralNaming = clarityHits >= 2;
+  let score = 0.5;
+  if (isVague) score -= 0.2;
+  if (hasStructuralNaming) score += Math.min(clarityHits * 0.08, 0.3);
+  return { score: clamp(score), isVague, hasStructuralNaming };
+}
+
+function enforceStructuralMechanismName(description: string, mechanismType: string, mechanismName?: string): string {
+  const clarity = scoreMechanismClarity(description);
+  if (!clarity.isVague && clarity.hasStructuralNaming) return description;
+
+  const structuralSuffixes: Record<string, string> = {
+    framework: "Framework",
+    system: "System",
+    process: "Process",
+    model: "Model",
+    program: "Program",
+    tool: "Platform",
+    service: "Engine",
+  };
+  const suffix = structuralSuffixes[mechanismType] || "System";
+
+  if (mechanismName && !clarity.hasStructuralNaming) {
+    return `${mechanismName} ${suffix}: ${description}`;
+  }
+  return description;
 }
 
 export function layer2_mechanismAlignment(
@@ -190,22 +265,32 @@ export function layer2_mechanismAlignment(
 
   if (core && core.mechanismType !== "none" && core.mechanismName) {
     const mechanismType = core.mechanismType;
-    const mechanismDescription = core.mechanismLogic || core.mechanismPromise || mechanism.description || "Standard delivery methodology";
+    const rawDescription = core.mechanismLogic || core.mechanismPromise || mechanism.description || "";
+    const mechanismDescription = enforceStructuralMechanismName(rawDescription, mechanismType, core.mechanismName);
     const differentiationLink = `Mechanism "${core.mechanismName}" (${core.mechanismType}) anchored to ${topPillar} via MechanismCore`;
     const stepsBonus = core.mechanismSteps.length > 0 ? clamp(core.mechanismSteps.length * 0.1, 0, 0.3) : 0;
-    const credibilityScore = clamp(0.7 + stepsBonus);
+    const clarity = scoreMechanismClarity(mechanismDescription);
+    const clarityBonus = clarity.hasStructuralNaming ? 0.1 : 0;
+    const clarityPenalty = clarity.isVague ? 0.15 : 0;
+    const credibilityScore = clamp(0.7 + stepsBonus + clarityBonus - clarityPenalty);
+    if (clarity.isVague) {
+      console.log(`[OfferEngine-V3] MECHANISM_CLARITY | vague mechanism description detected — credibility penalized`);
+    }
     return { mechanismType, mechanismDescription, differentiationLink, credibilityScore };
   }
 
   const mechanismType = mechanism.type || "none";
-  const mechanismDescription = mechanism.description || "Standard delivery methodology";
+  const rawDescription = mechanism.description || "";
+  const mechanismDescription = rawDescription ? enforceStructuralMechanismName(rawDescription, mechanismType) : "Awaiting mechanism definition from Differentiation Engine";
   const differentiationLink = mechanism.supported
     ? `Mechanism anchored to ${topPillar} with structural proof support`
     : `Generic delivery approach — mechanism not yet structurally validated`;
 
   const typeScore = mechanism.supported ? 0.7 : 0.3;
   const proofScore = mechanism.proofBasis?.length > 0 ? clamp(0.3 + (mechanism.proofBasis.length * 0.1)) : 0.2;
-  const credibilityScore = clamp(typeScore * 0.6 + proofScore * 0.4);
+  const clarity = scoreMechanismClarity(mechanismDescription);
+  const clarityMod = clarity.isVague ? -0.1 : (clarity.hasStructuralNaming ? 0.05 : 0);
+  const credibilityScore = clamp(typeScore * 0.6 + proofScore * 0.4 + clarityMod);
 
   return { mechanismType, mechanismDescription, differentiationLink, credibilityScore };
 }
@@ -256,6 +341,7 @@ export function layer3_deliveryStructure(
 export function layer4_proofAlignment(
   differentiation: OfferDifferentiationInput,
   hasObjectionSignals: boolean = false,
+  objectionContext?: Array<{ text: string; category: string }>,
 ): ProofLayer {
   const proofArchitecture = differentiation.proofArchitecture || [];
   const pillars = differentiation.pillars || [];
@@ -263,6 +349,33 @@ export function layer4_proofAlignment(
   const proofTypes = new Set<string>();
   const availableTypes = ["process_proof", "outcome_proof", "transparency_proof", "case_proof", "framework_proof", "comparative_proof"];
   const objectionRequiredProofs = new Set(["transparency_proof", "outcome_proof", "process_proof"]);
+
+  const objectionProofMapping: Record<string, string[]> = {};
+
+  const objectionKeywords = (objectionContext || []).map(o => ({
+    text: o.text.toLowerCase(),
+    category: o.category,
+  }));
+
+  const OBJECTION_TO_PROOF: Array<{ keywords: RegExp; proofType: string }> = [
+    { keywords: /trust|transparent|hide|secret|honest|truth|lying/i, proofType: "transparency_proof" },
+    { keywords: /result|outcome|deliver|promise|guarantee|roi|perform/i, proofType: "outcome_proof" },
+    { keywords: /process|method|how|approach|system|step|implement/i, proofType: "process_proof" },
+    { keywords: /proof|evidence|case|example|client|success|testimon/i, proofType: "case_proof" },
+    { keywords: /different|unique|better|compare|versus|unlike|stand out/i, proofType: "comparative_proof" },
+    { keywords: /framework|structure|model|architecture|blueprint/i, proofType: "framework_proof" },
+  ];
+
+  for (const obj of objectionKeywords) {
+    for (const mapping of OBJECTION_TO_PROOF) {
+      if (mapping.keywords.test(obj.text)) {
+        if (!objectionProofMapping[mapping.proofType]) {
+          objectionProofMapping[mapping.proofType] = [];
+        }
+        objectionProofMapping[mapping.proofType].push(obj.text.slice(0, 60));
+      }
+    }
+  }
 
   for (const asset of proofArchitecture) {
     if (asset.category && availableTypes.includes(asset.category)) {
@@ -285,12 +398,23 @@ export function layer4_proofAlignment(
     }
   }
 
+  if (hasObjectionSignals && Object.keys(objectionProofMapping).length > 0) {
+    for (const proofType of Object.keys(objectionProofMapping)) {
+      if (availableTypes.includes(proofType)) {
+        proofTypes.add(proofType);
+      }
+    }
+    const mappedCount = Object.keys(objectionProofMapping).length;
+    console.log(`[OfferEngine-V3] PROOF_OBJECTION_MAP | ${mappedCount} proof types mapped to specific objections: ${Object.entries(objectionProofMapping).map(([k, v]) => `${k}→[${v.length}]`).join(", ")}`);
+  }
+
   if (!hasObjectionSignals && proofTypes.size > 0) {
     console.log(`[OfferEngine-V3] PROOF_SIGNAL_GATE | objection signals absent — skipped ${[...objectionRequiredProofs].filter(p => !proofTypes.has(p)).length} objection-required proof types`);
   }
 
   const alignedProofTypes = Array.from(proofTypes);
-  const proofStrength = clamp(alignedProofTypes.length / 4);
+  const objectionMappedBonus = Object.keys(objectionProofMapping).length > 0 ? 0.1 : 0;
+  const proofStrength = clamp(alignedProofTypes.length / 4 + objectionMappedBonus);
 
   const mandatoryProof = hasObjectionSignals
     ? ["process_proof", "outcome_proof", "transparency_proof", "case_proof"]
@@ -450,6 +574,63 @@ export function checkPositioningConsistency(
   }
 
   return { consistent: contradictions.length === 0, contradictions };
+}
+
+export function checkDifferentiationStrength(
+  offer: { offerName: string; coreOutcome: string; mechanismDescription: string; deliverables: string[] },
+  differentiation: OfferDifferentiationInput,
+  positioning: OfferPositioningInput,
+): { sufficient: boolean; score: number; signals: string[]; gaps: string[] } {
+  const signals: string[] = [];
+  const gaps: string[] = [];
+  const offerText = `${offer.offerName} ${offer.coreOutcome} ${offer.mechanismDescription} ${(offer.deliverables || []).join(" ")}`.toLowerCase();
+
+  const hasContrast = !!(positioning.contrastAxis || positioning.enemyDefinition);
+  if (hasContrast) {
+    const contrastTokens = (positioning.contrastAxis || "").toLowerCase().split(/\s+/).filter(t => t.length > 4);
+    const enemyTokens = (positioning.enemyDefinition || "").toLowerCase().split(/\s+/).filter(t => t.length > 4);
+    const contrastInOffer = contrastTokens.some(t => offerText.includes(t)) || enemyTokens.some(t => offerText.includes(t));
+    if (contrastInOffer) {
+      signals.push("Contrast against common approaches present in offer language");
+    } else if (hasContrast) {
+      gaps.push("Positioning defines a contrast axis but offer language does not reflect it");
+    }
+  } else {
+    gaps.push("No contrast axis or enemy definition — cannot differentiate against common approaches");
+  }
+
+  const core = differentiation.mechanismCore;
+  const hasMechanism = !!(core && core.mechanismType !== "none" && core.mechanismName);
+  if (hasMechanism) {
+    const mechNameLower = core!.mechanismName.toLowerCase();
+    if (offerText.includes(mechNameLower) || offerText.includes(core!.mechanismType.toLowerCase())) {
+      signals.push(`Unique mechanism "${core!.mechanismName}" referenced in offer`);
+    } else {
+      gaps.push(`Mechanism "${core!.mechanismName}" defined but not referenced in offer text`);
+    }
+  } else {
+    const mechFraming = differentiation.mechanismFraming || {};
+    if (mechFraming.supported) {
+      signals.push("Mechanism framing supported by differentiation data");
+    } else {
+      gaps.push("No unique method, framework, or mechanism defined");
+    }
+  }
+
+  const pillars = differentiation.pillars || [];
+  const strongPillars = pillars.filter((p: any) => (p.overallScore || 0) >= 0.5);
+  if (strongPillars.length > 0) {
+    signals.push(`${strongPillars.length} strong differentiation pillar(s) above 0.5 threshold`);
+  } else if (pillars.length > 0) {
+    gaps.push("Differentiation pillars exist but all score below 0.5 — weak structural advantage");
+  } else {
+    gaps.push("No differentiation pillars defined");
+  }
+
+  const score = clamp(signals.length / 3);
+  const sufficient = score >= MIN_DIFFERENTIATION_SCORE;
+
+  return { sufficient, score, signals, gaps };
 }
 
 const MECHANISM_CATEGORY_MAP: Record<string, string[]> = {
@@ -771,14 +952,25 @@ ${desirePhrases.length > 0 ? `Raw Desire Phrases: ${JSON.stringify(desirePhrases
 ${emotionalPhrases.length > 0 ? `Emotional Language: ${JSON.stringify(emotionalPhrases)}` : ""}
 ${objectionPhrases.length > 0 ? `Objection Language to address: ${JSON.stringify(objectionPhrases)}` : ""}
 ${hasMarketLanguage ? `
-MANDATORY: You MUST use the audience's own words above directly in the offer name, outcome, mechanism, and deliverables.
-- Copy exact phrases from the pain/desire lists into your output
-- At least 20% of your output words must come directly from the phrases above
-- Do NOT substitute with generic business jargon like "optimize", "leverage", "scale", "transform", "empower", "unlock"
+MANDATORY LANGUAGE RULES:
+- You MUST use the audience's own words above directly in the offer name, outcome, mechanism, and deliverables.
+- Copy exact phrases from the pain/desire lists into your output.
+- At least 20% of your output words must come directly from the phrases above.
+- Use how BUYERS describe results, not how strategists do. Write as a market participant, not a consultant.
+- BANNED WORDS: "optimize", "leverage", "scale", "transform", "empower", "unlock", "synergy", "holistic", "comprehensive", "innovative", "cutting-edge", "next-level", "game-changing", "paradigm"
 - If audience says "struggle with debt" → use "struggle with debt", NOT "financial optimization"
-- If audience says "want more clients" → use "get more clients", NOT "scale revenue"` : ""}
+- If audience says "want more clients" → use "get more clients", NOT "scale revenue"
+- If audience says "wasting money on ads" → use "stop wasting money on ads", NOT "optimize ad spend allocation"` : ""}
 
-═══ SECTION 2: MECHANISM (single source of truth) ═══
+═══ SECTION 2: OUTCOME PRECISION (MANDATORY) ═══
+Outcomes MUST be specific, measurable, and market-relevant. Use concrete business impacts:
+- Pipeline growth (e.g., "fill your pipeline with 20+ qualified leads per month")
+- Revenue predictability (e.g., "build a predictable $50K/month revenue engine")
+- CAC improvement (e.g., "cut customer acquisition cost by 40%")
+- Conversion performance (e.g., "double your close rate from demo to deal")
+NEVER use vague outcomes like "financial improvement", "measurable improvement", "better results", "business growth", "enhanced outcomes", or "positive change".
+
+═══ SECTION 3: MECHANISM (single source of truth) ═══
 ${hasMechanismCore ? `Mechanism Name: "${core!.mechanismName}"
 Mechanism Type: ${core!.mechanismType}
 Mechanism Steps:
@@ -788,37 +980,43 @@ Problem it solves: ${core!.mechanismProblem}
 Logic: ${core!.mechanismLogic}
 
 MANDATORY: All offer mechanism descriptions MUST reference "${core!.mechanismName}" by name.
+Mechanisms MUST be expressed as clear strategic systems (e.g., "The [Name] Framework", "[Name] System", "[Name] Architecture").
+Do NOT use abstract mechanism descriptions like "community and belonging method", "holistic approach", or "innovative process".
 Describe delivery using ONLY the steps above. Do NOT invent new steps or mechanisms.` : `Mechanism: ${mechanism.description || "No validated mechanism"}
 Differentiation Pillars:
-${deliverableSteps}`}
+${deliverableSteps}
+Mechanisms MUST be expressed as clear strategic systems (e.g., "The [Name] Framework", "[Name] System") that a buyer immediately understands.`}
 
-═══ SECTION 3: DELIVERABLES (must map to mechanism steps) ═══
+═══ SECTION 4: DELIVERABLES (must map to mechanism steps) ═══
 Each deliverable MUST correspond to one mechanism step above.
 ${hasMechanismCore ? `Required deliverables (one per step):
 ${core!.mechanismSteps.map((step, i) => `  Deliverable ${i + 1}: Map to "${step}"`).join("\n")}
 Do NOT add generic deliverables like "community", "coaching", "support" unless they correspond to a mechanism step.` : `Derive deliverables from the differentiation pillars listed above.`}
 
-═══ SECTION 4: SIGNAL ANCHORS (MANDATORY) ═══
+═══ SECTION 5: SIGNAL ANCHORS (MANDATORY) ═══
 ${qualifyingSignals && qualifyingSignals.length > 0 ? `Every claim you generate MUST be derived from one of these upstream signals. Do NOT invent claims that cannot be traced to a signal below.
 ${qualifyingSignals.slice(0, 15).map((s, i) => `  [${s.signalId}] (${s.originEngine}/${s.category}): "${s.text}"`).join("\n")}
 RULE: Each outcome, mechanism justification, and deliverable must address or build upon at least one signal above.` : "No qualifying signals provided — generate conservatively with maximum specificity."}
 
-═══ SECTION 5: CONTEXT ═══
+═══ SECTION 6: CONTEXT ═══
 - Top Pains: ${JSON.stringify(pains.slice(0, 5).map((p: any) => typeof p === "string" ? p : p?.pain || p?.name))}
 - Top Desires: ${JSON.stringify(desires.slice(0, 5).map(([k]) => k))}
 - Territories: ${JSON.stringify(territories.slice(0, 3).map((t: any) => t.name))}
 - Enemy: ${positioning.enemyDefinition || "Not defined"}
 - Narrative: ${positioning.narrativeDirection || "Not defined"}
+${positioning.contrastAxis ? `- Contrast Axis: ${positioning.contrastAxis}\nMANDATORY: The primary offer MUST contrast against this axis. Show how your offer is structurally different from the common approach.` : ""}
 
-═══ SECTION 6: PROOF ALIGNMENT ═══
-Link proof types to the objections the audience has.
-${objectionPhrases.length > 0 ? `Audience objections to address: ${JSON.stringify(objectionPhrases)}` : "No specific objections identified"}
+═══ SECTION 7: PROOF ALIGNMENT (objection-specific) ═══
+Each proof type MUST be tied to a specific audience objection or credibility gap. Do NOT use generic proof placeholders.
+${objectionPhrases.length > 0 ? `Audience objections to address with proof:
+${objectionPhrases.map((o, i) => `  Objection ${i + 1}: "${o}" → What proof directly counters this?`).join("\n")}
+For each proof you include, state WHICH objection it addresses.` : "No specific objections identified — use case_proof only."}
 
 Return JSON:
 {
-  "primary": { "name": "Offer name using audience language", "outcome": "Transformation using raw pain/desire phrases", "mechanism": "How ${hasMechanismCore ? core!.mechanismName : "the mechanism"} delivers it using the exact steps", "deliverables": ["Step-mapped deliverable 1", "Step-mapped deliverable 2"] },
-  "alternative": { "name": "Alternative offer name", "outcome": "Different angle using audience language", "mechanism": "Alternative delivery approach", "deliverables": ["Alt deliverable 1", "Alt deliverable 2"] },
-  "rejected": { "name": "Rejected offer", "outcome": "Why this seems appealing", "mechanism": "What it promises", "deliverables": [], "rejectionReason": "Why this fails (generic, weak proof, contradicts positioning)" }
+  "primary": { "name": "Offer name using audience's exact words", "outcome": "Specific measurable business impact (pipeline, revenue, CAC, conversion)", "mechanism": "How ${hasMechanismCore ? `the ${core!.mechanismName} ${core!.mechanismType}` : "the mechanism"} delivers it using the exact steps", "deliverables": ["Step-mapped deliverable 1", "Step-mapped deliverable 2"] },
+  "alternative": { "name": "Alternative offer using audience language", "outcome": "Different specific measurable impact angle", "mechanism": "Alternative delivery using structured system language", "deliverables": ["Alt deliverable 1", "Alt deliverable 2"] },
+  "rejected": { "name": "Rejected offer", "outcome": "Why this seems appealing", "mechanism": "What it promises", "deliverables": [], "rejectionReason": "Why this fails (generic, weak proof, contradicts positioning, vague outcomes)" }
 }`;
 
   try {
@@ -972,10 +1170,11 @@ export async function runOfferEngine(
     s.category.includes("objection")
   );
   const hasObjectionSignals = objectionSignals.length > 0;
+  const objectionContext = objectionSignals.map(s => ({ text: s.text, category: s.category }));
   console.log(`[OfferEngine-V3] PROOF_GATE | objectionSignals=${objectionSignals.length} | hasObjectionSignals=${hasObjectionSignals}`);
 
-  const l4Proof = layer4_proofAlignment(differentiation, hasObjectionSignals);
-  diagnostics.layer4 = { proofTypes: l4Proof.alignedProofTypes.length, strength: l4Proof.proofStrength, gaps: l4Proof.proofGaps, objectionGated: !hasObjectionSignals };
+  const l4Proof = layer4_proofAlignment(differentiation, hasObjectionSignals, objectionContext);
+  diagnostics.layer4 = { proofTypes: l4Proof.alignedProofTypes.length, strength: l4Proof.proofStrength, gaps: l4Proof.proofGaps, objectionGated: !hasObjectionSignals, objectionMapped: objectionContext.length };
 
   const l5Risk = layer5_riskReduction(audience, l4Proof);
   diagnostics.layer5 = { reducers: l5Risk.riskReducers.length, buyerConfidence: l5Risk.buyerConfidenceScore };
@@ -1164,9 +1363,36 @@ export async function runOfferEngine(
     console.log(`[OfferEngine-V3] GENERIC_OUTPUT_PENALTY | phrases=${genericOutputCheck.genericPhrases.length} | penalty=${genericOutputCheck.penalty.toFixed(2)}`);
   }
 
+  const diffStrength = checkDifferentiationStrength(primaryOffer, differentiation, positioning);
+  diagnostics.differentiationReinforcement = diffStrength;
+  if (!diffStrength.sufficient) {
+    primaryOffer.offerStrengthScore = clamp(primaryOffer.offerStrengthScore * 0.85);
+    alternativeOffer.offerStrengthScore = clamp(alternativeOffer.offerStrengthScore * 0.85);
+    console.log(`[OfferEngine-V3] DIFFERENTIATION_WEAK | score=${diffStrength.score.toFixed(2)} | gaps=${diffStrength.gaps.join("; ")}`);
+  } else {
+    console.log(`[OfferEngine-V3] DIFFERENTIATION_CHECK | score=${diffStrength.score.toFixed(2)} | signals=${diffStrength.signals.length}`);
+  }
+
+  const outcomePrecision = scoreOutcomePrecision(primaryOffer.coreOutcome);
+  const mechClarity = scoreMechanismClarity(primaryOffer.mechanismDescription);
+  diagnostics.outcomePrecision = outcomePrecision;
+  diagnostics.mechanismClarity = mechClarity;
+  if (outcomePrecision.isVague) {
+    primaryOffer.offerStrengthScore = clamp(primaryOffer.offerStrengthScore - 0.1);
+    console.log(`[OfferEngine-V3] AI_OUTCOME_VAGUE | primary AI-generated outcome flagged as vague — strength penalized`);
+  }
+  if (mechClarity.isVague) {
+    primaryOffer.offerStrengthScore = clamp(primaryOffer.offerStrengthScore - 0.1);
+    console.log(`[OfferEngine-V3] AI_MECHANISM_VAGUE | primary AI-generated mechanism flagged as vague — strength penalized`);
+  }
+
   let status: string = STATUS.COMPLETE;
   let statusMessage: string | null = null;
   const structuralWarnings: string[] = [];
+
+  if (!diffStrength.sufficient) {
+    structuralWarnings.push(...diffStrength.gaps);
+  }
 
   if (!boundaryCheck.clean) {
     status = STATUS.INTEGRITY_FAILED;

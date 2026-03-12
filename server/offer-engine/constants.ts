@@ -1,4 +1,4 @@
-export const ENGINE_VERSION = 2;
+export const ENGINE_VERSION = 3;
 export const FRESHNESS_THRESHOLD_DAYS = 14;
 
 export const OFFER_DEPTH_WEIGHTS = {
@@ -85,6 +85,62 @@ export const MIN_PROOF_STRENGTH = 0.30;
 export const MIN_OUTCOME_SPECIFICITY = 0.40;
 export const MAX_DELIVERABLES = 8;
 export const FRICTION_THRESHOLD = 0.65;
+
+export const VAGUE_OUTCOME_PATTERNS = [
+  /\b(financial improvement)\b/i,
+  /\b(measurable improvement)\b/i,
+  /\b(general improvement)\b/i,
+  /\b(overall growth)\b/i,
+  /\b(business improvement)\b/i,
+  /\b(better results)\b/i,
+  /\b(improved performance)\b/i,
+  /\b(enhanced outcomes)\b/i,
+  /\b(strategic improvement)\b/i,
+  /\b(meaningful impact)\b/i,
+  /\b(positive change)\b/i,
+  /\b(value creation)\b/i,
+  /\b(sustainable growth)\b/i,
+  /\b(holistic transformation)\b/i,
+  /\b(comprehensive solution)\b/i,
+];
+
+export const OUTCOME_PRECISION_MARKERS = [
+  /\b(pipeline|funnel conversion|lead.to.close|close rate)\b/i,
+  /\b(revenue|MRR|ARR|monthly recurring|annual recurring)\b/i,
+  /\b(CAC|cost per acquisition|customer acquisition cost|CPA)\b/i,
+  /\b(conversion rate|opt.in rate|click.through|CTR)\b/i,
+  /\b(retention|churn|LTV|lifetime value|repeat purchase)\b/i,
+  /\b(response rate|engagement rate|open rate|reply rate)\b/i,
+  /\b(\d+%|\d+x|\$\d|within \d+ (days|weeks|months))\b/i,
+  /\b(qualified leads|sales calls|booked calls|demos|appointments)\b/i,
+  /\b(profit margin|gross margin|net margin|ROAS|ROI)\b/i,
+  /\b(market share|competitive advantage|positioning|authority)\b/i,
+];
+
+export const VAGUE_MECHANISM_PATTERNS = [
+  /\b(standard delivery methodology)\b/i,
+  /\b(community and belonging)\b/i,
+  /\b(holistic approach)\b/i,
+  /\b(comprehensive method)\b/i,
+  /\b(integrated solution)\b/i,
+  /\b(synergistic approach)\b/i,
+  /\b(proven methodology)\b/i,
+  /\b(systematic process)\b/i,
+  /\b(innovative approach)\b/i,
+  /\b(cutting.edge method)\b/i,
+  /\b(unique methodology)\b/i,
+  /\b(proprietary process)\b/i,
+];
+
+export const MECHANISM_CLARITY_MARKERS = [
+  /\b(framework|system|architecture|engine|protocol|blueprint|model)\b/i,
+  /\b(step|phase|stage|module|layer|pillar|component)\b/i,
+  /\b(audit|diagnose|assess|map|analyze|identify)\b/i,
+  /\b(implement|deploy|execute|install|activate|launch)\b/i,
+  /\b(optimize|calibrate|refine|iterate|scale|measure)\b/i,
+];
+
+export const MIN_DIFFERENTIATION_SCORE = 0.35;
 
 export const STATUS = {
   COMPLETE: "COMPLETE",

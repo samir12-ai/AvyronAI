@@ -1,0 +1,31 @@
+Team,
+
+The Offer Engine output is structurally correct and passes integrity checks, but a market-level review shows several areas that must be strengthened to make the offer competitive in real agency markets.
+
+Please implement the following refinements to improve strategic quality:
+
+1. Outcome Precision
+The current outcome language is too broad (e.g., “financial improvement”). Outcomes must be rewritten to be specific, measurable, and market-relevant. Prefer concrete business impacts such as pipeline growth, revenue predictability, CAC improvement, or conversion performance.
+
+2. Mechanism Clarity
+The current mechanism description (“community and belonging method”) is too abstract. Mechanisms must be expressed as clear strategic systems or frameworks that a buyer can immediately understand. Mechanism naming should reflect a structured approach (e.g., framework, system, architecture, engine).
+
+3. Differentiation Reinforcement
+The differentiation score is currently weak. The Offer Engine should actively check that the offer contains at least one of the following:
+- a clear contrast against common agency approaches
+- a unique method or framework
+- a structural advantage over standard agency services
+
+If differentiation signals are weak, the engine should refine the positioning before finalizing the offer.
+
+4. Proof Specificity
+Proof alignment is currently too generic (transparency proof, process proof, etc.). Proofs should be tied more directly to market objections or credibility gaps identified in MI and Audience signals. Avoid generic proof placeholders when possible.
+
+5. Market Language Calibration
+Offer language should use terminology that reflects how real buyers describe results, not abstract strategy language.
+
+These changes should improve the real-world competitiveness of the generated offer while maintaining the existing Signal → Reasoning → Claim architecture.
+
+Please ensure these refinements are applied within the Offer Engine logic and validated across the frontend output as well.
+
+Best,
