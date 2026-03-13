@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { miSnapshots, miSignalLogs, miTelemetry, ciCompetitors, growthCampaigns } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { inArray, eq, and, desc } from "drizzle-orm";
 import { pruneOldSnapshots } from "../engine-hardening";
 import { computeAllSignals, aggregateMissingFlags, classifyEngagementQuality, detectAudienceIntentSignals, detectSampleBias, computeRealDataRatio, clusterSemanticSignals } from "./signal-engine";
 import { extractNarrativeObjections, clusterObjections, type NarrativeObjectionItem } from "./narrative-objection-extractor";
@@ -200,7 +200,7 @@ export async function persistValidatedSnapshot(snapshotPayload: any, caller: str
       .where(and(
         eq(miSnapshots.accountId, snapshotPayload.accountId),
         eq(miSnapshots.campaignId, snapshotPayload.campaignId),
-        eq(miSnapshots.status, "COMPLETE"),
+        inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
       ))
       .orderBy(desc(miSnapshots.createdAt))
       .limit(1);
@@ -270,7 +270,7 @@ async function getCachedSnapshot(accountId: string, campaignId: string, competit
     .where(and(
       eq(miSnapshots.accountId, accountId),
       eq(miSnapshots.campaignId, campaignId),
-      eq(miSnapshots.status, "COMPLETE"),
+      inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
     ))
     .orderBy(desc(miSnapshots.createdAt))
     .limit(1);
@@ -967,7 +967,7 @@ export class MarketIntelligenceV3 {
       .where(and(
         eq(miSnapshots.accountId, accountId),
         eq(miSnapshots.campaignId, campaignId),
-        eq(miSnapshots.status, "COMPLETE"),
+        inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
       ))
       .orderBy(desc(miSnapshots.createdAt))
       .limit(1);

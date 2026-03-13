@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { db } from "../db";
 import { offerSnapshots, differentiationSnapshots, miSnapshots, audienceSnapshots, positioningSnapshots } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { inArray, eq, and, desc } from "drizzle-orm";
 import { runOfferEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
 import { ENGINE_VERSION as DIFF_ENGINE_VERSION } from "../differentiation-engine/constants";
@@ -88,7 +88,7 @@ export function registerOfferEngineRoutes(app: Express) {
             .where(and(
               eq(miSnapshots.campaignId, campaignId),
               eq(miSnapshots.accountId, accountId),
-              eq(miSnapshots.status, "COMPLETE"),
+              inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
               eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
             ))
             .orderBy(desc(miSnapshots.createdAt))
@@ -108,7 +108,7 @@ export function registerOfferEngineRoutes(app: Express) {
           .where(and(
             eq(miSnapshots.campaignId, campaignId),
             eq(miSnapshots.accountId, accountId),
-            eq(miSnapshots.status, "COMPLETE"),
+            inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
             eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
           ))
           .orderBy(desc(miSnapshots.createdAt))

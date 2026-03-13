@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { db } from "../db";
 import { miSnapshots, miTelemetry, miSignalLogs, miRefreshSchedule } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { inArray, eq, and, desc } from "drizzle-orm";
 import { MarketIntelligenceV3, validateEngineIsolation, rejectBlockedEngine, assertNoPlanWrites, assertNoOrchestrator, assertNoAutopilot, buildResultFromSnapshot } from "./engine";
 import { logAudit } from "../audit";
 import { requireCampaign } from "../campaign-routes";
@@ -83,7 +83,7 @@ export function registerMIv3Routes(app: Express) {
         .where(and(
           eq(miSnapshots.accountId, accountId),
           eq(miSnapshots.campaignId, campaignId),
-          eq(miSnapshots.status, "COMPLETE"),
+          inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
         ))
         .orderBy(desc(miSnapshots.createdAt))
         .limit(1);
@@ -138,7 +138,7 @@ export function registerMIv3Routes(app: Express) {
         .where(and(
           eq(miSnapshots.accountId, accountId),
           eq(miSnapshots.campaignId, campaignId),
-          eq(miSnapshots.status, "COMPLETE"),
+          inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
         ))
         .orderBy(desc(miSnapshots.createdAt))
         .limit(20);

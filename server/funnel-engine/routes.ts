@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { db } from "../db";
 import { funnelSnapshots, offerSnapshots, differentiationSnapshots, miSnapshots, audienceSnapshots, positioningSnapshots } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { inArray, eq, and, desc } from "drizzle-orm";
 import { runFunnelEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
 import { ENGINE_VERSION as OFFER_ENGINE_VERSION } from "../offer-engine/constants";
@@ -91,7 +91,7 @@ export function registerFunnelEngineRoutes(app: Express) {
             .where(and(
               eq(miSnapshots.campaignId, campaignId),
               eq(miSnapshots.accountId, accountId),
-              eq(miSnapshots.status, "COMPLETE"),
+              inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
               eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
             ))
             .orderBy(desc(miSnapshots.createdAt))
@@ -112,7 +112,7 @@ export function registerFunnelEngineRoutes(app: Express) {
           .where(and(
             eq(miSnapshots.campaignId, campaignId),
             eq(miSnapshots.accountId, accountId),
-            eq(miSnapshots.status, "COMPLETE"),
+            inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
             eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
           ))
           .orderBy(desc(miSnapshots.createdAt))

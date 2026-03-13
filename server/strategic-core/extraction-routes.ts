@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { aiChat } from "../ai-client";
 import { db } from "../db";
 import { strategicBlueprints, businessDataLayer, miSnapshots } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { inArray, eq, and, desc } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
 import { getEngineReadinessState } from "../market-intelligence-v3/engine-state";
 import { ENGINE_VERSION } from "../market-intelligence-v3/constants";
@@ -176,7 +176,7 @@ export function registerExtractionRoutes(app: Express) {
           .where(and(
             eq(miSnapshots.accountId, blueprint.accountId),
             eq(miSnapshots.campaignId, resolvedCampaignId),
-            eq(miSnapshots.status, "COMPLETE"),
+            inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
           ))
           .orderBy(desc(miSnapshots.createdAt))
           .limit(1);

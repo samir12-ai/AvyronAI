@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { miSnapshots } from "../../shared/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { inArray, eq, desc, and } from "drizzle-orm";
 import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/engine";
 
 export interface EngineHealthStatus {
@@ -38,7 +38,7 @@ export async function checkMIv3Freshness(
     .where(and(
       eq(miSnapshots.accountId, accountId),
       eq(miSnapshots.campaignId, campaignId),
-      eq(miSnapshots.status, "COMPLETE"),
+      inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
     ))
     .orderBy(desc(miSnapshots.createdAt))
     .limit(1);

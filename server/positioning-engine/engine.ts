@@ -5,7 +5,7 @@ import {
   audienceSnapshots,
   ciCompetitors,
 } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { inArray, eq, and, desc } from "drizzle-orm";
 import { aiChat } from "../ai-client";
 import { checkForOrphanClaims, type OrphanCheckResult } from "../shared/signal-quality-gate";
 import { enforceGlobalStateRefresh } from "../shared/engine-health";
@@ -1221,7 +1221,7 @@ export async function runPositioningEngine(
       .where(and(
         eq(miSnapshots.campaignId, campaignId),
         eq(miSnapshots.accountId, accountId),
-        eq(miSnapshots.status, "COMPLETE"),
+        inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
         eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
       ))
       .orderBy(desc(miSnapshots.createdAt))

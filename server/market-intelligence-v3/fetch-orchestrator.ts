@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { miFetchJobs, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, miSnapshots, miSignalLogs, miTelemetry, growthCampaigns } from "@shared/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { inArray, eq, and, desc, sql } from "drizzle-orm";
 import { fetchCompetitorData, enrichCompetitorWithComments, cleanupExpiredSyntheticComments, type FetchResult, type CollectionMode } from "../competitive-intelligence/data-acquisition";
 import { computeAllSignals, aggregateMissingFlags, clusterSemanticSignals } from "./signal-engine";
 import { classifyAllIntents, computeDominantMarketIntent } from "./intent-engine";
@@ -738,7 +738,7 @@ async function executeFetchJob(
     if (anyAnalysisRan) {
       try {
         const latestSnap = await db.select({ id: miSnapshots.id }).from(miSnapshots)
-          .where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.status, "COMPLETE")))
+          .where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId), inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"])))
           .orderBy(desc(miSnapshots.createdAt)).limit(1);
         if (latestSnap.length > 0) {
           snapshotIdCreated = latestSnap[0].id;
@@ -1004,7 +1004,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     .where(and(
       eq(miSnapshots.accountId, accountId),
       eq(miSnapshots.campaignId, campaignId),
-      eq(miSnapshots.status, "COMPLETE"),
+      inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
     ))
     .orderBy(desc(miSnapshots.createdAt))
     .limit(1);
@@ -1296,7 +1296,7 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
       .where(and(
         eq(miSnapshots.accountId, accountId),
         eq(miSnapshots.campaignId, campaignId),
-        eq(miSnapshots.status, "COMPLETE"),
+        inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
       ));
   } catch (err: any) {
     console.error(`[FetchOrch] Failed to set ENRICHING status: ${err.message}`);

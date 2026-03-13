@@ -9,7 +9,7 @@ import {
   audienceSnapshots,
   miSnapshots,
 } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { inArray, eq, and, desc } from "drizzle-orm";
 import { runIntegrityEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
 import { ENGINE_VERSION as FUNNEL_ENGINE_VERSION } from "../funnel-engine/constants";
@@ -106,7 +106,7 @@ export function registerIntegrityEngineRoutes(app: Express) {
             .where(and(
               eq(miSnapshots.campaignId, campaignId),
               eq(miSnapshots.accountId, accountId),
-              eq(miSnapshots.status, "COMPLETE"),
+              inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
               eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
             ))
             .orderBy(desc(miSnapshots.createdAt))
@@ -126,7 +126,7 @@ export function registerIntegrityEngineRoutes(app: Express) {
           .where(and(
             eq(miSnapshots.campaignId, campaignId),
             eq(miSnapshots.accountId, accountId),
-            eq(miSnapshots.status, "COMPLETE"),
+            inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
             eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
           ))
           .orderBy(desc(miSnapshots.createdAt))

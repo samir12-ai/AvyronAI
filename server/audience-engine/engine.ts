@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { audienceSnapshots, miSnapshots, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, growthCampaigns } from "@shared/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { inArray, eq, and, desc, sql } from "drizzle-orm";
 import {
   AUDIENCE_ENGINE_VERSION,
   AUDIENCE_THRESHOLDS,
@@ -1050,7 +1050,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     .where(and(
       eq(miSnapshots.accountId, accountId),
       eq(miSnapshots.campaignId, campaignId),
-      eq(miSnapshots.status, "COMPLETE"),
+      inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
     ))
     .orderBy(desc(miSnapshots.createdAt))
     .limit(1);

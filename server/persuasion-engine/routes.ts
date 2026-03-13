@@ -11,7 +11,7 @@ import {
   audienceSnapshots,
   miSnapshots,
 } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { inArray, eq, and, desc } from "drizzle-orm";
 import { runPersuasionEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
 import { ENGINE_VERSION as AWARENESS_ENGINE_VERSION } from "../awareness-engine/constants";
@@ -165,7 +165,7 @@ export function registerPersuasionEngineRoutes(app: Express) {
           const integrityResult = verifySnapshotIntegrity(snap, MI_ENGINE_VERSION, campaignId);
           if (!integrityResult.valid) {
             const [latest] = await db.select().from(miSnapshots)
-              .where(and(eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId), eq(miSnapshots.status, "COMPLETE"), eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION)))
+              .where(and(eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId), inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]), eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION)))
               .orderBy(desc(miSnapshots.createdAt)).limit(1);
             if (latest) snap = latest;
             else return res.status(400).json({ error: "MI_VERSION_MISMATCH", message: "MI snapshot version mismatch — please re-run Market Intelligence" });
@@ -173,7 +173,7 @@ export function registerPersuasionEngineRoutes(app: Express) {
           miSnapshot = snap;
         } else {
           const [latest] = await db.select().from(miSnapshots)
-            .where(and(eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId), eq(miSnapshots.status, "COMPLETE"), eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION)))
+            .where(and(eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId), inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]), eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION)))
             .orderBy(desc(miSnapshots.createdAt)).limit(1);
           if (!latest) return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid MI snapshot found" });
           miSnapshot = latest;
@@ -244,7 +244,7 @@ export function registerPersuasionEngineRoutes(app: Express) {
       if (!rawObjMapData) {
         const [latestMi] = await db.select({ objectionMapData: miSnapshots.objectionMapData })
           .from(miSnapshots)
-          .where(and(eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId), eq(miSnapshots.status, "COMPLETE")))
+          .where(and(eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId), inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"])))
           .orderBy(desc(miSnapshots.createdAt)).limit(1);
         if (latestMi?.objectionMapData) rawObjMapData = latestMi.objectionMapData;
       }

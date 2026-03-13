@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { miSnapshots } from "../../shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { inArray, eq, and, desc } from "drizzle-orm";
 
 export interface MarketBaseline {
   narrativeConvergence: number;
@@ -70,7 +70,7 @@ export async function computeMarketBaseline(accountId: string, campaignId: strin
       .where(and(
         eq(miSnapshots.accountId, accountId),
         eq(miSnapshots.campaignId, campaignId),
-        eq(miSnapshots.status, "COMPLETE"),
+        inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
       ))
       .orderBy(desc(miSnapshots.createdAt))
       .limit(BASELINE_WINDOW);

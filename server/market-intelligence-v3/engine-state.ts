@@ -2,7 +2,7 @@ import { ENGINE_VERSION } from "./constants";
 import { MI_CONFIDENCE } from "./constants";
 import { db } from "../db";
 import { miSnapshots } from "@shared/schema";
-import { ne, eq } from "drizzle-orm";
+import { ne, eq, inArray } from "drizzle-orm";
 
 export type EngineState = "READY" | "REFRESH_REQUIRED" | "REFRESHING" | "REFRESH_FAILED" | "BLOCKED";
 
@@ -163,25 +163,33 @@ export function checkMIDependencyForDownstream(
 }
 
 export async function invalidateStaleSnapshots(): Promise<{ invalidatedCount: number }> {
-  console.log(`[MIv3] ENGINE_VERSION_REFRESH | currentVersion=${ENGINE_VERSION} | action=startup_invalidation`);
+  console.log(`[MIv3] ENGINE_VERSION_CHECK | currentVersion=${ENGINE_VERSION} | action=startup_audit`);
 
   try {
-    const staleSnapshots = await db.update(miSnapshots)
-      .set({ status: "STALE" })
-      .where(ne(miSnapshots.analysisVersion, ENGINE_VERSION))
+    const recovered = await db.update(miSnapshots)
+      .set({ status: "COMPLETE" })
+      .where(eq(miSnapshots.status, "STALE"))
       .returning({ id: miSnapshots.id });
 
-    const invalidatedCount = staleSnapshots.length;
-
-    if (invalidatedCount > 0) {
-      console.log(`[MIv3] STARTUP_INVALIDATION_COMPLETE | invalidated=${invalidatedCount} | reason=ENGINE_VERSION_MISMATCH | currentVersion=${ENGINE_VERSION}`);
-    } else {
-      console.log(`[MIv3] STARTUP_INVALIDATION_COMPLETE | invalidated=0 | allSnapshotsCurrentVersion=${ENGINE_VERSION}`);
+    if (recovered.length > 0) {
+      console.log(`[MIv3] STALE_RECOVERY | recovered=${recovered.length} snapshots from STALE → COMPLETE`);
     }
 
-    return { invalidatedCount };
+    const oldVersionSnapshots = await db.select({ id: miSnapshots.id, analysisVersion: miSnapshots.analysisVersion })
+      .from(miSnapshots)
+      .where(ne(miSnapshots.analysisVersion, ENGINE_VERSION));
+
+    const staleCount = oldVersionSnapshots.length;
+
+    if (staleCount > 0) {
+      console.log(`[MIv3] STARTUP_AUDIT_COMPLETE | outdatedSnapshots=${staleCount} | currentVersion=${ENGINE_VERSION} | action=SOFT_FLAG (snapshots preserved, version noted for downstream)`);
+    } else {
+      console.log(`[MIv3] STARTUP_AUDIT_COMPLETE | outdatedSnapshots=0 | allSnapshotsCurrentVersion=${ENGINE_VERSION}`);
+    }
+
+    return { invalidatedCount: 0 };
   } catch (error) {
-    console.error(`[MIv3] STARTUP_INVALIDATION_ERROR | version=${ENGINE_VERSION} | error=${error}`);
+    console.error(`[MIv3] STARTUP_AUDIT_ERROR | version=${ENGINE_VERSION} | error=${error}`);
     return { invalidatedCount: 0 };
   }
 }

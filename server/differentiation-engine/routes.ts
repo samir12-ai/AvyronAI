@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { db } from "../db";
 import { differentiationSnapshots, miSnapshots, audienceSnapshots, positioningSnapshots } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { inArray, eq, and, desc } from "drizzle-orm";
 import { runDifferentiationEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
 import { getEngineReadinessState, verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
@@ -64,7 +64,7 @@ export function registerDifferentiationRoutes(app: Express) {
           const [latestMI] = await db.select().from(miSnapshots)
             .where(and(
               eq(miSnapshots.campaignId, campaignId),
-              eq(miSnapshots.status, "COMPLETE"),
+              inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
               eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
             ))
             .orderBy(desc(miSnapshots.createdAt))
@@ -85,7 +85,7 @@ export function registerDifferentiationRoutes(app: Express) {
         const [latestMI] = await db.select().from(miSnapshots)
           .where(and(
             eq(miSnapshots.campaignId, campaignId),
-            eq(miSnapshots.status, "COMPLETE"),
+            inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
             eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
           ))
           .orderBy(desc(miSnapshots.createdAt))
