@@ -144,9 +144,9 @@ export function validateSnapshotSchema(snapshot: any, currentVersion: number = E
 
   let recommendation: "USE" | "USE_WITH_CAUTION" | "INCOMPATIBLE";
 
-  if (missingFields.length >= 3) {
+  if (missingFields.length >= 3 || (snapshotVersion !== currentVersion && snapshotVersion > 0)) {
     recommendation = "INCOMPATIBLE";
-  } else if (missingFields.length > 0 || snapshotVersion !== currentVersion) {
+  } else if (missingFields.length > 0) {
     recommendation = "USE_WITH_CAUTION";
   } else {
     recommendation = "USE";
@@ -171,6 +171,8 @@ export interface FreshnessMetadata {
   blockedForStrategy: boolean;
   schemaCompatible: boolean;
   schemaRecommendation: "USE" | "USE_WITH_CAUTION" | "INCOMPATIBLE";
+  schemaVersion: number;
+  snapshotVersion: number;
 }
 
 export function buildFreshnessMetadata(snapshot: any): FreshnessMetadata {
@@ -191,11 +193,13 @@ export function buildFreshnessMetadata(snapshot: any): FreshnessMetadata {
     trustScore: staleness.trustScore,
     stalenessCoefficient: staleness.coefficient,
     warning: !schema.compatible
-      ? "Snapshot schema is incompatible with current engine. Re-run analysis."
+      ? `Snapshot schema is incompatible with current engine (snapshot v${schema.snapshotVersion}, engine v${schema.schemaVersion}). Re-run analysis.`
       : staleness.warning,
     blockedForStrategy,
     schemaCompatible: schema.compatible,
     schemaRecommendation: schema.recommendation,
+    schemaVersion: schema.schemaVersion,
+    snapshotVersion: schema.snapshotVersion,
   };
 }
 

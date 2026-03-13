@@ -30,6 +30,7 @@ export default function DataFreshnessWarning({ freshnessMetadata, onRefresh, com
   const { freshnessClass, ageInDays, warning, blockedForStrategy, schemaRecommendation } = freshnessMetadata;
 
   if (freshnessClass === 'FRESH' && schemaRecommendation === 'USE') return null;
+  if (freshnessClass === 'AGING' && ageInDays < 3 && schemaRecommendation === 'USE') return null;
 
   let iconName: keyof typeof Ionicons.glyphMap = 'information-circle';
   let bgColor = '#FFF3CD';
