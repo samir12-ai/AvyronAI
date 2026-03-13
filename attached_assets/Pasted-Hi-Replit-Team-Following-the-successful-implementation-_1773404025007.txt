@@ -1,0 +1,155 @@
+Hi Replit Team,
+
+Following the successful implementation of the Data Source Mode System, we need to introduce a controlled adaptive architecture that allows the system to intelligently transition between Market Benchmark Mode and Campaign Metrics Mode while preserving strict analytical integrity and maintaining full compliance with the MarketMind Master Plan engine architecture.
+
+The objective is to enable adaptive behavior without creating data contamination, logical conflicts, or engine interference.
+
+--------------------------------------------------
+
+MASTER RULE
+
+The system must support Adaptive Data Source Switching, but it must remain controlled, auditable, and statistically valid.
+
+At no time may benchmark data and campaign data be blended into a single analytical score.
+
+--------------------------------------------------
+
+REQUIRED SYSTEM EXTENSION
+
+1. Controlled Adaptive Switching
+
+Instead of locking the data source, the system must allow mode escalation only when statistical thresholds are satisfied.
+
+Transition rule:
+
+Benchmark Mode → Campaign Mode is allowed only if:
+
+• Conversions ≥ 50  
+OR  
+• Spend ≥ $1000
+
+If thresholds are not met, the system must remain in Benchmark Mode.
+
+--------------------------------------------------
+
+2. Data Source Isolation
+
+Each decision snapshot must explicitly store:
+
+• dataSourceMode  
+• dataSourceConfidence  
+• dataOrigin  
+• switchReason (if a transition occurred)
+
+Benchmark-derived decisions and campaign-derived decisions must never be merged into the same scoring model.
+
+--------------------------------------------------
+
+3. Statistical Validity Layer
+
+Current confidence scoring relies on signal strength but does not account for sample size validity.
+
+Introduce a Statistical Validity Layer before Budget Governor and CAC calculations.
+
+Minimum statistical thresholds:
+
+• Minimum conversions: 30–50  
+• Minimum spend: $500–$1000  
+• Confidence interval must reach statistical reliability before enabling scaling decisions.
+
+If thresholds are not satisfied:
+
+Scaling must remain blocked.
+
+--------------------------------------------------
+
+4. Benchmark Confidence Modeling
+
+Benchmark Mode must not use static values.
+
+Benchmark confidence must be derived from contextual parameters:
+
+• Industry  
+• Region  
+• Channel type
+
+Example:
+
+Dubai / Retail / Meta  
+≠  
+Dubai / SaaS / LinkedIn
+
+Benchmark datasets must include a confidence weight that feeds into the decision engines.
+
+--------------------------------------------------
+
+5. Projection Guard
+
+When operating in Benchmark Mode:
+
+All financial projections must display a Projection Only flag.
+
+Scaling decisions must remain conservative until campaign data becomes statistically reliable.
+
+--------------------------------------------------
+
+6. Adaptive Mode Logging
+
+Every time the system transitions between modes, the following must be logged:
+
+• previousMode  
+• newMode  
+• transitionReason  
+• statisticalEvidence
+
+This log must be stored inside the decision snapshot layer for auditability.
+
+--------------------------------------------------
+
+MASTER PLAN COMPLIANCE
+
+Reminder of the MarketMind architecture rule:
+
+Each engine must remain functionally independent.
+
+No engine may override another engine’s logic unless mediated by the Master Plan orchestration layer.
+
+Examples:
+
+• Channel Engine cannot alter data source mode  
+• Budget Governor cannot rewrite persuasion outputs  
+• Data Source Engine cannot modify channel scoring
+
+Each engine may only consume outputs, not rewrite them.
+
+--------------------------------------------------
+
+ACCEPTANCE CRITERIA (STRICT)
+
+Implementation will only be accepted if ALL conditions are satisfied:
+
+1. Adaptive switching occurs only after statistical thresholds are met.  
+2. Benchmark and campaign data cannot be merged into a single score.  
+3. Statistical Validity Layer must gate scaling decisions.  
+4. Benchmark confidence must be contextual, not static.  
+5. Every mode switch must generate a logged decision snapshot.  
+6. Projection Guard must label benchmark-derived outputs.  
+7. Engine independence rules must remain enforced under the Master Plan architecture.
+
+--------------------------------------------------
+
+EXPECTED RESULT
+
+After this extension:
+
+• The system becomes adaptive without compromising analytical integrity.  
+• Benchmark projections remain safe for early campaigns.  
+• Campaign data automatically takes control once statistically valid.  
+• Engine conflicts and data contamination risks are eliminated.
+
+This change ensures MarketMind evolves into a self-correcting marketing intelligence system while preserving the structural discipline of the Master Plan.
+
+Please confirm once the architecture extension and statistical validation layers are implemented so we can proceed with internal engine verification.
+
+Best regards,  
+MarketMind Engineering

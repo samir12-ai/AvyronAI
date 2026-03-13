@@ -1906,3 +1906,19 @@ export const snapshotArchive = pgTable("snapshot_archive", {
 });
 
 export type SnapshotArchive = typeof snapshotArchive.$inferSelect;
+
+export const dataSourceTransitions = pgTable("data_source_transitions", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  previousMode: text("previous_mode").notNull(),
+  newMode: text("new_mode").notNull(),
+  transitionReason: text("transition_reason").notNull(),
+  triggeredBy: text("triggered_by").notNull().default("adaptive_switch"),
+  statisticalEvidence: text("statistical_evidence"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type DataSourceTransition = typeof dataSourceTransitions.$inferSelect;

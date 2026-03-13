@@ -126,6 +126,19 @@ export function registerBudgetGovernorRoutes(app: Express) {
         };
       }
 
+      const statValidity = dataSource.statisticalValidity;
+      if (result.decision.action === "scale") {
+        if (!statValidity || !statValidity.isStatisticallyValid) {
+          const blockDetails = statValidity
+            ? statValidity.reasons.filter(r => r.includes("below")).join("; ")
+            : "No campaign performance data available — statistical validity cannot be assessed";
+          result.decision = {
+            action: "hold",
+            reasoning: `Statistical Validity Layer: ${blockDetails} — scaling blocked until statistical thresholds are met (min 30 conversions, $500 spend)`,
+          };
+        }
+      }
+
       const resultWithDataSource = {
         ...result,
         dataSource: {
@@ -135,6 +148,11 @@ export function registerBudgetGovernorRoutes(app: Express) {
           anomalies: dataSource.anomalies,
           warnings: dataSource.warnings,
           confidence: dataSource.confidence,
+          dataOrigin: dataSource.dataOrigin,
+          switchReason: dataSource.switchReason,
+          isProjectionOnly: dataSource.isProjectionOnly,
+          statisticalValidity: dataSource.statisticalValidity,
+          transitionEligibility: dataSource.transitionEligibility,
         },
       };
 

@@ -9,6 +9,7 @@ export interface RegionalBenchmark {
   ctrRange: { min: number; max: number };
   conversionRateRange: { min: number; max: number };
   roasRange: { min: number; max: number };
+  confidenceWeight: number;
 }
 
 const BENCHMARKS: RegionalBenchmark[] = [
@@ -21,6 +22,7 @@ const BENCHMARKS: RegionalBenchmark[] = [
     ctrRange: { min: 1.2, max: 2.5 },
     conversionRateRange: { min: 2, max: 5 },
     roasRange: { min: 1.5, max: 4.0 },
+    confidenceWeight: 0.72,
   },
   {
     region: "dubai",
@@ -31,6 +33,40 @@ const BENCHMARKS: RegionalBenchmark[] = [
     ctrRange: { min: 0.8, max: 2.0 },
     conversionRateRange: { min: 1.5, max: 4 },
     roasRange: { min: 2.0, max: 6.0 },
+    confidenceWeight: 0.65,
+  },
+  {
+    region: "dubai",
+    platform: "tiktok",
+    segment: "smb",
+    cpcRange: { min: 0.40, max: 0.90 },
+    cpaRange: { min: 10, max: 28 },
+    ctrRange: { min: 1.5, max: 3.0 },
+    conversionRateRange: { min: 1.5, max: 3.5 },
+    roasRange: { min: 1.2, max: 3.0 },
+    confidenceWeight: 0.58,
+  },
+  {
+    region: "dubai",
+    platform: "google",
+    segment: "smb",
+    cpcRange: { min: 1.20, max: 3.50 },
+    cpaRange: { min: 18, max: 55 },
+    ctrRange: { min: 2.0, max: 4.5 },
+    conversionRateRange: { min: 2.0, max: 5.0 },
+    roasRange: { min: 1.8, max: 5.0 },
+    confidenceWeight: 0.70,
+  },
+  {
+    region: "dubai",
+    platform: "linkedin",
+    segment: "saas",
+    cpcRange: { min: 3.00, max: 8.00 },
+    cpaRange: { min: 50, max: 150 },
+    ctrRange: { min: 0.5, max: 1.5 },
+    conversionRateRange: { min: 1.0, max: 3.0 },
+    roasRange: { min: 1.0, max: 3.0 },
+    confidenceWeight: 0.52,
   },
   {
     region: "uae",
@@ -41,6 +77,29 @@ const BENCHMARKS: RegionalBenchmark[] = [
     ctrRange: { min: 1.0, max: 2.3 },
     conversionRateRange: { min: 2, max: 5 },
     roasRange: { min: 1.5, max: 4.0 },
+    confidenceWeight: 0.68,
+  },
+  {
+    region: "uae",
+    platform: "tiktok",
+    segment: "smb",
+    cpcRange: { min: 0.35, max: 0.85 },
+    cpaRange: { min: 8, max: 25 },
+    ctrRange: { min: 1.3, max: 3.2 },
+    conversionRateRange: { min: 1.2, max: 3.0 },
+    roasRange: { min: 1.0, max: 2.8 },
+    confidenceWeight: 0.55,
+  },
+  {
+    region: "uae",
+    platform: "google",
+    segment: "smb",
+    cpcRange: { min: 0.90, max: 2.80 },
+    cpaRange: { min: 14, max: 45 },
+    ctrRange: { min: 1.8, max: 4.2 },
+    conversionRateRange: { min: 1.8, max: 4.5 },
+    roasRange: { min: 1.5, max: 4.2 },
+    confidenceWeight: 0.66,
   },
   {
     region: "global",
@@ -51,6 +110,7 @@ const BENCHMARKS: RegionalBenchmark[] = [
     ctrRange: { min: 0.9, max: 2.0 },
     conversionRateRange: { min: 1.5, max: 4.5 },
     roasRange: { min: 1.2, max: 3.5 },
+    confidenceWeight: 0.60,
   },
   {
     region: "global",
@@ -61,6 +121,7 @@ const BENCHMARKS: RegionalBenchmark[] = [
     ctrRange: { min: 1.5, max: 3.5 },
     conversionRateRange: { min: 1.0, max: 3.0 },
     roasRange: { min: 1.0, max: 3.0 },
+    confidenceWeight: 0.50,
   },
   {
     region: "global",
@@ -71,6 +132,29 @@ const BENCHMARKS: RegionalBenchmark[] = [
     ctrRange: { min: 2.0, max: 5.0 },
     conversionRateRange: { min: 2.0, max: 5.0 },
     roasRange: { min: 1.5, max: 4.5 },
+    confidenceWeight: 0.62,
+  },
+  {
+    region: "global",
+    platform: "linkedin",
+    segment: "saas",
+    cpcRange: { min: 4.00, max: 10.00 },
+    cpaRange: { min: 60, max: 200 },
+    ctrRange: { min: 0.4, max: 1.2 },
+    conversionRateRange: { min: 0.8, max: 2.5 },
+    roasRange: { min: 0.8, max: 2.5 },
+    confidenceWeight: 0.45,
+  },
+  {
+    region: "global",
+    platform: "linkedin",
+    segment: "smb",
+    cpcRange: { min: 3.50, max: 8.00 },
+    cpaRange: { min: 45, max: 120 },
+    ctrRange: { min: 0.5, max: 1.5 },
+    conversionRateRange: { min: 1.0, max: 3.0 },
+    roasRange: { min: 1.0, max: 3.0 },
+    confidenceWeight: 0.48,
   },
 ];
 
@@ -81,9 +165,17 @@ function normalizeLocation(location: string): string {
   return "global";
 }
 
-export function resolveBenchmark(location: string, platform: string): RegionalBenchmark {
+export function resolveBenchmark(location: string, platform: string, segment?: string): RegionalBenchmark {
   const region = normalizeLocation(location);
   const normalizedPlatform = platform.toLowerCase().trim();
+  const normalizedSegment = segment?.toLowerCase().trim();
+
+  if (normalizedSegment) {
+    let match = BENCHMARKS.find(b => b.region === region && b.platform === normalizedPlatform && b.segment === normalizedSegment);
+    if (match) return match;
+    match = BENCHMARKS.find(b => b.region === "global" && b.platform === normalizedPlatform && b.segment === normalizedSegment);
+    if (match) return match;
+  }
 
   let match = BENCHMARKS.find(b => b.region === region && b.platform === normalizedPlatform);
   if (!match) {
@@ -116,6 +208,7 @@ export function getBenchmarkMetrics(benchmark: RegionalBenchmark) {
     region: benchmark.region,
     platform: benchmark.platform,
     segment: benchmark.segment,
+    confidenceWeight: benchmark.confidenceWeight,
     ranges: {
       cpa: benchmark.cpaRange,
       roas: benchmark.roasRange,
@@ -124,4 +217,8 @@ export function getBenchmarkMetrics(benchmark: RegionalBenchmark) {
       conversionRate: benchmark.conversionRateRange,
     },
   };
+}
+
+export function getAllBenchmarks(): RegionalBenchmark[] {
+  return [...BENCHMARKS];
 }

@@ -44,8 +44,22 @@ Engine components in AI Management (Positioning, Differentiation, Offer, Funnel,
 ### Snapshot Lifecycle Management
 Operates in DATA_ARCHIVING mode (not immediate purge). COMPLETE/RESTORED/PARTIAL snapshots are protected for 30 days minimum. INCOMPATIBLE snapshots are archived to `snapshot_archive` table for recovery instead of deleted. Active session protection ensures the latest snapshot per campaign per table is never cleaned. The worker delays initial run by 5 minutes after startup. Only orphaned data (no parent campaign) and non-protected data exceeding the 30-day cold storage limit are targeted for cleanup. Per-campaign cap remains at 20 snapshots.
 
-### Data Source Mode System
-Campaigns support two data source modes: `campaign_metrics` (uses actual campaign performance data from `manual_campaign_metrics` table) and `benchmark` (uses regional industry benchmarks from `server/data-source/benchmarks.ts`). Mode is stored in `campaign_selections.dataSourceMode` (default: `benchmark`). The resolver (`server/data-source/resolver.ts`) automatically falls back to benchmark if campaign metrics are insufficient or fail validation. Anomaly detection (`server/data-source/validation.ts`) checks for suspicious metrics (CPA < $1, ROAS > 20x, spend/results inconsistency). The Budget Governor integrates data source resolution — using benchmark CPA/ROAS when in benchmark mode, and attaching data source metadata (mode, confidence, anomalies, warnings) to every decision snapshot. The confidence threshold for scaling was raised from 65% to 70% (`MIN_VALIDATION_CONFIDENCE_FOR_SCALE = 0.70`). REST API routes: `/api/data-source/resolve`, `/api/data-source/benchmarks`, `/api/data-source/validate-metrics`, `/api/data-source/mode`. Frontend: campaign creation form includes data source mode selector; AI Control Center shows a data source mode indicator badge; Budget Governor UI displays data source banners with anomaly warnings.
+### Data Source Mode System (Adaptive Architecture)
+Campaigns support two data source modes: `campaign_metrics` and `benchmark`. Mode stored in `campaign_selections.dataSourceMode` (default: `benchmark`). The system now features **Adaptive Data Source Switching** — a controlled architecture that automatically transitions between modes while preserving analytical integrity.
+
+**Adaptive Switching Rules**: Benchmark → Campaign Metrics transition allowed only when conversions ≥ 50 OR spend ≥ $1,000. If thresholds not met, system remains in Benchmark Mode. Each decision snapshot stores `dataSourceMode`, `dataSourceConfidence`, `dataOrigin` (benchmark_static/benchmark_contextual/campaign_verified/campaign_fallback), and `switchReason`.
+
+**Statistical Validity Layer** (`server/data-source/statistical-validity.ts`): Gates all scaling decisions. Minimum thresholds: 30 conversions + $500 spend. If either threshold is unsatisfied, scaling is blocked regardless of data source mode (applies even to pure benchmark with high confidence). Functions: `assessStatisticalValidity()`, `evaluateTransitionEligibility()`, `shouldBlockScaling()`.
+
+**Contextual Benchmark Confidence**: Benchmarks carry per-entry `confidenceWeight` values derived from region, platform, and industry/segment context. Example: Dubai/Meta/SMB = 0.72 vs Global/LinkedIn/SaaS = 0.45. Benchmark resolution now accepts optional segment parameter (inferred from `campaignGoalType`). Data: `server/data-source/benchmarks.ts`.
+
+**Projection Guard**: All benchmark-derived outputs flagged with `isProjectionOnly: true`. Scaling decisions remain conservative until campaign data becomes statistically reliable. Frontend displays "Projection Only" badge on benchmark-sourced data.
+
+**Transition Logging**: Every mode switch persisted to `data_source_transitions` DB table with `previousMode`, `newMode`, `transitionReason`, `statisticalEvidence`, `triggeredBy` (adaptive_switch/manual/validation_fallback). Transition log is durable and audit-grade.
+
+**Data Isolation**: Benchmark-derived and campaign-derived decisions never merged into the same scoring model. Each data origin clearly tracked.
+
+REST API routes: `/api/data-source/resolve`, `/api/data-source/benchmarks`, `/api/data-source/benchmarks/all`, `/api/data-source/validate-metrics`, `/api/data-source/mode`, `/api/data-source/statistical-validity`, `/api/data-source/transition-eligibility`, `/api/data-source/transition-log`.
 
 ### Snapshot Trust & Freshness System
 A core module for temporal decay scoring, schema validation, and freshness classification, providing staleness coefficients, freshness classes (FRESH/AGING/NEEDS_REFRESH/PARTIAL/INCOMPATIBLE), trust scores, and strategy-blocking statuses. Freshness metadata is included in all engine route responses and triggers frontend warnings.

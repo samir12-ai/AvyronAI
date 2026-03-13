@@ -324,6 +324,61 @@ export default function BudgetGovernorEngine({ isActive }: { isActive?: boolean 
                   ))}
                 </View>
               )}
+              {data.dataSource.isProjectionOnly && (
+                <View style={[styles.projectionGuard, { backgroundColor: '#F59E0B12' }]}>
+                  <Ionicons name="flask-outline" size={12} color="#F59E0B" />
+                  <Text style={[styles.projectionGuardText, { color: '#F59E0B' }]}>Projection Only — outputs based on market benchmarks, not verified campaign data</Text>
+                </View>
+              )}
+              {data.dataSource.switchReason && (
+                <View style={[styles.switchReasonBox, { backgroundColor: '#8B5CF612' }]}>
+                  <Ionicons name="swap-horizontal" size={12} color="#8B5CF6" />
+                  <Text style={[styles.switchReasonText, { color: '#8B5CF6' }]}>{data.dataSource.switchReason}</Text>
+                </View>
+              )}
+              {data.dataSource.statisticalValidity && (
+                <View style={[styles.statisticalValidityBox, {
+                  backgroundColor: data.dataSource.statisticalValidity.isStatisticallyValid ? '#10B98110' : '#EF444410',
+                  borderColor: data.dataSource.statisticalValidity.isStatisticallyValid ? '#10B98130' : '#EF444430',
+                }]}>
+                  <View style={styles.dataSourceBannerRow}>
+                    <Ionicons
+                      name={data.dataSource.statisticalValidity.isStatisticallyValid ? 'checkmark-shield-outline' : 'shield-outline'}
+                      size={13}
+                      color={data.dataSource.statisticalValidity.isStatisticallyValid ? '#10B981' : '#EF4444'}
+                    />
+                    <Text style={[styles.dataSourceBannerLabel, {
+                      color: data.dataSource.statisticalValidity.isStatisticallyValid ? '#10B981' : '#EF4444'
+                    }]}>
+                      {data.dataSource.statisticalValidity.isStatisticallyValid ? 'Statistically Valid' : 'Below Statistical Threshold'}
+                    </Text>
+                    <Text style={[styles.dataSourceConfidence, { color: colors.textMuted }]}>
+                      {(data.dataSource.statisticalValidity.confidenceLevel * 100).toFixed(0)}%
+                    </Text>
+                  </View>
+                  <View style={styles.validityMetrics}>
+                    <Text style={[styles.validityMetric, { color: colors.textSecondary }]}>
+                      Conversions: {data.dataSource.statisticalValidity.conversions}/{data.dataSource.statisticalValidity.minimumConversions}
+                    </Text>
+                    <Text style={[styles.validityMetric, { color: colors.textSecondary }]}>
+                      Spend: ${data.dataSource.statisticalValidity.spend?.toFixed(0) || '0'}/${data.dataSource.statisticalValidity.minimumSpend || 500}
+                    </Text>
+                  </View>
+                  {!data.dataSource.statisticalValidity.isStatisticallyValid && (
+                    <Text style={[styles.validityWarning, { color: '#EF4444' }]}>
+                      Scaling decisions blocked until statistical thresholds are met
+                    </Text>
+                  )}
+                </View>
+              )}
+              {data.dataSource.transitionEligibility && data.dataSource.transitionEligibility.eligible && (
+                <View style={[styles.transitionBox, { backgroundColor: '#8B5CF610' }]}>
+                  <Ionicons name="arrow-forward-circle-outline" size={12} color="#8B5CF6" />
+                  <Text style={[styles.transitionText, { color: '#8B5CF6' }]}>
+                    Adaptive switch available: {data.dataSource.transitionEligibility.currentMode} → {data.dataSource.transitionEligibility.recommendedMode}
+                  </Text>
+                </View>
+              )}
             </View>
           )}
 
@@ -709,4 +764,14 @@ const styles = StyleSheet.create({
   anomalyList: { marginTop: 6, gap: 4 },
   anomalyItem: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 6, borderRadius: 6 },
   anomalyText: { fontSize: 11, flex: 1, lineHeight: 14 },
+  projectionGuard: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 8, borderRadius: 8, marginTop: 8 },
+  projectionGuardText: { fontSize: 11, flex: 1, lineHeight: 15, fontWeight: '600' as const },
+  switchReasonBox: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 8, borderRadius: 8, marginTop: 6 },
+  switchReasonText: { fontSize: 11, flex: 1, lineHeight: 15 },
+  statisticalValidityBox: { borderRadius: 10, borderWidth: 1, padding: 10, marginTop: 8 },
+  validityMetrics: { flexDirection: 'row', gap: 12, marginTop: 6 },
+  validityMetric: { fontSize: 11 },
+  validityWarning: { fontSize: 11, fontWeight: '500' as const, marginTop: 6 },
+  transitionBox: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 8, borderRadius: 8, marginTop: 6 },
+  transitionText: { fontSize: 11, flex: 1, lineHeight: 15 },
 });
