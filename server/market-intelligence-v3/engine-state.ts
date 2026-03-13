@@ -164,10 +164,19 @@ export function getEngineReadinessState(
   if (!freshnessMetadata.schemaCompatible) {
     diagnostics.engineState = "BLOCKED";
     logDiagnostics("MI", diagnostics);
+
+    if (snapshot.id && snapshot.status !== "INCOMPATIBLE") {
+      db.update(miSnapshots)
+        .set({ status: "INCOMPATIBLE" })
+        .where(and(eq(miSnapshots.id, snapshot.id), eq(miSnapshots.status, snapshot.status)))
+        .then(() => console.log(`[MI] SCHEMA_GUARD | snapshot=${snapshot.id.slice(0, 8)} | status persisted as INCOMPATIBLE (v${freshnessMetadata.snapshotVersion} != v${freshnessMetadata.schemaVersion})`))
+        .catch((err: any) => console.error(`[MI] SCHEMA_GUARD | failed to persist INCOMPATIBLE: ${err.message}`));
+    }
+
     return {
       state: "BLOCKED",
       diagnostics,
-      reason: "Snapshot schema incompatible with current engine. Re-run analysis.",
+      reason: `Snapshot schema incompatible with current engine (v${freshnessMetadata.snapshotVersion} vs v${freshnessMetadata.schemaVersion}). Re-run analysis.`,
       freshnessMetadata,
     };
   }

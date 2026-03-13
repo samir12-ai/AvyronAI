@@ -1059,6 +1059,11 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   const miSnapshotAge = latestSnapshot?.createdAt
     ? `${Math.round((Date.now() - new Date(latestSnapshot.createdAt).getTime()) / 3600000)}h ago`
     : null;
+  if (latestSnapshot) {
+    const { logFreshnessTraceability, buildFreshnessMetadata } = await import("../shared/snapshot-trust");
+    const miFreshness = buildFreshnessMetadata(latestSnapshot);
+    logFreshnessTraceability("AudienceEngine", latestSnapshot, miFreshness);
+  }
   if (latestSnapshot && latestSnapshot.analysisVersion !== undefined) {
     const { ENGINE_VERSION: MI_EV } = await import("../market-intelligence-v3/constants");
     if (latestSnapshot.analysisVersion !== MI_EV) {

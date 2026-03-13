@@ -61,9 +61,24 @@ export function registerMIv3Routes(app: Express) {
         console.log(`[MIv3-Route] NarrativeOverlap | duplicates=${result.narrativeOverlap.duplicateNarratives.length} penalty=${result.narrativeOverlap.saturationPenalty}`);
       }
 
+      let freshnessMetadata = null;
+      if (result.snapshotId) {
+        try {
+          const [snap] = await db.select().from(miSnapshots)
+            .where(eq(miSnapshots.id, result.snapshotId))
+            .limit(1);
+          if (snap) {
+            const { buildFreshnessMetadata, logFreshnessTraceability } = await import("../shared/snapshot-trust");
+            freshnessMetadata = buildFreshnessMetadata(snap);
+            logFreshnessTraceability("MIv3-Analyze", snap, freshnessMetadata);
+          }
+        } catch {}
+      }
+
       return res.json({
         success: true,
         ...result,
+        freshnessMetadata,
       });
     } catch (err: any) {
       console.error("[MIv3-Route] Error:", err.message);

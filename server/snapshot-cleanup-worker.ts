@@ -91,7 +91,7 @@ async function purgeExpiredSnapshots(): Promise<{ table: string; deleted: number
         const nonCompleteExpired = await db
           .delete(config.table)
           .where(and(
-            inArray(config.table.status, ["FAILED", "STALE", "PENDING"]),
+            inArray(config.table.status, ["FAILED", "STALE", "PENDING", "PARTIAL"]),
             lt(tsCol, nonCompleteCutoff),
           ))
           .returning({ id: config.table.id });
