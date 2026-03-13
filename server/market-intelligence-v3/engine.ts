@@ -1108,6 +1108,7 @@ export class MarketIntelligenceV3 {
       deltaReport: deltaReport ? JSON.stringify(deltaReport) : null,
       diagnosticsData: JSON.stringify({
         ...diagnostics,
+        schemaVersion: ENGINE_VERSION,
         signalQualityGate: {
           gatePass: qualityGate.gatePass,
           totalInput: qualityGate.totalInputSignals,

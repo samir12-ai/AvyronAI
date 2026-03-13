@@ -114,7 +114,14 @@ export function classifyFreshness(snapshot: any): FreshnessClass {
 }
 
 export function validateSnapshotSchema(snapshot: any, currentVersion: number = ENGINE_VERSION): SchemaValidationResult {
-  const snapshotVersion = snapshot.analysisVersion ?? snapshot.version ?? 0;
+  let persistedSchemaVersion: number | null = null;
+  if (snapshot.diagnosticsData) {
+    try {
+      const diag = typeof snapshot.diagnosticsData === "string" ? JSON.parse(snapshot.diagnosticsData) : snapshot.diagnosticsData;
+      if (diag?.schemaVersion) persistedSchemaVersion = diag.schemaVersion;
+    } catch {}
+  }
+  const snapshotVersion = persistedSchemaVersion ?? snapshot.analysisVersion ?? snapshot.version ?? 0;
   const missingFields: string[] = [];
   const extraFields: string[] = [];
 
@@ -152,10 +159,8 @@ export function validateSnapshotSchema(snapshot: any, currentVersion: number = E
   let recommendation: "USE" | "USE_WITH_CAUTION" | "INCOMPATIBLE";
   const versionMismatch = snapshotVersion !== currentVersion && snapshotVersion > 0;
 
-  if (versionMismatch) {
+  if (versionMismatch || missingFields.length >= 3) {
     recommendation = "INCOMPATIBLE";
-  } else if (missingFields.length >= 3) {
-    recommendation = "USE_WITH_CAUTION";
   } else if (missingFields.length > 0) {
     recommendation = "USE_WITH_CAUTION";
   } else {
