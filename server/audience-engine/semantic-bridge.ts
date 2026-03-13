@@ -29,7 +29,9 @@ export interface SemanticBridgeResult {
 }
 
 const PAIN_CATEGORIES: SemanticSignalCategory[] = ["pain_signal"];
-const PAIN_DNA_TYPES = ["hook:problem"];
+const PAIN_DNA_TYPES = ["hook:problem", "narrative:problem_solution", "narrative:mistake_fix"];
+const DESIRE_DNA_TYPES = ["narrative:before_after", "narrative:story_lesson", "narrative:how_to"];
+const OBJECTION_DNA_TYPES = ["cta:trust", "narrative:mistake_fix"];
 const DESIRE_CATEGORIES: SemanticSignalCategory[] = ["desire_signal", "transformation_statement"];
 const OBJECTION_CATEGORIES: SemanticSignalCategory[] = ["audience_objection", "competitor_weakness"];
 
@@ -186,6 +188,36 @@ function extractContentDnaBridgeSignals(
           bridgeSource: "content_dna",
         });
       }
+
+      if (DESIRE_DNA_TYPES.includes(ev.detectedType)) {
+        bridged.push({
+          canonical: canonicalizeDesireSnippet(snippet),
+          category: "desire",
+          sourceCategory: ev.detectedType,
+          snippet,
+          strength: dna.dnaConfidence,
+          parentSignalId,
+          competitorId,
+          competitorName,
+          confidenceScore: dna.dnaConfidence,
+          bridgeSource: "content_dna",
+        });
+      }
+
+      if (OBJECTION_DNA_TYPES.includes(ev.detectedType)) {
+        bridged.push({
+          canonical: canonicalizeObjectionSnippet(snippet),
+          category: "objection",
+          sourceCategory: ev.detectedType,
+          snippet,
+          strength: dna.dnaConfidence,
+          parentSignalId,
+          competitorId,
+          competitorName,
+          confidenceScore: dna.dnaConfidence,
+          bridgeSource: "content_dna",
+        });
+      }
       idx++;
     }
 
@@ -201,6 +233,27 @@ function extractContentDnaBridgeSignals(
             snippet: ev.snippet || "",
             strength: dna.dnaConfidence,
             parentSignalId: generateSignalId("dna_hook", "problem", competitorId, i),
+            competitorId,
+            competitorName,
+            confidenceScore: dna.dnaConfidence,
+            bridgeSource: "content_dna",
+          });
+        }
+      }
+    }
+
+    for (const framework of dna.narrativeFrameworks || []) {
+      if (framework === "before_after") {
+        const baEvidence = dna.evidence.filter(e => e.detectedType === "narrative:before_after");
+        for (let i = 0; i < baEvidence.length; i++) {
+          const ev = baEvidence[i];
+          bridged.push({
+            canonical: canonicalizeDesireSnippet(ev.snippet || ""),
+            category: "desire",
+            sourceCategory: "narrative:before_after",
+            snippet: ev.snippet || "",
+            strength: dna.dnaConfidence,
+            parentSignalId: generateSignalId("dna_narrative", "before_after", competitorId, i),
             competitorId,
             competitorName,
             confidenceScore: dna.dnaConfidence,

@@ -1135,28 +1135,46 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     detectedMarkets: [] as string[],
   };
 
+  let bridgeResult: SemanticBridgeResult | null = null;
+  if (latestSnapshot) {
+    bridgeResult = executeSemanticBridge(latestSnapshot);
+    const bridgeValidation = validateBridgeIntegrity(bridgeResult);
+    if (!bridgeValidation.valid) {
+      console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_VALIDATION_FAIL | issues=${bridgeValidation.issues.join("; ")}`);
+      bridgeResult = null;
+    } else {
+      console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_ACTIVE | pains=${bridgeResult.painSignals.length} | desires=${bridgeResult.desireSignals.length} | objections=${bridgeResult.objectionSignals.length} | integrity=${bridgeResult.bridgeIntegrity}`);
+    }
+  }
+
+  const bridgeCanRescue = bridgeResult && bridgeResult.bridgeIntegrity && bridgeResult.totalPassed >= AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI;
+
   if (
     competitorCount < AUDIENCE_THRESHOLDS.MIN_COMPETITORS_FOR_ANALYSIS ||
     captions.length < AUDIENCE_THRESHOLDS.MIN_POSTS_FOR_ANALYSIS
   ) {
-    const msg = `DATASET TOO SMALL FOR RELIABLE AUDIENCE INTELLIGENCE — Need ≥${AUDIENCE_THRESHOLDS.MIN_COMPETITORS_FOR_ANALYSIS} competitors (have ${competitorCount}), ≥${AUDIENCE_THRESHOLDS.MIN_POSTS_FOR_ANALYSIS} posts (have ${captions.length}), comments available: ${commentTexts.length}`;
-    console.log(`[AudienceEngine-V3] ${msg}`);
+    if (bridgeCanRescue) {
+      console.log(`[AudienceEngine-V3] DATASET_TOO_SMALL bypassed — Semantic Bridge provides ${bridgeResult!.totalPassed} quality-gated signals from MIv3 contentDnaData (bridge-only mode)`);
+    } else {
+      const msg = `DATASET TOO SMALL FOR RELIABLE AUDIENCE INTELLIGENCE — Need ≥${AUDIENCE_THRESHOLDS.MIN_COMPETITORS_FOR_ANALYSIS} competitors (have ${competitorCount}), ≥${AUDIENCE_THRESHOLDS.MIN_POSTS_FOR_ANALYSIS} posts (have ${captions.length}), comments available: ${commentTexts.length}${latestSnapshot ? `, bridge signals: ${bridgeResult?.totalPassed || 0}` : ", no MI snapshot"}`;
+      console.log(`[AudienceEngine-V3] ${msg}`);
 
-    const executionTimeMs = Date.now() - startTime;
-    const [inserted] = await db.insert(audienceSnapshots).values({
-      accountId, campaignId, miSnapshotId,
-      engineVersion: AUDIENCE_ENGINE_VERSION,
-      inputSummary: JSON.stringify({ ...baseInputSummary, status: "DATASET_TOO_SMALL", statusMessage: msg }),
-      executionTimeMs,
-    }).returning({ id: audienceSnapshots.id });
+      const executionTimeMs = Date.now() - startTime;
+      const [inserted] = await db.insert(audienceSnapshots).values({
+        accountId, campaignId, miSnapshotId,
+        engineVersion: AUDIENCE_ENGINE_VERSION,
+        inputSummary: JSON.stringify({ ...baseInputSummary, status: "DATASET_TOO_SMALL", statusMessage: msg }),
+        executionTimeMs,
+      }).returning({ id: audienceSnapshots.id });
 
-    await pruneOldSnapshots(db, audienceSnapshots, campaignId, 20, accountId);
+      await pruneOldSnapshots(db, audienceSnapshots, campaignId, 20, accountId);
 
-    return buildEmptyResult("DATASET_TOO_SMALL", msg, baseInputSummary, executionTimeMs, inserted.id);
+      return buildEmptyResult("DATASET_TOO_SMALL", msg, baseInputSummary, executionTimeMs, inserted.id);
+    }
   }
 
   if (commentTexts.length === 0) {
-    console.log(`[AudienceEngine-V3] NO_COMMENT_TEXT — proceeding with ${captions.length} captions only`);
+    console.log(`[AudienceEngine-V3] NO_COMMENT_TEXT — proceeding with ${captions.length} captions${bridgeCanRescue ? " + semantic bridge signals" : " only"}`);
   }
 
   const [campaign] = await db.select().from(growthCampaigns)
@@ -1169,18 +1187,6 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     targetAudience: "Market audience",
     location: "",
   };
-
-  let bridgeResult: SemanticBridgeResult | null = null;
-  if (latestSnapshot) {
-    bridgeResult = executeSemanticBridge(latestSnapshot);
-    const bridgeValidation = validateBridgeIntegrity(bridgeResult);
-    if (!bridgeValidation.valid) {
-      console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_VALIDATION_FAIL | issues=${bridgeValidation.issues.join("; ")}`);
-      bridgeResult = null;
-    } else {
-      console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_ACTIVE | pains=${bridgeResult.painSignals.length} | desires=${bridgeResult.desireSignals.length} | objections=${bridgeResult.objectionSignals.length} | integrity=${bridgeResult.bridgeIntegrity}`);
-    }
-  }
 
   const allText = [...commentTexts, ...captions];
   const sourceTypes = [];
