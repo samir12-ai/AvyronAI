@@ -18,6 +18,7 @@ import {
   STATUS,
 } from "./constants";
 import { assessStrategyAcceptability } from "../../shared/strategy-acceptability";
+import { deduplicateWarnings, deduplicateByField } from "../dependency-validation";
 import type {
   IterationPerformanceInput,
   IterationFunnelInput,
@@ -562,6 +563,105 @@ function generateIterationPlan(
   return steps;
 }
 
+function generateBenchmarkExplorationHypotheses(): TestHypothesis[] {
+  return [
+    {
+      hypothesisId: generateId(),
+      hypothesis: "Test primary hook angle variations to establish baseline CTR benchmarks",
+      variable: "creative_hook",
+      expectedOutcome: "Establish CTR baseline above industry floor of 0.5%",
+      priority: "high",
+      riskLevel: "low",
+      testDurationDays: 7,
+      successMetric: "ctr",
+      successThreshold: CTR_FLOOR,
+    },
+    {
+      hypothesisId: generateId(),
+      hypothesis: "Test audience segment targeting to identify highest-converting cohort",
+      variable: "audience_targeting",
+      expectedOutcome: "Identify top 2-3 audience segments by conversion rate",
+      priority: "high",
+      riskLevel: "low",
+      testDurationDays: 10,
+      successMetric: "conversion_rate",
+      successThreshold: CONVERSION_RATE_FLOOR,
+    },
+    {
+      hypothesisId: generateId(),
+      hypothesis: "Test landing page messaging variants to optimize initial conversion flow",
+      variable: "landing_page",
+      expectedOutcome: "Establish conversion rate baseline and identify winning copy direction",
+      priority: "medium",
+      riskLevel: "low",
+      testDurationDays: 7,
+      successMetric: "conversion_rate",
+      successThreshold: CONVERSION_RATE_FLOOR * 1.5,
+    },
+    {
+      hypothesisId: generateId(),
+      hypothesis: "Test offer presentation formats to determine optimal value communication",
+      variable: "offer_format",
+      expectedOutcome: "Determine which offer format produces highest engagement",
+      priority: "medium",
+      riskLevel: "low",
+      testDurationDays: 7,
+      successMetric: "engagement_rate",
+      successThreshold: 0.03,
+    },
+  ];
+}
+
+function generateBenchmarkOptimizationTargets(): OptimizationTarget[] {
+  return [
+    {
+      targetArea: "Click-Through Rate",
+      currentValue: 0,
+      targetValue: CTR_FLOOR * 2,
+      confidence: 0.3,
+      effort: "low" as const,
+      improvementStrategy: "Launch initial creative variants with distinct hook angles to establish CTR baseline",
+    },
+    {
+      targetArea: "Conversion Rate",
+      currentValue: 0,
+      targetValue: CONVERSION_RATE_FLOOR * 2,
+      confidence: 0.25,
+      effort: "medium" as const,
+      improvementStrategy: "Deploy landing page with clear value proposition and conversion tracking to establish baseline",
+    },
+  ];
+}
+
+function generateBenchmarkExplorationPlan(): IterationPlanStep[] {
+  return [
+    {
+      stepNumber: 1,
+      action: "Launch initial campaign with 2-3 creative hook variants to establish CTR and engagement baselines",
+      variable: "creative_hook",
+      duration: "7 days",
+      successCriteria: "Minimum 1000 impressions collected with measurable CTR differentiation between variants",
+      fallbackAction: "Extend collection period to 14 days and verify tracking setup",
+    },
+    {
+      stepNumber: 2,
+      action: "Run audience segment test across 2-3 target cohorts to identify conversion potential",
+      variable: "audience_targeting",
+      duration: "10 days",
+      successCriteria: "At least 10 conversions per segment for statistical comparison",
+      fallbackAction: "Narrow to 2 segments and increase per-segment budget allocation",
+    },
+    {
+      stepNumber: 3,
+      action: "Deploy landing page A/B test with winning creative to optimize conversion funnel entry",
+      variable: "landing_page",
+      duration: "7 days",
+      successCriteria: "Conversion rate exceeds baseline floor with ≥95% confidence",
+      fallbackAction: "Iterate on landing page copy based on engagement heatmap data",
+    },
+  ];
+}
+
 export async function runIterationEngine(
   performance: IterationPerformanceInput | null,
   funnel: IterationFunnelInput | null,
@@ -580,31 +680,32 @@ export async function runIterationEngine(
   const structuralWarnings: string[] = [];
 
   if (!performance && !funnel && !creative) {
+    const benchmarkHypotheses = generateBenchmarkExplorationHypotheses();
+    const benchmarkTargets = generateBenchmarkOptimizationTargets();
+    const benchmarkPlan = generateBenchmarkExplorationPlan();
+
     return {
-      status: STATUS.INSUFFICIENT_DATA,
-      statusMessage: "No campaign performance, funnel, or creative data available — cannot generate iteration plan",
-      nextTestHypotheses: [],
-      optimizationTargets: [],
+      status: STATUS.BENCHMARK_EXPLORATION,
+      statusMessage: "No campaign data available — operating in Benchmark Exploration Mode with baseline hypotheses",
+      nextTestHypotheses: benchmarkHypotheses,
+      optimizationTargets: benchmarkTargets,
       failedStrategyFlags: [],
-      iterationPlan: [{
-        stepNumber: 1,
-        action: "Launch initial campaign and collect baseline performance data",
-        variable: "baseline_collection",
-        duration: "14 days",
-        successCriteria: "Minimum 1000 impressions and 10 conversions collected",
-        fallbackAction: "Extend collection period and verify tracking setup",
-      }],
+      iterationPlan: benchmarkPlan,
       layerResults,
-      structuralWarnings: ["No data available for iteration analysis"],
+      structuralWarnings: ["Benchmark Exploration Mode active — hypotheses are derived from industry baselines, not campaign data"],
       boundaryCheck: { passed: true, violations: [] },
       dataReliability: reliability,
-      confidenceScore: 0.1,
+      confidenceScore: 0.2,
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
     };
   }
 
-  const hypotheses = generateHypotheses(performance, funnel, creative, persuasion);
+  let hypotheses = generateHypotheses(performance, funnel, creative, persuasion);
+  if (hypotheses.length === 0) {
+    hypotheses = generateBenchmarkExplorationHypotheses().slice(0, 2);
+    structuralWarnings.push("No data-driven hypotheses generated — baseline exploration hypotheses injected");
+  }
   const targets = generateOptimizationTargets(performance, funnel);
   const failedFlags = detectFailedStrategies(performance, creative);
 
@@ -616,7 +717,12 @@ export async function runIterationEngine(
   }
   structuralWarnings.push(...reliability.advisories);
 
-  const filteredHypotheses = hypotheses.slice(0, reliability.isWeak ? 1 : MAX_CONCURRENT_TESTS);
+  const dedupedWarnings = deduplicateWarnings(structuralWarnings);
+  structuralWarnings.length = 0;
+  structuralWarnings.push(...dedupedWarnings);
+
+  const dedupedHypotheses = deduplicateByField(hypotheses, "variable");
+  const filteredHypotheses = dedupedHypotheses.slice(0, reliability.isWeak ? 1 : MAX_CONCURRENT_TESTS);
 
   const iterationPlan = generateIterationPlan(filteredHypotheses, targets, reliability);
 
@@ -628,18 +734,22 @@ export async function runIterationEngine(
   const boundaryCheck = sanitizeBoundary(allOutputText);
 
   if (!boundaryCheck.passed) {
+    const safeHypotheses = generateBenchmarkExplorationHypotheses().slice(0, 1);
+    const safeTargets = generateBenchmarkOptimizationTargets().slice(0, 1);
+    const safePlan = generateBenchmarkExplorationPlan().slice(0, 1);
+
     return {
       status: STATUS.GUARD_BLOCKED,
-      statusMessage: "Iteration plan output violated boundary protections",
-      nextTestHypotheses: [],
-      optimizationTargets: [],
+      statusMessage: "Iteration plan output violated boundary protections — safe fallback hypotheses provided",
+      nextTestHypotheses: safeHypotheses,
+      optimizationTargets: safeTargets,
       failedStrategyFlags: failedFlags,
-      iterationPlan: [],
+      iterationPlan: safePlan,
       layerResults,
-      structuralWarnings,
+      structuralWarnings: [...structuralWarnings, "Guard blocked original output — replaced with safe baseline hypotheses"],
       boundaryCheck,
       dataReliability: reliability,
-      confidenceScore: 0,
+      confidenceScore: 0.1,
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
     };

@@ -5,6 +5,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { runIterationEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
 import { pruneOldSnapshots, checkValidationSession } from "../../engine-hardening";
+import { validateEngineDependencies, logDependencyCheck } from "../dependency-validation";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -27,6 +28,16 @@ export function registerIterationEngineRoutes(app: Express) {
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
+      }
+
+      const depCheck = validateEngineDependencies("iteration-engine");
+      logDependencyCheck("iteration-engine", depCheck);
+      if (!depCheck.valid) {
+        return res.status(503).json({
+          error: "ENGINE_DEPENDENCY_MISMATCH",
+          message: `Iteration Engine cannot execute: ${depCheck.mismatches.join("; ")}`,
+          mismatches: depCheck.mismatches,
+        });
       }
 
       const sessionCheck = checkValidationSession(validationSessionId, "iteration-engine", campaignId);

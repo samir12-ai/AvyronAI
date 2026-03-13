@@ -1,0 +1,176 @@
+Hello Replit Engineering Team,
+
+Following the recent implementation of the Iteration Engine and Retention Engine, we require an additional system hardening phase to eliminate current inconsistencies and proactively prevent future failures. Please treat this request as a high-priority stability task, with strict acceptance criteria before any changes are considered complete.
+
+This system operates as a multi-engine strategic decision architecture, therefore any modification must respect engine isolation and Master Plan integrity. No engine is allowed to alter or interfere with the responsibilities of another engine.
+
+---
+
+## 1. Mandatory System Synchronization After Any Update
+One of the recurring issues observed in previous iterations is that code changes are applied without full system synchronization, leaving some components operating on outdated logic.
+
+To prevent this permanently:
+
+Requirements
+
+- After any engine update, the system must perform a full dependency refresh and rebuild.
+- Ensure that:
+  - backend services restart cleanly
+  - all engine modules reload the updated logic
+  - cached logic is invalidated
+  - frontend components re-bind to the updated schema.
+
+Acceptance Criteria
+
+The update will only be accepted if:
+
+- All engines confirm their version and dependency compatibility at runtime.
+- No component runs outdated logic after deployment.
+- A runtime validation check confirms that the updated engine version is active across:
+  - API layer
+  - engine core
+  - UI layer.
+
+---
+
+## 2. Iteration Engine Hardening
+The Iteration Engine must never enter a non-functional state when data is missing.
+
+Current behavior shows the engine stopping at:
+
+> "No campaign performance data available"
+
+This is unacceptable for production systems.
+
+Required Fix
+
+If no performance data exists, the engine must automatically switch to Benchmark Exploration Mode.
+
+In this mode it should:
+
+- generate baseline experimentation hypotheses
+- propose creative testing strategies
+- suggest funnel optimization experiments.
+
+Acceptance Criteria
+
+The Iteration Engine must always produce at least one actionable hypothesis, even when:
+
+- campaign data is missing
+- funnel data is unavailable
+- creative performance data does not exist.
+
+Under no condition may the engine return zero hypotheses.
+
+---
+
+## 3. Retention Engine Structural Completeness
+The Retention Engine currently detects missing retention mechanisms but does not always produce corrective strategy outputs.
+
+The engine must always transition from diagnosis → recommendation.
+
+Required Behavior
+
+When retention signals are weak or missing, the engine must automatically generate:
+
+- baseline retention loops
+- engagement loops
+- post-purchase reinforcement mechanisms
+- churn risk mitigation strategies.
+
+Acceptance Criteria
+
+The engine must produce at least one viable retention mechanism recommendation, even when:
+
+- customer journey data is incomplete
+- retention metrics are unavailable.
+
+---
+
+## 4. Cross-Engine Isolation Enforcement
+The system must guarantee that each engine operates strictly within its own domain.
+
+Specifically:
+
+- Channel Engine → channel selection only
+- Iteration Engine → experimentation logic only
+- Retention Engine → customer lifecycle optimization only
+- Budget Governor → budget constraints and scaling logic only
+
+No engine may modify outputs belonging to another engine.
+
+Acceptance Criteria
+
+Implement a validation guard that blocks any request where:
+
+- an engine attempts to alter another engine’s output
+- engine dependency mismatches occur.
+
+---
+
+## 5. Structural Error Handling
+The current system surfaces structural warnings but does not always ensure safe fallback behavior.
+
+All engines must implement fail-safe fallback modes.
+
+Examples:
+
+- Missing campaign data → Benchmark Mode
+- Missing retention data → Retention Baseline Model
+- Missing funnel metrics → Conservative funnel assumptions
+
+Acceptance Criteria
+
+No engine may terminate analysis due to missing inputs.  
+A fallback model must always be triggered.
+
+---
+
+## 6. Duplicate and Logical Consistency Checks
+We have previously encountered repeated warnings and duplicated signals within analysis results.
+
+Ensure the following safeguards are implemented:
+
+- warning deduplication
+- hypothesis deduplication
+- engine output consistency validation.
+
+Acceptance Criteria
+
+- No duplicate warnings appear in engine reports.
+- Logical contradictions between engine outputs are automatically detected.
+
+---
+
+## 7. Future-Proof System Guards
+To prevent regression in future updates:
+
+- implement versioned engine interfaces
+- enforce dependency validation at runtime
+- block execution if incompatible versions are detected.
+
+Acceptance Criteria
+
+Any incompatible engine dependency must prevent system execution until resolved.
+
+---
+
+## Final Requirement
+
+Before marking this task as complete:
+
+1. Restart the entire system stack.
+2. Run full end-to-end validation tests.
+3. Verify that all engines:
+   - load updated logic
+   - pass dependency validation
+   - produce stable outputs.
+
+No changes should be merged without all acceptance criteria passing.
+
+---
+
+Thank you for ensuring the system remains stable, deterministic, and resilient to both current and future failures.
+
+Best regards,  
+MarketMind AI System Architecture

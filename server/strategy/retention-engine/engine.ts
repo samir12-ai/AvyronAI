@@ -14,6 +14,7 @@ import {
   createEmptyReliability,
 } from "../../engine-hardening";
 import { assessStrategyAcceptability } from "../../shared/strategy-acceptability";
+import { deduplicateWarnings } from "../dependency-validation";
 import type {
   RetentionInput,
   RetentionLoop,
@@ -194,19 +195,37 @@ function buildFallbackResult(input: RetentionInput, guardResult: RetentionGuardR
     {
       name: "Post-Purchase Value Reinforcement",
       type: "value_reinforcement",
-      description: "Reinforce value delivery within first 7 days post-purchase through outcome reminders",
+      description: "Reinforce value delivery within first 7 days post-purchase through outcome reminders and success milestones",
       triggerCondition: "Customer completes purchase",
       expectedImpact: 0.4,
       implementationDifficulty: 0.3,
-      priorityScore: 0.7,
+      priorityScore: 0.8,
     },
     {
       name: "Engagement Check-in Loop",
-      type: "feedback_loop",
-      description: "Periodic check-ins to gather feedback and prevent silent churn",
+      type: "engagement_loop",
+      description: "Periodic check-ins to gather feedback, surface usage tips, and prevent silent churn",
       triggerCondition: "14 days since last engagement",
-      expectedImpact: 0.3,
+      expectedImpact: 0.35,
       implementationDifficulty: 0.2,
+      priorityScore: 0.7,
+    },
+    {
+      name: "Post-Purchase Reinforcement Sequence",
+      type: "habit_loop",
+      description: "Structured onboarding reinforcement that builds product usage habits in the first 30 days",
+      triggerCondition: "Days 1, 3, 7, 14, 30 post-purchase",
+      expectedImpact: 0.45,
+      implementationDifficulty: 0.4,
+      priorityScore: 0.75,
+    },
+    {
+      name: "Win-Back Re-engagement Loop",
+      type: "milestone_loop",
+      description: "Automated re-engagement for at-risk customers showing declining activity patterns",
+      triggerCondition: "30 days of declining engagement or inactivity",
+      expectedImpact: 0.3,
+      implementationDifficulty: 0.35,
       priorityScore: 0.6,
     },
   ];
@@ -219,14 +238,32 @@ function buildFallbackResult(input: RetentionInput, guardResult: RetentionGuardR
       mitigationStrategy: "Implement basic engagement tracking and post-purchase feedback collection",
       dataConfidence: 0.3,
     },
+    {
+      riskFactor: "No established post-purchase reinforcement — early churn risk elevated",
+      severity: 0.6,
+      timeframe: "0-14 days post-purchase",
+      mitigationStrategy: "Deploy immediate value reinforcement sequence within 48 hours of purchase",
+      dataConfidence: 0.4,
+    },
+  ];
+
+  const ltvExpansionPaths: LTVExpansionPath[] = [
+    {
+      pathName: "Baseline Engagement Expansion",
+      description: "Increase customer touchpoints to establish baseline retention metrics before advanced optimization",
+      estimatedLTVIncrease: 0.15,
+      requiredConditions: ["Basic engagement tracking active", "Post-purchase email sequence deployed"],
+      riskNotes: ["Limited data may lead to conservative estimates"],
+      confidenceScore: 0.3,
+    },
   ];
 
   return {
     status: STATUS.PROVISIONAL,
-    statusMessage: "Retention analysis is provisional — certainty is low, retention experiments recommended",
+    statusMessage: "Retention analysis is provisional — baseline retention mechanisms generated, retention experiments recommended",
     retentionLoops,
     churnRiskFlags,
-    ltvExpansionPaths: [],
+    ltvExpansionPaths,
     upsellTriggers: [],
     guardResult,
     boundaryCheck: { passed: true, violations: [] },
@@ -357,6 +394,22 @@ export async function runRetentionEngine(input: RetentionInput): Promise<Retenti
     return buildFallbackResult(input, guardResult, startTime);
   }
 
+  if (retentionLoops.length === 0) {
+    const fallback = buildFallbackResult(input, guardResult, startTime);
+    retentionLoops = fallback.retentionLoops;
+    warnings.push("AI returned no retention loops — baseline retention mechanisms injected");
+  }
+  if (churnRiskFlags.length === 0) {
+    churnRiskFlags = [{
+      riskFactor: "No churn risk factors identified by AI — baseline monitoring recommended",
+      severity: 0.4,
+      timeframe: "30-60 days",
+      mitigationStrategy: "Implement engagement tracking to establish churn baselines",
+      dataConfidence: 0.3,
+    }];
+    warnings.push("AI returned no churn risk flags — baseline churn flag injected");
+  }
+
   let rawConfidence =
     guardResult.valueDeliveryClarity * RETENTION_SCORE_WEIGHTS.valueDeliveryClarity +
     (1 - guardResult.trustDecayRisk) * RETENTION_SCORE_WEIGHTS.postPurchaseTrust +
@@ -385,29 +438,20 @@ export async function runRetentionEngine(input: RetentionInput): Promise<Retenti
   );
 
   if (!finalBoundaryCheck.clean) {
+    const fallback = buildFallbackResult(input, guardResult, startTime);
     return {
+      ...fallback,
       status: STATUS.GUARD_BLOCKED,
-      statusMessage: "Retention analysis blocked — boundary violations detected in AI output",
-      retentionLoops: [],
-      churnRiskFlags: [],
-      ltvExpansionPaths: [],
-      upsellTriggers: [],
-      guardResult,
+      statusMessage: "Retention analysis blocked — boundary violations in AI output, safe baseline mechanisms provided",
       boundaryCheck: { passed: false, violations: finalBoundaryCheck.violations },
-      structuralWarnings: warnings,
-      confidenceScore: 0,
-      executionTimeMs: Date.now() - startTime,
-      engineVersion: ENGINE_VERSION,
-      dataReliability: {
-        overallReliability: reliability.overallReliability,
-        isWeak: reliability.isWeak,
-        advisories: reliability.advisories,
-      },
-      strategyAcceptability: assessStrategyAcceptability(0, 0, 5, false, warnings),
+      structuralWarnings: [...deduplicateWarnings(warnings), "Guard blocked original output — replaced with safe baseline retention mechanisms"],
+      confidenceScore: 0.15,
+      strategyAcceptability: assessStrategyAcceptability(0.15, 0, 5, false, warnings),
     };
   }
 
   const status = guardResult.passed ? STATUS.COMPLETE : STATUS.PROVISIONAL;
+  const dedupedWarnings = deduplicateWarnings(warnings);
 
   return {
     status,
@@ -420,7 +464,7 @@ export async function runRetentionEngine(input: RetentionInput): Promise<Retenti
     upsellTriggers,
     guardResult,
     boundaryCheck: { passed: true, violations: [] },
-    structuralWarnings: warnings,
+    structuralWarnings: dedupedWarnings,
     confidenceScore,
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,
