@@ -62,7 +62,7 @@ const DECISION_CONFIG: Record<string, { color: string; icon: keyof typeof Ionico
   halt: { color: '#EF4444', icon: 'stop-circle', label: 'Halt' },
 };
 
-export default function BudgetGovernorEngine() {
+export default function BudgetGovernorEngine({ isActive }: { isActive?: boolean }) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
@@ -130,9 +130,11 @@ export default function BudgetGovernorEngine() {
   }, [selectedCampaignId]);
 
   useEffect(() => {
-    fetchLatest();
-    fetchValidationSnapshot();
-  }, [fetchLatest, fetchValidationSnapshot]);
+    if (isActive) {
+      fetchLatest();
+      fetchValidationSnapshot();
+    }
+  }, [isActive, fetchLatest, fetchValidationSnapshot]);
 
   const runAnalysis = useCallback(async () => {
     if (!selectedCampaignId) {

@@ -129,7 +129,7 @@ const EFFORT_COLORS: Record<string, string> = {
 const ENGINE_COLOR = '#F43F5E';
 const ENGINE_COLOR_DARK = '#E11D48';
 
-export default function IterationEngine() {
+export default function IterationEngine({ isActive }: { isActive?: boolean }) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
@@ -156,8 +156,8 @@ export default function IterationEngine() {
   }, [selectedCampaignId]);
 
   useEffect(() => {
-    fetchLatest();
-  }, [fetchLatest]);
+    if (isActive) fetchLatest();
+  }, [isActive, fetchLatest]);
 
   const runAnalysis = useCallback(async () => {
     if (!selectedCampaignId) return;

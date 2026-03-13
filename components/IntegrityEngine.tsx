@@ -62,7 +62,7 @@ const LAYER_ICONS: Record<string, string> = {
   system_coherence: "analytics",
 };
 
-export default function IntegrityEngine() {
+export default function IntegrityEngine({ isActive }: { isActive?: boolean }) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
@@ -104,9 +104,11 @@ export default function IntegrityEngine() {
   }, [selectedCampaignId]);
 
   useEffect(() => {
-    fetchLatest();
-    fetchFunnelSnapshot();
-  }, [fetchLatest, fetchFunnelSnapshot]);
+    if (isActive) {
+      fetchLatest();
+      fetchFunnelSnapshot();
+    }
+  }, [isActive, fetchLatest, fetchFunnelSnapshot]);
 
   const runAnalysis = useCallback(async () => {
     if (!selectedCampaignId || !funnelSnapshotId) {

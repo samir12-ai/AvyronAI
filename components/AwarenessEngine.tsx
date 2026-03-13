@@ -98,7 +98,7 @@ const READINESS_LABELS: Record<string, string> = {
   most_aware: "Most Aware",
 };
 
-export default function AwarenessEngine() {
+export default function AwarenessEngine({ isActive }: { isActive?: boolean }) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
@@ -141,9 +141,11 @@ export default function AwarenessEngine() {
   }, [selectedCampaignId]);
 
   useEffect(() => {
-    fetchLatest();
-    fetchIntegritySnapshot();
-  }, [fetchLatest, fetchIntegritySnapshot]);
+    if (isActive) {
+      fetchLatest();
+      fetchIntegritySnapshot();
+    }
+  }, [isActive, fetchLatest, fetchIntegritySnapshot]);
 
   const runAnalysis = useCallback(async () => {
     if (!selectedCampaignId || !integritySnapshotId) {

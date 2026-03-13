@@ -93,7 +93,7 @@ interface PositioningSnapshot {
   createdAt: string;
 }
 
-export default function PositioningStrategy() {
+export default function PositioningStrategy({ isActive }: { isActive?: boolean }) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
@@ -134,7 +134,7 @@ export default function PositioningStrategy() {
     setLoading(false);
   }, [selectedCampaignId]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { if (isActive) loadData(); }, [isActive, loadData]);
 
   const hasMI = isEngineReady(miNormalized, selectedCampaignId, miEngineState);
   const hasAudience = isEngineReady(audNormalized, selectedCampaignId);

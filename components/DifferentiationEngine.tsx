@@ -86,7 +86,7 @@ interface DifferentiationData {
 
 type DepStatus = 'ready' | 'not_ready' | 'loading';
 
-export default function DifferentiationEngine() {
+export default function DifferentiationEngine({ isActive }: { isActive?: boolean }) {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId: campaignId } = useCampaign();
@@ -144,11 +144,11 @@ export default function DifferentiationEngine() {
   }, [campaignId]);
 
   useEffect(() => {
-    if (campaignId) {
+    if (isActive && campaignId) {
       checkDependencies();
       fetchLatest();
     }
-  }, [campaignId, checkDependencies, fetchLatest]);
+  }, [isActive, campaignId, checkDependencies, fetchLatest]);
 
   const runAnalysis = async () => {
     if (!campaignId || !posSnapshotId) return;

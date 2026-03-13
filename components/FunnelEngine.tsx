@@ -88,7 +88,7 @@ interface FunnelData {
   createdAt?: string;
 }
 
-export default function FunnelEngine() {
+export default function FunnelEngine({ isActive }: { isActive?: boolean }) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
@@ -131,9 +131,11 @@ export default function FunnelEngine() {
   }, [selectedCampaignId]);
 
   useEffect(() => {
-    fetchLatest();
-    fetchOfferSnapshot();
-  }, [fetchLatest, fetchOfferSnapshot]);
+    if (isActive) {
+      fetchLatest();
+      fetchOfferSnapshot();
+    }
+  }, [isActive, fetchLatest, fetchOfferSnapshot]);
 
   const runAnalysis = useCallback(async () => {
     if (!selectedCampaignId || !offerSnapshotId) {

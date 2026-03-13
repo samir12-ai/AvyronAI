@@ -1243,62 +1243,62 @@ export default function AIManagementScreen() {
 
         {visitedTabs.has('positioning') && (
           <View style={{ display: activeTab === 'positioning' ? 'flex' : 'none' }}>
-            <CampaignGuard><PositioningStrategy /></CampaignGuard>
+            <CampaignGuard><PositioningStrategy isActive={activeTab === 'positioning'} /></CampaignGuard>
           </View>
         )}
         {visitedTabs.has('differentiation') && (
           <View style={{ display: activeTab === 'differentiation' ? 'flex' : 'none' }}>
-            <CampaignGuard><DifferentiationEngine /></CampaignGuard>
+            <CampaignGuard><DifferentiationEngine isActive={activeTab === 'differentiation'} /></CampaignGuard>
           </View>
         )}
         {visitedTabs.has('offers') && (
           <View style={{ display: activeTab === 'offers' ? 'flex' : 'none' }}>
-            <CampaignGuard><OfferEngine /></CampaignGuard>
+            <CampaignGuard><OfferEngine isActive={activeTab === 'offers'} /></CampaignGuard>
           </View>
         )}
         {visitedTabs.has('funnels') && (
           <View style={{ display: activeTab === 'funnels' ? 'flex' : 'none' }}>
-            <CampaignGuard><FunnelEngine /></CampaignGuard>
+            <CampaignGuard><FunnelEngine isActive={activeTab === 'funnels'} /></CampaignGuard>
           </View>
         )}
         {visitedTabs.has('integrity') && (
           <View style={{ display: activeTab === 'integrity' ? 'flex' : 'none' }}>
-            <CampaignGuard><IntegrityEngine /></CampaignGuard>
+            <CampaignGuard><IntegrityEngine isActive={activeTab === 'integrity'} /></CampaignGuard>
           </View>
         )}
         {visitedTabs.has('awareness') && (
           <View style={{ display: activeTab === 'awareness' ? 'flex' : 'none' }}>
-            <CampaignGuard><AwarenessEngine /></CampaignGuard>
+            <CampaignGuard><AwarenessEngine isActive={activeTab === 'awareness'} /></CampaignGuard>
           </View>
         )}
         {visitedTabs.has('persuasion') && (
           <View style={{ display: activeTab === 'persuasion' ? 'flex' : 'none' }}>
-            <CampaignGuard><PersuasionEngine /></CampaignGuard>
+            <CampaignGuard><PersuasionEngine isActive={activeTab === 'persuasion'} /></CampaignGuard>
           </View>
         )}
         {visitedTabs.has('statistical_validation') && (
           <View style={{ display: activeTab === 'statistical_validation' ? 'flex' : 'none' }}>
-            <CampaignGuard><StatisticalValidationEngine /></CampaignGuard>
+            <CampaignGuard><StatisticalValidationEngine isActive={activeTab === 'statistical_validation'} /></CampaignGuard>
           </View>
         )}
         {visitedTabs.has('budget_governor') && (
           <View style={{ display: activeTab === 'budget_governor' ? 'flex' : 'none' }}>
-            <CampaignGuard><BudgetGovernorEngine /></CampaignGuard>
+            <CampaignGuard><BudgetGovernorEngine isActive={activeTab === 'budget_governor'} /></CampaignGuard>
           </View>
         )}
         {visitedTabs.has('channel_selection') && (
           <View style={{ display: activeTab === 'channel_selection' ? 'flex' : 'none' }}>
-            <CampaignGuard><ChannelSelectionEngine /></CampaignGuard>
+            <CampaignGuard><ChannelSelectionEngine isActive={activeTab === 'channel_selection'} /></CampaignGuard>
           </View>
         )}
         {visitedTabs.has('iteration') && (
           <View style={{ display: activeTab === 'iteration' ? 'flex' : 'none' }}>
-            <CampaignGuard><IterationEngine /></CampaignGuard>
+            <CampaignGuard><IterationEngine isActive={activeTab === 'iteration'} /></CampaignGuard>
           </View>
         )}
         {visitedTabs.has('retention') && (
           <View style={{ display: activeTab === 'retention' ? 'flex' : 'none' }}>
-            <CampaignGuard><RetentionEngine /></CampaignGuard>
+            <CampaignGuard><RetentionEngine isActive={activeTab === 'retention'} /></CampaignGuard>
           </View>
         )}
 

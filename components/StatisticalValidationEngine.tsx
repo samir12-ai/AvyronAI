@@ -139,7 +139,7 @@ const PROVENANCE_SOURCE_LABELS: Record<string, string> = {
 const PRIMARY_COLOR = '#06B6D4';
 const PRIMARY_DARK = '#0891B2';
 
-export default function StatisticalValidationEngine() {
+export default function StatisticalValidationEngine({ isActive }: { isActive?: boolean }) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
@@ -192,8 +192,8 @@ export default function StatisticalValidationEngine() {
   }, [selectedCampaignId]);
 
   useEffect(() => {
-    fetchLatest();
-  }, [fetchLatest]);
+    if (isActive) fetchLatest();
+  }, [isActive, fetchLatest]);
 
   const runAnalysis = useCallback(async () => {
     if (!selectedCampaignId) {

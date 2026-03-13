@@ -109,7 +109,7 @@ const SEVERITY_COLORS: Record<string, string> = {
 const ENGINE_COLOR = '#059669';
 const ENGINE_COLOR_DARK = '#047857';
 
-export default function RetentionEngine() {
+export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
@@ -160,8 +160,8 @@ export default function RetentionEngine() {
   }, [selectedCampaignId]);
 
   useEffect(() => {
-    fetchLatest();
-  }, [fetchLatest]);
+    if (isActive) fetchLatest();
+  }, [isActive, fetchLatest]);
 
   const runAnalysis = useCallback(async () => {
     if (!selectedCampaignId) return;

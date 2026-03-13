@@ -62,7 +62,7 @@ interface OfferData {
   createdAt?: string;
 }
 
-export default function OfferEngine() {
+export default function OfferEngine({ isActive }: { isActive?: boolean }) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
@@ -105,9 +105,11 @@ export default function OfferEngine() {
   }, [selectedCampaignId]);
 
   useEffect(() => {
-    fetchLatest();
-    fetchDiffSnapshot();
-  }, [fetchLatest, fetchDiffSnapshot]);
+    if (isActive) {
+      fetchLatest();
+      fetchDiffSnapshot();
+    }
+  }, [isActive, fetchLatest, fetchDiffSnapshot]);
 
   const runAnalysis = useCallback(async () => {
     if (!selectedCampaignId || !diffSnapshotId) {

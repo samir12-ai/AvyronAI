@@ -166,7 +166,7 @@ const SEVERITY_COLORS: Record<string, string> = {
   low: "#10B981",
 };
 
-export default function PersuasionEngine() {
+export default function PersuasionEngine({ isActive }: { isActive?: boolean }) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
@@ -210,9 +210,11 @@ export default function PersuasionEngine() {
   }, [selectedCampaignId]);
 
   useEffect(() => {
-    fetchLatest();
-    fetchAwarenessSnapshot();
-  }, [fetchLatest, fetchAwarenessSnapshot]);
+    if (isActive) {
+      fetchLatest();
+      fetchAwarenessSnapshot();
+    }
+  }, [isActive, fetchLatest, fetchAwarenessSnapshot]);
 
   const runAnalysis = useCallback(async () => {
     if (!selectedCampaignId || !awarenessSnapshotId) {

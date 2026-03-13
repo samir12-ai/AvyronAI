@@ -101,7 +101,7 @@ const RISK_COLORS: Record<string, string> = {
   critical: '#DC2626',
 };
 
-export default function ChannelSelectionEngine() {
+export default function ChannelSelectionEngine({ isActive }: { isActive?: boolean }) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
@@ -150,8 +150,8 @@ export default function ChannelSelectionEngine() {
   }, [selectedCampaignId]);
 
   useEffect(() => {
-    fetchLatest();
-  }, [fetchLatest]);
+    if (isActive) fetchLatest();
+  }, [isActive, fetchLatest]);
 
   const runAnalysis = useCallback(async () => {
     if (!selectedCampaignId) return;
