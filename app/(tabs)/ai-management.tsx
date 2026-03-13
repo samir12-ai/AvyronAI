@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -119,6 +119,20 @@ export default function AIManagementScreen() {
   const { state: ps, updateState, isLoading: psLoading, isSaving, saveError, hydrationVersion } = usePersistedState('ai-management', defaultAIMgmtState);
 
   const [activeTab, setActiveTab] = useState<TabView>(ps.activeTab);
+  const [visitedTabs, setVisitedTabs] = useState<Set<TabView>>(new Set([ps.activeTab]));
+
+  const handleTabChange = useCallback((tab: TabView) => {
+    Haptics.selectionAsync();
+    setActiveTab(tab);
+    setVisitedTabs(prev => {
+      if (prev.has(tab)) return prev;
+      const next = new Set(prev);
+      next.add(tab);
+      return next;
+    });
+    updateState({ activeTab: tab });
+  }, [updateState]);
+
   const [autoPublishEnabled, setAutoPublishEnabled] = useState(false);
   const [selectedPosts, setSelectedPosts] = useState<Set<string>>(new Set());
   const [publishing, setPublishing] = useState(false);
@@ -183,6 +197,12 @@ export default function AIManagementScreen() {
       lastHydrationRef.current = hydrationVersion;
       skipSyncRef.current = true;
       setActiveTab(ps.activeTab);
+      setVisitedTabs(prev => {
+        if (prev.has(ps.activeTab)) return prev;
+        const next = new Set(prev);
+        next.add(ps.activeTab);
+        return next;
+      });
       setAudienceGoal(ps.audienceGoal);
       setAudienceProduct(ps.audienceProduct);
       setAudienceBudget(ps.audienceBudget);
@@ -418,7 +438,7 @@ export default function AIManagementScreen() {
             </View>
           )}
           <Pressable
-            onPress={() => { Haptics.selectionAsync(); setActiveTab(branch.key); updateState({ activeTab: branch.key }); }}
+            onPress={() => handleTabChange(branch.key)}
             style={[{
               backgroundColor: colors.card,
               borderRadius: 12,
@@ -1199,7 +1219,7 @@ export default function AIManagementScreen() {
               return (
                 <Pressable
                   key={t.key}
-                  onPress={() => { Haptics.selectionAsync(); setActiveTab(t.key); updateState({ activeTab: t.key }); }}
+                  onPress={() => handleTabChange(t.key)}
                   style={[styles.tab, isActive && { backgroundColor: t.color + '14', borderColor: t.color + '30' }]}
                 >
                   <Ionicons name={t.icon} size={14} color={isActive ? t.color : colors.textMuted} />
@@ -1211,28 +1231,76 @@ export default function AIManagementScreen() {
             })}
         </ScrollView>
 
-        {activeTab === 'buildplan' ? <BuildThePlan onNavigateToCI={() => { setActiveTab('intelligence'); updateState({ activeTab: 'intelligence' }); }} onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />
-          : activeTab === 'pipeline' ? <StrategicPipeline onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />
-          : activeTab === 'intelligence' ? renderIntelligence()
-          : activeTab === 'strategies' ? renderStrategiesBranch()
-          : activeTab === 'positioning' ? <CampaignGuard><PositioningStrategy /></CampaignGuard>
-          : activeTab === 'differentiation' ? <CampaignGuard><DifferentiationEngine /></CampaignGuard>
-          : activeTab === 'offers' ? <CampaignGuard><OfferEngine /></CampaignGuard>
-          : activeTab === 'funnels' ? <CampaignGuard><FunnelEngine /></CampaignGuard>
-          : activeTab === 'integrity' ? <CampaignGuard><IntegrityEngine /></CampaignGuard>
-          : activeTab === 'awareness' ? <CampaignGuard><AwarenessEngine /></CampaignGuard>
-          : activeTab === 'persuasion' ? <CampaignGuard><PersuasionEngine /></CampaignGuard>
-          : activeTab === 'statistical_validation' ? <CampaignGuard><StatisticalValidationEngine /></CampaignGuard>
-          : activeTab === 'budget_governor' ? <CampaignGuard><BudgetGovernorEngine /></CampaignGuard>
-          : activeTab === 'channel_selection' ? <CampaignGuard><ChannelSelectionEngine /></CampaignGuard>
-          : activeTab === 'iteration' ? <CampaignGuard><IterationEngine /></CampaignGuard>
-          : activeTab === 'retention' ? <CampaignGuard><RetentionEngine /></CampaignGuard>
-          : activeTab === 'control' ? renderControlCenter()
+        {activeTab === 'buildplan' && <BuildThePlan onNavigateToCI={() => handleTabChange('intelligence')} onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />}
+        {activeTab === 'pipeline' && <StrategicPipeline onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />}
+        {activeTab === 'intelligence' && renderIntelligence()}
+        {activeTab === 'strategies' && renderStrategiesBranch()}
+        {activeTab === 'control' && renderControlCenter()}
+        {activeTab === 'marketdb' && <MarketDatabaseAdmin />}
+        {activeTab === 'publisher' && renderPublisher()}
+        {activeTab === 'audience' && <CampaignGuard>{renderAudienceManager()}</CampaignGuard>}
+        {activeTab === 'leads' && <CampaignGuard><LeadControlPanel /></CampaignGuard>}
 
-          : activeTab === 'marketdb' ? <MarketDatabaseAdmin />
-          : activeTab === 'publisher' ? renderPublisher()
-          : activeTab === 'audience' ? <CampaignGuard>{renderAudienceManager()}</CampaignGuard>
-          : <CampaignGuard><LeadControlPanel /></CampaignGuard>}
+        {visitedTabs.has('positioning') && (
+          <View style={{ display: activeTab === 'positioning' ? 'flex' : 'none' }}>
+            <CampaignGuard><PositioningStrategy /></CampaignGuard>
+          </View>
+        )}
+        {visitedTabs.has('differentiation') && (
+          <View style={{ display: activeTab === 'differentiation' ? 'flex' : 'none' }}>
+            <CampaignGuard><DifferentiationEngine /></CampaignGuard>
+          </View>
+        )}
+        {visitedTabs.has('offers') && (
+          <View style={{ display: activeTab === 'offers' ? 'flex' : 'none' }}>
+            <CampaignGuard><OfferEngine /></CampaignGuard>
+          </View>
+        )}
+        {visitedTabs.has('funnels') && (
+          <View style={{ display: activeTab === 'funnels' ? 'flex' : 'none' }}>
+            <CampaignGuard><FunnelEngine /></CampaignGuard>
+          </View>
+        )}
+        {visitedTabs.has('integrity') && (
+          <View style={{ display: activeTab === 'integrity' ? 'flex' : 'none' }}>
+            <CampaignGuard><IntegrityEngine /></CampaignGuard>
+          </View>
+        )}
+        {visitedTabs.has('awareness') && (
+          <View style={{ display: activeTab === 'awareness' ? 'flex' : 'none' }}>
+            <CampaignGuard><AwarenessEngine /></CampaignGuard>
+          </View>
+        )}
+        {visitedTabs.has('persuasion') && (
+          <View style={{ display: activeTab === 'persuasion' ? 'flex' : 'none' }}>
+            <CampaignGuard><PersuasionEngine /></CampaignGuard>
+          </View>
+        )}
+        {visitedTabs.has('statistical_validation') && (
+          <View style={{ display: activeTab === 'statistical_validation' ? 'flex' : 'none' }}>
+            <CampaignGuard><StatisticalValidationEngine /></CampaignGuard>
+          </View>
+        )}
+        {visitedTabs.has('budget_governor') && (
+          <View style={{ display: activeTab === 'budget_governor' ? 'flex' : 'none' }}>
+            <CampaignGuard><BudgetGovernorEngine /></CampaignGuard>
+          </View>
+        )}
+        {visitedTabs.has('channel_selection') && (
+          <View style={{ display: activeTab === 'channel_selection' ? 'flex' : 'none' }}>
+            <CampaignGuard><ChannelSelectionEngine /></CampaignGuard>
+          </View>
+        )}
+        {visitedTabs.has('iteration') && (
+          <View style={{ display: activeTab === 'iteration' ? 'flex' : 'none' }}>
+            <CampaignGuard><IterationEngine /></CampaignGuard>
+          </View>
+        )}
+        {visitedTabs.has('retention') && (
+          <View style={{ display: activeTab === 'retention' ? 'flex' : 'none' }}>
+            <CampaignGuard><RetentionEngine /></CampaignGuard>
+          </View>
+        )}
 
         <View style={{ height: 120 }} />
       </ScrollView>
