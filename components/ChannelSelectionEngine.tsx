@@ -23,6 +23,25 @@ interface LayerResult {
   warnings: string[];
 }
 
+interface ObjectiveFitScores {
+  awarenessFit: number;
+  nurtureFit: number;
+  conversionFit: number;
+}
+
+interface DecisionGateResult {
+  outcome: "recommended" | "support_channel" | "exploratory";
+  reason: string;
+  violations: string[];
+}
+
+interface ChannelDifferentiation {
+  audienceDiscoveryDynamics: string;
+  contentVelocityRequirement: string;
+  algorithmAmplification: string;
+  conversionLikelihood: string;
+}
+
 interface ChannelCandidate {
   channelName: string;
   channelType: string;
@@ -35,6 +54,9 @@ interface ChannelCandidate {
   rejectionReason: string | null;
   estimatedCac: number | null;
   recommendedBudgetAllocation: number;
+  objectiveFit?: ObjectiveFitScores;
+  decisionGate?: DecisionGateResult;
+  differentiation?: ChannelDifferentiation | null;
 }
 
 interface ChannelSelectionData {
@@ -68,6 +90,7 @@ const LAYER_LABELS: Record<string, string> = {
   risk_assessment: "Risk Assessment",
   channel_fit_scoring: "Channel Fit Scoring",
   guard_layer: "Guard Layer",
+  decision_gate: "Decision Gate",
 };
 
 const LAYER_ICONS: Record<string, string> = {
@@ -79,6 +102,7 @@ const LAYER_ICONS: Record<string, string> = {
   risk_assessment: "shield-checkmark",
   channel_fit_scoring: "analytics",
   guard_layer: "lock-closed",
+  decision_gate: "flag",
 };
 
 const CHANNEL_TYPE_LABELS: Record<string, string> = {
@@ -284,10 +308,82 @@ export default function ChannelSelectionEngine({ isActive }: { isActive?: boolea
               <View style={[styles.channelMetaItem, { backgroundColor: colors.background }]}>
                 <Text style={[styles.channelMetaLabel, { color: colors.textMuted }]}>Budget Allocation</Text>
                 <Text style={[styles.channelMetaValue, { color: colors.text }]}>
-                  {Math.round(channel.recommendedBudgetAllocation * 100)}%
+                  {channel.recommendedBudgetAllocation === 0
+                    ? (channel.channelType.includes('organic') ? 'Organic' : 'N/A')
+                    : `${Math.round(channel.recommendedBudgetAllocation)}%`}
                 </Text>
               </View>
             </View>
+
+            {channel.decisionGate && (
+              <View style={[styles.gateStatusBox, {
+                backgroundColor: channel.decisionGate.outcome === 'recommended' ? '#10B98110' : channel.decisionGate.outcome === 'support_channel' ? '#F59E0B10' : '#EF444410',
+                borderColor: channel.decisionGate.outcome === 'recommended' ? '#10B98130' : channel.decisionGate.outcome === 'support_channel' ? '#F59E0B30' : '#EF444430',
+              }]}>
+                <View style={styles.gateStatusRow}>
+                  <Ionicons
+                    name={channel.decisionGate.outcome === 'recommended' ? 'checkmark-circle' : channel.decisionGate.outcome === 'support_channel' ? 'alert-circle' : 'flag'}
+                    size={14}
+                    color={channel.decisionGate.outcome === 'recommended' ? '#10B981' : channel.decisionGate.outcome === 'support_channel' ? '#F59E0B' : '#EF4444'}
+                  />
+                  <Text style={[styles.gateStatusLabel, {
+                    color: channel.decisionGate.outcome === 'recommended' ? '#10B981' : channel.decisionGate.outcome === 'support_channel' ? '#F59E0B' : '#EF4444'
+                  }]}>
+                    {channel.decisionGate.outcome === 'recommended' ? 'Recommended' : channel.decisionGate.outcome === 'support_channel' ? 'Support Channel' : 'Exploratory (Testing Required)'}
+                  </Text>
+                </View>
+                {channel.decisionGate.violations.length > 0 && (
+                  <View style={styles.gateViolations}>
+                    {channel.decisionGate.violations.map((v, i) => (
+                      <Text key={i} style={[styles.gateViolationText, { color: colors.textSecondary }]}>{v}</Text>
+                    ))}
+                  </View>
+                )}
+              </View>
+            )}
+
+            {channel.objectiveFit && (
+              <View style={styles.objectiveFitSection}>
+                <Text style={[styles.objectiveFitTitle, { color: colors.textMuted }]}>Objective Fit Scores</Text>
+                <View style={styles.channelMetaGrid}>
+                  <View style={[styles.channelMetaItem, { backgroundColor: colors.background }]}>
+                    <Text style={[styles.channelMetaLabel, { color: colors.textMuted }]}>Awareness</Text>
+                    <Text style={[styles.channelMetaValue, { color: scoreColor(channel.objectiveFit.awarenessFit) }]}>
+                      {Math.round(channel.objectiveFit.awarenessFit * 100)}%
+                    </Text>
+                  </View>
+                  <View style={[styles.channelMetaItem, { backgroundColor: colors.background }]}>
+                    <Text style={[styles.channelMetaLabel, { color: colors.textMuted }]}>Nurture</Text>
+                    <Text style={[styles.channelMetaValue, { color: scoreColor(channel.objectiveFit.nurtureFit) }]}>
+                      {Math.round(channel.objectiveFit.nurtureFit * 100)}%
+                    </Text>
+                  </View>
+                  <View style={[styles.channelMetaItem, { backgroundColor: colors.background }]}>
+                    <Text style={[styles.channelMetaLabel, { color: colors.textMuted }]}>Conversion</Text>
+                    <Text style={[styles.channelMetaValue, { color: scoreColor(channel.objectiveFit.conversionFit) }]}>
+                      {Math.round(channel.objectiveFit.conversionFit * 100)}%
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {channel.differentiation && (
+              <View style={styles.differentiationSection}>
+                <Text style={[styles.objectiveFitTitle, { color: colors.textMuted }]}>Channel Profile</Text>
+                {[
+                  { label: 'Discovery', value: channel.differentiation.audienceDiscoveryDynamics },
+                  { label: 'Velocity', value: channel.differentiation.contentVelocityRequirement },
+                  { label: 'Amplification', value: channel.differentiation.algorithmAmplification },
+                  { label: 'Conversion', value: channel.differentiation.conversionLikelihood },
+                ].map((item, i) => (
+                  <View key={i} style={styles.diffRow}>
+                    <Text style={[styles.diffLabel, { color: ACCENT }]}>{item.label}</Text>
+                    <Text style={[styles.diffValue, { color: colors.textSecondary }]}>{item.value}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
 
             {channel.estimatedCac !== null && (
               <View style={[styles.channelMetaFullRow, { backgroundColor: colors.background }]}>
@@ -583,6 +679,17 @@ const styles = StyleSheet.create({
   riskText: { fontSize: 12, flex: 1, lineHeight: 16 },
   rejectionBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 10, borderRadius: 8, marginTop: 8 },
   rejectionText: { fontSize: 12, flex: 1, lineHeight: 16, fontWeight: '500' as const },
+  gateStatusBox: { borderRadius: 10, borderWidth: 1, padding: 12, marginBottom: 10 },
+  gateStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  gateStatusLabel: { fontSize: 13, fontWeight: '600' as const },
+  gateViolations: { marginTop: 8, paddingLeft: 22 },
+  gateViolationText: { fontSize: 11, lineHeight: 16, marginBottom: 3 },
+  objectiveFitSection: { marginBottom: 10 },
+  objectiveFitTitle: { fontSize: 11, fontWeight: '600' as const, textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 8 },
+  differentiationSection: { marginBottom: 10 },
+  diffRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 5 },
+  diffLabel: { fontSize: 11, fontWeight: '600' as const, width: 90 },
+  diffValue: { fontSize: 11, flex: 1, lineHeight: 16 },
   riskNotesBox: { borderRadius: 12, borderWidth: 1, padding: 14, marginBottom: 16 },
   riskNotesHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
   riskNotesTitle: { fontSize: 13, fontWeight: '600' as const },

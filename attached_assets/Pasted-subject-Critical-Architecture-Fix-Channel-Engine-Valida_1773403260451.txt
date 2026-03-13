@@ -1,0 +1,176 @@
+subject=“Critical Architecture Fix: Channel Engine Validation, Update Integrity, and Master Plan Isolation Enforcement”}
+Hi Replit Team,
+
+We need to implement a structural correction and hardening of the Channel Engine (Channel Selection V3) to eliminate current inconsistencies and prevent future architecture drift that violates the MarketMind Master Plan engine rules.
+
+During the latest review we identified several systemic issues:
+
+• Channel recommendation logic is executing even when persuasion compatibility fails.
+• Warning layers are triggered but not enforced as decision gates.
+• Budget allocation calculations are producing unrealistic values (example: 6000% allocation).
+• Duplicate warning outputs are being generated.
+• Updates applied to engines are not consistently propagated across dependent modules.
+
+These issues create logical contradictions between engines, which violates the Master Plan principle that each engine must remain autonomous and non-conflicting unless explicitly coordinated through defined interfaces.
+
+The system must be hardened immediately.
+
+⸻
+
+CRITICAL ENGINE ARCHITECTURE RULE
+
+Every engine must follow this rule:
+
+If an upstream layer fails, downstream decision outputs must be restricted or downgraded.
+
+Warnings cannot exist without affecting the decision layer.
+
+⸻
+
+CHANNEL ENGINE CORRECTIONS REQUIRED
+	1.	Persuasion Compatibility Enforcement
+
+If:
+
+Persuasion Compatibility < 50%
+
+Then:
+
+• Channel cannot be labeled Primary Channel
+• Channel cannot be labeled Recommended
+• System must downgrade to Support Channel
+
+⸻
+
+	2.	Channel Type Differentiation
+
+Currently Instagram Organic and TikTok Organic are treated almost identically under social_organic.
+
+This must be corrected.
+
+Each channel must have its own parameter model including:
+
+• Audience discovery dynamics
+• Content velocity requirements
+• Algorithm amplification behavior
+• Conversion likelihood patterns
+
+⸻
+
+	3.	Budget Allocation Calculation Fix
+
+Budget allocation must be constrained by logic guards:
+
+Rules:
+
+• Allocation cannot exceed 100% per channel
+• Total allocation cannot exceed 100% across all channels
+• If budget source is organic, allocation must remain informational only, not financial.
+
+⸻
+
+	4.	Duplicate Warning Prevention
+
+The system must prevent repeated warning generation.
+
+Acceptance rule:
+
+Each warning type may appear once per analysis cycle.
+
+⸻
+
+	5.	Decision Gate Layer
+
+Add a mandatory Channel Decision Gate before recommendations.
+
+Conditions:
+
+If any of the following occur:
+
+• Persuasion Compatibility < 50%
+• Guard Layer reports incompatibility
+• Budget logic invalid
+• Channel objective mismatch
+
+Then:
+
+Recommendation must downgrade to:
+
+Exploratory Channel (Testing Required)
+
+⸻
+
+	6.	Objective Segmentation Layer
+
+Channel fit must be separated into three independent scores:
+
+• Awareness Fit
+• Nurture Fit
+• Conversion Fit
+
+Current model blends them incorrectly.
+
+⸻
+
+UPDATE INTEGRITY PROTECTION
+
+We have observed that when engines are updated, some related modules are not adjusted accordingly.
+
+This must be prevented.
+
+Add the following safeguard:
+
+Whenever an engine is modified:
+
+• All dependent modules must trigger automatic compatibility validation.
+• If dependency mismatch occurs, deployment must be blocked.
+
+⸻
+
+MASTER PLAN ENGINE ISOLATION RULE
+
+MarketMind follows a strict architecture principle:
+
+Each engine operates independently unless explicitly authorized by the Master Plan orchestration layer.
+
+No engine is allowed to override or distort another engine’s logic.
+
+Examples of prohibited behavior:
+
+• Channel Engine modifying persuasion outputs
+• Budget Engine overriding risk scores
+• Data layers rewriting strategic conclusions
+
+Only the Master Plan orchestration layer may reconcile outputs.
+
+⸻
+
+ACCEPTANCE CRITERIA (STRICT)
+
+Implementation will only be accepted if ALL conditions are satisfied:
+	1.	Channels cannot be recommended when persuasion compatibility fails.
+	2.	Budget allocation cannot exceed logical limits.
+	3.	Duplicate warnings must be eliminated.
+	4.	Channel decision gate must enforce downgrade logic.
+	5.	Awareness / Nurture / Conversion scoring must be separated.
+	6.	Engine updates must trigger dependency validation checks.
+	7.	No engine may modify another engine’s conclusions without orchestration approval.
+
+⸻
+
+EXPECTED RESULT
+
+After implementation:
+
+• Channel Engine recommendations will become logically coherent.
+• Conflicts between engines will be eliminated.
+• Future updates will not silently break system logic.
+• MarketMind engines will remain aligned with the Master Plan architecture rules.
+
+⸻
+
+Please confirm when the architecture fixes and validation layers are implemented so we can run internal engine verification.
+
+Best regards,
+MarketMind Engineering
+:::

@@ -51,6 +51,27 @@ export interface ChannelValidationInput {
   assumptionFlags: string[];
 }
 
+export interface ObjectiveFitScores {
+  awarenessFit: number;
+  nurtureFit: number;
+  conversionFit: number;
+}
+
+export interface ChannelDifferentiation {
+  audienceDiscoveryDynamics: string;
+  contentVelocityRequirement: string;
+  algorithmAmplification: string;
+  conversionLikelihood: string;
+}
+
+export type DecisionGateOutcome = "recommended" | "support_channel" | "exploratory";
+
+export interface DecisionGateResult {
+  outcome: DecisionGateOutcome;
+  reason: string;
+  violations: string[];
+}
+
 export interface ChannelCandidate {
   channelName: string;
   channelType: "social_organic" | "social_paid" | "search_paid" | "search_organic" | "email" | "referral" | "direct" | "community" | "partnerships" | "content_platform";
@@ -63,6 +84,9 @@ export interface ChannelCandidate {
   rejectionReason: string | null;
   estimatedCac: number | null;
   recommendedBudgetAllocation: number;
+  objectiveFit: ObjectiveFitScores;
+  decisionGate: DecisionGateResult;
+  differentiation: ChannelDifferentiation | null;
 }
 
 export interface LayerResult {

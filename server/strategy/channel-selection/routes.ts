@@ -13,6 +13,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { runChannelSelectionEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
 import { pruneOldSnapshots, checkValidationSession } from "../../engine-hardening";
+import { validateEngineDependencies, logDependencyCheck } from "../dependency-validation";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -161,6 +162,16 @@ export function registerChannelSelectionRoutes(app: Express) {
         validationState: validationResult?.validationState || "provisional",
         assumptionFlags: validationResult?.assumptionFlags || [],
       } : null;
+
+      const depCheck = validateEngineDependencies("channel-selection");
+      logDependencyCheck("channel-selection", depCheck);
+      if (!depCheck.valid) {
+        return res.status(503).json({
+          error: "Engine dependency mismatch",
+          mismatches: depCheck.mismatches,
+          warnings: depCheck.warnings,
+        });
+      }
 
       const result = runChannelSelectionEngine(
         audienceInput,

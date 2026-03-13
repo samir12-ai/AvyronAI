@@ -1,12 +1,14 @@
 import type { SoftPattern } from "../../engine-hardening/types";
+import type { ChannelDifferentiation } from "./types";
 
-export const ENGINE_VERSION = 1;
+export const ENGINE_VERSION = 2;
 
 export const STATUS = {
   COMPLETE: "COMPLETE",
   MISSING_DEPENDENCY: "MISSING_DEPENDENCY",
   GUARD_BLOCKED: "GUARD_BLOCKED",
   FALLBACK: "FALLBACK",
+  DECISION_GATE_DOWNGRADE: "DECISION_GATE_DOWNGRADE",
 } as const;
 
 export const CHANNEL_TYPES = [
@@ -21,6 +23,8 @@ export const CHANNEL_TYPES = [
   "partnerships",
   "content_platform",
 ] as const;
+
+export const PERSUASION_COMPATIBILITY_THRESHOLD = 0.50;
 
 export const CHANNEL_DEFINITIONS: Record<string, { label: string; type: typeof CHANNEL_TYPES[number]; baseEfficiency: number; minBudget: number }> = {
   instagram_organic: { label: "Instagram Organic", type: "social_organic", baseEfficiency: 0.65, minBudget: 0 },
@@ -39,6 +43,124 @@ export const CHANNEL_DEFINITIONS: Record<string, { label: string; type: typeof C
   referral_program: { label: "Referral Program", type: "referral", baseEfficiency: 0.85, minBudget: 0 },
   community_building: { label: "Community Building", type: "community", baseEfficiency: 0.50, minBudget: 0 },
   partnerships: { label: "Strategic Partnerships", type: "partnerships", baseEfficiency: 0.60, minBudget: 0 },
+};
+
+export const CHANNEL_DIFFERENTIATION_PROFILES: Record<string, ChannelDifferentiation> = {
+  instagram_organic: {
+    audienceDiscoveryDynamics: "Algorithm-driven discovery via Explore, Reels, and hashtag feeds; visual-first audience matching",
+    contentVelocityRequirement: "High — 5-7 posts/week including Stories, Reels, and carousel content for sustained visibility",
+    algorithmAmplification: "Strong Reels amplification; engagement-weighted distribution; saves and shares prioritized",
+    conversionLikelihood: "Moderate — discovery-heavy but limited direct conversion paths; relies on link-in-bio and DM funnels",
+  },
+  tiktok_organic: {
+    audienceDiscoveryDynamics: "For-You-Page (FYP) interest-graph discovery; content-first, not follower-first; viral potential high",
+    contentVelocityRequirement: "Very high — 1-3 videos/day recommended; algorithm favors consistent daily posting",
+    algorithmAmplification: "Strongest viral potential among social platforms; content quality over follower count; completion rate key metric",
+    conversionLikelihood: "Lower direct conversion — audience skews younger; best for awareness and consideration stages",
+  },
+  facebook_organic: {
+    audienceDiscoveryDynamics: "Group-based and share-driven discovery; declining organic reach for brand pages; community-centric",
+    contentVelocityRequirement: "Moderate — 3-5 posts/week; Groups require daily engagement and moderation",
+    algorithmAmplification: "Limited for pages; Groups and Reels have better reach; meaningful interaction signals weighted",
+    conversionLikelihood: "Moderate — mature platform with established conversion paths but declining organic engagement",
+  },
+  linkedin_organic: {
+    audienceDiscoveryDynamics: "Professional network graph; content surfaces via connections' engagement; B2B-focused discovery",
+    contentVelocityRequirement: "Low-moderate — 2-4 posts/week; thought leadership and document posts perform best",
+    algorithmAmplification: "Comments and dwell time heavily weighted; personal profiles outperform company pages",
+    conversionLikelihood: "High for B2B; professional intent audience; longer sales cycles but qualified leads",
+  },
+  instagram_paid: {
+    audienceDiscoveryDynamics: "Meta Ads Manager targeting; lookalike audiences, interest-based, and retargeting segments",
+    contentVelocityRequirement: "Moderate — 3-5 ad creatives per campaign with regular refresh cycles (2-4 weeks)",
+    algorithmAmplification: "Auction-based; creative quality score and relevance diagnostics influence delivery and cost",
+    conversionLikelihood: "High — strong conversion infrastructure with pixel tracking, shopping integration, and lead forms",
+  },
+  facebook_paid: {
+    audienceDiscoveryDynamics: "Meta Ads Manager with broadest targeting options; custom audiences, lookalikes, detailed targeting",
+    contentVelocityRequirement: "Moderate — 3-5 creatives; advantage+ campaigns reduce manual creative rotation needs",
+    algorithmAmplification: "Mature auction system; advantage+ optimization; broad targeting increasingly outperforming narrow",
+    conversionLikelihood: "High — most mature conversion tracking ecosystem; CAPI integration, offline conversions support",
+  },
+  google_search: {
+    audienceDiscoveryDynamics: "Intent-based; captures active search demand; keyword-driven targeting",
+    contentVelocityRequirement: "Low — ad copy rotation with 3-5 headlines/descriptions; landing page optimization ongoing",
+    algorithmAmplification: "Quality Score driven; relevance, landing page experience, and expected CTR determine ad rank",
+    conversionLikelihood: "Highest — captures bottom-of-funnel intent; direct conversion path from search to landing page",
+  },
+  google_organic: {
+    audienceDiscoveryDynamics: "Search intent matching via SEO; topical authority and backlink profile driven",
+    contentVelocityRequirement: "Low but consistent — 2-4 high-quality articles/month; existing content optimization ongoing",
+    algorithmAmplification: "E-E-A-T signals; topical clusters; freshness signals for time-sensitive queries",
+    conversionLikelihood: "High for bottom-of-funnel content; informational content builds pipeline; long payback period",
+  },
+  youtube_organic: {
+    audienceDiscoveryDynamics: "Recommendation algorithm and search; Shorts discovery separate from long-form; watch history driven",
+    contentVelocityRequirement: "Moderate — 1-2 long-form videos/week or 3-5 Shorts/week for channel growth",
+    algorithmAmplification: "Watch time and click-through rate primary signals; Shorts have independent discovery feed",
+    conversionLikelihood: "Moderate — strong trust-building but conversion requires clear CTAs and description links",
+  },
+  youtube_paid: {
+    audienceDiscoveryDynamics: "Google Ads targeting; in-stream, discovery, and Shorts ad placements; audience and contextual targeting",
+    contentVelocityRequirement: "Low — 2-3 video ad variants; skippable vs non-skippable formats require different creatives",
+    algorithmAmplification: "Auction-based; view rate and engagement signals optimize delivery; connected TV expanding reach",
+    conversionLikelihood: "Moderate — awareness and consideration strong; conversion requires multi-touch attribution",
+  },
+  tiktok_paid: {
+    audienceDiscoveryDynamics: "TikTok Ads Manager; interest and behavior targeting; Spark Ads amplify organic content",
+    contentVelocityRequirement: "High — creative fatigue fast; 5-10 ad creatives recommended with 1-2 week refresh",
+    algorithmAmplification: "Creative-quality driven auction; native-feeling content outperforms polished ads significantly",
+    conversionLikelihood: "Growing — TikTok Shop integration improving; pixel maturity catching up to Meta",
+  },
+  linkedin_paid: {
+    audienceDiscoveryDynamics: "Professional firmographic targeting; job title, company size, industry, seniority-based",
+    contentVelocityRequirement: "Low — 2-3 ad variants; document ads and thought leader ads perform well",
+    algorithmAmplification: "Auction-based; higher CPMs but precise B2B targeting; engagement rate signals matter",
+    conversionLikelihood: "High for B2B — qualified professional audience; lead gen forms with pre-filled fields",
+  },
+  email_marketing: {
+    audienceDiscoveryDynamics: "Owned audience; list-based; segmentation by behavior, purchase history, and engagement",
+    contentVelocityRequirement: "Moderate — 2-4 emails/week; automation sequences reduce manual effort",
+    algorithmAmplification: "Inbox placement algorithm; sender reputation, engagement, and authentication drive deliverability",
+    conversionLikelihood: "Highest among owned channels — direct communication, personalization, and clear CTAs",
+  },
+  referral_program: {
+    audienceDiscoveryDynamics: "Existing customer network; word-of-mouth amplification; incentive-driven acquisition",
+    contentVelocityRequirement: "Low — program setup and periodic incentive updates; automated referral tracking",
+    algorithmAmplification: "Trust-based; social proof inherent; quality depends on customer satisfaction and incentive structure",
+    conversionLikelihood: "Very high — warm introductions; pre-qualified leads through trusted recommendations",
+  },
+  community_building: {
+    audienceDiscoveryDynamics: "Organic community growth; member-to-member discovery; value-driven attraction",
+    contentVelocityRequirement: "Moderate-high — daily engagement, weekly events/content, community moderation ongoing",
+    algorithmAmplification: "Network effects; member engagement drives organic growth; platform-dependent (Discord/Slack/Forum)",
+    conversionLikelihood: "Moderate — long nurture cycle but high LTV; converts through trust and belonging",
+  },
+  partnerships: {
+    audienceDiscoveryDynamics: "Partner audience access; co-marketing reach; complementary audience overlap",
+    contentVelocityRequirement: "Low — joint content pieces, co-branded campaigns, event participation",
+    algorithmAmplification: "Cross-promotion amplification; combined audience reach; credibility transfer between brands",
+    conversionLikelihood: "Moderate-high — credibility boost from partner endorsement; depends on partner audience alignment",
+  },
+};
+
+export const OBJECTIVE_FIT_MATRIX: Record<string, { awarenessFit: number; nurtureFit: number; conversionFit: number }> = {
+  instagram_organic: { awarenessFit: 0.85, nurtureFit: 0.60, conversionFit: 0.30 },
+  instagram_paid: { awarenessFit: 0.70, nurtureFit: 0.55, conversionFit: 0.75 },
+  facebook_organic: { awarenessFit: 0.55, nurtureFit: 0.65, conversionFit: 0.25 },
+  facebook_paid: { awarenessFit: 0.65, nurtureFit: 0.50, conversionFit: 0.80 },
+  google_search: { awarenessFit: 0.20, nurtureFit: 0.15, conversionFit: 0.90 },
+  google_organic: { awarenessFit: 0.60, nurtureFit: 0.50, conversionFit: 0.65 },
+  youtube_organic: { awarenessFit: 0.80, nurtureFit: 0.70, conversionFit: 0.30 },
+  youtube_paid: { awarenessFit: 0.75, nurtureFit: 0.45, conversionFit: 0.55 },
+  email_marketing: { awarenessFit: 0.15, nurtureFit: 0.90, conversionFit: 0.80 },
+  tiktok_organic: { awarenessFit: 0.90, nurtureFit: 0.40, conversionFit: 0.20 },
+  tiktok_paid: { awarenessFit: 0.80, nurtureFit: 0.35, conversionFit: 0.55 },
+  linkedin_organic: { awarenessFit: 0.55, nurtureFit: 0.75, conversionFit: 0.40 },
+  linkedin_paid: { awarenessFit: 0.50, nurtureFit: 0.55, conversionFit: 0.70 },
+  referral_program: { awarenessFit: 0.30, nurtureFit: 0.40, conversionFit: 0.85 },
+  community_building: { awarenessFit: 0.45, nurtureFit: 0.85, conversionFit: 0.35 },
+  partnerships: { awarenessFit: 0.60, nurtureFit: 0.50, conversionFit: 0.55 },
 };
 
 export const AWARENESS_CHANNEL_MAP: Record<string, string[]> = {
@@ -66,18 +188,33 @@ export const LAYER_NAMES = [
   "risk_assessment",
   "channel_fit_scoring",
   "guard_layer",
+  "decision_gate",
 ] as const;
 
 export const LAYER_WEIGHTS: Record<string, number> = {
-  audience_density_assessment: 0.20,
-  awareness_channel_mapping: 0.15,
-  persuasion_mode_compatibility: 0.15,
+  audience_density_assessment: 0.18,
+  awareness_channel_mapping: 0.14,
+  persuasion_mode_compatibility: 0.16,
   budget_constraint_check: 0.10,
-  cost_efficiency_scoring: 0.15,
+  cost_efficiency_scoring: 0.14,
   risk_assessment: 0.10,
-  channel_fit_scoring: 0.10,
+  channel_fit_scoring: 0.08,
   guard_layer: 0.05,
+  decision_gate: 0.05,
 };
+
+export const ORGANIC_CHANNELS = new Set([
+  "instagram_organic",
+  "facebook_organic",
+  "google_organic",
+  "youtube_organic",
+  "tiktok_organic",
+  "linkedin_organic",
+  "email_marketing",
+  "referral_program",
+  "community_building",
+  "partnerships",
+]);
 
 export const BOUNDARY_HARD_PATTERNS: Record<string, RegExp> = {
   "marketing copy": /\b(marketing copy|ad copy|sales copy|copywriting)\b/i,
