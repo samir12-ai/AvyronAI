@@ -87,11 +87,11 @@ export function validateEngineDependencies(engineName: string): DependencyValida
 export function enforceEngineIsolation(sourceEngine: string, targetField: string, action: string): { allowed: boolean; reason: string } {
   const PROHIBITED_CROSS_ENGINE_WRITES: Record<string, string[]> = {
     "channel-selection": ["persuasion_output", "budget_risk_score", "strategic_conclusion", "offer_strength", "iteration_plan", "retention_loops"],
-    "budget-governor": ["risk_score_override", "strategic_conclusion", "channel_recommendation", "iteration_plan", "retention_loops"],
-    "iteration-engine": ["channel_recommendation", "budget_allocation", "retention_loops", "offer_strength", "persuasion_output"],
-    "retention-engine": ["channel_recommendation", "budget_allocation", "iteration_plan", "offer_strength", "persuasion_output"],
-    "offer-engine": ["funnel_design", "persuasion_mode", "channel_recommendation", "iteration_plan", "retention_loops"],
-    "funnel-engine": ["offer_redesign", "persuasion_framework", "budget_allocation", "iteration_plan", "retention_loops"],
+    "budget-governor": ["risk_score_override", "strategic_conclusion", "channel_recommendation", "funnel_stage_assignment", "iteration_plan", "retention_loops"],
+    "iteration-engine": ["channel_recommendation", "funnel_stage_assignment", "budget_allocation", "retention_loops", "offer_strength", "persuasion_output"],
+    "retention-engine": ["channel_recommendation", "funnel_stage_assignment", "budget_allocation", "iteration_plan", "offer_strength", "persuasion_output"],
+    "offer-engine": ["funnel_design", "persuasion_mode", "channel_recommendation", "funnel_stage_assignment", "iteration_plan", "retention_loops"],
+    "funnel-engine": ["offer_redesign", "persuasion_framework", "budget_allocation", "funnel_stage_assignment", "iteration_plan", "retention_loops"],
   };
 
   const prohibited = PROHIBITED_CROSS_ENGINE_WRITES[sourceEngine] || [];
@@ -136,11 +136,11 @@ export function getSystemHealth(): SystemHealthReport {
 
   const PROHIBITED_CROSS_ENGINE_WRITES: Record<string, string[]> = {
     "channel-selection": ["persuasion_output", "budget_risk_score", "strategic_conclusion", "offer_strength", "iteration_plan", "retention_loops"],
-    "budget-governor": ["risk_score_override", "strategic_conclusion", "channel_recommendation", "iteration_plan", "retention_loops"],
-    "iteration-engine": ["channel_recommendation", "budget_allocation", "retention_loops", "offer_strength", "persuasion_output"],
-    "retention-engine": ["channel_recommendation", "budget_allocation", "iteration_plan", "offer_strength", "persuasion_output"],
-    "offer-engine": ["funnel_design", "persuasion_mode", "channel_recommendation", "iteration_plan", "retention_loops"],
-    "funnel-engine": ["offer_redesign", "persuasion_framework", "budget_allocation", "iteration_plan", "retention_loops"],
+    "budget-governor": ["risk_score_override", "strategic_conclusion", "channel_recommendation", "funnel_stage_assignment", "iteration_plan", "retention_loops"],
+    "iteration-engine": ["channel_recommendation", "funnel_stage_assignment", "budget_allocation", "retention_loops", "offer_strength", "persuasion_output"],
+    "retention-engine": ["channel_recommendation", "funnel_stage_assignment", "budget_allocation", "iteration_plan", "offer_strength", "persuasion_output"],
+    "offer-engine": ["funnel_design", "persuasion_mode", "channel_recommendation", "funnel_stage_assignment", "iteration_plan", "retention_loops"],
+    "funnel-engine": ["offer_redesign", "persuasion_framework", "budget_allocation", "funnel_stage_assignment", "iteration_plan", "retention_loops"],
   };
 
   let isolationRules = 0;

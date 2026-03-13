@@ -87,6 +87,8 @@ export interface ChannelCandidate {
   objectiveFit: ObjectiveFitScores;
   decisionGate: DecisionGateResult;
   differentiation: ChannelDifferentiation | null;
+  assignedFunnelRole: FunnelRole | null;
+  wasReconstructed: boolean;
 }
 
 export interface LayerResult {
@@ -108,6 +110,30 @@ export interface DataReliabilityDiagnostics {
   advisories: string[];
 }
 
+export type FunnelRole = "awareness" | "nurture" | "conversion";
+
+export interface FunnelStageAssignment {
+  channelName: string;
+  channelKey: string;
+  assignedRole: FunnelRole;
+  roleFitScore: number;
+  originalPersuasionScore: number;
+  wasReconstructed: boolean;
+  reasoning: string;
+}
+
+export interface FunnelReconstructionResult {
+  reconstructed: boolean;
+  funnelStages: {
+    awareness: FunnelStageAssignment[];
+    nurture: FunnelStageAssignment[];
+    conversion: FunnelStageAssignment[];
+  };
+  reconstructionLog: string[];
+  channelsRescued: number;
+  channelsStillRejected: number;
+}
+
 export interface ChannelSelectionResult {
   status: string;
   statusMessage: string | null;
@@ -123,4 +149,5 @@ export interface ChannelSelectionResult {
   confidenceScore: number;
   executionTimeMs: number;
   engineVersion: number;
+  funnelReconstruction: FunnelReconstructionResult | null;
 }

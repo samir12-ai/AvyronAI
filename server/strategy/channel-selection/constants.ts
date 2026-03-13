@@ -1,7 +1,7 @@
 import type { SoftPattern } from "../../engine-hardening/types";
 import type { ChannelDifferentiation } from "./types";
 
-export const ENGINE_VERSION = 2;
+export const ENGINE_VERSION = 3;
 
 export const STATUS = {
   COMPLETE: "COMPLETE",
@@ -9,7 +9,33 @@ export const STATUS = {
   GUARD_BLOCKED: "GUARD_BLOCKED",
   FALLBACK: "FALLBACK",
   DECISION_GATE_DOWNGRADE: "DECISION_GATE_DOWNGRADE",
+  FUNNEL_RECONSTRUCTED: "FUNNEL_RECONSTRUCTED",
 } as const;
+
+export const FUNNEL_ROLE_THRESHOLDS = {
+  awareness: 0.55,
+  nurture: 0.50,
+  conversion: 0.50,
+} as const;
+
+export const CHANNEL_FUNNEL_CAPABILITIES: Record<string, { awareness: number; nurture: number; conversion: number; persuasionDepth: "shallow" | "moderate" | "deep" }> = {
+  instagram_organic: { awareness: 0.90, nurture: 0.45, conversion: 0.20, persuasionDepth: "shallow" },
+  instagram_paid: { awareness: 0.75, nurture: 0.50, conversion: 0.70, persuasionDepth: "moderate" },
+  facebook_organic: { awareness: 0.55, nurture: 0.55, conversion: 0.20, persuasionDepth: "moderate" },
+  facebook_paid: { awareness: 0.65, nurture: 0.50, conversion: 0.80, persuasionDepth: "moderate" },
+  google_search: { awareness: 0.15, nurture: 0.10, conversion: 0.95, persuasionDepth: "shallow" },
+  google_organic: { awareness: 0.60, nurture: 0.55, conversion: 0.65, persuasionDepth: "deep" },
+  youtube_organic: { awareness: 0.80, nurture: 0.80, conversion: 0.35, persuasionDepth: "deep" },
+  youtube_paid: { awareness: 0.75, nurture: 0.50, conversion: 0.55, persuasionDepth: "moderate" },
+  email_marketing: { awareness: 0.10, nurture: 0.90, conversion: 0.85, persuasionDepth: "deep" },
+  tiktok_organic: { awareness: 0.95, nurture: 0.30, conversion: 0.15, persuasionDepth: "shallow" },
+  tiktok_paid: { awareness: 0.85, nurture: 0.30, conversion: 0.50, persuasionDepth: "shallow" },
+  linkedin_organic: { awareness: 0.50, nurture: 0.75, conversion: 0.40, persuasionDepth: "deep" },
+  linkedin_paid: { awareness: 0.45, nurture: 0.55, conversion: 0.70, persuasionDepth: "moderate" },
+  referral_program: { awareness: 0.25, nurture: 0.40, conversion: 0.90, persuasionDepth: "moderate" },
+  community_building: { awareness: 0.40, nurture: 0.85, conversion: 0.30, persuasionDepth: "deep" },
+  partnerships: { awareness: 0.55, nurture: 0.50, conversion: 0.55, persuasionDepth: "moderate" },
+};
 
 export const CHANNEL_TYPES = [
   "social_organic",

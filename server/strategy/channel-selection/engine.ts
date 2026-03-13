@@ -11,6 +11,8 @@ import {
   OBJECTIVE_FIT_MATRIX,
   CHANNEL_DIFFERENTIATION_PROFILES,
   ORGANIC_CHANNELS,
+  CHANNEL_FUNNEL_CAPABILITIES,
+  FUNNEL_ROLE_THRESHOLDS,
 } from "./constants";
 import { enforceBoundaryWithSanitization } from "../../engine-hardening";
 import type {
@@ -28,6 +30,9 @@ import type {
   DecisionGateResult,
   DecisionGateOutcome,
   ChannelDifferentiation,
+  FunnelRole,
+  FunnelStageAssignment,
+  FunnelReconstructionResult,
 } from "./types";
 
 function clamp(v: number, min = 0, max = 1): number {
@@ -336,8 +341,8 @@ function runGuardLayer(
     const mode = safeString(persuasion.persuasionMode, "");
     const compatibleTypes = PERSUASION_CHANNEL_COMPATIBILITY[mode] || [];
     if (mode && !compatibleTypes.includes(channelDef.type)) {
-      passed = false;
-      findings.push(`GUARD: Persuasion mode "${mode}" incompatible with "${channelDef.type}" — channel blocked`);
+      findings.push(`GUARD NOTE: Persuasion mode "${mode}" incompatible with "${channelDef.type}" — deferred to Funnel Resolution Layer`);
+      warnings.push(`Persuasion incompatibility detected for "${channelDef.label}" — funnel reconstruction may reassign channel role`);
     }
   }
 
@@ -361,6 +366,186 @@ function runGuardLayer(
     score: passed ? 0.8 : 0.2,
     findings,
     warnings,
+  };
+}
+
+function determineBestFunnelRole(channelKey: string): { role: FunnelRole; score: number } {
+  const cap = CHANNEL_FUNNEL_CAPABILITIES[channelKey];
+  if (!cap) return { role: "awareness", score: 0.3 };
+
+  const roles: { role: FunnelRole; score: number }[] = [
+    { role: "awareness", score: cap.awareness },
+    { role: "nurture", score: cap.nurture },
+    { role: "conversion", score: cap.conversion },
+  ];
+
+  roles.sort((a, b) => b.score - a.score);
+  return roles[0];
+}
+
+function isPersuasionIncompatible(persuasionLayer: LayerResult): boolean {
+  return !persuasionLayer.passed || persuasionLayer.score < PERSUASION_COMPATIBILITY_THRESHOLD;
+}
+
+function runFunnelResolutionLayer(
+  candidates: { key: string; persuasionLayer: LayerResult; guardLayer: LayerResult; budgetLayer: LayerResult }[],
+  persuasion: ChannelPersuasionInput | null,
+): { resolution: FunnelReconstructionResult; rescuedChannels: Set<string>; funnelLayer: LayerResult } {
+  const reconstructionLog: string[] = [];
+  const funnelStages: FunnelReconstructionResult["funnelStages"] = {
+    awareness: [],
+    nurture: [],
+    conversion: [],
+  };
+  let channelsRescued = 0;
+  let channelsStillRejected = 0;
+  const rescuedChannels = new Set<string>();
+
+  const incompatibleChannels = candidates.filter(c => isPersuasionIncompatible(c.persuasionLayer));
+
+  if (incompatibleChannels.length === 0) {
+    for (const c of candidates) {
+      const def = CHANNEL_DEFINITIONS[c.key];
+      if (!def) continue;
+      const { role, score } = determineBestFunnelRole(c.key);
+      funnelStages[role].push({
+        channelName: def.label,
+        channelKey: c.key,
+        assignedRole: role,
+        roleFitScore: score,
+        originalPersuasionScore: c.persuasionLayer.score,
+        wasReconstructed: false,
+        reasoning: `Channel naturally compatible — assigned to ${role} stage based on capability profile`,
+      });
+    }
+
+    return {
+      resolution: {
+        reconstructed: false,
+        funnelStages,
+        reconstructionLog: ["No persuasion incompatibilities detected — standard channel evaluation applied"],
+        channelsRescued: 0,
+        channelsStillRejected: 0,
+      },
+      rescuedChannels,
+      funnelLayer: {
+        layerName: "funnel_resolution",
+        passed: true,
+        score: 1.0,
+        findings: ["All channels persuasion-compatible — no funnel reconstruction required"],
+        warnings: [],
+      },
+    };
+  }
+
+  const persuasionMode = persuasion?.persuasionMode || "trust_building";
+  reconstructionLog.push(`Funnel reconstruction triggered — ${incompatibleChannels.length} channel(s) incompatible with "${persuasionMode}" persuasion mode`);
+
+  for (const c of incompatibleChannels) {
+    const def = CHANNEL_DEFINITIONS[c.key];
+    if (!def) continue;
+    const cap = CHANNEL_FUNNEL_CAPABILITIES[c.key];
+    if (!cap) {
+      channelsStillRejected++;
+      reconstructionLog.push(`${def.label}: No funnel capability data — channel remains rejected`);
+      continue;
+    }
+
+    if (!c.guardLayer.passed || !c.budgetLayer.passed) {
+      channelsStillRejected++;
+      reconstructionLog.push(`${def.label}: Guard/budget layer blocked — funnel reconstruction cannot override structural constraints`);
+      continue;
+    }
+
+    const { role, score } = determineBestFunnelRole(c.key);
+    const threshold = FUNNEL_ROLE_THRESHOLDS[role];
+
+    if (score >= threshold) {
+      rescuedChannels.add(c.key);
+      channelsRescued++;
+
+      const needsDeepPersuasion = ["education_first", "trust_building", "authority_led"].includes(persuasionMode);
+      let reasoning: string;
+
+      if (role === "awareness" && cap.persuasionDepth === "shallow") {
+        reasoning = `Channel incompatible as conversion environment for "${persuasionMode}" — reassigned to Awareness Entry Point (fit: ${(score * 100).toFixed(0)}%). Deeper persuasion will occur in downstream Nurture/Conversion channels.`;
+      } else if (role === "nurture" && (cap.persuasionDepth === "deep" || cap.persuasionDepth === "moderate")) {
+        reasoning = `Channel supports ${cap.persuasionDepth} persuasion depth — reassigned to Nurture stage for "${persuasionMode}" model (fit: ${(score * 100).toFixed(0)}%).`;
+      } else if (role === "conversion") {
+        reasoning = `Channel has strong conversion capability (fit: ${(score * 100).toFixed(0)}%) — reassigned to Conversion stage. Persuasion delivery delegated to upstream funnel stages.`;
+      } else {
+        reasoning = `Channel reassigned to ${role} stage based on capability profile (fit: ${(score * 100).toFixed(0)}%). Persuasion model "${persuasionMode}" will be supported through multi-stage funnel design.`;
+      }
+
+      funnelStages[role].push({
+        channelName: def.label,
+        channelKey: c.key,
+        assignedRole: role,
+        roleFitScore: score,
+        originalPersuasionScore: c.persuasionLayer.score,
+        wasReconstructed: true,
+        reasoning,
+      });
+
+      reconstructionLog.push(`${def.label}: RESCUED — reassigned from rejected to ${role.toUpperCase()} stage (role fit: ${(score * 100).toFixed(0)}%, persuasion depth: ${cap.persuasionDepth})`);
+    } else {
+      channelsStillRejected++;
+      reconstructionLog.push(`${def.label}: No viable funnel role found (best: ${role} at ${(score * 100).toFixed(0)}%, threshold: ${(threshold * 100).toFixed(0)}%) — channel rejected after funnel reconstruction attempt`);
+    }
+  }
+
+  for (const c of candidates) {
+    if (!isPersuasionIncompatible(c.persuasionLayer)) {
+      const def = CHANNEL_DEFINITIONS[c.key];
+      if (!def) continue;
+      const { role, score } = determineBestFunnelRole(c.key);
+      funnelStages[role].push({
+        channelName: def.label,
+        channelKey: c.key,
+        assignedRole: role,
+        roleFitScore: score,
+        originalPersuasionScore: c.persuasionLayer.score,
+        wasReconstructed: false,
+        reasoning: `Channel naturally compatible with "${persuasionMode}" — assigned to ${role} stage`,
+      });
+    }
+  }
+
+  for (const role of ["awareness", "nurture", "conversion"] as FunnelRole[]) {
+    funnelStages[role].sort((a, b) => b.roleFitScore - a.roleFitScore);
+  }
+
+  const findings: string[] = [
+    `Funnel reconstruction complete — ${channelsRescued} channel(s) rescued, ${channelsStillRejected} still rejected`,
+    `Awareness stage: ${funnelStages.awareness.length} channel(s)`,
+    `Nurture stage: ${funnelStages.nurture.length} channel(s)`,
+    `Conversion stage: ${funnelStages.conversion.length} channel(s)`,
+  ];
+
+  const warnings: string[] = [];
+  if (funnelStages.nurture.length === 0) {
+    warnings.push("FUNNEL GAP: No channels assigned to Nurture stage — persuasion delivery may be limited");
+  }
+  if (funnelStages.conversion.length === 0) {
+    warnings.push("FUNNEL GAP: No channels assigned to Conversion stage — transaction completion requires manual funnel design");
+  }
+
+  return {
+    resolution: {
+      reconstructed: channelsRescued > 0,
+      funnelStages,
+      reconstructionLog,
+      channelsRescued,
+      channelsStillRejected,
+    },
+    rescuedChannels,
+    funnelLayer: {
+      layerName: "funnel_resolution",
+      passed: channelsRescued > 0 || channelsStillRejected === 0,
+      score: channelsRescued > 0 ? clamp(0.5 + channelsRescued * 0.1, 0.5, 0.85) : 0.3,
+      findings,
+      warnings,
+    },
   };
 }
 
@@ -470,6 +655,8 @@ function buildChannelCandidate(
       objectiveFit: { awarenessFit: 0, nurtureFit: 0, conversionFit: 0 },
       decisionGate: { outcome: "exploratory", reason: "Unknown channel", violations: ["Unknown channel definition"] },
       differentiation: null,
+      assignedFunnelRole: null,
+      wasReconstructed: false,
     };
   }
 
@@ -511,6 +698,8 @@ function buildChannelCandidate(
     budgetAllocation = isOrganic ? 0 : clamp(fitScore * 100, 5, 100);
   }
 
+  const { role: bestFunnelRole } = determineBestFunnelRole(channelKey);
+
   return {
     channelName: def.label,
     channelType: def.type as ChannelCandidate["channelType"],
@@ -526,6 +715,8 @@ function buildChannelCandidate(
     objectiveFit: getObjectiveFit(channelKey),
     decisionGate: gateResult,
     differentiation: getChannelDifferentiation(channelKey),
+    assignedFunnelRole: bestFunnelRole,
+    wasReconstructed: false,
   };
 }
 
@@ -545,6 +736,8 @@ export function runChannelSelectionEngine(
   const channelKeys = Object.keys(CHANNEL_DEFINITIONS);
   const candidates: { key: string; candidate: ChannelCandidate; layers: LayerResult[] }[] = [];
 
+  const preFunnelData: { key: string; persuasionLayer: LayerResult; guardLayer: LayerResult; budgetLayer: LayerResult }[] = [];
+
   for (const channelKey of channelKeys) {
     const def = CHANNEL_DEFINITIONS[channelKey];
     const audienceLayer = scoreAudienceDensity(audience, channelKey);
@@ -554,6 +747,8 @@ export function runChannelSelectionEngine(
     const efficiencyLayer = scoreCostEfficiency(def, offer);
     const riskLayer = assessRisk(validation, def);
     const guardLayer = runGuardLayer(audience, persuasion, budget, validation, def);
+
+    preFunnelData.push({ key: channelKey, persuasionLayer, guardLayer, budgetLayer });
 
     const { layer: decisionGateLayer, gate: gateResult } = runDecisionGate(
       persuasionLayer,
@@ -588,6 +783,62 @@ export function runChannelSelectionEngine(
     candidates.push({ key: channelKey, candidate, layers: allLayers });
   }
 
+  const { resolution: funnelReconstruction, rescuedChannels, funnelLayer } = runFunnelResolutionLayer(preFunnelData, persuasion);
+
+  const allFunnelAssignments = [
+    ...funnelReconstruction.funnelStages.awareness,
+    ...funnelReconstruction.funnelStages.nurture,
+    ...funnelReconstruction.funnelStages.conversion,
+  ];
+  for (const c of candidates) {
+    const assignment = allFunnelAssignments.find(a => a.channelKey === c.key);
+    if (assignment) {
+      c.candidate.assignedFunnelRole = assignment.assignedRole;
+    }
+  }
+
+  if (funnelReconstruction.reconstructed && rescuedChannels.size > 0) {
+    for (const c of candidates) {
+      if (rescuedChannels.has(c.key)) {
+        const assignment = allFunnelAssignments.find(a => a.channelKey === c.key);
+
+        if (assignment) {
+          const roleName = assignment.assignedRole.charAt(0).toUpperCase() + assignment.assignedRole.slice(1);
+
+          c.candidate.wasReconstructed = true;
+          c.candidate.assignedFunnelRole = assignment.assignedRole;
+          c.candidate.rejectionReason = null;
+          c.candidate.fitScore = clamp(assignment.roleFitScore * 0.7, 0.35, 0.65);
+          c.candidate.riskNotes = deduplicateWarnings([
+            ...c.candidate.riskNotes,
+            `Funnel-reconstructed: assigned to ${roleName} stage — not suitable as standalone conversion channel`,
+          ]);
+
+          const postReconstructionViolations: string[] = [];
+          if (assignment.roleFitScore < FUNNEL_ROLE_THRESHOLDS[assignment.assignedRole]) {
+            postReconstructionViolations.push(`Role fit (${(assignment.roleFitScore * 100).toFixed(0)}%) below ${assignment.assignedRole} threshold`);
+          }
+          if (c.candidate.persuasionCompatibility < 0.2) {
+            postReconstructionViolations.push(`Very low persuasion compatibility (${(c.candidate.persuasionCompatibility * 100).toFixed(0)}%) — channel limited to ${assignment.assignedRole} role only`);
+          }
+
+          const postGateOutcome: DecisionGateOutcome = postReconstructionViolations.length === 0 ? "support_channel" : "support_channel";
+          c.candidate.decisionGate = {
+            outcome: postGateOutcome,
+            reason: `Post-reconstruction validation: "${c.candidate.channelName}" assigned to ${roleName} stage (role fit: ${(assignment.roleFitScore * 100).toFixed(0)}%)${postReconstructionViolations.length > 0 ? ` with ${postReconstructionViolations.length} advisory note(s)` : ""}`,
+            violations: postReconstructionViolations,
+          };
+
+          const isOrganic = ORGANIC_CHANNELS.has(c.key);
+          c.candidate.recommendedBudgetAllocation = (!isOrganic && c.candidate.fitScore > 0.3) ? clamp(c.candidate.fitScore * 100, 5, 100) : 0;
+        }
+      }
+    }
+
+    structuralWarnings.push(`Funnel reconstruction rescued ${rescuedChannels.size} channel(s) from rejection — multi-stage funnel recommended`);
+    structuralWarnings.push(...funnelLayer.warnings);
+  }
+
   const viable = candidates.filter(c => !c.candidate.rejectionReason);
   const rejected = candidates.filter(c => !!c.candidate.rejectionReason);
 
@@ -615,6 +866,9 @@ export function runChannelSelectionEngine(
   const rejectedChannels = rejected.map(r => r.candidate);
 
   const primaryLayers = viable[0]?.layers || candidates[0]?.layers || [];
+  if (funnelReconstruction.reconstructed) {
+    primaryLayers.push(funnelLayer);
+  }
 
   const combinedText = JSON.stringify({ primary, secondary });
   const boundaryResult = enforceBoundaryWithSanitization(combinedText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
@@ -645,16 +899,33 @@ export function runChannelSelectionEngine(
   }
 
   const hasGateDowngrades = candidates.some(c => c.candidate.decisionGate.outcome !== "recommended");
+  const hasFunnelReconstruction = funnelReconstruction.reconstructed && rescuedChannels.size > 0;
 
-  const status = viable.length > 0
-    ? (reliability.isWeak ? STATUS.FALLBACK : (hasGateDowngrades ? STATUS.DECISION_GATE_DOWNGRADE : STATUS.COMPLETE))
-    : STATUS.GUARD_BLOCKED;
+  let status: string;
+  if (viable.length === 0) {
+    status = STATUS.GUARD_BLOCKED;
+  } else if (hasFunnelReconstruction) {
+    status = STATUS.FUNNEL_RECONSTRUCTED;
+  } else if (reliability.isWeak) {
+    status = STATUS.FALLBACK;
+  } else if (hasGateDowngrades) {
+    status = STATUS.DECISION_GATE_DOWNGRADE;
+  } else {
+    status = STATUS.COMPLETE;
+  }
+
+  let statusMessage: string;
+  if (viable.length === 0) {
+    statusMessage = "All channels blocked by guard layer or decision gate — review inputs";
+  } else if (hasFunnelReconstruction) {
+    statusMessage = `Funnel-oriented channel orchestration — ${rescuedChannels.size} channel(s) reassigned to funnel stages, ${viable.length} total viable channel(s)`;
+  } else {
+    statusMessage = `Channel selection complete — ${viable.length} viable channel(s) identified${hasGateDowngrades ? " (some channels downgraded by decision gate)" : ""}`;
+  }
 
   return {
     status,
-    statusMessage: viable.length > 0
-      ? `Channel selection complete — ${viable.length} viable channel(s) identified${hasGateDowngrades ? " (some channels downgraded by decision gate)" : ""}`
-      : "All channels blocked by guard layer or decision gate — review inputs",
+    statusMessage,
     primaryChannel: primary,
     secondaryChannel: secondary,
     rejectedChannels,
@@ -667,6 +938,7 @@ export function runChannelSelectionEngine(
     confidenceScore,
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,
+    funnelReconstruction,
   };
 }
 
@@ -686,5 +958,7 @@ function buildFallbackChannel(role: string): ChannelCandidate {
     objectiveFit: { awarenessFit: 0.3, nurtureFit: 0.3, conversionFit: 0.3 },
     decisionGate: { outcome: "exploratory", reason: "Fallback channel — testing required", violations: ["Insufficient data"] },
     differentiation: null,
+    assignedFunnelRole: null,
+    wasReconstructed: false,
   };
 }
