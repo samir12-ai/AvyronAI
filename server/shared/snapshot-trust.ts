@@ -150,9 +150,12 @@ export function validateSnapshotSchema(snapshot: any, currentVersion: number = E
   }
 
   let recommendation: "USE" | "USE_WITH_CAUTION" | "INCOMPATIBLE";
+  const versionMismatch = snapshotVersion !== currentVersion && snapshotVersion > 0;
 
-  if (missingFields.length >= 3 || (snapshotVersion !== currentVersion && snapshotVersion > 0)) {
+  if (versionMismatch) {
     recommendation = "INCOMPATIBLE";
+  } else if (missingFields.length >= 3) {
+    recommendation = "USE_WITH_CAUTION";
   } else if (missingFields.length > 0) {
     recommendation = "USE_WITH_CAUTION";
   } else {
