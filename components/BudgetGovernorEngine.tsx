@@ -103,6 +103,7 @@ export default function BudgetGovernorEngine({ isActive }: { isActive?: boolean 
           executionTimeMs: s.executionTimeMs ?? r.executionTimeMs,
           engineVersion: s.engineVersion ?? r.engineVersion,
           layerDiagnostics: r.layerDiagnostics,
+          dataSource: r.dataSource || null,
         });
       } else {
         setData({ exists: false });
@@ -287,6 +288,42 @@ export default function BudgetGovernorEngine({ isActive }: { isActive?: boolean 
                   <Text key={i} style={[styles.killFlagReason, { color: '#DC2626' }]}>{v}</Text>
                 ))}
               </View>
+            </View>
+          )}
+
+          {data.dataSource && (
+            <View style={[styles.dataSourceBanner, { backgroundColor: data.dataSource.isBenchmark ? '#3B82F610' : '#8B5CF610', borderColor: data.dataSource.isBenchmark ? '#3B82F630' : '#8B5CF630' }]}>
+              <View style={styles.dataSourceBannerRow}>
+                <Ionicons name={data.dataSource.isBenchmark ? 'bar-chart-outline' : 'analytics-outline'} size={14} color={data.dataSource.isBenchmark ? '#3B82F6' : '#8B5CF6'} />
+                <Text style={[styles.dataSourceBannerLabel, { color: data.dataSource.isBenchmark ? '#3B82F6' : '#8B5CF6' }]}>
+                  {data.dataSource.isBenchmark ? 'Market Benchmark Data' : 'Campaign Metrics Data'}
+                </Text>
+                {data.dataSource.confidence != null && (
+                  <Text style={[styles.dataSourceConfidence, { color: colors.textMuted }]}>
+                    {(data.dataSource.confidence * 100).toFixed(0)}% conf
+                  </Text>
+                )}
+              </View>
+              {data.dataSource.benchmarkLabel && data.dataSource.isBenchmark && (
+                <Text style={[styles.dataSourceDetail, { color: colors.textMuted }]}>{data.dataSource.benchmarkLabel}</Text>
+              )}
+              {data.dataSource.anomalies && data.dataSource.anomalies.length > 0 && (
+                <View style={styles.anomalyList}>
+                  {data.dataSource.anomalies.map((a: any, i: number) => (
+                    <View key={i} style={[styles.anomalyItem, { backgroundColor: a.severity === 'critical' ? '#EF444415' : '#F59E0B15' }]}>
+                      <Ionicons name={a.severity === 'critical' ? 'alert-circle' : 'warning'} size={12} color={a.severity === 'critical' ? '#EF4444' : '#F59E0B'} />
+                      <Text style={[styles.anomalyText, { color: a.severity === 'critical' ? '#EF4444' : '#F59E0B' }]}>{a.message}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              {data.dataSource.warnings && data.dataSource.warnings.length > 0 && (
+                <View style={styles.anomalyList}>
+                  {data.dataSource.warnings.map((w: string, i: number) => (
+                    <Text key={i} style={[styles.dataSourceDetail, { color: '#F59E0B' }]}>{w}</Text>
+                  ))}
+                </View>
+              )}
             </View>
           )}
 
@@ -664,4 +701,12 @@ const styles = StyleSheet.create({
   warningRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 4 },
   warningDot: { width: 5, height: 5, borderRadius: 2.5, marginTop: 5 },
   warningText: { fontSize: 12, lineHeight: 16, flex: 1 },
+  dataSourceBanner: { borderRadius: 10, borderWidth: 1, padding: 12, marginBottom: 10 },
+  dataSourceBannerRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  dataSourceBannerLabel: { fontSize: 12, fontWeight: '600' as const },
+  dataSourceConfidence: { fontSize: 11, marginLeft: 'auto' },
+  dataSourceDetail: { fontSize: 11, marginTop: 4, lineHeight: 16 },
+  anomalyList: { marginTop: 6, gap: 4 },
+  anomalyItem: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 6, borderRadius: 6 },
+  anomalyText: { fontSize: 11, flex: 1, lineHeight: 14 },
 });

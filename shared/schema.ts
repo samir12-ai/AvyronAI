@@ -927,6 +927,7 @@ export const campaignSelections = pgTable("campaign_selections", {
   campaignGoalType: text("campaign_goal_type").notNull(),
   campaignStatus: text("campaign_status").notNull().default("active"),
   campaignLocation: text("campaign_location"),
+  dataSourceMode: text("data_source_mode").notNull().default("benchmark"),
   selectedAt: timestamp("selected_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

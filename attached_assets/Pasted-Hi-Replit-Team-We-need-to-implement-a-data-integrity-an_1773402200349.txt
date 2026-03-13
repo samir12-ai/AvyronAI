@@ -1,0 +1,114 @@
+Hi Replit Team,
+
+We need to implement a data integrity and fallback architecture in the MarketMind dashboard to solve a current issue and prevent future vulnerabilities related to campaign metrics.
+
+Currently the system allows campaign metrics (Spend, Results, CPA, ROAS) to influence decision engines such as Budget Governor, CAC Validation, and Risk Assessment. However, many users (especially SMB retail users) do not yet have real campaign data, which can lead to misleading analysis or unrealistic projections.
+
+We need to introduce a Data Source Mode system with strict validation guards.
+
+--------------------------------------------------
+
+SYSTEM CHANGE REQUEST
+
+Introduce a Data Source Selector with two mutually exclusive modes:
+
+1. Campaign Metrics Mode  
+2. Market Benchmark Mode
+
+Users must explicitly select one of these during project setup.
+
+--------------------------------------------------
+
+MODE 1 — Campaign Metrics Mode
+
+If selected, the system will rely on user-provided or connected campaign metrics.
+
+Required fields:
+
+• Total Spend  
+• Results (Conversions or Leads)  
+• CPA  
+• Revenue (optional but recommended)  
+• Channel Source (Meta / TikTok / Google)
+
+System must validate consistency before enabling analysis engines.
+
+--------------------------------------------------
+
+MODE 2 — Market Benchmark Mode
+
+If the user does not have campaign data, the system must fallback to regional benchmark datasets.
+
+Example dataset (Dubai – Meta SMB):
+
+• CPC: $0.70 – $1.20  
+• CPA: $12 – $35  
+• CTR: 1.2% – 2.5%  
+• Conversion Rate: 2% – 5%
+
+These benchmarks should feed:
+
+• Budget Governor  
+• CAC Assumption Engine  
+• Risk Assessment Layer
+
+The UI must clearly label outputs as:
+
+“Benchmark-based projections”
+
+--------------------------------------------------
+
+CRITICAL GUARDS
+
+To prevent misuse or unrealistic projections:
+
+1. Campaign metrics cannot activate if:
+   - Spend = 0
+   - Results = 0
+   - CPA inconsistent with Spend/Results
+
+2. ROAS must be automatically recomputed, never manually entered.
+
+3. If CPA < $1 or ROAS > 20x:
+   - System must trigger Anomaly Warning
+
+4. If insufficient campaign history exists:
+   - Budget Governor must remain in HOLD state.
+
+--------------------------------------------------
+
+ACCEPTANCE CRITERIA (STRICT)
+
+The implementation will only be accepted if ALL conditions are satisfied:
+
+1. Data Source Mode must be mandatory during project creation.
+
+2. Campaign Metrics Mode must reject incomplete datasets.
+
+3. Benchmark Mode must fully power all analysis engines without campaign data.
+
+4. Budget Governor must automatically switch to HOLD when validation confidence < 70%.
+
+5. Any anomalous metric must trigger a visible warning banner.
+
+6. Engines must not execute financial projections without a verified data source.
+
+7. The system must log which data source was used for every decision engine.
+
+--------------------------------------------------
+
+EXPECTED RESULT
+
+After implementation:
+
+• Users with real data receive accurate validation.  
+• Users without data still receive safe benchmark-based projections.  
+• Budget expansion decisions remain protected from false signals.  
+• Future manipulation or unrealistic dashboard inputs are prevented.
+
+--------------------------------------------------
+
+Please confirm once the architecture and validation layers are implemented so we can run internal QA on the decision engines.
+
+Best regards,  
+MarketMind Engineering

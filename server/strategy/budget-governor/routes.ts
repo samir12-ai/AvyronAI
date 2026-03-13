@@ -3,8 +3,9 @@ import { db } from "../../db";
 import { budgetGovernorSnapshots, strategyValidationSnapshots, offerSnapshots, funnelSnapshots } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { runBudgetGovernorEngine } from "./engine";
-import { ENGINE_VERSION } from "./constants";
+import { ENGINE_VERSION, MIN_VALIDATION_CONFIDENCE_FOR_SCALE } from "./constants";
 import { pruneOldSnapshots, checkValidationSession } from "../../engine-hardening";
+import { resolveDataSource } from "../../data-source/resolver";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -92,6 +93,8 @@ export function registerBudgetGovernorRoutes(app: Express) {
         };
       }
 
+      const dataSource = await resolveDataSource(campaignId, accountId);
+
       const input = {
         offerStrength: offerData?.offerStrengthScore ?? 0.5,
         offerProofScore: offerData?.primaryOffer?.proofLayer?.proofStrength ?? 0.4,
@@ -100,8 +103,8 @@ export function registerBudgetGovernorRoutes(app: Express) {
         funnelFrictionScore: funnelData?.frictionMap?.totalFriction ?? 0.5,
         funnelProjections: {
           expectedConversionRate: funnelData?.primaryFunnel?.eligibilityScore ?? 0.05,
-          expectedCPA: req.body.expectedCPA ?? 25,
-          expectedROAS: req.body.expectedROAS ?? 2.0,
+          expectedCPA: dataSource.isBenchmark ? dataSource.cpa : (req.body.expectedCPA ?? dataSource.cpa),
+          expectedROAS: dataSource.isBenchmark ? (dataSource.roas ?? 2.0) : (req.body.expectedROAS ?? dataSource.roas ?? 2.0),
         },
         channelRisk: req.body.channelRisk ?? 0.4,
         validationConfidence: validationResult?.confidenceScore ?? 0.5,
@@ -110,11 +113,30 @@ export function registerBudgetGovernorRoutes(app: Express) {
         competitorSpendEstimate: req.body.competitorSpendEstimate ?? 0,
         audienceSize: req.body.audienceSize ?? "medium",
         currentBudget: req.body.currentBudget ?? 0,
-        historicalCPA: req.body.historicalCPA ?? null,
-        historicalROAS: req.body.historicalROAS ?? null,
+        historicalCPA: dataSource.isBenchmark ? dataSource.cpa : (req.body.historicalCPA ?? (dataSource.cpa > 0 ? dataSource.cpa : null)),
+        historicalROAS: dataSource.isBenchmark ? dataSource.roas : (req.body.historicalROAS ?? dataSource.roas),
       };
 
       const result = runBudgetGovernorEngine(input);
+
+      if (dataSource.confidence < MIN_VALIDATION_CONFIDENCE_FOR_SCALE && result.decision.action === "scale") {
+        result.decision = {
+          action: "hold",
+          reasoning: `Data source confidence (${(dataSource.confidence * 100).toFixed(0)}%) is below the ${(MIN_VALIDATION_CONFIDENCE_FOR_SCALE * 100).toFixed(0)}% threshold required for scaling — holding budget until data quality improves`,
+        };
+      }
+
+      const resultWithDataSource = {
+        ...result,
+        dataSource: {
+          mode: dataSource.mode,
+          isBenchmark: dataSource.isBenchmark,
+          benchmarkLabel: dataSource.benchmarkLabel,
+          anomalies: dataSource.anomalies,
+          warnings: dataSource.warnings,
+          confidence: dataSource.confidence,
+        },
+      };
 
       const snapshotId = crypto.randomUUID();
       await db.insert(budgetGovernorSnapshots).values({
@@ -125,7 +147,7 @@ export function registerBudgetGovernorRoutes(app: Express) {
         engineVersion: ENGINE_VERSION,
         status: result.status,
         statusMessage: result.statusMessage,
-        result: JSON.stringify(result),
+        result: JSON.stringify(resultWithDataSource),
         layerResults: JSON.stringify(result.layerDiagnostics),
         structuralWarnings: JSON.stringify(result.structuralWarnings),
         boundaryCheck: JSON.stringify(result.boundaryCheck),
@@ -136,12 +158,12 @@ export function registerBudgetGovernorRoutes(app: Express) {
 
       await pruneOldSnapshots(db, budgetGovernorSnapshots, campaignId, 20, accountId);
 
-      console.log(`[BudgetGovernor] Campaign ${campaignId} | Decision: ${result.decision.action} | Confidence: ${(result.confidenceScore * 100).toFixed(0)}% | Kill: ${result.killFlag} | Time: ${result.executionTimeMs}ms`);
+      console.log(`[BudgetGovernor] Campaign ${campaignId} | Decision: ${result.decision.action} | Confidence: ${(result.confidenceScore * 100).toFixed(0)}% | DataSource: ${dataSource.mode} | Kill: ${result.killFlag} | Time: ${result.executionTimeMs}ms`);
 
       return res.json({
         success: true,
         snapshotId,
-        result,
+        result: resultWithDataSource,
       });
     } catch (error: any) {
       console.error(`[BudgetGovernor] Error:`, error);

@@ -24,6 +24,7 @@ export function registerCampaignRoutes(app: Express) {
         goalType: s.campaignGoalType,
         status: s.campaignStatus || "active",
         location: s.campaignLocation || null,
+        dataSourceMode: s.dataSourceMode || "benchmark",
       }));
 
       res.json({
@@ -39,7 +40,7 @@ export function registerCampaignRoutes(app: Express) {
 
   app.post("/api/campaigns/create", async (req, res) => {
     try {
-      const { name, objective, location, platform, notes, accountId: reqAccountId } = req.body;
+      const { name, objective, location, platform, notes, dataSourceMode, accountId: reqAccountId } = req.body;
       const accountId = reqAccountId || "default";
       const requestId = `crt_${Date.now()}`;
 
@@ -60,6 +61,9 @@ export function registerCampaignRoutes(app: Express) {
         return res.status(400).json({ code: "MISSING_LOCATION", message: "Campaign location is required", requestId });
       }
 
+      const validModes = ["campaign_metrics", "benchmark"];
+      const resolvedMode = dataSourceMode && validModes.includes(dataSourceMode) ? dataSourceMode : "benchmark";
+
       const campaignId = `campaign_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
       const campaignName = name.trim();
 
@@ -73,6 +77,7 @@ export function registerCampaignRoutes(app: Express) {
           campaignGoalType: objective,
           campaignStatus: "active",
           campaignLocation: location.trim(),
+          dataSourceMode: resolvedMode,
           selectedAt: new Date(),
         })
         .returning();
@@ -91,6 +96,7 @@ export function registerCampaignRoutes(app: Express) {
           goalType: objective,
           status: "active",
           location: location.trim(),
+          dataSourceMode: resolvedMode,
         },
         selection,
         message: "Campaign created and auto-selected",

@@ -119,6 +119,13 @@ function determineBudgetDecision(input: BudgetGovernorInput, riskScore: number, 
     };
   }
 
+  if (input.validationConfidence < MIN_VALIDATION_CONFIDENCE_FOR_SCALE) {
+    return {
+      action: "hold",
+      reasoning: `Validation confidence (${(input.validationConfidence * 100).toFixed(0)}%) below ${(MIN_VALIDATION_CONFIDENCE_FOR_SCALE * 100).toFixed(0)}% threshold — holding budget until confidence improves`,
+    };
+  }
+
   if (!guardResult.passed) {
     return {
       action: "test",

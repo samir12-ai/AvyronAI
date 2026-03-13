@@ -12,6 +12,7 @@ interface CampaignInfo {
   budget?: string;
   startDate?: string;
   location?: string;
+  dataSourceMode?: string;
 }
 
 interface CampaignSelection {
@@ -21,6 +22,7 @@ interface CampaignSelection {
   campaignGoalType: string;
   campaignStatus: string;
   campaignLocation?: string;
+  dataSourceMode?: string;
 }
 
 interface CampaignWarning {
@@ -35,12 +37,14 @@ interface CreateCampaignInput {
   location: string;
   platform?: string;
   notes?: string;
+  dataSourceMode?: string;
 }
 
 interface CampaignContextValue {
   campaigns: CampaignInfo[];
   selectedCampaign: CampaignSelection | null;
   selectedCampaignId: string | null;
+  dataSourceMode: string;
   warning: CampaignWarning | null;
   isLoading: boolean;
   isCampaignSelected: boolean;
@@ -185,6 +189,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const isCampaignSelected = !!selectedCampaign && !warning;
   const selectedCampaignId = selectedCampaign?.selectedCampaignId ?? null;
+  const dataSourceMode = selectedCampaign?.dataSourceMode || "benchmark";
 
   return (
     <CampaignContext.Provider
@@ -192,6 +197,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         campaigns,
         selectedCampaign,
         selectedCampaignId,
+        dataSourceMode,
         warning,
         isLoading,
         isCampaignSelected,

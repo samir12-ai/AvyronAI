@@ -19,6 +19,7 @@ import { registerAudienceEngineRoutes } from "./audience-engine/routes";
 import { registerPositioningEngineRoutes } from "./positioning-engine/routes";
 import { registerStrategicCoreRoutes } from "./strategic-core";
 import { registerCampaignRoutes, requireCampaign } from "./campaign-routes";
+import { registerDataSourceRoutes } from "./data-source/routes";
 import { registerMetaStatusRoutes, requireMetaReal, getDecryptedPageToken } from "./meta-status";
 import { registerAuditRoutes } from "./audit-routes";
 import { registerBusinessDataRoutes } from "./business-data-routes";
@@ -1348,6 +1349,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerPublishPipelineRoutes(app);
   registerVeoRoutes(app);
   registerCampaignRoutes(app);
+  registerDataSourceRoutes(app);
   registerLeadEngineRoutes(app);
   registerCompetitiveIntelligenceRoutes(app);
   registerMarketIntelligenceV3(app);

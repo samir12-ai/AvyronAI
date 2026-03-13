@@ -115,7 +115,7 @@ export default function AIManagementScreen() {
   const { scheduledPosts, updateScheduledPost, metaConnection, brandProfile, campaigns, advancedMode } = useApp();
   const { t } = useLanguage();
 
-  const { selectedCampaignId } = useCampaign();
+  const { selectedCampaignId, isCampaignSelected, dataSourceMode } = useCampaign();
   const { state: ps, updateState, isLoading: psLoading, isSaving, saveError, hydrationVersion } = usePersistedState('ai-management', defaultAIMgmtState);
 
   const [activeTab, setActiveTab] = useState<TabView>(ps.activeTab);
@@ -1196,6 +1196,19 @@ export default function AIManagementScreen() {
 
         <CampaignBar />
 
+        {isCampaignSelected && (
+          <View style={[styles.dataSourceBadge, { backgroundColor: dataSourceMode === 'campaign_metrics' ? '#8B5CF620' : '#3B82F620', borderColor: dataSourceMode === 'campaign_metrics' ? '#8B5CF640' : '#3B82F640' }]}>
+            <Ionicons
+              name={dataSourceMode === 'campaign_metrics' ? 'analytics-outline' : 'bar-chart-outline'}
+              size={12}
+              color={dataSourceMode === 'campaign_metrics' ? '#8B5CF6' : '#3B82F6'}
+            />
+            <Text style={[styles.dataSourceBadgeText, { color: dataSourceMode === 'campaign_metrics' ? '#8B5CF6' : '#3B82F6' }]}>
+              {dataSourceMode === 'campaign_metrics' ? 'Campaign Metrics Mode' : 'Market Benchmark Mode'}
+            </Text>
+          </View>
+        )}
+
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -1547,6 +1560,21 @@ export default function AIManagementScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { paddingHorizontal: 20 },
+  dataSourceBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 8,
+    alignSelf: 'flex-start',
+  },
+  dataSourceBadgeText: {
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+  },
   header: { marginBottom: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   saveIndicator: { paddingTop: 4 },
   title: { fontSize: 28, fontFamily: 'Inter_700Bold', marginBottom: 4 },

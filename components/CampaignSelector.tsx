@@ -261,12 +261,18 @@ const OBJECTIVE_OPTIONS = [
   { value: 'TESTING', label: 'Testing', icon: 'flask' as const, color: '#8B5CF6' },
 ];
 
+const DATA_SOURCE_OPTIONS = [
+  { value: 'benchmark', label: 'Market Benchmarks', icon: 'bar-chart-outline' as const, color: '#3B82F6', desc: 'Uses regional industry benchmarks (recommended for new campaigns)' },
+  { value: 'campaign_metrics', label: 'Campaign Metrics', icon: 'analytics-outline' as const, color: '#8B5CF6', desc: 'Uses your actual campaign performance data' },
+];
+
 function NewCampaignForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: () => void }) {
   const { createCampaign } = useCampaign();
   const [name, setName] = useState('');
   const [objective, setObjective] = useState('');
   const [location, setLocation] = useState('');
   const [notes, setNotes] = useState('');
+  const [dataSourceMode, setDataSourceMode] = useState('benchmark');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -278,7 +284,7 @@ function NewCampaignForm({ onCreated, onCancel }: { onCreated: () => void; onCan
 
     setSaving(true);
     try {
-      await createCampaign({ name: name.trim(), objective, location: location.trim(), notes: notes.trim() || undefined });
+      await createCampaign({ name: name.trim(), objective, location: location.trim(), notes: notes.trim() || undefined, dataSourceMode });
       onCreated();
     } catch (err: any) {
       setError(err.message || 'Failed to create campaign');
@@ -333,6 +339,29 @@ function NewCampaignForm({ onCreated, onCancel }: { onCreated: () => void; onCan
             placeholderTextColor="#4B5563"
             testID="campaign-location-input"
           />
+        </View>
+
+        <View style={formStyles.field}>
+          <Text style={formStyles.label}>Data Source Mode</Text>
+          <View style={formStyles.objectiveGrid}>
+            {DATA_SOURCE_OPTIONS.map(opt => {
+              const selected = dataSourceMode === opt.value;
+              return (
+                <TouchableOpacity
+                  key={opt.value}
+                  style={[formStyles.objectiveChip, selected && { backgroundColor: opt.color + '25', borderColor: opt.color }, { width: '100%' }]}
+                  onPress={() => setDataSourceMode(opt.value)}
+                  testID={`datasource-${opt.value}`}
+                >
+                  <Ionicons name={opt.icon} size={14} color={selected ? opt.color : '#6B7280'} />
+                  <Text style={[formStyles.objectiveText, selected && { color: opt.color }]}>{opt.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <Text style={{ color: '#6B7280', fontSize: 11, marginTop: 4 }}>
+            {DATA_SOURCE_OPTIONS.find(o => o.value === dataSourceMode)?.desc}
+          </Text>
         </View>
 
         <View style={formStyles.field}>
