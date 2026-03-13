@@ -13,6 +13,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import DataFreshnessWarning from '@/components/DataFreshnessWarning';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
@@ -880,6 +881,8 @@ export default function CompetitiveIntelligence() {
                 </Text>
               </View>
             </View>
+
+            <DataFreshnessWarning freshnessMetadata={miv3Result?.freshnessMetadata} />
 
             <View style={{ backgroundColor: isDark ? '#1A2030' : '#F8F9FA', borderRadius: 10, padding: 12, marginBottom: 10, gap: 8 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>

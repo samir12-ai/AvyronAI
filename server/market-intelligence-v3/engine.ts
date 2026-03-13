@@ -717,11 +717,20 @@ export class MarketIntelligenceV3 {
     goalMode: GoalMode = "STRATEGY_MODE",
   ): Promise<MIv3DiagnosticResult> {
     const lockKey = `${accountId}:${campaignId}`;
+    const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
 
     const existingLock = activeLocks.get(lockKey);
     if (existingLock) {
       console.log(`[MIv3] Concurrent run detected for ${lockKey}, waiting for existing run`);
-      return existingLock;
+      try {
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Lock timeout: existing run for ${lockKey} exceeded ${LOCK_TIMEOUT_MS / 1000}s`)), LOCK_TIMEOUT_MS)
+        );
+        return await Promise.race([existingLock, timeoutPromise]);
+      } catch (err: any) {
+        console.warn(`[MIv3] Lock wait timed out for ${lockKey}: ${err.message} — rejecting concurrent request (original run still active)`);
+        throw new Error(`Analysis for this campaign is already in progress. Please wait and try again.`);
+      }
     }
 
     const runPromise = this._executeRun(mode, accountId, campaignId, forceRefresh, goalMode);

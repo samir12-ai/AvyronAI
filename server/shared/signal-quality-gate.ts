@@ -119,9 +119,9 @@ export function scoreSignalQuality(
   return scored;
 }
 
-export function deduplicateSignals(signals: SignalQualityScore[]): SignalQualityScore[] {
-  if (signals.length <= 1) return signals;
+const DEDUP_BATCH_SIZE = 50;
 
+function deduplicateBatch(signals: SignalQualityScore[]): SignalQualityScore[] {
   const deduplicated: SignalQualityScore[] = [];
   const merged = new Set<number>();
 
@@ -157,6 +157,42 @@ export function deduplicateSignals(signals: SignalQualityScore[]): SignalQuality
   }
 
   return deduplicated;
+}
+
+export function deduplicateSignals(signals: SignalQualityScore[]): SignalQualityScore[] {
+  if (signals.length <= 1) return signals;
+
+  if (signals.length <= DEDUP_BATCH_SIZE) {
+    return deduplicateBatch(signals);
+  }
+
+  const categoryGroups = new Map<string, SignalQualityScore[]>();
+  for (const signal of signals) {
+    const group = categoryGroups.get(signal.category) || [];
+    group.push(signal);
+    categoryGroups.set(signal.category, group);
+  }
+
+  const allDeduplicated: SignalQualityScore[] = [];
+  for (const [, group] of categoryGroups) {
+    if (group.length <= DEDUP_BATCH_SIZE) {
+      allDeduplicated.push(...deduplicateBatch(group));
+    } else {
+      const chunks: SignalQualityScore[][] = [];
+      for (let i = 0; i < group.length; i += DEDUP_BATCH_SIZE) {
+        chunks.push(group.slice(i, i + DEDUP_BATCH_SIZE));
+      }
+
+      const chunkResults: SignalQualityScore[] = [];
+      for (const chunk of chunks) {
+        chunkResults.push(...deduplicateBatch(chunk));
+      }
+
+      allDeduplicated.push(...deduplicateBatch(chunkResults));
+    }
+  }
+
+  return allDeduplicated;
 }
 
 export function crossValidateSignals(

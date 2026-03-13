@@ -2,7 +2,15 @@ import { ENGINE_VERSION } from "./constants";
 import { MI_CONFIDENCE } from "./constants";
 import { db } from "../db";
 import { miSnapshots } from "@shared/schema";
-import { ne, eq, inArray } from "drizzle-orm";
+import { ne, eq, inArray, and } from "drizzle-orm";
+import {
+  computeStalenessCoefficient,
+  validateSnapshotSchema,
+  buildFreshnessMetadata,
+  logFreshnessTraceability,
+  type FreshnessClass,
+  type FreshnessMetadata,
+} from "../shared/snapshot-trust";
 
 export type EngineState = "READY" | "REFRESH_REQUIRED" | "REFRESHING" | "REFRESH_FAILED" | "BLOCKED";
 
@@ -15,6 +23,7 @@ export interface EngineReadinessResult {
   state: EngineState;
   diagnostics: EngineDiagnostics;
   reason?: string;
+  freshnessMetadata?: FreshnessMetadata;
 }
 
 export interface EngineDiagnostics {
@@ -27,6 +36,10 @@ export interface EngineDiagnostics {
   integrityValid: boolean;
   integrityFailures: string[];
   engineState: EngineState;
+  freshnessClass?: FreshnessClass;
+  stalenessCoefficient?: number;
+  trustScore?: number;
+  schemaCompatible?: boolean;
 }
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -105,6 +118,14 @@ export function getEngineReadinessState(
   diagnostics.snapshotFound = true;
   diagnostics.snapshotId = snapshot.id || null;
 
+  const freshnessMetadata = buildFreshnessMetadata(snapshot);
+  diagnostics.freshnessClass = freshnessMetadata.freshnessClass;
+  diagnostics.stalenessCoefficient = freshnessMetadata.stalenessCoefficient;
+  diagnostics.trustScore = freshnessMetadata.trustScore;
+  diagnostics.schemaCompatible = freshnessMetadata.schemaCompatible;
+
+  logFreshnessTraceability("MI", snapshot, freshnessMetadata);
+
   const integrity = verifySnapshotIntegrity(snapshot, expectedVersion, campaignId);
   diagnostics.integrityValid = integrity.valid;
   diagnostics.integrityFailures = integrity.failures;
@@ -120,12 +141,12 @@ export function getEngineReadinessState(
     if (hasVersionMismatch || hasCampaignMismatch) {
       diagnostics.engineState = "REFRESH_REQUIRED";
       logDiagnostics("MI", diagnostics);
-      return { state: "REFRESH_REQUIRED", diagnostics, reason: `Integrity failed: ${integrity.failures.join("; ")}` };
+      return { state: "REFRESH_REQUIRED", diagnostics, reason: `Integrity failed: ${integrity.failures.join("; ")}`, freshnessMetadata };
     }
 
     diagnostics.engineState = "BLOCKED";
     logDiagnostics("MI", diagnostics);
-    return { state: "BLOCKED", diagnostics, reason: `Integrity failed: ${integrity.failures.join("; ")}` };
+    return { state: "BLOCKED", diagnostics, reason: `Integrity failed: ${integrity.failures.join("; ")}`, freshnessMetadata };
   }
 
   const freshnessDays = snapshot.dataFreshnessDays ?? null;
@@ -135,13 +156,36 @@ export function getEngineReadinessState(
     diagnostics.freshnessValid = false;
     diagnostics.engineState = "REFRESH_REQUIRED";
     logDiagnostics("MI", diagnostics);
-    return { state: "REFRESH_REQUIRED", diagnostics, reason: `Data stale: ${freshnessDays}d exceeds ${freshnessThresholdDays}d threshold` };
+    return { state: "REFRESH_REQUIRED", diagnostics, reason: `Data stale: ${freshnessDays}d exceeds ${freshnessThresholdDays}d threshold`, freshnessMetadata };
   }
 
   diagnostics.freshnessValid = true;
+
+  if (!freshnessMetadata.schemaCompatible) {
+    diagnostics.engineState = "BLOCKED";
+    logDiagnostics("MI", diagnostics);
+    return {
+      state: "BLOCKED",
+      diagnostics,
+      reason: "Snapshot schema incompatible with current engine. Re-run analysis.",
+      freshnessMetadata,
+    };
+  }
+
+  if (freshnessMetadata.freshnessClass === "NEEDS_REFRESH") {
+    diagnostics.engineState = "REFRESH_REQUIRED";
+    logDiagnostics("MI", diagnostics);
+    return {
+      state: "REFRESH_REQUIRED",
+      diagnostics,
+      reason: `Data is ${Math.round(freshnessMetadata.ageInDays)}d old (max 7d for strategy). Re-run analysis.`,
+      freshnessMetadata,
+    };
+  }
+
   diagnostics.engineState = "READY";
   logDiagnostics("MI", diagnostics);
-  return { state: "READY", diagnostics };
+  return { state: "READY", diagnostics, freshnessMetadata };
 }
 
 export function logDiagnostics(engineName: string, diagnostics: EngineDiagnostics): void {
@@ -166,13 +210,30 @@ export async function invalidateStaleSnapshots(): Promise<{ invalidatedCount: nu
   console.log(`[MIv3] ENGINE_VERSION_CHECK | currentVersion=${ENGINE_VERSION} | action=startup_audit`);
 
   try {
-    const recovered = await db.update(miSnapshots)
-      .set({ status: "COMPLETE" })
-      .where(eq(miSnapshots.status, "STALE"))
-      .returning({ id: miSnapshots.id });
+    const activeSessions = await db.select({ campaignId: miSnapshots.campaignId })
+      .from(miSnapshots)
+      .where(inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]));
+    const activeCampaignIds = new Set(activeSessions.map(s => s.campaignId));
 
-    if (recovered.length > 0) {
-      console.log(`[MIv3] STALE_RECOVERY | recovered=${recovered.length} snapshots from STALE → COMPLETE`);
+    const staleSnapshots = await db.select({ id: miSnapshots.id, campaignId: miSnapshots.campaignId })
+      .from(miSnapshots)
+      .where(eq(miSnapshots.status, "STALE"));
+
+    let recoveredCount = 0;
+    let skippedCount = 0;
+    for (const stale of staleSnapshots) {
+      if (activeCampaignIds.has(stale.campaignId)) {
+        skippedCount++;
+        continue;
+      }
+      await db.update(miSnapshots)
+        .set({ status: "COMPLETE" })
+        .where(and(eq(miSnapshots.id, stale.id), eq(miSnapshots.status, "STALE")));
+      recoveredCount++;
+    }
+
+    if (recoveredCount > 0 || skippedCount > 0) {
+      console.log(`[MIv3] STALE_RECOVERY | recovered=${recoveredCount} | skipped=${skippedCount} (active session exists)`);
     }
 
     const oldVersionSnapshots = await db.select({ id: miSnapshots.id, analysisVersion: miSnapshots.analysisVersion })

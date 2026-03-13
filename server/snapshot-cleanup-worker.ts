@@ -18,11 +18,13 @@ import {
   ciSnapshots,
   growthCampaigns,
 } from "@shared/schema";
-import { eq, lt, sql, notInArray, inArray } from "drizzle-orm";
+import { eq, lt, sql, notInArray, inArray, and } from "drizzle-orm";
 import { logAudit } from "./audit";
 
 const CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const MAX_RETENTION_DAYS = 90;
+const NON_COMPLETE_RETENTION_DAYS = 30;
+const INCOMPATIBLE_RETENTION_DAYS = 7;
 const MAX_SNAPSHOTS_PER_CAMPAIGN = 20;
 
 let cleanupTimer: ReturnType<typeof setInterval> | null = null;
@@ -59,20 +61,47 @@ function getTimestampCol(config: SnapshotTableConfig) {
 }
 
 async function purgeExpiredSnapshots(): Promise<{ table: string; deleted: number }[]> {
-  const cutoffDate = new Date(Date.now() - MAX_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  const completeCutoff = new Date(Date.now() - MAX_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  const nonCompleteCutoff = new Date(Date.now() - NON_COMPLETE_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  const incompatibleCutoff = new Date(Date.now() - INCOMPATIBLE_RETENTION_DAYS * 24 * 60 * 60 * 1000);
   const results: { table: string; deleted: number }[] = [];
 
   for (const config of SNAPSHOT_TABLES) {
     try {
       const tsCol = getTimestampCol(config);
+      const hasStatus = config.table.status !== undefined;
+
       const expired = await db
         .delete(config.table)
-        .where(lt(tsCol, cutoffDate))
+        .where(lt(tsCol, completeCutoff))
         .returning({ id: config.table.id });
 
-      if (expired.length > 0) {
-        results.push({ table: config.name, deleted: expired.length });
-        console.log(`[SnapshotCleanup] TIME_PURGE | ${config.name} | deleted=${expired.length} | cutoff=${cutoffDate.toISOString()}`);
+      let tierDeleted = 0;
+
+      if (hasStatus) {
+        const incompatibleExpired = await db
+          .delete(config.table)
+          .where(and(
+            eq(config.table.status, "INCOMPATIBLE"),
+            lt(tsCol, incompatibleCutoff),
+          ))
+          .returning({ id: config.table.id });
+        tierDeleted += incompatibleExpired.length;
+
+        const nonCompleteExpired = await db
+          .delete(config.table)
+          .where(and(
+            inArray(config.table.status, ["FAILED", "STALE", "PENDING"]),
+            lt(tsCol, nonCompleteCutoff),
+          ))
+          .returning({ id: config.table.id });
+        tierDeleted += nonCompleteExpired.length;
+      }
+
+      const totalDeleted = expired.length + tierDeleted;
+      if (totalDeleted > 0) {
+        results.push({ table: config.name, deleted: totalDeleted });
+        console.log(`[SnapshotCleanup] TIME_PURGE | ${config.name} | deleted=${totalDeleted} (base=${expired.length}, tiered=${tierDeleted}) | cutoffs: complete=${completeCutoff.toISOString()}, nonComplete=${nonCompleteCutoff.toISOString()}, incompatible=${incompatibleCutoff.toISOString()}`);
       }
     } catch (err: any) {
       console.error(`[SnapshotCleanup] TIME_PURGE_ERROR | ${config.name} | ${err.message}`);

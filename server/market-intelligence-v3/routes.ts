@@ -95,7 +95,13 @@ export function registerMIv3Routes(app: Express) {
       const snapshot = snapshots[0];
       const readiness = getEngineReadinessState(snapshot, campaignId, ENGINE_VERSION);
       const result = buildResultFromSnapshot(snapshot);
-      return res.json({ snapshot, ...result, engineState: readiness.state, engineDiagnostics: readiness.diagnostics });
+      return res.json({
+        snapshot,
+        ...result,
+        engineState: readiness.state,
+        engineDiagnostics: readiness.diagnostics,
+        freshnessMetadata: readiness.freshnessMetadata || null,
+      });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }

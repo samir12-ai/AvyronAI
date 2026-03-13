@@ -37,6 +37,7 @@ import {
 } from "../engine-hardening";
 import { verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
 import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/constants";
+import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snapshot-trust";
 
 interface PositioningEngineResult {
   status: PositioningStatus;
@@ -1233,6 +1234,19 @@ export async function runPositioningEngine(
     }
     console.log(`[PositioningEngine-V3] Self-healed: resolved stale MI ${miSnapshotId} → ${healed.id}`);
     activeMiSnapshot = healed;
+  }
+
+  const miFreshnessMetadata = buildFreshnessMetadata(activeMiSnapshot);
+  logFreshnessTraceability("PositioningEngine", activeMiSnapshot, miFreshnessMetadata);
+
+  if (miFreshnessMetadata.blockedForStrategy) {
+    console.log(`[PositioningEngine-V3] MI freshness BLOCKED | class=${miFreshnessMetadata.freshnessClass} | age=${miFreshnessMetadata.ageInDays}d | trust=${miFreshnessMetadata.trustScore} | schema=${miFreshnessMetadata.schemaRecommendation}`);
+    const executionTimeMs = Date.now() - startTime;
+    return buildEmptyResult(
+      "MISSING_DEPENDENCY",
+      miFreshnessMetadata.warning || `MI data freshness check failed (${miFreshnessMetadata.freshnessClass}). Re-run Market Intelligence.`,
+      executionTimeMs, miSnapshotId, audienceSnapshotId,
+    );
   }
 
   const miFreshness = activeMiSnapshot.dataFreshnessDays;

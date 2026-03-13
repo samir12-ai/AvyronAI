@@ -60,11 +60,27 @@ A backend and frontend system for auditing feeds, AI usage, gate status, decisio
 ### Snapshot Lifecycle Management
 - **Per-engine pruning**: `pruneOldSnapshots()` in `server/engine-hardening/index.ts` runs after every engine write — keeps 20 newest snapshots per campaign per table.
 - **Scheduled bulk cleanup**: `server/snapshot-cleanup-worker.ts` runs every 6 hours with three sweep passes:
-  1. **Time-based retention** — deletes all snapshots older than 90 days across all 16 snapshot tables.
+  1. **Time-based retention** — tiered expiry: COMPLETE snapshots at 90 days, FAILED/STALE/PENDING at 30 days, INCOMPATIBLE at 7 days.
   2. **Cross-campaign cap enforcement** — ensures no campaign exceeds 20 snapshots per table (bulk version of per-engine pruning).
   3. **Orphan purge** — deletes snapshots for campaigns that no longer exist in `growth_campaigns`. Safety guard: skips purge if zero active campaigns found.
 - Audit trail: cleanup actions logged via `logAudit("system", "SNAPSHOT_CLEANUP", ...)`.
 - Graceful shutdown: `stopSnapshotCleanupWorker()` called on SIGTERM/SIGINT.
+
+### Snapshot Trust & Freshness System
+- **`server/shared/snapshot-trust.ts`**: Core module for temporal decay scoring, schema validation, and freshness classification.
+  - `computeStalenessCoefficient()` — returns staleness coefficient [0,1], freshness class (FRESH/AGING/NEEDS_REFRESH/PARTIAL/INCOMPATIBLE), trust score, and strategy-blocking status.
+  - `validateSnapshotSchema()` — checks required MI fields (signalData, confidenceData, marketState, trajectoryData, dominanceData), returns USE/USE_WITH_CAUTION/INCOMPATIBLE recommendation.
+  - `buildFreshnessMetadata()` — combines staleness + schema into a single metadata object attached to API responses.
+  - `logFreshnessTraceability()` — structured logging for freshness state at all engine consumption points.
+- **Freshness thresholds**: FRESH ≤24h, AGING ≤7d, NEEDS_REFRESH ≤14d (blocked for strategy), NEEDS_REFRESH >14d (coefficient=1.0).
+- **Positioning Engine block**: `buildFreshnessMetadata()` blocks strategy execution when `blockedForStrategy=true` (NEEDS_REFRESH or INCOMPATIBLE).
+- **MIv3 route response**: `freshnessMetadata` field included in `/api/ci/mi-v3/snapshot/:campaignId` response.
+- **Frontend warning**: `components/DataFreshnessWarning.tsx` renders contextual warning banners (amber for AGING, orange for NEEDS_REFRESH, red for INCOMPATIBLE/blocked) in the Competitive Intelligence panel.
+
+### Concurrency Hardening
+- **MIv3 lock timeout**: Active locks expire after 5 minutes with a timeout guard; stale locks forcefully released if the promise exceeds the timeout.
+- **Batched Jaccard dedup**: `deduplicateSignals()` in `signal-quality-gate.ts` uses category-based batching (batch size 50) for O(n²) Jaccard similarity computation on 100+ signals.
+- **STALE recovery safeguard**: `invalidateStaleSnapshots()` skips recovery for campaigns that already have COMPLETE/PARTIAL snapshots to prevent overwriting active sessions.
 
 ### Scalability and Thundering Herd Protection
 Includes a global job queue with configurable concurrency limits, per-account job budgets, a shared market data cache, request deduplication, queue prioritization, backpressure mechanisms, and a rate gate.
