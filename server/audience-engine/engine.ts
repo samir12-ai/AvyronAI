@@ -1067,10 +1067,11 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   const miSnapshotAge = latestSnapshot?.createdAt
     ? `${Math.round((Date.now() - new Date(latestSnapshot.createdAt).getTime()) / 3600000)}h ago`
     : null;
+  let miFreshnessMetadata: any = null;
   if (latestSnapshot) {
     const { logFreshnessTraceability, buildFreshnessMetadata } = await import("../shared/snapshot-trust");
-    const miFreshness = buildFreshnessMetadata(latestSnapshot);
-    logFreshnessTraceability("AudienceEngine", latestSnapshot, miFreshness);
+    miFreshnessMetadata = buildFreshnessMetadata(latestSnapshot);
+    logFreshnessTraceability("AudienceEngine", latestSnapshot, miFreshnessMetadata);
   }
   if (latestSnapshot && latestSnapshot.analysisVersion !== undefined) {
     const { ENGINE_VERSION: MI_EV } = await import("../market-intelligence-v3/constants");
@@ -1169,7 +1170,8 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
 
       await pruneOldSnapshots(db, audienceSnapshots, campaignId, 20, accountId);
 
-      return buildEmptyResult("DATASET_TOO_SMALL", msg, baseInputSummary, executionTimeMs, inserted.id);
+      const emptyResult = buildEmptyResult("DATASET_TOO_SMALL", msg, baseInputSummary, executionTimeMs, inserted.id);
+      return { ...emptyResult, freshnessMetadata: miFreshnessMetadata };
     }
   }
 
@@ -1405,6 +1407,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     engineVersion: AUDIENCE_ENGINE_VERSION,
     executionTimeMs,
     snapshotId: inserted.id,
+    freshnessMetadata: miFreshnessMetadata,
   };
 }
 
@@ -1418,6 +1421,17 @@ export async function getLatestAudienceSnapshot(accountId: string, campaignId: s
     .limit(1);
 
   if (!snapshot) return null;
+
+  let freshnessMetadata = null;
+  if (snapshot.miSnapshotId) {
+    const [miSnap] = await db.select().from(miSnapshots)
+      .where(and(eq(miSnapshots.id, snapshot.miSnapshotId), eq(miSnapshots.accountId, accountId)))
+      .limit(1);
+    if (miSnap) {
+      const { buildFreshnessMetadata } = await import("../shared/snapshot-trust");
+      freshnessMetadata = buildFreshnessMetadata(miSnap);
+    }
+  }
 
   return {
     ...snapshot,
@@ -1434,6 +1448,7 @@ export async function getLatestAudienceSnapshot(accountId: string, campaignId: s
     intentDistribution: JSON.parse(snapshot.audienceIntentDistribution || "{}"),
     adsTargetingHints: JSON.parse(snapshot.adsTargetingHints || "[]"),
     inputSummary: JSON.parse(snapshot.inputSummary || "{}"),
+    freshnessMetadata,
   };
 }
 

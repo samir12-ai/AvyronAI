@@ -74,8 +74,9 @@ A backend and frontend system for auditing feeds, AI usage, gate status, decisio
   - `logFreshnessTraceability()` — structured logging for freshness state at all engine consumption points.
 - **Freshness thresholds**: FRESH ≤24h, AGING ≤7d, NEEDS_REFRESH ≤14d (blocked for strategy), NEEDS_REFRESH >14d (coefficient=1.0).
 - **Positioning Engine block**: `buildFreshnessMetadata()` blocks strategy execution when `blockedForStrategy=true` (NEEDS_REFRESH or INCOMPATIBLE).
-- **MIv3 route response**: `freshnessMetadata` field included in `/api/ci/mi-v3/snapshot/:campaignId` response.
-- **Frontend warning**: `components/DataFreshnessWarning.tsx` renders contextual warning banners (amber for AGING, orange for NEEDS_REFRESH, red for INCOMPATIBLE/blocked) in the Competitive Intelligence panel.
+- **All engine route responses**: `freshnessMetadata` field included in MIv3, Audience, Positioning, Differentiation, Offer, Funnel, Integrity, Awareness, and Persuasion engine API responses.
+- **All engine freshness traceability**: `logFreshnessTraceability()` called in every engine route that consumes MI snapshots — MIv3, Audience, Positioning, Differentiation, Offer, Funnel, Integrity, Awareness, Persuasion.
+- **Frontend warning**: `components/DataFreshnessWarning.tsx` renders contextual warning banners (amber for AGING, orange for NEEDS_REFRESH, red for INCOMPATIBLE/blocked) in both the Competitive Intelligence panel and the Audience Engine section of AI Management.
 
 ### Semantic Data Bridge (MIv3 → Audience Engine)
 - **`server/audience-engine/semantic-bridge.ts`**: Strategic data bridge wiring MIv3 high-fidelity signals directly into Audience Engine's core maps. Master Plan alignment maintained through strict integrity enforcement.

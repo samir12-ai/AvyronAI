@@ -22,6 +22,7 @@ import { ENGINE_VERSION as OFFER_ENGINE_VERSION } from "../offer-engine/constant
 import { ENGINE_VERSION as DIFF_ENGINE_VERSION } from "../differentiation-engine/constants";
 import { POSITIONING_ENGINE_VERSION } from "../positioning-engine/constants";
 import { AUDIENCE_ENGINE_VERSION } from "../audience-engine/constants";
+import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snapshot-trust";
 import { verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
 import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 import { parseLineageFromSnapshot, mergeLineageArrays, findBestParentSignal, createDerivedLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
@@ -179,6 +180,9 @@ export function registerPersuasionEngineRoutes(app: Express) {
           miSnapshot = latest;
         }
       }
+
+      const miFreshnessMetadata = buildFreshnessMetadata(miSnapshot);
+      logFreshnessTraceability("PersuasionEngine", miSnapshot, miFreshnessMetadata);
 
       let [audSnapshot] = await db.select().from(audienceSnapshots)
         .where(and(eq(audienceSnapshots.id, audienceSnapshotId), eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.accountId, accountId)))
@@ -415,6 +419,7 @@ export function registerPersuasionEngineRoutes(app: Express) {
         success: true,
         snapshotId: saved.id,
         ...result,
+        freshnessMetadata: miFreshnessMetadata,
       });
     } catch (error: any) {
       console.error("[PersuasionEngine] Analysis error:", error.message);

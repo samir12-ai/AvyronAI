@@ -45,6 +45,7 @@ import ChannelSelectionEngine from '@/components/ChannelSelectionEngine';
 import IterationEngine from '@/components/IterationEngine';
 import RetentionEngine from '@/components/RetentionEngine';
 import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
+import DataFreshnessWarning from '@/components/DataFreshnessWarning';
 
 interface AIAudience {
   name: string;
@@ -747,6 +748,13 @@ export default function AIManagementScreen() {
             <Text style={[styles.errorText, { color: colors.error }]}>{audienceEngineError}</Text>
           </View>
         ) : null}
+
+        {hasCachedData && (
+          <DataFreshnessWarning
+            freshnessMetadata={ae.freshnessMetadata}
+            onRefresh={handleRunAudienceEngine}
+          />
+        )}
 
         {hasCachedData && ae.status === 'DATASET_TOO_SMALL' && (
           <View style={[styles.aeStatusBanner, { backgroundColor: '#F59E0B' + '18', borderColor: '#F59E0B' + '40' }]}>

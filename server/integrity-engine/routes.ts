@@ -17,6 +17,7 @@ import { ENGINE_VERSION as OFFER_ENGINE_VERSION } from "../offer-engine/constant
 import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/constants";
 import { getEngineReadinessState, verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
 import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
+import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snapshot-trust";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -137,6 +138,9 @@ export function registerIntegrityEngineRoutes(app: Express) {
           return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid MI snapshot found — please run Market Intelligence first" });
         }
       }
+
+      const miFreshnessMetadata = buildFreshnessMetadata(miSnapshot);
+      logFreshnessTraceability("IntegrityEngine", miSnapshot, miFreshnessMetadata);
 
       const [audSnapshot] = await db.select().from(audienceSnapshots)
         .where(and(eq(audienceSnapshots.id, audienceSnapshotId), eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.accountId, accountId)))
@@ -281,6 +285,7 @@ export function registerIntegrityEngineRoutes(app: Express) {
         success: true,
         snapshotId: saved.id,
         ...result,
+        freshnessMetadata: miFreshnessMetadata,
       });
     } catch (error: any) {
       console.error("[IntegrityEngine] Analysis error:", error.message);

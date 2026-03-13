@@ -22,6 +22,7 @@ import { POSITIONING_ENGINE_VERSION } from "../positioning-engine/constants";
 import { AUDIENCE_ENGINE_VERSION } from "../audience-engine/constants";
 import { verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
 import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
+import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snapshot-trust";
 import { parseLineageFromSnapshot, mergeLineageArrays, findBestParentSignal, createDerivedLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 
 function safeJsonParse(text: any): any {
@@ -143,6 +144,9 @@ export function registerAwarenessEngineRoutes(app: Express) {
           return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid MI snapshot found — please run Market Intelligence first" });
         }
       }
+
+      const miFreshnessMetadata = buildFreshnessMetadata(miSnapshot);
+      logFreshnessTraceability("AwarenessEngine", miSnapshot, miFreshnessMetadata);
 
       let [audSnapshot] = await db.select().from(audienceSnapshots)
         .where(and(eq(audienceSnapshots.id, audienceSnapshotId), eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.accountId, accountId)))
@@ -426,6 +430,7 @@ export function registerAwarenessEngineRoutes(app: Express) {
         success: true,
         snapshotId: saved.id,
         ...result,
+        freshnessMetadata: miFreshnessMetadata,
       });
     } catch (error: any) {
       console.error("[AwarenessEngine] Analysis error:", error.message);

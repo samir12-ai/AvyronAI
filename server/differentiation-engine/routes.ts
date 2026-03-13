@@ -7,6 +7,7 @@ import { ENGINE_VERSION } from "./constants";
 import { getEngineReadinessState, verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
 import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/constants";
 import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
+import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snapshot-trust";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -36,7 +37,7 @@ export function registerDifferentiationRoutes(app: Express) {
       }
 
       const [posSnapshot] = await db.select().from(positioningSnapshots)
-        .where(and(eq(positioningSnapshots.id, positioningSnapshotId), eq(positioningSnapshots.campaignId, campaignId)))
+        .where(and(eq(positioningSnapshots.id, positioningSnapshotId), eq(positioningSnapshots.campaignId, campaignId), eq(positioningSnapshots.accountId, accountId)))
         .limit(1);
 
       if (!posSnapshot) {
@@ -50,7 +51,7 @@ export function registerDifferentiationRoutes(app: Express) {
       const audienceSnapshotId = posSnapshot.audienceSnapshotId;
 
       let [miSnapshot] = await db.select().from(miSnapshots)
-        .where(and(eq(miSnapshots.id, miSnapshotId), eq(miSnapshots.campaignId, campaignId)))
+        .where(and(eq(miSnapshots.id, miSnapshotId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId)))
         .limit(1);
 
       if (miSnapshot) {
@@ -64,6 +65,7 @@ export function registerDifferentiationRoutes(app: Express) {
           const [latestMI] = await db.select().from(miSnapshots)
             .where(and(
               eq(miSnapshots.campaignId, campaignId),
+              eq(miSnapshots.accountId, accountId),
               inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
               eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
             ))
@@ -85,6 +87,7 @@ export function registerDifferentiationRoutes(app: Express) {
         const [latestMI] = await db.select().from(miSnapshots)
           .where(and(
             eq(miSnapshots.campaignId, campaignId),
+            eq(miSnapshots.accountId, accountId),
             inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
             eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
           ))
@@ -99,8 +102,11 @@ export function registerDifferentiationRoutes(app: Express) {
         }
       }
 
+      const miFreshnessMetadata = buildFreshnessMetadata(miSnapshot);
+      logFreshnessTraceability("DifferentiationEngine", miSnapshot, miFreshnessMetadata);
+
       const [audSnapshot] = await db.select().from(audienceSnapshots)
-        .where(and(eq(audienceSnapshots.id, audienceSnapshotId), eq(audienceSnapshots.campaignId, campaignId)))
+        .where(and(eq(audienceSnapshots.id, audienceSnapshotId), eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.accountId, accountId)))
         .limit(1);
 
       if (!audSnapshot) {
@@ -184,6 +190,7 @@ export function registerDifferentiationRoutes(app: Express) {
         success: true,
         snapshotId: saved.id,
         ...result,
+        freshnessMetadata: miFreshnessMetadata,
       });
     } catch (error: any) {
       console.error("[DifferentiationEngine] Analysis error:", error.message);

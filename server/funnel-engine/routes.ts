@@ -8,6 +8,7 @@ import { ENGINE_VERSION as OFFER_ENGINE_VERSION } from "../offer-engine/constant
 import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/constants";
 import { getEngineReadinessState, verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
 import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
+import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snapshot-trust";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -123,6 +124,9 @@ export function registerFunnelEngineRoutes(app: Express) {
           return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "MI snapshot not found or campaign/account mismatch" });
         }
       }
+
+      const miFreshnessMetadata = buildFreshnessMetadata(miSnapshot);
+      logFreshnessTraceability("FunnelEngine", miSnapshot, miFreshnessMetadata);
 
       const miReadiness = getEngineReadinessState(miSnapshot, campaignId, MI_ENGINE_VERSION, 14);
       if (miReadiness.state !== "READY") {
@@ -252,6 +256,7 @@ export function registerFunnelEngineRoutes(app: Express) {
         success: true,
         snapshotId: saved.id,
         ...result,
+        freshnessMetadata: miFreshnessMetadata,
       });
     } catch (error: any) {
       console.error("[FunnelEngine] Analysis error:", error.message);

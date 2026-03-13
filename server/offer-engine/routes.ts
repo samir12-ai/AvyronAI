@@ -9,6 +9,7 @@ import { getEngineReadinessState, verifySnapshotIntegrity } from "../market-inte
 import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/constants";
 import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 import { parseLineageFromSnapshot, mergeLineageArrays, findBestParentSignal, createDerivedLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
+import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snapshot-trust";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -119,6 +120,9 @@ export function registerOfferEngineRoutes(app: Express) {
           return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid MI snapshot found — please run Market Intelligence first" });
         }
       }
+
+      const miFreshnessMetadata = buildFreshnessMetadata(miSnapshot);
+      logFreshnessTraceability("OfferEngine", miSnapshot, miFreshnessMetadata);
 
       const [audSnapshot] = await db.select().from(audienceSnapshots)
         .where(and(eq(audienceSnapshots.id, audienceSnapshotId), eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.accountId, accountId)))
@@ -242,6 +246,7 @@ export function registerOfferEngineRoutes(app: Express) {
         success: true,
         snapshotId: saved.id,
         ...result,
+        freshnessMetadata: miFreshnessMetadata,
       });
     } catch (error: any) {
       console.error("[OfferEngine] Analysis error:", error.message);
