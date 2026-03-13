@@ -118,7 +118,7 @@ export function validateSnapshotSchema(snapshot: any, currentVersion: number = E
   if (snapshot.diagnosticsData) {
     try {
       const diag = typeof snapshot.diagnosticsData === "string" ? JSON.parse(snapshot.diagnosticsData) : snapshot.diagnosticsData;
-      if (diag?.schemaVersion) persistedSchemaVersion = diag.schemaVersion;
+      if (diag?.schemaVersion) persistedSchemaVersion = Number(diag.schemaVersion) || null;
     } catch {}
   }
   const snapshotVersion = persistedSchemaVersion ?? snapshot.analysisVersion ?? snapshot.version ?? 0;
