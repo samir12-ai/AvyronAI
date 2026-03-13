@@ -1,0 +1,21 @@
+Subject: Critical Infrastructure Update: Implementation of "Smart Retention" & "Schema Guard" Protocols
+Context:
+We have shifted from "Destructive Startup" to "Data Persistence". However, we must eliminate the risk of Signal Drift and Schema Mismatch. The system must now differentiate between "Saved Data" and "Trustworthy Data" using a multi-layered validation gate.
+1. The "Freshness & Integrity" Protocol
+Implement a Temporal Decay Function on all restored snapshots:
+• Trust Calibration: Any snapshot marked as RESTORED or PARTIAL must be assigned a Staleness_Coefficient based on its timestamp.
+• Threshold: If Snapshot_Age > 7 Days, its status must automatically downgrade to NEEDS_REFRESH, and it cannot feed the Positioning Engine in Strategy Mode.
+• Visual Flag: Agent v1 must explicitly render a "Data Freshness Warning" for any analysis using restored blocks.
+2. The "Schema Guard" (Future-Proofing)
+To prevent system crashes during future updates:
+• Version Mapping: Implement a Schema_Version check inside the snapshot metadata.
+• Soft-Fail Mechanism: If the current engine's required fields do not match the stored snapshot's fields, the system must not attempt to force-load. It must flag the snapshot as INCOMPATIBLE and trigger a re-scraping request instead of crashing.
+3. Stress Test & Pressure Audit (High-Load Simulation)
+Execute a "Hard-Pressure Test" on the backend with the following criteria:
+• Concurrent Engine Access: Simulate 10+ engines requesting the same PARTIAL snapshot simultaneously. Ensure zero deadlocks.
+• Memory Leak Audit: Monitor RAM usage during the Jaccard Dedup process when handling 100+ restored snapshots.
+• Data Integrity Check: Verify that the STALE -> COMPLETE restoration does not overwrite existing active sessions or corrupt the server/shared directory.
+4. Acceptance Criteria (Hard-Gate)
+1. Zero-Crash Policy: The system must handle an Incompatible Schema without a runtime error.
+2. Logic Traceability: Every output from the BEAST Layer must log whether it used FRESH or RESTORED data.
+3. Automatic Purge: Implement a background worker that deletes INCOMPATIBLE or EXPIRED (>30 days) snapshots to maintain the Data Moat's hygiene.
