@@ -2,6 +2,7 @@ import type { Express } from "express";
 import express from "express";
 import { createServer, type Server } from "node:http";
 import { aiChat, aiGemini, Modality } from "./ai-client";
+import { validateRoutingIntegrity } from "./shared/engine-health";
 import multer from "multer";
 import path from "path";
 import { registerPhotographyRoutes } from "./photography-routes";
@@ -40,6 +41,20 @@ import { eq } from "drizzle-orm";
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  app.get("/api/engines/health", async (req, res) => {
+    try {
+      const accountId = (req.query.accountId as string) || "default";
+      const campaignId = req.query.campaignId as string;
+      if (!campaignId) {
+        return res.status(400).json({ error: "campaignId query parameter required" });
+      }
+      const result = await validateRoutingIntegrity(accountId, campaignId);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/generate-content", async (req, res) => {
     try {
       const { topic, contentType, platform, brandName, tone, targetAudience, industry, aiEngine } = req.body;

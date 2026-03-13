@@ -13,6 +13,7 @@ import { computeConfidence } from "./confidence-engine";
 import { computeAllDominance } from "./dominance-module";
 import { computeTokenBudget, applySampling } from "./token-budget";
 import { computeSimilarityDiagnosis } from "./similarity-engine";
+import { applyQualityGate, filterClustersByQuality, type QualityGateResult } from "../shared/signal-quality-gate";
 import { computeAllContentDNA } from "./content-dna";
 import { computeMarketBaseline, computeAllDeviations, computeDynamicThreshold, type DeviationResult, type CalibrationContext } from "./market-baselines";
 import type {
@@ -850,6 +851,15 @@ export class MarketIntelligenceV3 {
     const totalSemanticSignals = signalResults.reduce((s, r) => s + r.semanticSignals.length, 0);
     console.log(`[MIv3] SEMANTIC_SIGNALS | total=${totalSemanticSignals} | clusters=${signalClusters.length} | reinforced=${signalClusters.filter(c => c.reinforcedScore >= 0.3).length}`);
 
+    const qualityGate = applyQualityGate(signalResults, signalClusters);
+    console.log(`[MIv3] SIGNAL_QUALITY_GATE | ${qualityGate.gateSummary}`);
+    console.log(`[MIv3] QUALITY_GATE_DETAIL | input=${qualityGate.totalInputSignals} | passed=${qualityGate.passedSignals.length} | rejected=${qualityGate.rejectedSignals.length} | deduplicated=${qualityGate.deduplicatedCount} | crossValidated=${qualityGate.crossValidatedCount} | avgQuality=${qualityGate.averageQuality}`);
+
+    const clusterQuality = filterClustersByQuality(signalClusters, qualityGate);
+    if (clusterQuality.mergedDuplicates > 0) {
+      console.log(`[MIv3] CLUSTER_DEDUP | original=${clusterQuality.originalClusters} | qualified=${clusterQuality.qualifiedClusters} | mergedDuplicates=${clusterQuality.mergedDuplicates}`);
+    }
+
     const narrativeObjectionMap = extractNarrativeObjections(competitors);
 
     let contentDnaProblemObjections = 0;
@@ -903,8 +913,12 @@ export class MarketIntelligenceV3 {
     }
     console.log(`[MIv3] NARRATIVE_OBJECTIONS | total=${narrativeObjectionMap.totalObjectionsDetected} | multiCompetitor=${narrativeObjectionMap.objectionsFromMultipleCompetitors} | density=${narrativeObjectionMap.objectionDensity} | captions=${narrativeObjectionMap.captionsScanned} | problemStatements=${narrativeObjectionMap.problemStatementsExtracted} | clusters=${narrativeObjectionMap.clusteredObjections.length} | contentDnaBridge=${contentDnaProblemObjections}`);
 
-    const threatSignals = buildThreatSignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, signalClusters);
-    const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, signalClusters);
+    const gatedClusters = qualityGate.gatePass ? clusterQuality.filteredClusters : signalClusters;
+    if (!qualityGate.gatePass) {
+      console.log(`[MIv3] QUALITY_GATE_DEGRADED | Gate failed — using unfiltered clusters for threat/opportunity computation but marking snapshot as PARTIAL`);
+    }
+    const threatSignals = buildThreatSignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, gatedClusters);
+    const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, gatedClusters);
     const similarityData = computeSimilarityDiagnosis(competitors, signalResults);
 
     const numericalSignals = signalResults.reduce((s, r) => s + Object.values(r.signals).filter(v => Math.abs(v) > 0.01).length, 0);
@@ -1083,7 +1097,24 @@ export class MarketIntelligenceV3 {
       similarityData: JSON.stringify(similarityData),
       contentDnaData: JSON.stringify(contentDnaResults),
       deltaReport: deltaReport ? JSON.stringify(deltaReport) : null,
-      diagnosticsData: JSON.stringify(diagnostics),
+      diagnosticsData: JSON.stringify({
+        ...diagnostics,
+        signalQualityGate: {
+          gatePass: qualityGate.gatePass,
+          totalInput: qualityGate.totalInputSignals,
+          passed: qualityGate.passedSignals.length,
+          rejected: qualityGate.rejectedSignals.length,
+          deduplicated: qualityGate.deduplicatedCount,
+          crossValidated: qualityGate.crossValidatedCount,
+          averageQuality: qualityGate.averageQuality,
+          passedSignalIds: qualityGate.passedSignals.map(s => s.signalId),
+          clusterQuality: {
+            original: clusterQuality.originalClusters,
+            qualified: clusterQuality.qualifiedClusters,
+            mergedDuplicates: clusterQuality.mergedDuplicates,
+          },
+        },
+      }),
       objectionMapData: JSON.stringify(narrativeObjectionMap),
       signalLineage: JSON.stringify(miLineage),
       volatilityIndex,
@@ -1091,7 +1122,7 @@ export class MarketIntelligenceV3 {
       overallConfidence: confidence.overall,
       confidenceLevel: confidence.level,
       analysisVersion: ENGINE_VERSION,
-      status: "COMPLETE" as const,
+      status: qualityGate.gatePass ? "COMPLETE" as const : "PARTIAL" as const,
       confirmedRuns,
       previousDirection: trajectoryDirection,
       directionLockedUntil: directionLockedUntil ? new Date(directionLockedUntil) : null,

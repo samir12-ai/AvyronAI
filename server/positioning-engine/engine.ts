@@ -7,6 +7,8 @@ import {
 } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { aiChat } from "../ai-client";
+import { checkForOrphanClaims, type OrphanCheckResult } from "../shared/signal-quality-gate";
+import { enforceGlobalStateRefresh } from "../shared/engine-health";
 import {
   POSITIONING_ENGINE_VERSION,
   POSITIONING_THRESHOLDS,
@@ -1182,6 +1184,21 @@ export async function runPositioningEngine(
 ): Promise<PositioningEngineResult> {
   const startTime = Date.now();
 
+  const stateRefresh = await enforceGlobalStateRefresh(accountId, campaignId);
+  if (stateRefresh.refreshRequired) {
+    console.log(`[PositioningEngine-V3] GLOBAL_STATE_REFRESH_BLOCKED | fresh=${stateRefresh.fresh} | age=${stateRefresh.details.ageInDays}d | versionMatch=${stateRefresh.details.versionMatch}`);
+    const executionTimeMs = Date.now() - startTime;
+    if (!stateRefresh.details.snapshotId) {
+      return buildEmptyResult("MISSING_DEPENDENCY", `Global state refresh failed: No MIv3 snapshot exists for campaign ${campaignId}. Run Market Intelligence first.`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+    }
+    if (!stateRefresh.details.versionMatch) {
+      return buildEmptyResult("MISSING_DEPENDENCY", `Global state refresh failed: MIv3 snapshot version mismatch (expected current engine version). Re-run Market Intelligence to update.`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+    }
+    if (!stateRefresh.fresh) {
+      return buildEmptyResult("MISSING_DEPENDENCY", `Global state refresh failed: MIv3 snapshot is stale (${stateRefresh.details.ageInDays}d old, max 14d). Re-run Market Intelligence.`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+    }
+  }
+
   const [miSnapshot] = await db.select().from(miSnapshots)
     .where(eq(miSnapshots.id, miSnapshotId))
     .limit(1);
@@ -1411,6 +1428,50 @@ export async function runPositioningEngine(
   }
 
   const strategyCards = generateStrategyCards(finalTerritories);
+
+  const strategicSignalGate = {
+    passedSignals: allStrategicSignals.map((s, i) => ({
+      signalId: `STR-${i}`,
+      snippet: s.signal,
+      sourceCompetitor: s.source,
+      category: s.cluster,
+      confidenceScore: 1,
+      sourceCount: 1,
+      freshnessFactor: 1,
+      crossValidated: true,
+      qualityScore: 1,
+    })),
+    totalInputSignals: allStrategicSignals.length,
+    rejectedSignals: [] as any[],
+    deduplicatedCount: 0,
+    crossValidatedCount: allStrategicSignals.length,
+    averageQuality: 1,
+    gatePass: allStrategicSignals.length >= 3,
+    gateSummary: "",
+  };
+
+  let totalOrphanedClaims = 0;
+  let totalTracedClaims = 0;
+  for (const territory of finalTerritories) {
+    const claims = [territory.name, territory.enemyDefinition, territory.contrastAxis, territory.narrativeDirection].filter(Boolean);
+    const orphanResult = checkForOrphanClaims(claims, strategicSignalGate);
+
+    totalOrphanedClaims += orphanResult.orphanedClaims.length;
+    totalTracedClaims += orphanResult.tracedClaims;
+
+    if (orphanResult.orphanedClaims.length > 0) {
+      for (const orphan of orphanResult.orphanedClaims) {
+        if (!territory.stabilityNotes) territory.stabilityNotes = [];
+        territory.stabilityNotes.push(`[HYPOTHESIS] Claim not directly traceable to MIv3 signal: "${orphan.slice(0, 80)}"`);
+      }
+      territory.confidenceScore = Math.max(0, territory.confidenceScore - (orphanResult.orphanedClaims.length * 0.05));
+    }
+  }
+  if (totalOrphanedClaims > 0) {
+    console.log(`[PositioningEngine-V3] ORPHAN_AUDIT | orphaned=${totalOrphanedClaims} | traced=${totalTracedClaims} | territories=${finalTerritories.length} — orphaned claims flagged as [HYPOTHESIS]`);
+  } else {
+    console.log(`[PositioningEngine-V3] ORPHAN_AUDIT | ZERO_ORPHANS | all ${totalTracedClaims} claims traceable to MIv3 signals`);
+  }
 
   const primaryTerritory = finalTerritories[0] || null;
   const executionTimeMs = Date.now() - startTime;

@@ -16,6 +16,7 @@ import { computeAllContentDNA } from "./content-dna";
 import { computeMarketBaseline, computeAllDeviations, type CalibrationContext } from "./market-baselines";
 import { computeSimilarityDiagnosis } from "./similarity-engine";
 import type { CompetitorInput, GoalMode } from "./types";
+import { applyQualityGate, filterClustersByQuality } from "../shared/signal-quality-gate";
 import { logAudit } from "../audit";
 import { acquireStickySession, releaseStickySession, rotateSessionOnBlock, classifyBlock, logProxyTelemetry, getPoolDiagnostics, type StickySessionContext, type BlockClass } from "../competitive-intelligence/proxy-pool-manager";
 import { acquireToken, getBucketState } from "../competitive-intelligence/rate-limiter";
@@ -978,8 +979,16 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   const totalSemanticSignals = signalResults.reduce((s, r) => s + r.semanticSignals.length, 0);
   console.log(`[FetchOrch] SEMANTIC_SIGNALS | total=${totalSemanticSignals} | clusters=${signalClusters.length} | reinforced=${signalClusters.filter(c => c.reinforcedScore >= 0.3).length}`);
 
-  const threatSignals = buildThreatSignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, signalClusters);
-  const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, signalClusters);
+  const qualityGate = applyQualityGate(signalResults, signalClusters);
+  console.log(`[FetchOrch] SIGNAL_QUALITY_GATE | ${qualityGate.gateSummary}`);
+  const clusterQuality = filterClustersByQuality(signalClusters, qualityGate);
+
+  const gatedClusters = qualityGate.gatePass ? clusterQuality.filteredClusters : signalClusters;
+  if (!qualityGate.gatePass) {
+    console.log(`[FetchOrch] QUALITY_GATE_DEGRADED | Gate failed — using unfiltered clusters, snapshot will be PARTIAL`);
+  }
+  const threatSignals = buildThreatSignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, gatedClusters);
+  const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, gatedClusters);
   const similarityData = computeSimilarityDiagnosis(competitorInputs, signalResults);
 
   let narrativeSynthesis: string | null = null;
@@ -1041,12 +1050,28 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     missingSignalFlags: JSON.stringify(missingFlags),
     similarityData: JSON.stringify(similarityData),
     contentDnaData: JSON.stringify(contentDnaResults),
+    diagnosticsData: JSON.stringify({
+      signalQualityGate: {
+        gatePass: qualityGate.gatePass,
+        totalInput: qualityGate.totalInputSignals,
+        passed: qualityGate.passedSignals.length,
+        rejected: qualityGate.rejectedSignals.length,
+        deduplicated: qualityGate.deduplicatedCount,
+        crossValidated: qualityGate.crossValidatedCount,
+        averageQuality: qualityGate.averageQuality,
+        clusterQuality: {
+          original: clusterQuality.originalClusters,
+          qualified: clusterQuality.qualifiedClusters,
+          mergedDuplicates: clusterQuality.mergedDuplicates,
+        },
+      },
+    }),
     volatilityIndex,
     dataFreshnessDays,
     overallConfidence: confidence.overall,
     confidenceLevel: confidence.level,
     analysisVersion: ENGINE_VERSION,
-    status: "COMPLETE" as const,
+    status: qualityGate.gatePass ? "COMPLETE" as const : "PARTIAL" as const,
     dataStatus,
     confirmedRuns: (previousSnapshot?.confirmedRuns || 0) + 1,
     previousDirection: trajectoryDirection,
