@@ -24,6 +24,7 @@ import { MI_COST_LIMITS } from "../market-intelligence-v3/constants";
 import { pruneOldSnapshots, assessDataReliability as sharedAssessDataReliability, normalizeConfidence as sharedNormalizeConfidence, detectGenericOutput } from "../engine-hardening";
 import { aiChat } from "../ai-client";
 import { createSourceLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
+import { executeSemanticBridge, mergeBridgedIntoAudienceMap, validateBridgeIntegrity, type SemanticBridgeResult } from "./semantic-bridge";
 
 interface EvidenceMeta {
   evidenceCount: number;
@@ -114,6 +115,13 @@ export interface AudienceEngineV3Result {
     sanitizedCount: number;
     miSnapshotId: string | null;
     miSnapshotAge: string | null;
+    semanticBridge?: {
+      totalIngested: number;
+      totalPassed: number;
+      conflictsResolved: number;
+      bridgeIntegrity: boolean;
+      cleanPipeEnforced: boolean;
+    };
   };
   engineVersion: number;
   executionTimeMs: number;
@@ -1162,6 +1170,18 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     location: "",
   };
 
+  let bridgeResult: SemanticBridgeResult | null = null;
+  if (latestSnapshot) {
+    bridgeResult = executeSemanticBridge(latestSnapshot);
+    const bridgeValidation = validateBridgeIntegrity(bridgeResult);
+    if (!bridgeValidation.valid) {
+      console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_VALIDATION_FAIL | issues=${bridgeValidation.issues.join("; ")}`);
+      bridgeResult = null;
+    } else {
+      console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_ACTIVE | pains=${bridgeResult.painSignals.length} | desires=${bridgeResult.desireSignals.length} | objections=${bridgeResult.objectionSignals.length} | integrity=${bridgeResult.bridgeIntegrity}`);
+    }
+  }
+
   const allText = [...commentTexts, ...captions];
   const sourceTypes = [];
   if (commentTexts.length > 0) sourceTypes.push("comments");
@@ -1185,11 +1205,31 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
 
   rawObjectionMap = applyObjectionContextRules(rawObjectionMap, allText);
 
-  const painMap = applyEvidenceIntegrityFilter(rawPainMap);
-  const desireMap = applyEvidenceIntegrityFilter(rawDesireMap);
-  const objectionMap = applyEvidenceIntegrityFilter(rawObjectionMap);
+  let painMap = applyEvidenceIntegrityFilter(rawPainMap);
+  let desireMap = applyEvidenceIntegrityFilter(rawDesireMap);
+  let objectionMap = applyEvidenceIntegrityFilter(rawObjectionMap);
   const transformationMap = applyEvidenceIntegrityFilter(rawTransformationMap);
   const emotionalDrivers = applyEvidenceIntegrityFilter(rawEmotionalDrivers);
+
+  let totalBridgeConflicts = 0;
+  if (bridgeResult && bridgeResult.bridgeIntegrity) {
+    const painMerge = mergeBridgedIntoAudienceMap(painMap, bridgeResult.painSignals, miSnapshotId);
+    painMap = painMerge.merged;
+    totalBridgeConflicts += painMerge.conflictsResolved;
+
+    const desireMerge = mergeBridgedIntoAudienceMap(desireMap, bridgeResult.desireSignals, miSnapshotId);
+    desireMap = desireMerge.merged;
+    totalBridgeConflicts += desireMerge.conflictsResolved;
+
+    const objectionMerge = mergeBridgedIntoAudienceMap(objectionMap, bridgeResult.objectionSignals, miSnapshotId);
+    objectionMap = objectionMerge.merged;
+    totalBridgeConflicts += objectionMerge.conflictsResolved;
+
+    if (totalBridgeConflicts > 0) {
+      console.log(`[AudienceEngine-V3] CONFLICT_RESOLUTION | conflictsResolved=${totalBridgeConflicts} | anchor=MIv3_QUALITY_GATED`);
+    }
+    console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_MERGED | pains=${painMap.length} | desires=${desireMap.length} | objections=${objectionMap.length}`);
+  }
 
   let miObjectionDensity = 0;
   let miObjectionCount = 0;
@@ -1275,7 +1315,18 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     statusMessage = "Low signal environment detected — Audience intelligence limited — More market data required";
   }
 
-  const inputSummary = { ...baseInputSummary };
+  const inputSummary = {
+    ...baseInputSummary,
+    ...(bridgeResult ? {
+      semanticBridge: {
+        totalIngested: bridgeResult.totalIngested,
+        totalPassed: bridgeResult.totalPassed,
+        conflictsResolved: totalBridgeConflicts,
+        bridgeIntegrity: bridgeResult.bridgeIntegrity,
+        cleanPipeEnforced: bridgeResult.cleanPipeEnforced,
+      },
+    } : {}),
+  };
 
   const audienceLineage: SignalLineageEntry[] = [];
   painMap.forEach((p: any, i: number) => {
@@ -1291,7 +1342,18 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     const text = typeof d === "string" ? d : (d?.driver || d?.description || d?.canonical || "");
     if (text) audienceLineage.push(createSourceLineageEntry("audience", "emotional_driver", text, i));
   });
-  console.log(`[AudienceEngine-V3] LINEAGE_GENERATED | entries=${audienceLineage.length} | pains=${painMap.length} | desires=${desireMap.length} | objections=${objectionMap.length}`);
+  if (bridgeResult && bridgeResult.bridgeIntegrity) {
+    const allBridgedSignals = [...bridgeResult.painSignals, ...bridgeResult.desireSignals, ...bridgeResult.objectionSignals];
+    allBridgedSignals.forEach((bs, i) => {
+      audienceLineage.push(createSourceLineageEntry(
+        "audience",
+        `bridge_${bs.category}_${bs.bridgeSource}`,
+        `${bs.canonical} [parent:${bs.parentSignalId}]`,
+        i,
+      ));
+    });
+  }
+  console.log(`[AudienceEngine-V3] LINEAGE_GENERATED | entries=${audienceLineage.length} | pains=${painMap.length} | desires=${desireMap.length} | objections=${objectionMap.length} | bridged=${bridgeResult?.totalPassed || 0}`);
 
   const [inserted] = await db.insert(audienceSnapshots).values({
     accountId, campaignId, miSnapshotId,

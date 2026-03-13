@@ -77,6 +77,18 @@ A backend and frontend system for auditing feeds, AI usage, gate status, decisio
 - **MIv3 route response**: `freshnessMetadata` field included in `/api/ci/mi-v3/snapshot/:campaignId` response.
 - **Frontend warning**: `components/DataFreshnessWarning.tsx` renders contextual warning banners (amber for AGING, orange for NEEDS_REFRESH, red for INCOMPATIBLE/blocked) in the Competitive Intelligence panel.
 
+### Semantic Data Bridge (MIv3 → Audience Engine)
+- **`server/audience-engine/semantic-bridge.ts`**: Strategic data bridge wiring MIv3 high-fidelity signals directly into Audience Engine's core maps. Master Plan alignment maintained through strict integrity enforcement.
+  - `executeSemanticBridge()` — extracts semantic signals from MIv3 snapshot (signalData + contentDnaData) and maps them: `pain_signal` + `hook:problem` → Pain Profiles; `desire_signal` + `transformation_statement` → Desire Maps; `audience_objection` + `competitor_weakness` → Objection Maps.
+  - **Clean-Pipe Architecture**: Only signals with Confidence_Score > 0.85 pass through the bridge. Signals below threshold are hard-blocked. Enforced at both semantic signal and Content DNA levels.
+  - **Full Traceability**: Every bridged signal retains `parentSignalId` linking back to its MIv3 source. Zero-tolerance for orphan logic — signals without parent IDs trigger integrity violation and bridge halt.
+  - **Conflict Resolution Protocol**: When MIv3 semantic signals conflict with existing Audience Engine patterns, the MIv3 quality-gated signal takes precedence as the **Strategic Anchor** (based on competitor DNA analysis with quality gate > 0.85).
+  - `mergeBridgedIntoAudienceMap()` — merges bridged signals into existing Audience Engine maps, respecting Strategic Anchor precedence. Existing patterns reinforced when MIv3 confirms them; new patterns added when MIv3 introduces novel signals.
+  - `validateBridgeIntegrity()` — validates bridge output: no orphan signals, no below-threshold signals, clean-pipe enforced. Used by Engine Health endpoint.
+- **Audience Engine Integration**: Bridge executes during `runAudienceEngine()` after MI snapshot fetch but before AI segmentation. Bridged signals merged into painMap, desireMap, objectionMap with full lineage tracking.
+- **Engine Health Validation**: `GET /api/engines/health` now validates `SemanticBridge-MIv3→Audience` — checks bridge integrity, clean-pipe enforcement, and detects inference-without-evidence in audience lineage.
+- **Routing Audit**: Bridge enforces that `contentDnaData` ingestion does not bypass the Fortress Layer or Signal Quality Gate — only quality-gated signals from the MIv3 snapshot are consumed.
+
 ### Concurrency Hardening
 - **MIv3 lock timeout**: Active locks expire after 5 minutes with a timeout guard; stale locks forcefully released if the promise exceeds the timeout.
 - **Batched Jaccard dedup**: `deduplicateSignals()` in `signal-quality-gate.ts` uses category-based batching (batch size 50) for O(n²) Jaccard similarity computation on 100+ signals.

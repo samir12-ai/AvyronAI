@@ -1,7 +1,8 @@
 import { db } from "../db";
-import { miSnapshots } from "../../shared/schema";
+import { miSnapshots, audienceSnapshots } from "../../shared/schema";
 import { inArray, eq, desc, and } from "drizzle-orm";
 import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/engine";
+import { executeSemanticBridge, validateBridgeIntegrity } from "../audience-engine/semantic-bridge";
 
 export interface EngineHealthStatus {
   engine: string;
@@ -133,6 +134,63 @@ export async function validateRoutingIntegrity(
     brokenRoutes.push("MIv3 → Positioning: Stale/version-mismatched data buffer");
     brokenRoutes.push("MIv3 → Offer: Stale/version-mismatched data buffer");
   }
+
+  const audienceBridgeHealth: EngineHealthStatus = {
+    engine: "SemanticBridge-MIv3→Audience",
+    healthy: true,
+    version: MI_ENGINE_VERSION,
+    issues: [],
+  };
+
+  if (miFreshness.snapshotId) {
+    try {
+      const [miSnap] = await db.select().from(miSnapshots)
+        .where(eq(miSnapshots.id, miFreshness.snapshotId))
+        .limit(1);
+
+      if (miSnap) {
+        const bridgeResult = executeSemanticBridge(miSnap);
+        const bridgeValidation = validateBridgeIntegrity(bridgeResult);
+
+        if (!bridgeValidation.valid) {
+          audienceBridgeHealth.healthy = false;
+          audienceBridgeHealth.issues.push(...bridgeValidation.issues);
+          brokenRoutes.push("MIv3 → Audience: Semantic bridge integrity failure");
+        }
+
+        if (!bridgeResult.cleanPipeEnforced) {
+          audienceBridgeHealth.issues.push("Clean-pipe architecture not enforced — unverified signals may reach audience profiles");
+          audienceBridgeHealth.healthy = false;
+        }
+      }
+
+      const [latestAudience] = await db.select().from(audienceSnapshots)
+        .where(and(
+          eq(audienceSnapshots.accountId, accountId),
+          eq(audienceSnapshots.campaignId, campaignId),
+        ))
+        .orderBy(desc(audienceSnapshots.createdAt))
+        .limit(1);
+
+      if (latestAudience?.signalLineage) {
+        try {
+          const lineage = JSON.parse(latestAudience.signalLineage);
+          const bridgeEntries = (lineage as any[]).filter((e: any) => e.category?.startsWith("bridge_"));
+          const orphanEntries = bridgeEntries.filter((e: any) => !e.description?.includes("[parent:"));
+          if (orphanEntries.length > 0) {
+            audienceBridgeHealth.healthy = false;
+            audienceBridgeHealth.issues.push(`Inference without evidence: ${orphanEntries.length} bridged signal(s) lack parent traceability`);
+          }
+        } catch {}
+      }
+    } catch (err) {
+      audienceBridgeHealth.healthy = false;
+      audienceBridgeHealth.issues.push(`Bridge validation error: ${err instanceof Error ? err.message : "unknown"}`);
+    }
+  } else {
+    audienceBridgeHealth.issues.push("No MIv3 snapshot available — semantic bridge inactive");
+  }
+  engines.push(audienceBridgeHealth);
 
   const healthy = engines.every(e => e.healthy) && brokenRoutes.length === 0;
 
