@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { startAutonomousWorker, stopAutonomousWorker } from "./autonomous-worker";
 import { startPublishWorker, stopPublishWorker } from "./publish-worker";
+import { startSnapshotCleanupWorker, stopSnapshotCleanupWorker } from "./snapshot-cleanup-worker";
 import { runAllHealthChecks } from "./meta-token-manager";
 import { invalidateStaleSnapshots } from "./market-intelligence-v3/engine-state";
 import * as fs from "fs";
@@ -264,6 +265,7 @@ function setupErrorHandler(app: express.Application) {
       log(`express server serving on port ${port}`);
       startAutonomousWorker();
       startPublishWorker();
+      startSnapshotCleanupWorker();
 
       invalidateStaleSnapshots().catch(err => console.error("[MIv3] Startup snapshot invalidation error:", err));
 
@@ -282,6 +284,7 @@ function setupErrorHandler(app: express.Application) {
     log(`[Server] ${signal} received — shutting down gracefully...`);
     stopAutonomousWorker();
     await stopPublishWorker();
+    stopSnapshotCleanupWorker();
     server.close(() => {
       log("[Server] HTTP server closed");
       process.exit(0);

@@ -57,6 +57,15 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 ### Audit & Control System
 A backend and frontend system for auditing feeds, AI usage, gate status, decisions, publish history, and job management, presented in a 5-panel dashboard.
 
+### Snapshot Lifecycle Management
+- **Per-engine pruning**: `pruneOldSnapshots()` in `server/engine-hardening/index.ts` runs after every engine write — keeps 20 newest snapshots per campaign per table.
+- **Scheduled bulk cleanup**: `server/snapshot-cleanup-worker.ts` runs every 6 hours with three sweep passes:
+  1. **Time-based retention** — deletes all snapshots older than 90 days across all 16 snapshot tables.
+  2. **Cross-campaign cap enforcement** — ensures no campaign exceeds 20 snapshots per table (bulk version of per-engine pruning).
+  3. **Orphan purge** — deletes snapshots for campaigns that no longer exist in `growth_campaigns`. Safety guard: skips purge if zero active campaigns found.
+- Audit trail: cleanup actions logged via `logAudit("system", "SNAPSHOT_CLEANUP", ...)`.
+- Graceful shutdown: `stopSnapshotCleanupWorker()` called on SIGTERM/SIGINT.
+
 ### Scalability and Thundering Herd Protection
 Includes a global job queue with configurable concurrency limits, per-account job budgets, a shared market data cache, request deduplication, queue prioritization, backpressure mechanisms, and a rate gate.
 
