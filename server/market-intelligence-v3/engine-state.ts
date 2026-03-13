@@ -40,6 +40,8 @@ export interface EngineDiagnostics {
   stalenessCoefficient?: number;
   trustScore?: number;
   schemaCompatible?: boolean;
+  schemaVersion?: number;
+  snapshotSchemaVersion?: number;
 }
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -123,6 +125,8 @@ export function getEngineReadinessState(
   diagnostics.stalenessCoefficient = freshnessMetadata.stalenessCoefficient;
   diagnostics.trustScore = freshnessMetadata.trustScore;
   diagnostics.schemaCompatible = freshnessMetadata.schemaCompatible;
+  diagnostics.schemaVersion = freshnessMetadata.schemaVersion;
+  diagnostics.snapshotSchemaVersion = freshnessMetadata.snapshotVersion;
 
   logFreshnessTraceability("MI", snapshot, freshnessMetadata);
 

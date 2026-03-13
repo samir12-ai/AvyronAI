@@ -1239,7 +1239,8 @@ export async function runPositioningEngine(
   const miFreshnessMetadata = buildFreshnessMetadata(activeMiSnapshot);
   logFreshnessTraceability("PositioningEngine", activeMiSnapshot, miFreshnessMetadata);
 
-  if (miFreshnessMetadata.blockedForStrategy) {
+  const isStrategyMode = true;
+  if (isStrategyMode && miFreshnessMetadata.blockedForStrategy) {
     console.log(`[PositioningEngine-V3] MI freshness BLOCKED | class=${miFreshnessMetadata.freshnessClass} | age=${miFreshnessMetadata.ageInDays}d | trust=${miFreshnessMetadata.trustScore} | schema=${miFreshnessMetadata.schemaRecommendation}`);
     const executionTimeMs = Date.now() - startTime;
     return buildEmptyResult(

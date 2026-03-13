@@ -64,10 +64,15 @@ export function computeStalenessCoefficient(snapshot: any): StalenessResult {
     };
   }
 
+  const wasRestored = snapshot._restored === true || snapshot.restoredFromStale === true;
+
   let freshnessClass: FreshnessClass;
   let coefficient: number;
 
-  if (status === "PARTIAL") {
+  if (wasRestored) {
+    freshnessClass = "RESTORED";
+    coefficient = Math.min(1, 0.15 + (ageInDays / FRESHNESS_THRESHOLDS.NEEDS_REFRESH_MAX_DAYS) * 0.85);
+  } else if (status === "PARTIAL") {
     freshnessClass = "PARTIAL";
     coefficient = Math.min(1, 0.2 + (ageInDays / FRESHNESS_THRESHOLDS.NEEDS_REFRESH_MAX_DAYS) * 0.8);
   } else if (ageInHours <= FRESHNESS_THRESHOLDS.FRESH_MAX_HOURS) {
@@ -97,6 +102,8 @@ export function computeStalenessCoefficient(snapshot: any): StalenessResult {
     warning = `Data is ${Math.round(ageInDays)} days old. Consider re-running analysis for fresher insights.`;
   } else if (freshnessClass === "PARTIAL") {
     warning = `Analysis was completed with partial data. Some signals may be missing.`;
+  } else if (freshnessClass === "RESTORED") {
+    warning = `Data was restored from a previous state. Verify accuracy and consider re-running analysis.`;
   }
 
   return { coefficient, freshnessClass, ageInDays, trustScore, warning, blockedForStrategy };

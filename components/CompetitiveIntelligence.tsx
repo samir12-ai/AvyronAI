@@ -882,7 +882,10 @@ export default function CompetitiveIntelligence() {
               </View>
             </View>
 
-            <DataFreshnessWarning freshnessMetadata={miv3Result?.freshnessMetadata} />
+            <DataFreshnessWarning
+              freshnessMetadata={miv3Result?.freshnessMetadata}
+              onRefresh={() => analyzeMutation.mutate()}
+            />
 
             <View style={{ backgroundColor: isDark ? '#1A2030' : '#F8F9FA', borderRadius: 10, padding: 12, marginBottom: 10, gap: 8 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
