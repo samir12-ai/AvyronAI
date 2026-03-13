@@ -1887,3 +1887,21 @@ export const retentionSnapshots = pgTable("retention_snapshots", {
 });
 
 export type RetentionSnapshot = typeof retentionSnapshots.$inferSelect;
+
+export const snapshotArchive = pgTable("snapshot_archive", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  originalId: varchar("original_id").notNull(),
+  sourceTable: varchar("source_table").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id"),
+  originalStatus: text("original_status").notNull(),
+  engineVersion: integer("engine_version"),
+  archiveReason: text("archive_reason").notNull(),
+  snapshotData: text("snapshot_data"),
+  originalCreatedAt: timestamp("original_created_at"),
+  archivedAt: timestamp("archived_at").defaultNow(),
+});
+
+export type SnapshotArchive = typeof snapshotArchive.$inferSelect;

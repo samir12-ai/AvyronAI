@@ -41,7 +41,7 @@ A backend and frontend system for auditing feeds, AI usage, gate status, decisio
 Engine components in AI Management (Positioning, Differentiation, Offer, Funnel, Integrity, Awareness, Persuasion, Statistical Validation, Budget Governor, Channel Selection, Iteration, Retention) use a "lazy mount, keep alive" rendering pattern. Once an engine tab is first visited, the component stays mounted (hidden with `display: 'none'`) when switching to other tabs, preserving React state and analysis results without requiring re-fetch from the database.
 
 ### Snapshot Lifecycle Management
-Manages snapshot pruning (keeping 20 newest per campaign per table), scheduled bulk cleanup with tiered expiry, and orphan purges, all with audit logging and graceful shutdown.
+Operates in DATA_ARCHIVING mode (not immediate purge). COMPLETE/RESTORED/PARTIAL snapshots are protected for 30 days minimum. INCOMPATIBLE snapshots are archived to `snapshot_archive` table for recovery instead of deleted. Active session protection ensures the latest snapshot per campaign per table is never cleaned. The worker delays initial run by 5 minutes after startup. Only orphaned data (no parent campaign) and non-protected data exceeding the 30-day cold storage limit are targeted for cleanup. Per-campaign cap remains at 20 snapshots.
 
 ### Snapshot Trust & Freshness System
 A core module for temporal decay scoring, schema validation, and freshness classification, providing staleness coefficients, freshness classes (FRESH/AGING/NEEDS_REFRESH/PARTIAL/INCOMPATIBLE), trust scores, and strategy-blocking statuses. Freshness metadata is included in all engine route responses and triggers frontend warnings.

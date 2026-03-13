@@ -130,6 +130,7 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
   const router = useRouter();
 
   const [expandedStep, setExpandedStep] = useState<number | null>(null);
+  const [visitedSteps, setVisitedSteps] = useState<Set<number>>(new Set());
   const [plans, setPlans] = useState<PlanData[]>([]);
   const [account, setAccount] = useState<AccountData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -233,7 +234,16 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
     const status = getStepStatus(index);
     if (status === 'locked') return;
     Platform.OS !== 'web' && Haptics.selectionAsync();
-    setExpandedStep(expandedStep === index ? null : index);
+    const newExpanded = expandedStep === index ? null : index;
+    setExpandedStep(newExpanded);
+    if (newExpanded !== null) {
+      setVisitedSteps(prev => {
+        if (prev.has(newExpanded)) return prev;
+        const next = new Set(prev);
+        next.add(newExpanded);
+        return next;
+      });
+    }
   };
 
   const handleApprove = useCallback(async (planId: string) => {
@@ -973,8 +983,8 @@ export default function StrategicPipeline({ onNavigateToCalendar }: StrategicPip
               </Pressable>
             </View>
 
-            {isExpanded && (
-              <View style={s.expandedContent}>
+            {visitedSteps.has(index) && (
+              <View style={[s.expandedContent, { display: isExpanded ? 'flex' : 'none' }]}>
                 {renderStepContent(index)}
               </View>
             )}

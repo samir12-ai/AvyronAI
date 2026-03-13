@@ -1,0 +1,13 @@
+Technical Directive: UI Persistence & Snapshot Retention Fix
+Objective: Eliminate data loss when navigating between engine sections and stabilize the Snapshot Cleanup background worker to prevent premature data destruction.
+1. Data Persistence & Hydration Logic:
+The system must stop losing analysis results during UI tab switching. Implement a global state persistence layer for MIv3, Audience, and Positioning engines. When a user mounts an engine component, the system must prioritize fetching the latest existing snapshot from the database (Rehydration) instead of defaulting to an empty state or triggering a destructive cleanup. The UI should only show an empty state if NO snapshots exist in the database for the current user/project.
+2. Snapshot Cleaner Re-Configuration (The Global Standard):
+The background cleanup worker is currently too aggressive and must be re-configured to follow standard "Data Archiving" protocols rather than "Immediate Purge" logic. Apply these strict rules:
+• Zero-Touch Retention: Any snapshot marked as COMPLETE, RESTORED, or PARTIAL must be protected from deletion for a minimum of 30 days.
+• Incompatibility Handling: Snapshots flagged as INCOMPATIBLE (Schema Mismatch) should be archived/moved to a legacy table instead of being deleted, allowing for potential data recovery or version-rollback.
+• Active Session Protection: The cleaner is strictly forbidden from touching any snapshot associated with an active session or the "Last Viewed" ID in the user's state.
+• Cleanup Trigger: The cleaner should only target orphaned data (snapshots with no parent project) or data exceeding the 30-day "Cold Storage" limit.
+3. Execution Architecture:
+Ensure the StrategicPipeline component keeps the engine states "Alive" in the background. When switching between "Overview" and "Threats," the React component should not unmount the data. If a refresh is needed, it must be a manual user-triggered action or a silent background update that doesn't wipe the current view.
+Verify that the 'Startup Audit' does not trigger the cleaner prematurely. Persistence is now the priority over disk space.
