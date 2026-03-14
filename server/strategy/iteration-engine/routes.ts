@@ -85,7 +85,24 @@ export function registerIterationEngineRoutes(app: Express) {
         });
       }
 
-      const result = await runIterationEngine(performance, funnel, creative, persuasion);
+      const dbPerformance: import("./types").IterationPerformanceInput = {
+        campaignId,
+        spend: campaignData.spend || 0,
+        impressions: campaignData.impressions || 0,
+        clicks: campaignData.clicks || 0,
+        conversions: campaignData.conversions || 0,
+        revenue: campaignData.revenue || 0,
+        reach: campaignData.impressions || 0,
+        ctr: campaignData.impressions > 0 ? (campaignData.clicks || 0) / campaignData.impressions : 0,
+        cpc: campaignData.clicks > 0 ? (campaignData.spend || 0) / campaignData.clicks : 0,
+        cpa: campaignData.conversions > 0 ? (campaignData.spend || 0) / campaignData.conversions : 0,
+        roas: campaignData.spend > 0 ? (campaignData.revenue || 0) / campaignData.spend : 0,
+        engagementRate: campaignData.impressions > 0 ? (campaignData.clicks || 0) / campaignData.impressions : 0,
+      };
+
+      const effectivePerformance = performance || dbPerformance;
+
+      const result = await runIterationEngine(effectivePerformance, funnel, creative, persuasion);
 
       const [saved] = await db.insert(iterationSnapshots).values({
         accountId,
