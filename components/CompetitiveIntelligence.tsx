@@ -128,10 +128,10 @@ export default function CompetitiveIntelligence() {
   });
 
   useEffect(() => {
-    if (cachedSnapshot && cachedSnapshot.snapshot?.campaignId === activeCampaignId) {
+    if (cachedSnapshot) {
       setMiv3Result(cachedSnapshot);
     }
-  }, [cachedSnapshot, activeCampaignId]);
+  }, [cachedSnapshot]);
 
   useEffect(() => {
     setMiv3Result(null);

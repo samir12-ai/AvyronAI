@@ -95,7 +95,79 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
 
   const channel = results.get("channel_selection");
   if (channel?.status === "SUCCESS" && channel.output) {
-    sections.push(`Channel Selection: channels selected`);
+    const out = channel.output.output || channel.output;
+    const primary = out.primaryChannel?.channelName || out.primaryChannel?.name || "unknown";
+    const secondary = out.secondaryChannel?.channelName || out.secondaryChannel?.name || "none";
+    const rejected = out.rejectedChannels?.length || 0;
+    sections.push(`Channel Selection: primary "${primary}", secondary "${secondary}", ${rejected} rejected`);
+  }
+
+  const diff = results.get("differentiation");
+  if (diff?.status === "SUCCESS" && diff.output) {
+    const out = diff.output.output || diff.output;
+    const pillars = out.pillars?.length || 0;
+    const claims = out.claimStructures?.length || 0;
+    const proofAssets = out.proofArchitecture?.length || 0;
+    const authorityMode = out.authorityMode?.mode || out.authorityMode || "unknown";
+    sections.push(`Differentiation: ${pillars} pillars, ${claims} claim structures, ${proofAssets} proof assets, authority mode: ${authorityMode}`);
+  }
+
+  const integrity = results.get("integrity");
+  if (integrity?.status === "SUCCESS" && integrity.output) {
+    const out = integrity.output.output || integrity.output;
+    const score = out.confidenceScore ?? "N/A";
+    const warnings = out.structuralWarnings?.length || 0;
+    const stable = out.stabilityResult?.stable ?? "unknown";
+    sections.push(`Integrity: confidence ${score}, ${warnings} structural warnings, stable: ${stable}`);
+  }
+
+  const awareness = results.get("awareness");
+  if (awareness?.status === "SUCCESS" && awareness.output) {
+    const out = awareness.output.output || awareness.output;
+    const primaryRoute = out.primaryRoute?.routeName || out.primaryRoute?.name || "unknown";
+    const layers = out.layerResults?.length || 0;
+    const confidence = out.confidenceScore ?? "N/A";
+    sections.push(`Awareness: primary route "${primaryRoute}", ${layers} layer results, confidence ${confidence}`);
+  }
+
+  const persuasion = results.get("persuasion");
+  if (persuasion?.status === "SUCCESS" && persuasion.output) {
+    const out = persuasion.output.output || persuasion.output;
+    const primaryRoute = out.primaryRoute?.routeName || out.primaryRoute?.name || "unknown";
+    const altRoute = out.alternativeRoute?.routeName || "none";
+    const layers = out.layerResults?.length || 0;
+    sections.push(`Persuasion: primary route "${primaryRoute}", alternative "${altRoute}", ${layers} layer results`);
+  }
+
+  const statVal = results.get("statistical_validation");
+  if (statVal?.status === "SUCCESS" && statVal.output) {
+    const out = statVal.output.output || statVal.output;
+    const state = out.validationState || "unknown";
+    const claimConfidence = out.claimConfidenceScore ?? "N/A";
+    const warnings = out.structuralWarnings?.length || 0;
+    const claimValidations = out.claimValidations?.length || 0;
+    sections.push(`Statistical Validation: state ${state}, claim confidence ${claimConfidence}, ${claimValidations} claims validated, ${warnings} warnings`);
+  }
+
+  const iteration = results.get("iteration");
+  if (iteration?.status === "SUCCESS" && iteration.output) {
+    const out = iteration.output.output || iteration.output;
+    const hypotheses = out.nextTestHypotheses?.length || 0;
+    const targets = out.optimizationTargets?.length || 0;
+    const failedFlags = out.failedStrategyFlags?.length || 0;
+    const planSteps = out.iterationPlan?.length || 0;
+    sections.push(`Iteration: ${hypotheses} test hypotheses, ${targets} optimization targets, ${planSteps} plan steps, ${failedFlags} failed strategy flags`);
+  }
+
+  const retention = results.get("retention");
+  if (retention?.status === "SUCCESS" && retention.output) {
+    const out = retention.output.output || retention.output;
+    const loops = out.retentionLoops?.length || 0;
+    const churnRisks = out.churnRiskFlags?.length || 0;
+    const ltvPaths = out.ltvExpansionPaths?.length || 0;
+    const upsells = out.upsellTriggers?.length || 0;
+    const confidence = out.confidenceScore ?? "N/A";
+    sections.push(`Retention: ${loops} retention loops, ${churnRisks} churn risk flags, ${ltvPaths} LTV paths, ${upsells} upsell triggers, confidence ${confidence}`);
   }
 
   return sections.join("\n");

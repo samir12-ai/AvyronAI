@@ -14,6 +14,7 @@ import { validateExecutionRoute } from "../engine-contracts/execution-map";
 import { enforceOutputType } from "../engine-contracts/type-enforcement";
 import { globalRegistry } from "../engine-contracts/engine-registry";
 import { assertSnapshotReadOnly, assertNoComputeFromExternal } from "../market-intelligence-v3/isolation-guard";
+import { runOrchestrator } from "../orchestrator/index";
 
 function enforceBuildAPlanSnapshotOnly(operation: string): void {
   assertSnapshotReadOnly("BUILD_A_PLAN_ORCHESTRATOR", operation);
@@ -498,6 +499,23 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
     } catch (err) { log("PERF_INTEL_SKIPPED", { error: (err as Error).message }); }
 
     log("CONTEXT_BUILT");
+
+    try {
+      log("V2_ORCHESTRATOR_START", { accountId, campaignId });
+      const v2Result = await runOrchestrator({
+        accountId,
+        campaignId: campaignId || "default",
+        forceRefresh: false,
+      });
+      log("V2_ORCHESTRATOR_COMPLETE", {
+        status: v2Result.status,
+        enginesCompleted: v2Result.completedEngines.length,
+        planId: v2Result.planId || "none",
+        durationMs: v2Result.durationMs,
+      });
+    } catch (v2Err: any) {
+      log("V2_ORCHESTRATOR_ERROR", { error: v2Err.message });
+    }
 
     let strategicContext: StrategicContext | null = null;
     try {

@@ -8,6 +8,20 @@ import {
   studioItems,
   orchestratorJobs,
   manualCampaignMetrics,
+  miSnapshots,
+  audienceSnapshots,
+  positioningSnapshots,
+  differentiationSnapshots,
+  offerSnapshots,
+  funnelSnapshots,
+  integritySnapshots,
+  awarenessSnapshots,
+  persuasionSnapshots,
+  strategyValidationSnapshots,
+  budgetGovernorSnapshots,
+  channelSelectionSnapshots,
+  iterationSnapshots,
+  retentionSnapshots,
 } from "@shared/schema";
 import { eq, and, desc, count, sql } from "drizzle-orm";
 
@@ -33,6 +47,7 @@ export interface SystemContext {
   } | null;
   performance: any;
   engineStatus: any;
+  engineSnapshots: Record<string, { id: string; status: string; createdAt: any }>;
   warnings: string[];
 }
 
@@ -164,6 +179,49 @@ export async function loadSystemContext(
     .orderBy(desc(manualCampaignMetrics.createdAt))
     .limit(1);
 
+  const engineSnapshots: Record<string, { id: string; status: string; createdAt: any }> = {};
+  const snapshotTablesWithStatus = [
+    { name: "market_intelligence", table: miSnapshots },
+    { name: "positioning", table: positioningSnapshots },
+    { name: "differentiation", table: differentiationSnapshots },
+    { name: "offer", table: offerSnapshots },
+    { name: "funnel", table: funnelSnapshots },
+    { name: "integrity", table: integritySnapshots },
+    { name: "awareness", table: awarenessSnapshots },
+    { name: "persuasion", table: persuasionSnapshots },
+    { name: "statistical_validation", table: strategyValidationSnapshots },
+    { name: "budget_governor", table: budgetGovernorSnapshots },
+    { name: "channel_selection", table: channelSelectionSnapshots },
+    { name: "iteration", table: iterationSnapshots },
+    { name: "retention", table: retentionSnapshots },
+  ] as const;
+
+  for (const { name, table } of snapshotTablesWithStatus) {
+    try {
+      const [snap] = await db
+        .select({ id: table.id, status: table.status, createdAt: table.createdAt })
+        .from(table)
+        .where(and(eq(table.campaignId, campaignId), eq(table.accountId, accountId)))
+        .orderBy(desc(table.createdAt))
+        .limit(1);
+      if (snap) {
+        engineSnapshots[name] = { id: snap.id, status: snap.status || "COMPLETE", createdAt: snap.createdAt };
+      }
+    } catch {}
+  }
+
+  try {
+    const [audSnap] = await db
+      .select({ id: audienceSnapshots.id, createdAt: audienceSnapshots.createdAt })
+      .from(audienceSnapshots)
+      .where(and(eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.accountId, accountId)))
+      .orderBy(desc(audienceSnapshots.createdAt))
+      .limit(1);
+    if (audSnap) {
+      engineSnapshots["audience"] = { id: audSnap.id, status: "COMPLETE", createdAt: audSnap.createdAt };
+    }
+  } catch {}
+
   return {
     businessProfile: bizData ? {
       businessType: bizData.businessType,
@@ -204,6 +262,7 @@ export async function loadSystemContext(
       durationMs: latestOrchJob.durationMs,
       completedAt: latestOrchJob.completedAt,
     } : null,
+    engineSnapshots,
     warnings,
   };
 }
@@ -260,6 +319,25 @@ export function buildSystemPrompt(context: SystemContext): string {
 
   if (context.engineStatus) {
     lines.push(`ENGINES: Last run ${context.engineStatus.status} | ${context.engineStatus.sections?.filter((s: any) => s.status === "SUCCESS").length || 0} engines completed`);
+  }
+
+  const snapKeys = Object.keys(context.engineSnapshots || {});
+  if (snapKeys.length > 0) {
+    lines.push(`ENGINE SNAPSHOTS (${snapKeys.length}/14 available):`);
+    for (const [name, snap] of Object.entries(context.engineSnapshots)) {
+      lines.push(`  ${name}: ${snap.status} (${snap.createdAt ? new Date(snap.createdAt).toLocaleDateString() : "unknown date"})`);
+    }
+    const missing = [
+      "market_intelligence", "audience", "positioning", "differentiation",
+      "offer", "funnel", "integrity", "awareness", "persuasion",
+      "statistical_validation", "budget_governor", "channel_selection",
+      "iteration", "retention"
+    ].filter(e => !context.engineSnapshots[e]);
+    if (missing.length > 0) {
+      lines.push(`  Missing: ${missing.join(", ")}`);
+    }
+  } else {
+    lines.push("ENGINE SNAPSHOTS: None available — run orchestrator to generate");
   }
 
   if (context.warnings.length > 0) {
