@@ -137,12 +137,15 @@ interface GateInputs {
   assetDescription: string;
   primaryKpi: string;
   dataWindowDays: string;
-  spend: string;
-  impressions: string;
-  clicks: string;
-  leads: string;
-  purchases: string;
-  revenue: string;
+}
+
+interface CampaignMetricsData {
+  spend: number;
+  impressions: number;
+  clicks: number;
+  leads: number;
+  revenue: number;
+  conversions: number;
 }
 
 const KPI_OPTIONS = ['CTR', 'ROAS', 'CPA', 'Conversion Rate', 'Revenue', 'Leads', 'Impressions'];
@@ -162,8 +165,8 @@ export default function IterationEngine({ isActive }: { isActive?: boolean }) {
   const [gateMissing, setGateMissing] = useState<string[]>([]);
   const [gateInputs, setGateInputs] = useState<GateInputs>({
     hasExistingAsset: false, assetDescription: '', primaryKpi: '', dataWindowDays: '',
-    spend: '', impressions: '', clicks: '', leads: '', purchases: '', revenue: '',
   });
+  const [campaignMetrics, setCampaignMetrics] = useState<CampaignMetricsData | null>(null);
   const [savingGate, setSavingGate] = useState(false);
 
   const fetchGateStatus = useCallback(async () => {
@@ -174,18 +177,13 @@ export default function IterationEngine({ isActive }: { isActive?: boolean }) {
       const json = await safeApiJson(res);
       setGateStatus(json.gateStatus === 'unlocked' ? 'unlocked' : 'locked');
       setGateMissing(json.missingRequirements || []);
+      setCampaignMetrics(json.campaignMetrics || null);
       if (json.inputs) {
         setGateInputs({
           hasExistingAsset: json.inputs.hasExistingAsset || false,
           assetDescription: json.inputs.assetDescription || '',
           primaryKpi: json.inputs.primaryKpi || '',
           dataWindowDays: json.inputs.dataWindowDays?.toString() || '',
-          spend: json.inputs.spend?.toString() || '',
-          impressions: json.inputs.impressions?.toString() || '',
-          clicks: json.inputs.clicks?.toString() || '',
-          leads: json.inputs.leads?.toString() || '',
-          purchases: json.inputs.purchases?.toString() || '',
-          revenue: json.inputs.revenue?.toString() || '',
         });
       }
     } catch (err) {
@@ -208,18 +206,13 @@ export default function IterationEngine({ isActive }: { isActive?: boolean }) {
           assetDescription: gateInputs.assetDescription,
           primaryKpi: gateInputs.primaryKpi,
           dataWindowDays: gateInputs.dataWindowDays || null,
-          spend: gateInputs.spend || null,
-          impressions: gateInputs.impressions || null,
-          clicks: gateInputs.clicks || null,
-          leads: gateInputs.leads || null,
-          purchases: gateInputs.purchases || null,
-          revenue: gateInputs.revenue || null,
         }),
       });
       const json = await safeApiJson(res);
       if (json.success) {
         setGateStatus(json.gateStatus === 'unlocked' ? 'unlocked' : 'locked');
         setGateMissing(json.missingRequirements || []);
+        setCampaignMetrics(json.campaignMetrics || null);
         Haptics.notificationAsync(
           json.gateStatus === 'unlocked'
             ? Haptics.NotificationFeedbackType.Success
@@ -647,22 +640,44 @@ export default function IterationEngine({ isActive }: { isActive?: boolean }) {
           ))}
         </View>
 
-        <Text style={[styles.gateLabel, { color: colors.text, marginTop: 12 }]}>Performance Metrics (at least 1)</Text>
-        <View style={styles.gateMetricsGrid}>
-          {(['spend', 'impressions', 'clicks', 'leads', 'purchases', 'revenue'] as const).map(metric => (
-            <View key={metric} style={styles.gateMetricItem}>
-              <Text style={[styles.gateMetricLabel, { color: colors.textSecondary }]}>{metric.charAt(0).toUpperCase() + metric.slice(1)}</Text>
-              <TextInput
-                style={[styles.gateMetricInput, { color: colors.text, borderColor: colors.cardBorder, backgroundColor: colors.background }]}
-                placeholder="0"
-                placeholderTextColor={colors.textMuted}
-                keyboardType="numeric"
-                value={gateInputs[metric]}
-                onChangeText={(v) => setGateInputs(prev => ({ ...prev, [metric]: v }))}
-              />
+        <Text style={[styles.gateLabel, { color: colors.text, marginTop: 12 }]}>Campaign Performance Data</Text>
+        {campaignMetrics ? (
+          <View style={[styles.gateConnectedBox, { backgroundColor: '#10B98110' }]}>
+            <View style={styles.gateConnectedHeader}>
+              <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+              <Text style={[styles.gateConnectedText, { color: '#10B981' }]}>Connected from Campaign Metrics</Text>
             </View>
-          ))}
-        </View>
+            <View style={styles.gateMetricsGrid}>
+              {([
+                ['Spend', campaignMetrics.spend],
+                ['Impressions', campaignMetrics.impressions],
+                ['Clicks', campaignMetrics.clicks],
+                ['Leads', campaignMetrics.leads],
+                ['Revenue', campaignMetrics.revenue],
+                ['Conversions', campaignMetrics.conversions],
+              ] as [string, number][]).map(([label, val]) => (
+                <View key={label} style={styles.gateMetricItem}>
+                  <Text style={[styles.gateMetricLabel, { color: colors.textSecondary }]}>{label}</Text>
+                  <View style={[styles.gateMetricDisplay, { backgroundColor: colors.background, borderColor: colors.cardBorder }]}>
+                    <Text style={[styles.gateMetricValue, { color: val > 0 ? '#10B981' : colors.textMuted }]}>
+                      {label === 'Spend' || label === 'Revenue' ? `$${val.toLocaleString()}` : val.toLocaleString()}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : (
+          <View style={[styles.gateConnectedBox, { backgroundColor: '#EF444410' }]}>
+            <View style={styles.gateConnectedHeader}>
+              <Ionicons name="alert-circle" size={14} color="#EF4444" />
+              <Text style={[styles.gateConnectedText, { color: '#EF4444' }]}>No campaign metrics found</Text>
+            </View>
+            <Text style={[styles.gateConnectedSubtext, { color: colors.textMuted }]}>
+              Enter performance data in Settings → Campaign Metrics to unlock this requirement.
+            </Text>
+          </View>
+        )}
 
         <Pressable
           onPress={saveGateInputs}
@@ -933,10 +948,15 @@ const styles = StyleSheet.create({
   gateChipRowWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 4 },
   gateChip: { borderWidth: 1, borderColor: '#76768030', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, marginRight: 6 },
   gateChipText: { fontSize: 12, fontWeight: '500' as const },
-  gateMetricsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  gateMetricsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
   gateMetricItem: { width: '30%' as any, minWidth: 90 },
   gateMetricLabel: { fontSize: 11, fontWeight: '500' as const, marginBottom: 4 },
-  gateMetricInput: { borderWidth: 1, borderRadius: 8, padding: 8, fontSize: 13, textAlign: 'center' as const },
+  gateMetricDisplay: { borderWidth: 1, borderRadius: 8, padding: 8, alignItems: 'center' as const },
+  gateMetricValue: { fontSize: 13, fontWeight: '600' as const },
+  gateConnectedBox: { borderRadius: 10, padding: 12, marginBottom: 12 },
+  gateConnectedHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  gateConnectedText: { fontSize: 12, fontWeight: '600' as const },
+  gateConnectedSubtext: { fontSize: 12, lineHeight: 16, marginTop: 4 },
   gateSaveBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderRadius: 10, padding: 12 },
   gateSaveBtnText: { fontSize: 13, fontWeight: '600' as const },
 });

@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { db } from "../../db";
 import { retentionSnapshots, manualRetentionMetrics, retentionGateInputs } from "@shared/schema";
+
 import { eq, and, desc } from "drizzle-orm";
 import { runRetentionEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
@@ -47,8 +48,22 @@ export function registerRetentionEngineRoutes(app: Express) {
         ))
         .limit(1);
 
+      const [retentionData] = await db.select().from(manualRetentionMetrics)
+        .where(and(
+          eq(manualRetentionMetrics.campaignId, campaignId),
+          eq(manualRetentionMetrics.accountId, accountId),
+        ))
+        .limit(1);
+
+      const hasCustomerData = retentionData && (
+        (retentionData.monthlyCustomers != null && retentionData.monthlyCustomers > 0) ||
+        (retentionData.repeatPurchaseRate != null && retentionData.repeatPurchaseRate > 0) ||
+        (retentionData.averageOrderValue != null && retentionData.averageOrderValue > 0)
+      );
+      const hasExistingCustomers = (gateInputs?.hasExistingCustomers) || !!hasCustomerData;
+
       const gateMissing: string[] = [];
-      if (!gateInputs || !gateInputs.hasExistingCustomers) gateMissing.push("Confirmation that the business has existing or past customers");
+      if (!hasExistingCustomers) gateMissing.push("Confirmation that the business has existing or past customers");
       if (!gateInputs || !gateInputs.retentionGoal) gateMissing.push("A retention goal (repeat purchase, renewal, churn reduction, or win-back)");
       if (!gateInputs || !gateInputs.businessModel) gateMissing.push("Business model (one-time purchase, recurring subscription, retainer, or repeat purchase)");
       if (!gateInputs || !gateInputs.reachableAudience) gateMissing.push("A reachable audience after purchase (customer list, email, WhatsApp, phone, or community)");

@@ -139,6 +139,7 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
   const [gateInputs, setGateInputs] = useState<RetentionGateInputs>({
     hasExistingCustomers: false, retentionGoal: '', businessModel: '', reachableAudience: '',
   });
+  const [hasCustomerData, setHasCustomerData] = useState(false);
   const [savingGate, setSavingGate] = useState(false);
 
   const fetchGateStatus = useCallback(async () => {
@@ -149,6 +150,7 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
       const json = await safeApiJson(res);
       setGateStatus(json.gateStatus === 'unlocked' ? 'unlocked' : 'locked');
       setGateMissing(json.missingRequirements || []);
+      setHasCustomerData(json.hasCustomerData || false);
       if (json.inputs) {
         setGateInputs({
           hasExistingCustomers: json.inputs.hasExistingCustomers || false,
@@ -178,6 +180,7 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
       if (json.success) {
         setGateStatus(json.gateStatus === 'unlocked' ? 'unlocked' : 'locked');
         setGateMissing(json.missingRequirements || []);
+        setHasCustomerData(json.hasCustomerData || false);
         Haptics.notificationAsync(
           json.gateStatus === 'unlocked'
             ? Haptics.NotificationFeedbackType.Success
@@ -366,12 +369,23 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
         <View style={styles.gateRow}>
           <Text style={[styles.gateLabel, { color: colors.text }]}>Has existing customers?</Text>
           <Switch
-            value={gateInputs.hasExistingCustomers}
+            value={gateInputs.hasExistingCustomers || hasCustomerData}
             onValueChange={(v) => setGateInputs(prev => ({ ...prev, hasExistingCustomers: v }))}
             trackColor={{ false: '#76768020', true: ENGINE_COLOR + '40' }}
-            thumbColor={gateInputs.hasExistingCustomers ? ENGINE_COLOR : '#f4f3f4'}
+            thumbColor={(gateInputs.hasExistingCustomers || hasCustomerData) ? ENGINE_COLOR : '#f4f3f4'}
           />
         </View>
+        {hasCustomerData && (
+          <View style={[styles.gateConnectedBox, { backgroundColor: '#10B98110' }]}>
+            <View style={styles.gateConnectedHeader}>
+              <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+              <Text style={[styles.gateConnectedText, { color: '#10B981' }]}>Auto-detected from Retention Metrics</Text>
+            </View>
+            <Text style={[styles.gateConnectedSubtext, { color: colors.textMuted }]}>
+              Customer data found in your retention metrics. This requirement is satisfied.
+            </Text>
+          </View>
+        )}
 
         <Text style={[styles.gateLabel, { color: colors.text, marginTop: 12 }]}>Retention Goal</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.gateChipRow}>
@@ -833,6 +847,10 @@ const styles = StyleSheet.create({
   gateChipRow: { marginBottom: 4 },
   gateChip: { borderWidth: 1, borderColor: '#76768030', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, marginRight: 6 },
   gateChipText: { fontSize: 12, fontWeight: '500' as const },
+  gateConnectedBox: { borderRadius: 10, padding: 12, marginBottom: 8 },
+  gateConnectedHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  gateConnectedText: { fontSize: 12, fontWeight: '600' as const },
+  gateConnectedSubtext: { fontSize: 12, lineHeight: 16, marginTop: 4 },
   gateSaveBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderRadius: 10, padding: 12 },
   gateSaveBtnText: { fontSize: 13, fontWeight: '600' as const },
 });

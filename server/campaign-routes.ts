@@ -570,25 +570,39 @@ export function registerCampaignRoutes(app: Express) {
         ))
         .limit(1);
 
-      if (!existing) {
-        return res.json({ success: true, inputs: null, gateStatus: "locked" });
-      }
+      const [campaignData] = await db.select().from(manualCampaignMetrics)
+        .where(and(
+          eq(manualCampaignMetrics.campaignId, campaignId),
+          eq(manualCampaignMetrics.accountId, accountId)
+        ))
+        .limit(1);
 
       const missing: string[] = [];
-      if (!existing.hasExistingAsset) missing.push("Existing campaign, asset, or funnel to iterate on");
-      if (!existing.primaryKpi) missing.push("Primary KPI for optimization");
-      if (!existing.dataWindowDays) missing.push("Data window (7, 14, 30, or 60 days)");
-      const hasMetric = (existing.spend != null && existing.spend > 0) ||
-        (existing.impressions != null && existing.impressions > 0) ||
-        (existing.clicks != null && existing.clicks > 0) ||
-        (existing.leads != null && existing.leads > 0) ||
-        (existing.purchases != null && existing.purchases > 0) ||
-        (existing.revenue != null && existing.revenue > 0);
-      if (!hasMetric) missing.push("At least one real performance metric (spend, impressions, clicks, leads, purchases, or revenue)");
+      if (!existing || !existing.hasExistingAsset) missing.push("Existing campaign, asset, or funnel to iterate on");
+      if (!existing || !existing.primaryKpi) missing.push("Primary KPI for optimization");
+      if (!existing || !existing.dataWindowDays) missing.push("Data window (7, 14, 30, or 60 days)");
+
+      const hasMetric = campaignData && (
+        (campaignData.spend > 0) ||
+        (campaignData.impressions > 0) ||
+        (campaignData.clicks > 0) ||
+        (campaignData.leads > 0) ||
+        (campaignData.revenue > 0) ||
+        (campaignData.conversions > 0)
+      );
+      if (!hasMetric) missing.push("At least one real performance metric in Campaign Metrics (spend, impressions, clicks, leads, or revenue)");
 
       res.json({
         success: true,
-        inputs: existing,
+        inputs: existing || null,
+        campaignMetrics: campaignData ? {
+          spend: campaignData.spend,
+          impressions: campaignData.impressions,
+          clicks: campaignData.clicks,
+          leads: campaignData.leads,
+          revenue: campaignData.revenue,
+          conversions: campaignData.conversions,
+        } : null,
         gateStatus: missing.length === 0 ? "unlocked" : "locked",
         missingRequirements: missing,
       });
@@ -608,12 +622,6 @@ export function registerCampaignRoutes(app: Express) {
         assetDescription: req.body.assetDescription || null,
         primaryKpi: req.body.primaryKpi || null,
         dataWindowDays: req.body.dataWindowDays ? parseInt(req.body.dataWindowDays) : null,
-        spend: req.body.spend != null ? parseFloat(req.body.spend) : null,
-        impressions: req.body.impressions != null ? parseInt(req.body.impressions) : null,
-        clicks: req.body.clicks != null ? parseInt(req.body.clicks) : null,
-        leads: req.body.leads != null ? parseInt(req.body.leads) : null,
-        purchases: req.body.purchases != null ? parseInt(req.body.purchases) : null,
-        revenue: req.body.revenue != null ? parseFloat(req.body.revenue) : null,
         updatedAt: new Date(),
       };
 
@@ -641,23 +649,40 @@ export function registerCampaignRoutes(app: Express) {
         result = inserted;
       }
 
+      const [campaignData] = await db.select().from(manualCampaignMetrics)
+        .where(and(
+          eq(manualCampaignMetrics.campaignId, campaignId),
+          eq(manualCampaignMetrics.accountId, accountId)
+        ))
+        .limit(1);
+
       const missing: string[] = [];
       if (!result.hasExistingAsset) missing.push("Existing campaign, asset, or funnel to iterate on");
       if (!result.primaryKpi) missing.push("Primary KPI for optimization");
       if (!result.dataWindowDays) missing.push("Data window (7, 14, 30, or 60 days)");
-      const hasMetric = (result.spend != null && result.spend > 0) ||
-        (result.impressions != null && result.impressions > 0) ||
-        (result.clicks != null && result.clicks > 0) ||
-        (result.leads != null && result.leads > 0) ||
-        (result.purchases != null && result.purchases > 0) ||
-        (result.revenue != null && result.revenue > 0);
-      if (!hasMetric) missing.push("At least one real performance metric (spend, impressions, clicks, leads, purchases, or revenue)");
+      const hasMetric = campaignData && (
+        (campaignData.spend > 0) ||
+        (campaignData.impressions > 0) ||
+        (campaignData.clicks > 0) ||
+        (campaignData.leads > 0) ||
+        (campaignData.revenue > 0) ||
+        (campaignData.conversions > 0)
+      );
+      if (!hasMetric) missing.push("At least one real performance metric in Campaign Metrics (spend, impressions, clicks, leads, or revenue)");
 
       console.log(`[Campaigns] Iteration gate saved for campaign ${campaignId}: gate=${missing.length === 0 ? 'unlocked' : 'locked'}`);
 
       res.json({
         success: true,
         inputs: result,
+        campaignMetrics: campaignData ? {
+          spend: campaignData.spend,
+          impressions: campaignData.impressions,
+          clicks: campaignData.clicks,
+          leads: campaignData.leads,
+          revenue: campaignData.revenue,
+          conversions: campaignData.conversions,
+        } : null,
         gateStatus: missing.length === 0 ? "unlocked" : "locked",
         missingRequirements: missing,
       });
@@ -679,19 +704,38 @@ export function registerCampaignRoutes(app: Express) {
         ))
         .limit(1);
 
-      if (!existing) {
-        return res.json({ success: true, inputs: null, gateStatus: "locked" });
-      }
+      const [retentionData] = await db.select().from(manualRetentionMetrics)
+        .where(and(
+          eq(manualRetentionMetrics.campaignId, campaignId),
+          eq(manualRetentionMetrics.accountId, accountId)
+        ))
+        .limit(1);
+
+      const hasCustomerData = retentionData && (
+        (retentionData.monthlyCustomers != null && retentionData.monthlyCustomers > 0) ||
+        (retentionData.repeatPurchaseRate != null && retentionData.repeatPurchaseRate > 0) ||
+        (retentionData.averageOrderValue != null && retentionData.averageOrderValue > 0)
+      );
+      const hasExistingCustomers = (existing?.hasExistingCustomers) || !!hasCustomerData;
 
       const missing: string[] = [];
-      if (!existing.hasExistingCustomers) missing.push("Confirmation that the business has existing or past customers");
-      if (!existing.retentionGoal) missing.push("A retention goal (repeat purchase, renewal, churn reduction, or win-back)");
-      if (!existing.businessModel) missing.push("Business model (one-time purchase, recurring subscription, retainer, or repeat purchase)");
-      if (!existing.reachableAudience) missing.push("A reachable audience after purchase (customer list, email, WhatsApp, phone, or community)");
+      if (!hasExistingCustomers) missing.push("Confirmation that the business has existing or past customers");
+      if (!existing || !existing.retentionGoal) missing.push("A retention goal (repeat purchase, renewal, churn reduction, or win-back)");
+      if (!existing || !existing.businessModel) missing.push("Business model (one-time purchase, recurring subscription, retainer, or repeat purchase)");
+      if (!existing || !existing.reachableAudience) missing.push("A reachable audience after purchase (customer list, email, WhatsApp, phone, or community)");
 
       res.json({
         success: true,
-        inputs: existing,
+        inputs: existing || null,
+        retentionMetrics: retentionData ? {
+          monthlyCustomers: retentionData.monthlyCustomers,
+          repeatPurchaseRate: retentionData.repeatPurchaseRate,
+          averageOrderValue: retentionData.averageOrderValue,
+          customerLifespan: retentionData.customerLifespan,
+          purchaseFrequency: retentionData.purchaseFrequency,
+          refundRate: retentionData.refundRate,
+        } : null,
+        hasCustomerData: !!hasCustomerData,
         gateStatus: missing.length === 0 ? "unlocked" : "locked",
         missingRequirements: missing,
       });
@@ -738,8 +782,22 @@ export function registerCampaignRoutes(app: Express) {
         result = inserted;
       }
 
+      const [retentionData] = await db.select().from(manualRetentionMetrics)
+        .where(and(
+          eq(manualRetentionMetrics.campaignId, campaignId),
+          eq(manualRetentionMetrics.accountId, accountId)
+        ))
+        .limit(1);
+
+      const hasCustomerData = retentionData && (
+        (retentionData.monthlyCustomers != null && retentionData.monthlyCustomers > 0) ||
+        (retentionData.repeatPurchaseRate != null && retentionData.repeatPurchaseRate > 0) ||
+        (retentionData.averageOrderValue != null && retentionData.averageOrderValue > 0)
+      );
+      const hasExistingCustomers = result.hasExistingCustomers || !!hasCustomerData;
+
       const missing: string[] = [];
-      if (!result.hasExistingCustomers) missing.push("Confirmation that the business has existing or past customers");
+      if (!hasExistingCustomers) missing.push("Confirmation that the business has existing or past customers");
       if (!result.retentionGoal) missing.push("A retention goal (repeat purchase, renewal, churn reduction, or win-back)");
       if (!result.businessModel) missing.push("Business model (one-time purchase, recurring subscription, retainer, or repeat purchase)");
       if (!result.reachableAudience) missing.push("A reachable audience after purchase (customer list, email, WhatsApp, phone, or community)");
@@ -749,6 +807,7 @@ export function registerCampaignRoutes(app: Express) {
       res.json({
         success: true,
         inputs: result,
+        hasCustomerData: !!hasCustomerData,
         gateStatus: missing.length === 0 ? "unlocked" : "locked",
         missingRequirements: missing,
       });

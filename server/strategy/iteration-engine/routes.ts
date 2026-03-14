@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { db } from "../../db";
-import { iterationSnapshots, iterationGateInputs } from "@shared/schema";
+import { iterationSnapshots, iterationGateInputs, manualCampaignMetrics } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { runIterationEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
@@ -55,19 +55,26 @@ export function registerIterationEngineRoutes(app: Express) {
         ))
         .limit(1);
 
+      const [campaignData] = await db.select().from(manualCampaignMetrics)
+        .where(and(
+          eq(manualCampaignMetrics.campaignId, campaignId),
+          eq(manualCampaignMetrics.accountId, accountId),
+        ))
+        .limit(1);
+
       const gateMissing: string[] = [];
       if (!gateInputs || !gateInputs.hasExistingAsset) gateMissing.push("Existing campaign, asset, or funnel to iterate on");
       if (!gateInputs || !gateInputs.primaryKpi) gateMissing.push("Primary KPI for optimization");
       if (!gateInputs || !gateInputs.dataWindowDays) gateMissing.push("Data window (7, 14, 30, or 60 days)");
-      const hasMetric = gateInputs && (
-        (gateInputs.spend != null && gateInputs.spend > 0) ||
-        (gateInputs.impressions != null && gateInputs.impressions > 0) ||
-        (gateInputs.clicks != null && gateInputs.clicks > 0) ||
-        (gateInputs.leads != null && gateInputs.leads > 0) ||
-        (gateInputs.purchases != null && gateInputs.purchases > 0) ||
-        (gateInputs.revenue != null && gateInputs.revenue > 0)
+      const hasMetric = campaignData && (
+        (campaignData.spend > 0) ||
+        (campaignData.impressions > 0) ||
+        (campaignData.clicks > 0) ||
+        (campaignData.leads > 0) ||
+        (campaignData.revenue > 0) ||
+        (campaignData.conversions > 0)
       );
-      if (!hasMetric) gateMissing.push("At least one real performance metric (spend, impressions, clicks, leads, purchases, or revenue)");
+      if (!hasMetric) gateMissing.push("At least one real performance metric in Campaign Metrics (spend, impressions, clicks, leads, or revenue)");
 
       if (gateMissing.length > 0) {
         return res.status(422).json({
