@@ -305,6 +305,32 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
       setBlueprint(bpData.blueprint);
       setCurrentPhase(1);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      console.log('[BuildThePlan] Gate passed, auto-generating blueprint for', data.blueprintId);
+      try {
+        const genUrl = getApiUrl('/api/strategic/generate-creative-blueprint');
+        const genRes = await fetch(genUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ blueprintId: data.blueprintId }),
+        });
+        const genData = await safeApiJson(genRes);
+        console.log('[BuildThePlan] Auto-generate result:', JSON.stringify({ success: genData.success, fallback: genData.extractionFallbackUsed }));
+        if (genData.success) {
+          const extractionStatus = genData.extractionFallbackUsed ? 'EXTRACTION_FALLBACK' : 'EXTRACTION_COMPLETE';
+          setBlueprint(prev => prev ? {
+            ...prev,
+            status: extractionStatus as BlueprintStatus,
+            draftBlueprint: genData.draftBlueprint,
+            creativeAnalysis: genData.draftBlueprint,
+            confirmedBlueprint: null,
+          } : null);
+          setClarifications([]);
+          setCurrentPhase(2);
+        }
+      } catch (genErr: any) {
+        console.error('[BuildThePlan] Auto-generate failed:', genErr.message);
+      }
     } catch (err: any) {
       const failedUrl = getApiUrl('/api/strategic/init');
       const domain = process.env.EXPO_PUBLIC_DOMAIN || 'NOT_SET';
@@ -317,20 +343,28 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
   }, [ciCompetitors, selectedCompetitorIds, avgPrice]);
 
   const generateCreativeBlueprint = useCallback(async () => {
-    if (!blueprint) return;
+    if (!blueprint) {
+      console.log('[BuildThePlan] generateCreativeBlueprint: no blueprint');
+      return;
+    }
+    console.log('[BuildThePlan] generateCreativeBlueprint: starting for', blueprint.id);
     setError('');
     setLoading(true);
 
     try {
-      const res = await fetch(getApiUrl('/api/strategic/generate-creative-blueprint'), {
+      const url = getApiUrl('/api/strategic/generate-creative-blueprint');
+      console.log('[BuildThePlan] POST', url);
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ blueprintId: blueprint.id }),
       });
+      console.log('[BuildThePlan] response status:', res.status);
       const data = await safeApiJson(res);
+      console.log('[BuildThePlan] response:', JSON.stringify({ success: data.success, fallback: data.extractionFallbackUsed, reason: data.parseFailedReason, meta: data._meta }));
 
       if (!data.success) {
-        setError(data.error || 'Blueprint generation failed');
+        setError(data.error || data.message || 'Blueprint generation failed');
         return;
       }
 
@@ -346,6 +380,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
       setCurrentPhase(2);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch (err: any) {
+      console.error('[BuildThePlan] generateCreativeBlueprint error:', err);
       setError(err.message || 'Blueprint generation failed');
     } finally {
       setLoading(false);
@@ -1189,12 +1224,15 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
 
           {isFallback && !isConfirmed && (
             <Pressable
-              onPress={() => { setCurrentPhase(1); }}
-              style={{ marginTop: 8, marginBottom: 4, alignSelf: 'flex-start' }}
+              onPress={() => { generateCreativeBlueprint(); }}
+              disabled={loading}
+              style={{ marginTop: 8, marginBottom: 4, alignSelf: 'flex-start', opacity: loading ? 0.6 : 1 }}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#3B82F615', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#3B82F630' }}>
-                <Ionicons name="refresh" size={16} color="#3B82F6" />
-                <Text style={{ color: '#3B82F6', fontWeight: '600', fontSize: 14, marginLeft: 6 }}>Regenerate Blueprint</Text>
+                {loading ? <ActivityIndicator color="#3B82F6" size="small" /> : <Ionicons name="refresh" size={16} color="#3B82F6" />}
+                <Text style={{ color: '#3B82F6', fontWeight: '600', fontSize: 14, marginLeft: 6 }}>
+                  {loading ? 'Regenerating...' : 'Regenerate Blueprint'}
+                </Text>
               </View>
             </Pressable>
           )}
