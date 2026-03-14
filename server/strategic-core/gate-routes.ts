@@ -5,6 +5,7 @@ import { eq, and, desc, ne } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
 import { verifySnapshotIntegrity, getEngineReadinessState } from "../market-intelligence-v3/engine-state";
 import { ENGINE_VERSION } from "../market-intelligence-v3/constants";
+import { generateBlueprintForId } from "./extraction-routes";
 
 interface CampaignContextObject {
   campaignId: string;
@@ -188,10 +189,26 @@ export function registerGateRoutes(app: Express) {
   app.get("/api/strategic/blueprint/:id", async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
+      let [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
 
       if (!blueprint) {
         return res.status(404).json({ error: "Blueprint not found" });
+      }
+
+      if (blueprint.status === "EXTRACTION_FALLBACK" || blueprint.status === "GATE_PASSED") {
+        console.log(`[StrategicCore] Blueprint ${id} has status ${blueprint.status} — auto-generating`);
+        try {
+          const genResult = await generateBlueprintForId(id);
+          if (genResult.success) {
+            console.log(`[StrategicCore] Auto-generation succeeded for ${id} — status now ${genResult.status}`);
+            const [refreshed] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
+            if (refreshed) blueprint = refreshed;
+          } else {
+            console.warn(`[StrategicCore] Auto-generation failed for ${id}: ${genResult.error}`);
+          }
+        } catch (genErr: any) {
+          console.warn(`[StrategicCore] Auto-generation error for ${id}: ${genErr.message}`);
+        }
       }
 
       const competitors = await db.select().from(blueprintCompetitors).where(eq(blueprintCompetitors.blueprintId, id));

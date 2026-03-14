@@ -382,6 +382,274 @@ async function loadEngineOutputs(accountId: string, campaignId: string): Promise
   return sections.join("\n");
 }
 
+export async function generateBlueprintForId(blueprintId: string): Promise<{
+  success: boolean;
+  error?: string;
+  blueprintId?: string;
+  blueprintVersion?: number;
+  status?: string;
+  draftBlueprint?: any;
+  extractionFallbackUsed?: boolean;
+  parseFailedReason?: string | null;
+  _meta?: any;
+}> {
+  const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, blueprintId)).limit(1);
+  if (!blueprint) {
+    return { success: false, error: "Blueprint not found" };
+  }
+
+  if (!["GATE_PASSED", "EXTRACTION_COMPLETE", "EXTRACTION_FALLBACK", "ANALYSIS_COMPLETE"].includes(blueprint.status)) {
+    return { success: false, error: "Blueprint must pass Phase 0 gate before creative blueprint generation" };
+  }
+
+  const campaignContext = blueprint.campaignContext ? JSON.parse(blueprint.campaignContext) : null;
+  const competitorUrls = blueprint.competitorUrls ? JSON.parse(blueprint.competitorUrls) : [];
+  const asp = blueprint.averageSellingPrice;
+
+  const resolvedCampaignId = campaignContext?.campaignId || blueprint.campaignId;
+
+  const [latestMiForCheck] = await db.select().from(miSnapshots)
+    .where(and(
+      eq(miSnapshots.accountId, blueprint.accountId),
+      eq(miSnapshots.campaignId, resolvedCampaignId),
+    ))
+    .orderBy(desc(miSnapshots.createdAt))
+    .limit(1);
+
+  const miReadiness = getEngineReadinessState(
+    latestMiForCheck || null,
+    resolvedCampaignId,
+    ENGINE_VERSION,
+    14,
+  );
+
+  console.log(`[StrategicCore] Phase 1 MI readiness check: state=${miReadiness.state} | campaign=${resolvedCampaignId} | blueprint=${blueprintId}`);
+
+  if (miReadiness.state !== "READY") {
+    console.log(`[StrategicCore] Phase 1 blocked — MI not ready: ${JSON.stringify(miReadiness.diagnostics)}`);
+    return {
+      success: false,
+      error: "MI_NOT_READY",
+    };
+  }
+
+  let businessData: any = null;
+  if (resolvedCampaignId) {
+    const [bd] = await db.select().from(businessDataLayer)
+      .where(eq(businessDataLayer.campaignId, resolvedCampaignId))
+      .limit(1);
+    if (bd) businessData = bd;
+  }
+
+  let marketSignals: any = null;
+  if (resolvedCampaignId) {
+    const [latestSnapshot] = await db.select({
+      marketDiagnosis: miSnapshots.marketDiagnosis,
+      threatSignals: miSnapshots.threatSignals,
+      opportunitySignals: miSnapshots.opportunitySignals,
+      trajectoryData: miSnapshots.trajectoryData,
+    }).from(miSnapshots)
+      .where(and(
+        eq(miSnapshots.accountId, blueprint.accountId),
+        eq(miSnapshots.campaignId, resolvedCampaignId),
+        inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
+      ))
+      .orderBy(desc(miSnapshots.createdAt))
+      .limit(1);
+
+    if (latestSnapshot) {
+      marketSignals = {
+        diagnosis: latestSnapshot.marketDiagnosis,
+        threats: latestSnapshot.threatSignals ? JSON.parse(latestSnapshot.threatSignals) : [],
+        opportunities: latestSnapshot.opportunitySignals ? JSON.parse(latestSnapshot.opportunitySignals) : [],
+        trajectory: latestSnapshot.trajectoryData ? JSON.parse(latestSnapshot.trajectoryData) : null,
+      };
+    }
+  }
+
+  let contextBlock = `CAMPAIGN CONTEXT:\n`;
+  if (campaignContext) {
+    contextBlock += `- Campaign: ${campaignContext.campaignName}\n`;
+    contextBlock += `- Objective: ${campaignContext.objective}\n`;
+    contextBlock += `- Location: ${campaignContext.location || "Not specified"}\n`;
+    contextBlock += `- Platform: ${campaignContext.platform || "meta"}\n`;
+  }
+  contextBlock += `- Average Selling Price: $${asp || "Not specified"}\n`;
+  contextBlock += `- Competitors Tracked: ${competitorUrls.length}\n`;
+
+  if (businessData) {
+    contextBlock += `\nBUSINESS PROFILE:\n`;
+    contextBlock += `- Business Type: ${businessData.businessType || "Unknown"}\n`;
+    contextBlock += `- Core Offer: ${businessData.coreOffer || "Unknown"}\n`;
+    contextBlock += `- Price Range: ${businessData.priceRange || "Unknown"}\n`;
+    contextBlock += `- Target Audience Age: ${businessData.targetAudienceAge || "Unknown"}\n`;
+    contextBlock += `- Target Segment: ${businessData.targetAudienceSegment || "Unknown"}\n`;
+    contextBlock += `- Monthly Budget: ${businessData.monthlyBudget || "Unknown"}\n`;
+    contextBlock += `- Funnel Objective: ${businessData.funnelObjective || "Unknown"}\n`;
+    contextBlock += `- Conversion Channel: ${businessData.primaryConversionChannel || "Unknown"}\n`;
+    if (businessData.businessLocation) contextBlock += `- Location: ${businessData.businessLocation}\n`;
+  }
+
+  if (marketSignals) {
+    contextBlock += `\nMARKET INTELLIGENCE:\n`;
+    if (marketSignals.diagnosis) {
+      contextBlock += `- Market Diagnosis: ${marketSignals.diagnosis}\n`;
+    }
+    if (marketSignals.threats?.length > 0) {
+      contextBlock += `- Threat Signals:\n`;
+      for (const t of marketSignals.threats.slice(0, 5)) {
+        contextBlock += `  • ${t}\n`;
+      }
+    }
+    if (marketSignals.opportunities?.length > 0) {
+      contextBlock += `- Market Openings:\n`;
+      for (const o of marketSignals.opportunities.slice(0, 5)) {
+        contextBlock += `  • ${o}\n`;
+      }
+    }
+    if (marketSignals.trajectory) {
+      const traj = marketSignals.trajectory;
+      contextBlock += `- Market Heating Index: ${traj.marketHeatingIndex ?? "N/A"}\n`;
+      contextBlock += `- Narrative Convergence: ${traj.narrativeConvergenceScore ?? "N/A"}\n`;
+    }
+  }
+
+  if (competitorUrls.length > 0) {
+    contextBlock += `\nCOMPETITOR URLS:\n`;
+    for (const url of competitorUrls.slice(0, 10)) {
+      contextBlock += `- ${url}\n`;
+    }
+  }
+
+  let engineOutputBlock = "";
+  try {
+    engineOutputBlock = await loadEngineOutputs(blueprint.accountId || "default", resolvedCampaignId);
+    if (engineOutputBlock) {
+      contextBlock += `\nENGINE PIPELINE OUTPUTS (use as PRIMARY data source for blueprint fields):\n${engineOutputBlock}\n`;
+      console.log(`[StrategicCore] Engine outputs loaded for blueprint: ${engineOutputBlock.split('\n').filter((l: string) => l.endsWith(':')).length} engines found`);
+    } else {
+      console.log(`[StrategicCore] No engine outputs available — blueprint will use business data and MI only`);
+    }
+  } catch (err: any) {
+    console.warn(`[StrategicCore] Failed to load engine outputs: ${err.message}`);
+  }
+
+  let rawBlueprint: any = null;
+  let extractionFallbackUsed = false;
+  let parseFailedReason: string | null = null;
+
+  try {
+    const response = await aiChat({
+      model: "gpt-4.1-mini",
+      messages: [
+        { role: "system", content: CREATIVE_BLUEPRINT_PROMPT },
+        { role: "user", content: `Generate a Creative Blueprint based on this strategic data:\n\n${contextBlock}` },
+      ],
+      max_tokens: 2000,
+      accountId: blueprint.accountId || "default",
+      endpoint: "strategic-creative-blueprint",
+    });
+
+    const rawText = typeof response === "string" ? response : response?.choices?.[0]?.message?.content || "";
+    const cleaned = cleanJsonString(rawText);
+    rawBlueprint = JSON.parse(cleaned);
+  } catch (err: any) {
+    console.error("[StrategicCore] Creative blueprint generation attempt 1 failed:", err.message);
+
+    try {
+      const retryResponse = await aiChat({
+        model: "gpt-4.1-mini",
+        messages: [
+          { role: "system", content: CREATIVE_BLUEPRINT_PROMPT + "\n\nPREVIOUS ATTEMPT FAILED. Return ONLY a valid JSON object. No markdown. No comments." },
+          { role: "user", content: `Generate a Creative Blueprint:\n\n${contextBlock}` },
+        ],
+        max_tokens: 2000,
+        accountId: blueprint.accountId || "default",
+        endpoint: "strategic-creative-blueprint-retry",
+      });
+
+      const retryText = typeof retryResponse === "string" ? retryResponse : retryResponse?.choices?.[0]?.message?.content || "";
+      const cleaned = cleanJsonString(retryText);
+      rawBlueprint = JSON.parse(cleaned);
+    } catch (retryErr: any) {
+      console.error("[StrategicCore] Creative blueprint generation attempt 2 failed:", retryErr.message);
+    }
+  }
+
+  if (!rawBlueprint) {
+    extractionFallbackUsed = true;
+    parseFailedReason = "AI_GENERATION_FAILED";
+    console.warn(`[StrategicCore] Creative blueprint fallback triggered: ${parseFailedReason}`);
+    rawBlueprint = {};
+  }
+
+  const draftBlueprint = normalizeExtraction(rawBlueprint);
+
+  const allInsufficient = ["detectedOffer", "detectedPositioning", "detectedCTA", "detectedAudienceGuess", "detectedFunnelStage"].every(
+    f => draftBlueprint[f]?.value === "INSUFFICIENT_DATA"
+  );
+  if (allInsufficient && !extractionFallbackUsed) {
+    extractionFallbackUsed = true;
+    parseFailedReason = "EMPTY_FIELDS";
+  }
+
+  draftBlueprint.extractionFallbackUsed = extractionFallbackUsed;
+  draftBlueprint.parseFailedReason = parseFailedReason;
+  draftBlueprint.generationSource = "AI_STRATEGY";
+
+  const finalStatus = extractionFallbackUsed ? "EXTRACTION_FALLBACK" : "EXTRACTION_COMPLETE";
+
+  await db.update(strategicBlueprints)
+    .set({
+      status: finalStatus,
+      creativeMediaType: "ai_generated",
+      draftBlueprint: JSON.stringify(draftBlueprint),
+      creativeAnalysis: JSON.stringify(draftBlueprint),
+      confirmedBlueprint: null,
+      marketMap: null,
+      validationResult: null,
+      orchestratorPlan: null,
+      analysisCompletedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(strategicBlueprints.id, blueprintId));
+
+  await logAuditEvent({
+    accountId: blueprint.accountId,
+    campaignId: blueprint.campaignId || undefined,
+    blueprintId,
+    blueprintVersion: blueprint.blueprintVersion,
+    event: extractionFallbackUsed ? "CREATIVE_BLUEPRINT_FALLBACK" : "CREATIVE_BLUEPRINT_GENERATED",
+    details: {
+      source: "AI_STRATEGY",
+      allInsufficient,
+      extractionFallbackUsed,
+      parseFailedReason,
+      hasMarketSignals: !!marketSignals,
+      hasBusinessData: !!businessData,
+      hasEngineOutputs: !!engineOutputBlock,
+    },
+  });
+
+  return {
+    success: true,
+    blueprintId,
+    blueprintVersion: blueprint.blueprintVersion,
+    status: finalStatus,
+    draftBlueprint,
+    extractionFallbackUsed,
+    parseFailedReason,
+    _meta: {
+      source: "AI_STRATEGY",
+      allFieldsInsufficient: allInsufficient,
+      hasMarketSignals: !!marketSignals,
+      hasBusinessData: !!businessData,
+      hasEngineOutputs: !!engineOutputBlock,
+      engineOutputSections: engineOutputBlock ? engineOutputBlock.split('\n').filter((l: string) => l.endsWith(':')).map((l: string) => l.replace(':', '').trim()) : [],
+    },
+  };
+}
+
 export function registerExtractionRoutes(app: Express) {
   app.post("/api/strategic/generate-creative-blueprint", async (req: Request, res: Response) => {
     try {
@@ -391,263 +659,11 @@ export function registerExtractionRoutes(app: Express) {
         return res.status(400).json({ error: "blueprintId is required" });
       }
 
-      const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, blueprintId)).limit(1);
-      if (!blueprint) {
-        return res.status(404).json({ error: "Blueprint not found" });
+      const result = await generateBlueprintForId(blueprintId);
+      if (!result.success) {
+        return res.status(400).json(result);
       }
-
-      if (!["GATE_PASSED", "EXTRACTION_COMPLETE", "EXTRACTION_FALLBACK", "ANALYSIS_COMPLETE"].includes(blueprint.status)) {
-        return res.status(400).json({ error: "Blueprint must pass Phase 0 gate before creative blueprint generation" });
-      }
-
-      const campaignContext = blueprint.campaignContext ? JSON.parse(blueprint.campaignContext) : null;
-      const competitorUrls = blueprint.competitorUrls ? JSON.parse(blueprint.competitorUrls) : [];
-      const asp = blueprint.averageSellingPrice;
-
-      const resolvedCampaignId = campaignContext?.campaignId || blueprint.campaignId;
-
-      const [latestMiForCheck] = await db.select().from(miSnapshots)
-        .where(and(
-          eq(miSnapshots.accountId, blueprint.accountId),
-          eq(miSnapshots.campaignId, resolvedCampaignId),
-        ))
-        .orderBy(desc(miSnapshots.createdAt))
-        .limit(1);
-
-      const miReadiness = getEngineReadinessState(
-        latestMiForCheck || null,
-        resolvedCampaignId,
-        ENGINE_VERSION,
-        14,
-      );
-
-      console.log(`[StrategicCore] Phase 1 MI readiness check: state=${miReadiness.state} | campaign=${resolvedCampaignId} | blueprint=${blueprintId}`);
-
-      if (miReadiness.state !== "READY") {
-        console.log(`[StrategicCore] Phase 1 blocked — MI not ready: ${JSON.stringify(miReadiness.diagnostics)}`);
-        return res.status(400).json({
-          error: "MI_NOT_READY",
-          message: "Market Intelligence data is no longer valid. Please refresh MI before generating a blueprint.",
-          engineState: miReadiness.state,
-          diagnostics: miReadiness.diagnostics,
-        });
-      }
-
-      let businessData: any = null;
-      if (resolvedCampaignId) {
-        const [bd] = await db.select().from(businessDataLayer)
-          .where(eq(businessDataLayer.campaignId, resolvedCampaignId))
-          .limit(1);
-        if (bd) businessData = bd;
-      }
-
-      let marketSignals: any = null;
-      if (resolvedCampaignId) {
-        const [latestSnapshot] = await db.select({
-          marketDiagnosis: miSnapshots.marketDiagnosis,
-          threatSignals: miSnapshots.threatSignals,
-          opportunitySignals: miSnapshots.opportunitySignals,
-          trajectoryData: miSnapshots.trajectoryData,
-        }).from(miSnapshots)
-          .where(and(
-            eq(miSnapshots.accountId, blueprint.accountId),
-            eq(miSnapshots.campaignId, resolvedCampaignId),
-            inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
-          ))
-          .orderBy(desc(miSnapshots.createdAt))
-          .limit(1);
-
-        if (latestSnapshot) {
-          marketSignals = {
-            diagnosis: latestSnapshot.marketDiagnosis,
-            threats: latestSnapshot.threatSignals ? JSON.parse(latestSnapshot.threatSignals) : [],
-            opportunities: latestSnapshot.opportunitySignals ? JSON.parse(latestSnapshot.opportunitySignals) : [],
-            trajectory: latestSnapshot.trajectoryData ? JSON.parse(latestSnapshot.trajectoryData) : null,
-          };
-        }
-      }
-
-      let contextBlock = `CAMPAIGN CONTEXT:\n`;
-      if (campaignContext) {
-        contextBlock += `- Campaign: ${campaignContext.campaignName}\n`;
-        contextBlock += `- Objective: ${campaignContext.objective}\n`;
-        contextBlock += `- Location: ${campaignContext.location || "Not specified"}\n`;
-        contextBlock += `- Platform: ${campaignContext.platform || "meta"}\n`;
-      }
-      contextBlock += `- Average Selling Price: $${asp || "Not specified"}\n`;
-      contextBlock += `- Competitors Tracked: ${competitorUrls.length}\n`;
-
-      if (businessData) {
-        contextBlock += `\nBUSINESS PROFILE:\n`;
-        contextBlock += `- Business Type: ${businessData.businessType || "Unknown"}\n`;
-        contextBlock += `- Core Offer: ${businessData.coreOffer || "Unknown"}\n`;
-        contextBlock += `- Price Range: ${businessData.priceRange || "Unknown"}\n`;
-        contextBlock += `- Target Audience Age: ${businessData.targetAudienceAge || "Unknown"}\n`;
-        contextBlock += `- Target Segment: ${businessData.targetAudienceSegment || "Unknown"}\n`;
-        contextBlock += `- Monthly Budget: ${businessData.monthlyBudget || "Unknown"}\n`;
-        contextBlock += `- Funnel Objective: ${businessData.funnelObjective || "Unknown"}\n`;
-        contextBlock += `- Conversion Channel: ${businessData.primaryConversionChannel || "Unknown"}\n`;
-        if (businessData.businessLocation) contextBlock += `- Location: ${businessData.businessLocation}\n`;
-      }
-
-      if (marketSignals) {
-        contextBlock += `\nMARKET INTELLIGENCE:\n`;
-        if (marketSignals.diagnosis) {
-          contextBlock += `- Market Diagnosis: ${marketSignals.diagnosis}\n`;
-        }
-        if (marketSignals.threats?.length > 0) {
-          contextBlock += `- Threat Signals:\n`;
-          for (const t of marketSignals.threats.slice(0, 5)) {
-            contextBlock += `  • ${t}\n`;
-          }
-        }
-        if (marketSignals.opportunities?.length > 0) {
-          contextBlock += `- Market Openings:\n`;
-          for (const o of marketSignals.opportunities.slice(0, 5)) {
-            contextBlock += `  • ${o}\n`;
-          }
-        }
-        if (marketSignals.trajectory) {
-          const traj = marketSignals.trajectory;
-          contextBlock += `- Market Heating Index: ${traj.marketHeatingIndex ?? "N/A"}\n`;
-          contextBlock += `- Narrative Convergence: ${traj.narrativeConvergenceScore ?? "N/A"}\n`;
-        }
-      }
-
-      if (competitorUrls.length > 0) {
-        contextBlock += `\nCOMPETITOR URLS:\n`;
-        for (const url of competitorUrls.slice(0, 10)) {
-          contextBlock += `- ${url}\n`;
-        }
-      }
-
-      let engineOutputBlock = "";
-      try {
-        engineOutputBlock = await loadEngineOutputs(blueprint.accountId || "default", resolvedCampaignId);
-        if (engineOutputBlock) {
-          contextBlock += `\nENGINE PIPELINE OUTPUTS (use as PRIMARY data source for blueprint fields):\n${engineOutputBlock}\n`;
-          console.log(`[StrategicCore] Engine outputs loaded for blueprint: ${engineOutputBlock.split('\n').filter((l: string) => l.endsWith(':')).length} engines found`);
-        } else {
-          console.log(`[StrategicCore] No engine outputs available — blueprint will use business data and MI only`);
-        }
-      } catch (err: any) {
-        console.warn(`[StrategicCore] Failed to load engine outputs: ${err.message}`);
-      }
-
-      let rawBlueprint: any = null;
-      let extractionFallbackUsed = false;
-      let parseFailedReason: string | null = null;
-
-      try {
-        const response = await aiChat({
-          model: "gpt-4.1-mini",
-          messages: [
-            { role: "system", content: CREATIVE_BLUEPRINT_PROMPT },
-            { role: "user", content: `Generate a Creative Blueprint based on this strategic data:\n\n${contextBlock}` },
-          ],
-          max_tokens: 2000,
-          accountId: blueprint.accountId || "default",
-          endpoint: "strategic-creative-blueprint",
-        });
-
-        const rawText = typeof response === "string" ? response : response?.choices?.[0]?.message?.content || "";
-        const cleaned = cleanJsonString(rawText);
-        rawBlueprint = JSON.parse(cleaned);
-      } catch (err: any) {
-        console.error("[StrategicCore] Creative blueprint generation attempt 1 failed:", err.message);
-
-        try {
-          const retryResponse = await aiChat({
-            model: "gpt-4.1-mini",
-            messages: [
-              { role: "system", content: CREATIVE_BLUEPRINT_PROMPT + "\n\nPREVIOUS ATTEMPT FAILED. Return ONLY a valid JSON object. No markdown. No comments." },
-              { role: "user", content: `Generate a Creative Blueprint:\n\n${contextBlock}` },
-            ],
-            max_tokens: 2000,
-            accountId: blueprint.accountId || "default",
-            endpoint: "strategic-creative-blueprint-retry",
-          });
-
-          const retryText = typeof retryResponse === "string" ? retryResponse : retryResponse?.choices?.[0]?.message?.content || "";
-          const cleaned = cleanJsonString(retryText);
-          rawBlueprint = JSON.parse(cleaned);
-        } catch (retryErr: any) {
-          console.error("[StrategicCore] Creative blueprint generation attempt 2 failed:", retryErr.message);
-        }
-      }
-
-      if (!rawBlueprint) {
-        extractionFallbackUsed = true;
-        parseFailedReason = "AI_GENERATION_FAILED";
-        console.warn(`[StrategicCore] Creative blueprint fallback triggered: ${parseFailedReason}`);
-        rawBlueprint = {};
-      }
-
-      const draftBlueprint = normalizeExtraction(rawBlueprint);
-
-      const allInsufficient = ["detectedOffer", "detectedPositioning", "detectedCTA", "detectedAudienceGuess", "detectedFunnelStage"].every(
-        f => draftBlueprint[f]?.value === "INSUFFICIENT_DATA"
-      );
-      if (allInsufficient && !extractionFallbackUsed) {
-        extractionFallbackUsed = true;
-        parseFailedReason = "EMPTY_FIELDS";
-      }
-
-      draftBlueprint.extractionFallbackUsed = extractionFallbackUsed;
-      draftBlueprint.parseFailedReason = parseFailedReason;
-      draftBlueprint.generationSource = "AI_STRATEGY";
-
-      const finalStatus = extractionFallbackUsed ? "EXTRACTION_FALLBACK" : "EXTRACTION_COMPLETE";
-
-      await db.update(strategicBlueprints)
-        .set({
-          status: finalStatus,
-          creativeMediaType: "ai_generated",
-          draftBlueprint: JSON.stringify(draftBlueprint),
-          creativeAnalysis: JSON.stringify(draftBlueprint),
-          confirmedBlueprint: null,
-          marketMap: null,
-          validationResult: null,
-          orchestratorPlan: null,
-          analysisCompletedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(strategicBlueprints.id, blueprintId));
-
-      await logAuditEvent({
-        accountId: blueprint.accountId,
-        campaignId: blueprint.campaignId || undefined,
-        blueprintId,
-        blueprintVersion: blueprint.blueprintVersion,
-        event: extractionFallbackUsed ? "CREATIVE_BLUEPRINT_FALLBACK" : "CREATIVE_BLUEPRINT_GENERATED",
-        details: {
-          source: "AI_STRATEGY",
-          allInsufficient,
-          extractionFallbackUsed,
-          parseFailedReason,
-          hasMarketSignals: !!marketSignals,
-          hasBusinessData: !!businessData,
-          hasEngineOutputs: !!engineOutputBlock,
-        },
-      });
-
-      res.json({
-        success: true,
-        blueprintId,
-        blueprintVersion: blueprint.blueprintVersion,
-        status: finalStatus,
-        draftBlueprint,
-        extractionFallbackUsed,
-        parseFailedReason,
-        _meta: {
-          source: "AI_STRATEGY",
-          allFieldsInsufficient: allInsufficient,
-          hasMarketSignals: !!marketSignals,
-          hasBusinessData: !!businessData,
-          hasEngineOutputs: !!engineOutputBlock,
-          engineOutputSections: engineOutputBlock ? engineOutputBlock.split('\n').filter((l: string) => l.endsWith(':')).map((l: string) => l.replace(':', '').trim()) : [],
-        },
-      });
+      res.json(result);
     } catch (error: any) {
       console.error("[StrategicCore] Creative blueprint generation error:", error.message);
       res.status(500).json({ error: "Failed to generate creative blueprint. Please try again." });
