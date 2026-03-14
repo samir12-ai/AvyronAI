@@ -37,6 +37,9 @@ function safeJsonParse(text: any): any {
 
 function runGuardLayer(input: RetentionInput): RetentionGuardResult {
   const flags: string[] = [];
+  const hasRawInputs = !!(input.customerJourneyData as any)?.rawInputs;
+  const rawInputs = (input.customerJourneyData as any)?.rawInputs;
+  const derivedMetrics = (input.customerJourneyData as any)?.derivedMetrics;
 
   let valueDeliveryClarity = 0.5;
   if (input.offerStructure.coreOutcome && input.offerStructure.coreOutcome.length > 10) {
@@ -47,6 +50,9 @@ function runGuardLayer(input: RetentionInput): RetentionGuardResult {
   }
   if (input.offerStructure.proofStrength && input.offerStructure.proofStrength > 0.5) {
     valueDeliveryClarity += 0.15;
+  }
+  if (hasRawInputs && rawInputs.totalCustomers > 0) {
+    valueDeliveryClarity += 0.2;
   }
   valueDeliveryClarity = clamp(valueDeliveryClarity);
 
@@ -64,6 +70,9 @@ function runGuardLayer(input: RetentionInput): RetentionGuardResult {
   if (!input.offerStructure.riskReducers || input.offerStructure.riskReducers.length === 0) {
     trustDecayRisk += 0.2;
   }
+  if (hasRawInputs && derivedMetrics && derivedMetrics.refundRate < 0.05) {
+    trustDecayRisk -= 0.15;
+  }
   trustDecayRisk = clamp(trustDecayRisk);
 
   if (trustDecayRisk > GUARD_THRESHOLDS.maxTrustDecayRisk) {
@@ -74,6 +83,8 @@ function runGuardLayer(input: RetentionInput): RetentionGuardResult {
   const journey = input.customerJourneyData;
   if (journey.repeatPurchaseRate && journey.repeatPurchaseRate > 0.1) {
     retentionMechanismPresence += 0.3;
+  } else if (hasRawInputs && derivedMetrics && derivedMetrics.repeatPurchaseRate > 0) {
+    retentionMechanismPresence += 0.2;
   }
   if (journey.touchpoints.length > 2) {
     retentionMechanismPresence += 0.2;
@@ -86,6 +97,12 @@ function runGuardLayer(input: RetentionInput): RetentionGuardResult {
   }
   if (journey.engagementDecayRate && journey.engagementDecayRate < 0.5) {
     retentionMechanismPresence += 0.15;
+  }
+  if (hasRawInputs && rawInputs.totalPurchases > 0 && rawInputs.returningCustomers > 0) {
+    retentionMechanismPresence += 0.25;
+  }
+  if (hasRawInputs && rawInputs.dataWindowDays > 0) {
+    retentionMechanismPresence += 0.1;
   }
   retentionMechanismPresence = clamp(retentionMechanismPresence);
 
@@ -118,6 +135,25 @@ function buildRetentionPrompt(input: RetentionInput): string {
     ? input.postPurchaseObjections.map(o => `- ${o.objection} (severity: ${o.severity.toFixed(2)}, frequency: ${o.frequency.toFixed(2)})`).join("\n")
     : "No post-purchase objection data available";
 
+  const rawInputs = (journey as any).rawInputs;
+  const derivedMetrics = (journey as any).derivedMetrics;
+  const rawDataSection = rawInputs ? `
+RAW BUSINESS DATA (${rawInputs.dataWindowDays || 30}-day window):
+- Total Customers: ${rawInputs.totalCustomers}
+- Total Purchases: ${rawInputs.totalPurchases}
+- Returning Customers: ${rawInputs.returningCustomers}
+- Average Order Value: $${rawInputs.averageOrderValue || 0}
+- Refund Count: ${rawInputs.refundCount || 0}
+- Monthly Active Customers: ${rawInputs.monthlyCustomers || 0}
+
+DERIVED METRICS:
+- Repeat Purchase Rate: ${((derivedMetrics?.repeatPurchaseRate || 0) * 100).toFixed(1)}%
+- Purchase Frequency: ${derivedMetrics?.purchaseFrequency?.toFixed(2) || "N/A"}
+- Refund Rate: ${((derivedMetrics?.refundRate || 0) * 100).toFixed(1)}%
+- Estimated LTV: $${derivedMetrics?.estimatedLTV?.toFixed(2) || "N/A"}
+- Churn Risk Estimate: ${((derivedMetrics?.churnRiskEstimate || 0) * 100).toFixed(1)}%
+- Estimated Lifespan: ${derivedMetrics?.estimatedLifespanMonths || "N/A"} months` : "";
+
   return `You are a Retention Strategy Engine. Analyze the following customer retention data and produce actionable retention outputs.
 
 OFFER STRUCTURE:
@@ -135,6 +171,7 @@ CUSTOMER JOURNEY:
 - Customer LTV: ${journey.customerLifetimeValue ?? "Unknown"}
 - Retention Window: ${journey.retentionWindowDays ?? "Unknown"} days
 - Engagement Decay Rate: ${journey.engagementDecayRate ?? "Unknown"}
+${rawDataSection}
 
 TOUCHPOINTS:
 ${touchpointSummary}
@@ -296,12 +333,21 @@ export async function runRetentionEngine(input: RetentionInput): Promise<Retenti
     warnings.push(...guardResult.flags);
   }
 
+  const hasRawInputs = !!(input.customerJourneyData as any)?.rawInputs;
+  const rawInputs = (input.customerJourneyData as any)?.rawInputs;
+  const rawSignalBoost = hasRawInputs ? (
+    (rawInputs.totalCustomers > 0 ? 3 : 0) +
+    (rawInputs.totalPurchases > 0 ? 2 : 0) +
+    (rawInputs.returningCustomers > 0 ? 2 : 0) +
+    (rawInputs.dataWindowDays > 0 ? 1 : 0)
+  ) : 0;
+
   const reliability = assessDataReliability(
-    input.customerJourneyData.touchpoints.length,
-    input.purchaseMotivations.length + input.postPurchaseObjections.length,
-    input.offerStructure.coreOutcome !== null,
-    input.offerStructure.deliverables.length > 0,
-    input.purchaseMotivations.length > 0,
+    input.customerJourneyData.touchpoints.length + (hasRawInputs ? 2 : 0),
+    input.purchaseMotivations.length + input.postPurchaseObjections.length + rawSignalBoost,
+    input.offerStructure.coreOutcome !== null || (hasRawInputs && rawInputs.totalCustomers > 0),
+    input.offerStructure.deliverables.length > 0 || (hasRawInputs && rawInputs.totalPurchases > 0),
+    input.purchaseMotivations.length > 0 || hasRawInputs,
     guardResult.retentionMechanismPresence,
   );
 
@@ -319,7 +365,7 @@ export async function runRetentionEngine(input: RetentionInput): Promise<Retenti
 
   try {
     const response = await aiChat({
-      model: "openai/gpt-4o-mini",
+      model: "gpt-4.1-mini",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.4,
       max_tokens: 3000,

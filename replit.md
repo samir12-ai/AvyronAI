@@ -31,7 +31,7 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 - **Competitive Intelligence (MIv3)**: A 6-layer pipeline for real-data competitor analysis, featuring narrative objection extraction, clustering, content DNA bridging, and a Signal Quality Gate.
 - **Strategic Core Architecture**: A 6-phase sequential engine for comprehensive plan generation using AI Creative Blueprints.
 - **Adaptive Engine Architecture**: Provides a foundation for scalable engine integration with standardized output schemas and a Context Kernel.
-- **Fortress Completion Engines (V3 Strategy Layer)**: Includes Statistical Validation Engine (V4), Budget Governor Engine, Channel Selection Engine (V3 with Funnel Resolution), Iteration Engine, and Retention Engine.
+- **Fortress Completion Engines (V3 Strategy Layer)**: Includes Statistical Validation Engine (V4), Budget Governor Engine, Channel Selection Engine (V3 with Funnel Resolution), Iteration Engine (with synthesized funnel/creative analysis from campaign metrics), and Retention Engine (with raw data model and AI-derived metrics).
 - **Adaptive Data Source System**: Supports `campaign_metrics` and `benchmark` modes with adaptive switching rules based on statistical thresholds. Includes a Statistical Validity Layer to gate scaling decisions.
 - **Snapshot Trust & Freshness System**: Provides temporal decay scoring, schema validation, and freshness classification for data, including staleness coefficients and trust scores.
 - **Semantic Data Bridge**: Wires MIv3 high-fidelity signals into the Audience Engine's core maps (Pain Profiles, Desire Maps, Objection Maps).
