@@ -10,9 +10,24 @@ import {
   studioItems,
   strategyInsights,
   performanceSnapshots,
+  miSnapshots,
+  audienceSnapshots,
+  positioningSnapshots,
+  differentiationSnapshots,
+  offerSnapshots,
+  funnelSnapshots,
+  awarenessSnapshots,
+  persuasionSnapshots,
+  strategyValidationSnapshots,
+  budgetGovernorSnapshots,
+  channelSelectionSnapshots,
+  iterationSnapshots,
+  retentionSnapshots,
+  strategicBlueprints,
 } from "@shared/schema";
 import { eq, and, desc, gte, sql, inArray } from "drizzle-orm";
 import { ACTIVE_PLAN_STATUSES } from "./plan-constants";
+import { aiChat } from "./ai-client";
 
 const LOG_PREFIX = "[Dashboard]";
 
@@ -410,6 +425,371 @@ export function registerDashboardRoutes(app: Express) {
     } catch (error: any) {
       console.error(`${LOG_PREFIX} Plan status error:`, error);
       res.status(500).json({ success: false, code: 500, message: "Failed to load plan status" });
+    }
+  });
+
+  app.get("/api/dashboard/agent-brief", requireCampaign, async (req: Request, res: Response) => {
+    try {
+      const { accountId, campaignId } = (req as any).campaignContext;
+      const mode = await resolveDataMode(accountId);
+
+      const safeJson = (v: any) => { try { return typeof v === "string" ? JSON.parse(v) : v; } catch { return null; } };
+
+      const [plans, manual, miData, audData, posData, diffData, offerData, funnelData, awarenessData, persuasionData, statValData, budgetData, channelData, iterData, retentionData, blueprint] = await Promise.all([
+        db.select().from(strategicPlans)
+          .where(and(eq(strategicPlans.campaignId, campaignId), eq(strategicPlans.accountId, accountId), inArray(strategicPlans.status, [...ACTIVE_PLAN_STATUSES])))
+          .orderBy(desc(strategicPlans.createdAt)).limit(1),
+        getManualMetrics(campaignId, accountId),
+        db.select({ marketDiagnosis: miSnapshots.marketDiagnosis, competitorData: miSnapshots.competitorData, status: miSnapshots.status })
+          .from(miSnapshots).where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId)))
+          .orderBy(desc(miSnapshots.createdAt)).limit(1),
+        db.select({ audiencePains: audienceSnapshots.audiencePains, audienceSegments: audienceSnapshots.audienceSegments, emotionalDrivers: audienceSnapshots.emotionalDrivers })
+          .from(audienceSnapshots).where(and(eq(audienceSnapshots.accountId, accountId), eq(audienceSnapshots.campaignId, campaignId)))
+          .orderBy(desc(audienceSnapshots.createdAt)).limit(1),
+        db.select({ territories: positioningSnapshots.territories, narrativeDirection: positioningSnapshots.narrativeDirection })
+          .from(positioningSnapshots).where(and(eq(positioningSnapshots.accountId, accountId), eq(positioningSnapshots.campaignId, campaignId)))
+          .orderBy(desc(positioningSnapshots.createdAt)).limit(1),
+        db.select({ differentiationPillars: differentiationSnapshots.differentiationPillars, authorityMode: differentiationSnapshots.authorityMode })
+          .from(differentiationSnapshots).where(and(eq(differentiationSnapshots.accountId, accountId), eq(differentiationSnapshots.campaignId, campaignId)))
+          .orderBy(desc(differentiationSnapshots.createdAt)).limit(1),
+        db.select({ primaryOffer: offerSnapshots.primaryOffer })
+          .from(offerSnapshots).where(and(eq(offerSnapshots.accountId, accountId), eq(offerSnapshots.campaignId, campaignId)))
+          .orderBy(desc(offerSnapshots.createdAt)).limit(1),
+        db.select({ primaryFunnel: funnelSnapshots.primaryFunnel })
+          .from(funnelSnapshots).where(and(eq(funnelSnapshots.accountId, accountId), eq(funnelSnapshots.campaignId, campaignId)))
+          .orderBy(desc(funnelSnapshots.createdAt)).limit(1),
+        db.select({ primaryRoute: awarenessSnapshots.primaryRoute, awarenessStrengthScore: awarenessSnapshots.awarenessStrengthScore })
+          .from(awarenessSnapshots).where(and(eq(awarenessSnapshots.accountId, accountId), eq(awarenessSnapshots.campaignId, campaignId)))
+          .orderBy(desc(awarenessSnapshots.createdAt)).limit(1),
+        db.select({ primaryRoute: persuasionSnapshots.primaryRoute, persuasionStrengthScore: persuasionSnapshots.persuasionStrengthScore })
+          .from(persuasionSnapshots).where(and(eq(persuasionSnapshots.accountId, accountId), eq(persuasionSnapshots.campaignId, campaignId)))
+          .orderBy(desc(persuasionSnapshots.createdAt)).limit(1),
+        db.select({ result: strategyValidationSnapshots.result, confidenceScore: strategyValidationSnapshots.confidenceScore, status: strategyValidationSnapshots.status })
+          .from(strategyValidationSnapshots).where(and(eq(strategyValidationSnapshots.accountId, accountId), eq(strategyValidationSnapshots.campaignId, campaignId)))
+          .orderBy(desc(strategyValidationSnapshots.createdAt)).limit(1),
+        db.select({ result: budgetGovernorSnapshots.result, status: budgetGovernorSnapshots.status })
+          .from(budgetGovernorSnapshots).where(and(eq(budgetGovernorSnapshots.accountId, accountId), eq(budgetGovernorSnapshots.campaignId, campaignId)))
+          .orderBy(desc(budgetGovernorSnapshots.createdAt)).limit(1),
+        db.select({ result: channelSelectionSnapshots.result, status: channelSelectionSnapshots.status })
+          .from(channelSelectionSnapshots).where(and(eq(channelSelectionSnapshots.accountId, accountId), eq(channelSelectionSnapshots.campaignId, campaignId)))
+          .orderBy(desc(channelSelectionSnapshots.createdAt)).limit(1),
+        db.select({ result: iterationSnapshots.result, status: iterationSnapshots.status })
+          .from(iterationSnapshots).where(and(eq(iterationSnapshots.accountId, accountId), eq(iterationSnapshots.campaignId, campaignId)))
+          .orderBy(desc(iterationSnapshots.createdAt)).limit(1),
+        db.select({ result: retentionSnapshots.result, status: retentionSnapshots.status })
+          .from(retentionSnapshots).where(and(eq(retentionSnapshots.accountId, accountId), eq(retentionSnapshots.campaignId, campaignId)))
+          .orderBy(desc(retentionSnapshots.createdAt)).limit(1),
+        db.select().from(strategicBlueprints)
+          .where(and(eq(strategicBlueprints.accountId, accountId), eq(strategicBlueprints.campaignId, campaignId)))
+          .orderBy(desc(strategicBlueprints.createdAt)).limit(1),
+      ]);
+
+      const plan = plans[0] || null;
+      const hasManualData = manual && (manual.spend > 0 || manual.revenue > 0 || manual.impressions > 0);
+      const spend = manual?.spend || 0;
+      const revenue = manual?.revenue || 0;
+      const conversions = manual?.conversions || 0;
+      const cpa = conversions > 0 ? +(spend / conversions).toFixed(2) : 0;
+      const roas = spend > 0 ? +(revenue / spend).toFixed(2) : 0;
+
+      let fulfillmentData: any = null;
+      if (plan) {
+        const { computeFulfillment } = await import("./fulfillment-engine");
+        fulfillmentData = await computeFulfillment(campaignId, accountId);
+      }
+
+      const totalPieces = fulfillmentData?.total?.required || 0;
+      const fulfilledPieces = fulfillmentData?.total?.fulfilled || 0;
+      const remainingPieces = fulfillmentData?.total?.remaining || totalPieces;
+      const progressPct = fulfillmentData?.progressPercent || 0;
+
+      const engineSummaries: Record<string, string> = {};
+      const enginesActive: string[] = [];
+
+      if (miData[0]) {
+        enginesActive.push("Market Intelligence");
+        let compCount = 0;
+        try { const cd = miData[0].competitorData ? JSON.parse(miData[0].competitorData) : []; compCount = Array.isArray(cd) ? cd.length : 0; } catch {}
+        engineSummaries.marketIntelligence = `${compCount} competitors tracked. Market: ${miData[0].marketDiagnosis || "analyzed"}`;
+      }
+      if (audData[0]) {
+        enginesActive.push("Audience");
+        const pains = safeJson(audData[0].audiencePains) || [];
+        const segs = safeJson(audData[0].audienceSegments) || [];
+        engineSummaries.audience = `${Array.isArray(pains) ? pains.length : 0} pain profiles, ${Array.isArray(segs) ? segs.length : 0} segments identified`;
+      }
+      if (posData[0]) {
+        enginesActive.push("Positioning");
+        const terr = safeJson(posData[0].territories) || [];
+        engineSummaries.positioning = `${Array.isArray(terr) ? terr.length : 0} positioning territories mapped`;
+      }
+      if (diffData[0]) {
+        enginesActive.push("Differentiation");
+        const pillars = safeJson(diffData[0].differentiationPillars) || [];
+        engineSummaries.differentiation = `${Array.isArray(pillars) ? pillars.length : 0} differentiation pillars, authority: ${diffData[0].authorityMode || "N/A"}`;
+      }
+      if (offerData[0]) {
+        enginesActive.push("Offer");
+        const offer = safeJson(offerData[0].primaryOffer);
+        engineSummaries.offer = offer?.offerName || "Structured offer defined";
+      }
+      if (funnelData[0]) {
+        enginesActive.push("Funnel");
+        const funnel = safeJson(funnelData[0].primaryFunnel);
+        engineSummaries.funnel = funnel?.funnelName || "Conversion funnel mapped";
+      }
+      if (awarenessData[0]) {
+        enginesActive.push("Awareness");
+        const route = safeJson(awarenessData[0].primaryRoute);
+        engineSummaries.awareness = `Route: ${route?.routeName || "defined"}, strength: ${awarenessData[0].awarenessStrengthScore ?? "N/A"}`;
+      }
+      if (persuasionData[0]) {
+        enginesActive.push("Persuasion");
+        const pRoute = safeJson(persuasionData[0].primaryRoute);
+        engineSummaries.persuasion = `Mode: ${pRoute?.routeName || "N/A"}, strength: ${persuasionData[0].persuasionStrengthScore ?? "N/A"}`;
+      }
+      if (statValData[0]) {
+        enginesActive.push("Statistical Validation");
+        const svResult = safeJson(statValData[0].result);
+        engineSummaries.statisticalValidation = `Confidence: ${statValData[0].confidenceScore ?? "N/A"}, status: ${statValData[0].status || "N/A"}`;
+      }
+      if (budgetData[0]) {
+        enginesActive.push("Budget Governor");
+        const bgResult = safeJson(budgetData[0].result);
+        engineSummaries.budgetGovernor = bgResult?.recommendation || `Budget analysis ${budgetData[0].status || "complete"}`;
+      }
+      if (channelData[0]) {
+        enginesActive.push("Channel Selection");
+        const csResult = safeJson(channelData[0].result);
+        engineSummaries.channelSelection = csResult?.selectedChannels ? `${csResult.selectedChannels.length} channels selected` : `Channel analysis ${channelData[0].status || "complete"}`;
+      }
+      if (iterData[0]) {
+        enginesActive.push("Iteration");
+        engineSummaries.iteration = `Iteration analysis ${iterData[0].status || "complete"}`;
+      }
+      if (retentionData[0]) {
+        enginesActive.push("Retention");
+        engineSummaries.retention = `Retention analysis ${retentionData[0].status || "complete"}`;
+      }
+
+      let planSections: string[] = [];
+      let planJson: any = null;
+      if (plan?.planJson) {
+        try {
+          planJson = typeof plan.planJson === "string" ? JSON.parse(plan.planJson) : plan.planJson;
+          if (planJson.contentDistributionPlan) planSections.push("Content Distribution");
+          if (planJson.creativeTestingMatrix) planSections.push("Creative Testing");
+          if (planJson.budgetAllocationStructure) planSections.push("Budget Allocation");
+          if (planJson.kpiMonitoringPriority) planSections.push("KPI Monitoring");
+          if (planJson.competitiveWatchTargets) planSections.push("Competitive Watch");
+          if (planJson.riskMonitoringTriggers) planSections.push("Risk Monitoring");
+        } catch {}
+      }
+
+      let orchestratorSections: string[] = [];
+      if (blueprint[0]?.orchestratorPlan) {
+        try {
+          const op = typeof blueprint[0].orchestratorPlan === "string" ? JSON.parse(blueprint[0].orchestratorPlan) : blueprint[0].orchestratorPlan;
+          if (op.contentDistributionPlan) orchestratorSections.push("Content Distribution");
+          if (op.creativeTestingMatrix) orchestratorSections.push("Creative Testing");
+          if (op.budgetAllocationStructure) orchestratorSections.push("Budget Allocation");
+          if (op.kpiMonitoringPriority) orchestratorSections.push("KPI Monitoring");
+          if (op.competitiveWatchTargets) orchestratorSections.push("Competitive Watch");
+          if (op.riskMonitoringTriggers) orchestratorSections.push("Risk Monitoring");
+        } catch {}
+      }
+
+      const statusParts: string[] = [];
+      if (hasManualData) statusParts.push(`CPA: $${cpa} | ROAS: ${roas}x`);
+      if (totalPieces > 0) statusParts.push(`Content: ${fulfilledPieces}/${totalPieces}`);
+      if (plan) statusParts.push(`Plan: ${plan.status}`);
+      if (!plan) statusParts.push("No plan yet");
+
+      const campaignStatus = statusParts.join(" · ");
+
+      let insight = "";
+      let priorityAction = "";
+
+      const contextForAI = [
+        hasManualData ? `Performance: CPA=$${cpa}, ROAS=${roas}x, Spend=$${spend}, Revenue=$${revenue}, Conversions=${conversions}` : "No performance data yet",
+        totalPieces > 0 ? `Plan progress: ${fulfilledPieces}/${totalPieces} pieces (${progressPct}% complete), ${remainingPieces} remaining` : "No content plan active",
+        plan ? `Plan status: ${plan.status}` : "No strategic plan created",
+        enginesActive.length > 0 ? `Active engines (${enginesActive.length}/13): ${enginesActive.join(", ")}` : "No engines have run yet",
+        ...Object.entries(engineSummaries).map(([k, v]) => `${k}: ${v}`),
+      ].join("\n");
+
+      try {
+        const response = await aiChat({
+          model: "gpt-4.1-mini",
+          messages: [
+            {
+              role: "system",
+              content: `You are the MarketMind AI Campaign Manager. Given campaign data and engine intelligence, produce EXACTLY this JSON:
+{"insight":"<1-2 sentence strategic interpretation of the current situation>","priorityAction":"<1 specific actionable next step the user should take right now>"}
+Be specific and data-driven. Reference actual numbers. Do NOT use generic advice. Respond with ONLY valid JSON.`,
+            },
+            { role: "user", content: contextForAI },
+          ],
+          max_tokens: 300,
+          accountId,
+          endpoint: "dashboard-agent-brief",
+        });
+
+        const rawText = typeof response === "string" ? response : response?.choices?.[0]?.message?.content || "";
+        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          insight = parsed.insight || "";
+          priorityAction = parsed.priorityAction || "";
+        }
+      } catch (err: any) {
+        console.warn(`${LOG_PREFIX} Agent brief AI generation failed:`, err.message);
+      }
+
+      if (!insight) {
+        if (hasManualData && roas > 0) {
+          insight = roas >= 3
+            ? `Campaign is performing well at ${roas}x ROAS. Engine intelligence suggests maintaining current creative direction while scaling proven content.`
+            : `ROAS at ${roas}x needs improvement. Consider refining audience targeting and creative strategy based on engine outputs.`;
+        } else if (totalPieces > 0) {
+          insight = `Content pipeline is ${progressPct}% complete with ${remainingPieces} pieces remaining. Consistent execution is key to maintaining campaign momentum.`;
+        } else {
+          insight = enginesActive.length > 0
+            ? `${enginesActive.length} engines have analyzed your market. Use these insights to build a strategic plan.`
+            : "Start by building a strategic plan to activate the AI engine pipeline.";
+        }
+      }
+
+      if (!priorityAction) {
+        if (!plan) {
+          priorityAction = "Build a strategic plan to activate the full engine pipeline and content calendar.";
+        } else if (totalPieces > 0 && remainingPieces > 0) {
+          priorityAction = `Create ${Math.min(remainingPieces, 2)} content pieces today to maintain cadence and progress toward your ${totalPieces}-piece plan.`;
+        } else {
+          priorityAction = "Review your plan sections and approve to start the content pipeline.";
+        }
+      }
+
+      console.log(`${LOG_PREFIX} Agent brief for ${campaignId}: ${enginesActive.length} engines, plan=${!!plan}, insight=${insight.length}ch`);
+
+      res.json({
+        success: true,
+        campaignStatus,
+        insight,
+        priorityAction,
+        planProgress: totalPieces > 0 ? { completed: fulfilledPieces, total: totalPieces, remaining: remainingPieces, percent: progressPct } : null,
+        engineCount: enginesActive.length,
+        enginesActive,
+        engineSummaries,
+        planSections: planSections.length > 0 ? planSections : orchestratorSections,
+        hasPlan: !!plan,
+        planStatus: plan?.status || null,
+        hasMetrics: hasManualData,
+        mode,
+        metrics: hasManualData ? { cpa, roas, spend, revenue } : null,
+      });
+    } catch (error: any) {
+      console.error(`${LOG_PREFIX} Agent brief error:`, error);
+      res.status(500).json({ success: false, code: 500, message: "Failed to generate agent brief" });
+    }
+  });
+
+  app.post("/api/dashboard/agent-explain", requireCampaign, async (req: Request, res: Response) => {
+    try {
+      const { accountId, campaignId } = (req as any).campaignContext;
+      const { question } = req.body;
+
+      if (!question || typeof question !== "string") {
+        return res.status(400).json({ success: false, error: "Question is required" });
+      }
+
+      const [plans, miData, audData, posData, diffData, offerData, funnelData, awarenessData, persuasionData, blueprint] = await Promise.all([
+        db.select().from(strategicPlans)
+          .where(and(eq(strategicPlans.campaignId, campaignId), eq(strategicPlans.accountId, accountId), inArray(strategicPlans.status, [...ACTIVE_PLAN_STATUSES])))
+          .orderBy(desc(strategicPlans.createdAt)).limit(1),
+        db.select({ marketDiagnosis: miSnapshots.marketDiagnosis, narrativeSynthesis: miSnapshots.narrativeSynthesis, threatSignals: miSnapshots.threatSignals, opportunitySignals: miSnapshots.opportunitySignals })
+          .from(miSnapshots).where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId)))
+          .orderBy(desc(miSnapshots.createdAt)).limit(1),
+        db.select({ audiencePains: audienceSnapshots.audiencePains, audienceSegments: audienceSnapshots.audienceSegments, emotionalDrivers: audienceSnapshots.emotionalDrivers })
+          .from(audienceSnapshots).where(and(eq(audienceSnapshots.accountId, accountId), eq(audienceSnapshots.campaignId, campaignId)))
+          .orderBy(desc(audienceSnapshots.createdAt)).limit(1),
+        db.select({ territories: positioningSnapshots.territories, narrativeDirection: positioningSnapshots.narrativeDirection })
+          .from(positioningSnapshots).where(and(eq(positioningSnapshots.accountId, accountId), eq(positioningSnapshots.campaignId, campaignId)))
+          .orderBy(desc(positioningSnapshots.createdAt)).limit(1),
+        db.select({ differentiationPillars: differentiationSnapshots.differentiationPillars, authorityMode: differentiationSnapshots.authorityMode })
+          .from(differentiationSnapshots).where(and(eq(differentiationSnapshots.accountId, accountId), eq(differentiationSnapshots.campaignId, campaignId)))
+          .orderBy(desc(differentiationSnapshots.createdAt)).limit(1),
+        db.select({ primaryOffer: offerSnapshots.primaryOffer })
+          .from(offerSnapshots).where(and(eq(offerSnapshots.accountId, accountId), eq(offerSnapshots.campaignId, campaignId)))
+          .orderBy(desc(offerSnapshots.createdAt)).limit(1),
+        db.select({ primaryFunnel: funnelSnapshots.primaryFunnel })
+          .from(funnelSnapshots).where(and(eq(funnelSnapshots.accountId, accountId), eq(funnelSnapshots.campaignId, campaignId)))
+          .orderBy(desc(funnelSnapshots.createdAt)).limit(1),
+        db.select({ primaryRoute: awarenessSnapshots.primaryRoute, awarenessStrengthScore: awarenessSnapshots.awarenessStrengthScore })
+          .from(awarenessSnapshots).where(and(eq(awarenessSnapshots.accountId, accountId), eq(awarenessSnapshots.campaignId, campaignId)))
+          .orderBy(desc(awarenessSnapshots.createdAt)).limit(1),
+        db.select({ primaryRoute: persuasionSnapshots.primaryRoute, persuasionStrengthScore: persuasionSnapshots.persuasionStrengthScore })
+          .from(persuasionSnapshots).where(and(eq(persuasionSnapshots.accountId, accountId), eq(persuasionSnapshots.campaignId, campaignId)))
+          .orderBy(desc(persuasionSnapshots.createdAt)).limit(1),
+        db.select().from(strategicBlueprints)
+          .where(and(eq(strategicBlueprints.accountId, accountId), eq(strategicBlueprints.campaignId, campaignId)))
+          .orderBy(desc(strategicBlueprints.createdAt)).limit(1),
+      ]);
+
+      const plan = plans[0] || null;
+      let planJson: any = null;
+      if (plan?.planJson) { try { planJson = typeof plan.planJson === "string" ? JSON.parse(plan.planJson) : plan.planJson; } catch {} }
+      let orchestratorPlan: any = null;
+      if (blueprint[0]?.orchestratorPlan) { try { orchestratorPlan = typeof blueprint[0].orchestratorPlan === "string" ? JSON.parse(blueprint[0].orchestratorPlan) : blueprint[0].orchestratorPlan; } catch {} }
+
+      const safeJson = (v: any) => { try { return typeof v === "string" ? JSON.parse(v) : v; } catch { return null; } };
+
+      const contextParts: string[] = [];
+      if (miData[0]) contextParts.push(`MARKET INTELLIGENCE:\nDiagnosis: ${miData[0].marketDiagnosis || "N/A"}\nThreats: ${JSON.stringify(safeJson(miData[0].threatSignals) || [])}\nOpportunities: ${JSON.stringify(safeJson(miData[0].opportunitySignals) || [])}`);
+      if (audData[0]) contextParts.push(`AUDIENCE:\nPain profiles: ${(safeJson(audData[0].audiencePains) || []).length}\nSegments: ${JSON.stringify(safeJson(audData[0].audienceSegments) || [])}\nEmotional drivers: ${JSON.stringify(safeJson(audData[0].emotionalDrivers) || [])}`);
+      if (posData[0]) contextParts.push(`POSITIONING:\nTerritories: ${JSON.stringify(safeJson(posData[0].territories) || [])}\nNarrative: ${posData[0].narrativeDirection || "N/A"}`);
+      if (diffData[0]) contextParts.push(`DIFFERENTIATION:\nPillars: ${JSON.stringify(safeJson(diffData[0].differentiationPillars) || [])}\nAuthority mode: ${diffData[0].authorityMode || "N/A"}`);
+      if (offerData[0]) contextParts.push(`OFFER:\n${JSON.stringify(safeJson(offerData[0].primaryOffer) || {})}`);
+      if (funnelData[0]) contextParts.push(`FUNNEL:\n${JSON.stringify(safeJson(funnelData[0].primaryFunnel) || {})}`);
+      if (awarenessData[0]) contextParts.push(`AWARENESS:\nRoute: ${JSON.stringify(safeJson(awarenessData[0].primaryRoute) || {})}\nStrength: ${awarenessData[0].awarenessStrengthScore ?? "N/A"}`);
+      if (persuasionData[0]) {
+        const pRouteData = safeJson(persuasionData[0].primaryRoute);
+        contextParts.push(`PERSUASION:\nMode: ${pRouteData?.routeName || "N/A"}\nStrength: ${persuasionData[0].persuasionStrengthScore ?? "N/A"}`);
+      }
+
+      const activePlan = planJson || orchestratorPlan;
+      if (activePlan) {
+        const sectionNames = Object.keys(activePlan).filter(k => !["blueprintVersion", "fallback", "partialFallback", "fallbackReason", "aiGeneratedSections", "fallbackSections"].includes(k));
+        for (const section of sectionNames) {
+          const sData = activePlan[section];
+          if (sData && typeof sData === "object") {
+            contextParts.push(`PLAN SECTION [${section}]:\n${JSON.stringify(sData).substring(0, 800)}`);
+          }
+        }
+      }
+
+      const contextStr = contextParts.join("\n\n").substring(0, 6000);
+
+      const response = await aiChat({
+        model: "gpt-4.1-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are the MarketMind AI Campaign Manager. You have full access to all engine outputs and plan sections. Answer the user's question using the provided engine data and plan context. Be specific, reference actual data, and explain the strategic reasoning. Keep your answer concise (2-4 sentences). Do not invent data not present in the context.`,
+          },
+          { role: "user", content: `CONTEXT:\n${contextStr}\n\nUSER QUESTION: ${question}` },
+        ],
+        max_tokens: 400,
+        accountId,
+        endpoint: "dashboard-agent-explain",
+      });
+
+      const rawText = typeof response === "string" ? response : response?.choices?.[0]?.message?.content || "";
+
+      res.json({ success: true, answer: rawText.trim() });
+    } catch (error: any) {
+      console.error(`${LOG_PREFIX} Agent explain error:`, error);
+      res.status(500).json({ success: false, error: "Failed to generate explanation" });
     }
   });
 }

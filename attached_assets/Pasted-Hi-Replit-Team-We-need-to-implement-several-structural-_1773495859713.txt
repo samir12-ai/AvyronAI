@@ -1,0 +1,225 @@
+Hi Replit Team,
+
+We need to implement several structural updates to the MarketMind V1 system. This is not a cosmetic update — it is a product architecture adjustment that ensures the AI Agent, Engines, Plan System, and Dashboard all work together reliably. Please read the following carefully and implement each point fully and precisely.
+
+--------------------------------------------------
+
+1. Transform the Current “AI Actions” Section into an Agent Control Box
+
+The current "AI Actions" section is acting as a metrics log rather than an intelligent campaign manager. This must be redesigned into a compact AI Agent Box that functions as the operational brain of the dashboard.
+
+The new component should be titled:
+
+MarketMind Agent  
+(or AI Campaign Manager)
+
+This box must summarize the campaign situation and guide the user toward the next action rather than listing raw metrics.
+
+The Agent Box must contain the following structured layers:
+
+A. Campaign Status Summary  
+A short high-level snapshot of the campaign state derived from system metrics and engines. This should summarize the situation in a way a user can understand within seconds.
+
+Example information sources:
+- CPA
+- ROAS
+- Content pipeline status
+- Plan execution progress
+
+Example display:
+
+Campaign Status  
+CPA: $10 | ROAS: 4x  
+Content Progress: 1 / 50
+
+This summary must not dump raw metrics, but synthesize them into readable status signals.
+
+--------------------------------------------------
+
+B. Strategic Insight Layer
+
+The AI Agent must produce a short interpretation of the data coming from the engines and campaign metrics.
+
+Example:
+
+“Creative performance is strong (CTR indicates high resonance). Scaling winning creatives may reduce acquisition cost.”
+
+This insight must be generated from the underlying system data, not hardcoded.
+
+--------------------------------------------------
+
+C. Priority Action Layer
+
+The agent must always provide one clear recommended action.
+
+Example:
+
+Priority Action  
+Create 2 reels today to maintain content cadence and reduce CPA.
+
+This should be generated dynamically based on:
+
+- Plan progress
+- Content pipeline status
+- Performance signals
+- Engine recommendations
+
+--------------------------------------------------
+
+D. Action Buttons (Execution Shortcuts)
+
+The Agent Box must include direct execution buttons connected to the system:
+
+Examples:
+
+Create Content  
+Generate Content Idea  
+Open Creation Studio
+
+These buttons must route directly to the relevant modules.
+
+--------------------------------------------------
+
+E. Plan Progress Indicator
+
+The agent must display plan execution progress clearly.
+
+Example:
+
+Content Plan Progress  
+1 / 50 completed  
+49 remaining
+
+This information should come from the plan execution tracker.
+
+--------------------------------------------------
+
+2. Ensure the AI Agent Receives Full Engine Intelligence
+
+The AI Agent must not operate as a simple chat assistant.  
+It must act as a manager that has visibility into all engine outputs.
+
+The agent must have access to the outputs of:
+
+Market Intelligence Engine  
+Audience Engine  
+Positioning Engine  
+Differentiation Engine  
+Offer Engine  
+Funnel Engine  
+Awareness Engine  
+Persuasion Engine  
+Statistical Validation Engine  
+Budget Governor  
+Channel Selection Engine  
+Iteration Engine  
+Retention Engine
+
+These outputs must be available to the agent through structured data access.
+
+This allows the agent to:
+
+- Interpret system decisions
+- Explain strategy sections
+- Provide intelligent guidance
+- Answer user questions about any plan component
+
+--------------------------------------------------
+
+3. Allow Section-Level Explanations Through the Agent
+
+If the user asks for clarification about a specific section, the agent must be able to explain it using engine outputs.
+
+Examples:
+
+“Explain the Content Distribution strategy.”  
+“Why is the funnel structured this way?”  
+“Why is the budget allocated like this?”  
+“Explain the persuasion logic.”
+
+The agent must retrieve the relevant engine outputs and provide a contextual explanation rather than generic responses.
+
+--------------------------------------------------
+
+4. Ensure Plan Data Is Fully Connected to the Agent
+
+The agent must also have access to the generated plan structure.
+
+This includes:
+
+Content distribution strategy  
+Content pillars  
+Creative testing experiments  
+Budget allocation  
+KPI monitoring  
+Competitive watch  
+Risk triggers  
+Calendar generation
+
+The agent must be able to reference these when generating insights or instructions.
+
+--------------------------------------------------
+
+5. Maintain Clear Separation Between Metrics and Agent Logic
+
+The Agent Box must not function as a metric dump.
+
+Metrics such as:
+
+CTR  
+Clicks  
+Conversions  
+Impressions  
+
+should remain inside analytics modules.
+
+The agent should synthesize insights from them, not list them raw.
+
+--------------------------------------------------
+
+6. Strict Root and Data Flow Verification
+
+Please carefully verify the system’s internal routing and data connections.
+
+Key checks:
+
+• All engine outputs must properly flow into the orchestrator.  
+• The orchestrator must pass structured outputs to the plan synthesis layer.  
+• The plan must be stored and accessible to the dashboard and the agent.  
+• The agent must read both plan outputs and engine intelligence.
+
+Any broken root connections or data flow issues must be fixed.
+
+--------------------------------------------------
+
+7. System Update and Environment Refresh
+
+After implementing these changes please:
+
+• Update the system environment  
+• Rebuild the routing structure  
+• Verify all modules reconnect correctly  
+• Ensure agent access permissions to engines and plan outputs
+
+This update must prevent partial state failures or disconnected components.
+
+--------------------------------------------------
+
+8. Acceptance Criteria (Strict)
+
+Before closing the task, the following must be confirmed:
+
+• Agent Box fully replaces AI Actions panel  
+• Agent displays campaign summary, insight, priority action, and plan progress  
+• Agent has access to all engine outputs  
+• Agent can explain any plan section when asked  
+• Engine outputs flow correctly through the orchestrator  
+• Dashboard and plan remain synchronized  
+• System routing verified and stable after update
+
+This feature is critical for MarketMind V1 usability and must be implemented carefully.
+
+Please confirm when the implementation and system update are completed.
+
+Best regards,  
+MarketMind Development

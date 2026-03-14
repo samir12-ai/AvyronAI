@@ -29,6 +29,7 @@ import { BusinessProfileModal, ProfileButton } from '@/components/BusinessProfil
 import { PlanStatus } from '@/components/PlanStatus';
 import { ExecutionPipeline } from '@/components/ExecutionPipeline';
 import { RequiredWorkCard } from '@/components/RequiredWorkCard';
+import { MarketMindAgent, MarketMindAgentRef } from '@/components/MarketMindAgent';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -93,7 +94,7 @@ function PulsingDot({ color, size = 8 }: { color: string; size?: number }) {
   );
 }
 
-function MiniBarChart({ isDark }: { isDark: boolean }) {
+function _MiniBarChart({ isDark }: { isDark: boolean }) {
   const bars = [0.4, 0.6, 0.35, 0.8, 0.55, 0.9, 0.7];
   return (
     <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 3, height: 32 }}>
@@ -125,16 +126,6 @@ type DashboardMetrics = {
   engagement: number;
 };
 
-type AIAction = {
-  id: string;
-  action: string;
-  evidenceMetric: string;
-  evidenceTimeframe: string;
-  sourceTag: string;
-  priority: string;
-  priorityJustification: string;
-};
-
 type PanelState = 'loading' | 'empty' | 'error' | 'success' | 'no_data';
 
 export default function DashboardScreen() {
@@ -153,10 +144,6 @@ export default function DashboardScreen() {
   const [dataSource, setDataSource] = useState<'META' | 'MANUAL' | 'PLAN' | 'NONE'>('NONE');
   const [planMetrics, setPlanMetrics] = useState<{ plannedPieces: number; generatedPieces: number; failedPieces: number; pendingGeneration: number; completionPct: number; nextScheduledDate: string | null; hasPlan: boolean; planStatus: string | null } | null>(null);
 
-  const [actionsState, setActionsState] = useState<PanelState>('loading');
-  const [actionsError, setActionsError] = useState<number | null>(null);
-  const [aiActions, setAiActions] = useState<AIAction[]>([]);
-  const [actionsGated, setActionsGated] = useState(false);
 
   const [confidenceScore, setConfidenceScore] = useState(0);
   const [confidenceStatus, setConfidenceStatus] = useState<'Stable' | 'Caution' | 'Unstable'>('Stable');
@@ -170,6 +157,7 @@ export default function DashboardScreen() {
   const [showProfile, setShowProfile] = useState(false);
   const [orchestratorRunning, setOrchestratorRunning] = useState(false);
   const prevCampaignRef = useRef<string | null | undefined>(undefined);
+  const agentRef = useRef<MarketMindAgentRef>(null);
 
   const headerFade = useRef(new RNAnimated.Value(0)).current;
   const cardSlide = useRef(new RNAnimated.Value(30)).current;
@@ -220,41 +208,6 @@ export default function DashboardScreen() {
     }
   }, [baseUrl, selectedCampaignId]);
 
-  const fetchActions = useCallback(async () => {
-    const requestCampaign = selectedCampaignId;
-    if (!requestCampaign) {
-      setActionsState('empty');
-      setAiActions([]);
-      return;
-    }
-    setActionsState('loading');
-    try {
-      const res = await fetch(new URL(`/api/dashboard/ai-actions?accountId=default&campaignId=${requestCampaign}`, baseUrl).toString());
-      if (activeCampaignRef.current !== requestCampaign) return;
-      if (!res.ok) {
-        setActionsState('error');
-        setActionsError(res.status);
-        return;
-      }
-      const data = await res.json();
-      if (activeCampaignRef.current !== requestCampaign) return;
-      if (data.gated) {
-        setActionsGated(true);
-        setAiActions([]);
-        setActionsState('empty');
-        return;
-      }
-      setActionsGated(false);
-      setAiActions(data.actions || []);
-      setActionsState(data.actions?.length > 0 ? 'success' : 'no_data');
-      setActionsError(null);
-    } catch {
-      if (activeCampaignRef.current !== requestCampaign) return;
-      setActionsState('error');
-      setActionsError(0);
-    }
-  }, [baseUrl, selectedCampaignId]);
-
   const fetchConfidence = useCallback(async () => {
     try {
       const res = await fetch(new URL('/api/autopilot/status', baseUrl).toString());
@@ -292,10 +245,6 @@ export default function DashboardScreen() {
       setMetricsError(null);
       setDataSource('NONE');
       setPlanMetrics(null);
-      setAiActions([]);
-      setActionsState('loading');
-      setActionsError(null);
-      setActionsGated(false);
       setConfidenceScore(0);
       setConfidenceStatus('Stable');
       setConfidenceLoaded(false);
@@ -306,16 +255,16 @@ export default function DashboardScreen() {
     }
 
     fetchMetrics();
-    fetchActions();
     fetchConfidence();
     fetchDataMode();
   }, [selectedCampaignId]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([fetchMetrics(), fetchActions(), fetchConfidence(), fetchDataMode()]);
+    const agentRefresh = agentRef.current?.refresh() ?? Promise.resolve();
+    await Promise.all([agentRefresh, fetchMetrics(), fetchConfidence(), fetchDataMode()]);
     setRefreshing(false);
-  }, [fetchMetrics, fetchActions, fetchConfidence, fetchDataMode]);
+  }, [fetchMetrics, fetchConfidence, fetchDataMode]);
 
   const formatNumber = (num: number | undefined | null): string => {
     if (num == null || isNaN(num)) return '0';
@@ -367,19 +316,6 @@ export default function DashboardScreen() {
   const textMuted = isDark ? P.textDarkMuted : P.textLightMuted;
   const cardBg = isDark ? P.darkCard : P.lightCard;
   const cardBorder = isDark ? P.darkCardBorder : P.lightCardBorder;
-
-  const sourceTagColor = (tag: string) => {
-    switch (tag) {
-      case 'PERFORMANCE': return P.mint;
-      case 'PLAN': return P.blue;
-      case 'PLAN_PROGRESS': return P.blue;
-      case 'MANUAL_METRICS': return P.orange;
-      case 'HYBRID': return P.purple;
-      case 'GATES': return P.orange;
-      case 'PUBLISH': return P.purple;
-      default: return P.silver;
-    }
-  };
 
   const renderMetricsPanel = () => {
     if (metricsState === 'loading') {
@@ -556,110 +492,6 @@ export default function DashboardScreen() {
     );
   };
 
-  const renderActionsPanel = () => {
-    if (actionsState === 'loading') {
-      return (
-        <View style={[s.aiCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-          <View style={s.aiCardHeader}>
-            <View style={s.aiCardLeft}>
-              <View style={[s.aiCardIcon, { backgroundColor: isDark ? '#1F1135' : '#F3EEFF' }]}>
-                <Ionicons name="flash" size={15} color={P.purple} />
-              </View>
-              <Text style={[s.aiCardTitle, { color: textPrimary }]}>AI Actions</Text>
-            </View>
-          </View>
-          <View style={{ paddingVertical: 12, alignItems: 'center' }}>
-            <ActivityIndicator size="small" color={P.purple} />
-          </View>
-        </View>
-      );
-    }
-    if (actionsState === 'error') {
-      return (
-        <View style={[s.aiCard, { backgroundColor: cardBg, borderColor: P.coral + '30' }]}>
-          <View style={s.aiCardHeader}>
-            <View style={s.aiCardLeft}>
-              <Ionicons name="warning-outline" size={15} color={P.coral} />
-              <Text style={[s.aiCardTitle, { color: P.coral }]}>AI Actions</Text>
-            </View>
-          </View>
-          <Text style={[{ fontSize: 12, color: textMuted }]}>Failed to load (Error {actionsError || 'unknown'})</Text>
-          <Pressable onPress={fetchActions} style={{ marginTop: 8, paddingHorizontal: 12, paddingVertical: 5, backgroundColor: P.coral + '15', borderRadius: 6, alignSelf: 'flex-start' }}>
-            <Text style={{ fontSize: 11, fontWeight: '600', color: P.coral }}>Retry</Text>
-          </Pressable>
-        </View>
-      );
-    }
-    if (actionsGated) {
-      return (
-        <View style={[s.aiCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-          <View style={s.aiCardHeader}>
-            <View style={s.aiCardLeft}>
-              <View style={[s.aiCardIcon, { backgroundColor: isDark ? '#1F1135' : '#F3EEFF' }]}>
-                <Ionicons name="lock-closed" size={15} color={P.silver} />
-              </View>
-              <Text style={[s.aiCardTitle, { color: textMuted }]}>AI Actions</Text>
-            </View>
-          </View>
-          <Text style={[{ fontSize: 12, color: textMuted, paddingVertical: 4 }]}>
-            Requires an approved plan. Build and approve a strategic plan to unlock AI-driven actions.
-          </Text>
-        </View>
-      );
-    }
-    if (actionsState === 'empty' || actionsState === 'no_data') {
-      return (
-        <View style={[s.aiCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-          <View style={s.aiCardHeader}>
-            <View style={s.aiCardLeft}>
-              <View style={[s.aiCardIcon, { backgroundColor: isDark ? '#1F1135' : '#F3EEFF' }]}>
-                <Ionicons name="flash" size={15} color={P.purple} />
-              </View>
-              <Text style={[s.aiCardTitle, { color: textPrimary }]}>AI Actions</Text>
-            </View>
-          </View>
-          <Text style={[{ fontSize: 12, color: textMuted, paddingVertical: 4 }]}>
-            {selectedCampaignId ? 'No actions available yet' : 'Select a campaign to view AI actions'}
-          </Text>
-        </View>
-      );
-    }
-
-    return (
-      <View style={[s.aiCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-        <View style={s.aiCardHeader}>
-          <View style={s.aiCardLeft}>
-            <View style={[s.aiCardIcon, { backgroundColor: isDark ? '#1F1135' : '#F3EEFF' }]}>
-              <Ionicons name="flash" size={15} color={P.purple} />
-            </View>
-            <Text style={[s.aiCardTitle, { color: textPrimary }]}>AI Actions</Text>
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <MiniBarChart isDark={isDark} />
-            <View style={[s.actionCount, { backgroundColor: P.purple + '12' }]}>
-              <Text style={[s.actionCountText, { color: P.purple }]}>{aiActions.length}</Text>
-            </View>
-          </View>
-        </View>
-        {aiActions.map((action, i) => (
-          <View key={action.id} style={[s.aiAction, i < aiActions.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: isDark ? '#1A2030' : '#F0F3F1' }]}>
-            <View style={[s.aiActionDot, { backgroundColor: sourceTagColor(action.sourceTag) }]} />
-            <View style={{ flex: 1 }}>
-              <Text style={[s.aiActionText, { color: textSecondary }]}>{action.action}</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
-                <View style={{ paddingHorizontal: 5, paddingVertical: 1, backgroundColor: sourceTagColor(action.sourceTag) + '15', borderRadius: 4 }}>
-                  <Text style={{ fontSize: 9, fontWeight: '600', color: sourceTagColor(action.sourceTag) }}>{action.sourceTag}</Text>
-                </View>
-                <Text style={{ fontSize: 10, color: textMuted }}>{action.evidenceMetric}</Text>
-                <Text style={{ fontSize: 10, color: textMuted }}>{action.evidenceTimeframe}</Text>
-              </View>
-            </View>
-          </View>
-        ))}
-      </View>
-    );
-  };
-
   return (
     <View style={[s.container, { backgroundColor: bg }]}>
       <ScrollView
@@ -727,7 +559,7 @@ export default function DashboardScreen() {
           </>
         ) : null}
 
-        {renderActionsPanel()}
+        <MarketMindAgent ref={agentRef} campaignId={selectedCampaignId} isDark={isDark} />
 
         <View style={[s.metaStrip, { 
           backgroundColor: metaConnection.isConnected 
