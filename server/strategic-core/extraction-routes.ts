@@ -545,6 +545,7 @@ export function registerExtractionRoutes(app: Express) {
             { role: "system", content: CREATIVE_BLUEPRINT_PROMPT },
             { role: "user", content: `Generate a Creative Blueprint based on this strategic data:\n\n${contextBlock}` },
           ],
+          max_tokens: 2000,
           accountId: blueprint.accountId || "default",
           endpoint: "strategic-creative-blueprint",
         });
@@ -562,6 +563,7 @@ export function registerExtractionRoutes(app: Express) {
               { role: "system", content: CREATIVE_BLUEPRINT_PROMPT + "\n\nPREVIOUS ATTEMPT FAILED. Return ONLY a valid JSON object. No markdown. No comments." },
               { role: "user", content: `Generate a Creative Blueprint:\n\n${contextBlock}` },
             ],
+            max_tokens: 2000,
             accountId: blueprint.accountId || "default",
             endpoint: "strategic-creative-blueprint-retry",
           });
