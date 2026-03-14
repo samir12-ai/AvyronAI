@@ -129,6 +129,15 @@ export default function SettingsScreen() {
   const [manualDerived, setManualDerived] = useState({ cpa: 0, roas: 0 });
   const isMetaConnected = metaStatus?.metaMode === 'REAL';
 
+  const [retRepeatPurchaseRate, setRetRepeatPurchaseRate] = useState('');
+  const [retAvgOrderValue, setRetAvgOrderValue] = useState('');
+  const [retCustomerLifespan, setRetCustomerLifespan] = useState('');
+  const [retRefundRate, setRetRefundRate] = useState('');
+  const [retPurchaseFrequency, setRetPurchaseFrequency] = useState('');
+  const [retMonthlyCustomers, setRetMonthlyCustomers] = useState('');
+  const [retSaving, setRetSaving] = useState(false);
+  const [retDerived, setRetDerived] = useState({ ltv: 0, churnRisk: 0, retentionStrength: 0 });
+
   const fetchManualMetrics = useCallback(async () => {
     if (!selectedCampaignId) return;
     try {
@@ -197,6 +206,86 @@ export default function SettingsScreen() {
       Alert.alert('Error', error.message || 'Failed to save metrics');
     } finally {
       setManualSaving(false);
+    }
+  };
+
+  const fetchRetentionMetrics = useCallback(async () => {
+    if (!selectedCampaignId) return;
+    try {
+      const apiUrl = getApiUrl();
+      const url = new URL(`/api/campaigns/${selectedCampaignId}/retention-metrics`, apiUrl);
+      const res = await fetch(url.toString(), { credentials: 'include' });
+      const data = await res.json();
+      if (data.success && data.metrics) {
+        const m = data.metrics;
+        setRetRepeatPurchaseRate(m.repeatPurchaseRate > 0 ? String(m.repeatPurchaseRate) : '');
+        setRetAvgOrderValue(m.averageOrderValue > 0 ? String(m.averageOrderValue) : '');
+        setRetCustomerLifespan(m.customerLifespan > 0 ? String(m.customerLifespan) : '');
+        setRetRefundRate(m.refundRate > 0 ? String(m.refundRate) : '');
+        setRetPurchaseFrequency(m.purchaseFrequency > 0 ? String(m.purchaseFrequency) : '');
+        setRetMonthlyCustomers(m.monthlyCustomers > 0 ? String(m.monthlyCustomers) : '');
+        if (m.derived) {
+          setRetDerived({
+            ltv: m.derived.estimatedLTV || 0,
+            churnRisk: m.derived.churnRisk || 0,
+            retentionStrength: m.derived.retentionStrength || 0,
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch retention metrics:', error);
+    }
+  }, [selectedCampaignId]);
+
+  useEffect(() => {
+    fetchRetentionMetrics();
+  }, [fetchRetentionMetrics]);
+
+  useEffect(() => {
+    const aov = parseFloat(retAvgOrderValue) || 0;
+    const freq = parseFloat(retPurchaseFrequency) || 0;
+    const lifespan = parseFloat(retCustomerLifespan) || 0;
+    const refund = parseFloat(retRefundRate) || 0;
+    const rpr = parseFloat(retRepeatPurchaseRate) || 0;
+    const ltv = aov * freq * lifespan;
+    const churnRisk = refund > 0 ? Math.min(refund * 2, 1) : (rpr > 0 ? Math.max(0, 1 - rpr) : 0);
+    const retentionStrength = rpr > 0 ? (rpr * 0.4 + (1 - churnRisk) * 0.3 + Math.min(lifespan / 24, 1) * 0.3) : 0;
+    setRetDerived({ ltv: +ltv.toFixed(2), churnRisk: +churnRisk.toFixed(2), retentionStrength: +retentionStrength.toFixed(2) });
+  }, [retAvgOrderValue, retPurchaseFrequency, retCustomerLifespan, retRefundRate, retRepeatPurchaseRate]);
+
+  const handleSaveRetentionMetrics = async () => {
+    if (!selectedCampaignId) {
+      Alert.alert('No Campaign', 'Please select a campaign first.');
+      return;
+    }
+    setRetSaving(true);
+    try {
+      const apiUrl = getApiUrl();
+      const url = new URL(`/api/campaigns/${selectedCampaignId}/retention-metrics`, apiUrl);
+      const res = await fetch(url.toString(), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          repeatPurchaseRate: parseFloat(retRepeatPurchaseRate) || 0,
+          averageOrderValue: parseFloat(retAvgOrderValue) || 0,
+          customerLifespan: parseFloat(retCustomerLifespan) || 0,
+          refundRate: parseFloat(retRefundRate) || 0,
+          purchaseFrequency: parseFloat(retPurchaseFrequency) || 0,
+          monthlyCustomers: parseInt(retMonthlyCustomers) || 0,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('Saved', 'Retention metrics updated. The retention engine will use these for analysis.');
+      } else {
+        throw new Error(data.error || 'Save failed');
+      }
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to save retention metrics');
+    } finally {
+      setRetSaving(false);
     }
   };
 
@@ -888,6 +977,136 @@ export default function SettingsScreen() {
                   )}
                 </Pressable>
               )}
+            </View>
+          )}
+        </View>
+
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={styles.cardHeader}>
+            <View style={styles.cardTitleRow}>
+              <Ionicons name="repeat" size={20} color="#8B5CF6" />
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Retention Metrics</Text>
+            </View>
+            <View style={[styles.badge, { backgroundColor: '#8B5CF6' + '20' }]}>
+              <Text style={[styles.badgeText, { color: '#8B5CF6' }]}>Engine Input</Text>
+            </View>
+          </View>
+          <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
+            Your customer retention data powers the Retention Engine analysis. Enter real numbers for accurate LTV, churn, and retention scoring.
+          </Text>
+
+          {!selectedCampaignId ? (
+            <View style={{ padding: 16, alignItems: 'center' }}>
+              <Text style={{ color: colors.textMuted, fontSize: 14 }}>Select a campaign first to enter retention data</Text>
+            </View>
+          ) : (
+            <View style={{ marginTop: 12, gap: 10 }}>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Repeat Purchase Rate</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={retRepeatPurchaseRate}
+                    onChangeText={setRetRepeatPurchaseRate}
+                    placeholder="0.30"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Avg Order Value ($)</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={retAvgOrderValue}
+                    onChangeText={setRetAvgOrderValue}
+                    placeholder="0.00"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Customer Lifespan (mo)</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={retCustomerLifespan}
+                    onChangeText={setRetCustomerLifespan}
+                    placeholder="12"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Refund Rate</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={retRefundRate}
+                    onChangeText={setRetRefundRate}
+                    placeholder="0.05"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Purchase Frequency</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={retPurchaseFrequency}
+                    onChangeText={setRetPurchaseFrequency}
+                    placeholder="2.5"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Monthly Customers</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={retMonthlyCustomers}
+                    onChangeText={setRetMonthlyCustomers}
+                    placeholder="100"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                  />
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+                <View style={[styles.derivedMetric, { backgroundColor: '#8B5CF6' + '10', borderColor: '#8B5CF6' + '30' }]}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Est. LTV</Text>
+                  <Text style={{ color: '#8B5CF6', fontSize: 16, fontWeight: '700' as const }}>${retDerived.ltv.toFixed(0)}</Text>
+                </View>
+                <View style={[styles.derivedMetric, { backgroundColor: (retDerived.churnRisk > 0.5 ? '#EF4444' : '#10B981') + '10', borderColor: (retDerived.churnRisk > 0.5 ? '#EF4444' : '#10B981') + '30' }]}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Churn Risk</Text>
+                  <Text style={{ color: retDerived.churnRisk > 0.5 ? '#EF4444' : '#10B981', fontSize: 16, fontWeight: '700' as const }}>{(retDerived.churnRisk * 100).toFixed(0)}%</Text>
+                </View>
+                <View style={[styles.derivedMetric, { backgroundColor: '#3B82F6' + '10', borderColor: '#3B82F6' + '30' }]}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Retention</Text>
+                  <Text style={{ color: '#3B82F6', fontSize: 16, fontWeight: '700' as const }}>{(retDerived.retentionStrength * 100).toFixed(0)}%</Text>
+                </View>
+              </View>
+
+              <Pressable
+                onPress={handleSaveRetentionMetrics}
+                disabled={retSaving}
+                style={({ pressed }) => [{
+                  backgroundColor: '#8B5CF6',
+                  padding: 14,
+                  borderRadius: 10,
+                  alignItems: 'center' as const,
+                  marginTop: 6,
+                  opacity: (pressed || retSaving) ? 0.7 : 1,
+                }]}
+              >
+                {retSaving ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={{ color: '#fff', fontWeight: '600' as const, fontSize: 15 }}>Save Retention Metrics</Text>
+                )}
+              </Pressable>
             </View>
           )}
         </View>

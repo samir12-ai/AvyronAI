@@ -134,6 +134,16 @@ export interface FunnelReconstructionResult {
   channelsStillRejected: number;
 }
 
+export type ChannelMode = "organic_only" | "paid_only" | "hybrid" | "automatic";
+
+export interface DecisionGateScoring {
+  funnelIntegrityScore: number;
+  persuasionAlignmentScore: number;
+  budgetRealism: number;
+  channelScalability: number;
+  compositeGateScore: number;
+}
+
 export interface ChannelSelectionResult {
   status: string;
   statusMessage: string | null;
@@ -150,4 +160,8 @@ export interface ChannelSelectionResult {
   executionTimeMs: number;
   engineVersion: number;
   funnelReconstruction: FunnelReconstructionResult | null;
+  conversionChannelAssigned: boolean;
+  channelMode: ChannelMode;
+  channelModeReasoning: string | null;
+  decisionGateScoring: DecisionGateScoring | null;
 }

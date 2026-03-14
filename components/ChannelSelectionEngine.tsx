@@ -59,6 +59,14 @@ interface ChannelCandidate {
   differentiation?: ChannelDifferentiation | null;
 }
 
+interface DecisionGateScoring {
+  funnelIntegrityScore: number;
+  persuasionAlignmentScore: number;
+  budgetRealism: number;
+  channelScalability: number;
+  compositeGateScore: number;
+}
+
 interface ChannelSelectionData {
   exists: boolean;
   id?: string;
@@ -76,6 +84,10 @@ interface ChannelSelectionData {
   engineVersion?: number;
   executionTimeMs?: number;
   createdAt?: string;
+  conversionChannelAssigned?: boolean;
+  channelMode?: string;
+  channelModeReasoning?: string | null;
+  decisionGateScoring?: DecisionGateScoring | null;
 }
 
 const ACCENT = '#3B82F6';
@@ -134,6 +146,7 @@ export default function ChannelSelectionEngine({ isActive }: { isActive?: boolea
   const [analyzing, setAnalyzing] = useState(false);
   const [expandedLayer, setExpandedLayer] = useState<string | null>(null);
   const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
+  const [channelMode, setChannelMode] = useState<string>('automatic');
 
   const fetchLatest = useCallback(async () => {
     if (!selectedCampaignId) return;
@@ -165,6 +178,10 @@ export default function ChannelSelectionEngine({ isActive }: { isActive?: boolea
         engineVersion: json.engineVersion,
         executionTimeMs: json.executionTimeMs,
         createdAt: json.createdAt,
+        conversionChannelAssigned: r.conversionChannelAssigned,
+        channelMode: r.channelMode,
+        channelModeReasoning: r.channelModeReasoning,
+        decisionGateScoring: r.decisionGateScoring,
       });
     } catch (err) {
       console.error('[ChannelSelectionEngine] Fetch error:', err);
@@ -186,7 +203,7 @@ export default function ChannelSelectionEngine({ isActive }: { isActive?: boolea
       const res = await fetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaignId: selectedCampaignId }),
+        body: JSON.stringify({ campaignId: selectedCampaignId, channelMode }),
       });
       const json = await safeApiJson(res);
       if (res.ok && json.snapshotId) {
@@ -200,7 +217,7 @@ export default function ChannelSelectionEngine({ isActive }: { isActive?: boolea
     } finally {
       setAnalyzing(false);
     }
-  }, [selectedCampaignId, fetchLatest]);
+  }, [selectedCampaignId, fetchLatest, channelMode]);
 
   const scoreColor = (score: number) => {
     if (score >= 0.7) return '#10B981';
@@ -534,6 +551,86 @@ export default function ChannelSelectionEngine({ isActive }: { isActive?: boolea
         </View>
       )}
 
+      <View style={[styles.channelModeContainer, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <Text style={[styles.channelModeLabel, { color: colors.text }]}>Channel Mode</Text>
+        <View style={styles.channelModeRow}>
+          {[
+            { key: 'automatic', label: 'Auto', icon: 'sparkles' as const },
+            { key: 'hybrid', label: 'Hybrid', icon: 'git-merge' as const },
+            { key: 'organic_only', label: 'Organic', icon: 'leaf' as const },
+            { key: 'paid_only', label: 'Paid', icon: 'card' as const },
+          ].map((mode) => (
+            <Pressable
+              key={mode.key}
+              onPress={() => {
+                Haptics.selectionAsync();
+                setChannelMode(mode.key);
+              }}
+              style={[
+                styles.channelModeBtn,
+                {
+                  backgroundColor: channelMode === mode.key ? ACCENT + '20' : colors.inputBackground,
+                  borderColor: channelMode === mode.key ? ACCENT : 'transparent',
+                },
+              ]}
+            >
+              <Ionicons name={mode.icon} size={14} color={channelMode === mode.key ? ACCENT : colors.textMuted} />
+              <Text style={[styles.channelModeBtnText, { color: channelMode === mode.key ? ACCENT : colors.textMuted }]}>
+                {mode.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+
+      {data?.decisionGateScoring && (
+        <View style={[styles.gateScoreContainer, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={styles.gateScoreHeader}>
+            <Ionicons name="shield-checkmark" size={16} color={ACCENT} />
+            <Text style={[styles.gateScoreTitle, { color: colors.text }]}>Decision Gate Score</Text>
+            <View style={[styles.gateScoreBadge, {
+              backgroundColor: data.decisionGateScoring.compositeGateScore >= 0.6 ? '#10B981' + '20' : data.decisionGateScoring.compositeGateScore >= 0.4 ? '#F59E0B' + '20' : '#EF4444' + '20',
+            }]}>
+              <Text style={{
+                fontSize: 12,
+                fontWeight: '700' as const,
+                color: data.decisionGateScoring.compositeGateScore >= 0.6 ? '#10B981' : data.decisionGateScoring.compositeGateScore >= 0.4 ? '#F59E0B' : '#EF4444',
+              }}>
+                {(data.decisionGateScoring.compositeGateScore * 100).toFixed(0)}%
+              </Text>
+            </View>
+          </View>
+          <View style={styles.gateScoreGrid}>
+            {[
+              { label: 'Funnel Integrity', value: data.decisionGateScoring.funnelIntegrityScore, weight: '30%' },
+              { label: 'Persuasion Align', value: data.decisionGateScoring.persuasionAlignmentScore, weight: '25%' },
+              { label: 'Budget Realism', value: data.decisionGateScoring.budgetRealism, weight: '25%' },
+              { label: 'Scalability', value: data.decisionGateScoring.channelScalability, weight: '20%' },
+            ].map((item) => (
+              <View key={item.label} style={styles.gateScoreItem}>
+                <View style={styles.gateScoreBar}>
+                  <View style={[styles.gateScoreBarFill, { width: `${Math.min(item.value * 100, 100)}%`, backgroundColor: item.value >= 0.6 ? '#10B981' : item.value >= 0.4 ? '#F59E0B' : '#EF4444' }]} />
+                </View>
+                <Text style={[styles.gateScoreItemLabel, { color: colors.textMuted }]}>{item.label}</Text>
+                <Text style={[styles.gateScoreItemValue, { color: colors.text }]}>{(item.value * 100).toFixed(0)}%</Text>
+              </View>
+            ))}
+          </View>
+          {data.conversionChannelAssigned !== undefined && (
+            <View style={[styles.funnelStatus, { backgroundColor: data.conversionChannelAssigned ? '#10B981' + '10' : '#EF4444' + '10' }]}>
+              <Ionicons
+                name={data.conversionChannelAssigned ? 'checkmark-circle' : 'warning'}
+                size={14}
+                color={data.conversionChannelAssigned ? '#10B981' : '#EF4444'}
+              />
+              <Text style={{ fontSize: 12, color: data.conversionChannelAssigned ? '#10B981' : '#EF4444', fontWeight: '500' as const }}>
+                {data.conversionChannelAssigned ? 'Conversion channel assigned' : 'No conversion channel — funnel incomplete'}
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+
       <Pressable
         onPress={runAnalysis}
         disabled={analyzing}
@@ -717,4 +814,20 @@ const styles = StyleSheet.create({
   warningRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 6 },
   warningDot: { width: 5, height: 5, borderRadius: 2.5, marginTop: 5 },
   warningText: { fontSize: 12, flex: 1, lineHeight: 16 },
+  channelModeContainer: { borderRadius: 12, borderWidth: 1, padding: 14, marginBottom: 12 },
+  channelModeLabel: { fontSize: 13, fontWeight: '600' as const, marginBottom: 10 },
+  channelModeRow: { flexDirection: 'row', gap: 8 },
+  channelModeBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 10, borderRadius: 8, borderWidth: 1.5 },
+  channelModeBtnText: { fontSize: 12, fontWeight: '600' as const },
+  gateScoreContainer: { borderRadius: 12, borderWidth: 1, padding: 14, marginBottom: 12 },
+  gateScoreHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  gateScoreTitle: { fontSize: 13, fontWeight: '600' as const, flex: 1 },
+  gateScoreBadge: { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3 },
+  gateScoreGrid: { gap: 8 },
+  gateScoreItem: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  gateScoreBar: { flex: 1, height: 6, borderRadius: 3, backgroundColor: 'rgba(0,0,0,0.08)' },
+  gateScoreBarFill: { height: 6, borderRadius: 3 },
+  gateScoreItemLabel: { fontSize: 11, width: 100 },
+  gateScoreItemValue: { fontSize: 12, fontWeight: '700' as const, width: 32, textAlign: 'right' as const },
+  funnelStatus: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 8, padding: 10, marginTop: 10 },
 });

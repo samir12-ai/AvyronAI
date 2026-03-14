@@ -242,6 +242,45 @@ export const ORGANIC_CHANNELS = new Set([
   "partnerships",
 ]);
 
+export const PAID_CHANNELS = new Set([
+  "instagram_paid",
+  "facebook_paid",
+  "google_search",
+  "youtube_paid",
+  "tiktok_paid",
+  "linkedin_paid",
+]);
+
+export const CONVERSION_INJECTION_PRIORITY = [
+  "google_search",
+  "email_marketing",
+  "facebook_paid",
+  "referral_program",
+  "instagram_paid",
+  "linkedin_paid",
+] as const;
+
+export const PERSUASION_CORRECTION_FLOOR = 0.35;
+
+export const CHANNEL_SCALABILITY: Record<string, number> = {
+  instagram_organic: 0.60,
+  instagram_paid: 0.85,
+  facebook_organic: 0.40,
+  facebook_paid: 0.90,
+  google_search: 0.95,
+  google_organic: 0.70,
+  youtube_organic: 0.75,
+  youtube_paid: 0.80,
+  email_marketing: 0.65,
+  tiktok_organic: 0.80,
+  tiktok_paid: 0.75,
+  linkedin_organic: 0.45,
+  linkedin_paid: 0.70,
+  referral_program: 0.50,
+  community_building: 0.35,
+  partnerships: 0.55,
+};
+
 export const BOUNDARY_HARD_PATTERNS: Record<string, RegExp> = {
   "marketing copy": /\b(marketing copy|ad copy|sales copy|copywriting)\b/i,
   "ad creatives": /\b(ad creative|creative asset|banner design|creative brief)\b/i,

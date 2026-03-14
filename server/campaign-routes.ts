@@ -1,6 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { db } from "./db";
-import { campaignSelections, adSpendEntries, performanceSnapshots, conversionEvents, manualCampaignMetrics } from "@shared/schema";
+import { campaignSelections, adSpendEntries, performanceSnapshots, conversionEvents, manualCampaignMetrics, manualRetentionMetrics } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { getCampaignMetrics, getRevenueSummary, detectPerformanceSignals, getDashboardMetrics, resolveDataMode, getManualMetrics } from "./campaign-data-layer";
 
@@ -270,6 +270,12 @@ export function registerCampaignRoutes(app: Express) {
           eq(manualCampaignMetrics.accountId, accountId)
         ));
 
+      await db.delete(manualRetentionMetrics)
+        .where(and(
+          eq(manualRetentionMetrics.campaignId, campaignId),
+          eq(manualRetentionMetrics.accountId, accountId)
+        ));
+
       await db.delete(campaignSelections)
         .where(and(
           eq(campaignSelections.selectedCampaignId, campaignId),
@@ -446,6 +452,104 @@ export function registerCampaignRoutes(app: Express) {
     }
   });
 
+  app.get("/api/campaigns/:campaignId/retention-metrics", async (req: Request, res: Response) => {
+    try {
+      const { campaignId } = req.params;
+      const accountId = (req.query.accountId as string) || "default";
+      const rows = await db.select().from(manualRetentionMetrics)
+        .where(and(
+          eq(manualRetentionMetrics.campaignId, campaignId),
+          eq(manualRetentionMetrics.accountId, accountId)
+        ))
+        .limit(1);
+      const metrics = rows[0] || null;
+      if (!metrics) {
+        return res.json({ success: true, metrics: null, message: "No retention metrics entered yet" });
+      }
+      const estimatedLTV = (metrics.averageOrderValue || 0) * (metrics.purchaseFrequency || 1) * (metrics.customerLifespan || 1);
+      const churnRisk = metrics.repeatPurchaseRate != null ? clamp(1 - metrics.repeatPurchaseRate, 0, 1) : 0.5;
+      const retentionStrength = clamp(
+        ((metrics.repeatPurchaseRate || 0) * 0.3) +
+        ((1 - (metrics.refundRate || 0)) * 0.2) +
+        (Math.min((metrics.purchaseFrequency || 0) / 4, 1) * 0.25) +
+        (Math.min((metrics.monthlyCustomers || 0) / 100, 1) * 0.25),
+        0, 1
+      );
+      res.json({
+        success: true,
+        metrics: { ...metrics, derived: { estimatedLTV, churnRisk, retentionStrength } },
+      });
+    } catch (error: any) {
+      console.error("[Campaigns] Retention metrics GET error:", error);
+      res.status(500).json({ code: "RETENTION_METRICS_FAILED", message: "Failed to fetch retention metrics" });
+    }
+  });
+
+  app.put("/api/campaigns/:campaignId/retention-metrics", async (req: Request, res: Response) => {
+    try {
+      const { campaignId } = req.params;
+      const accountId = req.body.accountId || "default";
+      const { repeatPurchaseRate, averageOrderValue, customerLifespan, refundRate, purchaseFrequency, monthlyCustomers } = req.body;
+
+      const data: any = { updatedAt: new Date() };
+      if (repeatPurchaseRate !== undefined) data.repeatPurchaseRate = Number(repeatPurchaseRate) || 0;
+      if (averageOrderValue !== undefined) data.averageOrderValue = Number(averageOrderValue) || 0;
+      if (customerLifespan !== undefined) data.customerLifespan = Number(customerLifespan) || 0;
+      if (refundRate !== undefined) data.refundRate = Number(refundRate) || 0;
+      if (purchaseFrequency !== undefined) data.purchaseFrequency = Number(purchaseFrequency) || 0;
+      if (monthlyCustomers !== undefined) data.monthlyCustomers = Number(monthlyCustomers) || 0;
+
+      const existing = await db.select().from(manualRetentionMetrics)
+        .where(and(
+          eq(manualRetentionMetrics.campaignId, campaignId),
+          eq(manualRetentionMetrics.accountId, accountId)
+        ))
+        .limit(1);
+
+      let result;
+      if (existing.length > 0) {
+        const updated = await db.update(manualRetentionMetrics)
+          .set(data)
+          .where(and(
+            eq(manualRetentionMetrics.campaignId, campaignId),
+            eq(manualRetentionMetrics.accountId, accountId)
+          ))
+          .returning();
+        result = updated[0];
+      } else {
+        const inserted = await db.insert(manualRetentionMetrics)
+          .values({ campaignId, accountId, ...data })
+          .returning();
+        result = inserted[0];
+      }
+
+      const estimatedLTV = (result.averageOrderValue || 0) * (result.purchaseFrequency || 1) * (result.customerLifespan || 1);
+      const churnRisk = result.repeatPurchaseRate != null ? clamp(1 - result.repeatPurchaseRate, 0, 1) : 0.5;
+      const retentionStrength = clamp(
+        ((result.repeatPurchaseRate || 0) * 0.3) +
+        ((1 - (result.refundRate || 0)) * 0.2) +
+        (Math.min((result.purchaseFrequency || 0) / 4, 1) * 0.25) +
+        (Math.min((result.monthlyCustomers || 0) / 100, 1) * 0.25),
+        0, 1
+      );
+
+      console.log(`[Campaigns] Retention metrics saved for campaign ${campaignId}: RPR=${result.repeatPurchaseRate}, AOV=${result.averageOrderValue}`);
+
+      res.json({
+        success: true,
+        metrics: { ...result, derived: { estimatedLTV, churnRisk, retentionStrength } },
+        message: "Retention metrics saved successfully",
+      });
+    } catch (error: any) {
+      console.error("[Campaigns] Retention metrics PUT error:", error);
+      res.status(500).json({ code: "RETENTION_METRICS_SAVE_FAILED", message: "Failed to save retention metrics" });
+    }
+  });
+
+}
+
+function clamp(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v));
 }
 
 export async function requireCampaign(req: Request, res: Response, next: NextFunction) {

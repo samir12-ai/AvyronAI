@@ -1312,6 +1312,22 @@ export const manualCampaignMetrics = pgTable("manual_campaign_metrics", {
 
 export type ManualCampaignMetrics = typeof manualCampaignMetrics.$inferSelect;
 
+export const manualRetentionMetrics = pgTable("manual_retention_metrics", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  accountId: varchar("account_id", { length: 255 }).notNull().default("default"),
+  campaignId: varchar("campaign_id", { length: 255 }).notNull(),
+  repeatPurchaseRate: doublePrecision("repeat_purchase_rate"),
+  averageOrderValue: doublePrecision("average_order_value"),
+  customerLifespan: doublePrecision("customer_lifespan"),
+  refundRate: doublePrecision("refund_rate"),
+  purchaseFrequency: doublePrecision("purchase_frequency"),
+  monthlyCustomers: integer("monthly_customers"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type ManualRetentionMetrics = typeof manualRetentionMetrics.$inferSelect;
+
 export const orchestratorJobs = pgTable("orchestrator_jobs", {
   id: varchar("id")
     .primaryKey()

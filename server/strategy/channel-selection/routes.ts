@@ -30,11 +30,14 @@ function safeNumber(v: any, fallback: number): number {
 export function registerChannelSelectionRoutes(app: Express) {
   app.post("/api/strategy/channel-selection/analyze", async (req: Request, res: Response) => {
     try {
-      const { campaignId, accountId = "default", validationSessionId } = req.body;
+      const { campaignId, accountId = "default", validationSessionId, channelMode = "automatic" } = req.body;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
+
+      const validModes = ["organic_only", "paid_only", "hybrid", "automatic"];
+      const resolvedMode = validModes.includes(channelMode) ? channelMode : "automatic";
 
       const sessionCheck = checkValidationSession(validationSessionId, "channel-selection", campaignId);
       if (!sessionCheck.allowed) {
@@ -180,6 +183,7 @@ export function registerChannelSelectionRoutes(app: Express) {
         offerInput,
         budgetInput,
         validationInput,
+        resolvedMode,
       );
 
       const snapshotId = `cs-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;

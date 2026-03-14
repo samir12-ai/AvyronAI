@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { db } from "../../db";
-import { retentionSnapshots } from "@shared/schema";
+import { retentionSnapshots, manualRetentionMetrics } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { runRetentionEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
@@ -40,16 +40,43 @@ export function registerRetentionEngineRoutes(app: Express) {
         });
       }
 
+      const [retentionMetrics] = await db.select().from(manualRetentionMetrics)
+        .where(and(
+          eq(manualRetentionMetrics.campaignId, campaignId),
+          eq(manualRetentionMetrics.accountId, accountId),
+        ))
+        .limit(1);
+
+      const baseJourney = req.body.customerJourneyData || {
+        touchpoints: [],
+        avgTimeToConversion: null,
+        repeatPurchaseRate: null,
+        churnRate: null,
+        customerLifetimeValue: null,
+        retentionWindowDays: null,
+        engagementDecayRate: null,
+      };
+
+      if (retentionMetrics) {
+        if (retentionMetrics.repeatPurchaseRate != null && baseJourney.repeatPurchaseRate == null) {
+          baseJourney.repeatPurchaseRate = retentionMetrics.repeatPurchaseRate;
+        }
+        if (retentionMetrics.customerLifespan != null && baseJourney.retentionWindowDays == null) {
+          baseJourney.retentionWindowDays = retentionMetrics.customerLifespan * 30;
+        }
+        if (retentionMetrics.averageOrderValue != null && retentionMetrics.purchaseFrequency != null && retentionMetrics.customerLifespan != null) {
+          const estimatedLTV = retentionMetrics.averageOrderValue * retentionMetrics.purchaseFrequency * retentionMetrics.customerLifespan;
+          if (baseJourney.customerLifetimeValue == null) {
+            baseJourney.customerLifetimeValue = estimatedLTV;
+          }
+        }
+        if (retentionMetrics.refundRate != null && baseJourney.churnRate == null) {
+          baseJourney.churnRate = Math.min(retentionMetrics.refundRate * 2, 1);
+        }
+      }
+
       const input = {
-        customerJourneyData: req.body.customerJourneyData || {
-          touchpoints: [],
-          avgTimeToConversion: null,
-          repeatPurchaseRate: null,
-          churnRate: null,
-          customerLifetimeValue: null,
-          retentionWindowDays: null,
-          engagementDecayRate: null,
-        },
+        customerJourneyData: baseJourney,
         offerStructure: req.body.offerStructure || {
           offerName: null,
           coreOutcome: null,
@@ -62,6 +89,7 @@ export function registerRetentionEngineRoutes(app: Express) {
         postPurchaseObjections: Array.isArray(req.body.postPurchaseObjections) ? req.body.postPurchaseObjections : [],
         campaignId,
         accountId,
+        hasManualRetentionMetrics: !!retentionMetrics,
       };
 
       const result = await runRetentionEngine(input);
