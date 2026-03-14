@@ -1035,6 +1035,18 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     </View>
   );
 
+  const ENGINE_SOURCE_LABELS: Record<string, string> = {
+    offer_engine: 'Offer Engine',
+    positioning_engine: 'Positioning Engine',
+    persuasion_engine: 'Persuasion Engine',
+    audience_engine: 'Audience Engine',
+    funnel_engine: 'Funnel Engine',
+    differentiation_engine: 'Differentiation Engine',
+    awareness_engine: 'Awareness Engine',
+    channel_selection: 'Channel Selection',
+    market_intelligence: 'Market Intelligence',
+  };
+
   const renderExtractionField = (label: string, fieldKey: string, fieldData: FieldWithConfidence | any, icon: string) => {
     const isEditing = editingField === fieldKey;
     const hasClarification = clarifications.some(c => c.field === fieldKey);
@@ -1042,11 +1054,13 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     let displayValue: string;
     let confidence: number;
     let isInsufficient = false;
+    let sourceEngine: string | null = null;
 
     if (fieldData && typeof fieldData === 'object' && 'value' in fieldData) {
       displayValue = fieldData.value === 'INSUFFICIENT_DATA' ? '' : String(fieldData.value ?? '');
       confidence = typeof fieldData.confidence === 'number' ? fieldData.confidence : 0;
       isInsufficient = fieldData.value === 'INSUFFICIENT_DATA';
+      sourceEngine = fieldData.source || null;
     } else {
       displayValue = fieldData === null || fieldData === undefined ? '' : String(fieldData);
       confidence = displayValue ? 50 : 0;
@@ -1057,6 +1071,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     const confLabel = getConfidenceLabel(confidence);
     const needsAttention = isInsufficient || confidence < 60 || hasClarification;
     const clarification = clarifications.find(c => c.field === fieldKey);
+    const sourceLabel = sourceEngine ? ENGINE_SOURCE_LABELS[sourceEngine] || sourceEngine : null;
 
     return (
       <View style={[s.fieldCard, { backgroundColor: colors.card, borderColor: needsAttention ? '#F59E0B50' : colors.cardBorder }]}>
@@ -1096,6 +1111,15 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
           <Text style={[s.fieldValue, { color: isInsufficient ? '#EF4444' : colors.text }]}>
             {isInsufficient ? 'INSUFFICIENT DATA — Tap pencil to provide input' : displayValue || 'Not detected'}
           </Text>
+        )}
+
+        {sourceLabel && !isEditing && !isInsufficient && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+            <Ionicons name="link" size={11} color={colors.textSecondary} />
+            <Text style={{ color: colors.textSecondary, fontSize: 11, marginLeft: 4 }}>
+              Source: {sourceLabel}
+            </Text>
+          </View>
         )}
 
         {clarification && !isEditing && (
