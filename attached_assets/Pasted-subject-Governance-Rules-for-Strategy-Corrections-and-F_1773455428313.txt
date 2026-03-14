@@ -1,0 +1,127 @@
+subject=“Governance Rules for Strategy Corrections and Funnel Injection — Conflict Prevention”}
+Hello Replit Engineering Team,
+
+Following the recent structural upgrades to the MarketMind engines (funnel enforcement, persuasion correction, retention data model, and decision gate improvements), we need to formally lock a set of governance rules to prevent strategic conflicts between automated corrections and core engine logic.
+
+These rules are necessary to ensure that system stability and the Master Plan engine isolation principles remain intact as the system evolves.
+
+⸻
+
+1. Auto-Injection Transparency Rule
+
+When the system injects a conversion channel automatically to complete the funnel, this must never be treated as a native strategic decision.
+
+Required implementation:
+
+Every injected channel must include metadata flags:
+	•	autoInjectedConversion: true
+	•	injectionReason
+	•	injectionStage
+
+These flags must remain visible in the strategy output and available to the Decision Gate and audit logs.
+
+Acceptance criteria:
+	•	Injected channels must be distinguishable from organically selected channels.
+	•	The Decision Gate must treat injected channels as structural corrections, not original strategic selections.
+
+⸻
+
+2. Persuasion Correction Boundaries
+
+The new persuasion compatibility correction mechanism must not alter the logic of other engines.
+
+Specifically:
+	•	Persuasion correction may allow re-evaluation of channel role assignment.
+	•	It must not modify channel capability models.
+	•	It must not override funnel stage definitions.
+	•	It must not alter retention or budget engine outputs.
+
+Acceptance criteria:
+	•	Corrections must be logged with a persuasionCorrectionApplied flag.
+	•	Channel capability scoring must remain unchanged.
+
+⸻
+
+3. Correction vs Strategy Distinction
+
+To maintain strategic integrity, the system must clearly separate:
+	•	Original Strategy Decisions
+	•	System Corrections
+
+All corrections must be tagged and stored in the strategy output.
+
+Required metadata fields:
+	•	wasReconstructed
+	•	autoInjectedConversion
+	•	persuasionCorrectionApplied
+
+Acceptance criteria:
+	•	The UI and audit logs must show which parts of the strategy were corrected.
+
+⸻
+
+4. Decision Gate Awareness
+
+The Decision Gate must incorporate awareness of corrections.
+
+If corrections exist, the gate must:
+	•	apply a confidence penalty
+	•	mark the strategy as structurally repaired
+	•	prevent false confidence inflation.
+
+Acceptance criteria:
+	•	Gate scoring must consider correction flags when calculating final confidence.
+
+⸻
+
+5. Cross-Engine Conflict Prevention
+
+Corrections must not violate engine isolation.
+
+Specifically:
+	•	Channel Engine may assign funnel roles.
+	•	Persuasion Engine defines persuasion structure.
+	•	Retention Engine manages customer lifecycle logic.
+	•	Budget Governor controls scaling.
+
+No correction mechanism may override outputs from another engine.
+
+Acceptance criteria:
+	•	Any cross-domain mutation attempt must trigger an isolation validation error.
+
+⸻
+
+6. Audit Trail Requirement
+
+All structural corrections must be recorded in the strategy reconstruction log.
+
+Minimum required entries:
+	•	correction type
+	•	timestamp
+	•	engine responsible
+	•	affected channel or component.
+
+Acceptance criteria:
+	•	The reconstruction log must always include correction history when present.
+
+⸻
+
+Final Requirement
+
+Before merging any future updates affecting strategy corrections, the following validations must run:
+	1.	Engine isolation validation
+	2.	Decision Gate integrity check
+	3.	Funnel completeness verification
+	4.	Correction metadata verification
+
+No change should be considered complete unless all validations pass.
+
+⸻
+
+These governance rules ensure that automated corrections stabilize the system without masking strategic weaknesses, maintaining both transparency and architectural discipline.
+
+Thank you for implementing these safeguards.
+
+Best regards,
+MarketMind System Architecture
+:::

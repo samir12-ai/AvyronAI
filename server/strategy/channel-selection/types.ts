@@ -89,6 +89,8 @@ export interface ChannelCandidate {
   differentiation: ChannelDifferentiation | null;
   assignedFunnelRole: FunnelRole | null;
   wasReconstructed: boolean;
+  autoInjectedConversion: boolean;
+  persuasionCorrectionApplied: boolean;
 }
 
 export interface LayerResult {
@@ -112,6 +114,17 @@ export interface DataReliabilityDiagnostics {
 
 export type FunnelRole = "awareness" | "nurture" | "conversion";
 
+export type CorrectionType = "auto_injection" | "persuasion_correction" | "funnel_reassignment";
+
+export interface CorrectionAuditEntry {
+  correctionType: CorrectionType;
+  timestamp: number;
+  engineResponsible: string;
+  affectedChannel: string;
+  affectedComponent: string;
+  detail: string;
+}
+
 export interface FunnelStageAssignment {
   channelName: string;
   channelKey: string;
@@ -119,6 +132,10 @@ export interface FunnelStageAssignment {
   roleFitScore: number;
   originalPersuasionScore: number;
   wasReconstructed: boolean;
+  autoInjectedConversion: boolean;
+  injectionReason: string | null;
+  injectionStage: FunnelRole | null;
+  persuasionCorrectionApplied: boolean;
   reasoning: string;
 }
 
@@ -164,4 +181,6 @@ export interface ChannelSelectionResult {
   channelMode: ChannelMode;
   channelModeReasoning: string | null;
   decisionGateScoring: DecisionGateScoring | null;
+  structurallyRepaired: boolean;
+  correctionAuditTrail: CorrectionAuditEntry[];
 }

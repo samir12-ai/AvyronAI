@@ -39,6 +39,7 @@ import type {
   FunnelReconstructionResult,
   ChannelMode,
   DecisionGateScoring,
+  CorrectionAuditEntry,
 } from "./types";
 
 function clamp(v: number, min = 0, max = 1): number {
@@ -479,6 +480,10 @@ function runFunnelResolutionLayer(
         roleFitScore: score,
         originalPersuasionScore: c.persuasionLayer.score,
         wasReconstructed: false,
+        autoInjectedConversion: false,
+        injectionReason: null,
+        injectionStage: null,
+        persuasionCorrectionApplied: false,
         reasoning: `Channel naturally compatible — assigned to ${role} stage based on capability profile`,
       });
     }
@@ -578,6 +583,10 @@ function runFunnelResolutionLayer(
           roleFitScore: score,
           originalPersuasionScore: c.persuasionLayer.score,
           wasReconstructed: true,
+          autoInjectedConversion: false,
+          injectionReason: null,
+          injectionStage: null,
+          persuasionCorrectionApplied: correction.corrected,
           reasoning,
         });
 
@@ -605,6 +614,10 @@ function runFunnelResolutionLayer(
         roleFitScore: score,
         originalPersuasionScore: c.persuasionLayer.score,
         wasReconstructed: false,
+        autoInjectedConversion: false,
+        injectionReason: null,
+        injectionStage: null,
+        persuasionCorrectionApplied: false,
         reasoning: `Channel naturally compatible with "${persuasionMode}" — assigned to ${role} stage`,
       });
     }
@@ -680,6 +693,8 @@ function injectConversionChannel(
     const def = CHANNEL_DEFINITIONS[channelKey];
     if (!def) continue;
 
+    const injectionReason = `Funnel missing conversion stage — "${def.label}" auto-injected based on conversion capability (${(cap.conversion * 100).toFixed(0)}%)${alreadyAssigned ? ". Channel also serves another funnel stage." : ""}`;
+
     funnelStages.conversion.push({
       channelName: def.label,
       channelKey,
@@ -687,6 +702,10 @@ function injectConversionChannel(
       roleFitScore: cap.conversion,
       originalPersuasionScore: candidate?.persuasionLayer.score ?? 0,
       wasReconstructed: true,
+      autoInjectedConversion: true,
+      injectionReason,
+      injectionStage: "conversion",
+      persuasionCorrectionApplied: false,
       reasoning: `CONVERSION INJECTION: "${def.label}" auto-assigned to Conversion stage to ensure funnel completeness (conversion capability: ${(cap.conversion * 100).toFixed(0)}%). ${alreadyAssigned ? "Channel also serves another funnel stage." : ""}`,
     });
 
@@ -766,13 +785,26 @@ function computeDecisionGateScoring(
   candidates: { key: string; candidate: ChannelCandidate; layers: LayerResult[] }[],
   budget: ChannelBudgetInput | null,
 ): DecisionGateScoring {
+  const allAssignments = [
+    ...funnelStages.awareness,
+    ...funnelStages.nurture,
+    ...funnelStages.conversion,
+  ];
+  const hasInjections = allAssignments.some(a => a.autoInjectedConversion);
+  const hasPersuasionCorrections = allAssignments.some(a => a.persuasionCorrectionApplied);
+  const hasReconstructions = allAssignments.some(a => a.wasReconstructed);
+
   const hasAwareness = funnelStages.awareness.length > 0;
   const hasNurture = funnelStages.nurture.length > 0;
   const hasConversion = funnelStages.conversion.length > 0;
-  const funnelIntegrityScore = clamp(
+  let funnelIntegrityScore = clamp(
     (hasAwareness ? 0.33 : 0) + (hasNurture ? 0.33 : 0) + (hasConversion ? 0.34 : 0),
     0, 1
   );
+
+  if (hasInjections) {
+    funnelIntegrityScore = clamp(funnelIntegrityScore - 0.08, 0, 1);
+  }
 
   const viable = candidates.filter(c => !c.candidate.rejectionReason);
   const avgPersuasion = viable.length > 0
@@ -794,13 +826,19 @@ function computeDecisionGateScoring(
     : 0.3;
   const channelScalability = clamp(avgScalability, 0, 1);
 
-  const compositeGateScore = clamp(
+  let compositeGateScore = clamp(
     funnelIntegrityScore * 0.30 +
     persuasionAlignmentScore * 0.25 +
     budgetRealism * 0.25 +
     channelScalability * 0.20,
     0, 1
   );
+
+  if (hasReconstructions || hasPersuasionCorrections) {
+    const correctionCount = allAssignments.filter(a => a.wasReconstructed || a.persuasionCorrectionApplied).length;
+    const gatePenalty = Math.min(correctionCount * 0.03, 0.12);
+    compositeGateScore = clamp(compositeGateScore - gatePenalty, 0, 1);
+  }
 
   return { funnelIntegrityScore, persuasionAlignmentScore, budgetRealism, channelScalability, compositeGateScore };
 }
@@ -868,6 +906,8 @@ function buildChannelCandidate(
       differentiation: null,
       assignedFunnelRole: null,
       wasReconstructed: false,
+      autoInjectedConversion: false,
+      persuasionCorrectionApplied: false,
     };
   }
 
@@ -928,6 +968,8 @@ function buildChannelCandidate(
     differentiation: getChannelDifferentiation(channelKey),
     assignedFunnelRole: bestFunnelRole,
     wasReconstructed: false,
+    autoInjectedConversion: false,
+    persuasionCorrectionApplied: false,
   };
 }
 
@@ -1009,6 +1051,8 @@ export function runChannelSelectionEngine(
     const assignment = allFunnelAssignments.find(a => a.channelKey === c.key);
     if (assignment) {
       c.candidate.assignedFunnelRole = assignment.assignedRole;
+      c.candidate.autoInjectedConversion = assignment.autoInjectedConversion;
+      c.candidate.persuasionCorrectionApplied = assignment.persuasionCorrectionApplied;
     }
   }
 
@@ -1099,9 +1143,52 @@ export function runChannelSelectionEngine(
     structuralWarnings.push(...boundaryResult.violations);
   }
 
+  const correctionAuditTrail: CorrectionAuditEntry[] = [];
+  const now = Date.now();
+
+  for (const assignment of allFunnelAssignments) {
+    if (assignment.autoInjectedConversion) {
+      correctionAuditTrail.push({
+        correctionType: "auto_injection",
+        timestamp: now,
+        engineResponsible: "channel-selection",
+        affectedChannel: assignment.channelName,
+        affectedComponent: "funnel_conversion_stage",
+        detail: assignment.injectionReason || "Conversion channel auto-injected for funnel completeness",
+      });
+    }
+    if (assignment.persuasionCorrectionApplied) {
+      correctionAuditTrail.push({
+        correctionType: "persuasion_correction",
+        timestamp: now,
+        engineResponsible: "channel-selection",
+        affectedChannel: assignment.channelName,
+        affectedComponent: "persuasion_compatibility",
+        detail: `Persuasion score corrected to allow funnel role assignment as ${assignment.assignedRole}`,
+      });
+    }
+    if (assignment.wasReconstructed && !assignment.autoInjectedConversion) {
+      correctionAuditTrail.push({
+        correctionType: "funnel_reassignment",
+        timestamp: now,
+        engineResponsible: "channel-selection",
+        affectedChannel: assignment.channelName,
+        affectedComponent: `funnel_${assignment.assignedRole}_stage`,
+        detail: `Channel reassigned from rejected to ${assignment.assignedRole} stage via funnel reconstruction`,
+      });
+    }
+  }
+
+  const structurallyRepaired = correctionAuditTrail.length > 0;
+
   let confidenceScore = primary.fitScore;
   if (reliability.isWeak) {
     confidenceScore = Math.min(confidenceScore * 0.6, 0.65);
+  }
+  if (structurallyRepaired) {
+    const correctionPenalty = Math.min(correctionAuditTrail.length * 0.05, 0.20);
+    confidenceScore = clamp(confidenceScore - correctionPenalty, 0.1, 1);
+    structuralWarnings.push(`Confidence adjusted: -${(correctionPenalty * 100).toFixed(0)}% penalty for ${correctionAuditTrail.length} structural correction(s) — strategy marked as structurally repaired`);
   }
 
   const channelRiskNotes = deduplicateWarnings([
@@ -1177,6 +1264,8 @@ export function runChannelSelectionEngine(
     channelMode,
     channelModeReasoning,
     decisionGateScoring: gateScoring,
+    structurallyRepaired,
+    correctionAuditTrail,
   };
 }
 
@@ -1198,5 +1287,7 @@ function buildFallbackChannel(role: string): ChannelCandidate {
     differentiation: null,
     assignedFunnelRole: null,
     wasReconstructed: false,
+    autoInjectedConversion: false,
+    persuasionCorrectionApplied: false,
   };
 }

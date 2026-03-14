@@ -67,6 +67,15 @@ interface DecisionGateScoring {
   compositeGateScore: number;
 }
 
+interface CorrectionAuditEntry {
+  correctionType: string;
+  timestamp: number;
+  engineResponsible: string;
+  affectedChannel: string;
+  affectedComponent: string;
+  detail: string;
+}
+
 interface ChannelSelectionData {
   exists: boolean;
   id?: string;
@@ -88,6 +97,8 @@ interface ChannelSelectionData {
   channelMode?: string;
   channelModeReasoning?: string | null;
   decisionGateScoring?: DecisionGateScoring | null;
+  structurallyRepaired?: boolean;
+  correctionAuditTrail?: CorrectionAuditEntry[];
 }
 
 const ACCENT = '#3B82F6';
@@ -182,6 +193,8 @@ export default function ChannelSelectionEngine({ isActive }: { isActive?: boolea
         channelMode: r.channelMode,
         channelModeReasoning: r.channelModeReasoning,
         decisionGateScoring: r.decisionGateScoring,
+        structurallyRepaired: r.structurallyRepaired,
+        correctionAuditTrail: r.correctionAuditTrail,
       });
     } catch (err) {
       console.error('[ChannelSelectionEngine] Fetch error:', err);
@@ -704,6 +717,41 @@ export default function ChannelSelectionEngine({ isActive }: { isActive?: boolea
             </View>
             {data.layerResults && data.layerResults.map(layer => renderLayerCard(layer))}
           </View>
+
+          {data.structurallyRepaired && (
+            <View style={[styles.warningsBox, { backgroundColor: colors.card, borderColor: '#8B5CF630' }]}>
+              <View style={styles.warningsHeader}>
+                <Ionicons name="construct" size={16} color="#8B5CF6" />
+                <Text style={[styles.warningsTitle, { color: '#8B5CF6' }]}>
+                  Structurally Repaired
+                </Text>
+              </View>
+              <Text style={[styles.warningText, { color: colors.textSecondary, marginBottom: 8 }]}>
+                This strategy includes automated corrections. Confidence score has been adjusted accordingly.
+              </Text>
+              {data.correctionAuditTrail && data.correctionAuditTrail.length > 0 && (
+                <>
+                  <Text style={[styles.warningsTitle, { color: '#8B5CF6', marginBottom: 6, fontSize: 12 }]}>
+                    Correction Audit Trail ({data.correctionAuditTrail.length})
+                  </Text>
+                  {data.correctionAuditTrail.map((entry, i) => (
+                    <View key={i} style={styles.warningRow}>
+                      <View style={[styles.warningDot, { backgroundColor: entry.correctionType === 'auto_injection' ? '#EF4444' : entry.correctionType === 'persuasion_correction' ? '#F59E0B' : '#3B82F6' }]} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.warningText, { color: colors.text, fontWeight: '600' as const }]}>
+                          {entry.correctionType === 'auto_injection' ? 'Auto-Injection' : entry.correctionType === 'persuasion_correction' ? 'Persuasion Correction' : 'Funnel Reassignment'}
+                          {' · '}{entry.affectedChannel}
+                        </Text>
+                        <Text style={[styles.warningText, { color: colors.textSecondary, fontSize: 11, marginTop: 2 }]}>
+                          {entry.detail}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </>
+              )}
+            </View>
+          )}
 
           {data.structuralWarnings && data.structuralWarnings.length > 0 && (
             <View style={[styles.warningsBox, { backgroundColor: colors.card, borderColor: '#F59E0B30' }]}>
