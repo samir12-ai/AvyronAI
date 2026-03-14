@@ -537,5 +537,13 @@ export async function synthesizePlan(
 
   console.log(`[PlanSynthesis] Created plan ${plan.id} with ${calendarSlots.length} calendar entries and ${volume.totalContentPieces} required content pieces`);
 
+  try {
+    const { generateContentDna } = await import("../content-dna-routes");
+    await generateContentDna(config.campaignId, config.accountId, plan.id);
+    console.log(`[PlanSynthesis] Content DNA generated for plan ${plan.id}`);
+  } catch (dnaErr: any) {
+    console.warn(`[PlanSynthesis] Content DNA generation failed (non-blocking):`, dnaErr.message);
+  }
+
   return { planId: plan.id, plan: synthesized };
 }

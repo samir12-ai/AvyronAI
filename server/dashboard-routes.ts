@@ -28,6 +28,7 @@ import {
 import { eq, and, desc, gte, sql, inArray } from "drizzle-orm";
 import { ACTIVE_PLAN_STATUSES } from "./plan-constants";
 import { aiChat } from "./ai-client";
+import { getLatestContentDna } from "./content-dna-routes";
 
 const LOG_PREFIX = "[Dashboard]";
 
@@ -672,6 +673,14 @@ Be specific and data-driven. Reference actual numbers. Do NOT use generic advice
 
       console.log(`${LOG_PREFIX} Agent brief for ${campaignId}: ${enginesActive.length} engines, plan=${!!plan}, insight=${insight.length}ch`);
 
+      let dnaSnapshot: any = null;
+      try {
+        const dna = await getLatestContentDna(campaignId, accountId);
+        if (dna?.snapshot) dnaSnapshot = dna.snapshot;
+      } catch (e: any) {
+        console.warn(`${LOG_PREFIX} Content DNA fetch failed:`, e.message);
+      }
+
       res.json({
         success: true,
         campaignStatus,
@@ -687,6 +696,7 @@ Be specific and data-driven. Reference actual numbers. Do NOT use generic advice
         hasMetrics: hasManualData,
         mode,
         metrics: hasManualData ? { cpa, roas, spend, revenue } : null,
+        contentDnaSnapshot: dnaSnapshot,
       });
     } catch (error: any) {
       console.error(`${LOG_PREFIX} Agent brief error:`, error);
@@ -768,14 +778,33 @@ Be specific and data-driven. Reference actual numbers. Do NOT use generic advice
         }
       }
 
-      const contextStr = contextParts.join("\n\n").substring(0, 6000);
+      let dnaContext = "";
+      try {
+        const dna = await getLatestContentDna(campaignId, accountId);
+        if (dna) {
+          const dnaParts: string[] = ["CONTENT DNA:"];
+          if (dna.messagingCore) dnaParts.push(`Messaging Core: ${JSON.stringify(dna.messagingCore).substring(0, 600)}`);
+          if (dna.ctaDna) dnaParts.push(`CTA DNA: ${JSON.stringify(dna.ctaDna).substring(0, 600)}`);
+          if (dna.hookDna) dnaParts.push(`Hook DNA: ${JSON.stringify(dna.hookDna).substring(0, 600)}`);
+          if (dna.narrativeDna) dnaParts.push(`Narrative DNA: ${JSON.stringify(dna.narrativeDna).substring(0, 600)}`);
+          if (dna.contentAngleDna) dnaParts.push(`Content Angle DNA: ${JSON.stringify(dna.contentAngleDna).substring(0, 600)}`);
+          if (dna.visualDna) dnaParts.push(`Visual DNA: ${JSON.stringify(dna.visualDna).substring(0, 400)}`);
+          if (dna.formatDna) dnaParts.push(`Format DNA: ${JSON.stringify(dna.formatDna).substring(0, 400)}`);
+          if (dna.executionRules) dnaParts.push(`Execution Rules: ${JSON.stringify(dna.executionRules).substring(0, 400)}`);
+          dnaContext = dnaParts.join("\n");
+        }
+      } catch {}
+
+      if (dnaContext) contextParts.push(dnaContext);
+
+      const contextStr = contextParts.join("\n\n").substring(0, 8000);
 
       const response = await aiChat({
         model: "gpt-4.1-mini",
         messages: [
           {
             role: "system",
-            content: `You are the MarketMind AI Campaign Manager. You have full access to all engine outputs and plan sections. Answer the user's question using the provided engine data and plan context. Be specific, reference actual data, and explain the strategic reasoning. Keep your answer concise (2-4 sentences). Do not invent data not present in the context.`,
+            content: `You are the MarketMind AI Campaign Manager. You have full access to all engine outputs, plan sections, and Content DNA (the content creation blueprint). Answer the user's question using the provided data. If the question is about content creation, hooks, CTAs, narrative style, or how to make content, answer from Content DNA specifically. Be specific, reference actual data, and explain the strategic reasoning. Keep your answer concise (2-4 sentences). Do not invent data not present in the context.`,
           },
           { role: "user", content: `CONTEXT:\n${contextStr}\n\nUSER QUESTION: ${question}` },
         ],

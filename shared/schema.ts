@@ -1992,3 +1992,24 @@ export const messages = pgTable("messages", {
   content: text("content").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+export const contentDna = pgTable("content_dna", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  campaignId: varchar("campaign_id").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  planId: varchar("plan_id"),
+  messagingCore: text("messaging_core"),
+  ctaDna: text("cta_dna"),
+  hookDna: text("hook_dna"),
+  narrativeDna: text("narrative_dna"),
+  contentAngleDna: text("content_angle_dna"),
+  visualDna: text("visual_dna"),
+  formatDna: text("format_dna"),
+  executionRules: text("execution_rules"),
+  snapshot: text("snapshot"),
+  status: text("status").notNull().default("active"),
+  generatedAt: timestamp("generated_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type ContentDna = typeof contentDna.$inferSelect;

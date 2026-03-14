@@ -501,6 +501,7 @@ export default function CreateScreen() {
           industry: brandProfile.industry || 'business',
           reelDuration,
           reelGoal,
+          campaignId: selectedCampaignId || undefined,
         };
 
         if (hasCIContext) {
@@ -538,6 +539,7 @@ export default function CreateScreen() {
           targetAudience: brandProfile.targetAudience || 'general audience',
           industry: brandProfile.industry || 'business',
           aiEngine,
+          campaignId: selectedCampaignId || undefined,
         });
         const data = await response.json();
         setGeneratedContent(data.content);

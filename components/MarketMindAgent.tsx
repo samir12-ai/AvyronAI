@@ -39,6 +39,16 @@ const P = {
   textLightMuted: '#8A96A8',
 };
 
+type DnaSnapshot = {
+  ctaType?: string;
+  hookStyle?: string;
+  hookDuration?: string;
+  narrativeStyle?: string;
+  contentAngle?: string;
+  formatPriority?: string;
+  toneStyle?: string;
+};
+
 type AgentBrief = {
   campaignStatus: string;
   insight: string;
@@ -53,6 +63,7 @@ type AgentBrief = {
   hasMetrics: boolean;
   mode: string;
   metrics: { cpa: number; roas: number; spend: number; revenue: number } | null;
+  contentDnaSnapshot: DnaSnapshot | null;
 };
 
 type Props = {
@@ -264,6 +275,59 @@ export const MarketMindAgent = forwardRef<MarketMindAgentRef, Props>(function Ma
             <View style={[st.progressFill, { width: `${Math.min(progress.percent, 100)}%`, backgroundColor: P.mint }]} />
           </View>
           <Text style={[st.progressSub, { color: textMuted }]}>{progress.percent}% complete · {progress.remaining} remaining</Text>
+        </View>
+      )}
+
+      {brief.contentDnaSnapshot && (
+        <View style={[st.dnaBox, { backgroundColor: isDark ? P.mint + '06' : P.mint + '04', borderColor: P.mint + '15' }]}>
+          <View style={st.dnaHeader}>
+            <Ionicons name="code-working-outline" size={13} color={P.mint} />
+            <Text style={[st.dnaTitle, { color: textPrimary }]}>Content DNA</Text>
+          </View>
+          <View style={st.dnaGrid}>
+            {brief.contentDnaSnapshot.ctaType && (
+              <View style={st.dnaItem}>
+                <Text style={[st.dnaLabel, { color: textMuted }]}>CTA</Text>
+                <Text style={[st.dnaValue, { color: textSecondary }]} numberOfLines={1}>{brief.contentDnaSnapshot.ctaType}</Text>
+              </View>
+            )}
+            {brief.contentDnaSnapshot.hookStyle && (
+              <View style={st.dnaItem}>
+                <Text style={[st.dnaLabel, { color: textMuted }]}>Hooks</Text>
+                <Text style={[st.dnaValue, { color: textSecondary }]} numberOfLines={1}>{brief.contentDnaSnapshot.hookStyle}</Text>
+              </View>
+            )}
+            {brief.contentDnaSnapshot.hookDuration && (
+              <View style={st.dnaItem}>
+                <Text style={[st.dnaLabel, { color: textMuted }]}>Hook length</Text>
+                <Text style={[st.dnaValue, { color: textSecondary }]} numberOfLines={1}>{brief.contentDnaSnapshot.hookDuration}</Text>
+              </View>
+            )}
+            {brief.contentDnaSnapshot.narrativeStyle && (
+              <View style={st.dnaItem}>
+                <Text style={[st.dnaLabel, { color: textMuted }]}>Narrative</Text>
+                <Text style={[st.dnaValue, { color: textSecondary }]} numberOfLines={1}>{brief.contentDnaSnapshot.narrativeStyle}</Text>
+              </View>
+            )}
+            {brief.contentDnaSnapshot.contentAngle && (
+              <View style={st.dnaItem}>
+                <Text style={[st.dnaLabel, { color: textMuted }]}>Angle</Text>
+                <Text style={[st.dnaValue, { color: textSecondary }]} numberOfLines={1}>{brief.contentDnaSnapshot.contentAngle}</Text>
+              </View>
+            )}
+            {brief.contentDnaSnapshot.toneStyle && (
+              <View style={st.dnaItem}>
+                <Text style={[st.dnaLabel, { color: textMuted }]}>Tone</Text>
+                <Text style={[st.dnaValue, { color: textSecondary }]} numberOfLines={1}>{brief.contentDnaSnapshot.toneStyle}</Text>
+              </View>
+            )}
+            {brief.contentDnaSnapshot.formatPriority && (
+              <View style={st.dnaItem}>
+                <Text style={[st.dnaLabel, { color: textMuted }]}>Format</Text>
+                <Text style={[st.dnaValue, { color: textSecondary }]} numberOfLines={1}>{brief.contentDnaSnapshot.formatPriority}</Text>
+              </View>
+            )}
+          </View>
         </View>
       )}
 
@@ -521,6 +585,43 @@ const st = StyleSheet.create({
   progressSub: {
     fontSize: 10,
     fontWeight: '500',
+  },
+  dnaBox: {
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 12,
+  },
+  dnaHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  dnaTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  dnaGrid: {
+    gap: 6,
+  },
+  dnaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dnaLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    width: 72,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.4,
+  },
+  dnaValue: {
+    fontSize: 12,
+    fontWeight: '500',
+    flex: 1,
   },
   shortcutsRow: {
     flexDirection: 'row',

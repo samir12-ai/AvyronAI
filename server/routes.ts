@@ -34,6 +34,7 @@ import { registerPersuasionEngineRoutes } from "./persuasion-engine/routes";
 import { registerStrategyEngineRoutes } from "./strategy";
 import { registerOrchestratorV2Routes } from "./orchestrator/routes";
 import { registerChatRoutes } from "./replit_integrations/chat";
+import { registerContentDnaRoutes } from "./content-dna-routes";
 import { storeTokensAfterOAuth, runAllHealthChecks } from "./meta-token-manager";
 import { redactToken } from "./meta-crypto";
 import { initMetaMetrics } from "./meta-metrics";
@@ -60,10 +61,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/generate-content", async (req, res) => {
     try {
-      const { topic, contentType, platform, brandName, tone, targetAudience, industry, aiEngine } = req.body;
+      const { topic, contentType, platform, brandName, tone, targetAudience, industry, aiEngine, campaignId } = req.body;
 
       if (!topic) {
         return res.status(400).json({ error: "Topic is required" });
+      }
+
+      let dnaGuidance = "";
+      if (campaignId) {
+        try {
+          const { getLatestContentDna } = await import("./content-dna-routes");
+          const dna = await getLatestContentDna(campaignId, "default");
+          if (dna) {
+            const parts: string[] = ["\n\nContent DNA (use these rules for this business):"];
+            if (dna.messagingCore) parts.push(`Messaging: tone=${dna.messagingCore.toneStyle || ""}, persuasion=${dna.messagingCore.persuasionIntensity || ""}, value promise=${dna.messagingCore.primaryValuePromise || ""}`);
+            if (dna.ctaDna) parts.push(`CTA: type=${dna.ctaDna.primaryCtaType || ""}, style=${dna.ctaDna.ctaDeliveryStyle || ""}, rule=${dna.ctaDna.softVsDirectRule || ""}`);
+            if (dna.hookDna) parts.push(`Hooks: types=${(dna.hookDna.preferredHookTypes || []).join(", ")}, opening=${dna.hookDna.recommendedOpeningStyle || ""}, duration=${dna.hookDna.recommendedHookDuration || ""}`);
+            if (dna.narrativeDna) parts.push(`Narrative: structure=${dna.narrativeDna.preferredStructure || ""}, storytelling=${dna.narrativeDna.storytellingGuidance || ""}`);
+            if (dna.executionRules) {
+              if (dna.executionRules.alwaysInclude?.length) parts.push(`Always include: ${dna.executionRules.alwaysInclude.join(", ")}`);
+              if (dna.executionRules.neverDo?.length) parts.push(`Never do: ${dna.executionRules.neverDo.join(", ")}`);
+            }
+            dnaGuidance = parts.join("\n");
+          }
+        } catch {}
       }
 
       const systemPrompt = `You are an expert marketing copywriter and content strategist. You create engaging, high-converting marketing content that resonates with the target audience.
@@ -81,7 +102,7 @@ Guidelines:
 - Keep content concise and impactful
 - Focus on benefits and value proposition
 - Use action-oriented language
-- Avoid being overly promotional`;
+- Avoid being overly promotional${dnaGuidance}`;
 
       const userPrompt = `Create a ${contentType} for ${platform} about: ${topic}
 
@@ -223,7 +244,7 @@ Make sure the content works well across all the specified platforms.`;
 
   app.post("/api/generate-reel-script", async (req, res) => {
     try {
-      const { topic, platform, brandName, tone, targetAudience, industry, reelDuration, reelGoal, ciContext } = req.body;
+      const { topic, platform, brandName, tone, targetAudience, industry, reelDuration, reelGoal, ciContext, campaignId } = req.body;
 
       if (ciContext) {
         return res.status(410).json({
@@ -239,6 +260,28 @@ Make sure the content works well across all the specified platforms.`;
 
       const duration = reelDuration || '30-60 seconds';
       const goal = reelGoal || 'engagement';
+
+      let reelDnaRules = "";
+      if (campaignId) {
+        try {
+          const { getLatestContentDna } = await import("./content-dna-routes");
+          const dna = await getLatestContentDna(campaignId, "default");
+          if (dna) {
+            const parts: string[] = ["\n\nCONTENT DNA RULES (follow these for this specific business):"];
+            if (dna.hookDna) parts.push(`Hook strategy: types=${(dna.hookDna.preferredHookTypes || []).join(", ")}, opening=${dna.hookDna.recommendedOpeningStyle || ""}, duration=${dna.hookDna.recommendedHookDuration || ""}`);
+            if (dna.narrativeDna) parts.push(`Narrative: ${dna.narrativeDna.preferredStructure || ""}`);
+            if (dna.ctaDna) parts.push(`CTA: ${dna.ctaDna.primaryCtaType || ""}, ${dna.ctaDna.softVsDirectRule || ""}`);
+            if (dna.visualDna) parts.push(`Visual: ${dna.visualDna.visualDirection || ""}, ${dna.visualDna.talkingHeadVsProofVsDemo || ""}`);
+            if (dna.formatDna?.reelBehavior) parts.push(`Reel behavior: ${dna.formatDna.reelBehavior}`);
+            if (dna.messagingCore) parts.push(`Tone: ${dna.messagingCore.toneStyle || ""}, Persuasion: ${dna.messagingCore.persuasionIntensity || ""}`);
+            if (dna.executionRules) {
+              if (dna.executionRules.alwaysInclude?.length) parts.push(`Always include: ${dna.executionRules.alwaysInclude.join(", ")}`);
+              if (dna.executionRules.neverDo?.length) parts.push(`Never do: ${dna.executionRules.neverDo.join(", ")}`);
+            }
+            reelDnaRules = parts.join("\n");
+          }
+        } catch {}
+      }
 
       const systemPrompt = `You are an elite social media content strategist and Reels director who has deep expertise in the Meta (Instagram/Facebook) algorithm. You create viral-worthy Reels scripts that are engineered for maximum reach, engagement, and retention.
 
@@ -269,7 +312,7 @@ SCRIPT STRUCTURE RULES:
 - Every scene must have a visual transition or movement (static = scroll-away)
 - Include B-roll suggestions that are achievable with a smartphone
 - End with a loop point or strong CTA that drives the algorithm-favored action (share/save)
-- Audio direction should suggest trending sounds or original voiceover style`;
+- Audio direction should suggest trending sounds or original voiceover style${reelDnaRules}`;
 
       const userPrompt = `Create a complete, production-ready Reel script about: "${topic}"
 
@@ -1372,6 +1415,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerStrategyEngineRoutes(app);
   registerOrchestratorV2Routes(app);
   registerChatRoutes(app);
+  registerContentDnaRoutes(app);
 
   initMetaMetrics();
 
