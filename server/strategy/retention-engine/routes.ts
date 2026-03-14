@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { db } from "../../db";
-import { retentionSnapshots, manualRetentionMetrics } from "@shared/schema";
+import { retentionSnapshots, manualRetentionMetrics, retentionGateInputs } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { runRetentionEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
@@ -37,6 +37,28 @@ export function registerRetentionEngineRoutes(app: Express) {
         return res.status(429).json({
           error: "REVALIDATION_LOOP_BLOCKED",
           message: sessionCheck.warning,
+        });
+      }
+
+      const [gateInputs] = await db.select().from(retentionGateInputs)
+        .where(and(
+          eq(retentionGateInputs.campaignId, campaignId),
+          eq(retentionGateInputs.accountId, accountId),
+        ))
+        .limit(1);
+
+      const gateMissing: string[] = [];
+      if (!gateInputs || !gateInputs.hasExistingCustomers) gateMissing.push("Confirmation that the business has existing or past customers");
+      if (!gateInputs || !gateInputs.retentionGoal) gateMissing.push("A retention goal (repeat purchase, renewal, churn reduction, or win-back)");
+      if (!gateInputs || !gateInputs.businessModel) gateMissing.push("Business model (one-time purchase, recurring subscription, retainer, or repeat purchase)");
+      if (!gateInputs || !gateInputs.reachableAudience) gateMissing.push("A reachable audience after purchase (customer list, email, WhatsApp, phone, or community)");
+
+      if (gateMissing.length > 0) {
+        return res.status(422).json({
+          error: "INPUT_GATE_LOCKED",
+          message: "Retention Engine requires existing customers and a reachable audience. Analysis cannot run without these foundational inputs.",
+          gateStatus: "locked",
+          missingRequirements: gateMissing,
         });
       }
 

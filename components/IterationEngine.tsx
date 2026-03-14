@@ -6,6 +6,9 @@ import {
   Pressable,
   ActivityIndicator,
   Alert,
+  TextInput,
+  Switch,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -129,6 +132,22 @@ const EFFORT_COLORS: Record<string, string> = {
 const ENGINE_COLOR = '#F43F5E';
 const ENGINE_COLOR_DARK = '#E11D48';
 
+interface GateInputs {
+  hasExistingAsset: boolean;
+  assetDescription: string;
+  primaryKpi: string;
+  dataWindowDays: string;
+  spend: string;
+  impressions: string;
+  clicks: string;
+  leads: string;
+  purchases: string;
+  revenue: string;
+}
+
+const KPI_OPTIONS = ['CTR', 'ROAS', 'CPA', 'Conversion Rate', 'Revenue', 'Leads', 'Impressions'];
+const WINDOW_OPTIONS = ['7', '14', '30', '60'];
+
 export default function IterationEngine({ isActive }: { isActive?: boolean }) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
@@ -138,6 +157,81 @@ export default function IterationEngine({ isActive }: { isActive?: boolean }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [expandedLayer, setExpandedLayer] = useState<string | null>(null);
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
+
+  const [gateStatus, setGateStatus] = useState<'locked' | 'unlocked' | 'loading'>('loading');
+  const [gateMissing, setGateMissing] = useState<string[]>([]);
+  const [gateInputs, setGateInputs] = useState<GateInputs>({
+    hasExistingAsset: false, assetDescription: '', primaryKpi: '', dataWindowDays: '',
+    spend: '', impressions: '', clicks: '', leads: '', purchases: '', revenue: '',
+  });
+  const [savingGate, setSavingGate] = useState(false);
+
+  const fetchGateStatus = useCallback(async () => {
+    if (!selectedCampaignId) return;
+    try {
+      const url = new URL(`/api/campaigns/${selectedCampaignId}/iteration-gate`, getApiUrl());
+      const res = await fetch(url.toString());
+      const json = await safeApiJson(res);
+      setGateStatus(json.gateStatus === 'unlocked' ? 'unlocked' : 'locked');
+      setGateMissing(json.missingRequirements || []);
+      if (json.inputs) {
+        setGateInputs({
+          hasExistingAsset: json.inputs.hasExistingAsset || false,
+          assetDescription: json.inputs.assetDescription || '',
+          primaryKpi: json.inputs.primaryKpi || '',
+          dataWindowDays: json.inputs.dataWindowDays?.toString() || '',
+          spend: json.inputs.spend?.toString() || '',
+          impressions: json.inputs.impressions?.toString() || '',
+          clicks: json.inputs.clicks?.toString() || '',
+          leads: json.inputs.leads?.toString() || '',
+          purchases: json.inputs.purchases?.toString() || '',
+          revenue: json.inputs.revenue?.toString() || '',
+        });
+      }
+    } catch (err) {
+      console.error('[IterationEngine] Gate fetch error:', err);
+      setGateStatus('locked');
+      setGateMissing(["Failed to load gate status"]);
+    }
+  }, [selectedCampaignId]);
+
+  const saveGateInputs = useCallback(async () => {
+    if (!selectedCampaignId) return;
+    setSavingGate(true);
+    try {
+      const url = new URL(`/api/campaigns/${selectedCampaignId}/iteration-gate`, getApiUrl());
+      const res = await fetch(url.toString(), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          hasExistingAsset: gateInputs.hasExistingAsset,
+          assetDescription: gateInputs.assetDescription,
+          primaryKpi: gateInputs.primaryKpi,
+          dataWindowDays: gateInputs.dataWindowDays || null,
+          spend: gateInputs.spend || null,
+          impressions: gateInputs.impressions || null,
+          clicks: gateInputs.clicks || null,
+          leads: gateInputs.leads || null,
+          purchases: gateInputs.purchases || null,
+          revenue: gateInputs.revenue || null,
+        }),
+      });
+      const json = await safeApiJson(res);
+      if (json.success) {
+        setGateStatus(json.gateStatus === 'unlocked' ? 'unlocked' : 'locked');
+        setGateMissing(json.missingRequirements || []);
+        Haptics.notificationAsync(
+          json.gateStatus === 'unlocked'
+            ? Haptics.NotificationFeedbackType.Success
+            : Haptics.NotificationFeedbackType.Warning
+        );
+      }
+    } catch (err: any) {
+      Alert.alert('Error', 'Failed to save gate inputs');
+    } finally {
+      setSavingGate(false);
+    }
+  }, [selectedCampaignId, gateInputs]);
 
   const fetchLatest = useCallback(async () => {
     if (!selectedCampaignId) return;
@@ -156,11 +250,18 @@ export default function IterationEngine({ isActive }: { isActive?: boolean }) {
   }, [selectedCampaignId]);
 
   useEffect(() => {
-    if (isActive) fetchLatest();
-  }, [isActive, fetchLatest]);
+    if (isActive) {
+      fetchGateStatus();
+      fetchLatest();
+    }
+  }, [isActive, fetchGateStatus, fetchLatest]);
 
   const runAnalysis = useCallback(async () => {
     if (!selectedCampaignId) return;
+    if (gateStatus !== 'unlocked') {
+      Alert.alert('Gate Locked', 'Please complete all required inputs before running analysis.');
+      return;
+    }
     setAnalyzing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
@@ -174,6 +275,10 @@ export default function IterationEngine({ isActive }: { isActive?: boolean }) {
       if (json.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         await fetchLatest();
+      } else if (json.error === 'INPUT_GATE_LOCKED') {
+        setGateStatus('locked');
+        setGateMissing(json.missingRequirements || []);
+        Alert.alert('Gate Locked', json.message);
       } else {
         Alert.alert('Analysis Failed', json.message || json.error || 'Unknown error');
       }
@@ -182,7 +287,7 @@ export default function IterationEngine({ isActive }: { isActive?: boolean }) {
     } finally {
       setAnalyzing(false);
     }
-  }, [selectedCampaignId, fetchLatest]);
+  }, [selectedCampaignId, fetchLatest, gateStatus]);
 
   const scoreColor = (score: number) => {
     if (score >= 0.7) return '#10B981';
@@ -472,23 +577,128 @@ export default function IterationEngine({ isActive }: { isActive?: boolean }) {
         )}
       </LinearGradient>
 
+      <View style={[styles.gateCard, { backgroundColor: colors.card, borderColor: gateStatus === 'unlocked' ? '#10B98130' : '#F59E0B30' }]}>
+        <View style={styles.gateHeader}>
+          <View style={styles.gateHeaderLeft}>
+            <Ionicons name={gateStatus === 'unlocked' ? "lock-open" : "lock-closed"} size={16} color={gateStatus === 'unlocked' ? '#10B981' : '#F59E0B'} />
+            <Text style={[styles.gateTitle, { color: colors.text }]}>Input Gate</Text>
+          </View>
+          <View style={[styles.gateStatusBadge, { backgroundColor: gateStatus === 'unlocked' ? '#10B98120' : '#F59E0B20' }]}>
+            <Text style={{ fontSize: 11, fontWeight: '600', color: gateStatus === 'unlocked' ? '#10B981' : '#F59E0B' }}>
+              {gateStatus === 'loading' ? 'Loading...' : gateStatus === 'unlocked' ? 'Unlocked' : 'Locked'}
+            </Text>
+          </View>
+        </View>
+
+        {gateMissing.length > 0 && gateStatus === 'locked' && (
+          <View style={styles.gateMissingBox}>
+            {gateMissing.map((m, i) => (
+              <View key={i} style={styles.gateMissingRow}>
+                <Ionicons name="close-circle" size={12} color="#EF4444" />
+                <Text style={[styles.gateMissingText, { color: colors.textSecondary }]}>{m}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        <View style={styles.gateRow}>
+          <Text style={[styles.gateLabel, { color: colors.text }]}>Has existing campaign/asset?</Text>
+          <Switch
+            value={gateInputs.hasExistingAsset}
+            onValueChange={(v) => setGateInputs(prev => ({ ...prev, hasExistingAsset: v }))}
+            trackColor={{ false: '#76768020', true: ENGINE_COLOR + '40' }}
+            thumbColor={gateInputs.hasExistingAsset ? ENGINE_COLOR : '#f4f3f4'}
+          />
+        </View>
+
+        {gateInputs.hasExistingAsset && (
+          <TextInput
+            style={[styles.gateInput, { color: colors.text, borderColor: colors.cardBorder, backgroundColor: colors.background }]}
+            placeholder="Describe the asset (e.g., Facebook campaign, landing page)"
+            placeholderTextColor={colors.textMuted}
+            value={gateInputs.assetDescription}
+            onChangeText={(v) => setGateInputs(prev => ({ ...prev, assetDescription: v }))}
+          />
+        )}
+
+        <Text style={[styles.gateLabel, { color: colors.text, marginTop: 12 }]}>Primary KPI</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.gateChipRow}>
+          {KPI_OPTIONS.map(kpi => (
+            <Pressable
+              key={kpi}
+              onPress={() => setGateInputs(prev => ({ ...prev, primaryKpi: kpi }))}
+              style={[styles.gateChip, gateInputs.primaryKpi === kpi && { backgroundColor: ENGINE_COLOR + '20', borderColor: ENGINE_COLOR }]}
+            >
+              <Text style={[styles.gateChipText, { color: gateInputs.primaryKpi === kpi ? ENGINE_COLOR : colors.textSecondary }]}>{kpi}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+
+        <Text style={[styles.gateLabel, { color: colors.text, marginTop: 12 }]}>Data Window (days)</Text>
+        <View style={styles.gateChipRowWrap}>
+          {WINDOW_OPTIONS.map(w => (
+            <Pressable
+              key={w}
+              onPress={() => setGateInputs(prev => ({ ...prev, dataWindowDays: w }))}
+              style={[styles.gateChip, gateInputs.dataWindowDays === w && { backgroundColor: ENGINE_COLOR + '20', borderColor: ENGINE_COLOR }]}
+            >
+              <Text style={[styles.gateChipText, { color: gateInputs.dataWindowDays === w ? ENGINE_COLOR : colors.textSecondary }]}>{w}</Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <Text style={[styles.gateLabel, { color: colors.text, marginTop: 12 }]}>Performance Metrics (at least 1)</Text>
+        <View style={styles.gateMetricsGrid}>
+          {(['spend', 'impressions', 'clicks', 'leads', 'purchases', 'revenue'] as const).map(metric => (
+            <View key={metric} style={styles.gateMetricItem}>
+              <Text style={[styles.gateMetricLabel, { color: colors.textSecondary }]}>{metric.charAt(0).toUpperCase() + metric.slice(1)}</Text>
+              <TextInput
+                style={[styles.gateMetricInput, { color: colors.text, borderColor: colors.cardBorder, backgroundColor: colors.background }]}
+                placeholder="0"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="numeric"
+                value={gateInputs[metric]}
+                onChangeText={(v) => setGateInputs(prev => ({ ...prev, [metric]: v }))}
+              />
+            </View>
+          ))}
+        </View>
+
+        <Pressable
+          onPress={saveGateInputs}
+          disabled={savingGate}
+          style={[styles.gateSaveBtn, { borderColor: ENGINE_COLOR }]}
+        >
+          {savingGate ? (
+            <ActivityIndicator size="small" color={ENGINE_COLOR} />
+          ) : (
+            <>
+              <Ionicons name="save-outline" size={14} color={ENGINE_COLOR} />
+              <Text style={[styles.gateSaveBtnText, { color: ENGINE_COLOR }]}>Save Inputs</Text>
+            </>
+          )}
+        </Pressable>
+      </View>
+
       {!hasData && !analyzing && (
         <View style={[styles.emptyState, { backgroundColor: colors.card }]}>
           <Ionicons name="repeat-outline" size={40} color={colors.textMuted} />
           <Text style={[styles.emptyTitle, { color: colors.text }]}>No Iteration Analysis</Text>
           <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
-            Run the Iteration Engine to generate test hypotheses, optimization targets, and a step-by-step iteration plan for your campaign.
+            {gateStatus === 'locked'
+              ? 'Complete the input gate above to unlock the Iteration Engine.'
+              : 'Run the Iteration Engine to generate test hypotheses, optimization targets, and a step-by-step iteration plan for your campaign.'}
           </Text>
         </View>
       )}
 
       <Pressable
         onPress={runAnalysis}
-        disabled={analyzing}
-        style={[styles.analyzeBtn, analyzing && styles.analyzeBtnDisabled]}
+        disabled={analyzing || gateStatus !== 'unlocked'}
+        style={[styles.analyzeBtn, (analyzing || gateStatus !== 'unlocked') && styles.analyzeBtnDisabled]}
       >
         <LinearGradient
-          colors={analyzing ? ['#9CA3AF', '#6B7280'] : [ENGINE_COLOR, ENGINE_COLOR_DARK]}
+          colors={analyzing || gateStatus !== 'unlocked' ? ['#9CA3AF', '#6B7280'] : [ENGINE_COLOR, ENGINE_COLOR_DARK]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
           style={styles.analyzeBtnGradient}
@@ -497,6 +707,11 @@ export default function IterationEngine({ isActive }: { isActive?: boolean }) {
             <>
               <ActivityIndicator size="small" color="#fff" />
               <Text style={styles.analyzeBtnText}>Running Iteration Analysis...</Text>
+            </>
+          ) : gateStatus !== 'unlocked' ? (
+            <>
+              <Ionicons name="lock-closed" size={16} color="#fff" />
+              <Text style={styles.analyzeBtnText}>Gate Locked — Complete Inputs</Text>
             </>
           ) : (
             <>
@@ -703,4 +918,25 @@ const styles = StyleSheet.create({
   warningRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 4 },
   warningDot: { width: 6, height: 6, borderRadius: 3, marginTop: 5 },
   warningText: { fontSize: 12, lineHeight: 16, flex: 1 },
+  gateCard: { borderRadius: 12, borderWidth: 1, padding: 16, marginBottom: 12 },
+  gateHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  gateHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  gateTitle: { fontSize: 14, fontWeight: '600' as const },
+  gateStatusBadge: { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3 },
+  gateMissingBox: { borderRadius: 8, padding: 10, marginBottom: 12, backgroundColor: '#EF444410' },
+  gateMissingRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 4 },
+  gateMissingText: { fontSize: 12, lineHeight: 16, flex: 1 },
+  gateRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  gateLabel: { fontSize: 13, fontWeight: '500' as const },
+  gateInput: { borderWidth: 1, borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 8 },
+  gateChipRow: { marginBottom: 4 },
+  gateChipRowWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 4 },
+  gateChip: { borderWidth: 1, borderColor: '#76768030', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, marginRight: 6 },
+  gateChipText: { fontSize: 12, fontWeight: '500' as const },
+  gateMetricsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  gateMetricItem: { width: '30%' as any, minWidth: 90 },
+  gateMetricLabel: { fontSize: 11, fontWeight: '500' as const, marginBottom: 4 },
+  gateMetricInput: { borderWidth: 1, borderRadius: 8, padding: 8, fontSize: 13, textAlign: 'center' as const },
+  gateSaveBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderRadius: 10, padding: 12 },
+  gateSaveBtnText: { fontSize: 13, fontWeight: '600' as const },
 });

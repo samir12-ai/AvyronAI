@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { db } from "../../db";
-import { iterationSnapshots } from "@shared/schema";
+import { iterationSnapshots, iterationGateInputs } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { runIterationEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
@@ -45,6 +45,36 @@ export function registerIterationEngineRoutes(app: Express) {
         return res.status(429).json({
           error: "REVALIDATION_LOOP_BLOCKED",
           message: sessionCheck.warning,
+        });
+      }
+
+      const [gateInputs] = await db.select().from(iterationGateInputs)
+        .where(and(
+          eq(iterationGateInputs.campaignId, campaignId),
+          eq(iterationGateInputs.accountId, accountId),
+        ))
+        .limit(1);
+
+      const gateMissing: string[] = [];
+      if (!gateInputs || !gateInputs.hasExistingAsset) gateMissing.push("Existing campaign, asset, or funnel to iterate on");
+      if (!gateInputs || !gateInputs.primaryKpi) gateMissing.push("Primary KPI for optimization");
+      if (!gateInputs || !gateInputs.dataWindowDays) gateMissing.push("Data window (7, 14, 30, or 60 days)");
+      const hasMetric = gateInputs && (
+        (gateInputs.spend != null && gateInputs.spend > 0) ||
+        (gateInputs.impressions != null && gateInputs.impressions > 0) ||
+        (gateInputs.clicks != null && gateInputs.clicks > 0) ||
+        (gateInputs.leads != null && gateInputs.leads > 0) ||
+        (gateInputs.purchases != null && gateInputs.purchases > 0) ||
+        (gateInputs.revenue != null && gateInputs.revenue > 0)
+      );
+      if (!hasMetric) gateMissing.push("At least one real performance metric (spend, impressions, clicks, leads, purchases, or revenue)");
+
+      if (gateMissing.length > 0) {
+        return res.status(422).json({
+          error: "INPUT_GATE_LOCKED",
+          message: "Iteration Engine requires historical performance data and an existing asset to optimize. Analysis cannot run on empty or hypothetical datasets.",
+          gateStatus: "locked",
+          missingRequirements: gateMissing,
         });
       }
 

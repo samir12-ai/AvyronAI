@@ -6,6 +6,8 @@ import {
   Pressable,
   ActivityIndicator,
   Alert,
+  Switch,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -109,6 +111,17 @@ const SEVERITY_COLORS: Record<string, string> = {
 const ENGINE_COLOR = '#059669';
 const ENGINE_COLOR_DARK = '#047857';
 
+interface RetentionGateInputs {
+  hasExistingCustomers: boolean;
+  retentionGoal: string;
+  businessModel: string;
+  reachableAudience: string;
+}
+
+const RETENTION_GOALS = ['Repeat Purchase', 'Renewal', 'Churn Reduction', 'Win-back'];
+const BUSINESS_MODELS = ['One-time Purchase', 'Recurring Subscription', 'Retainer', 'Repeat Purchase'];
+const AUDIENCE_CHANNELS = ['Customer Email List', 'WhatsApp/SMS', 'Phone', 'Community/Forum', 'Push Notifications', 'In-App'];
+
 export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
@@ -120,6 +133,63 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
   const [expandedChurn, setExpandedChurn] = useState<string | null>(null);
   const [expandedLTV, setExpandedLTV] = useState<string | null>(null);
   const [expandedUpsell, setExpandedUpsell] = useState<string | null>(null);
+
+  const [gateStatus, setGateStatus] = useState<'locked' | 'unlocked' | 'loading'>('loading');
+  const [gateMissing, setGateMissing] = useState<string[]>([]);
+  const [gateInputs, setGateInputs] = useState<RetentionGateInputs>({
+    hasExistingCustomers: false, retentionGoal: '', businessModel: '', reachableAudience: '',
+  });
+  const [savingGate, setSavingGate] = useState(false);
+
+  const fetchGateStatus = useCallback(async () => {
+    if (!selectedCampaignId) return;
+    try {
+      const url = new URL(`/api/campaigns/${selectedCampaignId}/retention-gate`, getApiUrl());
+      const res = await fetch(url.toString());
+      const json = await safeApiJson(res);
+      setGateStatus(json.gateStatus === 'unlocked' ? 'unlocked' : 'locked');
+      setGateMissing(json.missingRequirements || []);
+      if (json.inputs) {
+        setGateInputs({
+          hasExistingCustomers: json.inputs.hasExistingCustomers || false,
+          retentionGoal: json.inputs.retentionGoal || '',
+          businessModel: json.inputs.businessModel || '',
+          reachableAudience: json.inputs.reachableAudience || '',
+        });
+      }
+    } catch (err) {
+      console.error('[RetentionEngine] Gate fetch error:', err);
+      setGateStatus('locked');
+      setGateMissing(["Failed to load gate status"]);
+    }
+  }, [selectedCampaignId]);
+
+  const saveGateInputs = useCallback(async () => {
+    if (!selectedCampaignId) return;
+    setSavingGate(true);
+    try {
+      const url = new URL(`/api/campaigns/${selectedCampaignId}/retention-gate`, getApiUrl());
+      const res = await fetch(url.toString(), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(gateInputs),
+      });
+      const json = await safeApiJson(res);
+      if (json.success) {
+        setGateStatus(json.gateStatus === 'unlocked' ? 'unlocked' : 'locked');
+        setGateMissing(json.missingRequirements || []);
+        Haptics.notificationAsync(
+          json.gateStatus === 'unlocked'
+            ? Haptics.NotificationFeedbackType.Success
+            : Haptics.NotificationFeedbackType.Warning
+        );
+      }
+    } catch (err: any) {
+      Alert.alert('Error', 'Failed to save gate inputs');
+    } finally {
+      setSavingGate(false);
+    }
+  }, [selectedCampaignId, gateInputs]);
 
   const fetchLatest = useCallback(async () => {
     if (!selectedCampaignId) return;
@@ -160,11 +230,18 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
   }, [selectedCampaignId]);
 
   useEffect(() => {
-    if (isActive) fetchLatest();
-  }, [isActive, fetchLatest]);
+    if (isActive) {
+      fetchGateStatus();
+      fetchLatest();
+    }
+  }, [isActive, fetchGateStatus, fetchLatest]);
 
   const runAnalysis = useCallback(async () => {
     if (!selectedCampaignId) return;
+    if (gateStatus !== 'unlocked') {
+      Alert.alert('Gate Locked', 'Please complete all required inputs before running analysis.');
+      return;
+    }
     setAnalyzing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
@@ -178,6 +255,10 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
       if (json.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         await fetchLatest();
+      } else if (json.error === 'INPUT_GATE_LOCKED') {
+        setGateStatus('locked');
+        setGateMissing(json.missingRequirements || []);
+        Alert.alert('Gate Locked', json.message);
       } else {
         Alert.alert('Analysis Failed', json.message || json.error || 'Unknown error');
       }
@@ -186,7 +267,7 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
     } finally {
       setAnalyzing(false);
     }
-  }, [selectedCampaignId, fetchLatest]);
+  }, [selectedCampaignId, fetchLatest, gateStatus]);
 
   const scoreColor = (score: number) => {
     if (score >= 0.7) return '#10B981';
@@ -258,23 +339,114 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
         )}
       </LinearGradient>
 
+      <View style={[styles.gateCard, { backgroundColor: colors.card, borderColor: gateStatus === 'unlocked' ? '#10B98130' : '#F59E0B30' }]}>
+        <View style={styles.gateHeader}>
+          <View style={styles.gateHeaderLeft}>
+            <Ionicons name={gateStatus === 'unlocked' ? "lock-open" : "lock-closed"} size={16} color={gateStatus === 'unlocked' ? '#10B981' : '#F59E0B'} />
+            <Text style={[styles.gateTitle, { color: colors.text }]}>Input Gate</Text>
+          </View>
+          <View style={[styles.gateStatusBadge, { backgroundColor: gateStatus === 'unlocked' ? '#10B98120' : '#F59E0B20' }]}>
+            <Text style={{ fontSize: 11, fontWeight: '600', color: gateStatus === 'unlocked' ? '#10B981' : '#F59E0B' }}>
+              {gateStatus === 'loading' ? 'Loading...' : gateStatus === 'unlocked' ? 'Unlocked' : 'Locked'}
+            </Text>
+          </View>
+        </View>
+
+        {gateMissing.length > 0 && gateStatus === 'locked' && (
+          <View style={styles.gateMissingBox}>
+            {gateMissing.map((m, i) => (
+              <View key={i} style={styles.gateMissingRow}>
+                <Ionicons name="close-circle" size={12} color="#EF4444" />
+                <Text style={[styles.gateMissingText, { color: colors.textSecondary }]}>{m}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        <View style={styles.gateRow}>
+          <Text style={[styles.gateLabel, { color: colors.text }]}>Has existing customers?</Text>
+          <Switch
+            value={gateInputs.hasExistingCustomers}
+            onValueChange={(v) => setGateInputs(prev => ({ ...prev, hasExistingCustomers: v }))}
+            trackColor={{ false: '#76768020', true: ENGINE_COLOR + '40' }}
+            thumbColor={gateInputs.hasExistingCustomers ? ENGINE_COLOR : '#f4f3f4'}
+          />
+        </View>
+
+        <Text style={[styles.gateLabel, { color: colors.text, marginTop: 12 }]}>Retention Goal</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.gateChipRow}>
+          {RETENTION_GOALS.map(goal => (
+            <Pressable
+              key={goal}
+              onPress={() => setGateInputs(prev => ({ ...prev, retentionGoal: goal }))}
+              style={[styles.gateChip, gateInputs.retentionGoal === goal && { backgroundColor: ENGINE_COLOR + '20', borderColor: ENGINE_COLOR }]}
+            >
+              <Text style={[styles.gateChipText, { color: gateInputs.retentionGoal === goal ? ENGINE_COLOR : colors.textSecondary }]}>{goal}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+
+        <Text style={[styles.gateLabel, { color: colors.text, marginTop: 12 }]}>Business Model</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.gateChipRow}>
+          {BUSINESS_MODELS.map(model => (
+            <Pressable
+              key={model}
+              onPress={() => setGateInputs(prev => ({ ...prev, businessModel: model }))}
+              style={[styles.gateChip, gateInputs.businessModel === model && { backgroundColor: ENGINE_COLOR + '20', borderColor: ENGINE_COLOR }]}
+            >
+              <Text style={[styles.gateChipText, { color: gateInputs.businessModel === model ? ENGINE_COLOR : colors.textSecondary }]}>{model}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+
+        <Text style={[styles.gateLabel, { color: colors.text, marginTop: 12 }]}>Reachable Audience Channel</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.gateChipRow}>
+          {AUDIENCE_CHANNELS.map(ch => (
+            <Pressable
+              key={ch}
+              onPress={() => setGateInputs(prev => ({ ...prev, reachableAudience: ch }))}
+              style={[styles.gateChip, gateInputs.reachableAudience === ch && { backgroundColor: ENGINE_COLOR + '20', borderColor: ENGINE_COLOR }]}
+            >
+              <Text style={[styles.gateChipText, { color: gateInputs.reachableAudience === ch ? ENGINE_COLOR : colors.textSecondary }]}>{ch}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+
+        <Pressable
+          onPress={saveGateInputs}
+          disabled={savingGate}
+          style={[styles.gateSaveBtn, { borderColor: ENGINE_COLOR, marginTop: 12 }]}
+        >
+          {savingGate ? (
+            <ActivityIndicator size="small" color={ENGINE_COLOR} />
+          ) : (
+            <>
+              <Ionicons name="save-outline" size={14} color={ENGINE_COLOR} />
+              <Text style={[styles.gateSaveBtnText, { color: ENGINE_COLOR }]}>Save Inputs</Text>
+            </>
+          )}
+        </Pressable>
+      </View>
+
       {!hasData && !analyzing && (
         <View style={[styles.emptyState, { backgroundColor: colors.card }]}>
           <Ionicons name="refresh-circle-outline" size={40} color={colors.textMuted} />
           <Text style={[styles.emptyTitle, { color: colors.text }]}>No Retention Analysis</Text>
           <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
-            Run the Retention Engine to identify retention loops, churn risks, LTV expansion paths, and upsell triggers.
+            {gateStatus === 'locked'
+              ? 'Complete the input gate above to unlock the Retention Engine.'
+              : 'Run the Retention Engine to identify retention loops, churn risks, LTV expansion paths, and upsell triggers.'}
           </Text>
         </View>
       )}
 
       <Pressable
         onPress={runAnalysis}
-        disabled={analyzing}
-        style={[styles.analyzeBtn]}
+        disabled={analyzing || gateStatus !== 'unlocked'}
+        style={[styles.analyzeBtn, (analyzing || gateStatus !== 'unlocked') && { opacity: 0.5 }]}
       >
         <LinearGradient
-          colors={analyzing ? ['#9CA3AF', '#6B7280'] : [ENGINE_COLOR, ENGINE_COLOR_DARK]}
+          colors={analyzing || gateStatus !== 'unlocked' ? ['#9CA3AF', '#6B7280'] : [ENGINE_COLOR, ENGINE_COLOR_DARK]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
           style={styles.analyzeBtnGradient}
@@ -283,6 +455,11 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
             <>
               <ActivityIndicator size="small" color="#fff" />
               <Text style={styles.analyzeBtnText}>Analyzing Retention...</Text>
+            </>
+          ) : gateStatus !== 'unlocked' ? (
+            <>
+              <Ionicons name="lock-closed" size={16} color="#fff" />
+              <Text style={styles.analyzeBtnText}>Gate Locked — Complete Inputs</Text>
             </>
           ) : (
             <>
@@ -643,4 +820,19 @@ const styles = StyleSheet.create({
   warningRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 6 },
   warningDot: { width: 5, height: 5, borderRadius: 2.5, marginTop: 5 },
   warningText: { fontSize: 12, lineHeight: 16, flex: 1 },
+  gateCard: { borderRadius: 12, borderWidth: 1, padding: 16, marginBottom: 12 },
+  gateHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  gateHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  gateTitle: { fontSize: 14, fontWeight: '600' as const },
+  gateStatusBadge: { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3 },
+  gateMissingBox: { borderRadius: 8, padding: 10, marginBottom: 12, backgroundColor: '#EF444410' },
+  gateMissingRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 4 },
+  gateMissingText: { fontSize: 12, lineHeight: 16, flex: 1 },
+  gateRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  gateLabel: { fontSize: 13, fontWeight: '500' as const },
+  gateChipRow: { marginBottom: 4 },
+  gateChip: { borderWidth: 1, borderColor: '#76768030', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, marginRight: 6 },
+  gateChipText: { fontSize: 12, fontWeight: '500' as const },
+  gateSaveBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderRadius: 10, padding: 12 },
+  gateSaveBtnText: { fontSize: 13, fontWeight: '600' as const },
 });

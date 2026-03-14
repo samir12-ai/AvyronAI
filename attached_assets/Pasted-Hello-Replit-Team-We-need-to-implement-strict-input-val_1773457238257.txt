@@ -1,0 +1,82 @@
+Hello Replit Team,
+
+We need to implement strict input validation gates for the Iteration Engine and the Retention Engine to ensure both engines operate only when the required data context exists. These engines should not attempt analysis if the foundational inputs are missing.
+
+The purpose of this change is to prevent misleading analysis, avoid speculative outputs, and maintain the integrity of the system’s strategic decision framework.
+
+Below are the required rules.
+
+---
+
+1. Iteration Engine Gate Requirements
+
+The Iteration Engine must only activate when there is an existing campaign, asset, funnel, or performance dataset that can be improved.
+
+Before analysis begins, the system must confirm the following:
+
+- There is an existing campaign, asset, or funnel to iterate on.
+- A primary KPI for optimization is defined.
+- A data window (for example 7, 14, 30, or 60 days) is specified.
+- At least one real performance metric exists such as spend, impressions, clicks, leads, purchases, or revenue.
+
+If these requirements are not satisfied, the engine must stop execution and display a clear message explaining that iteration requires historical performance data and an existing asset to optimize.
+
+The system should also list the missing inputs so the user understands exactly what needs to be provided.
+
+Iteration analysis should never run on empty or hypothetical datasets.
+
+---
+
+2. Retention Engine Gate Requirements
+
+The Retention Engine must only run when there is a customer base or previous buyers to analyze.
+
+Before activation, the engine must confirm:
+
+- The business has existing or past customers.
+- A retention goal is defined (for example repeat purchase, renewal, churn reduction, or win-back).
+- The business model is specified (one-time purchase, recurring subscription, retainer, or repeat purchase).
+- There is a reachable audience after purchase, such as a customer list or a communication channel (WhatsApp, email, phone, or community).
+
+If these requirements are not met, the engine must stop execution and display a message explaining that retention analysis requires existing customers and a reachable audience.
+
+The system should also highlight which inputs are missing.
+
+---
+
+3. Fallback Behavior
+
+If the gates are not satisfied:
+
+- The engine must not perform full analytical output.
+- It should display a blocked state.
+- The UI should show a checklist of missing inputs required to activate the engine.
+
+Optional baseline suggestions may be shown for educational purposes, but they must not be presented as analytical results.
+
+---
+
+4. User Interface Behavior
+
+When an engine is blocked:
+
+- The interface must clearly state why the engine cannot run.
+- The system must display the missing fields required to unlock the analysis.
+- Once the missing inputs are completed, the engine can be activated normally.
+
+---
+
+5. Strategic Integrity Requirement
+
+These validation gates are critical to maintaining the reliability of the platform.
+
+Iteration requires existing performance data.  
+Retention requires existing customers.
+
+Without these conditions, any analysis produced by the system would be speculative and could mislead users.
+
+For that reason, these engines must remain locked until the minimum required inputs are provided.
+
+Please implement these gate rules carefully and ensure they are integrated with the current system validation flow.
+
+Thank you.

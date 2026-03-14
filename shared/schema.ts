@@ -1328,6 +1328,40 @@ export const manualRetentionMetrics = pgTable("manual_retention_metrics", {
 
 export type ManualRetentionMetrics = typeof manualRetentionMetrics.$inferSelect;
 
+export const iterationGateInputs = pgTable("iteration_gate_inputs", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  accountId: varchar("account_id", { length: 255 }).notNull().default("default"),
+  campaignId: varchar("campaign_id", { length: 255 }).notNull(),
+  hasExistingAsset: boolean("has_existing_asset").notNull().default(false),
+  assetDescription: text("asset_description"),
+  primaryKpi: varchar("primary_kpi", { length: 100 }),
+  dataWindowDays: integer("data_window_days"),
+  spend: doublePrecision("spend"),
+  impressions: integer("impressions"),
+  clicks: integer("clicks"),
+  leads: integer("leads"),
+  purchases: integer("purchases"),
+  revenue: doublePrecision("revenue"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type IterationGateInputs = typeof iterationGateInputs.$inferSelect;
+
+export const retentionGateInputs = pgTable("retention_gate_inputs", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  accountId: varchar("account_id", { length: 255 }).notNull().default("default"),
+  campaignId: varchar("campaign_id", { length: 255 }).notNull(),
+  hasExistingCustomers: boolean("has_existing_customers").notNull().default(false),
+  retentionGoal: varchar("retention_goal", { length: 100 }),
+  businessModel: varchar("business_model", { length: 100 }),
+  reachableAudience: text("reachable_audience"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type RetentionGateInputs = typeof retentionGateInputs.$inferSelect;
+
 export const orchestratorJobs = pgTable("orchestrator_jobs", {
   id: varchar("id")
     .primaryKey()
