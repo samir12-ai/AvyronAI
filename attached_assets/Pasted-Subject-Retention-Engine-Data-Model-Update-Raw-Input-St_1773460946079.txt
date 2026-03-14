@@ -1,0 +1,133 @@
+Subject: Retention Engine Data Model Update — Raw Input Strategy, AI-Derived Metrics, and System Integrity Enforcement
+
+Replit Team,
+
+During the latest review of the Retention Engine outputs, we identified a structural limitation in how retention metrics are currently expected to enter the system. The current model implicitly assumes that users can provide calculated retention metrics (repeat purchase rate, churn percentage, etc.), which is unrealistic for most businesses.
+
+Most clients do not know their percentages — they only know raw numbers. Therefore, the system architecture must shift from percentage-based input → raw operational inputs, with AI computing the derived metrics internally.
+
+This update is required to ensure accuracy, usability, and consistency across the system.
+
+---
+
+### 1. Required Architectural Change — Raw Input Model
+
+Instead of asking users for calculated metrics, the Retention Engine must accept raw business data only.
+
+Required input fields:
+
+• Total customers acquired (last 30–90 days)  
+• Total purchases/orders  
+• Returning customers count  
+• Average order value (AOV)  
+• Refund count  
+• Monthly active customers  
+• Time window of the data (30 / 60 / 90 days)
+
+The AI layer will calculate internally:
+
+• Repeat Purchase Rate  
+• Churn Risk Estimate  
+• Customer Lifespan Estimate  
+• Retention Strength Score  
+• Estimated LTV
+
+This removes the requirement for users to perform calculations themselves and prevents inaccurate manual percentages.
+
+---
+
+### 2. Derived Metrics Calculation Layer
+
+The Retention Engine must compute derived metrics automatically using deterministic formulas.
+
+Examples:
+
+Repeat Purchase Rate  
+= Returning Customers ÷ Total Customers
+
+Estimated LTV  
+= Average Order Value × Purchase Frequency × Lifespan
+
+Churn Risk Estimate  
+= Function of inactivity window + repeat purchase rate + engagement signals
+
+These calculations must occur inside the engine and never rely on manual percentages provided by users.
+
+---
+
+### 3. Input Gate Enforcement
+
+A strict Retention Engine Input Gate must be implemented.
+
+The engine must not execute analysis until the required raw inputs exist.
+
+Required conditions before unlock:
+
+• Total customers present  
+• Returning customers present  
+• Total purchases present  
+• Time window selected
+
+If any of these fields are missing, the engine must remain locked and display a clear prompt requesting the missing values.
+
+---
+
+### 4. System Integration
+
+Retention data must remain isolated from other engines but accessible where required.
+
+Key rules:
+
+• Iteration Engine must not modify retention data  
+• Channel Engine must not write retention metrics  
+• Only the Retention Engine may compute derived retention metrics
+
+Additionally, when campaign data exists, retention metrics may optionally be cross-validated with campaign performance but must not overwrite the retention dataset automatically.
+
+---
+
+### 5. Structural Safeguards
+
+Please ensure the following safeguards are enforced:
+
+• No engine may output empty arrays (fallback logic must remain active)  
+• Retention loops must always produce at least 3 actionable mechanisms  
+• Derived metrics must be recalculated whenever raw inputs change  
+• Retention calculations must remain deterministic and reproducible
+
+---
+
+### 6. Critical Reminder — System Update After Modifications
+
+This has been a recurring issue.
+
+After completing any modification, the entire system must be rebuilt and synchronized. Failure to update dependent modules creates inconsistencies between engines.
+
+Mandatory procedure after implementation:
+
+1. Update affected engine modules  
+2. Rebuild the system  
+3. Run full system health validation  
+4. Verify engine compatibility versions  
+5. Restart backend services
+
+No change should be considered complete without a full system update and validation pass.
+
+---
+
+### 7. Final Objective
+
+The Retention Engine must operate as a data-driven decision system, not a heuristic estimator.
+
+By shifting to raw inputs and AI-derived metrics, we ensure:
+
+• Accurate retention modeling  
+• Reduced user error  
+• Consistent system outputs  
+• Stronger integration with the overall MarketMind architecture
+
+Please implement these adjustments and confirm once the system rebuild and validation cycle is complete.
+
+Regards,
+System Architecture Lead
+MarketMind AI

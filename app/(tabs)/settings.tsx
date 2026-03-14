@@ -129,14 +129,15 @@ export default function SettingsScreen() {
   const [manualDerived, setManualDerived] = useState({ cpa: 0, roas: 0 });
   const isMetaConnected = metaStatus?.metaMode === 'REAL';
 
-  const [retRepeatPurchaseRate, setRetRepeatPurchaseRate] = useState('');
+  const [retTotalCustomers, setRetTotalCustomers] = useState('');
+  const [retTotalPurchases, setRetTotalPurchases] = useState('');
+  const [retReturningCustomers, setRetReturningCustomers] = useState('');
   const [retAvgOrderValue, setRetAvgOrderValue] = useState('');
-  const [retCustomerLifespan, setRetCustomerLifespan] = useState('');
-  const [retRefundRate, setRetRefundRate] = useState('');
-  const [retPurchaseFrequency, setRetPurchaseFrequency] = useState('');
+  const [retRefundCount, setRetRefundCount] = useState('');
   const [retMonthlyCustomers, setRetMonthlyCustomers] = useState('');
+  const [retDataWindow, setRetDataWindow] = useState('30');
   const [retSaving, setRetSaving] = useState(false);
-  const [retDerived, setRetDerived] = useState({ ltv: 0, churnRisk: 0, retentionStrength: 0 });
+  const [retDerived, setRetDerived] = useState({ ltv: 0, churnRisk: 0, retentionStrength: 0, repeatPurchaseRate: 0 });
 
   const fetchManualMetrics = useCallback(async () => {
     if (!selectedCampaignId) return;
@@ -218,19 +219,21 @@ export default function SettingsScreen() {
       const data = await res.json();
       if (data.success && data.metrics) {
         const m = data.metrics;
-        setRetRepeatPurchaseRate(m.repeatPurchaseRate > 0 ? String(m.repeatPurchaseRate) : '');
+        setRetTotalCustomers(m.totalCustomers > 0 ? String(m.totalCustomers) : '');
+        setRetTotalPurchases(m.totalPurchases > 0 ? String(m.totalPurchases) : '');
+        setRetReturningCustomers(m.returningCustomers > 0 ? String(m.returningCustomers) : '');
         setRetAvgOrderValue(m.averageOrderValue > 0 ? String(m.averageOrderValue) : '');
-        setRetCustomerLifespan(m.customerLifespan > 0 ? String(m.customerLifespan) : '');
-        setRetRefundRate(m.refundRate > 0 ? String(m.refundRate) : '');
-        setRetPurchaseFrequency(m.purchaseFrequency > 0 ? String(m.purchaseFrequency) : '');
+        setRetRefundCount(m.refundCount > 0 ? String(m.refundCount) : '');
         setRetMonthlyCustomers(m.monthlyCustomers > 0 ? String(m.monthlyCustomers) : '');
-        if (m.derived) {
-          setRetDerived({
-            ltv: m.derived.estimatedLTV || 0,
-            churnRisk: m.derived.churnRisk || 0,
-            retentionStrength: m.derived.retentionStrength || 0,
-          });
-        }
+        setRetDataWindow(m.dataWindowDays > 0 ? String(m.dataWindowDays) : '30');
+      }
+      if (data.derived) {
+        setRetDerived({
+          ltv: data.derived.estimatedLTV || 0,
+          churnRisk: data.derived.churnRiskEstimate || 0,
+          retentionStrength: data.derived.retentionStrengthScore || 0,
+          repeatPurchaseRate: data.derived.repeatPurchaseRate || 0,
+        });
       }
     } catch (error) {
       console.error('Failed to fetch retention metrics:', error);
@@ -242,16 +245,30 @@ export default function SettingsScreen() {
   }, [fetchRetentionMetrics]);
 
   useEffect(() => {
+    const tc = parseInt(retTotalCustomers) || 0;
+    const tp = parseInt(retTotalPurchases) || 0;
+    const rc = parseInt(retReturningCustomers) || 0;
     const aov = parseFloat(retAvgOrderValue) || 0;
-    const freq = parseFloat(retPurchaseFrequency) || 0;
-    const lifespan = parseFloat(retCustomerLifespan) || 0;
-    const refund = parseFloat(retRefundRate) || 0;
-    const rpr = parseFloat(retRepeatPurchaseRate) || 0;
-    const ltv = aov * freq * lifespan;
-    const churnRisk = refund > 0 ? Math.min(refund * 2, 1) : (rpr > 0 ? Math.max(0, 1 - rpr) : 0);
-    const retentionStrength = rpr > 0 ? (rpr * 0.4 + (1 - churnRisk) * 0.3 + Math.min(lifespan / 24, 1) * 0.3) : 0;
-    setRetDerived({ ltv: +ltv.toFixed(2), churnRisk: +churnRisk.toFixed(2), retentionStrength: +retentionStrength.toFixed(2) });
-  }, [retAvgOrderValue, retPurchaseFrequency, retCustomerLifespan, retRefundRate, retRepeatPurchaseRate]);
+    const rfc = parseInt(retRefundCount) || 0;
+    const dw = parseInt(retDataWindow) || 30;
+
+    const rpr = tc > 0 ? Math.min(rc / tc, 1) : 0;
+    const pf = tc > 0 ? tp / tc : 1;
+    const refundRate = tp > 0 ? Math.min(rfc / tp, 1) : 0;
+    const monthsInWindow = Math.max(dw / 30, 1);
+    const estLifespan = rpr > 0.1 ? Math.round(1 / (1 - rpr) * monthsInWindow) : 6;
+    const annualFreq = pf * (12 / monthsInWindow);
+    const ltv = aov * annualFreq * (estLifespan / 12);
+    const churnRisk = Math.min(1 - rpr + (refundRate * 0.3), 1);
+    const retentionStrength = (rpr * 0.3) + ((1 - refundRate) * 0.2) + (Math.min(pf / 4, 1) * 0.25) + (Math.min((parseInt(retMonthlyCustomers) || 0) / 100, 1) * 0.25);
+
+    setRetDerived({
+      ltv: +ltv.toFixed(2),
+      churnRisk: +churnRisk.toFixed(2),
+      retentionStrength: +Math.min(Math.max(retentionStrength, 0), 1).toFixed(2),
+      repeatPurchaseRate: +rpr.toFixed(3),
+    });
+  }, [retTotalCustomers, retTotalPurchases, retReturningCustomers, retAvgOrderValue, retRefundCount, retMonthlyCustomers, retDataWindow]);
 
   const handleSaveRetentionMetrics = async () => {
     if (!selectedCampaignId) {
@@ -267,18 +284,27 @@ export default function SettingsScreen() {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          repeatPurchaseRate: parseFloat(retRepeatPurchaseRate) || 0,
+          totalCustomers: parseInt(retTotalCustomers) || 0,
+          totalPurchases: parseInt(retTotalPurchases) || 0,
+          returningCustomers: parseInt(retReturningCustomers) || 0,
           averageOrderValue: parseFloat(retAvgOrderValue) || 0,
-          customerLifespan: parseFloat(retCustomerLifespan) || 0,
-          refundRate: parseFloat(retRefundRate) || 0,
-          purchaseFrequency: parseFloat(retPurchaseFrequency) || 0,
+          refundCount: parseInt(retRefundCount) || 0,
           monthlyCustomers: parseInt(retMonthlyCustomers) || 0,
+          dataWindowDays: parseInt(retDataWindow) || 30,
         }),
       });
       const data = await res.json();
       if (data.success) {
+        if (data.derived) {
+          setRetDerived({
+            ltv: data.derived.estimatedLTV || 0,
+            churnRisk: data.derived.churnRiskEstimate || 0,
+            retentionStrength: data.derived.retentionStrengthScore || 0,
+            repeatPurchaseRate: data.derived.repeatPurchaseRate || 0,
+          });
+        }
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        Alert.alert('Saved', 'Retention metrics updated. The retention engine will use these for analysis.');
+        Alert.alert('Saved', 'Retention data saved. Derived metrics computed automatically by the system.');
       } else {
         throw new Error(data.error || 'Save failed');
       }
@@ -992,7 +1018,7 @@ export default function SettingsScreen() {
             </View>
           </View>
           <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
-            Your customer retention data powers the Retention Engine analysis. Enter real numbers for accurate LTV, churn, and retention scoring.
+            Enter raw business numbers. The system automatically computes retention rate, LTV, churn risk, and retention strength.
           </Text>
 
           {!selectedCampaignId ? (
@@ -1003,14 +1029,38 @@ export default function SettingsScreen() {
             <View style={{ marginTop: 12, gap: 10 }}>
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Repeat Purchase Rate</Text>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Total Customers *</Text>
                   <TextInput
                     style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={retRepeatPurchaseRate}
-                    onChangeText={setRetRepeatPurchaseRate}
-                    placeholder="0.30"
+                    value={retTotalCustomers}
+                    onChangeText={setRetTotalCustomers}
+                    placeholder="e.g. 500"
                     placeholderTextColor={colors.textMuted}
-                    keyboardType="decimal-pad"
+                    keyboardType="number-pad"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Total Purchases *</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={retTotalPurchases}
+                    onChangeText={setRetTotalPurchases}
+                    placeholder="e.g. 750"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                  />
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Returning Customers *</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={retReturningCustomers}
+                    onChangeText={setRetReturningCustomers}
+                    placeholder="e.g. 120"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
                   />
                 </View>
                 <View style={{ flex: 1 }}>
@@ -1019,7 +1069,7 @@ export default function SettingsScreen() {
                     style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
                     value={retAvgOrderValue}
                     onChangeText={setRetAvgOrderValue}
-                    placeholder="0.00"
+                    placeholder="e.g. 45"
                     placeholderTextColor={colors.textMuted}
                     keyboardType="decimal-pad"
                   />
@@ -1027,54 +1077,57 @@ export default function SettingsScreen() {
               </View>
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Customer Lifespan (mo)</Text>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Refund Count</Text>
                   <TextInput
                     style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={retCustomerLifespan}
-                    onChangeText={setRetCustomerLifespan}
-                    placeholder="12"
+                    value={retRefundCount}
+                    onChangeText={setRetRefundCount}
+                    placeholder="e.g. 15"
                     placeholderTextColor={colors.textMuted}
-                    keyboardType="decimal-pad"
+                    keyboardType="number-pad"
                   />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Refund Rate</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={retRefundRate}
-                    onChangeText={setRetRefundRate}
-                    placeholder="0.05"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="decimal-pad"
-                  />
-                </View>
-              </View>
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Purchase Frequency</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={retPurchaseFrequency}
-                    onChangeText={setRetPurchaseFrequency}
-                    placeholder="2.5"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="decimal-pad"
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Monthly Customers</Text>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Monthly Active</Text>
                   <TextInput
                     style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
                     value={retMonthlyCustomers}
                     onChangeText={setRetMonthlyCustomers}
-                    placeholder="100"
+                    placeholder="e.g. 200"
                     placeholderTextColor={colors.textMuted}
                     keyboardType="number-pad"
                   />
                 </View>
               </View>
 
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+              <View style={{ marginTop: 4 }}>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary, marginBottom: 6 }]}>Time Window</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  {[{ label: '30 Days', value: '30' }, { label: '60 Days', value: '60' }, { label: '90 Days', value: '90' }].map(w => (
+                    <Pressable
+                      key={w.value}
+                      onPress={() => setRetDataWindow(w.value)}
+                      style={{
+                        flex: 1,
+                        padding: 10,
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: retDataWindow === w.value ? '#8B5CF6' : colors.cardBorder,
+                        backgroundColor: retDataWindow === w.value ? '#8B5CF6' + '15' : 'transparent',
+                        alignItems: 'center' as const,
+                      }}
+                    >
+                      <Text style={{ color: retDataWindow === w.value ? '#8B5CF6' : colors.textSecondary, fontSize: 13, fontWeight: '500' as const }}>{w.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                <View style={[styles.derivedMetric, { backgroundColor: '#8B5CF6' + '10', borderColor: '#8B5CF6' + '30' }]}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Repeat Rate</Text>
+                  <Text style={{ color: '#8B5CF6', fontSize: 16, fontWeight: '700' as const }}>{(retDerived.repeatPurchaseRate * 100).toFixed(0)}%</Text>
+                </View>
                 <View style={[styles.derivedMetric, { backgroundColor: '#8B5CF6' + '10', borderColor: '#8B5CF6' + '30' }]}>
                   <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Est. LTV</Text>
                   <Text style={{ color: '#8B5CF6', fontSize: 16, fontWeight: '700' as const }}>${retDerived.ltv.toFixed(0)}</Text>
@@ -1104,7 +1157,7 @@ export default function SettingsScreen() {
                 {retSaving ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={{ color: '#fff', fontWeight: '600' as const, fontSize: 15 }}>Save Retention Metrics</Text>
+                  <Text style={{ color: '#fff', fontWeight: '600' as const, fontSize: 15 }}>Save Retention Data</Text>
                 )}
               </Pressable>
             </View>

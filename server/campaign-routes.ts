@@ -476,20 +476,13 @@ export function registerCampaignRoutes(app: Express) {
         .limit(1);
       const metrics = rows[0] || null;
       if (!metrics) {
-        return res.json({ success: true, metrics: null, message: "No retention metrics entered yet" });
+        return res.json({ success: true, metrics: null, derived: null, message: "No retention metrics entered yet" });
       }
-      const estimatedLTV = (metrics.averageOrderValue || 0) * (metrics.purchaseFrequency || 1) * (metrics.customerLifespan || 1);
-      const churnRisk = metrics.repeatPurchaseRate != null ? clamp(1 - metrics.repeatPurchaseRate, 0, 1) : 0.5;
-      const retentionStrength = clamp(
-        ((metrics.repeatPurchaseRate || 0) * 0.3) +
-        ((1 - (metrics.refundRate || 0)) * 0.2) +
-        (Math.min((metrics.purchaseFrequency || 0) / 4, 1) * 0.25) +
-        (Math.min((metrics.monthlyCustomers || 0) / 100, 1) * 0.25),
-        0, 1
-      );
+      const derived = computeDerivedRetentionMetrics(metrics);
       res.json({
         success: true,
-        metrics: { ...metrics, derived: { estimatedLTV, churnRisk, retentionStrength } },
+        metrics,
+        derived,
       });
     } catch (error: any) {
       console.error("[Campaigns] Retention metrics GET error:", error);
@@ -501,15 +494,30 @@ export function registerCampaignRoutes(app: Express) {
     try {
       const { campaignId } = req.params;
       const accountId = req.body.accountId || "default";
-      const { repeatPurchaseRate, averageOrderValue, customerLifespan, refundRate, purchaseFrequency, monthlyCustomers } = req.body;
+      const { totalCustomers, totalPurchases, returningCustomers, averageOrderValue, refundCount, monthlyCustomers, dataWindowDays } = req.body;
+
+      const tc = totalCustomers !== undefined ? (Number(totalCustomers) || 0) : undefined;
+      const tp = totalPurchases !== undefined ? (Number(totalPurchases) || 0) : undefined;
+      const rc = returningCustomers !== undefined ? (Number(returningCustomers) || 0) : undefined;
+      const aov = averageOrderValue !== undefined ? (Number(averageOrderValue) || 0) : undefined;
+      const rfc = refundCount !== undefined ? (Number(refundCount) || 0) : undefined;
+      const mc = monthlyCustomers !== undefined ? (Number(monthlyCustomers) || 0) : undefined;
+      const dwRaw = dataWindowDays !== undefined ? Number(dataWindowDays) : undefined;
+      const dw = dwRaw !== undefined ? ([30, 60, 90].includes(dwRaw) ? dwRaw : 30) : undefined;
 
       const data: any = { updatedAt: new Date() };
-      if (repeatPurchaseRate !== undefined) data.repeatPurchaseRate = Number(repeatPurchaseRate) || 0;
-      if (averageOrderValue !== undefined) data.averageOrderValue = Number(averageOrderValue) || 0;
-      if (customerLifespan !== undefined) data.customerLifespan = Number(customerLifespan) || 0;
-      if (refundRate !== undefined) data.refundRate = Number(refundRate) || 0;
-      if (purchaseFrequency !== undefined) data.purchaseFrequency = Number(purchaseFrequency) || 0;
-      if (monthlyCustomers !== undefined) data.monthlyCustomers = Number(monthlyCustomers) || 0;
+      if (tc !== undefined) data.totalCustomers = tc;
+      if (tp !== undefined) data.totalPurchases = tp;
+      if (rc !== undefined) data.returningCustomers = rc;
+      if (aov !== undefined) data.averageOrderValue = aov;
+      if (rfc !== undefined) data.refundCount = rfc;
+      if (mc !== undefined) data.monthlyCustomers = mc;
+      if (dw !== undefined) data.dataWindowDays = dw;
+
+      const rawDerived = computeDerivedFromRaw(tc || 0, tp || 0, rc || 0, aov || 0, rfc || 0, dw || 30);
+      if (rawDerived.repeatPurchaseRate !== null) data.repeatPurchaseRate = rawDerived.repeatPurchaseRate;
+      if (rawDerived.refundRate !== null) data.refundRate = rawDerived.refundRate;
+      if (rawDerived.purchaseFrequency !== null) data.purchaseFrequency = rawDerived.purchaseFrequency;
 
       const existing = await db.select().from(manualRetentionMetrics)
         .where(and(
@@ -535,21 +543,14 @@ export function registerCampaignRoutes(app: Express) {
         result = inserted[0];
       }
 
-      const estimatedLTV = (result.averageOrderValue || 0) * (result.purchaseFrequency || 1) * (result.customerLifespan || 1);
-      const churnRisk = result.repeatPurchaseRate != null ? clamp(1 - result.repeatPurchaseRate, 0, 1) : 0.5;
-      const retentionStrength = clamp(
-        ((result.repeatPurchaseRate || 0) * 0.3) +
-        ((1 - (result.refundRate || 0)) * 0.2) +
-        (Math.min((result.purchaseFrequency || 0) / 4, 1) * 0.25) +
-        (Math.min((result.monthlyCustomers || 0) / 100, 1) * 0.25),
-        0, 1
-      );
+      const derived = computeDerivedRetentionMetrics(result);
 
-      console.log(`[Campaigns] Retention metrics saved for campaign ${campaignId}: RPR=${result.repeatPurchaseRate}, AOV=${result.averageOrderValue}`);
+      console.log(`[Campaigns] Retention metrics saved for campaign ${campaignId}: TC=${result.totalCustomers}, RC=${result.returningCustomers}, AOV=${result.averageOrderValue}, RPR=${derived.repeatPurchaseRate}`);
 
       res.json({
         success: true,
-        metrics: { ...result, derived: { estimatedLTV, churnRisk, retentionStrength } },
+        metrics: result,
+        derived,
         message: "Retention metrics saved successfully",
       });
     } catch (error: any) {
@@ -711,31 +712,44 @@ export function registerCampaignRoutes(app: Express) {
         ))
         .limit(1);
 
-      const hasCustomerData = retentionData && (
-        (retentionData.monthlyCustomers != null && retentionData.monthlyCustomers > 0) ||
-        (retentionData.repeatPurchaseRate != null && retentionData.repeatPurchaseRate > 0) ||
-        (retentionData.averageOrderValue != null && retentionData.averageOrderValue > 0)
+      const hasRawData = retentionData && (
+        (retentionData.totalCustomers != null && retentionData.totalCustomers > 0) ||
+        (retentionData.monthlyCustomers != null && retentionData.monthlyCustomers > 0)
       );
-      const hasExistingCustomers = (existing?.hasExistingCustomers) || !!hasCustomerData;
 
       const missing: string[] = [];
-      if (!hasExistingCustomers) missing.push("Confirmation that the business has existing or past customers");
+      if (!retentionData || !retentionData.totalCustomers || retentionData.totalCustomers <= 0) {
+        missing.push("Total customers acquired (last 30–90 days)");
+      }
+      if (!retentionData || retentionData.returningCustomers == null) {
+        missing.push("Returning customers count");
+      }
+      if (!retentionData || !retentionData.totalPurchases || retentionData.totalPurchases <= 0) {
+        missing.push("Total purchases/orders");
+      }
+      if (!retentionData || ![30, 60, 90].includes(retentionData.dataWindowDays || 0)) {
+        missing.push("Time window selection (30, 60, or 90 days)");
+      }
       if (!existing || !existing.retentionGoal) missing.push("A retention goal (repeat purchase, renewal, churn reduction, or win-back)");
       if (!existing || !existing.businessModel) missing.push("Business model (one-time purchase, recurring subscription, retainer, or repeat purchase)");
       if (!existing || !existing.reachableAudience) missing.push("A reachable audience after purchase (customer list, email, WhatsApp, phone, or community)");
+
+      const derived = retentionData ? computeDerivedRetentionMetrics(retentionData) : null;
 
       res.json({
         success: true,
         inputs: existing || null,
         retentionMetrics: retentionData ? {
-          monthlyCustomers: retentionData.monthlyCustomers,
-          repeatPurchaseRate: retentionData.repeatPurchaseRate,
+          totalCustomers: retentionData.totalCustomers,
+          totalPurchases: retentionData.totalPurchases,
+          returningCustomers: retentionData.returningCustomers,
           averageOrderValue: retentionData.averageOrderValue,
-          customerLifespan: retentionData.customerLifespan,
-          purchaseFrequency: retentionData.purchaseFrequency,
-          refundRate: retentionData.refundRate,
+          refundCount: retentionData.refundCount,
+          monthlyCustomers: retentionData.monthlyCustomers,
+          dataWindowDays: retentionData.dataWindowDays,
         } : null,
-        hasCustomerData: !!hasCustomerData,
+        derived,
+        hasCustomerData: !!hasRawData,
         gateStatus: missing.length === 0 ? "unlocked" : "locked",
         missingRequirements: missing,
       });
@@ -789,25 +803,46 @@ export function registerCampaignRoutes(app: Express) {
         ))
         .limit(1);
 
-      const hasCustomerData = retentionData && (
-        (retentionData.monthlyCustomers != null && retentionData.monthlyCustomers > 0) ||
-        (retentionData.repeatPurchaseRate != null && retentionData.repeatPurchaseRate > 0) ||
-        (retentionData.averageOrderValue != null && retentionData.averageOrderValue > 0)
+      const hasRawData = retentionData && (
+        (retentionData.totalCustomers != null && retentionData.totalCustomers > 0) ||
+        (retentionData.monthlyCustomers != null && retentionData.monthlyCustomers > 0)
       );
-      const hasExistingCustomers = result.hasExistingCustomers || !!hasCustomerData;
 
       const missing: string[] = [];
-      if (!hasExistingCustomers) missing.push("Confirmation that the business has existing or past customers");
+      if (!retentionData || !retentionData.totalCustomers || retentionData.totalCustomers <= 0) {
+        missing.push("Total customers acquired (last 30–90 days)");
+      }
+      if (!retentionData || retentionData.returningCustomers == null) {
+        missing.push("Returning customers count");
+      }
+      if (!retentionData || !retentionData.totalPurchases || retentionData.totalPurchases <= 0) {
+        missing.push("Total purchases/orders");
+      }
+      if (!retentionData || ![30, 60, 90].includes(retentionData.dataWindowDays || 0)) {
+        missing.push("Time window selection (30, 60, or 90 days)");
+      }
       if (!result.retentionGoal) missing.push("A retention goal (repeat purchase, renewal, churn reduction, or win-back)");
       if (!result.businessModel) missing.push("Business model (one-time purchase, recurring subscription, retainer, or repeat purchase)");
       if (!result.reachableAudience) missing.push("A reachable audience after purchase (customer list, email, WhatsApp, phone, or community)");
+
+      const derived = retentionData ? computeDerivedRetentionMetrics(retentionData) : null;
 
       console.log(`[Campaigns] Retention gate saved for campaign ${campaignId}: gate=${missing.length === 0 ? 'unlocked' : 'locked'}`);
 
       res.json({
         success: true,
         inputs: result,
-        hasCustomerData: !!hasCustomerData,
+        retentionMetrics: retentionData ? {
+          totalCustomers: retentionData.totalCustomers,
+          totalPurchases: retentionData.totalPurchases,
+          returningCustomers: retentionData.returningCustomers,
+          averageOrderValue: retentionData.averageOrderValue,
+          refundCount: retentionData.refundCount,
+          monthlyCustomers: retentionData.monthlyCustomers,
+          dataWindowDays: retentionData.dataWindowDays,
+        } : null,
+        derived,
+        hasCustomerData: !!hasRawData,
         gateStatus: missing.length === 0 ? "unlocked" : "locked",
         missingRequirements: missing,
       });
@@ -821,6 +856,56 @@ export function registerCampaignRoutes(app: Express) {
 
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
+}
+
+function computeDerivedFromRaw(
+  totalCustomers: number, totalPurchases: number, returningCustomers: number,
+  averageOrderValue: number, refundCount: number, dataWindowDays: number
+) {
+  const repeatPurchaseRate = totalCustomers > 0 ? clamp(returningCustomers / totalCustomers, 0, 1) : null;
+  const purchaseFrequency = totalCustomers > 0 ? totalPurchases / totalCustomers : null;
+  const refundRate = totalPurchases > 0 ? clamp(refundCount / totalPurchases, 0, 1) : null;
+  return { repeatPurchaseRate, purchaseFrequency, refundRate };
+}
+
+function computeDerivedRetentionMetrics(metrics: any) {
+  const tc = metrics.totalCustomers || 0;
+  const tp = metrics.totalPurchases || 0;
+  const rc = metrics.returningCustomers || 0;
+  const aov = metrics.averageOrderValue || 0;
+  const rfc = metrics.refundCount || 0;
+  const dw = metrics.dataWindowDays || 30;
+  const mc = metrics.monthlyCustomers || 0;
+
+  const repeatPurchaseRate = tc > 0 ? clamp(rc / tc, 0, 1) : (metrics.repeatPurchaseRate || 0);
+  const purchaseFrequency = tc > 0 ? tp / tc : (metrics.purchaseFrequency || 1);
+  const refundRate = tp > 0 ? clamp(rfc / tp, 0, 1) : (metrics.refundRate || 0);
+
+  const monthsInWindow = Math.max(dw / 30, 1);
+  const annualizedFrequency = purchaseFrequency * (12 / monthsInWindow);
+  const estimatedLifespanMonths = repeatPurchaseRate > 0.1 ? Math.round(1 / (1 - repeatPurchaseRate) * monthsInWindow) : 6;
+  const estimatedLTV = aov * annualizedFrequency * (estimatedLifespanMonths / 12);
+
+  const churnRiskEstimate = clamp(1 - repeatPurchaseRate + (refundRate * 0.3), 0, 1);
+
+  const retentionStrengthScore = clamp(
+    (repeatPurchaseRate * 0.3) +
+    ((1 - refundRate) * 0.2) +
+    (Math.min(purchaseFrequency / 4, 1) * 0.25) +
+    (Math.min(mc / 100, 1) * 0.25),
+    0, 1
+  );
+
+  return {
+    repeatPurchaseRate: Math.round(repeatPurchaseRate * 1000) / 1000,
+    purchaseFrequency: Math.round(purchaseFrequency * 100) / 100,
+    refundRate: Math.round(refundRate * 1000) / 1000,
+    estimatedLTV: Math.round(estimatedLTV * 100) / 100,
+    churnRiskEstimate: Math.round(churnRiskEstimate * 1000) / 1000,
+    retentionStrengthScore: Math.round(retentionStrengthScore * 1000) / 1000,
+    estimatedLifespanMonths,
+    dataWindowDays: dw,
+  };
 }
 
 export async function requireCampaign(req: Request, res: Response, next: NextFunction) {

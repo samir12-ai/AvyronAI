@@ -6,7 +6,7 @@ import {
   Pressable,
   ActivityIndicator,
   Alert,
-  Switch,
+  TextInput,
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -112,15 +112,40 @@ const ENGINE_COLOR = '#059669';
 const ENGINE_COLOR_DARK = '#047857';
 
 interface RetentionGateInputs {
-  hasExistingCustomers: boolean;
   retentionGoal: string;
   businessModel: string;
   reachableAudience: string;
 }
 
+interface RawRetentionInputs {
+  totalCustomers: string;
+  totalPurchases: string;
+  returningCustomers: string;
+  averageOrderValue: string;
+  refundCount: string;
+  monthlyCustomers: string;
+  dataWindowDays: string;
+}
+
+interface DerivedRetentionMetrics {
+  repeatPurchaseRate: number;
+  purchaseFrequency: number;
+  refundRate: number;
+  estimatedLTV: number;
+  churnRiskEstimate: number;
+  retentionStrengthScore: number;
+  estimatedLifespanMonths: number;
+  dataWindowDays: number;
+}
+
 const RETENTION_GOALS = ['Repeat Purchase', 'Renewal', 'Churn Reduction', 'Win-back'];
 const BUSINESS_MODELS = ['One-time Purchase', 'Recurring Subscription', 'Retainer', 'Repeat Purchase'];
 const AUDIENCE_CHANNELS = ['Customer Email List', 'WhatsApp/SMS', 'Phone', 'Community/Forum', 'Push Notifications', 'In-App'];
+const DATA_WINDOWS = [
+  { label: '30 Days', value: '30' },
+  { label: '60 Days', value: '60' },
+  { label: '90 Days', value: '90' },
+];
 
 export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
   const colorScheme = useColorScheme();
@@ -137,10 +162,15 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
   const [gateStatus, setGateStatus] = useState<'locked' | 'unlocked' | 'loading'>('loading');
   const [gateMissing, setGateMissing] = useState<string[]>([]);
   const [gateInputs, setGateInputs] = useState<RetentionGateInputs>({
-    hasExistingCustomers: false, retentionGoal: '', businessModel: '', reachableAudience: '',
+    retentionGoal: '', businessModel: '', reachableAudience: '',
   });
-  const [hasCustomerData, setHasCustomerData] = useState(false);
+  const [rawInputs, setRawInputs] = useState<RawRetentionInputs>({
+    totalCustomers: '', totalPurchases: '', returningCustomers: '',
+    averageOrderValue: '', refundCount: '', monthlyCustomers: '', dataWindowDays: '30',
+  });
+  const [derivedMetrics, setDerivedMetrics] = useState<DerivedRetentionMetrics | null>(null);
   const [savingGate, setSavingGate] = useState(false);
+  const [savingMetrics, setSavingMetrics] = useState(false);
 
   const fetchGateStatus = useCallback(async () => {
     if (!selectedCampaignId) return;
@@ -150,14 +180,26 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
       const json = await safeApiJson(res);
       setGateStatus(json.gateStatus === 'unlocked' ? 'unlocked' : 'locked');
       setGateMissing(json.missingRequirements || []);
-      setHasCustomerData(json.hasCustomerData || false);
       if (json.inputs) {
         setGateInputs({
-          hasExistingCustomers: json.inputs.hasExistingCustomers || false,
           retentionGoal: json.inputs.retentionGoal || '',
           businessModel: json.inputs.businessModel || '',
           reachableAudience: json.inputs.reachableAudience || '',
         });
+      }
+      if (json.retentionMetrics) {
+        setRawInputs({
+          totalCustomers: json.retentionMetrics.totalCustomers?.toString() || '',
+          totalPurchases: json.retentionMetrics.totalPurchases?.toString() || '',
+          returningCustomers: json.retentionMetrics.returningCustomers?.toString() || '',
+          averageOrderValue: json.retentionMetrics.averageOrderValue?.toString() || '',
+          refundCount: json.retentionMetrics.refundCount?.toString() || '',
+          monthlyCustomers: json.retentionMetrics.monthlyCustomers?.toString() || '',
+          dataWindowDays: json.retentionMetrics.dataWindowDays?.toString() || '30',
+        });
+      }
+      if (json.derived) {
+        setDerivedMetrics(json.derived);
       }
     } catch (err) {
       console.error('[RetentionEngine] Gate fetch error:', err);
@@ -165,6 +207,37 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
       setGateMissing(["Failed to load gate status"]);
     }
   }, [selectedCampaignId]);
+
+  const saveRawMetrics = useCallback(async () => {
+    if (!selectedCampaignId) return;
+    setSavingMetrics(true);
+    try {
+      const url = new URL(`/api/campaigns/${selectedCampaignId}/retention-metrics`, getApiUrl());
+      const res = await fetch(url.toString(), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          totalCustomers: rawInputs.totalCustomers,
+          totalPurchases: rawInputs.totalPurchases,
+          returningCustomers: rawInputs.returningCustomers,
+          averageOrderValue: rawInputs.averageOrderValue,
+          refundCount: rawInputs.refundCount,
+          monthlyCustomers: rawInputs.monthlyCustomers,
+          dataWindowDays: rawInputs.dataWindowDays,
+        }),
+      });
+      const json = await safeApiJson(res);
+      if (json.success && json.derived) {
+        setDerivedMetrics(json.derived);
+      }
+      await fetchGateStatus();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err: any) {
+      Alert.alert('Error', 'Failed to save retention metrics');
+    } finally {
+      setSavingMetrics(false);
+    }
+  }, [selectedCampaignId, rawInputs, fetchGateStatus]);
 
   const saveGateInputs = useCallback(async () => {
     if (!selectedCampaignId) return;
@@ -180,7 +253,7 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
       if (json.success) {
         setGateStatus(json.gateStatus === 'unlocked' ? 'unlocked' : 'locked');
         setGateMissing(json.missingRequirements || []);
-        setHasCustomerData(json.hasCustomerData || false);
+        if (json.derived) setDerivedMetrics(json.derived);
         Haptics.notificationAsync(
           json.gateStatus === 'unlocked'
             ? Haptics.NotificationFeedbackType.Success
@@ -366,28 +439,91 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
           </View>
         )}
 
-        <View style={styles.gateRow}>
-          <Text style={[styles.gateLabel, { color: colors.text }]}>Has existing customers?</Text>
-          <Switch
-            value={gateInputs.hasExistingCustomers || hasCustomerData}
-            onValueChange={(v) => setGateInputs(prev => ({ ...prev, hasExistingCustomers: v }))}
-            trackColor={{ false: '#76768020', true: ENGINE_COLOR + '40' }}
-            thumbColor={(gateInputs.hasExistingCustomers || hasCustomerData) ? ENGINE_COLOR : '#f4f3f4'}
-          />
-        </View>
-        {hasCustomerData && (
-          <View style={[styles.gateConnectedBox, { backgroundColor: '#10B98110' }]}>
-            <View style={styles.gateConnectedHeader}>
-              <Ionicons name="checkmark-circle" size={14} color="#10B981" />
-              <Text style={[styles.gateConnectedText, { color: '#10B981' }]}>Auto-detected from Retention Metrics</Text>
+        <Text style={[styles.gateLabel, { color: colors.text }]}>Raw Business Data (required)</Text>
+        <Text style={[styles.gateConnectedSubtext, { color: colors.textMuted, marginBottom: 8 }]}>
+          Enter your actual numbers — the system will compute retention metrics automatically.
+        </Text>
+
+        <View style={styles.rawInputGrid}>
+          {([
+            { key: 'totalCustomers', label: 'Total Customers', placeholder: 'e.g. 500', required: true },
+            { key: 'totalPurchases', label: 'Total Purchases', placeholder: 'e.g. 750', required: true },
+            { key: 'returningCustomers', label: 'Returning Customers', placeholder: 'e.g. 120', required: true },
+            { key: 'averageOrderValue', label: 'Avg Order Value ($)', placeholder: 'e.g. 45', required: false },
+            { key: 'refundCount', label: 'Refund Count', placeholder: 'e.g. 15', required: false },
+            { key: 'monthlyCustomers', label: 'Monthly Active', placeholder: 'e.g. 200', required: false },
+          ] as { key: keyof RawRetentionInputs; label: string; placeholder: string; required: boolean }[]).map(field => (
+            <View key={field.key} style={styles.rawInputItem}>
+              <Text style={[styles.rawInputLabel, { color: colors.textSecondary }]}>
+                {field.label}{field.required ? ' *' : ''}
+              </Text>
+              <TextInput
+                style={[styles.rawInputField, { color: colors.text, borderColor: colors.cardBorder, backgroundColor: colors.background }]}
+                placeholder={field.placeholder}
+                placeholderTextColor={colors.textMuted}
+                keyboardType="numeric"
+                value={rawInputs[field.key]}
+                onChangeText={(v) => setRawInputs(prev => ({ ...prev, [field.key]: v }))}
+              />
             </View>
-            <Text style={[styles.gateConnectedSubtext, { color: colors.textMuted }]}>
-              Customer data found in your retention metrics. This requirement is satisfied.
-            </Text>
+          ))}
+        </View>
+
+        <Text style={[styles.gateLabel, { color: colors.text, marginTop: 12 }]}>Time Window *</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.gateChipRow}>
+          {DATA_WINDOWS.map(w => (
+            <Pressable
+              key={w.value}
+              onPress={() => setRawInputs(prev => ({ ...prev, dataWindowDays: w.value }))}
+              style={[styles.gateChip, rawInputs.dataWindowDays === w.value && { backgroundColor: ENGINE_COLOR + '20', borderColor: ENGINE_COLOR }]}
+            >
+              <Text style={[styles.gateChipText, { color: rawInputs.dataWindowDays === w.value ? ENGINE_COLOR : colors.textSecondary }]}>{w.label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+
+        <Pressable
+          onPress={saveRawMetrics}
+          disabled={savingMetrics}
+          style={[styles.gateSaveBtn, { borderColor: ENGINE_COLOR, marginTop: 8 }]}
+        >
+          {savingMetrics ? (
+            <ActivityIndicator size="small" color={ENGINE_COLOR} />
+          ) : (
+            <>
+              <Ionicons name="analytics-outline" size={14} color={ENGINE_COLOR} />
+              <Text style={[styles.gateSaveBtnText, { color: ENGINE_COLOR }]}>Save & Compute Metrics</Text>
+            </>
+          )}
+        </Pressable>
+
+        {derivedMetrics && (
+          <View style={[styles.gateConnectedBox, { backgroundColor: '#10B98110', marginTop: 12 }]}>
+            <View style={styles.gateConnectedHeader}>
+              <Ionicons name="calculator" size={14} color="#10B981" />
+              <Text style={[styles.gateConnectedText, { color: '#10B981' }]}>AI-Derived Metrics</Text>
+            </View>
+            <View style={styles.derivedGrid}>
+              {([
+                ['Repeat Purchase', `${(derivedMetrics.repeatPurchaseRate * 100).toFixed(1)}%`],
+                ['Churn Risk', `${(derivedMetrics.churnRiskEstimate * 100).toFixed(1)}%`],
+                ['Est. LTV', `$${derivedMetrics.estimatedLTV.toLocaleString()}`],
+                ['Strength', `${(derivedMetrics.retentionStrengthScore * 100).toFixed(0)}%`],
+                ['Frequency', `${derivedMetrics.purchaseFrequency.toFixed(1)}x`],
+                ['Lifespan', `${derivedMetrics.estimatedLifespanMonths}mo`],
+              ] as [string, string][]).map(([label, val]) => (
+                <View key={label} style={styles.derivedItem}>
+                  <Text style={[styles.derivedLabel, { color: colors.textSecondary }]}>{label}</Text>
+                  <Text style={[styles.derivedValue, { color: ENGINE_COLOR }]}>{val}</Text>
+                </View>
+              ))}
+            </View>
           </View>
         )}
 
-        <Text style={[styles.gateLabel, { color: colors.text, marginTop: 12 }]}>Retention Goal</Text>
+        <View style={[styles.gateDivider, { backgroundColor: colors.cardBorder }]} />
+
+        <Text style={[styles.gateLabel, { color: colors.text }]}>Retention Goal</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.gateChipRow}>
           {RETENTION_GOALS.map(goal => (
             <Pressable
@@ -436,7 +572,7 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
           ) : (
             <>
               <Ionicons name="save-outline" size={14} color={ENGINE_COLOR} />
-              <Text style={[styles.gateSaveBtnText, { color: ENGINE_COLOR }]}>Save Inputs</Text>
+              <Text style={[styles.gateSaveBtnText, { color: ENGINE_COLOR }]}>Save Strategy Inputs</Text>
             </>
           )}
         </Pressable>
@@ -850,7 +986,16 @@ const styles = StyleSheet.create({
   gateConnectedBox: { borderRadius: 10, padding: 12, marginBottom: 8 },
   gateConnectedHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
   gateConnectedText: { fontSize: 12, fontWeight: '600' as const },
-  gateConnectedSubtext: { fontSize: 12, lineHeight: 16, marginTop: 4 },
+  gateConnectedSubtext: { fontSize: 12, lineHeight: 16 },
   gateSaveBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderRadius: 10, padding: 12 },
   gateSaveBtnText: { fontSize: 13, fontWeight: '600' as const },
+  gateDivider: { height: 1, marginVertical: 16 },
+  rawInputGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  rawInputItem: { width: '48%' as any, minWidth: 140 },
+  rawInputLabel: { fontSize: 11, fontWeight: '500' as const, marginBottom: 4 },
+  rawInputField: { borderWidth: 1, borderRadius: 8, padding: 10, fontSize: 13 },
+  derivedGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+  derivedItem: { minWidth: 80, flex: 1, alignItems: 'center' as const },
+  derivedLabel: { fontSize: 10, fontWeight: '500' as const, marginBottom: 2 },
+  derivedValue: { fontSize: 13, fontWeight: '700' as const },
 });
