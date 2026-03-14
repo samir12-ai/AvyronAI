@@ -90,7 +90,7 @@ interface AdsTargetingHint extends EvidenceMeta {
   rationale: string;
 }
 
-export type EngineStatus = "COMPLETE" | "DATASET_TOO_SMALL" | "INSUFFICIENT_SIGNALS" | "DEFENSIVE_MODE";
+export type EngineStatus = "COMPLETE" | "DATASET_TOO_SMALL" | "INSUFFICIENT_SIGNALS" | "DEFENSIVE_MODE" | "MISSING_DEPENDENCY";
 
 export interface AudienceEngineV3Result {
   status: EngineStatus;
@@ -1067,11 +1067,23 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   const miSnapshotAge = latestSnapshot?.createdAt
     ? `${Math.round((Date.now() - new Date(latestSnapshot.createdAt).getTime()) / 3600000)}h ago`
     : null;
-  let miFreshnessMetadata: any = null;
+  let miFreshnessMetadata: import("../shared/snapshot-trust").FreshnessMetadata | null = null;
   if (latestSnapshot) {
     const { logFreshnessTraceability, buildFreshnessMetadata } = await import("../shared/snapshot-trust");
     miFreshnessMetadata = buildFreshnessMetadata(latestSnapshot);
     logFreshnessTraceability("AudienceEngine", latestSnapshot, miFreshnessMetadata);
+
+    if (miFreshnessMetadata.blockedForStrategy) {
+      console.log(`[AudienceEngine-V3] MI freshness BLOCKED | class=${miFreshnessMetadata.freshnessClass} | age=${miFreshnessMetadata.ageInDays}d | trust=${miFreshnessMetadata.trustScore} | schema=${miFreshnessMetadata.schemaRecommendation}`);
+      const executionTimeMs = Date.now() - startTime;
+      return buildEmptyResult(
+        "MISSING_DEPENDENCY",
+        miFreshnessMetadata.warning || `MI data freshness check failed (${miFreshnessMetadata.freshnessClass}). Re-run Market Intelligence before audience analysis.`,
+        { postsAnalyzed: 0, commentsAnalyzed: 0, competitorsAnalyzed: 0, sanitizedCount: 0, miSnapshotId: miSnapshotId, miSnapshotAge: miSnapshotAge },
+        executionTimeMs,
+        "",
+      );
+    }
   }
   if (latestSnapshot && latestSnapshot.analysisVersion !== undefined) {
     const { ENGINE_VERSION: MI_EV } = await import("../market-intelligence-v3/constants");

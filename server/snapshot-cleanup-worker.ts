@@ -25,8 +25,8 @@ import { logAudit } from "./audit";
 const CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const INITIAL_DELAY_MS = 5 * 60 * 1000;
 const COLD_STORAGE_DAYS = 30;
+const COMPLETE_RETENTION_DAYS = 90;
 const MAX_SNAPSHOTS_PER_CAMPAIGN = 20;
-const PROTECTED_STATUSES = ["COMPLETE", "RESTORED", "PARTIAL"];
 
 let cleanupTimer: ReturnType<typeof setInterval> | null = null;
 let initialTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -63,6 +63,7 @@ function getTimestampCol(config: SnapshotTableConfig) {
 
 async function getLatestSnapshotIds(): Promise<Set<string>> {
   const protectedIds = new Set<string>();
+  const maxProtectionCutoff = new Date(Date.now() - COMPLETE_RETENTION_DAYS * 24 * 60 * 60 * 1000);
 
   for (const config of SNAPSHOT_TABLES.filter(c => c.campaignScoped)) {
     try {
@@ -73,14 +74,17 @@ async function getLatestSnapshotIds(): Promise<Set<string>> {
 
       for (const { campaignId } of campaigns) {
         const [latest] = await db
-          .select({ id: config.table.id })
+          .select({ id: config.table.id, ts: tsCol })
           .from(config.table)
           .where(eq(config.table.campaignId, campaignId))
           .orderBy(desc(tsCol))
           .limit(1);
 
         if (latest) {
-          protectedIds.add(`${config.name}:${latest.id}`);
+          const snapshotTime = latest.ts ? new Date(latest.ts) : new Date();
+          if (snapshotTime >= maxProtectionCutoff) {
+            protectedIds.add(`${config.name}:${latest.id}`);
+          }
         }
       }
     } catch {
@@ -132,7 +136,8 @@ async function archiveIncompatibleSnapshots(): Promise<{ table: string; archived
 }
 
 async function purgeExpiredSnapshots(protectedIds: Set<string>): Promise<{ table: string; deleted: number }[]> {
-  const coldStorageCutoff = new Date(Date.now() - COLD_STORAGE_DAYS * 24 * 60 * 60 * 1000);
+  const nonCompleteCutoff = new Date(Date.now() - COLD_STORAGE_DAYS * 24 * 60 * 60 * 1000);
+  const completeCutoff = new Date(Date.now() - COMPLETE_RETENTION_DAYS * 24 * 60 * 60 * 1000);
   const results: { table: string; deleted: number }[] = [];
 
   for (const config of SNAPSHOT_TABLES) {
@@ -143,20 +148,30 @@ async function purgeExpiredSnapshots(protectedIds: Set<string>): Promise<{ table
       const candidates = await db
         .select({ id: config.table.id, status: hasStatus ? config.table.status : sql`'UNKNOWN'` })
         .from(config.table)
-        .where(lt(tsCol, coldStorageCutoff));
+        .where(lt(tsCol, nonCompleteCutoff));
 
       const toDelete: string[] = [];
       for (const row of candidates) {
         const compositeKey = `${config.name}:${row.id}`;
         if (protectedIds.has(compositeKey)) continue;
-        if (PROTECTED_STATUSES.includes(row.status)) continue;
+
+        if (row.status === "COMPLETE") {
+          const rowAge = await db
+            .select({ ts: tsCol })
+            .from(config.table)
+            .where(eq(config.table.id, row.id))
+            .limit(1);
+          const rowTimestamp = rowAge[0]?.ts ? new Date(rowAge[0].ts) : new Date();
+          if (rowTimestamp >= completeCutoff) continue;
+        }
+
         toDelete.push(row.id);
       }
 
       if (toDelete.length > 0) {
         await db.delete(config.table).where(inArray(config.table.id, toDelete));
         results.push({ table: config.name, deleted: toDelete.length });
-        console.log(`[SnapshotCleanup] COLD_STORAGE_PURGE | ${config.name} | deleted=${toDelete.length} | cutoff=${coldStorageCutoff.toISOString()} | protectedSkipped=${candidates.length - toDelete.length}`);
+        console.log(`[SnapshotCleanup] COLD_STORAGE_PURGE | ${config.name} | deleted=${toDelete.length} | nonCompleteCutoff=${nonCompleteCutoff.toISOString()} | completeCutoff=${completeCutoff.toISOString()} | protectedSkipped=${candidates.length - toDelete.length}`);
       }
     } catch (err: any) {
       console.error(`[SnapshotCleanup] COLD_STORAGE_ERROR | ${config.name} | ${err.message}`);
@@ -258,7 +273,7 @@ async function purgeOrphanedSnapshots(protectedIds: Set<string>): Promise<{ tabl
 
 async function runSnapshotCleanup(): Promise<void> {
   const startTime = Date.now();
-  console.log(`[SnapshotCleanup] Starting scheduled cleanup cycle | mode=DATA_ARCHIVING | protectedStatuses=${PROTECTED_STATUSES.join(",")}`);
+  console.log(`[SnapshotCleanup] Starting scheduled cleanup cycle | mode=DATA_ARCHIVING | completeRetention=${COMPLETE_RETENTION_DAYS}d | nonCompleteRetention=${COLD_STORAGE_DAYS}d`);
 
   try {
     const protectedIds = await getLatestSnapshotIds();
@@ -304,7 +319,7 @@ async function runSnapshotCleanup(): Promise<void> {
 }
 
 export function startSnapshotCleanupWorker(): void {
-  console.log(`[SnapshotCleanup] Starting worker | mode=DATA_ARCHIVING | interval=${CLEANUP_INTERVAL_MS / 3600000}h | coldStorage=${COLD_STORAGE_DAYS}d | cap=${MAX_SNAPSHOTS_PER_CAMPAIGN}/campaign | initialDelay=${INITIAL_DELAY_MS / 60000}min | protectedStatuses=${PROTECTED_STATUSES.join(",")}`);
+  console.log(`[SnapshotCleanup] Starting worker | mode=DATA_ARCHIVING | interval=${CLEANUP_INTERVAL_MS / 3600000}h | completeRetention=${COMPLETE_RETENTION_DAYS}d | nonCompleteRetention=${COLD_STORAGE_DAYS}d | cap=${MAX_SNAPSHOTS_PER_CAMPAIGN}/campaign | initialDelay=${INITIAL_DELAY_MS / 60000}min`);
 
   initialTimeout = setTimeout(() => {
     initialTimeout = null;

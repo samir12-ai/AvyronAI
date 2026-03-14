@@ -69,7 +69,15 @@ export function computeStalenessCoefficient(snapshot: any): StalenessResult {
   let freshnessClass: FreshnessClass;
   let coefficient: number;
 
-  if (wasRestored) {
+  if (ageInDays > FRESHNESS_THRESHOLDS.AGING_MAX_DAYS) {
+    freshnessClass = "NEEDS_REFRESH";
+    if (ageInDays <= FRESHNESS_THRESHOLDS.NEEDS_REFRESH_MAX_DAYS) {
+      coefficient = 0.5 + ((ageInDays - FRESHNESS_THRESHOLDS.AGING_MAX_DAYS) /
+        (FRESHNESS_THRESHOLDS.NEEDS_REFRESH_MAX_DAYS - FRESHNESS_THRESHOLDS.AGING_MAX_DAYS)) * 0.5;
+    } else {
+      coefficient = 1.0;
+    }
+  } else if (wasRestored) {
     freshnessClass = "RESTORED";
     coefficient = Math.min(1, 0.15 + (ageInDays / FRESHNESS_THRESHOLDS.NEEDS_REFRESH_MAX_DAYS) * 0.85);
   } else if (status === "PARTIAL") {
@@ -78,22 +86,15 @@ export function computeStalenessCoefficient(snapshot: any): StalenessResult {
   } else if (ageInHours <= FRESHNESS_THRESHOLDS.FRESH_MAX_HOURS) {
     freshnessClass = "FRESH";
     coefficient = ageInHours / FRESHNESS_THRESHOLDS.FRESH_MAX_HOURS * 0.1;
-  } else if (ageInDays <= FRESHNESS_THRESHOLDS.AGING_MAX_DAYS) {
+  } else {
     freshnessClass = "AGING";
     coefficient = 0.1 + ((ageInDays - 1) / (FRESHNESS_THRESHOLDS.AGING_MAX_DAYS - 1)) * 0.4;
-  } else if (ageInDays <= FRESHNESS_THRESHOLDS.NEEDS_REFRESH_MAX_DAYS) {
-    freshnessClass = "NEEDS_REFRESH";
-    coefficient = 0.5 + ((ageInDays - FRESHNESS_THRESHOLDS.AGING_MAX_DAYS) /
-      (FRESHNESS_THRESHOLDS.NEEDS_REFRESH_MAX_DAYS - FRESHNESS_THRESHOLDS.AGING_MAX_DAYS)) * 0.5;
-  } else {
-    freshnessClass = "NEEDS_REFRESH";
-    coefficient = 1.0;
   }
 
   coefficient = Math.round(Math.min(1, Math.max(0, coefficient)) * 1000) / 1000;
   const trustScore = Math.round((1 - coefficient) * 1000) / 1000;
 
-  const blockedForStrategy = freshnessClass === "NEEDS_REFRESH" || freshnessClass === "INCOMPATIBLE";
+  const blockedForStrategy = freshnessClass === "NEEDS_REFRESH";
 
   let warning: string | null = null;
   if (freshnessClass === "NEEDS_REFRESH") {

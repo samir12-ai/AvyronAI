@@ -447,6 +447,19 @@ async function executeEngine(
         };
     }
 
+    const engineOutputStatus = output?.status;
+    if (engineOutputStatus === "MISSING_DEPENDENCY") {
+      console.log(`[Orchestrator] Engine ${engineId} returned MISSING_DEPENDENCY: ${output?.statusMessage || "dependency check failed"}`);
+      return {
+        engineId,
+        status: "BLOCKED",
+        output,
+        snapshotId,
+        durationMs: Date.now() - startTime,
+        blockReason: output?.statusMessage || "Engine dependency not met",
+      };
+    }
+
     return {
       engineId,
       status: "SUCCESS",

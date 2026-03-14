@@ -18,7 +18,7 @@ The frontend is built with Expo SDK, React Native, Expo Router for navigation, R
 The backend uses Express.js with Node.js and TypeScript, exposing RESTful APIs. It integrates a dual-AI engine (OpenAI GPT and Google Gemini) for content and strategy, specialized models for AI image/design, and an autonomous engine for marketing decisions with guardrails and a decision feedback loop.
 
 ### Data Storage
-Client-side data is stored using AsyncStorage. Server-side data, including user information and chat conversations, is managed in PostgreSQL with Drizzle ORM. Snapshot lifecycle management operates in DATA_ARCHIVING mode, protecting COMPLETE/RESTORED/PARTIAL snapshots for 30 days and archiving INCOMPATIBLE snapshots.
+Client-side data is stored using AsyncStorage. Server-side data, including user information and chat conversations, is managed in PostgreSQL with Drizzle ORM. Snapshot lifecycle management operates in DATA_ARCHIVING mode with dual-window retention: COMPLETE snapshots retained for 90 days, non-COMPLETE (PARTIAL/RESTORED) purged after 30 days. Latest-per-campaign protection is bounded by the 90-day window (no indefinite retention). INCOMPATIBLE snapshots are archived immediately.
 
 ### Key Features
 - **Dashboard**: Displays revenue-focused KPIs, AI action summaries, and campaign metrics.
@@ -37,7 +37,7 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 - **Adaptive Engine Architecture**: Provides a foundation for scalable engine integration with standardized output schemas and a Context Kernel.
 - **Fortress Completion Engines (V3 Strategy Layer)**: Includes Statistical Validation Engine (V4), Budget Governor Engine, Channel Selection Engine (V3 with Funnel Resolution), Iteration Engine (with synthesized funnel/creative analysis from campaign metrics), and Retention Engine (with raw data model and AI-derived metrics).
 - **Adaptive Data Source System**: Supports `campaign_metrics` and `benchmark` modes with adaptive switching rules based on statistical thresholds. Includes a Statistical Validity Layer to gate scaling decisions.
-- **Snapshot Trust & Freshness System**: Provides temporal decay scoring, schema validation, and freshness classification for data, including staleness coefficients and trust scores.
+- **Snapshot Trust & Freshness System**: Provides temporal decay scoring, schema validation, and freshness classification for data, including staleness coefficients and trust scores. Age-first classification: snapshots >7 days are always downgraded to NEEDS_REFRESH regardless of RESTORED/PARTIAL status, triggering `blockedForStrategy`. Both audience and positioning engines enforce hard freshness gates before MI data ingestion, returning MISSING_DEPENDENCY when blocked. The orchestrator maps MISSING_DEPENDENCY engine outputs to BLOCKED step status, preventing stale data from propagating downstream into plan synthesis.
 - **Semantic Data Bridge**: Wires MIv3 high-fidelity signals into the Audience Engine's core maps (Pain Profiles, Desire Maps, Objection Maps).
 - **Concurrency Hardening**: Includes MIv3 lock timeouts, batched Jaccard deduplication, and stale recovery safeguards.
 - **Scalability & Thundering Herd Protection**: Features a global job queue, per-account job budgets, shared market data cache, request deduplication, and a rate gate.
