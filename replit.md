@@ -29,6 +29,10 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 - **Lead Engine**: Modular lead generation with AI Lead Optimization.
 - **Strategic Engines (V3)**: Includes Positioning, Offer (V5 with pre-generation constraint architecture), Funnel, Integrity, Awareness, Persuasion, and Differentiation Engines.
 - **Competitive Intelligence (MIv3)**: A 6-layer pipeline for real-data competitor analysis, featuring narrative objection extraction, clustering, content DNA bridging, and a Signal Quality Gate.
+- **AI Orchestrator**: Single-entry orchestration engine that runs all 14 engines in priority order (Market Reality → Positioning → Offer → Messaging → Financial → Channel → Creative) with checkpoint persistence. Generates coherent 9-section strategic plans via AI synthesis with deterministic fallback.
+- **Plan-First Dashboard**: Dashboard hierarchy: Performance → Active Plan Status → Execution Pipeline → Required Work → AI Actions → Agent. Floating agent FAB opens full-screen chat modal.
+- **Agent Chat**: Multi-conversation agent with full system context injection (business profile, campaign, plan, execution state, required work, calendar, studio, engine outputs, warnings). Agent role: strategic operations manager that explains, guides, and suggests within defined boundaries.
+- **Execution Pipeline**: 6-stage pipeline (Build Plan → Approval → Calendar → Creation → Review → Publishing) with real-time status tracking and auto-decrement of required work counts.
 - **Strategic Core Architecture**: A 6-phase sequential engine for comprehensive plan generation using AI Creative Blueprints.
 - **Adaptive Engine Architecture**: Provides a foundation for scalable engine integration with standardized output schemas and a Context Kernel.
 - **Fortress Completion Engines (V3 Strategy Layer)**: Includes Statistical Validation Engine (V4), Budget Governor Engine, Channel Selection Engine (V3 with Funnel Resolution), Iteration Engine (with synthesized funnel/creative analysis from campaign metrics), and Retention Engine (with raw data model and AI-derived metrics).

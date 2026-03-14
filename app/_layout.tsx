@@ -27,6 +27,7 @@ function RootLayoutNav() {
       <Stack.Screen name="login" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="studio/[id]" options={{ headerShown: false, presentation: 'card' }} />
+      <Stack.Screen name="agent" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
     </Stack>
   );
 }

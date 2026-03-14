@@ -24,8 +24,11 @@ import { useLanguage } from '@/context/LanguageContext';
 import { useCampaign } from '@/context/CampaignContext';
 import { MetricCard } from '@/components/MetricCard';
 import { CampaignBar } from '@/components/CampaignSelector';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, apiRequest } from '@/lib/query-client';
 import { BusinessProfileModal, ProfileButton } from '@/components/BusinessProfile';
+import { PlanStatus } from '@/components/PlanStatus';
+import { ExecutionPipeline } from '@/components/ExecutionPipeline';
+import { RequiredWorkCard } from '@/components/RequiredWorkCard';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -165,6 +168,7 @@ export default function DashboardScreen() {
   const [dataMode, setDataMode] = useState<'REAL' | 'MANUAL' | 'UNKNOWN'>('UNKNOWN');
   const [refreshing, setRefreshing] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [orchestratorRunning, setOrchestratorRunning] = useState(false);
   const prevCampaignRef = useRef<string | null | undefined>(undefined);
 
   const headerFade = useRef(new RNAnimated.Value(0)).current;
@@ -325,6 +329,35 @@ export default function DashboardScreen() {
     if (num >= 1000) return '$' + (num / 1000).toFixed(1) + 'K';
     return '$' + num.toFixed(2);
   };
+
+  const handleBuildPlan = useCallback(async () => {
+    if (!selectedCampaignId || orchestratorRunning) return;
+    setOrchestratorRunning(true);
+    try {
+      await fetch(new URL('/api/orchestrator/run', baseUrl).toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaignId: selectedCampaignId }),
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      console.error('Failed to start orchestrator:', err);
+    }
+    setTimeout(() => setOrchestratorRunning(false), 5000);
+  }, [selectedCampaignId, baseUrl, orchestratorRunning]);
+
+  const handleApprovePlan = useCallback(async (planId: string) => {
+    try {
+      await fetch(new URL(`/api/plans/${planId}/approve`, baseUrl).toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      console.error('Failed to approve plan:', err);
+    }
+  }, [baseUrl]);
 
   const confColor = confidenceStatus === 'Stable' ? P.mint : confidenceStatus === 'Caution' ? P.orange : P.coral;
 
@@ -679,118 +712,19 @@ export default function DashboardScreen() {
           {renderMetricsPanel()}
         </RNAnimated.View>
 
-        {confidenceLoaded && selectedCampaignId ? (
-          <View style={[s.autopilotStrip, { 
-            backgroundColor: isDark ? P.darkCard : P.lightCard,
-            borderColor: planBindingState === 'BLOCKED' ? '#F59E0B40' : cardBorder,
-          }]}>
-            <View style={s.autopilotInner}>
-              <View style={[s.autopilotDot, { backgroundColor: (planBindingState === 'BLOCKED' ? '#F59E0B' : P.mint) + '15' }]}>
-                <PulsingDot color={planBindingState === 'BLOCKED' ? '#F59E0B' : P.mint} size={8} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <View style={s.autopilotTopRow}>
-                  <Text style={[s.autopilotTitle, { color: textPrimary }]}>
-                    {planBindingState === 'BLOCKED' ? 'Autopilot Blocked' : 'Autopilot Connected'}
-                  </Text>
-                </View>
-                {planBindingState === 'BLOCKED' ? (
-                  <Text style={{ color: '#F59E0B', fontSize: 10, marginTop: 2 }}>No Approved Plan</Text>
-                ) : planBindingId ? (
-                  <Text style={{ color: P.mint, fontSize: 10, marginTop: 2 }}>Plan {planBindingId.slice(0, 8)}</Text>
-                ) : null}
-              </View>
-              {planBindingState !== 'BLOCKED' && (
-                <View style={s.confBlock}>
-                  <Text style={[s.confValue, { color: confColor }]}>{confidenceScore}%</Text>
-                  <View style={[s.confBar, { backgroundColor: isDark ? '#1A2030' : '#E5EBE7' }]}>
-                    <View style={[s.confFill, { width: `${confidenceScore}%`, backgroundColor: confColor }]} />
-                  </View>
-                </View>
-              )}
-            </View>
-          </View>
-        ) : null}
+        {selectedCampaignId ? (
+          <>
+            <PlanStatus
+              campaignId={selectedCampaignId}
+              isDark={isDark}
+              onBuildPlan={handleBuildPlan}
+              onApprovePlan={handleApprovePlan}
+            />
 
-        {metricsState === 'success' && planMetrics?.hasPlan ? (
-          <View style={{ marginTop: 12, backgroundColor: cardBg, borderRadius: 16, borderWidth: 1, borderColor: isDark ? P.mint + '18' : P.mint + '20', padding: 16 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Ionicons name="document-text" size={16} color={P.mint} />
-                <Text style={{ fontSize: 13, fontWeight: '700' as const, color: isDark ? P.mint : P.mintDark, letterSpacing: 1 }}>PLAN PROGRESS</Text>
-              </View>
-              <Text style={{ fontSize: 22, fontWeight: '800' as const, color: textPrimary }}>{planMetrics.completionPct}%</Text>
-            </View>
-            <View style={{ height: 6, backgroundColor: isDark ? '#1A2530' : '#E5EBE7', borderRadius: 3, overflow: 'hidden' as const, marginBottom: 14 }}>
-              <View style={{ height: 6, backgroundColor: P.mint, borderRadius: 3, width: `${planMetrics.completionPct}%` }} />
-            </View>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
-              <View style={{ alignItems: 'center' as const }}>
-                <Text style={{ fontSize: 20, fontWeight: '700' as const, color: P.mint }}>{planMetrics.plannedPieces}</Text>
-                <Text style={{ fontSize: 11, color: textMuted, marginTop: 2 }}>Required</Text>
-              </View>
-              <View style={{ width: 1, backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }} />
-              <View style={{ alignItems: 'center' as const }}>
-                <Text style={{ fontSize: 20, fontWeight: '700' as const, color: P.blue }}>{planMetrics.generatedPieces}</Text>
-                <Text style={{ fontSize: 11, color: textMuted, marginTop: 2 }}>Fulfilled</Text>
-              </View>
-              <View style={{ width: 1, backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }} />
-              <View style={{ alignItems: 'center' as const }}>
-                <Text style={{ fontSize: 20, fontWeight: '700' as const, color: planMetrics.pendingGeneration > 0 ? P.orange : P.mint }}>{planMetrics.pendingGeneration}</Text>
-                <Text style={{ fontSize: 11, color: textMuted, marginTop: 2 }}>Remaining</Text>
-              </View>
-            </View>
-          </View>
-        ) : null}
+            <ExecutionPipeline campaignId={selectedCampaignId} isDark={isDark} />
 
-        {metricsState === 'success' && metrics ? (
-          <View style={s.quickGrid}>
-            <Pressable 
-              style={[s.quickCard, { backgroundColor: cardBg, borderColor: cardBorder }]}
-              onPress={() => router.push('/(tabs)/create')}
-            >
-              <LinearGradient
-                colors={[P.purple + '18', P.purple + '05']}
-                style={s.quickCardGradient}
-              >
-                <View style={[s.quickIcon, { backgroundColor: P.purple + '18' }]}>
-                  <Ionicons name="sparkles" size={18} color={P.purple} />
-                </View>
-                <Text style={[s.quickValue, { color: textPrimary }]}>{metrics.contentCount}</Text>
-                <Text style={[s.quickLabel, { color: textMuted }]}>Content</Text>
-              </LinearGradient>
-            </Pressable>
-            <Pressable 
-              style={[s.quickCard, { backgroundColor: cardBg, borderColor: cardBorder }]}
-              onPress={() => router.push('/(tabs)/calendar')}
-            >
-              <LinearGradient
-                colors={[P.blue + '18', P.blue + '05']}
-                style={s.quickCardGradient}
-              >
-                <View style={[s.quickIcon, { backgroundColor: P.blue + '18' }]}>
-                  <Ionicons name="calendar-outline" size={18} color={P.blue} />
-                </View>
-                <Text style={[s.quickValue, { color: textPrimary }]}>{metrics.queuedCount}</Text>
-                <Text style={[s.quickLabel, { color: textMuted }]}>Queued</Text>
-              </LinearGradient>
-            </Pressable>
-            <Pressable 
-              style={[s.quickCard, { backgroundColor: cardBg, borderColor: cardBorder }]}
-              onPress={() => router.push('/(tabs)/ai-management')}
-            >
-              <LinearGradient
-                colors={[P.mint + '18', P.mint + '05']}
-                style={s.quickCardGradient}
-              >
-                <View style={[s.quickIcon, { backgroundColor: P.mint + '18' }]}>
-                  <Ionicons name="checkmark-done" size={18} color={P.mint} />
-                </View>
-                <Text style={[s.quickValue, { color: textPrimary }]}>{metrics.publishedCount}</Text>
-                <Text style={[s.quickLabel, { color: textMuted }]}>Published</Text>
-              </LinearGradient>
-            </Pressable>
-          </View>
+            <RequiredWorkCard campaignId={selectedCampaignId} isDark={isDark} />
+          </>
         ) : null}
 
         {renderActionsPanel()}
@@ -880,6 +814,14 @@ export default function DashboardScreen() {
 
         <View style={{ height: Platform.OS === 'web' ? 34 + 60 : 100 }} />
       </ScrollView>
+
+      <Pressable
+        style={[s.fab, { backgroundColor: P.purple }]}
+        onPress={() => { router.push('/agent'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); }}
+        testID="agent-fab"
+      >
+        <Ionicons name="sparkles" size={22} color="#fff" />
+      </Pressable>
 
       <BusinessProfileModal
         visible={showProfile}
@@ -1259,5 +1201,21 @@ const s = StyleSheet.create({
   modeLabel: {
     fontSize: 13,
     fontWeight: '500',
+  },
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 100,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 50,
   },
 });
