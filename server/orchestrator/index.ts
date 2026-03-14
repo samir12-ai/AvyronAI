@@ -134,11 +134,15 @@ function extractAudienceInput(audienceResult: any): any {
 
 function extractPositioningInput(positioningResult: any): any {
   if (!positioningResult) return {};
+  const out = positioningResult.output || positioningResult;
   return {
-    territories: positioningResult.territories || [],
-    narrative: positioningResult.narrative || "",
-    specificity: positioningResult.specificityScore || 0,
-    saturation: positioningResult.saturationScore || 0,
+    territories: out.territories || positioningResult.territories || [],
+    narrative: out.narrative || positioningResult.narrative || "",
+    narrativeDirection: out.narrativeDirection || positioningResult.narrativeDirection || "",
+    specificity: out.specificityScore || positioningResult.specificityScore || 0,
+    saturation: out.saturationScore || positioningResult.saturationScore || 0,
+    stabilityResult: out.stabilityResult || positioningResult.stabilityResult || { isStable: true, checks: [], advisories: [], fallbackApplied: false },
+    strategyCards: out.strategyCards || positioningResult.strategyCards || [],
   };
 }
 

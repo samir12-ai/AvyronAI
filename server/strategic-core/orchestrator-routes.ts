@@ -184,9 +184,9 @@ const SECTION_SPECS: SectionSpec[] = [
   {
     key: "competitiveWatchTargets",
     label: "Competitive Watch",
-    maxTokens: 500,
-    systemPrompt: `You generate competitive watch targets for Instagram marketing. For each competitor URL provided, define watch metrics, alert triggers, and check frequency. Focus on actionable intelligence. Respond with ONLY valid JSON.`,
-    schemaHint: `{"competitiveWatchTargets":{"targets":[{"competitor":"string","watchMetrics":["string"],"alertTriggers":["string"],"checkFrequency":"string"}]}}`,
+    maxTokens: 1200,
+    systemPrompt: `You generate competitive watch targets for Instagram marketing. Select the TOP 3-5 most relevant competitors from the list provided (do NOT include all competitors if there are many). For each selected competitor, use a SHORT label (brand name or handle only, NOT the full URL). Define watch metrics, alert triggers, and check frequency. Focus on actionable intelligence. Keep the response concise. Respond with ONLY valid JSON.`,
+    schemaHint: `{"competitiveWatchTargets":{"targets":[{"competitor":"string (short name/handle only)","watchMetrics":["string"],"alertTriggers":["string"],"checkFrequency":"string"}]}}`,
   },
   {
     key: "riskMonitoringTriggers",
@@ -377,6 +377,38 @@ function buildSectionContext(params: {
   return `Blueprint v${blueprint.blueprintVersion}. Do NOT override confirmed data.\nGeo-scope: ${campaignContext?.location || "Not specified"}\nCAMPAIGN: ${campaignContext?.campaignName || "N/A"} | ${campaignContext?.objective || "N/A"} | ${campaignContext?.platform || "N/A"}${businessDataBlock}\nBLUEPRINT: ${capJson(confirmedBlueprint, 1200)}\nASP: $${blueprint.averageSellingPrice || "N/A"}\nCOMPETITORS: ${competitorUrls.slice(0, 12).join(", ")}${marketMapRaw ? `\nMARKET MAP (summary): ${capJson(marketMapRaw, 600)}` : ""}${performanceIntelligenceBlock}`;
 }
 
+function repairTruncatedJson(jsonStr: string): string {
+  let s = jsonStr.trim();
+  if (s.endsWith(",")) s = s.slice(0, -1);
+
+  let braces = 0;
+  let brackets = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (escaped) { escaped = false; continue; }
+    if (ch === "\\") { escaped = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "{") braces++;
+    else if (ch === "}") braces--;
+    else if (ch === "[") brackets++;
+    else if (ch === "]") brackets--;
+  }
+
+  if (inString) s += '"';
+
+  const lastChar = s.trim().slice(-1);
+  if (lastChar === "," || lastChar === ":") s = s.trim().slice(0, -1);
+
+  while (brackets > 0) { s += "]"; brackets--; }
+  while (braces > 0) { s += "}"; braces--; }
+
+  return s;
+}
+
 async function generateSingleSection(
   spec: SectionSpec,
   contextBlock: string,
@@ -407,7 +439,19 @@ async function generateSingleSection(
       const jsonMatch = rawText.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error("No JSON in response");
 
-      const parsed = JSON.parse(jsonMatch[0]);
+      let jsonStr = jsonMatch[0];
+      let parsed: any;
+      try {
+        parsed = JSON.parse(jsonStr);
+      } catch (parseErr: any) {
+        if (response.choices[0]?.finish_reason === "length") {
+          log(`SECTION_${spec.key}_TRUNCATED`, { rawLength: rawText.length, attempting: "json_repair" });
+          jsonStr = repairTruncatedJson(jsonStr);
+          parsed = JSON.parse(jsonStr);
+        } else {
+          throw parseErr;
+        }
+      }
       const sectionData = parsed[spec.key] || parsed;
       if (!sectionData || typeof sectionData !== "object" || Object.keys(sectionData).length === 0) {
         throw new Error("Empty section data");
