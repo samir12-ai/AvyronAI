@@ -10,10 +10,9 @@ import {
   Platform,
   Keyboard,
 } from 'react-native';
-import { Ionicons, Feather } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { getApiUrl, apiRequest } from '@/lib/query-client';
+import { getApiUrl } from '@/lib/query-client';
 
 const P = {
   mint: '#8B5CF6',
@@ -110,13 +109,11 @@ export type MarketMindAgentRef = {
 export const MarketMindAgent = forwardRef<MarketMindAgentRef, Props>(function MarketMindAgent({ campaignId, isDark }, ref) {
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [brief, setBrief] = useState<AgentBrief | null>(null);
-  const [expanded, setExpanded] = useState(false);
   const [askQuestion, setAskQuestion] = useState(false);
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState('');
   const [answering, setAnswering] = useState(false);
   const pulseAnim = useRef(new RNAnimated.Value(0.4)).current;
-  const expandAnim = useRef(new RNAnimated.Value(0)).current;
 
   const baseUrl = getApiUrl();
 
@@ -193,26 +190,6 @@ export const MarketMindAgent = forwardRef<MarketMindAgentRef, Props>(function Ma
     }
   }, [question, campaignId, baseUrl, answering]);
 
-  const toggleExpand = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const next = !expanded;
-    setExpanded(next);
-    RNAnimated.timing(expandAnim, { toValue: next ? 1 : 0, duration: 250, useNativeDriver: false }).start();
-  };
-
-  const engineIcon = (name: string): keyof typeof Ionicons.glyphMap => {
-    const map: Record<string, keyof typeof Ionicons.glyphMap> = {
-      'Market Intelligence': 'globe-outline',
-      'Audience': 'people-outline',
-      'Positioning': 'navigate-outline',
-      'Differentiation': 'diamond-outline',
-      'Offer': 'pricetag-outline',
-      'Funnel': 'funnel-outline',
-      'Awareness': 'megaphone-outline',
-      'Persuasion': 'chatbubbles-outline',
-    };
-    return map[name] || 'flash-outline';
-  };
 
   if (state === 'loading') {
     return (
@@ -310,251 +287,43 @@ export const MarketMindAgent = forwardRef<MarketMindAgentRef, Props>(function Ma
         </View>
       )}
 
-      {brief.contentDnaSnapshot && (
-        <View style={[st.dnaBox, { backgroundColor: isDark ? P.mint + '06' : P.mint + '04', borderColor: P.mint + '15' }]}>
-          <View style={st.dnaHeader}>
-            <Ionicons name="code-working-outline" size={13} color={P.mint} />
-            <Text style={[st.dnaTitle, { color: textPrimary }]}>Content DNA</Text>
-          </View>
-          <View style={st.dnaGrid}>
-            {brief.contentDnaSnapshot.ctaType && (
-              <View style={st.dnaItem}>
-                <Text style={[st.dnaLabel, { color: textMuted }]}>CTA</Text>
-                <Text style={[st.dnaValue, { color: textSecondary }]} numberOfLines={1}>{brief.contentDnaSnapshot.ctaType}</Text>
-              </View>
-            )}
-            {brief.contentDnaSnapshot.hookStyle && (
-              <View style={st.dnaItem}>
-                <Text style={[st.dnaLabel, { color: textMuted }]}>Hooks</Text>
-                <Text style={[st.dnaValue, { color: textSecondary }]} numberOfLines={1}>{brief.contentDnaSnapshot.hookStyle}</Text>
-              </View>
-            )}
-            {brief.contentDnaSnapshot.hookDuration && (
-              <View style={st.dnaItem}>
-                <Text style={[st.dnaLabel, { color: textMuted }]}>Hook length</Text>
-                <Text style={[st.dnaValue, { color: textSecondary }]} numberOfLines={1}>{brief.contentDnaSnapshot.hookDuration}</Text>
-              </View>
-            )}
-            {brief.contentDnaSnapshot.narrativeStyle && (
-              <View style={st.dnaItem}>
-                <Text style={[st.dnaLabel, { color: textMuted }]}>Narrative</Text>
-                <Text style={[st.dnaValue, { color: textSecondary }]} numberOfLines={1}>{brief.contentDnaSnapshot.narrativeStyle}</Text>
-              </View>
-            )}
-            {brief.contentDnaSnapshot.contentAngle && (
-              <View style={st.dnaItem}>
-                <Text style={[st.dnaLabel, { color: textMuted }]}>Angle</Text>
-                <Text style={[st.dnaValue, { color: textSecondary }]} numberOfLines={1}>{brief.contentDnaSnapshot.contentAngle}</Text>
-              </View>
-            )}
-            {brief.contentDnaSnapshot.toneStyle && (
-              <View style={st.dnaItem}>
-                <Text style={[st.dnaLabel, { color: textMuted }]}>Tone</Text>
-                <Text style={[st.dnaValue, { color: textSecondary }]} numberOfLines={1}>{brief.contentDnaSnapshot.toneStyle}</Text>
-              </View>
-            )}
-            {brief.contentDnaSnapshot.formatPriority && (
-              <View style={st.dnaItem}>
-                <Text style={[st.dnaLabel, { color: textMuted }]}>Format</Text>
-                <Text style={[st.dnaValue, { color: textSecondary }]} numberOfLines={1}>{brief.contentDnaSnapshot.formatPriority}</Text>
-              </View>
-            )}
-          </View>
-        </View>
-      )}
-
-      {brief.goalDecomposition && (
-        <View style={[st.goalBox, { backgroundColor: isDark ? '#0F1520' : '#EFF6FF', borderColor: isDark ? '#1A2540' : '#BFDBFE' }]}>
-          <View style={st.goalHeader}>
-            <Ionicons name="flag-outline" size={13} color={P.blue} />
-            <Text style={[st.goalTitle, { color: textPrimary }]}>Goal</Text>
-            <View style={[st.feasBadge, {
-              backgroundColor: brief.goalDecomposition.feasibility === 'ACHIEVABLE' ? P.green + '18' :
-                brief.goalDecomposition.feasibility === 'STRETCH' ? P.gold + '18' : P.coral + '18'
-            }]}>
-              <Text style={[st.feasBadgeText, {
-                color: brief.goalDecomposition.feasibility === 'ACHIEVABLE' ? P.green :
-                  brief.goalDecomposition.feasibility === 'STRETCH' ? P.gold : P.coral
-              }]}>{brief.goalDecomposition.feasibility}</Text>
-            </View>
-          </View>
-          <Text style={[st.goalLabel, { color: textSecondary }]} numberOfLines={2}>{brief.goalDecomposition.goalLabel}</Text>
-          <View style={st.goalStats}>
-            <View style={st.goalStatItem}>
-              <Text style={[st.goalStatVal, { color: P.blue }]}>{brief.goalDecomposition.feasibilityScore}</Text>
-              <Text style={[st.goalStatLbl, { color: textMuted }]}>Feasibility</Text>
-            </View>
-            <View style={st.goalStatItem}>
-              <Text style={[st.goalStatVal, { color: P.mint }]}>{brief.goalDecomposition.confidenceScore}</Text>
-              <Text style={[st.goalStatLbl, { color: textMuted }]}>Confidence</Text>
-            </View>
-            <View style={st.goalStatItem}>
-              <Text style={[st.goalStatVal, { color: textPrimary }]}>{brief.goalDecomposition.timeHorizonDays}d</Text>
-              <Text style={[st.goalStatLbl, { color: textMuted }]}>Timeline</Text>
-            </View>
-          </View>
-        </View>
-      )}
-
-      {(brief.executionTasksSummary || brief.simulation || brief.assumptionsSummary) && (
-        <View style={st.opsRow}>
-          {brief.executionTasksSummary && (
-            <View style={[st.opsCard, { backgroundColor: isDark ? '#0F1419' : '#F9FAFB', borderColor: isDark ? '#1A2030' : '#E5E7EB' }]}>
-              <Ionicons name="list-outline" size={13} color={P.green} />
-              <Text style={[st.opsValue, { color: textPrimary }]}>{brief.executionTasksSummary.completed}/{brief.executionTasksSummary.total}</Text>
-              <Text style={[st.opsLabel, { color: textMuted }]}>Tasks Done</Text>
-              {brief.executionTasksSummary.blocked > 0 && (
-                <Text style={[st.opsWarn, { color: P.coral }]}>{brief.executionTasksSummary.blocked} blocked</Text>
-              )}
-            </View>
-          )}
-          {brief.simulation && (
-            <View style={[st.opsCard, { backgroundColor: isDark ? '#0F1419' : '#F9FAFB', borderColor: isDark ? '#1A2030' : '#E5E7EB' }]}>
-              <Ionicons name="trending-up-outline" size={13} color={P.blue} />
-              <Text style={[st.opsValue, { color: textPrimary }]}>{brief.simulation.confidenceScore}%</Text>
-              <Text style={[st.opsLabel, { color: textMuted }]}>Sim Confidence</Text>
-              {brief.simulation.bottleneckAlerts.length > 0 && (
-                <Text style={[st.opsWarn, { color: P.orange }]} numberOfLines={1}>{brief.simulation.bottleneckAlerts.length} risk{brief.simulation.bottleneckAlerts.length > 1 ? 's' : ''}</Text>
-              )}
-            </View>
-          )}
-          {brief.assumptionsSummary && (
-            <View style={[st.opsCard, { backgroundColor: isDark ? '#0F1419' : '#F9FAFB', borderColor: isDark ? '#1A2030' : '#E5E7EB' }]}>
-              <Ionicons name="alert-circle-outline" size={13} color={P.orange} />
-              <Text style={[st.opsValue, { color: textPrimary }]}>{brief.assumptionsSummary.total}</Text>
-              <Text style={[st.opsLabel, { color: textMuted }]}>Assumptions</Text>
-              {brief.assumptionsSummary.highImpact > 0 && (
-                <Text style={[st.opsWarn, { color: P.coral }]}>{brief.assumptionsSummary.highImpact} high-impact</Text>
-              )}
-            </View>
-          )}
-        </View>
-      )}
-
-      <View style={st.shortcutsRow}>
-        <Pressable
-          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push('/(tabs)/studio'); }}
-          style={[st.shortcutBtn, { backgroundColor: isDark ? '#1A1530' : '#F3EEFF' }]}
-        >
-          <Ionicons name="create-outline" size={14} color={P.mint} />
-          <Text style={[st.shortcutText, { color: P.mint }]}>Create</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push('/(tabs)/calendar'); }}
-          style={[st.shortcutBtn, { backgroundColor: isDark ? '#0F1A15' : '#F0FFF4' }]}
-        >
-          <Ionicons name="calendar-outline" size={14} color={P.green} />
-          <Text style={[st.shortcutText, { color: P.green }]}>Calendar</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push('/(tabs)/ai-management'); }}
-          style={[st.shortcutBtn, { backgroundColor: isDark ? '#1A1520' : '#FFF5F5' }]}
-        >
-          <Feather name="sliders" size={14} color={P.blue} />
-          <Text style={[st.shortcutText, { color: P.blue }]}>Engines</Text>
-        </Pressable>
-      </View>
-
-      <Pressable onPress={toggleExpand} style={[st.expandBtn, { borderTopColor: isDark ? '#1A2030' : '#F0F3F1' }]}>
-        <Text style={[st.expandText, { color: textSecondary }]}>
-          {expanded ? 'Hide Details' : `Engine Intelligence (${brief.engineCount} active)`}
-        </Text>
-        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color={textMuted} />
+      <Pressable
+        onPress={() => { setAskQuestion(!askQuestion); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+        style={[st.askBtn, { backgroundColor: P.mint + '12', borderColor: P.mint + '25' }]}
+      >
+        <Ionicons name="chatbubble-ellipses-outline" size={14} color={P.mint} />
+        <Text style={[st.askBtnText, { color: P.mint }]}>Ask the Agent</Text>
       </Pressable>
 
-      {expanded && (
-        <View style={st.detailsSection}>
-          {brief.enginesActive.length > 0 && (
-            <View style={st.enginesGrid}>
-              {brief.enginesActive.map((eng) => (
-                <View key={eng} style={[st.engineItem, { backgroundColor: surfaceBg }]}>
-                  <Ionicons name={engineIcon(eng)} size={13} color={P.mint} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[st.engineName, { color: textPrimary }]}>{eng}</Text>
-                    {brief.engineSummaries[eng.charAt(0).toLowerCase() + eng.slice(1).replace(/\s/g, '')] && (
-                      <Text style={[st.engineDetail, { color: textMuted }]} numberOfLines={2}>
-                        {brief.engineSummaries[eng.charAt(0).toLowerCase() + eng.slice(1).replace(/\s/g, '')]}
-                      </Text>
-                    )}
-                  </View>
-                </View>
-              ))}
+      {askQuestion && (
+        <View style={st.askSection}>
+          <View style={[st.inputRow, { backgroundColor: surfaceBg, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+            <TextInput
+              style={[st.input, { color: textPrimary }]}
+              placeholder="e.g. Why was this positioning chosen?"
+              placeholderTextColor={textMuted}
+              value={question}
+              onChangeText={setQuestion}
+              onSubmitEditing={handleAsk}
+              returnKeyType="send"
+            />
+            <Pressable
+              onPress={handleAsk}
+              disabled={answering || !question.trim()}
+              style={[st.sendBtn, { backgroundColor: P.mint, opacity: (answering || !question.trim()) ? 0.4 : 1 }]}
+            >
+              {answering ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name="arrow-up" size={14} color="#fff" />
+              )}
+            </Pressable>
+          </View>
+          {answer ? (
+            <View style={[st.answerBox, { backgroundColor: isDark ? P.mint + '08' : P.mint + '06', borderColor: P.mint + '15' }]}>
+              <Text style={[st.answerText, { color: textSecondary }]}>{answer}</Text>
             </View>
-          )}
-
-          {brief.planSections.length > 0 && (
-            <View style={st.planSectionsBox}>
-              <Text style={[st.sectionLabel, { color: textMuted }]}>Plan Sections</Text>
-              <View style={st.sectionTags}>
-                {brief.planSections.map((sec) => (
-                  <View key={sec} style={[st.sectionTag, { backgroundColor: P.purple + '12' }]}>
-                    <Text style={[st.sectionTagText, { color: P.purple }]}>{sec}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-          )}
-
-          {brief.metrics && (
-            <View style={[st.metricsRow, { borderTopColor: isDark ? '#1A2030' : '#F0F3F1' }]}>
-              <View style={st.metricItem}>
-                <Text style={[st.metricValue, { color: textPrimary }]}>${brief.metrics.cpa}</Text>
-                <Text style={[st.metricLabel, { color: textMuted }]}>CPA</Text>
-              </View>
-              <View style={st.metricItem}>
-                <Text style={[st.metricValue, { color: textPrimary }]}>{brief.metrics.roas}x</Text>
-                <Text style={[st.metricLabel, { color: textMuted }]}>ROAS</Text>
-              </View>
-              <View style={st.metricItem}>
-                <Text style={[st.metricValue, { color: textPrimary }]}>${(brief.metrics.spend / 1000).toFixed(1)}k</Text>
-                <Text style={[st.metricLabel, { color: textMuted }]}>Spend</Text>
-              </View>
-              <View style={st.metricItem}>
-                <Text style={[st.metricValue, { color: textPrimary }]}>${(brief.metrics.revenue / 1000).toFixed(1)}k</Text>
-                <Text style={[st.metricLabel, { color: textMuted }]}>Revenue</Text>
-              </View>
-            </View>
-          )}
-
-          <Pressable
-            onPress={() => { setAskQuestion(!askQuestion); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-            style={[st.askBtn, { backgroundColor: P.mint + '12', borderColor: P.mint + '25' }]}
-          >
-            <Ionicons name="chatbubble-ellipses-outline" size={14} color={P.mint} />
-            <Text style={[st.askBtnText, { color: P.mint }]}>Ask the Agent</Text>
-          </Pressable>
-
-          {askQuestion && (
-            <View style={st.askSection}>
-              <View style={[st.inputRow, { backgroundColor: surfaceBg, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-                <TextInput
-                  style={[st.input, { color: textPrimary }]}
-                  placeholder="e.g. Why was this positioning chosen?"
-                  placeholderTextColor={textMuted}
-                  value={question}
-                  onChangeText={setQuestion}
-                  onSubmitEditing={handleAsk}
-                  returnKeyType="send"
-                />
-                <Pressable
-                  onPress={handleAsk}
-                  disabled={answering || !question.trim()}
-                  style={[st.sendBtn, { backgroundColor: P.mint, opacity: (answering || !question.trim()) ? 0.4 : 1 }]}
-                >
-                  {answering ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Ionicons name="arrow-up" size={14} color="#fff" />
-                  )}
-                </Pressable>
-              </View>
-              {answer ? (
-                <View style={[st.answerBox, { backgroundColor: isDark ? P.mint + '08' : P.mint + '06', borderColor: P.mint + '15' }]}>
-                  <Text style={[st.answerText, { color: textSecondary }]}>{answer}</Text>
-                </View>
-              ) : null}
-            </View>
-          )}
+          ) : null}
         </View>
       )}
     </View>
@@ -686,137 +455,6 @@ const st = StyleSheet.create({
     fontSize: 10,
     fontWeight: '500',
   },
-  dnaBox: {
-    borderRadius: 10,
-    borderWidth: 1,
-    padding: 12,
-    marginBottom: 12,
-  },
-  dnaHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 8,
-  },
-  dnaTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
-  dnaGrid: {
-    gap: 6,
-  },
-  dnaItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  dnaLabel: {
-    fontSize: 10,
-    fontWeight: '600',
-    width: 72,
-    textTransform: 'uppercase' as const,
-    letterSpacing: 0.4,
-  },
-  dnaValue: {
-    fontSize: 12,
-    fontWeight: '500',
-    flex: 1,
-  },
-  shortcutsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 12,
-  },
-  shortcutBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    paddingVertical: 9,
-    borderRadius: 10,
-  },
-  shortcutText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  expandBtn: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  expandText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  detailsSection: {
-    marginTop: 12,
-  },
-  enginesGrid: {
-    gap: 6,
-    marginBottom: 12,
-  },
-  engineItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    padding: 10,
-    borderRadius: 10,
-  },
-  engineName: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  engineDetail: {
-    fontSize: 11,
-    lineHeight: 15,
-    marginTop: 2,
-  },
-  planSectionsBox: {
-    marginBottom: 12,
-  },
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: '500',
-    marginBottom: 6,
-  },
-  sectionTags: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  sectionTag: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  sectionTagText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  metricsRow: {
-    flexDirection: 'row',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 10,
-    marginBottom: 12,
-  },
-  metricItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  metricValue: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  metricLabel: {
-    fontSize: 10,
-    fontWeight: '500',
-    marginTop: 2,
-    textTransform: 'uppercase',
-  },
   askBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -863,87 +501,5 @@ const st = StyleSheet.create({
   answerText: {
     fontSize: 13,
     lineHeight: 19,
-  },
-  goalBox: {
-    borderRadius: 10,
-    borderWidth: 1,
-    padding: 12,
-    marginBottom: 12,
-  },
-  goalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 6,
-  },
-  goalTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    flex: 1,
-  },
-  feasBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  feasBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
-  goalLabel: {
-    fontSize: 12,
-    lineHeight: 17,
-    marginBottom: 10,
-  },
-  goalStats: {
-    flexDirection: 'row',
-    gap: 4,
-  },
-  goalStatItem: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  goalStatVal: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  goalStatLbl: {
-    fontSize: 9,
-    fontWeight: '500',
-    marginTop: 2,
-    textTransform: 'uppercase' as const,
-    letterSpacing: 0.3,
-  },
-  opsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 12,
-  },
-  opsCard: {
-    flex: 1,
-    alignItems: 'center',
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 6,
-    gap: 3,
-  },
-  opsValue: {
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  opsLabel: {
-    fontSize: 9,
-    fontWeight: '500',
-    textTransform: 'uppercase' as const,
-    letterSpacing: 0.3,
-  },
-  opsWarn: {
-    fontSize: 9,
-    fontWeight: '600',
-    marginTop: 2,
   },
 });
