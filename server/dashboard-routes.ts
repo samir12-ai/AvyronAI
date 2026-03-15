@@ -704,8 +704,9 @@ export function registerDashboardRoutes(app: Express) {
       let simLine = "";
       if (simulation) {
         const base = safeJson(simulation.baseCase);
-        const bottlenecks = safeJson(simulation.bottleneckAlerts) || [];
-        simLine = `SIMULATION: Confidence ${simulation.confidenceScore}/100`;
+        const bnRaw = safeJson(simulation.bottleneckAlerts);
+        const bottlenecks = Array.isArray(bnRaw) ? bnRaw : [];
+        simLine = `SIMULATION: Confidence ${simulation.confidenceScore ?? "N/A"}/100`;
         if (base) simLine += ` | Base case: ${base.expectedCustomers || base.expectedLeads || base.expectedReach || "N/A"} (${base.achievementPct || 100}%)`;
         if (bottlenecks.length > 0) simLine += ` | Bottlenecks: ${bottlenecks.slice(0, 3).join(", ")}`;
       }
@@ -804,17 +805,17 @@ Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simul
         metrics: hasManualData ? { cpa, roas, spend, revenue } : null,
         contentDnaSnapshot: dnaSnapshot,
         goalDecomposition: goalDecomp ? {
-          goalLabel: goalDecomp.goalLabel,
-          goalType: goalDecomp.goalType,
-          goalTarget: goalDecomp.goalTarget,
-          timeHorizonDays: goalDecomp.timeHorizonDays,
-          feasibility: goalDecomp.feasibility,
-          feasibilityScore: goalDecomp.feasibilityScore,
-          confidenceScore: goalDecomp.confidenceScore,
+          goalLabel: goalDecomp.goalLabel || "Goal",
+          goalType: goalDecomp.goalType || "revenue",
+          goalTarget: goalDecomp.goalTarget ?? 0,
+          timeHorizonDays: goalDecomp.timeHorizonDays ?? 90,
+          feasibility: goalDecomp.feasibility || "UNKNOWN",
+          feasibilityScore: goalDecomp.feasibilityScore ?? 0,
+          confidenceScore: goalDecomp.confidenceScore ?? 0,
         } : null,
         simulation: simulation ? {
-          confidenceScore: simulation.confidenceScore,
-          bottleneckAlerts: safeJson(simulation.bottleneckAlerts) || [],
+          confidenceScore: simulation.confidenceScore ?? 0,
+          bottleneckAlerts: (() => { const r = safeJson(simulation.bottleneckAlerts); return Array.isArray(r) ? r : []; })(),
         } : null,
         executionTasksSummary: taskSummary,
         assumptionsSummary,
@@ -946,12 +947,15 @@ Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simul
         const cons = safeJson(simExplain.conservativeCase);
         const base = safeJson(simExplain.baseCase);
         const ups = safeJson(simExplain.upsideCase);
-        const ka = safeJson(simExplain.keyAssumptions) || [];
-        const ba = safeJson(simExplain.bottleneckAlerts) || [];
-        contextParts.push(`GROWTH SIMULATION:\nConfidence: ${simExplain.confidenceScore}/100\nConservative: ${JSON.stringify(cons).substring(0, 300)}\nBase Case: ${JSON.stringify(base).substring(0, 300)}\nUpside: ${JSON.stringify(ups).substring(0, 300)}\nKey Assumptions: ${ka.join("; ")}\nBottleneck Alerts: ${ba.join("; ")}`);
+        const kaRaw = safeJson(simExplain.keyAssumptions);
+        const baRaw = safeJson(simExplain.bottleneckAlerts);
+        const ka = Array.isArray(kaRaw) ? kaRaw : [];
+        const ba = Array.isArray(baRaw) ? baRaw : [];
+        contextParts.push(`GROWTH SIMULATION:\nConfidence: ${simExplain.confidenceScore ?? "N/A"}/100\nConservative: ${JSON.stringify(cons).substring(0, 300)}\nBase Case: ${JSON.stringify(base).substring(0, 300)}\nUpside: ${JSON.stringify(ups).substring(0, 300)}\nKey Assumptions: ${ka.join("; ")}\nBottleneck Alerts: ${ba.join("; ")}`);
       }
 
       let planAssumptionContext = "";
+      let executionTaskContext = "";
       if (plan) {
         try {
           const assRows = await db.select().from(planAssumptions).where(eq(planAssumptions.planId, plan.id));
@@ -960,8 +964,21 @@ Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simul
             planAssumptionContext = `PLAN ASSUMPTIONS (${assRows.length}):\n${assLines.join("\n")}`;
           }
         } catch {}
+        try {
+          const taskRows = await db.select({ title: executionTasks.title, status: executionTasks.status, type: executionTasks.type, week: executionTasks.week })
+            .from(executionTasks).where(eq(executionTasks.planId, plan.id));
+          if (taskRows.length > 0) {
+            const total = taskRows.length;
+            const pending = taskRows.filter(t => t.status === "pending").length;
+            const completed = taskRows.filter(t => t.status === "completed").length;
+            const blocked = taskRows.filter(t => t.status === "blocked").length;
+            const topTasks = taskRows.slice(0, 8).map(t => `- [${t.status}] W${t.week}: ${t.title} (${t.type})`);
+            executionTaskContext = `EXECUTION TASKS (${total} total | ${pending} pending | ${completed} done | ${blocked} blocked):\n${topTasks.join("\n")}`;
+          }
+        } catch {}
       }
       if (planAssumptionContext) contextParts.push(planAssumptionContext);
+      if (executionTaskContext) contextParts.push(executionTaskContext);
 
       const contextStr = contextParts.join("\n\n").substring(0, 10000);
 

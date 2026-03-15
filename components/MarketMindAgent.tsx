@@ -49,6 +49,34 @@ type DnaSnapshot = {
   toneStyle?: string;
 };
 
+type GoalDecomp = {
+  goalLabel: string;
+  goalType: string;
+  goalTarget: number;
+  timeHorizonDays: number;
+  feasibility: string;
+  feasibilityScore: number;
+  confidenceScore: number;
+};
+
+type SimulationSummary = {
+  confidenceScore: number;
+  bottleneckAlerts: string[];
+};
+
+type TaskSummary = {
+  total: number;
+  pending: number;
+  completed: number;
+  blocked: number;
+};
+
+type AssumptionSummary = {
+  total: number;
+  highImpact: number;
+  lowConfidence: number;
+};
+
 type AgentBrief = {
   campaignStatus: string;
   insight: string;
@@ -64,6 +92,10 @@ type AgentBrief = {
   mode: string;
   metrics: { cpa: number; roas: number; spend: number; revenue: number } | null;
   contentDnaSnapshot: DnaSnapshot | null;
+  goalDecomposition: GoalDecomp | null;
+  simulation: SimulationSummary | null;
+  executionTasksSummary: TaskSummary | null;
+  assumptionsSummary: AssumptionSummary | null;
 };
 
 type Props = {
@@ -328,6 +360,74 @@ export const MarketMindAgent = forwardRef<MarketMindAgentRef, Props>(function Ma
               </View>
             )}
           </View>
+        </View>
+      )}
+
+      {brief.goalDecomposition && (
+        <View style={[st.goalBox, { backgroundColor: isDark ? '#0F1520' : '#EFF6FF', borderColor: isDark ? '#1A2540' : '#BFDBFE' }]}>
+          <View style={st.goalHeader}>
+            <Ionicons name="flag-outline" size={13} color={P.blue} />
+            <Text style={[st.goalTitle, { color: textPrimary }]}>Goal</Text>
+            <View style={[st.feasBadge, {
+              backgroundColor: brief.goalDecomposition.feasibility === 'ACHIEVABLE' ? P.green + '18' :
+                brief.goalDecomposition.feasibility === 'STRETCH' ? P.gold + '18' : P.coral + '18'
+            }]}>
+              <Text style={[st.feasBadgeText, {
+                color: brief.goalDecomposition.feasibility === 'ACHIEVABLE' ? P.green :
+                  brief.goalDecomposition.feasibility === 'STRETCH' ? P.gold : P.coral
+              }]}>{brief.goalDecomposition.feasibility}</Text>
+            </View>
+          </View>
+          <Text style={[st.goalLabel, { color: textSecondary }]} numberOfLines={2}>{brief.goalDecomposition.goalLabel}</Text>
+          <View style={st.goalStats}>
+            <View style={st.goalStatItem}>
+              <Text style={[st.goalStatVal, { color: P.blue }]}>{brief.goalDecomposition.feasibilityScore}</Text>
+              <Text style={[st.goalStatLbl, { color: textMuted }]}>Feasibility</Text>
+            </View>
+            <View style={st.goalStatItem}>
+              <Text style={[st.goalStatVal, { color: P.mint }]}>{brief.goalDecomposition.confidenceScore}</Text>
+              <Text style={[st.goalStatLbl, { color: textMuted }]}>Confidence</Text>
+            </View>
+            <View style={st.goalStatItem}>
+              <Text style={[st.goalStatVal, { color: textPrimary }]}>{brief.goalDecomposition.timeHorizonDays}d</Text>
+              <Text style={[st.goalStatLbl, { color: textMuted }]}>Timeline</Text>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {(brief.executionTasksSummary || brief.simulation || brief.assumptionsSummary) && (
+        <View style={st.opsRow}>
+          {brief.executionTasksSummary && (
+            <View style={[st.opsCard, { backgroundColor: isDark ? '#0F1419' : '#F9FAFB', borderColor: isDark ? '#1A2030' : '#E5E7EB' }]}>
+              <Ionicons name="list-outline" size={13} color={P.green} />
+              <Text style={[st.opsValue, { color: textPrimary }]}>{brief.executionTasksSummary.completed}/{brief.executionTasksSummary.total}</Text>
+              <Text style={[st.opsLabel, { color: textMuted }]}>Tasks Done</Text>
+              {brief.executionTasksSummary.blocked > 0 && (
+                <Text style={[st.opsWarn, { color: P.coral }]}>{brief.executionTasksSummary.blocked} blocked</Text>
+              )}
+            </View>
+          )}
+          {brief.simulation && (
+            <View style={[st.opsCard, { backgroundColor: isDark ? '#0F1419' : '#F9FAFB', borderColor: isDark ? '#1A2030' : '#E5E7EB' }]}>
+              <Ionicons name="trending-up-outline" size={13} color={P.blue} />
+              <Text style={[st.opsValue, { color: textPrimary }]}>{brief.simulation.confidenceScore}%</Text>
+              <Text style={[st.opsLabel, { color: textMuted }]}>Sim Confidence</Text>
+              {brief.simulation.bottleneckAlerts.length > 0 && (
+                <Text style={[st.opsWarn, { color: P.orange }]} numberOfLines={1}>{brief.simulation.bottleneckAlerts.length} risk{brief.simulation.bottleneckAlerts.length > 1 ? 's' : ''}</Text>
+              )}
+            </View>
+          )}
+          {brief.assumptionsSummary && (
+            <View style={[st.opsCard, { backgroundColor: isDark ? '#0F1419' : '#F9FAFB', borderColor: isDark ? '#1A2030' : '#E5E7EB' }]}>
+              <Ionicons name="alert-circle-outline" size={13} color={P.orange} />
+              <Text style={[st.opsValue, { color: textPrimary }]}>{brief.assumptionsSummary.total}</Text>
+              <Text style={[st.opsLabel, { color: textMuted }]}>Assumptions</Text>
+              {brief.assumptionsSummary.highImpact > 0 && (
+                <Text style={[st.opsWarn, { color: P.coral }]}>{brief.assumptionsSummary.highImpact} high-impact</Text>
+              )}
+            </View>
+          )}
         </View>
       )}
 
@@ -763,5 +863,87 @@ const st = StyleSheet.create({
   answerText: {
     fontSize: 13,
     lineHeight: 19,
+  },
+  goalBox: {
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 12,
+  },
+  goalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  goalTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    flex: 1,
+  },
+  feasBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  feasBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  goalLabel: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 10,
+  },
+  goalStats: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  goalStatItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  goalStatVal: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  goalStatLbl: {
+    fontSize: 9,
+    fontWeight: '500',
+    marginTop: 2,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.3,
+  },
+  opsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  opsCard: {
+    flex: 1,
+    alignItems: 'center',
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+    gap: 3,
+  },
+  opsValue: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  opsLabel: {
+    fontSize: 9,
+    fontWeight: '500',
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.3,
+  },
+  opsWarn: {
+    fontSize: 9,
+    fontWeight: '600',
+    marginTop: 2,
   },
 });
