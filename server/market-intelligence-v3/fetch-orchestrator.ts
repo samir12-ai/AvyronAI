@@ -1499,8 +1499,27 @@ function recordPromotion(): void {
   promotionTracker.count++;
 }
 
+const STALE_JOB_TIMEOUT_MS = 30 * 60 * 1000;
+
+async function recoverStaleRunningJobs(): Promise<number> {
+  const staleThreshold = new Date(Date.now() - STALE_JOB_TIMEOUT_MS);
+  const staleJobs = await db.update(miFetchJobs)
+    .set({ status: "FAILED", error: "Auto-recovered: stuck in RUNNING for >30 minutes", completedAt: new Date() })
+    .where(and(
+      eq(miFetchJobs.status, "RUNNING"),
+      sql`${miFetchJobs.createdAt} < ${staleThreshold}`,
+    ))
+    .returning({ id: miFetchJobs.id });
+  if (staleJobs.length > 0) {
+    console.log(`[QueueProcessor] STALE_RECOVERY: Auto-recovered ${staleJobs.length} stuck RUNNING jobs: ${staleJobs.map(j => j.id).join(", ")}`);
+  }
+  return staleJobs.length;
+}
+
 async function processJobQueue(): Promise<void> {
   try {
+    await recoverStaleRunningJobs();
+
     const globalRunning = await getGlobalRunningJobCount();
     if (globalRunning >= GLOBAL_MAX_CONCURRENT_JOBS) {
       return;
@@ -1708,6 +1727,20 @@ export function startQueueProcessor(): void {
   if (queueProcessorHandle) return;
   queueProcessorHandle = setInterval(processJobQueue, QUEUE_PROCESSOR_INTERVAL_MS);
   console.log(`[QueueProcessor] Started — interval=${QUEUE_PROCESSOR_INTERVAL_MS}ms, globalMax=${GLOBAL_MAX_CONCURRENT_JOBS}, perAccountBudget=${PER_ACCOUNT_JOB_BUDGET_PER_HOUR}/hr`);
+
+  setTimeout(async () => {
+    try {
+      const orphaned = await db.update(miFetchJobs)
+        .set({ status: "QUEUED", error: null })
+        .where(eq(miFetchJobs.status, "RUNNING"))
+        .returning({ id: miFetchJobs.id });
+      if (orphaned.length > 0) {
+        console.log(`[QueueProcessor] STARTUP_RECOVERY: Reset ${orphaned.length} orphaned RUNNING→QUEUED: ${orphaned.map(j => j.id).join(", ")}`);
+      }
+    } catch (err: any) {
+      console.error(`[QueueProcessor] STARTUP_RECOVERY error:`, err.message);
+    }
+  }, 5000);
 
   setTimeout(() => recoverStuckDeepPass(), 15000);
 
