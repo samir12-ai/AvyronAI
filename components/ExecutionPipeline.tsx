@@ -26,6 +26,7 @@ interface ExecutionPipelineProps {
 
 const STAGE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   plan: 'document-text',
+  'content-dna': 'code-working',
   approval: 'checkmark-circle',
   calendar: 'calendar',
   creation: 'color-palette',

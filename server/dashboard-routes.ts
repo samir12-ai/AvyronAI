@@ -611,11 +611,25 @@ export function registerDashboardRoutes(app: Express) {
       let insight = "";
       let priorityAction = "";
 
+      let dnaStatusLine = "Content DNA: Not generated yet";
+      let dnaSnapshot: any = null;
+      try {
+        const dna = await getLatestContentDna(campaignId, accountId);
+        if (dna?.snapshot) {
+          dnaSnapshot = dna.snapshot;
+          const snap = dna.snapshot as any;
+          dnaStatusLine = `Content DNA: Active — CTA=${snap.ctaType || "N/A"}, Hook=${snap.hookStyle || "N/A"}, Narrative=${snap.narrativeStyle || "N/A"}, Tone=${snap.toneStyle || "N/A"}, Format=${snap.formatPriority || "N/A"}`;
+        }
+      } catch (e: any) {
+        console.warn(`${LOG_PREFIX} Content DNA fetch failed:`, e.message);
+      }
+
       const contextForAI = [
         hasManualData ? `Performance: CPA=$${cpa}, ROAS=${roas}x, Spend=$${spend}, Revenue=$${revenue}, Conversions=${conversions}` : "No performance data yet",
         totalPieces > 0 ? `Plan progress: ${fulfilledPieces}/${totalPieces} pieces (${progressPct}% complete), ${remainingPieces} remaining` : "No content plan active",
         plan ? `Plan status: ${plan.status}` : "No strategic plan created",
-        enginesActive.length > 0 ? `Active engines (${enginesActive.length}/13): ${enginesActive.join(", ")}` : "No engines have run yet",
+        dnaStatusLine,
+        enginesActive.length > 0 ? `Active engines (${enginesActive.length}/14): ${enginesActive.join(", ")}` : "No engines have run yet",
         ...Object.entries(engineSummaries).map(([k, v]) => `${k}: ${v}`),
       ].join("\n");
 
@@ -625,9 +639,9 @@ export function registerDashboardRoutes(app: Express) {
           messages: [
             {
               role: "system",
-              content: `You are the MarketMind AI Campaign Manager. Given campaign data and engine intelligence, produce EXACTLY this JSON:
+              content: `You are the MarketMind AI Campaign Manager. You have access to all 14 engine outputs and Content DNA (the content creation blueprint synthesized from all engines + business profile into 8 rules: Messaging Core, CTA DNA, Hook DNA, Narrative DNA, Content Angle DNA, Visual DNA, Format DNA, Execution Rules). Content DNA auto-generates after plan synthesis and governs all content creation. When DNA is active, reference its rules in your insight. Given campaign data and engine intelligence, produce EXACTLY this JSON:
 {"insight":"<1-2 sentence strategic interpretation of the current situation>","priorityAction":"<1 specific actionable next step the user should take right now>"}
-Be specific and data-driven. Reference actual numbers. Do NOT use generic advice. Respond with ONLY valid JSON.`,
+Be specific and data-driven. Reference actual numbers and DNA rules when available. Do NOT use generic advice. Respond with ONLY valid JSON.`,
             },
             { role: "user", content: contextForAI },
           ],
@@ -671,15 +685,7 @@ Be specific and data-driven. Reference actual numbers. Do NOT use generic advice
         }
       }
 
-      console.log(`${LOG_PREFIX} Agent brief for ${campaignId}: ${enginesActive.length} engines, plan=${!!plan}, insight=${insight.length}ch`);
-
-      let dnaSnapshot: any = null;
-      try {
-        const dna = await getLatestContentDna(campaignId, accountId);
-        if (dna?.snapshot) dnaSnapshot = dna.snapshot;
-      } catch (e: any) {
-        console.warn(`${LOG_PREFIX} Content DNA fetch failed:`, e.message);
-      }
+      console.log(`${LOG_PREFIX} Agent brief for ${campaignId}: ${enginesActive.length} engines, plan=${!!plan}, dna=${!!dnaSnapshot}, insight=${insight.length}ch`);
 
       res.json({
         success: true,
@@ -804,7 +810,16 @@ Be specific and data-driven. Reference actual numbers. Do NOT use generic advice
         messages: [
           {
             role: "system",
-            content: `You are the MarketMind AI Campaign Manager. You have full access to all engine outputs, plan sections, and Content DNA (the content creation blueprint). Answer the user's question using the provided data. If the question is about content creation, hooks, CTAs, narrative style, or how to make content, answer from Content DNA specifically. Be specific, reference actual data, and explain the strategic reasoning. Keep your answer concise (2-4 sentences). Do not invent data not present in the context.`,
+            content: `You are the MarketMind AI Campaign Manager. You have full access to all 14 engine outputs, plan sections, and Content DNA — the foundational content creation blueprint that synthesizes all engine outputs + business profile into 8 structured rules:
+1. Messaging Core (tone, persuasion intensity, value promise)
+2. CTA DNA (primary CTA type, delivery style, soft vs direct rule)
+3. Hook DNA (preferred hook types, opening style, recommended duration)
+4. Narrative DNA (preferred structure, storytelling guidance)
+5. Content Angle DNA (primary angles, engagement patterns)
+6. Visual DNA (visual direction, talking-head vs proof vs demo)
+7. Format DNA (format priority, reel behavior, carousel logic)
+8. Execution Rules (always include list, never do list)
+Content DNA auto-generates after plan synthesis and governs all content creation in the system. When the user asks about content creation, hooks, CTAs, narrative style, tone, visual direction, or how to make content, answer from Content DNA specifically and explain why those rules were chosen. Be specific, reference actual data, and explain the strategic reasoning. Keep your answer concise (2-4 sentences). Do not invent data not present in the context.`,
           },
           { role: "user", content: `CONTEXT:\n${contextStr}\n\nUSER QUESTION: ${question}` },
         ],

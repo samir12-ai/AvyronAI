@@ -8,6 +8,7 @@ import {
   calendarEntries,
   studioItems,
   planApprovals,
+  contentDna,
 } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 
@@ -410,6 +411,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         return res.json({
           stages: [
             { id: "plan", name: "Build Plan", status: "ACTION_NEEDED", count: 0 },
+            { id: "content-dna", name: "Content DNA", status: "LOCKED", count: 0 },
             { id: "approval", name: "Approval", status: "LOCKED", count: 0 },
             { id: "calendar", name: "Calendar", status: "LOCKED", count: 0 },
             { id: "creation", name: "Creation", status: "LOCKED", count: 0 },
@@ -419,11 +421,20 @@ export function registerOrchestratorV2Routes(app: Express) {
         });
       }
 
-      const [work] = await db
-        .select()
-        .from(requiredWork)
-        .where(eq(requiredWork.planId, plan.id))
-        .limit(1);
+      const [work, dnaRows] = await Promise.all([
+        db.select().from(requiredWork).where(eq(requiredWork.planId, plan.id)).limit(1).then(r => r[0]),
+        db.select({ id: contentDna.id, status: contentDna.status })
+          .from(contentDna)
+          .where(and(
+            eq(contentDna.campaignId, req.params.campaignId),
+            eq(contentDna.accountId, "default"),
+            eq(contentDna.status, "active"),
+          ))
+          .orderBy(desc(contentDna.generatedAt))
+          .limit(1),
+      ]);
+
+      const hasDna = dnaRows.length > 0;
 
       const calendarCount = await db
         .select({ count: sql<number>`count(*)` })
@@ -445,6 +456,12 @@ export function registerOrchestratorV2Routes(app: Express) {
           name: "Build Plan",
           status: "COMPLETED" as string,
           count: 1,
+        },
+        {
+          id: "content-dna",
+          name: "Content DNA",
+          status: hasDna ? "COMPLETED" : "IN_PROGRESS",
+          count: hasDna ? 1 : 0,
         },
         {
           id: "approval",

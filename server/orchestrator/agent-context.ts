@@ -22,6 +22,7 @@ import {
   channelSelectionSnapshots,
   iterationSnapshots,
   retentionSnapshots,
+  contentDna,
 } from "@shared/schema";
 import { eq, and, desc, count, sql } from "drizzle-orm";
 
@@ -48,6 +49,7 @@ export interface SystemContext {
   performance: any;
   engineStatus: any;
   engineSnapshots: Record<string, { id: string; status: string; createdAt: any }>;
+  contentDnaSnapshot: any;
   warnings: string[];
 }
 
@@ -222,6 +224,32 @@ export async function loadSystemContext(
     }
   } catch {}
 
+  let dnaData: any = null;
+  try {
+    const [dnaRow] = await db.select({
+      snapshot: contentDna.snapshot,
+      messagingCore: contentDna.messagingCore,
+      ctaDna: contentDna.ctaDna,
+      hookDna: contentDna.hookDna,
+      narrativeDna: contentDna.narrativeDna,
+      executionRules: contentDna.executionRules,
+    }).from(contentDna)
+      .where(and(eq(contentDna.accountId, accountId), eq(contentDna.campaignId, campaignId), eq(contentDna.status, "active")))
+      .orderBy(desc(contentDna.generatedAt))
+      .limit(1);
+    if (dnaRow) {
+      const safeP = (v: any) => { try { return typeof v === "string" ? JSON.parse(v) : v; } catch { return null; } };
+      dnaData = {
+        snapshot: safeP(dnaRow.snapshot),
+        messagingCore: safeP(dnaRow.messagingCore),
+        ctaDna: safeP(dnaRow.ctaDna),
+        hookDna: safeP(dnaRow.hookDna),
+        narrativeDna: safeP(dnaRow.narrativeDna),
+        executionRules: safeP(dnaRow.executionRules),
+      };
+    }
+  } catch {}
+
   return {
     businessProfile: bizData ? {
       businessType: bizData.businessType,
@@ -263,6 +291,7 @@ export async function loadSystemContext(
       completedAt: latestOrchJob.completedAt,
     } : null,
     engineSnapshots,
+    contentDnaSnapshot: dnaData,
     warnings,
   };
 }
@@ -340,12 +369,29 @@ export function buildSystemPrompt(context: SystemContext): string {
     lines.push("ENGINE SNAPSHOTS: None available — run orchestrator to generate");
   }
 
+  if (context.contentDnaSnapshot) {
+    const d = context.contentDnaSnapshot;
+    lines.push("");
+    lines.push("CONTENT DNA (governs all content creation):");
+    if (d.snapshot) {
+      const s = d.snapshot;
+      lines.push(`  CTA: ${s.ctaType || "N/A"} | Hook: ${s.hookStyle || "N/A"} (${s.hookDuration || "N/A"}) | Narrative: ${s.narrativeStyle || "N/A"} | Tone: ${s.toneStyle || "N/A"} | Format: ${s.formatPriority || "N/A"}`);
+    }
+    if (d.executionRules) {
+      if (d.executionRules.alwaysInclude?.length) lines.push(`  Always include: ${d.executionRules.alwaysInclude.join(", ")}`);
+      if (d.executionRules.neverDo?.length) lines.push(`  Never do: ${d.executionRules.neverDo.join(", ")}`);
+    }
+  } else {
+    lines.push("");
+    lines.push("CONTENT DNA: Not generated yet — runs automatically after plan synthesis");
+  }
+
   if (context.warnings.length > 0) {
     lines.push(`WARNINGS: ${context.warnings.join(" | ")}`);
   }
 
   lines.push("");
-  lines.push("Use this context to answer the user's questions accurately. Guide them toward their next action.");
+  lines.push("Use this context to answer the user's questions accurately. Guide them toward their next action. When users ask about content creation, hooks, CTAs, or narrative style, reference the Content DNA rules.");
 
   return lines.join("\n");
 }
