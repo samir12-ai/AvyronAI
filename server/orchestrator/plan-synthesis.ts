@@ -4,6 +4,10 @@ import { eq, and } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { aiChat } from "../ai-client";
 import { lockRootBundle } from "../root-bundle";
+import { decomposeGoal, generateSimulation, normalizeGoal, computeFunnelMath, checkFeasibility } from "../goal-math";
+import { checkPlanReadiness, resolveArchetype } from "../plan-gate";
+import { composeTasks } from "../task-composer";
+import { logAssumptions, type AssumptionEntry } from "../conflict-resolver";
 import type { OrchestratorConfig } from "./index";
 import type { EngineId, EngineStepResult } from "./priority-matrix";
 
@@ -178,11 +182,42 @@ async function generatePlanWithAI(
   engineInsights: string,
   businessData: any,
   campaign: any,
+  goalMathContext?: { goal: any; funnel: any; feasibility: any; archetype: any } | null,
 ): Promise<SynthesizedPlan> {
   const objective = campaign?.objective || businessData?.funnelObjective || "AWARENESS";
   const businessType = businessData?.businessType || "general";
   const location = campaign?.location || businessData?.geoScope || "Not specified";
   const budget = businessData?.monthlyBudget || "Not specified";
+
+  let goalMathSection = "";
+  if (goalMathContext) {
+    const { goal, funnel, feasibility, archetype } = goalMathContext;
+    goalMathSection = `
+GOAL DECOMPOSITION (use these numbers as the source of truth):
+  Goal: ${goal.label}
+  Type: ${goal.goalType}
+  Target: ${goal.target}
+  Time Horizon: ${goal.timeHorizonDays} days
+  Feasibility: ${feasibility.verdict} (${feasibility.score}/100)
+
+FUNNEL MATH:
+  Required Reach: ${funnel.requiredReach.toLocaleString()}
+  Required Leads: ${funnel.requiredLeads.toLocaleString()}
+  Required Qualified Leads: ${funnel.requiredQualifiedLeads.toLocaleString()}
+  Close Rate: ${(funnel.closeRate * 100).toFixed(1)}%
+  Content-to-Lead Rate: ${(funnel.contentToLeadRate * 100).toFixed(1)}%
+
+BUSINESS ARCHETYPE: ${archetype?.name || businessType}
+  Funnel Type: ${archetype?.funnelArchetype || "standard"}
+  Trust Requirement: ${archetype?.trustRequirement || 5}/10
+  Proof Requirement: ${archetype?.proofRequirement || 5}/10
+  Channel Priority: ${archetype?.channelPriority?.join(", ") || "instagram"}
+  Content Formats: ${archetype?.typicalFormats?.join(", ") || "reels, posts"}
+
+IMPORTANT: Content volumes and distribution MUST be derived from the funnel math above.
+The plan must explain WHY each content type volume was chosen based on the goal decomposition.
+`;
+  }
 
   const prompt = `You are a marketing strategist synthesizing engine outputs into a coherent execution plan.
 
@@ -190,7 +225,7 @@ Business Type: ${businessType}
 Location: ${location}
 Objective: ${objective}
 Monthly Budget: ${budget}
-
+${goalMathSection}
 Engine Analysis Results:
 ${engineInsights}
 
@@ -497,10 +532,35 @@ export async function synthesizePlan(
     console.warn(`[PlanSynthesis] Root bundle lock failed (non-blocking):`, rootErr.message);
   }
 
-  const engineInsights = extractEngineInsights(results);
-  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign);
+  let goalMathContext: { goal: any; funnel: any; feasibility: any; archetype: any } | null = null;
+  let goalDecomp: any = null;
 
-  const periodDays = 30;
+  try {
+    goalDecomp = await decomposeGoal(config.campaignId, config.accountId, rootBundle?.id || null, rootBundle?.version || null);
+    const archetype = resolveArchetype(bizData?.businessType || "");
+    goalMathContext = {
+      goal: goalDecomp.goal,
+      funnel: goalDecomp.funnel,
+      feasibility: goalDecomp.feasibility,
+      archetype,
+    };
+    console.log(`[PlanSynthesis] Goal decomposed: ${goalDecomp.goal.label} → ${goalDecomp.feasibility.verdict} (${goalDecomp.feasibility.score}/100)`);
+  } catch (goalErr: any) {
+    console.warn(`[PlanSynthesis] Goal decomposition failed (non-blocking):`, goalErr.message);
+  }
+
+  let readiness: any = null;
+  try {
+    readiness = await checkPlanReadiness(config.campaignId, config.accountId);
+    console.log(`[PlanSynthesis] Plan gate: ${readiness.gate} (score: ${readiness.overallScore})`);
+  } catch (gateErr: any) {
+    console.warn(`[PlanSynthesis] Plan gate check failed (non-blocking):`, gateErr.message);
+  }
+
+  const engineInsights = extractEngineInsights(results);
+  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext);
+
+  const periodDays = goalMathContext?.goal?.timeHorizonDays || 30;
   const volume = deriveContentVolume(synthesized, periodDays);
 
   const [plan] = await db.insert(strategicPlans).values({
@@ -570,6 +630,47 @@ export async function synthesizePlan(
     console.log(`[PlanSynthesis] Content DNA generated for plan ${plan.id}`);
   } catch (dnaErr: any) {
     console.warn(`[PlanSynthesis] Content DNA generation failed (non-blocking):`, dnaErr.message);
+  }
+
+  try {
+    await composeTasks(plan.id, config.campaignId, config.accountId, synthesized, periodDays, rootBundle?.id || null);
+    console.log(`[PlanSynthesis] Execution tasks generated for plan ${plan.id}`);
+  } catch (taskErr: any) {
+    console.warn(`[PlanSynthesis] Task composition failed (non-blocking):`, taskErr.message);
+  }
+
+  if (goalMathContext) {
+    try {
+      await generateSimulation(
+        config.campaignId,
+        config.accountId,
+        plan.id,
+        goalMathContext.goal,
+        goalMathContext.funnel,
+        goalMathContext.feasibility,
+        bizData,
+        rootBundle?.id || null
+      );
+      console.log(`[PlanSynthesis] Growth simulation generated for plan ${plan.id}`);
+    } catch (simErr: any) {
+      console.warn(`[PlanSynthesis] Simulation failed (non-blocking):`, simErr.message);
+    }
+  }
+
+  if (readiness && readiness.assumptions.length > 0) {
+    try {
+      const assumptions: AssumptionEntry[] = readiness.assumptions.map((a: any) => ({
+        assumption: a.item,
+        confidence: a.confidence as "low" | "medium" | "high",
+        impactSeverity: a.impact as "low" | "medium" | "high",
+        source: "plan_gate",
+        affectedModules: ["plan", "simulation"],
+      }));
+      await logAssumptions(plan.id, config.campaignId, config.accountId, assumptions);
+      console.log(`[PlanSynthesis] ${assumptions.length} assumptions logged for plan ${plan.id}`);
+    } catch (assErr: any) {
+      console.warn(`[PlanSynthesis] Assumption logging failed (non-blocking):`, assErr.message);
+    }
   }
 
   return { planId: plan.id, plan: synthesized };

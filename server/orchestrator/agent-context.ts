@@ -24,6 +24,10 @@ import {
   retentionSnapshots,
   contentDna,
   rootBundles,
+  goalDecompositions,
+  growthSimulations,
+  executionTasks,
+  planAssumptions,
 } from "@shared/schema";
 import { eq, and, desc, count, sql } from "drizzle-orm";
 import { getActiveRootBundle, detectStaleness } from "../root-bundle";
@@ -53,6 +57,10 @@ export interface SystemContext {
   engineSnapshots: Record<string, { id: string; status: string; createdAt: any }>;
   contentDnaSnapshot: any;
   rootBundle: { id: string; version: number; status: string; isStale: boolean; staleReason: string | null; strategyHash: string | null } | null;
+  goalDecomposition: any;
+  simulation: any;
+  executionTasksSummary: { total: number; pending: number; completed: number; blocked: number } | null;
+  assumptionsSummary: { total: number; highImpact: number; lowConfidence: number } | null;
   warnings: string[];
 }
 
@@ -77,6 +85,7 @@ export async function loadSystemContext(
         eq(businessDataLayer.campaignId, campaignId)
       )
     )
+    .orderBy(desc(businessDataLayer.createdAt))
     .limit(1);
 
   if (!campaign) warnings.push("No active campaign found");
@@ -253,12 +262,76 @@ export async function loadSystemContext(
     }
   } catch {}
 
+  const safeP = (v: any) => { try { return typeof v === "string" ? JSON.parse(v) : v; } catch { return null; } };
+
+  let goalDecomposition: any = null;
+  let simulation: any = null;
+  let executionTasksSummary: any = null;
+  let assumptionsSummary: any = null;
+
+  try {
+    const [gd] = await db.select().from(goalDecompositions)
+      .where(and(eq(goalDecompositions.campaignId, campaignId), eq(goalDecompositions.accountId, accountId), eq(goalDecompositions.status, "active")))
+      .orderBy(desc(goalDecompositions.createdAt)).limit(1);
+    if (gd) {
+      goalDecomposition = {
+        goalType: gd.goalType, goalTarget: gd.goalTarget, goalLabel: gd.goalLabel,
+        timeHorizonDays: gd.timeHorizonDays, feasibility: gd.feasibility,
+        feasibilityScore: gd.feasibilityScore, confidenceScore: gd.confidenceScore,
+        funnelMath: safeP(gd.funnelMath),
+      };
+    }
+  } catch {}
+
+  try {
+    const [sim] = await db.select().from(growthSimulations)
+      .where(and(eq(growthSimulations.campaignId, campaignId), eq(growthSimulations.accountId, accountId), eq(growthSimulations.status, "active")))
+      .orderBy(desc(growthSimulations.createdAt)).limit(1);
+    if (sim) {
+      simulation = {
+        conservativeCase: safeP(sim.conservativeCase),
+        baseCase: safeP(sim.baseCase),
+        upsideCase: safeP(sim.upsideCase),
+        confidenceScore: sim.confidenceScore,
+        keyAssumptions: safeP(sim.keyAssumptions),
+        bottleneckAlerts: safeP(sim.bottleneckAlerts),
+      };
+    }
+  } catch {}
+
+  if (activePlan) {
+    try {
+      const taskRows = await db.select({ status: executionTasks.status }).from(executionTasks)
+        .where(eq(executionTasks.planId, activePlan.id));
+      if (taskRows.length > 0) {
+        executionTasksSummary = {
+          total: taskRows.length,
+          pending: taskRows.filter(t => t.status === "pending").length,
+          completed: taskRows.filter(t => t.status === "completed").length,
+          blocked: taskRows.filter(t => t.status === "blocked").length,
+        };
+      }
+    } catch {}
+
+    try {
+      const assRows = await db.select().from(planAssumptions)
+        .where(eq(planAssumptions.planId, activePlan.id));
+      if (assRows.length > 0) {
+        assumptionsSummary = {
+          total: assRows.length,
+          highImpact: assRows.filter(a => a.impactSeverity === "high").length,
+          lowConfidence: assRows.filter(a => a.confidence === "low").length,
+        };
+      }
+    } catch {}
+  }
+
   return {
     businessProfile: bizData ? {
       businessType: bizData.businessType,
       monthlyBudget: bizData.monthlyBudget,
       funnelObjective: bizData.funnelObjective,
-      conversionChannel: bizData.conversionChannel,
+      conversionChannel: bizData.primaryConversionChannel,
       geoScope: bizData.geoScope,
     } : null,
     campaign: campaign ? {
@@ -310,6 +383,10 @@ export async function loadSystemContext(
         };
       } catch { return null; }
     })(),
+    goalDecomposition,
+    simulation,
+    executionTasksSummary,
+    assumptionsSummary,
     warnings,
   };
 }
@@ -402,6 +479,42 @@ export function buildSystemPrompt(context: SystemContext): string {
   } else {
     lines.push("");
     lines.push("CONTENT DNA: Not generated yet — runs automatically after plan synthesis");
+  }
+
+  if (context.goalDecomposition) {
+    const gd = context.goalDecomposition;
+    lines.push("");
+    lines.push(`GOAL DECOMPOSITION: ${gd.goalLabel}`);
+    lines.push(`  Type: ${gd.goalType} | Target: ${gd.goalTarget} | Time: ${gd.timeHorizonDays} days`);
+    lines.push(`  Feasibility: ${gd.feasibility} (${gd.feasibilityScore}/100) | Confidence: ${gd.confidenceScore}/100`);
+    if (gd.funnelMath) {
+      lines.push(`  Funnel: Reach ${gd.funnelMath.requiredReach?.toLocaleString()} → Leads ${gd.funnelMath.requiredLeads?.toLocaleString()} → Qualified ${gd.funnelMath.requiredQualifiedLeads?.toLocaleString()}`);
+    }
+  }
+
+  if (context.simulation) {
+    const sim = context.simulation;
+    lines.push("");
+    lines.push(`GROWTH SIMULATION: Confidence ${sim.confidenceScore}/100`);
+    if (sim.conservativeCase) lines.push(`  Conservative: ${sim.conservativeCase.expectedCustomers || sim.conservativeCase.expectedLeads || "N/A"} (${sim.conservativeCase.achievementPct || 70}%)`);
+    if (sim.baseCase) lines.push(`  Base: ${sim.baseCase.expectedCustomers || sim.baseCase.expectedLeads || "N/A"} (${sim.baseCase.achievementPct || 100}%)`);
+    if (sim.upsideCase) lines.push(`  Upside: ${sim.upsideCase.expectedCustomers || sim.upsideCase.expectedLeads || "N/A"} (${sim.upsideCase.achievementPct || 115}%)`);
+    if (sim.bottleneckAlerts?.length) lines.push(`  Bottlenecks: ${sim.bottleneckAlerts.join(", ")}`);
+  }
+
+  if (context.executionTasksSummary) {
+    const ts = context.executionTasksSummary;
+    lines.push("");
+    lines.push(`EXECUTION TASKS: ${ts.total} total | ${ts.pending} pending | ${ts.completed} completed | ${ts.blocked} blocked`);
+  }
+
+  if (context.assumptionsSummary) {
+    const as_ = context.assumptionsSummary;
+    lines.push("");
+    lines.push(`ASSUMPTIONS: ${as_.total} total | ${as_.highImpact} high-impact | ${as_.lowConfidence} low-confidence`);
+    if (as_.highImpact > 0 || as_.lowConfidence > 0) {
+      lines.push("  Warning: Plan has assumptions that could significantly affect outcomes. Review before publishing.");
+    }
   }
 
   if (context.rootBundle) {

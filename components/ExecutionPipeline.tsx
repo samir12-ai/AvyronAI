@@ -25,10 +25,13 @@ interface ExecutionPipelineProps {
 }
 
 const STAGE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
+  'goal-math': 'calculator',
   plan: 'document-text',
   roots: 'leaf',
+  simulation: 'trending-up',
   'content-dna': 'code-working',
   approval: 'checkmark-circle',
+  tasks: 'list',
   calendar: 'calendar',
   creation: 'color-palette',
   review: 'eye',

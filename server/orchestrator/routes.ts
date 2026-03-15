@@ -9,6 +9,10 @@ import {
   studioItems,
   planApprovals,
   contentDna,
+  goalDecompositions,
+  growthSimulations,
+  executionTasks,
+  planAssumptions,
 } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { validateRootIntegrity, detectStaleness, computeCalendarDeviation } from "../root-bundle";
@@ -127,6 +131,22 @@ export function registerOrchestratorV2Routes(app: Express) {
         .from(studioItems)
         .where(eq(studioItems.planId, plan.id));
 
+      const safeJson = (v: any) => { try { return typeof v === "string" ? JSON.parse(v) : v; } catch { return null; } };
+
+      const [goalDecomp] = await db.select().from(goalDecompositions)
+        .where(and(eq(goalDecompositions.campaignId, req.params.campaignId), eq(goalDecompositions.accountId, accountId)))
+        .orderBy(desc(goalDecompositions.createdAt)).limit(1);
+
+      const [simulation] = await db.select().from(growthSimulations)
+        .where(and(eq(growthSimulations.campaignId, req.params.campaignId), eq(growthSimulations.accountId, accountId)))
+        .orderBy(desc(growthSimulations.createdAt)).limit(1);
+
+      const tasks = await db.select().from(executionTasks)
+        .where(eq(executionTasks.planId, plan.id));
+
+      const assumptions = await db.select().from(planAssumptions)
+        .where(eq(planAssumptions.planId, plan.id));
+
       res.json({
         hasPlan: true,
         plan: {
@@ -167,6 +187,47 @@ export function registerOrchestratorV2Routes(app: Express) {
           approved: Number(studioStats[0]?.approved) || 0,
           published: Number(studioStats[0]?.published) || 0,
         },
+        goalDecomposition: goalDecomp ? {
+          id: goalDecomp.id,
+          goalType: goalDecomp.goalType,
+          goalTarget: goalDecomp.goalTarget,
+          goalLabel: goalDecomp.goalLabel,
+          timeHorizonDays: goalDecomp.timeHorizonDays,
+          feasibility: goalDecomp.feasibility,
+          feasibilityScore: goalDecomp.feasibilityScore,
+          feasibilityExplanation: goalDecomp.feasibilityExplanation,
+          funnelMath: safeJson(goalDecomp.funnelMath),
+          confidenceScore: goalDecomp.confidenceScore,
+          assumptions: safeJson(goalDecomp.assumptions),
+        } : null,
+        simulation: simulation ? {
+          id: simulation.id,
+          conservativeCase: safeJson(simulation.conservativeCase),
+          baseCase: safeJson(simulation.baseCase),
+          upsideCase: safeJson(simulation.upsideCase),
+          confidenceScore: simulation.confidenceScore,
+          keyAssumptions: safeJson(simulation.keyAssumptions),
+          bottleneckAlerts: safeJson(simulation.bottleneckAlerts),
+          constraintSimulation: safeJson(simulation.constraintSimulation),
+        } : null,
+        executionTasks: {
+          total: tasks.length,
+          byStatus: {
+            pending: tasks.filter(t => t.status === "pending").length,
+            inProgress: tasks.filter(t => t.status === "in_progress").length,
+            completed: tasks.filter(t => t.status === "completed").length,
+            blocked: tasks.filter(t => t.status === "blocked").length,
+          },
+          today: tasks.filter(t => t.priority === "high" || t.weekNumber === 1).slice(0, 5).map(t => ({
+            id: t.id, title: t.title, type: t.taskType, priority: t.priority, status: t.status,
+          })),
+        },
+        assumptions: assumptions.map(a => ({
+          assumption: a.assumption,
+          confidence: a.confidence,
+          impactSeverity: a.impactSeverity,
+          source: a.source,
+        })),
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -470,10 +531,13 @@ export function registerOrchestratorV2Routes(app: Express) {
       if (!plan) {
         return res.json({
           stages: [
-            { id: "plan", name: "Build Plan", status: "ACTION_NEEDED", count: 0 },
+            { id: "goal-math", name: "Goal Math", status: "ACTION_NEEDED", count: 0 },
+            { id: "plan", name: "Build Plan", status: "LOCKED", count: 0 },
             { id: "roots", name: "Roots", status: "LOCKED", count: 0 },
+            { id: "simulation", name: "Simulation", status: "LOCKED", count: 0 },
             { id: "content-dna", name: "Content DNA", status: "LOCKED", count: 0 },
             { id: "approval", name: "Approval", status: "LOCKED", count: 0 },
+            { id: "tasks", name: "Tasks", status: "LOCKED", count: 0 },
             { id: "calendar", name: "Calendar", status: "LOCKED", count: 0 },
             { id: "creation", name: "Creation", status: "LOCKED", count: 0 },
             { id: "review", name: "Review", status: "LOCKED", count: 0 },
@@ -522,7 +586,31 @@ export function registerOrchestratorV2Routes(app: Express) {
         rootsStatus = "IN_PROGRESS";
       }
 
+      const [goalDecompPipeline] = await db.select({ id: goalDecompositions.id })
+        .from(goalDecompositions)
+        .where(and(eq(goalDecompositions.campaignId, req.params.campaignId), eq(goalDecompositions.accountId, accountId)))
+        .orderBy(desc(goalDecompositions.createdAt)).limit(1);
+
+      const [simPipeline] = await db.select({ id: growthSimulations.id })
+        .from(growthSimulations)
+        .where(and(eq(growthSimulations.campaignId, req.params.campaignId), eq(growthSimulations.accountId, accountId)))
+        .orderBy(desc(growthSimulations.createdAt)).limit(1);
+
+      const taskCount = await db.select({ count: sql<number>`count(*)` })
+        .from(executionTasks)
+        .where(eq(executionTasks.planId, plan.id));
+
+      const hasGoalMath = !!goalDecompPipeline;
+      const hasSim = !!simPipeline;
+      const hasTasksPipeline = Number(taskCount[0]?.count) > 0;
+
       const stages = [
+        {
+          id: "goal-math",
+          name: "Goal Math",
+          status: hasGoalMath ? "COMPLETED" : "IN_PROGRESS" as string,
+          count: hasGoalMath ? 1 : 0,
+        },
         {
           id: "plan",
           name: "Build Plan",
@@ -536,6 +624,12 @@ export function registerOrchestratorV2Routes(app: Express) {
           count: hasRoots ? (plan.rootBundleVersion || 1) : 0,
         },
         {
+          id: "simulation",
+          name: "Simulation",
+          status: hasSim ? "COMPLETED" : (hasGoalMath ? "IN_PROGRESS" : "LOCKED") as string,
+          count: hasSim ? 1 : 0,
+        },
+        {
           id: "content-dna",
           name: "Content DNA",
           status: hasDna ? "COMPLETED" : "IN_PROGRESS",
@@ -546,6 +640,12 @@ export function registerOrchestratorV2Routes(app: Express) {
           name: "Approval",
           status: plan.status === "APPROVED" ? "COMPLETED" : plan.status === "REJECTED" ? "REJECTED" : "ACTION_NEEDED",
           count: plan.status === "APPROVED" ? 1 : 0,
+        },
+        {
+          id: "tasks",
+          name: "Tasks",
+          status: hasTasksPipeline ? "COMPLETED" : (plan.status === "APPROVED" ? "ACTION_NEEDED" : "LOCKED") as string,
+          count: Number(taskCount[0]?.count) || 0,
         },
         {
           id: "calendar",

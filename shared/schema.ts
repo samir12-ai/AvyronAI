@@ -2043,3 +2043,87 @@ export const rootBundles = pgTable("root_bundles", {
 });
 
 export type RootBundle = typeof rootBundles.$inferSelect;
+
+export const goalDecompositions = pgTable("goal_decompositions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  campaignId: varchar("campaign_id").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  planId: varchar("plan_id"),
+  rootBundleId: varchar("root_bundle_id"),
+  rootBundleVersion: integer("root_bundle_version"),
+  goalType: text("goal_type").notNull(),
+  goalTarget: integer("goal_target"),
+  goalLabel: text("goal_label"),
+  timeHorizonDays: integer("time_horizon_days").notNull().default(90),
+  feasibility: text("feasibility").notNull().default("pending"),
+  feasibilityScore: integer("feasibility_score"),
+  feasibilityExplanation: text("feasibility_explanation"),
+  funnelMath: text("funnel_math"),
+  channelFit: text("channel_fit"),
+  contentSystem: text("content_system"),
+  budgetDecomposition: text("budget_decomposition"),
+  assumptions: text("assumptions"),
+  confidenceScore: integer("confidence_score"),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type GoalDecomposition = typeof goalDecompositions.$inferSelect;
+
+export const growthSimulations = pgTable("growth_simulations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  campaignId: varchar("campaign_id").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  planId: varchar("plan_id"),
+  goalDecompositionId: varchar("goal_decomposition_id"),
+  rootBundleId: varchar("root_bundle_id"),
+  planHash: varchar("plan_hash"),
+  conservativeCase: text("conservative_case"),
+  baseCase: text("base_case"),
+  upsideCase: text("upside_case"),
+  confidenceScore: integer("confidence_score"),
+  keyAssumptions: text("key_assumptions"),
+  bottleneckAlerts: text("bottleneck_alerts"),
+  constraintSimulation: text("constraint_simulation"),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type GrowthSimulation = typeof growthSimulations.$inferSelect;
+
+export const executionTasks = pgTable("execution_tasks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  planId: varchar("plan_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  rootBundleId: varchar("root_bundle_id"),
+  taskType: text("task_type").notNull(),
+  dayNumber: integer("day_number"),
+  weekNumber: integer("week_number"),
+  title: text("title").notNull(),
+  description: text("description"),
+  category: text("category"),
+  priority: text("priority").notNull().default("normal"),
+  status: text("status").notNull().default("pending"),
+  sortOrder: integer("sort_order").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type ExecutionTask = typeof executionTasks.$inferSelect;
+
+export const planAssumptions = pgTable("plan_assumptions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  planId: varchar("plan_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  assumption: text("assumption").notNull(),
+  confidence: text("confidence").notNull(),
+  impactSeverity: text("impact_severity").notNull(),
+  source: text("source"),
+  affectedModules: text("affected_modules"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type PlanAssumption = typeof planAssumptions.$inferSelect;

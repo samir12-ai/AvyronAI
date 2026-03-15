@@ -13,16 +13,21 @@ import Colors from '@/constants/colors';
 import { getApiUrl, safeApiJson } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
 
-const SECTION_META: Record<string, { label: string; icon: string; gradient: [string, string] }> = {
-  contentDistributionPlan: { label: 'Content Distribution', icon: 'megaphone-outline', gradient: ['#8B5CF6', '#7C3AED'] },
-  creativeTestingMatrix: { label: 'Creative Testing', icon: 'flask-outline', gradient: ['#EC4899', '#DB2777'] },
-  budgetAllocationStructure: { label: 'Budget Allocation', icon: 'wallet-outline', gradient: ['#10B981', '#059669'] },
-  kpiMonitoringPriority: { label: 'KPI Monitoring', icon: 'analytics-outline', gradient: ['#F59E0B', '#D97706'] },
-  competitiveWatchTargets: { label: 'Competitive Watch', icon: 'eye-outline', gradient: ['#3B82F6', '#2563EB'] },
-  riskMonitoringTriggers: { label: 'Risk Triggers', icon: 'warning-outline', gradient: ['#EF4444', '#DC2626'] },
+const C = {
+  mint: '#8B5CF6',
+  neon: '#39FF14',
+  coral: '#FF6B6B',
+  gold: '#FFD700',
+  blue: '#4C9AFF',
+  teal: '#14B8A6',
+  orange: '#F97316',
 };
 
-const SECTION_KEYS = Object.keys(SECTION_META);
+const FEASIBILITY_COLORS: Record<string, { bg: string; text: string; darkBg: string; darkText: string }> = {
+  feasible: { bg: '#D1FAE5', text: '#065F46', darkBg: '#064E3B', darkText: '#6EE7B7' },
+  borderline: { bg: '#FEF3C7', text: '#92400E', darkBg: '#451A03', darkText: '#FCD34D' },
+  unrealistic: { bg: '#FEE2E2', text: '#991B1B', darkBg: '#450A0A', darkText: '#FCA5A5' },
+};
 
 interface PlanDocumentViewProps {
   planId?: string;
@@ -38,49 +43,59 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [document, setDocument] = useState<any>(null);
-  const [plan, setPlan] = useState<any>(null);
+  const [planData, setPlanData] = useState<any>(null);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
 
-  const fetchDocument = useCallback(async () => {
+  const cardBg = isDark ? '#0F1419' : '#FFFFFF';
+  const cardBorder = isDark ? '#1F2937' : '#E2E8F0';
+  const textPrimary = isDark ? '#E8EDF2' : '#1A2332';
+  const textSecondary = isDark ? '#8892A4' : '#546478';
+  const surfaceBg = isDark ? '#111827' : '#F8FAFC';
+
+  const fetchPlan = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const campaignId = selectedCampaign?.selectedCampaignId || '';
-      let url: string;
-      if (planId) {
-        url = getApiUrl(`/api/plans/${planId}/document?accountId=default${campaignId ? `&campaignId=${encodeURIComponent(campaignId)}` : ''}`);
-      } else if (blueprintId) {
-        url = getApiUrl(`/api/strategic/blueprint/${blueprintId}/document`);
-      } else {
-        setError('No plan or blueprint ID provided.');
+      if (!campaignId) {
+        setError('No campaign selected.');
         setLoading(false);
         return;
       }
 
-      const res = await fetch(url);
-      const data = await safeApiJson(res);
-      if (res.ok && data.success) {
-        setDocument(data.document);
-        setPlan(data.plan);
-        setExpandedSections({});
-      } else {
-        setError(data.message || data.error || 'Failed to load plan document.');
+      const activeUrl = getApiUrl(`/api/plans/active/${encodeURIComponent(campaignId)}?accountId=default`);
+      const activeRes = await fetch(activeUrl);
+      const activeData = await safeApiJson(activeRes);
+
+      if (!activeRes.ok || !activeData.hasPlan) {
+        setError('No active plan found. Build a plan first.');
+        setLoading(false);
+        return;
       }
+
+      let docData: any = null;
+      if (activeData.plan?.id) {
+        try {
+          const docUrl = getApiUrl(`/api/plans/${activeData.plan.id}/document?accountId=default&campaignId=${encodeURIComponent(campaignId)}`);
+          const docRes = await fetch(docUrl);
+          const docJson = await safeApiJson(docRes);
+          if (docRes.ok && docJson.success) {
+            docData = docJson;
+          }
+        } catch {}
+      }
+
+      setPlanData({ ...activeData, documentData: docData });
     } catch (err: any) {
       setError(err.message || 'Network error.');
     } finally {
       setLoading(false);
     }
-  }, [planId, blueprintId]);
+  }, [selectedCampaign]);
 
-  useEffect(() => {
-    fetchDocument();
-  }, [fetchDocument]);
+  useEffect(() => { fetchPlan(); }, [fetchPlan]);
 
-  const toggleSection = (key: string) => {
-    setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
-  };
+  const toggle = (key: string) => setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
 
   const safeStr = (v: any): string => {
     if (v === null || v === undefined) return '';
@@ -88,230 +103,13 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
     return String(v);
   };
 
-  const safeArray = (v: any): any[] => {
-    if (Array.isArray(v)) return v;
-    return [];
-  };
-
-  const renderContentDistribution = (data: any) => {
-    const platforms = safeArray(data.platforms);
-    const pillars = safeArray(data.contentPillars);
-    return (
-      <View style={st.sectionBody}>
-        {platforms.map((p: any, i: number) => (
-          <View key={i} style={[st.detailCard, { backgroundColor: isDark ? '#111827' : '#F8FAFC', borderColor: isDark ? '#1F2937' : '#E2E8F0' }]}>
-            <View style={st.detailCardHeader}>
-              <View style={[st.platformDot, { backgroundColor: '#8B5CF6' }]} />
-              <Text style={[st.detailCardTitle, { color: colors.text }]}>{safeStr(p.platform)}</Text>
-              <Text style={[st.detailCardBadge, { color: isDark ? '#A78BFA' : '#7C3AED' }]}>{safeStr(p.frequency)}</Text>
-            </View>
-            {safeArray(p.contentTypes).map((ct: any, j: number) => (
-              <View key={j} style={st.detailRow}>
-                <Text style={[st.detailLabel, { color: colors.textSecondary }]}>{safeStr(ct.type)}</Text>
-                <View style={st.detailValueWrap}>
-                  <Text style={[st.detailValue, { color: colors.text }]}>{safeStr(ct.percentage)}</Text>
-                  <Text style={[st.detailSub, { color: colors.textSecondary }]}>{safeStr(ct.weeklyCount)}/wk</Text>
-                </View>
-              </View>
-            ))}
-            {p.bestPostingTimes && (
-              <View style={[st.infoChip, { backgroundColor: isDark ? '#1E1B4B' : '#EDE9FE' }]}>
-                <Ionicons name="time-outline" size={12} color="#8B5CF6" />
-                <Text style={[st.infoChipText, { color: isDark ? '#C4B5FD' : '#6D28D9' }]}>
-                  {Array.isArray(p.bestPostingTimes) ? p.bestPostingTimes.join(' · ') : safeStr(p.bestPostingTimes)}
-                </Text>
-              </View>
-            )}
-          </View>
-        ))}
-        {pillars.length > 0 && (
-          <View style={{ marginTop: 4 }}>
-            <Text style={[st.subHeading, { color: colors.text }]}>Content Pillars</Text>
-            {pillars.map((pillar: any, i: number) => (
-              <View key={i} style={st.detailRow}>
-                <Text style={[st.detailLabel, { color: colors.textSecondary }]}>{safeStr(pillar.pillar)}</Text>
-                <Text style={[st.detailValue, { color: colors.text }]}>{safeStr(pillar.percentage)}%</Text>
-              </View>
-            ))}
-          </View>
-        )}
-        {platforms.length === 0 && <Text style={[st.emptyText, { color: colors.textSecondary }]}>No distribution data.</Text>}
-      </View>
-    );
-  };
-
-  const renderCreativeTesting = (data: any) => {
-    const tests = safeArray(data.tests || data.experiments);
-    return (
-      <View style={st.sectionBody}>
-        {tests.map((t: any, i: number) => (
-          <View key={i} style={[st.detailCard, { backgroundColor: isDark ? '#111827' : '#F8FAFC', borderColor: isDark ? '#1F2937' : '#E2E8F0' }]}>
-            <Text style={[st.detailCardTitle, { color: colors.text }]}>{safeStr(t.testName || t.name)}</Text>
-            <View style={st.testMeta}>
-              <View style={[st.infoChip, { backgroundColor: isDark ? '#1E1B4B' : '#FCE7F3' }]}>
-                <Ionicons name="flask-outline" size={11} color="#EC4899" />
-                <Text style={[st.infoChipText, { color: isDark ? '#F9A8D4' : '#BE185D' }]}>{safeStr(t.variable || t.hypothesis)}</Text>
-              </View>
-              <View style={[st.infoChip, { backgroundColor: isDark ? '#1E1B4B' : '#FEF3C7' }]}>
-                <Ionicons name="timer-outline" size={11} color="#F59E0B" />
-                <Text style={[st.infoChipText, { color: isDark ? '#FCD34D' : '#92400E' }]}>{safeStr(t.duration || t.timeline)}</Text>
-              </View>
-            </View>
-            {t.rationale && <Text style={[st.rationaleText, { color: colors.textSecondary }]}>{safeStr(t.rationale)}</Text>}
-          </View>
-        ))}
-        {tests.length === 0 && <Text style={[st.emptyText, { color: colors.textSecondary }]}>No tests defined.</Text>}
-      </View>
-    );
-  };
-
-  const renderBudgetAllocation = (data: any) => {
-    const total = safeStr(data.totalBudget || data.totalRecommended || data.total || 'N/A');
-    const categories = safeArray(data.categories || data.breakdown);
-    return (
-      <View style={st.sectionBody}>
-        <View style={[st.budgetBanner, { backgroundColor: isDark ? '#064E3B' : '#ECFDF5' }]}>
-          <Ionicons name="cash-outline" size={18} color={isDark ? '#6EE7B7' : '#059669'} />
-          <Text style={[st.budgetAmount, { color: isDark ? '#6EE7B7' : '#065F46' }]}>Total Budget: {total}</Text>
-        </View>
-        {categories.map((c: any, i: number) => (
-          <View key={i} style={st.detailRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={[st.detailLabel, { color: colors.text }]}>{safeStr(c.category || c.name)}</Text>
-              {c.purpose && <Text style={[st.purposeText, { color: colors.textSecondary }]}>{safeStr(c.purpose)}</Text>}
-            </View>
-            <View style={[st.percentBadge, { backgroundColor: isDark ? '#064E3B' : '#D1FAE5' }]}>
-              <Text style={[st.percentText, { color: isDark ? '#6EE7B7' : '#065F46' }]}>{safeStr(c.percentage || c.percent)}%</Text>
-            </View>
-          </View>
-        ))}
-      </View>
-    );
-  };
-
-  const renderKpiMonitoring = (data: any) => {
-    const primary = safeArray(data.primaryKPIs || data.primaryMetrics || data.primary);
-    const secondary = safeArray(data.secondaryKPIs || data.secondaryMetrics || data.secondary);
-    return (
-      <View style={st.sectionBody}>
-        {primary.length > 0 && (
-          <>
-            <Text style={[st.subHeading, { color: colors.text }]}>Primary KPIs</Text>
-            {primary.map((m: any, i: number) => (
-              <View key={i} style={[st.detailCard, { backgroundColor: isDark ? '#111827' : '#F8FAFC', borderColor: isDark ? '#1F2937' : '#E2E8F0' }]}>
-                <Text style={[st.detailCardTitle, { color: colors.text }]}>{safeStr(m.kpi || m.metric || m.name)}</Text>
-                <View style={st.kpiRow}>
-                  <View style={[st.infoChip, { backgroundColor: isDark ? '#1E1B4B' : '#FEF3C7' }]}>
-                    <Ionicons name="flag-outline" size={11} color="#F59E0B" />
-                    <Text style={[st.infoChipText, { color: isDark ? '#FCD34D' : '#92400E' }]}>{safeStr(m.target)}</Text>
-                  </View>
-                  {m.frequency && (
-                    <View style={[st.infoChip, { backgroundColor: isDark ? '#1E1B4B' : '#EDE9FE' }]}>
-                      <Ionicons name="sync-outline" size={11} color="#8B5CF6" />
-                      <Text style={[st.infoChipText, { color: isDark ? '#C4B5FD' : '#6D28D9' }]}>{safeStr(m.frequency)}</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-            ))}
-          </>
-        )}
-        {secondary.length > 0 && (
-          <>
-            <Text style={[st.subHeading, { color: colors.text, marginTop: 8 }]}>Secondary KPIs</Text>
-            {secondary.map((m: any, i: number) => (
-              <View key={i} style={st.detailRow}>
-                <Text style={[st.detailLabel, { color: colors.textSecondary, flex: 1 }]}>{safeStr(m.kpi || m.metric || m.name)}</Text>
-                <Text style={[st.detailValue, { color: colors.text }]}>{safeStr(m.target)}</Text>
-              </View>
-            ))}
-          </>
-        )}
-        {primary.length === 0 && secondary.length === 0 && <Text style={[st.emptyText, { color: colors.textSecondary }]}>No KPIs defined.</Text>}
-      </View>
-    );
-  };
-
-  const renderCompetitiveWatch = (data: any) => {
-    const targets = safeArray(data.competitors || data.targets);
-    return (
-      <View style={st.sectionBody}>
-        {targets.map((c: any, i: number) => (
-          <View key={i} style={[st.detailCard, { backgroundColor: isDark ? '#111827' : '#F8FAFC', borderColor: isDark ? '#1F2937' : '#E2E8F0' }]}>
-            <Text style={[st.detailCardTitle, { color: colors.text }]}>{safeStr(c.competitor || c.name)}</Text>
-            {c.watchMetrics && (
-              <View style={st.chipWrap}>
-                {safeArray(c.watchMetrics).slice(0, 4).map((m: string, j: number) => (
-                  <View key={j} style={[st.infoChip, { backgroundColor: isDark ? '#1E1B4B' : '#DBEAFE' }]}>
-                    <Text style={[st.infoChipText, { color: isDark ? '#93C5FD' : '#1E40AF' }]}>{safeStr(m)}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-            {c.checkFrequency && <Text style={[st.purposeText, { color: colors.textSecondary, marginTop: 4 }]}>Check: {safeStr(c.checkFrequency)}</Text>}
-          </View>
-        ))}
-        {targets.length === 0 && <Text style={[st.emptyText, { color: colors.textSecondary }]}>No competitive watch targets.</Text>}
-      </View>
-    );
-  };
-
-  const renderRiskTriggers = (data: any) => {
-    const risks = safeArray(data.triggers || data.risks);
-    const sevColors: Record<string, { bg: string; text: string; darkBg: string; darkText: string }> = {
-      critical: { bg: '#FEE2E2', text: '#991B1B', darkBg: '#450A0A', darkText: '#FCA5A5' },
-      high: { bg: '#FEF3C7', text: '#92400E', darkBg: '#451A03', darkText: '#FCD34D' },
-      medium: { bg: '#DBEAFE', text: '#1E40AF', darkBg: '#1E1B4B', darkText: '#93C5FD' },
-      low: { bg: '#D1FAE5', text: '#065F46', darkBg: '#064E3B', darkText: '#6EE7B7' },
-    };
-    return (
-      <View style={st.sectionBody}>
-        {risks.map((r: any, i: number) => {
-          const sev = safeStr(r.severity || 'medium').toLowerCase();
-          const sc = sevColors[sev] || sevColors.medium;
-          return (
-            <View key={i} style={[st.detailCard, { backgroundColor: isDark ? '#111827' : '#F8FAFC', borderColor: isDark ? '#1F2937' : '#E2E8F0' }]}>
-              <View style={st.riskHeader}>
-                <Text style={[st.detailCardTitle, { color: colors.text, flex: 1 }]}>{safeStr(r.trigger)}</Text>
-                <View style={[st.severityBadge, { backgroundColor: isDark ? sc.darkBg : sc.bg }]}>
-                  <Text style={[st.severityText, { color: isDark ? sc.darkText : sc.text }]}>{sev}</Text>
-                </View>
-              </View>
-              {r.condition && <Text style={[st.purposeText, { color: colors.textSecondary, marginTop: 4 }]}>{safeStr(r.condition)}</Text>}
-              {r.action && (
-                <View style={[st.infoChip, { backgroundColor: isDark ? '#1E1B4B' : '#EDE9FE', marginTop: 6 }]}>
-                  <Ionicons name="arrow-forward-outline" size={11} color="#8B5CF6" />
-                  <Text style={[st.infoChipText, { color: isDark ? '#C4B5FD' : '#6D28D9' }]}>{safeStr(r.action)}</Text>
-                </View>
-              )}
-            </View>
-          );
-        })}
-        {risks.length === 0 && <Text style={[st.emptyText, { color: colors.textSecondary }]}>No risk triggers.</Text>}
-      </View>
-    );
-  };
-
-  const renderSectionContent = (key: string, data: any) => {
-    if (!data || typeof data !== 'object') {
-      return <Text style={[st.emptyText, { color: colors.textSecondary }]}>No data available.</Text>;
-    }
-    switch (key) {
-      case 'contentDistributionPlan': return renderContentDistribution(data);
-      case 'creativeTestingMatrix': return renderCreativeTesting(data);
-      case 'budgetAllocationStructure': return renderBudgetAllocation(data);
-      case 'kpiMonitoringPriority': return renderKpiMonitoring(data);
-      case 'competitiveWatchTargets': return renderCompetitiveWatch(data);
-      case 'riskMonitoringTriggers': return renderRiskTriggers(data);
-      default: return <Text style={[st.emptyText, { color: colors.textSecondary }]}>{JSON.stringify(data, null, 2)}</Text>;
-    }
-  };
+  const safeArr = (v: any): any[] => Array.isArray(v) ? v : [];
 
   if (loading) {
     return (
       <View style={st.stateContainer}>
-        <ActivityIndicator size="large" color="#8B5CF6" />
-        <Text style={[st.stateText, { color: colors.textSecondary }]}>Loading plan...</Text>
+        <ActivityIndicator size="large" color={C.mint} />
+        <Text style={[st.stateText, { color: textSecondary }]}>Loading plan...</Text>
       </View>
     );
   }
@@ -319,388 +117,644 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
   if (error) {
     return (
       <View style={st.stateContainer}>
-        <Ionicons name="cloud-offline-outline" size={28} color={colors.textSecondary} />
-        <Text style={[st.stateText, { color: colors.textSecondary }]}>{error}</Text>
-        <Pressable onPress={fetchDocument} style={[st.retryBtn, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
-          <Ionicons name="refresh" size={14} color="#8B5CF6" />
+        <Ionicons name="cloud-offline-outline" size={28} color={textSecondary} />
+        <Text style={[st.stateText, { color: textSecondary }]}>{error}</Text>
+        <Pressable onPress={fetchPlan} style={[st.retryBtn, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
+          <Ionicons name="refresh" size={14} color={C.mint} />
           <Text style={st.retryBtnText}>Retry</Text>
         </Pressable>
         {onClose && (
           <Pressable onPress={onClose} style={{ marginTop: 8 }}>
-            <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Close</Text>
+            <Text style={{ color: textSecondary, fontSize: 13 }}>Close</Text>
           </Pressable>
         )}
       </View>
     );
   }
 
-  if (!document) return null;
+  if (!planData) return null;
 
-  const contentJson = document.contentJson || {};
+  const plan = planData.plan;
+  const goalDecomp = planData.goalDecomposition;
+  const simulation = planData.simulation;
+  const executionTasks = planData.executionTasks;
+  const assumptions = planData.assumptions || [];
+  const work = planData.requiredWork;
+  const calendar = planData.calendar;
+  const docContent = planData.documentData?.document?.contentJson || {};
 
   const statusLabel = plan?.status?.replace(/_/g, ' ') || 'DRAFT';
   const isActive = ['APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'SCHEDULED', 'PUBLISHED'].includes(plan?.status);
+  const feasColor = FEASIBILITY_COLORS[goalDecomp?.feasibility] || FEASIBILITY_COLORS.borderline;
+
+  const renderGoalBlock = () => {
+    if (!goalDecomp) return null;
+    return (
+      <View style={[st.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+        <LinearGradient
+          colors={isDark ? ['#1E1B4B', '#312E81'] : ['#EDE9FE', '#DDD6FE']}
+          style={st.cardGradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          <View style={st.goalHeader}>
+            <View style={st.goalIconWrap}>
+              <Ionicons name="flag" size={20} color={C.mint} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[st.goalLabel, { color: isDark ? '#E0E7FF' : '#312E81' }]}>{goalDecomp.goalLabel}</Text>
+              <View style={st.goalMetaRow}>
+                <View style={[st.metaChip, { backgroundColor: '#ffffff20' }]}>
+                  <Ionicons name="time-outline" size={11} color={isDark ? '#C4B5FD' : '#6D28D9'} />
+                  <Text style={[st.metaChipText, { color: isDark ? '#C4B5FD' : '#6D28D9' }]}>{goalDecomp.timeHorizonDays} days</Text>
+                </View>
+                <View style={[st.metaChip, { backgroundColor: '#ffffff20' }]}>
+                  <Ionicons name="analytics-outline" size={11} color={isDark ? '#C4B5FD' : '#6D28D9'} />
+                  <Text style={[st.metaChipText, { color: isDark ? '#C4B5FD' : '#6D28D9' }]}>{goalDecomp.goalType?.replace(/_/g, ' ')}</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+          <View style={st.feasRow}>
+            <View style={[st.feasBadge, { backgroundColor: isDark ? feasColor.darkBg : feasColor.bg }]}>
+              <Ionicons
+                name={goalDecomp.feasibility === 'feasible' ? 'checkmark-circle' : goalDecomp.feasibility === 'borderline' ? 'alert-circle' : 'close-circle'}
+                size={13}
+                color={isDark ? feasColor.darkText : feasColor.text}
+              />
+              <Text style={[st.feasText, { color: isDark ? feasColor.darkText : feasColor.text }]}>
+                {goalDecomp.feasibility?.toUpperCase()}
+              </Text>
+            </View>
+            <View style={st.scoreRow}>
+              <Text style={[st.scoreLabel, { color: isDark ? '#A5B4FC' : '#6D28D9' }]}>Score</Text>
+              <Text style={[st.scoreValue, { color: isDark ? '#E0E7FF' : '#312E81' }]}>{goalDecomp.feasibilityScore}/100</Text>
+            </View>
+            <View style={st.scoreRow}>
+              <Text style={[st.scoreLabel, { color: isDark ? '#A5B4FC' : '#6D28D9' }]}>Confidence</Text>
+              <Text style={[st.scoreValue, { color: isDark ? '#E0E7FF' : '#312E81' }]}>{goalDecomp.confidenceScore}/100</Text>
+            </View>
+          </View>
+        </LinearGradient>
+      </View>
+    );
+  };
+
+  const renderWhyThisPlan = () => {
+    const explanation = goalDecomp?.feasibilityExplanation || plan?.summary;
+    if (!explanation) return null;
+    return (
+      <View style={[st.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+        <View style={st.sectionHead}>
+          <Ionicons name="bulb-outline" size={18} color={C.gold} />
+          <Text style={[st.sectionTitle, { color: textPrimary }]}>Why This Plan Works</Text>
+        </View>
+        <Text style={[st.bodyText, { color: textSecondary }]}>{explanation}</Text>
+        {goalDecomp?.assumptions && safeArr(goalDecomp.assumptions).length > 0 && (
+          <View style={{ marginTop: 10 }}>
+            <Text style={[st.subLabel, { color: textPrimary }]}>Key Assumptions</Text>
+            {safeArr(goalDecomp.assumptions).slice(0, 4).map((a: any, i: number) => (
+              <View key={i} style={st.assumptionRow}>
+                <View style={[st.assumptionDot, { backgroundColor: C.gold }]} />
+                <Text style={[st.assumptionText, { color: textSecondary }]}>{typeof a === 'string' ? a : safeStr(a)}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderNumbersThatMatter = () => {
+    const funnel = goalDecomp?.funnelMath;
+    if (!funnel) return null;
+    const funnelSteps = [
+      { label: 'Required Reach', value: funnel.requiredReach || funnel.topOfFunnel, icon: 'megaphone-outline', color: C.blue },
+      { label: 'Expected Leads', value: funnel.requiredLeads || funnel.middleFunnel, icon: 'people-outline', color: C.teal },
+      { label: 'Qualified Leads', value: funnel.requiredQualifiedLeads, icon: 'person-outline', color: C.orange },
+      { label: 'Conversion Rate', value: funnel.conversionRate ? `${(funnel.conversionRate * 100).toFixed(1)}%` : null, icon: 'trending-up-outline', color: C.neon },
+      { label: 'Close Rate', value: funnel.closeRate ? `${(funnel.closeRate * 100).toFixed(1)}%` : null, icon: 'checkmark-done-outline', color: C.mint },
+    ].filter(s => s.value != null && s.value !== 0);
+
+    return (
+      <View style={[st.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+        <View style={st.sectionHead}>
+          <Ionicons name="calculator-outline" size={18} color={C.teal} />
+          <Text style={[st.sectionTitle, { color: textPrimary }]}>Numbers That Matter</Text>
+        </View>
+        <View style={st.numbersGrid}>
+          {funnelSteps.map((s, i) => (
+            <View key={i} style={[st.numberCard, { backgroundColor: surfaceBg, borderColor: cardBorder }]}>
+              <Ionicons name={s.icon as any} size={16} color={s.color} />
+              <Text style={[st.numberValue, { color: textPrimary }]}>
+                {typeof s.value === 'number' ? s.value.toLocaleString() : s.value}
+              </Text>
+              <Text style={[st.numberLabel, { color: textSecondary }]}>{s.label}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
+  const renderGrowthSimulation = () => {
+    if (!simulation) return null;
+    const scenarios = [
+      { key: 'Conservative', data: simulation.conservativeCase, color: C.coral, icon: 'trending-down-outline' },
+      { key: 'Base Case', data: simulation.baseCase, color: C.blue, icon: 'remove-outline' },
+      { key: 'Upside', data: simulation.upsideCase, color: C.neon, icon: 'trending-up-outline' },
+    ].filter(s => s.data);
+
+    return (
+      <View style={[st.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+        <View style={st.sectionHead}>
+          <Ionicons name="bar-chart-outline" size={18} color={C.blue} />
+          <Text style={[st.sectionTitle, { color: textPrimary }]}>Growth Simulation</Text>
+          <View style={[st.confBadge, { backgroundColor: C.blue + '20' }]}>
+            <Text style={[st.confText, { color: C.blue }]}>{simulation.confidenceScore}% conf.</Text>
+          </View>
+        </View>
+        {scenarios.map((sc, i) => {
+          const d = sc.data;
+          const mainMetric = d.expectedCustomers || d.expectedLeads || d.expectedRevenue || d.expectedReach || 'N/A';
+          const achievement = d.achievementPct || (i === 0 ? 70 : i === 1 ? 100 : 115);
+          return (
+            <View key={i} style={[st.scenarioRow, { backgroundColor: surfaceBg, borderColor: cardBorder }]}>
+              <View style={[st.scenarioIcon, { backgroundColor: sc.color + '15' }]}>
+                <Ionicons name={sc.icon as any} size={16} color={sc.color} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[st.scenarioLabel, { color: textPrimary }]}>{sc.key}</Text>
+                {d.description && <Text style={[st.scenarioDesc, { color: textSecondary }]} numberOfLines={1}>{d.description}</Text>}
+              </View>
+              <View style={{ alignItems: 'flex-end' as const }}>
+                <Text style={[st.scenarioValue, { color: sc.color }]}>
+                  {typeof mainMetric === 'number' ? mainMetric.toLocaleString() : mainMetric}
+                </Text>
+                <Text style={[st.scenarioPct, { color: textSecondary }]}>{achievement}%</Text>
+              </View>
+            </View>
+          );
+        })}
+        {simulation.bottleneckAlerts && safeArr(simulation.bottleneckAlerts).length > 0 && (
+          <View style={[st.alertStrip, { backgroundColor: isDark ? '#451A03' : '#FEF3C7' }]}>
+            <Ionicons name="warning-outline" size={13} color={C.gold} />
+            <Text style={[st.alertText, { color: isDark ? '#FCD34D' : '#92400E' }]}>
+              {safeArr(simulation.bottleneckAlerts).slice(0, 2).join(' · ')}
+            </Text>
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderContentDistribution = () => {
+    const distData = docContent.contentDistributionPlan;
+    if (!distData) return null;
+    const platforms = safeArr(distData.platforms);
+    if (platforms.length === 0) return null;
+
+    return (
+      <View style={[st.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+        <Pressable onPress={() => toggle('content')} style={st.sectionHead}>
+          <Ionicons name="megaphone-outline" size={18} color={C.mint} />
+          <Text style={[st.sectionTitle, { color: textPrimary, flex: 1 }]}>Execution Blueprint</Text>
+          <Ionicons name={expandedSections.content ? 'chevron-up' : 'chevron-down'} size={16} color={textSecondary} />
+        </Pressable>
+        {expandedSections.content && (
+          <View style={st.expandedBody}>
+            {platforms.map((p: any, i: number) => (
+              <View key={i} style={[st.detailCard, { backgroundColor: surfaceBg, borderColor: cardBorder }]}>
+                <View style={st.platformHeader}>
+                  <View style={[st.platformDot, { backgroundColor: C.mint }]} />
+                  <Text style={[st.detailTitle, { color: textPrimary }]}>{safeStr(p.platform)}</Text>
+                  <Text style={[st.freqLabel, { color: C.mint }]}>{safeStr(p.frequency)}</Text>
+                </View>
+                {safeArr(p.contentTypes).map((ct: any, j: number) => (
+                  <View key={j} style={st.detailRow}>
+                    <Text style={[st.detailLabel, { color: textSecondary }]}>{safeStr(ct.type)}</Text>
+                    <Text style={[st.detailValue, { color: textPrimary }]}>{safeStr(ct.percentage)} · {safeStr(ct.weeklyCount)}/wk</Text>
+                  </View>
+                ))}
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderWeeklyRhythm = () => {
+    if (!work) return null;
+    const items = [
+      { label: 'Reels', count: work.reels?.perWeek, icon: 'videocam-outline', color: C.coral },
+      { label: 'Posts', count: work.posts?.perWeek, icon: 'image-outline', color: C.blue },
+      { label: 'Stories', count: work.stories?.perDay ? `${work.stories.perDay}/day` : 0, icon: 'layers-outline', color: C.teal },
+      { label: 'Carousels', count: work.carousels?.perWeek, icon: 'albums-outline', color: C.orange },
+      { label: 'Videos', count: work.videos?.perWeek, icon: 'film-outline', color: C.mint },
+    ].filter(i => i.count && i.count !== 0);
+
+    if (items.length === 0) return null;
+
+    return (
+      <View style={[st.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+        <View style={st.sectionHead}>
+          <Ionicons name="calendar-outline" size={18} color={C.orange} />
+          <Text style={[st.sectionTitle, { color: textPrimary }]}>Weekly Rhythm</Text>
+        </View>
+        <View style={st.rhythmGrid}>
+          {items.map((item, i) => (
+            <View key={i} style={[st.rhythmCard, { backgroundColor: surfaceBg, borderColor: cardBorder }]}>
+              <Ionicons name={item.icon as any} size={16} color={item.color} />
+              <Text style={[st.rhythmCount, { color: textPrimary }]}>{item.count}</Text>
+              <Text style={[st.rhythmLabel, { color: textSecondary }]}>{item.label}</Text>
+            </View>
+          ))}
+        </View>
+        {work && (
+          <View style={st.progressSection}>
+            <View style={st.progressHeader}>
+              <Text style={[st.progressLabel, { color: textSecondary }]}>Overall Progress</Text>
+              <Text style={[st.progressValue, { color: C.mint }]}>
+                {Math.round(((work.generated + work.ready + work.published) / Math.max(work.totalPieces, 1)) * 100)}%
+              </Text>
+            </View>
+            <View style={[st.progressTrack, { backgroundColor: isDark ? '#1A2030' : '#E5EBE7' }]}>
+              <View style={[st.progressFill, { width: `${Math.min(100, Math.round(((work.generated + work.ready + work.published) / Math.max(work.totalPieces, 1)) * 100))}%`, backgroundColor: C.mint }]} />
+            </View>
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderTaskQueue = () => {
+    if (!executionTasks || executionTasks.total === 0) return null;
+    const byStatus = executionTasks.byStatus || {};
+    const todayTasks = safeArr(executionTasks.today);
+
+    return (
+      <View style={[st.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+        <Pressable onPress={() => toggle('tasks')} style={st.sectionHead}>
+          <Ionicons name="list-outline" size={18} color={C.neon} />
+          <Text style={[st.sectionTitle, { color: textPrimary, flex: 1 }]}>Task Queue</Text>
+          <View style={[st.confBadge, { backgroundColor: C.neon + '20' }]}>
+            <Text style={[st.confText, { color: C.neon }]}>{executionTasks.total} tasks</Text>
+          </View>
+          <Ionicons name={expandedSections.tasks ? 'chevron-up' : 'chevron-down'} size={16} color={textSecondary} />
+        </Pressable>
+
+        <View style={st.taskStatusRow}>
+          <View style={[st.taskStatusChip, { backgroundColor: C.gold + '15' }]}>
+            <Text style={[st.taskStatusNum, { color: C.gold }]}>{byStatus.pending || 0}</Text>
+            <Text style={[st.taskStatusLabel, { color: textSecondary }]}>Pending</Text>
+          </View>
+          <View style={[st.taskStatusChip, { backgroundColor: C.blue + '15' }]}>
+            <Text style={[st.taskStatusNum, { color: C.blue }]}>{byStatus.inProgress || 0}</Text>
+            <Text style={[st.taskStatusLabel, { color: textSecondary }]}>Active</Text>
+          </View>
+          <View style={[st.taskStatusChip, { backgroundColor: C.neon + '15' }]}>
+            <Text style={[st.taskStatusNum, { color: C.neon }]}>{byStatus.completed || 0}</Text>
+            <Text style={[st.taskStatusLabel, { color: textSecondary }]}>Done</Text>
+          </View>
+          <View style={[st.taskStatusChip, { backgroundColor: C.coral + '15' }]}>
+            <Text style={[st.taskStatusNum, { color: C.coral }]}>{byStatus.blocked || 0}</Text>
+            <Text style={[st.taskStatusLabel, { color: textSecondary }]}>Blocked</Text>
+          </View>
+        </View>
+
+        {expandedSections.tasks && todayTasks.length > 0 && (
+          <View style={st.expandedBody}>
+            <Text style={[st.subLabel, { color: textPrimary }]}>Priority Tasks</Text>
+            {todayTasks.map((t: any, i: number) => (
+              <View key={i} style={[st.taskItem, { borderColor: cardBorder }]}>
+                <View style={[st.taskDot, {
+                  backgroundColor: t.status === 'completed' ? C.neon : t.status === 'blocked' ? C.coral : C.gold
+                }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[st.taskTitle, { color: textPrimary }]}>{t.title}</Text>
+                  <View style={st.taskMeta}>
+                    <Text style={[st.taskType, { color: textSecondary }]}>{t.type?.replace(/_/g, ' ')}</Text>
+                    <Text style={[st.taskPriority, { color: t.priority === 'high' ? C.coral : C.blue }]}>
+                      {t.priority}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderCalendarSync = () => {
+    if (!calendar || calendar.total === 0) return null;
+    return (
+      <View style={[st.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+        <View style={st.sectionHead}>
+          <Ionicons name="calendar-outline" size={18} color={C.blue} />
+          <Text style={[st.sectionTitle, { color: textPrimary }]}>Calendar Sync</Text>
+        </View>
+        <View style={st.calendarRow}>
+          <View style={st.calendarStat}>
+            <Text style={[st.calendarNum, { color: textPrimary }]}>{calendar.total}</Text>
+            <Text style={[st.calendarLabel, { color: textSecondary }]}>Scheduled</Text>
+          </View>
+          <View style={st.calendarStat}>
+            <Text style={[st.calendarNum, { color: C.gold }]}>{calendar.pending}</Text>
+            <Text style={[st.calendarLabel, { color: textSecondary }]}>Pending</Text>
+          </View>
+          <View style={st.calendarStat}>
+            <Text style={[st.calendarNum, { color: C.neon }]}>{calendar.completed}</Text>
+            <Text style={[st.calendarLabel, { color: textSecondary }]}>Published</Text>
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  const renderDiagnostics = () => {
+    const hasCreativeTesting = docContent.creativeTestingMatrix && safeArr(docContent.creativeTestingMatrix.tests || docContent.creativeTestingMatrix.experiments).length > 0;
+    const hasCompetitiveWatch = docContent.competitiveWatchTargets && safeArr(docContent.competitiveWatchTargets.competitors || docContent.competitiveWatchTargets.targets).length > 0;
+    const hasRiskTriggers = docContent.riskMonitoringTriggers && safeArr(docContent.riskMonitoringTriggers.triggers || docContent.riskMonitoringTriggers.risks).length > 0;
+    const hasBudget = docContent.budgetAllocationStructure;
+    const hasKpi = docContent.kpiMonitoringPriority;
+    const hasAssumptions = assumptions.length > 0;
+
+    if (!hasCreativeTesting && !hasCompetitiveWatch && !hasRiskTriggers && !hasBudget && !hasKpi && !hasAssumptions) return null;
+
+    const isExpanded = expandedSections.diagnostics;
+
+    return (
+      <View style={[st.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+        <Pressable onPress={() => toggle('diagnostics')} style={st.sectionHead}>
+          <Ionicons name="construct-outline" size={18} color={textSecondary} />
+          <Text style={[st.sectionTitle, { color: textPrimary, flex: 1 }]}>Diagnostics</Text>
+          <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={textSecondary} />
+        </Pressable>
+
+        {isExpanded && (
+          <View style={st.expandedBody}>
+            {hasBudget && renderDiagBudget(docContent.budgetAllocationStructure)}
+            {hasKpi && renderDiagKpi(docContent.kpiMonitoringPriority)}
+            {hasCompetitiveWatch && renderDiagCompetitive(docContent.competitiveWatchTargets)}
+            {hasRiskTriggers && renderDiagRisk(docContent.riskMonitoringTriggers)}
+            {hasCreativeTesting && renderDiagTesting(docContent.creativeTestingMatrix)}
+            {hasAssumptions && renderDiagAssumptions()}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderDiagBudget = (data: any) => {
+    const total = safeStr(data.totalBudget || data.totalRecommended || data.total || 'N/A');
+    const cats = safeArr(data.categories || data.breakdown);
+    return (
+      <View style={st.diagSection}>
+        <View style={st.diagHead}>
+          <Ionicons name="wallet-outline" size={14} color={C.teal} />
+          <Text style={[st.diagTitle, { color: textPrimary }]}>Budget: {total}</Text>
+        </View>
+        {cats.map((c: any, i: number) => (
+          <View key={i} style={st.detailRow}>
+            <Text style={[st.detailLabel, { color: textSecondary }]}>{safeStr(c.category || c.name)}</Text>
+            <Text style={[st.detailValue, { color: textPrimary }]}>{safeStr(c.percentage || c.percent)}%</Text>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
+  const renderDiagKpi = (data: any) => {
+    const primary = safeArr(data.primaryKPIs || data.primaryMetrics || data.primary);
+    return (
+      <View style={st.diagSection}>
+        <View style={st.diagHead}>
+          <Ionicons name="analytics-outline" size={14} color={C.gold} />
+          <Text style={[st.diagTitle, { color: textPrimary }]}>KPI Targets</Text>
+        </View>
+        {primary.map((m: any, i: number) => (
+          <View key={i} style={st.detailRow}>
+            <Text style={[st.detailLabel, { color: textSecondary }]}>{safeStr(m.kpi || m.metric || m.name)}</Text>
+            <Text style={[st.detailValue, { color: textPrimary }]}>{safeStr(m.target)}</Text>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
+  const renderDiagCompetitive = (data: any) => {
+    const targets = safeArr(data.competitors || data.targets);
+    return (
+      <View style={st.diagSection}>
+        <View style={st.diagHead}>
+          <Ionicons name="eye-outline" size={14} color={C.blue} />
+          <Text style={[st.diagTitle, { color: textPrimary }]}>Competitive Watch</Text>
+        </View>
+        {targets.map((c: any, i: number) => (
+          <View key={i} style={st.detailRow}>
+            <Text style={[st.detailLabel, { color: textSecondary }]}>{safeStr(c.competitor || c.name)}</Text>
+            <Text style={[st.detailValue, { color: textPrimary }]}>{safeStr(c.checkFrequency || 'Weekly')}</Text>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
+  const renderDiagRisk = (data: any) => {
+    const risks = safeArr(data.triggers || data.risks);
+    const sevColors: Record<string, string> = { critical: C.coral, high: C.gold, medium: C.blue, low: C.teal };
+    return (
+      <View style={st.diagSection}>
+        <View style={st.diagHead}>
+          <Ionicons name="warning-outline" size={14} color={C.coral} />
+          <Text style={[st.diagTitle, { color: textPrimary }]}>Risk Triggers</Text>
+        </View>
+        {risks.map((r: any, i: number) => {
+          const sev = safeStr(r.severity || 'medium').toLowerCase();
+          return (
+            <View key={i} style={st.detailRow}>
+              <Text style={[st.detailLabel, { color: textSecondary, flex: 1 }]}>{safeStr(r.trigger)}</Text>
+              <Text style={[st.detailValue, { color: sevColors[sev] || C.blue }]}>{sev}</Text>
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
+
+  const renderDiagTesting = (data: any) => {
+    const tests = safeArr(data.tests || data.experiments);
+    return (
+      <View style={st.diagSection}>
+        <View style={st.diagHead}>
+          <Ionicons name="flask-outline" size={14} color={C.mint} />
+          <Text style={[st.diagTitle, { color: textPrimary }]}>Creative Testing</Text>
+        </View>
+        {tests.map((t: any, i: number) => (
+          <View key={i} style={st.detailRow}>
+            <Text style={[st.detailLabel, { color: textSecondary, flex: 1 }]}>{safeStr(t.testName || t.name)}</Text>
+            <Text style={[st.detailValue, { color: textPrimary }]}>{safeStr(t.duration || t.timeline)}</Text>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
+  const renderDiagAssumptions = () => {
+    const highImpact = assumptions.filter((a: any) => a.impactSeverity === 'high');
+    const others = assumptions.filter((a: any) => a.impactSeverity !== 'high');
+    return (
+      <View style={st.diagSection}>
+        <View style={st.diagHead}>
+          <Ionicons name="help-circle-outline" size={14} color={C.orange} />
+          <Text style={[st.diagTitle, { color: textPrimary }]}>Assumptions ({assumptions.length})</Text>
+        </View>
+        {highImpact.map((a: any, i: number) => (
+          <View key={`h${i}`} style={st.assumptionRow}>
+            <View style={[st.assumptionDot, { backgroundColor: C.coral }]} />
+            <Text style={[st.assumptionText, { color: textSecondary }]}>{a.assumption}</Text>
+            <Text style={[st.confBadgeSmall, { color: C.coral }]}>HIGH</Text>
+          </View>
+        ))}
+        {others.slice(0, 3).map((a: any, i: number) => (
+          <View key={`o${i}`} style={st.assumptionRow}>
+            <View style={[st.assumptionDot, { backgroundColor: C.gold }]} />
+            <Text style={[st.assumptionText, { color: textSecondary }]}>{a.assumption}</Text>
+          </View>
+        ))}
+      </View>
+    );
+  };
 
   return (
     <View>
       {onClose && (
         <Pressable onPress={onClose} style={st.backBtn}>
-          <Ionicons name="arrow-back" size={18} color={colors.text} />
-          <Text style={[st.backBtnText, { color: colors.text }]}>Back</Text>
+          <Ionicons name="arrow-back" size={18} color={textPrimary} />
+          <Text style={[st.backBtnText, { color: textPrimary }]}>Back</Text>
         </Pressable>
       )}
 
-      <View style={[st.headerCard, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1F2937' : '#E2E8F0' }]}>
-        <LinearGradient
-          colors={isDark ? ['#1E1B4B', '#312E81'] : ['#EDE9FE', '#DDD6FE']}
-          style={st.headerGradient}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        >
-          <View style={st.headerContent}>
-            <View style={st.headerIconWrap}>
-              <Ionicons name="document-text" size={22} color="#8B5CF6" />
-            </View>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                <Text style={[st.headerTitle, { color: isDark ? '#E0E7FF' : '#312E81' }]}>The Plan</Text>
-                <View style={[st.statusPill, { backgroundColor: isActive ? '#10B98125' : '#F59E0B25' }]}>
-                  <View style={[st.statusDot, { backgroundColor: isActive ? '#10B981' : '#F59E0B' }]} />
-                  <Text style={[st.statusLabel, { color: isActive ? '#10B981' : '#F59E0B' }]} numberOfLines={1}>{statusLabel}</Text>
-                </View>
-              </View>
-              <Text style={[st.headerSub, { color: isDark ? '#A5B4FC' : '#6D28D9' }]}>
-                v{document.version} · {new Date(document.createdAt).toLocaleDateString()}
-              </Text>
-            </View>
+      <View style={[st.headerStrip, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+        <View style={st.headerRow}>
+          <View style={st.headerIconWrap}>
+            <Ionicons name="rocket" size={20} color={C.mint} />
           </View>
-        </LinearGradient>
-
-        {document.isFallback && (
-          <View style={[st.fallbackStrip, { backgroundColor: isDark ? '#451A03' : '#FEF3C7' }]}>
-            <Ionicons name="alert-circle" size={13} color="#D97706" />
-            <Text style={[st.fallbackText, { color: isDark ? '#FCD34D' : '#92400E' }]}>Fallback plan — AI was unavailable during generation</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={[st.headerTitle, { color: textPrimary }]}>Operations Center</Text>
+            <Text style={[st.headerSub, { color: textSecondary }]}>
+              {planData.documentData?.document?.version ? `v${planData.documentData.document.version} · ` : ''}
+              {plan?.createdAt ? new Date(plan.createdAt).toLocaleDateString() : ''}
+            </Text>
           </View>
-        )}
+          <View style={[st.statusPill, { backgroundColor: isActive ? C.neon + '20' : C.gold + '20' }]}>
+            <View style={[st.statusDot, { backgroundColor: isActive ? C.neon : C.gold }]} />
+            <Text style={[st.statusText, { color: isActive ? C.neon : C.gold }]}>{statusLabel}</Text>
+          </View>
+        </View>
       </View>
 
-      {SECTION_KEYS.map(key => {
-        const meta = SECTION_META[key];
-        const sectionData = contentJson[key];
-        const isExpanded = expandedSections[key];
-        const hasData = sectionData && typeof sectionData === 'object' && Object.keys(sectionData).length > 0;
-
-        return (
-          <View key={key} style={[st.sectionCard, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1F2937' : '#E2E8F0' }]}>
-            <Pressable onPress={() => toggleSection(key)} style={st.sectionHeader}>
-              <LinearGradient
-                colors={meta.gradient}
-                style={st.sectionIconBg}
-              >
-                <Ionicons name={meta.icon as any} size={15} color="#fff" />
-              </LinearGradient>
-              <View style={{ flex: 1 }}>
-                <Text style={[st.sectionTitle, { color: colors.text }]}>{meta.label}</Text>
-              </View>
-              {!hasData && (
-                <View style={[st.emptyTag, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
-                  <Text style={{ fontSize: 9, color: colors.textSecondary, fontWeight: '600' as const }}>EMPTY</Text>
-                </View>
-              )}
-              <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textSecondary} />
-            </Pressable>
-            {isExpanded && (
-              <View style={[st.sectionContent, { borderTopColor: isDark ? '#1F2937' : '#F1F5F9' }]}>
-                {renderSectionContent(key, sectionData)}
-              </View>
-            )}
-          </View>
-        );
-      })}
+      {renderGoalBlock()}
+      {renderWhyThisPlan()}
+      {renderNumbersThatMatter()}
+      {renderGrowthSimulation()}
+      {renderContentDistribution()}
+      {renderWeeklyRhythm()}
+      {renderTaskQueue()}
+      {renderCalendarSync()}
+      {renderDiagnostics()}
     </View>
   );
 }
 
 const st = StyleSheet.create({
-  stateContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 40,
-    gap: 10,
-  },
-  stateText: {
-    fontSize: 13,
-    textAlign: 'center',
-  },
-  retryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    marginTop: 4,
-  },
-  retryBtnText: {
-    color: '#8B5CF6',
-    fontWeight: '600' as const,
-    fontSize: 13,
-  },
-  backBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 12,
-    paddingVertical: 4,
-  },
-  backBtnText: {
-    fontSize: 14,
-    fontWeight: '600' as const,
-  },
-  headerCard: {
-    borderRadius: 14,
-    borderWidth: 1,
-    overflow: 'hidden',
-    marginBottom: 12,
-  },
-  headerGradient: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  headerIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: '#ffffff20',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '800' as const,
-    letterSpacing: -0.3,
-  },
-  headerSub: {
-    fontSize: 12,
-    fontWeight: '500' as const,
-    marginTop: 1,
-  },
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 20,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  statusLabel: {
-    maxWidth: 160,
-    fontSize: 10,
-    fontWeight: '700' as const,
-    textTransform: 'uppercase',
-    letterSpacing: 0.3,
-  },
-  fallbackStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  fallbackText: {
-    fontSize: 11,
-    fontWeight: '500' as const,
-  },
-  sectionCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 8,
-    overflow: 'hidden',
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    paddingHorizontal: 14,
-    gap: 10,
-  },
-  sectionIconBg: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: '700' as const,
-  },
-  emptyTag: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginRight: 4,
-  },
-  sectionContent: {
-    borderTopWidth: 1,
-    paddingTop: 2,
-  },
-  sectionBody: {
-    paddingHorizontal: 14,
-    paddingBottom: 14,
-    paddingTop: 8,
-  },
-  detailCard: {
-    borderWidth: 1,
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 8,
-  },
-  detailCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  platformDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  detailCardTitle: {
-    fontSize: 13,
-    fontWeight: '700' as const,
-    marginBottom: 2,
-  },
-  detailCardBadge: {
-    fontSize: 11,
-    fontWeight: '600' as const,
-    marginLeft: 'auto',
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 5,
-  },
-  detailLabel: {
-    fontSize: 12,
-  },
-  detailValueWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  detailValue: {
-    fontSize: 12,
-    fontWeight: '700' as const,
-  },
-  detailSub: {
-    fontSize: 11,
-  },
-  infoChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 6,
-    marginTop: 4,
-    flexShrink: 1,
-  },
-  infoChipText: {
-    fontSize: 11,
-    fontWeight: '500' as const,
-    flexShrink: 1,
-  },
-  chipWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
-    marginTop: 4,
-  },
-  subHeading: {
-    fontSize: 12,
-    fontWeight: '700' as const,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 6,
-    marginTop: 4,
-  },
-  testMeta: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
-    marginTop: 4,
-  },
-  rationaleText: {
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 6,
-    fontStyle: 'italic',
-  },
-  budgetBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 10,
-  },
-  budgetAmount: {
-    fontSize: 16,
-    fontWeight: '800' as const,
-  },
-  purposeText: {
-    fontSize: 11,
-    lineHeight: 15,
-    marginTop: 2,
-  },
-  percentBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-    marginLeft: 8,
-  },
-  percentText: {
-    fontSize: 13,
-    fontWeight: '800' as const,
-  },
-  kpiRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
-    marginTop: 4,
-  },
-  riskHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  severityBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  severityText: {
-    fontSize: 10,
-    fontWeight: '800' as const,
-    textTransform: 'uppercase',
-    letterSpacing: 0.3,
-  },
-  emptyText: {
-    fontSize: 12,
-    fontStyle: 'italic',
-    paddingVertical: 8,
-  },
+  stateContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40, gap: 10 },
+  stateText: { fontSize: 13, textAlign: 'center' },
+  retryBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, marginTop: 4 },
+  retryBtnText: { color: '#8B5CF6', fontWeight: '600' as const, fontSize: 13 },
+  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12, paddingVertical: 4 },
+  backBtnText: { fontSize: 14, fontWeight: '600' as const },
+  card: { borderRadius: 14, borderWidth: 1, overflow: 'hidden', marginBottom: 10 },
+  cardGradient: { padding: 16 },
+  headerStrip: { borderRadius: 14, borderWidth: 1, padding: 16, marginBottom: 10 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headerIconWrap: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#8B5CF620', justifyContent: 'center', alignItems: 'center' },
+  headerTitle: { fontSize: 18, fontWeight: '800' as const, letterSpacing: -0.3 },
+  headerSub: { fontSize: 12, fontWeight: '500' as const, marginTop: 1 },
+  statusPill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  statusDot: { width: 6, height: 6, borderRadius: 3 },
+  statusText: { fontSize: 10, fontWeight: '700' as const, textTransform: 'uppercase', letterSpacing: 0.3 },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14 },
+  sectionTitle: { fontSize: 15, fontWeight: '700' as const },
+  bodyText: { fontSize: 13, lineHeight: 20, paddingHorizontal: 14, paddingBottom: 14 },
+  subLabel: { fontSize: 12, fontWeight: '700' as const, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+  goalHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  goalIconWrap: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#ffffff20', justifyContent: 'center', alignItems: 'center' },
+  goalLabel: { fontSize: 16, fontWeight: '800' as const, letterSpacing: -0.3 },
+  goalMetaRow: { flexDirection: 'row', gap: 6, marginTop: 6, flexWrap: 'wrap' },
+  metaChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  metaChipText: { fontSize: 11, fontWeight: '500' as const },
+  feasRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14, flexWrap: 'wrap' },
+  feasBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  feasText: { fontSize: 11, fontWeight: '800' as const, letterSpacing: 0.3 },
+  scoreRow: { alignItems: 'center' as const },
+  scoreLabel: { fontSize: 10, fontWeight: '500' as const },
+  scoreValue: { fontSize: 16, fontWeight: '800' as const },
+  numbersGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 14, paddingBottom: 14 },
+  numberCard: { flex: 1, minWidth: 90, borderWidth: 1, borderRadius: 10, padding: 10, alignItems: 'center' as const, gap: 4 },
+  numberValue: { fontSize: 16, fontWeight: '800' as const },
+  numberLabel: { fontSize: 10, textAlign: 'center' as const },
+  confBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginLeft: 'auto' as any },
+  confText: { fontSize: 11, fontWeight: '600' as const },
+  scenarioRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 14, marginBottom: 8, padding: 12, borderRadius: 10, borderWidth: 1 },
+  scenarioIcon: { width: 32, height: 32, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  scenarioLabel: { fontSize: 13, fontWeight: '700' as const },
+  scenarioDesc: { fontSize: 11, marginTop: 2 },
+  scenarioValue: { fontSize: 16, fontWeight: '800' as const },
+  scenarioPct: { fontSize: 10, marginTop: 1 },
+  alertStrip: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 10, marginHorizontal: 14, marginBottom: 14, borderRadius: 8 },
+  alertText: { fontSize: 11, fontWeight: '500' as const, flex: 1 },
+  expandedBody: { paddingHorizontal: 14, paddingBottom: 14 },
+  detailCard: { borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 8 },
+  platformHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  platformDot: { width: 8, height: 8, borderRadius: 4 },
+  detailTitle: { fontSize: 13, fontWeight: '700' as const },
+  freqLabel: { fontSize: 11, fontWeight: '600' as const, marginLeft: 'auto' as any },
+  detailRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
+  detailLabel: { fontSize: 12 },
+  detailValue: { fontSize: 12, fontWeight: '700' as const },
+  rhythmGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 14, paddingBottom: 8 },
+  rhythmCard: { flex: 1, minWidth: 70, borderWidth: 1, borderRadius: 10, padding: 10, alignItems: 'center' as const, gap: 4 },
+  rhythmCount: { fontSize: 18, fontWeight: '800' as const },
+  rhythmLabel: { fontSize: 10 },
+  progressSection: { paddingHorizontal: 14, paddingBottom: 14 },
+  progressHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  progressLabel: { fontSize: 12 },
+  progressValue: { fontSize: 14, fontWeight: '700' as const },
+  progressTrack: { height: 6, borderRadius: 3, overflow: 'hidden' as const },
+  progressFill: { height: 6, borderRadius: 3 },
+  taskStatusRow: { flexDirection: 'row', gap: 6, paddingHorizontal: 14, paddingBottom: 14 },
+  taskStatusChip: { flex: 1, borderRadius: 10, padding: 10, alignItems: 'center' as const },
+  taskStatusNum: { fontSize: 18, fontWeight: '800' as const },
+  taskStatusLabel: { fontSize: 10, marginTop: 2 },
+  taskItem: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 8, borderBottomWidth: 1 },
+  taskDot: { width: 8, height: 8, borderRadius: 4, marginTop: 5 },
+  taskTitle: { fontSize: 13, fontWeight: '600' as const },
+  taskMeta: { flexDirection: 'row', gap: 8, marginTop: 2 },
+  taskType: { fontSize: 11 },
+  taskPriority: { fontSize: 11, fontWeight: '700' as const, textTransform: 'uppercase' },
+  calendarRow: { flexDirection: 'row', gap: 12, paddingHorizontal: 14, paddingBottom: 14 },
+  calendarStat: { flex: 1, alignItems: 'center' as const },
+  calendarNum: { fontSize: 22, fontWeight: '800' as const },
+  calendarLabel: { fontSize: 11, marginTop: 2 },
+  diagSection: { marginBottom: 14, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#1F293720' },
+  diagHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  diagTitle: { fontSize: 13, fontWeight: '700' as const },
+  assumptionRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, paddingVertical: 3 },
+  assumptionDot: { width: 6, height: 6, borderRadius: 3, marginTop: 5 },
+  assumptionText: { fontSize: 12, flex: 1, lineHeight: 17 },
+  confBadgeSmall: { fontSize: 9, fontWeight: '800' as const, letterSpacing: 0.3 },
 });
