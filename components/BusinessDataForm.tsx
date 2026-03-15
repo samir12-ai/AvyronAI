@@ -31,6 +31,13 @@ const CONVERSION_CHANNELS = [
   { value: 'FORM', label: 'Form', icon: 'document-text-outline' as const },
 ] as const;
 
+const GOAL_TIMELINES = [
+  { value: '30', label: '30 days', icon: 'timer-outline' as const },
+  { value: '60', label: '60 days', icon: 'time-outline' as const },
+  { value: '90', label: '90 days', icon: 'calendar-outline' as const },
+  { value: '180', label: '6 months', icon: 'calendar-number-outline' as const },
+] as const;
+
 interface BusinessData {
   businessLocation: string;
   businessType: string;
@@ -41,6 +48,9 @@ interface BusinessData {
   monthlyBudget: string;
   funnelObjective: string;
   primaryConversionChannel: string;
+  goalTarget: string;
+  goalTimeline: string;
+  goalDescription: string;
 }
 
 const EMPTY_DATA: BusinessData = {
@@ -53,6 +63,9 @@ const EMPTY_DATA: BusinessData = {
   monthlyBudget: '',
   funnelObjective: '',
   primaryConversionChannel: '',
+  goalTarget: '',
+  goalTimeline: '',
+  goalDescription: '',
 };
 
 interface Props {
@@ -74,9 +87,18 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
 
   const campaignId = selectedCampaign?.selectedCampaignId;
 
+  const CORE_FIELDS: (keyof BusinessData)[] = [
+    'businessLocation', 'businessType', 'coreOffer', 'priceRange',
+    'targetAudienceAge', 'targetAudienceSegment', 'monthlyBudget',
+    'funnelObjective', 'primaryConversionChannel',
+  ];
+  const GOAL_FIELDS: (keyof BusinessData)[] = ['goalTarget', 'goalTimeline', 'goalDescription'];
+
   const isComplete = useCallback(() => {
-    return Object.values(data).every(v => v.trim().length > 0);
+    return CORE_FIELDS.every(f => data[f].trim().length > 0);
   }, [data]);
+
+  const goalsFilled = GOAL_FIELDS.filter(f => data[f].trim().length > 0).length;
 
   useEffect(() => {
     if (!campaignId) {
@@ -101,6 +123,9 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
             monthlyBudget: d.monthlyBudget || '',
             funnelObjective: d.funnelObjective || '',
             primaryConversionChannel: d.primaryConversionChannel || '',
+            goalTarget: d.goalTarget || '',
+            goalTimeline: d.goalTimeline || '',
+            goalDescription: d.goalDescription || '',
           });
           setSaved(true);
         }
@@ -249,8 +274,9 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
     );
   };
 
-  const filledCount = Object.values(data).filter(v => v.trim().length > 0).length;
-  const totalFields = 9;
+  const coreFilledCount = CORE_FIELDS.filter(f => data[f].trim().length > 0).length;
+  const filledCount = coreFilledCount + goalsFilled;
+  const totalFields = 12;
 
   return (
     <View style={[s.container, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
@@ -293,6 +319,20 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
 
       {renderChipSelector('funnelObjective', 'Funnel Objective', FUNNEL_OBJECTIVES)}
       {renderChipSelector('primaryConversionChannel', 'Primary Conversion Channel', CONVERSION_CHANNELS)}
+
+      <View style={[s.goalSection, { borderColor: colors.inputBorder + '60' }]}>
+        <View style={s.goalSectionHeader}>
+          <Ionicons name="flag-outline" size={16} color={goalsFilled === 3 ? colors.success : '#6366F1'} />
+          <Text style={[s.goalSectionTitle, { color: colors.text }]}>Goal Planning</Text>
+          {goalsFilled === 3 && <Ionicons name="checkmark-circle" size={14} color={colors.success} />}
+        </View>
+        <Text style={[s.goalSectionSubtitle, { color: colors.textSecondary }]}>
+          Set a specific target so MarketMind can calculate feasibility and build your funnel math
+        </Text>
+        {renderTextField('goalTarget', 'Goal Target Number', 'e.g. 50 new clients, $10,000 revenue, 500 leads', 'trending-up-outline')}
+        {renderChipSelector('goalTimeline', 'Goal Timeline', GOAL_TIMELINES)}
+        {renderTextField('goalDescription', 'Goal Description', 'e.g. Get 50 new coaching clients in 90 days through Instagram', 'document-text-outline', true)}
+      </View>
 
       {error ? (
         <View style={[s.errorWrap, { backgroundColor: colors.error + '12', borderColor: colors.error + '30' }]}>
@@ -449,6 +489,28 @@ const s = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '700' as const,
+  },
+  goalSection: {
+    borderTopWidth: 1,
+    paddingTop: 16,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  goalSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  goalSectionTitle: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+    flex: 1,
+  },
+  goalSectionSubtitle: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 14,
   },
   emptyWrap: {
     borderRadius: 16,

@@ -143,9 +143,19 @@ export async function checkPlanReadiness(campaignId: string, accountId: string):
 
   let goalSpecificity = 100;
   if (!campaign?.objective && !bizData?.funnelObjective) { goalSpecificity -= 40; missingItems.push("Primary goal/objective"); }
-  if (!campaign?.totalDays) {
+  const hasGoalTarget = bizData?.goalTarget && bizData.goalTarget.trim().length > 0;
+  const hasGoalTimeline = bizData?.goalTimeline && bizData.goalTimeline.trim().length > 0;
+  const hasGoalDescription = bizData?.goalDescription && bizData.goalDescription.trim().length > 0;
+  if (!hasGoalTarget) {
+    goalSpecificity -= 15;
+    assumptions.push({ item: "Goal target will be estimated from business data", confidence: "medium", impact: "medium" });
+  }
+  if (!hasGoalTimeline && !campaign?.totalDays) {
     goalSpecificity -= 20;
     assumptions.push({ item: "Time horizon assumed as 90 days", confidence: "medium", impact: "low" });
+  }
+  if (!hasGoalDescription && hasGoalTarget) {
+    goalSpecificity -= 5;
   }
 
   let funnelViability = 100;
@@ -201,7 +211,16 @@ export function registerPlanGateRoutes(app: Express) {
       const accountId = req.body.accountId || "default";
 
       const readiness = await checkPlanReadiness(campaignId, accountId);
-      res.json({ success: true, ...readiness });
+      res.json({
+        success: true,
+        ...readiness,
+        verdict: readiness.gate,
+        readinessScore: readiness.overallScore,
+        gaps: readiness.missingItems,
+        archetype: readiness.archetype.id,
+        archetypeDetail: readiness.archetype,
+        assumptions: readiness.assumptions.map(a => a.item),
+      });
     } catch (err: any) {
       console.error("[PlanGate] Check error:", err.message);
       res.status(500).json({ success: false, error: err.message });
@@ -212,7 +231,16 @@ export function registerPlanGateRoutes(app: Express) {
     try {
       const accountId = (req.query.accountId as string) || "default";
       const readiness = await checkPlanReadiness(req.params.campaignId, accountId);
-      res.json({ success: true, ...readiness });
+      res.json({
+        success: true,
+        ...readiness,
+        verdict: readiness.gate,
+        readinessScore: readiness.overallScore,
+        gaps: readiness.missingItems,
+        archetype: readiness.archetype.id,
+        archetypeDetail: readiness.archetype,
+        assumptions: readiness.assumptions.map(a => a.item),
+      });
     } catch (err: any) {
       console.error("[PlanGate] Fetch error:", err.message);
       res.status(500).json({ success: false, error: err.message });

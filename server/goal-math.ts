@@ -30,31 +30,39 @@ const GOAL_TYPE_MAP: Record<string, string> = {
 export function normalizeGoal(campaign: any, bizData: any): NormalizedGoal {
   const objective = campaign?.objective || bizData?.funnelObjective || "AWARENESS";
   const goalType = GOAL_TYPE_MAP[objective.toUpperCase()] || "reach_growth";
-  const totalDays = campaign?.totalDays || 90;
+  const totalDays = parseInt(bizData?.goalTimeline) || campaign?.totalDays || 90;
+
+  const userGoalTarget = bizData?.goalTarget ? parseInt(bizData.goalTarget.replace(/[^0-9]/g, "") || "0") : 0;
+  const userGoalDesc = bizData?.goalDescription?.trim() || "";
 
   let target = 0;
   let label = "";
 
-  switch (goalType) {
-    case "customer_acquisition":
-      target = parseInt(campaign?.targetCustomers) || 100;
-      label = `Acquire ${target} customers in ${totalDays} days`;
-      break;
-    case "lead_generation":
-      target = parseInt(campaign?.targetLeads) || 200;
-      label = `Generate ${target} leads in ${totalDays} days`;
-      break;
-    case "revenue_growth":
-      target = parseInt(campaign?.targetRevenue) || 10000;
-      label = `Generate $${target} revenue in ${totalDays} days`;
-      break;
-    case "audience_growth":
-      target = parseInt(campaign?.targetFollowers) || 5000;
-      label = `Grow audience by ${target} in ${totalDays} days`;
-      break;
-    default:
-      target = parseInt(campaign?.targetReach) || 50000;
-      label = `Reach ${target.toLocaleString()} people in ${totalDays} days`;
+  if (userGoalTarget > 0) {
+    target = userGoalTarget;
+    label = userGoalDesc || `Achieve ${target} ${goalType.replace(/_/g, " ")} in ${totalDays} days`;
+  } else {
+    switch (goalType) {
+      case "customer_acquisition":
+        target = parseInt(campaign?.targetCustomers) || 100;
+        label = `Acquire ${target} customers in ${totalDays} days`;
+        break;
+      case "lead_generation":
+        target = parseInt(campaign?.targetLeads) || 200;
+        label = `Generate ${target} leads in ${totalDays} days`;
+        break;
+      case "revenue_growth":
+        target = parseInt(campaign?.targetRevenue) || 10000;
+        label = `Generate $${target} revenue in ${totalDays} days`;
+        break;
+      case "audience_growth":
+        target = parseInt(campaign?.targetFollowers) || 5000;
+        label = `Grow audience by ${target} in ${totalDays} days`;
+        break;
+      default:
+        target = parseInt(campaign?.targetReach) || 50000;
+        label = `Reach ${target.toLocaleString()} people in ${totalDays} days`;
+    }
   }
 
   return {

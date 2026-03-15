@@ -158,8 +158,37 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
   const [miFreshnessDays, setMiFreshnessDays] = useState<number | null>(null);
   const [miChecking, setMiChecking] = useState(true);
 
+  const [gateResult, setGateResult] = useState<any>(null);
+  const [gateChecking, setGateChecking] = useState(false);
+
   const isMetaReal = metaConnection?.isConnected === true;
   const profileCampaignId = selectedCampaign?.selectedCampaignId;
+
+  const checkPlanGateReadiness = useCallback(async () => {
+    if (!profileCampaignId) return;
+    setGateChecking(true);
+    try {
+      const res = await fetch(getApiUrl('/api/plan-gate/check'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaignId: profileCampaignId, accountId: 'default' }),
+      });
+      if (res.ok) {
+        const data = await safeApiJson(res);
+        setGateResult(data);
+      }
+    } catch (err) {
+      console.error('[BuildThePlan] Plan gate check failed:', err);
+    } finally {
+      setGateChecking(false);
+    }
+  }, [profileCampaignId]);
+
+  useEffect(() => {
+    if (businessDataComplete) {
+      checkPlanGateReadiness();
+    }
+  }, [businessDataComplete, checkPlanGateReadiness]);
 
   const checkProfileCompleteness = useCallback(async () => {
     if (!profileCampaignId) {
@@ -917,6 +946,67 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
                 <Ionicons name="chevron-forward" size={18} color="#EF4444" />
               </Pressable>
             )}
+          </View>
+        )}
+
+        {businessDataComplete && !gateChecking && gateResult && (
+          <View style={{ marginTop: 16 }}>
+            <Text style={[s.sectionLabel, { color: colors.text }]}>Plan Readiness</Text>
+            <View style={[s.profileCompleteBadge, {
+              backgroundColor: gateResult.verdict === 'PASS' ? '#10B98112' :
+                gateResult.verdict === 'PASS_WITH_ASSUMPTIONS' ? '#F59E0B12' : '#EF444412',
+              borderColor: gateResult.verdict === 'PASS' ? '#10B98130' :
+                gateResult.verdict === 'PASS_WITH_ASSUMPTIONS' ? '#F59E0B30' : '#EF444430',
+            }]}>
+              <Ionicons
+                name={gateResult.verdict === 'PASS' ? 'checkmark-circle' :
+                  gateResult.verdict === 'PASS_WITH_ASSUMPTIONS' ? 'alert-circle' : 'close-circle'}
+                size={18}
+                color={gateResult.verdict === 'PASS' ? '#10B981' :
+                  gateResult.verdict === 'PASS_WITH_ASSUMPTIONS' ? '#F59E0B' : '#EF4444'}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={[s.profileCompleteText, {
+                  color: gateResult.verdict === 'PASS' ? '#10B981' :
+                    gateResult.verdict === 'PASS_WITH_ASSUMPTIONS' ? '#F59E0B' : '#EF4444',
+                }]}>
+                  {gateResult.verdict === 'PASS' ? 'Ready to Build' :
+                    gateResult.verdict === 'PASS_WITH_ASSUMPTIONS' ? 'Ready (with assumptions)' : 'Missing Information'}
+                </Text>
+                {gateResult.readinessScore !== undefined && (
+                  <Text style={[s.profileIncompleteDesc, { color: colors.textMuted }]}>
+                    Score: {gateResult.readinessScore}/100 | {gateResult.archetype?.toUpperCase() || 'Unknown'} archetype
+                  </Text>
+                )}
+              </View>
+            </View>
+            {gateResult.gaps && gateResult.gaps.length > 0 && (
+              <View style={{ marginTop: 6, paddingHorizontal: 4 }}>
+                {gateResult.gaps.slice(0, 3).map((gap: string, i: number) => (
+                  <Text key={i} style={[{ fontSize: 11, lineHeight: 16, color: colors.textMuted }]}>
+                    {'\u2022'} {gap}
+                  </Text>
+                ))}
+              </View>
+            )}
+            {gateResult.assumptions && gateResult.assumptions.length > 0 && (
+              <View style={{ marginTop: 6, paddingHorizontal: 4 }}>
+                <Text style={{ fontSize: 10, fontWeight: '600' as const, color: '#F59E0B', marginBottom: 2, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>
+                  Assumptions Made
+                </Text>
+                {gateResult.assumptions.slice(0, 3).map((a: string, i: number) => (
+                  <Text key={i} style={[{ fontSize: 11, lineHeight: 16, color: colors.textMuted }]}>
+                    {'\u2022'} {a}
+                  </Text>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+        {gateChecking && (
+          <View style={[s.ciLoadingWrap, { marginTop: 16 }]}>
+            <ActivityIndicator size="small" color={colors.accent} />
+            <Text style={[s.ciLoadingText, { color: colors.textSecondary }]}>Checking plan readiness...</Text>
           </View>
         )}
 

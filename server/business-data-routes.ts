@@ -90,7 +90,7 @@ export function registerBusinessDataRoutes(app: Express) {
         });
       }
 
-      const dataValues = {
+      const dataValues: Record<string, any> = {
         businessLocation: req.body.businessLocation,
         businessType: req.body.businessType,
         coreOffer: req.body.coreOffer,
@@ -102,6 +102,10 @@ export function registerBusinessDataRoutes(app: Express) {
         primaryConversionChannel,
         updatedAt: new Date(),
       };
+
+      if (req.body.goalTarget !== undefined) dataValues.goalTarget = String(req.body.goalTarget);
+      if (req.body.goalTimeline !== undefined) dataValues.goalTimeline = String(req.body.goalTimeline);
+      if (req.body.goalDescription !== undefined) dataValues.goalDescription = String(req.body.goalDescription);
 
       const existing = await db
         .select()

@@ -1249,6 +1249,9 @@ export const businessDataLayer = pgTable("business_data_layer", {
   monthlyBudget: text("monthly_budget").notNull(),
   funnelObjective: text("funnel_objective").notNull(),
   primaryConversionChannel: text("primary_conversion_channel").notNull(),
+  goalTarget: text("goal_target").default(""),
+  goalTimeline: text("goal_timeline").default(""),
+  goalDescription: text("goal_description").default(""),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
