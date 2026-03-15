@@ -190,6 +190,22 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
   }));
   const hash = computeCompetitorHash(competitorInputs);
 
+  const STALE_QUEUED_THRESHOLD_MS = 10 * 60 * 1000;
+  const staleQueuedCutoff = new Date(Date.now() - STALE_QUEUED_THRESHOLD_MS);
+
+  const staleQueued = await db.update(miFetchJobs)
+    .set({ status: "FAILED", error: "Auto-expired: stuck in QUEUED for >10 minutes", completedAt: new Date() })
+    .where(and(
+      eq(miFetchJobs.accountId, accountId),
+      eq(miFetchJobs.campaignId, campaignId),
+      eq(miFetchJobs.status, "QUEUED"),
+      sql`${miFetchJobs.createdAt} < ${staleQueuedCutoff}`,
+    ))
+    .returning({ id: miFetchJobs.id });
+  if (staleQueued.length > 0) {
+    console.log(`[FetchOrch] STALE_QUEUED_CLEANUP: Expired ${staleQueued.length} stale QUEUED jobs for ${lockKey}: ${staleQueued.map(j => j.id).join(", ")}`);
+  }
+
   const existingActive = await db.select().from(miFetchJobs)
     .where(and(
       eq(miFetchJobs.accountId, accountId),
@@ -1501,19 +1517,36 @@ function recordPromotion(): void {
 
 const STALE_JOB_TIMEOUT_MS = 30 * 60 * 1000;
 
+const STALE_QUEUED_GLOBAL_THRESHOLD_MS = 15 * 60 * 1000;
+
 async function recoverStaleRunningJobs(): Promise<number> {
-  const staleThreshold = new Date(Date.now() - STALE_JOB_TIMEOUT_MS);
-  const staleJobs = await db.update(miFetchJobs)
-    .set({ status: "FAILED", error: "Auto-recovered: stuck in RUNNING for >30 minutes", completedAt: new Date() })
+  const now = new Date();
+  const staleRunningThreshold = new Date(Date.now() - STALE_JOB_TIMEOUT_MS);
+  const staleQueuedThreshold = new Date(Date.now() - STALE_QUEUED_GLOBAL_THRESHOLD_MS);
+
+  const staleRunning = await db.update(miFetchJobs)
+    .set({ status: "FAILED", error: "Auto-recovered: stuck in RUNNING for >30 minutes", completedAt: now })
     .where(and(
       eq(miFetchJobs.status, "RUNNING"),
-      sql`${miFetchJobs.createdAt} < ${staleThreshold}`,
+      sql`${miFetchJobs.createdAt} < ${staleRunningThreshold}`,
     ))
     .returning({ id: miFetchJobs.id });
-  if (staleJobs.length > 0) {
-    console.log(`[QueueProcessor] STALE_RECOVERY: Auto-recovered ${staleJobs.length} stuck RUNNING jobs: ${staleJobs.map(j => j.id).join(", ")}`);
+  if (staleRunning.length > 0) {
+    console.log(`[QueueProcessor] STALE_RECOVERY: Auto-recovered ${staleRunning.length} stuck RUNNING jobs: ${staleRunning.map(j => j.id).join(", ")}`);
   }
-  return staleJobs.length;
+
+  const staleQueued = await db.update(miFetchJobs)
+    .set({ status: "FAILED", error: "Auto-expired: stuck in QUEUED for >15 minutes", completedAt: now })
+    .where(and(
+      eq(miFetchJobs.status, "QUEUED"),
+      sql`${miFetchJobs.createdAt} < ${staleQueuedThreshold}`,
+    ))
+    .returning({ id: miFetchJobs.id });
+  if (staleQueued.length > 0) {
+    console.log(`[QueueProcessor] STALE_QUEUED_RECOVERY: Expired ${staleQueued.length} stuck QUEUED jobs: ${staleQueued.map(j => j.id).join(", ")}`);
+  }
+
+  return staleRunning.length + staleQueued.length;
 }
 
 async function processJobQueue(): Promise<void> {
