@@ -51,10 +51,16 @@ export interface SynthesizedPlan {
   };
   competitiveWatch: {
     targets: Array<{ competitor: string; watchMetrics: string[]; checkFrequency: string }>;
+    strategyFeed?: Array<{ insight: string; actionableResponse: string; priority: string }>;
   };
   riskTriggers: {
-    triggers: Array<{ trigger: string; condition: string; action: string; severity: string }>;
+    triggers: Array<{ trigger: string; condition: string; action: string; severity: string; optimizationPlaybook?: string }>;
     escalationPath: string[];
+    earlyWarningSystem?: Array<{ signal: string; threshold: string; response: string }>;
+  };
+  executionBlueprintDnaLink?: {
+    contentPillarToDna?: Array<{ pillar: string; dnaElements: string[]; hookApproach: string; ctaStyle: string }>;
+    weeklyDnaApplication?: string;
   };
 }
 
@@ -200,12 +206,14 @@ GOAL DECOMPOSITION (use these numbers as the source of truth):
   Time Horizon: ${goal.timeHorizonDays} days
   Feasibility: ${feasibility.verdict} (${feasibility.score}/100)
 
-FUNNEL MATH:
-  Required Reach: ${funnel.requiredReach.toLocaleString()}
-  Required Leads: ${funnel.requiredLeads.toLocaleString()}
-  Required Qualified Leads: ${funnel.requiredQualifiedLeads.toLocaleString()}
-  Close Rate: ${(funnel.closeRate * 100).toFixed(1)}%
-  Content-to-Lead Rate: ${(funnel.contentToLeadRate * 100).toFixed(1)}%
+FUNNEL MATH (full acquisition flow):
+  Reach: ${funnel.requiredReach.toLocaleString()}
+  → Clicks (CTR ${(funnel.ctr * 100).toFixed(1)}%): ${funnel.requiredClicks.toLocaleString()}
+  → Conversations (${(funnel.clickToConversationRate * 100).toFixed(0)}%): ${funnel.requiredConversations.toLocaleString()}
+  → Leads (${(funnel.conversationToLeadRate * 100).toFixed(0)}%): ${funnel.requiredLeads.toLocaleString()}
+  → Qualified Leads (20%): ${funnel.requiredQualifiedLeads.toLocaleString()}
+  → Closed Clients (${(funnel.leadToClientRate * 100).toFixed(1)}%): ${funnel.requiredClosedClients}
+  Close Rate: ${(funnel.closeRate * 100).toFixed(1)}%${feasibility.budgetAdjustment?.needed ? `\n\nBUDGET ADJUSTMENT REQUIRED:\n  ${feasibility.budgetAdjustment.explanation}\n  Adjustment Type: ${feasibility.budgetAdjustment.type}\n  Affordable Leads: ${feasibility.budgetAdjustment.affordableLeads}` : ""}
 
 BUSINESS ARCHETYPE: ${archetype?.name || businessType}
   Funnel Type: ${archetype?.funnelArchetype || "standard"}
@@ -216,6 +224,15 @@ BUSINESS ARCHETYPE: ${archetype?.name || businessType}
 
 IMPORTANT: Content volumes and distribution MUST be derived from the funnel math above.
 The plan must explain WHY each content type volume was chosen based on the goal decomposition.
+
+CONTENT DISTRIBUTION RULES (platform algorithm-aware):
+On Instagram and similar platforms, reach and discovery are primarily driven by short-form video (Reels).
+Adjust content distribution based on the funnel objective:
+- AWARENESS / REACH objectives: Reels 70%, Carousels 20%, Posts 10%
+- LEAD GENERATION objectives: Reels 50%, Carousels 35%, Posts 15%
+- SALES / CONVERSION objectives: Reels 40%, Carousels 40%, Posts 20%
+- DEFAULT distribution: Reels 60%, Carousels 30%, Posts 10%
+The reelsPerWeek should always be the highest count. Never generate plans where posts exceed reels.
 `;
   }
 
@@ -269,11 +286,17 @@ Generate a complete execution plan with these 9 sections. Return ONLY valid JSON
     "reportingCadence": "Weekly review, monthly deep-dive"
   },
   "competitiveWatch": {
-    "targets": [{"competitor":"name","watchMetrics":["metric"],"checkFrequency":"weekly"}]
+    "targets": [{"competitor":"name","watchMetrics":["metric"],"checkFrequency":"weekly"}],
+    "strategyFeed": [{"insight":"competitive insight that should influence your strategy","actionableResponse":"how to respond to this competitive signal","priority":"high|medium|low"}]
   },
   "riskTriggers": {
-    "triggers": [{"trigger":"name","condition":"when","action":"what","severity":"high"}],
-    "escalationPath": ["step1","step2"]
+    "triggers": [{"trigger":"name","condition":"when this triggers","action":"specific optimization action to take","severity":"high|medium|low","optimizationPlaybook":"detailed step-by-step response plan"}],
+    "escalationPath": ["step1","step2"],
+    "earlyWarningSystem": [{"signal":"what to watch for","threshold":"when to act","response":"immediate action"}]
+  },
+  "executionBlueprintDnaLink": {
+    "contentPillarToDna": [{"pillar":"content pillar name","dnaElements":["which DNA components power this pillar"],"hookApproach":"recommended hook style","ctaStyle":"CTA approach for this pillar"}],
+    "weeklyDnaApplication": "How to apply Content DNA rules across the weekly content schedule"
   }
 }`;
 
@@ -300,6 +323,7 @@ function buildDeterministicPlan(businessData: any, campaign: any, objective: str
   const businessType = businessData?.businessType || "general business";
   const location = campaign?.location || "target market";
   const budget = businessData?.monthlyBudget || "available budget";
+  const objectiveUpper = objective.toUpperCase();
 
   return {
     strategicSummary: {
@@ -320,12 +344,12 @@ function buildDeterministicPlan(businessData: any, campaign: any, objective: str
       performanceExpectations: "Steady improvement over 30-day period with weekly benchmarks",
     },
     contentDistribution: {
-      reelsPerWeek: 3,
-      postsPerWeek: 2,
-      storiesPerDay: 1,
-      carouselsPerWeek: 1,
+      reelsPerWeek: objectiveUpper === "AWARENESS" || objectiveUpper === "FOLLOWERS" ? 5 : objectiveUpper === "SALES" || objectiveUpper === "REVENUE" ? 4 : 4,
+      postsPerWeek: 1,
+      storiesPerDay: 2,
+      carouselsPerWeek: objectiveUpper === "SALES" || objectiveUpper === "REVENUE" ? 3 : 2,
       videosPerWeek: 0,
-      rationale: `Balanced content mix optimized for ${objective.toLowerCase()} objective`,
+      rationale: `Platform-aware distribution biased toward Reels for algorithm reach. ${objectiveUpper === "AWARENESS" ? "Reels 70%, Carousels 20%, Posts 10%" : objectiveUpper === "SALES" || objectiveUpper === "REVENUE" ? "Reels 50%, Carousels 35%, Posts 15%" : "Reels 60%, Carousels 30%, Posts 10%"} — short-form video drives discovery on Instagram.`,
       contentPillars: [
         { pillar: "Educational", percentage: "40%", examples: ["How-to content", "Tips and insights"] },
         { pillar: "Social Proof", percentage: "30%", examples: ["Testimonials", "Case studies"] },
@@ -361,14 +385,30 @@ function buildDeterministicPlan(businessData: any, campaign: any, objective: str
       targets: [
         { competitor: "Top competitor", watchMetrics: ["Posting frequency", "Engagement rate", "Content types"], checkFrequency: "weekly" },
       ],
+      strategyFeed: [
+        { insight: "Competitors increasing Reels output", actionableResponse: "Match or exceed Reels volume, focus on differentiated hooks", priority: "high" },
+        { insight: "Market shifting toward educational content", actionableResponse: "Add 1 educational carousel per week to content mix", priority: "medium" },
+      ],
     },
     riskTriggers: {
       triggers: [
-        { trigger: "Engagement Drop", condition: "Below 2% for 2 weeks", action: "Review content mix", severity: "high" },
-        { trigger: "Reach Plateau", condition: "Flat for 3 weeks", action: "Test new formats", severity: "medium" },
-        { trigger: "Budget Overrun", condition: "Spend exceeds plan by 20%", action: "Pause paid promotion", severity: "critical" },
+        { trigger: "Engagement Drop", condition: "Below 2% for 2 weeks", action: "Review content mix", severity: "high", optimizationPlaybook: "1. Audit last 10 posts for hook effectiveness 2. A/B test 3 new hook styles 3. Shift 20% of reels to trending formats 4. Re-evaluate posting times" },
+        { trigger: "Reach Plateau", condition: "Flat for 3 weeks", action: "Test new formats", severity: "medium", optimizationPlaybook: "1. Introduce carousel content 2. Cross-promote to Stories 3. Test collaboration posts 4. Increase Reels proportion by 20%" },
+        { trigger: "Budget Overrun", condition: "Spend exceeds plan by 20%", action: "Pause paid promotion", severity: "critical", optimizationPlaybook: "1. Pause all paid campaigns immediately 2. Audit CPA by channel 3. Reallocate to organic-only for 1 week 4. Resume with tighter daily caps" },
       ],
       escalationPath: ["Content review", "Strategy adjustment", "Full plan revision"],
+      earlyWarningSystem: [
+        { signal: "Declining save rate", threshold: "Save rate drops 30% week-over-week", response: "Increase value-driven content proportion" },
+        { signal: "Rising CPA", threshold: "CPA exceeds target by 15%", response: "Pause lowest-performing ad sets and reallocate" },
+      ],
+    },
+    executionBlueprintDnaLink: {
+      contentPillarToDna: [
+        { pillar: "Authority", dnaElements: ["messagingCore", "narrativeDna"], hookApproach: "Expertise-led hook", ctaStyle: "Soft authority CTA" },
+        { pillar: "Engagement", dnaElements: ["hookDna", "contentAngleDna"], hookApproach: "Pattern interrupt", ctaStyle: "Comment/share CTA" },
+        { pillar: "Conversion", dnaElements: ["ctaDna", "executionRules"], hookApproach: "Problem-solution hook", ctaStyle: "Direct action CTA" },
+      ],
+      weeklyDnaApplication: "Apply messaging core tone to all content. Use hookDna patterns for Reels. Apply ctaDna rules to conversion-focused posts. Follow executionRules always/never lists.",
     },
   };
 }

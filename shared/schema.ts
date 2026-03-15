@@ -2016,6 +2016,7 @@ export const contentDna = pgTable("content_dna", {
   formatDna: text("format_dna"),
   executionRules: text("execution_rules"),
   snapshot: text("snapshot"),
+  contentInstructions: text("content_instructions"),
   status: text("status").notNull().default("active"),
   rootBundleId: varchar("root_bundle_id"),
   rootBundleVersion: integer("root_bundle_version"),

@@ -87,6 +87,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               if (dna.executionRules.alwaysInclude?.length) parts.push(`Always include: ${dna.executionRules.alwaysInclude.join(", ")}`);
               if (dna.executionRules.neverDo?.length) parts.push(`Never do: ${dna.executionRules.neverDo.join(", ")}`);
             }
+            if (dna.contentInstructions) {
+              const ci = dna.contentInstructions;
+              if (ci.hookGuide?.structure) parts.push(`Hook construction: ${ci.hookGuide.structure}`);
+              if (ci.hookGuide?.examples?.length) parts.push(`Hook examples: ${ci.hookGuide.examples.join(" | ")}`);
+              if (ci.narrativeBreakdown?.postStructure) parts.push(`Post structure: ${ci.narrativeBreakdown.postStructure}`);
+              if (ci.narrativeBreakdown?.carouselFlow) parts.push(`Carousel flow: ${ci.narrativeBreakdown.carouselFlow}`);
+              if (ci.ctaPlacement?.softVsHard) parts.push(`CTA strategy: ${ci.ctaPlacement.softVsHard}`);
+            }
             dnaGuidance = parts.join("\n");
           }
         } catch {}
@@ -282,6 +290,15 @@ Make sure the content works well across all the specified platforms.`;
             if (dna.executionRules) {
               if (dna.executionRules.alwaysInclude?.length) parts.push(`Always include: ${dna.executionRules.alwaysInclude.join(", ")}`);
               if (dna.executionRules.neverDo?.length) parts.push(`Never do: ${dna.executionRules.neverDo.join(", ")}`);
+            }
+            if (dna.contentInstructions) {
+              const ci = dna.contentInstructions;
+              if (ci.hookGuide?.structure) parts.push(`Hook construction: ${ci.hookGuide.structure}`);
+              if (ci.hookGuide?.examples?.length) parts.push(`Hook examples: ${ci.hookGuide.examples.join(" | ")}`);
+              if (ci.narrativeBreakdown?.reelScript) parts.push(`Reel narrative: ${ci.narrativeBreakdown.reelScript}`);
+              if (ci.ctaPlacement?.reelCta) parts.push(`Reel CTA: ${ci.ctaPlacement.reelCta}`);
+              if (ci.visualDirection?.talkingHead) parts.push(`Visual: ${ci.visualDirection.talkingHead}`);
+              if (ci.visualDirection?.bRoll) parts.push(`B-roll: ${ci.visualDirection.bRoll}`);
             }
             reelDnaRules = parts.join("\n");
           }

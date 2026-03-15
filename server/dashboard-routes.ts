@@ -930,6 +930,9 @@ Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simul
           if (dna.visualDna) dnaParts.push(`Visual DNA: ${JSON.stringify(dna.visualDna).substring(0, 400)}`);
           if (dna.formatDna) dnaParts.push(`Format DNA: ${JSON.stringify(dna.formatDna).substring(0, 400)}`);
           if (dna.executionRules) dnaParts.push(`Execution Rules: ${JSON.stringify(dna.executionRules).substring(0, 400)}`);
+          if (dna.contentInstructions) {
+            dnaParts.push(`Content Instructions (production manual): ${JSON.stringify(dna.contentInstructions).substring(0, 1200)}`);
+          }
           dnaContext = dnaParts.join("\n");
         }
       } catch {}
@@ -941,7 +944,7 @@ Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simul
       if (gdExplain) {
         const fm = safeJson(gdExplain.funnelMath);
         const ga = safeJson(gdExplain.assumptions) || [];
-        contextParts.push(`GOAL DECOMPOSITION:\nGoal: ${gdExplain.goalLabel}\nType: ${gdExplain.goalType} | Target: ${gdExplain.goalTarget} | Timeline: ${gdExplain.timeHorizonDays} days\nFeasibility: ${gdExplain.feasibility} (${gdExplain.feasibilityScore}/100) | Confidence: ${gdExplain.confidenceScore}/100\nExplanation: ${gdExplain.feasibilityExplanation || "N/A"}\nFunnel Math: Reach=${fm?.requiredReach}, Leads=${fm?.requiredLeads}, QualifiedLeads=${fm?.requiredQualifiedLeads}, ConversionRate=${fm?.conversionRate}, CloseRate=${fm?.closeRate}\nAssumptions: ${ga.length > 0 ? ga.join("; ") : "None"}`);
+        contextParts.push(`GOAL DECOMPOSITION:\nGoal: ${gdExplain.goalLabel}\nType: ${gdExplain.goalType} | Target: ${gdExplain.goalTarget} | Timeline: ${gdExplain.timeHorizonDays} days\nFeasibility: ${gdExplain.feasibility} (${gdExplain.feasibilityScore}/100) | Confidence: ${gdExplain.confidenceScore}/100\nExplanation: ${gdExplain.feasibilityExplanation || "N/A"}\nFull Funnel: Reach=${fm?.requiredReach} → Clicks=${fm?.requiredClicks || "N/A"} (CTR ${fm?.ctr ? (fm.ctr * 100).toFixed(1) + "%" : "N/A"}) → Conversations=${fm?.requiredConversations || "N/A"} → Leads=${fm?.requiredLeads} → QualifiedLeads=${fm?.requiredQualifiedLeads} → ClosedClients=${fm?.requiredClosedClients || "N/A"}\nRates: CloseRate=${fm?.closeRate}, ConversionRate=${fm?.conversionRate}, CTR=${fm?.ctr || "N/A"}\nAssumptions: ${ga.length > 0 ? ga.join("; ") : "None"}`);
       }
       if (simExplain) {
         const cons = safeJson(simExplain.conservativeCase);

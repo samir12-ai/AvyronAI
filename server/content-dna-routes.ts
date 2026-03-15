@@ -251,10 +251,35 @@ Synthesize ALL of this into a structured Content DNA with these 8 sections. Retu
     "contentAngle": "string (short)",
     "formatPriority": "string (short)",
     "toneStyle": "string (short)"
+  },
+  "contentInstructions": {
+    "hookGuide": {
+      "structure": "Step-by-step hook construction guide",
+      "examples": ["3 specific hook scripts tailored to this business"],
+      "avoidPatterns": ["What NOT to open with"]
+    },
+    "narrativeBreakdown": {
+      "reelScript": "Beat-by-beat reel narrative structure (e.g. Problem 0-3s → Educate 3-12s → Proof 12-20s → CTA 20-25s)",
+      "carouselFlow": "Slide-by-slide carousel structure",
+      "postStructure": "Opening → Body → CTA post format"
+    },
+    "ctaPlacement": {
+      "reelCta": "When and how to place CTA in reels",
+      "carouselCta": "CTA slide strategy",
+      "storyCta": "Story CTA approach",
+      "softVsHard": "When to use soft vs direct CTA"
+    },
+    "visualDirection": {
+      "talkingHead": "Guidelines for talking head content",
+      "bRoll": "B-roll and proof footage direction",
+      "textOverlays": "Text overlay style and placement",
+      "thumbnailStrategy": "Cover image / thumbnail guidance"
+    }
   }
 }
 
-Make every field specific to THIS business. No generic marketing advice. Use the engine data to derive precise, actionable guidance.`;
+Make every field specific to THIS business. No generic marketing advice. Use the engine data to derive precise, actionable guidance.
+The contentInstructions section must be a practical content production manual — specific enough that a content creator can follow it without additional context.`;
 
   const response = await aiChat({
     model: "gpt-4.1-mini",
@@ -290,6 +315,7 @@ Make every field specific to THIS business. No generic marketing advice. Use the
     formatDna: JSON.stringify(parsed.formatDna),
     executionRules: JSON.stringify(parsed.executionRules),
     snapshot: JSON.stringify(parsed.snapshot),
+    contentInstructions: parsed.contentInstructions ? JSON.stringify(parsed.contentInstructions) : null,
     status: "active",
     rootBundleId: rootBundleId || null,
     rootBundleVersion: rootBundleVersion || null,
@@ -323,6 +349,7 @@ export async function getLatestContentDna(campaignId: string, accountId: string)
     visualDna: safeJson(row.visualDna),
     formatDna: safeJson(row.formatDna),
     executionRules: safeJson(row.executionRules),
+    contentInstructions: safeJson(row.contentInstructions),
     snapshot: safeJson(row.snapshot),
     generatedAt: row.generatedAt,
   };

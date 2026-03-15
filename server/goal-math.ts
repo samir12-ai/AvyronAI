@@ -83,57 +83,142 @@ export function computeFunnelMath(goal: NormalizedGoal, bizData: any): {
   middleFunnel: number;
   bottomFunnel: number;
   requiredReach: number;
+  requiredClicks: number;
+  requiredConversations: number;
   requiredLeads: number;
   requiredQualifiedLeads: number;
+  requiredClosedClients: number;
   closeRate: number;
   conversionRate: number;
   contentToLeadRate: number;
+  ctr: number;
+  clickToConversationRate: number;
+  conversationToLeadRate: number;
+  leadToClientRate: number;
 } {
   const closeRate = parseFloat(bizData?.closeRate) || 0.10;
   const conversionRate = parseFloat(bizData?.conversionRate) || 0.02;
   const contentToLeadRate = 0.02;
+  const ctr = parseFloat(bizData?.ctr) || 0.025;
+  const clickToConversationRate = parseFloat(bizData?.clickToConversationRate) || 0.30;
+  const conversationToLeadRate = parseFloat(bizData?.conversationToLeadRate) || 0.50;
+  const leadToClientRate = closeRate;
 
-  let requiredCustomers = goal.target;
-  if (goal.goalType === "lead_generation") requiredCustomers = Math.ceil(goal.target * closeRate);
-  if (goal.goalType === "reach_growth") requiredCustomers = 0;
+  const qualificationRate = 0.2;
+  let requiredLeads: number;
+  let requiredQualifiedLeads: number;
+  let requiredClosedClients: number;
 
-  const requiredQualifiedLeads = requiredCustomers > 0 ? Math.ceil(requiredCustomers / closeRate) : 0;
-  const requiredLeads = requiredQualifiedLeads > 0 ? Math.ceil(requiredQualifiedLeads / 0.2) : goal.target;
-  const requiredReach = Math.ceil(requiredLeads / contentToLeadRate);
+  if (goal.goalType === "lead_generation") {
+    requiredLeads = goal.target;
+    requiredQualifiedLeads = Math.ceil(requiredLeads * qualificationRate);
+    requiredClosedClients = Math.ceil(requiredQualifiedLeads * leadToClientRate);
+  } else if (goal.goalType === "reach_growth") {
+    requiredLeads = 0;
+    requiredQualifiedLeads = 0;
+    requiredClosedClients = 0;
+  } else {
+    requiredClosedClients = goal.target;
+    requiredQualifiedLeads = Math.ceil(requiredClosedClients / leadToClientRate);
+    requiredLeads = Math.ceil(requiredQualifiedLeads / qualificationRate);
+  }
+
+  const requiredConversations = requiredLeads > 0 ? Math.ceil(requiredLeads / conversationToLeadRate) : 0;
+  const requiredClicks = requiredConversations > 0 ? Math.ceil(requiredConversations / clickToConversationRate) : (goal.goalType === "reach_growth" ? goal.target : Math.ceil(requiredLeads / contentToLeadRate));
+  const requiredReach = requiredClicks > 0 ? Math.ceil(requiredClicks / ctr) : goal.target;
 
   return {
     topOfFunnel: requiredReach,
     middleFunnel: requiredLeads,
     bottomFunnel: requiredQualifiedLeads,
     requiredReach,
+    requiredClicks,
+    requiredConversations,
     requiredLeads,
     requiredQualifiedLeads,
+    requiredClosedClients,
     closeRate,
     conversionRate,
     contentToLeadRate,
+    ctr,
+    clickToConversationRate,
+    conversationToLeadRate,
+    leadToClientRate,
   };
+}
+
+export interface BudgetAdjustment {
+  needed: boolean;
+  type: "reduce_target" | "extend_timeline" | "increase_budget" | "none";
+  originalTarget: number;
+  adjustedTarget: number;
+  originalTimeline: number;
+  adjustedTimeline: number;
+  requiredBudget: number;
+  affordableLeads: number;
+  explanation: string;
 }
 
 export function checkFeasibility(
   goal: NormalizedGoal,
   funnel: ReturnType<typeof computeFunnelMath>,
   bizData: any
-): { verdict: string; score: number; explanation: string; constraints: string[] } {
+): { verdict: string; score: number; explanation: string; constraints: string[]; budgetAdjustment: BudgetAdjustment } {
   const constraints: string[] = [];
   let score = 100;
 
   const monthlyBudget = parseFloat(bizData?.monthlyBudget?.replace(/[^0-9.]/g, "") || "0");
   const months = Math.ceil(goal.timeHorizonDays / 30);
 
+  let budgetAdjustment: BudgetAdjustment = {
+    needed: false,
+    type: "none",
+    originalTarget: goal.target,
+    adjustedTarget: goal.target,
+    originalTimeline: goal.timeHorizonDays,
+    adjustedTimeline: goal.timeHorizonDays,
+    requiredBudget: 0,
+    affordableLeads: funnel.requiredLeads,
+    explanation: "Budget is sufficient for the current plan.",
+  };
+
   if (monthlyBudget > 0 && funnel.requiredLeads > 0) {
     const expectedCpl = monthlyBudget > 500 ? 5 : 15;
-    const affordableLeads = Math.floor((monthlyBudget * months) / expectedCpl);
-    if (affordableLeads < funnel.requiredLeads * 0.5) {
-      score -= 30;
-      constraints.push(`Budget may only support ~${affordableLeads} leads vs ${funnel.requiredLeads} required`);
-    } else if (affordableLeads < funnel.requiredLeads) {
-      score -= 15;
-      constraints.push(`Budget is tight — may support ~${affordableLeads} of ${funnel.requiredLeads} needed leads`);
+    const totalBudget = monthlyBudget * months;
+    const affordableLeads = Math.floor(totalBudget / expectedCpl);
+    const requiredBudget = Math.ceil(funnel.requiredLeads * expectedCpl);
+
+    if (affordableLeads < funnel.requiredLeads) {
+      budgetAdjustment.needed = true;
+      budgetAdjustment.affordableLeads = affordableLeads;
+      budgetAdjustment.requiredBudget = requiredBudget;
+
+      const budgetGap = requiredBudget - totalBudget;
+      const affordableRatio = affordableLeads / funnel.requiredLeads;
+
+      if (affordableRatio < 0.5) {
+        score -= 30;
+        constraints.push(`Budget can only support ~${affordableLeads} leads vs ${funnel.requiredLeads} required (gap: $${budgetGap})`);
+
+        const adjustedTarget = Math.max(1, Math.floor(goal.target * affordableRatio));
+        const extendedMonths = Math.ceil(funnel.requiredLeads / (affordableLeads / months));
+        const extendedDays = extendedMonths * 30;
+
+        if (extendedDays <= goal.timeHorizonDays * 3) {
+          budgetAdjustment.type = "extend_timeline";
+          budgetAdjustment.adjustedTimeline = extendedDays;
+          budgetAdjustment.explanation = `Budget supports ${affordableLeads} leads in ${months} months. Extending timeline to ${extendedMonths} months to reach ${funnel.requiredLeads} leads, or increase monthly budget to $${Math.ceil(requiredBudget / months)}.`;
+        } else {
+          budgetAdjustment.type = "reduce_target";
+          budgetAdjustment.adjustedTarget = adjustedTarget;
+          budgetAdjustment.explanation = `Budget cannot realistically support ${goal.target} target. Adjusted to ${adjustedTarget} (achievable with $${totalBudget} budget at $${expectedCpl} CPL). Alternatively, increase budget to $${Math.ceil(requiredBudget / months)}/month.`;
+        }
+      } else {
+        score -= 15;
+        constraints.push(`Budget is tight — supports ~${affordableLeads} of ${funnel.requiredLeads} needed leads`);
+        budgetAdjustment.type = "increase_budget";
+        budgetAdjustment.explanation = `Budget is $${budgetGap} short. Recommend increasing monthly budget to $${Math.ceil(requiredBudget / months)} for full lead coverage.`;
+      }
     }
   }
 
@@ -164,7 +249,7 @@ export function checkFeasibility(
     ? `The goal is challenging. ${constraints[0] || "Consider adjusting timeline or budget."}`
     : `The goal may not be achievable. ${constraints.join(". ")}.`;
 
-  return { verdict, score, explanation, constraints };
+  return { verdict, score, explanation, constraints, budgetAdjustment };
 }
 
 export async function generateSimulation(
@@ -177,6 +262,11 @@ export async function generateSimulation(
   bizData: any,
   rootBundleId: string | null = null
 ) {
+  const monthlyBudget = parseFloat(bizData?.monthlyBudget?.replace(/[^0-9.]/g, "") || "0");
+  const budgetInfo = monthlyBudget > 0
+    ? `Current Monthly Budget: $${monthlyBudget}\nBudget x1.5: $${Math.round(monthlyBudget * 1.5)}\nBudget x2: $${Math.round(monthlyBudget * 2)}`
+    : `Budget: ${bizData?.monthlyBudget || "Not specified"}`;
+
   const prompt = `You are a marketing growth simulator. Based on the following business and goal data, generate 3 growth scenarios.
 
 Goal: ${goal.label}
@@ -185,11 +275,20 @@ Target: ${goal.target}
 Time Horizon: ${goal.timeHorizonDays} days
 Feasibility: ${feasibility.verdict} (${feasibility.score}/100)
 Business Type: ${bizData?.businessType || "general"}
-Budget: ${bizData?.monthlyBudget || "Not specified"}
+${budgetInfo}
 Channel: ${bizData?.primaryConversionChannel || "Not specified"}
-Required Reach: ${funnel.requiredReach}
-Required Leads: ${funnel.requiredLeads}
+Full Funnel: Reach=${funnel.requiredReach} → Clicks=${funnel.requiredClicks} → Conversations=${funnel.requiredConversations} → Leads=${funnel.requiredLeads} → QualifiedLeads=${funnel.requiredQualifiedLeads} → Clients=${funnel.requiredClosedClients}
 Close Rate: ${(funnel.closeRate * 100).toFixed(1)}%
+CTR: ${(funnel.ctr * 100).toFixed(1)}%
+${feasibility.budgetAdjustment?.needed ? `Budget Constraint: ${feasibility.budgetAdjustment.explanation}` : ""}
+
+SIMULATION INSTRUCTIONS:
+Generate 3 scenarios based on STRATEGIC LEVERS, not just multipliers:
+- Conservative: Current budget + current conversion rates (baseline reality)
+- Base Case: Current budget + 20% conversion improvement from content optimization
+- Upside: Increased budget (1.5x) + improved conversion + accelerated content production
+
+Each scenario must explain WHICH LEVER drives the improvement.
 
 Return ONLY valid JSON:
 {
@@ -201,7 +300,8 @@ Return ONLY valid JSON:
     "expectedCac": number,
     "expectedCpl": number,
     "achievementPct": number,
-    "summary": "string"
+    "summary": "string",
+    "lever": "string (what strategic lever this scenario assumes)"
   },
   "baseCase": {
     "expectedReach": number,
@@ -211,7 +311,8 @@ Return ONLY valid JSON:
     "expectedCac": number,
     "expectedCpl": number,
     "achievementPct": number,
-    "summary": "string"
+    "summary": "string",
+    "lever": "string"
   },
   "upsideCase": {
     "expectedReach": number,
@@ -221,11 +322,13 @@ Return ONLY valid JSON:
     "expectedCac": number,
     "expectedCpl": number,
     "achievementPct": number,
-    "summary": "string"
+    "summary": "string",
+    "lever": "string"
   },
   "confidenceScore": number,
   "keyAssumptions": ["string"],
   "bottleneckAlerts": ["string"],
+  "highestLeverageDriver": "string (identify the single highest-impact growth lever)",
   "constraintSimulation": {
     "bottleneckProbability": number,
     "underDeliveryRisk": "low|medium|high",
@@ -313,6 +416,7 @@ function buildDeterministicSimulation(
       expectedCpl: 0,
       achievementPct: 70,
       summary: "Conservative estimate assuming below-average performance",
+      lever: "Current budget + current conversion rates (baseline reality)",
     },
     baseCase: {
       expectedReach: funnel.requiredReach,
@@ -323,6 +427,7 @@ function buildDeterministicSimulation(
       expectedCpl: 0,
       achievementPct: 100,
       summary: "Base case with average conversion rates",
+      lever: "Current budget + 20% conversion improvement from content optimization",
     },
     upsideCase: {
       expectedReach: Math.round(funnel.requiredReach * 1.15),
@@ -333,10 +438,12 @@ function buildDeterministicSimulation(
       expectedCpl: 0,
       achievementPct: 115,
       summary: "Upside case with optimized performance",
+      lever: "Increased budget (1.5x) + improved conversion + accelerated content production",
     },
     confidenceScore: feasibility.score,
     keyAssumptions: feasibility.constraints.length > 0 ? feasibility.constraints : ["Standard conversion rates assumed"],
     bottleneckAlerts: [],
+    highestLeverageDriver: "Content optimization and conversion rate improvement",
     constraintSimulation: {
       bottleneckProbability: feasibility.score < 70 ? 0.6 : 0.2,
       underDeliveryRisk: feasibility.score < 50 ? "high" : feasibility.score < 70 ? "medium" : "low",
@@ -433,7 +540,15 @@ export function registerGoalMathRoutes(app: Express) {
       const funnel = computeFunnelMath(goal, bizData);
       const feasibility = checkFeasibility(goal, funnel, bizData);
 
-      const sim = await generateSimulation(campaignId, accountId, planId || null, goal, funnel, feasibility, bizData);
+      const effectiveGoal = { ...goal };
+      if (feasibility.budgetAdjustment.needed && feasibility.budgetAdjustment.type === "reduce_target" && feasibility.budgetAdjustment.adjustedTarget > 0) {
+        effectiveGoal.target = feasibility.budgetAdjustment.adjustedTarget;
+      }
+      const effectiveFunnel = feasibility.budgetAdjustment.needed && feasibility.budgetAdjustment.type === "reduce_target"
+        ? computeFunnelMath(effectiveGoal, bizData)
+        : funnel;
+
+      const sim = await generateSimulation(campaignId, accountId, planId || null, effectiveGoal, effectiveFunnel, feasibility, bizData);
       res.json({ success: true, simulation: sim });
     } catch (err: any) {
       console.error("[GoalMath] Simulate error:", err.message);
