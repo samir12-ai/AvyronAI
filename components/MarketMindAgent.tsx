@@ -261,11 +261,6 @@ export const MarketMindAgent = forwardRef<MarketMindAgentRef, Props>(function Ma
         </View>
       </View>
 
-      <View style={[st.insightBox, { backgroundColor: isDark ? P.mint + '08' : P.mint + '06', borderColor: P.mint + '18' }]}>
-        <Ionicons name="bulb-outline" size={14} color={P.mint} style={{ marginTop: 1 }} />
-        <Text style={[st.insightText, { color: textSecondary }]}>{brief.insight}</Text>
-      </View>
-
       <View style={[st.actionBox, { backgroundColor: isDark ? '#0F1A15' : '#F0FFF4', borderColor: isDark ? '#1A3025' : '#C6F6D5' }]}>
         <Ionicons name="arrow-forward-circle" size={14} color={P.green} style={{ marginTop: 1 }} />
         <View style={{ flex: 1 }}>
@@ -284,6 +279,29 @@ export const MarketMindAgent = forwardRef<MarketMindAgentRef, Props>(function Ma
             <View style={[st.progressFill, { width: `${Math.min(progress.percent, 100)}%`, backgroundColor: P.mint }]} />
           </View>
           <Text style={[st.progressSub, { color: textMuted }]}>{progress.percent}% complete · {progress.remaining} remaining</Text>
+        </View>
+      )}
+
+      {brief.contentDnaSnapshot && (
+        <View style={[st.dnaCard, { backgroundColor: isDark ? '#0F1419' : '#F8F7FF', borderColor: isDark ? '#2D2654' : '#E0D9F6' }]}>
+          <View style={st.dnaHeader}>
+            <Ionicons name="link-outline" size={14} color={P.purple} />
+            <Text style={[st.dnaTitle, { color: textPrimary }]}>Content DNA</Text>
+          </View>
+          {[
+            { label: 'CTA', value: brief.contentDnaSnapshot.ctaType },
+            { label: 'HOOKS', value: brief.contentDnaSnapshot.hookStyle },
+            { label: 'HOOK\nLENGTH', value: brief.contentDnaSnapshot.hookDuration },
+            { label: 'NARRATIVE', value: brief.contentDnaSnapshot.narrativeStyle },
+            { label: 'ANGLE', value: brief.contentDnaSnapshot.contentAngle },
+            { label: 'TONE', value: brief.contentDnaSnapshot.toneStyle },
+            { label: 'FORMAT', value: brief.contentDnaSnapshot.formatPriority },
+          ].filter(d => d.value).map((d, i) => (
+            <View key={i} style={st.dnaRow}>
+              <Text style={[st.dnaRowLabel, { color: textMuted }]}>{d.label}</Text>
+              <Text style={[st.dnaRowValue, { color: textPrimary }]}>{d.value}</Text>
+            </View>
+          ))}
         </View>
       )}
 
@@ -491,6 +509,40 @@ const st = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  dnaCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 12,
+  },
+  dnaHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+  },
+  dnaTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  dnaRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 5,
+  },
+  dnaRowLabel: {
+    width: 80,
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  dnaRowValue: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 18,
   },
   answerBox: {
     marginTop: 8,
