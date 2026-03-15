@@ -170,7 +170,7 @@ async function gatherEngineContext(campaignId: string, accountId: string) {
   return { contextString: parts.join("\n\n---\n\n"), businessProfile: biz || null };
 }
 
-export async function generateContentDna(campaignId: string, accountId: string, planId?: string): Promise<any> {
+export async function generateContentDna(campaignId: string, accountId: string, planId?: string, rootBundleId?: string | null, rootBundleVersion?: number | null): Promise<any> {
   const { contextString, businessProfile } = await gatherEngineContext(campaignId, accountId);
 
   if (!contextString || contextString.length < 50) {
@@ -291,6 +291,8 @@ Make every field specific to THIS business. No generic marketing advice. Use the
     executionRules: JSON.stringify(parsed.executionRules),
     snapshot: JSON.stringify(parsed.snapshot),
     status: "active",
+    rootBundleId: rootBundleId || null,
+    rootBundleVersion: rootBundleVersion || null,
   });
 
   return parsed;

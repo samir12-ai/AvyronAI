@@ -11,6 +11,7 @@ import {
   contentDna,
 } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
+import { validateRootIntegrity, detectStaleness, computeCalendarDeviation } from "../root-bundle";
 
 export function registerOrchestratorV2Routes(app: Express) {
   app.post("/api/orchestrator/run", async (req: Request, res: Response) => {
@@ -175,6 +176,8 @@ export function registerOrchestratorV2Routes(app: Express) {
   app.post("/api/plans/:planId/approve", async (req: Request, res: Response) => {
     try {
       const { planId } = req.params;
+      const forceApprove = req.body.force === true;
+
       const [plan] = await db
         .select()
         .from(strategicPlans)
@@ -186,6 +189,63 @@ export function registerOrchestratorV2Routes(app: Express) {
         return res.status(400).json({ error: `Plan is ${plan.status}, not approvable` });
       }
 
+      const warnings: string[] = [];
+
+      if (plan.rootBundleId) {
+        const integrity = await validateRootIntegrity(planId);
+        if (!integrity.valid) {
+          warnings.push(...integrity.issues);
+        }
+
+        const staleness = await detectStaleness(plan.campaignId, plan.accountId);
+        if (staleness.isStale) {
+          warnings.push(`Root staleness detected: ${staleness.reason}`);
+        }
+      }
+
+      const [work] = await db.select().from(requiredWork)
+        .where(eq(requiredWork.planId, planId)).limit(1);
+
+      if (work) {
+        const calCounts = await db.select({
+          reels: sql<number>`count(case when content_type = 'REEL' then 1 end)`,
+          posts: sql<number>`count(case when content_type = 'POST' then 1 end)`,
+          stories: sql<number>`count(case when content_type = 'STORY' then 1 end)`,
+          carousels: sql<number>`count(case when content_type = 'CAROUSEL' then 1 end)`,
+          videos: sql<number>`count(case when content_type = 'VIDEO' then 1 end)`,
+        }).from(calendarEntries).where(eq(calendarEntries.planId, planId));
+
+        const deviation = computeCalendarDeviation(
+          {
+            reels: work.totalReels || 0,
+            posts: work.totalPosts || 0,
+            stories: work.totalStories || 0,
+            carousels: work.totalCarousels || 0,
+            videos: work.totalVideos || 0,
+          },
+          {
+            reels: Number(calCounts[0]?.reels) || 0,
+            posts: Number(calCounts[0]?.posts) || 0,
+            stories: Number(calCounts[0]?.stories) || 0,
+            carousels: Number(calCounts[0]?.carousels) || 0,
+            videos: Number(calCounts[0]?.videos) || 0,
+          }
+        );
+
+        if (!deviation.passesThreshold) {
+          warnings.push(`Calendar deviation exceeds threshold: max ${deviation.maxDeviation}% (limit 5%)`);
+        }
+      }
+
+      if (warnings.length > 0 && !forceApprove) {
+        return res.status(409).json({
+          success: false,
+          blocked: true,
+          warnings,
+          message: "Plan approval blocked due to integrity issues. Set force=true to override.",
+        });
+      }
+
       await db.update(strategicPlans)
         .set({ status: "APPROVED", updatedAt: new Date() })
         .where(eq(strategicPlans.id, planId));
@@ -194,11 +254,11 @@ export function registerOrchestratorV2Routes(app: Express) {
         planId,
         accountId: plan.accountId,
         decision: "APPROVED",
-        reason: req.body.reason || "Approved by user",
+        reason: req.body.reason || (warnings.length > 0 ? `Force-approved with warnings: ${warnings.join("; ")}` : "Approved by user"),
         decidedBy: "client",
       });
 
-      res.json({ success: true, status: "APPROVED" });
+      res.json({ success: true, status: "APPROVED", warnings });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -411,6 +471,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         return res.json({
           stages: [
             { id: "plan", name: "Build Plan", status: "ACTION_NEEDED", count: 0 },
+            { id: "roots", name: "Roots", status: "LOCKED", count: 0 },
             { id: "content-dna", name: "Content DNA", status: "LOCKED", count: 0 },
             { id: "approval", name: "Approval", status: "LOCKED", count: 0 },
             { id: "calendar", name: "Calendar", status: "LOCKED", count: 0 },
@@ -450,12 +511,29 @@ export function registerOrchestratorV2Routes(app: Express) {
         .from(studioItems)
         .where(eq(studioItems.planId, plan.id));
 
+      const hasRoots = !!plan.rootBundleId;
+      let rootsStatus = "LOCKED";
+      if (hasRoots) {
+        try {
+          const staleness = await detectStaleness(req.params.campaignId, accountId);
+          rootsStatus = staleness.isStale ? "ACTION_NEEDED" : "COMPLETED";
+        } catch { rootsStatus = "COMPLETED"; }
+      } else {
+        rootsStatus = "IN_PROGRESS";
+      }
+
       const stages = [
         {
           id: "plan",
           name: "Build Plan",
           status: "COMPLETED" as string,
           count: 1,
+        },
+        {
+          id: "roots",
+          name: "Roots",
+          status: rootsStatus,
+          count: hasRoots ? (plan.rootBundleVersion || 1) : 0,
         },
         {
           id: "content-dna",

@@ -3,6 +3,7 @@ import { strategicPlans, requiredWork, calendarEntries, businessDataLayer } from
 import { eq, and } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { aiChat } from "../ai-client";
+import { lockRootBundle } from "../root-bundle";
 import type { OrchestratorConfig } from "./index";
 import type { EngineId, EngineStepResult } from "./priority-matrix";
 
@@ -364,7 +365,9 @@ function generateCalendarSlots(
   periodDays: number,
   campaignId: string,
   accountId: string,
-  planId: string
+  planId: string,
+  rootBundleId: string | null = null,
+  rootBundleVersion: number | null = null
 ): Array<{
   planId: string;
   campaignId: string;
@@ -374,6 +377,8 @@ function generateCalendarSlots(
   scheduledTime: string;
   title: string;
   status: string;
+  rootBundleId: string | null;
+  rootBundleVersion: number | null;
 }> {
   const slots: any[] = [];
   const startDate = new Date();
@@ -406,6 +411,8 @@ function generateCalendarSlots(
           scheduledTime: postingTimes.REEL,
           title: `Reel - Week ${weekIndex + 1}`,
           status: "PENDING",
+          rootBundleId,
+          rootBundleVersion,
         });
       }
 
@@ -419,6 +426,8 @@ function generateCalendarSlots(
           scheduledTime: postingTimes.POST,
           title: `Post - Week ${weekIndex + 1}`,
           status: "PENDING",
+          rootBundleId,
+          rootBundleVersion,
         });
       }
 
@@ -432,6 +441,8 @@ function generateCalendarSlots(
           scheduledTime: postingTimes.CAROUSEL,
           title: `Carousel - Week ${weekIndex + 1}`,
           status: "PENDING",
+          rootBundleId,
+          rootBundleVersion,
         });
       }
     }
@@ -446,6 +457,8 @@ function generateCalendarSlots(
         scheduledTime: s === 0 ? "10:00" : "17:00",
         title: `Story - Day ${day + 1}`,
         status: "PENDING",
+        rootBundleId,
+        rootBundleVersion,
       });
     }
   }
@@ -476,6 +489,14 @@ export async function synthesizePlan(
     .where(eq(growthCampaigns.id, config.campaignId))
     .limit(1);
 
+  let rootBundle: { id: string; version: number; strategyHash: string } | null = null;
+  try {
+    rootBundle = await lockRootBundle(config.campaignId, config.accountId);
+    console.log(`[PlanSynthesis] Root bundle locked: v${rootBundle.version} (${rootBundle.strategyHash})`);
+  } catch (rootErr: any) {
+    console.warn(`[PlanSynthesis] Root bundle lock failed (non-blocking):`, rootErr.message);
+  }
+
   const engineInsights = extractEngineInsights(results);
   const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign);
 
@@ -495,6 +516,8 @@ export async function synthesizePlan(
     totalPublished: 0,
     totalFailed: 0,
     totalCanceled: 0,
+    rootBundleId: rootBundle?.id || null,
+    rootBundleVersion: rootBundle?.version || null,
   }).returning();
 
   await db.insert(requiredWork).values({
@@ -518,6 +541,8 @@ export async function synthesizePlan(
     scheduledCount: 0,
     publishedCount: 0,
     failedCount: 0,
+    rootBundleId: rootBundle?.id || null,
+    rootBundleVersion: rootBundle?.version || null,
   });
 
   const calendarSlots = generateCalendarSlots(
@@ -525,7 +550,9 @@ export async function synthesizePlan(
     periodDays,
     config.campaignId,
     config.accountId,
-    plan.id
+    plan.id,
+    rootBundle?.id || null,
+    rootBundle?.version || null
   );
 
   if (calendarSlots.length > 0) {
@@ -535,11 +562,11 @@ export async function synthesizePlan(
       .where(eq(strategicPlans.id, plan.id));
   }
 
-  console.log(`[PlanSynthesis] Created plan ${plan.id} with ${calendarSlots.length} calendar entries and ${volume.totalContentPieces} required content pieces`);
+  console.log(`[PlanSynthesis] Created plan ${plan.id} with ${calendarSlots.length} calendar entries, ${volume.totalContentPieces} required content pieces, root v${rootBundle?.version || "none"}`);
 
   try {
     const { generateContentDna } = await import("../content-dna-routes");
-    await generateContentDna(config.campaignId, config.accountId, plan.id);
+    await generateContentDna(config.campaignId, config.accountId, plan.id, rootBundle?.id || null, rootBundle?.version || null);
     console.log(`[PlanSynthesis] Content DNA generated for plan ${plan.id}`);
   } catch (dnaErr: any) {
     console.warn(`[PlanSynthesis] Content DNA generation failed (non-blocking):`, dnaErr.message);

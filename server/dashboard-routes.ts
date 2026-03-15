@@ -29,6 +29,7 @@ import { eq, and, desc, gte, sql, inArray } from "drizzle-orm";
 import { ACTIVE_PLAN_STATUSES } from "./plan-constants";
 import { aiChat } from "./ai-client";
 import { getLatestContentDna } from "./content-dna-routes";
+import { getActiveRootBundle, detectStaleness, validateRootIntegrity, computeCalendarDeviation } from "./root-bundle";
 
 const LOG_PREFIX = "[Dashboard]";
 
@@ -410,6 +411,25 @@ export function registerDashboardRoutes(app: Express) {
       const { computeFulfillment } = await import("./fulfillment-engine");
       const fulfillment = await computeFulfillment(campaignId, accountId);
 
+      let rootInfo: any = null;
+      try {
+        const activeRoot = await getActiveRootBundle(campaignId, accountId);
+        if (activeRoot) {
+          const staleness = await detectStaleness(campaignId, accountId);
+          rootInfo = {
+            id: activeRoot.id,
+            version: activeRoot.version,
+            strategyHash: activeRoot.strategyHash,
+            status: staleness.isStale ? "stale" : activeRoot.status,
+            isStale: staleness.isStale,
+            staleReason: staleness.reason,
+            lockedAt: activeRoot.lockedAt,
+          };
+        }
+      } catch (rootErr: any) {
+        console.warn(`${LOG_PREFIX} Root bundle fetch failed:`, rootErr.message);
+      }
+
       res.json({
         success: true,
         hasPlan: true,
@@ -422,6 +442,7 @@ export function registerDashboardRoutes(app: Express) {
         totalStudioItems: fulfillment.total.fulfilled,
         totalPublished: fulfillment.byStatus.published,
         fulfillment,
+        rootBundle: rootInfo,
       });
     } catch (error: any) {
       console.error(`${LOG_PREFIX} Plan status error:`, error);

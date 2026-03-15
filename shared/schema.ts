@@ -1110,6 +1110,8 @@ export const strategicPlans = pgTable("strategic_plans", {
   totalPublished: integer("total_published").default(0),
   totalFailed: integer("total_failed").default(0),
   totalCanceled: integer("total_canceled").default(0),
+  rootBundleId: varchar("root_bundle_id"),
+  rootBundleVersion: integer("root_bundle_version"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1154,6 +1156,8 @@ export const requiredWork = pgTable("required_work", {
   storyItems: integer("story_items").default(0),
   postItems: integer("post_items").default(0),
   reelItems: integer("reel_items").default(0),
+  rootBundleId: varchar("root_bundle_id"),
+  rootBundleVersion: integer("root_bundle_version"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1177,6 +1181,8 @@ export const calendarEntries = pgTable("calendar_entries", {
   aiGeneratedAt: timestamp("ai_generated_at"),
   errorReason: text("error_reason"),
   sourceLabel: text("source_label"),
+  rootBundleId: varchar("root_bundle_id"),
+  rootBundleVersion: integer("root_bundle_version"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -2008,8 +2014,32 @@ export const contentDna = pgTable("content_dna", {
   executionRules: text("execution_rules"),
   snapshot: text("snapshot"),
   status: text("status").notNull().default("active"),
+  rootBundleId: varchar("root_bundle_id"),
+  rootBundleVersion: integer("root_bundle_version"),
   generatedAt: timestamp("generated_at").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
 export type ContentDna = typeof contentDna.$inferSelect;
+
+export const rootBundles = pgTable("root_bundles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  campaignId: varchar("campaign_id").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  version: integer("version").notNull().default(1),
+  businessRoots: text("business_roots"),
+  funnelRoots: text("funnel_roots"),
+  contentRoots: text("content_roots"),
+  executionRoots: text("execution_roots"),
+  mathRoots: text("math_roots"),
+  strategyHash: varchar("strategy_hash"),
+  sourceSnapshot: text("source_snapshot"),
+  status: text("status").notNull().default("draft"),
+  lockedAt: timestamp("locked_at"),
+  staleAt: timestamp("stale_at"),
+  staleReason: text("stale_reason"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type RootBundle = typeof rootBundles.$inferSelect;

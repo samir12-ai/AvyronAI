@@ -23,8 +23,10 @@ import {
   iterationSnapshots,
   retentionSnapshots,
   contentDna,
+  rootBundles,
 } from "@shared/schema";
 import { eq, and, desc, count, sql } from "drizzle-orm";
+import { getActiveRootBundle, detectStaleness } from "../root-bundle";
 
 export interface SystemContext {
   businessProfile: any;
@@ -50,6 +52,7 @@ export interface SystemContext {
   engineStatus: any;
   engineSnapshots: Record<string, { id: string; status: string; createdAt: any }>;
   contentDnaSnapshot: any;
+  rootBundle: { id: string; version: number; status: string; isStale: boolean; staleReason: string | null; strategyHash: string | null } | null;
   warnings: string[];
 }
 
@@ -292,6 +295,21 @@ export async function loadSystemContext(
     } : null,
     engineSnapshots,
     contentDnaSnapshot: dnaData,
+    rootBundle: await (async () => {
+      try {
+        const active = await getActiveRootBundle(campaignId, accountId);
+        if (!active) return null;
+        const staleness = await detectStaleness(campaignId, accountId);
+        return {
+          id: active.id,
+          version: active.version,
+          status: staleness.isStale ? "stale" : active.status,
+          isStale: staleness.isStale,
+          staleReason: staleness.reason,
+          strategyHash: active.strategyHash,
+        };
+      } catch { return null; }
+    })(),
     warnings,
   };
 }
@@ -386,12 +404,24 @@ export function buildSystemPrompt(context: SystemContext): string {
     lines.push("CONTENT DNA: Not generated yet — runs automatically after plan synthesis");
   }
 
+  if (context.rootBundle) {
+    lines.push("");
+    lines.push(`ROOT BUNDLE: v${context.rootBundle.version} | Status: ${context.rootBundle.status} | Hash: ${context.rootBundle.strategyHash}`);
+    if (context.rootBundle.isStale) {
+      lines.push(`  ⚠ STALE: ${context.rootBundle.staleReason}`);
+      lines.push("  The plan's foundation data has changed since it was locked. Recommend re-running the orchestrator to regenerate the plan with fresh roots.");
+    }
+  } else {
+    lines.push("");
+    lines.push("ROOT BUNDLE: Not yet created — will be auto-generated on next plan synthesis");
+  }
+
   if (context.warnings.length > 0) {
     lines.push(`WARNINGS: ${context.warnings.join(" | ")}`);
   }
 
   lines.push("");
-  lines.push("Use this context to answer the user's questions accurately. Guide them toward their next action. When users ask about content creation, hooks, CTAs, or narrative style, reference the Content DNA rules.");
+  lines.push("Use this context to answer the user's questions accurately. Guide them toward their next action. When users ask about content creation, hooks, CTAs, or narrative style, reference the Content DNA rules. When users ask about plan integrity or staleness, reference the Root Bundle status.");
 
   return lines.join("\n");
 }

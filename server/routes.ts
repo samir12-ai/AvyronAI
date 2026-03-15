@@ -35,6 +35,7 @@ import { registerStrategyEngineRoutes } from "./strategy";
 import { registerOrchestratorV2Routes } from "./orchestrator/routes";
 import { registerChatRoutes } from "./replit_integrations/chat";
 import { registerContentDnaRoutes } from "./content-dna-routes";
+import { registerRootBundleRoutes } from "./root-bundle";
 import { storeTokensAfterOAuth, runAllHealthChecks } from "./meta-token-manager";
 import { redactToken } from "./meta-crypto";
 import { initMetaMetrics } from "./meta-metrics";
@@ -1416,6 +1417,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerOrchestratorV2Routes(app);
   registerChatRoutes(app);
   registerContentDnaRoutes(app);
+  registerRootBundleRoutes(app);
 
   initMetaMetrics();
 
