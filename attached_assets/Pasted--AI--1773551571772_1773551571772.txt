@@ -1,0 +1,1250 @@
+
+ممتاز. هلق صار المطلوب واضح جدًا:
+
+أنت لا تريد “AI يطلع اقتراحات”.
+أنت تريد نظام تخطيط وتسليم وتنفيذ مترابط، مبني على roots واحدة، مربوط مع 13 محرك، يمنع التضارب، ويطلع Plan + Calendar + Simulation + Tasks من نفس المصدر، مع gates واضحة حتى ما يبقى مجال للتخبيط.
+
+سأقفلها معك كأنها وثيقة قرار Product + System Design من أول مرة.
+
+⸻
+
+القرار الأساسي
+
+من هذه اللحظة لازم يتغير تعريف المنتج من:
+
+AI content planner
+
+إلى:
+
+Goal-driven marketing operating system
+
+يعني النظام لا يبدأ من “شو ننشر؟”
+النظام يبدأ من:
+
+ما الهدف؟ هل قابل للتحقيق؟ عبر أي funnel؟ كم نحتاج volume؟ ما التوزيع الصحيح؟ وما الذي يجب أن يظهر في التقويم؟
+
+⸻
+
+1) أصل المشكلة الحالية
+
+من اللقطات واضح عندك 3 مشاكل بنيوية، وليس UI فقط:
+
+أ. plan و calendar لا يشتغلان من نفس الجذر
+
+البلان يعرض distribution معيّن، والتقويم يطلع distribution مختلف.
+هذا يعني أن عندك انفصال بين source of truth و execution layer.
+
+ب. الخطط متشابهة بين البزنسات
+
+هذا يعني أن النظام يعتمد على preset patterns أكثر من اعتماده على business math + engine outputs.
+
+ج. الـ plan الحالي شكله informative وليس operational
+
+يعني يعطي boxes مثل:
+	•	Creative Testing
+	•	Competitive Watch
+	•	Risk Triggers
+
+لكن لا يجيب على السؤال التنفيذي الحقيقي:
+	•	كم نحتاج محتوى؟
+	•	لماذا هذا العدد؟
+	•	كيف يربط بالهدف؟
+	•	ما المهام اليومية؟
+	•	ما المتوقع أن ينتج؟
+
+⸻
+
+2) المبدأ الجديد: Source of Truth واحدة
+
+لازم نعتمد هيكل واحد صريح: Client Goal
+→ Intake + Gate Validation
+→ Unified Roots
+→ 13 Engines Enrichment
+→ Strategic Math Layer
+→ Plan Composer
+→ Calendar Composer
+→ Simulation Engine
+→ Task Composer
+→ Acceptance + Publish
+
+أي شيء يطلع بعد ذلك لازم يكون ناتج من نفس roots.
+
+⸻
+
+3) تعريف الـ Roots بشكل صحيح
+
+الـ roots ليست فقط “content pillars”.
+لازم تكون طبقات جذرية واضحة، لأن كل شيء سيتولد منها.
+
+Root Layer 1: Business Roots
+	•	business_model
+	•	offer_type
+	•	price_point
+	•	sales_cycle_length
+	•	market_location
+	•	target_segment
+	•	service_area
+	•	acquisition_goal
+	•	revenue_goal
+	•	lead_goal
+	•	time_horizon
+	•	available_budget
+	•	fulfillment_capacity
+	•	preferred_channels
+
+Root Layer 2: Funnel Roots
+	•	awareness_channels
+	•	acquisition_channel
+	•	conversion_path
+	•	primary_cta
+	•	landing_type
+	•	closing_method
+	•	expected conversion benchmarks
+	•	bottleneck stage
+
+Root Layer 3: Content Roots
+	•	content mission
+	•	messaging angles
+	•	trust assets
+	•	objections
+	•	content pillars
+	•	format weights
+	•	content cadence
+	•	creative testing priorities
+
+Root Layer 4: Execution Roots
+	•	production capacity
+	•	ad capacity
+	•	team constraints
+	•	approval constraints
+	•	compliance constraints
+	•	calendar constraints
+
+Root Layer 5: Math Roots
+	•	target_customers
+	•	target_leads
+	•	target_reach
+	•	target_content_units
+	•	ad spend allocation
+	•	expected CAC
+	•	expected CPL
+	•	expected close rate
+
+⸻
+
+4) ممنوع أي موديول يشتغل بدون roots version
+
+كل plan، كل calendar item، كل simulation، كل task لازم يحمل:
+	•	root_bundle_id
+	•	root_bundle_version
+	•	engine_snapshot_version
+	•	plan_id
+	•	strategy_hash
+
+إذا تغيّر شيء في الجذر، لازم كل ما بعده يعرف أنه صار stale.
+
+مثال:
+	•	العميل عدّل الهدف من 100 lead إلى 400 lead
+	•	أو تغيّر budget من 400$ إلى 1200$
+	•	أو تغيّر primary channel من Instagram إلى Instagram + WhatsApp ads
+
+بهذه الحالة:
+	•	الخطة القديمة تصبح stale
+	•	التقويم القديم يصبح stale
+‏	•	simulation القديمة تصبح stale
+‏	•	tasks القديمة تصبح stale
+
+ولازم يصير rebuild controlled، وليس patch عشوائي.
+
+⸻
+
+5) كيف نمنع تضارب plan و calendar نهائيًا
+
+الحل هنا لازم يكون صارم.
+
+القاعدة
+
+Calendar لا يحسب distribution من نفسه أبدًا.
+
+التقويم فقط ينفّذ هذا object
+
+{
+  "content_mix": {
+    "reel": 0.40,
+    "carousel": 0.20,
+    "story": 0.30,
+    "static_post": 0.10
+  },
+  "volume_plan": {
+    "reel": 20,
+    "carousel": 8,
+    "story": 40,
+    "static_post": 5
+  },
+  "cadence_rules": {...},
+  "timing_rules": {...},
+  "pillar_allocation": {...}
+}
+
+هذا object يجب أن يأتي من Plan Composer فقط.
+
+آلية الحماية
+
+قبل نشر calendar:
+	•	نحسب actual counts generated
+	•	نقارنها مع target counts
+	•	إذا deviation أكبر من threshold، لا يُنشر
+
+مثلاً:
+	•	target reels = 20
+	•	generated reels = 16
+	•	deviation = 20%
+‎	•	فوق الحد → reject publish
+
+thresholds مقترحة
+	•	content type count deviation: max 5%
+	•	pillar distribution deviation: max 7%
+	•	posting frequency deviation: max 5%
+	•	ad-budget distribution deviation: max 2%
+	•	funnel expectation mismatch: max 5%
+
+لو تعدى أي threshold:
+	•	status = REQUIRES_REGENERATION
+‎	•	لا يقبل النظام اعتماد الخطة
+
+⸻
+
+6) مشكلة “كل الخطط تشبه بعضها” وكيف نكسرها جذريًا
+
+هذه لا تنحل بتغيير prompts.
+تنحل بتغيير logic order.
+
+لازم الخطة لا تبدأ من content ideas.
+لازم تبدأ من goal decomposition.
+
+⸻
+
+7) كيف يبني AI الخطة من هدف العميل
+
+هذا هو القلب الحقيقي للنظام.
+
+Step 1: Goal normalization
+
+العميل قد يقول:
+	•	بدي 400 زبون
+	•	بدي 100 lead بالشهر
+	•	بدي أوصل 50 ألف متابع
+	•	بدي أرفع المبيعات 30%
+	•	بدي 20 صفقة من واتساب
+
+النظام يحول الهدف إلى:
+	•	primary goal type
+	•	measurable target
+	•	time horizon
+	•	success constraints
+
+مثال:
+	•	Goal: 400 customers in 90 days
+
+يتحول إلى:
+	•	goal_type = customer_acquisition
+	•	target_customers = 400
+	•	time_horizon_days = 90
+
+⸻
+
+Step 2: Feasibility check
+
+قبل بناء الخطة، النظام يسأل:
+
+هل الهدف ممكن أصلًا بالنسبة لـ:
+	•	السعر
+	•	القدرة التشغيلية
+	•	السوق
+	•	الميزانية
+	•	معدل الإغلاق
+	•	الفريق
+	•	القنوات
+
+إذا لا، النظام لا يكذب.
+
+يعطي:
+	•	feasible
+	•	borderline
+	•	unrealistic
+
+مع explanation:
+	•	“الهدف يحتاج reach أعلى من المتوقع”
+	•	“الميزانية الحالية لا تكفي”
+	•	“قدرة الفريق لا تكفي لهذا الحجم”
+
+⸻
+
+Step 3: Funnel math
+
+مثال:
+
+الهدف = 400 customers
+إذا close rate = 10%
+فنحتاج 4000 qualified leads
+
+إذا WhatsApp response-to-qualified-lead = 20%
+فنحتاج 20,000 conversation starts أو reachable contacts حسب الفانل
+
+إذا content-to-inbound lead efficiency = 2%
+فنحتاج reach/impressions محسوبة
+
+هنا النظام يبني:
+	•	top of funnel target
+	•	middle funnel target
+	•	bottom funnel target
+
+⸻
+
+Step 4: Channel fit scoring
+
+ليس كل بزنس يناسبه نفس mix.
+
+لازم كل قناة تأخذ score من:
+	•	audience fit
+	•	offer fit
+	•	content suitability
+	•	speed to results
+	•	cost efficiency
+	•	team capability
+	•	local market fit
+
+ثم النظام يقرر:
+	•	primary channel
+	•	support channels
+	•	channels to ignore now
+
+⸻
+
+Step 5: Content system derivation
+
+هنا النظام لا يقول “4 posts per week” بشكل عام.
+بل يقول:
+
+بناءً على:
+	•	الهدف
+	•	السوق
+	•	البزنس
+	•	طبيعة العرض
+	•	قدرة الفريق
+‏	•	funnel stage
+‏	•	market sophistication
+
+فإن أفضل mix هو:
+	•	Reels: X
+	•	Stories: Y
+	•	Carousels: Z
+	•	Static: N
+
+مع سبب واضح:
+	•	reels لزيادة reach
+	•	carousels لبناء authority
+	•	stories للتكرار والدفعات اليومية
+	•	ads لتحويل intent
+
+⸻
+
+Step 6: Budget decomposition
+
+الميزانية لا تُعرض box فقط.
+
+بل تتوزع إلى:
+	•	content production
+	•	paid promotion
+	•	retargeting
+	•	community management
+	•	tooling
+	•	contingency
+
+ويكون معها سبب:
+	•	لماذا 40% هنا؟
+	•	لماذا 35% هناك؟
+	•	ما المتوقع من هذا التوزيع؟
+
+⸻
+
+Step 7: Simulation
+
+قبل الاعتماد النهائي:
+	•	النظام يشغل سيناريوهات
+‏	•	baseline
+‏	•	conservative
+‏	•	aggressive
+
+مثلاً:
+	•	if reach per reel منخفض
+	•	if close rate أقل
+	•	if CPL أعلى
+	•	if ad CTR أفضل
+
+ثم يخرج:
+	•	expected leads
+	•	expected customers
+	•	expected revenue
+	•	risk areas
+
+⸻
+
+Step 8: Plan composition
+
+بعد أن تتثبت الرياضيات والمنطق، فقط عندها يتم بناء:
+	•	executive summary
+	•	numbers
+	•	tasks
+	•	calendar
+	•	simulations
+
+⸻
+
+8) AI Growth Simulation — كيف يجب أن يعمل فعلًا
+
+هذه الميزة ممتازة، لكن لازم تكون مبنية على model واضح، لا مجرد أرقام زينة.
+
+Inputs
+	•	target goal
+	•	budget
+	•	content volume
+	•	market type
+	•	channel selection
+	•	conversion assumptions
+	•	historical signals إن وجدت
+	•	competitor intensity
+	•	offer quality score
+	•	account score
+	•	readiness score
+
+Outputs
+
+ثلاث طبقات:
+
+أ. Outcome simulation
+	•	expected reach
+	•	expected engagement
+	•	expected inbound leads
+	•	expected qualified leads
+	•	expected sales
+	•	expected revenue
+	•	expected CAC / CPL
+
+ب. Constraint simulation
+	•	bottleneck probability
+	•	under-delivery risks
+	•	budget overrun risk
+	•	low conversion risk
+	•	capacity overload risk
+
+ج. Scenario simulation
+	•	conservative case
+	•	base case
+	•	upside case
+
+واجهتها المقترحة
+
+بدل box عادي، اعمل section اسمه:
+
+Projected Growth Outcome
+
+وفيه:
+	•	90-day target
+	•	expected outcome range
+	•	confidence score
+	•	key assumptions
+	•	bottleneck alert
+
+مثال:
+	•	Target customers: 400
+	•	Expected range: 280–430
+	•	Confidence: 71%
+	•	Main bottleneck: WhatsApp close rate
+	•	To hit upper range: increase ad spend by 20% or improve reply time
+
+⸻
+
+9) UI جديد للـ Plan
+
+نعم، لازم يتغير بالكامل.
+
+الـ Plan الحالي شكله “ملاحظات استراتيجية”.
+أنت تحتاج command center.
+
+الترتيب الجديد المقترح
+
+1. Plan Header
+	•	Plan name
+	•	root version
+	•	status
+	•	generated at
+	•	accepted / draft / stale / needs review
+	•	confidence
+	•	feasibility badge
+
+2. Goal Block
+	•	what are we trying to achieve
+	•	by when
+	•	with what budget
+	•	success definition
+
+3. Strategy Summary
+	•	primary channel
+	•	core funnel
+	•	offer path
+	•	why this plan
+
+4. Numbers That Matter
+	•	target reach
+	•	target leads
+	•	target customers
+	•	required content units
+	•	ad count
+	•	required spend
+
+5. Execution Blueprint
+	•	content volumes by type
+	•	ad plan
+	•	CTA strategy
+	•	messaging angles
+	•	weekly cadence
+
+6. Growth Simulation
+	•	three scenarios
+	•	confidence score
+	•	risks
+	•	assumptions
+
+7. Daily / Weekly Tasks
+	•	Monday tasks
+	•	Tuesday tasks
+	•	approvals
+	•	creative production
+	•	launch tasks
+	•	follow-up tasks
+
+8. Calendar Linkage
+	•	generated entries count
+	•	sync status
+	•	match score with plan
+	•	stale warning if mismatch
+
+9. Dependencies / Alerts
+	•	missing inputs
+	•	engine conflicts
+	•	inconsistent assumptions
+	•	blocked items
+
+⸻
+
+10) ما الذي يجب إزالته أو إنزاله من الواجهة الأساسية
+
+هذه العناصر ليست غلط، لكن مكانها ليس داخل plan surface الأولى:
+	•	Competitive Watch
+	•	Risk Triggers
+	•	Creative Testing details
+
+هذه يجب أن تكون:
+	•	secondary tabs
+	•	expandable panels
+	•	expert diagnostics
+
+لكن ليست هي التي تستقبل المستخدم أول شيء.
+
+المستخدم يجب أن يرى:
+	•	الهدف
+	•	الطريق
+	•	الأرقام
+	•	المطلوب تنفيذه
+	•	المتوقع
+
+⸻
+
+11) daily tasks و plan explanation
+
+هذه نقطة ممتازة جدًا.
+
+أنت لا تريد plan “وعظية”.
+أنت تريد plan تترجم إلى سلوك تنفيذي.
+
+أ. Box للشرح
+
+اسمها مثلًا:
+Why this plan works
+
+وتحتها:
+	•	هذا البزنس يعتمد على trust + proof
+	•	لذلك نسبة reels أعلى من static
+	•	لأن جمهورك يتفاعل مع case-based content
+	•	ولأن عرضك يحتاج warming قبل conversion
+	•	ولأن budget لا يكفي full paid-only acquisition
+
+هذه تشرح المنطق.
+
+ب. Box للمهام اليومية
+
+اسمها:
+Execution Queue
+
+وتتولد من الخطة تلقائيًا.
+
+مثال:
+	•	Day 1: write 2 reel scripts
+	•	Day 2: record 2 reels
+	•	Day 3: launch ad set A
+	•	Day 4: answer inbound WhatsApp leads
+	•	Day 5: review close-rate drop
+	•	Day 6: publish carousel
+	•	Day 7: weekly review
+
+⸻
+
+12) adaptive planning — كيف نخليه adaptive فعلًا
+
+الـ adaptive ليس theme switch.
+الـ adaptive يعني أن النظام يعيد وزن نفسه بحسب نوع البزنس.
+
+المطلوب
+
+كل business type لازم يكون له:
+	•	funnel archetype
+	•	channel priority archetype
+	•	sales cycle profile
+	•	trust requirement score
+	•	proof requirement score
+	•	content-to-conversion weight
+
+مثال:
+
+Agency / services
+	•	تحتاج authority + proof + objection handling
+‏	•	reels + carousels + WhatsApp CTA + retargeting
+
+Ecommerce
+	•	تحتاج UGC + offer pushes + retargeting + direct conversion ads
+
+Restaurant / local
+	•	تحتاج stories + local offer loops + map/social proof
+
+High-ticket consulting
+	•	تحتاج fewer but stronger authority assets + lead nurture + appointment conversion
+
+يعني adaptivity يجب أن تأتي من:
+	•	domain profiles
+	•	goal type
+	•	team capacity
+	•	budget band
+	•	market sophistication
+	•	current account maturity
+
+⸻
+
+13) أين نضع الأسئلة التي لازم العميل يجاوبها؟
+
+إجابتك الصحيحة كانت:
+	•	بعضها في build up plan gate
+	•	بعضها في account score
+	•	وبعضها conditional حسب السياق
+
+وأنا أؤكد هذا 100%.
+
+لازم لا نسأل 40 سؤالًا دائمًا.
+لازم يكون عندنا layered intake.
+
+⸻
+
+14) تقسيم الأسئلة إلى 3 طبقات
+
+الطبقة 1: Required Gate Questions
+
+هذه تمنع بناء خطة سيئة.
+لازم لا يتخطاها أحد.
+
+هوية البزنس
+	•	ما نوع البزنس؟
+	•	ما الخدمة أو المنتج الأساسي؟
+	•	ما السعر أو متوسط الصفقة؟
+	•	ما السوق/المدينة؟
+	•	من العميل المستهدف؟
+	•	ما الهدف الأساسي؟
+
+الهدف
+	•	كم تريد leads / customers / revenue؟
+	•	خلال كم يوم/شهر؟
+	•	هل الهدف أولي أم مبني على نتائج سابقة؟
+
+القنوات
+	•	ما القنوات الحالية؟
+	•	هل تريد التركيز على Instagram فقط أم عدة قنوات؟
+	•	هل لديك واتساب/landing page/website؟
+
+الميزانية والقدرة
+	•	كم الميزانية الشهرية؟
+	•	هل لديك قدرة على إنتاج فيديو؟
+	•	كم مرة تقدر تنشر أسبوعيًا؟
+	•	هل لديك شخص يرد على الرسائل والمتابعة؟
+
+القيود
+	•	هل يوجد قيود قانونية أو تنظيمية؟
+	•	هل توجد موافقات داخلية؟
+	•	هل توجد عروض جاهزة أم سنبني messaging من الصفر؟
+
+إذا نقص شيء من هذه، الخطة إما لا تبنى، أو تبنى كـ provisional draft مع تحذير واضح.
+
+⸻
+
+الطبقة 2: Account Score Inputs
+
+هذه لا تمنع البدء، لكنها تؤثر على جودة الخطة والمحاكاة.
+	•	عدد المتابعين
+	•	معدل التفاعل الحالي
+	•	عدد leads الحالي
+‏	•	close rate الحالي
+‏	•	reply speed
+‏	•	previous ad performance
+‏	•	conversion source mix
+‏	•	availability of testimonials
+‏	•	number of proof assets
+‏	•	frequency consistency
+‏	•	current content library quality
+
+هذه تدخل في:
+	•	readiness score
+	•	maturity score
+	•	simulation confidence
+
+⸻
+
+الطبقة 3: Contextual Questions
+
+هذه تظهر فقط إذا احتاجها النظام.
+
+مثلاً:
+	•	إذا high-ticket service → اسأل عن booking funnel
+	•	إذا local business → اسأل عن service radius
+	•	إذا ecommerce → اسأل عن AOV و return rate
+	•	إذا ads-heavy plan → اسأل عن pixel / tracking readiness
+	•	إذا WhatsApp conversion → اسأل عن team response SLA
+
+⸻
+
+15) build up plan gate — كيف يجب أن يعمل
+
+اسم هذا gate مهم جدًا، لأن هنا نمنع التخبيط من البداية.
+
+حالات الـ gate
+
+1. PASS
+
+كل الأساسيات متوفرة
+→ ابني plan كاملة
+
+2. PASS WITH ASSUMPTIONS
+
+في بعض النواقص، لكن يمكن البناء
+→ تبني الخطة مع assumptions صريحة
+
+3. BLOCKED
+
+المعطيات الأساسية ناقصة
+→ لا تبني plan نهائية
+
+ماذا يظهر للمستخدم
+
+بدل “please complete your profile”، يظهر له:
+
+Plan Readiness
+	•	business clarity: 92%
+	•	funnel clarity: 71%
+	•	goal specificity: 100%
+	•	execution readiness: 63%
+	•	data confidence: 58%
+
+ثم:
+	•	missing items preventing full precision
+	•	how much accuracy improves if completed
+
+⸻
+
+16) account score — كيف نستخدمه صح
+
+لا تجعله vanity score.
+اجعله planning weight modifier.
+
+مثلاً:
+	•	low readiness → simulation confidence ينخفض
+	•	weak proof assets → authority content ratio يرتفع
+	•	poor response time → lead target achievable ينخفض
+	•	low creative capacity → required reel count يُعاد حسابه
+
+يعني account score لا يكون مجرد بطاقة جميلة.
+يجب أن يدخل في الحساب الفعلي.
+
+⸻
+
+17) ربط 13 محرك مع بعضهم بدون تضارب
+
+هذه أهم نقطة عندك، وأوافقك: لا نريد chaos بين 13 engines.
+
+الحل ليس فقط orchestration.
+الحل هو contract-driven orchestration.
+
+كل engine يجب أن يكون له:
+	•	input contract
+	•	output contract
+	•	confidence score
+	•	assumption log
+	•	dependency map
+	•	version
+	•	freshness timestamp
+
+مثال
+
+لو عندك:
+	•	market engine
+	•	audience engine
+	•	positioning engine
+	•	offer engine
+	•	content engine
+	•	creative testing engine
+	•	budget engine
+	•	KPI engine
+	•	competitive engine
+	•	risk engine
+	•	calendar engine
+	•	simulation engine
+	•	execution engine
+
+كل واحد لازم لا يرسل “text”.
+لازم يرسل structured objects.
+
+⸻
+
+18) قاعدة ذهبية: لا engine يكتب مباشرة في plan
+
+كل engines ترسل إلى:
+Plan Orchestrator / Decision Layer
+
+هذا القرار مهم جدًا.
+
+يعني:
+	•	Audience engine لا يحق له تعديل calendar
+	•	Budget engine لا يحق له تعديل content mix وحده
+	•	Creative testing engine لا يحق له فرض volume مباشرة
+	•	Calendar engine لا يحق له invent roots
+
+كلهم يرسلون insights.
+والقرار النهائي يكون في decision layer.
+
+⸻
+
+19) Decision Layer — قلب منع التضارب
+
+هذه الطبقة تجمع outputs الـ 13 engines، ثم:
+	•	تتحقق من التناقضات
+	•	تحل التضاربات بالأولوية
+	•	توحّد assumptions
+	•	تنتج root-consistent plan
+
+أمثلة تضارب
+	•	audience engine يقول business decision makers
+	•	content engine يبني content style شبابي جدًا
+	•	budget engine يقول budget منخفض
+	•	calendar engine يولد volume عالي جدًا
+	•	simulation يقول الهدف غير واقعي
+
+هنا القرار ليس “نجمعهم كلهم”.
+هنا decision layer يقول:
+	•	الخطة invalid
+	•	أو rebuild with constraints
+	•	أو ask for missing inputs
+
+⸻
+
+20) conflict resolution policy
+
+لازم تحدد سلم أولوية واضح:
+	1.	hard constraints
+	2.	compliance
+	3.	goal feasibility
+	4.	funnel math
+	5.	budget limits
+	6.	business fit
+	7.	channel fit
+	8.	content preference
+	9.	stylistic suggestions
+
+إذا تعارض style مع funnel math، style يخسر.
+إذا تعارض calendar shape مع root distribution، calendar يخسر.
+إذا تعارض simulation مع goal fantasy، fantasy تخسر.
+
+⸻
+
+21) root integrity checks
+
+قبل أي publish:
+	•	هل كل sections تشير لنفس root bundle؟
+	•	هل كل engines استخدمت نفس version؟
+	•	هل هناك stale outputs؟
+	•	هل يوجد conflicting assumptions؟
+	•	هل calendar match score >= threshold؟
+	•	هل simulation مبنية على نفس final plan؟
+	•	هل tasks مولدة من نفس execution model؟
+
+إذا لا، لا publish.
+
+⸻
+
+22) update system — كيف يعمل التحديث صح
+
+أنت قلت: “يعمل update للسيستم ويتأكد من roots وتعطي accepting create رسالة”.
+
+تمام. هي الآلية الصح:
+
+Trigger sources
+	•	user changed input
+	•	engine refresh
+	•	market update
+	•	team capacity change
+	•	budget change
+	•	new competitor data
+	•	account score update
+	•	manual rebuild request
+
+Update flow
+	1.	detect changed root-affecting fields
+	2.	classify impact:
+	•	cosmetic
+	•	tactical
+	•	strategic
+	3.	invalidate affected modules
+	4.	rebuild only downstream affected modules
+	5.	run integrity checks
+	6.	if passed → create candidate_version
+	7.	show acceptance message
+	8.	on accept → promote to active version
+
+أمثلة
+
+Cosmetic change
+	•	تغيير عنوان الخطة
+لا يحتاج rebuild كامل
+
+Tactical change
+	•	تغيير posting capacity
+يحتاج rebuild calendar + tasks + simulation maybe
+
+Strategic change
+	•	تغيير goal / budget / audience / channel
+يحتاج full rebuild
+
+⸻
+
+23) acceptance flow — الرسالة التي يجب أن تظهر
+
+لازم تكون الرسالة قوية وواضحة، مثل:
+
+Plan Update Ready
+	•	roots revalidated
+	•	13 engines synced
+	•	calendar realigned to final distribution
+	•	growth simulation refreshed
+	•	tasks regenerated
+	•	integrity score: 98/100
+
+Changes
+	•	Reels reduced from 24 → 18 due to production capacity
+	•	Stories increased from 20 → 35 to preserve reach target
+	•	Ad allocation moved from prospecting-heavy to retargeting-balanced
+	•	Forecast adjusted from 420 max customers to 360–390 expected range
+
+Accept and Publish
+أو
+Review Changes
+
+هذه أفضل من رسالة عامة.
+
+⸻
+
+24) create / accept message بعد إنشاء plan جديدة
+
+نفس الفكرة، لكن بصيغة بناء:
+
+Plan Generated Successfully
+	•	roots locked
+	•	13-engine sync completed
+	•	calendar aligned with plan
+	•	simulations generated
+	•	execution tasks scheduled
+	•	no integrity conflicts detected
+
+Confidence
+	•	Feasibility: High
+	•	Data confidence: Medium
+	•	Execution readiness: High
+
+Next action
+	•	Accept and create calendar
+أو
+	•	Review assumptions first
+
+⸻
+
+25) acceptance criteria — حتى نقفل “ما في مجال للتخبيط”
+
+أعطيك معايير قبول صريحة. إذا ما تحققت، لا يُعتبر العمل منجزًا.
+
+Plan integrity
+	•	كل sections مبنية من root_bundle_version نفسها
+	•	لا assumptions متضاربة
+	•	كل الأرقام قابلة للتتبع إلى goal math
+
+Calendar integrity
+	•	type distribution deviation ≤ 5%
+	•	pillar distribution deviation ≤ 7%
+	•	cadence integrity ≥ 95%
+	•	no orphan entries
+	•	every entry has source trace
+
+Simulation integrity
+	•	simulation input hash = final plan hash
+	•	scenarios generated from same plan version
+	•	confidence score present
+	•	assumptions exposed
+
+Task integrity
+	•	every task tied to execution block
+	•	no task without owner/type/date context
+	•	daily tasks reflect actual calendar/ad plan
+
+Engine sync
+	•	all 13 engines version-logged
+	•	stale engine outputs rejected
+	•	conflicts resolved before publish
+
+UX integrity
+	•	user sees goal → plan → numbers → calendar → tasks → simulation
+	•	no diagnostic clutter in main view
+	•	expert sections collapsed or secondary
+
+⸻
+
+26) الـ UX النهائي المقترح للصفحة
+
+الصفحة الرئيسية للـ Plan
+
+فوق
+	•	title
+	•	status
+	•	confidence
+	•	accept/create CTA
+
+section 1
+
+Goal
+“Acquire 400 customers in 90 days with $1200 monthly budget”
+
+section 2
+
+Why this plan
+شرح مختصر منطقي
+
+section 3
+
+Execution numbers
+	•	18 reels
+	•	8 carousels
+	•	40 stories
+	•	4 ad sets
+	•	2 landing/CTA experiments
+
+section 4
+
+Projected growth
+	•	conservative / base / upside
+
+section 5
+
+Weekly operating rhythm
+	•	week 1 production
+	•	week 2 launch
+	•	week 3 optimize
+	•	week 4 scale
+
+section 6
+
+Task queue
+	•	today
+	•	this week
+	•	blocked
+	•	awaiting approval
+
+section 7
+
+Calendar sync
+	•	71 items scheduled
+	•	plan match 97%
+	•	synced to version v4
+
+section 8
+
+Diagnostics
+	•	competitive watch
+	•	risk triggers
+	•	testing matrix
+	•	advanced assumptions
+
+⸻
+
+27) لا تترك مساحة للهلاوس
+
+أنت قلتها بشكل ممتاز:
+“ما بدي AI هالويس”.
+
+إذًا لازم نضيف قواعد صريحة:
+
+لا يبني النظام أي شيء إذا:
+	•	goal missing
+	•	budget missing في الحالات التي تتطلب budget math
+	•	conversion path غير معروف
+	•	primary channel غير محسوم
+	•	business type غير معروف
+
+إذا اضطر يفترض
+
+لازم يكتب:
+	•	assumption
+	•	confidence
+	•	impact severity
+
+مثال:
+	•	Assumed close rate = 8%
+	•	Confidence = low
+	•	Impact = high
+
+ثم يؤثر هذا على:
+	•	readiness score
+	•	simulation confidence
+	•	publish warning
+
+⸻
+
+28) traceability — أهم شيء للثقة
+
+كل رقم يجب أن يكون قابلًا للتتبع.
+
+مثال:
+	•	“20 reels”
+المستخدم يقدر يضغط ويعرف:
+‎	•	جاء من goal decomposition
+	•	based on target reach shortfall
+	•	adjusted بسبب production capacity
+	•	approved by decision layer v3
+
+هذا يقتل التخبيط تمامًا.
+
+⸻
+
+29) التنفيذ على مستوى المنتج: backlog مرتب
+
+إذا بدك تقفل هذا صح، الترتيب الصحيح للتنفيذ هو:
+
+المرحلة 1
+	•	unified root schema
+	•	root versioning
+	•	plan-calendar locking
+	•	integrity validation
+
+المرحلة 2
+	•	goal decomposition math layer
+	•	feasibility engine
+	•	scenario simulation
+
+المرحلة 3
+	•	adaptive business archetypes
+	•	layered intake gates
+	•	account score integration
+
+المرحلة 4
+	•	plan UI redesign
+	•	task system
+	•	acceptance / publish flow
+
+المرحلة 5
+	•	full 13-engine orchestration with conflict resolver
+	•	assumption ledger
+	•	traceability layer
+
+⸻
+
+30) القرار النهائي الذي أنصحك تعتمدوه
+
+اعتمد هذه القواعد كقرارات منتج ثابتة:
+	1.	لا calendar بدون plan version locked
+	2.	لا plan بدون roots validated
+	3.	لا simulation بدون final plan hash
+	4.	لا tasks بدون execution model
+	5.	لا engine يكتب مباشرة على UI
+	6.	كل engine outputs structured, versioned, confidence-scored
+	7.	أي mismatch يتجاوز threshold يمنع publish
+‏	8.	diagnostics ليست الواجهة الأساسية
+	9.	الـ plan يجب أن تشرح وتنفذ، لا فقط تنصح
+	10.	أي assumption عالي التأثير يجب أن يظهر صراحة
+
+⸻
+
+31) الصياغة النهائية للـ Build Up Plan Gate
+
+حتى تكون جاهزة للفريق:
+
+Build Up Plan Gate
+	•	validates business clarity
+	•	validates goal specificity
+	•	validates funnel viability
+	•	validates budget feasibility
+	•	validates execution capacity
+	•	flags high-impact missing data
+	•	routes optional inputs to account score
+	•	routes contextual inputs by business archetype
+	•	blocks low-confidence final plans
+	•	allows provisional drafts with explicit assumptions only
+
+⸻
+
+32) الصياغة النهائية للـ System Promise
+
+هذه مهمة جدًا داخليًا وخارجيًا:
+
+This system does not generate disconnected content plans.
+It builds goal-linked, root-consistent, engine-synchronized execution plans that remain aligned across strategy, calendar, simulations, and daily operations.
+
+هذا هو الوعد الصحيح للمنتج.
+
+⸻
+
+33) الخلاصة التنفيذية
+
+أنت تحتاج 6 تعديلات جوهرية، وليس patch واحد:
+	•	توحيد roots وversioning
+	•	منع calendar من إعادة اختراع distribution
+	•	بناء goal-to-plan math layer
+	•	إدخال adaptive business archetypes
+	•	إضافة growth simulations
+	•	إعادة تصميم plan UI لتصبح operational
+
+إذا عملت هذه الستة صح، المنتج سيطلع من مستوى “AI planner” إلى مستوى serious execution OS.
+
+⸻
+
+34) ماذا أعتبره “مقفل 10/10” في حالتك
+
+أعتبره مقفل فقط إذا صار التالي:
+	•	لا يمكن نظريًا أن plan تقول شيء وcalendar تقول شيء آخر
+	•	لا يمكن أن خطتين لبزنسين مختلفين يطلعوا شبه بعض إلا إذا فعلاً المعطيات متشابهة
+	•	المستخدم يفهم فورًا: الهدف، الطريق، الأرقام، المهام، المتوقع
+	•	كل رقم له أصل واضح
+	•	كل engine مربوط بعقد واضح
+	•	كل update يمر من root validation
+	•	كل create / publish يمر من integrity check
+	•	لا يوجد نصائح عامة غير قابلة للتنفيذ
