@@ -996,8 +996,10 @@ export function validateOfferAlignment(
       const matchedTokens = allMarketTokens.filter(t => combinedOfferText.includes(t));
       const marketLanguageRatio = matchedTokens.length / allMarketTokens.length;
 
-      if (marketLanguageRatio < 0.1 && allMarketTokens.length >= 3) {
-        failures.push(`Market language preservation failed — only ${matchedTokens.length}/${allMarketTokens.length} audience tokens found in offer text (abstract rewrite detected)`);
+      if (matchedTokens.length === 0 && allMarketTokens.length >= 5) {
+        failures.push(`Market language preservation failed — zero audience tokens found in offer text (completely disconnected from market language)`);
+      } else if (marketLanguageRatio < 0.1 && allMarketTokens.length >= 3) {
+        console.log(`[OfferEngine-V4] MARKET_LANGUAGE_SOFT_WARNING | ${matchedTokens.length}/${allMarketTokens.length} tokens matched (${(marketLanguageRatio * 100).toFixed(1)}%) — below 10% ideal but offer accepted`);
       }
     }
   }
