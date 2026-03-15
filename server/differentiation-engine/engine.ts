@@ -15,6 +15,9 @@ import {
   STABILITY_MIN_TRUST_ALIGNMENT,
   BOUNDARY_HARD_PATTERNS,
   BOUNDARY_SOFT_PATTERNS,
+  SIGNAL_WEIGHTS,
+  SOFT_FAILURE_PROOFABILITY,
+  SOFT_FAILURE_TRUST_ALIGNMENT,
 } from "./constants";
 import {
   enforceBoundaryWithSanitization,
@@ -29,6 +32,8 @@ import type {
   MIInput,
   AudienceInput,
   PositioningInput,
+  ProfileInput,
+  ProfileSignals,
   Territory,
   CompetitorClaim,
   ClaimCollision,
@@ -129,6 +134,72 @@ function deriveObjectionsFromAudienceData(audience: AudienceInput): Record<strin
   }
 
   return derived;
+}
+
+export function extractProfileSignals(profile: ProfileInput | null): ProfileSignals {
+  if (!profile) {
+    return { claimTokens: new Set(), offerTokens: new Set(), audienceTokens: new Set(), strategyTokens: new Set(), signalCount: 0, hasProfile: false };
+  }
+
+  const tokenizeProfile = (text: string | null): string[] => {
+    if (!text) return [];
+    return text.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 2);
+  };
+
+  const offerTokens = new Set(tokenizeProfile(profile.coreOffer));
+  const audienceTokens = new Set([
+    ...tokenizeProfile(profile.targetAudienceSegment),
+    ...tokenizeProfile(profile.targetAudienceAge),
+  ]);
+  const strategyTokens = new Set([
+    ...tokenizeProfile(profile.funnelObjective),
+    ...tokenizeProfile(profile.goalDescription),
+    ...tokenizeProfile(profile.priceRange),
+  ]);
+  const claimTokens = new Set([
+    ...tokenizeProfile(profile.businessType),
+    ...tokenizeProfile(profile.coreOffer),
+    ...tokenizeProfile(profile.businessLocation),
+  ]);
+
+  const signalCount = offerTokens.size + audienceTokens.size + strategyTokens.size + claimTokens.size;
+
+  return { claimTokens, offerTokens, audienceTokens, strategyTokens, signalCount, hasProfile: signalCount > 0 };
+}
+
+function computeProfileGroundingScore(
+  territoryName: string,
+  profileSignals: ProfileSignals,
+): number {
+  if (!profileSignals.hasProfile) return 0;
+
+  const tTokens = new Set(territoryName.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 2));
+  if (tTokens.size === 0) return 0;
+
+  let matchCount = 0;
+  const allProfileTokens = new Set([
+    ...profileSignals.claimTokens,
+    ...profileSignals.offerTokens,
+    ...profileSignals.audienceTokens,
+    ...profileSignals.strategyTokens,
+  ]);
+
+  for (const t of tTokens) {
+    if (allProfileTokens.has(t)) matchCount++;
+  }
+
+  const directMatch = tTokens.size > 0 ? matchCount / tTokens.size : 0;
+
+  let semanticBoost = 0;
+  const tLower = territoryName.toLowerCase();
+  for (const token of profileSignals.offerTokens) {
+    if (tLower.includes(token) && token.length > 3) { semanticBoost += 0.1; break; }
+  }
+  for (const token of profileSignals.strategyTokens) {
+    if (tLower.includes(token) && token.length > 3) { semanticBoost += 0.05; break; }
+  }
+
+  return clamp(directMatch + semanticBoost);
 }
 
 function tokenize(text: string): string[] {
@@ -627,6 +698,7 @@ export function layer9_differentiationPillarScoring(
   proofDemands: ProofDemand[],
   audience: AudienceInput,
   mi?: MIInput,
+  profileSignals?: ProfileSignals,
 ): DifferentiationPillar[] {
   const pillars: DifferentiationPillar[] = [];
   const objections = Object.keys(audience.objectionMap || {});
@@ -663,13 +735,13 @@ export function layer9_differentiationPillarScoring(
     const territorySaturation = clamp(saturationCount / Math.max(competitorNarratives.length, 1));
 
     const rawUniqueness = (narrativeDistance * 0.40) + (signalRarity * 0.35) + ((1 - territorySaturation) * 0.25);
-    const uniqueness = clamp(Math.min(rawUniqueness, 0.95));
+    const marketUniqueness = clamp(Math.min(rawUniqueness, 0.95));
 
     const relevantProof = proofDemands.filter(d => d.requiredFor.includes(tName));
-    const proofability = clamp(relevantProof.length > 0 ? relevantProof.reduce((s, d) => s + d.priority, 0) / relevantProof.length : 0.3);
+    const marketProofability = clamp(relevantProof.length > 0 ? relevantProof.reduce((s, d) => s + d.priority, 0) / relevantProof.length : 0.3);
 
     const relevantGaps = trustGaps.filter(g => jaccardSimilarity(g.objection, tLower) > 0.10);
-    const trustAlignment = clamp(relevantGaps.length > 0 ? relevantGaps.reduce((s, g) => s + g.relevanceToTerritory, 0) / relevantGaps.length : 0.3);
+    const marketTrustAlignment = clamp(relevantGaps.length > 0 ? relevantGaps.reduce((s, g) => s + g.relevanceToTerritory, 0) / relevantGaps.length : 0.3);
 
     const avgCompetitorAuthority = competitorAuthorities.length > 0
       ? competitorAuthorities.reduce((s, a) => s + a, 0) / competitorAuthorities.length : 0;
@@ -683,6 +755,25 @@ export function layer9_differentiationPillarScoring(
     const objectionCoverage = clamp(
       objections.filter(o => jaccardSimilarity(o, tLower) > 0.10).length / Math.max(objections.length, 1)
     );
+
+    const profileGrounding = profileSignals ? computeProfileGroundingScore(tName, profileSignals) : 0;
+    const hasProfileData = profileSignals?.hasProfile ?? false;
+
+    const profileUniquenessBasis = clamp(profileGrounding * 0.6 + 0.3);
+    const profileProofabilityBasis = clamp(profileGrounding * 0.7 + 0.2);
+    const profileTrustBasis = clamp(profileGrounding * 0.5 + 0.25);
+
+    const uniqueness = hasProfileData
+      ? clamp(marketUniqueness * SIGNAL_WEIGHTS.MARKET + profileUniquenessBasis * SIGNAL_WEIGHTS.PROFILE)
+      : marketUniqueness;
+
+    const proofability = hasProfileData
+      ? clamp(marketProofability * SIGNAL_WEIGHTS.MARKET + profileProofabilityBasis * SIGNAL_WEIGHTS.PROFILE)
+      : marketProofability;
+
+    const trustAlignment = hasProfileData
+      ? clamp(marketTrustAlignment * SIGNAL_WEIGHTS.MARKET + profileTrustBasis * SIGNAL_WEIGHTS.PROFILE)
+      : marketTrustAlignment;
 
     const overallScore = clamp(
       uniqueness * DIFFERENTIATION_SCORE_WEIGHTS.uniqueness +
@@ -899,8 +990,11 @@ export function layer12_stabilityGuard(
   claims: ClaimStructure[],
   collisions: ClaimCollision[],
   territories: Territory[],
-): { stable: boolean; failures: string[] } {
+  hasProfileSignals: boolean = false,
+): { stable: boolean; failures: string[]; warnings: string[]; lowConfidence: boolean } {
   const failures: string[] = [];
+  const warnings: string[] = [];
+  let groundingWarningCount = 0;
   const territoryNames = new Set(territories.map(t => t.name));
 
   for (const pillar of pillars) {
@@ -915,21 +1009,34 @@ export function layer12_stabilityGuard(
   }
 
   const avgProofability = pillars.length > 0 ? pillars.reduce((s, p) => s + p.proofability, 0) / pillars.length : 0;
-  if (avgProofability < STABILITY_MIN_PROOFABILITY) {
-    failures.push(`Average proofability (${avgProofability.toFixed(2)}) below threshold (${STABILITY_MIN_PROOFABILITY})`);
+  if (avgProofability < SOFT_FAILURE_PROOFABILITY) {
+    failures.push(`Average proofability critically low (${avgProofability.toFixed(2)}) — insufficient signal grounding`);
+  } else if (avgProofability < STABILITY_MIN_PROOFABILITY) {
+    warnings.push(`Insufficient signal grounding – running analysis with limited confidence (proofability: ${avgProofability.toFixed(2)} < ${STABILITY_MIN_PROOFABILITY})`);
+    groundingWarningCount++;
   }
 
   const avgTrustAlignment = pillars.length > 0 ? pillars.reduce((s, p) => s + p.trustAlignment, 0) / pillars.length : 0;
-  if (avgTrustAlignment < STABILITY_MIN_TRUST_ALIGNMENT) {
-    failures.push(`Average trust alignment (${avgTrustAlignment.toFixed(2)}) below threshold (${STABILITY_MIN_TRUST_ALIGNMENT})`);
+  if (avgTrustAlignment < SOFT_FAILURE_TRUST_ALIGNMENT) {
+    failures.push(`Average trust alignment critically low (${avgTrustAlignment.toFixed(2)}) — insufficient signal grounding`);
+  } else if (avgTrustAlignment < STABILITY_MIN_TRUST_ALIGNMENT) {
+    warnings.push(`Insufficient signal grounding – running analysis with limited confidence (trust alignment: ${avgTrustAlignment.toFixed(2)} < ${STABILITY_MIN_TRUST_ALIGNMENT})`);
+    groundingWarningCount++;
   }
 
   const weakClaims = claims.filter(c => c.overallScore < MIN_PILLAR_SCORE);
   if (weakClaims.length === claims.length && claims.length > 0) {
-    failures.push(`All claims below minimum score threshold (${MIN_PILLAR_SCORE})`);
+    if (hasProfileSignals) {
+      warnings.push(`All claims below minimum score threshold (${MIN_PILLAR_SCORE}) — profile signals provide partial grounding`);
+      groundingWarningCount++;
+    } else {
+      failures.push(`All claims below minimum score threshold (${MIN_PILLAR_SCORE})`);
+    }
   }
 
-  return { stable: failures.length === 0, failures };
+  const lowConfidence = groundingWarningCount > 0 && failures.length === 0;
+
+  return { stable: failures.length === 0, failures, warnings, lowConfidence };
 }
 
 function safeJsonParse(text: any): any {
@@ -943,11 +1050,22 @@ export async function runDifferentiationEngine(
   audience: AudienceInput,
   positioning: PositioningInput,
   accountId: string,
+  profile?: ProfileInput | null,
 ): Promise<DifferentiationResult> {
   const startTime = Date.now();
   const diagnostics: Record<string, any> = {};
 
-  console.log(`[DifferentiationEngine-V3] Starting 12-layer pipeline`);
+  const profileSignals = extractProfileSignals(profile || null);
+  diagnostics.profileSignals = {
+    hasProfile: profileSignals.hasProfile,
+    signalCount: profileSignals.signalCount,
+    claimTokenCount: profileSignals.claimTokens.size,
+    offerTokenCount: profileSignals.offerTokens.size,
+    audienceTokenCount: profileSignals.audienceTokens.size,
+    strategyTokenCount: profileSignals.strategyTokens.size,
+  };
+
+  console.log(`[DifferentiationEngine-V3] Starting 12-layer pipeline | profileSignals=${profileSignals.hasProfile ? profileSignals.signalCount : "none"} | dualSignalModel=${profileSignals.hasProfile}`);
 
   const l1 = layer1_positioningIntakeLock(positioning);
   diagnostics.layer1 = { valid: l1.valid, territoryCount: l1.territories.length, failures: l1.failures };
@@ -1012,7 +1130,7 @@ export async function runDifferentiationEngine(
     lowDensity: lowObjectionDensity,
   };
 
-  const l9RawPillars = layer9_differentiationPillarScoring(l1.territories, l2Claims, l5TrustGaps, l4ProofDemands, enrichedAudience, mi);
+  const l9RawPillars = layer9_differentiationPillarScoring(l1.territories, l2Claims, l5TrustGaps, l4ProofDemands, enrichedAudience, mi, profileSignals);
   const evidenceDensity = validateTerritoryEvidenceDensity(l9RawPillars, l4ProofDemands, l5TrustGaps, l2Claims);
   const l9Pillars = evidenceDensity.validatedPillars.sort((a, b) => b.overallScore - a.overallScore);
   diagnostics.layer9 = { pillarCount: l9Pillars.length, topScore: l9Pillars[0]?.overallScore ?? 0, downgradedPillars: evidenceDensity.downgradedCount };
@@ -1077,8 +1195,8 @@ export async function runDifferentiationEngine(
     finalMechanism.description = applySoftSanitization(finalMechanism.description, BOUNDARY_SOFT_PATTERNS);
   }
 
-  const l12Stability = layer12_stabilityGuard(finalPillars, finalClaims, l3Collisions, l1.territories);
-  diagnostics.layer12 = { stable: l12Stability.stable, failures: l12Stability.failures };
+  const l12Stability = layer12_stabilityGuard(finalPillars, finalClaims, l3Collisions, l1.territories, profileSignals.hasProfile);
+  diagnostics.layer12 = { stable: l12Stability.stable, failures: l12Stability.failures, warnings: l12Stability.warnings, lowConfidence: l12Stability.lowConfidence };
 
   const allHighCollision = l3Collisions.every(c => c.collisionRisk >= COLLISION_THRESHOLD) && l3Collisions.length > 0;
   const highCollisionCount = l3Collisions.filter(c => c.collisionRisk >= COLLISION_THRESHOLD).length;
@@ -1092,6 +1210,10 @@ export async function runDifferentiationEngine(
   } else if (!l12Stability.stable) {
     status = STATUS.UNSTABLE;
     statusMessage = `Stability check failed: ${l12Stability.failures.join("; ")}`;
+  } else if (l12Stability.lowConfidence) {
+    status = STATUS.LOW_CONFIDENCE;
+    statusMessage = `Insufficient signal grounding – running analysis with limited confidence. ${l12Stability.warnings.join("; ")}`;
+    console.log(`[DifferentiationEngine-V3] LOW_CONFIDENCE | warnings=${l12Stability.warnings.length} | profileSignals=${profileSignals.hasProfile}`);
   }
 
   const allDiffText = [
@@ -1108,7 +1230,8 @@ export async function runDifferentiationEngine(
   const avgClaimScore = finalClaims.length > 0 ? finalClaims.reduce((s, c) => s + c.overallScore, 0) / finalClaims.length : 0;
   const objectionDensityFactor = lowObjectionDensity ? 0.85 : 1.0;
   const genericPenaltyFactor = genericOutputCheck.genericDetected ? (1 - genericOutputCheck.penalty) : 1;
-  const rawConfidence = clamp(avgClaimScore * (l12Stability.stable ? 1 : 0.6) * objectionDensityFactor * genericPenaltyFactor);
+  const stabilityFactor = l12Stability.stable ? (l12Stability.lowConfidence ? 0.75 : 1) : 0.6;
+  const rawConfidence = clamp(avgClaimScore * stabilityFactor * objectionDensityFactor * genericPenaltyFactor);
   const confidenceScore = normalizeConfidence(rawConfidence, dataReliability);
   const confidenceNormalized = rawConfidence !== confidenceScore;
   diagnostics.confidenceNormalized = confidenceNormalized;
@@ -1116,7 +1239,7 @@ export async function runDifferentiationEngine(
     diagnostics.rawConfidence = rawConfidence;
   }
 
-  console.log(`[DifferentiationEngine-V3] Complete | status=${status} | pillars=${finalPillars.length} | claims=${finalClaims.length} | confidence=${confidenceScore.toFixed(2)} | stable=${l12Stability.stable} | collisions=${highCollisionCount}`);
+  console.log(`[DifferentiationEngine-V3] Complete | status=${status} | pillars=${finalPillars.length} | claims=${finalClaims.length} | confidence=${confidenceScore.toFixed(2)} | stable=${l12Stability.stable} | lowConfidence=${l12Stability.lowConfidence} | collisions=${highCollisionCount} | profileSignals=${profileSignals.hasProfile}`);
 
   return {
     status,

@@ -1,0 +1,141 @@
+Team,
+
+During the latest system test we encountered a recurring issue in the Differentiation / Signal Grounding process where analysis fails due to insufficient signal anchoring (example: 1/4 claims grounded = 25% while the system requires 30%).
+
+This behavior is technically correct, but the current architecture relies too heavily on Market Intelligence signals while under-utilizing the structured inputs coming from the Profile Card.
+
+To stabilize the system and prevent unnecessary analysis failures, we need to rebalance the signal sources and treat Profile Inputs as a permanent signal layer alongside Market Intelligence.
+
+Below are the required adjustments.
+
+---
+
+# 1. Integrate Profile Inputs as Permanent Signals
+
+Currently the grounding logic is prioritizing Market Intelligence signals almost entirely. This causes the engine to reject valid claims even when the user has provided structured information in the Profile Card.
+
+We must introduce a dual signal model:
+
+Signal Sources
+
+• Profile Card Inputs (User-defined signals)  
+• Market Intelligence Signals (External validation)
+
+Both must contribute to the claim grounding score.
+
+Required behavior:
+
+Profile Card signals should be treated as permanent baseline signals, meaning they always participate in grounding calculations even if market signals are weak.
+
+This will prevent unnecessary analysis failures when the market dataset is limited.
+
+---
+
+# 2. Implement Clean Signal Weighting (No Conflicts)
+
+To avoid data collisions between the two sources, implement a clear weighting model.
+
+Suggested structure:
+
+Profile Signals → 40% weight  
+Market Intelligence Signals → 60% weight
+
+This ensures:
+
+• Market data remains the primary validation layer  
+• User strategy inputs remain respected and usable
+
+The Differentiation Engine should evaluate claims using both sources rather than rejecting claims purely based on market signals.
+
+---
+
+# 3. Prevent Signal Collisions
+
+We must ensure the two data layers do not overwrite each other.
+
+Architecture rule:
+
+Profile Data = Intent Layer  
+Market Data = Reality Layer
+
+The Differentiation Engine becomes the reconciliation layer between them.
+
+This prevents situations where:
+
+• Market signals override user strategy  
+• User claims ignore market reality
+
+Instead the engine evaluates the relationship between the two.
+
+---
+
+# 4. Lower Analysis Failure Sensitivity
+
+The current failure condition:
+
+25% signal grounding < 30% threshold
+
+This causes analysis to fail too aggressively.
+
+Instead of blocking the entire analysis, implement:
+
+Soft warning mode.
+
+Example behavior:
+
+If signal grounding < threshold  
+→ Run analysis with Low Confidence flag
+
+Do not fully terminate the engine unless signals are extremely weak.
+
+---
+
+# 5. Improve Error Messaging
+
+Current message:
+
+“Analysis Failed – Signal grounding failed”
+
+This reads like a system crash.
+
+Replace with:
+
+“Insufficient signal grounding – running analysis with limited confidence.”
+
+This better reflects the nature of the issue.
+
+---
+
+# 6. After Implementation – System Stabilization Pass
+
+Once the signal architecture update is completed, please perform the following:
+
+• Re-run Differentiation Engine tests  
+• Verify signal grounding stability  
+• Confirm Profile + Market signals are both counted  
+• Ensure the frontend displays results correctly
+
+---
+
+# 7. Frontend Update
+
+After backend adjustments are complete:
+
+• Update the frontend display logic to reflect the new signal model  
+• Ensure confidence indicators render correctly  
+• Verify the Differentiation UI handles soft-warning states
+
+The system should continue operating smoothly even when market signals are limited.
+
+---
+
+# 8. Final Review
+
+After these updates are complete, we will run another evaluation session to analyze the root causes of signal instability and refine the system architecture further.
+
+The objective is to ensure MarketMind maintains strong analytical rigor without blocking valid strategic analysis due to signal imbalance.
+
+Please complete the update and confirm once backend and frontend adjustments are deployed.
+
+Best,  
+[Your Name]

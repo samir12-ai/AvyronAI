@@ -1,4 +1,4 @@
-export const ENGINE_VERSION = 7;
+export const ENGINE_VERSION = 8;
 export const FRESHNESS_THRESHOLD_DAYS = 14;
 
 export const DIFFERENTIATION_SCORE_WEIGHTS = {
@@ -48,7 +48,16 @@ export const STATUS = {
   INSUFFICIENT_SIGNALS: "INSUFFICIENT_SIGNALS",
   UNSTABLE: "UNSTABLE",
   COLLISION_RISK: "COLLISION_RISK",
+  LOW_CONFIDENCE: "LOW_CONFIDENCE",
 } as const;
+
+export const SIGNAL_WEIGHTS = {
+  PROFILE: 0.40,
+  MARKET: 0.60,
+} as const;
+
+export const SOFT_FAILURE_PROOFABILITY = 0.20;
+export const SOFT_FAILURE_TRUST_ALIGNMENT = 0.15;
 
 export const MIN_TERRITORIES = 1;
 export const MIN_OBJECTIONS = 1;

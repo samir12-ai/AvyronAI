@@ -214,7 +214,7 @@ export function registerPersuasionEngineRoutes(app: Express) {
       if (!diffSnapshot) return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Differentiation snapshot not found" });
       if (diffSnapshot.engineVersion !== DIFF_ENGINE_VERSION) {
         const [latest] = await db.select().from(differentiationSnapshots)
-          .where(and(eq(differentiationSnapshots.campaignId, campaignId), eq(differentiationSnapshots.accountId, accountId), eq(differentiationSnapshots.status, "COMPLETE"), eq(differentiationSnapshots.engineVersion, DIFF_ENGINE_VERSION)))
+          .where(and(eq(differentiationSnapshots.campaignId, campaignId), eq(differentiationSnapshots.accountId, accountId), inArray(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"]), eq(differentiationSnapshots.engineVersion, DIFF_ENGINE_VERSION)))
           .orderBy(desc(differentiationSnapshots.createdAt)).limit(1);
         if (!latest) return res.status(400).json({ error: "VERSION_MISMATCH", message: "Differentiation snapshot version mismatch — please re-run Differentiation" });
         diffSnapshot = latest;

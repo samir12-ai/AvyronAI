@@ -212,7 +212,7 @@ export function registerAwarenessEngineRoutes(app: Express) {
           .where(and(
             eq(differentiationSnapshots.campaignId, campaignId),
             eq(differentiationSnapshots.accountId, accountId),
-            eq(differentiationSnapshots.status, "COMPLETE"),
+            inArray(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"]),
             eq(differentiationSnapshots.engineVersion, DIFF_ENGINE_VERSION),
           ))
           .orderBy(desc(differentiationSnapshots.createdAt))

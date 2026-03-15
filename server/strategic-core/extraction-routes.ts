@@ -194,7 +194,7 @@ async function loadEngineOutputs(accountId: string, campaignId: string): Promise
 
   try {
     const [diff] = await db.select().from(differentiationSnapshots)
-      .where(and(eq(differentiationSnapshots.accountId, accountId), eq(differentiationSnapshots.campaignId, campaignId), eq(differentiationSnapshots.status, "COMPLETE")))
+      .where(and(eq(differentiationSnapshots.accountId, accountId), eq(differentiationSnapshots.campaignId, campaignId), inArray(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"])))
       .orderBy(desc(differentiationSnapshots.createdAt)).limit(1);
     if (diff) {
       sections.push(`DIFFERENTIATION ENGINE:`);

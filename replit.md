@@ -27,7 +27,7 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 - **AI Management**: Auto-Publisher for Meta platforms, AI Audience Engine, and a Performance Intelligence Layer.
 - **Studio**: Media library with AI Auto-Fill metadata, AI Video Editor, and AI Video Analysis Assist.
 - **Lead Engine**: Modular lead generation with AI Lead Optimization.
-- **Strategic Engines**: Includes Positioning, Offer, Funnel, Integrity, Awareness, Persuasion, and Differentiation Engines.
+- **Strategic Engines**: Includes Positioning, Offer, Funnel, Integrity, Awareness, Persuasion, and Differentiation Engines. The Differentiation Engine (V8) uses a dual signal model (Profile 40% / Market Intelligence 60%) with soft-warning mode for low signal grounding instead of hard failures.
 - **Competitive Intelligence (MIv3)**: A 6-layer pipeline for real-data competitor analysis.
 - **AI Orchestrator**: Single-entry orchestration engine that runs 14 engines in priority order with checkpoint persistence, generating coherent 9-section strategic plans via AI synthesis.
 - **Plan-First Dashboard**: Provides a hierarchical view of performance, active plan status, execution pipeline, required work, and advanced insights.

@@ -20,6 +20,26 @@ export interface AudienceInput {
   intentDistribution: any;
 }
 
+export interface ProfileInput {
+  businessType: string | null;
+  coreOffer: string | null;
+  targetAudienceSegment: string | null;
+  targetAudienceAge: string | null;
+  priceRange: string | null;
+  funnelObjective: string | null;
+  businessLocation: string | null;
+  goalDescription: string | null;
+}
+
+export interface ProfileSignals {
+  claimTokens: Set<string>;
+  offerTokens: Set<string>;
+  audienceTokens: Set<string>;
+  strategyTokens: Set<string>;
+  signalCount: number;
+  hasProfile: boolean;
+}
+
 export interface PositioningInput {
   territories: Territory[];
   differentiationVector: any;

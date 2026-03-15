@@ -76,7 +76,7 @@ interface DifferentiationData {
   trustPriorityMap?: TrustGap[];
   claimScores?: { averageScore: number; highestCollision: number; totalClaims: number };
   collisionDiagnostics?: ClaimCollision[];
-  stabilityResult?: { stable: boolean; failures: string[] };
+  stabilityResult?: { stable: boolean; failures: string[]; warnings?: string[]; lowConfidence?: boolean };
   confidenceScore?: number;
   executionTimeMs?: number;
   engineVersion?: number;
@@ -254,14 +254,27 @@ export default function DifferentiationEngine({ isActive }: { isActive?: boolean
 
       {data?.exists && data.status && (
         <View style={styles.results}>
-          <View style={[styles.statusBar, { backgroundColor: data.status === 'COMPLETE' ? '#10B98118' : data.status === 'UNSTABLE' ? '#F59E0B18' : '#EF444418' }]}>
+          <View style={[styles.statusBar, {
+            backgroundColor: data.status === 'COMPLETE' ? '#10B98118'
+              : data.status === 'LOW_CONFIDENCE' ? '#F59E0B18'
+              : data.status === 'UNSTABLE' ? '#F59E0B18' : '#EF444418'
+          }]}>
             <Ionicons
-              name={data.status === 'COMPLETE' ? 'checkmark-circle' : data.status === 'UNSTABLE' ? 'warning' : 'alert-circle'}
+              name={data.status === 'COMPLETE' ? 'checkmark-circle'
+                : data.status === 'LOW_CONFIDENCE' ? 'information-circle'
+                : data.status === 'UNSTABLE' ? 'warning' : 'alert-circle'}
               size={16}
-              color={data.status === 'COMPLETE' ? '#10B981' : data.status === 'UNSTABLE' ? '#F59E0B' : '#EF4444'}
+              color={data.status === 'COMPLETE' ? '#10B981'
+                : data.status === 'LOW_CONFIDENCE' ? '#F59E0B'
+                : data.status === 'UNSTABLE' ? '#F59E0B' : '#EF4444'}
             />
-            <Text style={[styles.statusText, { color: data.status === 'COMPLETE' ? '#10B981' : data.status === 'UNSTABLE' ? '#F59E0B' : '#EF4444' }]}>
-              {data.status}{data.statusMessage ? ` — ${data.statusMessage}` : ''}
+            <Text style={[styles.statusText, {
+              color: data.status === 'COMPLETE' ? '#10B981'
+                : data.status === 'LOW_CONFIDENCE' ? '#F59E0B'
+                : data.status === 'UNSTABLE' ? '#F59E0B' : '#EF4444'
+            }]}>
+              {data.status === 'LOW_CONFIDENCE' ? 'LIMITED CONFIDENCE' : data.status}
+              {data.statusMessage ? ` — ${data.statusMessage}` : ''}
             </Text>
           </View>
 
@@ -400,16 +413,34 @@ export default function DifferentiationEngine({ isActive }: { isActive?: boolean
           {data.stabilityResult && (
             <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
               <View style={styles.sectionHeader}>
-                <Ionicons name="shield-outline" size={16} color={data.stabilityResult.stable ? '#10B981' : '#EF4444'} />
+                <Ionicons name="shield-outline" size={16} color={
+                  data.stabilityResult.stable
+                    ? (data.stabilityResult.lowConfidence ? '#F59E0B' : '#10B981')
+                    : '#EF4444'
+                } />
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>Stability Guard</Text>
               </View>
-              <View style={[styles.stabilityBadge, { backgroundColor: data.stabilityResult.stable ? '#10B98118' : '#EF444418' }]}>
-                <Text style={{ color: data.stabilityResult.stable ? '#10B981' : '#EF4444', fontWeight: '600', fontSize: 12 }}>
-                  {data.stabilityResult.stable ? 'STABLE' : 'UNSTABLE'}
+              <View style={[styles.stabilityBadge, {
+                backgroundColor: data.stabilityResult.stable
+                  ? (data.stabilityResult.lowConfidence ? '#F59E0B18' : '#10B98118')
+                  : '#EF444418'
+              }]}>
+                <Text style={{
+                  color: data.stabilityResult.stable
+                    ? (data.stabilityResult.lowConfidence ? '#F59E0B' : '#10B981')
+                    : '#EF4444',
+                  fontWeight: '600' as const, fontSize: 12,
+                }}>
+                  {data.stabilityResult.stable
+                    ? (data.stabilityResult.lowConfidence ? 'LIMITED CONFIDENCE' : 'STABLE')
+                    : 'UNSTABLE'}
                 </Text>
               </View>
+              {data.stabilityResult.warnings?.map((w: string, i: number) => (
+                <Text key={`w-${i}`} style={[styles.warningText, { color: '#F59E0B' }]}>• {w}</Text>
+              ))}
               {data.stabilityResult.failures?.map((f: string, i: number) => (
-                <Text key={i} style={[styles.failureText, { color: '#EF4444' }]}>• {f}</Text>
+                <Text key={`f-${i}`} style={[styles.failureText, { color: '#EF4444' }]}>• {f}</Text>
               ))}
             </View>
           )}
@@ -484,6 +515,7 @@ const styles = StyleSheet.create({
   collisionRiskText: { color: '#EF4444', fontSize: 11, fontWeight: '700' },
   collisionComp: { fontSize: 11, fontStyle: 'italic' },
   stabilityBadge: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  warningText: { fontSize: 11, lineHeight: 16 },
   failureText: { fontSize: 11, lineHeight: 16 },
   execTime: { fontSize: 11, textAlign: 'center', marginTop: 4 },
   empty: { padding: 32, borderRadius: 12, alignItems: 'center', gap: 8 },

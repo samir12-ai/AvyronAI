@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { db } from "../db";
-import { differentiationSnapshots, miSnapshots, audienceSnapshots, positioningSnapshots } from "@shared/schema";
+import { differentiationSnapshots, miSnapshots, audienceSnapshots, positioningSnapshots, businessDataLayer } from "@shared/schema";
 import { inArray, eq, and, desc } from "drizzle-orm";
 import { runDifferentiationEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
@@ -8,6 +8,7 @@ import { getEngineReadinessState, verifySnapshotIntegrity } from "../market-inte
 import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/constants";
 import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snapshot-trust";
+import type { ProfileInput } from "./types";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -149,7 +150,31 @@ export function registerDifferentiationRoutes(app: Express) {
         strategyCards: safeJsonParse(posSnapshot.strategyCards) || [],
       };
 
-      const result = await runDifferentiationEngine(miInput, audienceInput, positioningInput, accountId);
+      let profileInput: ProfileInput | null = null;
+      try {
+        const [bizData] = await db.select().from(businessDataLayer)
+          .where(and(eq(businessDataLayer.campaignId, campaignId), eq(businessDataLayer.accountId, accountId)))
+          .limit(1);
+        if (bizData) {
+          profileInput = {
+            businessType: bizData.businessType,
+            coreOffer: bizData.coreOffer,
+            targetAudienceSegment: bizData.targetAudienceSegment,
+            targetAudienceAge: bizData.targetAudienceAge,
+            priceRange: bizData.priceRange,
+            funnelObjective: bizData.funnelObjective,
+            businessLocation: bizData.businessLocation,
+            goalDescription: bizData.goalDescription,
+          };
+          console.log(`[DifferentiationEngine] Profile data loaded for campaign ${campaignId} — dual signal model active`);
+        } else {
+          console.log(`[DifferentiationEngine] No profile data for campaign ${campaignId} — market-only signal model`);
+        }
+      } catch (err: any) {
+        console.log(`[DifferentiationEngine] Profile data fetch failed (non-blocking): ${err.message}`);
+      }
+
+      const result = await runDifferentiationEngine(miInput, audienceInput, positioningInput, accountId, profileInput);
 
       if (result.status === "INTEGRITY_FAILED") {
         return res.status(400).json({
