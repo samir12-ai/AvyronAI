@@ -45,6 +45,7 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
   const [error, setError] = useState<string | null>(null);
   const [planData, setPlanData] = useState<any>(null);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+  const [expandedRiskIdx, setExpandedRiskIdx] = useState<number | null>(null);
 
   const cardBg = isDark ? '#0F1419' : '#FFFFFF';
   const cardBorder = isDark ? '#1F2937' : '#E2E8F0';
@@ -228,31 +229,50 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
   const renderNumbersThatMatter = () => {
     const funnel = goalDecomp?.funnelMath;
     if (!funnel) return null;
-    const funnelSteps = [
-      { label: 'Required Reach', value: funnel.requiredReach || funnel.topOfFunnel, icon: 'megaphone-outline', color: C.blue },
-      { label: 'Expected Leads', value: funnel.requiredLeads || funnel.middleFunnel, icon: 'people-outline', color: C.teal },
-      { label: 'Qualified Leads', value: funnel.requiredQualifiedLeads, icon: 'person-outline', color: C.orange },
-      { label: 'Conversion Rate', value: funnel.conversionRate ? `${(funnel.conversionRate * 100).toFixed(1)}%` : null, icon: 'trending-up-outline', color: C.neon },
-      { label: 'Close Rate', value: funnel.closeRate ? `${(funnel.closeRate * 100).toFixed(1)}%` : null, icon: 'checkmark-done-outline', color: C.mint },
-    ].filter(s => s.value != null && s.value !== 0);
+
+    const pipelineSteps = [
+      { label: 'Reach', value: funnel.requiredReach ?? funnel.topOfFunnel ?? 0, icon: 'megaphone-outline', color: C.blue },
+      { label: 'Clicks', value: funnel.requiredClicks ?? 0, icon: 'hand-left-outline', color: '#818CF8' },
+      { label: 'Conversations', value: funnel.requiredConversations ?? 0, icon: 'chatbubbles-outline', color: C.gold },
+      { label: 'Leads', value: funnel.requiredLeads ?? funnel.middleFunnel ?? 0, icon: 'people-outline', color: C.teal },
+      { label: 'Qualified', value: funnel.requiredQualifiedLeads ?? 0, icon: 'person-outline', color: C.orange },
+      { label: 'Closed', value: funnel.requiredClosedClients ?? 0, icon: 'checkmark-circle-outline', color: C.neon },
+    ];
+
+    const rateItems = [
+      { label: 'CTR', value: funnel.ctr ? `${(funnel.ctr * 100).toFixed(1)}%` : null },
+      { label: 'Click→Conv', value: funnel.clickToConversationRate ? `${(funnel.clickToConversationRate * 100).toFixed(0)}%` : null },
+      { label: 'Conv→Lead', value: funnel.conversationToLeadRate ? `${(funnel.conversationToLeadRate * 100).toFixed(0)}%` : null },
+      { label: 'Close Rate', value: funnel.closeRate ? `${(funnel.closeRate * 100).toFixed(1)}%` : null },
+    ].filter(r => r.value != null);
 
     return (
       <View style={[st.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
         <View style={st.sectionHead}>
           <Ionicons name="calculator-outline" size={18} color={C.teal} />
-          <Text style={[st.sectionTitle, { color: textPrimary }]}>Numbers That Matter</Text>
+          <Text style={[st.sectionTitle, { color: textPrimary }]}>Full Funnel Pipeline</Text>
         </View>
         <View style={st.numbersGrid}>
-          {funnelSteps.map((s, i) => (
+          {pipelineSteps.map((s, i) => (
             <View key={i} style={[st.numberCard, { backgroundColor: surfaceBg, borderColor: cardBorder }]}>
               <Ionicons name={s.icon as any} size={16} color={s.color} />
-              <Text style={[st.numberValue, { color: textPrimary }]}>
-                {typeof s.value === 'number' ? s.value.toLocaleString() : s.value}
+              <Text style={[st.numberValue, { color: s.value === 0 ? textSecondary : textPrimary }]}>
+                {s.value === 0 ? '—' : s.value.toLocaleString()}
               </Text>
               <Text style={[st.numberLabel, { color: textSecondary }]}>{s.label}</Text>
             </View>
           ))}
         </View>
+        {rateItems.length > 0 && (
+          <View style={[st.rateRow, { borderTopColor: cardBorder }]}>
+            {rateItems.map((r, i) => (
+              <View key={i} style={st.rateItem}>
+                <Text style={[st.rateValue, { color: C.mint }]}>{r.value}</Text>
+                <Text style={[st.rateLabel, { color: textSecondary }]}>{r.label}</Text>
+              </View>
+            ))}
+          </View>
+        )}
       </View>
     );
   };
@@ -285,7 +305,8 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[st.scenarioLabel, { color: textPrimary }]}>{sc.key}</Text>
-                {d.description && <Text style={[st.scenarioDesc, { color: textSecondary }]} numberOfLines={1}>{d.description}</Text>}
+                {d.lever && <Text style={[st.scenarioDesc, { color: textSecondary }]} numberOfLines={2}>{d.lever}</Text>}
+                {!d.lever && d.summary && <Text style={[st.scenarioDesc, { color: textSecondary }]} numberOfLines={1}>{d.summary}</Text>}
               </View>
               <View style={{ alignItems: 'flex-end' as const }}>
                 <Text style={[st.scenarioValue, { color: sc.color }]}>
@@ -296,6 +317,14 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
             </View>
           );
         })}
+        {simulation.highestLeverageDriver && (
+          <View style={[st.leverStrip, { backgroundColor: isDark ? '#064E3B' : '#D1FAE5' }]}>
+            <Ionicons name="flash-outline" size={13} color={isDark ? '#6EE7B7' : '#065F46'} />
+            <Text style={[st.leverText, { color: isDark ? '#6EE7B7' : '#065F46' }]}>
+              Highest Leverage: {simulation.highestLeverageDriver}
+            </Text>
+          </View>
+        )}
         {simulation.bottleneckAlerts && safeArr(simulation.bottleneckAlerts).length > 0 && (
           <View style={[st.alertStrip, { backgroundColor: isDark ? '#451A03' : '#FEF3C7' }]}>
             <Ionicons name="warning-outline" size={13} color={C.gold} />
@@ -475,14 +504,36 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
   };
 
   const renderDiagnostics = () => {
+    const planSections = plan?.sections || {};
     const hasCreativeTesting = docContent.creativeTestingMatrix && safeArr(docContent.creativeTestingMatrix.tests || docContent.creativeTestingMatrix.experiments).length > 0;
-    const hasCompetitiveWatch = docContent.competitiveWatchTargets && safeArr(docContent.competitiveWatchTargets.competitors || docContent.competitiveWatchTargets.targets).length > 0;
-    const hasRiskTriggers = docContent.riskMonitoringTriggers && safeArr(docContent.riskMonitoringTriggers.triggers || docContent.riskMonitoringTriggers.risks).length > 0;
-    const hasBudget = docContent.budgetAllocationStructure;
-    const hasKpi = docContent.kpiMonitoringPriority;
-    const hasAssumptions = assumptions.length > 0;
 
-    if (!hasCreativeTesting && !hasCompetitiveWatch && !hasRiskTriggers && !hasBudget && !hasKpi && !hasAssumptions) return null;
+    const mergeObj = (a: any, b: any) => {
+      if (!a) return b || {};
+      if (!b) return a;
+      const merged: any = { ...a };
+      for (const k of Object.keys(b)) {
+        if (Array.isArray(b[k]) && b[k].length > 0) {
+          merged[k] = Array.isArray(a[k]) && a[k].length > 0 ? a[k] : b[k];
+        } else if (b[k] && !merged[k]) {
+          merged[k] = b[k];
+        }
+      }
+      return merged;
+    };
+
+    const compWatch = mergeObj(docContent.competitiveWatchTargets, planSections.competitiveWatch);
+    const hasCompetitiveWatch = safeArr(compWatch.competitors || compWatch.targets).length > 0 || safeArr(compWatch.strategyFeed).length > 0;
+    const riskData = mergeObj(docContent.riskMonitoringTriggers, planSections.riskTriggers);
+    const hasRiskTriggers = safeArr(riskData.triggers || riskData.risks).length > 0 || safeArr(riskData.earlyWarningSystem).length > 0;
+    const budgetData = docContent.budgetAllocationStructure || planSections.budgetAllocation;
+    const hasBudget = !!budgetData;
+    const kpiData = docContent.kpiMonitoringPriority || planSections.kpiMonitoring;
+    const hasKpi = !!kpiData;
+    const hasAssumptions = assumptions.length > 0;
+    const dnaLinkData = planSections.executionBlueprintDnaLink || docContent.executionBlueprintDnaLink;
+    const hasDnaLink = dnaLinkData && safeArr(dnaLinkData.contentPillarToDna).length > 0;
+
+    if (!hasCreativeTesting && !hasCompetitiveWatch && !hasRiskTriggers && !hasBudget && !hasKpi && !hasAssumptions && !hasDnaLink) return null;
 
     const isExpanded = expandedSections.diagnostics;
 
@@ -496,10 +547,11 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
 
         {isExpanded && (
           <View style={st.expandedBody}>
-            {hasBudget && renderDiagBudget(docContent.budgetAllocationStructure)}
-            {hasKpi && renderDiagKpi(docContent.kpiMonitoringPriority)}
-            {hasCompetitiveWatch && renderDiagCompetitive(docContent.competitiveWatchTargets)}
-            {hasRiskTriggers && renderDiagRisk(docContent.riskMonitoringTriggers)}
+            {hasBudget && renderDiagBudget(budgetData)}
+            {hasKpi && renderDiagKpi(kpiData)}
+            {hasCompetitiveWatch && renderDiagCompetitive(compWatch)}
+            {hasRiskTriggers && renderDiagRisk(riskData)}
+            {hasDnaLink && renderDiagDnaLink(dnaLinkData)}
             {hasCreativeTesting && renderDiagTesting(docContent.creativeTestingMatrix)}
             {hasAssumptions && renderDiagAssumptions()}
           </View>
@@ -547,6 +599,8 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
 
   const renderDiagCompetitive = (data: any) => {
     const targets = safeArr(data.competitors || data.targets);
+    const strategyFeed = safeArr(data.strategyFeed);
+    const priorityColors: Record<string, string> = { high: C.coral, medium: C.gold, low: C.teal };
     return (
       <View style={st.diagSection}>
         <View style={st.diagHead}>
@@ -559,12 +613,27 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
             <Text style={[st.detailValue, { color: textPrimary }]}>{safeStr(c.checkFrequency || 'Weekly')}</Text>
           </View>
         ))}
+        {strategyFeed.length > 0 && (
+          <View style={{ marginTop: 8 }}>
+            <Text style={[st.subLabel, { color: textPrimary, fontSize: 11 }]}>Strategy Feed</Text>
+            {strategyFeed.map((sf: any, i: number) => (
+              <View key={i} style={[st.feedCard, { backgroundColor: surfaceBg, borderColor: cardBorder }]}>
+                <View style={st.feedHeader}>
+                  <View style={[st.priorityDot, { backgroundColor: priorityColors[sf.priority] || C.blue }]} />
+                  <Text style={[st.feedInsight, { color: textPrimary }]}>{safeStr(sf.insight)}</Text>
+                </View>
+                <Text style={[st.feedResponse, { color: textSecondary }]}>{safeStr(sf.actionableResponse)}</Text>
+              </View>
+            ))}
+          </View>
+        )}
       </View>
     );
   };
 
   const renderDiagRisk = (data: any) => {
     const risks = safeArr(data.triggers || data.risks);
+    const earlyWarnings = safeArr(data.earlyWarningSystem);
     const sevColors: Record<string, string> = { critical: C.coral, high: C.gold, medium: C.blue, low: C.teal };
     return (
       <View style={st.diagSection}>
@@ -574,13 +643,71 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
         </View>
         {risks.map((r: any, i: number) => {
           const sev = safeStr(r.severity || 'medium').toLowerCase();
+          const hasPlaybook = !!r.optimizationPlaybook;
+          const isOpen = expandedRiskIdx === i;
           return (
-            <View key={i} style={st.detailRow}>
-              <Text style={[st.detailLabel, { color: textSecondary, flex: 1 }]}>{safeStr(r.trigger)}</Text>
-              <Text style={[st.detailValue, { color: sevColors[sev] || C.blue }]}>{sev}</Text>
+            <View key={i}>
+              <Pressable onPress={() => hasPlaybook && setExpandedRiskIdx(isOpen ? null : i)} style={st.detailRow}>
+                <Text style={[st.detailLabel, { color: textSecondary, flex: 1 }]}>{safeStr(r.trigger)}</Text>
+                <Text style={[st.detailValue, { color: sevColors[sev] || C.blue }]}>{sev}</Text>
+                {hasPlaybook && <Ionicons name={isOpen ? 'chevron-up' : 'chevron-down'} size={12} color={textSecondary} style={{ marginLeft: 4 }} />}
+              </Pressable>
+              {isOpen && r.optimizationPlaybook && (
+                <View style={[st.playbookBox, { backgroundColor: isDark ? '#1E1B4B' : '#EDE9FE', borderColor: cardBorder }]}>
+                  <Text style={[st.playbookLabel, { color: isDark ? '#A5B4FC' : '#6D28D9' }]}>Optimization Playbook</Text>
+                  <Text style={[st.playbookText, { color: textSecondary }]}>{r.optimizationPlaybook}</Text>
+                </View>
+              )}
             </View>
           );
         })}
+        {earlyWarnings.length > 0 && (
+          <View style={{ marginTop: 8 }}>
+            <Text style={[st.subLabel, { color: textPrimary, fontSize: 11 }]}>Early Warning System</Text>
+            {earlyWarnings.map((ew: any, i: number) => (
+              <View key={i} style={[st.feedCard, { backgroundColor: isDark ? '#451A03' : '#FEF3C7', borderColor: cardBorder }]}>
+                <View style={st.feedHeader}>
+                  <Ionicons name="radio-outline" size={12} color={C.gold} />
+                  <Text style={[st.feedInsight, { color: textPrimary }]}>{safeStr(ew.signal)}</Text>
+                </View>
+                <Text style={[st.feedResponse, { color: textSecondary }]}>Threshold: {safeStr(ew.threshold)} → {safeStr(ew.response)}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderDiagDnaLink = (data: any) => {
+    const pillars = safeArr(data.contentPillarToDna);
+    return (
+      <View style={st.diagSection}>
+        <View style={st.diagHead}>
+          <Ionicons name="git-merge-outline" size={14} color={C.mint} />
+          <Text style={[st.diagTitle, { color: textPrimary }]}>Blueprint ↔ DNA</Text>
+        </View>
+        {pillars.map((p: any, i: number) => (
+          <View key={i} style={[st.feedCard, { backgroundColor: surfaceBg, borderColor: cardBorder }]}>
+            <Text style={[st.feedInsight, { color: textPrimary }]}>{safeStr(p.pillar)}</Text>
+            <View style={st.dnaLinkRow}>
+              <Text style={[st.dnaLinkLabel, { color: textSecondary }]}>Hook: {safeStr(p.hookApproach)}</Text>
+              <Text style={[st.dnaLinkLabel, { color: textSecondary }]}>CTA: {safeStr(p.ctaStyle)}</Text>
+            </View>
+            {safeArr(p.dnaElements).length > 0 && (
+              <View style={st.dnaChipRow}>
+                {safeArr(p.dnaElements).map((el: string, j: number) => (
+                  <View key={j} style={[st.dnaChip, { backgroundColor: C.mint + '15' }]}>
+                    <Text style={[st.dnaChipText, { color: C.mint }]}>{el}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        ))}
+        {data.weeklyDnaApplication && (
+          <Text style={[st.feedResponse, { color: textSecondary, marginTop: 6 }]}>{data.weeklyDnaApplication}</Text>
+        )}
       </View>
     );
   };
@@ -757,4 +884,23 @@ const st = StyleSheet.create({
   assumptionDot: { width: 6, height: 6, borderRadius: 3, marginTop: 5 },
   assumptionText: { fontSize: 12, flex: 1, lineHeight: 17 },
   confBadgeSmall: { fontSize: 9, fontWeight: '800' as const, letterSpacing: 0.3 },
+  rateRow: { flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, marginTop: 4, paddingTop: 12, paddingHorizontal: 14, paddingBottom: 14 },
+  rateItem: { alignItems: 'center' as const, gap: 2 },
+  rateValue: { fontSize: 14, fontWeight: '800' as const },
+  rateLabel: { fontSize: 10 },
+  leverStrip: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 10, marginHorizontal: 14, marginBottom: 6, borderRadius: 8 },
+  leverText: { fontSize: 11, fontWeight: '600' as const, flex: 1 },
+  feedCard: { borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 6 },
+  feedHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  priorityDot: { width: 7, height: 7, borderRadius: 4 },
+  feedInsight: { fontSize: 12, fontWeight: '600' as const, flex: 1 },
+  feedResponse: { fontSize: 11, lineHeight: 16 },
+  playbookBox: { borderWidth: 1, borderRadius: 8, padding: 10, marginLeft: 12, marginTop: 4, marginBottom: 6 },
+  playbookLabel: { fontSize: 10, fontWeight: '700' as const, textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 4 },
+  playbookText: { fontSize: 11, lineHeight: 16 },
+  dnaLinkRow: { flexDirection: 'row', gap: 12, marginTop: 4 },
+  dnaLinkLabel: { fontSize: 11 },
+  dnaChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 6 },
+  dnaChip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  dnaChipText: { fontSize: 10, fontWeight: '600' as const },
 });
