@@ -24,6 +24,10 @@ import {
   iterationSnapshots,
   retentionSnapshots,
   strategicBlueprints,
+  goalDecompositions,
+  growthSimulations,
+  executionTasks,
+  planAssumptions,
 } from "@shared/schema";
 import { eq, and, desc, gte, sql, inArray } from "drizzle-orm";
 import { ACTIVE_PLAN_STATUSES } from "./plan-constants";
@@ -457,7 +461,7 @@ export function registerDashboardRoutes(app: Express) {
 
       const safeJson = (v: any) => { try { return typeof v === "string" ? JSON.parse(v) : v; } catch { return null; } };
 
-      const [plans, manual, miData, audData, posData, diffData, offerData, funnelData, awarenessData, persuasionData, statValData, budgetData, channelData, iterData, retentionData, blueprint] = await Promise.all([
+      const [plans, manual, miData, audData, posData, diffData, offerData, funnelData, awarenessData, persuasionData, statValData, budgetData, channelData, iterData, retentionData, blueprint, goalDecompData, simulationData] = await Promise.all([
         db.select().from(strategicPlans)
           .where(and(eq(strategicPlans.campaignId, campaignId), eq(strategicPlans.accountId, accountId), inArray(strategicPlans.status, [...ACTIVE_PLAN_STATUSES])))
           .orderBy(desc(strategicPlans.createdAt)).limit(1),
@@ -504,9 +508,26 @@ export function registerDashboardRoutes(app: Express) {
         db.select().from(strategicBlueprints)
           .where(and(eq(strategicBlueprints.accountId, accountId), eq(strategicBlueprints.campaignId, campaignId)))
           .orderBy(desc(strategicBlueprints.createdAt)).limit(1),
+        db.select({
+          goalType: goalDecompositions.goalType, goalTarget: goalDecompositions.goalTarget,
+          goalLabel: goalDecompositions.goalLabel, timeHorizonDays: goalDecompositions.timeHorizonDays,
+          feasibility: goalDecompositions.feasibility, feasibilityScore: goalDecompositions.feasibilityScore,
+          confidenceScore: goalDecompositions.confidenceScore, funnelMath: goalDecompositions.funnelMath,
+        }).from(goalDecompositions)
+          .where(and(eq(goalDecompositions.accountId, accountId), eq(goalDecompositions.campaignId, campaignId), eq(goalDecompositions.status, "active")))
+          .orderBy(desc(goalDecompositions.createdAt)).limit(1),
+        db.select({
+          conservativeCase: growthSimulations.conservativeCase, baseCase: growthSimulations.baseCase,
+          upsideCase: growthSimulations.upsideCase, confidenceScore: growthSimulations.confidenceScore,
+          bottleneckAlerts: growthSimulations.bottleneckAlerts,
+        }).from(growthSimulations)
+          .where(and(eq(growthSimulations.accountId, accountId), eq(growthSimulations.campaignId, campaignId), eq(growthSimulations.status, "active")))
+          .orderBy(desc(growthSimulations.createdAt)).limit(1),
       ]);
 
       const plan = plans[0] || null;
+      const goalDecomp = goalDecompData[0] || null;
+      const simulation = simulationData[0] || null;
       const hasManualData = manual && (manual.spend > 0 || manual.revenue > 0 || manual.impressions > 0);
       const spend = manual?.spend || 0;
       const revenue = manual?.revenue || 0;
@@ -518,6 +539,34 @@ export function registerDashboardRoutes(app: Express) {
       if (plan) {
         const { computeFulfillment } = await import("./fulfillment-engine");
         fulfillmentData = await computeFulfillment(campaignId, accountId);
+      }
+
+      let taskSummary: any = null;
+      let assumptionsSummary: any = null;
+      if (plan) {
+        try {
+          const taskRows = await db.select({ status: executionTasks.status }).from(executionTasks)
+            .where(eq(executionTasks.planId, plan.id));
+          if (taskRows.length > 0) {
+            taskSummary = {
+              total: taskRows.length,
+              pending: taskRows.filter(t => t.status === "pending").length,
+              completed: taskRows.filter(t => t.status === "completed").length,
+              blocked: taskRows.filter(t => t.status === "blocked").length,
+            };
+          }
+        } catch {}
+        try {
+          const assRows = await db.select({ confidence: planAssumptions.confidence, impactSeverity: planAssumptions.impactSeverity })
+            .from(planAssumptions).where(eq(planAssumptions.planId, plan.id));
+          if (assRows.length > 0) {
+            assumptionsSummary = {
+              total: assRows.length,
+              highImpact: assRows.filter(a => a.impactSeverity === "high").length,
+              lowConfidence: assRows.filter(a => a.confidence === "low").length,
+            };
+          }
+        } catch {}
       }
 
       const totalPieces = fulfillmentData?.total?.required || 0;
@@ -645,14 +694,44 @@ export function registerDashboardRoutes(app: Express) {
         console.warn(`${LOG_PREFIX} Content DNA fetch failed:`, e.message);
       }
 
+      let goalLine = "";
+      if (goalDecomp) {
+        const fm = safeJson(goalDecomp.funnelMath);
+        goalLine = `GOAL: ${goalDecomp.goalLabel} | Type: ${goalDecomp.goalType} | Target: ${goalDecomp.goalTarget} | ${goalDecomp.timeHorizonDays} days | Feasibility: ${goalDecomp.feasibility} (${goalDecomp.feasibilityScore}/100) | Confidence: ${goalDecomp.confidenceScore}/100`;
+        if (fm) goalLine += ` | Funnel: Reach=${fm.requiredReach?.toLocaleString()}, Leads=${fm.requiredLeads?.toLocaleString()}, CloseRate=${fm.closeRate}`;
+      }
+
+      let simLine = "";
+      if (simulation) {
+        const base = safeJson(simulation.baseCase);
+        const bottlenecks = safeJson(simulation.bottleneckAlerts) || [];
+        simLine = `SIMULATION: Confidence ${simulation.confidenceScore}/100`;
+        if (base) simLine += ` | Base case: ${base.expectedCustomers || base.expectedLeads || base.expectedReach || "N/A"} (${base.achievementPct || 100}%)`;
+        if (bottlenecks.length > 0) simLine += ` | Bottlenecks: ${bottlenecks.slice(0, 3).join(", ")}`;
+      }
+
+      let taskLine = "";
+      if (taskSummary) {
+        taskLine = `TASKS: ${taskSummary.total} total | ${taskSummary.pending} pending | ${taskSummary.completed} done | ${taskSummary.blocked} blocked`;
+      }
+
+      let assumptionLine = "";
+      if (assumptionsSummary) {
+        assumptionLine = `ASSUMPTIONS: ${assumptionsSummary.total} total | ${assumptionsSummary.highImpact} high-impact | ${assumptionsSummary.lowConfidence} low-confidence`;
+      }
+
       const contextForAI = [
         hasManualData ? `Performance: CPA=$${cpa}, ROAS=${roas}x, Spend=$${spend}, Revenue=$${revenue}, Conversions=${conversions}` : "No performance data yet",
         totalPieces > 0 ? `Plan progress: ${fulfilledPieces}/${totalPieces} pieces (${progressPct}% complete), ${remainingPieces} remaining` : "No content plan active",
         plan ? `Plan status: ${plan.status}` : "No strategic plan created",
+        goalLine,
+        simLine,
+        taskLine,
+        assumptionLine,
         dnaStatusLine,
         enginesActive.length > 0 ? `Active engines (${enginesActive.length}/14): ${enginesActive.join(", ")}` : "No engines have run yet",
         ...Object.entries(engineSummaries).map(([k, v]) => `${k}: ${v}`),
-      ].join("\n");
+      ].filter(Boolean).join("\n");
 
       try {
         const response = await aiChat({
@@ -660,9 +739,9 @@ export function registerDashboardRoutes(app: Express) {
           messages: [
             {
               role: "system",
-              content: `You are the MarketMind AI Campaign Manager. You have access to all 14 engine outputs and Content DNA (the content creation blueprint synthesized from all engines + business profile into 8 rules: Messaging Core, CTA DNA, Hook DNA, Narrative DNA, Content Angle DNA, Visual DNA, Format DNA, Execution Rules). Content DNA auto-generates after plan synthesis and governs all content creation. When DNA is active, reference its rules in your insight. Given campaign data and engine intelligence, produce EXACTLY this JSON:
+              content: `You are the MarketMind AI Campaign Manager. You have access to all 14 engine outputs, Content DNA (8 rules: Messaging Core, CTA DNA, Hook DNA, Narrative DNA, Content Angle DNA, Visual DNA, Format DNA, Execution Rules), Goal Decomposition (funnel math, feasibility verdict, confidence score), Growth Simulation (conservative/base/upside scenarios with bottleneck alerts), Execution Tasks (pending/completed/blocked), and Plan Assumptions (confidence + impact severity). When goal data is available, reference feasibility and funnel numbers. When simulation data is present, factor in bottleneck risks. Given campaign data and engine intelligence, produce EXACTLY this JSON:
 {"insight":"<1-2 sentence strategic interpretation of the current situation>","priorityAction":"<1 specific actionable next step the user should take right now>"}
-Be specific and data-driven. Reference actual numbers and DNA rules when available. Do NOT use generic advice. Respond with ONLY valid JSON.`,
+Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simulation data when available. Do NOT use generic advice. Respond with ONLY valid JSON.`,
             },
             { role: "user", content: contextForAI },
           ],
@@ -724,6 +803,21 @@ Be specific and data-driven. Reference actual numbers and DNA rules when availab
         mode,
         metrics: hasManualData ? { cpa, roas, spend, revenue } : null,
         contentDnaSnapshot: dnaSnapshot,
+        goalDecomposition: goalDecomp ? {
+          goalLabel: goalDecomp.goalLabel,
+          goalType: goalDecomp.goalType,
+          goalTarget: goalDecomp.goalTarget,
+          timeHorizonDays: goalDecomp.timeHorizonDays,
+          feasibility: goalDecomp.feasibility,
+          feasibilityScore: goalDecomp.feasibilityScore,
+          confidenceScore: goalDecomp.confidenceScore,
+        } : null,
+        simulation: simulation ? {
+          confidenceScore: simulation.confidenceScore,
+          bottleneckAlerts: safeJson(simulation.bottleneckAlerts) || [],
+        } : null,
+        executionTasksSummary: taskSummary,
+        assumptionsSummary,
       });
     } catch (error: any) {
       console.error(`${LOG_PREFIX} Agent brief error:`, error);
@@ -740,7 +834,7 @@ Be specific and data-driven. Reference actual numbers and DNA rules when availab
         return res.status(400).json({ success: false, error: "Question is required" });
       }
 
-      const [plans, miData, audData, posData, diffData, offerData, funnelData, awarenessData, persuasionData, blueprint] = await Promise.all([
+      const [plans, miData, audData, posData, diffData, offerData, funnelData, awarenessData, persuasionData, blueprint, goalDecompExplain, simulationExplain] = await Promise.all([
         db.select().from(strategicPlans)
           .where(and(eq(strategicPlans.campaignId, campaignId), eq(strategicPlans.accountId, accountId), inArray(strategicPlans.status, [...ACTIVE_PLAN_STATUSES])))
           .orderBy(desc(strategicPlans.createdAt)).limit(1),
@@ -771,6 +865,23 @@ Be specific and data-driven. Reference actual numbers and DNA rules when availab
         db.select().from(strategicBlueprints)
           .where(and(eq(strategicBlueprints.accountId, accountId), eq(strategicBlueprints.campaignId, campaignId)))
           .orderBy(desc(strategicBlueprints.createdAt)).limit(1),
+        db.select({
+          goalType: goalDecompositions.goalType, goalTarget: goalDecompositions.goalTarget,
+          goalLabel: goalDecompositions.goalLabel, timeHorizonDays: goalDecompositions.timeHorizonDays,
+          feasibility: goalDecompositions.feasibility, feasibilityScore: goalDecompositions.feasibilityScore,
+          confidenceScore: goalDecompositions.confidenceScore, funnelMath: goalDecompositions.funnelMath,
+          feasibilityExplanation: goalDecompositions.feasibilityExplanation,
+          assumptions: goalDecompositions.assumptions,
+        }).from(goalDecompositions)
+          .where(and(eq(goalDecompositions.accountId, accountId), eq(goalDecompositions.campaignId, campaignId), eq(goalDecompositions.status, "active")))
+          .orderBy(desc(goalDecompositions.createdAt)).limit(1),
+        db.select({
+          conservativeCase: growthSimulations.conservativeCase, baseCase: growthSimulations.baseCase,
+          upsideCase: growthSimulations.upsideCase, confidenceScore: growthSimulations.confidenceScore,
+          keyAssumptions: growthSimulations.keyAssumptions, bottleneckAlerts: growthSimulations.bottleneckAlerts,
+        }).from(growthSimulations)
+          .where(and(eq(growthSimulations.accountId, accountId), eq(growthSimulations.campaignId, campaignId), eq(growthSimulations.status, "active")))
+          .orderBy(desc(growthSimulations.createdAt)).limit(1),
       ]);
 
       const plan = plans[0] || null;
@@ -824,23 +935,47 @@ Be specific and data-driven. Reference actual numbers and DNA rules when availab
 
       if (dnaContext) contextParts.push(dnaContext);
 
-      const contextStr = contextParts.join("\n\n").substring(0, 8000);
+      const gdExplain = goalDecompExplain[0];
+      const simExplain = simulationExplain[0];
+      if (gdExplain) {
+        const fm = safeJson(gdExplain.funnelMath);
+        const ga = safeJson(gdExplain.assumptions) || [];
+        contextParts.push(`GOAL DECOMPOSITION:\nGoal: ${gdExplain.goalLabel}\nType: ${gdExplain.goalType} | Target: ${gdExplain.goalTarget} | Timeline: ${gdExplain.timeHorizonDays} days\nFeasibility: ${gdExplain.feasibility} (${gdExplain.feasibilityScore}/100) | Confidence: ${gdExplain.confidenceScore}/100\nExplanation: ${gdExplain.feasibilityExplanation || "N/A"}\nFunnel Math: Reach=${fm?.requiredReach}, Leads=${fm?.requiredLeads}, QualifiedLeads=${fm?.requiredQualifiedLeads}, ConversionRate=${fm?.conversionRate}, CloseRate=${fm?.closeRate}\nAssumptions: ${ga.length > 0 ? ga.join("; ") : "None"}`);
+      }
+      if (simExplain) {
+        const cons = safeJson(simExplain.conservativeCase);
+        const base = safeJson(simExplain.baseCase);
+        const ups = safeJson(simExplain.upsideCase);
+        const ka = safeJson(simExplain.keyAssumptions) || [];
+        const ba = safeJson(simExplain.bottleneckAlerts) || [];
+        contextParts.push(`GROWTH SIMULATION:\nConfidence: ${simExplain.confidenceScore}/100\nConservative: ${JSON.stringify(cons).substring(0, 300)}\nBase Case: ${JSON.stringify(base).substring(0, 300)}\nUpside: ${JSON.stringify(ups).substring(0, 300)}\nKey Assumptions: ${ka.join("; ")}\nBottleneck Alerts: ${ba.join("; ")}`);
+      }
+
+      let planAssumptionContext = "";
+      if (plan) {
+        try {
+          const assRows = await db.select().from(planAssumptions).where(eq(planAssumptions.planId, plan.id));
+          if (assRows.length > 0) {
+            const assLines = assRows.map(a => `- ${a.assumption} (confidence: ${a.confidence}, impact: ${a.impactSeverity}, source: ${a.source})`);
+            planAssumptionContext = `PLAN ASSUMPTIONS (${assRows.length}):\n${assLines.join("\n")}`;
+          }
+        } catch {}
+      }
+      if (planAssumptionContext) contextParts.push(planAssumptionContext);
+
+      const contextStr = contextParts.join("\n\n").substring(0, 10000);
 
       const response = await aiChat({
         model: "gpt-4.1-mini",
         messages: [
           {
             role: "system",
-            content: `You are the MarketMind AI Campaign Manager. You have full access to all 14 engine outputs, plan sections, and Content DNA — the foundational content creation blueprint that synthesizes all engine outputs + business profile into 8 structured rules:
-1. Messaging Core (tone, persuasion intensity, value promise)
-2. CTA DNA (primary CTA type, delivery style, soft vs direct rule)
-3. Hook DNA (preferred hook types, opening style, recommended duration)
-4. Narrative DNA (preferred structure, storytelling guidance)
-5. Content Angle DNA (primary angles, engagement patterns)
-6. Visual DNA (visual direction, talking-head vs proof vs demo)
-7. Format DNA (format priority, reel behavior, carousel logic)
-8. Execution Rules (always include list, never do list)
-Content DNA auto-generates after plan synthesis and governs all content creation in the system. When the user asks about content creation, hooks, CTAs, narrative style, tone, visual direction, or how to make content, answer from Content DNA specifically and explain why those rules were chosen. Be specific, reference actual data, and explain the strategic reasoning. Keep your answer concise (2-4 sentences). Do not invent data not present in the context.`,
+            content: `You are the MarketMind AI Campaign Manager. You have full access to all 14 engine outputs, plan sections, Content DNA (8 rules governing content creation), Goal Decomposition (funnel math, feasibility, confidence), Growth Simulation (3 scenarios with bottleneck alerts), and Plan Assumptions (with confidence + impact severity).
+When asked about goals, targets, or feasibility — answer from Goal Decomposition data (funnel math, feasibility verdict, time horizon).
+When asked about projections, growth, or scenarios — answer from Growth Simulation (conservative/base/upside cases).
+When asked about risks or assumptions — answer from Plan Assumptions and bottleneck alerts.
+When asked about content creation, hooks, CTAs, narrative style — answer from Content DNA and explain why those rules were chosen.
+Be specific, reference actual data, and explain the strategic reasoning. Keep your answer concise (2-4 sentences). Do not invent data not present in the context.`,
           },
           { role: "user", content: `CONTEXT:\n${contextStr}\n\nUSER QUESTION: ${question}` },
         ],
