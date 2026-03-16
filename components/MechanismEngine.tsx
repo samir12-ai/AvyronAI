@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -44,6 +44,26 @@ export default function MechanismEngine({ isActive }: Props) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const [analyzing, setAnalyzing] = useState(false);
+  const [strategyRoot, setStrategyRoot] = useState<any>(null);
+
+  const fetchStrategyRoot = useCallback(async () => {
+    if (!selectedCampaignId) return;
+    try {
+      const url = new URL('/api/strategy-root/active', baseUrl);
+      url.searchParams.set('campaignId', selectedCampaignId);
+      const res = await fetch(url.toString());
+      const json = await safeApiJson(res);
+      setStrategyRoot(json);
+    } catch (err) {
+      console.error('[MechanismEngine] Strategy root fetch error:', err);
+    }
+  }, [selectedCampaignId, baseUrl]);
+
+  useEffect(() => {
+    if (isActive && selectedCampaignId) {
+      fetchStrategyRoot();
+    }
+  }, [isActive, selectedCampaignId, fetchStrategyRoot]);
 
   const { data: latestData, refetch } = useQuery({
     queryKey: ['mechanism-engine-latest', selectedCampaignId],
@@ -84,12 +104,13 @@ export default function MechanismEngine({ isActive }: Props) {
       if (!res.ok) throw new Error(data.message || data.error || 'Analysis failed');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       refetch();
+      fetchStrategyRoot();
     } catch (err: any) {
       Alert.alert('Analysis Error', err.message);
     } finally {
       setAnalyzing(false);
     }
-  }, [selectedCampaignId, hasDiffData, diffData, baseUrl, refetch]);
+  }, [selectedCampaignId, hasDiffData, diffData, baseUrl, refetch, fetchStrategyRoot]);
 
   const mechanism: MechanismOutput | null = latestData?.primaryMechanism || null;
   const axisConsistency = latestData?.axisConsistency;
@@ -289,6 +310,37 @@ export default function MechanismEngine({ isActive }: Props) {
               </View>
             </View>
           </View>
+
+          {strategyRoot?.exists && (
+            <View style={[styles.card, isDark && styles.cardDark]}>
+              <View style={styles.cardHeader}>
+                <Ionicons name="git-network" size={14} color="#06B6D4" />
+                <Text style={[styles.cardTitle, isDark && styles.textLight]}>Strategy Root</Text>
+                <View style={[styles.mechBadge, { backgroundColor: '#06B6D415', marginLeft: 'auto' as any }]}>
+                  <Ionicons name="checkmark-circle" size={10} color="#06B6D4" />
+                  <Text style={[styles.mechBadgeText, { color: '#06B6D4' }]}>ACTIVE</Text>
+                </View>
+              </View>
+              <Text style={[styles.mechDesc, isDark && styles.textMuted]}>
+                Unified source of truth binding all 5 engines. Downstream engines will reference this root for axis, mechanism, and audience alignment.
+              </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                <View style={styles.emphasisTag}>
+                  <Text style={styles.emphasisText}>Hash: {strategyRoot.rootHash?.substring(0, 10)}</Text>
+                </View>
+                <View style={styles.emphasisTag}>
+                  <Text style={styles.emphasisText}>Run: {strategyRoot.runId?.split('_')[1] || '—'}</Text>
+                </View>
+                {strategyRoot.primaryAxis && (
+                  <View style={[styles.emphasisTag, { backgroundColor: '#D946EF15' }]}>
+                    <Text style={[styles.emphasisText, { color: '#D946EF' }]}>
+                      {strategyRoot.primaryAxis.replace(/_/g, ' ')}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
         </>
       )}
     </ScrollView>

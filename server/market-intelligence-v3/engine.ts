@@ -220,6 +220,17 @@ export async function persistValidatedSnapshot(snapshotPayload: any, caller: str
 
   const [snapshot] = await db.insert(miSnapshots).values(snapshotPayload).returning();
   await pruneOldSnapshots(db, miSnapshots, snapshotPayload.campaignId, 20, snapshotPayload.accountId || "default");
+
+  try {
+    const { invalidateDownstreamOnRegeneration } = await import("../shared/strategy-root");
+    const inv = await invalidateDownstreamOnRegeneration(snapshotPayload.campaignId, snapshotPayload.accountId || "default", "mi");
+    if (inv.supersededRoots > 0) {
+      console.log(`[MIv3] ROOT_INVALIDATED | superseded=${inv.supersededRoots}`);
+    }
+  } catch (invErr: any) {
+    console.error(`[MIv3] Root invalidation failed (non-blocking): ${invErr.message}`);
+  }
+
   return snapshot;
 }
 

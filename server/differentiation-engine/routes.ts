@@ -218,6 +218,16 @@ export function registerDifferentiationRoutes(app: Express) {
 
       await pruneOldSnapshots(db, differentiationSnapshots, campaignId, 20, accountId);
 
+      try {
+        const { invalidateDownstreamOnRegeneration } = await import("../shared/strategy-root");
+        const inv = await invalidateDownstreamOnRegeneration(campaignId, accountId, "differentiation");
+        if (inv.supersededRoots > 0) {
+          console.log(`[DifferentiationEngine] ROOT_INVALIDATED | superseded=${inv.supersededRoots}`);
+        }
+      } catch (invErr: any) {
+        console.error(`[DifferentiationEngine] Root invalidation failed (non-blocking): ${invErr.message}`);
+      }
+
       res.json({
         success: true,
         snapshotId: saved.id,

@@ -76,6 +76,7 @@ interface OfferData {
   structuralWarnings?: string[];
   layerDiagnostics?: LayerDiagnostics;
   mechanismSnapshotId?: string;
+  strategyRootId?: string;
   createdAt?: string;
 }
 
@@ -89,6 +90,7 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
   const [diffSnapshotId, setDiffSnapshotId] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<'primary' | 'alternative' | 'rejected'>('primary');
   const [selecting, setSelecting] = useState(false);
+  const [strategyRoot, setStrategyRoot] = useState<any>(null);
 
   const fetchLatest = useCallback(async () => {
     if (!selectedCampaignId) return;
@@ -121,12 +123,26 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
     }
   }, [selectedCampaignId]);
 
+  const fetchStrategyRoot = useCallback(async () => {
+    if (!selectedCampaignId) return;
+    try {
+      const url = new URL('/api/strategy-root/active', getApiUrl());
+      url.searchParams.set('campaignId', selectedCampaignId);
+      const res = await fetch(url.toString());
+      const json = await safeApiJson(res);
+      setStrategyRoot(json);
+    } catch (err) {
+      console.error('[OfferEngine] Strategy root fetch error:', err);
+    }
+  }, [selectedCampaignId]);
+
   useEffect(() => {
     if (isActive) {
       fetchLatest();
       fetchDiffSnapshot();
+      fetchStrategyRoot();
     }
-  }, [isActive, fetchLatest, fetchDiffSnapshot]);
+  }, [isActive, fetchLatest, fetchDiffSnapshot, fetchStrategyRoot]);
 
   const runAnalysis = useCallback(async () => {
     if (!selectedCampaignId || !diffSnapshotId) {
@@ -146,6 +162,7 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
       if (json.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         await fetchLatest();
+        await fetchStrategyRoot();
       } else {
         Alert.alert('Analysis Failed', json.message || json.error || 'Unknown error');
       }
@@ -484,6 +501,53 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
                     ))}
                   </View>
                 )}
+              </View>
+            </View>
+          )}
+
+          {strategyRoot?.exists && (
+            <View style={[styles.sourceRow, { backgroundColor: colors.card, borderColor: '#06B6D430' }]}>
+              <View style={[styles.sourceBadge, { backgroundColor: '#06B6D415' }]}>
+                <Ionicons name="git-network" size={12} color="#06B6D4" />
+                <Text style={[styles.sourceBadgeText, { color: '#06B6D4' }]}>Strategy Root</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.sourceDetail, { color: colors.textMuted }]}>
+                  {strategyRoot.primaryAxis ? strategyRoot.primaryAxis.replace(/_/g, ' ') : 'Unified'} axis
+                  {data.strategyRootId === strategyRoot.id ? ' (bound)' : ' (stale — regenerate)'}
+                </Text>
+                <Text style={[styles.sourceDetail, { color: colors.textMuted, fontSize: 10, marginTop: 2 }]}>
+                  Hash: {strategyRoot.rootHash?.substring(0, 10)}... | Run: {strategyRoot.runId?.split('_')[1] || '—'}
+                </Text>
+              </View>
+              {data.strategyRootId === strategyRoot.id ? (
+                <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+              ) : (
+                <Ionicons name="alert-circle" size={16} color="#F59E0B" />
+              )}
+            </View>
+          )}
+
+          {!strategyRoot?.exists && data?.exists && (
+            <View style={[styles.warningBox, { backgroundColor: '#F59E0B10', borderColor: '#F59E0B25' }]}>
+              <Ionicons name="information-circle" size={16} color="#F59E0B" />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.warningTitle, { color: '#D97706' }]}>No Strategy Root</Text>
+                <Text style={[styles.warningDetail, { color: '#92400E' }]}>
+                  Run the Mechanism Engine to create a unified strategy root. Offers will still work but may not be axis-aligned.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {data.layerDiagnostics?.strategyRoot?.bound && !data.layerDiagnostics.strategyRoot.bindingValid && (
+            <View style={[styles.warningBox, { backgroundColor: '#F59E0B10', borderColor: '#F59E0B30' }]}>
+              <Ionicons name="warning" size={16} color="#F59E0B" />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.warningTitle, { color: '#D97706' }]}>Root Binding Mismatch</Text>
+                {(data.layerDiagnostics.strategyRoot.bindingIssues || []).map((issue: string, i: number) => (
+                  <Text key={i} style={[styles.warningDetail, { color: '#92400E', marginTop: 2 }]}>{issue}</Text>
+                ))}
               </View>
             </View>
           )}

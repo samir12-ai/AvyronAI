@@ -1,0 +1,115 @@
+Hi Replit Team,
+
+We need to stop patching this issue at the surface and fix it from the root.
+
+The recurring mismatch is no longer a copy issue or a single-engine issue. It is a system routing issue.
+
+Right now, the Offer Engine is still able to generate hooks/outcomes from a different or stale source than the active mechanism / axis / audience pain context. That is why mismatch keeps returning even after Mechanism Engine succeeds.
+
+## Root cause
+
+We currently have multiple parallel sources feeding downstream engines instead of one enforced strategy root.
+
+This creates cases where:
+
+- Mechanism is generated from the current axis
+- Offer hook/outcome is generated from older or parallel context
+- Audience pain alignment is checked against another source
+
+This must stop.
+
+## Required root fix
+
+Please rebuild this flow so the system uses one single strategy root object per run.
+
+After these stages complete:
+
+- Product DNA
+- Market Intelligence
+- Audience
+- Positioning
+- Differentiation
+- Mechanism
+
+the system must create one unified strategy root that includes, at minimum:
+
+- run_id
+- root_hash
+- primary_axis
+- contrast_axis_text
+- approved_mechanism
+- approved_audience_pains
+- approved_desires
+- approved_transformation
+- approved_claim
+- approved_promise
+
+## Mandatory routing rule
+
+All downstream engines, especially the Offer Engine, must read only from this strategy root.
+
+Offer Engine must not read directly from:
+
+- legacy audience cache
+- old differentiation outputs
+- stale mechanism context
+- previous hook libraries
+- any parallel source outside the active strategy root
+
+## Enforcement required
+
+Please implement all of the following:
+
+1. Run-scoped routing
+   Every downstream output must belong to the same active run_id.
+
+2. Root hash validation
+   Offer generation must validate that axis, mechanism, and audience context share the same root_hash.
+
+3. Hard cache invalidation
+   If positioning, differentiation, audience, or mechanism is regenerated, all downstream offer context must be invalidated immediately.
+
+4. Pre-generation gate
+   Offer Engine must not generate if:
+   - primary axis missing
+   - approved mechanism missing
+   - approved audience pain/desire missing
+   - run_id mismatch
+   - root_hash mismatch
+
+5. Post-generation validator
+   Reject any generated offer if:
+   - hook does not reference the active axis
+   - outcome does not map to approved audience pains/desires
+   - mechanism logic is absent from the offer structure
+   - promise/claim does not derive from the same strategy root
+
+## System update required
+
+After this patch, update the system fully so this routing rule becomes the enforced default across the whole pipeline, not a local fix.
+
+## UI update required
+
+After the backend fix is complete, please update the interface so the UI reflects the new routing state clearly:
+
+- show that offer generation is tied to the active strategy root
+- prevent stale offer cards from appearing after upstream regeneration
+- refresh all affected views after regenerate actions
+- ensure the user always sees the latest valid run state, not cached mixed-state results
+
+In short: after the update, both the system and the interface must reflect one clean, current, synchronized strategy chain.
+
+## Goal
+
+We do not want another patch.
+
+We want one enforced flow:
+
+Product DNA / MI / Audience / Positioning / Differentiation / Mechanism  
+→ one approved strategy root  
+→ Offer Engine reads only from that root  
+→ UI refreshes to the latest valid state
+
+Please review the full routing architecture, implement this at the root level, and update both backend and frontend accordingly.
+
+Thanks.

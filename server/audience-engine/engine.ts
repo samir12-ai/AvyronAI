@@ -1421,6 +1421,16 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
 
   await pruneOldSnapshots(db, audienceSnapshots, campaignId, 20, accountId);
 
+  try {
+    const { invalidateDownstreamOnRegeneration } = await import("../shared/strategy-root");
+    const inv = await invalidateDownstreamOnRegeneration(campaignId, accountId, "audience");
+    if (inv.supersededRoots > 0) {
+      console.log(`[AudienceEngine-V3] ROOT_INVALIDATED | superseded=${inv.supersededRoots}`);
+    }
+  } catch (invErr: any) {
+    console.error(`[AudienceEngine-V3] Root invalidation failed (non-blocking): ${invErr.message}`);
+  }
+
   console.log(`[AudienceEngine-V3] ${status} in ${executionTimeMs}ms | snapshot=${inserted.id} | signals=${totalSignalMatches} | freq=${totalSignalFrequency} | segments=${audienceSegments.length} | defensive=${isDefensiveMode}`);
 
   return {

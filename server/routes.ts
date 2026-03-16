@@ -30,6 +30,7 @@ import { registerMechanismEngineRoutes } from "./mechanism-engine/routes";
 import { registerOfferEngineRoutes } from "./offer-engine/routes";
 import { registerFunnelEngineRoutes } from "./funnel-engine/routes";
 import { registerIntegrityEngineRoutes } from "./integrity-engine/routes";
+import { registerStrategyRootRoutes } from "./strategy-root-routes";
 import { registerAwarenessEngineRoutes } from "./awareness-engine/routes";
 import { registerPersuasionEngineRoutes } from "./persuasion-engine/routes";
 import { registerStrategyEngineRoutes } from "./strategy";
@@ -1434,6 +1435,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerOfferEngineRoutes(app);
   registerFunnelEngineRoutes(app);
   registerIntegrityEngineRoutes(app);
+  registerStrategyRootRoutes(app);
   registerAwarenessEngineRoutes(app);
   registerPersuasionEngineRoutes(app);
   registerStrategyEngineRoutes(app);

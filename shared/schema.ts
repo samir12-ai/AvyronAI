@@ -1785,6 +1785,7 @@ export const offerSnapshots = pgTable("offer_snapshots", {
   signalLineage: text("signal_lineage"),
   structuralWarnings: text("structural_warnings"),
   layerDiagnostics: text("layer_diagnostics"),
+  strategyRootId: varchar("strategy_root_id"),
   executionTimeMs: integer("execution_time_ms"),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -1815,6 +1816,7 @@ export const funnelSnapshots = pgTable("funnel_snapshots", {
   boundaryCheck: text("boundary_check"),
   confidenceScore: doublePrecision("confidence_score"),
   selectedOption: varchar("selected_option"),
+  strategyRootId: varchar("strategy_root_id"),
   executionTimeMs: integer("execution_time_ms"),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -1842,6 +1844,7 @@ export const integritySnapshots = pgTable("integrity_snapshots", {
   structuralWarnings: text("structural_warnings"),
   flaggedInconsistencies: text("flagged_inconsistencies"),
   boundaryCheck: text("boundary_check"),
+  strategyRootId: varchar("strategy_root_id"),
   executionTimeMs: integer("execution_time_ms"),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -2200,3 +2203,30 @@ export const planAssumptions = pgTable("plan_assumptions", {
 });
 
 export type PlanAssumption = typeof planAssumptions.$inferSelect;
+
+export const strategyRoots = pgTable("strategy_roots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  runId: varchar("run_id").notNull(),
+  rootHash: varchar("root_hash").notNull(),
+  primaryAxis: text("primary_axis"),
+  contrastAxisText: text("contrast_axis_text"),
+  approvedMechanism: text("approved_mechanism"),
+  approvedAudiencePains: text("approved_audience_pains"),
+  approvedDesires: text("approved_desires"),
+  approvedTransformation: text("approved_transformation"),
+  approvedClaim: text("approved_claim"),
+  approvedPromise: text("approved_promise"),
+  miSnapshotId: varchar("mi_snapshot_id").notNull(),
+  audienceSnapshotId: varchar("audience_snapshot_id").notNull(),
+  positioningSnapshotId: varchar("positioning_snapshot_id").notNull(),
+  differentiationSnapshotId: varchar("differentiation_snapshot_id").notNull(),
+  mechanismSnapshotId: varchar("mechanism_snapshot_id").notNull(),
+  status: text("status").notNull().default("ACTIVE"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type StrategyRoot = typeof strategyRoots.$inferSelect;

@@ -1,12 +1,13 @@
 import type { Express, Request, Response } from "express";
 import { db } from "../db";
-import { mechanismSnapshots, differentiationSnapshots, positioningSnapshots } from "@shared/schema";
+import { mechanismSnapshots, differentiationSnapshots, positioningSnapshots, audienceSnapshots } from "@shared/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { runMechanismEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
 import { ENGINE_VERSION as DIFF_ENGINE_VERSION } from "../differentiation-engine/constants";
 import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 import { parseLineageFromSnapshot, mergeLineageArrays, findBestParentSignal, createDerivedLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
+import { buildStrategyRoot } from "../shared/strategy-root";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -116,9 +117,58 @@ export function registerMechanismEngineRoutes(app: Express) {
 
       console.log(`[MechanismEngine] SAVED | snapshotId=${saved.id} | status=${result.status} | confidence=${result.confidenceScore.toFixed(2)}`);
 
+      let strategyRootResult: any = null;
+      if (result.status === "COMPLETE" || result.status === "LOW_CONFIDENCE") {
+        try {
+          const miSnapshotId = activeDiffSnapshot.miSnapshotId;
+          const audienceSnapshotId = activeDiffSnapshot.audienceSnapshotId;
+
+          let audiencePains: any[] = [];
+          let audienceDesires: any = {};
+          let audienceTransformation: string | null = null;
+          if (audienceSnapshotId) {
+            const [audSnap] = await db.select().from(audienceSnapshots)
+              .where(and(eq(audienceSnapshots.id, audienceSnapshotId), eq(audienceSnapshots.campaignId, campaignId)))
+              .limit(1);
+            if (audSnap) {
+              audiencePains = safeJsonParse(audSnap.audiencePains) || [];
+              audienceDesires = safeJsonParse(audSnap.desireMap) || {};
+              const segments = safeJsonParse(audSnap.audienceSegments) || [];
+              audienceTransformation = segments[0]?.transformation || null;
+            }
+          }
+
+          const primaryMech = result.primaryMechanism;
+          const mechClaim = primaryMech?.mechanismPromise || null;
+
+          strategyRootResult = await buildStrategyRoot({
+            campaignId,
+            accountId,
+            miSnapshotId: miSnapshotId || "",
+            audienceSnapshotId: audienceSnapshotId || "",
+            positioningSnapshotId,
+            differentiationSnapshotId: activeDiffSnapshot.id,
+            mechanismSnapshotId: saved.id,
+            primaryAxis: primaryMech?.axisAlignment?.primaryAxis || posSnapshot.contrastAxis || null,
+            contrastAxisText: posSnapshot.contrastAxis || null,
+            approvedMechanism: primaryMech || null,
+            approvedAudiencePains: audiencePains,
+            approvedDesires: audienceDesires,
+            approvedTransformation: audienceTransformation,
+            approvedClaim: mechClaim,
+            approvedPromise: primaryMech?.mechanismPromise || null,
+          });
+
+          console.log(`[MechanismEngine] STRATEGY_ROOT | id=${strategyRootResult.id} | hash=${strategyRootResult.rootHash} | isNew=${strategyRootResult.isNew}`);
+        } catch (rootErr: any) {
+          console.error(`[MechanismEngine] Strategy root creation failed (non-blocking): ${rootErr.message}`);
+        }
+      }
+
       res.json({
         success: true,
         snapshotId: saved.id,
+        strategyRoot: strategyRootResult,
         ...result,
       });
     } catch (error: any) {

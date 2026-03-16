@@ -10,6 +10,7 @@ import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/c
 import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 import { parseLineageFromSnapshot, mergeLineageArrays, findBestParentSignal, createDerivedLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snapshot-trust";
+import { getActiveRoot, validateRootBinding, validatePreGeneration, validatePostGeneration } from "../shared/strategy-root";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -184,22 +185,71 @@ export function registerOfferEngineRoutes(app: Express) {
       );
       console.log(`[OfferEngine] UPSTREAM_LINEAGE | mi=${parseLineageFromSnapshot((miSnapshot as any).signalLineage).length} | audience=${parseLineageFromSnapshot((audSnapshot as any).signalLineage).length} | merged=${upstreamLineage.length}`);
 
+      const activeRoot = await getActiveRoot(campaignId, accountId);
+      let strategyRootId: string | null = null;
+      let rootValidation: any = null;
+
+      if (activeRoot) {
+        const preGen = validatePreGeneration(activeRoot);
+        rootValidation = validateRootBinding(activeRoot, {
+          miSnapshotId: miSnapshot.id,
+          audienceSnapshotId,
+          positioningSnapshotId,
+          differentiationSnapshotId: activeDiffSnapshot.id,
+        });
+
+        if (!rootValidation.valid) {
+          console.log(`[OfferEngine] ROOT_BINDING_ADVISORY | issues: ${rootValidation.issues.join("; ")}`);
+        }
+        if (!preGen.canGenerate) {
+          console.log(`[OfferEngine] ROOT_PRE_GEN_ADVISORY | missing: ${preGen.missingFields.join(", ")}`);
+        }
+        strategyRootId = activeRoot.id;
+        console.log(`[OfferEngine] STRATEGY_ROOT_BOUND | rootId=${activeRoot.id} | hash=${activeRoot.rootHash} | runId=${activeRoot.runId}`);
+      } else {
+        console.log(`[OfferEngine] NO_ACTIVE_ROOT | campaign=${campaignId} | proceeding without root binding`);
+      }
+
       let mechanismEngineOutput: any = undefined;
-      const [latestMechanism] = await db.select().from(mechanismSnapshots)
-        .where(and(
-          eq(mechanismSnapshots.campaignId, campaignId),
-          eq(mechanismSnapshots.accountId, accountId),
-          eq(mechanismSnapshots.status, "COMPLETE"),
-        ))
-        .orderBy(desc(mechanismSnapshots.createdAt))
-        .limit(1);
-      if (latestMechanism) {
-        mechanismEngineOutput = {
-          primaryMechanism: safeJsonParse(latestMechanism.primaryMechanism),
-          alternativeMechanism: safeJsonParse(latestMechanism.alternativeMechanism),
-          axisConsistency: safeJsonParse(latestMechanism.axisConsistency),
-        };
-        console.log(`[OfferEngine] MECHANISM_ENGINE_FOUND | snapshotId=${latestMechanism.id} | consuming centralized mechanism`);
+      let mechanismSnapshotUsed: string | null = null;
+
+      if (activeRoot?.mechanismSnapshotId) {
+        const [rootMechanism] = await db.select().from(mechanismSnapshots)
+          .where(and(
+            eq(mechanismSnapshots.id, activeRoot.mechanismSnapshotId),
+            eq(mechanismSnapshots.campaignId, campaignId),
+            eq(mechanismSnapshots.accountId, accountId),
+          ))
+          .limit(1);
+        if (rootMechanism) {
+          mechanismEngineOutput = {
+            primaryMechanism: safeJsonParse(rootMechanism.primaryMechanism),
+            alternativeMechanism: safeJsonParse(rootMechanism.alternativeMechanism),
+            axisConsistency: safeJsonParse(rootMechanism.axisConsistency),
+          };
+          mechanismSnapshotUsed = rootMechanism.id;
+          console.log(`[OfferEngine] MECHANISM_FROM_ROOT | snapshotId=${rootMechanism.id} | bound to strategy root ${activeRoot.id}`);
+        }
+      }
+
+      if (!mechanismEngineOutput) {
+        const [latestMechanism] = await db.select().from(mechanismSnapshots)
+          .where(and(
+            eq(mechanismSnapshots.campaignId, campaignId),
+            eq(mechanismSnapshots.accountId, accountId),
+            eq(mechanismSnapshots.status, "COMPLETE"),
+          ))
+          .orderBy(desc(mechanismSnapshots.createdAt))
+          .limit(1);
+        if (latestMechanism) {
+          mechanismEngineOutput = {
+            primaryMechanism: safeJsonParse(latestMechanism.primaryMechanism),
+            alternativeMechanism: safeJsonParse(latestMechanism.alternativeMechanism),
+            axisConsistency: safeJsonParse(latestMechanism.axisConsistency),
+          };
+          mechanismSnapshotUsed = latestMechanism.id;
+          console.log(`[OfferEngine] MECHANISM_FALLBACK | snapshotId=${latestMechanism.id} | no root binding, using latest`);
+        }
       }
 
       const result = await runOfferEngine(miInput, audienceInput, positioningInput, differentiationInput, accountId, upstreamLineage, mechanismEngineOutput);
@@ -229,6 +279,29 @@ export function registerOfferEngineRoutes(app: Express) {
       });
       console.log(`[OfferEngine] LINEAGE_BUILT | upstream=${upstreamLineage.length} | derived=${offerLineage.length} | claims=${offerClaims.length} | grounding=${result.signalGrounding ? `${result.signalGrounding.groundedClaims}/${result.signalGrounding.totalClaims}` : 'N/A'}`);
 
+      let postGenValidation: any = null;
+      if (activeRoot && result.primaryOffer) {
+        postGenValidation = validatePostGeneration(activeRoot, result.primaryOffer);
+        if (!postGenValidation.valid) {
+          console.log(`[OfferEngine] POST_GEN_ADVISORY | issues: ${postGenValidation.issues.join("; ")}`);
+          const warnings = result.structuralWarnings || [];
+          warnings.push(...postGenValidation.issues);
+          result.structuralWarnings = warnings;
+        }
+      }
+
+      const diagnostics = result.layerDiagnostics || {};
+      diagnostics.strategyRoot = activeRoot ? {
+        rootId: activeRoot.id,
+        rootHash: activeRoot.rootHash,
+        runId: activeRoot.runId,
+        bound: true,
+        bindingValid: rootValidation?.valid ?? true,
+        bindingIssues: rootValidation?.issues || [],
+        postGenValid: postGenValidation?.valid ?? true,
+        postGenIssues: postGenValidation?.issues || [],
+      } : { bound: false };
+
       const [saved] = await db.insert(offerSnapshots).values({
         accountId,
         campaignId,
@@ -236,7 +309,8 @@ export function registerOfferEngineRoutes(app: Express) {
         audienceSnapshotId,
         positioningSnapshotId,
         differentiationSnapshotId: activeDiffSnapshot.id,
-        mechanismSnapshotId: latestMechanism?.id || null,
+        mechanismSnapshotId: mechanismSnapshotUsed || null,
+        strategyRootId,
         engineVersion: ENGINE_VERSION,
         status: result.status,
         statusMessage: result.statusMessage,
@@ -250,7 +324,7 @@ export function registerOfferEngineRoutes(app: Express) {
         confidenceScore: result.confidenceScore,
         signalLineage: JSON.stringify(mergeLineageArrays(upstreamLineage, offerLineage)),
         structuralWarnings: JSON.stringify(result.structuralWarnings || []),
-        layerDiagnostics: JSON.stringify(result.layerDiagnostics || null),
+        layerDiagnostics: JSON.stringify(diagnostics),
         executionTimeMs: result.executionTimeMs,
       }).returning();
 
@@ -309,6 +383,7 @@ export function registerOfferEngineRoutes(app: Express) {
         structuralWarnings: safeJsonParse(latest.structuralWarnings),
         layerDiagnostics: safeJsonParse(latest.layerDiagnostics),
         mechanismSnapshotId: latest.mechanismSnapshotId,
+        strategyRootId: latest.strategyRootId,
         executionTimeMs: latest.executionTimeMs,
         createdAt: latest.createdAt,
         differentiationSnapshotId: latest.differentiationSnapshotId,

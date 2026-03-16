@@ -9,6 +9,7 @@ import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/c
 import { getEngineReadinessState, verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
 import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snapshot-trust";
+import { getActiveRoot, validateRootBinding } from "../shared/strategy-root";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -216,6 +217,25 @@ export function registerFunnelEngineRoutes(app: Express) {
         frictionLevel: offerData?.frictionLevel || 0,
       };
 
+      const activeRoot = await getActiveRoot(campaignId, accountId);
+      let strategyRootId: string | null = null;
+
+      if (activeRoot) {
+        const rootValidation = validateRootBinding(activeRoot, {
+          miSnapshotId: miSnapshot.id,
+          audienceSnapshotId,
+          positioningSnapshotId,
+          differentiationSnapshotId,
+        });
+        if (!rootValidation.valid) {
+          console.log(`[FunnelEngine] ROOT_BINDING_ADVISORY | issues: ${rootValidation.issues.join("; ")}`);
+        }
+        strategyRootId = activeRoot.id;
+        console.log(`[FunnelEngine] STRATEGY_ROOT_BOUND | rootId=${activeRoot.id} | hash=${activeRoot.rootHash}`);
+      } else {
+        console.log(`[FunnelEngine] NO_ACTIVE_ROOT | campaign=${campaignId}`);
+      }
+
       const result = await runFunnelEngine(miInput, audienceInput, offerInput, positioningInput, differentiationInput, accountId);
 
       if (result.status === "INTEGRITY_FAILED") {
@@ -237,6 +257,7 @@ export function registerFunnelEngineRoutes(app: Express) {
         audienceSnapshotId,
         positioningSnapshotId,
         differentiationSnapshotId,
+        strategyRootId,
         engineVersion: ENGINE_VERSION,
         status: result.status,
         statusMessage: result.statusMessage,

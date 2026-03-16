@@ -1612,6 +1612,16 @@ export async function runPositioningEngine(
 
   await pruneOldSnapshots(db, positioningSnapshots, campaignId, 20, accountId);
 
+  try {
+    const { invalidateDownstreamOnRegeneration } = await import("../shared/strategy-root");
+    const inv = await invalidateDownstreamOnRegeneration(campaignId, accountId, "positioning");
+    if (inv.supersededRoots > 0) {
+      console.log(`[PositioningEngine-V3] ROOT_INVALIDATED | superseded=${inv.supersededRoots}`);
+    }
+  } catch (invErr: any) {
+    console.error(`[PositioningEngine-V3] Root invalidation failed (non-blocking): ${invErr.message}`);
+  }
+
   console.log(`[PositioningEngine-V3] ${status} in ${executionTimeMs}ms | snapshot=${inserted.id} | territories=${finalTerritories.length} | confidence=${overallConfidence}`);
 
   return {
