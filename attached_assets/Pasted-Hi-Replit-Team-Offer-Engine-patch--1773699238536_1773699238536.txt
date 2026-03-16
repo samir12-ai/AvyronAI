@@ -1,0 +1,234 @@
+Hi Replit Team,
+
+أريد إغلاق موضوع الـ Offer Engine نهائياً من الجذور، وليس عمل patch جديد أو تحسينات سطحية. هذا التعديل يجب أن يكون إعادة برمجة واضحة لبنية الـ Offer Engine حتى يعمل بنفس صرامة بقية الـ engines في النظام، ويصبح متناسقاً 100% مع الـ Strategy Root، والـ Positioning، والـ Mechanism، والـ Audience outputs.
+
+المشكلة الحالية ليست مجرد warning أو prompt issue. المشكلة أن الـ Offer Engine تاريخياً كان يتعامل مع الأوفر كأنه copy-generation task، بينما الصحيح أنه يجب أن يتعامل معه كـ structured strategic output مبني على جذور النظام المعتمدة.
+
+## الهدف النهائي
+
+أريد أن يصبح الـ Offer Engine مبنياً على هذا المنطق الإجباري:
+
+Pain + Desired Outcome + Unique Mechanism + Approved Strategy Context = Offer Structure
+
+ثم بعد بناء الهيكل الاستراتيجي بشكل deterministic، يمكن للـ AI فقط أن يحسّن الصياغة، وليس أن يقرر المنطق أو الاتجاه من نفسه.
+
+بمعنى آخر:
+- المنطق أولاً
+- الهيكل ثانياً
+- الصياغة أخيراً
+
+وليس:
+- AI يكتب بحرية
+- ثم النظام يحاول تصحيح ما كتبه
+
+---
+
+## المطلوب: إعادة بناء Offer Engine Architecture بالكامل
+
+### 1) Offer Engine يجب أن يعتمد فقط على Strategy Root
+أريد أن يكون هناك source of truth واحد فقط للأوفر، وهو الـ active Strategy Root الخاص بنفس الـ run الحالي.
+
+يجب أن يقرأ الـ Offer Engine فقط من هذه الحقول المعتمدة:
+
+- run_id
+- root_hash
+- primary_axis
+- contrast_axis_text
+- approved_claim
+- approved_promise
+- approved_transformation
+- approved_mechanism
+- approved_audience_pains
+- approved_desires
+- approved_objections
+- approved_proof_types
+- approved_positioning_context
+
+ويُمنع منعاً باتاً أن يقرأ من:
+- legacy cached offer data
+- old differentiation outputs
+- previous hooks/outcomes
+- stale context
+- any parallel prompt source outside the active strategy root
+
+---
+
+### 2) بناء الأوفر يجب أن يكون deterministic وليس free-generation
+أريد إعادة بناء offer generation logic ليعمل بهذا الترتيب الإجباري:
+
+#### Step A — Select pain
+اختيار ألم واحد معتمد من approved audience pains
+
+#### Step B — Select desired outcome
+اختيار نتيجة مرغوبة مرتبطة بذلك الألم من approved desires / transformation
+
+#### Step C — Bind mechanism
+ربط الألم والنتيجة بالـ approved mechanism الحالي
+
+#### Step D — Build strategic skeleton
+بناء هيكل offer واضح يحتوي على:
+- hook
+- problem statement
+- promised outcome
+- mechanism connection
+- deliverables
+- proof path
+- friction handling
+
+#### Step E — AI wording refinement only
+إرسال هذا الهيكل إلى الـ AI فقط لتحسين الصياغة، بدون السماح له بتغيير:
+- axis
+- pain
+- mechanism
+- transformation
+- strategic direction
+
+---
+
+### 3) قواعد إلزامية داخل Offer Engine
+أريد إضافة enforcement rules واضحة:
+
+#### Axis enforcement
+كل hook لازم يشتق من primary axis نفسه، وليس فقط يكون “جميلاً”.
+إذا كان المحور مثلاً:
+- simplicity
+- clarity
+- automation
+- transparency
+- consolidation
+
+فلازم الـ hook والـ outcome يحملان نفس الجوهر، وليس مجرد كلام عام عن النمو أو النجاح.
+
+#### Pain alignment enforcement
+كل offer لازم يرتبط صراحةً بألم سوقي فعلي تم اكتشافه من Audience / MI.
+
+#### Outcome alignment enforcement
+كل promised outcome لازم يكون امتداد منطقي لـ pain + desire + transformation.
+
+#### Mechanism enforcement
+كل offer لازم يشرح لماذا هذا الحل يعمل من خلال الـ approved mechanism، وليس أن يكون الأوفر منفصلاً عن الميكانيزم.
+
+#### Proof alignment enforcement
+نوع الإثبات داخل الأوفر لازم يُختار من approved proof types، وليس بشكل عشوائي.
+
+---
+
+### 4) Root consistency and run binding
+أريد أن يتم فرض هذه القواعد برمجياً:
+
+- Offer Engine must only generate if run_id matches current strategy root
+- Offer Engine must only generate if root_hash matches current strategy root
+- أي mismatch يجب أن يوقف التوليد مباشرة
+- لا أريد fallback صامت
+- لا أريد silent regeneration من context قديم
+
+إذا تغيّر أي شيء upstream:
+- Positioning
+- Differentiation
+- Audience
+- Mechanism
+- Strategy Root
+
+فيجب مباشرة:
+- invalidation لكل offer outputs القديمة
+- invalidation لكل cached offer states
+- forced regeneration path using latest root only
+
+---
+
+### 5) مطلوب إعادة تعريف “الأوفر القوي” داخل النظام
+أريد أن يُبرمج Offer Engine على أساس أن الأوفر القوي لا يُبنى فقط على pain.
+
+بل يجب أن يُبنى على:
+
+- market pain
+- desired outcome
+- unique mechanism
+- believable promise
+- executable deliverables
+- proof path
+- objection handling
+
+أي أن الأوفر يجب أن يكون:
+strategic offer structure, not only emotional pain copy.
+
+---
+
+### 6) Frontend update required after backend completion
+بعد انتهاء إعادة برمجة Offer Engine، أريد تحديث كامل للواجهة حتى تعكس المنطق الجديد بوضوح.
+
+أريد أن يظهر في الواجهة بشكل مرتب وواضح:
+
+#### Offer Source Context
+- active axis
+- selected pain
+- selected desired outcome
+- selected mechanism
+- selected proof path
+- selected transformation
+
+#### Offer Integrity Status
+- root synced
+- axis aligned
+- pain aligned
+- mechanism aligned
+- proof aligned
+- final integrity passed
+
+#### Offer Structure Visibility
+أريد أن يكون ظاهر للمستخدم:
+- Hook
+- Problem
+- Promise
+- Mechanism
+- Deliverables
+- Proof
+- Objection handling
+
+وليس فقط نص offer نهائي بدون فهم كيف بُني.
+
+#### Regeneration behavior
+إذا تغير upstream context:
+- يجب أن تختفي outputs القديمة مباشرة
+- يجب ألا تبقى عروض قديمة ظاهرة
+- يجب أن يرى المستخدم فقط latest valid state
+
+---
+
+### 7) مهم جداً: لا أريد patch جديد
+أريد هذا التعديل كـ root-level system correction، وليس كحل مؤقت أو تعديل prompt إضافي أو retry logic جديد.
+
+لا أريد:
+- free generation + validation
+- validation + retry
+- hiding warnings in UI
+- cosmetic cleanup without logic fix
+
+أريد:
+Offer Engine rebuilt to behave like the rest of the system engines  
+أي:
+- consume approved upstream outputs
+- construct deterministic strategic output
+- then refine language only
+
+---
+
+## Definition of success
+سأعتبر الموضوع مغلقاً فقط إذا تحقق التالي:
+
+1. Offer Engine no longer generates free-form strategic logic  
+2. Every offer derives from the active Strategy Root only  
+3. Hook, outcome, and mechanism stay on the same axis  
+4. Offer reflects real market pain and approved desired outcome  
+5. Offer uses the approved mechanism, not generic copy  
+6. All stale/cached legacy offer states are invalidated correctly  
+7. Frontend reflects the new logic clearly and cleanly  
+8. No repeated mismatch loops  
+9. No hidden issue behind removed warnings  
+10. System and UI are both updated after completion
+
+---
+
+## Final note
+Please treat this as the final architectural correction for the Offer Engine.  
+I want this done cleanly, deeply, and completely so we do not reopen the sa

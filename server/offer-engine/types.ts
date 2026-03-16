@@ -91,6 +91,9 @@ export interface OfferCandidate {
   audienceFitExplanation: string;
   offerStrengthScore: number;
   riskNotes: string[];
+  problemStatement?: string;
+  proofPath?: string[];
+  objectionHandling?: string[];
   outcomeLayer: OutcomeLayer;
   mechanismLayer: MechanismLayer;
   deliveryLayer: DeliveryLayer;

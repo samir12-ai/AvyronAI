@@ -126,6 +126,7 @@ export function registerMechanismEngineRoutes(app: Express) {
           let audiencePains: any[] = [];
           let audienceDesires: any = {};
           let audienceTransformation: string | null = null;
+          let audienceObjections: any = {};
           if (audienceSnapshotId) {
             const [audSnap] = await db.select().from(audienceSnapshots)
               .where(and(eq(audienceSnapshots.id, audienceSnapshotId), eq(audienceSnapshots.campaignId, campaignId)))
@@ -133,10 +134,21 @@ export function registerMechanismEngineRoutes(app: Express) {
             if (audSnap) {
               audiencePains = safeJsonParse(audSnap.audiencePains) || [];
               audienceDesires = safeJsonParse(audSnap.desireMap) || {};
+              audienceObjections = safeJsonParse(audSnap.objectionMap) || {};
               const segments = safeJsonParse(audSnap.audienceSegments) || [];
               audienceTransformation = segments[0]?.transformation || null;
             }
           }
+
+          const diffProofArchitecture = safeJsonParse(activeDiffSnapshot.proofArchitecture) || [];
+          const proofTypes = diffProofArchitecture.map((p: any) => typeof p === "string" ? p : p?.type || p?.name || String(p));
+
+          const positioningContext = {
+            territories: safeJsonParse(posSnapshot.territories) || [],
+            enemyDefinition: posSnapshot.enemyDefinition || null,
+            contrastAxis: posSnapshot.contrastAxis || null,
+            narrativeDirection: posSnapshot.narrativeDirection || null,
+          };
 
           const primaryMech = result.primaryMechanism;
           const mechClaim = primaryMech?.mechanismPromise || null;
@@ -157,6 +169,9 @@ export function registerMechanismEngineRoutes(app: Express) {
             approvedTransformation: audienceTransformation,
             approvedClaim: mechClaim,
             approvedPromise: primaryMech?.mechanismPromise || null,
+            approvedObjections: audienceObjections,
+            approvedProofTypes: proofTypes,
+            approvedPositioningContext: positioningContext,
           });
 
           console.log(`[MechanismEngine] STRATEGY_ROOT | id=${strategyRootResult.id} | hash=${strategyRootResult.rootHash} | isNew=${strategyRootResult.isNew}`);

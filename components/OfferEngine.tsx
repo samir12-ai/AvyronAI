@@ -37,6 +37,9 @@ interface OfferCandidate {
   audienceFitExplanation: string;
   offerStrengthScore: number;
   riskNotes: string[];
+  problemStatement?: string;
+  proofPath?: string[];
+  objectionHandling?: string[];
   completeness: { complete: boolean; missingLayers: string[] };
   genericFlag: boolean;
   integrityResult: { passed: boolean; failures: string[] };
@@ -44,17 +47,31 @@ interface OfferCandidate {
   depthScores: OfferDepthScores;
 }
 
-interface AxisEnrichment {
-  original: string;
-  enriched: string;
-  mechanismAxis: string;
-  emphasis: string[];
+interface SourceContext {
+  selectedAxis: string;
+  selectedPain: string;
+  selectedDesire: string;
+  selectedMechanism: string;
+  selectedTransformation: string;
+  selectedProofTypes: string[];
+  selectedObjections: string[];
+}
+
+interface IntegrityChecks {
+  rootSynced: boolean;
+  axisAligned: boolean;
+  painAligned: boolean;
+  mechanismAligned: boolean;
+  proofAligned: boolean;
+  integrityPassed: boolean;
 }
 
 interface LayerDiagnostics {
   mechanismEngineConsumed?: boolean;
-  axisEnrichment?: AxisEnrichment;
-  positioningLock?: any;
+  axisEnrichment?: { original: string; enriched: string; mechanismAxis: string; emphasis: string[] };
+  sourceContext?: SourceContext;
+  integrityChecks?: IntegrityChecks;
+  strategyRoot?: any;
   [key: string]: any;
 }
 
@@ -199,7 +216,7 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
     return '#EF4444';
   };
 
-  const renderScoreBar = (label: string, value: number, maxWidth = 120) => (
+  const renderScoreBar = (label: string, value: number) => (
     <View style={styles.scoreRow}>
       <Text style={[styles.scoreLabel, { color: colors.textMuted }]}>{label}</Text>
       <View style={styles.scoreBarContainer}>
@@ -211,10 +228,96 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
     </View>
   );
 
+  const renderIntegrityItem = (label: string, passed: boolean) => (
+    <View style={styles.integrityItem}>
+      <Ionicons name={passed ? 'checkmark-circle' : 'close-circle'} size={14} color={passed ? '#10B981' : '#EF4444'} />
+      <Text style={[styles.integrityLabel, { color: passed ? '#10B981' : '#EF4444' }]}>{label}</Text>
+    </View>
+  );
+
+  const renderSourceContextCard = () => {
+    const ctx = data?.layerDiagnostics?.sourceContext;
+    if (!ctx) return null;
+
+    return (
+      <View style={[styles.contextCard, { backgroundColor: colors.card, borderColor: '#8B5CF630' }]}>
+        <View style={styles.contextHeader}>
+          <Ionicons name="layers" size={16} color="#8B5CF6" />
+          <Text style={[styles.contextTitle, { color: '#8B5CF6' }]}>Offer Source Context</Text>
+        </View>
+        <View style={styles.contextGrid}>
+          <View style={styles.contextRow}>
+            <Text style={[styles.contextKey, { color: colors.textMuted }]}>Axis</Text>
+            <Text style={[styles.contextVal, { color: colors.text }]}>{ctx.selectedAxis}</Text>
+          </View>
+          <View style={styles.contextRow}>
+            <Text style={[styles.contextKey, { color: colors.textMuted }]}>Pain</Text>
+            <Text style={[styles.contextVal, { color: colors.text }]} numberOfLines={2}>{ctx.selectedPain}</Text>
+          </View>
+          <View style={styles.contextRow}>
+            <Text style={[styles.contextKey, { color: colors.textMuted }]}>Desired Outcome</Text>
+            <Text style={[styles.contextVal, { color: colors.text }]} numberOfLines={2}>{ctx.selectedDesire}</Text>
+          </View>
+          <View style={styles.contextRow}>
+            <Text style={[styles.contextKey, { color: colors.textMuted }]}>Mechanism</Text>
+            <Text style={[styles.contextVal, { color: colors.text }]}>{ctx.selectedMechanism}</Text>
+          </View>
+          <View style={styles.contextRow}>
+            <Text style={[styles.contextKey, { color: colors.textMuted }]}>Transformation</Text>
+            <Text style={[styles.contextVal, { color: colors.text }]} numberOfLines={2}>{ctx.selectedTransformation}</Text>
+          </View>
+          {Array.isArray(ctx.selectedProofTypes) && ctx.selectedProofTypes.length > 0 && (
+            <View style={styles.contextRow}>
+              <Text style={[styles.contextKey, { color: colors.textMuted }]}>Proof Path</Text>
+              <View style={styles.tagRow}>
+                {ctx.selectedProofTypes.slice(0, 4).map((p, i) => (
+                  <View key={i} style={[styles.miniTag, { backgroundColor: '#3B82F618' }]}>
+                    <Text style={[styles.miniTagText, { color: '#3B82F6' }]}>{p.replace(/_/g, ' ')}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+        </View>
+      </View>
+    );
+  };
+
+  const renderIntegrityStatusCard = () => {
+    const checks = data?.layerDiagnostics?.integrityChecks;
+    if (!checks) return null;
+
+    const allPassed = checks.integrityPassed;
+    const borderColor = allPassed ? '#10B98130' : '#EF444430';
+    const headerColor = allPassed ? '#10B981' : '#EF4444';
+
+    return (
+      <View style={[styles.contextCard, { backgroundColor: colors.card, borderColor }]}>
+        <View style={styles.contextHeader}>
+          <Ionicons name={allPassed ? 'shield-checkmark' : 'shield'} size={16} color={headerColor} />
+          <Text style={[styles.contextTitle, { color: headerColor }]}>
+            {allPassed ? 'Offer Integrity Passed' : 'Offer Integrity Issues'}
+          </Text>
+        </View>
+        <View style={styles.integrityGrid}>
+          {renderIntegrityItem('Root Synced', checks.rootSynced)}
+          {renderIntegrityItem('Axis Aligned', checks.axisAligned)}
+          {renderIntegrityItem('Pain Aligned', checks.painAligned)}
+          {renderIntegrityItem('Mechanism Aligned', checks.mechanismAligned)}
+          {renderIntegrityItem('Proof Aligned', checks.proofAligned)}
+          {renderIntegrityItem('Final Integrity', checks.integrityPassed)}
+        </View>
+      </View>
+    );
+  };
+
   const renderOfferCard = (offer: OfferCandidate, variant: 'primary' | 'alternative' | 'rejected') => {
     const borderColor = variant === 'primary' ? '#10B981' : variant === 'alternative' ? '#3B82F6' : '#EF4444';
     const rejectionReason = variant === 'rejected' ? data?.rejectedOffer?.rejectionReason : null;
     const isSelected = data?.selectedOption === variant;
+
+    const aiOfferData = data?.layerDiagnostics?.aiGeneration as any;
+    const offerExtras = aiOfferData?.mode === 'skeleton_refinement' ? true : false;
 
     return (
       <View style={[styles.offerCard, { backgroundColor: colors.card, borderColor: borderColor + '40' }]}>
@@ -245,8 +348,18 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
           )}
         </View>
 
+        <Text style={[styles.structureLabel, { color: '#F97316' }]}>Hook</Text>
         <Text style={[styles.offerName, { color: colors.text }]}>{offer.offerName}</Text>
-        <Text style={[styles.offerOutcome, { color: colors.textSecondary }]}>{offer.coreOutcome}</Text>
+
+        {offer.problemStatement ? (
+          <>
+            <Text style={[styles.structureLabel, { color: '#F97316', marginTop: 10 }]}>Problem</Text>
+            <Text style={[styles.bodyText, { color: colors.textSecondary }]}>{offer.problemStatement}</Text>
+          </>
+        ) : null}
+
+        <Text style={[styles.structureLabel, { color: '#F97316', marginTop: 10 }]}>Promise / Outcome</Text>
+        <Text style={[styles.bodyText, { color: colors.textSecondary }]}>{offer.coreOutcome}</Text>
 
         <View style={styles.offerMeta}>
           <View style={styles.metaItem}>
@@ -272,12 +385,12 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
 
         <View style={styles.sectionDivider} />
 
-        <Text style={[styles.subSectionTitle, { color: colors.text }]}>Mechanism</Text>
+        <Text style={[styles.structureLabel, { color: '#F97316' }]}>Mechanism</Text>
         <Text style={[styles.bodyText, { color: colors.textSecondary }]}>{offer.mechanismDescription}</Text>
 
         {offer.deliverables.length > 0 && (
           <>
-            <Text style={[styles.subSectionTitle, { color: colors.text, marginTop: 12 }]}>Deliverables</Text>
+            <Text style={[styles.structureLabel, { color: '#F97316', marginTop: 12 }]}>Deliverables</Text>
             {offer.deliverables.map((d, i) => (
               <View key={i} style={styles.deliverableRow}>
                 <Ionicons name="checkmark-circle" size={14} color="#10B981" />
@@ -287,9 +400,19 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
           </>
         )}
 
-        {offer.proofAlignment.length > 0 && (
+        {(offer.proofPath && offer.proofPath.length > 0) ? (
           <>
-            <Text style={[styles.subSectionTitle, { color: colors.text, marginTop: 12 }]}>Proof Alignment</Text>
+            <Text style={[styles.structureLabel, { color: '#F97316', marginTop: 12 }]}>Proof Path</Text>
+            {offer.proofPath.map((p, i) => (
+              <View key={i} style={styles.deliverableRow}>
+                <Ionicons name="shield-checkmark" size={14} color="#3B82F6" />
+                <Text style={[styles.deliverableText, { color: colors.textSecondary }]}>{p}</Text>
+              </View>
+            ))}
+          </>
+        ) : offer.proofAlignment.length > 0 ? (
+          <>
+            <Text style={[styles.structureLabel, { color: '#F97316', marginTop: 12 }]}>Proof Path</Text>
             <View style={styles.tagRow}>
               {offer.proofAlignment.map((p, i) => (
                 <View key={i} style={[styles.tag, { backgroundColor: '#3B82F620' }]}>
@@ -298,11 +421,21 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
               ))}
             </View>
           </>
-        )}
+        ) : null}
 
-        {offer.riskNotes.length > 0 && variant !== 'rejected' && (
+        {(offer.objectionHandling && offer.objectionHandling.length > 0) ? (
           <>
-            <Text style={[styles.subSectionTitle, { color: colors.text, marginTop: 12 }]}>Risk Notes</Text>
+            <Text style={[styles.structureLabel, { color: '#F97316', marginTop: 12 }]}>Objection Handling</Text>
+            {offer.objectionHandling.map((o, i) => (
+              <View key={i} style={styles.riskRow}>
+                <Ionicons name="chatbubble-ellipses" size={14} color="#8B5CF6" />
+                <Text style={[styles.riskText, { color: colors.textMuted }]}>{o}</Text>
+              </View>
+            ))}
+          </>
+        ) : offer.riskNotes.length > 0 && variant !== 'rejected' ? (
+          <>
+            <Text style={[styles.structureLabel, { color: '#F97316', marginTop: 12 }]}>Risk Notes</Text>
             {offer.riskNotes.map((r, i) => (
               <View key={i} style={styles.riskRow}>
                 <Ionicons name="alert-circle" size={14} color="#F59E0B" />
@@ -310,11 +443,11 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
               </View>
             ))}
           </>
-        )}
+        ) : null}
 
         <View style={styles.sectionDivider} />
 
-        <Text style={[styles.subSectionTitle, { color: colors.text }]}>Depth Analysis</Text>
+        <Text style={[styles.structureLabel, { color: colors.text }]}>Depth Analysis</Text>
         {renderScoreBar('Outcome Clarity', offer.depthScores.outcomeClarity)}
         {renderScoreBar('Mechanism Credibility', offer.depthScores.mechanismCredibility)}
         {renderScoreBar('Proof Strength', offer.depthScores.proofStrength)}
@@ -385,7 +518,8 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
     );
   }
 
-  const hasData = data?.exists && data.primaryOffer;
+  const isStale = data?.rootSyncStatus === 'stale';
+  const hasData = data?.exists && data.primaryOffer && !isStale;
   const currentOffer = activeSection === 'primary' ? data?.primaryOffer
     : activeSection === 'alternative' ? data?.alternativeOffer
     : data?.rejectedOffer?.offer;
@@ -396,7 +530,7 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
         <View style={styles.headerContent}>
           <View style={styles.headerLeft}>
             <Ionicons name="pricetag" size={20} color="#fff" />
-            <Text style={styles.headerTitle}>Offer Engine V3</Text>
+            <Text style={styles.headerTitle}>Offer Engine</Text>
           </View>
           {data?.engineVersion && (
             <View style={styles.versionBadge}>
@@ -425,11 +559,16 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
       {!hasData && !analyzing && (
         <View style={[styles.emptyState, { backgroundColor: colors.card }]}>
           <Ionicons name="pricetag-outline" size={40} color={colors.textMuted} />
-          <Text style={[styles.emptyTitle, { color: colors.text }]}>No Offer Analysis</Text>
-          <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
-            Run the Offer Engine to generate structured, market-aligned offers based on your positioning and differentiation data.
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>
+            {isStale ? 'Offers Outdated' : 'No Offer Analysis'}
           </Text>
-          {!strategyRoot?.exists && (
+          <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
+            {isStale
+              ? 'The upstream pipeline has changed. Previous offers are invalidated. Regenerate to sync with the current Strategy Root.'
+              : 'Run the Offer Engine to generate structured, market-aligned offers based on your positioning and differentiation data.'
+            }
+          </Text>
+          {!strategyRoot?.exists && !isStale && (
             <View style={[styles.depWarning, { backgroundColor: '#F59E0B15' }]}>
               <Ionicons name="alert-circle" size={16} color="#F59E0B" />
               <Text style={[styles.depWarningText, { color: '#F59E0B' }]}>
@@ -437,18 +576,6 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
               </Text>
             </View>
           )}
-        </View>
-      )}
-
-      {data?.rootSyncStatus === 'stale' && (
-        <View style={[styles.warningBox, { backgroundColor: '#F59E0B12', borderColor: '#F59E0B30', marginBottom: 10 }]}>
-          <Ionicons name="refresh-circle" size={18} color="#F59E0B" />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.warningTitle, { color: '#D97706' }]}>Stale Run Context</Text>
-            <Text style={[styles.warningDetail, { color: '#92400E' }]}>
-              This offer was generated against an older Strategy Root. The pipeline has newer data. Regenerate to sync with the current run.
-            </Text>
-          </View>
         </View>
       )}
 
@@ -471,7 +598,9 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
           ) : (
             <>
               <Ionicons name="flash" size={16} color="#fff" />
-              <Text style={styles.analyzeBtnText}>{hasData ? 'Regenerate Offers' : 'Generate Offers'}</Text>
+              <Text style={styles.analyzeBtnText}>
+                {isStale ? 'Regenerate (Stale)' : hasData ? 'Regenerate Offers' : 'Generate Offers'}
+              </Text>
             </>
           )}
         </LinearGradient>
@@ -479,66 +608,28 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
 
       {hasData && (
         <>
-          {data.layerDiagnostics?.mechanismEngineConsumed && (
-            <View style={[styles.sourceRow, { backgroundColor: colors.card, borderColor: '#D946EF30' }]}>
-              <View style={styles.sourceBadge}>
-                <Ionicons name="construct" size={12} color="#D946EF" />
-                <Text style={styles.sourceBadgeText}>Mechanism Engine</Text>
-              </View>
-              <Text style={[styles.sourceDetail, { color: colors.textMuted }]}>
-                {data.mechanismSnapshotId ? 'Axis-aligned mechanism consumed' : 'Mechanism data enriched'}
-              </Text>
-            </View>
-          )}
-
-          {data.layerDiagnostics?.axisEnrichment && (
-            <View style={[styles.enrichmentBox, { backgroundColor: '#8B5CF615', borderColor: '#8B5CF630' }]}>
-              <Ionicons name="git-merge" size={16} color="#8B5CF6" />
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.warningTitle, { color: '#7C3AED' }]}>Axis Enrichment</Text>
-                <Text style={[styles.warningDetail, { color: '#6D28D9' }]}>
-                  {data.layerDiagnostics.axisEnrichment.mechanismAxis.replace(/_/g, ' ')}
-                </Text>
-                {data.layerDiagnostics.axisEnrichment.emphasis.length > 0 && (
-                  <View style={styles.emphasisRow}>
-                    {data.layerDiagnostics.axisEnrichment.emphasis.slice(0, 4).map((e, i) => (
-                      <View key={i} style={styles.emphasisChip}>
-                        <Text style={styles.emphasisChipText}>{e}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
-              </View>
-            </View>
-          )}
-
           {strategyRoot?.exists && (
             <View style={[styles.sourceRow, {
               backgroundColor: colors.card,
-              borderColor: data.rootSyncStatus === 'synced' ? '#10B98130' : data.rootSyncStatus === 'stale' ? '#F59E0B30' : '#06B6D430',
+              borderColor: data.rootSyncStatus === 'synced' ? '#10B98130' : '#06B6D430',
             }]}>
               <View style={[styles.sourceBadge, {
-                backgroundColor: data.rootSyncStatus === 'synced' ? '#10B98115' : data.rootSyncStatus === 'stale' ? '#F59E0B15' : '#06B6D415',
+                backgroundColor: data.rootSyncStatus === 'synced' ? '#10B98115' : '#06B6D415',
               }]}>
-                <Ionicons name="git-network" size={12} color={data.rootSyncStatus === 'synced' ? '#10B981' : data.rootSyncStatus === 'stale' ? '#F59E0B' : '#06B6D4'} />
+                <Ionicons name="git-network" size={12} color={data.rootSyncStatus === 'synced' ? '#10B981' : '#06B6D4'} />
                 <Text style={[styles.sourceBadgeText, {
-                  color: data.rootSyncStatus === 'synced' ? '#10B981' : data.rootSyncStatus === 'stale' ? '#F59E0B' : '#06B6D4',
+                  color: data.rootSyncStatus === 'synced' ? '#10B981' : '#06B6D4',
                 }]}>Strategy Root</Text>
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.sourceDetail, { color: colors.textMuted }]}>
-                  {strategyRoot.primaryAxis ? strategyRoot.primaryAxis.replace(/_/g, ' ') : 'Unified'} axis
-                  {data.rootSyncStatus === 'synced' ? ' — synced' : data.rootSyncStatus === 'stale' ? ' — stale, regenerate' : ''}
+                  {strategyRoot.primaryAxis ? strategyRoot.primaryAxis.replace(/_/g, ' ') : 'Unified'} axis — synced
                 </Text>
                 <Text style={[styles.sourceDetail, { color: colors.textMuted, fontSize: 10, marginTop: 2 }]}>
                   Hash: {strategyRoot.rootHash?.substring(0, 10)}... | Run: {strategyRoot.runId?.split('_')[1] || '—'}
                 </Text>
               </View>
-              {data.rootSyncStatus === 'synced' ? (
-                <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-              ) : (
-                <Ionicons name="alert-circle" size={16} color="#F59E0B" />
-              )}
+              <Ionicons name="checkmark-circle" size={16} color="#10B981" />
             </View>
           )}
 
@@ -566,18 +657,20 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
             </View>
           )}
 
+          {renderSourceContextCard()}
+          {renderIntegrityStatusCard()}
 
           <View style={[styles.selectorRow, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             {(['primary', 'alternative', 'rejected'] as const).map(section => {
-              const isActive = activeSection === section;
+              const isActiveTab = activeSection === section;
               const sColor = section === 'primary' ? '#10B981' : section === 'alternative' ? '#3B82F6' : '#EF4444';
               return (
                 <Pressable
                   key={section}
                   onPress={() => { Haptics.selectionAsync(); setActiveSection(section); }}
-                  style={[styles.selectorTab, isActive && { backgroundColor: sColor + '14', borderColor: sColor + '40' }]}
+                  style={[styles.selectorTab, isActiveTab && { backgroundColor: sColor + '14', borderColor: sColor + '40' }]}
                 >
-                  <Text style={[styles.selectorText, { color: isActive ? sColor : colors.textMuted }]}>
+                  <Text style={[styles.selectorText, { color: isActiveTab ? sColor : colors.textMuted }]}>
                     {section.charAt(0).toUpperCase() + section.slice(1)}
                   </Text>
                 </Pressable>
@@ -598,60 +691,67 @@ const styles = StyleSheet.create({
   headerGradient: { borderRadius: 12, padding: 16, marginBottom: 12 },
   headerContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  headerTitle: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  headerTitle: { fontSize: 16, fontWeight: '700' as const, color: '#fff' },
   versionBadge: { backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
-  versionText: { fontSize: 11, fontWeight: '600', color: '#fff' },
+  versionText: { fontSize: 11, fontWeight: '600' as const, color: '#fff' },
   headerMeta: { flexDirection: 'row', marginTop: 12, gap: 16 },
   headerMetaItem: { flex: 1 },
   headerMetaLabel: { fontSize: 10, color: 'rgba(255,255,255,0.7)', marginBottom: 2 },
-  headerMetaValue: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  headerMetaValue: { fontSize: 14, fontWeight: '700' as const, color: '#fff' },
   emptyState: { borderRadius: 12, padding: 24, alignItems: 'center', marginBottom: 12, gap: 8 },
-  emptyTitle: { fontSize: 16, fontWeight: '600' },
+  emptyTitle: { fontSize: 16, fontWeight: '600' as const },
   emptySubtitle: { fontSize: 13, textAlign: 'center', lineHeight: 18 },
   depWarning: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: 8, marginTop: 8 },
-  depWarningText: { fontSize: 12, fontWeight: '500' },
+  depWarningText: { fontSize: 12, fontWeight: '500' as const },
   analyzeBtn: { marginBottom: 12 },
   analyzeBtnDisabled: { opacity: 0.5 },
   analyzeBtnGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 10, padding: 14 },
-  analyzeBtnText: { fontSize: 14, fontWeight: '600', color: '#fff' },
+  analyzeBtnText: { fontSize: 14, fontWeight: '600' as const, color: '#fff' },
   sourceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 10, borderWidth: 1, marginBottom: 10 },
-  sourceBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#D946EF18', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  sourceBadgeText: { fontSize: 11, fontWeight: '600' as const, color: '#D946EF' },
+  sourceBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  sourceBadgeText: { fontSize: 11, fontWeight: '600' as const },
   sourceDetail: { fontSize: 11, flex: 1 },
-  enrichmentBox: { flexDirection: 'row', gap: 10, padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 10 },
-  emphasisRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 6 },
-  emphasisChip: { backgroundColor: '#8B5CF620', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  emphasisChipText: { fontSize: 10, color: '#7C3AED', fontWeight: '500' as const },
+  contextCard: { borderRadius: 10, borderWidth: 1, padding: 12, marginBottom: 10 },
+  contextHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  contextTitle: { fontSize: 13, fontWeight: '600' as const },
+  contextGrid: { gap: 6 },
+  contextRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  contextKey: { fontSize: 11, fontWeight: '600' as const, width: 100 },
+  contextVal: { fontSize: 12, flex: 1, lineHeight: 16 },
+  integrityGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  integrityItem: { flexDirection: 'row', alignItems: 'center', gap: 4, width: '45%' as any },
+  integrityLabel: { fontSize: 11, fontWeight: '500' as const },
   warningBox: { flexDirection: 'row', gap: 10, padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 10 },
   warningTitle: { fontSize: 13, fontWeight: '600' as const, marginBottom: 2 },
   warningDetail: { fontSize: 12, lineHeight: 16 },
   selectorRow: { flexDirection: 'row', borderRadius: 10, borderWidth: 1, padding: 4, marginBottom: 12, gap: 4 },
   selectorTab: { flex: 1, borderRadius: 8, paddingVertical: 8, alignItems: 'center', borderWidth: 1, borderColor: 'transparent' },
-  selectorText: { fontSize: 13, fontWeight: '600' },
+  selectorText: { fontSize: 13, fontWeight: '600' as const },
   offerCard: { borderRadius: 12, padding: 16, borderWidth: 1, marginBottom: 12 },
   offerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   offerHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   selectedBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  selectedBadgeText: { fontSize: 11, fontWeight: '600' },
+  selectedBadgeText: { fontSize: 11, fontWeight: '600' as const },
   offerBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  offerBadgeText: { fontSize: 12, fontWeight: '600' },
+  offerBadgeText: { fontSize: 12, fontWeight: '600' as const },
   warningBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  warningBadgeText: { fontSize: 11, fontWeight: '600' },
-  offerName: { fontSize: 16, fontWeight: '700', marginBottom: 4 },
-  offerOutcome: { fontSize: 13, lineHeight: 18, marginBottom: 10 },
-  offerMeta: { flexDirection: 'row', gap: 16, marginBottom: 10 },
+  warningBadgeText: { fontSize: 11, fontWeight: '600' as const },
+  structureLabel: { fontSize: 11, fontWeight: '700' as const, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 },
+  offerName: { fontSize: 16, fontWeight: '700' as const, marginBottom: 4 },
+  bodyText: { fontSize: 13, lineHeight: 18 },
+  offerMeta: { flexDirection: 'row', gap: 16, marginTop: 10, marginBottom: 10 },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  metaText: { fontSize: 12, fontWeight: '500' },
+  metaText: { fontSize: 12, fontWeight: '500' as const },
   rejectionBox: { flexDirection: 'row', gap: 8, padding: 10, borderRadius: 8, marginBottom: 10, alignItems: 'flex-start' },
   rejectionText: { fontSize: 12, flex: 1, lineHeight: 16 },
   sectionDivider: { height: 1, backgroundColor: 'rgba(128,128,128,0.15)', marginVertical: 12 },
-  subSectionTitle: { fontSize: 13, fontWeight: '600', marginBottom: 6 },
-  bodyText: { fontSize: 13, lineHeight: 18 },
   deliverableRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 4 },
   deliverableText: { fontSize: 12, flex: 1, lineHeight: 16 },
   tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   tag: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  tagText: { fontSize: 11, fontWeight: '500' },
+  tagText: { fontSize: 11, fontWeight: '500' as const },
+  miniTag: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  miniTagText: { fontSize: 10, fontWeight: '500' as const },
   riskRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 4 },
   riskText: { fontSize: 12, flex: 1, lineHeight: 16 },
   scoreRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
@@ -659,11 +759,11 @@ const styles = StyleSheet.create({
   scoreBarContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
   scoreBarBg: { flex: 1, height: 6, borderRadius: 3, overflow: 'hidden' },
   scoreBarFill: { height: '100%', borderRadius: 3 },
-  scoreValue: { fontSize: 11, fontWeight: '600', width: 32, textAlign: 'right' },
+  scoreValue: { fontSize: 11, fontWeight: '600' as const, width: 32, textAlign: 'right' },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
-  statusText: { fontSize: 12, fontWeight: '500' },
+  statusText: { fontSize: 12, fontWeight: '500' as const },
   selectBtn: { marginTop: 8 },
   selectBtnSelected: { opacity: 0.8 },
   selectBtnGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 10, padding: 12 },
-  selectBtnText: { fontSize: 13, fontWeight: '600', color: '#fff' },
+  selectBtnText: { fontSize: 13, fontWeight: '600' as const, color: '#fff' },
 });

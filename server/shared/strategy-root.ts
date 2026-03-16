@@ -19,6 +19,9 @@ interface StrategyRootInput {
   approvedTransformation: string | null;
   approvedClaim: string | null;
   approvedPromise: string | null;
+  approvedObjections: any;
+  approvedProofTypes: any;
+  approvedPositioningContext: any;
 }
 
 export function computeRootHash(input: StrategyRootInput): string {
@@ -30,6 +33,9 @@ export function computeRootHash(input: StrategyRootInput): string {
     mech: input.mechanismSnapshotId,
     axis: input.primaryAxis,
     contrast: input.contrastAxisText,
+    objections: input.approvedObjections ? JSON.stringify(input.approvedObjections) : null,
+    proofTypes: input.approvedProofTypes ? JSON.stringify(input.approvedProofTypes) : null,
+    posContext: input.approvedPositioningContext ? JSON.stringify(input.approvedPositioningContext) : null,
   };
   return crypto.createHash("sha256").update(JSON.stringify(hashPayload)).digest("hex").substring(0, 16);
 }
@@ -82,6 +88,9 @@ export async function buildStrategyRoot(input: StrategyRootInput): Promise<{
     approvedTransformation: input.approvedTransformation,
     approvedClaim: input.approvedClaim,
     approvedPromise: input.approvedPromise,
+    approvedObjections: JSON.stringify(input.approvedObjections),
+    approvedProofTypes: JSON.stringify(input.approvedProofTypes),
+    approvedPositioningContext: JSON.stringify(input.approvedPositioningContext),
     miSnapshotId: input.miSnapshotId,
     audienceSnapshotId: input.audienceSnapshotId,
     positioningSnapshotId: input.positioningSnapshotId,

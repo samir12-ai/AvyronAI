@@ -1185,6 +1185,7 @@ function buildOfferCandidate(
   differentiation: OfferDifferentiationInput,
   mi: OfferMIInput,
   positioning: OfferPositioningInput,
+  extraFields?: { problemStatement?: string; proofPath?: string[]; objectionHandling?: string[] },
 ): OfferCandidate {
   const completeness = checkOfferCompleteness(outcome, mechanism, delivery, proof, riskReduction);
   const integrity = integrityCheck({ outcome, mechanism, proof }, positioning, differentiation, audience);
@@ -1223,6 +1224,9 @@ function buildOfferCandidate(
       ...(isGeneric ? ["Generic offer flag triggered — language lacks specificity"] : []),
       ...integrity.failures,
     ],
+    problemStatement: extraFields?.problemStatement,
+    proofPath: extraFields?.proofPath,
+    objectionHandling: extraFields?.objectionHandling,
     outcomeLayer: outcome,
     mechanismLayer: mechanism,
     deliveryLayer: delivery,
@@ -1241,6 +1245,28 @@ interface OfferSkeleton {
   outcome: string;
   mechanism: string;
   deliverables: string[];
+  problemStatement: string;
+  proofPath: string[];
+  objectionHandling: string[];
+}
+
+interface OfferSourceContext {
+  selectedAxis: string;
+  selectedPain: string;
+  selectedDesire: string;
+  selectedMechanism: string;
+  selectedTransformation: string;
+  selectedProofTypes: string[];
+  selectedObjections: string[];
+}
+
+interface OfferIntegrityChecks {
+  rootSynced: boolean;
+  axisAligned: boolean;
+  painAligned: boolean;
+  mechanismAligned: boolean;
+  proofAligned: boolean;
+  integrityPassed: boolean;
 }
 
 function buildDeterministicOfferSkeletons(
@@ -1248,10 +1274,17 @@ function buildDeterministicOfferSkeletons(
   audience: OfferAudienceInput,
   positioning: OfferPositioningInput,
   differentiation: OfferDifferentiationInput,
-): { primary: OfferSkeleton; alternative: OfferSkeleton; rejected: OfferSkeleton & { rejectionReason: string } } {
+): {
+  primary: OfferSkeleton;
+  alternative: OfferSkeleton;
+  rejected: OfferSkeleton & { rejectionReason: string };
+  sourceContext: OfferSourceContext;
+} {
   const rootMech = strategyRoot?.approvedMechanism ? (typeof strategyRoot.approvedMechanism === "string" ? safeJsonParse(strategyRoot.approvedMechanism) : strategyRoot.approvedMechanism) : null;
   const rootPains = strategyRoot?.approvedAudiencePains ? (typeof strategyRoot.approvedAudiencePains === "string" ? safeJsonParse(strategyRoot.approvedAudiencePains) : strategyRoot.approvedAudiencePains) : null;
   const rootDesires = strategyRoot?.approvedDesires ? (typeof strategyRoot.approvedDesires === "string" ? safeJsonParse(strategyRoot.approvedDesires) : strategyRoot.approvedDesires) : null;
+  const rootObjections = strategyRoot?.approvedObjections ? (typeof strategyRoot.approvedObjections === "string" ? safeJsonParse(strategyRoot.approvedObjections) : strategyRoot.approvedObjections) : null;
+  const rootProofTypes = strategyRoot?.approvedProofTypes ? (typeof strategyRoot.approvedProofTypes === "string" ? safeJsonParse(strategyRoot.approvedProofTypes) : strategyRoot.approvedProofTypes) : null;
   const rootAxis = (strategyRoot?.primaryAxis || "").replace(/_/g, " ");
   const rootContrastText = strategyRoot?.contrastAxisText || "";
   const rootTransformation = strategyRoot?.approvedTransformation || "";
@@ -1280,6 +1313,26 @@ function buildDeterministicOfferSkeletons(
     desiresList.push(...Object.keys(audience.desireMap || {}).slice(0, 5));
   }
 
+  const objectionsList: string[] = [];
+  if (rootObjections && typeof rootObjections === "object") {
+    objectionsList.push(...Object.keys(rootObjections).slice(0, 5));
+  }
+  if (objectionsList.length === 0) {
+    objectionsList.push(...Object.keys(audience.objectionMap || {}).slice(0, 5));
+  }
+
+  const proofTypesList: string[] = [];
+  if (rootProofTypes && Array.isArray(rootProofTypes)) {
+    for (const p of rootProofTypes.slice(0, 6)) {
+      proofTypesList.push(typeof p === "string" ? p : p?.type || p?.name || String(p));
+    }
+  }
+  if (proofTypesList.length === 0) {
+    for (const p of (differentiation.proofArchitecture || []).slice(0, 6)) {
+      proofTypesList.push(typeof p === "string" ? p : p?.type || p?.name || String(p));
+    }
+  }
+
   const primaryPain = painsList[0] || "unresolved challenge";
   const altPain = painsList[1] || painsList[0] || "persistent friction";
   const primaryDesire = desiresList[0] || "measurable improvement";
@@ -1295,6 +1348,9 @@ function buildDeterministicOfferSkeletons(
     ? `${axisPhrase}: ${rootPromise.substring(0, 80)}`
     : `${axisPhrase} — Achieve ${primaryDesire}`;
 
+  const primaryProblem = `${primaryPain} — preventing ${primaryDesire} and blocking ${rootTransformation || "meaningful progress"}`;
+  const altProblem = `${altPain} — creating friction toward ${altDesire}`;
+
   const primaryOutcome = rootTransformation
     ? `${rootTransformation.substring(0, 100)} — addressing ${primaryPain} and delivering ${primaryDesire}`
     : `Eliminate ${primaryPain} and achieve ${primaryDesire} through ${axisPhrase}`;
@@ -1309,26 +1365,54 @@ function buildDeterministicOfferSkeletons(
     ? rootMechSteps.slice(0, 6)
     : (differentiation.mechanismCore?.mechanismSteps || []).slice(0, 6);
 
+  const proofPath = proofTypesList.length > 0
+    ? proofTypesList
+    : ["process_proof"];
+
+  const objectionHandling = objectionsList.length > 0
+    ? objectionsList.map(obj => `Addresses: ${obj}`)
+    : ["Friction handling through mechanism demonstration"];
+
+  const sourceContext: OfferSourceContext = {
+    selectedAxis: axisPhrase,
+    selectedPain: primaryPain,
+    selectedDesire: primaryDesire,
+    selectedMechanism: rootMechName || "direct mechanism",
+    selectedTransformation: rootTransformation || primaryOutcome,
+    selectedProofTypes: proofPath,
+    selectedObjections: objectionsList,
+  };
+
   return {
     primary: {
       name: primaryHook,
       outcome: primaryOutcome,
       mechanism: mechDesc,
       deliverables: deliverables.length > 0 ? deliverables : ["Core implementation module"],
+      problemStatement: primaryProblem,
+      proofPath,
+      objectionHandling,
     },
     alternative: {
       name: altHook,
       outcome: altOutcome,
       mechanism: mechDesc,
       deliverables: deliverables.length > 0 ? deliverables : ["Alternative implementation module"],
+      problemStatement: altProblem,
+      proofPath,
+      objectionHandling,
     },
     rejected: {
       name: `Generic ${axisPhrase} Package`,
       outcome: "General improvement without axis specificity",
       mechanism: "Standard approach without mechanism binding",
       deliverables: [],
+      problemStatement: "Vague problem without market evidence",
+      proofPath: [],
+      objectionHandling: [],
       rejectionReason: `Does not reference the ${axisPhrase} axis or approved mechanism "${rootMechName}"`,
     },
+    sourceContext,
   };
 }
 
@@ -1346,11 +1430,14 @@ export async function aiOfferGeneration(
 ): Promise<{ primary: { name: string; outcome: string; mechanism: string; deliverables: string[] }; alternative: { name: string; outcome: string; mechanism: string; deliverables: string[] }; rejected: { name: string; outcome: string; mechanism: string; deliverables: string[]; rejectionReason: string } }> {
 
   if (strategyRoot) {
-    const skeletons = buildDeterministicOfferSkeletons(strategyRoot, audience, positioning, differentiation);
-    console.log(`[OfferEngine-V4] DETERMINISTIC_SKELETON_BUILT | primaryHook="${skeletons.primary.name.substring(0, 60)}" | mechName="${(safeJsonParse(typeof strategyRoot.approvedMechanism === 'string' ? strategyRoot.approvedMechanism : JSON.stringify(strategyRoot.approvedMechanism))?.mechanismName || 'n/a')}"`);
+    const skeletonResult = buildDeterministicOfferSkeletons(strategyRoot, audience, positioning, differentiation);
+    const skeletons = skeletonResult;
+    console.log(`[OfferEngine-V4] DETERMINISTIC_SKELETON_BUILT | primaryHook="${skeletons.primary.name.substring(0, 60)}" | mechName="${(safeJsonParse(typeof strategyRoot.approvedMechanism === 'string' ? strategyRoot.approvedMechanism : JSON.stringify(strategyRoot.approvedMechanism))?.mechanismName || 'n/a')}" | proofTypes=${skeletons.primary.proofPath.length} | objections=${skeletons.primary.objectionHandling.length}`);
 
     const painPhrases = marketLanguage?.rawPainPhrases?.slice(0, 8) || [];
     const desirePhrases = marketLanguage?.rawDesirePhrases?.slice(0, 8) || [];
+
+    const mechName = safeJsonParse(typeof strategyRoot.approvedMechanism === 'string' ? strategyRoot.approvedMechanism : JSON.stringify(strategyRoot.approvedMechanism))?.mechanismName || '';
 
     const prompt = `You are an Offer Copywriter. You must refine the wording of pre-built offer skeletons.
 
@@ -1362,35 +1449,48 @@ You MUST preserve:
 2. The mechanism name reference — do NOT rename or replace it
 3. The pain/desire references in the outcome — do NOT substitute different pains/desires
 4. The deliverables — keep the same items, just improve wording
+5. The problem statement — keep the pain reference, improve clarity
+6. The proof path types — keep same types, improve descriptions
+7. The objection handling points — keep same objections, improve responses
 
 ═══ PRE-BUILT OFFER SKELETONS (REFINE THESE — DO NOT REPLACE) ═══
 
 PRIMARY OFFER:
 - Hook/Name: "${skeletons.primary.name}"
+- Problem Statement: "${skeletons.primary.problemStatement}"
 - Outcome: "${skeletons.primary.outcome}"
 - Mechanism: "${skeletons.primary.mechanism}"
 - Deliverables: ${JSON.stringify(skeletons.primary.deliverables)}
+- Proof Path: ${JSON.stringify(skeletons.primary.proofPath)}
+- Objection Handling: ${JSON.stringify(skeletons.primary.objectionHandling)}
 
 ALTERNATIVE OFFER:
 - Hook/Name: "${skeletons.alternative.name}"
+- Problem Statement: "${skeletons.alternative.problemStatement}"
 - Outcome: "${skeletons.alternative.outcome}"
 - Mechanism: "${skeletons.alternative.mechanism}"
 - Deliverables: ${JSON.stringify(skeletons.alternative.deliverables)}
+- Proof Path: ${JSON.stringify(skeletons.alternative.proofPath)}
+- Objection Handling: ${JSON.stringify(skeletons.alternative.objectionHandling)}
 
 REJECTED OFFER (anti-pattern):
 - Hook/Name: "${skeletons.rejected.name}"
+- Problem Statement: "${skeletons.rejected.problemStatement}"
 - Outcome: "${skeletons.rejected.outcome}"
 - Mechanism: "${skeletons.rejected.mechanism}"
 - Rejection Reason: "${skeletons.rejected.rejectionReason}"
 
 ═══ REFINEMENT RULES ═══
 1. Make the hook/name punchier and more compelling — but KEEP the axis words and pain references
-2. Make the outcome more specific with numbers or concrete results — but KEEP the pain/desire references
-3. Make the mechanism description clearer — but KEEP the mechanism name "${(safeJsonParse(typeof strategyRoot.approvedMechanism === 'string' ? strategyRoot.approvedMechanism : JSON.stringify(strategyRoot.approvedMechanism))?.mechanismName || '')}"
-4. Polish deliverable descriptions — but KEEP the same deliverable items
-5. BANNED WORDS: "optimize", "leverage", "scale", "transform", "empower", "unlock", "synergy", "holistic", "comprehensive", "innovative", "cutting-edge", "next-level", "game-changing", "paradigm"
-${painPhrases.length > 0 ? `6. Use audience language where possible: ${JSON.stringify(painPhrases.slice(0, 5))}` : ""}
-${desirePhrases.length > 0 ? `7. Use desire language where possible: ${JSON.stringify(desirePhrases.slice(0, 5))}` : ""}
+2. Make the problem statement more vivid and specific — but KEEP the pain reference
+3. Make the outcome more specific with numbers or concrete results — but KEEP the pain/desire references
+4. Make the mechanism description clearer — but KEEP the mechanism name "${mechName}"
+5. Polish deliverable descriptions — but KEEP the same deliverable items
+6. Refine proof path descriptions to be more convincing — KEEP the same proof types
+7. Sharpen objection handling to directly address each objection — KEEP the same objections
+8. BANNED WORDS: "optimize", "leverage", "scale", "transform", "empower", "unlock", "synergy", "holistic", "comprehensive", "innovative", "cutting-edge", "next-level", "game-changing", "paradigm"
+${painPhrases.length > 0 ? `9. Use audience language where possible: ${JSON.stringify(painPhrases.slice(0, 5))}` : ""}
+${desirePhrases.length > 0 ? `10. Use desire language where possible: ${JSON.stringify(desirePhrases.slice(0, 5))}` : ""}
 
 ${productDna ? `═══ PRODUCT IDENTITY ═══\n${formatProductDNAForPrompt(productDna)}\n` : ""}
 ABSOLUTE RULES:
@@ -1400,9 +1500,9 @@ ABSOLUTE RULES:
 
 Return JSON:
 {
-  "primary": { "name": "Refined hook", "outcome": "Refined outcome", "mechanism": "Refined mechanism", "deliverables": ["Refined deliverable 1", "Refined deliverable 2"] },
-  "alternative": { "name": "Refined alt hook", "outcome": "Refined alt outcome", "mechanism": "Refined alt mechanism", "deliverables": ["Refined alt deliverable 1"] },
-  "rejected": { "name": "Rejected offer name", "outcome": "Why it seems appealing", "mechanism": "What it promises", "deliverables": [], "rejectionReason": "Why this fails" }
+  "primary": { "name": "Refined hook", "problemStatement": "Refined problem", "outcome": "Refined outcome", "mechanism": "Refined mechanism", "deliverables": ["..."], "proofPath": ["..."], "objectionHandling": ["..."] },
+  "alternative": { "name": "Refined alt hook", "problemStatement": "Refined alt problem", "outcome": "Refined alt outcome", "mechanism": "Refined alt mechanism", "deliverables": ["..."], "proofPath": ["..."], "objectionHandling": ["..."] },
+  "rejected": { "name": "Rejected name", "outcome": "Why appealing", "mechanism": "What it promises", "deliverables": [], "rejectionReason": "Why this fails" }
 }`;
 
     try {
@@ -1418,18 +1518,24 @@ Return JSON:
       const cleanedResponse = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
       const parsed = JSON.parse(cleanedResponse);
 
-      return {
+      const result = {
         primary: {
           name: parsed.primary?.name || skeletons.primary.name,
           outcome: parsed.primary?.outcome || skeletons.primary.outcome,
           mechanism: parsed.primary?.mechanism || skeletons.primary.mechanism,
           deliverables: Array.isArray(parsed.primary?.deliverables) ? parsed.primary.deliverables : skeletons.primary.deliverables,
+          problemStatement: parsed.primary?.problemStatement || skeletons.primary.problemStatement,
+          proofPath: Array.isArray(parsed.primary?.proofPath) ? parsed.primary.proofPath : skeletons.primary.proofPath,
+          objectionHandling: Array.isArray(parsed.primary?.objectionHandling) ? parsed.primary.objectionHandling : skeletons.primary.objectionHandling,
         },
         alternative: {
           name: parsed.alternative?.name || skeletons.alternative.name,
           outcome: parsed.alternative?.outcome || skeletons.alternative.outcome,
           mechanism: parsed.alternative?.mechanism || skeletons.alternative.mechanism,
           deliverables: Array.isArray(parsed.alternative?.deliverables) ? parsed.alternative.deliverables : skeletons.alternative.deliverables,
+          problemStatement: parsed.alternative?.problemStatement || skeletons.alternative.problemStatement,
+          proofPath: Array.isArray(parsed.alternative?.proofPath) ? parsed.alternative.proofPath : skeletons.alternative.proofPath,
+          objectionHandling: Array.isArray(parsed.alternative?.objectionHandling) ? parsed.alternative.objectionHandling : skeletons.alternative.objectionHandling,
         },
         rejected: {
           name: parsed.rejected?.name || skeletons.rejected.name,
@@ -1438,10 +1544,12 @@ Return JSON:
           deliverables: [],
           rejectionReason: parsed.rejected?.rejectionReason || skeletons.rejected.rejectionReason,
         },
+        sourceContext: skeletonResult.sourceContext,
       };
+      return result as any;
     } catch (err: any) {
       console.log(`[OfferEngine-V4] AI_REFINEMENT_FAILED | ${err.message} — using raw skeletons`);
-      return { ...skeletons };
+      return { ...skeletons, sourceContext: skeletonResult.sourceContext } as any;
     }
   }
 
@@ -1834,11 +1942,15 @@ export async function runOfferEngine(
   try {
     aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot, productDna);
     diagnostics.aiGeneration = { success: true, mode: strategyRoot ? "skeleton_refinement" : "free_generation" };
+    if (aiOffers.sourceContext) {
+      diagnostics.sourceContext = aiOffers.sourceContext;
+    }
   } catch (err: any) {
     diagnostics.aiGeneration = { success: false, error: err.message };
     if (strategyRoot) {
-      const fallbackSkeletons = buildDeterministicOfferSkeletons(strategyRoot, audience, positioning, differentiation);
-      aiOffers = { ...fallbackSkeletons };
+      const fallbackResult = buildDeterministicOfferSkeletons(strategyRoot, audience, positioning, differentiation);
+      aiOffers = { ...fallbackResult } as any;
+      diagnostics.sourceContext = fallbackResult.sourceContext;
       console.log(`[OfferEngine-V4] AI_FAILED_USING_RAW_SKELETONS | ${err.message}`);
     } else {
       aiOffers = {
@@ -1953,6 +2065,7 @@ export async function runOfferEngine(
   const primaryOffer = buildOfferCandidate(
     aiOffers.primary.name, primaryOutcome, primaryMechanism, primaryDelivery, l4Proof, l5Risk,
     audience, differentiation, mi, positioning,
+    { problemStatement: aiOffers.primary.problemStatement, proofPath: aiOffers.primary.proofPath, objectionHandling: aiOffers.primary.objectionHandling },
   );
 
   const altOutcome: OutcomeLayer = {
@@ -1982,6 +2095,7 @@ export async function runOfferEngine(
   const alternativeOffer = buildOfferCandidate(
     aiOffers.alternative.name, altOutcome, altMechanism, altDelivery, l4Proof, l5Risk,
     audience, differentiation, mi, positioning,
+    { problemStatement: aiOffers.alternative.problemStatement, proofPath: aiOffers.alternative.proofPath, objectionHandling: aiOffers.alternative.objectionHandling },
   );
 
   const rejOutcome: OutcomeLayer = {
@@ -2210,6 +2324,7 @@ export async function runOfferEngine(
       const retryPrimary = buildOfferCandidate(
         retryOffers.primary.name, retryPrimaryOutcome, retryMechanism, retryDelivery, l4Proof, l5Risk,
         audience, differentiation, mi, positioning,
+        { problemStatement: retryOffers.primary.problemStatement, proofPath: retryOffers.primary.proofPath, objectionHandling: retryOffers.primary.objectionHandling },
       );
 
       if (posLock.locked) {
@@ -2320,7 +2435,33 @@ export async function runOfferEngine(
   );
   diagnostics.strategyAcceptability = acceptability;
 
-  console.log(`[OfferEngine-V4] Complete | status=${status} | strength=${primaryOffer.offerStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | grade=${acceptability.grade} | generic=${primaryOffer.genericFlag} | boundary=${boundaryCheck.clean} | alignmentWarnings=${structuralWarnings.length} | grounded=${primaryGrounding.groundedClaims}/${primaryGrounding.totalClaims}`);
+  if (strategyRoot) {
+    const offerMechText = (primaryOffer.mechanismDescription || "").toLowerCase();
+    const offerHookText = (primaryOffer.offerName || "").toLowerCase();
+    const offerOutcomeText = (primaryOffer.coreOutcome || "").toLowerCase();
+    const axisLabel = (strategyRoot.primaryAxis || "").replace(/_/g, " ").toLowerCase();
+    const axisTokensForCheck = axisLabel.split(/\s+/).filter((t: string) => t.length > 3);
+    const rootMechParsed = typeof strategyRoot.approvedMechanism === "string" ? safeJsonParse(strategyRoot.approvedMechanism) : strategyRoot.approvedMechanism;
+    const rootMechNameCheck = (rootMechParsed?.mechanismName || "").toLowerCase();
+
+    const axisInHook = axisTokensForCheck.length === 0 || axisTokensForCheck.some((t: string) => offerHookText.includes(t));
+    const painInOutcome = diagnostics.sourceContext?.selectedPain
+      ? offerOutcomeText.includes(diagnostics.sourceContext.selectedPain.toLowerCase().substring(0, 15))
+      : true;
+    const mechInOffer = rootMechNameCheck.length === 0 || offerMechText.includes(rootMechNameCheck.substring(0, Math.min(rootMechNameCheck.length, 20)));
+    const proofInOffer = (primaryOffer.proofAlignment || []).length > 0;
+
+    diagnostics.integrityChecks = {
+      rootSynced: true,
+      axisAligned: axisInHook,
+      painAligned: painInOutcome,
+      mechanismAligned: mechInOffer,
+      proofAligned: proofInOffer,
+      integrityPassed: axisInHook && painInOutcome && mechInOffer && proofInOffer,
+    };
+  }
+
+  console.log(`[OfferEngine-V4] Complete | status=${status} | strength=${primaryOffer.offerStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | grade=${acceptability.grade} | generic=${primaryOffer.genericFlag} | boundary=${boundaryCheck.clean} | alignmentWarnings=${structuralWarnings.length} | grounded=${primaryGrounding.groundedClaims}/${primaryGrounding.totalClaims}${diagnostics.integrityChecks ? ` | integrity=${diagnostics.integrityChecks.integrityPassed}` : ""}`);
 
   return {
     status,
