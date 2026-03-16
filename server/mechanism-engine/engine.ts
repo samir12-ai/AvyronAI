@@ -210,7 +210,7 @@ Respond with ONLY valid JSON, no markdown:
     const primaryMech = buildMechanismOutput(parsed.primary, primaryAxis, pillars);
     const altMech = parsed.alternative ? buildMechanismOutput(parsed.alternative, primaryAxis, pillars) : null;
 
-    const sanitizedPrimary = applySoftSanitization(primaryMech.mechanismDescription);
+    const sanitizedPrimary = applySoftSanitization(primaryMech.mechanismDescription, []);
     if (sanitizedPrimary !== primaryMech.mechanismDescription) {
       primaryMech.mechanismDescription = sanitizedPrimary;
       diagnostics.primarySanitized = true;

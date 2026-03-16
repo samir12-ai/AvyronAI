@@ -218,7 +218,7 @@ export default function MechanismEngine({ isActive }: Props) {
               <Text style={[styles.consistencyText, { color: axisConsistency.consistent ? "#065F46" : "#92400E" }]}>
                 {axisConsistency.consistent
                   ? `Axis Consistent — mechanism aligned with ${axisConsistency.primaryAxis.replace(/_/g, ' ')} positioning`
-                  : `Axis Warning — ${axisConsistency.failures?.[0] || 'mechanism may not fully align with positioning axis'}`
+                  : `Axis Warning — ${(axisConsistency.failures?.[0] && !axisConsistency.failures[0].includes('is not iterable') && !axisConsistency.failures[0].includes('Cannot read')) ? axisConsistency.failures[0] : 'mechanism may not fully align with positioning axis'}`
                 }
               </Text>
             </View>
