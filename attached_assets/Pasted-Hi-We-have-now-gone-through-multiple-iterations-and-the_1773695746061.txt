@@ -1,0 +1,69 @@
+Hi,
+
+We have now gone through multiple iterations and the Offer Engine still produces axis-mismatch outputs even though the Strategy Root, Mechanism Engine, and upstream pipeline are correct. This indicates the problem is no longer prompt inputs or validation — it is the core generation logic of the Offer Engine itself.
+
+Right now the engine works like this:
+
+1. Generate hook/outcome freely with the LLM  
+2. Validate against axis/mechanism  
+3. Retry if mismatch  
+
+This approach is failing repeatedly because the model is still generating free-form offers first, then trying to correct them afterward. Even with retries and better prompts, the same mismatch keeps happening.
+
+We need to change the Offer Engine architecture so it derives the offer deterministically from the Strategy Root before the copy is generated.
+
+## Required change to Offer Engine logic
+
+Instead of:
+
+Free AI generation → validation → retry
+
+The engine must do:
+
+Strategy Root → structured offer assembly → AI wording refinement.
+
+The generation pipeline should follow this order:
+
+1. Read from Strategy Root only:
+   - primary_axis
+   - contrast_axis
+   - approved_mechanism
+   - approved_pains
+   - approved_desires
+   - approved_transformation
+   - approved_claim
+   - approved_promise
+
+2. Extract axis tokens from the primary axis.
+
+3. Select one approved audience pain or desire.
+
+4. Bind the selected pain to the approved mechanism logic.
+
+5. Construct a deterministic hook skeleton and outcome skeleton using those elements.
+
+6. Only after that, send the skeleton to the AI model to refine wording, not generate the logic.
+
+This ensures:
+- hook references the axis
+- outcome references approved pains/desires
+- mechanism remains consistent with the offer
+
+## Important rule
+
+The AI should never decide the strategic structure of the offer.  
+The system must construct the structure first, then the AI only improves wording.
+
+## Expected result
+
+Offer Engine should behave like the other engines in the pipeline:
+
+Strategy Root → deterministic downstream output → AI phrasing layer
+
+not:
+
+AI generation → validation → retry loop.
+
+Please adjust the Offer Engine generation architecture accordingly so it works consistently with the rest of the system.
+
+Thanks.

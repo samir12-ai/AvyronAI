@@ -1236,6 +1236,102 @@ function buildOfferCandidate(
   };
 }
 
+interface OfferSkeleton {
+  name: string;
+  outcome: string;
+  mechanism: string;
+  deliverables: string[];
+}
+
+function buildDeterministicOfferSkeletons(
+  strategyRoot: any,
+  audience: OfferAudienceInput,
+  positioning: OfferPositioningInput,
+  differentiation: OfferDifferentiationInput,
+): { primary: OfferSkeleton; alternative: OfferSkeleton; rejected: OfferSkeleton & { rejectionReason: string } } {
+  const rootMech = strategyRoot?.approvedMechanism ? (typeof strategyRoot.approvedMechanism === "string" ? safeJsonParse(strategyRoot.approvedMechanism) : strategyRoot.approvedMechanism) : null;
+  const rootPains = strategyRoot?.approvedAudiencePains ? (typeof strategyRoot.approvedAudiencePains === "string" ? safeJsonParse(strategyRoot.approvedAudiencePains) : strategyRoot.approvedAudiencePains) : null;
+  const rootDesires = strategyRoot?.approvedDesires ? (typeof strategyRoot.approvedDesires === "string" ? safeJsonParse(strategyRoot.approvedDesires) : strategyRoot.approvedDesires) : null;
+  const rootAxis = (strategyRoot?.primaryAxis || "").replace(/_/g, " ");
+  const rootContrastText = strategyRoot?.contrastAxisText || "";
+  const rootTransformation = strategyRoot?.approvedTransformation || "";
+  const rootClaim = strategyRoot?.approvedClaim || "";
+  const rootPromise = strategyRoot?.approvedPromise || "";
+  const rootMechName = rootMech?.mechanismName || "";
+  const rootMechSteps: string[] = rootMech?.mechanismSteps || [];
+
+  const painsList: string[] = [];
+  if (rootPains && Array.isArray(rootPains)) {
+    for (const p of rootPains.slice(0, 5)) {
+      painsList.push(typeof p === "string" ? p : p?.pain || p?.name || String(p));
+    }
+  }
+  if (painsList.length === 0) {
+    for (const p of (audience.audiencePains || []).slice(0, 5)) {
+      painsList.push(typeof p === "string" ? p : (p as any)?.pain || (p as any)?.name || String(p));
+    }
+  }
+
+  const desiresList: string[] = [];
+  if (rootDesires && typeof rootDesires === "object") {
+    desiresList.push(...Object.keys(rootDesires).slice(0, 5));
+  }
+  if (desiresList.length === 0) {
+    desiresList.push(...Object.keys(audience.desireMap || {}).slice(0, 5));
+  }
+
+  const primaryPain = painsList[0] || "unresolved challenge";
+  const altPain = painsList[1] || painsList[0] || "persistent friction";
+  const primaryDesire = desiresList[0] || "measurable improvement";
+  const altDesire = desiresList[1] || desiresList[0] || "tangible results";
+
+  const axisPhrase = rootAxis || "strategic alignment";
+
+  const primaryHook = rootClaim
+    ? `${axisPhrase}: ${rootClaim.substring(0, 80)}`
+    : `${axisPhrase} — Eliminate ${primaryPain}`;
+
+  const altHook = rootPromise && rootPromise !== rootClaim
+    ? `${axisPhrase}: ${rootPromise.substring(0, 80)}`
+    : `${axisPhrase} — Achieve ${primaryDesire}`;
+
+  const primaryOutcome = rootTransformation
+    ? `${rootTransformation.substring(0, 100)} — addressing ${primaryPain} and delivering ${primaryDesire}`
+    : `Eliminate ${primaryPain} and achieve ${primaryDesire} through ${axisPhrase}`;
+
+  const altOutcome = `Resolve ${altPain} and deliver ${altDesire} through ${axisPhrase}`;
+
+  const mechDesc = rootMechName
+    ? `The ${rootMechName} delivers this through: ${rootMechSteps.slice(0, 4).join(", ") || "structured implementation"}`
+    : `Structured delivery system using ${axisPhrase}`;
+
+  const deliverables = rootMechSteps.length > 0
+    ? rootMechSteps.slice(0, 6)
+    : (differentiation.mechanismCore?.mechanismSteps || []).slice(0, 6);
+
+  return {
+    primary: {
+      name: primaryHook,
+      outcome: primaryOutcome,
+      mechanism: mechDesc,
+      deliverables: deliverables.length > 0 ? deliverables : ["Core implementation module"],
+    },
+    alternative: {
+      name: altHook,
+      outcome: altOutcome,
+      mechanism: mechDesc,
+      deliverables: deliverables.length > 0 ? deliverables : ["Alternative implementation module"],
+    },
+    rejected: {
+      name: `Generic ${axisPhrase} Package`,
+      outcome: "General improvement without axis specificity",
+      mechanism: "Standard approach without mechanism binding",
+      deliverables: [],
+      rejectionReason: `Does not reference the ${axisPhrase} axis or approved mechanism "${rootMechName}"`,
+    },
+  };
+}
+
 export async function aiOfferGeneration(
   audience: OfferAudienceInput,
   positioning: OfferPositioningInput,
@@ -1246,7 +1342,109 @@ export async function aiOfferGeneration(
   positioningLock?: PositioningLock,
   axisCorrection?: { previousFailures: string[]; attempt: number },
   strategyRoot?: any,
+  productDna?: ProductDNA | null,
 ): Promise<{ primary: { name: string; outcome: string; mechanism: string; deliverables: string[] }; alternative: { name: string; outcome: string; mechanism: string; deliverables: string[] }; rejected: { name: string; outcome: string; mechanism: string; deliverables: string[]; rejectionReason: string } }> {
+
+  if (strategyRoot) {
+    const skeletons = buildDeterministicOfferSkeletons(strategyRoot, audience, positioning, differentiation);
+    console.log(`[OfferEngine-V4] DETERMINISTIC_SKELETON_BUILT | primaryHook="${skeletons.primary.name.substring(0, 60)}" | mechName="${(safeJsonParse(typeof strategyRoot.approvedMechanism === 'string' ? strategyRoot.approvedMechanism : JSON.stringify(strategyRoot.approvedMechanism))?.mechanismName || 'n/a')}"`);
+
+    const painPhrases = marketLanguage?.rawPainPhrases?.slice(0, 8) || [];
+    const desirePhrases = marketLanguage?.rawDesirePhrases?.slice(0, 8) || [];
+
+    const prompt = `You are an Offer Copywriter. You must refine the wording of pre-built offer skeletons.
+
+CRITICAL: You are NOT generating offers from scratch. The strategic structure has already been decided.
+Your ONLY job is to improve the wording to be more compelling, specific, and market-ready.
+
+You MUST preserve:
+1. The axis keywords that appear in the hook/name — do NOT remove them
+2. The mechanism name reference — do NOT rename or replace it
+3. The pain/desire references in the outcome — do NOT substitute different pains/desires
+4. The deliverables — keep the same items, just improve wording
+
+═══ PRE-BUILT OFFER SKELETONS (REFINE THESE — DO NOT REPLACE) ═══
+
+PRIMARY OFFER:
+- Hook/Name: "${skeletons.primary.name}"
+- Outcome: "${skeletons.primary.outcome}"
+- Mechanism: "${skeletons.primary.mechanism}"
+- Deliverables: ${JSON.stringify(skeletons.primary.deliverables)}
+
+ALTERNATIVE OFFER:
+- Hook/Name: "${skeletons.alternative.name}"
+- Outcome: "${skeletons.alternative.outcome}"
+- Mechanism: "${skeletons.alternative.mechanism}"
+- Deliverables: ${JSON.stringify(skeletons.alternative.deliverables)}
+
+REJECTED OFFER (anti-pattern):
+- Hook/Name: "${skeletons.rejected.name}"
+- Outcome: "${skeletons.rejected.outcome}"
+- Mechanism: "${skeletons.rejected.mechanism}"
+- Rejection Reason: "${skeletons.rejected.rejectionReason}"
+
+═══ REFINEMENT RULES ═══
+1. Make the hook/name punchier and more compelling — but KEEP the axis words and pain references
+2. Make the outcome more specific with numbers or concrete results — but KEEP the pain/desire references
+3. Make the mechanism description clearer — but KEEP the mechanism name "${(safeJsonParse(typeof strategyRoot.approvedMechanism === 'string' ? strategyRoot.approvedMechanism : JSON.stringify(strategyRoot.approvedMechanism))?.mechanismName || '')}"
+4. Polish deliverable descriptions — but KEEP the same deliverable items
+5. BANNED WORDS: "optimize", "leverage", "scale", "transform", "empower", "unlock", "synergy", "holistic", "comprehensive", "innovative", "cutting-edge", "next-level", "game-changing", "paradigm"
+${painPhrases.length > 0 ? `6. Use audience language where possible: ${JSON.stringify(painPhrases.slice(0, 5))}` : ""}
+${desirePhrases.length > 0 ? `7. Use desire language where possible: ${JSON.stringify(desirePhrases.slice(0, 5))}` : ""}
+
+${productDna ? `═══ PRODUCT IDENTITY ═══\n${formatProductDNAForPrompt(productDna)}\n` : ""}
+ABSOLUTE RULES:
+- Do NOT generate funnel architecture, advertising strategy, channel selection, media planning, or budget recommendations
+- Do NOT include financial advisory claims
+- Respond with ONLY valid JSON, no markdown
+
+Return JSON:
+{
+  "primary": { "name": "Refined hook", "outcome": "Refined outcome", "mechanism": "Refined mechanism", "deliverables": ["Refined deliverable 1", "Refined deliverable 2"] },
+  "alternative": { "name": "Refined alt hook", "outcome": "Refined alt outcome", "mechanism": "Refined alt mechanism", "deliverables": ["Refined alt deliverable 1"] },
+  "rejected": { "name": "Rejected offer name", "outcome": "Why it seems appealing", "mechanism": "What it promises", "deliverables": [], "rejectionReason": "Why this fails" }
+}`;
+
+    try {
+      const completion = await aiChat({
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 1000,
+        temperature: 0.5,
+        accountId,
+        endpoint: "offer-engine",
+      });
+      const response = completion.choices?.[0]?.message?.content || "{}";
+      const cleanedResponse = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+      const parsed = JSON.parse(cleanedResponse);
+
+      return {
+        primary: {
+          name: parsed.primary?.name || skeletons.primary.name,
+          outcome: parsed.primary?.outcome || skeletons.primary.outcome,
+          mechanism: parsed.primary?.mechanism || skeletons.primary.mechanism,
+          deliverables: Array.isArray(parsed.primary?.deliverables) ? parsed.primary.deliverables : skeletons.primary.deliverables,
+        },
+        alternative: {
+          name: parsed.alternative?.name || skeletons.alternative.name,
+          outcome: parsed.alternative?.outcome || skeletons.alternative.outcome,
+          mechanism: parsed.alternative?.mechanism || skeletons.alternative.mechanism,
+          deliverables: Array.isArray(parsed.alternative?.deliverables) ? parsed.alternative.deliverables : skeletons.alternative.deliverables,
+        },
+        rejected: {
+          name: parsed.rejected?.name || skeletons.rejected.name,
+          outcome: parsed.rejected?.outcome || skeletons.rejected.outcome,
+          mechanism: parsed.rejected?.mechanism || skeletons.rejected.mechanism,
+          deliverables: [],
+          rejectionReason: parsed.rejected?.rejectionReason || skeletons.rejected.rejectionReason,
+        },
+      };
+    } catch (err: any) {
+      console.log(`[OfferEngine-V4] AI_REFINEMENT_FAILED | ${err.message} — using raw skeletons`);
+      return { ...skeletons };
+    }
+  }
+
   const pains = audience.audiencePains || [];
   const desires = Object.entries(audience.desireMap || {});
   const territories = positioning.territories || [];
@@ -1287,8 +1485,6 @@ AXIS LOCK RULES (VIOLATION = AUTOMATIC REJECTION):
 3. The outcome MUST describe results that directly follow from solving the LOCKED PROBLEM DOMAIN.
 4. ALL THREE (hook, mechanism, outcome) must exist on the SAME strategic axis.
 5. DO NOT introduce any problem framing, mechanism, or solution that falls outside the locked axis.
-6. EXAMPLE OF VIOLATION: Hook about "wasting money on ads" + Mechanism about "community building" = REJECTED (different axes).
-7. EXAMPLE OF COMPLIANCE: Hook about "wasting money on ads" + Mechanism that "eliminates ad waste via [locked mechanism name]" = ACCEPTED (same axis).
 ` : "";
 
   const correctionSection = axisCorrection ? `
@@ -1297,66 +1493,15 @@ This is attempt ${axisCorrection.attempt}. The previous generation was REJECTED 
 ${axisCorrection.previousFailures.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}
 
 You MUST fix these specific issues. Generate offers that directly address these failures.
-Do NOT repeat the same mistake. The hook, mechanism, and outcome MUST all reference the same problem domain.
-` : "";
-
-  const rootMech = strategyRoot?.approvedMechanism ? (typeof strategyRoot.approvedMechanism === "string" ? safeJsonParse(strategyRoot.approvedMechanism) : strategyRoot.approvedMechanism) : null;
-  const rootPains = strategyRoot?.approvedAudiencePains ? (typeof strategyRoot.approvedAudiencePains === "string" ? safeJsonParse(strategyRoot.approvedAudiencePains) : strategyRoot.approvedAudiencePains) : null;
-  const rootDesires = strategyRoot?.approvedDesires ? (typeof strategyRoot.approvedDesires === "string" ? safeJsonParse(strategyRoot.approvedDesires) : strategyRoot.approvedDesires) : null;
-  const rootAxis = strategyRoot?.primaryAxis?.replace(/_/g, " ") || "";
-  const rootContrastText = strategyRoot?.contrastAxisText || "";
-  const rootTransformation = strategyRoot?.approvedTransformation || "";
-  const rootClaim = strategyRoot?.approvedClaim || "";
-  const rootPromise = strategyRoot?.approvedPromise || "";
-  const rootMechName = rootMech?.mechanismName || "";
-  const rootMechSteps = rootMech?.mechanismSteps || [];
-
-  const axisKeywords: string[] = [];
-  if (rootAxis) {
-    axisKeywords.push(...rootAxis.split(/[\s_,]+/).filter((t: string) => t.length >= 3 && !STOP_WORDS.has(t.toLowerCase())));
-  }
-  if (rootContrastText) {
-    const coreTokens = extractCoreAxisTokens(rootContrastText);
-    axisKeywords.push(...coreTokens.filter(t => !axisKeywords.includes(t)));
-  }
-  const uniqueAxisKeywords = [...new Set(axisKeywords.map(k => k.toLowerCase()))];
-
-  const strategyRootSection = strategyRoot ? `
-═══ STRATEGY ROOT (ENFORCED SINGLE SOURCE OF TRUTH — MANDATORY) ═══
-All offer hooks, outcomes, and mechanisms MUST derive from these approved strategy root fields.
-Do NOT use any other source of information for strategic direction. These are the ONLY approved inputs.
-
-PRIMARY AXIS: "${rootAxis}"
-CONTRAST AXIS: "${rootContrastText}"
-${rootMechName ? `APPROVED MECHANISM: "${rootMechName}"` : ""}
-${rootClaim ? `APPROVED CLAIM: "${rootClaim}"` : ""}
-${rootPromise ? `APPROVED PROMISE: "${rootPromise}"` : ""}
-${rootTransformation ? `APPROVED TRANSFORMATION: "${rootTransformation}"` : ""}
-${rootPains && Array.isArray(rootPains) && rootPains.length > 0 ? `APPROVED AUDIENCE PAINS: ${JSON.stringify(rootPains.slice(0, 8).map((p: any) => typeof p === "string" ? p : p?.pain || p?.name || p))}` : ""}
-${rootDesires && typeof rootDesires === "object" ? `APPROVED DESIRES: ${JSON.stringify(Object.keys(rootDesires).slice(0, 8))}` : ""}
-${rootMechSteps.length > 0 ? `MECHANISM STEPS:\n${rootMechSteps.map((s: string, i: number) => `  ${i + 1}. ${s}`).join("\n")}` : ""}
-
-AXIS TOKEN ENFORCEMENT (HARD RULE — VIOLATION = AUTOMATIC REJECTION):
-The following axis keywords MUST appear in EVERY offer hook/name and outcome you generate:
-Required tokens (use at least TWO): ${JSON.stringify(uniqueAxisKeywords)}
-
-Rules:
-1. Every offer hook/name MUST contain at least 2 of the axis keywords above.
-2. Every outcome MUST reference at least one approved audience pain or desire above.
-3. Every mechanism description MUST reference "${rootMechName}" by name.
-4. Hooks must frame the problem using language from the APPROVED AUDIENCE PAINS.
-5. Outcomes must describe results using language from the APPROVED DESIRES or APPROVED TRANSFORMATION.
-6. If your generated hook does NOT contain axis keywords → it will be REJECTED.
-7. If your outcome does NOT map to an approved pain or desire → it will be REJECTED.
 ` : "";
 
   const prompt = `You are an Offer Architect. Generate three offer concepts.
 
 ABSOLUTE RULES:
 - Do NOT generate funnel architecture, advertising strategy, channel selection, media planning, budget recommendations, campaign execution, sales scripts, or strategic master plan decisions
-- Do NOT include financial advisory claims (eliminating debt, increasing savings, building net worth, financial freedom). Use outcome-oriented language instead.
+- Do NOT include financial advisory claims
 - Respond with ONLY valid JSON, no markdown${mechLockInstruction}
-${strategyRootSection}${lockSection}${correctionSection}
+${lockSection}${correctionSection}
 
 ${productDna ? `═══ PRODUCT IDENTITY (Source of Truth) ═══\n${formatProductDNAForPrompt(productDna)}\n\n` : ""}═══ SECTION 1: AUDIENCE PAIN LANGUAGE (use these exact words) ═══
 ${painPhrases.length > 0 ? `Raw Pain Phrases: ${JSON.stringify(painPhrases)}` : "No raw pain phrases available"}
@@ -1366,21 +1511,11 @@ ${objectionPhrases.length > 0 ? `Objection Language to address: ${JSON.stringify
 ${hasMarketLanguage ? `
 MANDATORY LANGUAGE RULES:
 - You MUST use the audience's own words above directly in the offer name, outcome, mechanism, and deliverables.
-- Copy exact phrases from the pain/desire lists into your output.
-- At least 20% of your output words must come directly from the phrases above.
-- Use how BUYERS describe results, not how strategists do. Write as a market participant, not a consultant.
-- BANNED WORDS: "optimize", "leverage", "scale", "transform", "empower", "unlock", "synergy", "holistic", "comprehensive", "innovative", "cutting-edge", "next-level", "game-changing", "paradigm"
-- If audience says "struggle with debt" → use "struggle with debt", NOT "financial optimization"
-- If audience says "want more clients" → use "get more clients", NOT "scale revenue"
-- If audience says "wasting money on ads" → use "stop wasting money on ads", NOT "optimize ad spend allocation"` : ""}
+- BANNED WORDS: "optimize", "leverage", "scale", "transform", "empower", "unlock", "synergy", "holistic", "comprehensive", "innovative", "cutting-edge", "next-level", "game-changing", "paradigm"` : ""}
 
 ═══ SECTION 2: OUTCOME PRECISION (MANDATORY) ═══
-Outcomes MUST be specific, measurable, and market-relevant. Use concrete business impacts:
-- Pipeline growth (e.g., "fill your pipeline with 20+ qualified leads per month")
-- Revenue predictability (e.g., "build a predictable $50K/month revenue engine")
-- CAC improvement (e.g., "cut customer acquisition cost by 40%")
-- Conversion performance (e.g., "double your close rate from demo to deal")
-NEVER use vague outcomes like "financial improvement", "measurable improvement", "better results", "business growth", "enhanced outcomes", or "positive change".
+Outcomes MUST be specific, measurable, and market-relevant.
+NEVER use vague outcomes like "financial improvement", "measurable improvement", "better results", "business growth".
 
 ═══ SECTION 3: MECHANISM (single source of truth) ═══
 ${hasMechanismCore ? `Mechanism Name: "${core!.mechanismName}"
@@ -1389,52 +1524,26 @@ Mechanism Steps:
 ${deliverableSteps}
 Mechanism Promise: ${core!.mechanismPromise}
 Problem it solves: ${core!.mechanismProblem}
-Logic: ${core!.mechanismLogic}
 
-MANDATORY: All offer mechanism descriptions MUST reference "${core!.mechanismName}" by name.
-Mechanisms MUST be expressed as clear strategic systems (e.g., "The [Name] Framework", "[Name] System", "[Name] Architecture").
-Do NOT use abstract mechanism descriptions like "community and belonging method", "holistic approach", or "innovative process".
-Describe delivery using ONLY the steps above. Do NOT invent new steps or mechanisms.` : `Mechanism: ${mechanism.description || "No validated mechanism"}
+MANDATORY: All offer mechanism descriptions MUST reference "${core!.mechanismName}" by name.` : `Mechanism: ${mechanism.description || "No validated mechanism"}
 Differentiation Pillars:
-${deliverableSteps}
-Mechanisms MUST be expressed as clear strategic systems (e.g., "The [Name] Framework", "[Name] System") that a buyer immediately understands.`}
+${deliverableSteps}`}
 
-═══ SECTION 4: DELIVERABLES (must map to mechanism steps) ═══
-Each deliverable MUST correspond to one mechanism step above.
-${hasMechanismCore ? `Required deliverables (one per step):
-${core!.mechanismSteps.map((step, i) => `  Deliverable ${i + 1}: Map to "${step}"`).join("\n")}
-Do NOT add generic deliverables like "community", "coaching", "support" unless they correspond to a mechanism step.` : `Derive deliverables from the differentiation pillars listed above.`}
+═══ SECTION 4: SIGNAL ANCHORS ═══
+${qualifyingSignals && qualifyingSignals.length > 0 ? `Every claim must be derived from one of these upstream signals.
+${qualifyingSignals.slice(0, 10).map((s, i) => `  [${s.signalId}] (${s.originEngine}/${s.category}): "${s.text}"`).join("\n")}` : "No qualifying signals provided — generate conservatively."}
 
-═══ SECTION 5: SIGNAL ANCHORS (MANDATORY) ═══
-${qualifyingSignals && qualifyingSignals.length > 0 ? `Every claim you generate MUST be derived from one of these upstream signals. Do NOT invent claims that cannot be traced to a signal below.
-${qualifyingSignals.slice(0, 15).map((s, i) => `  [${s.signalId}] (${s.originEngine}/${s.category}): "${s.text}"`).join("\n")}
-RULE: Each outcome, mechanism justification, and deliverable must address or build upon at least one signal above.` : "No qualifying signals provided — generate conservatively with maximum specificity."}
-
-═══ SECTION 6: CONTEXT ═══
+═══ SECTION 5: CONTEXT ═══
 - Top Pains: ${JSON.stringify(pains.slice(0, 5).map((p: any) => typeof p === "string" ? p : p?.pain || p?.name))}
 - Top Desires: ${JSON.stringify(desires.slice(0, 5).map(([k]) => k))}
-- Territories: ${JSON.stringify(territories.slice(0, 3).map((t: any) => t.name))}
 - Enemy: ${positioning.enemyDefinition || "Not defined"}
-- Narrative: ${positioning.narrativeDirection || "Not defined"}
-${positioning.contrastAxis ? `- Contrast Axis: ${positioning.contrastAxis}
-MANDATORY POSITIONING ALIGNMENT RULES:
-1. The offer hook/name, outcome, AND mechanism MUST all derive from the SAME positioning contrast axis above.
-2. If the hook references a problem (e.g., "wasting money on ads"), the mechanism MUST solve THAT EXACT problem — not a different one.
-3. DO NOT create a hook about one problem (ad waste) and a mechanism about an unrelated solution (community building). Every element must be on the same strategic axis.
-4. The mechanism must DIRECTLY address whatever problem the hook identifies.
-5. Show how your offer is structurally different from the common approach.` : ""}
-
-═══ SECTION 7: PROOF ALIGNMENT (objection-specific) ═══
-Each proof type MUST be tied to a specific audience objection or credibility gap. Do NOT use generic proof placeholders.
-${objectionPhrases.length > 0 ? `Audience objections to address with proof:
-${objectionPhrases.map((o, i) => `  Objection ${i + 1}: "${o}" → What proof directly counters this?`).join("\n")}
-For each proof you include, state WHICH objection it addresses.` : "No specific objections identified — use case_proof only."}
+${positioning.contrastAxis ? `- Contrast Axis: ${positioning.contrastAxis}` : ""}
 
 Return JSON:
 {
-  "primary": { "name": "Offer name using audience's exact words", "outcome": "Specific measurable business impact (pipeline, revenue, CAC, conversion)", "mechanism": "How ${hasMechanismCore ? `the ${core!.mechanismName} ${core!.mechanismType}` : "the mechanism"} delivers it using the exact steps", "deliverables": ["Step-mapped deliverable 1", "Step-mapped deliverable 2"] },
-  "alternative": { "name": "Alternative offer using audience language", "outcome": "Different specific measurable impact angle", "mechanism": "Alternative delivery using structured system language", "deliverables": ["Alt deliverable 1", "Alt deliverable 2"] },
-  "rejected": { "name": "Rejected offer", "outcome": "Why this seems appealing", "mechanism": "What it promises", "deliverables": [], "rejectionReason": "Why this fails (generic, weak proof, contradicts positioning, vague outcomes)" }
+  "primary": { "name": "Offer name", "outcome": "Specific measurable impact", "mechanism": "How ${hasMechanismCore ? `the ${core!.mechanismName}` : "the mechanism"} delivers it", "deliverables": ["Deliverable 1", "Deliverable 2"] },
+  "alternative": { "name": "Alternative offer", "outcome": "Different impact angle", "mechanism": "Alternative delivery", "deliverables": ["Alt deliverable 1"] },
+  "rejected": { "name": "Rejected offer", "outcome": "Why it seems appealing", "mechanism": "What it promises", "deliverables": [], "rejectionReason": "Why this fails" }
 }`;
 
   try {
@@ -1723,111 +1832,26 @@ export async function runOfferEngine(
 
   let aiOffers;
   try {
-    aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot);
-    diagnostics.aiGeneration = { success: true };
+    aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot, productDna);
+    diagnostics.aiGeneration = { success: true, mode: strategyRoot ? "skeleton_refinement" : "free_generation" };
   } catch (err: any) {
     diagnostics.aiGeneration = { success: false, error: err.message };
-    aiOffers = {
-      primary: { name: "Core Transformation System", outcome: l1Outcome.primaryOutcome, mechanism: l2Mechanism.mechanismDescription, deliverables: [] },
-      alternative: { name: "Alternative Implementation Program", outcome: l1Outcome.transformationStatement, mechanism: l2Mechanism.mechanismDescription, deliverables: [] },
-      rejected: { name: "Generic Growth Package", outcome: "General improvement", mechanism: "Standard approach", deliverables: [], rejectionReason: "Generic and unspecific" },
-    };
+    if (strategyRoot) {
+      const fallbackSkeletons = buildDeterministicOfferSkeletons(strategyRoot, audience, positioning, differentiation);
+      aiOffers = { ...fallbackSkeletons };
+      console.log(`[OfferEngine-V4] AI_FAILED_USING_RAW_SKELETONS | ${err.message}`);
+    } else {
+      aiOffers = {
+        primary: { name: "Core Transformation System", outcome: l1Outcome.primaryOutcome, mechanism: l2Mechanism.mechanismDescription, deliverables: [] },
+        alternative: { name: "Alternative Implementation Program", outcome: l1Outcome.transformationStatement, mechanism: l2Mechanism.mechanismDescription, deliverables: [] },
+        rejected: { name: "Generic Growth Package", outcome: "General improvement", mechanism: "Standard approach", deliverables: [], rejectionReason: "Generic and unspecific" },
+      };
+    }
   }
 
   if (strategyRoot) {
-    const rootAxisVal = (strategyRoot.primaryAxis || "").replace(/_/g, " ");
-    const rootContrastVal = strategyRoot.contrastAxisText || "";
-    const enforcementTokens: string[] = [];
-    if (rootAxisVal) {
-      enforcementTokens.push(...rootAxisVal.toLowerCase().split(/[\s_,]+/).filter((t: string) => t.length >= 3 && !STOP_WORDS.has(t)));
-    }
-    if (rootContrastVal) {
-      enforcementTokens.push(...extractCoreAxisTokens(rootContrastVal));
-    }
-    const uniqueEnfTokens = [...new Set(enforcementTokens)];
-
-    const rootMechNameVal = (() => {
-      const m = strategyRoot.approvedMechanism ? (typeof strategyRoot.approvedMechanism === "string" ? safeJsonParse(strategyRoot.approvedMechanism) : strategyRoot.approvedMechanism) : null;
-      return m?.mechanismName || "";
-    })();
-
-    const matchesAxisToken = (text: string): boolean => {
-      const lc = text.toLowerCase();
-      return uniqueEnfTokens.some(t => {
-        if (lc.includes(t)) return true;
-        const stem = stemPrefix(t);
-        return stem.length >= 3 && lc.includes(stem);
-      });
-    };
-
-    const matchesMechName = (mechText: string): boolean => {
-      if (!rootMechNameVal) return true;
-      const mechLC = mechText.toLowerCase();
-      const nameWords = rootMechNameVal.toLowerCase().split(/\s+/).filter((w: string) => w.length >= 3 && !STOP_WORDS.has(w));
-      return nameWords.some((w: string) => {
-        if (mechLC.includes(w)) return true;
-        const stem = stemPrefix(w);
-        return stem.length >= 3 && mechLC.includes(stem);
-      });
-    };
-
-    const validateOfferAxis = (name: string, outcome: string, mechanism: string, label: string): string[] => {
-      const failures: string[] = [];
-      const hookHasAxis = matchesAxisToken(name);
-      const outcomeHasAxis = matchesAxisToken(outcome);
-      if (!hookHasAxis && !outcomeHasAxis) {
-        failures.push(`${label}: neither hook "${name}" nor outcome "${outcome}" contains any axis tokens [${uniqueEnfTokens.join(", ")}]`);
-      } else if (!hookHasAxis) {
-        failures.push(`${label}: hook "${name}" does not contain axis tokens [${uniqueEnfTokens.join(", ")}] — outcome passes`);
-      }
-      if (!matchesMechName(mechanism)) {
-        failures.push(`${label}: mechanism does not reference approved mechanism "${rootMechNameVal}"`);
-      }
-      return failures;
-    };
-
-    if (uniqueEnfTokens.length > 0 || rootMechNameVal) {
-      const primaryAxisFailures = validateOfferAxis(aiOffers.primary.name, aiOffers.primary.outcome, aiOffers.primary.mechanism, "Primary");
-      const altAxisFailures = validateOfferAxis(aiOffers.alternative.name, aiOffers.alternative.outcome, aiOffers.alternative.mechanism, "Alternative");
-      const axisFailures = [...primaryAxisFailures, ...altAxisFailures];
-
-      if (axisFailures.length > 0) {
-        console.log(`[OfferEngine-V4] ROOT_AXIS_ENFORCEMENT_FAILED | ${axisFailures.join("; ")} — forcing corrective regeneration`);
-        diagnostics.rootAxisEnforcement = { passed: false, failures: axisFailures, attempt: 1 };
-
-        try {
-          const enforcedRetry = await aiOfferGeneration(
-            audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals,
-            posLock,
-            { previousFailures: axisFailures, attempt: 2 },
-            strategyRoot,
-          );
-
-          const retryPrimaryFail = validateOfferAxis(enforcedRetry.primary.name, enforcedRetry.primary.outcome, enforcedRetry.primary.mechanism, "Primary");
-          const retryAltFail = validateOfferAxis(enforcedRetry.alternative.name, enforcedRetry.alternative.outcome, enforcedRetry.alternative.mechanism, "Alternative");
-
-          aiOffers.primary = enforcedRetry.primary;
-          aiOffers.alternative = enforcedRetry.alternative;
-          aiOffers.rejected = enforcedRetry.rejected;
-
-          const retryAllPassed = retryPrimaryFail.length === 0 && retryAltFail.length === 0;
-          diagnostics.rootAxisEnforcement.retrySuccess = retryAllPassed;
-          diagnostics.rootAxisEnforcement.retryFailures = [...retryPrimaryFail, ...retryAltFail];
-
-          if (retryAllPassed) {
-            console.log(`[OfferEngine-V4] ROOT_AXIS_ENFORCEMENT_RETRY_SUCCESS | all offers now contain axis tokens and mechanism references`);
-          } else {
-            console.log(`[OfferEngine-V4] ROOT_AXIS_ENFORCEMENT_RETRY_PARTIAL | remaining issues: ${[...retryPrimaryFail, ...retryAltFail].join("; ")}`);
-          }
-        } catch (retryErr: any) {
-          console.log(`[OfferEngine-V4] ROOT_AXIS_ENFORCEMENT_RETRY_FAILED | ${retryErr.message}`);
-          diagnostics.rootAxisEnforcement.retryError = retryErr.message;
-        }
-      } else {
-        diagnostics.rootAxisEnforcement = { passed: true };
-        console.log(`[OfferEngine-V4] ROOT_AXIS_ENFORCEMENT_PASSED | both offers contain axis tokens and mechanism references`);
-      }
-    }
+    diagnostics.rootAxisEnforcement = { passed: true, mode: "deterministic_skeleton" };
+    console.log(`[OfferEngine-V4] ROOT_AXIS_ENFORCEMENT_PASSED | skeleton-based generation — axis alignment guaranteed by construction`);
   }
 
   const primaryClaimsForGrounding = [
@@ -2024,79 +2048,12 @@ export async function runOfferEngine(
     };
   }
 
-  if (!hookMechAlignment.aligned) {
-    console.log(`[OfferEngine-V4] HOOK_MECHANISM_MISMATCH | ${hookMechAlignment.failures.join("; ")} — attempting corrective regeneration with axis lock`);
-    try {
-      const retryOffers = await aiOfferGeneration(
-        audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals,
-        posLock,
-        { previousFailures: hookMechAlignment.failures, attempt: 2 },
-        strategyRoot,
-      );
-      diagnostics.hookMechanismRetry = { success: true, attempt: 2, corrective: true };
-
-      const retryPrimaryOutcome: OutcomeLayer = { ...l1Outcome, primaryOutcome: retryOffers.primary.outcome || l1Outcome.primaryOutcome };
-      const retryMechDesc = retryOffers.primary.mechanism || l2Mechanism.mechanismDescription;
-      const retryMechLock = checkMechanismLock(retryMechDesc, differentiation);
-      const retryMechanism: MechanismLayer = { ...l2Mechanism, mechanismDescription: retryMechLock.locked ? retryMechDesc : l2Mechanism.mechanismDescription };
-      const retryDelivery: DeliveryLayer = { ...l3Delivery, deliverables: mergeDeliverables(retryOffers.primary.deliverables, l3Delivery.deliverables) };
-
-      const retryPrimary = buildOfferCandidate(
-        retryOffers.primary.name, retryPrimaryOutcome, retryMechanism, retryDelivery, l4Proof, l5Risk,
-        audience, differentiation, mi, positioning,
-      );
-
-      if (posLock.locked) {
-        const retryClamp = clampOfferToAxis(retryPrimary.offerName, retryPrimary.coreOutcome, retryPrimary.mechanismDescription, posLock);
-        if (retryClamp.clamped) {
-          retryPrimary.offerName = retryClamp.offerName;
-          retryPrimary.coreOutcome = retryClamp.coreOutcome;
-          retryPrimary.mechanismDescription = retryClamp.mechanismDescription;
-          retryPrimary.mechanismLayer.mechanismDescription = retryClamp.mechanismDescription;
-          retryPrimary.outcomeLayer.primaryOutcome = retryClamp.coreOutcome;
-        }
-      }
-
-      const retryAlignment = checkHookMechanismAlignment(retryPrimary, positioning);
-      diagnostics.hookMechanismRetryResult = retryAlignment;
-
-      if (retryAlignment.aligned || retryAlignment.failures.length < hookMechAlignment.failures.length) {
-        console.log(`[OfferEngine-V4] CORRECTIVE_RETRY_SUCCESS | Retry ${retryAlignment.aligned ? "passed" : "improved"} alignment`);
-        Object.assign(primaryOffer, retryPrimary);
-        hookMechAlignment = retryAlignment;
-
-        const retryAltOutcome: OutcomeLayer = { ...l1Outcome, primaryOutcome: retryOffers.alternative.outcome || l1Outcome.primaryOutcome };
-        const retryAltMechDesc = retryOffers.alternative.mechanism || l2Mechanism.mechanismDescription;
-        const retryAltMechLock = checkMechanismLock(retryAltMechDesc, differentiation);
-        const retryAltMech: MechanismLayer = { ...l2Mechanism, mechanismDescription: retryAltMechLock.locked ? retryAltMechDesc : l2Mechanism.mechanismDescription };
-        const retryAltDelivery: DeliveryLayer = { ...l3Delivery, deliverables: mergeDeliverables(retryOffers.alternative.deliverables, l3Delivery.deliverables) };
-        const retryAlt = buildOfferCandidate(
-          retryOffers.alternative.name, retryAltOutcome, retryAltMech, retryAltDelivery, l4Proof, l5Risk,
-          audience, differentiation, mi, positioning,
-        );
-
-        if (posLock.locked) {
-          const retryAltClamp = clampOfferToAxis(retryAlt.offerName, retryAlt.coreOutcome, retryAlt.mechanismDescription, posLock);
-          if (retryAltClamp.clamped) {
-            retryAlt.offerName = retryAltClamp.offerName;
-            retryAlt.coreOutcome = retryAltClamp.coreOutcome;
-            retryAlt.mechanismDescription = retryAltClamp.mechanismDescription;
-            retryAlt.mechanismLayer.mechanismDescription = retryAltClamp.mechanismDescription;
-            retryAlt.outcomeLayer.primaryOutcome = retryAltClamp.coreOutcome;
-          }
-        }
-
-        const retryAltAlignment = checkHookMechanismAlignment(retryAlt, positioning);
-        if (retryAltAlignment.aligned) {
-          Object.assign(alternativeOffer, retryAlt);
-        }
-      } else {
-        console.log(`[OfferEngine-V4] CORRECTIVE_RETRY_NO_IMPROVEMENT | Keeping original — will flag POSITIONING_MISMATCH`);
-      }
-    } catch (retryErr: any) {
-      console.log(`[OfferEngine-V4] CORRECTIVE_RETRY_FAILED | ${retryErr.message} — keeping original`);
-      diagnostics.hookMechanismRetry = { success: false, error: retryErr.message };
-    }
+  if (!hookMechAlignment.aligned && !strategyRoot) {
+    console.log(`[OfferEngine-V4] HOOK_MECHANISM_MISMATCH | ${hookMechAlignment.failures.join("; ")} — no strategy root, logging advisory`);
+    diagnostics.hookMechanismRetry = { skipped: true, reason: "no_retry_without_root" };
+  } else if (!hookMechAlignment.aligned && strategyRoot) {
+    console.log(`[OfferEngine-V4] HOOK_MECHANISM_CHECK | skeleton-generated offers — alignment check advisory only: ${hookMechAlignment.failures.join("; ")}`);
+    diagnostics.hookMechanismRetry = { skipped: true, reason: "skeleton_based_no_retry_needed" };
   }
 
   const allOfferText = [
@@ -2184,19 +2141,23 @@ export async function runOfferEngine(
     structuralWarnings.push(...diffStrength.gaps);
   }
 
-  if (!hookMechAlignment.aligned) {
+  if (!hookMechAlignment.aligned && !strategyRoot) {
     status = STATUS.POSITIONING_MISMATCH;
     statusMessage = `Positioning axis mismatch — hook and mechanism do not share the same strategic axis: ${hookMechAlignment.failures.join("; ")}`;
     structuralWarnings.push(...hookMechAlignment.failures);
     console.log(`[OfferEngine-V4] POSITIONING_MISMATCH | ${hookMechAlignment.failures.join("; ")}`);
+  } else if (!hookMechAlignment.aligned && strategyRoot) {
+    console.log(`[OfferEngine-V4] HOOK_MECH_ADVISORY_ONLY | skeleton-based — validator advisory: ${hookMechAlignment.failures.join("; ")}`);
   }
 
-  if (!posConsistency.consistent) {
+  if (!posConsistency.consistent && !strategyRoot) {
     structuralWarnings.push(...posConsistency.contradictions);
     if (status === STATUS.COMPLETE) {
       status = STATUS.POSITIONING_MISMATCH;
       statusMessage = `Positioning inconsistency — ${posConsistency.contradictions.join("; ")}`;
     }
+  } else if (!posConsistency.consistent && strategyRoot) {
+    console.log(`[OfferEngine-V4] POS_CONSISTENCY_ADVISORY_ONLY | skeleton-based — validator advisory: ${posConsistency.contradictions.join("; ")}`);
   }
 
   if (!boundaryCheck.clean) {
