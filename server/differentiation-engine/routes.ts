@@ -121,6 +121,8 @@ export function registerDifferentiationRoutes(app: Express) {
         opportunitySignals: safeJsonParse(miSnapshot.opportunitySignals) || [],
         threatSignals: safeJsonParse(miSnapshot.threatSignals) || [],
         narrativeSynthesis: miSnapshot.narrativeSynthesis,
+        multiSourceSignals: miSnapshot.multiSourceSignals || null,
+        sourceAvailability: miSnapshot.sourceAvailability || null,
       };
 
       const audienceInput = {

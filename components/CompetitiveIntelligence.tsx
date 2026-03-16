@@ -51,6 +51,9 @@ interface Competitor {
   profileLink: string;
   businessType: string;
   primaryObjective: string;
+  websiteUrl: string | null;
+  blogUrl: string | null;
+  websiteEnrichmentStatus: string | null;
   postingFrequency: number | null;
   contentTypeRatio: string | null;
   engagementRatio: number | null;
@@ -95,6 +98,7 @@ export default function CompetitiveIntelligence() {
     platform: 'instagram', postingFrequency: '', contentTypeRatio: '',
     engagementRatio: '', ctaPatterns: '', discountFrequency: '',
     hookStyles: '', messagingTone: '', socialProofPresence: '',
+    websiteUrl: '', blogUrl: '',
   };
 
   const [newComp, setNewComp] = useState(emptyComp);
@@ -205,6 +209,8 @@ export default function CompetitiveIntelligence() {
       hookStyles: comp.hookStyles || '',
       messagingTone: comp.messagingTone || '',
       socialProofPresence: comp.socialProofPresence || '',
+      websiteUrl: comp.websiteUrl || '',
+      blogUrl: comp.blogUrl || '',
     });
     setShowAddCompetitor(true);
   }, []);
@@ -458,6 +464,7 @@ export default function CompetitiveIntelligence() {
                   {(dc?.postsCollected || 0) > 0
                     ? `${comp.platform} • ${comp.businessType || 'Unknown type'} • ${dc?.postsCollected || 0} posts • ${dc?.commentsCollected || 0} comments`
                     : `${comp.platform} • ${comp.businessType || 'Unknown type'} • No data collected`}
+                  {(comp.websiteUrl || comp.blogUrl) ? ` • ${[comp.websiteUrl ? 'Web' : '', comp.blogUrl ? 'Blog' : ''].filter(Boolean).join('+')}` : ''}
                 </Text>
               </View>
               <View style={s.compRight}>
@@ -552,6 +559,35 @@ export default function CompetitiveIntelligence() {
                     <Text style={[s.detailValue, { color: colors.text }]} numberOfLines={1}>{comp.profileLink}</Text>
                   </View>
                 )}
+
+                <View style={s.detailRow}>
+                  <Text style={[s.detailLabel, { color: colors.textMuted }]}>Sources</Text>
+                  <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                      <Ionicons name="logo-instagram" size={12} color={comp.profileLink ? '#10B981' : colors.textMuted} />
+                      <Text style={{ fontSize: 11, color: comp.profileLink ? '#10B981' : colors.textMuted }}>IG</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                      <Ionicons name="globe-outline" size={12} color={comp.websiteUrl ? '#10B981' : colors.textMuted} />
+                      <Text style={{ fontSize: 11, color: comp.websiteUrl ? '#10B981' : colors.textMuted }}>Web</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                      <Ionicons name="document-text-outline" size={12} color={comp.blogUrl ? '#10B981' : colors.textMuted} />
+                      <Text style={{ fontSize: 11, color: comp.blogUrl ? '#10B981' : colors.textMuted }}>Blog</Text>
+                    </View>
+                    {comp.websiteEnrichmentStatus === 'COMPLETE' && (
+                      <View style={{ backgroundColor: '#10B98120', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                        <Text style={{ fontSize: 9, color: '#10B981', fontWeight: '600' }}>SCRAPED</Text>
+                      </View>
+                    )}
+                    {comp.websiteEnrichmentStatus === 'FAILED' && (
+                      <View style={{ backgroundColor: '#EF444420', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                        <Text style={{ fontSize: 9, color: '#EF4444', fontWeight: '600' }}>FAILED</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+
                 {comp.businessType && (
                   <View style={s.detailRow}>
                     <Text style={[s.detailLabel, { color: colors.textMuted }]}>Type</Text>
@@ -1695,6 +1731,28 @@ export default function CompetitiveIntelligence() {
                 value={newComp.profileLink}
                 onChangeText={v => setNewComp(p => ({ ...p, profileLink: v }))}
                 placeholder="https://instagram.com/socialeyez"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="none"
+                keyboardType="url"
+              />
+
+              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Website URL</Text>
+              <TextInput
+                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
+                value={newComp.websiteUrl}
+                onChangeText={v => setNewComp(p => ({ ...p, websiteUrl: v }))}
+                placeholder="https://competitor.com"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="none"
+                keyboardType="url"
+              />
+
+              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Blog URL</Text>
+              <TextInput
+                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
+                value={newComp.blogUrl}
+                onChangeText={v => setNewComp(p => ({ ...p, blogUrl: v }))}
+                placeholder="https://competitor.com/blog"
                 placeholderTextColor={colors.textMuted}
                 autoCapitalize="none"
                 keyboardType="url"

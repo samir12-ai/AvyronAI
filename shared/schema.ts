@@ -796,6 +796,12 @@ export const ciCompetitors = pgTable("ci_competitors", {
   socialProofPresence: text("social_proof_presence"),
   screenshotUrls: text("screenshot_urls"),
   notes: text("notes"),
+  websiteUrl: text("website_url"),
+  blogUrl: text("blog_url"),
+  websiteScrapedAt: timestamp("website_scraped_at"),
+  blogScrapedAt: timestamp("blog_scraped_at"),
+  websiteEnrichmentStatus: text("website_enrichment_status").default("NONE"),
+  blogEnrichmentStatus: text("blog_enrichment_status").default("NONE"),
   isDemo: boolean("is_demo").default(false),
   isActive: boolean("is_active").default(true),
   lastCheckedAt: timestamp("last_checked_at"),
@@ -934,6 +940,38 @@ export const campaignSelections = pgTable("campaign_selections", {
 
 export type CampaignSelection = typeof campaignSelections.$inferSelect;
 
+export const competitorWebData = pgTable("competitor_web_data", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  competitorId: varchar("competitor_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  sourceType: text("source_type").notNull(),
+  sourceUrl: text("source_url").notNull(),
+  pageType: text("page_type"),
+  headlines: text("headlines"),
+  subheadlines: text("subheadlines"),
+  ctaLabels: text("cta_labels"),
+  offerPhrases: text("offer_phrases"),
+  pricingAnchors: text("pricing_anchors"),
+  proofBlocks: text("proof_blocks"),
+  testimonialBlocks: text("testimonial_blocks"),
+  topicTitles: text("topic_titles"),
+  contentHeadings: text("content_headings"),
+  guarantees: text("guarantees"),
+  featureList: text("feature_list"),
+  navigationLinks: text("navigation_links"),
+  rawTextPreview: text("raw_text_preview"),
+  extractionStatus: text("extraction_status").default("PENDING"),
+  extractionError: text("extraction_error"),
+  signalClassification: text("signal_classification"),
+  scrapedAt: timestamp("scraped_at").defaultNow(),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type CompetitorWebData = typeof competitorWebData.$inferSelect;
 export type CiCompetitor = typeof ciCompetitors.$inferSelect;
 export type CiSnapshot = typeof ciSnapshots.$inferSelect;
 export type CiMarketAnalysis = typeof ciMarketAnalyses.$inferSelect;
@@ -1443,6 +1481,8 @@ export const miSnapshots = pgTable("mi_snapshots", {
   dataStatus: text("data_status").default("LIVE"),
   objectionMapData: text("objection_map_data"),
   signalLineage: text("signal_lineage"),
+  multiSourceSignals: text("multi_source_signals"),
+  sourceAvailability: text("source_availability"),
   createdAt: timestamp("created_at").defaultNow(),
   expiresAt: timestamp("expires_at"),
 });

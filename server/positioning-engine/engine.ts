@@ -85,7 +85,17 @@ function layer1_categoryDetection(miData: any, competitorCount: number = 0, sign
   const narrative = miData.narrativeSynthesis || "";
   const contentDna = safeJsonParse(miData.contentDnaData, []);
 
-  const combined = `${marketState} ${diagnosis} ${narrative}`.toLowerCase();
+  let websiteText = "";
+  const multiSourceData = safeJsonParse(miData.multiSourceSignals, {});
+  for (const compData of Object.values(multiSourceData) as any[]) {
+    if (compData?.website) {
+      websiteText += " " + (compData.website.headlineExtractions || []).join(" ");
+      websiteText += " " + (compData.website.positioningLanguage || []).join(" ");
+      websiteText += " " + (compData.website.featureHierarchy || []).join(" ");
+    }
+  }
+
+  const combined = `${marketState} ${diagnosis} ${narrative} ${websiteText}`.toLowerCase();
 
   const categories: Record<string, string[]> = {
     fitness: ["fitness", "workout", "gym", "exercise", "weight", "muscle", "body"],
@@ -973,11 +983,35 @@ async function layer11_positioningStatementGeneration(
   category: string,
   segmentPriority: { segment: string; priority: number }[],
   accountId: string,
+  miData?: any,
 ): Promise<Territory[]> {
   if (territories.length === 0) return territories;
 
   try {
     const topSegment = segmentPriority[0]?.segment || "target audience";
+
+    let websitePositioningContext = "";
+    const multiSourceData = safeJsonParse(miData.multiSourceSignals, {});
+    if (multiSourceData && typeof multiSourceData === "object") {
+      const headlines: string[] = [];
+      const positioning: string[] = [];
+      for (const compData of Object.values(multiSourceData) as any[]) {
+        if (compData?.website) {
+          for (const h of (compData.website.headlineExtractions || []).slice(0, 3)) {
+            if (typeof h === "string" && h.trim()) headlines.push(h);
+          }
+          for (const p of (compData.website.positioningLanguage || []).slice(0, 3)) {
+            if (typeof p === "string" && p.trim()) positioning.push(p);
+          }
+        }
+      }
+      if (headlines.length > 0 || positioning.length > 0) {
+        websitePositioningContext = `\n\nWEBSITE INTELLIGENCE (competitor positioning from their websites):`;
+        if (headlines.length > 0) websitePositioningContext += `\nCompetitor Headlines: ${JSON.stringify(headlines.slice(0, 8))}`;
+        if (positioning.length > 0) websitePositioningContext += `\nCompetitor Positioning Language: ${JSON.stringify(positioning.slice(0, 8))}`;
+        websitePositioningContext += `\nUse this to identify gaps and differentiation opportunities. Position AGAINST these competitor claims.`;
+      }
+    }
 
     const prompt = `You are a strategic positioning analyst. Generate precise positioning statements for each territory.
 
@@ -989,6 +1023,7 @@ ${territories.map((t, i) => `${i + 1}. "${t.name}" (opportunity: ${t.opportunity
    Pain alignment: ${t.painAlignment.join(", ") || "general"}
    Enemy: ${t.enemyDefinition}
    Contrast axis: ${t.contrastAxis}`).join("\n\n")}
+${websitePositioningContext}
 
 For each territory, return a JSON array with objects containing:
 {
@@ -1400,7 +1435,7 @@ export async function runPositioningEngine(
     console.warn(`[PositioningEngine-V3] Cross-campaign diversity check skipped: ${err.message}`);
   }
 
-  territories = await layer11_positioningStatementGeneration(territories, category, segmentPriority, accountId);
+  territories = await layer11_positioningStatementGeneration(territories, category, segmentPriority, accountId, activeMiSnapshot);
   console.log(`[PositioningEngine-V3] L11 Statements generated`);
 
   const boundaryText = territories.map(t =>

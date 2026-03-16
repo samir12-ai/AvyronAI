@@ -23,6 +23,8 @@ export interface PersuasionMIInput {
     signalType: string;
     competitorSources: string[];
   }>;
+  multiSourceSignals?: any;
+  sourceAvailability?: any;
 }
 
 export interface PersuasionAudienceInput {

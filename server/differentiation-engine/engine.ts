@@ -294,6 +294,23 @@ export function layer2_competitorClaimSurfaceMapping(mi: MIInput): CompetitorCla
     claims.push({ claim: diagnosis, source: "market_diagnosis", category: "market", strength: 0.5 });
   }
 
+  const multiSource = typeof mi.multiSourceSignals === "string" ? safeJsonParse(mi.multiSourceSignals) : mi.multiSourceSignals;
+  if (multiSource && typeof multiSource === "object") {
+    for (const [compId, compData] of Object.entries(multiSource as Record<string, any>)) {
+      if (compData?.website) {
+        for (const headline of (compData.website.headlineExtractions || []).slice(0, 5)) {
+          claims.push({ competitorId: compId, claim: headline, source: "website_headline", category: "positioning", strength: 0.85 });
+        }
+        for (const offer of (compData.website.offerStructure || []).slice(0, 3)) {
+          claims.push({ competitorId: compId, claim: offer, source: "website_offer", category: "offer", strength: 0.8 });
+        }
+        for (const proof of (compData.website.proofStructure || []).slice(0, 3)) {
+          claims.push({ competitorId: compId, claim: proof, source: "website_proof", category: "proof", strength: 0.75 });
+        }
+      }
+    }
+  }
+
   return claims;
 }
 

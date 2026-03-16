@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { miFetchJobs, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, miSnapshots, miSignalLogs, miTelemetry, growthCampaigns } from "@shared/schema";
+import { miFetchJobs, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, miSnapshots, miSignalLogs, miTelemetry, growthCampaigns, competitorWebData } from "@shared/schema";
 import { inArray, eq, and, desc, sql } from "drizzle-orm";
 import { fetchCompetitorData, enrichCompetitorWithComments, cleanupExpiredSyntheticComments, type FetchResult, type CollectionMode } from "../competitive-intelligence/data-acquisition";
 import { computeAllSignals, aggregateMissingFlags, clusterSemanticSignals } from "./signal-engine";
@@ -16,10 +16,17 @@ import { computeAllContentDNA } from "./content-dna";
 import { computeMarketBaseline, computeAllDeviations, type CalibrationContext } from "./market-baselines";
 import { computeSimilarityDiagnosis } from "./similarity-engine";
 import type { CompetitorInput, GoalMode } from "./types";
+import { scrapeWebsite, scrapeBlog, isWebDataStale } from "./website-scraper";
+import { computeSourceAvailability } from "./source-types";
 import { applyQualityGate, filterClustersByQuality } from "../shared/signal-quality-gate";
 import { logAudit } from "../audit";
 import { acquireStickySession, releaseStickySession, rotateSessionOnBlock, classifyBlock, logProxyTelemetry, getPoolDiagnostics, type StickySessionContext, type BlockClass } from "../competitive-intelligence/proxy-pool-manager";
 import { acquireToken, getBucketState } from "../competitive-intelligence/rate-limiter";
+
+function safeParseJson(val: string | null | undefined, fallback: any): any {
+  if (!val) return fallback;
+  try { return JSON.parse(val); } catch { return fallback; }
+}
 
 const FETCH_COOLDOWN_MS = 72 * 60 * 60 * 1000;
 const MIN_POSTS_TARGET = MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR;
@@ -331,6 +338,88 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
   activeJobs.set(lockKey, promise);
 
   return jobId;
+}
+
+async function scrapeWebAndBlogForCompetitor(comp: any, accountId: string): Promise<void> {
+  try {
+    if (comp.websiteUrl && (isWebDataStale(comp.websiteScrapedAt) || comp.websiteEnrichmentStatus === "NONE")) {
+      console.log(`[FetchOrch] Website scrape starting for ${comp.name}: ${comp.websiteUrl}`);
+      const extractions = await scrapeWebsite(comp.id, comp.name, comp.websiteUrl);
+      const successCount = extractions.filter(e => e.extractionStatus === "COMPLETE").length;
+
+      for (const ext of extractions) {
+        await db.insert(competitorWebData).values({
+          accountId,
+          competitorId: comp.id,
+          campaignId: comp.campaignId,
+          sourceType: "website",
+          sourceUrl: ext.sourceUrl,
+          pageType: ext.pageType,
+          headlines: JSON.stringify(ext.headlines),
+          subheadlines: JSON.stringify(ext.subheadlines),
+          ctaLabels: JSON.stringify(ext.ctaLabels),
+          offerPhrases: JSON.stringify(ext.offerPhrases),
+          pricingAnchors: JSON.stringify(ext.pricingAnchors),
+          proofBlocks: JSON.stringify(ext.proofBlocks),
+          testimonialBlocks: JSON.stringify(ext.testimonialBlocks),
+          guarantees: JSON.stringify(ext.guarantees),
+          featureList: JSON.stringify(ext.featureList),
+          navigationLinks: JSON.stringify(ext.navigationLinks),
+          topicTitles: JSON.stringify(ext.topicTitles || []),
+          contentHeadings: JSON.stringify(ext.contentHeadings || []),
+          rawTextPreview: ext.rawTextPreview?.slice(0, 3000) || "",
+          extractionStatus: ext.extractionStatus,
+          extractionError: ext.extractionError || null,
+          signalClassification: null,
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        });
+      }
+
+      const status = successCount > 0 ? "COMPLETE" : "FAILED";
+      await db.update(ciCompetitors)
+        .set({ websiteEnrichmentStatus: status, websiteScrapedAt: new Date() })
+        .where(eq(ciCompetitors.id, comp.id));
+      console.log(`[FetchOrch] Website scrape ${status} for ${comp.name}: ${successCount}/${extractions.length} pages`);
+    }
+
+    if (comp.blogUrl && (isWebDataStale(comp.blogScrapedAt) || comp.blogEnrichmentStatus === "NONE")) {
+      console.log(`[FetchOrch] Blog scrape starting for ${comp.name}: ${comp.blogUrl}`);
+      const blogResult = await scrapeBlog(comp.id, comp.name, comp.blogUrl);
+
+      await db.insert(competitorWebData).values({
+        accountId,
+        competitorId: comp.id,
+        campaignId: comp.campaignId,
+        sourceType: "blog",
+        sourceUrl: blogResult.sourceUrl,
+        pageType: "blog_index",
+        headlines: null,
+        subheadlines: null,
+        ctaLabels: null,
+        offerPhrases: null,
+        pricingAnchors: null,
+        proofBlocks: null,
+        testimonialBlocks: null,
+        guarantees: null,
+        featureList: null,
+        navigationLinks: null,
+        topicTitles: JSON.stringify(blogResult.topicTitles),
+        contentHeadings: JSON.stringify(blogResult.contentHeadings),
+        rawTextPreview: blogResult.rawTextPreview?.slice(0, 3000) || "",
+        extractionStatus: blogResult.extractionStatus,
+        extractionError: blogResult.extractionError || null,
+        signalClassification: null,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      });
+
+      await db.update(ciCompetitors)
+        .set({ blogEnrichmentStatus: blogResult.extractionStatus === "COMPLETE" ? "COMPLETE" : "FAILED", blogScrapedAt: new Date() })
+        .where(eq(ciCompetitors.id, comp.id));
+      console.log(`[FetchOrch] Blog scrape ${blogResult.extractionStatus} for ${comp.name}`);
+    }
+  } catch (err: any) {
+    console.error(`[FetchOrch] Web/blog scrape error for ${comp.name}:`, err.message);
+  }
 }
 
 async function executeFetchJob(
@@ -697,6 +786,7 @@ async function executeFetchJob(
           engagementRatio: comp.engagementRatio, ctaPatterns: comp.ctaPatterns,
           discountFrequency: comp.discountFrequency, hookStyles: comp.hookStyles,
           messagingTone: comp.messagingTone, socialProofPresence: comp.socialProofPresence,
+          websiteUrl: comp.websiteUrl || null,
           posts, comments,
         };
 
@@ -708,6 +798,8 @@ async function executeFetchJob(
         stage.SIGNAL_COMPUTE = "FAILED";
         stage.error = `Signal compute: ${err.message}`;
       }
+
+      await scrapeWebAndBlogForCompetitor(comp, accountId);
 
       await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
     }
@@ -1028,6 +1120,95 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   const previousSnapshot = previousSnapshots[0] || null;
   const newVersion = (previousSnapshot?.version || 0) + 1;
 
+  const { buildWebsiteSignals, buildBlogSignals, buildInstagramSignals, classifyWebsiteSignals, classifyBlogSignals, classifyInstagramSignals, reconcileMultiSourceSignals } = await import("./signal-normalizer");
+  const { computeSourceAvailability: buildSourceAvail } = await import("./source-types");
+  let multiSourceSignalsJson: string | null = null;
+  let sourceAvailabilityJson: string | null = null;
+  try {
+    const allWebData = await db.select().from(competitorWebData)
+      .where(and(eq(competitorWebData.accountId, accountId), eq(competitorWebData.campaignId, campaignId)));
+
+    const perCompetitorMultiSource: Record<string, any> = {};
+    for (const c of competitors) {
+      const sourceAvail = buildSourceAvail(c);
+      const compWebData = allWebData.filter(w => w.competitorId === c.id && w.sourceType === "website" && w.extractionStatus === "COMPLETE");
+      const compBlogData = allWebData.find(w => w.competitorId === c.id && w.sourceType === "blog" && w.extractionStatus === "COMPLETE");
+
+      const webExtractions = compWebData.map(w => ({
+        competitorId: c.id,
+        competitorName: c.name,
+        sourceUrl: w.sourceUrl,
+        pageType: (w.pageType || "homepage") as any,
+        headlines: safeParseJson(w.headlines, []),
+        subheadlines: safeParseJson(w.subheadlines, []),
+        ctaLabels: safeParseJson(w.ctaLabels, []),
+        offerPhrases: safeParseJson(w.offerPhrases, []),
+        pricingAnchors: safeParseJson(w.pricingAnchors, []),
+        proofBlocks: safeParseJson(w.proofBlocks, []),
+        testimonialBlocks: safeParseJson(w.testimonialBlocks, []),
+        guarantees: safeParseJson(w.guarantees, []),
+        featureList: safeParseJson(w.featureList, []),
+        navigationLinks: safeParseJson(w.navigationLinks, []),
+        topicTitles: safeParseJson(w.topicTitles, []),
+        contentHeadings: safeParseJson(w.contentHeadings, []),
+        rawTextPreview: w.rawTextPreview || "",
+        extractionStatus: "COMPLETE" as const,
+        scrapedAt: w.scrapedAt?.toISOString() || new Date().toISOString(),
+      }));
+
+      const blogExtraction = compBlogData ? (() => {
+        const topicTitles = safeParseJson(compBlogData.topicTitles, []);
+        const contentHeadings = safeParseJson(compBlogData.contentHeadings, []);
+        const navLinks = safeParseJson(compBlogData.navigationLinks, []);
+        const derivedCategories = navLinks.filter((l: string) => /blog|category|topic|tag/i.test(l)).slice(0, 10);
+        return {
+          competitorId: c.id,
+          competitorName: c.name,
+          sourceUrl: compBlogData.sourceUrl,
+          topicTitles,
+          contentHeadings,
+          categories: derivedCategories.length > 0 ? derivedCategories : contentHeadings.slice(0, 5),
+          educationalThemes: topicTitles.filter((t: string) => /how|why|what|guide|tips/i.test(t)),
+          rawTextPreview: compBlogData.rawTextPreview || "",
+          extractionStatus: "COMPLETE" as const,
+          scrapedAt: compBlogData.scrapedAt?.toISOString() || new Date().toISOString(),
+        };
+      })() : null;
+
+      const contentDnaForComp = contentDnaResults.find(d => d.competitorId === c.id) || null;
+      const captions = competitorInputs.find(ci => ci.id === c.id)?.posts?.map(p => p.caption) || [];
+      const igSignals = buildInstagramSignals(contentDnaForComp, captions);
+      const webSignals = buildWebsiteSignals(webExtractions);
+      const blogSigs = buildBlogSignals(blogExtraction);
+
+      const classified: any[] = [];
+      for (const ext of webExtractions) classified.push(...classifyWebsiteSignals(ext));
+      if (blogExtraction) classified.push(...classifyBlogSignals(blogExtraction));
+      if (contentDnaForComp) classified.push(...classifyInstagramSignals(contentDnaForComp));
+
+      const reconciled = reconcileMultiSourceSignals(igSignals, webSignals, blogSigs, classified, sourceAvail);
+      perCompetitorMultiSource[c.id] = {
+        competitorName: c.name,
+        ...reconciled,
+      };
+    }
+
+    const aggregatedAvail = buildSourceAvail({
+      profileLink: competitors.some(c => c.profileLink) ? "any" : null,
+      websiteUrl: competitors.some(c => c.websiteUrl) ? "any" : null,
+      blogUrl: competitors.some(c => c.blogUrl) ? "any" : null,
+      postsCollected: totalPosts,
+      websiteEnrichmentStatus: competitors.some(c => c.websiteEnrichmentStatus === "COMPLETE") ? "COMPLETE" : "NONE",
+      blogEnrichmentStatus: competitors.some(c => c.blogEnrichmentStatus === "COMPLETE") ? "COMPLETE" : "NONE",
+    });
+
+    multiSourceSignalsJson = JSON.stringify(perCompetitorMultiSource);
+    sourceAvailabilityJson = JSON.stringify(aggregatedAvail);
+    console.log(`[FetchOrch] Multi-source signals built | competitors=${Object.keys(perCompetitorMultiSource).length} | sources=${aggregatedAvail.availableSources.join(",")}`);
+  } catch (err: any) {
+    console.error(`[FetchOrch] Multi-source signal building failed (non-blocking):`, err.message);
+  }
+
   const snapshotPayload = {
     accountId,
     campaignId,
@@ -1043,6 +1224,8 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     executionMode,
     snapshotSource,
     fetchExecuted,
+    multiSourceSignals: multiSourceSignalsJson,
+    sourceAvailability: sourceAvailabilityJson,
     telemetry: JSON.stringify({
       executionMode,
       projectedTokens: tokenBudget.projectedTokens,

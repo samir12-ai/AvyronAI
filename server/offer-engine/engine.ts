@@ -1440,6 +1440,24 @@ export async function runOfferEngine(
   }
 
   const marketLanguage = buildMarketLanguageMap(audience);
+
+  const multiSource = typeof mi.multiSourceSignals === "string" ? safeJsonParse(mi.multiSourceSignals) : mi.multiSourceSignals;
+  if (multiSource && typeof multiSource === "object") {
+    for (const compData of Object.values(multiSource as Record<string, any>)) {
+      if (compData?.website) {
+        for (const offer of (compData.website.offerStructure || []).slice(0, 3)) {
+          if (typeof offer === "string" && offer.trim()) marketLanguage.rawDesirePhrases.push(offer);
+        }
+        for (const cta of (compData.website.funnelCTAs || compData.website.ctaPatterns || []).slice(0, 3)) {
+          if (typeof cta === "string" && cta.trim()) marketLanguage.rawDesirePhrases.push(cta);
+        }
+        for (const guarantee of (compData.website.guarantees || compData.website.guaranteeLanguage || []).slice(0, 2)) {
+          if (typeof guarantee === "string" && guarantee.trim()) marketLanguage.objectionLanguage.push(guarantee);
+        }
+      }
+    }
+  }
+
   diagnostics.marketLanguage = {
     painPhraseCount: marketLanguage.rawPainPhrases.length,
     desirePhraseCount: marketLanguage.rawDesirePhrases.length,

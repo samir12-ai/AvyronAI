@@ -42,6 +42,8 @@ async function gatherEngineContext(campaignId: string, accountId: string) {
       marketDiagnosis: miSnapshots.marketDiagnosis,
       competitorData: miSnapshots.competitorData,
       narrativeSynthesis: miSnapshots.narrativeSynthesis,
+      multiSourceSignals: miSnapshots.multiSourceSignals,
+      sourceAvailability: miSnapshots.sourceAvailability,
     }).from(miSnapshots)
       .where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId)))
       .orderBy(desc(miSnapshots.createdAt)).limit(1),
@@ -165,6 +167,34 @@ async function gatherEngineContext(campaignId: string, accountId: string) {
   const iter = iterData[0];
   if (iter) {
     parts.push(`ITERATION LEARNINGS:\n${truncJson(safeJson(iter.result))}`);
+  }
+
+  const miForSources = miData[0];
+  if (miForSources?.multiSourceSignals) {
+    try {
+      const multiSource = typeof miForSources.multiSourceSignals === "string" ? JSON.parse(miForSources.multiSourceSignals) : miForSources.multiSourceSignals;
+      if (multiSource && typeof multiSource === "object") {
+        const websiteSignals: string[] = [];
+        const blogSignals: string[] = [];
+        for (const compData of Object.values(multiSource as Record<string, any>)) {
+          if ((compData as any)?.website) {
+            const ws = (compData as any).website;
+            if (ws.headlineExtractions?.length) websiteSignals.push(`Headlines: ${ws.headlineExtractions.slice(0, 3).join(", ")}`);
+            if (ws.ctaPatterns?.length) websiteSignals.push(`CTAs: ${ws.ctaPatterns.slice(0, 3).join(", ")}`);
+          }
+          if ((compData as any)?.blog) {
+            const blog = (compData as any).blog;
+            if (blog.topicClusters?.length) blogSignals.push(`Topics: ${blog.topicClusters.slice(0, 3).join(", ")}`);
+          }
+        }
+        if (websiteSignals.length > 0 || blogSignals.length > 0) {
+          let section = "MULTI-SOURCE INTELLIGENCE:";
+          if (websiteSignals.length > 0) section += `\nWebsite Signals:\n${websiteSignals.join("\n")}`;
+          if (blogSignals.length > 0) section += `\nBlog Signals:\n${blogSignals.join("\n")}`;
+          parts.push(section);
+        }
+      }
+    } catch {}
   }
 
   return { contextString: parts.join("\n\n---\n\n"), businessProfile: biz || null };

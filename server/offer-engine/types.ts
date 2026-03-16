@@ -11,6 +11,8 @@ export interface OfferMIInput {
   marketDiagnosis: string | null;
   opportunitySignals: any[];
   threatSignals: any[];
+  multiSourceSignals?: any;
+  sourceAvailability?: any;
 }
 
 export interface OfferAudienceInput {

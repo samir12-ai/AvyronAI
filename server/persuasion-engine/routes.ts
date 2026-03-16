@@ -269,6 +269,8 @@ export function registerPersuasionEngineRoutes(app: Express) {
         threatSignals: safeJsonParse(miSnapshot.threatSignals) || [],
         narrativeObjectionCount: narrativeObjMap?.totalObjectionsDetected ?? 0,
         narrativeObjections,
+        multiSourceSignals: miSnapshot.multiSourceSignals || null,
+        sourceAvailability: miSnapshot.sourceAvailability || null,
       };
 
       const audienceInput = {

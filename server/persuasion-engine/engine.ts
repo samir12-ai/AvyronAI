@@ -59,6 +59,12 @@ function safeNumber(v: any, fallback: number): number {
   return isNaN(parsed) ? fallback : parsed;
 }
 
+function safeJsonParse(text: any): any {
+  if (!text) return null;
+  if (typeof text !== "string") return text;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
 function safeString(v: any, fallback: string): string {
   if (typeof v === "string" && v.trim()) return v.trim();
   return fallback;
@@ -1700,6 +1706,20 @@ export function analyzePersuasion(
   }
 
   const structuredObjections = buildStructuredObjectionMap(audience, mi);
+
+  const multiSource = safeJsonParse(mi.multiSourceSignals);
+  let websiteProofCount = 0;
+  if (multiSource && typeof multiSource === "object") {
+    for (const compData of Object.values(multiSource as Record<string, any>)) {
+      const ws = (compData as any)?.website;
+      if (ws) {
+        websiteProofCount += (ws.proofStructure || []).length + (ws.guarantees || []).length;
+      }
+    }
+  }
+  if (websiteProofCount > 0) {
+    console.log(`[PersuasionEngine] MULTI_SOURCE | websiteProofSignals=${websiteProofCount} — enriching proof landscape`);
+  }
 
   const reliability = assessDataReliability(mi, audience, positioning, differentiation, offer, awareness, structuredObjections);
 

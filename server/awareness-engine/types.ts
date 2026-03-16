@@ -63,6 +63,8 @@ export interface AwarenessMIInput {
   threatSignals: any[];
   narrativeObjectionCount: number;
   narrativeObjectionDensity: number;
+  multiSourceSignals?: any;
+  sourceAvailability?: any;
 }
 
 export interface LayerResult {

@@ -289,6 +289,7 @@ export interface CompetitorInput {
   messagingTone: string | null;
   socialProofPresence: string | null;
   websiteUrl?: string | null;
+  blogUrl?: string | null;
   googleMapsUrl?: string | null;
   manualNotes?: string | null;
   pricingHints?: string | null;

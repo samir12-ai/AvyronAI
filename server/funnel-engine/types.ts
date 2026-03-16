@@ -4,6 +4,8 @@ export interface FunnelMIInput {
   marketDiagnosis: string | null;
   opportunitySignals: any[];
   threatSignals: any[];
+  multiSourceSignals?: any;
+  sourceAvailability?: any;
 }
 
 export interface FunnelAudienceInput {

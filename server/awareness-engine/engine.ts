@@ -44,6 +44,12 @@ function safeString(v: any, fallback: string): string {
   return fallback;
 }
 
+function safeJsonParse(text: any): any {
+  if (!text) return null;
+  if (typeof text !== "string") return text;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
 export interface DataReliabilityAssessment {
   signalDensity: number;
   signalDiversity: number;
@@ -303,6 +309,22 @@ export function layer3_attentionTriggerMapping(
   const drivers = audience.emotionalDrivers || [];
   const threats = mi.threatSignals || [];
   const opportunities = mi.opportunitySignals || [];
+
+  const multiSource = safeJsonParse(mi.multiSourceSignals);
+  let websiteHeadlineCount = 0;
+  let blogTopicCount = 0;
+  if (multiSource && typeof multiSource === "object") {
+    for (const compData of Object.values(multiSource as Record<string, any>)) {
+      websiteHeadlineCount += ((compData as any)?.website?.headlineExtractions || []).length;
+      blogTopicCount += ((compData as any)?.blog?.topicClusters || []).length;
+    }
+  }
+  if (websiteHeadlineCount > 0) {
+    findings.push(`Website headline signals available (${websiteHeadlineCount}) — enriching trigger detection`);
+  }
+  if (blogTopicCount > 0) {
+    findings.push(`Blog topic signals available (${blogTopicCount}) — enriching educational awareness`);
+  }
 
   let primaryTrigger = "";
 

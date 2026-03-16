@@ -253,6 +253,8 @@ async function getCompetitorData(accountId: string, campaignId: string): Promise
       hookStyles: c.hookStyles,
       messagingTone: c.messagingTone,
       socialProofPresence: c.socialProofPresence,
+      websiteUrl: c.websiteUrl || null,
+      blogUrl: c.blogUrl || null,
       posts,
       comments,
     });

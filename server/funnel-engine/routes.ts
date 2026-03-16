@@ -167,6 +167,8 @@ export function registerFunnelEngineRoutes(app: Express) {
         marketDiagnosis: miSnapshot.marketDiagnosis,
         opportunitySignals: safeJsonParse(miSnapshot.opportunitySignals) || [],
         threatSignals: safeJsonParse(miSnapshot.threatSignals) || [],
+        multiSourceSignals: miSnapshot.multiSourceSignals || null,
+        sourceAvailability: miSnapshot.sourceAvailability || null,
       };
 
       const audienceInput = {

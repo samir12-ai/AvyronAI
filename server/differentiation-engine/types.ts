@@ -7,6 +7,8 @@ export interface MIInput {
   opportunitySignals: any[];
   threatSignals: any[];
   narrativeSynthesis: string | null;
+  multiSourceSignals?: any;
+  sourceAvailability?: any;
 }
 
 export interface AudienceInput {

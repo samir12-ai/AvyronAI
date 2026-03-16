@@ -1,0 +1,548 @@
+Hi Replit Team,
+
+We are now moving into an important architecture hardening step for MarketMind.
+
+This is not a small feature request and it must not be treated as a quick patch.  
+We are introducing new market intelligence sources and the system must be updated in a deep, structured, architecture-safe way so that all engines can consume these sources correctly without creating signal conflicts, data pollution, or plan instability.
+
+The goal is to make MarketMind capable of working across different business types:
+
+- businesses with Instagram only
+- businesses with Website only
+- businesses with Instagram + Website
+- businesses with optional Blog content
+
+At the same time, we must preserve:
+
+- single strategic track
+- engine isolation
+- clean signal lineage
+- consistent downstream plan generation
+- accurate Content DNA
+- safe proxy-based scraping flow
+
+Please implement the following comprehensively.
+
+---
+
+## 1. New Source Architecture Must Be Source-Type Aware
+
+Do not train the system to think in terms of “platform names only.”
+
+The system must learn to think in terms of signal types.
+
+Required signal type model:
+
+### A. Instagram Signals
+These are primarily content behavior signals.
+
+They should be used for:
+- hook extraction
+- CTA pattern extraction
+- content angle extraction
+- audience pain inference from hook framing
+- short-form content style
+- storytelling pattern detection
+- authority / proof / curiosity / challenge framing
+
+### B. Website Signals
+These are primarily product and positioning signals.
+
+They should be used for:
+- positioning language
+- headline extraction
+- offer structure
+- pricing model
+- funnel CTA analysis
+- proof structure
+- guarantees
+- feature hierarchy
+- brand promise
+
+### C. Blog Signals
+These are primarily education and topic signals.
+
+They should be used for:
+- educational themes
+- repeated market questions
+- long-form authority themes
+- topic clusters
+- problem framing
+- strategic education patterns
+
+This separation is critical.
+
+The engines must not treat all source inputs as interchangeable text.
+
+---
+
+## 2. All Relevant Engines Must Be Retrained to Understand the New Source Types
+
+This is the most important requirement.
+
+Do not update only Market Intelligence and assume the system is done.
+
+All affected engines must be updated to correctly interpret the new signal structure.
+
+At minimum, the following engines must be re-aligned:
+
+### Market Intelligence Engine
+Must combine:
+- Instagram content behavior
+- Website strategic/product signals
+- Blog topic signals
+
+Must produce:
+- market pressure map
+- competitor messaging model
+- offer pattern map
+- content pattern map
+- category language map
+
+### Audience Engine
+Important note:
+This engine in MarketMind does not depend on comments.  
+It depends on hook/content DNA extraction and inferred pain framing from competitor content.
+
+It must therefore learn:
+
+- to infer pain from Instagram hooks
+- to infer pain from website headlines
+- to infer pain from landing copy
+- to infer pain from educational titles when blog exists
+
+It must not fail when comments are absent.
+
+### Positioning Engine
+Must stop depending too heavily on surface-level social sentiment.
+
+It must learn from:
+- website headline structure
+- category language
+- feature framing
+- value proposition phrasing
+- offer-page structure
+
+This engine must use the expanded web/product signal layer to avoid weak “simple / affordable” positioning defaults.
+
+### Differentiation Engine
+Must use:
+- Profile card inputs
+- Website claims
+- Competitor offer structures
+- proof signals
+- product framing
+
+Must not reject valid claims just because Instagram surface signals are weak.
+
+### Offer Engine
+Must learn from:
+- website pricing pages
+- offer pages
+- CTA structures
+- guarantees
+- free trial / audit / booking flows
+
+### Funnel Engine
+Must learn from:
+- website CTA flows
+- navigation patterns
+- landing page actions
+- conversion entry points
+
+### Awareness Engine
+Must use:
+- Instagram hooks
+- website headlines
+- blog titles
+
+### Persuasion Engine
+Must use:
+- proof language
+- testimonials
+- authority signals
+- narrative patterns
+- CTA framing from both social and website
+
+### Statistical / Integrity Layer
+Must validate:
+- source quality
+- source sufficiency
+- signal consistency
+- source conflicts
+- stale or weak signal composition
+
+This must be done deeply, not superficially.
+
+---
+
+## 3. Single Signal Model Must Prevent Cross-Source Conflict
+
+We must avoid a common failure mode:
+
+Instagram says one thing  
+Website says another thing  
+Profile says a third thing  
+Plan becomes inconsistent
+
+To solve this, implement a clean signal hierarchy.
+
+### Required signal model:
+
+#### Layer 1 — Profile Card
+This is the business intent layer and must be treated as persistent business truth.
+
+Examples:
+- real offer
+- real niche
+- real target market
+- business claim
+- business model
+
+#### Layer 2 — Market Intelligence Sources
+This is the external reality layer.
+
+It validates, pressure-tests, and contextualizes profile inputs.
+
+#### Layer 3 — Reconciliation Layer
+This is where the engines reconcile:
+
+- what the business claims
+- what the market shows
+- what the competitor landscape suggests
+
+This is extremely important.
+
+Do not let source layers overwrite each other directly.
+
+Instead:
+- preserve each source
+- score each source
+- reconcile through engine logic
+
+This is how we avoid signal contamination and strategic drift.
+
+---
+
+## 4. Proxy-Based Scraping Must Be Treated as Infrastructure, Not a Quick Hack
+
+The proxy layer must be implemented with discipline.
+
+We are using residential proxy infrastructure to support source collection.  
+That solves access, but not extraction quality.
+
+The scraping system must be designed around the following:
+
+### A. Safe Page Scope
+Only scrape the pages that matter:
+
+For websites:
+- homepage
+- pricing
+- features/services
+- about
+- blog index / relevant blog pages
+
+Do not crawl excessively.
+
+### B. Structured Extraction
+Do not return raw HTML blobs into the engines.
+
+Extract clean structured fields such as:
+- headline
+- subheadline
+- CTA labels
+- offer phrases
+- pricing anchors
+- proof blocks
+- testimonial blocks
+- topic titles
+- content headings
+
+### C. Signal Classification Before Engine Injection
+Before passing scraped data to engines, classify it into:
+- positioning signal
+- offer signal
+- content signal
+- educational signal
+- proof signal
+- CTA signal
+
+The engines should consume normalized signals, not chaotic page text.
+
+### D. Retry / Error Handling
+If scraping fails:
+- mark source unavailable
+- do not fake signals
+- do not inject empty output as valid source
+- downgrade confidence cleanly
+
+### E. Source freshness
+Store source snapshots with timestamps and validity labels.
+
+Do not let stale website snapshots continue influencing current plans invisibly.
+
+---
+
+## 5. Input Model for Competitors Must Be Flexible, Not Rigid
+
+Do not force every competitor to provide the same links.
+
+We need a flexible competitor source model:
+
+### Minimum required:
+At least one of:
+- Instagram
+- Website
+
+### Recommended:
+- Instagram + Website
+
+### Optional:
+- Blog
+
+Do not add YouTube.  
+Do not add LinkedIn.
+
+Those add complexity without enough value for the current MarketMind architecture.
+
+This rule must be implemented in both:
+- frontend competitor input forms
+- backend validation logic
+
+---
+
+## 6. The System Must Know What to Do When a Source Is Missing
+
+We cannot assume every business has:
+- Instagram
+- Website
+- Blog
+
+Therefore, each engine must have source fallback behavior.
+
+Examples:
+
+### If Instagram is missing
+Use:
+- website headlines
+- offer copy
+- blog titles if available
+
+### If Website is missing
+Use:
+- Instagram content DNA
+- profile card
+- competitor external signals
+
+### If both are missing
+Use:
+- profile card
+- competitor source intelligence
+- low-confidence mode
+
+The engines must not collapse or behave unpredictably when a source is missing.
+
+---
+
+## 7. Frontend and Backend Must Be Updated Together
+
+This must not become another situation where the backend is updated and the frontend remains partially disconnected.
+
+Please update both layers together.
+
+### Frontend must:
+- allow competitor source entry cleanly
+- indicate source availability
+- indicate missing sources
+- indicate which sources were used in analysis
+- surface confidence / completeness clearly
+
+### Backend must:
+- validate inputs
+- normalize source signals
+- persist structured snapshots
+- expose usable engine-ready outputs
+- feed plan synthesis and Content DNA
+
+---
+
+## 8. Route Wiring Must Be Revalidated End-to-End
+
+Please carefully verify all routes and data pipelines related to this feature.
+
+At minimum verify:
+
+- competitor source input routes
+- scraping execution routes
+- source normalization routes
+- engine consumption routes
+- plan synthesis routes
+- Content DNA routes
+- agent context loading routes
+- dashboard summary routes
+
+I want to avoid partial wiring where:
+- source is saved but not used
+- scraped data is fetched but not normalized
+- normalized data exists but engines do not consume it
+- engines use it but plan does not reflect it
+- plan reflects it but agent cannot explain it
+
+Everything must be fully connected.
+
+---
+
+## 9. Agent Must Be Trained on the New Source Logic
+
+The Agent must understand:
+- what kind of signal came from where
+- what is reliable
+- what is inferred
+- what is confirmed
+- what source is absent
+- why the system chose a certain conclusion
+
+This is critical.
+
+If the user asks:
+- why is this the recommended CTA?
+- why this hook style?
+- why this positioning?
+- why is confidence low?
+
+The Agent must be able to answer using:
+- profile signals
+- Instagram signals
+- website signals
+- blog signals
+- engine reconciliation logic
+
+The agent must not hallucinate generic explanations.
+
+---
+
+## 10. Content DNA Must Explicitly Benefit from the New Sources
+
+The purpose of this architecture is not only better market intelligence.
+
+It is to improve:
+- Content DNA
+- plan quality
+- content execution quality
+- explanation quality
+
+Content DNA must use:
+- Instagram hooks for content behavior
+- website messaging for offer truth
+- blog signals for educational framing
+- profile card for business anchor
+
+This must make Content DNA more stable, more explainable, and less dependent on one source only.
+
+---
+
+## 11. Avoid Common Scraping / Signal Integration Mistakes
+
+Please actively avoid the following common failures:
+
+- treating all scraped text equally
+- mixing strategic product copy with short-form content signals
+- letting website signals override the actual business offer
+- ignoring missing-source states
+- silently using stale data
+- allowing one strong source to completely drown out the others
+- failing to surface confidence penalties to the UI
+- updating backend extraction without updating agent logic
+- updating engine logic without updating plan synthesis
+
+These are exactly the types of mistakes that create hidden instability.
+
+---
+
+## 12. Required System Update After Implementation
+
+Once this is implemented, perform a full update and validation pass.
+
+This must include:
+- backend refresh
+- frontend refresh
+- route verification
+- source normalization verification
+- engine coverage verification
+- plan synthesis verification
+- Content DNA verification
+- agent explanation verification
+
+Do not stop at “API works.”  
+The whole system must behave correctly.
+
+---
+
+## 13. Strict Acceptance Criteria
+
+This task is only accepted if all of the following are true:
+
+### Source Architecture
+- Instagram, Website, and Blog signals are treated as different signal classes
+- competitor input allows minimum 1 source, recommended 2, optional blog
+- YouTube and LinkedIn are not added
+
+### Engine Training
+- all relevant engines are updated to understand the new source types
+- Audience Engine correctly works without comments
+- Positioning Engine uses website/product/category signals properly
+- Differentiation Engine uses reconciled profile + market signals
+- Content DNA improves using the expanded source model
+
+### Signal Integrity
+- profile inputs remain the persistent business truth layer
+- market intelligence remains the reality layer
+- reconciliation happens cleanly without overwrite conflicts
+- low-confidence / missing-source states are surfaced correctly
+
+### Scraping / Proxy Layer
+- proxy architecture is stable
+- scraping is structured, not raw
+- extraction is field-based, not blob-based
+- failed scraping downgrades confidence instead of injecting fake signals
+- source freshness is tracked
+
+### System Wiring
+- all new routes are connected
+- engines consume normalized signals
+- plan synthesis consumes updated engine outputs
+- Content DNA reflects updated source fusion
+- agent can explain the logic per source
+
+### Final Stability
+- frontend and backend both updated
+- no stale states
+- no partial connections
+- no hidden silent fallbacks
+- no patchwork implementation
+
+If any of the above is incomplete, the task is not complete.
+
+---
+
+## 14. Final Objective
+
+The final system should work like this:
+
+- flexible competitor sources
+- structured source extraction
+- normalized signal classification
+- clean engine consumption
+- stable reconciliation
+- stronger plan outputs
+- stronger Content DNA
+- smarter Agent explanations
+- zero strategic drift
+
+This must be implemented as a real architecture upgrade, not a workaround.
+
+Please proceed carefully and confirm only after the full system is updated and validated.
+
+Best regards,  
+MarketMind Architecture

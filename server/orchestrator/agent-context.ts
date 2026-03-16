@@ -55,6 +55,7 @@ export interface SystemContext {
   performance: any;
   engineStatus: any;
   engineSnapshots: Record<string, { id: string; status: string; createdAt: any }>;
+  sourceAvailability: any;
   contentDnaSnapshot: any;
   rootBundle: { id: string; version: number; status: string; isStale: boolean; staleReason: string | null; strategyHash: string | null } | null;
   goalDecomposition: any;
@@ -367,6 +368,19 @@ export async function loadSystemContext(
       completedAt: latestOrchJob.completedAt,
     } : null,
     engineSnapshots,
+    sourceAvailability: await (async () => {
+      try {
+        const [miSnap] = await db.select({
+          sourceAvailability: miSnapshots.sourceAvailability,
+          multiSourceSignals: miSnapshots.multiSourceSignals,
+        }).from(miSnapshots)
+          .where(and(eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId)))
+          .orderBy(desc(miSnapshots.createdAt))
+          .limit(1);
+        if (!miSnap?.sourceAvailability) return null;
+        return typeof miSnap.sourceAvailability === "string" ? JSON.parse(miSnap.sourceAvailability) : miSnap.sourceAvailability;
+      } catch { return null; }
+    })(),
     contentDnaSnapshot: dnaData,
     rootBundle: await (async () => {
       try {
@@ -443,6 +457,29 @@ export function buildSystemPrompt(context: SystemContext): string {
 
   if (context.engineStatus) {
     lines.push(`ENGINES: Last run ${context.engineStatus.status} | ${context.engineStatus.sections?.filter((s: any) => s.status === "SUCCESS").length || 0} engines completed`);
+  }
+
+  if (context.sourceAvailability) {
+    const sa = context.sourceAvailability;
+    const sources: string[] = [];
+    if (typeof sa.instagram === "boolean") {
+      sources.push(`Instagram: ${sa.instagram ? "✓" : "✗"}`);
+    } else if (sa.instagram && typeof sa.instagram === "object") {
+      sources.push(`Instagram: ${sa.instagram.available ? "✓" : "✗"} (${sa.instagram.competitorCount || 0} competitors)`);
+    }
+    if (typeof sa.website === "boolean") {
+      sources.push(`Website: ${sa.website ? "✓" : "✗"}`);
+    } else if (sa.website && typeof sa.website === "object") {
+      sources.push(`Website: ${sa.website.available ? "✓" : "✗"} (${sa.website.competitorCount || 0} competitors)`);
+    }
+    if (typeof sa.blog === "boolean") {
+      sources.push(`Blog: ${sa.blog ? "✓" : "✗"}`);
+    } else if (sa.blog && typeof sa.blog === "object") {
+      sources.push(`Blog: ${sa.blog.available ? "✓" : "✗"} (${sa.blog.competitorCount || 0} competitors)`);
+    }
+    if (sources.length > 0) {
+      lines.push(`DATA SOURCES: ${sources.join(" | ")}`);
+    }
   }
 
   const snapKeys = Object.keys(context.engineSnapshots || {});

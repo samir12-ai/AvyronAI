@@ -294,6 +294,8 @@ export function registerAwarenessEngineRoutes(app: Express) {
         threatSignals: safeJsonParse(miSnapshot.threatSignals) || [],
         narrativeObjectionCount: miNarrativeObjectionCount,
         narrativeObjectionDensity: miNarrativeObjectionDensity,
+        multiSourceSignals: miSnapshot.multiSourceSignals || null,
+        sourceAvailability: miSnapshot.sourceAvailability || null,
       };
 
       const audienceInput = {

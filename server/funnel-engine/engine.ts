@@ -1,5 +1,12 @@
 import { aiChat } from "../ai-client";
 import { detectGenericOutput, checkCrossEngineAlignment, enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
+
+function safeJsonParse(text: any): any {
+  if (!text) return null;
+  if (typeof text !== "string") return text;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
 import {
   ENGINE_VERSION,
   FUNNEL_STRENGTH_WEIGHTS,
@@ -685,6 +692,7 @@ export async function aiFunnelGeneration(
   positioning: FunnelPositioningInput,
   differentiation: FunnelDifferentiationInput,
   accountId: string,
+  mi?: FunnelMIInput | null,
 ): Promise<{ primary: { name: string; type: string }; alternative: { name: string; type: string }; rejected: { name: string; type: string; rejectionReason: string } }> {
   const pains = audience.audiencePains || [];
   const desires = Object.entries(audience.desireMap || {});
@@ -720,6 +728,28 @@ Market Context:
 - Enemy: ${positioning.enemyDefinition || "Not defined"}
 - Narrative: ${positioning.narrativeDirection || "Not defined"}
 - Offer Strength: ${offer.offerStrengthScore.toFixed(2)}
+${(() => {
+  const ms = safeJsonParse(mi?.multiSourceSignals);
+  if (!ms || typeof ms !== "object") return "";
+  const ctaPatterns: string[] = [];
+  const navPatterns: string[] = [];
+  for (const compData of Object.values(ms as Record<string, any>)) {
+    if ((compData as any)?.website) {
+      for (const cta of ((compData as any).website.funnelCTAs || (compData as any).website.ctaPatterns || []).slice(0, 3)) {
+        if (typeof cta === "string" && cta.trim()) ctaPatterns.push(cta);
+      }
+      for (const nav of ((compData as any).website.featureHierarchy || (compData as any).website.navigationFlow || []).slice(0, 3)) {
+        if (typeof nav === "string" && nav.trim()) navPatterns.push(nav);
+      }
+    }
+  }
+  if (ctaPatterns.length === 0 && navPatterns.length === 0) return "";
+  let section = "\n═══ WEBSITE INTELLIGENCE (competitor CTA/flow patterns) ═══";
+  if (ctaPatterns.length > 0) section += `\nCompetitor CTA Patterns: ${JSON.stringify(ctaPatterns.slice(0, 6))}`;
+  if (navPatterns.length > 0) section += `\nCompetitor Navigation Flows: ${JSON.stringify(navPatterns.slice(0, 6))}`;
+  section += "\nUse these patterns to inform funnel stage design and entry mechanisms.";
+  return section;
+})()}
 
 Return JSON:
 {
@@ -844,7 +874,7 @@ export async function runFunnelEngine(
 
   let aiFunnels;
   try {
-    aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId);
+    aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi);
     diagnostics.aiGeneration = { success: true };
   } catch (err: any) {
     diagnostics.aiGeneration = { success: false, error: err.message };

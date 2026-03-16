@@ -811,6 +811,20 @@ async function constructSegments(
   inputSnapshotId: string | null,
 ): Promise<AudienceSegment[]> {
   try {
+    let multiSourceSection = "";
+    try {
+      const { loadMultiSourceContext, buildMultiSourcePromptSection, buildSourceFallbackContext } = await import("../shared/multi-source-loader");
+      if (inputSnapshotId) {
+        const msCtx = await loadMultiSourceContext(inputSnapshotId);
+        if (msCtx && (msCtx.hasMeaningfulWebData || msCtx.hasMeaningfulBlogData)) {
+          multiSourceSection = buildMultiSourcePromptSection(msCtx);
+          multiSourceSection += "\n\nIMPORTANT: Use website headlines and blog titles to infer audience pains even when comments are absent. Website copy reveals what the market responds to. Blog topics reveal what questions the audience asks repeatedly.";
+        } else {
+          multiSourceSection = buildSourceFallbackContext(msCtx);
+        }
+      }
+    } catch {}
+
     const prompt = `You are an audience research analyst. Based on market evidence, construct 2-4 distinct audience segments.
 
 BUSINESS: ${businessContext.industry} — ${businessContext.coreOffer}
@@ -829,6 +843,7 @@ ${emotionalDrivers.slice(0, 6).map(e => `- ${e.canonical}: frequency=${e.frequen
 
 MARKET MATURITY: ${maturity.level}
 AWARENESS LEVEL: ${awareness.level}
+${multiSourceSection}
 
 SAMPLE COMMENTS (real audience language):
 ${commentSamples.slice(0, 12).map(c => `"${c.slice(0, 100)}"`).join("\n")}
