@@ -342,7 +342,8 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
 
 async function scrapeWebAndBlogForCompetitor(comp: any, accountId: string): Promise<void> {
   try {
-    if (comp.websiteUrl && (isWebDataStale(comp.websiteScrapedAt) || comp.websiteEnrichmentStatus === "NONE")) {
+    const websiteFailedRecently = comp.websiteEnrichmentStatus === "FAILED" && comp.websiteScrapedAt && (Date.now() - new Date(comp.websiteScrapedAt).getTime()) < 24 * 60 * 60 * 1000;
+    if (comp.websiteUrl && !websiteFailedRecently && (isWebDataStale(comp.websiteScrapedAt) || comp.websiteEnrichmentStatus === "NONE" || comp.websiteEnrichmentStatus === "FAILED")) {
       console.log(`[FetchOrch] Website scrape starting for ${comp.name}: ${comp.websiteUrl}`);
       const extractions = await scrapeWebsite(comp.id, comp.name, comp.websiteUrl);
       const successCount = extractions.filter(e => e.extractionStatus === "COMPLETE").length;
@@ -382,7 +383,8 @@ async function scrapeWebAndBlogForCompetitor(comp: any, accountId: string): Prom
       console.log(`[FetchOrch] Website scrape ${status} for ${comp.name}: ${successCount}/${extractions.length} pages`);
     }
 
-    if (comp.blogUrl && (isWebDataStale(comp.blogScrapedAt) || comp.blogEnrichmentStatus === "NONE")) {
+    const blogFailedRecently = comp.blogEnrichmentStatus === "FAILED" && comp.blogScrapedAt && (Date.now() - new Date(comp.blogScrapedAt).getTime()) < 24 * 60 * 60 * 1000;
+    if (comp.blogUrl && !blogFailedRecently && (isWebDataStale(comp.blogScrapedAt) || comp.blogEnrichmentStatus === "NONE" || comp.blogEnrichmentStatus === "FAILED")) {
       console.log(`[FetchOrch] Blog scrape starting for ${comp.name}: ${comp.blogUrl}`);
       const blogResult = await scrapeBlog(comp.id, comp.name, comp.blogUrl);
 

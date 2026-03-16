@@ -31,29 +31,47 @@ async function fetchWithProxy(opts: FetchOptions): Promise<{ html: string; statu
   const proxy = getProxyConfig();
   const timeout = opts.timeoutMs || SCRAPE_TIMEOUT_MS;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
+  const baseHeaders: Record<string, string> = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+    "Accept-Encoding": "gzip, deflate",
+    "Connection": "keep-alive",
+  };
 
-  try {
-    const fetchOpts: any = {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Accept-Encoding": "gzip, deflate",
-        "Connection": "keep-alive",
-      },
-      signal: controller.signal,
-      redirect: "follow",
-    };
-
-    if (proxy) {
+  if (proxy) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
       const { ProxyAgent } = await import("undici");
       const proxyUrl = `http://${proxy.username}:${proxy.password}@${proxy.host}:${proxy.port}`;
-      fetchOpts.dispatcher = new ProxyAgent(proxyUrl);
+      const res = await fetch(opts.url, {
+        headers: baseHeaders,
+        signal: controller.signal,
+        redirect: "follow",
+        dispatcher: new ProxyAgent(proxyUrl),
+      } as any);
+      const html = await res.text();
+      return { html, status: res.status, ok: res.ok };
+    } catch (proxyErr: any) {
+      const isConnectError = /fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|tunnel|socket|proxy/i.test(
+        proxyErr.message + (proxyErr.cause?.message || "")
+      );
+      if (!isConnectError) throw proxyErr;
+      console.log(`[WebScraper] Proxy connection failed for ${opts.url}: ${proxyErr.message} — falling back to direct fetch`);
+    } finally {
+      clearTimeout(timer);
     }
+  }
 
-    const res = await fetch(opts.url, fetchOpts);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const res = await fetch(opts.url, {
+      headers: baseHeaders,
+      signal: controller.signal,
+      redirect: "follow",
+    });
     const html = await res.text();
     return { html, status: res.status, ok: res.ok };
   } finally {
@@ -263,7 +281,9 @@ function discoverSubPages(baseUrl: string, html: string): string[] {
         if (parsed.hostname !== base.hostname) continue;
         fullUrl = href;
       } else if (href.startsWith("/")) {
-        fullUrl = `${base.origin}${href}`;
+        const resolved = new URL(href, base.origin);
+        if (resolved.hostname !== base.hostname) continue;
+        fullUrl = resolved.toString();
       } else {
         continue;
       }
