@@ -1040,17 +1040,20 @@ export default function CompetitiveIntelligence() {
             </View>
 
             {(() => {
+              const cl = miv3Result.output?.confidence?.level || 'MODERATE';
+              const clColor = cl === 'STRONG' ? '#10B981' : cl === 'MODERATE' ? '#3B82F6' : '#F59E0B';
+              const clLabel = cl === 'STRONG' ? 'HIGH' : cl === 'MODERATE' ? 'MEDIUM' : 'LOW';
               const reasons = (miv3Result.output?.confidence?.guardReasons || [])
                 .filter((r: string) => r.includes('advisory') || r.includes('ADVISORY') || r.includes('proceeding'))
                 .map((r: string) => r.replace(/ \(advisory only\)$/, '').replace(/— proceeding with available data$/, '').trim());
-              return reasons.length > 0 ? (
-                <View style={{ backgroundColor: '#3B82F615', borderRadius: 8, padding: 10, marginBottom: 8 }}>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#3B82F6' }}>DATA NOTES</Text>
-                  {reasons.map((reason: string, i: number) => (
+              return (
+                <View style={{ backgroundColor: clColor + '10', borderRadius: 8, padding: 10, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: clColor }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: clColor }}>PROCEED — {clLabel} CONFIDENCE</Text>
+                  {reasons.length > 0 && reasons.map((reason: string, i: number) => (
                     <Text key={i} style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>• {reason}</Text>
                   ))}
                 </View>
-              ) : null;
+              );
             })()}
 
             {miv3Result.output?.marketDiagnosis && !miv3Result.output.marketDiagnosis.includes('Exploratory assessment') && (
@@ -1444,11 +1447,16 @@ export default function CompetitiveIntelligence() {
       <View>
         <View style={s.sectionHeader}>
           <Text style={[s.sectionTitle, { color: colors.text }]}>Threat Signals</Text>
-          {confidence && (
-            <View style={[s.countBadge, { backgroundColor: '#10B981' + '20' }]}>
-              <Text style={[s.countText, { color: '#10B981' }]}>PROCEED</Text>
-            </View>
-          )}
+          {confidence && (() => {
+            const cl = confidence.level || 'MODERATE';
+            const clColor = cl === 'STRONG' ? '#10B981' : cl === 'MODERATE' ? '#3B82F6' : '#F59E0B';
+            const clLabel = cl === 'STRONG' ? 'HIGH' : cl === 'MODERATE' ? 'MEDIUM' : 'LOW';
+            return (
+              <View style={[s.countBadge, { backgroundColor: clColor + '20' }]}>
+                <Text style={[s.countText, { color: clColor }]}>PROCEED — {clLabel} CONFIDENCE</Text>
+              </View>
+            );
+          })()}
         </View>
 
         {!miv3Result ? (
@@ -1631,7 +1639,7 @@ export default function CompetitiveIntelligence() {
 
             <View style={{ paddingHorizontal: 4, paddingTop: 4 }}>
               <Text style={{ fontSize: 9, color: colors.textMuted, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
-                source: miv3_snapshot:{miv3Result?.snapshotId?.slice(0, 8)} | guard: {confidence?.guardDecision} | mode: {miv3Result?.executionMode} | dataSource: {miv3Result?.snapshotSource || 'N/A'} | fetched: {miv3Result?.fetchExecuted === false ? 'no' : 'yes'}
+                source: miv3_snapshot:{miv3Result?.snapshotId?.slice(0, 8)} | confidence: {confidence?.level} ({Math.round((confidence?.overall || 0) * 100)}%) | mode: {miv3Result?.executionMode} | dataSource: {miv3Result?.snapshotSource || 'N/A'} | fetched: {miv3Result?.fetchExecuted === false ? 'no' : 'yes'}
               </Text>
             </View>
           </View>
