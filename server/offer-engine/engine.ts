@@ -1,4 +1,5 @@
 import { aiChat } from "../ai-client";
+import { loadProductDNA, formatProductDNAForPrompt, type ProductDNA } from "../shared/product-dna";
 import { detectGenericOutput, checkCrossEngineAlignment, enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
 import {
   ENGINE_VERSION,
@@ -1230,7 +1231,7 @@ ABSOLUTE RULES:
 - Respond with ONLY valid JSON, no markdown${mechLockInstruction}
 ${lockSection}${correctionSection}
 
-═══ SECTION 1: AUDIENCE PAIN LANGUAGE (use these exact words) ═══
+${productDna ? `═══ PRODUCT IDENTITY (Source of Truth) ═══\n${formatProductDNAForPrompt(productDna)}\n\n` : ""}═══ SECTION 1: AUDIENCE PAIN LANGUAGE (use these exact words) ═══
 ${painPhrases.length > 0 ? `Raw Pain Phrases: ${JSON.stringify(painPhrases)}` : "No raw pain phrases available"}
 ${desirePhrases.length > 0 ? `Raw Desire Phrases: ${JSON.stringify(desirePhrases)}` : "No raw desire phrases available"}
 ${emotionalPhrases.length > 0 ? `Emotional Language: ${JSON.stringify(emotionalPhrases)}` : ""}
@@ -1403,6 +1404,13 @@ export async function runOfferEngine(
         },
       };
     }
+  }
+
+  const campaignId = (mi as any)?._campaignId || "";
+  const productDna = campaignId ? await loadProductDNA(campaignId, accountId) : null;
+  if (productDna) {
+    console.log(`[OfferEngine-V4] PRODUCT_DNA_LOADED | category=${productDna.productCategory || "n/a"} | mechanism=${productDna.uniqueMechanism || "n/a"}`);
+    diagnostics.productDnaLoaded = true;
   }
 
   console.log(`[OfferEngine-V4] Starting 5-layer pipeline`);

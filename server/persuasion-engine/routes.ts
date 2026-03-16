@@ -13,6 +13,7 @@ import {
 } from "@shared/schema";
 import { inArray, eq, and, desc } from "drizzle-orm";
 import { runPersuasionEngine } from "./engine";
+import { loadProductDNA, formatProductDNAForPrompt } from "../shared/product-dna";
 import { ENGINE_VERSION } from "./constants";
 import { ENGINE_VERSION as AWARENESS_ENGINE_VERSION } from "../awareness-engine/constants";
 import { ENGINE_VERSION as INTEGRITY_ENGINE_VERSION } from "../integrity-engine/constants";
@@ -262,6 +263,11 @@ export function registerPersuasionEngineRoutes(app: Express) {
         competitorSources: item.competitorSources || [],
       }));
 
+      const productDna = await loadProductDNA(campaignId, accountId);
+      if (productDna) {
+        console.log(`[PersuasionEngine-V3] PRODUCT_DNA_LOADED | category=${productDna.productCategory || "n/a"} | mechanism=${productDna.uniqueMechanism || "n/a"}`);
+      }
+
       const miInput = {
         marketDiagnosis: miSnapshot.marketDiagnosis,
         overallConfidence: safeNumber(miSnapshot.overallConfidence, 0),
@@ -271,6 +277,7 @@ export function registerPersuasionEngineRoutes(app: Express) {
         narrativeObjections,
         multiSourceSignals: miSnapshot.multiSourceSignals || null,
         sourceAvailability: miSnapshot.sourceAvailability || null,
+        _productDnaContext: productDna ? formatProductDNAForPrompt(productDna) : null,
       };
 
       const audienceInput = {

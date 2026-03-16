@@ -146,20 +146,27 @@ export function extractProfileSignals(profile: ProfileInput | null): ProfileSign
     return text.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 2);
   };
 
-  const offerTokens = new Set(tokenizeProfile(profile.coreOffer));
+  const offerTokens = new Set([
+    ...tokenizeProfile(profile.coreOffer),
+    ...tokenizeProfile(profile.coreProblemSolved),
+    ...tokenizeProfile(profile.uniqueMechanism),
+  ]);
   const audienceTokens = new Set([
     ...tokenizeProfile(profile.targetAudienceSegment),
     ...tokenizeProfile(profile.targetAudienceAge),
+    ...tokenizeProfile(profile.targetDecisionMaker),
   ]);
   const strategyTokens = new Set([
     ...tokenizeProfile(profile.funnelObjective),
     ...tokenizeProfile(profile.goalDescription),
     ...tokenizeProfile(profile.priceRange),
+    ...tokenizeProfile(profile.strategicAdvantage),
   ]);
   const claimTokens = new Set([
     ...tokenizeProfile(profile.businessType),
     ...tokenizeProfile(profile.coreOffer),
     ...tokenizeProfile(profile.businessLocation),
+    ...tokenizeProfile(profile.productCategory),
   ]);
 
   const signalCount = offerTokens.size + audienceTokens.size + strategyTokens.size + claimTokens.size;

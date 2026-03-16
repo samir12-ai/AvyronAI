@@ -1,0 +1,123 @@
+Hi Replit Team,
+
+We need to implement a small but important structural update to stabilize the strategy pipeline and eliminate recurring positioning inconsistencies.
+
+The goal is to keep the solution simple, low-cost, and directly implemented in the current system architecture without heavy refactoring.
+
+---
+
+## 1. Integrate Product DNA into the Profile Card (Source of Truth)
+
+Product DNA must be stored directly inside the Profile Card and treated as a core input layer for the strategy system.
+
+The Profile Card should include the minimal Product DNA fields:
+
+- Product Category  
+- Core Problem Solved  
+- Unique Mechanism  
+- Strategic Advantage / Differentiation  
+- Target Decision Maker
+
+This Profile Card becomes the product reference layer for downstream engines.
+
+---
+
+## 2. Enforce Product DNA Consumption Across Engines
+
+Please ensure that all strategic engines load the Profile Card before running their logic.
+
+Execution order should become:
+
+Profile Card (Product DNA) → Market Signals → Engine Logic
+
+This ensures the system generates positioning and offers that reflect both market reality and product identity.
+
+Important clarification:
+
+- Market Intelligence must remain market-driven.
+- It may read Product DNA as context but must not bias its analysis with it.
+- Market analysis must remain based on competitor and market signals.
+
+Engines that must actively use Product DNA include:
+
+- Audience Engine  
+- Positioning Engine  
+- Differentiation Engine  
+- Offer Engine  
+- Persuasion Engine
+
+---
+
+## 3. Verify Existing Product Signals in Account Code
+
+We previously introduced product-level signals in the account layer.
+
+Please confirm:
+
+- Whether Product signals are currently being extracted from the account code
+- Whether engines are actually consuming those signals
+- If they exist but are unused, ensure they are properly injected into the engine pipeline.
+
+This step is only a verification and connection check, not a redesign.
+
+---
+
+## 4. Remove Minimum Data Safeguards in Market Intelligence
+
+We also need to adjust the Market Intelligence validation logic.
+
+Currently the system enforces minimum thresholds such as:
+
+- minimum number of posts  
+- minimum number of comments  
+- minimum signal counts
+
+Because Instagram and some sources restrict scraping, these safeguards are causing the system to repeatedly produce Partial Analysis states even when the available data is sufficient.
+
+Please remove these minimum requirement checks entirely.
+
+The new logic should be simple:
+
+- Use whatever data is available from scraping
+- Treat the scraped dataset as the maximum available dataset
+- Run analysis normally without blocking or partial states.
+
+Example:
+
+If scraping returns 12 posts, the system should simply analyze those 12 posts without any safeguard checks.
+
+This will eliminate unnecessary “partial” warnings that are currently blocking normal analysis.
+
+---
+
+## 5. Audience Engine Data Sources
+
+Once Product DNA is integrated, the Audience Engine should rely on a blended signal model:
+
+- Content DNA signals  
+- Extracted text signals from scraping  
+- Product DNA context
+
+This ensures audience understanding remains accurate even when comment scraping is limited.
+
+---
+
+## 6. Implementation Approach
+
+Please implement these adjustments directly in the current system.
+
+No architectural overhaul is required. The focus is simply:
+
+- connecting Product DNA through the Profile Card  
+- ensuring engines load it  
+- removing Market Intelligence minimum thresholds.
+
+---
+
+Once completed, please run a quick verification to confirm:
+
+- Engines are loading Product DNA from Profile Card
+- Market Intelligence runs without minimum thresholds
+- Audience analysis still operates normally using available signals.
+
+Thank you.

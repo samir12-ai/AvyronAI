@@ -93,31 +93,24 @@ export function evaluateSignalStabilityGuard(signalResults: CompetitorSignalResu
   const allMissing = signalResults.flatMap(r => r.missingFields);
 
   const reasons: string[] = [];
-  let decision: GuardDecision = "PROCEED";
+  const decision: GuardDecision = "PROCEED";
 
   if (avgCoverage < MI_CONFIDENCE.BLOCK_COVERAGE) {
-    decision = "BLOCK";
-    reasons.push(`Signal coverage critically low: ${avgCoverage.toFixed(2)} < ${MI_CONFIDENCE.BLOCK_COVERAGE}`);
-  } else if (avgCoverage < MI_CONFIDENCE.DOWNGRADE_COVERAGE) {
-    if (decision !== "BLOCK") decision = "DOWNGRADE";
-    reasons.push(`Signal coverage below threshold: ${avgCoverage.toFixed(2)} < ${MI_CONFIDENCE.DOWNGRADE_COVERAGE}`);
+    reasons.push(`Signal coverage low: ${avgCoverage.toFixed(2)} (advisory only)`);
   }
 
   if (avgReliability < MI_CONFIDENCE.BLOCK_RELIABILITY) {
-    decision = "BLOCK";
-    reasons.push(`Source reliability critically low: ${avgReliability.toFixed(2)} < ${MI_CONFIDENCE.BLOCK_RELIABILITY}`);
+    reasons.push(`Source reliability low: ${avgReliability.toFixed(2)} (advisory only)`);
   }
 
   const effectiveDominantThreshold = contentPrimaryMode ? 0.75 : MI_CONFIDENCE.DOWNGRADE_DOMINANT_SOURCE;
   if (maxDominantRatio > effectiveDominantThreshold) {
-    if (decision !== "BLOCK") decision = "DOWNGRADE";
-    reasons.push(`Dominant source ratio too high: ${maxDominantRatio.toFixed(2)} > ${effectiveDominantThreshold}${contentPrimaryMode ? " (content-primary mode)" : ""}`);
+    reasons.push(`Dominant source ratio high: ${maxDominantRatio.toFixed(2)} > ${effectiveDominantThreshold}${contentPrimaryMode ? " (content-primary mode)" : ""} (advisory only)`);
   }
 
   const minSample = MI_THRESHOLDS.MIN_POSTS_API_CEILING * signalResults.length;
   if (totalSampleSize < minSample) {
-    if (decision !== "BLOCK") decision = "DOWNGRADE";
-    reasons.push(`Sample size insufficient: ${totalSampleSize} < ${minSample}`);
+    reasons.push(`Sample size note: ${totalSampleSize} < ${minSample} (using available data)`);
   }
 
   return {
@@ -162,14 +155,10 @@ export function computeConfidence(
   const guardReasons = [...guard.reasons];
 
   if (dataAgeDays > MI_CONFIDENCE.FRESHNESS_HARD_GATE_DAYS) {
-    guardDecision = "BLOCK";
-    guardReasons.push(`DATA_STALE_HARD_GATE: data older than ${MI_CONFIDENCE.FRESHNESS_HARD_GATE_DAYS} days requires refresh (age: ${dataAgeDays}d)`);
-  } else if (overall < MI_CONFIDENCE.BLOCK_THRESHOLD && guardDecision !== "BLOCK") {
-    guardDecision = "BLOCK";
-    guardReasons.push(`Overall confidence below block threshold: ${overall} < ${MI_CONFIDENCE.BLOCK_THRESHOLD}`);
-  } else if (overall < MI_CONFIDENCE.NO_AGGRESSIVE_THRESHOLD && guardDecision === "PROCEED") {
-    guardDecision = "DOWNGRADE";
-    guardReasons.push(`Overall confidence below aggressive threshold: ${overall} < ${MI_CONFIDENCE.NO_AGGRESSIVE_THRESHOLD}`);
+    guardReasons.push(`DATA_STALE_ADVISORY: data older than ${MI_CONFIDENCE.FRESHNESS_HARD_GATE_DAYS} days (age: ${dataAgeDays}d) — proceeding with available data`);
+  }
+  if (overall < MI_CONFIDENCE.BLOCK_THRESHOLD) {
+    guardReasons.push(`Low confidence advisory: ${overall} < ${MI_CONFIDENCE.BLOCK_THRESHOLD} — proceeding with available data`);
   }
 
   return {

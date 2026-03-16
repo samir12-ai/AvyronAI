@@ -5,6 +5,7 @@ import {
   audienceSnapshots,
   ciCompetitors,
 } from "@shared/schema";
+import { loadProductDNA, formatProductDNAForPrompt } from "../shared/product-dna";
 import { inArray, eq, and, desc } from "drizzle-orm";
 import { aiChat } from "../ai-client";
 import { checkForOrphanClaims, type OrphanCheckResult } from "../shared/signal-quality-gate";
@@ -984,6 +985,7 @@ async function layer11_positioningStatementGeneration(
   segmentPriority: { segment: string; priority: number }[],
   accountId: string,
   miData?: any,
+  productDna?: any,
 ): Promise<Territory[]> {
   if (territories.length === 0) return territories;
 
@@ -1013,10 +1015,13 @@ async function layer11_positioningStatementGeneration(
       }
     }
 
+    const productDnaBlock = productDna ? formatProductDNAForPrompt(productDna) : "";
+
     const prompt = `You are a strategic positioning analyst. Generate precise positioning statements for each territory.
 
 MARKET CATEGORY: ${category}
 PRIMARY AUDIENCE SEGMENT: ${topSegment}
+${productDnaBlock ? `\n${productDnaBlock}\n` : ""}
 
 TERRITORIES:
 ${territories.map((t, i) => `${i + 1}. "${t.name}" (opportunity: ${t.opportunityScore}, distance: ${t.narrativeDistanceScore})
@@ -1336,10 +1341,15 @@ export async function runPositioningEngine(
     console.log(`[PositioningEngine-V3] WEAK_DATA | reliability=${dataReliability.overallReliability.toFixed(2)} | advisories=${dataReliability.advisories.length}`);
   }
 
+  const productDna = await loadProductDNA(campaignId, accountId);
+  if (productDna) {
+    console.log(`[PositioningEngine-V3] PRODUCT_DNA_LOADED | category=${productDna.productCategory || "n/a"} | mechanism=${productDna.uniqueMechanism || "n/a"} | advantage=${productDna.strategicAdvantage || "n/a"}`);
+  }
+
   console.log(`[PositioningEngine-V3] Starting 12-layer analysis | MI=${miSnapshotId} | Audience=${audienceSnapshotId} | Competitors=${competitors.length}`);
 
   const categoryResult = layer1_categoryDetection(activeMiSnapshot, competitors.length, totalSignals);
-  const category = categoryResult.macro;
+  const category = productDna?.productCategory || categoryResult.macro;
   console.log(`[PositioningEngine-V3] L1 Category: ${category}${categoryResult.subcategory ? ` / ${categoryResult.subcategory}` : ""}`);
 
   const narrativeMap = layer2_marketNarrativeMap(activeMiSnapshot);
@@ -1435,7 +1445,7 @@ export async function runPositioningEngine(
     console.warn(`[PositioningEngine-V3] Cross-campaign diversity check skipped: ${err.message}`);
   }
 
-  territories = await layer11_positioningStatementGeneration(territories, category, segmentPriority, accountId, activeMiSnapshot);
+  territories = await layer11_positioningStatementGeneration(territories, category, segmentPriority, accountId, activeMiSnapshot, productDna);
   console.log(`[PositioningEngine-V3] L11 Statements generated`);
 
   const boundaryText = territories.map(t =>

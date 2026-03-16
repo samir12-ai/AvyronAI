@@ -48,6 +48,11 @@ interface BusinessData {
   monthlyBudget: string;
   funnelObjective: string;
   primaryConversionChannel: string;
+  productCategory: string;
+  coreProblemSolved: string;
+  uniqueMechanism: string;
+  strategicAdvantage: string;
+  targetDecisionMaker: string;
   goalTarget: string;
   goalTimeline: string;
   goalDescription: string;
@@ -63,6 +68,11 @@ const EMPTY_DATA: BusinessData = {
   monthlyBudget: '',
   funnelObjective: '',
   primaryConversionChannel: '',
+  productCategory: '',
+  coreProblemSolved: '',
+  uniqueMechanism: '',
+  strategicAdvantage: '',
+  targetDecisionMaker: '',
   goalTarget: '',
   goalTimeline: '',
   goalDescription: '',
@@ -123,6 +133,11 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
             monthlyBudget: d.monthlyBudget || '',
             funnelObjective: d.funnelObjective || '',
             primaryConversionChannel: d.primaryConversionChannel || '',
+            productCategory: d.productCategory || '',
+            coreProblemSolved: d.coreProblemSolved || '',
+            uniqueMechanism: d.uniqueMechanism || '',
+            strategicAdvantage: d.strategicAdvantage || '',
+            targetDecisionMaker: d.targetDecisionMaker || '',
             goalTarget: d.goalTarget || '',
             goalTimeline: d.goalTimeline || '',
             goalDescription: d.goalDescription || '',
@@ -319,6 +334,21 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
 
       {renderChipSelector('funnelObjective', 'Funnel Objective', FUNNEL_OBJECTIVES)}
       {renderChipSelector('primaryConversionChannel', 'Primary Conversion Channel', CONVERSION_CHANNELS)}
+
+      <View style={[s.goalSection, { borderColor: '#D946EF30' }]}>
+        <View style={s.goalSectionHeader}>
+          <Ionicons name="flask-outline" size={16} color="#D946EF" />
+          <Text style={[s.goalSectionTitle, { color: colors.text }]}>Product DNA</Text>
+        </View>
+        <Text style={[s.goalSectionSubtitle, { color: colors.textSecondary }]}>
+          Define your product identity so all engines generate consistent positioning and offers
+        </Text>
+        {renderTextField('productCategory', 'Product Category', 'e.g. Online coaching, SaaS tool, Physical product', 'grid-outline')}
+        {renderTextField('coreProblemSolved', 'Core Problem Solved', 'e.g. Small businesses struggle to get consistent leads', 'help-circle-outline', true)}
+        {renderTextField('uniqueMechanism', 'Unique Mechanism', 'e.g. AI-powered lead scoring system', 'construct-outline', true)}
+        {renderTextField('strategicAdvantage', 'Strategic Advantage / Differentiation', 'e.g. Only platform with real-time competitor monitoring', 'trophy-outline', true)}
+        {renderTextField('targetDecisionMaker', 'Target Decision Maker', 'e.g. Marketing directors at mid-size agencies', 'person-circle-outline')}
+      </View>
 
       <View style={[s.goalSection, { borderColor: colors.inputBorder + '60' }]}>
         <View style={s.goalSectionHeader}>

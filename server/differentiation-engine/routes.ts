@@ -167,6 +167,11 @@ export function registerDifferentiationRoutes(app: Express) {
             funnelObjective: bizData.funnelObjective,
             businessLocation: bizData.businessLocation,
             goalDescription: bizData.goalDescription,
+            productCategory: (bizData as any).productCategory || null,
+            coreProblemSolved: (bizData as any).coreProblemSolved || null,
+            uniqueMechanism: (bizData as any).uniqueMechanism || null,
+            strategicAdvantage: (bizData as any).strategicAdvantage || null,
+            targetDecisionMaker: (bizData as any).targetDecisionMaker || null,
           };
           console.log(`[DifferentiationEngine] Profile data loaded for campaign ${campaignId} — dual signal model active`);
         } else {

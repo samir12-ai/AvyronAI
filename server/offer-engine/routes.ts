@@ -148,6 +148,7 @@ export function registerOfferEngineRoutes(app: Express) {
         threatSignals: safeJsonParse(miSnapshot.threatSignals) || [],
         multiSourceSignals: miSnapshot.multiSourceSignals || null,
         sourceAvailability: miSnapshot.sourceAvailability || null,
+        _campaignId: campaignId,
       };
 
       const audienceInput = {

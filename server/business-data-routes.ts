@@ -103,6 +103,11 @@ export function registerBusinessDataRoutes(app: Express) {
         updatedAt: new Date(),
       };
 
+      if (req.body.productCategory !== undefined) dataValues.productCategory = String(req.body.productCategory);
+      if (req.body.coreProblemSolved !== undefined) dataValues.coreProblemSolved = String(req.body.coreProblemSolved);
+      if (req.body.uniqueMechanism !== undefined) dataValues.uniqueMechanism = String(req.body.uniqueMechanism);
+      if (req.body.strategicAdvantage !== undefined) dataValues.strategicAdvantage = String(req.body.strategicAdvantage);
+      if (req.body.targetDecisionMaker !== undefined) dataValues.targetDecisionMaker = String(req.body.targetDecisionMaker);
       if (req.body.goalTarget !== undefined) dataValues.goalTarget = String(req.body.goalTarget);
       if (req.body.goalTimeline !== undefined) dataValues.goalTimeline = String(req.body.goalTimeline);
       if (req.body.goalDescription !== undefined) dataValues.goalDescription = String(req.body.goalDescription);

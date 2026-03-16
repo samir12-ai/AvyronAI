@@ -31,6 +31,11 @@ export interface ProfileInput {
   funnelObjective: string | null;
   businessLocation: string | null;
   goalDescription: string | null;
+  productCategory?: string | null;
+  coreProblemSolved?: string | null;
+  uniqueMechanism?: string | null;
+  strategicAdvantage?: string | null;
+  targetDecisionMaker?: string | null;
 }
 
 export interface ProfileSignals {

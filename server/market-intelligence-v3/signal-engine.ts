@@ -463,21 +463,18 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
   const postCommentCounts = posts.reduce((s, p) => s + (p.comments || 0), 0);
 
   const missingFields: string[] = [];
-  if (posts.length < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR) missingFields.push(`posts (have ${posts.length}, need ${MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR})`);
-  if (comments.length < MI_THRESHOLDS.MIN_COMMENTS_SAMPLE && postCommentCounts < MI_THRESHOLDS.MIN_COMMENTS_SAMPLE) missingFields.push(`comments (have ${comments.length} text, ${postCommentCounts} counted, need ${MI_THRESHOLDS.MIN_COMMENTS_SAMPLE})`);
-  if (!competitor.postingFrequency && posts.length < MI_THRESHOLDS.MIN_ENGAGEMENT_POSTS) missingFields.push("postingFrequency");
+  if (posts.length === 0) missingFields.push("posts (none available)");
   if (!competitor.contentTypeRatio) missingFields.push("contentTypeRatio");
-  if (!competitor.engagementRatio && posts.length < MI_THRESHOLDS.MIN_ENGAGEMENT_POSTS) missingFields.push("engagementRatio");
   if (!competitor.ctaPatterns) missingFields.push("ctaPatterns");
   if (!competitor.profileLink) missingFields.push("profileLink (bio/CTA detection)");
 
-  const hasCommentSignal = comments.length >= MI_THRESHOLDS.MIN_COMMENTS_SAMPLE || postCommentCounts >= MI_THRESHOLDS.MIN_COMMENTS_SAMPLE;
+  const hasCommentSignal = comments.length > 0 || postCommentCounts > 0;
 
   const totalExpectedFields = 9;
   const availableFields = totalExpectedFields - [
-    posts.length < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR,
+    posts.length === 0,
     !hasCommentSignal,
-    !competitor.engagementRatio && posts.length < MI_THRESHOLDS.MIN_ENGAGEMENT_POSTS,
+    !competitor.engagementRatio && posts.length === 0,
     !competitor.ctaPatterns,
     !competitor.profileLink,
   ].filter(Boolean).length;
@@ -496,8 +493,8 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
 
   const rawAuthorityWeight = computeCompetitorAuthorityWeight(signals, sampleSize, signalCoverageScore);
   const lifecycle = classifyCompetitorLifecycle(signals, sampleSize, signalCoverageScore);
-  const lowSample = posts.length < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR;
-  const authorityWeight = lowSample ? Math.round(rawAuthorityWeight * MI_LIFECYCLE.LOW_SAMPLE_WEIGHT_FACTOR * 1000) / 1000 : rawAuthorityWeight;
+  const lowSample = posts.length === 0;
+  const authorityWeight = rawAuthorityWeight;
 
   return {
     competitorId: competitor.id,
@@ -539,12 +536,8 @@ export function aggregateMissingFlags(signalResults: CompetitorSignalResult[]): 
       flags.add(`${r.competitorName}: ${f}`);
     }
   }
-  if (signalResults.length < MI_THRESHOLDS.MIN_COMPETITORS) {
-    flags.add(`Insufficient competitors (have ${signalResults.length}, need ${MI_THRESHOLDS.MIN_COMPETITORS})`);
-  }
-  const fullyQualified = signalResults.filter(r => r.missingFields.length === 0).length;
-  if (fullyQualified < MI_THRESHOLDS.MIN_FULL_THRESHOLD_COMPETITORS) {
-    flags.add(`Insufficient fully qualified competitors (have ${fullyQualified}, need ${MI_THRESHOLDS.MIN_FULL_THRESHOLD_COMPETITORS})`);
+  if (signalResults.length === 0) {
+    flags.add(`No competitors available for analysis`);
   }
   return Array.from(flags);
 }

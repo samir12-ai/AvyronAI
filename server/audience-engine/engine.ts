@@ -1,5 +1,6 @@
 import { db } from "../db";
 import { audienceSnapshots, miSnapshots, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, growthCampaigns } from "@shared/schema";
+import { loadProductDNA, formatProductDNAForPrompt } from "../shared/product-dna";
 import { inArray, eq, and, desc, sql } from "drizzle-orm";
 import {
   AUDIENCE_ENGINE_VERSION,
@@ -825,9 +826,12 @@ async function constructSegments(
       }
     } catch {}
 
+    const productDnaBlock = (businessContext as any).productDna ? formatProductDNAForPrompt((businessContext as any).productDna) : "";
+
     const prompt = `You are an audience research analyst. Based on market evidence, construct 2-4 distinct audience segments.
 
 BUSINESS: ${businessContext.industry} — ${businessContext.coreOffer}
+${productDnaBlock ? `\n${productDnaBlock}\n` : ""}
 
 PAIN MAP (from real audience data):
 ${painMap.slice(0, 8).map(p => `- ${p.canonical}: frequency=${p.frequency}, confidence=${(p.confidenceScore * 100).toFixed(0)}%`).join("\n")}
@@ -1210,12 +1214,17 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     .where(eq(growthCampaigns.id, campaignId))
     .limit(1);
 
+  const productDna = await loadProductDNA(campaignId, accountId);
   const businessContext = {
-    industry: campaign?.name || "General",
-    coreOffer: campaign?.name || "Products/Services",
-    targetAudience: "Market audience",
+    industry: productDna?.businessType || productDna?.productCategory || campaign?.name || "General",
+    coreOffer: productDna?.coreOffer || campaign?.name || "Products/Services",
+    targetAudience: productDna?.targetDecisionMaker || productDna?.targetAudienceSegment || "Market audience",
     location: "",
+    productDna: productDna || undefined,
   };
+  if (productDna) {
+    console.log(`[AudienceEngine-V3] PRODUCT_DNA_LOADED | category=${productDna.productCategory || "n/a"} | mechanism=${productDna.uniqueMechanism || "n/a"} | advantage=${productDna.strategicAdvantage || "n/a"}`);
+  }
 
   const allText = [...commentTexts, ...captions];
   const sourceTypes = [];
