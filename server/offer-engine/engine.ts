@@ -224,11 +224,9 @@ export function buildPositioningLock(
   const mechanismFamily = mechanism.supported ? (mechanism.type || "none") : "none";
   const mechanismName = core && core.mechanismType !== "none" ? core.mechanismName : null;
 
-  const extractTokens = (text: string): string[] =>
-    text.toLowerCase().split(/[\s,.\-/]+/).filter(t => t.length > 2);
   const axisTokens = [...new Set([
-    ...extractTokens(contrastAxis),
-    ...extractTokens(enemyDefinition),
+    ...extractRobustTokens(contrastAxis),
+    ...extractRobustTokens(enemyDefinition),
   ])];
 
   let problemDomain: string | null = null;
@@ -319,12 +317,11 @@ export function clampOfferToAxis(
   }
 
   if (lock.problemDomain) {
-    const problemTokens = lock.problemDomain.toLowerCase().split(/[\s,.\-/]+/).filter(t => t.length > 3);
-    const nameHasProblem = problemTokens.some(t => clampedName.toLowerCase().includes(t));
-    const outcomeHasProblem = problemTokens.some(t => clampedOutcome.toLowerCase().includes(t));
-    const mechHasProblem = problemTokens.some(t => clampedMech.toLowerCase().includes(t));
+    const problemTokens = extractRobustTokens(lock.problemDomain);
+    const combinedText = `${clampedName} ${clampedOutcome} ${clampedMech}`.toLowerCase();
+    const hasProblemRef = fuzzyTokenMatch(problemTokens, combinedText);
 
-    if (!nameHasProblem && !outcomeHasProblem && !mechHasProblem && problemTokens.length > 0) {
+    if (!hasProblemRef && problemTokens.length > 0) {
       clampedOutcome = `${clampedOutcome} — addressing ${lock.problemDomain}`;
       clampActions.push(`Outcome clamped — appended problem domain "${lock.problemDomain}"`);
     }
@@ -1407,9 +1404,11 @@ export async function runOfferEngine(
 
   if (mechanismEngineOutput?.primaryMechanism) {
     const mechOut = mechanismEngineOutput.primaryMechanism;
-    console.log(`[OfferEngine-V4] MECHANISM_ENGINE_INPUT | name="${mechOut.mechanismName}" | axis=${mechOut.axisAlignment?.primaryAxis} | consuming centralized mechanism`);
+    const mechAxis = mechOut.axisAlignment?.primaryAxis;
+    const mechEmphasis: string[] = mechOut.axisAlignment?.axisEmphasis || [];
+    console.log(`[OfferEngine-V4] MECHANISM_ENGINE_INPUT | name="${mechOut.mechanismName}" | axis=${mechAxis} | emphasis=[${mechEmphasis.slice(0, 3).join(",")}] | consuming centralized mechanism`);
     diagnostics.mechanismEngineConsumed = true;
-    diagnostics.mechanismEngineAxis = mechOut.axisAlignment?.primaryAxis;
+    diagnostics.mechanismEngineAxis = mechAxis;
 
     if (!differentiation.mechanismCore || differentiation.mechanismCore.mechanismType === "none") {
       differentiation = {
@@ -1442,6 +1441,32 @@ export async function runOfferEngine(
           mechanismLogic: mechOut.mechanismLogic || differentiation.mechanismCore.mechanismLogic,
         },
       };
+    }
+
+    if (mechAxis) {
+      const axisLabel = mechAxis.replace(/_/g, " ");
+      const axisLabelTokens = extractRobustTokens(axisLabel);
+      const effectiveEmphasis = mechEmphasis.length > 0 ? mechEmphasis : axisLabelTokens;
+      const emphasisText = effectiveEmphasis.join(", ");
+      const currentContrast = (positioning.contrastAxis || "").trim();
+      const alreadyEnriched = currentContrast.includes(axisLabel);
+      if (!alreadyEnriched) {
+        const enrichedAxis = currentContrast
+          ? `${currentContrast} (${axisLabel}: ${emphasisText})`
+          : `${axisLabel}: ${emphasisText}`;
+        positioning = { ...positioning, contrastAxis: enrichedAxis };
+        diagnostics.axisEnrichment = {
+          original: currentContrast,
+          enriched: enrichedAxis,
+          mechanismAxis: mechAxis,
+          emphasis: effectiveEmphasis,
+        };
+        console.log(`[OfferEngine-V4] AXIS_SYNC | enriched contrastAxis with mechanism emphasis | "${currentContrast}" → "${enrichedAxis}"`);
+      }
+    }
+
+    if (mechOut.mechanismProblem && !positioning.contrastAxis?.includes(mechOut.mechanismProblem)) {
+      diagnostics.mechanismProblemDomain = mechOut.mechanismProblem;
     }
   }
 
