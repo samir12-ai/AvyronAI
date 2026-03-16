@@ -204,16 +204,6 @@ export function registerOfferEngineRoutes(app: Express) {
 
       const result = await runOfferEngine(miInput, audienceInput, positioningInput, differentiationInput, accountId, upstreamLineage, mechanismEngineOutput);
 
-      if (result.status === "INTEGRITY_FAILED") {
-        return res.status(422).json({
-          success: false,
-          error: "INTEGRITY_FAILED",
-          message: result.statusMessage || "Offer output violated boundary protections",
-          boundaryCheck: result.boundaryCheck,
-          executionTimeMs: result.executionTimeMs,
-        });
-      }
-
       if (result.status === "INSUFFICIENT_SIGNALS") {
         return res.status(422).json({
           success: false,

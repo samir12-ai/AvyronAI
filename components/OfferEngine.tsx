@@ -322,8 +322,8 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
         {variant !== 'rejected' && (
           <Pressable
             onPress={() => selectOption(variant)}
-            disabled={selecting || isSelected || data.status === 'POSITIONING_MISMATCH'}
-            style={[styles.selectBtn, isSelected && styles.selectBtnSelected, data.status === 'POSITIONING_MISMATCH' && { opacity: 0.3 }]}
+            disabled={selecting || isSelected}
+            style={[styles.selectBtn, isSelected && styles.selectBtnSelected]}
           >
             <LinearGradient
               colors={isSelected ? ['#10B981', '#059669'] : [borderColor, borderColor + 'CC']}
@@ -337,7 +337,7 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
                 <>
                   <Ionicons name={isSelected ? 'checkmark-circle' : 'hand-left'} size={14} color="#fff" />
                   <Text style={styles.selectBtnText}>
-                    {isSelected ? 'Selected' : data.status === 'POSITIONING_MISMATCH' ? 'Blocked — Axis Mismatch' : 'Select This Offer'}
+                    {isSelected ? 'Selected' : 'Select This Offer'}
                   </Text>
                 </>
               )}
@@ -476,11 +476,11 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
           )}
 
           {data.status === 'POSITIONING_MISMATCH' && (
-            <View style={[styles.warningBox, { backgroundColor: '#7C3AED15', borderColor: '#7C3AED30' }]}>
-              <Ionicons name="shield" size={16} color="#7C3AED" />
+            <View style={[styles.warningBox, { backgroundColor: '#F59E0B12', borderColor: '#F59E0B30' }]}>
+              <Ionicons name="alert-circle" size={16} color="#F59E0B" />
               <View style={{ flex: 1 }}>
-                <Text style={[styles.warningTitle, { color: '#7C3AED' }]}>Offers Blocked</Text>
-                <Text style={[styles.warningDetail, { color: '#6D28D9' }]}>These offers failed the positioning consistency guard. The hook and mechanism must share the same strategic axis before offers can be finalized. Please regenerate.</Text>
+                <Text style={[styles.warningTitle, { color: '#D97706' }]}>Positioning Advisory</Text>
+                <Text style={[styles.warningDetail, { color: '#92400E' }]}>Hook and mechanism may not fully share the same strategic axis. Review alignment and regenerate if needed.</Text>
               </View>
             </View>
           )}
@@ -489,16 +489,14 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
             {(['primary', 'alternative', 'rejected'] as const).map(section => {
               const isActive = activeSection === section;
               const sColor = section === 'primary' ? '#10B981' : section === 'alternative' ? '#3B82F6' : '#EF4444';
-              const isBlocked = data.status === 'POSITIONING_MISMATCH' && section !== 'rejected';
               return (
                 <Pressable
                   key={section}
                   onPress={() => { Haptics.selectionAsync(); setActiveSection(section); }}
-                  style={[styles.selectorTab, isActive && { backgroundColor: sColor + '14', borderColor: sColor + '40' }, isBlocked && { opacity: 0.4 }]}
+                  style={[styles.selectorTab, isActive && { backgroundColor: sColor + '14', borderColor: sColor + '40' }]}
                 >
                   <Text style={[styles.selectorText, { color: isActive ? sColor : colors.textMuted }]}>
                     {section.charAt(0).toUpperCase() + section.slice(1)}
-                    {isBlocked ? ' ⚠' : ''}
                   </Text>
                 </Pressable>
               );

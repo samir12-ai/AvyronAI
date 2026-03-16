@@ -372,10 +372,6 @@ export function registerFunnelEngineRoutes(app: Express) {
         ))
         .limit(1);
 
-      if (existingSnapshot && existingSnapshot.status === "POSITIONING_MISMATCH") {
-        return res.status(400).json({ error: "Cannot select an offer with POSITIONING_MISMATCH status. Regenerate offers to resolve the positioning axis conflict." });
-      }
-
       const [updated] = await db.update(offerSnapshots)
         .set({ selectedOption })
         .where(and(

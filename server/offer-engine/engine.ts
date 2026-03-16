@@ -1,6 +1,39 @@
 import { aiChat } from "../ai-client";
 import { loadProductDNA, formatProductDNAForPrompt, type ProductDNA } from "../shared/product-dna";
 import { detectGenericOutput, checkCrossEngineAlignment, enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
+
+const STOP_WORDS = new Set([
+  "the","and","for","with","from","that","this","into","through","about",
+  "over","after","before","between","under","above","but","not","are","was",
+  "were","been","being","have","has","had","does","did","will","would","could",
+  "should","may","might","shall","can","its","our","your","their","his","her",
+  "who","which","what","when","where","how","all","each","every","both","few",
+  "more","most","other","some","such","than","too","very","just","also","any",
+  "customer","customers","business","market","product","service","based","using",
+]);
+
+function extractRobustTokens(text: string, minLen = 3): string[] {
+  return text
+    .toLowerCase()
+    .split(/[\s_,.\-/()]+/)
+    .filter(t => t.length >= minLen && !STOP_WORDS.has(t));
+}
+
+function stemPrefix(word: string): string {
+  return word.replace(/(ity|ness|ment|tion|sion|ance|ence|able|ible|ful|less|ing|ous|ive|ical|ally|ized|ise|ize)$/, "");
+}
+
+function fuzzyTokenMatch(sourceTokens: string[], targetText: string): boolean {
+  if (sourceTokens.length === 0) return true;
+  const targetLower = targetText.toLowerCase();
+  return sourceTokens.some(token => {
+    if (targetLower.includes(token)) return true;
+    const stem = stemPrefix(token);
+    if (stem.length >= 3 && targetLower.includes(stem)) return true;
+    return false;
+  });
+}
+
 import {
   ENGINE_VERSION,
   OFFER_DEPTH_WEIGHTS,
@@ -696,20 +729,16 @@ export function checkPositioningConsistency(
   }
 
   if (positioning.contrastAxis) {
-    const contrast = positioning.contrastAxis.toLowerCase();
-    const contrastTokens = contrast.split(/\s+/).filter(t => t.length > 3);
-    const negativeAlignment = contrastTokens.some(t => offerText.includes(t));
-    if (!negativeAlignment && contrastTokens.length > 0) {
+    const contrastTokens = extractRobustTokens(positioning.contrastAxis);
+    if (contrastTokens.length > 0 && !fuzzyTokenMatch(contrastTokens, offerText)) {
       contradictions.push("Offer does not reflect positioning contrast axis");
     }
   }
 
   const mechanism = differentiation.mechanismFraming || {};
   if (mechanism.supported && mechanism.type !== "none") {
-    const mechDesc = (mechanism.description || "").toLowerCase();
-    const mechTokens = mechDesc.split(/\s+/).filter((t: string) => t.length > 4).slice(0, 5);
-    const hasAlignment = mechTokens.some((t: string) => offerText.includes(t));
-    if (!hasAlignment && mechTokens.length > 2) {
+    const mechTokens = extractRobustTokens(mechanism.description || "").slice(0, 5);
+    if (mechTokens.length > 2 && !fuzzyTokenMatch(mechTokens, offerText)) {
       contradictions.push("Offer mechanism does not align with differentiation mechanism framing");
     }
   }
@@ -734,19 +763,25 @@ export function checkHookMechanismAlignment(
     return { aligned: true, failures: [], hookAxis: null, mechanismAxis: null };
   }
 
-  const extractAxisTokens = (axis: string): string[] =>
-    axis.split(/[\s,.\-/]+/).filter(t => t.length > 2);
-
-  const contrastTokens = extractAxisTokens(contrastAxis);
-  const enemyTokens = extractAxisTokens(enemyDef);
+  const contrastTokens = extractRobustTokens(contrastAxis);
+  const enemyTokens = extractRobustTokens(enemyDef);
   const axisTokens = [...new Set([...contrastTokens, ...enemyTokens])];
 
   if (axisTokens.length === 0) {
     return { aligned: true, failures: [], hookAxis: null, mechanismAxis: null };
   }
 
-  const hookAxisTokensFound = axisTokens.filter(t => hookText.includes(t) || outcomeText.includes(t));
-  const mechAxisTokensFound = axisTokens.filter(t => mechText.includes(t));
+  const hookCombined = `${hookText} ${outcomeText}`;
+  const hookAxisTokensFound = axisTokens.filter(t => {
+    if (hookCombined.includes(t)) return true;
+    const stem = stemPrefix(t);
+    return stem.length >= 3 && hookCombined.includes(stem);
+  });
+  const mechAxisTokensFound = axisTokens.filter(t => {
+    if (mechText.includes(t)) return true;
+    const stem = stemPrefix(t);
+    return stem.length >= 3 && mechText.includes(stem);
+  });
 
   const hookHasAxis = hookAxisTokensFound.length > 0;
   const mechHasAxis = mechAxisTokensFound.length > 0;
@@ -786,11 +821,15 @@ export function checkHookMechanismAlignment(
     const hookProblemText = hookText + " " + outcomeText;
     const mechSolutionText = mechText;
 
-    const hookContentTokens = hookProblemText.split(/[\s,.\-/]+/).filter(t => t.length > 4);
-    const mechContentTokens = mechSolutionText.split(/[\s,.\-/]+/).filter(t => t.length > 4);
-    const sharedTokens = hookContentTokens.filter(t => mechContentTokens.includes(t));
+    const hookContentTokens = extractRobustTokens(hookProblemText, 4);
+    const mechContentTokens = extractRobustTokens(mechSolutionText, 4);
+    const sharedTokens = hookContentTokens.filter(t => {
+      if (mechContentTokens.includes(t)) return true;
+      const stem = stemPrefix(t);
+      return stem.length >= 3 && mechContentTokens.some(m => m.startsWith(stem) || stemPrefix(m) === stem);
+    });
 
-    if (sharedTokens.length < 2) {
+    if (sharedTokens.length < 1) {
       const hookProblemSummary = hookProblems.map(p => {
         const match = (hookText + " " + outcomeText).match(p);
         return match ? match[0] : "";
@@ -838,9 +877,9 @@ export function checkDifferentiationStrength(
 
   const hasContrast = !!(positioning.contrastAxis || positioning.enemyDefinition);
   if (hasContrast) {
-    const contrastTokens = (positioning.contrastAxis || "").toLowerCase().split(/\s+/).filter(t => t.length > 4);
-    const enemyTokens = (positioning.enemyDefinition || "").toLowerCase().split(/\s+/).filter(t => t.length > 4);
-    const contrastInOffer = contrastTokens.some(t => offerText.includes(t)) || enemyTokens.some(t => offerText.includes(t));
+    const contrastTokens = extractRobustTokens(positioning.contrastAxis || "");
+    const enemyTokens = extractRobustTokens(positioning.enemyDefinition || "");
+    const contrastInOffer = fuzzyTokenMatch(contrastTokens, offerText) || fuzzyTokenMatch(enemyTokens, offerText);
     if (contrastInOffer) {
       signals.push("Contrast against common approaches present in offer language");
     } else if (hasContrast) {
@@ -958,17 +997,14 @@ export function validateOfferAlignment(
     const delivText = (offer.deliverables || []).join(" ").toLowerCase();
     const combinedText = `${nameText} ${outcomeText} ${mechText} ${delivText}`;
 
-    const extractTokens = (text: string): string[] =>
-      text.toLowerCase().split(/[\s,.\-/]+/).filter(t => t.length > 4);
-
     const hasPainRef = pains.some((p: any) => {
-      const painText = (typeof p === "string" ? p : p?.pain || p?.name || p?.canonical || "").toLowerCase();
-      const tokens = extractTokens(painText);
-      return tokens.length > 0 && tokens.some(t => combinedText.includes(t));
+      const painText = (typeof p === "string" ? p : p?.pain || p?.name || p?.canonical || "");
+      const tokens = extractRobustTokens(painText);
+      return tokens.length > 0 && fuzzyTokenMatch(tokens, combinedText);
     });
     const hasDesireRef = desires.some(([k]) => {
-      const tokens = extractTokens(k);
-      return tokens.length > 0 && tokens.some(t => combinedText.includes(t));
+      const tokens = extractRobustTokens(k);
+      return tokens.length > 0 && fuzzyTokenMatch(tokens, combinedText);
     });
 
     if (!hasPainRef && !hasDesireRef) {
@@ -981,8 +1017,7 @@ export function validateOfferAlignment(
     const extractMarketTokens = (phrases: string[]): string[] => {
       const tokens: string[] = [];
       for (const phrase of phrases) {
-        const words = phrase.toLowerCase().split(/[\s,.\-/]+/).filter(w => w.length > 4);
-        tokens.push(...words);
+        tokens.push(...extractRobustTokens(phrase, 4));
       }
       return [...new Set(tokens)];
     };
@@ -994,7 +1029,11 @@ export function validateOfferAlignment(
     const allMarketTokens = [...painTokens, ...desireTokens, ...objectionTokens, ...emotionalTokens];
 
     if (allMarketTokens.length > 0) {
-      const matchedTokens = allMarketTokens.filter(t => combinedOfferText.includes(t));
+      const matchedTokens = allMarketTokens.filter(t => {
+        if (combinedOfferText.includes(t)) return true;
+        const stem = stemPrefix(t);
+        return stem.length >= 3 && combinedOfferText.includes(stem);
+      });
       const marketLanguageRatio = matchedTokens.length / allMarketTokens.length;
 
       if (matchedTokens.length === 0 && allMarketTokens.length >= 5) {
@@ -1008,11 +1047,11 @@ export function validateOfferAlignment(
   const deliverables = offer.deliverables || [];
   const mechanism = differentiation.mechanismFraming || {};
   if (mechanism.supported && deliverables.length > 0 && mechanism.description) {
-    const mechTokens = (mechanism.description || "").toLowerCase().split(/[\s,.\-/]+/).filter((t: string) => t.length > 4).slice(0, 8);
+    const mechTokens = extractRobustTokens(mechanism.description || "").slice(0, 8);
     const delivText = deliverables.join(" ").toLowerCase();
     const outcomeText = (offer.coreOutcome || "").toLowerCase();
     const combinedOfferText = `${delivText} ${outcomeText} ${(offer.mechanismDescription || "").toLowerCase()}`;
-    const hasDeliverableSupport = mechTokens.some((t: string) => combinedOfferText.includes(t));
+    const hasDeliverableSupport = fuzzyTokenMatch(mechTokens, combinedOfferText);
     if (!hasDeliverableSupport && mechTokens.length > 2) {
       failures.push("Deliverables do not logically support the defined differentiation mechanism");
     }
