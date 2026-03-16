@@ -34,6 +34,34 @@ function fuzzyTokenMatch(sourceTokens: string[], targetText: string): boolean {
   });
 }
 
+function extractAxisLabel(contrastAxis: string): string | null {
+  if (!contrastAxis) return null;
+
+  const parenMatch = contrastAxis.match(/\(([^:]+?):/);
+  if (parenMatch) return parenMatch[1].trim();
+
+  const colonMatch = contrastAxis.match(/^([^:]{2,60})\s*:/);
+  if (colonMatch) {
+    const label = colonMatch[1].trim().replace(/_/g, " ");
+    if (label.length <= 40) return label;
+  }
+
+  return null;
+}
+
+function extractCoreAxisTokens(contrastAxis: string): string[] {
+  const label = extractAxisLabel(contrastAxis);
+  if (!label) return [];
+
+  const parenSection = contrastAxis.match(/\([^)]+\)/);
+  if (parenSection) {
+    const innerTokens = extractRobustTokens(parenSection[0]);
+    if (innerTokens.length > 0) return innerTokens;
+  }
+
+  return extractRobustTokens(label);
+}
+
 import {
   ENGINE_VERSION,
   OFFER_DEPTH_WEIGHTS,
@@ -225,7 +253,7 @@ export function buildPositioningLock(
   const mechanismName = core && core.mechanismType !== "none" ? core.mechanismName : null;
 
   const axisTokens = [...new Set([
-    ...extractRobustTokens(contrastAxis),
+    ...extractCoreAxisTokens(contrastAxis),
     ...extractRobustTokens(enemyDefinition),
   ])];
 
@@ -324,6 +352,18 @@ export function clampOfferToAxis(
     if (!hasProblemRef && problemTokens.length > 0) {
       clampedOutcome = `${clampedOutcome} — addressing ${lock.problemDomain}`;
       clampActions.push(`Outcome clamped — appended problem domain "${lock.problemDomain}"`);
+    }
+  }
+
+  if (lock.axisTokens.length > 0) {
+    const postClampText = `${clampedName} ${clampedOutcome} ${clampedMech}`.toLowerCase();
+    const hasAxisRef = fuzzyTokenMatch(lock.axisTokens, postClampText);
+    if (!hasAxisRef) {
+      const axisLabel = extractAxisLabel(lock.contrastAxis || "");
+      if (axisLabel) {
+        clampedOutcome = `${clampedOutcome} — built on ${axisLabel} principles`;
+        clampActions.push(`Axis clamped — appended axis label "${axisLabel}" to ensure axis token presence`);
+      }
     }
   }
 
@@ -726,7 +766,7 @@ export function checkPositioningConsistency(
   }
 
   if (positioning.contrastAxis) {
-    const contrastTokens = extractRobustTokens(positioning.contrastAxis);
+    const contrastTokens = extractCoreAxisTokens(positioning.contrastAxis);
     if (contrastTokens.length > 0 && !fuzzyTokenMatch(contrastTokens, offerText)) {
       contradictions.push("Offer does not reflect positioning contrast axis");
     }
@@ -760,7 +800,7 @@ export function checkHookMechanismAlignment(
     return { aligned: true, failures: [], hookAxis: null, mechanismAxis: null };
   }
 
-  const contrastTokens = extractRobustTokens(contrastAxis);
+  const contrastTokens = extractCoreAxisTokens(contrastAxis);
   const enemyTokens = extractRobustTokens(enemyDef);
   const axisTokens = [...new Set([...contrastTokens, ...enemyTokens])];
 
@@ -874,9 +914,9 @@ export function checkDifferentiationStrength(
 
   const hasContrast = !!(positioning.contrastAxis || positioning.enemyDefinition);
   if (hasContrast) {
-    const contrastTokens = extractRobustTokens(positioning.contrastAxis || "");
+    const contrastTokens = extractCoreAxisTokens(positioning.contrastAxis || "");
     const enemyTokens = extractRobustTokens(positioning.enemyDefinition || "");
-    const contrastInOffer = fuzzyTokenMatch(contrastTokens, offerText) || fuzzyTokenMatch(enemyTokens, offerText);
+    const contrastInOffer = (contrastTokens.length > 0 && fuzzyTokenMatch(contrastTokens, offerText)) || fuzzyTokenMatch(enemyTokens, offerText);
     if (contrastInOffer) {
       signals.push("Contrast against common approaches present in offer language");
     } else if (hasContrast) {
