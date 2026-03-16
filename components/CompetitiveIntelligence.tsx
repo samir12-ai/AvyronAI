@@ -918,8 +918,8 @@ export default function CompetitiveIntelligence() {
                 <ActivityIndicator size={12} color={dataStatusColor} />
               )}
               {miv3Result.snapshotStatus === 'PARTIAL' && (
-                <View style={[s.intensityBadge, { backgroundColor: '#EF444420' }]}>
-                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#EF4444' }}>PARTIAL</Text>
+                <View style={[s.intensityBadge, { backgroundColor: '#F59E0B20' }]}>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#F59E0B' }}>PARTIAL</Text>
                 </View>
               )}
               <View style={[s.intensityBadge, { backgroundColor: miv3Result.executionMode === 'FULL' ? '#10B981' + '20' : miv3Result.executionMode === 'REDUCED' ? '#F59E0B' + '20' : '#6B7280' + '20' }]}>
@@ -1039,16 +1039,21 @@ export default function CompetitiveIntelligence() {
               </View>
             </View>
 
-            {miv3Result.output?.confidence?.guardReasons?.length > 0 && (
-              <View style={{ backgroundColor: '#3B82F615', borderRadius: 8, padding: 10, marginBottom: 8 }}>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: '#3B82F6' }}>DATA NOTES</Text>
-                {miv3Result.output.confidence.guardReasons.map((reason: string, i: number) => (
-                  <Text key={i} style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>• {reason}</Text>
-                ))}
-              </View>
-            )}
+            {(() => {
+              const reasons = (miv3Result.output?.confidence?.guardReasons || [])
+                .filter((r: string) => r.includes('advisory') || r.includes('ADVISORY') || r.includes('proceeding'))
+                .map((r: string) => r.replace(/ \(advisory only\)$/, '').replace(/— proceeding with available data$/, '').trim());
+              return reasons.length > 0 ? (
+                <View style={{ backgroundColor: '#3B82F615', borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#3B82F6' }}>DATA NOTES</Text>
+                  {reasons.map((reason: string, i: number) => (
+                    <Text key={i} style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>• {reason}</Text>
+                  ))}
+                </View>
+              ) : null;
+            })()}
 
-            {miv3Result.output?.marketDiagnosis && (
+            {miv3Result.output?.marketDiagnosis && !miv3Result.output.marketDiagnosis.includes('Exploratory assessment') && (
               <View style={{ marginBottom: 8 }}>
                 <Text style={{ fontSize: 11, fontWeight: '600', color: '#8B5CF6', marginBottom: 2 }}>Market Diagnosis</Text>
                 <Text style={{ fontSize: 11, color: colors.textSecondary }}>{miv3Result.output.marketDiagnosis}</Text>
@@ -1440,10 +1445,8 @@ export default function CompetitiveIntelligence() {
         <View style={s.sectionHeader}>
           <Text style={[s.sectionTitle, { color: colors.text }]}>Threat Signals</Text>
           {confidence && (
-            <View style={[s.countBadge, { backgroundColor: confidence.guardDecision === 'PROCEED' ? '#10B981' + '20' : confidence.guardDecision === 'DOWNGRADE' ? '#F59E0B' + '20' : '#EF4444' + '20' }]}>
-              <Text style={[s.countText, { color: confidence.guardDecision === 'PROCEED' ? '#10B981' : confidence.guardDecision === 'DOWNGRADE' ? '#F59E0B' : '#EF4444' }]}>
-                {confidence.guardDecision}
-              </Text>
+            <View style={[s.countBadge, { backgroundColor: '#10B981' + '20' }]}>
+              <Text style={[s.countText, { color: '#10B981' }]}>PROCEED</Text>
             </View>
           )}
         </View>
@@ -1500,7 +1503,7 @@ export default function CompetitiveIntelligence() {
               )}
             </View>
 
-            {marketDiagnosis && (
+            {marketDiagnosis && !marketDiagnosis.includes('Exploratory assessment') && (
               <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
                 <View style={s.cardHeader}>
                   <Ionicons name="pulse-outline" size={18} color="#8B5CF6" />

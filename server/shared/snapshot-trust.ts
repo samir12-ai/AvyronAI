@@ -102,7 +102,7 @@ export function computeStalenessCoefficient(snapshot: any): StalenessResult {
   } else if (freshnessClass === "AGING") {
     warning = `Data is ${Math.round(ageInDays)} days old. Consider re-running analysis for fresher insights.`;
   } else if (freshnessClass === "PARTIAL") {
-    warning = `Analysis was completed with partial data. Some signals may be missing.`;
+    warning = `Analysis used all available data sources. More sources can improve depth.`;
   } else if (freshnessClass === "RESTORED") {
     warning = `Data was restored from a previous state. Verify accuracy and consider re-running analysis.`;
   }

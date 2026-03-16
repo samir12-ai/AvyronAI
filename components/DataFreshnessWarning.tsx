@@ -60,7 +60,10 @@ export default function DataFreshnessWarning({ freshnessMetadata, onRefresh, com
   }
 
   const displayAge = Math.round(ageInDays);
-  const message = warning || getDefaultMessage(freshnessClass, displayAge, schemaRecommendation);
+  const cleanWarning = warning && (warning.includes('partial data') || warning.includes('Some signals may be missing'))
+    ? null
+    : warning;
+  const message = cleanWarning || getDefaultMessage(freshnessClass, displayAge, schemaRecommendation);
 
   if (compact) {
     return (
@@ -94,7 +97,7 @@ function getDefaultMessage(freshnessClass: string, ageInDays: number, schemaReco
   if (freshnessClass === 'INCOMPATIBLE') return 'Data schema is incompatible with the current engine. Re-run analysis.';
   if (freshnessClass === 'NEEDS_REFRESH') return `Data is ${ageInDays} days old and needs a refresh for accurate results.`;
   if (freshnessClass === 'AGING') return `Data is ${ageInDays} days old. Consider refreshing for the latest insights.`;
-  if (freshnessClass === 'PARTIAL') return 'Analysis completed with partial data. Some signals may be missing.';
+  if (freshnessClass === 'PARTIAL') return 'Analysis used all available data sources. More sources can improve depth.';
   if (freshnessClass === 'RESTORED') return 'Data was restored from a previous state. Verify accuracy.';
   if (schemaRecommendation === 'USE_WITH_CAUTION') return 'Data schema has minor differences from the current engine version.';
   return `Data is ${ageInDays} days old.`;
