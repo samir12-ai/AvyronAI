@@ -701,6 +701,7 @@ async function executeFetchJob(
           stage: "POSTS_FETCH", reason: "COOLDOWN",
           details: `${fetchResult.message} | existingCoverage: ${fetchResult.postsCollected}p/${fetchResult.commentsCollected}c | thresholdsMet: ${coverageMeetsThresholds}`,
         });
+        await scrapeWebAndBlogForCompetitor(comp, accountId);
         await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
         continue;
       }
