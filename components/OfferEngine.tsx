@@ -44,6 +44,20 @@ interface OfferCandidate {
   depthScores: OfferDepthScores;
 }
 
+interface AxisEnrichment {
+  original: string;
+  enriched: string;
+  mechanismAxis: string;
+  emphasis: string[];
+}
+
+interface LayerDiagnostics {
+  mechanismEngineConsumed?: boolean;
+  axisEnrichment?: AxisEnrichment;
+  positioningLock?: any;
+  [key: string]: any;
+}
+
 interface OfferData {
   exists: boolean;
   id?: string;
@@ -59,6 +73,9 @@ interface OfferData {
   confidenceScore?: number;
   engineVersion?: number;
   selectedOption?: string | null;
+  structuralWarnings?: string[];
+  layerDiagnostics?: LayerDiagnostics;
+  mechanismSnapshotId?: string;
   createdAt?: string;
 }
 
@@ -438,14 +455,47 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
 
       {hasData && (
         <>
-          {data.hookMechanismAlignment && !data.hookMechanismAlignment.aligned && (
-            <View style={[styles.warningBox, { backgroundColor: '#EF444415', borderColor: '#EF444430' }]}>
-              <Ionicons name="alert-circle" size={16} color="#EF4444" />
+          {data.layerDiagnostics?.mechanismEngineConsumed && (
+            <View style={[styles.sourceRow, { backgroundColor: colors.card, borderColor: '#D946EF30' }]}>
+              <View style={styles.sourceBadge}>
+                <Ionicons name="construct" size={12} color="#D946EF" />
+                <Text style={styles.sourceBadgeText}>Mechanism Engine</Text>
+              </View>
+              <Text style={[styles.sourceDetail, { color: colors.textMuted }]}>
+                {data.mechanismSnapshotId ? 'Axis-aligned mechanism consumed' : 'Mechanism data enriched'}
+              </Text>
+            </View>
+          )}
+
+          {data.layerDiagnostics?.axisEnrichment && (
+            <View style={[styles.enrichmentBox, { backgroundColor: '#8B5CF615', borderColor: '#8B5CF630' }]}>
+              <Ionicons name="git-merge" size={16} color="#8B5CF6" />
               <View style={{ flex: 1 }}>
-                <Text style={[styles.warningTitle, { color: '#EF4444' }]}>Positioning Mismatch</Text>
-                <Text style={[styles.warningDetail, { color: '#DC2626' }]}>Hook, outcome, and mechanism do not share the same positioning axis. Offers below may not be strategically coherent. Regenerate to attempt correction.</Text>
+                <Text style={[styles.warningTitle, { color: '#7C3AED' }]}>Axis Enrichment</Text>
+                <Text style={[styles.warningDetail, { color: '#6D28D9' }]}>
+                  {data.layerDiagnostics.axisEnrichment.mechanismAxis.replace(/_/g, ' ')}
+                </Text>
+                {data.layerDiagnostics.axisEnrichment.emphasis.length > 0 && (
+                  <View style={styles.emphasisRow}>
+                    {data.layerDiagnostics.axisEnrichment.emphasis.slice(0, 4).map((e, i) => (
+                      <View key={i} style={styles.emphasisChip}>
+                        <Text style={styles.emphasisChipText}>{e}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
+
+          {data.hookMechanismAlignment && !data.hookMechanismAlignment.aligned && (
+            <View style={[styles.warningBox, { backgroundColor: '#F59E0B12', borderColor: '#F59E0B30' }]}>
+              <Ionicons name="warning" size={16} color="#F59E0B" />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.warningTitle, { color: '#D97706' }]}>Axis Alignment Advisory</Text>
+                <Text style={[styles.warningDetail, { color: '#92400E' }]}>Hook, outcome, and mechanism may not fully share the same positioning axis. Review and regenerate if needed.</Text>
                 {data.hookMechanismAlignment.failures.map((f, i) => (
-                  <Text key={i} style={[styles.warningDetail, { color: '#DC2626', marginTop: 2 }]}>{f}</Text>
+                  <Text key={i} style={[styles.warningDetail, { color: '#92400E', marginTop: 2 }]}>{f}</Text>
                 ))}
               </View>
             </View>
@@ -481,6 +531,23 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
               <View style={{ flex: 1 }}>
                 <Text style={[styles.warningTitle, { color: '#D97706' }]}>Positioning Advisory</Text>
                 <Text style={[styles.warningDetail, { color: '#92400E' }]}>Hook and mechanism may not fully share the same strategic axis. Review alignment and regenerate if needed.</Text>
+              </View>
+            </View>
+          )}
+
+          {data.structuralWarnings && data.structuralWarnings.length > 0 && (
+            <View style={[styles.warningBox, { backgroundColor: '#6366F115', borderColor: '#6366F130' }]}>
+              <Ionicons name="information-circle" size={16} color="#6366F1" />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.warningTitle, { color: '#4F46E5' }]}>Structural Notes ({data.structuralWarnings.length})</Text>
+                {data.structuralWarnings.slice(0, 5).map((w, i) => (
+                  <Text key={i} style={[styles.warningDetail, { color: '#4338CA', marginTop: 2 }]}>{w}</Text>
+                ))}
+                {data.structuralWarnings.length > 5 && (
+                  <Text style={[styles.warningDetail, { color: '#6366F1', marginTop: 4, fontStyle: 'italic' as const }]}>
+                    +{data.structuralWarnings.length - 5} more
+                  </Text>
+                )}
               </View>
             </View>
           )}
@@ -532,8 +599,16 @@ const styles = StyleSheet.create({
   analyzeBtnDisabled: { opacity: 0.5 },
   analyzeBtnGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 10, padding: 14 },
   analyzeBtnText: { fontSize: 14, fontWeight: '600', color: '#fff' },
+  sourceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 10, borderWidth: 1, marginBottom: 10 },
+  sourceBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#D946EF18', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  sourceBadgeText: { fontSize: 11, fontWeight: '600' as const, color: '#D946EF' },
+  sourceDetail: { fontSize: 11, flex: 1 },
+  enrichmentBox: { flexDirection: 'row', gap: 10, padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 10 },
+  emphasisRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 6 },
+  emphasisChip: { backgroundColor: '#8B5CF620', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  emphasisChipText: { fontSize: 10, color: '#7C3AED', fontWeight: '500' as const },
   warningBox: { flexDirection: 'row', gap: 10, padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 10 },
-  warningTitle: { fontSize: 13, fontWeight: '600', marginBottom: 2 },
+  warningTitle: { fontSize: 13, fontWeight: '600' as const, marginBottom: 2 },
   warningDetail: { fontSize: 12, lineHeight: 16 },
   selectorRow: { flexDirection: 'row', borderRadius: 10, borderWidth: 1, padding: 4, marginBottom: 12, gap: 4 },
   selectorTab: { flex: 1, borderRadius: 8, paddingVertical: 8, alignItems: 'center', borderWidth: 1, borderColor: 'transparent' },

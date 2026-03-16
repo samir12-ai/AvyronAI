@@ -249,6 +249,8 @@ export function registerOfferEngineRoutes(app: Express) {
         boundaryCheck: JSON.stringify(result.boundaryCheck),
         confidenceScore: result.confidenceScore,
         signalLineage: JSON.stringify(mergeLineageArrays(upstreamLineage, offerLineage)),
+        structuralWarnings: JSON.stringify(result.structuralWarnings || []),
+        layerDiagnostics: JSON.stringify(result.layerDiagnostics || null),
         executionTimeMs: result.executionTimeMs,
       }).returning();
 
@@ -304,6 +306,9 @@ export function registerOfferEngineRoutes(app: Express) {
         boundaryCheck: safeJsonParse(latest.boundaryCheck),
         confidenceScore: latest.confidenceScore,
         selectedOption: latest.selectedOption,
+        structuralWarnings: safeJsonParse(latest.structuralWarnings),
+        layerDiagnostics: safeJsonParse(latest.layerDiagnostics),
+        mechanismSnapshotId: latest.mechanismSnapshotId,
         executionTimeMs: latest.executionTimeMs,
         createdAt: latest.createdAt,
         differentiationSnapshotId: latest.differentiationSnapshotId,

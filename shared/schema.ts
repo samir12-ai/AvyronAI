@@ -1783,6 +1783,8 @@ export const offerSnapshots = pgTable("offer_snapshots", {
   confidenceScore: doublePrecision("confidence_score"),
   selectedOption: varchar("selected_option"),
   signalLineage: text("signal_lineage"),
+  structuralWarnings: text("structural_warnings"),
+  layerDiagnostics: text("layer_diagnostics"),
   executionTimeMs: integer("execution_time_ms"),
   createdAt: timestamp("created_at").defaultNow(),
 });

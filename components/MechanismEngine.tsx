@@ -168,7 +168,28 @@ export default function MechanismEngine({ isActive }: Props) {
             <Text style={styles.headerTitle}>Mechanism Engine</Text>
             <Text style={styles.headerSubtitle}>Axis-aligned mechanism generation</Text>
           </View>
+          {latestData?.engineVersion && (
+            <View style={styles.versionBadge}>
+              <Text style={styles.versionText}>v{latestData.engineVersion}</Text>
+            </View>
+          )}
         </View>
+        {hasData && (
+          <View style={styles.headerMeta}>
+            <View style={styles.headerMetaItem}>
+              <Text style={styles.headerMetaLabel}>Confidence</Text>
+              <Text style={styles.headerMetaValue}>{((latestData.confidenceScore || 0) * 100).toFixed(0)}%</Text>
+            </View>
+            <View style={styles.headerMetaItem}>
+              <Text style={styles.headerMetaLabel}>Status</Text>
+              <Text style={styles.headerMetaValue}>{latestData.status}</Text>
+            </View>
+            <View style={styles.headerMetaItem}>
+              <Text style={styles.headerMetaLabel}>Time</Text>
+              <Text style={styles.headerMetaValue}>{latestData.executionTimeMs || 0}ms</Text>
+            </View>
+          </View>
+        )}
       </LinearGradient>
 
       {!hasDiffData && !hasData && !analyzing && (
@@ -228,19 +249,44 @@ export default function MechanismEngine({ isActive }: Props) {
 
           {latestData.alternativeMechanism && renderMechanismCard(latestData.alternativeMechanism, 'Alternative Mechanism')}
 
-          <View style={[styles.metaCard, isDark && styles.cardDark]}>
-            <Text style={[styles.sectionLabel, isDark && styles.textMuted]}>Engine Details</Text>
-            <View style={styles.metaRow}>
-              <Text style={[styles.metaLabel, isDark && styles.textMuted]}>Confidence</Text>
-              <Text style={[styles.metaValue, isDark && styles.textLight]}>{((latestData.confidenceScore || 0) * 100).toFixed(0)}%</Text>
+          {mechanism.differentiationLink && (
+            <View style={[styles.card, isDark && styles.cardDark]}>
+              <View style={styles.cardHeader}>
+                <Ionicons name="link" size={14} color="#3B82F6" />
+                <Text style={[styles.cardTitle, isDark && styles.textLight]}>Differentiation Link</Text>
+              </View>
+              <Text style={[styles.mechDesc, isDark && styles.textMuted]}>{mechanism.differentiationLink}</Text>
             </View>
-            <View style={styles.metaRow}>
-              <Text style={[styles.metaLabel, isDark && styles.textMuted]}>Status</Text>
-              <Text style={[styles.metaValue, isDark && styles.textLight]}>{latestData.status}</Text>
+          )}
+
+          <View style={[styles.card, isDark && styles.cardDark]}>
+            <View style={styles.cardHeader}>
+              <Ionicons name="git-network" size={14} color="#8B5CF6" />
+              <Text style={[styles.cardTitle, isDark && styles.textLight]}>Axis Propagation</Text>
             </View>
-            <View style={styles.metaRow}>
-              <Text style={[styles.metaLabel, isDark && styles.textMuted]}>Execution Time</Text>
-              <Text style={[styles.metaValue, isDark && styles.textLight]}>{latestData.executionTimeMs || 0}ms</Text>
+            <Text style={[styles.mechDesc, isDark && styles.textMuted]}>
+              This mechanism's axis and emphasis keywords are automatically propagated to the Offer Engine for strategic coherence.
+            </Text>
+            <View style={styles.propChain}>
+              <View style={styles.propNode}>
+                <Ionicons name="layers" size={12} color="#6366F1" />
+                <Text style={styles.propNodeText}>Differentiation</Text>
+              </View>
+              <Ionicons name="arrow-forward" size={10} color="#9CA3AF" />
+              <View style={[styles.propNode, styles.propNodeActive]}>
+                <Ionicons name="construct" size={12} color="#D946EF" />
+                <Text style={[styles.propNodeText, { color: '#D946EF' }]}>Mechanism</Text>
+              </View>
+              <Ionicons name="arrow-forward" size={10} color="#9CA3AF" />
+              <View style={styles.propNode}>
+                <Ionicons name="pricetag" size={12} color="#F97316" />
+                <Text style={styles.propNodeText}>Offers</Text>
+              </View>
+              <Ionicons name="arrow-forward" size={10} color="#9CA3AF" />
+              <View style={styles.propNode}>
+                <Ionicons name="funnel" size={12} color="#10B981" />
+                <Text style={styles.propNodeText}>Funnels</Text>
+              </View>
             </View>
           </View>
         </>
@@ -254,6 +300,12 @@ const styles = StyleSheet.create({
   contentContainer: { paddingBottom: 40 },
   headerGradient: { padding: 20, borderRadius: 16, margin: 16, marginBottom: 12 },
   headerContent: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  versionBadge: { backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
+  versionText: { fontSize: 11, fontWeight: '600' as const, color: '#fff' },
+  headerMeta: { flexDirection: 'row', marginTop: 12, gap: 16 },
+  headerMetaItem: { flex: 1 },
+  headerMetaLabel: { fontSize: 10, color: 'rgba(255,255,255,0.7)', marginBottom: 2 },
+  headerMetaValue: { fontSize: 14, fontWeight: '700' as const, color: '#fff' },
   headerText: { flex: 1 },
   headerTitle: { fontSize: 20, fontWeight: '700' as const, color: '#fff' },
   headerSubtitle: { fontSize: 13, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
@@ -291,6 +343,10 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 },
   metaLabel: { fontSize: 13, color: '#9CA3AF' },
   metaValue: { fontSize: 13, fontWeight: '600' as const, color: '#374151' },
+  propChain: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 10 },
+  propNode: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#F3F4F6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  propNodeActive: { backgroundColor: '#FAF5FF', borderWidth: 1, borderColor: '#D946EF40' },
+  propNodeText: { fontSize: 10, fontWeight: '600' as const, color: '#6B7280' },
   emptyState: { alignItems: 'center', padding: 32, margin: 16, backgroundColor: '#fff', borderRadius: 16 },
   emptyTitle: { fontSize: 16, fontWeight: '600' as const, color: '#374151', marginTop: 12, marginBottom: 6 },
   emptyDesc: { fontSize: 13, color: '#9CA3AF', textAlign: 'center' as const, lineHeight: 20 },
