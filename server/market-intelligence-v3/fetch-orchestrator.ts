@@ -342,8 +342,10 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
 
 async function scrapeWebAndBlogForCompetitor(comp: any, accountId: string): Promise<void> {
   try {
+    const websiteBlocked = comp.websiteEnrichmentStatus === "ACCESS_BLOCKED";
+    const websiteBlockedCooldown = websiteBlocked && comp.websiteScrapedAt && (Date.now() - new Date(comp.websiteScrapedAt).getTime()) < 7 * 24 * 60 * 60 * 1000;
     const websiteFailedRecently = comp.websiteEnrichmentStatus === "FAILED" && comp.websiteScrapedAt && (Date.now() - new Date(comp.websiteScrapedAt).getTime()) < 24 * 60 * 60 * 1000;
-    if (comp.websiteUrl && !websiteFailedRecently && (isWebDataStale(comp.websiteScrapedAt) || comp.websiteEnrichmentStatus === "NONE" || comp.websiteEnrichmentStatus === "FAILED")) {
+    if (comp.websiteUrl && !websiteBlockedCooldown && !websiteFailedRecently && (isWebDataStale(comp.websiteScrapedAt) || comp.websiteEnrichmentStatus === "NONE" || comp.websiteEnrichmentStatus === "FAILED" || (websiteBlocked && !websiteBlockedCooldown))) {
       console.log(`[FetchOrch] Website scrape starting for ${comp.name}: ${comp.websiteUrl}`);
       const extractions = await scrapeWebsite(comp.id, comp.name, comp.websiteUrl);
       const successCount = extractions.filter(e => e.extractionStatus === "COMPLETE").length;
@@ -376,7 +378,8 @@ async function scrapeWebAndBlogForCompetitor(comp: any, accountId: string): Prom
         });
       }
 
-      const status = successCount > 0 ? "COMPLETE" : "FAILED";
+      const hasBlocked = extractions.some(e => e.extractionStatus === "ACCESS_BLOCKED");
+      const status = successCount > 0 ? "COMPLETE" : hasBlocked ? "ACCESS_BLOCKED" : "FAILED";
       await db.update(ciCompetitors)
         .set({ websiteEnrichmentStatus: status, websiteScrapedAt: new Date() })
         .where(eq(ciCompetitors.id, comp.id));

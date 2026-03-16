@@ -585,6 +585,11 @@ export default function CompetitiveIntelligence() {
                         <Text style={{ fontSize: 9, color: '#EF4444', fontWeight: '600' }}>FAILED</Text>
                       </View>
                     )}
+                    {comp.websiteEnrichmentStatus === 'ACCESS_BLOCKED' && (
+                      <View style={{ backgroundColor: '#F59E0B20', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                        <Text style={{ fontSize: 9, color: '#F59E0B', fontWeight: '600' }}>BLOCKED</Text>
+                      </View>
+                    )}
                   </View>
                 </View>
 

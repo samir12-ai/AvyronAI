@@ -162,8 +162,8 @@ function extractProofBlocks(html: string): string[] {
   for (const regex of proofPatterns) {
     let match;
     while ((match = regex.exec(html)) !== null && results.length < 15) {
-      const text = match[1].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-      if (text.length > 5) results.push(text);
+      const text = sanitizeExtractedText(match[1]);
+      if (isCleanText(text)) results.push(text);
     }
   }
   return results;
@@ -198,8 +198,8 @@ function extractGuarantees(html: string): string[] {
   for (const regex of guaranteePatterns) {
     let match;
     while ((match = regex.exec(html)) !== null && results.length < 10) {
-      const text = match[1].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-      if (text.length > 5) results.push(text);
+      const text = sanitizeExtractedText(match[1]);
+      if (isCleanText(text)) results.push(text);
     }
   }
   return results;
@@ -232,6 +232,14 @@ function extractNavigationLinks(html: string): string[] {
   return results;
 }
 
+function sanitizeExtractedText(raw: string): string {
+  return raw.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+}
+
+function isCleanText(text: string): boolean {
+  return text.length > 5 && text.length < 200 && !/href=|class=|onclick=|data-|style=|utm_|\.js|\.css/i.test(text);
+}
+
 function extractOfferPhrases(html: string): string[] {
   const offerPatterns = [
     /((?:get started|sign up|book a call|schedule|start your|try for free|get your|claim your)[^<.]{0,80})/gi,
@@ -242,8 +250,8 @@ function extractOfferPhrases(html: string): string[] {
   for (const regex of offerPatterns) {
     let match;
     while ((match = regex.exec(html)) !== null && results.length < 15) {
-      const text = match[1].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-      if (text.length > 5) results.push(text);
+      const text = sanitizeExtractedText(match[1]);
+      if (isCleanText(text)) results.push(text);
     }
   }
   return results;
@@ -321,7 +329,9 @@ export async function scrapeWebsite(
   try {
     const homeResult = await fetchWithProxy({ url: normalizedUrl });
     if (!homeResult.ok) {
-      console.log(`[WebScraper] Homepage fetch failed: HTTP ${homeResult.status}`);
+      const isBlocked = homeResult.status === 403 || homeResult.status === 451;
+      const statusLabel = isBlocked ? "ACCESS_BLOCKED" : "FAILED";
+      console.log(`[WebScraper] Homepage fetch failed: HTTP ${homeResult.status} (${statusLabel})`);
       return [{
         competitorId,
         competitorName,
@@ -340,8 +350,8 @@ export async function scrapeWebsite(
         topicTitles: [],
         contentHeadings: [],
         rawTextPreview: "",
-        extractionStatus: "FAILED",
-        extractionError: `HTTP ${homeResult.status}`,
+        extractionStatus: statusLabel,
+        extractionError: `HTTP ${homeResult.status}${isBlocked ? " — site blocks automated access" : ""}`,
         scrapedAt: now,
       }];
     }

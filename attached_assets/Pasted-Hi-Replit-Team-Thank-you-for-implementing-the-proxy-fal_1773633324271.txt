@@ -1,0 +1,148 @@
+Hi Replit Team,
+
+Thank you for implementing the proxy fallback and stabilizing the scraping pipeline. The results look very promising (9/10 competitors scraped successfully, multi-source signals collected, and snapshot v24 persisted). However, before we close this task completely, we need to run a final verification pass to ensure the system is fully stable and that the new data sources are actually being consumed by the engines correctly.
+
+Please review and confirm the following items.
+
+---
+
+### 1. Resolve the “Error during tool execution” message
+
+The log output still contains a line indicating “Error during tool execution.”
+
+Even if scraping succeeded afterwards, we need to confirm:
+
+- Which step triggered this error
+- Whether it affected persistence or downstream processing
+- That no silent failures remain in the scraping → normalization → engine pipeline
+
+Please verify that this error is either removed or fully explained and handled safely.
+
+---
+
+### 2. Verify Snapshot v24 is Actually Used by the Engine Pipeline
+
+We saw confirmation that snapshot v24 was persisted, but we need to confirm it is actively used across the system, not just stored.
+
+Please verify that:
+
+- Market Intelligence reads snapshot v24
+- Positioning Engine reads snapshot v24
+- Audience Engine reads snapshot v24
+- Differentiation Engine reads snapshot v24
+- Plan synthesis reads snapshot v24
+- Agent context reads snapshot v24
+
+There must be no situation where an older snapshot is still used by downstream engines.
+
+---
+
+### 3. Confirm Website + Blog Signals Are Consumed by Engines
+
+The scraping pipeline now collects:
+
+- Instagram signals
+- Website signals
+- Blog signals
+
+We must confirm that these signals are actually used by the engines.
+
+Please verify:
+
+Market Intelligence Engine
+- Uses website pages (headline, features, pricing)
+- Uses blog topics where available
+
+Audience Engine
+- Can infer pains from website messaging when Instagram hooks are limited
+
+Positioning Engine
+- Uses website headline/category language
+
+Offer Engine
+- Uses pricing/offer structures from website pages
+
+Awareness Engine
+- Can use blog titles and website headlines as hook sources
+
+Persuasion Engine
+- Uses proof/testimonial patterns from website copy
+
+The engines must consume normalized signals, not raw page text.
+
+---
+
+### 4. Handle 403-Blocked Sites Cleanly (MarketingBlocks Case)
+
+MarketingBlocks returned 403 Forbidden, which is expected when sites block scraping.
+
+However, the system must handle this gracefully.
+
+Please ensure:
+
+- The competitor is marked ACCESS BLOCKED, not FAILED silently
+- The engine pipeline still runs using available signals
+- The system does not repeatedly hammer blocked sites
+
+---
+
+### 5. Confirm Proxy Fallback Behavior is Safe
+
+The proxy fallback implementation is correct conceptually, but please verify:
+
+- Direct fetch only triggers for connection-level proxy failures
+- Content errors (403 / 404 / etc.) do not trigger fallback loops
+- Headers and parsing logic remain consistent between proxy and direct fetch
+
+This prevents signal inconsistencies.
+
+---
+
+### 6. Validate Sub-Page Discovery Quality
+
+Several competitors now show 6/6 pages scraped, which is good.
+
+Please confirm the discovered pages are meaningful pages such as:
+
+- pricing
+- features
+- solutions
+- about
+- blog
+
+The scraper should avoid collecting navigation noise or irrelevant pages.
+
+---
+
+### 7. Confirm Engines Receive Structured Signals
+
+Please confirm that scraped data is normalized into structured fields before entering engines, such as:
+
+- headline
+- subheadline
+- CTA text
+- offer phrases
+- feature lists
+- testimonial blocks
+- topic titles
+
+Engines should not consume raw HTML or large unstructured text blobs.
+
+---
+
+### Acceptance Criteria (Strict)
+
+This task is considered complete only if:
+
+- No remaining “tool execution” errors appear in logs
+- Snapshot v24 is verified as the active snapshot used by engines
+- Website and blog signals are consumed by all relevant engines
+- 403-blocked sites are handled gracefully
+- Proxy fallback behaves correctly and safely
+- Sub-page discovery extracts meaningful pages
+- All engines receive normalized structured signals
+
+Once these checks are confirmed, we can confidently consider the scraping architecture stable and production-ready.
+
+Best regards,  
+MarketMind System Architecture
