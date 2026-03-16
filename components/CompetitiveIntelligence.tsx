@@ -1005,8 +1005,8 @@ export default function CompetitiveIntelligence() {
               </View>
             )}
             {miv3Result.snapshotStatus === 'PARTIAL' && (
-              <View style={{ backgroundColor: '#EF444415', borderRadius: 8, padding: 10, marginBottom: 8 }}>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: '#EF4444' }}>Partial analysis — some analytical fields may be incomplete. Results should not be interpreted as final strategy.</Text>
+              <View style={{ backgroundColor: '#F59E0B15', borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: '#F59E0B' }}>Analysis based on available data — additional data sources may improve accuracy.</Text>
               </View>
             )}
 
@@ -1039,12 +1039,10 @@ export default function CompetitiveIntelligence() {
               </View>
             </View>
 
-            {miv3Result.output?.confidence?.guardDecision && miv3Result.output.confidence.guardDecision !== 'PROCEED' && (
-              <View style={{ backgroundColor: miv3Result.output.confidence.guardDecision === 'BLOCK' ? '#EF4444' + '15' : '#F59E0B' + '15', borderRadius: 8, padding: 10, marginBottom: 8 }}>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: miv3Result.output.confidence.guardDecision === 'BLOCK' ? '#EF4444' : '#F59E0B' }}>
-                  {miv3Result.output.confidence.guardDecision === 'BLOCK' ? 'BLOCKED' : 'EXPLORATORY MODE'}
-                </Text>
-                {(miv3Result.output.confidence.guardReasons || []).map((reason: string, i: number) => (
+            {miv3Result.output?.confidence?.guardReasons?.length > 0 && (
+              <View style={{ backgroundColor: '#3B82F615', borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#3B82F6' }}>DATA NOTES</Text>
+                {miv3Result.output.confidence.guardReasons.map((reason: string, i: number) => (
                   <Text key={i} style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>• {reason}</Text>
                 ))}
               </View>
@@ -1066,17 +1064,20 @@ export default function CompetitiveIntelligence() {
               </View>
             )}
 
-            {miv3Result.output?.missingSignalFlags?.length > 0 && (
-              <View style={{ marginBottom: 8 }}>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: '#F59E0B', marginBottom: 2 }}>Missing Signals</Text>
-                {miv3Result.output.missingSignalFlags.slice(0, 5).map((flag: string, i: number) => (
-                  <Text key={i} style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>• {flag}</Text>
-                ))}
-                {miv3Result.output.missingSignalFlags.length > 5 && (
-                  <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>...and {miv3Result.output.missingSignalFlags.length - 5} more</Text>
-                )}
-              </View>
-            )}
+            {(() => {
+              const flags = (miv3Result.output?.missingSignalFlags || []).filter((f: string) => !f.includes('need '));
+              return flags.length > 0 ? (
+                <View style={{ marginBottom: 8 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '600', color: '#F59E0B', marginBottom: 2 }}>Signal Gaps</Text>
+                  {flags.slice(0, 5).map((flag: string, i: number) => (
+                    <Text key={i} style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>• {flag}</Text>
+                  ))}
+                  {flags.length > 5 && (
+                    <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>...and {flags.length - 5} more</Text>
+                  )}
+                </View>
+              ) : null;
+            })()}
 
             {!miv3Result.twoRunStatus?.isConfirmed && (
               <View style={{ backgroundColor: '#3B82F6' + '15', borderRadius: 6, padding: 8, marginBottom: 4 }}>
@@ -1607,20 +1608,23 @@ export default function CompetitiveIntelligence() {
               </View>
             )}
 
-            {missingSignals.length > 0 && (
-              <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-                <View style={s.cardHeader}>
-                  <Ionicons name="help-circle-outline" size={18} color="#F59E0B" />
-                  <Text style={[s.cardTitle, { color: colors.text }]}>Missing Signals</Text>
+            {(() => {
+              const filteredSignals = missingSignals.filter((f: string) => !f.includes('need '));
+              return filteredSignals.length > 0 ? (
+                <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                  <View style={s.cardHeader}>
+                    <Ionicons name="help-circle-outline" size={18} color="#F59E0B" />
+                    <Text style={[s.cardTitle, { color: colors.text }]}>Signal Gaps</Text>
+                  </View>
+                  {filteredSignals.slice(0, 8).map((flag: string, i: number) => (
+                    <Text key={i} style={{ fontSize: 11, color: colors.textMuted, marginBottom: 3 }}>• {flag}</Text>
+                  ))}
+                  {filteredSignals.length > 8 && (
+                    <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>...and {filteredSignals.length - 8} more</Text>
+                  )}
                 </View>
-                {missingSignals.slice(0, 8).map((flag: string, i: number) => (
-                  <Text key={i} style={{ fontSize: 11, color: colors.textMuted, marginBottom: 3 }}>• {flag}</Text>
-                ))}
-                {missingSignals.length > 8 && (
-                  <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>...and {missingSignals.length - 8} more</Text>
-                )}
-              </View>
-            )}
+              ) : null;
+            })()}
 
             <View style={{ paddingHorizontal: 4, paddingTop: 4 }}>
               <Text style={{ fontSize: 9, color: colors.textMuted, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>

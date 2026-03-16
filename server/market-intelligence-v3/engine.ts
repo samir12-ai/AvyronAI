@@ -383,14 +383,7 @@ export function computeEvidenceCoverage(signalResults: any[], totalCompetitors: 
 }
 
 export function buildMarketDiagnosis(confidence: any, trajectory: any, dominantIntent: string): string | null {
-  if (confidence.guardDecision === "BLOCK") return null;
-  if (confidence.overall < MI_CONFIDENCE.NO_AGGRESSIVE_THRESHOLD) return null;
-
   const direction = deriveTrajectoryDirection(trajectory);
-
-  if (confidence.guardDecision === "DOWNGRADE") {
-    return "Exploratory assessment. Data volume is below confidence thresholds. Current signals are provisional.";
-  }
 
   switch (direction) {
     case "HEATING_COMPRESSED":
@@ -1355,9 +1348,6 @@ export function buildMarketSummary(
   parts.push(`Dominant competitor intent: ${dominantIntent}.`);
   parts.push(`Confidence: ${confidence.level} (${(confidence.overall * 100).toFixed(1)}%).`);
 
-  if (confidence.guardDecision === "DOWNGRADE") {
-    parts.push("EXPLORATORY MODE: Data insufficient for confident market assessment.");
-  }
 
   const intentSummary = intents.map((i: any) => `${i.competitorName}: ${i.intentCategory}`).join(", ");
   if (intentSummary) parts.push(`Intent breakdown: ${intentSummary}.`);
