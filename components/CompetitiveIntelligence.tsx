@@ -90,7 +90,7 @@ export default function CompetitiveIntelligence() {
   const [showAddCompetitor, setShowAddCompetitor] = useState(false);
   const [expandedCompetitor, setExpandedCompetitor] = useState<string | null>(null);
   const [addAndFetch, setAddAndFetch] = useState(false);
-  const [miv3Result, setMiv3Result] = useState<any>(null);
+  const [miv3Override, setMiv3Override] = useState<any>(null);
   const [editingCompetitorId, setEditingCompetitorId] = useState<string | null>(null);
 
   const emptyComp = {
@@ -106,6 +106,7 @@ export default function CompetitiveIntelligence() {
   const { data: competitorsData, isLoading: loadingCompetitors } = useQuery({
     queryKey: ['ci-competitors', activeCampaignId],
     enabled: !!activeCampaignId,
+    gcTime: 30 * 60 * 1000,
     queryFn: async () => {
       const res = await fetch(new URL(`/api/ci/competitors?accountId=default&campaignId=${activeCampaignId}`, baseUrl).toString());
       return safeApiJson(res);
@@ -116,6 +117,7 @@ export default function CompetitiveIntelligence() {
   const { data: cachedSnapshot } = useQuery({
     queryKey: ['mi-v3-snapshot', activeCampaignId],
     enabled: !!activeCampaignId,
+    gcTime: 30 * 60 * 1000,
     refetchInterval: (query) => {
       const snap = query.state.data;
       if (snap?.dataStatus === 'ENRICHING') return 30000;
@@ -133,17 +135,20 @@ export default function CompetitiveIntelligence() {
 
   useEffect(() => {
     if (cachedSnapshot) {
-      setMiv3Result(cachedSnapshot);
+      setMiv3Override(null);
     }
   }, [cachedSnapshot]);
 
   useEffect(() => {
-    setMiv3Result(null);
+    setMiv3Override(null);
   }, [activeCampaignId]);
+
+  const miv3Result = miv3Override || cachedSnapshot || null;
 
   const { data: timelineData } = useQuery({
     queryKey: ['ci-miv3-history', activeCampaignId],
     enabled: !!activeCampaignId,
+    gcTime: 30 * 60 * 1000,
     queryFn: async () => {
       const res = await fetch(new URL(`/api/ci/mi-v3/history/${activeCampaignId}?accountId=default`, baseUrl).toString());
       return safeApiJson(res);
@@ -226,7 +231,8 @@ export default function CompetitiveIntelligence() {
       return data;
     },
     onSuccess: (data: any) => {
-      setMiv3Result(data);
+      setMiv3Override(data);
+      queryClient.setQueryData(['mi-v3-snapshot', activeCampaignId], data);
       queryClient.invalidateQueries({ queryKey: ['ci-miv3-history', activeCampaignId] });
       queryClient.invalidateQueries({ queryKey: ['mi-v3-snapshot', activeCampaignId] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
