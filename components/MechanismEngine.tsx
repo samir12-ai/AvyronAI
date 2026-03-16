@@ -60,16 +60,15 @@ export default function MechanismEngine({ isActive }: Props) {
     enabled: !!selectedCampaignId && isActive,
     gcTime: 30 * 60 * 1000,
     queryFn: async () => {
-      const res = await fetch(new URL(`/api/differentiation/latest?campaignId=${selectedCampaignId}&accountId=default`, baseUrl).toString());
+      const res = await fetch(new URL(`/api/differentiation-engine/latest?campaignId=${selectedCampaignId}&accountId=default`, baseUrl).toString());
       return safeApiJson(res);
     },
   });
 
+  const hasDiffData = !!diffData?.id;
+
   const runAnalysis = useCallback(async () => {
-    if (!selectedCampaignId || !diffData?.id) {
-      Alert.alert('Missing Data', 'Run the Differentiation Engine first before generating mechanisms.');
-      return;
-    }
+    if (!selectedCampaignId || !hasDiffData) return;
     setAnalyzing(true);
     try {
       const res = await fetch(new URL('/api/mechanism-engine/analyze', baseUrl).toString(), {
@@ -90,7 +89,7 @@ export default function MechanismEngine({ isActive }: Props) {
     } finally {
       setAnalyzing(false);
     }
-  }, [selectedCampaignId, diffData, baseUrl, refetch]);
+  }, [selectedCampaignId, hasDiffData, diffData, baseUrl, refetch]);
 
   const mechanism: MechanismOutput | null = latestData?.primaryMechanism || null;
   const axisConsistency = latestData?.axisConsistency;
@@ -172,10 +171,20 @@ export default function MechanismEngine({ isActive }: Props) {
         </View>
       </LinearGradient>
 
+      {!hasDiffData && !hasData && !analyzing && (
+        <View style={[styles.emptyState, isDark && styles.cardDark, { borderColor: '#F59E0B40', borderWidth: 1 }]}>
+          <Ionicons name="git-branch-outline" size={48} color="#F59E0B" />
+          <Text style={[styles.emptyTitle, isDark && styles.textLight]}>Differentiation Engine Required</Text>
+          <Text style={[styles.emptyDesc, isDark && styles.textMuted]}>
+            The Mechanism Engine builds on your differentiation output. Run the Differentiation Engine in the Pipeline tab first, then return here to generate axis-aligned mechanisms.
+          </Text>
+        </View>
+      )}
+
       <Pressable
-        style={[styles.analyzeBtn, analyzing && styles.analyzeBtnDisabled]}
+        style={[styles.analyzeBtn, (analyzing || !hasDiffData) && styles.analyzeBtnDisabled]}
         onPress={runAnalysis}
-        disabled={analyzing}
+        disabled={analyzing || !hasDiffData}
       >
         {analyzing ? (
           <ActivityIndicator color="#fff" size="small" />
@@ -183,16 +192,16 @@ export default function MechanismEngine({ isActive }: Props) {
           <Ionicons name="flash" size={18} color="#fff" />
         )}
         <Text style={styles.analyzeBtnText}>
-          {analyzing ? 'Generating Mechanism...' : hasData ? 'Regenerate Mechanism' : 'Generate Mechanism'}
+          {analyzing ? 'Generating Mechanism...' : !hasDiffData ? 'Waiting for Differentiation Data' : hasData ? 'Regenerate Mechanism' : 'Generate Mechanism'}
         </Text>
       </Pressable>
 
-      {!hasData && !analyzing && (
+      {!hasData && hasDiffData && !analyzing && (
         <View style={[styles.emptyState, isDark && styles.cardDark]}>
           <Ionicons name="construct-outline" size={48} color="#D946EF" />
-          <Text style={[styles.emptyTitle, isDark && styles.textLight]}>No Mechanism Generated</Text>
+          <Text style={[styles.emptyTitle, isDark && styles.textLight]}>Ready to Generate</Text>
           <Text style={[styles.emptyDesc, isDark && styles.textMuted]}>
-            Run the Differentiation Engine first, then generate an axis-aligned mechanism that ensures strategic coherence across Hook, Outcome, Mechanism, and Proof.
+            Differentiation data is available. Generate an axis-aligned mechanism that ensures strategic coherence across Hook, Outcome, Mechanism, and Proof.
           </Text>
         </View>
       )}
