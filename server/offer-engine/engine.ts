@@ -1360,9 +1360,50 @@ export async function runOfferEngine(
   differentiation: OfferDifferentiationInput,
   accountId: string,
   upstreamLineage: SignalLineageEntry[] = [],
+  mechanismEngineOutput?: any,
 ): Promise<OfferResult> {
   const startTime = Date.now();
   const diagnostics: Record<string, any> = {};
+
+  if (mechanismEngineOutput?.primaryMechanism) {
+    const mechOut = mechanismEngineOutput.primaryMechanism;
+    console.log(`[OfferEngine-V4] MECHANISM_ENGINE_INPUT | name="${mechOut.mechanismName}" | axis=${mechOut.axisAlignment?.primaryAxis} | consuming centralized mechanism`);
+    diagnostics.mechanismEngineConsumed = true;
+    diagnostics.mechanismEngineAxis = mechOut.axisAlignment?.primaryAxis;
+
+    if (!differentiation.mechanismCore || differentiation.mechanismCore.mechanismType === "none") {
+      differentiation = {
+        ...differentiation,
+        mechanismCore: {
+          mechanismName: mechOut.mechanismName,
+          mechanismType: mechOut.mechanismType as any || "system",
+          mechanismSteps: mechOut.mechanismSteps || [],
+          mechanismPromise: mechOut.mechanismPromise || "",
+          mechanismProblem: mechOut.mechanismProblem || "",
+          mechanismLogic: mechOut.mechanismLogic || "",
+        },
+        mechanismFraming: {
+          name: mechOut.mechanismName,
+          description: mechOut.mechanismDescription,
+          supported: true,
+          proofBasis: [],
+          type: mechOut.mechanismType || "system",
+        },
+      };
+    } else {
+      differentiation = {
+        ...differentiation,
+        mechanismCore: {
+          ...differentiation.mechanismCore,
+          mechanismName: mechOut.mechanismName || differentiation.mechanismCore.mechanismName,
+          mechanismSteps: mechOut.mechanismSteps?.length > 0 ? mechOut.mechanismSteps : differentiation.mechanismCore.mechanismSteps,
+          mechanismPromise: mechOut.mechanismPromise || differentiation.mechanismCore.mechanismPromise,
+          mechanismProblem: mechOut.mechanismProblem || differentiation.mechanismCore.mechanismProblem,
+          mechanismLogic: mechOut.mechanismLogic || differentiation.mechanismCore.mechanismLogic,
+        },
+      };
+    }
+  }
 
   console.log(`[OfferEngine-V4] Starting 5-layer pipeline`);
 
@@ -1821,6 +1862,40 @@ export async function runOfferEngine(
   if (mechClarity.isVague) {
     primaryOffer.offerStrengthScore = clamp(primaryOffer.offerStrengthScore - 0.1);
     console.log(`[OfferEngine-V4] AI_MECHANISM_VAGUE | primary AI-generated mechanism flagged as vague — strength penalized`);
+  }
+
+  if (mechanismEngineOutput?.axisConsistency) {
+    const mechAxisCheck = mechanismEngineOutput.axisConsistency;
+    diagnostics.mechanismAxisConsistency = mechAxisCheck;
+    if (!mechAxisCheck.consistent) {
+      console.log(`[OfferEngine-V4] MECHANISM_AXIS_GUARD | mechanism axis "${mechAxisCheck.mechanismAxis}" does not match positioning axis "${mechAxisCheck.primaryAxis}" — HARD REJECT`);
+      return {
+        status: "AXIS_MISMATCH",
+        statusMessage: `Mechanism axis "${mechAxisCheck.mechanismAxis}" does not match positioning axis "${mechAxisCheck.primaryAxis}". Re-run Mechanism Engine to resolve.`,
+        primaryOffer,
+        alternativeOffer: null,
+        rejectedOffer: null,
+        offerStrengthScore: 0,
+        positioningConsistency: null,
+        hookMechanismAlignment: null,
+        boundaryCheck: null,
+        confidenceScore: 0,
+        executionTimeMs: Date.now() - startTime,
+        diagnostics,
+      } as any;
+    }
+    const offerMechText = (primaryOffer.mechanismDescription || "").toLowerCase();
+    const mechPrimaryAxis = (mechAxisCheck.primaryAxis || "").replace(/_/g, " ").toLowerCase();
+    const axisTokens = mechPrimaryAxis.split(/\s+/).filter((t: string) => t.length > 3);
+    const mechReferencesAxis = axisTokens.some((t: string) => offerMechText.includes(t));
+    if (!mechReferencesAxis && axisTokens.length > 0) {
+      console.log(`[OfferEngine-V4] MECHANISM_AXIS_ENFORCEMENT | offer mechanism does not reference positioning axis "${mechAxisCheck.primaryAxis}" — axis propagation warning`);
+      diagnostics.mechanismAxisEnforcement = {
+        passed: false,
+        offerMechText: offerMechText.slice(0, 200),
+        expectedAxis: mechAxisCheck.primaryAxis,
+      };
+    }
   }
 
   let status: string = STATUS.COMPLETE;

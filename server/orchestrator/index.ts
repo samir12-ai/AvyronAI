@@ -34,6 +34,7 @@ import { MarketIntelligenceV3 } from "../market-intelligence-v3/engine";
 import { runAudienceEngine } from "../audience-engine/engine";
 import { runPositioningEngine } from "../positioning-engine/engine";
 import { runDifferentiationEngine } from "../differentiation-engine/engine";
+import { runMechanismEngine } from "../mechanism-engine/engine";
 import { runOfferEngine } from "../offer-engine/engine";
 import { runFunnelEngine } from "../funnel-engine/engine";
 import { runIntegrityEngine } from "../integrity-engine/engine";
@@ -68,6 +69,8 @@ interface EngineContext {
   audience?: any;
   positioning?: any;
   differentiation?: any;
+  mechanism?: any;
+  mechanismSnapshotId?: string;
   offer?: any;
   funnel?: any;
   integrity?: any;
@@ -143,6 +146,7 @@ function extractPositioningInput(positioningResult: any): any {
     saturation: out.saturationScore || positioningResult.saturationScore || 0,
     stabilityResult: out.stabilityResult || positioningResult.stabilityResult || { isStable: true, checks: [], advisories: [], fallbackApplied: false },
     strategyCards: out.strategyCards || positioningResult.strategyCards || [],
+    differentiationVector: out.differentiationVector || positioningResult.differentiationVector || [],
   };
 }
 
@@ -256,6 +260,30 @@ async function executeEngine(
         break;
       }
 
+      case "mechanism": {
+        const posInput = extractPositioningInput(ctx.positioning);
+        const diffInput = extractDifferentiationInput(ctx.differentiation);
+        const positioningForMech = {
+          contrastAxis: ctx.positioning?.contrastAxis || posInput.narrative || null,
+          enemyDefinition: ctx.positioning?.enemyDefinition || null,
+          narrativeDirection: ctx.positioning?.narrativeDirection || posInput.narrativeDirection || null,
+          differentiationVector: posInput.differentiationVector || [],
+          territories: posInput.territories || [],
+        };
+        const diffForMech = {
+          pillars: diffInput.claims || [],
+          mechanismFraming: ctx.differentiation?.mechanismFraming || null,
+          mechanismCore: ctx.differentiation?.mechanismCore || null,
+          authorityMode: ctx.differentiation?.authorityMode || null,
+          claimStructures: ctx.differentiation?.claimStructures || [],
+          proofArchitecture: ctx.differentiation?.proofArchitecture || [],
+        };
+        const result = await runMechanismEngine(positioningForMech, diffForMech, config.accountId);
+        output = result;
+        ctx.mechanism = result;
+        break;
+      }
+
       case "offer": {
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
@@ -263,7 +291,8 @@ async function executeEngine(
         const diffInput = extractDifferentiationInput(ctx.differentiation);
         const result = await runOfferEngine(
           miInput, audInput, posInput, diffInput,
-          config.accountId, []
+          config.accountId, [],
+          ctx.mechanism || undefined
         );
         output = result;
         snapshotId = result.snapshotId;

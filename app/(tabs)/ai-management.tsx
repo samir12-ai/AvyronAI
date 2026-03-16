@@ -34,6 +34,7 @@ import ControlCenter from '@/components/ControlCenter';
 import MarketDatabaseAdmin from '@/components/MarketDatabaseAdmin';
 import PositioningStrategy from '@/components/PositioningStrategy';
 import DifferentiationEngine from '@/components/DifferentiationEngine';
+import MechanismEngine from '@/components/MechanismEngine';
 import OfferEngine from '@/components/OfferEngine';
 import FunnelEngine from '@/components/FunnelEngine';
 import IntegrityEngine from '@/components/IntegrityEngine';
@@ -64,7 +65,7 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'strategies' | 'positioning' | 'differentiation' | 'offers' | 'funnels' | 'integrity' | 'awareness' | 'persuasion' | 'statistical_validation' | 'budget_governor' | 'channel_selection' | 'iteration' | 'retention' | 'control' | 'marketdb' | 'publisher' | 'audience' | 'leads';
+type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'strategies' | 'positioning' | 'differentiation' | 'mechanism' | 'offers' | 'funnels' | 'integrity' | 'awareness' | 'persuasion' | 'statistical_validation' | 'budget_governor' | 'channel_selection' | 'iteration' | 'retention' | 'control' | 'marketdb' | 'publisher' | 'audience' | 'leads';
 
 interface AIMgmtPersistedState {
   activeTab: TabView;
@@ -400,6 +401,7 @@ export default function AIManagementScreen() {
   const strategyBranches: { key: TabView; icon: keyof typeof Ionicons.glyphMap; label: string; color: string; description: string }[] = [
     { key: 'positioning', icon: 'compass-outline', label: 'Positioning', color: '#10B981', description: 'Strategic territory discovery and narrative positioning' },
     { key: 'differentiation', icon: 'layers-outline', label: 'Differentiation', color: '#8B5CF6', description: '12-layer proof-backed differentiation analysis' },
+    { key: 'mechanism', icon: 'construct-outline', label: 'Mechanism Engine', color: '#D946EF', description: 'Axis-aligned mechanism generation from positioning and differentiation' },
     { key: 'offers', icon: 'pricetag-outline', label: 'Offer Engine', color: '#F97316', description: '5-layer structured offer construction' },
     { key: 'funnels', icon: 'funnel-outline', label: 'Funnel Engine', color: '#14B8A6', description: '8-layer funnel decision with trust path and proof placement' },
     { key: 'integrity', icon: 'shield-checkmark-outline', label: 'Integrity Engine', color: '#6366F1', description: 'Final validation gate — 8-layer strategic consistency check before execution' },
@@ -1262,6 +1264,11 @@ export default function AIManagementScreen() {
         {visitedTabs.has('differentiation') && (
           <View style={{ display: activeTab === 'differentiation' ? 'flex' : 'none' }}>
             <CampaignGuard><DifferentiationEngine isActive={activeTab === 'differentiation'} /></CampaignGuard>
+          </View>
+        )}
+        {visitedTabs.has('mechanism') && (
+          <View style={{ display: activeTab === 'mechanism' ? 'flex' : 'none' }}>
+            <CampaignGuard><MechanismEngine isActive={activeTab === 'mechanism'} /></CampaignGuard>
           </View>
         )}
         {visitedTabs.has('offers') && (

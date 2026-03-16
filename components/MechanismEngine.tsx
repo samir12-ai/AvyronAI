@@ -1,0 +1,290 @@
+import React, { useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
+import Colors from '@/constants/colors';
+import { useCampaign } from '@/context/CampaignContext';
+import { getApiUrl, safeApiJson } from '@/lib/query-client';
+import { useQuery } from '@tanstack/react-query';
+import { useColorScheme } from 'react-native';
+
+interface MechanismOutput {
+  mechanismName: string;
+  mechanismType: string;
+  mechanismDescription: string;
+  mechanismSteps: string[];
+  mechanismPromise: string;
+  mechanismProblem: string;
+  mechanismLogic: string;
+  axisAlignment: {
+    primaryAxis: string;
+    axisEmphasis: string[];
+    axisConfidence: number;
+  };
+  structuralFrame: string;
+  differentiationLink: string;
+}
+
+interface Props {
+  isActive: boolean;
+}
+
+export default function MechanismEngine({ isActive }: Props) {
+  const { selectedCampaignId } = useCampaign();
+  const baseUrl = getApiUrl();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const [analyzing, setAnalyzing] = useState(false);
+
+  const { data: latestData, refetch } = useQuery({
+    queryKey: ['mechanism-engine-latest', selectedCampaignId],
+    enabled: !!selectedCampaignId && isActive,
+    gcTime: 30 * 60 * 1000,
+    queryFn: async () => {
+      const res = await fetch(new URL(`/api/mechanism-engine/latest?campaignId=${selectedCampaignId}&accountId=default`, baseUrl).toString());
+      return safeApiJson(res);
+    },
+  });
+
+  const { data: diffData } = useQuery({
+    queryKey: ['diff-engine-latest', selectedCampaignId],
+    enabled: !!selectedCampaignId && isActive,
+    gcTime: 30 * 60 * 1000,
+    queryFn: async () => {
+      const res = await fetch(new URL(`/api/differentiation/latest?campaignId=${selectedCampaignId}&accountId=default`, baseUrl).toString());
+      return safeApiJson(res);
+    },
+  });
+
+  const runAnalysis = useCallback(async () => {
+    if (!selectedCampaignId || !diffData?.id) {
+      Alert.alert('Missing Data', 'Run the Differentiation Engine first before generating mechanisms.');
+      return;
+    }
+    setAnalyzing(true);
+    try {
+      const res = await fetch(new URL('/api/mechanism-engine/analyze', baseUrl).toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaignId: selectedCampaignId,
+          accountId: 'default',
+          differentiationSnapshotId: diffData.id,
+        }),
+      });
+      const data = await safeApiJson(res);
+      if (!res.ok) throw new Error(data.message || data.error || 'Analysis failed');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      refetch();
+    } catch (err: any) {
+      Alert.alert('Analysis Error', err.message);
+    } finally {
+      setAnalyzing(false);
+    }
+  }, [selectedCampaignId, diffData, baseUrl, refetch]);
+
+  const mechanism: MechanismOutput | null = latestData?.primaryMechanism || null;
+  const axisConsistency = latestData?.axisConsistency;
+  const hasData = latestData?.exists && mechanism;
+
+  const renderMechanismCard = (mech: MechanismOutput, title: string) => (
+    <View style={[styles.card, isDark && styles.cardDark]}>
+      <View style={styles.cardHeader}>
+        <View style={styles.mechBadge}>
+          <Ionicons name="construct" size={14} color="#D946EF" />
+          <Text style={styles.mechBadgeText}>{mech.mechanismType.toUpperCase()}</Text>
+        </View>
+        <Text style={[styles.cardTitle, isDark && styles.textLight]}>{title}</Text>
+      </View>
+
+      <Text style={[styles.mechName, isDark && styles.textLight]}>{mech.structuralFrame || mech.mechanismName}</Text>
+      <Text style={[styles.mechDesc, isDark && styles.textMuted]}>{mech.mechanismDescription}</Text>
+
+      {mech.axisAlignment && (
+        <View style={styles.axisRow}>
+          <View style={[styles.axisBadge, axisConsistency?.consistent ? styles.axisBadgeGreen : styles.axisBadgeAmber]}>
+            <Ionicons name={axisConsistency?.consistent ? "checkmark-circle" : "warning"} size={12} color={axisConsistency?.consistent ? "#10B981" : "#F59E0B"} />
+            <Text style={[styles.axisBadgeText, { color: axisConsistency?.consistent ? "#10B981" : "#F59E0B" }]}>
+              {mech.axisAlignment.primaryAxis.replace(/_/g, ' ')}
+            </Text>
+          </View>
+          {mech.axisAlignment.axisEmphasis.slice(0, 3).map((e, i) => (
+            <View key={i} style={styles.emphasisTag}>
+              <Text style={styles.emphasisText}>{e}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {mech.mechanismSteps.length > 0 && (
+        <View style={styles.stepsSection}>
+          <Text style={[styles.sectionLabel, isDark && styles.textMuted]}>Mechanism Steps</Text>
+          {mech.mechanismSteps.map((step, i) => (
+            <View key={i} style={styles.stepRow}>
+              <View style={styles.stepNum}><Text style={styles.stepNumText}>{i + 1}</Text></View>
+              <Text style={[styles.stepText, isDark && styles.textLight]}>{step}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {mech.mechanismPromise && (
+        <View style={styles.promiseSection}>
+          <Text style={[styles.sectionLabel, isDark && styles.textMuted]}>Promise</Text>
+          <Text style={[styles.promiseText, isDark && styles.textLight]}>{mech.mechanismPromise}</Text>
+        </View>
+      )}
+
+      {mech.mechanismProblem && (
+        <View style={styles.promiseSection}>
+          <Text style={[styles.sectionLabel, isDark && styles.textMuted]}>Problem it Solves</Text>
+          <Text style={[styles.promiseText, isDark && styles.textLight]}>{mech.mechanismProblem}</Text>
+        </View>
+      )}
+
+      {mech.mechanismLogic && (
+        <View style={styles.promiseSection}>
+          <Text style={[styles.sectionLabel, isDark && styles.textMuted]}>Logic</Text>
+          <Text style={[styles.promiseText, isDark && styles.textLight]}>{mech.mechanismLogic}</Text>
+        </View>
+      )}
+    </View>
+  );
+
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+      <LinearGradient colors={['#D946EF', '#A855F7']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.headerGradient}>
+        <View style={styles.headerContent}>
+          <Ionicons name="construct" size={28} color="#fff" />
+          <View style={styles.headerText}>
+            <Text style={styles.headerTitle}>Mechanism Engine</Text>
+            <Text style={styles.headerSubtitle}>Axis-aligned mechanism generation</Text>
+          </View>
+        </View>
+      </LinearGradient>
+
+      <Pressable
+        style={[styles.analyzeBtn, analyzing && styles.analyzeBtnDisabled]}
+        onPress={runAnalysis}
+        disabled={analyzing}
+      >
+        {analyzing ? (
+          <ActivityIndicator color="#fff" size="small" />
+        ) : (
+          <Ionicons name="flash" size={18} color="#fff" />
+        )}
+        <Text style={styles.analyzeBtnText}>
+          {analyzing ? 'Generating Mechanism...' : hasData ? 'Regenerate Mechanism' : 'Generate Mechanism'}
+        </Text>
+      </Pressable>
+
+      {!hasData && !analyzing && (
+        <View style={[styles.emptyState, isDark && styles.cardDark]}>
+          <Ionicons name="construct-outline" size={48} color="#D946EF" />
+          <Text style={[styles.emptyTitle, isDark && styles.textLight]}>No Mechanism Generated</Text>
+          <Text style={[styles.emptyDesc, isDark && styles.textMuted]}>
+            Run the Differentiation Engine first, then generate an axis-aligned mechanism that ensures strategic coherence across Hook, Outcome, Mechanism, and Proof.
+          </Text>
+        </View>
+      )}
+
+      {hasData && mechanism && (
+        <>
+          {axisConsistency && (
+            <View style={[styles.consistencyBanner, axisConsistency.consistent ? styles.consistencyGreen : styles.consistencyAmber]}>
+              <Ionicons
+                name={axisConsistency.consistent ? "checkmark-circle" : "warning"}
+                size={18}
+                color={axisConsistency.consistent ? "#065F46" : "#92400E"}
+              />
+              <Text style={[styles.consistencyText, { color: axisConsistency.consistent ? "#065F46" : "#92400E" }]}>
+                {axisConsistency.consistent
+                  ? `Axis Consistent — mechanism aligned with ${axisConsistency.primaryAxis.replace(/_/g, ' ')} positioning`
+                  : `Axis Warning — ${axisConsistency.failures?.[0] || 'mechanism may not fully align with positioning axis'}`
+                }
+              </Text>
+            </View>
+          )}
+
+          {renderMechanismCard(mechanism, 'Primary Mechanism')}
+
+          {latestData.alternativeMechanism && renderMechanismCard(latestData.alternativeMechanism, 'Alternative Mechanism')}
+
+          <View style={[styles.metaCard, isDark && styles.cardDark]}>
+            <Text style={[styles.sectionLabel, isDark && styles.textMuted]}>Engine Details</Text>
+            <View style={styles.metaRow}>
+              <Text style={[styles.metaLabel, isDark && styles.textMuted]}>Confidence</Text>
+              <Text style={[styles.metaValue, isDark && styles.textLight]}>{((latestData.confidenceScore || 0) * 100).toFixed(0)}%</Text>
+            </View>
+            <View style={styles.metaRow}>
+              <Text style={[styles.metaLabel, isDark && styles.textMuted]}>Status</Text>
+              <Text style={[styles.metaValue, isDark && styles.textLight]}>{latestData.status}</Text>
+            </View>
+            <View style={styles.metaRow}>
+              <Text style={[styles.metaLabel, isDark && styles.textMuted]}>Execution Time</Text>
+              <Text style={[styles.metaValue, isDark && styles.textLight]}>{latestData.executionTimeMs || 0}ms</Text>
+            </View>
+          </View>
+        </>
+      )}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  contentContainer: { paddingBottom: 40 },
+  headerGradient: { padding: 20, borderRadius: 16, margin: 16, marginBottom: 12 },
+  headerContent: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headerText: { flex: 1 },
+  headerTitle: { fontSize: 20, fontWeight: '700' as const, color: '#fff' },
+  headerSubtitle: { fontSize: 13, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
+  analyzeBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#D946EF', paddingVertical: 14, borderRadius: 12, marginHorizontal: 16, marginBottom: 16 },
+  analyzeBtnDisabled: { opacity: 0.6 },
+  analyzeBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' as const },
+  card: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginHorizontal: 16, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  cardDark: { backgroundColor: '#1C1C1E' },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  cardTitle: { fontSize: 14, fontWeight: '600' as const, color: '#374151' },
+  mechBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FAF5FF', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  mechBadgeText: { fontSize: 10, fontWeight: '700' as const, color: '#D946EF' },
+  mechName: { fontSize: 18, fontWeight: '700' as const, color: '#111827', marginBottom: 6 },
+  mechDesc: { fontSize: 13, color: '#6B7280', lineHeight: 20, marginBottom: 12 },
+  axisRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
+  axisBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  axisBadgeGreen: { backgroundColor: '#ECFDF5' },
+  axisBadgeAmber: { backgroundColor: '#FFFBEB' },
+  axisBadgeText: { fontSize: 11, fontWeight: '600' as const },
+  emphasisTag: { backgroundColor: '#F3E8FF', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 },
+  emphasisText: { fontSize: 10, color: '#7C3AED', fontWeight: '500' as const },
+  stepsSection: { marginTop: 4, marginBottom: 8 },
+  sectionLabel: { fontSize: 12, fontWeight: '600' as const, color: '#9CA3AF', textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 8 },
+  stepRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 8 },
+  stepNum: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#D946EF', alignItems: 'center', justifyContent: 'center' },
+  stepNumText: { fontSize: 11, fontWeight: '700' as const, color: '#fff' },
+  stepText: { flex: 1, fontSize: 13, color: '#374151', lineHeight: 18 },
+  promiseSection: { marginTop: 4, marginBottom: 8 },
+  promiseText: { fontSize: 13, color: '#374151', lineHeight: 20 },
+  consistencyBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 10, marginHorizontal: 16, marginBottom: 12, borderRadius: 10 },
+  consistencyGreen: { backgroundColor: '#ECFDF5' },
+  consistencyAmber: { backgroundColor: '#FFFBEB' },
+  consistencyText: { flex: 1, fontSize: 12, fontWeight: '500' as const },
+  metaCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginHorizontal: 16, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  metaRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 },
+  metaLabel: { fontSize: 13, color: '#9CA3AF' },
+  metaValue: { fontSize: 13, fontWeight: '600' as const, color: '#374151' },
+  emptyState: { alignItems: 'center', padding: 32, margin: 16, backgroundColor: '#fff', borderRadius: 16 },
+  emptyTitle: { fontSize: 16, fontWeight: '600' as const, color: '#374151', marginTop: 12, marginBottom: 6 },
+  emptyDesc: { fontSize: 13, color: '#9CA3AF', textAlign: 'center' as const, lineHeight: 20 },
+  textLight: { color: '#E5E7EB' },
+  textMuted: { color: '#9CA3AF' },
+});

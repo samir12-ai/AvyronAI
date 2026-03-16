@@ -1,0 +1,81 @@
+Hi Replit Team,
+
+We’ve identified a structural issue in the MarketMind engine pipeline that causes recurring Positioning Mismatch errors in the Offer Engine. This issue was previously patched but has resurfaced because the underlying architecture still allows the Offer Engine to generate mechanisms independently from the strategic positioning axis.
+
+Root Cause  
+The pipeline currently behaves like this:
+
+Market Intelligence → Positioning Engine → Differentiation Engine → Offer Engine
+
+The Offer Engine correctly uses the Hook and Outcome derived from the Positioning axis, but the Mechanism is generated independently, often from generic product descriptions (AI system, automation, platform, etc.). This creates a strategic inconsistency where:
+
+- Hook references the positioning axis (e.g., simplicity_and_ease)  
+- Outcome follows the same axis  
+- Mechanism does not reflect that axis  
+
+As a result, the Positioning Consistency Guard blocks the offers, producing a persistent mismatch.
+
+Required Structural Fix
+
+We need to introduce a dedicated Mechanism Engine layer and enforce axis propagation through the entire strategy stack.
+
+The corrected pipeline should be:
+
+Market Intelligence → Positioning Engine → Differentiation Engine → Mechanism Engine → Offer Engine
+
+Mechanism Engine Responsibilities
+
+The Mechanism Engine must generate mechanisms strictly derived from:
+
+- positioningAxis  
+- contrastAxis  
+- differentiationPillars  
+
+Example logic:
+
+If positioningAxis = simplicity_and_ease  
+Mechanism must emphasize simplification, consolidation, automation, or removal of complexity.
+
+If positioningAxis = cost_affordability  
+Mechanism must emphasize cost reduction, replacing expensive teams, or efficiency gains.
+
+Mechanism generation must therefore follow:
+
+Mechanism = f(positioningAxis, contrastAxis, differentiationPillars)
+
+Offer Engine Update
+
+The Offer Engine should no longer generate mechanisms itself. Instead it must consume the structured mechanism object returned by the Mechanism Engine.
+
+Offer structure must follow:
+
+Hook  
+Outcome  
+Mechanism  
+Proof
+
+All four components must reference the same strategic axis.
+
+Mandatory Consistency Guard
+
+Before an offer is finalized, enforce:
+
+if mechanism.axis !== positioning.axis → reject offer
+
+This ensures strategic coherence across all engines.
+
+System-Wide Update Required
+
+Please implement this as a global architectural update, ensuring:
+
+1. Positioning axis is propagated to all downstream engines.  
+2. Mechanism generation is centralized in the Mechanism Engine.  
+3. Offer Engine consumes the generated mechanism rather than creating one.  
+4. Consistency guard verifies axis alignment across Hook, Outcome, Mechanism, and Proof.  
+5. Existing offers are revalidated after deployment.
+
+This fix must apply across all business types and market categories, ensuring that every generated offer remains structurally aligned with the detected strategic positioning.
+
+Please deploy this as a system-wide update to prevent future regressions.
+
+Thanks.

@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { db } from "../db";
-import { offerSnapshots, differentiationSnapshots, miSnapshots, audienceSnapshots, positioningSnapshots } from "@shared/schema";
+import { offerSnapshots, differentiationSnapshots, miSnapshots, audienceSnapshots, positioningSnapshots, mechanismSnapshots } from "@shared/schema";
 import { inArray, eq, and, desc } from "drizzle-orm";
 import { runOfferEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
@@ -183,7 +183,25 @@ export function registerOfferEngineRoutes(app: Express) {
       );
       console.log(`[OfferEngine] UPSTREAM_LINEAGE | mi=${parseLineageFromSnapshot((miSnapshot as any).signalLineage).length} | audience=${parseLineageFromSnapshot((audSnapshot as any).signalLineage).length} | merged=${upstreamLineage.length}`);
 
-      const result = await runOfferEngine(miInput, audienceInput, positioningInput, differentiationInput, accountId, upstreamLineage);
+      let mechanismEngineOutput: any = undefined;
+      const [latestMechanism] = await db.select().from(mechanismSnapshots)
+        .where(and(
+          eq(mechanismSnapshots.campaignId, campaignId),
+          eq(mechanismSnapshots.accountId, accountId),
+          eq(mechanismSnapshots.status, "COMPLETE"),
+        ))
+        .orderBy(desc(mechanismSnapshots.createdAt))
+        .limit(1);
+      if (latestMechanism) {
+        mechanismEngineOutput = {
+          primaryMechanism: safeJsonParse(latestMechanism.primaryMechanism),
+          alternativeMechanism: safeJsonParse(latestMechanism.alternativeMechanism),
+          axisConsistency: safeJsonParse(latestMechanism.axisConsistency),
+        };
+        console.log(`[OfferEngine] MECHANISM_ENGINE_FOUND | snapshotId=${latestMechanism.id} | consuming centralized mechanism`);
+      }
+
+      const result = await runOfferEngine(miInput, audienceInput, positioningInput, differentiationInput, accountId, upstreamLineage, mechanismEngineOutput);
 
       if (result.status === "INTEGRITY_FAILED") {
         return res.status(422).json({
@@ -227,6 +245,7 @@ export function registerOfferEngineRoutes(app: Express) {
         audienceSnapshotId,
         positioningSnapshotId,
         differentiationSnapshotId: activeDiffSnapshot.id,
+        mechanismSnapshotId: latestMechanism?.id || null,
         engineVersion: ENGINE_VERSION,
         status: result.status,
         statusMessage: result.statusMessage,

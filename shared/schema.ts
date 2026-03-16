@@ -1733,6 +1733,27 @@ export const differentiationSnapshots = pgTable("differentiation_snapshots", {
 
 export type DifferentiationSnapshot = typeof differentiationSnapshots.$inferSelect;
 
+export const mechanismSnapshots = pgTable("mechanism_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  positioningSnapshotId: varchar("positioning_snapshot_id").notNull(),
+  differentiationSnapshotId: varchar("differentiation_snapshot_id").notNull(),
+  engineVersion: integer("engine_version").notNull().default(1),
+  status: text("status").notNull().default("COMPLETE"),
+  statusMessage: text("status_message"),
+  primaryMechanism: text("primary_mechanism"),
+  alternativeMechanism: text("alternative_mechanism"),
+  axisConsistency: text("axis_consistency"),
+  confidenceScore: doublePrecision("confidence_score"),
+  executionTimeMs: integer("execution_time_ms"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type MechanismSnapshot = typeof mechanismSnapshots.$inferSelect;
+
 export const offerSnapshots = pgTable("offer_snapshots", {
   id: varchar("id")
     .primaryKey()
@@ -1743,6 +1764,7 @@ export const offerSnapshots = pgTable("offer_snapshots", {
   audienceSnapshotId: varchar("audience_snapshot_id").notNull(),
   positioningSnapshotId: varchar("positioning_snapshot_id").notNull(),
   differentiationSnapshotId: varchar("differentiation_snapshot_id").notNull(),
+  mechanismSnapshotId: varchar("mechanism_snapshot_id"),
   engineVersion: integer("engine_version").notNull().default(1),
   status: text("status").notNull().default("COMPLETE"),
   statusMessage: text("status_message"),
