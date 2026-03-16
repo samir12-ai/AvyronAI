@@ -78,6 +78,9 @@ interface OfferData {
   mechanismSnapshotId?: string;
   strategyRootId?: string;
   createdAt?: string;
+  rootSyncStatus?: 'synced' | 'stale' | 'no_root';
+  activeRootId?: string | null;
+  activeRootHash?: string | null;
 }
 
 export default function OfferEngine({ isActive }: { isActive?: boolean }) {
@@ -87,7 +90,6 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
   const [data, setData] = useState<OfferData | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-  const [diffSnapshotId, setDiffSnapshotId] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<'primary' | 'alternative' | 'rejected'>('primary');
   const [selecting, setSelecting] = useState(false);
   const [strategyRoot, setStrategyRoot] = useState<any>(null);
@@ -108,21 +110,6 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
     }
   }, [selectedCampaignId]);
 
-  const fetchDiffSnapshot = useCallback(async () => {
-    if (!selectedCampaignId) return;
-    try {
-      const url = new URL('/api/differentiation-engine/latest', getApiUrl());
-      url.searchParams.set('campaignId', selectedCampaignId);
-      const res = await fetch(url.toString());
-      const json = await safeApiJson(res);
-      if (json.exists && json.id) {
-        setDiffSnapshotId(json.id);
-      }
-    } catch (err) {
-      console.error('[OfferEngine] Diff snapshot fetch error:', err);
-    }
-  }, [selectedCampaignId]);
-
   const fetchStrategyRoot = useCallback(async () => {
     if (!selectedCampaignId) return;
     try {
@@ -139,16 +126,18 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
   useEffect(() => {
     if (isActive) {
       fetchLatest();
-      fetchDiffSnapshot();
       fetchStrategyRoot();
     }
-  }, [isActive, fetchLatest, fetchDiffSnapshot, fetchStrategyRoot]);
+  }, [isActive, fetchLatest, fetchStrategyRoot]);
 
   const runAnalysis = useCallback(async () => {
-    if (!selectedCampaignId || !diffSnapshotId) {
-      Alert.alert('Missing Dependency', 'A completed Differentiation Engine analysis is required before running the Offer Engine.');
+    if (!selectedCampaignId) return;
+
+    if (!strategyRoot?.exists) {
+      Alert.alert('No Strategy Root', 'Complete the full pipeline (Product DNA, MI, Audience, Positioning, Differentiation, Mechanism) to create a Strategy Root before generating offers.');
       return;
     }
+
     setAnalyzing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
@@ -156,7 +145,7 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
       const res = await fetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaignId: selectedCampaignId, differentiationSnapshotId: diffSnapshotId }),
+        body: JSON.stringify({ campaignId: selectedCampaignId }),
       });
       const json = await safeApiJson(res);
       if (json.success) {
@@ -164,14 +153,20 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
         await fetchLatest();
         await fetchStrategyRoot();
       } else {
-        Alert.alert('Analysis Failed', json.message || json.error || 'Unknown error');
+        if (json.error === 'NO_ACTIVE_STRATEGY_ROOT') {
+          Alert.alert('Strategy Root Required', 'No active Strategy Root found. Run the Mechanism Engine first to create one.');
+        } else if (json.error === 'STRATEGY_ROOT_INCOMPLETE') {
+          Alert.alert('Incomplete Root', json.message || 'Strategy Root is missing required fields.');
+        } else {
+          Alert.alert('Analysis Failed', json.message || json.error || 'Unknown error');
+        }
       }
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Analysis failed');
     } finally {
       setAnalyzing(false);
     }
-  }, [selectedCampaignId, diffSnapshotId, fetchLatest]);
+  }, [selectedCampaignId, strategyRoot, fetchLatest, fetchStrategyRoot]);
 
   const selectOption = useCallback(async (option: 'primary' | 'alternative') => {
     if (!data?.id) return;
@@ -434,21 +429,33 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
           <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
             Run the Offer Engine to generate structured, market-aligned offers based on your positioning and differentiation data.
           </Text>
-          {!diffSnapshotId && (
+          {!strategyRoot?.exists && (
             <View style={[styles.depWarning, { backgroundColor: '#F59E0B15' }]}>
               <Ionicons name="alert-circle" size={16} color="#F59E0B" />
               <Text style={[styles.depWarningText, { color: '#F59E0B' }]}>
-                Complete a Differentiation Engine analysis first
+                Complete the full pipeline and run the Mechanism Engine to create a Strategy Root first
               </Text>
             </View>
           )}
         </View>
       )}
 
+      {data?.rootSyncStatus === 'stale' && (
+        <View style={[styles.warningBox, { backgroundColor: '#F59E0B12', borderColor: '#F59E0B30', marginBottom: 10 }]}>
+          <Ionicons name="refresh-circle" size={18} color="#F59E0B" />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.warningTitle, { color: '#D97706' }]}>Stale Run Context</Text>
+            <Text style={[styles.warningDetail, { color: '#92400E' }]}>
+              This offer was generated against an older Strategy Root. The pipeline has newer data. Regenerate to sync with the current run.
+            </Text>
+          </View>
+        </View>
+      )}
+
       <Pressable
         onPress={runAnalysis}
-        disabled={analyzing || !diffSnapshotId}
-        style={[styles.analyzeBtn, (!diffSnapshotId) && styles.analyzeBtnDisabled]}
+        disabled={analyzing || !strategyRoot?.exists}
+        style={[styles.analyzeBtn, (!strategyRoot?.exists) && styles.analyzeBtnDisabled]}
       >
         <LinearGradient
           colors={analyzing ? ['#9CA3AF', '#6B7280'] : ['#F97316', '#EA580C']}
@@ -506,21 +513,28 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
           )}
 
           {strategyRoot?.exists && (
-            <View style={[styles.sourceRow, { backgroundColor: colors.card, borderColor: '#06B6D430' }]}>
-              <View style={[styles.sourceBadge, { backgroundColor: '#06B6D415' }]}>
-                <Ionicons name="git-network" size={12} color="#06B6D4" />
-                <Text style={[styles.sourceBadgeText, { color: '#06B6D4' }]}>Strategy Root</Text>
+            <View style={[styles.sourceRow, {
+              backgroundColor: colors.card,
+              borderColor: data.rootSyncStatus === 'synced' ? '#10B98130' : data.rootSyncStatus === 'stale' ? '#F59E0B30' : '#06B6D430',
+            }]}>
+              <View style={[styles.sourceBadge, {
+                backgroundColor: data.rootSyncStatus === 'synced' ? '#10B98115' : data.rootSyncStatus === 'stale' ? '#F59E0B15' : '#06B6D415',
+              }]}>
+                <Ionicons name="git-network" size={12} color={data.rootSyncStatus === 'synced' ? '#10B981' : data.rootSyncStatus === 'stale' ? '#F59E0B' : '#06B6D4'} />
+                <Text style={[styles.sourceBadgeText, {
+                  color: data.rootSyncStatus === 'synced' ? '#10B981' : data.rootSyncStatus === 'stale' ? '#F59E0B' : '#06B6D4',
+                }]}>Strategy Root</Text>
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.sourceDetail, { color: colors.textMuted }]}>
                   {strategyRoot.primaryAxis ? strategyRoot.primaryAxis.replace(/_/g, ' ') : 'Unified'} axis
-                  {data.strategyRootId === strategyRoot.id ? ' (bound)' : ' (stale — regenerate)'}
+                  {data.rootSyncStatus === 'synced' ? ' — synced' : data.rootSyncStatus === 'stale' ? ' — stale, regenerate' : ''}
                 </Text>
                 <Text style={[styles.sourceDetail, { color: colors.textMuted, fontSize: 10, marginTop: 2 }]}>
                   Hash: {strategyRoot.rootHash?.substring(0, 10)}... | Run: {strategyRoot.runId?.split('_')[1] || '—'}
                 </Text>
               </View>
-              {data.strategyRootId === strategyRoot.id ? (
+              {data.rootSyncStatus === 'synced' ? (
                 <Ionicons name="checkmark-circle" size={16} color="#10B981" />
               ) : (
                 <Ionicons name="alert-circle" size={16} color="#F59E0B" />
@@ -529,12 +543,12 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
           )}
 
           {!strategyRoot?.exists && data?.exists && (
-            <View style={[styles.warningBox, { backgroundColor: '#F59E0B10', borderColor: '#F59E0B25' }]}>
-              <Ionicons name="information-circle" size={16} color="#F59E0B" />
+            <View style={[styles.warningBox, { backgroundColor: '#EF444412', borderColor: '#EF444425' }]}>
+              <Ionicons name="alert-circle" size={16} color="#EF4444" />
               <View style={{ flex: 1 }}>
-                <Text style={[styles.warningTitle, { color: '#D97706' }]}>No Strategy Root</Text>
-                <Text style={[styles.warningDetail, { color: '#92400E' }]}>
-                  Run the Mechanism Engine to create a unified strategy root. Offers will still work but may not be axis-aligned.
+                <Text style={[styles.warningTitle, { color: '#DC2626' }]}>No Active Strategy Root</Text>
+                <Text style={[styles.warningDetail, { color: '#991B1B' }]}>
+                  Run the Mechanism Engine to create a unified Strategy Root. Offers cannot be generated without an active root.
                 </Text>
               </View>
             </View>

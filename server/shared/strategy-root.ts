@@ -179,6 +179,8 @@ export async function invalidateDownstreamOnRegeneration(
     return { supersededRoots: 0, invalidatedOffers: 0, invalidatedFunnels: 0, invalidatedIntegrity: 0 };
   }
 
+  const supersededRootId = activeRoot.id;
+
   await db.update(strategyRoots)
     .set({ status: "SUPERSEDED" })
     .where(and(
@@ -187,9 +189,52 @@ export async function invalidateDownstreamOnRegeneration(
       eq(strategyRoots.status, "ACTIVE"),
     ));
 
-  console.log(`[StrategyRoot] INVALIDATED | root=${activeRoot.id} | trigger=${regeneratedEngine} | campaign=${campaignId}`);
+  let invalidatedOffers = 0;
+  let invalidatedFunnels = 0;
+  let invalidatedIntegrity = 0;
 
-  return { supersededRoots: 1, invalidatedOffers: 0, invalidatedFunnels: 0, invalidatedIntegrity: 0 };
+  try {
+    const offerResult = await db.update(offerSnapshots)
+      .set({ statusMessage: `Invalidated: upstream ${regeneratedEngine} engine regenerated (root ${supersededRootId} superseded)` })
+      .where(and(
+        eq(offerSnapshots.campaignId, campaignId),
+        eq(offerSnapshots.accountId, accountId),
+        eq(offerSnapshots.strategyRootId, supersededRootId),
+      ));
+    invalidatedOffers = (offerResult as any)?.rowCount || 0;
+  } catch (e) {
+    console.log(`[StrategyRoot] Could not mark offer snapshots (non-critical): ${(e as Error).message}`);
+  }
+
+  try {
+    const funnelResult = await db.update(funnelSnapshots)
+      .set({ statusMessage: `Invalidated: upstream ${regeneratedEngine} engine regenerated (root ${supersededRootId} superseded)` })
+      .where(and(
+        eq(funnelSnapshots.campaignId, campaignId),
+        eq(funnelSnapshots.accountId, accountId),
+        eq(funnelSnapshots.strategyRootId, supersededRootId),
+      ));
+    invalidatedFunnels = (funnelResult as any)?.rowCount || 0;
+  } catch (e) {
+    console.log(`[StrategyRoot] Could not mark funnel snapshots (non-critical): ${(e as Error).message}`);
+  }
+
+  try {
+    const integrityResult = await db.update(integritySnapshots)
+      .set({ statusMessage: `Invalidated: upstream ${regeneratedEngine} engine regenerated (root ${supersededRootId} superseded)` })
+      .where(and(
+        eq(integritySnapshots.campaignId, campaignId),
+        eq(integritySnapshots.accountId, accountId),
+        eq(integritySnapshots.strategyRootId, supersededRootId),
+      ));
+    invalidatedIntegrity = (integrityResult as any)?.rowCount || 0;
+  } catch (e) {
+    console.log(`[StrategyRoot] Could not mark integrity snapshots (non-critical): ${(e as Error).message}`);
+  }
+
+  console.log(`[StrategyRoot] INVALIDATED | root=${supersededRootId} | trigger=${regeneratedEngine} | campaign=${campaignId} | offers=${invalidatedOffers} | funnels=${invalidatedFunnels} | integrity=${invalidatedIntegrity}`);
+
+  return { supersededRoots: 1, invalidatedOffers, invalidatedFunnels, invalidatedIntegrity };
 }
 
 export function validatePreGeneration(activeRoot: any): {

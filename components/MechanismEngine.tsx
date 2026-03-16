@@ -316,13 +316,13 @@ export default function MechanismEngine({ isActive }: Props) {
               <View style={styles.cardHeader}>
                 <Ionicons name="git-network" size={14} color="#06B6D4" />
                 <Text style={[styles.cardTitle, isDark && styles.textLight]}>Strategy Root</Text>
-                <View style={[styles.mechBadge, { backgroundColor: '#06B6D415', marginLeft: 'auto' as any }]}>
-                  <Ionicons name="checkmark-circle" size={10} color="#06B6D4" />
-                  <Text style={[styles.mechBadgeText, { color: '#06B6D4' }]}>ACTIVE</Text>
+                <View style={[styles.mechBadge, { backgroundColor: strategyRoot.allSnapshotsValid ? '#10B98115' : '#F59E0B15', marginLeft: 'auto' as any }]}>
+                  <Ionicons name={strategyRoot.allSnapshotsValid ? "checkmark-circle" : "alert-circle"} size={10} color={strategyRoot.allSnapshotsValid ? "#10B981" : "#F59E0B"} />
+                  <Text style={[styles.mechBadgeText, { color: strategyRoot.allSnapshotsValid ? '#10B981' : '#F59E0B' }]}>{strategyRoot.allSnapshotsValid ? 'ACTIVE' : 'NEEDS REFRESH'}</Text>
                 </View>
               </View>
               <Text style={[styles.mechDesc, isDark && styles.textMuted]}>
-                Unified source of truth binding all 5 engines. Downstream engines will reference this root for axis, mechanism, and audience alignment.
+                Unified source of truth binding all 5 engines. Offer Engine will consume only this root for axis, mechanism, and audience alignment.
               </Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                 <View style={styles.emphasisTag}>
@@ -339,6 +339,19 @@ export default function MechanismEngine({ isActive }: Props) {
                   </View>
                 )}
               </View>
+              {strategyRoot.snapshotBindings && (
+                <View style={{ marginTop: 10, gap: 3 }}>
+                  {['mi', 'audience', 'positioning', 'differentiation', 'mechanism'].map((key) => {
+                    const binding = strategyRoot.snapshotBindings[key];
+                    return (
+                      <View key={key} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Ionicons name={binding?.exists ? "checkmark-circle" : "close-circle"} size={11} color={binding?.exists ? "#10B981" : "#EF4444"} />
+                        <Text style={{ fontSize: 10, color: isDark ? '#9CA3AF' : '#6B7280', textTransform: 'capitalize' as const }}>{key}</Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
             </View>
           )}
         </>

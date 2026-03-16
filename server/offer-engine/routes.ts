@@ -35,110 +35,83 @@ export function registerOfferEngineRoutes(app: Express) {
         });
       }
 
-      if (!differentiationSnapshotId) {
-        return res.status(400).json({ error: "differentiationSnapshotId is required" });
-      }
+      const activeRoot = await getActiveRoot(campaignId, accountId);
 
-      const [diffSnapshot] = await db.select().from(differentiationSnapshots)
-        .where(and(eq(differentiationSnapshots.id, differentiationSnapshotId), eq(differentiationSnapshots.campaignId, campaignId), eq(differentiationSnapshots.accountId, accountId)))
-        .limit(1);
-
-      if (!diffSnapshot) {
+      if (!activeRoot) {
+        console.log(`[OfferEngine] ROOT_REQUIRED_BLOCK | campaign=${campaignId} | no active strategy root`);
         return res.status(400).json({
-          error: "MISSING_DEPENDENCY",
-          message: "Differentiation snapshot not found or campaign mismatch",
+          error: "NO_ACTIVE_STRATEGY_ROOT",
+          message: "No active Strategy Root found. Complete the full pipeline (Product DNA → MI → Audience → Positioning → Differentiation → Mechanism) to create a unified Strategy Root before generating offers.",
         });
       }
 
-      let activeDiffSnapshot = diffSnapshot;
-      if (activeDiffSnapshot.engineVersion !== DIFF_ENGINE_VERSION) {
-        console.log(`[OfferEngine] Diff snapshot ${differentiationSnapshotId} version mismatch (v${activeDiffSnapshot.engineVersion} vs v${DIFF_ENGINE_VERSION}), searching for latest valid diff snapshot`);
-        const [latestDiff] = await db.select().from(differentiationSnapshots)
-          .where(and(
-            eq(differentiationSnapshots.campaignId, campaignId),
-            eq(differentiationSnapshots.accountId, accountId),
-            inArray(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"]),
-            eq(differentiationSnapshots.engineVersion, DIFF_ENGINE_VERSION),
-          ))
-          .orderBy(desc(differentiationSnapshots.createdAt))
-          .limit(1);
-        if (latestDiff) {
-          console.log(`[OfferEngine] Using latest valid diff snapshot ${latestDiff.id} (v${latestDiff.engineVersion})`);
-          activeDiffSnapshot = latestDiff;
-        } else {
-          return res.status(400).json({
-            error: "VERSION_MISMATCH",
-            message: `Differentiation snapshot version ${activeDiffSnapshot.engineVersion} does not match current version ${DIFF_ENGINE_VERSION} — please re-run Differentiation Engine first`,
-          });
-        }
+      const preGen = validatePreGeneration(activeRoot);
+      if (!preGen.canGenerate) {
+        console.log(`[OfferEngine] ROOT_PRE_GEN_BLOCK | missing: ${preGen.missingFields.join(", ")}`);
+        return res.status(400).json({
+          error: "STRATEGY_ROOT_INCOMPLETE",
+          message: `Strategy Root is missing required fields: ${preGen.missingFields.join(", ")}. Re-run the Mechanism Engine to regenerate a complete root.`,
+        });
       }
 
-      const miSnapshotId = activeDiffSnapshot.miSnapshotId;
-      const audienceSnapshotId = activeDiffSnapshot.audienceSnapshotId;
-      const positioningSnapshotId = activeDiffSnapshot.positioningSnapshotId;
+      const rootMiId = activeRoot.miSnapshotId;
+      const rootAudienceId = activeRoot.audienceSnapshotId;
+      const rootPositioningId = activeRoot.positioningSnapshotId;
+      const rootDiffId = activeRoot.differentiationSnapshotId;
+      const rootMechId = activeRoot.mechanismSnapshotId;
 
-      let [miSnapshot] = await db.select().from(miSnapshots)
-        .where(and(eq(miSnapshots.id, miSnapshotId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId)))
+      console.log(`[OfferEngine] ROOT_SCOPED_ROUTING | rootId=${activeRoot.id} | hash=${activeRoot.rootHash} | runId=${activeRoot.runId} | mi=${rootMiId} | aud=${rootAudienceId} | pos=${rootPositioningId} | diff=${rootDiffId} | mech=${rootMechId}`);
+
+      const [activeDiffSnapshot] = await db.select().from(differentiationSnapshots)
+        .where(and(eq(differentiationSnapshots.id, rootDiffId), eq(differentiationSnapshots.campaignId, campaignId), eq(differentiationSnapshots.accountId, accountId)))
         .limit(1);
 
-      if (miSnapshot) {
-        const integrityResult = verifySnapshotIntegrity(miSnapshot, MI_ENGINE_VERSION, campaignId);
-        const miReadiness = integrityResult.valid ? getEngineReadinessState(miSnapshot, campaignId, MI_ENGINE_VERSION, 14) : null;
-        if (!integrityResult.valid || (miReadiness && miReadiness.state !== "READY")) {
-          console.log(`[OfferEngine] MI snapshot ${miSnapshotId} failed integrity/readiness check, searching for latest valid MI snapshot`);
-          const [latestMI] = await db.select().from(miSnapshots)
-            .where(and(
-              eq(miSnapshots.campaignId, campaignId),
-              eq(miSnapshots.accountId, accountId),
-              inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
-              eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
-            ))
-            .orderBy(desc(miSnapshots.createdAt))
-            .limit(1);
-          if (latestMI) {
-            console.log(`[OfferEngine] Using latest valid MI snapshot ${latestMI.id} (v${latestMI.analysisVersion})`);
-            miSnapshot = latestMI;
-          } else {
-            return res.status(400).json({
-              error: "MI_INTEGRITY_FAILED",
-              message: "MI snapshot integrity check failed and no valid alternative found — please re-run Market Intelligence first",
-            });
-          }
-        }
-      } else {
-        const [latestMI] = await db.select().from(miSnapshots)
-          .where(and(
-            eq(miSnapshots.campaignId, campaignId),
-            eq(miSnapshots.accountId, accountId),
-            inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
-            eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
-          ))
-          .orderBy(desc(miSnapshots.createdAt))
-          .limit(1);
-        if (latestMI) {
-          miSnapshot = latestMI;
-        } else {
-          return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid MI snapshot found — please run Market Intelligence first" });
-        }
+      if (!activeDiffSnapshot) {
+        return res.status(400).json({
+          error: "ROOT_SNAPSHOT_MISSING",
+          message: `Differentiation snapshot ${rootDiffId} referenced by Strategy Root not found. Re-run the pipeline to regenerate.`,
+        });
+      }
+
+      let [miSnapshot] = await db.select().from(miSnapshots)
+        .where(and(eq(miSnapshots.id, rootMiId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId)))
+        .limit(1);
+
+      if (!miSnapshot) {
+        return res.status(400).json({
+          error: "ROOT_SNAPSHOT_MISSING",
+          message: `MI snapshot ${rootMiId} referenced by Strategy Root not found. Re-run Market Intelligence to regenerate.`,
+        });
+      }
+
+      const integrityResult = verifySnapshotIntegrity(miSnapshot, MI_ENGINE_VERSION, campaignId);
+      if (!integrityResult.valid) {
+        console.log(`[OfferEngine] MI_INTEGRITY_WARNING | snapshot=${rootMiId} | proceeding with root-bound snapshot despite version mismatch`);
       }
 
       const miFreshnessMetadata = buildFreshnessMetadata(miSnapshot);
       logFreshnessTraceability("OfferEngine", miSnapshot, miFreshnessMetadata);
 
       const [audSnapshot] = await db.select().from(audienceSnapshots)
-        .where(and(eq(audienceSnapshots.id, audienceSnapshotId), eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.accountId, accountId)))
+        .where(and(eq(audienceSnapshots.id, rootAudienceId), eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.accountId, accountId)))
         .limit(1);
 
       if (!audSnapshot) {
-        return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Audience snapshot not found or campaign/account mismatch" });
+        return res.status(400).json({
+          error: "ROOT_SNAPSHOT_MISSING",
+          message: `Audience snapshot ${rootAudienceId} referenced by Strategy Root not found. Re-run the Audience Engine to regenerate.`,
+        });
       }
 
       const [posSnapshot] = await db.select().from(positioningSnapshots)
-        .where(and(eq(positioningSnapshots.id, positioningSnapshotId), eq(positioningSnapshots.campaignId, campaignId), eq(positioningSnapshots.accountId, accountId)))
+        .where(and(eq(positioningSnapshots.id, rootPositioningId), eq(positioningSnapshots.campaignId, campaignId), eq(positioningSnapshots.accountId, accountId)))
         .limit(1);
 
       if (!posSnapshot) {
-        return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Positioning snapshot not found or campaign/account mismatch" });
+        return res.status(400).json({
+          error: "ROOT_SNAPSHOT_MISSING",
+          message: `Positioning snapshot ${rootPositioningId} referenced by Strategy Root not found. Re-run the Positioning Engine to regenerate.`,
+        });
       }
 
       const miInput = {
@@ -185,71 +158,44 @@ export function registerOfferEngineRoutes(app: Express) {
       );
       console.log(`[OfferEngine] UPSTREAM_LINEAGE | mi=${parseLineageFromSnapshot((miSnapshot as any).signalLineage).length} | audience=${parseLineageFromSnapshot((audSnapshot as any).signalLineage).length} | merged=${upstreamLineage.length}`);
 
-      const activeRoot = await getActiveRoot(campaignId, accountId);
-      let strategyRootId: string | null = null;
-      let rootValidation: any = null;
+      const strategyRootId = activeRoot.id;
 
-      if (activeRoot) {
-        const preGen = validatePreGeneration(activeRoot);
-        rootValidation = validateRootBinding(activeRoot, {
-          miSnapshotId: miSnapshot.id,
-          audienceSnapshotId,
-          positioningSnapshotId,
-          differentiationSnapshotId: activeDiffSnapshot.id,
-        });
+      const rootValidation = validateRootBinding(activeRoot, {
+        miSnapshotId: miSnapshot.id,
+        audienceSnapshotId: rootAudienceId,
+        positioningSnapshotId: rootPositioningId,
+        differentiationSnapshotId: activeDiffSnapshot.id,
+        mechanismSnapshotId: rootMechId,
+      });
 
-        if (!rootValidation.valid) {
-          console.log(`[OfferEngine] ROOT_BINDING_ADVISORY | issues: ${rootValidation.issues.join("; ")}`);
-        }
-        if (!preGen.canGenerate) {
-          console.log(`[OfferEngine] ROOT_PRE_GEN_ADVISORY | missing: ${preGen.missingFields.join(", ")}`);
-        }
-        strategyRootId = activeRoot.id;
-        console.log(`[OfferEngine] STRATEGY_ROOT_BOUND | rootId=${activeRoot.id} | hash=${activeRoot.rootHash} | runId=${activeRoot.runId}`);
-      } else {
-        console.log(`[OfferEngine] NO_ACTIVE_ROOT | campaign=${campaignId} | proceeding without root binding`);
+      if (!rootValidation.valid) {
+        console.log(`[OfferEngine] ROOT_BINDING_ADVISORY | issues: ${rootValidation.issues.join("; ")}`);
       }
 
       let mechanismEngineOutput: any = undefined;
       let mechanismSnapshotUsed: string | null = null;
 
-      if (activeRoot?.mechanismSnapshotId) {
-        const [rootMechanism] = await db.select().from(mechanismSnapshots)
-          .where(and(
-            eq(mechanismSnapshots.id, activeRoot.mechanismSnapshotId),
-            eq(mechanismSnapshots.campaignId, campaignId),
-            eq(mechanismSnapshots.accountId, accountId),
-          ))
-          .limit(1);
-        if (rootMechanism) {
-          mechanismEngineOutput = {
-            primaryMechanism: safeJsonParse(rootMechanism.primaryMechanism),
-            alternativeMechanism: safeJsonParse(rootMechanism.alternativeMechanism),
-            axisConsistency: safeJsonParse(rootMechanism.axisConsistency),
-          };
-          mechanismSnapshotUsed = rootMechanism.id;
-          console.log(`[OfferEngine] MECHANISM_FROM_ROOT | snapshotId=${rootMechanism.id} | bound to strategy root ${activeRoot.id}`);
-        }
-      }
+      const [rootMechanism] = await db.select().from(mechanismSnapshots)
+        .where(and(
+          eq(mechanismSnapshots.id, rootMechId),
+          eq(mechanismSnapshots.campaignId, campaignId),
+          eq(mechanismSnapshots.accountId, accountId),
+        ))
+        .limit(1);
 
-      if (!mechanismEngineOutput) {
-        const [latestMechanism] = await db.select().from(mechanismSnapshots)
-          .where(and(
-            eq(mechanismSnapshots.campaignId, campaignId),
-            eq(mechanismSnapshots.accountId, accountId),
-            eq(mechanismSnapshots.status, "COMPLETE"),
-          ))
-          .orderBy(desc(mechanismSnapshots.createdAt))
-          .limit(1);
-        if (latestMechanism) {
-          mechanismEngineOutput = {
-            primaryMechanism: safeJsonParse(latestMechanism.primaryMechanism),
-            alternativeMechanism: safeJsonParse(latestMechanism.alternativeMechanism),
-            axisConsistency: safeJsonParse(latestMechanism.axisConsistency),
-          };
-          mechanismSnapshotUsed = latestMechanism.id;
-          console.log(`[OfferEngine] MECHANISM_FALLBACK | snapshotId=${latestMechanism.id} | no root binding, using latest`);
-        }
+      if (rootMechanism) {
+        mechanismEngineOutput = {
+          primaryMechanism: safeJsonParse(rootMechanism.primaryMechanism),
+          alternativeMechanism: safeJsonParse(rootMechanism.alternativeMechanism),
+          axisConsistency: safeJsonParse(rootMechanism.axisConsistency),
+        };
+        mechanismSnapshotUsed = rootMechanism.id;
+        console.log(`[OfferEngine] MECHANISM_FROM_ROOT | snapshotId=${rootMechanism.id} | bound to strategy root ${activeRoot.id}`);
+      } else {
+        return res.status(400).json({
+          error: "ROOT_SNAPSHOT_MISSING",
+          message: `Mechanism snapshot ${rootMechId} referenced by Strategy Root not found. Re-run the Mechanism Engine to regenerate.`,
+        });
       }
 
       const result = await runOfferEngine(miInput, audienceInput, positioningInput, differentiationInput, accountId, upstreamLineage, mechanismEngineOutput);
@@ -280,7 +226,7 @@ export function registerOfferEngineRoutes(app: Express) {
       console.log(`[OfferEngine] LINEAGE_BUILT | upstream=${upstreamLineage.length} | derived=${offerLineage.length} | claims=${offerClaims.length} | grounding=${result.signalGrounding ? `${result.signalGrounding.groundedClaims}/${result.signalGrounding.totalClaims}` : 'N/A'}`);
 
       let postGenValidation: any = null;
-      if (activeRoot && result.primaryOffer) {
+      if (result.primaryOffer) {
         postGenValidation = validatePostGeneration(activeRoot, result.primaryOffer);
         if (!postGenValidation.valid) {
           console.log(`[OfferEngine] POST_GEN_ADVISORY | issues: ${postGenValidation.issues.join("; ")}`);
@@ -291,25 +237,32 @@ export function registerOfferEngineRoutes(app: Express) {
       }
 
       const diagnostics = result.layerDiagnostics || {};
-      diagnostics.strategyRoot = activeRoot ? {
+      diagnostics.strategyRoot = {
         rootId: activeRoot.id,
         rootHash: activeRoot.rootHash,
         runId: activeRoot.runId,
         bound: true,
-        bindingValid: rootValidation?.valid ?? true,
-        bindingIssues: rootValidation?.issues || [],
+        bindingValid: rootValidation.valid,
+        bindingIssues: rootValidation.issues,
         postGenValid: postGenValidation?.valid ?? true,
         postGenIssues: postGenValidation?.issues || [],
-      } : { bound: false };
+        snapshotSources: {
+          mi: rootMiId,
+          audience: rootAudienceId,
+          positioning: rootPositioningId,
+          differentiation: rootDiffId,
+          mechanism: rootMechId,
+        },
+      };
 
       const [saved] = await db.insert(offerSnapshots).values({
         accountId,
         campaignId,
         miSnapshotId: miSnapshot.id,
-        audienceSnapshotId,
-        positioningSnapshotId,
+        audienceSnapshotId: rootAudienceId,
+        positioningSnapshotId: rootPositioningId,
         differentiationSnapshotId: activeDiffSnapshot.id,
-        mechanismSnapshotId: mechanismSnapshotUsed || null,
+        mechanismSnapshotId: mechanismSnapshotUsed,
         strategyRootId,
         engineVersion: ENGINE_VERSION,
         status: result.status,
@@ -364,6 +317,12 @@ export function registerOfferEngineRoutes(app: Express) {
         return res.json({ exists: false });
       }
 
+      const activeRoot = await getActiveRoot(campaignId, accountId);
+      let rootSyncStatus: "synced" | "stale" | "no_root" = "no_root";
+      if (activeRoot) {
+        rootSyncStatus = latest.strategyRootId === activeRoot.id ? "synced" : "stale";
+      }
+
       res.json({
         exists: true,
         id: latest.id,
@@ -390,6 +349,9 @@ export function registerOfferEngineRoutes(app: Express) {
         positioningSnapshotId: latest.positioningSnapshotId,
         miSnapshotId: latest.miSnapshotId,
         audienceSnapshotId: latest.audienceSnapshotId,
+        rootSyncStatus,
+        activeRootId: activeRoot?.id || null,
+        activeRootHash: activeRoot?.rootHash || null,
       });
     } catch (error: any) {
       console.error("[OfferEngine] Latest fetch error:", error.message);
