@@ -566,13 +566,27 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
             </View>
           )}
 
+          {data.layerDiagnostics?.rootAxisEnforcement && !data.layerDiagnostics.rootAxisEnforcement.passed && (
+            <View style={[styles.warningBox, { backgroundColor: '#F59E0B12', borderColor: '#F59E0B30' }]}>
+              <Ionicons name="warning" size={16} color="#F59E0B" />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.warningTitle, { color: '#D97706' }]}>Axis Enforcement {data.layerDiagnostics.rootAxisEnforcement.retrySuccess ? '(Corrected)' : '(Attempted)'}</Text>
+                <Text style={[styles.warningDetail, { color: '#92400E' }]}>
+                  {data.layerDiagnostics.rootAxisEnforcement.retrySuccess
+                    ? 'Initial generation missed axis tokens. Corrective regeneration succeeded — offers now reference the Strategy Root axis.'
+                    : 'Offers were regenerated to align with the Strategy Root axis. Some axis tokens may still be indirect. Regenerate for stricter alignment.'}
+                </Text>
+              </View>
+            </View>
+          )}
+
           {data.hookMechanismAlignment && !data.hookMechanismAlignment.aligned && (
             <View style={[styles.warningBox, { backgroundColor: '#F59E0B12', borderColor: '#F59E0B30' }]}>
               <Ionicons name="warning" size={16} color="#F59E0B" />
               <View style={{ flex: 1 }}>
-                <Text style={[styles.warningTitle, { color: '#D97706' }]}>Axis Alignment Advisory</Text>
-                <Text style={[styles.warningDetail, { color: '#92400E' }]}>Hook, outcome, and mechanism may not fully share the same positioning axis. Review and regenerate if needed.</Text>
-                {data.hookMechanismAlignment.failures.map((f, i) => (
+                <Text style={[styles.warningTitle, { color: '#D97706' }]}>Axis Alignment</Text>
+                <Text style={[styles.warningDetail, { color: '#92400E' }]}>Hook, outcome, and mechanism may not fully share the same positioning axis. Regenerating typically resolves this.</Text>
+                {data.hookMechanismAlignment.failures.slice(0, 3).map((f, i) => (
                   <Text key={i} style={[styles.warningDetail, { color: '#92400E', marginTop: 2 }]}>{f}</Text>
                 ))}
               </View>
@@ -608,7 +622,7 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
               <Ionicons name="alert-circle" size={16} color="#F59E0B" />
               <View style={{ flex: 1 }}>
                 <Text style={[styles.warningTitle, { color: '#D97706' }]}>Positioning Advisory</Text>
-                <Text style={[styles.warningDetail, { color: '#92400E' }]}>Hook and mechanism may not fully share the same strategic axis. Review alignment and regenerate if needed.</Text>
+                <Text style={[styles.warningDetail, { color: '#92400E' }]}>Hook and mechanism may not fully share the same strategic axis. Regenerating will attempt to correct this alignment.</Text>
               </View>
             </View>
           )}

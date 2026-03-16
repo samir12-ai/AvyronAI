@@ -1245,6 +1245,7 @@ export async function aiOfferGeneration(
   qualifyingSignals?: QualifyingSignal[],
   positioningLock?: PositioningLock,
   axisCorrection?: { previousFailures: string[]; attempt: number },
+  strategyRoot?: any,
 ): Promise<{ primary: { name: string; outcome: string; mechanism: string; deliverables: string[] }; alternative: { name: string; outcome: string; mechanism: string; deliverables: string[] }; rejected: { name: string; outcome: string; mechanism: string; deliverables: string[]; rejectionReason: string } }> {
   const pains = audience.audiencePains || [];
   const desires = Object.entries(audience.desireMap || {});
@@ -1299,13 +1300,63 @@ You MUST fix these specific issues. Generate offers that directly address these 
 Do NOT repeat the same mistake. The hook, mechanism, and outcome MUST all reference the same problem domain.
 ` : "";
 
+  const rootMech = strategyRoot?.approvedMechanism ? (typeof strategyRoot.approvedMechanism === "string" ? safeJsonParse(strategyRoot.approvedMechanism) : strategyRoot.approvedMechanism) : null;
+  const rootPains = strategyRoot?.approvedAudiencePains ? (typeof strategyRoot.approvedAudiencePains === "string" ? safeJsonParse(strategyRoot.approvedAudiencePains) : strategyRoot.approvedAudiencePains) : null;
+  const rootDesires = strategyRoot?.approvedDesires ? (typeof strategyRoot.approvedDesires === "string" ? safeJsonParse(strategyRoot.approvedDesires) : strategyRoot.approvedDesires) : null;
+  const rootAxis = strategyRoot?.primaryAxis?.replace(/_/g, " ") || "";
+  const rootContrastText = strategyRoot?.contrastAxisText || "";
+  const rootTransformation = strategyRoot?.approvedTransformation || "";
+  const rootClaim = strategyRoot?.approvedClaim || "";
+  const rootPromise = strategyRoot?.approvedPromise || "";
+  const rootMechName = rootMech?.mechanismName || "";
+  const rootMechSteps = rootMech?.mechanismSteps || [];
+
+  const axisKeywords: string[] = [];
+  if (rootAxis) {
+    axisKeywords.push(...rootAxis.split(/[\s_,]+/).filter((t: string) => t.length >= 3 && !STOP_WORDS.has(t.toLowerCase())));
+  }
+  if (rootContrastText) {
+    const coreTokens = extractCoreAxisTokens(rootContrastText);
+    axisKeywords.push(...coreTokens.filter(t => !axisKeywords.includes(t)));
+  }
+  const uniqueAxisKeywords = [...new Set(axisKeywords.map(k => k.toLowerCase()))];
+
+  const strategyRootSection = strategyRoot ? `
+═══ STRATEGY ROOT (ENFORCED SINGLE SOURCE OF TRUTH — MANDATORY) ═══
+All offer hooks, outcomes, and mechanisms MUST derive from these approved strategy root fields.
+Do NOT use any other source of information for strategic direction. These are the ONLY approved inputs.
+
+PRIMARY AXIS: "${rootAxis}"
+CONTRAST AXIS: "${rootContrastText}"
+${rootMechName ? `APPROVED MECHANISM: "${rootMechName}"` : ""}
+${rootClaim ? `APPROVED CLAIM: "${rootClaim}"` : ""}
+${rootPromise ? `APPROVED PROMISE: "${rootPromise}"` : ""}
+${rootTransformation ? `APPROVED TRANSFORMATION: "${rootTransformation}"` : ""}
+${rootPains && Array.isArray(rootPains) && rootPains.length > 0 ? `APPROVED AUDIENCE PAINS: ${JSON.stringify(rootPains.slice(0, 8).map((p: any) => typeof p === "string" ? p : p?.pain || p?.name || p))}` : ""}
+${rootDesires && typeof rootDesires === "object" ? `APPROVED DESIRES: ${JSON.stringify(Object.keys(rootDesires).slice(0, 8))}` : ""}
+${rootMechSteps.length > 0 ? `MECHANISM STEPS:\n${rootMechSteps.map((s: string, i: number) => `  ${i + 1}. ${s}`).join("\n")}` : ""}
+
+AXIS TOKEN ENFORCEMENT (HARD RULE — VIOLATION = AUTOMATIC REJECTION):
+The following axis keywords MUST appear in EVERY offer hook/name and outcome you generate:
+Required tokens (use at least TWO): ${JSON.stringify(uniqueAxisKeywords)}
+
+Rules:
+1. Every offer hook/name MUST contain at least 2 of the axis keywords above.
+2. Every outcome MUST reference at least one approved audience pain or desire above.
+3. Every mechanism description MUST reference "${rootMechName}" by name.
+4. Hooks must frame the problem using language from the APPROVED AUDIENCE PAINS.
+5. Outcomes must describe results using language from the APPROVED DESIRES or APPROVED TRANSFORMATION.
+6. If your generated hook does NOT contain axis keywords → it will be REJECTED.
+7. If your outcome does NOT map to an approved pain or desire → it will be REJECTED.
+` : "";
+
   const prompt = `You are an Offer Architect. Generate three offer concepts.
 
 ABSOLUTE RULES:
 - Do NOT generate funnel architecture, advertising strategy, channel selection, media planning, budget recommendations, campaign execution, sales scripts, or strategic master plan decisions
 - Do NOT include financial advisory claims (eliminating debt, increasing savings, building net worth, financial freedom). Use outcome-oriented language instead.
 - Respond with ONLY valid JSON, no markdown${mechLockInstruction}
-${lockSection}${correctionSection}
+${strategyRootSection}${lockSection}${correctionSection}
 
 ${productDna ? `═══ PRODUCT IDENTITY (Source of Truth) ═══\n${formatProductDNAForPrompt(productDna)}\n\n` : ""}═══ SECTION 1: AUDIENCE PAIN LANGUAGE (use these exact words) ═══
 ${painPhrases.length > 0 ? `Raw Pain Phrases: ${JSON.stringify(painPhrases)}` : "No raw pain phrases available"}
@@ -1438,6 +1489,7 @@ export async function runOfferEngine(
   accountId: string,
   upstreamLineage: SignalLineageEntry[] = [],
   mechanismEngineOutput?: any,
+  strategyRoot?: any,
 ): Promise<OfferResult> {
   const startTime = Date.now();
   const diagnostics: Record<string, any> = {};
@@ -1508,6 +1560,23 @@ export async function runOfferEngine(
     if (mechOut.mechanismProblem && !positioning.contrastAxis?.includes(mechOut.mechanismProblem)) {
       diagnostics.mechanismProblemDomain = mechOut.mechanismProblem;
     }
+  }
+
+  if (strategyRoot) {
+    const srMech = strategyRoot.approvedMechanism ? (typeof strategyRoot.approvedMechanism === "string" ? safeJsonParse(strategyRoot.approvedMechanism) : strategyRoot.approvedMechanism) : null;
+    console.log(`[OfferEngine-V4] STRATEGY_ROOT_CONSUMED | rootId=${strategyRoot.id} | hash=${strategyRoot.rootHash} | runId=${strategyRoot.runId} | axis="${strategyRoot.primaryAxis}" | mechanism="${srMech?.mechanismName || "n/a"}" | claim="${(strategyRoot.approvedClaim || "").substring(0, 60)}" | promise="${(strategyRoot.approvedPromise || "").substring(0, 60)}"`);
+    diagnostics.strategyRootConsumed = {
+      rootId: strategyRoot.id,
+      rootHash: strategyRoot.rootHash,
+      runId: strategyRoot.runId,
+      primaryAxis: strategyRoot.primaryAxis,
+      mechanismName: srMech?.mechanismName || null,
+      hasClaim: !!strategyRoot.approvedClaim,
+      hasPromise: !!strategyRoot.approvedPromise,
+      hasTransformation: !!strategyRoot.approvedTransformation,
+      hasPains: !!strategyRoot.approvedAudiencePains,
+      hasDesires: !!strategyRoot.approvedDesires,
+    };
   }
 
   const campaignId = (mi as any)?._campaignId || "";
@@ -1654,7 +1723,7 @@ export async function runOfferEngine(
 
   let aiOffers;
   try {
-    aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock);
+    aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot);
     diagnostics.aiGeneration = { success: true };
   } catch (err: any) {
     diagnostics.aiGeneration = { success: false, error: err.message };
@@ -1663,6 +1732,102 @@ export async function runOfferEngine(
       alternative: { name: "Alternative Implementation Program", outcome: l1Outcome.transformationStatement, mechanism: l2Mechanism.mechanismDescription, deliverables: [] },
       rejected: { name: "Generic Growth Package", outcome: "General improvement", mechanism: "Standard approach", deliverables: [], rejectionReason: "Generic and unspecific" },
     };
+  }
+
+  if (strategyRoot) {
+    const rootAxisVal = (strategyRoot.primaryAxis || "").replace(/_/g, " ");
+    const rootContrastVal = strategyRoot.contrastAxisText || "";
+    const enforcementTokens: string[] = [];
+    if (rootAxisVal) {
+      enforcementTokens.push(...rootAxisVal.toLowerCase().split(/[\s_,]+/).filter((t: string) => t.length >= 3 && !STOP_WORDS.has(t)));
+    }
+    if (rootContrastVal) {
+      enforcementTokens.push(...extractCoreAxisTokens(rootContrastVal));
+    }
+    const uniqueEnfTokens = [...new Set(enforcementTokens)];
+
+    const rootMechNameVal = (() => {
+      const m = strategyRoot.approvedMechanism ? (typeof strategyRoot.approvedMechanism === "string" ? safeJsonParse(strategyRoot.approvedMechanism) : strategyRoot.approvedMechanism) : null;
+      return m?.mechanismName || "";
+    })();
+
+    const matchesAxisToken = (text: string): boolean => {
+      const lc = text.toLowerCase();
+      return uniqueEnfTokens.some(t => {
+        if (lc.includes(t)) return true;
+        const stem = stemPrefix(t);
+        return stem.length >= 3 && lc.includes(stem);
+      });
+    };
+
+    const matchesMechName = (mechText: string): boolean => {
+      if (!rootMechNameVal) return true;
+      const mechLC = mechText.toLowerCase();
+      const nameWords = rootMechNameVal.toLowerCase().split(/\s+/).filter((w: string) => w.length >= 3 && !STOP_WORDS.has(w));
+      return nameWords.some((w: string) => {
+        if (mechLC.includes(w)) return true;
+        const stem = stemPrefix(w);
+        return stem.length >= 3 && mechLC.includes(stem);
+      });
+    };
+
+    const validateOfferAxis = (name: string, outcome: string, mechanism: string, label: string): string[] => {
+      const failures: string[] = [];
+      const hookHasAxis = matchesAxisToken(name);
+      const outcomeHasAxis = matchesAxisToken(outcome);
+      if (!hookHasAxis && !outcomeHasAxis) {
+        failures.push(`${label}: neither hook "${name}" nor outcome "${outcome}" contains any axis tokens [${uniqueEnfTokens.join(", ")}]`);
+      } else if (!hookHasAxis) {
+        failures.push(`${label}: hook "${name}" does not contain axis tokens [${uniqueEnfTokens.join(", ")}] — outcome passes`);
+      }
+      if (!matchesMechName(mechanism)) {
+        failures.push(`${label}: mechanism does not reference approved mechanism "${rootMechNameVal}"`);
+      }
+      return failures;
+    };
+
+    if (uniqueEnfTokens.length > 0 || rootMechNameVal) {
+      const primaryAxisFailures = validateOfferAxis(aiOffers.primary.name, aiOffers.primary.outcome, aiOffers.primary.mechanism, "Primary");
+      const altAxisFailures = validateOfferAxis(aiOffers.alternative.name, aiOffers.alternative.outcome, aiOffers.alternative.mechanism, "Alternative");
+      const axisFailures = [...primaryAxisFailures, ...altAxisFailures];
+
+      if (axisFailures.length > 0) {
+        console.log(`[OfferEngine-V4] ROOT_AXIS_ENFORCEMENT_FAILED | ${axisFailures.join("; ")} — forcing corrective regeneration`);
+        diagnostics.rootAxisEnforcement = { passed: false, failures: axisFailures, attempt: 1 };
+
+        try {
+          const enforcedRetry = await aiOfferGeneration(
+            audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals,
+            posLock,
+            { previousFailures: axisFailures, attempt: 2 },
+            strategyRoot,
+          );
+
+          const retryPrimaryFail = validateOfferAxis(enforcedRetry.primary.name, enforcedRetry.primary.outcome, enforcedRetry.primary.mechanism, "Primary");
+          const retryAltFail = validateOfferAxis(enforcedRetry.alternative.name, enforcedRetry.alternative.outcome, enforcedRetry.alternative.mechanism, "Alternative");
+
+          aiOffers.primary = enforcedRetry.primary;
+          aiOffers.alternative = enforcedRetry.alternative;
+          aiOffers.rejected = enforcedRetry.rejected;
+
+          const retryAllPassed = retryPrimaryFail.length === 0 && retryAltFail.length === 0;
+          diagnostics.rootAxisEnforcement.retrySuccess = retryAllPassed;
+          diagnostics.rootAxisEnforcement.retryFailures = [...retryPrimaryFail, ...retryAltFail];
+
+          if (retryAllPassed) {
+            console.log(`[OfferEngine-V4] ROOT_AXIS_ENFORCEMENT_RETRY_SUCCESS | all offers now contain axis tokens and mechanism references`);
+          } else {
+            console.log(`[OfferEngine-V4] ROOT_AXIS_ENFORCEMENT_RETRY_PARTIAL | remaining issues: ${[...retryPrimaryFail, ...retryAltFail].join("; ")}`);
+          }
+        } catch (retryErr: any) {
+          console.log(`[OfferEngine-V4] ROOT_AXIS_ENFORCEMENT_RETRY_FAILED | ${retryErr.message}`);
+          diagnostics.rootAxisEnforcement.retryError = retryErr.message;
+        }
+      } else {
+        diagnostics.rootAxisEnforcement = { passed: true };
+        console.log(`[OfferEngine-V4] ROOT_AXIS_ENFORCEMENT_PASSED | both offers contain axis tokens and mechanism references`);
+      }
+    }
   }
 
   const primaryClaimsForGrounding = [
@@ -1866,6 +2031,7 @@ export async function runOfferEngine(
         audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals,
         posLock,
         { previousFailures: hookMechAlignment.failures, attempt: 2 },
+        strategyRoot,
       );
       diagnostics.hookMechanismRetry = { success: true, attempt: 2, corrective: true };
 
@@ -2071,7 +2237,7 @@ export async function runOfferEngine(
   if (!offerAlignmentValidation.aligned && status === STATUS.COMPLETE) {
     console.log(`[OfferEngine-V4] ALIGNMENT_RETRY | First attempt failed: ${offerAlignmentValidation.failures.join("; ")} — regenerating with positioning lock`);
     try {
-      const retryOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock);
+      const retryOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot);
       diagnostics.aiGenerationRetry = { success: true, attempt: 2 };
 
       const retryPrimaryOutcome: OutcomeLayer = { ...l1Outcome, primaryOutcome: retryOffers.primary.outcome || l1Outcome.primaryOutcome };

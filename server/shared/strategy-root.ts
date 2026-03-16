@@ -276,9 +276,13 @@ export function validatePostGeneration(
     const nameLC = generatedOffer.offerName.toLowerCase();
     const nameLC2 = (generatedOffer.coreOutcome || "").toLowerCase();
     const combined = `${nameLC} ${nameLC2} ${(generatedOffer.mechanismDescription || "").toLowerCase()}`;
-    const hasAxisRef = axisTokens.some((t: string) => combined.includes(t));
+    const hasAxisRef = axisTokens.some((t: string) => {
+      if (combined.includes(t)) return true;
+      const stem = t.replace(/(ity|ness|ment|tion|sion|ance|ence|able|ible|ful|less|ing|ous|ive|ical|ally|ized|ise|ize)$/, "");
+      return stem.length >= 3 && combined.includes(stem);
+    });
     if (!hasAxisRef) {
-      issues.push(`Advisory: offer does not reference the active axis "${axis.replace(/_/g, " ")}"`);
+      issues.push(`axis_mismatch: offer does not reference the active axis "${axis.replace(/_/g, " ")}" — required tokens: [${axisTokens.join(", ")}]`);
     }
   }
 
@@ -286,8 +290,21 @@ export function validatePostGeneration(
   if (mechData?.mechanismName && generatedOffer.mechanismDescription) {
     const mechName = mechData.mechanismName.toLowerCase();
     const mechDesc = generatedOffer.mechanismDescription.toLowerCase();
-    if (!mechDesc.includes(mechName.substring(0, Math.min(mechName.length, 8)))) {
-      issues.push(`Advisory: mechanism "${mechData.mechanismName}" not referenced in offer mechanism`);
+    if (!mechDesc.includes(mechName.substring(0, Math.min(mechName.length, 10)))) {
+      issues.push(`mechanism_mismatch: approved mechanism "${mechData.mechanismName}" not referenced in offer mechanism description`);
+    }
+  }
+
+  const rootPains = safeJsonParse(activeRoot.approvedAudiencePains);
+  if (rootPains && Array.isArray(rootPains) && rootPains.length > 0 && generatedOffer.coreOutcome) {
+    const outcomeLC = generatedOffer.coreOutcome.toLowerCase();
+    const painTokens = rootPains.slice(0, 8).flatMap((p: any) => {
+      const text = typeof p === "string" ? p : p?.pain || p?.name || "";
+      return text.toLowerCase().split(/\s+/).filter((t: string) => t.length > 4);
+    });
+    const hasPainRef = painTokens.some((t: string) => outcomeLC.includes(t));
+    if (!hasPainRef && painTokens.length > 0) {
+      issues.push(`audience_pain_alignment: offer outcome does not reference any approved audience pains`);
     }
   }
 

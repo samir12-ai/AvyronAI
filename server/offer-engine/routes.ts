@@ -198,7 +198,7 @@ export function registerOfferEngineRoutes(app: Express) {
         });
       }
 
-      const result = await runOfferEngine(miInput, audienceInput, positioningInput, differentiationInput, accountId, upstreamLineage, mechanismEngineOutput);
+      const result = await runOfferEngine(miInput, audienceInput, positioningInput, differentiationInput, accountId, upstreamLineage, mechanismEngineOutput, activeRoot);
 
       if (result.status === "INSUFFICIENT_SIGNALS") {
         return res.status(422).json({

@@ -1,0 +1,144 @@
+:::writing{variant=“email” id=“84219” subject=“Required: Rebuild Offer Engine to Follow the Same Engine Pipeline Architecture”}
+Hi,
+
+We need to stop patching the Offer Engine and bring it fully in line with how the rest of the system engines operate. Right now it is the only engine behaving inconsistently in the pipeline, which is why we continue to see axis mismatch warnings even when Strategy Root and Mechanism are correct.
+
+All other engines follow a strict upstream dependency chain, but the Offer Engine still behaves partially like a template generator rather than a downstream strategy consumer.
+
+This needs to be corrected so the Offer Engine behaves exactly like the rest of the engine architecture.
+
+⸻
+
+Required architecture alignment
+
+The Offer Engine must follow the same pipeline dependency model used by the other engines.
+
+Correct pipeline:
+
+Product DNA
+→ Market Intelligence
+→ Audience
+→ Positioning / Differentiation Axis
+→ Mechanism Engine
+→ Strategy Root (single source of truth)
+→ Offer Engine
+
+The Offer Engine must only consume Strategy Root outputs.
+
+It must not generate hooks/outcomes from:
+	•	legacy templates
+	•	cached audience summaries
+	•	previous runs
+	•	standalone hook generators
+	•	internal heuristic prompts that ignore axis context
+
+Everything must derive from the active Strategy Root of the current run.
+
+⸻
+
+Offer Engine input contract (must be enforced)
+
+Offer generation must read only from:
+	•	strategy_root.run_id
+	•	strategy_root.primary_axis
+	•	strategy_root.contrast_axis_text
+	•	strategy_root.approved_mechanism
+	•	strategy_root.approved_audience_pains
+	•	strategy_root.approved_desires
+	•	strategy_root.approved_transformation
+	•	strategy_root.approved_claim
+	•	strategy_root.approved_promise
+
+No other inputs should influence hook/outcome generation.
+
+⸻
+
+Required behavioral rules
+
+1. Axis enforcement
+
+Every generated hook must explicitly derive from the primary_axis tokens.
+
+Example for axis simplicity_and_ease:
+
+hooks must reference at least one of:
+	•	simplification
+	•	automation
+	•	clarity
+	•	transparency
+	•	consolidation
+	•	remove complexity
+	•	hassle-free
+
+If none appear → reject the hook.
+
+⸻
+
+2. Audience pain alignment
+
+Offer outcomes must reference at least one of the approved audience pains or desires.
+
+If outcome does not map to the audience pain set → reject generation.
+
+⸻
+
+3. Mechanism linkage
+
+Hooks and outcomes must logically connect to the approved mechanism output.
+
+If the mechanism is ClearCost System, the offer logic must derive from the mechanism steps.
+
+⸻
+
+4. Run-level consistency
+
+Offer Engine must validate:
+
+run_id == strategy_root.run_id
+
+and
+
+root_hash == strategy_root.root_hash
+
+If mismatch → block generation.
+
+⸻
+
+Cache and regeneration rules
+
+Whenever any upstream engine regenerates:
+	•	Positioning
+	•	Differentiation
+	•	Audience
+	•	Mechanism
+
+the Offer Engine must:
+	1.	invalidate existing offers
+	2.	reload the latest strategy_root
+	3.	regenerate offers using the new root
+
+⸻
+
+UI synchronization
+
+After these corrections:
+	•	The UI must always display the current active run context.
+	•	Old offers must not remain visible after upstream regeneration.
+	•	The system should never show axis mismatch if Strategy Root and Mechanism are aligned.
+
+⸻
+
+Goal
+
+The Offer Engine must behave exactly like the other engines in the system:
+
+consume upstream outputs → generate deterministic downstream outputs
+
+not operate as a semi-independent generator.
+
+Once routing, validation, and regeneration are enforced at the engine level, this recurring mismatch issue should disappear completely.
+
+Please review the Offer Engine architecture and align it with the rest of the engine pipeline.
+
+Thanks.
+:::
