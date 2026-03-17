@@ -69,6 +69,9 @@ interface PersuasionRoute {
     stage: string;
     educationFirst: boolean;
     proofRole: string;
+    hardCtaBlocked?: boolean;
+    commitmentDisabled?: boolean;
+    blockedTactics?: string[];
   };
   scarcityValidation?: {
     allowed: boolean;
@@ -368,15 +371,38 @@ export default function PersuasionEngine({ isActive }: { isActive?: boolean }) {
 
   const renderReadinessAlignment = (alignment: PersuasionRoute['readinessAlignment']) => {
     if (!alignment) return null;
+    const isBlocked = alignment.hardCtaBlocked || alignment.commitmentDisabled;
+    const cardColor = isBlocked ? '#EF4444' : alignment.educationFirst ? '#14B8A6' : '#10B981';
     return (
-      <View style={[styles.readinessCard, { backgroundColor: alignment.educationFirst ? '#14B8A6' + '10' : '#10B981' + '10' }]}>
+      <View style={[styles.readinessCard, { backgroundColor: cardColor + '10', borderColor: cardColor + '30', borderWidth: 1 }]}>
         <View style={styles.readinessRow}>
-          <Ionicons name={alignment.educationFirst ? "school" : "checkmark-done"} size={14} color={alignment.educationFirst ? '#14B8A6' : '#10B981'} />
+          <Ionicons name={alignment.educationFirst ? "school" : "checkmark-done"} size={14} color={cardColor} />
           <Text style={[styles.readinessStage, { color: colors.text }]}>
             {alignment.stage.replace(/_/g, ' ')} {alignment.educationFirst ? '(Education-First)' : ''}
           </Text>
         </View>
         <Text style={[styles.readinessProofRole, { color: colors.textMuted }]}>Proof role: {alignment.proofRole}</Text>
+        {alignment.hardCtaBlocked && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 }}>
+            <Ionicons name="ban" size={12} color="#EF4444" />
+            <Text style={{ fontSize: 11, color: '#EF4444', fontWeight: '600' as const }}>Hard CTA BLOCKED</Text>
+          </View>
+        )}
+        {alignment.commitmentDisabled && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+            <Ionicons name="lock-closed" size={12} color="#EF4444" />
+            <Text style={{ fontSize: 11, color: '#EF4444', fontWeight: '600' as const }}>Commitment Logic DISABLED</Text>
+          </View>
+        )}
+        {alignment.blockedTactics && alignment.blockedTactics.length > 0 && (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+            {alignment.blockedTactics.map((tactic, i) => (
+              <View key={i} style={{ backgroundColor: '#EF444415', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 }}>
+                <Text style={{ fontSize: 10, color: '#EF4444', fontWeight: '500' as const }}>{tactic.replace(/_/g, ' ')}</Text>
+              </View>
+            ))}
+          </View>
+        )}
       </View>
     );
   };
@@ -510,16 +536,26 @@ export default function PersuasionEngine({ isActive }: { isActive?: boolean }) {
             {route.messageOrderLogic.length > 0 && (
               <View style={styles.routeSection}>
                 <Text style={[styles.routeSectionTitle, { color: colors.textMuted }]}>Message Order</Text>
-                {route.messageOrderLogic.map((step, i) => (
-                  <View key={i} style={styles.sequenceItem}>
-                    <View style={[styles.sequenceNumber, { backgroundColor: '#3B82F6' + '20' }]}>
-                      <Text style={[styles.sequenceNumberText, { color: '#3B82F6' }]}>{i + 1}</Text>
+                {route.messageOrderLogic.map((step, i) => {
+                  const isSoftStep = step === 'soft_next_step';
+                  const isCommitment = step === 'invite_commitment';
+                  const stepColor = isSoftStep ? '#14B8A6' : isCommitment ? '#F97316' : '#3B82F6';
+                  return (
+                    <View key={i} style={styles.sequenceItem}>
+                      <View style={[styles.sequenceNumber, { backgroundColor: stepColor + '20' }]}>
+                        <Text style={[styles.sequenceNumberText, { color: stepColor }]}>{i + 1}</Text>
+                      </View>
+                      <Text style={[styles.listItemText, { color: colors.text }]}>
+                        {step.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                      </Text>
+                      {isSoftStep && (
+                        <View style={{ backgroundColor: '#14B8A6' + '20', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 6 }}>
+                          <Text style={{ fontSize: 9, color: '#14B8A6', fontWeight: '600' as const }}>SOFT</Text>
+                        </View>
+                      )}
                     </View>
-                    <Text style={[styles.listItemText, { color: colors.text }]}>
-                      {step.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
-                    </Text>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
 

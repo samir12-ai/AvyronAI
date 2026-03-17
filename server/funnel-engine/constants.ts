@@ -82,11 +82,19 @@ export const FUNNEL_TYPES = [
 ] as const;
 
 export const AWARENESS_TO_FUNNEL_MAP: Record<string, string[]> = {
-  unaware: ["challenge", "webinar", "product-launch"],
-  problem_aware: ["webinar", "vsl", "challenge"],
-  solution_aware: ["direct", "vsl", "consultation"],
-  product_aware: ["direct", "tripwire", "application"],
+  unaware: ["webinar", "challenge"],
+  problem_aware: ["webinar", "challenge", "vsl"],
+  solution_aware: ["vsl", "consultation", "webinar"],
+  product_aware: ["direct", "application", "consultation"],
   most_aware: ["direct", "tripwire", "membership"],
+};
+
+export const AWARENESS_BLOCKED_FUNNELS: Record<string, string[]> = {
+  unaware: ["direct", "tripwire", "application", "product-launch"],
+  problem_aware: ["direct", "tripwire", "application"],
+  solution_aware: ["tripwire"],
+  product_aware: [],
+  most_aware: [],
 };
 
 export const STATUS = {

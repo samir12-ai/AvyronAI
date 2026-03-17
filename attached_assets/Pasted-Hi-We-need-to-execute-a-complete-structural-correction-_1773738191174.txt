@@ -1,0 +1,236 @@
+Hi,
+
+We need to execute a complete structural correction to the system. This is not a UI adjustment or simple swap — this is a logic-level refactor to eliminate current inconsistencies between Awareness, Persuasion, and Funnel layers.
+
+Please follow ALL instructions below precisely and treat this as a closed-scope final fix (no partial implementations).
+
+---
+
+# 1. Core Problem (Root Cause)
+
+Currently:
+- Awareness = Unaware (education-first)
+- Funnel = Conversion-oriented (webinar, commitment logic)
+- Persuasion Engine = partially aligned with awareness, but still influenced by funnel logic
+
+This creates:
+- Awareness → Persuasion misfit (low score)
+- Early commitment injection
+- Structural contradiction between learning vs selling
+
+---
+
+# 2. Required Architecture (MANDATORY)
+
+We must enforce strict separation of layers:
+
+### A. Awareness Layer (Pre-Funnel)
+- Role: Education, problem recognition, self-identification
+- MUST NOT:
+  - Trigger conversion logic
+  - Include commitment steps
+  - Use sales-oriented persuasion
+
+### B. Funnel Layer (Post-Awareness ONLY)
+- Role: Conversion, offer delivery, decision facilitation
+- MUST NOT activate unless:
+  - Awareness output is complete and validated
+
+---
+
+# 3. Execution Changes
+
+## 3.1 Layer Order (STRUCTURAL)
+
+Final order must be:
+
+Market Intelligence → Audience → Awareness → Funnel → Offer → Persuasion (execution layer)
+
+NOT:
+❌ Funnel before Awareness  
+❌ Mixed inputs  
+
+---
+
+## 3.2 Input / Output Contracts (CRITICAL)
+
+### Awareness Outputs MUST include:
+- readiness_stage
+- awareness_type
+- trust_requirement
+- objection_map (early-stage)
+- education_path
+
+### Funnel MUST:
+- Consume Awareness outputs
+- NOT override them
+- NOT introduce new readiness assumptions
+
+---
+
+## 3.3 Persuasion Engine Rules
+
+Persuasion MUST be awareness-driven, not funnel-driven.
+
+### If readiness = unaware:
+- Enforce:
+  - education-first
+  - no hard CTA
+  - no urgency/scarcity
+  - no early commitment
+
+### Commitment logic MUST:
+- Be dynamically disabled at low readiness
+- ONLY activate in decision stage (post-awareness + funnel alignment)
+
+---
+
+## 3.4 Message Order Constraints
+
+For unaware stage, enforce STRICT sequence:
+
+1. Acknowledge pain  
+2. Educate on problem  
+3. Demonstrate understanding  
+4. Self-identification  
+5. Illustrative proof  
+6. Authority  
+7. Risk reduction  
+8. (OPTIONAL, SOFT) next step — NOT hard commitment  
+
+Hard CTA = BLOCKED
+
+---
+
+## 3.5 Funnel Constraints
+
+If awareness = unaware:
+
+Allowed funnels:
+- education-led
+- content-first
+- webinar (ONLY if positioned as learning, not selling)
+
+Blocked:
+- direct
+- aggressive conversion funnels
+- tripwire logic
+
+---
+
+## 3.6 Proof System Alignment
+
+Proof must adapt to awareness:
+
+If unaware:
+- proof = illustrative (not outcome-driven selling)
+
+If decision:
+- proof = outcome + case + conversion support
+
+---
+
+## 3.7 Anti-Hype Enforcement
+
+- Detect and penalize hype words (e.g. "effortless")
+- Reduce persuasion score automatically
+- Do NOT allow hype to pass silently
+
+---
+
+# 4. Dependency Enforcement (CRITICAL)
+
+System must enforce:
+
+- Funnel CANNOT execute without Awareness completion  
+- Persuasion CANNOT override Awareness stage  
+- Engines AFTER Funnel must consume BOTH:
+  - Awareness outputs
+  - Funnel outputs  
+
+---
+
+# 5. Priority Logic (Family Priority System)
+
+Define priority as:
+
+P1 = Awareness (dominant context)  
+P2 = Funnel (execution layer)  
+P3 = Persuasion (behavior layer)
+
+Rules:
+- P1 overrides ALL  
+- P2 cannot contradict P1  
+- P3 adapts to P1 + P2  
+
+---
+
+# 6. Root Integrity Fix (VERY IMPORTANT)
+
+You must:
+
+- Reconnect ALL roots between:
+  - Awareness ↔ Funnel  
+  - Funnel ↔ Persuasion  
+  - Awareness ↔ Persuasion  
+
+- Ensure:
+  - No broken references  
+  - No orphan logic  
+  - No duplicated assumptions  
+
+Run full validation:
+- All roots connected  
+- All dependencies resolved  
+- No circular conflicts  
+
+---
+
+# 7. Frontend Update (REQUIRED)
+
+After backend is fixed:
+
+- Reflect:
+  - Awareness-first flow
+  - Clear separation of stages
+  - No mixed messaging
+  - Correct message order visibility
+
+- Display:
+  - readiness stage clearly
+  - blocked logic (e.g. commitment, scarcity)
+  - active persuasion mode
+
+---
+
+# 8. Final Validation Checklist (MUST PASS ALL)
+
+Before completion, verify:
+
+- Awareness → Persuasion fit ≥ 80%
+- No early commitment in unaware stage
+- Funnel does not activate prematurely
+- Message order matches awareness stage
+- Proof type aligned with stage
+- No hype leakage
+- All engines respect priority system
+
+---
+
+# 9. Delivery Requirement
+
+- Deploy system update
+- Confirm backend + frontend alignment
+- Provide validation report
+
+---
+
+This must be implemented as a complete system correction, not incremental patches.
+
+No shortcuts, no partial fixes.
+
+---
+
+Let me know once fully completed and validated.
+
+Thanks

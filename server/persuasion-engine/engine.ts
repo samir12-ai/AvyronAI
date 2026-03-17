@@ -594,10 +594,16 @@ function layer1_awarenessToPersuasionFit(
     findings.push("Diagnostic entry — education-first persuasion pathway");
   }
 
-  if (isLowReadiness(readiness)) {
+  if (readiness === "unaware") {
+    score -= 0.15;
+    warnings.push(`UNAWARE STAGE: education-only mode enforced — NO conversion logic, NO commitment steps, NO urgency/scarcity, NO hard CTA permitted`);
+    findings.push("Education-first persuasion enforced: proof is illustrative only, not conversion-oriented");
+    findings.push("Blocked tactics: commitment injection, scarcity, urgency, sales-oriented proof, hard CTA");
+  } else if (readiness === "problem_aware") {
     score -= 0.1;
-    warnings.push(`Low readiness stage (${readiness}) — EDUCATION-FIRST RULE: persuasion must focus on problem recognition, self-identification, and understanding before any commitment logic`);
+    warnings.push(`Problem aware: education-first with soft engagement — commitment logic disabled, proof supports understanding`);
     findings.push("Education-first persuasion enforced: proof supports learning, not conversion");
+    findings.push("Blocked tactics: hard CTA, early commitment, aggressive conversion");
   } else if (readiness === "most_aware") {
     score += 0.15;
     findings.push("Most aware stage — direct proof and commitment persuasion viable");
@@ -1038,11 +1044,31 @@ function layer6_messageOrderLogic(
   const hasUnresolvedObjections = objectionProofLinks.some(l => !l.proofAvailable);
   const proofCount = (differentiation.proofArchitecture || []).length;
 
-  if (isLowReadiness(readiness)) {
-    sequence.push("acknowledge_pain", "educate_on_problem", "demonstrate_understanding", "invite_self_identification");
+  if (readiness === "unaware") {
+    sequence.push(
+      "acknowledge_pain",
+      "educate_on_problem",
+      "demonstrate_understanding",
+      "invite_self_identification",
+    );
     if (proofCount > 0) sequence.push("illustrative_proof");
-    sequence.push("establish_authority", "remove_risk", "invite_commitment");
-    findings.push(`Low readiness (${readiness}) → education-first sequence: problem recognition before proof`);
+    sequence.push("establish_authority", "remove_risk", "soft_next_step");
+    findings.push(`UNAWARE STRICT SEQUENCE: education-first — hard CTA BLOCKED, soft next step only`);
+    findings.push(`Commitment logic DISABLED at unaware stage — no conversion pressure permitted`);
+    warnings.push("HARD CTA BLOCKED: audience is unaware — only soft next-step invitation allowed");
+    score -= 0.1;
+  } else if (readiness === "problem_aware") {
+    sequence.push(
+      "acknowledge_pain",
+      "educate_on_problem",
+      "demonstrate_understanding",
+      "invite_self_identification",
+    );
+    if (proofCount > 0) sequence.push("illustrative_proof");
+    sequence.push("establish_authority", "remove_risk", "soft_next_step");
+    findings.push(`Problem aware → education-first sequence with soft next step (no hard commitment)`);
+    warnings.push("HARD CTA BLOCKED: audience is problem_aware — commitment logic limited to soft invitation");
+    score -= 0.05;
   } else if (readiness === "solution_aware") {
     if (hasMechanismBarrier) {
       sequence.push("demonstrate_understanding", "explain_mechanism", "present_proof", "establish_authority", "address_objections", "remove_risk", "invite_commitment");
@@ -1167,26 +1193,30 @@ function layer7_antiHypeGuard(
   allText: string,
   objectionProofLinks: ObjectionProofLink[],
   trustBarriers: TrustBarrierClassification[],
+  readinessStage?: string,
 ): LayerResult {
   const findings: string[] = [];
   const warnings: string[] = [];
   let score = 0.85;
 
   const textLower = allText.toLowerCase();
+  const isLowReady = readinessStage === "unaware" || readinessStage === "problem_aware";
+  const hypePenalty = isLowReady ? 0.2 : 0.1;
 
   let hypeCount = 0;
   for (const pattern of HYPE_PATTERNS) {
     if (textLower.includes(pattern.toLowerCase())) {
       hypeCount++;
-      warnings.push(`Hype pattern detected: "${pattern}"`);
+      warnings.push(`Hype pattern detected: "${pattern}"${isLowReady ? " [DOUBLE PENALTY — low readiness context]" : ""}`);
     }
   }
 
   if (hypeCount === 0) {
     findings.push("No hype patterns detected — persuasion structure is grounded");
   } else {
-    score -= hypeCount * 0.1;
-    warnings.push(`${hypeCount} hype pattern(s) detected — credibility score reduced by ${hypeCount * 10}pts; strategy flow continues with adjusted scoring`);
+    score -= hypeCount * hypePenalty;
+    const penaltyPts = Math.round(hypeCount * hypePenalty * 100);
+    warnings.push(`${hypeCount} hype pattern(s) detected — credibility score reduced by ${penaltyPts}pts${isLowReady ? " (ELEVATED penalty for low-readiness audience)" : ""}; strategy flow continues with adjusted scoring`);
   }
 
   let genericCount = 0;
@@ -1536,10 +1566,22 @@ function buildPersuasionRoutes(
   const isEducationFirst = isLowReadiness(readiness);
   const scarcityValidation = validateScarcityConditions(awareness, audience, differentiation, funnel, objectionProofLinks);
 
+  const ctaBlocked = readiness === "unaware" || readiness === "problem_aware";
+  const commitmentDisabled = readiness === "unaware";
+
   const readinessAlignment = {
     stage: readiness,
     educationFirst: isEducationFirst,
-    proofRole: isEducationFirst ? "illustrative — supports education" : isHighReadiness(readiness) ? "primary — leads conversion" : "supporting — reinforces understanding",
+    proofRole: readiness === "unaware" ? "illustrative only — education support, NOT outcome-driven" :
+               readiness === "problem_aware" ? "illustrative — supports problem understanding" :
+               isHighReadiness(readiness) ? "primary — leads conversion" : "supporting — reinforces understanding",
+    hardCtaBlocked: ctaBlocked,
+    commitmentDisabled,
+    blockedTactics: [
+      ...(ctaBlocked ? ["hard_cta", "urgency_pressure"] : []),
+      ...(commitmentDisabled ? ["commitment_injection", "early_commitment", "conversion_logic"] : []),
+      ...(!scarcityValidation.allowed ? ["scarcity"] : []),
+    ],
   };
 
   const core = differentiation.mechanismCore;
@@ -1732,7 +1774,8 @@ export function analyzePersuasion(
   const l4 = layer4_influenceDriverSelection(audience, differentiation, awareness, trustBarriers);
   const l5 = layer5_proofPriorityMapping(differentiation, audience, awareness, objectionProofLinks);
   const l6 = layer6_messageOrderLogic(awareness, audience, offer, funnel, differentiation, trustBarriers, objectionProofLinks);
-  const l7 = layer7_antiHypeGuard(allText, objectionProofLinks, trustBarriers);
+  const awarenessReadiness = safeString(awareness.targetReadinessStage, "unknown");
+  const l7 = layer7_antiHypeGuard(allText, objectionProofLinks, trustBarriers, awarenessReadiness);
 
   const preFinalLayers = [l1, l2, l3, l4, l5, l6, l7];
 
@@ -1760,6 +1803,35 @@ export function analyzePersuasion(
   }
 
   const routes = buildPersuasionRoutes(audience, awareness, differentiation, offer, funnel, mi, allLayers, trustBarriers, awarenessStageProperties, objectionProofLinks, autoCorrection, structuredObjections);
+
+  const crossEngineValidation: string[] = [];
+  const pReadiness = safeString(awareness.targetReadinessStage, "unknown");
+  const pMode = routes.primary.persuasionMode;
+  const pMsgOrder = routes.primary.messageOrderLogic;
+
+  if (isLowReadiness(pReadiness)) {
+    if (pMode !== "education_led" && pMode !== "empathy_led" && pMode !== "diagnostic_led") {
+      crossEngineValidation.push(`CROSS-ENGINE VIOLATION: Awareness stage "${pReadiness}" requires education-first mode but persuasion selected "${pMode}"`);
+    }
+    if (pMsgOrder.includes("invite_commitment")) {
+      crossEngineValidation.push(`CROSS-ENGINE VIOLATION: Awareness stage "${pReadiness}" blocks hard commitment but message order includes "invite_commitment"`);
+    }
+    const hasConversionStep = pMsgOrder.some(s => s === "invite_commitment" || s === "hard_cta");
+    if (hasConversionStep && pReadiness === "unaware") {
+      crossEngineValidation.push(`STRUCTURAL CONTRADICTION: unaware audience cannot receive conversion steps — awareness authority overrides persuasion`);
+    }
+  }
+
+  const funnelType = safeString(funnel.funnelType, "unknown").toLowerCase();
+  if ((pReadiness === "unaware" || pReadiness === "problem_aware") &&
+      (funnelType === "direct" || funnelType === "tripwire" || funnelType === "application")) {
+    crossEngineValidation.push(`CROSS-ENGINE VIOLATION: Funnel type "${funnelType}" contradicts awareness stage "${pReadiness}" — funnel should not have passed awareness gate`);
+  }
+
+  if (crossEngineValidation.length > 0) {
+    structuralWarnings.push(...crossEngineValidation);
+    console.log(`[PersuasionEngine-V3] CROSS_ENGINE_VIOLATIONS | ${crossEngineValidation.length} violations detected | stage=${pReadiness} mode=${pMode}`);
+  }
 
   const outputText = [
     routes.primary.routeName,

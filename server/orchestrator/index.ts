@@ -317,6 +317,11 @@ async function executeEngine(
       }
 
       case "funnel": {
+        if (!ctx.awareness || !ctx.awareness.primaryRoute) {
+          console.log(`[Orchestrator] AWARENESS_GATE_BLOCKED | Funnel cannot execute without completed Awareness — awareness output missing or incomplete`);
+          output = { status: "MISSING_DEPENDENCY", statusMessage: "Funnel requires completed Awareness output — awareness gate active" };
+          break;
+        }
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const offerInput = ctx.offer || {};

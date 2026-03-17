@@ -29,6 +29,7 @@ import {
   AWARENESS_ROUTE_TO_ENTRY_MECHANISMS,
   TRIGGER_CLASS_TO_ENTRY_MECHANISMS,
   TRUST_STATE_ENTRY_OVERRIDES,
+  AWARENESS_BLOCKED_FUNNELS,
 } from "./constants";
 import {
   assessDataReliability,
@@ -818,20 +819,21 @@ export function applyAwarenessPriorityMatrix(
   });
 
   const p3Blocked: string[] = [];
-  if (LOW_READINESS_STAGES.includes(awarenessStage) && awareness) {
-    const lowReadinessBlocked = ["direct", "application", "tripwire"];
-    for (const ft of lowReadinessBlocked) {
+  if (awareness) {
+    const stageBlockedList = AWARENESS_BLOCKED_FUNNELS[awarenessStage] || [];
+    for (const ft of stageBlockedList) {
       if (eligible.has(ft)) {
         eligible.delete(ft);
         p3Blocked.push(ft);
-        blocked.push({ funnelType: ft, blockedByPriority: 3, reason: `Low readiness stage "${awarenessStage}" blocks high-commitment funnel "${ft}"` });
+        blocked.push({ funnelType: ft, blockedByPriority: 3, reason: `Awareness stage "${awarenessStage}" blocks funnel "${ft}" — structural constraint` });
       }
     }
     if (!eligible.has(proposedType) && decidingPriority > 3) {
       decidingPriority = 3;
       decidingPriorityName = "Awareness Stage";
     }
-  } else if (HIGH_READINESS_STAGES.includes(awarenessStage) && awareness) {
+  }
+  if (HIGH_READINESS_STAGES.includes(awarenessStage) && awareness) {
     const highReadinessPreferred = ["direct", "tripwire", "application", "membership"];
     for (const ft of eligible) {
       if (!highReadinessPreferred.includes(ft) && ft !== "vsl" && ft !== "webinar" && ft !== "consultation" && ft !== "hybrid") {

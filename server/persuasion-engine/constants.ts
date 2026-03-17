@@ -116,6 +116,7 @@ export const MESSAGE_STEP_CATEGORY_MAP: Record<string, string> = {
   address_objections: "proof",
   remove_risk: "outcome",
   invite_commitment: "offer",
+  soft_next_step: "offer",
 };
 
 export const FUNNEL_PERSUASION_COMPATIBILITY: Record<string, string[]> = {
@@ -203,6 +204,27 @@ export const HYPE_PATTERNS = [
   "foolproof system",
   "can't fail",
   "money back no questions",
+  "life-changing",
+  "revolutionary system",
+  "breakthrough method",
+  "hack your way",
+  "shortcut to success",
+  "done for you",
+  "autopilot income",
+  "set and forget",
+  "push button",
+  "silver bullet",
+  "game changer",
+  "transform overnight",
+  "skyrocket your",
+  "explode your",
+  "crush the competition",
+  "dominate your market",
+  "unstoppable",
+  "fire your boss",
+  "escape the rat race",
+  "print money",
+  "cash machine",
 ];
 
 export const GENERIC_PERSUASION_PHRASES = [
