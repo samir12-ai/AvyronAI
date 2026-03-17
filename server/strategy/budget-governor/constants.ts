@@ -13,6 +13,12 @@ export const TEST_BUDGET_CEILING = 500;
 export const SCALE_BUDGET_FLOOR = 500;
 export const SCALE_BUDGET_CEILING = 10000;
 
+export const PERFORMANCE_OVERRIDE_THRESHOLDS = {
+  minConversions: 100,
+  minSpend: 500,
+  minReconciledConfidence: 0.80,
+};
+
 export const KILL_THRESHOLDS = {
   minOfferStrength: 0.2,
   minValidationConfidence: 0.15,

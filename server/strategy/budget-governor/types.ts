@@ -1,3 +1,11 @@
+export interface CampaignPerformanceMetrics {
+  conversions: number;
+  spend: number;
+  revenue: number;
+  isStatisticallyValid: boolean;
+  statisticalConfidence: number;
+}
+
 export interface BudgetGovernorInput {
   offerStrength: number;
   offerProofScore: number;
@@ -18,6 +26,7 @@ export interface BudgetGovernorInput {
   currentBudget: number;
   historicalCPA: number | null;
   historicalROAS: number | null;
+  campaignPerformance?: CampaignPerformanceMetrics;
 }
 
 export interface BudgetDecision {

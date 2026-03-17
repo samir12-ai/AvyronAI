@@ -12,6 +12,7 @@ import {
   KILL_THRESHOLDS,
   RISK_WEIGHTS,
   STATUS,
+  PERFORMANCE_OVERRIDE_THRESHOLDS,
 } from "./constants";
 import type {
   BudgetGovernorInput,
@@ -20,11 +21,53 @@ import type {
   ExpansionPermission,
   BudgetGuardResult,
   BudgetGovernorResult,
+  CampaignPerformanceMetrics,
 } from "./types";
 import { assessStrategyAcceptability } from "../../shared/strategy-acceptability";
 
 function clamp(v: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, v));
+}
+
+function reconcileValidationWithPerformance(
+  baseValidationConfidence: number,
+  perf?: CampaignPerformanceMetrics,
+): { reconciledConfidence: number; overrideApplied: boolean; overrideReason: string | null; diagnostics: string[] } {
+  const diagnostics: string[] = [];
+
+  if (!perf) {
+    diagnostics.push("No campaign performance data — using base validation confidence");
+    return { reconciledConfidence: baseValidationConfidence, overrideApplied: false, overrideReason: null, diagnostics };
+  }
+
+  diagnostics.push(`Campaign metrics: ${perf.conversions} conversions, $${perf.spend.toFixed(2)} spend, statistical confidence: ${(perf.statisticalConfidence * 100).toFixed(0)}%`);
+
+  if (perf.conversions >= PERFORMANCE_OVERRIDE_THRESHOLDS.minConversions &&
+      perf.spend >= PERFORMANCE_OVERRIDE_THRESHOLDS.minSpend &&
+      perf.isStatisticallyValid) {
+    const performanceConfidence = perf.statisticalConfidence;
+    const reconciled = Math.max(performanceConfidence, PERFORMANCE_OVERRIDE_THRESHOLDS.minReconciledConfidence);
+    const overrideReason = `PERFORMANCE OVERRIDE: ${perf.conversions} conversions ≥ ${PERFORMANCE_OVERRIDE_THRESHOLDS.minConversions}, $${perf.spend.toFixed(2)} spend ≥ $${PERFORMANCE_OVERRIDE_THRESHOLDS.minSpend}, statistically valid — validation confidence elevated from ${(baseValidationConfidence * 100).toFixed(0)}% to ${(reconciled * 100).toFixed(0)}%`;
+    diagnostics.push(overrideReason);
+    return { reconciledConfidence: reconciled, overrideApplied: true, overrideReason, diagnostics };
+  }
+
+  if (perf.isStatisticallyValid && perf.statisticalConfidence > baseValidationConfidence) {
+    const blended = baseValidationConfidence * 0.4 + perf.statisticalConfidence * 0.6;
+    const reconciled = clamp(blended);
+    diagnostics.push(`Statistical validity confirmed — blending base (${(baseValidationConfidence * 100).toFixed(0)}%) with campaign confidence (${(perf.statisticalConfidence * 100).toFixed(0)}%) → ${(reconciled * 100).toFixed(0)}%`);
+    return { reconciledConfidence: reconciled, overrideApplied: false, overrideReason: null, diagnostics };
+  }
+
+  if (perf.conversions > 0 || perf.spend > 0) {
+    const partialBoost = clamp(perf.statisticalConfidence * 0.3, 0, 0.15);
+    const reconciled = clamp(baseValidationConfidence + partialBoost);
+    diagnostics.push(`Partial campaign data — boosting base confidence by ${(partialBoost * 100).toFixed(0)}% → ${(reconciled * 100).toFixed(0)}%`);
+    return { reconciledConfidence: reconciled, overrideApplied: false, overrideReason: null, diagnostics };
+  }
+
+  diagnostics.push("Campaign metrics at zero — no reconciliation applied");
+  return { reconciledConfidence: baseValidationConfidence, overrideApplied: false, overrideReason: null, diagnostics };
 }
 
 function computeRiskScore(input: BudgetGovernorInput): { overallRisk: number; riskFactors: string[]; mitigations: string[] } {
@@ -273,13 +316,31 @@ export function runBudgetGovernorEngine(input: BudgetGovernorInput): BudgetGover
   const structuralWarnings: string[] = [];
 
   try {
-    const { overallRisk, riskFactors, mitigations } = computeRiskScore(input);
-    const guardResult = runGuard(input, overallRisk);
-    const decision = determineBudgetDecision(input, overallRisk, guardResult);
-    const testBudgetRange = computeTestBudgetRange(input, overallRisk);
-    const scaleBudgetRange = computeScaleBudgetRange(input, overallRisk);
-    const expansionPermission = computeExpansionPermission(input, overallRisk, guardResult);
-    const cacAssumptionCheck = assessCACRealism(input);
+    const reconciliation = reconcileValidationWithPerformance(
+      input.validationConfidence,
+      input.campaignPerformance,
+    );
+
+    if (reconciliation.reconciledConfidence !== input.validationConfidence) {
+      structuralWarnings.push(
+        `CONFIDENCE RECONCILIATION: base=${(input.validationConfidence * 100).toFixed(0)}% → reconciled=${(reconciliation.reconciledConfidence * 100).toFixed(0)}%` +
+        (reconciliation.overrideApplied ? " [PERFORMANCE OVERRIDE ACTIVE]" : " [BLENDED]")
+      );
+    }
+    structuralWarnings.push(...reconciliation.diagnostics);
+
+    const reconciledInput = {
+      ...input,
+      validationConfidence: reconciliation.reconciledConfidence,
+    };
+
+    const { overallRisk, riskFactors, mitigations } = computeRiskScore(reconciledInput);
+    const guardResult = runGuard(reconciledInput, overallRisk);
+    const decision = determineBudgetDecision(reconciledInput, overallRisk, guardResult);
+    const testBudgetRange = computeTestBudgetRange(reconciledInput, overallRisk);
+    const scaleBudgetRange = computeScaleBudgetRange(reconciledInput, overallRisk);
+    const expansionPermission = computeExpansionPermission(reconciledInput, overallRisk, guardResult);
+    const cacAssumptionCheck = assessCACRealism(reconciledInput);
 
     if (cacAssumptionCheck.warnings.length > 0) {
       structuralWarnings.push(...cacAssumptionCheck.warnings);
@@ -291,24 +352,25 @@ export function runBudgetGovernorEngine(input: BudgetGovernorInput): BudgetGover
     const killFlag = decision.action === "halt";
     const killReasons: string[] = [];
     if (killFlag) {
-      if (input.offerStrength < KILL_THRESHOLDS.minOfferStrength) killReasons.push("Offer strength below minimum viable threshold");
-      if (input.validationConfidence < KILL_THRESHOLDS.minValidationConfidence) killReasons.push("Validation confidence critically low");
+      if (reconciledInput.offerStrength < KILL_THRESHOLDS.minOfferStrength) killReasons.push("Offer strength below minimum viable threshold");
+      if (reconciledInput.validationConfidence < KILL_THRESHOLDS.minValidationConfidence) killReasons.push("Validation confidence critically low");
       if (overallRisk > KILL_THRESHOLDS.maxRisk) killReasons.push("Overall risk exceeds maximum safe threshold");
     }
 
     let layersPassed = 0;
-    const totalLayers = 5;
+    const totalLayers = 6;
     if (guardResult.passed) layersPassed++;
     if (cacAssumptionCheck.realistic) layersPassed++;
     if (overallRisk < MAX_RISK_FOR_EXPANSION) layersPassed++;
-    if (input.offerCompleteness) layersPassed++;
-    if (input.validationConfidence >= 0.5) layersPassed++;
+    if (reconciledInput.offerCompleteness) layersPassed++;
+    if (reconciledInput.validationConfidence >= 0.5) layersPassed++;
+    if (reconciliation.overrideApplied || reconciledInput.validationConfidence >= MIN_VALIDATION_CONFIDENCE_FOR_SCALE) layersPassed++;
 
     const rawConfidence = clamp(
-      input.validationConfidence * 0.3 +
-      input.offerStrength * 0.25 +
+      reconciledInput.validationConfidence * 0.3 +
+      reconciledInput.offerStrength * 0.25 +
       (1 - overallRisk) * 0.25 +
-      input.funnelStrengthScore * 0.2
+      reconciledInput.funnelStrengthScore * 0.2
     );
 
     const confidenceScore = killFlag ? Math.min(rawConfidence, 0.15) : rawConfidence;
@@ -347,6 +409,13 @@ export function runBudgetGovernorEngine(input: BudgetGovernorInput): BudgetGover
         expansionAllowed: expansionPermission.allowed,
         layersPassed,
         totalLayers,
+        confidenceReconciliation: {
+          baseValidationConfidence: input.validationConfidence,
+          reconciledConfidence: reconciliation.reconciledConfidence,
+          overrideApplied: reconciliation.overrideApplied,
+          overrideReason: reconciliation.overrideReason,
+          campaignPerformance: input.campaignPerformance || null,
+        },
       },
       strategyAcceptability,
     };

@@ -3,7 +3,7 @@ import { db } from "../../db";
 import { budgetGovernorSnapshots, strategyValidationSnapshots, offerSnapshots, funnelSnapshots } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { runBudgetGovernorEngine } from "./engine";
-import { ENGINE_VERSION, MIN_VALIDATION_CONFIDENCE_FOR_SCALE } from "./constants";
+import { ENGINE_VERSION, MIN_VALIDATION_CONFIDENCE_FOR_SCALE, PERFORMANCE_OVERRIDE_THRESHOLDS } from "./constants";
 import { pruneOldSnapshots, checkValidationSession } from "../../engine-hardening";
 import { resolveDataSource } from "../../data-source/resolver";
 
@@ -95,6 +95,15 @@ export function registerBudgetGovernorRoutes(app: Express) {
 
       const dataSource = await resolveDataSource(campaignId, accountId);
 
+      const statValidity = dataSource.statisticalValidity;
+      const campaignPerformance = statValidity ? {
+        conversions: statValidity.conversions,
+        spend: statValidity.spend,
+        revenue: dataSource.revenue ?? 0,
+        isStatisticallyValid: statValidity.isStatisticallyValid,
+        statisticalConfidence: statValidity.confidenceLevel,
+      } : undefined;
+
       const input = {
         offerStrength: offerData?.offerStrengthScore ?? 0.5,
         offerProofScore: offerData?.primaryOffer?.proofLayer?.proofStrength ?? 0.4,
@@ -115,18 +124,23 @@ export function registerBudgetGovernorRoutes(app: Express) {
         currentBudget: req.body.currentBudget ?? 0,
         historicalCPA: dataSource.isBenchmark ? dataSource.cpa : (req.body.historicalCPA ?? (dataSource.cpa > 0 ? dataSource.cpa : null)),
         historicalROAS: dataSource.isBenchmark ? dataSource.roas : (req.body.historicalROAS ?? dataSource.roas),
+        campaignPerformance,
       };
 
       const result = runBudgetGovernorEngine(input);
 
-      if (dataSource.confidence < MIN_VALIDATION_CONFIDENCE_FOR_SCALE && result.decision.action === "scale") {
+      const hasPerformanceOverride = statValidity &&
+        statValidity.isStatisticallyValid &&
+        statValidity.conversions >= PERFORMANCE_OVERRIDE_THRESHOLDS.minConversions &&
+        statValidity.spend >= PERFORMANCE_OVERRIDE_THRESHOLDS.minSpend;
+
+      if (!hasPerformanceOverride && dataSource.confidence < MIN_VALIDATION_CONFIDENCE_FOR_SCALE && result.decision.action === "scale") {
         result.decision = {
           action: "hold",
           reasoning: `Data source confidence (${(dataSource.confidence * 100).toFixed(0)}%) is below the ${(MIN_VALIDATION_CONFIDENCE_FOR_SCALE * 100).toFixed(0)}% threshold required for scaling — holding budget until data quality improves`,
         };
       }
 
-      const statValidity = dataSource.statisticalValidity;
       if (result.decision.action === "scale") {
         if (!statValidity || !statValidity.isStatisticallyValid) {
           const blockDetails = statValidity
@@ -176,7 +190,8 @@ export function registerBudgetGovernorRoutes(app: Express) {
 
       await pruneOldSnapshots(db, budgetGovernorSnapshots, campaignId, 20, accountId);
 
-      console.log(`[BudgetGovernor] Campaign ${campaignId} | Decision: ${result.decision.action} | Confidence: ${(result.confidenceScore * 100).toFixed(0)}% | DataSource: ${dataSource.mode} | Kill: ${result.killFlag} | Time: ${result.executionTimeMs}ms`);
+      const perfOverrideLabel = hasPerformanceOverride ? " | PerfOverride: YES" : "";
+      console.log(`[BudgetGovernor] Campaign ${campaignId} | Decision: ${result.decision.action} | Confidence: ${(result.confidenceScore * 100).toFixed(0)}% | DataSource: ${dataSource.mode} | Kill: ${result.killFlag}${perfOverrideLabel} | Time: ${result.executionTimeMs}ms`);
 
       return res.json({
         success: true,
