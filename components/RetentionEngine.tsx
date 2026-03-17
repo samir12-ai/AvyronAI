@@ -505,12 +505,12 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
             </View>
             <View style={styles.derivedGrid}>
               {([
-                ['Repeat Purchase', `${(derivedMetrics.repeatPurchaseRate * 100).toFixed(1)}%`],
-                ['Churn Risk', `${(derivedMetrics.churnRiskEstimate * 100).toFixed(1)}%`],
-                ['Est. LTV', `$${derivedMetrics.estimatedLTV.toLocaleString()}`],
-                ['Strength', `${(derivedMetrics.retentionStrengthScore * 100).toFixed(0)}%`],
-                ['Frequency', `${derivedMetrics.purchaseFrequency.toFixed(1)}x`],
-                ['Lifespan', `${derivedMetrics.estimatedLifespanMonths}mo`],
+                ['Repeat Purchase', `${((derivedMetrics.repeatPurchaseRate ?? 0) * 100).toFixed(1)}%`],
+                ['Churn Risk', `${((derivedMetrics.churnRiskEstimate ?? 0) * 100).toFixed(1)}%`],
+                ['Est. LTV', `$${(derivedMetrics.estimatedLTV ?? 0).toLocaleString()}`],
+                ['Strength', `${((derivedMetrics.retentionStrengthScore ?? 0) * 100).toFixed(0)}%`],
+                ['Frequency', `${(derivedMetrics.purchaseFrequency ?? 0).toFixed(1)}x`],
+                ['Lifespan', `${derivedMetrics.estimatedLifespanMonths ?? 0}mo`],
               ] as [string, string][]).map(([label, val]) => (
                 <View key={label} style={styles.derivedItem}>
                   <Text style={[styles.derivedLabel, { color: colors.textSecondary }]}>{label}</Text>
