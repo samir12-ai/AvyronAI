@@ -1,0 +1,135 @@
+Hi,
+
+We need to apply a system-wide structural swap between the Awareness Engine and the Funnel Engine.
+
+This is not a cosmetic UI change and not a prompt tweak.  
+It is an architecture-level execution-order correction that must be reflected across the entire pipeline.
+
+## Current issue
+
+Right now the system behaves as if:
+
+Funnel → Awareness
+
+which means the Funnel is selected first, and then Awareness analyzes or validates afterward.
+
+This is creating contradictions such as:
+- Awareness identifying proof-led entry
+- Funnel still selecting challenge
+- warnings appearing because the funnel type does not match the awareness route
+
+In other words, the Awareness Engine is diagnosing correctly, but it is placed too late in the system to control downstream decisions.
+
+## Required structural correction
+
+We need to swap the execution order to:
+
+Awareness → Funnel
+
+This must be treated as a root-level pipeline change, not a local screen reorder.
+
+## Important: apply this swap across the whole system
+
+This is the most important part.
+
+At the moment, the engines after Awareness are wired as if Awareness comes later in the chain.  
+After the swap, the whole system must be re-bound around the new order.
+
+That means:
+
+- anything that currently waits for Funnel must be updated if it now needs Awareness first
+- anything that currently consumes Awareness after Funnel must be re-bound to consume it before Funnel
+- anything downstream that depends on funnel structure must now depend on the funnel generated from awareness, not on a pre-awareness funnel path
+
+In other words:
+
+### the entire dependency graph must be updated to reflect the new order
+
+not just the two engine screens.
+
+## Required execution model
+
+The new execution order should be:
+
+Product DNA  
+→ Market Intelligence  
+→ Audience  
+→ Positioning / Differentiation / Mechanism / Strategy Root  
+→ Awareness Engine  
+→ Funnel Engine  
+→ all downstream engines that depend on funnel outputs
+
+## Required dependency rules
+
+### 1. Awareness must execute before Funnel
+Funnel must not run unless Awareness has completed successfully.
+
+### 2. Funnel must consume Awareness outputs directly
+At minimum Funnel must consume:
+
+- awareness_stage
+- entry_mechanism
+- trigger_class
+- trust_requirement
+- awareness_route
+- readiness_state
+- awareness_strength
+
+### 3. Downstream rebinding must follow the new order
+Any engine or module after Funnel must now rely on the new Funnel output generated from Awareness.
+
+Nothing should continue behaving as if Funnel came first.
+
+### 4. Block incorrect execution
+After this change:
+
+- Funnel should not run without Awareness
+- Downstream funnel-dependent engines should not run without Funnel
+- No engine should consume stale pre-swap routes or old execution assumptions
+
+## Root alignment requirements
+
+Please ensure Awareness and Funnel share the same active:
+
+- strategyRoot
+- run_id
+- root_hash
+- audience signals
+- mechanism context
+- positioning axis
+
+No duplicated route logic, no parallel context, no legacy fallback path.
+
+## UI / system update requirements
+
+After the backend rebinding is complete, update the interface so the order is reflected clearly:
+
+- Awareness appears before Funnel
+- Funnel is displayed as derived from Awareness
+- any downstream stages reflect the new chain
+- stale outputs from the old order must not remain visible
+
+## Critical constraint
+
+We do not want a major rewrite of the internal scoring logic.
+
+This should be implemented as:
+
+- execution order swap
+- dependency rebinding
+- root alignment
+- downstream pipeline update
+- UI reorder + state refresh
+
+## Expected result
+
+After deployment:
+
+- Awareness becomes the actual upstream decision driver
+- Funnel selection is derived from Awareness, not merely validated by it
+- the rest of the system behaves consistently with this new order
+- no more contradictions like “challenge funnel expects curiosity but got proof-led entry”
+
+Please treat this as a full-system dependency correction, not a local adjustment.
+
+Thanks.

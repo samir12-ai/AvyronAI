@@ -1,0 +1,147 @@
+Hi,
+
+We are implementing a structural swap between Awareness and Funnel in the pipeline.
+
+This is not just a reorder — it requires full dependency rebinding across the system to keep everything consistent.
+
+---
+
+## 🔁 New Order
+
+Awareness → Funnel
+
+---
+
+## 🧠 Required System Rebinding (Critical)
+
+You must rebalance ALL engine dependencies based on this swap.
+
+---
+
+## 1. Engines BEFORE Awareness (unchanged)
+
+These remain the same and feed Awareness:
+
+- Market Intelligence  
+- Audience  
+- Any upstream context engines  
+
+No changes here.
+
+---
+
+## 2. Engines BETWEEN Awareness and Funnel (Critical Adjustment)
+
+Previously, these engines were taking input from Funnel.
+
+After the swap, they must:
+
+✅ STOP consuming Funnel outputs  
+✅ START consuming Awareness outputs instead
+
+So:
+
+Before:
+- Engine X ← Funnel  
+
+After:
+- Engine X ← Awareness  
+
+---
+
+## 3. Funnel Engine (new position)
+
+Funnel must now:
+
+- Execute AFTER Awareness  
+- Consume Awareness outputs directly:
+
+Required inputs:
+- awareness_stage  
+- entry_mechanism  
+- trigger_class  
+- trust_state  
+- awareness_route  
+
+Funnel becomes a derived layer from Awareness
+
+---
+
+## 4. Engines AFTER Funnel (Final Stage)
+
+These engines must now consume:
+
+✅ Awareness outputs  
+✅ Funnel outputs  
+
+So:
+
+Before:
+- Engine Y ← Awareness  
+
+After:
+- Engine Y ← Awareness + Funnel  
+
+---
+
+## 5. DO NOT break Awareness or Funnel inputs
+
+- Awareness still consumes:
+  - Market Intelligence  
+  - Audience  
+
+- Funnel still consumes:
+  - Awareness (new upstream)
+
+No backward dependencies allowed.
+
+---
+
+## 6. Root & Context Alignment (Very Important)
+
+Ensure ALL engines (especially Awareness + Funnel + downstream) share:
+
+- same strategyRoot  
+- same run_id  
+- same root_hash  
+- no duplicated context  
+- no stale references  
+
+No parallel flows. No legacy paths.
+
+---
+
+## 7. Execution Rules
+
+- Awareness must run BEFORE Funnel  
+- Funnel must NOT run without Awareness  
+- Engines between them must NOT access Funnel anymore  
+- Engines after Funnel must access BOTH  
+
+---
+
+## 8. Frontend Update
+
+After rebinding:
+
+- Reflect the new order visually  
+- Awareness appears before Funnel  
+- No stale outputs from old structure  
+- Ensure correct data mapping in UI (no miswired inputs)
+
+---
+
+## 🎯 Expected Result
+
+- Clean dependency flow  
+- No contradictions between Awareness and Funnel  
+- All engines aligned with the new pipeline  
+- System behaves consistently end-to-end  
+
+---
+
+This must be implemented carefully — this is a full dependency shift, not just a reorder.
+
+Let me know once done so I can validate the pipeline.
+
+Thanks.

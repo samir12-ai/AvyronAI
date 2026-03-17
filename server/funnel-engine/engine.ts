@@ -796,6 +796,15 @@ Return JSON:
   }
 }
 
+export interface FunnelAwarenessInput {
+  awarenessStage: string;
+  entryMechanism: string;
+  triggerClass: string;
+  trustState: string;
+  awarenessRoute: string;
+  awarenessStrengthScore: number;
+}
+
 export async function runFunnelEngine(
   mi: FunnelMIInput,
   audience: FunnelAudienceInput,
@@ -803,11 +812,16 @@ export async function runFunnelEngine(
   positioning: FunnelPositioningInput,
   differentiation: FunnelDifferentiationInput,
   accountId: string,
+  awareness?: FunnelAwarenessInput | null,
 ): Promise<FunnelResult> {
   const startTime = Date.now();
   const diagnostics: Record<string, any> = {};
 
-  console.log(`[FunnelEngine-V3] Starting 8-layer pipeline`);
+  console.log(`[FunnelEngine-V3] Starting 8-layer pipeline | awarenessProvided=${!!awareness}`);
+
+  if (awareness) {
+    console.log(`[FunnelEngine-V3] AWARENESS_CONTEXT | stage=${awareness.awarenessStage} | entry=${awareness.entryMechanism} | trigger=${awareness.triggerClass} | trust=${awareness.trustState} | score=${awareness.awarenessStrengthScore}`);
+  }
 
   const pillars = differentiation.pillars || [];
   const proofArch = differentiation.proofArchitecture || [];
@@ -857,11 +871,28 @@ export async function runFunnelEngine(
   const l2Fit = layer2_offerToFunnelFit(offer, audience);
   diagnostics.layer2 = { funnelType: l2Fit.funnelType, fitScore: l2Fit.fitScore, rationale: l2Fit.rationale };
 
+  if (awareness) {
+    diagnostics.awarenessBinding = {
+      stage: awareness.awarenessStage,
+      entryMechanism: awareness.entryMechanism,
+      triggerClass: awareness.triggerClass,
+      trustState: awareness.trustState,
+      score: awareness.awarenessStrengthScore,
+    };
+
+    if (awareness.entryMechanism === "diagnostic_entry" && !["challenge", "quiz"].includes(l2Fit.funnelType)) {
+      console.log(`[FunnelEngine-V3] AWARENESS_OVERRIDE | diagnostic entry suggests challenge/quiz funnel, current=${l2Fit.funnelType}`);
+    }
+    if (awareness.entryMechanism === "authority_entry" && l2Fit.funnelType === "direct") {
+      console.log(`[FunnelEngine-V3] AWARENESS_ADVISORY | authority entry + direct funnel — trust path critical`);
+    }
+  }
+
   const l3Friction = layer3_audienceFrictionModeling(audience, l2Fit.funnelType);
   diagnostics.layer3 = { frictionPoints: l3Friction.frictionPoints.length, score: l3Friction.audienceFrictionScore };
 
-  const awareness = audience.awarenessLevel || "problem_aware";
-  const stageMap = buildStageMap(l2Fit.funnelType, awareness);
+  const awarenessStage = awareness?.awarenessStage || audience.awarenessLevel || "problem_aware";
+  const stageMap = buildStageMap(l2Fit.funnelType, awarenessStage);
 
   const l4Trust = layer4_trustPathConstruction(audience, differentiation, l2Fit.funnelType);
   diagnostics.layer4 = { steps: l4Trust.trustPath.length, score: l4Trust.trustPathScore };

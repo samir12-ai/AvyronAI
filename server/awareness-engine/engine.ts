@@ -29,6 +29,18 @@ import type {
   AwarenessResult,
 } from "./types";
 
+const EMPTY_FUNNEL: AwarenessFunnelInput = {
+  funnelName: "",
+  funnelType: "none",
+  stageMap: [],
+  trustPath: [],
+  proofPlacements: [],
+  commitmentLevel: "none",
+  frictionMap: [],
+  entryTrigger: { mechanismType: "none", purpose: "" },
+  funnelStrengthScore: 0,
+};
+
 function clamp(v: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, v));
 }
@@ -67,7 +79,6 @@ export function assessDataReliability(
   positioning: AwarenessPositioningInput,
   differentiation: AwarenessDifferentiationInput,
   offer: AwarenessOfferInput,
-  integrity: AwarenessIntegrityInput,
 ): DataReliabilityAssessment {
   const advisories: string[] = [];
 
@@ -710,10 +721,9 @@ export async function runAwarenessEngine(
   positioning: AwarenessPositioningInput,
   differentiation: AwarenessDifferentiationInput,
   offer: AwarenessOfferInput,
-  funnel: AwarenessFunnelInput,
-  integrity: AwarenessIntegrityInput,
   accountId: string,
   upstreamLineage: SignalLineageEntry[] = [],
+  funnel: AwarenessFunnelInput = EMPTY_FUNNEL,
 ): Promise<AwarenessResult> {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
@@ -738,28 +748,7 @@ export async function runAwarenessEngine(
     };
   }
 
-  if (!integrity.safeToExecute) {
-    structuralWarnings.push("Upstream integrity check did not pass safe-to-execute — awareness analysis proceeding with caution");
-  }
-
-  if (integrity.overallIntegrityScore < 0.5) {
-    return {
-      status: STATUS.INTEGRITY_FAILED,
-      statusMessage: `Upstream integrity score too low (${integrity.overallIntegrityScore.toFixed(2)}) — awareness analysis blocked`,
-      primaryRoute: emptyRoute("blocked"),
-      alternativeRoute: emptyRoute("blocked"),
-      rejectedRoute: emptyRoute("blocked", "Upstream integrity failure"),
-      layerResults: [],
-      structuralWarnings: [`Integrity score ${integrity.overallIntegrityScore.toFixed(2)} below minimum threshold 0.50`],
-      boundaryCheck: { passed: false, violations: ["Upstream integrity check failed"] },
-      dataReliability: { signalDensity: 0, signalDiversity: 0, narrativeStability: 0, competitorValidity: 0, marketMaturityConfidence: 0, overallReliability: 0, isWeak: true, advisories: ["Blocked before reliability assessment"] },
-      confidenceNormalized: false,
-      executionTimeMs: Date.now() - startTime,
-      engineVersion: ENGINE_VERSION,
-    };
-  }
-
-  const reliability = assessDataReliability(mi, audience, positioning, differentiation, offer, integrity);
+  const reliability = assessDataReliability(mi, audience, positioning, differentiation, offer);
   if (reliability.advisories.length > 0) {
     structuralWarnings.push(...reliability.advisories);
   }

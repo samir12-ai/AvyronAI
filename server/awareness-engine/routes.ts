@@ -2,8 +2,6 @@ import type { Express, Request, Response } from "express";
 import { db } from "../db";
 import {
   awarenessSnapshots,
-  integritySnapshots,
-  funnelSnapshots,
   offerSnapshots,
   differentiationSnapshots,
   positioningSnapshots,
@@ -13,9 +11,7 @@ import {
 import { inArray, eq, and, desc } from "drizzle-orm";
 import { runAwarenessEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
-import { ENGINE_VERSION as INTEGRITY_ENGINE_VERSION } from "../integrity-engine/constants";
 import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/constants";
-import { ENGINE_VERSION as FUNNEL_ENGINE_VERSION } from "../funnel-engine/constants";
 import { ENGINE_VERSION as OFFER_ENGINE_VERSION } from "../offer-engine/constants";
 import { ENGINE_VERSION as DIFF_ENGINE_VERSION } from "../differentiation-engine/constants";
 import { POSITIONING_ENGINE_VERSION } from "../positioning-engine/constants";
@@ -24,6 +20,7 @@ import { verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state"
 import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snapshot-trust";
 import { parseLineageFromSnapshot, mergeLineageArrays, findBestParentSignal, createDerivedLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
+import { getActiveRoot, validateRootBinding } from "../shared/strategy-root";
 
 function safeJsonParse(text: any): any {
   if (!text) return null;
@@ -40,7 +37,7 @@ function safeNumber(v: any, fallback: number): number {
 export function registerAwarenessEngineRoutes(app: Express) {
   app.post("/api/awareness-engine/analyze", async (req: Request, res: Response) => {
     try {
-      const { campaignId, accountId = "default", integritySnapshotId, validationSessionId } = req.body;
+      const { campaignId, accountId = "default", offerSnapshotId, validationSessionId } = req.body;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -54,52 +51,52 @@ export function registerAwarenessEngineRoutes(app: Express) {
         });
       }
 
-      if (!integritySnapshotId) {
-        return res.status(400).json({ error: "integritySnapshotId is required" });
+      if (!offerSnapshotId) {
+        return res.status(400).json({ error: "offerSnapshotId is required" });
       }
 
-      let [integritySnapshot] = await db.select().from(integritySnapshots)
+      let [offerSnapshot] = await db.select().from(offerSnapshots)
         .where(and(
-          eq(integritySnapshots.id, integritySnapshotId),
-          eq(integritySnapshots.campaignId, campaignId),
-          eq(integritySnapshots.accountId, accountId),
+          eq(offerSnapshots.id, offerSnapshotId),
+          eq(offerSnapshots.campaignId, campaignId),
+          eq(offerSnapshots.accountId, accountId),
         ))
         .limit(1);
 
-      if (!integritySnapshot) {
+      if (!offerSnapshot) {
         return res.status(400).json({
           error: "MISSING_DEPENDENCY",
-          message: "Integrity snapshot not found or campaign mismatch",
+          message: "Offer snapshot not found or campaign mismatch",
         });
       }
 
-      if (integritySnapshot.engineVersion !== INTEGRITY_ENGINE_VERSION) {
-        console.log(`[AwarenessEngine-V3] Integrity snapshot ${integritySnapshotId} version mismatch (v${integritySnapshot.engineVersion} vs v${INTEGRITY_ENGINE_VERSION}), searching for latest valid`);
-        const [latestIntegrity] = await db.select().from(integritySnapshots)
+      let activeOfferSnapshot = offerSnapshot;
+      if (offerSnapshot.engineVersion !== OFFER_ENGINE_VERSION) {
+        console.log(`[AwarenessEngine-V3] Offer snapshot ${offerSnapshotId} version mismatch (v${offerSnapshot.engineVersion} vs v${OFFER_ENGINE_VERSION}), searching for latest valid`);
+        const [latestOffer] = await db.select().from(offerSnapshots)
           .where(and(
-            eq(integritySnapshots.campaignId, campaignId),
-            eq(integritySnapshots.accountId, accountId),
-            eq(integritySnapshots.status, "COMPLETE"),
-            eq(integritySnapshots.engineVersion, INTEGRITY_ENGINE_VERSION),
+            eq(offerSnapshots.campaignId, campaignId),
+            eq(offerSnapshots.accountId, accountId),
+            eq(offerSnapshots.status, "COMPLETE"),
+            eq(offerSnapshots.engineVersion, OFFER_ENGINE_VERSION),
           ))
-          .orderBy(desc(integritySnapshots.createdAt))
+          .orderBy(desc(offerSnapshots.createdAt))
           .limit(1);
-        if (!latestIntegrity) {
+        if (latestOffer) {
+          console.log(`[AwarenessEngine-V3] Using latest valid Offer snapshot ${latestOffer.id}`);
+          activeOfferSnapshot = latestOffer;
+        } else {
           return res.status(400).json({
             error: "VERSION_MISMATCH",
-            message: `Integrity snapshot version ${integritySnapshot.engineVersion} does not match current version ${INTEGRITY_ENGINE_VERSION} — please re-run Integrity Engine`,
+            message: `Offer snapshot version ${offerSnapshot.engineVersion} does not match current version ${OFFER_ENGINE_VERSION} — please re-run Offer Engine first`,
           });
         }
-        console.log(`[AwarenessEngine-V3] Using latest valid Integrity snapshot ${latestIntegrity.id}`);
-        Object.assign(integritySnapshot, latestIntegrity);
       }
 
-      const funnelSnapshotId = integritySnapshot.funnelSnapshotId;
-      const offerSnapshotId = integritySnapshot.offerSnapshotId;
-      const miSnapshotId = integritySnapshot.miSnapshotId;
-      const audienceSnapshotId = integritySnapshot.audienceSnapshotId;
-      const positioningSnapshotId = integritySnapshot.positioningSnapshotId;
-      const differentiationSnapshotId = integritySnapshot.differentiationSnapshotId;
+      const miSnapshotId = activeOfferSnapshot.miSnapshotId;
+      const audienceSnapshotId = activeOfferSnapshot.audienceSnapshotId;
+      const positioningSnapshotId = activeOfferSnapshot.positioningSnapshotId;
+      const differentiationSnapshotId = activeOfferSnapshot.differentiationSnapshotId;
 
       let [miSnapshot] = await db.select().from(miSnapshots)
         .where(and(eq(miSnapshots.id, miSnapshotId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId)))
@@ -225,58 +222,6 @@ export function registerAwarenessEngineRoutes(app: Express) {
         }
       }
 
-      let [offerSnapshot] = await db.select().from(offerSnapshots)
-        .where(and(eq(offerSnapshots.id, offerSnapshotId), eq(offerSnapshots.campaignId, campaignId), eq(offerSnapshots.accountId, accountId)))
-        .limit(1);
-
-      if (!offerSnapshot) {
-        return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Offer snapshot not found" });
-      }
-      if (offerSnapshot.engineVersion !== OFFER_ENGINE_VERSION) {
-        console.log(`[AwarenessEngine-V3] Offer snapshot ${offerSnapshotId} version mismatch (v${offerSnapshot.engineVersion} vs v${OFFER_ENGINE_VERSION}), searching for latest valid`);
-        const [latestOffer] = await db.select().from(offerSnapshots)
-          .where(and(
-            eq(offerSnapshots.campaignId, campaignId),
-            eq(offerSnapshots.accountId, accountId),
-            eq(offerSnapshots.status, "COMPLETE"),
-            eq(offerSnapshots.engineVersion, OFFER_ENGINE_VERSION),
-          ))
-          .orderBy(desc(offerSnapshots.createdAt))
-          .limit(1);
-        if (latestOffer) {
-          console.log(`[AwarenessEngine-V3] Using latest valid Offer snapshot ${latestOffer.id}`);
-          offerSnapshot = latestOffer;
-        } else {
-          return res.status(400).json({ error: "VERSION_MISMATCH", message: `Offer snapshot version ${offerSnapshot.engineVersion} does not match current version ${OFFER_ENGINE_VERSION} — please re-run Offer Engine` });
-        }
-      }
-
-      let [funnelSnapshot] = await db.select().from(funnelSnapshots)
-        .where(and(eq(funnelSnapshots.id, funnelSnapshotId), eq(funnelSnapshots.campaignId, campaignId), eq(funnelSnapshots.accountId, accountId)))
-        .limit(1);
-
-      if (!funnelSnapshot) {
-        return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Funnel snapshot not found" });
-      }
-      if (funnelSnapshot.engineVersion !== FUNNEL_ENGINE_VERSION) {
-        console.log(`[AwarenessEngine-V3] Funnel snapshot ${funnelSnapshotId} version mismatch (v${funnelSnapshot.engineVersion} vs v${FUNNEL_ENGINE_VERSION}), searching for latest valid`);
-        const [latestFunnel] = await db.select().from(funnelSnapshots)
-          .where(and(
-            eq(funnelSnapshots.campaignId, campaignId),
-            eq(funnelSnapshots.accountId, accountId),
-            eq(funnelSnapshots.status, "COMPLETE"),
-            eq(funnelSnapshots.engineVersion, FUNNEL_ENGINE_VERSION),
-          ))
-          .orderBy(desc(funnelSnapshots.createdAt))
-          .limit(1);
-        if (latestFunnel) {
-          console.log(`[AwarenessEngine-V3] Using latest valid Funnel snapshot ${latestFunnel.id}`);
-          funnelSnapshot = latestFunnel;
-        } else {
-          return res.status(400).json({ error: "VERSION_MISMATCH", message: `Funnel snapshot version ${funnelSnapshot.engineVersion} does not match current version ${FUNNEL_ENGINE_VERSION} — please re-run Funnel Engine` });
-        }
-      }
-
       let miNarrativeObjectionCount = 0;
       let miNarrativeObjectionDensity = 0;
       if (miSnapshot.objectionMapData) {
@@ -286,6 +231,11 @@ export function registerAwarenessEngineRoutes(app: Express) {
           miNarrativeObjectionDensity = objMap?.objectionDensity || 0;
         } catch {}
       }
+
+      const selectedOfferKey = activeOfferSnapshot.selectedOption || "primary";
+      const offerData = safeJsonParse(
+        selectedOfferKey === "alternative" ? activeOfferSnapshot.alternativeOffer : activeOfferSnapshot.primaryOffer
+      );
 
       const miInput = {
         marketDiagnosis: miSnapshot.marketDiagnosis,
@@ -325,11 +275,6 @@ export function registerAwarenessEngineRoutes(app: Express) {
         confidenceScore: safeNumber(diffSnapshot.confidenceScore, 0),
       };
 
-      const selectedOfferKey = offerSnapshot.selectedOption || "primary";
-      const offerData = safeJsonParse(
-        selectedOfferKey === "alternative" ? offerSnapshot.alternativeOffer : offerSnapshot.primaryOffer
-      );
-
       const offerInput = {
         offerName: offerData?.offerName || "Primary Offer",
         coreOutcome: offerData?.coreOutcome || "",
@@ -341,39 +286,33 @@ export function registerAwarenessEngineRoutes(app: Express) {
         frictionLevel: safeNumber(offerData?.frictionLevel, 0),
       };
 
-      const selectedFunnelKey = funnelSnapshot.selectedOption || "primary";
-      const funnelData = safeJsonParse(
-        selectedFunnelKey === "alternative" ? funnelSnapshot.alternativeFunnel : funnelSnapshot.primaryFunnel
-      );
+      const activeRoot = await getActiveRoot(campaignId, accountId);
+      let strategyRootId: string | null = null;
 
-      const funnelInput = {
-        funnelName: funnelData?.funnelName || "Primary Funnel",
-        funnelType: funnelData?.funnelType || "webinar",
-        stageMap: funnelData?.stageMap || [],
-        trustPath: funnelData?.trustPath || [],
-        proofPlacements: funnelData?.proofPlacements || [],
-        commitmentLevel: funnelData?.commitmentLevel || "medium",
-        frictionMap: funnelData?.frictionMap || [],
-        entryTrigger: funnelData?.entryTrigger || { mechanismType: "none", purpose: "" },
-        funnelStrengthScore: safeNumber(funnelData?.funnelStrengthScore, 0),
-      };
-
-      const integrityInput = {
-        overallIntegrityScore: safeNumber(integritySnapshot.overallIntegrityScore, 0),
-        safeToExecute: integritySnapshot.safeToExecute ?? false,
-        layerResults: safeJsonParse(integritySnapshot.layerResults) || [],
-        structuralWarnings: safeJsonParse(integritySnapshot.structuralWarnings) || [],
-        flaggedInconsistencies: safeJsonParse(integritySnapshot.flaggedInconsistencies) || [],
-      };
+      if (activeRoot) {
+        const rootValidation = validateRootBinding(activeRoot, {
+          miSnapshotId: miSnapshot.id,
+          audienceSnapshotId,
+          positioningSnapshotId,
+          differentiationSnapshotId,
+        });
+        if (!rootValidation.valid) {
+          console.log(`[AwarenessEngine] ROOT_BINDING_ADVISORY | issues: ${rootValidation.issues.join("; ")}`);
+        }
+        strategyRootId = activeRoot.id;
+        console.log(`[AwarenessEngine] STRATEGY_ROOT_BOUND | rootId=${activeRoot.id} | hash=${activeRoot.rootHash}`);
+      } else {
+        console.log(`[AwarenessEngine] NO_ACTIVE_ROOT | campaign=${campaignId}`);
+      }
 
       const upstreamLineage = mergeLineageArrays(
         parseLineageFromSnapshot((miSnapshot as any).signalLineage),
         parseLineageFromSnapshot((audSnapshot as any).signalLineage),
-        parseLineageFromSnapshot((offerSnapshot as any).signalLineage),
+        parseLineageFromSnapshot((activeOfferSnapshot as any).signalLineage),
       );
-      console.log(`[AwarenessEngine] UPSTREAM_LINEAGE | mi=${parseLineageFromSnapshot((miSnapshot as any).signalLineage).length} | audience=${parseLineageFromSnapshot((audSnapshot as any).signalLineage).length} | offer=${parseLineageFromSnapshot((offerSnapshot as any).signalLineage).length} | merged=${upstreamLineage.length}`);
+      console.log(`[AwarenessEngine] UPSTREAM_LINEAGE | mi=${parseLineageFromSnapshot((miSnapshot as any).signalLineage).length} | audience=${parseLineageFromSnapshot((audSnapshot as any).signalLineage).length} | offer=${parseLineageFromSnapshot((activeOfferSnapshot as any).signalLineage).length} | merged=${upstreamLineage.length}`);
 
-      const result = await runAwarenessEngine(miInput, audienceInput, positioningInput, differentiationInput, offerInput, funnelInput, integrityInput, accountId, upstreamLineage);
+      const result = await runAwarenessEngine(miInput, audienceInput, positioningInput, differentiationInput, offerInput, accountId, upstreamLineage);
 
       if (result.status === "INTEGRITY_FAILED") {
         console.error(`[AwarenessEngine] HARD-FAIL: ${result.statusMessage || "Boundary violation"} — not persisting`);
@@ -403,9 +342,9 @@ export function registerAwarenessEngineRoutes(app: Express) {
       const [saved] = await db.insert(awarenessSnapshots).values({
         accountId,
         campaignId,
-        integritySnapshotId: integritySnapshot.id,
-        funnelSnapshotId: funnelSnapshot.id,
-        offerSnapshotId: offerSnapshot.id,
+        integritySnapshotId: null,
+        funnelSnapshotId: null,
+        offerSnapshotId: activeOfferSnapshot.id,
         miSnapshotId: miSnapshot.id,
         audienceSnapshotId: audSnapshot.id,
         positioningSnapshotId: posSnapshot.id,
@@ -478,15 +417,14 @@ export function registerAwarenessEngineRoutes(app: Express) {
         dataReliability: safeJsonParse(latest.dataReliability),
         confidenceNormalized: latest.confidenceNormalized,
         awarenessStrengthScore: latest.awarenessStrengthScore,
+        signalLineage: safeJsonParse(latest.signalLineage),
         executionTimeMs: latest.executionTimeMs,
         createdAt: latest.createdAt,
-        integritySnapshotId: latest.integritySnapshotId,
-        funnelSnapshotId: latest.funnelSnapshotId,
         offerSnapshotId: latest.offerSnapshotId,
-        differentiationSnapshotId: latest.differentiationSnapshotId,
-        positioningSnapshotId: latest.positioningSnapshotId,
         miSnapshotId: latest.miSnapshotId,
         audienceSnapshotId: latest.audienceSnapshotId,
+        positioningSnapshotId: latest.positioningSnapshotId,
+        differentiationSnapshotId: latest.differentiationSnapshotId,
       });
     } catch (error: any) {
       console.error("[AwarenessEngine] Latest fetch error:", error.message);

@@ -300,15 +300,39 @@ async function executeEngine(
         break;
       }
 
+      case "awareness": {
+        const miInput = extractMiInput(ctx.mi);
+        const audInput = extractAudienceInput(ctx.audience);
+        const posInput = extractPositioningInput(ctx.positioning);
+        const diffInput = extractDifferentiationInput(ctx.differentiation);
+        const offerInput = ctx.offer || {};
+        const result = await runAwarenessEngine(
+          miInput, audInput, posInput, diffInput, offerInput,
+          config.accountId, []
+        );
+        output = result;
+        snapshotId = result.snapshotId;
+        ctx.awareness = result;
+        break;
+      }
+
       case "funnel": {
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const offerInput = ctx.offer || {};
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
+        const awarenessInput = ctx.awareness ? {
+          awarenessStage: ctx.awareness.primaryRoute?.targetReadinessStage || "problem_aware",
+          entryMechanism: ctx.awareness.primaryRoute?.entryMechanismType || "unknown",
+          triggerClass: ctx.awareness.primaryRoute?.triggerClass || "unknown",
+          trustState: ctx.awareness.primaryRoute?.trustRequirement || "moderate",
+          awarenessRoute: ctx.awareness.primaryRoute?.routeName || "default",
+          awarenessStrengthScore: ctx.awareness.primaryRoute?.awarenessStrengthScore || 0,
+        } : null;
         const result = await runFunnelEngine(
           miInput, audInput, offerInput, posInput, diffInput,
-          config.accountId
+          config.accountId, awarenessInput
         );
         output = result;
         snapshotId = result.snapshotId;
@@ -328,24 +352,6 @@ async function executeEngine(
         );
         output = result;
         ctx.integrity = result;
-        break;
-      }
-
-      case "awareness": {
-        const miInput = extractMiInput(ctx.mi);
-        const audInput = extractAudienceInput(ctx.audience);
-        const posInput = extractPositioningInput(ctx.positioning);
-        const diffInput = extractDifferentiationInput(ctx.differentiation);
-        const offerInput = ctx.offer || {};
-        const funnelInput = ctx.funnel || {};
-        const integrityInput = ctx.integrity || {};
-        const result = await runAwarenessEngine(
-          miInput, audInput, posInput, diffInput, offerInput, funnelInput, integrityInput,
-          config.accountId, []
-        );
-        output = result;
-        snapshotId = result.snapshotId;
-        ctx.awareness = result;
         break;
       }
 

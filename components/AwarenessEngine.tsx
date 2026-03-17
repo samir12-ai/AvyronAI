@@ -105,7 +105,7 @@ export default function AwarenessEngine({ isActive }: { isActive?: boolean }) {
   const [data, setData] = useState<AwarenessData | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-  const [integritySnapshotId, setIntegritySnapshotId] = useState<string | null>(null);
+  const [offerSnapshotId, setOfferSnapshotId] = useState<string | null>(null);
   const [expandedLayer, setExpandedLayer] = useState<string | null>(null);
   const [expandedRoute, setExpandedRoute] = useState<string | null>(null);
 
@@ -125,31 +125,31 @@ export default function AwarenessEngine({ isActive }: { isActive?: boolean }) {
     }
   }, [selectedCampaignId]);
 
-  const fetchIntegritySnapshot = useCallback(async () => {
+  const fetchOfferSnapshot = useCallback(async () => {
     if (!selectedCampaignId) return;
     try {
-      const url = new URL('/api/integrity-engine/latest', getApiUrl());
+      const url = new URL('/api/offer-engine/latest', getApiUrl());
       url.searchParams.set('campaignId', selectedCampaignId);
       const res = await fetch(url.toString());
       const json = await safeApiJson(res);
       if (json.exists && json.id) {
-        setIntegritySnapshotId(json.id);
+        setOfferSnapshotId(json.id);
       }
     } catch (err) {
-      console.error('[AwarenessEngine] Integrity snapshot fetch error:', err);
+      console.error('[AwarenessEngine] Offer snapshot fetch error:', err);
     }
   }, [selectedCampaignId]);
 
   useEffect(() => {
     if (isActive) {
       fetchLatest();
-      fetchIntegritySnapshot();
+      fetchOfferSnapshot();
     }
-  }, [isActive, fetchLatest, fetchIntegritySnapshot]);
+  }, [isActive, fetchLatest, fetchOfferSnapshot]);
 
   const runAnalysis = useCallback(async () => {
-    if (!selectedCampaignId || !integritySnapshotId) {
-      Alert.alert('Missing Dependency', 'A completed Integrity Engine analysis is required before running the Awareness Engine.');
+    if (!selectedCampaignId || !offerSnapshotId) {
+      Alert.alert('Missing Dependency', 'A completed Offer Engine analysis is required before running the Awareness Engine.');
       return;
     }
     setAnalyzing(true);
@@ -159,7 +159,7 @@ export default function AwarenessEngine({ isActive }: { isActive?: boolean }) {
       const res = await fetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaignId: selectedCampaignId, integritySnapshotId }),
+        body: JSON.stringify({ campaignId: selectedCampaignId, offerSnapshotId }),
       });
       const json = await safeApiJson(res);
       if (json.success) {
@@ -173,7 +173,7 @@ export default function AwarenessEngine({ isActive }: { isActive?: boolean }) {
     } finally {
       setAnalyzing(false);
     }
-  }, [selectedCampaignId, integritySnapshotId, fetchLatest]);
+  }, [selectedCampaignId, offerSnapshotId, fetchLatest]);
 
   const scoreColor = (score: number) => {
     if (score >= 0.7) return '#10B981';
@@ -412,11 +412,11 @@ export default function AwarenessEngine({ isActive }: { isActive?: boolean }) {
           <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
             Run the Awareness Engine to map entry routes, readiness stages, and attention triggers for your strategic positioning.
           </Text>
-          {!integritySnapshotId && (
+          {!offerSnapshotId && (
             <View style={[styles.depWarning, { backgroundColor: '#F59E0B15' }]}>
               <Ionicons name="alert-circle" size={16} color="#F59E0B" />
               <Text style={[styles.depWarningText, { color: '#F59E0B' }]}>
-                Complete an Integrity Engine analysis first
+                Complete an Offer Engine analysis first
               </Text>
             </View>
           )}
@@ -425,8 +425,8 @@ export default function AwarenessEngine({ isActive }: { isActive?: boolean }) {
 
       <Pressable
         onPress={runAnalysis}
-        disabled={analyzing || !integritySnapshotId}
-        style={[styles.analyzeBtn, (!integritySnapshotId) && styles.analyzeBtnDisabled]}
+        disabled={analyzing || !offerSnapshotId}
+        style={[styles.analyzeBtn, (!offerSnapshotId) && styles.analyzeBtnDisabled]}
       >
         <LinearGradient
           colors={analyzing ? ['#9CA3AF', '#6B7280'] : ['#F97316', '#EA580C']}

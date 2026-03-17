@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { db } from "../db";
-import { funnelSnapshots, offerSnapshots, differentiationSnapshots, miSnapshots, audienceSnapshots, positioningSnapshots } from "@shared/schema";
+import { funnelSnapshots, offerSnapshots, differentiationSnapshots, miSnapshots, audienceSnapshots, positioningSnapshots, awarenessSnapshots } from "@shared/schema";
+import { ENGINE_VERSION as AWARENESS_ENGINE_VERSION } from "../awareness-engine/constants";
 import { inArray, eq, and, desc } from "drizzle-orm";
 import { runFunnelEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
@@ -20,7 +21,7 @@ function safeJsonParse(text: any): any {
 export function registerFunnelEngineRoutes(app: Express) {
   app.post("/api/funnel-engine/analyze", async (req: Request, res: Response) => {
     try {
-      const { campaignId, accountId = "default", offerSnapshotId, validationSessionId } = req.body;
+      const { campaignId, accountId = "default", offerSnapshotId, awarenessSnapshotId, validationSessionId } = req.body;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -217,6 +218,72 @@ export function registerFunnelEngineRoutes(app: Express) {
         frictionLevel: offerData?.frictionLevel || 0,
       };
 
+      let awarenessInput = null;
+      let activeAwarenessSnapshotId: string | null = null;
+
+      if (awarenessSnapshotId) {
+        let [awarenessSnapshot] = await db.select().from(awarenessSnapshots)
+          .where(and(eq(awarenessSnapshots.id, awarenessSnapshotId), eq(awarenessSnapshots.campaignId, campaignId), eq(awarenessSnapshots.accountId, accountId)))
+          .limit(1);
+        if (awarenessSnapshot && awarenessSnapshot.engineVersion !== AWARENESS_ENGINE_VERSION) {
+          const [latestAwareness] = await db.select().from(awarenessSnapshots)
+            .where(and(
+              eq(awarenessSnapshots.campaignId, campaignId),
+              eq(awarenessSnapshots.accountId, accountId),
+              eq(awarenessSnapshots.engineVersion, AWARENESS_ENGINE_VERSION),
+            ))
+            .orderBy(desc(awarenessSnapshots.createdAt))
+            .limit(1);
+          if (latestAwareness) {
+            console.log(`[FunnelEngine-V3] Using latest valid Awareness snapshot ${latestAwareness.id}`);
+            awarenessSnapshot = latestAwareness;
+          }
+        }
+        if (awarenessSnapshot) {
+          const routeData = safeJsonParse(awarenessSnapshot.primaryRoute);
+          awarenessInput = {
+            awarenessStage: routeData?.targetReadinessStage || "problem_aware",
+            entryMechanism: routeData?.entryMechanismType || "unknown",
+            triggerClass: routeData?.triggerClass || "unknown",
+            trustState: routeData?.trustRequirement || "moderate",
+            awarenessRoute: routeData?.routeName || "default awareness route",
+            awarenessStrengthScore: awarenessSnapshot.awarenessStrengthScore || 0,
+          };
+          activeAwarenessSnapshotId = awarenessSnapshot.id;
+          console.log(`[FunnelEngine-V3] AWARENESS_BOUND | snapshotId=${awarenessSnapshot.id} | stage=${awarenessInput.awarenessStage} | entry=${awarenessInput.entryMechanism}`);
+        }
+      }
+
+      if (!awarenessInput) {
+        const [latestAwareness] = await db.select().from(awarenessSnapshots)
+          .where(and(
+            eq(awarenessSnapshots.campaignId, campaignId),
+            eq(awarenessSnapshots.accountId, accountId),
+            eq(awarenessSnapshots.engineVersion, AWARENESS_ENGINE_VERSION),
+          ))
+          .orderBy(desc(awarenessSnapshots.createdAt))
+          .limit(1);
+        if (latestAwareness) {
+          const routeData = safeJsonParse(latestAwareness.primaryRoute);
+          awarenessInput = {
+            awarenessStage: routeData?.targetReadinessStage || "problem_aware",
+            entryMechanism: routeData?.entryMechanismType || "unknown",
+            triggerClass: routeData?.triggerClass || "unknown",
+            trustState: routeData?.trustRequirement || "moderate",
+            awarenessRoute: routeData?.routeName || "default awareness route",
+            awarenessStrengthScore: latestAwareness.awarenessStrengthScore || 0,
+          };
+          activeAwarenessSnapshotId = latestAwareness.id;
+          console.log(`[FunnelEngine-V3] AWARENESS_FALLBACK | using latest snapshot ${latestAwareness.id}`);
+        } else {
+          console.log(`[FunnelEngine-V3] NO_AWARENESS_SNAPSHOT | campaign=${campaignId} — Funnel requires Awareness to run first`);
+          return res.status(400).json({
+            error: "MISSING_DEPENDENCY",
+            message: "No Awareness snapshot found — please run Awareness Engine first. Awareness must run before Funnel.",
+          });
+        }
+      }
+
       const activeRoot = await getActiveRoot(campaignId, accountId);
       let strategyRootId: string | null = null;
 
@@ -236,7 +303,7 @@ export function registerFunnelEngineRoutes(app: Express) {
         console.log(`[FunnelEngine] NO_ACTIVE_ROOT | campaign=${campaignId}`);
       }
 
-      const result = await runFunnelEngine(miInput, audienceInput, offerInput, positioningInput, differentiationInput, accountId);
+      const result = await runFunnelEngine(miInput, audienceInput, offerInput, positioningInput, differentiationInput, accountId, awarenessInput);
 
       if (result.status === "INTEGRITY_FAILED") {
         console.error(`[FunnelEngine] HARD-FAIL: Boundary violation detected — not persisting`);
@@ -253,6 +320,7 @@ export function registerFunnelEngineRoutes(app: Express) {
         accountId,
         campaignId,
         offerSnapshotId: activeOfferSnapshot.id,
+        awarenessSnapshotId: activeAwarenessSnapshotId,
         miSnapshotId: miSnapshot.id,
         audienceSnapshotId,
         positioningSnapshotId,
