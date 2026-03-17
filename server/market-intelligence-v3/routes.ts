@@ -72,7 +72,9 @@ export function registerMIv3Routes(app: Express) {
             freshnessMetadata = buildFreshnessMetadata(snap);
             logFreshnessTraceability("MIv3-Analyze", snap, freshnessMetadata);
           }
-        } catch {}
+        } catch (fmErr: any) {
+          console.warn(`[MIv3-Route] Freshness metadata build failed for snapshot ${result.snapshotId}: ${fmErr.message}`);
+        }
       }
 
       return res.json({
