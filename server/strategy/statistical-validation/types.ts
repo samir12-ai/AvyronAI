@@ -122,6 +122,14 @@ export interface DataReliabilityDiagnostics {
   advisories: string[];
 }
 
+export interface ConfidenceExplanation {
+  score: number;
+  state: "validated" | "provisional" | "weak" | "rejected";
+  reasoning: string;
+  factors: string[];
+  actionImplication: "PROCEED" | "PROCEED_WITH_CAUTION" | "HOLD" | "BLOCKED";
+}
+
 export interface StatisticalValidationResult {
   status: string;
   statusMessage: string | null;
@@ -135,6 +143,7 @@ export interface StatisticalValidationResult {
   boundaryCheck: { passed: boolean; violations: string[]; sanitized?: boolean; sanitizedText?: string; warnings?: string[] };
   dataReliability: DataReliabilityDiagnostics;
   confidenceNormalized: boolean;
+  confidenceExplanation: ConfidenceExplanation;
   executionTimeMs: number;
   engineVersion: number;
   strategyAcceptability?: import("../../shared/strategy-acceptability").StrategyAcceptability;

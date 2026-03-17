@@ -604,6 +604,16 @@ export function registerOrchestratorV2Routes(app: Express) {
       const hasSim = !!simPipeline;
       const hasTasksPipeline = Number(taskCount[0]?.count) > 0;
 
+      let activationInfo: any = null;
+      if (plan.status === "APPROVED" || plan.executionStatus !== "IDLE") {
+        try {
+          const { getActivationStatus } = await import("../execution-activation/engine");
+          activationInfo = await getActivationStatus(plan.id);
+        } catch (actErr: any) {
+          console.warn(`[Pipeline] Activation status fetch failed: ${actErr.message}`);
+        }
+      }
+
       const stages = [
         {
           id: "goal-math",
@@ -673,7 +683,17 @@ export function registerOrchestratorV2Routes(app: Express) {
         },
       ];
 
-      res.json({ planId: plan.id, stages });
+      res.json({
+        planId: plan.id,
+        stages,
+        activation: activationInfo ? {
+          executionStatus: activationInfo.executionStatus,
+          contentQueue: activationInfo.contentQueue,
+          funnelFeeding: activationInfo.funnelFeeding,
+          calendarEntryCount: activationInfo.calendarEntryCount,
+          studioItemCount: activationInfo.studioItemCount,
+        } : null,
+      });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

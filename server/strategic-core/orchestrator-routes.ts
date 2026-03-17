@@ -1225,7 +1225,7 @@ export function registerOrchestratorRoutes(app: Express) {
 
       const plan = plans[0];
       let planJson: any = {};
-      try { planJson = JSON.parse(plan.planJson); } catch {}
+      try { planJson = JSON.parse(plan.planJson); } catch (e: any) { console.warn(`[Orchestrator] Plan JSON parse failed for ${plan.id}: ${e.message}`); }
 
       const work = await db.select().from(requiredWork)
         .where(and(eq(requiredWork.planId, plan.id), eq(requiredWork.accountId, accountId)))
@@ -1386,7 +1386,7 @@ export function registerOrchestratorRoutes(app: Express) {
       let parsedContentJson = null;
       try {
         if (doc.contentJson) parsedContentJson = JSON.parse(doc.contentJson);
-      } catch { parsedContentJson = null; }
+      } catch (e: any) { console.warn(`[Orchestrator] Content JSON parse failed: ${e.message}`); parsedContentJson = null; }
 
       res.json({
         success: true,
@@ -1449,7 +1449,7 @@ export function registerOrchestratorRoutes(app: Express) {
       let parsedContentJson = null;
       try {
         if (doc.contentJson) parsedContentJson = JSON.parse(doc.contentJson);
-      } catch { parsedContentJson = null; }
+      } catch (e: any) { console.warn(`[Orchestrator] Content JSON parse failed: ${e.message}`); parsedContentJson = null; }
 
       res.json({
         success: true,

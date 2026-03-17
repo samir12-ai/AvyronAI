@@ -809,7 +809,9 @@ export function registerExecutionRoutes(app: Express) {
         const industry = planJson.marketAnalysis?.industry || planJson.industry || "";
         const tone = planJson.contentStrategy?.toneOfVoice || planJson.toneOfVoice || "";
         planContext = `Brand: ${brand}. Industry: ${industry}. Tone: ${tone}.`.replace(/\.\s*\./g, ".");
-      } catch {}
+      } catch (ctxErr: any) {
+        console.warn(`[Execution] Plan context extraction failed: ${ctxErr.message}`);
+      }
 
       let aiContent: { caption: string; creativeBrief: string; ctaCopy: string };
       try {

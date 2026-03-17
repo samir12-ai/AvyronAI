@@ -10,6 +10,7 @@ const P = {
   coral: '#FF6B6B',
   gold: '#FFD700',
   blue: '#4C9AFF',
+  orange: '#FF9500',
 };
 
 interface Stage {
@@ -17,6 +18,30 @@ interface Stage {
   name: string;
   status: string;
   count: number;
+}
+
+interface ContentQueueValidation {
+  valid: boolean;
+  violations: string[];
+  formatCounts?: Record<string, number>;
+}
+
+interface FunnelFeeding {
+  valid: boolean;
+  funnelStatus: string;
+  violations: string[];
+  trafficFlowing: boolean;
+  contentGenerated: number;
+  contentScheduled: number;
+  contentPublished: number;
+}
+
+interface ActivationInfo {
+  executionStatus: string;
+  contentQueue: ContentQueueValidation | null;
+  funnelFeeding: FunnelFeeding | null;
+  calendarEntryCount: number;
+  studioItemCount: number;
 }
 
 interface ExecutionPipelineProps {
@@ -38,6 +63,58 @@ const STAGE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   publishing: 'cloud-upload',
 };
 
+const EXEC_STATUS_CONFIG: Record<string, { label: string; color: string; icon: keyof typeof Ionicons.glyphMap }> = {
+  IDLE: { label: 'Idle', color: '#8892A4', icon: 'pause-circle' },
+  ACTIVATING: { label: 'Activating...', color: P.blue, icon: 'sync-circle' },
+  ACTIVE: { label: 'Active', color: P.neon, icon: 'checkmark-circle' },
+  ACTIVATION_FAILED: { label: 'Activation Failed', color: P.coral, icon: 'alert-circle' },
+  STARVED: { label: 'Content Starved', color: P.orange, icon: 'warning' },
+};
+
+function ActivationStatusBanner({ activation, isDark }: { activation: ActivationInfo; isDark: boolean }) {
+  const config = EXEC_STATUS_CONFIG[activation.executionStatus] || EXEC_STATUS_CONFIG.IDLE;
+  const textSecondary = isDark ? '#8892A4' : '#546478';
+  const surfaceBg = isDark ? '#151B24' : '#F4F7F5';
+
+  return (
+    <View style={[s.activationBanner, { backgroundColor: surfaceBg, borderColor: config.color + '30' }]}>
+      <View style={s.activationHeader}>
+        <Ionicons name={config.icon} size={16} color={config.color} />
+        <Text style={[s.activationLabel, { color: config.color }]}>{config.label}</Text>
+        <View style={s.activationCounts}>
+          <Text style={[s.activationCount, { color: textSecondary }]}>
+            {activation.calendarEntryCount} cal · {activation.studioItemCount} items
+          </Text>
+        </View>
+      </View>
+
+      {activation.contentQueue && !activation.contentQueue.valid && (
+        <View style={s.violationsContainer}>
+          {activation.contentQueue.violations.map((v, i) => (
+            <View key={i} style={s.violationRow}>
+              <Ionicons name="close-circle" size={12} color={P.coral} />
+              <Text style={[s.violationText, { color: P.coral }]} numberOfLines={2}>{v}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {activation.funnelFeeding && (
+        <View style={s.funnelRow}>
+          <Ionicons
+            name={activation.funnelFeeding.valid ? 'checkmark-circle' : 'alert-circle'}
+            size={12}
+            color={activation.funnelFeeding.valid ? P.neon : P.gold}
+          />
+          <Text style={[s.funnelText, { color: activation.funnelFeeding.valid ? P.neon : P.gold }]}>
+            Funnel: {activation.funnelFeeding.funnelStatus}
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
 export function ExecutionPipeline({ campaignId, isDark }: ExecutionPipelineProps) {
   const baseUrl = getApiUrl();
   const textPrimary = isDark ? '#E8EDF2' : '#1A2332';
@@ -56,6 +133,7 @@ export function ExecutionPipeline({ campaignId, isDark }: ExecutionPipelineProps
   });
 
   const stages: Stage[] = data?.stages || [];
+  const activation: ActivationInfo | null = data?.activation || null;
 
   return (
     <View style={[s.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
@@ -63,6 +141,10 @@ export function ExecutionPipeline({ campaignId, isDark }: ExecutionPipelineProps
         <Ionicons name="git-branch-outline" size={18} color={P.mint} />
         <Text style={[s.headerText, { color: textPrimary }]}>Execution Pipeline</Text>
       </View>
+
+      {activation && activation.executionStatus !== 'IDLE' && (
+        <ActivationStatusBanner activation={activation} isDark={isDark} />
+      )}
 
       {isLoading ? (
         <ActivityIndicator size="small" color={P.mint} style={{ marginVertical: 16 }} />
@@ -153,4 +235,32 @@ const s = StyleSheet.create({
   stageName: { fontSize: 13, fontWeight: '500' as const },
   countBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
   countText: { fontSize: 11, fontWeight: '600' as const },
+  activationBanner: {
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 10,
+    marginBottom: 12,
+  },
+  activationHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+  },
+  activationLabel: { fontSize: 13, fontWeight: '600' as const },
+  activationCounts: { marginLeft: 'auto' as any },
+  activationCount: { fontSize: 11 },
+  violationsContainer: { marginTop: 8, gap: 4 },
+  violationRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    gap: 4,
+  },
+  violationText: { fontSize: 11, flex: 1 },
+  funnelRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 4,
+    marginTop: 6,
+  },
+  funnelText: { fontSize: 11, fontWeight: '500' as const },
 });

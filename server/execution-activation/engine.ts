@@ -6,8 +6,11 @@ import {
   requiredWork,
   businessDataLayer,
   publishedPosts,
+  contentDna,
+  audienceSnapshots,
+  positioningSnapshots,
 } from "@shared/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, ne } from "drizzle-orm";
 import { logAudit } from "../audit";
 import { aiChat } from "../ai-client";
 import {
@@ -313,14 +316,61 @@ export async function activateExecution(planId: string): Promise<ActivationResul
     };
   }
 
-  await transitionState(planId, previousState, EXECUTION_STATES.ACTIVATING, plan.accountId);
-  activationLog.push(`STATE: ${previousState} → ACTIVATING`);
+  const lockResult = await db.update(strategicPlans)
+    .set({ executionStatus: EXECUTION_STATES.ACTIVATING, updatedAt: new Date() })
+    .where(and(
+      eq(strategicPlans.id, planId),
+      eq(strategicPlans.executionStatus, previousState),
+    ))
+    .returning({ id: strategicPlans.id });
+
+  if (lockResult.length === 0) {
+    activationLog.push(`ACTIVATION_BLOCKED: Concurrent activation detected — another process already changed state`);
+    return {
+      success: false,
+      planId,
+      previousState,
+      newState: previousState,
+      calendarEntriesGenerated: 0,
+      contentItemsGenerated: 0,
+      contentGenerationErrors: ["Concurrent activation detected — state changed by another process"],
+      contentQueueValidation: validateContentQueue([]),
+      funnelValidation: null,
+      activationLog,
+      error: "CONCURRENT_ACTIVATION",
+    };
+  }
+
+  await logAudit(plan.accountId, "EXECUTION_STATE_TRANSITION", {
+    details: { planId, from: previousState, to: EXECUTION_STATES.ACTIVATING },
+  });
+  activationLog.push(`STATE: ${previousState} → ACTIVATING (atomic lock acquired)`);
 
   try {
+    const [audienceCheck, positioningCheck] = await Promise.all([
+      db.select({ id: audienceSnapshots.id }).from(audienceSnapshots)
+        .where(eq(audienceSnapshots.campaignId, plan.campaignId))
+        .limit(1),
+      db.select({ id: positioningSnapshots.id }).from(positioningSnapshots)
+        .where(eq(positioningSnapshots.campaignId, plan.campaignId))
+        .limit(1),
+    ]);
+
+    const upstreamMissing: string[] = [];
+    if (audienceCheck.length === 0) upstreamMissing.push("Audience snapshot");
+    if (positioningCheck.length === 0) upstreamMissing.push("Positioning snapshot");
+
+    if (upstreamMissing.length > 0) {
+      activationLog.push(`UPSTREAM_WARNING: Missing snapshots: ${upstreamMissing.join(", ")} — activation proceeds with limited context`);
+    } else {
+      activationLog.push(`UPSTREAM_CHECK: Audience + Positioning snapshots verified`);
+    }
+
     let planJson: any;
     try {
       planJson = JSON.parse(plan.planJson || "{}");
-    } catch {
+    } catch (parseErr: any) {
+      activationLog.push(`WARNING: Plan JSON parse failed — using empty object: ${parseErr.message}`);
       planJson = {};
     }
 
@@ -333,7 +383,25 @@ export async function activateExecution(planId: string): Promise<ActivationResul
         ))
         .limit(1);
       if (bizRows.length > 0) bizData = bizRows[0];
-    } catch {}
+    } catch (bizErr: any) {
+      activationLog.push(`WARNING: Business data fetch failed — using defaults: ${bizErr.message}`);
+    }
+
+    let contentDnaRecord: any = null;
+    try {
+      const dnaRows = await db.select().from(contentDna)
+        .where(eq(contentDna.campaignId, plan.campaignId))
+        .limit(1);
+      if (dnaRows.length > 0) contentDnaRecord = dnaRows[0];
+    } catch (dnaErr: any) {
+      activationLog.push(`WARNING: Content DNA fetch failed: ${dnaErr.message}`);
+    }
+
+    if (contentDnaRecord) {
+      activationLog.push(`CONTENT_DNA: Found — will enforce format priority alignment`);
+    } else {
+      activationLog.push(`CONTENT_DNA: Not found — using default distribution`);
+    }
 
     const existingEntries = await db.select().from(calendarEntries)
       .where(eq(calendarEntries.planId, planId));
@@ -413,7 +481,9 @@ export async function activateExecution(planId: string): Promise<ActivationResul
       const industry = planJson.marketAnalysis?.industry || planJson.industry || "";
       const tone = planJson.contentStrategy?.toneOfVoice || planJson.toneOfVoice || "";
       planContext = `Brand: ${brand}. Industry: ${industry}. Tone: ${tone}.`.replace(/\.\s*\./g, ".");
-    } catch {}
+    } catch (ctxErr: any) {
+      activationLog.push(`WARNING: Plan context extraction failed — using generic context: ${ctxErr.message}`);
+    }
 
     let contentItemsGenerated = 0;
 
@@ -513,7 +583,9 @@ export async function activateExecution(planId: string): Promise<ActivationResul
           eq(publishedPosts.campaignId, plan.campaignId),
           eq(publishedPosts.status, "published")
         ));
-    } catch {}
+    } catch (pubErr: any) {
+      activationLog.push(`WARNING: Published posts fetch failed — assuming zero published: ${pubErr.message}`);
+    }
 
     const funnelValidation = validateFunnelFeeding(contentQueueItems, published.length, 0);
 
@@ -627,7 +699,9 @@ export async function getActivationStatus(planId: string): Promise<ActivationSta
         eq(publishedPosts.campaignId, plan.campaignId),
         eq(publishedPosts.status, "published")
       ));
-  } catch {}
+  } catch (err: any) {
+    console.warn(`[ExecutionActivation] Published posts fetch failed for status check: ${err.message}`);
+  }
 
   const funnelFeeding = entries.length > 0
     ? validateFunnelFeeding(contentQueueItems, published.length, 0)

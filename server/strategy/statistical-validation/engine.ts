@@ -34,6 +34,7 @@ import type {
   StatisticalValidationResult,
   SignalCluster,
   SignalProvenance,
+  ConfidenceExplanation,
 } from "./types";
 
 function clamp(v: number, min = 0, max = 1): number {
@@ -1027,6 +1028,60 @@ function layer_confidenceCalibration(
   };
 }
 
+function buildConfidenceExplanation(
+  score: number,
+  evidenceStrength: number,
+  state: "validated" | "provisional" | "weak" | "rejected",
+  wasNormalized: boolean,
+  reliability: DataReliabilityDiagnostics,
+  signalGroundingRatio: number,
+  warnings: string[],
+): ConfidenceExplanation {
+  const factors: string[] = [];
+
+  factors.push(`Confidence score: ${(score * 100).toFixed(0)}%`);
+  factors.push(`Evidence strength: ${(evidenceStrength * 100).toFixed(0)}%`);
+  factors.push(`Signal grounding: ${(signalGroundingRatio * 100).toFixed(0)}%`);
+
+  if (wasNormalized) {
+    factors.push(`Score was normalized down due to weak data reliability (${(reliability.overallReliability * 100).toFixed(0)}%)`);
+  }
+
+  if (reliability.isWeak) {
+    factors.push(`Data reliability flagged as weak`);
+  }
+
+  const hasBlockingWarnings = warnings.some(w => w.includes("GUARD:") || w.includes("GROUNDING_ENFORCEMENT"));
+
+  let actionImplication: ConfidenceExplanation["actionImplication"];
+  let reasoning: string;
+
+  if (state === "validated" && !hasBlockingWarnings) {
+    actionImplication = "PROCEED";
+    reasoning = `Strategy confidence (${(score * 100).toFixed(0)}%) meets validated threshold with sufficient evidence density. Execution engines can proceed at full capacity.`;
+  } else if (state === "validated" && hasBlockingWarnings) {
+    actionImplication = "PROCEED_WITH_CAUTION";
+    reasoning = `Strategy meets validated confidence threshold (${(score * 100).toFixed(0)}%) but structural warnings are present. Execution should proceed with monitoring.`;
+    factors.push("Validated confidence with active structural warnings");
+  } else if (state === "provisional") {
+    if (signalGroundingRatio < SIGNAL_GROUNDING_THRESHOLD) {
+      actionImplication = "HOLD";
+      reasoning = `Strategy is provisional — signal grounding (${(signalGroundingRatio * 100).toFixed(0)}%) is below ${(SIGNAL_GROUNDING_THRESHOLD * 100).toFixed(0)}% threshold. Additional signal evidence required before scaling execution.`;
+    } else {
+      actionImplication = "PROCEED_WITH_CAUTION";
+      reasoning = `Strategy meets provisional threshold but lacks full validation. Execution should proceed conservatively with monitoring.`;
+    }
+  } else if (state === "weak") {
+    actionImplication = "HOLD";
+    reasoning = `Strategy evidence is weak (${(score * 100).toFixed(0)}% confidence). Execution engines should use conservative defaults only. Scaling is blocked until evidence improves.`;
+  } else {
+    actionImplication = "BLOCKED";
+    reasoning = `Strategy validation failed — confidence (${(score * 100).toFixed(0)}%) is below minimum threshold. Execution engines are blocked. Strategy requires rework with stronger signal evidence.`;
+  }
+
+  return { score, state, reasoning, factors, actionImplication };
+}
+
 export async function runStatisticalValidationEngine(
   mi: ValidationMIInput,
   audience: ValidationAudienceInput,
@@ -1064,6 +1119,13 @@ export async function runStatisticalValidationEngine(
       boundaryCheck: { passed: false, violations: boundaryResult.violations },
       dataReliability: reliability,
       confidenceNormalized: false,
+      confidenceExplanation: {
+        score: 0,
+        state: "rejected",
+        reasoning: "Strategy validation failed — boundary integrity violations detected. All execution is blocked until content is sanitized.",
+        factors: ["Boundary check failed", `${boundaryResult.violations.length} violation(s) detected`],
+        actionImplication: "BLOCKED",
+      },
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
       signalClusters: [],
@@ -1239,6 +1301,16 @@ export async function runStatisticalValidationEngine(
   const lineageAnchoredCount = claimValidations.filter(c => c.parentSignalId !== null || c.originEngine !== null).length;
   console.log(`[StatisticalValidation] GROUNDING_METRICS | total=${claimValidations.length} | signalBacked=${signalBackedClaimCount} | lineageAnchored=${lineageAnchoredCount} | hypotheses=${hypotheses.length} | ratio=${signalBackedClaimRatio.toFixed(2)} | state=${validationState}`);
 
+  const confidenceExplanation = buildConfidenceExplanation(
+    claimConfidenceScore,
+    evidenceStrength,
+    validationState,
+    confidenceNormalized,
+    reliability,
+    signalBackedClaimRatio,
+    structuralWarnings,
+  );
+
   const layersPassed = layers.filter(l => l.passed).length;
   const strategyAcceptability = assessStrategyAcceptability(
     claimConfidenceScore,
@@ -1273,6 +1345,7 @@ export async function runStatisticalValidationEngine(
     },
     dataReliability: reliability,
     confidenceNormalized,
+    confidenceExplanation,
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,
     strategyAcceptability,
