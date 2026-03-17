@@ -17,6 +17,7 @@ export const PERSUASION_MODES = [
   "contrast_led",
   "education_led",
   "diagnostic_led",
+  "education_proof_hybrid",
 ] as const;
 
 export const INFLUENCE_DRIVERS = [
@@ -69,7 +70,7 @@ export const OBJECTION_PROOF_MAP: Record<string, string> = {
 export const LOW_READINESS_STAGES = ["unaware", "problem_aware"] as const;
 export const HIGH_READINESS_STAGES = ["product_aware", "most_aware"] as const;
 
-export const EDUCATION_FIRST_MODES = ["education_led", "diagnostic_led", "empathy_led"] as const;
+export const EDUCATION_FIRST_MODES = ["education_led", "diagnostic_led", "empathy_led", "education_proof_hybrid"] as const;
 
 export const SCARCITY_BLOCKED_CONDITIONS = [
   "low_trust",
@@ -81,7 +82,7 @@ export const SCARCITY_BLOCKED_CONDITIONS = [
 ] as const;
 
 export const AWARENESS_PERSUASION_MAP: Record<string, string> = {
-  unaware: "education_led",
+  unaware: "education_proof_hybrid",
   problem_aware: "empathy_led",
   solution_aware: "contrast_led",
   product_aware: "proof_led",
@@ -105,14 +106,18 @@ export const MESSAGE_ARCHITECTURE_ORDER = [
 
 export const MESSAGE_STEP_CATEGORY_MAP: Record<string, string> = {
   acknowledge_pain: "problem",
+  disrupt_assumption: "problem",
   educate_on_problem: "problem",
   invite_self_identification: "problem",
   demonstrate_understanding: "problem",
   establish_contrast: "problem",
+  introduce_mechanism: "mechanism",
   explain_mechanism: "mechanism",
   present_proof: "proof",
   illustrative_proof: "proof",
+  reinforce_with_proof: "proof",
   establish_authority: "proof",
+  build_authority: "proof",
   address_objections: "proof",
   remove_risk: "outcome",
   invite_commitment: "offer",
@@ -120,15 +125,15 @@ export const MESSAGE_STEP_CATEGORY_MAP: Record<string, string> = {
 };
 
 export const FUNNEL_PERSUASION_COMPATIBILITY: Record<string, string[]> = {
-  webinar: ["authority_led", "proof_led", "education_led", "social_proof_led"],
-  challenge: ["education_led", "diagnostic_led", "empathy_led", "contrast_led"],
+  webinar: ["authority_led", "proof_led", "education_led", "social_proof_led", "education_proof_hybrid"],
+  challenge: ["education_led", "diagnostic_led", "empathy_led", "contrast_led", "education_proof_hybrid"],
   tripwire: ["proof_led", "logic_led", "contrast_led"],
   application: ["authority_led", "proof_led", "social_proof_led"],
   direct: ["proof_led", "authority_led", "contrast_led", "logic_led"],
-  diagnostic: ["diagnostic_led", "education_led", "empathy_led"],
-  consultation: ["authority_led", "empathy_led", "proof_led"],
-  free_resource: ["education_led", "reciprocity_led", "empathy_led"],
-  community: ["social_proof_led", "reciprocity_led", "empathy_led"],
+  diagnostic: ["diagnostic_led", "education_led", "empathy_led", "education_proof_hybrid"],
+  consultation: ["authority_led", "empathy_led", "proof_led", "education_proof_hybrid"],
+  free_resource: ["education_led", "reciprocity_led", "empathy_led", "education_proof_hybrid"],
+  community: ["social_proof_led", "reciprocity_led", "empathy_led", "education_proof_hybrid"],
 };
 
 export const BOUNDARY_HARD_PATTERNS: Record<string, RegExp> = {
@@ -179,52 +184,60 @@ export const LAYER_WEIGHTS: Record<string, number> = {
   persuasion_strength_scoring: 0.10,
 };
 
-export const HYPE_PATTERNS = [
+export const HYPE_PATTERNS_HARD = [
   "guaranteed results",
   "overnight success",
   "get rich quick",
-  "effortless",
   "no work required",
   "instant results",
-  "unlimited",
   "never fail",
   "100% guaranteed",
-  "risk free",
   "magic formula",
   "secret method",
   "once in a lifetime",
   "act now or lose",
-  "limited time only",
   "last chance ever",
   "double your money",
   "triple your income",
   "passive income guaranteed",
   "zero effort required",
-  "no experience needed",
   "foolproof system",
   "can't fail",
   "money back no questions",
-  "life-changing",
-  "revolutionary system",
-  "breakthrough method",
   "hack your way",
   "shortcut to success",
-  "done for you",
   "autopilot income",
   "set and forget",
   "push button",
   "silver bullet",
-  "game changer",
   "transform overnight",
+  "fire your boss",
+  "escape the rat race",
+  "print money",
+  "cash machine",
+];
+
+export const HYPE_PATTERNS_CONTEXTUAL = [
+  "effortless",
+  "unlimited",
+  "risk free",
+  "limited time only",
+  "no experience needed",
+  "life-changing",
+  "revolutionary system",
+  "breakthrough method",
+  "done for you",
+  "game changer",
   "skyrocket your",
   "explode your",
   "crush the competition",
   "dominate your market",
   "unstoppable",
-  "fire your boss",
-  "escape the rat race",
-  "print money",
-  "cash machine",
+];
+
+export const HYPE_PATTERNS = [
+  ...HYPE_PATTERNS_HARD,
+  ...HYPE_PATTERNS_CONTEXTUAL,
 ];
 
 export const GENERIC_PERSUASION_PHRASES = [

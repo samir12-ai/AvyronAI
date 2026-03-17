@@ -173,6 +173,21 @@ export interface PersuasionRoute {
     stage: string;
     educationFirst: boolean;
     proofRole: string;
+    hardCtaBlocked?: boolean;
+    commitmentDisabled?: boolean;
+    blockedTactics?: string[];
+    entryMode?: string;
+    controlledPersuasion?: {
+      microTension: boolean;
+      progressiveCuriosity: boolean;
+      contrastFraming: boolean;
+      pressureLevel: string;
+    };
+    pressureCalibration?: {
+      level: string;
+      strategy: string;
+      progression: string;
+    };
   };
   scarcityValidation?: {
     allowed: boolean;
