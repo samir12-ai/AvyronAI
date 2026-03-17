@@ -5,8 +5,8 @@ import {
   EMPTY_ANALYTICAL_PACKAGE,
 } from "./types";
 
-const LOG_PREFIX = "[AEL]";
-const AEL_VERSION = 1;
+const LOG_PREFIX = "[AEL-v2]";
+const AEL_VERSION = 2;
 
 function buildInputSummary(input: AELInput) {
   const hasMI = !!(input.mi && (input.mi.signalClusters || input.mi.marketState || input.mi.signals));
@@ -26,24 +26,27 @@ function buildContextBlock(input: AELInput): string {
 
   if (input.mi) {
     const mi = input.mi;
-    sections.push("=== MARKET INTELLIGENCE ===");
-    if (mi.marketState) sections.push(`Market State: ${JSON.stringify(mi.marketState).slice(0, 800)}`);
-    if (mi.signalClusters) sections.push(`Signal Clusters (${mi.signalClusters.length}): ${JSON.stringify(mi.signalClusters.slice(0, 5)).slice(0, 1200)}`);
-    if (mi.trajectoryData) sections.push(`Trajectory: ${JSON.stringify(mi.trajectoryData).slice(0, 600)}`);
-    if (mi.intentData) sections.push(`Intent Signals: ${JSON.stringify(mi.intentData).slice(0, 600)}`);
-    if (mi.narrativeObjections) sections.push(`Market Objections: ${JSON.stringify(mi.narrativeObjections).slice(0, 600)}`);
-    if (mi.dominanceData) sections.push(`Competitive Dominance: ${JSON.stringify(mi.dominanceData).slice(0, 600)}`);
+    sections.push("=== MARKET INTELLIGENCE RAW DATA ===");
+    if (mi.marketState) sections.push(`Market State: ${JSON.stringify(mi.marketState).slice(0, 1200)}`);
+    if (mi.signalClusters) sections.push(`Signal Clusters (${mi.signalClusters.length}): ${JSON.stringify(mi.signalClusters.slice(0, 8)).slice(0, 2000)}`);
+    if (mi.trajectoryData) sections.push(`Market Trajectory: ${JSON.stringify(mi.trajectoryData).slice(0, 800)}`);
+    if (mi.intentData) sections.push(`Buyer Intent Signals: ${JSON.stringify(mi.intentData).slice(0, 800)}`);
+    if (mi.narrativeObjections) sections.push(`Market Objections & Resistance: ${JSON.stringify(mi.narrativeObjections).slice(0, 800)}`);
+    if (mi.dominanceData) sections.push(`Competitive Dominance Patterns: ${JSON.stringify(mi.dominanceData).slice(0, 800)}`);
+    if (mi.competitorPosts || mi.posts) sections.push(`Competitor Content Sample: ${JSON.stringify((mi.competitorPosts || mi.posts || []).slice(0, 5)).slice(0, 1000)}`);
+    if (mi.comments || mi.audienceComments) sections.push(`Audience Comments: ${JSON.stringify((mi.comments || mi.audienceComments || []).slice(0, 10)).slice(0, 1200)}`);
   }
 
   if (input.audience) {
     const aud = input.audience;
-    sections.push("\n=== AUDIENCE INSIGHTS ===");
-    if (aud.painMap || aud.pains) sections.push(`Pain Map: ${JSON.stringify(aud.painMap || aud.pains).slice(0, 800)}`);
-    if (aud.desireMap || aud.desires) sections.push(`Desire Map: ${JSON.stringify(aud.desireMap || aud.desires).slice(0, 800)}`);
-    if (aud.objectionMap || aud.objections) sections.push(`Objection Map: ${JSON.stringify(aud.objectionMap || aud.objections).slice(0, 600)}`);
+    sections.push("\n=== AUDIENCE DATA ===");
+    if (aud.painMap || aud.pains) sections.push(`Pain Data: ${JSON.stringify(aud.painMap || aud.pains).slice(0, 1200)}`);
+    if (aud.desireMap || aud.desires) sections.push(`Desire Data: ${JSON.stringify(aud.desireMap || aud.desires).slice(0, 1000)}`);
+    if (aud.objectionMap || aud.objections) sections.push(`Objection Data: ${JSON.stringify(aud.objectionMap || aud.objections).slice(0, 800)}`);
     if (aud.awarenessLevel) sections.push(`Awareness Level: ${JSON.stringify(aud.awarenessLevel)}`);
-    if (aud.segments || aud.audienceSegments) sections.push(`Segments: ${JSON.stringify(aud.segments || aud.audienceSegments).slice(0, 600)}`);
-    if (aud.maturityIndex) sections.push(`Maturity Index: ${JSON.stringify(aud.maturityIndex)}`);
+    if (aud.segments || aud.audienceSegments) sections.push(`Audience Segments: ${JSON.stringify(aud.segments || aud.audienceSegments).slice(0, 800)}`);
+    if (aud.maturityIndex) sections.push(`Market Maturity Index: ${JSON.stringify(aud.maturityIndex)}`);
+    if (aud.buyingBehavior) sections.push(`Buying Behavior: ${JSON.stringify(aud.buyingBehavior).slice(0, 600)}`);
   }
 
   if (input.productDNA) {
@@ -62,8 +65,8 @@ function buildContextBlock(input: AELInput): string {
   if (input.competitiveData) {
     const ci = input.competitiveData;
     sections.push("\n=== COMPETITIVE DATA ===");
-    if (ci.competitors) sections.push(`Competitors (${ci.competitors.length}): ${JSON.stringify(ci.competitors.slice(0, 3)).slice(0, 600)}`);
-    if (ci.posts) sections.push(`Competitor Posts (${ci.posts.length} total, sample): ${JSON.stringify(ci.posts.slice(0, 3)).slice(0, 600)}`);
+    if (ci.competitors) sections.push(`Competitors (${ci.competitors.length}): ${JSON.stringify(ci.competitors.slice(0, 5)).slice(0, 1000)}`);
+    if (ci.posts) sections.push(`Competitor Posts (${ci.posts.length} total): ${JSON.stringify(ci.posts.slice(0, 5)).slice(0, 1000)}`);
   }
 
   return sections.join("\n");
@@ -82,42 +85,134 @@ export async function buildAnalyticalPackage(input: AELInput): Promise<Analytica
 
   const contextBlock = buildContextBlock(input);
 
-  const systemPrompt = `You are an Analytical Enrichment Layer (AEL) — a precision analysis tool.
+  const systemPrompt = `You are a Deep Causal Interpretation Engine — the Analytical Enrichment Layer (AEL v2).
 
-YOUR ROLE:
-- Analyze raw market intelligence, audience insights, product DNA, and competitive data
-- Produce STRUCTURED ANALYTICAL CONTEXT that helps downstream engines make better decisions
-- You do NOT make strategic decisions yourself
+YOUR MISSION:
+You interpret WHY things happen, not WHAT is happening. You extract ROOT CAUSES beneath surface signals. You model causal chains that explain buyer behavior. You identify the REAL reasons people don't convert — not the obvious ones.
 
-STRICT RULES:
-- Do NOT generate positioning statements, offer copy, funnel designs, or messaging
-- Do NOT say "the positioning should be..." or "the offer should include..."
-- ONLY produce analytical observations, patterns, gaps, and candidates for deeper investigation
-- Every insight must cite which input data supports it
+CRITICAL DISTINCTION:
+- Surface signal: "Users complain about price"
+- Deep interpretation: "Users lack trust in ROI justification — they can't see how the investment pays back, so any price feels too high. The real barrier is proof of value, not affordability."
+
+- Surface signal: "Users want simplicity"
+- Deep interpretation: "Users fear wasting time on something that won't work for their specific situation. The real barrier is mechanism comprehension — they don't understand HOW it works, so they default to requesting simplicity as a proxy for certainty."
+
+YOU MUST:
+1. ALWAYS dig beneath surface signals to find the actual cause
+2. ALWAYS explain WHY, not just WHAT
+3. ALWAYS model causal chains: pain → cause → impact → behavior
+4. ALWAYS identify what's REALLY stopping conversion
+5. ALWAYS detect when surface complaints mask deeper issues
+6. ALWAYS rank insights by conversion impact
+
+YOU MUST NOT:
+- Label signals without interpretation (e.g., "affordability issue" alone is REJECTED)
+- Group multiple distinct pains into one generic category
+- Use vague descriptors like "simplicity", "ease of use", "quality" without causal reasoning
+- Make strategic recommendations or decisions — you INTERPRET, engines DECIDE
+- Fabricate data — if evidence is weak, say so in confidence_notes
 
 OUTPUT FORMAT (strict JSON):
 {
-  "root_cause_candidates": [{"claim": "...", "sourceEngine": "MI|Audience|ProductDNA|CI", "evidence": "specific data point", "confidenceLevel": "high|medium|low"}],
-  "pain_type_map": [{"painPoint": "...", "painType": "functional|emotional|social|financial|identity", "severity": "critical|moderate|minor", "evidence": "..."}],
-  "trust_gap_map": [{"gap": "...", "barrier": "what prevents trust", "currentTrustLevel": "none|low|moderate|high", "requiredTrustLevel": "low|moderate|high|very_high"}],
-  "mechanism_gap_hints": [{"area": "...", "currentState": "what exists now", "idealState": "what would close the gap", "gapSeverity": "critical|moderate|minor"}],
-  "proof_need_hints": [{"claim": "claim that needs proof", "proofType": "testimonial|data|demonstration|authority|social", "urgency": "immediate|important|nice_to_have"}],
-  "strategic_angle_candidates": [{"angle": "...", "rationale": "why this angle has potential", "targetSegment": "who this appeals to", "differentiationPotential": "high|medium|low"}],
-  "contradiction_flags": [{"element1": "...", "element2": "...", "nature": "description of contradiction", "severity": "blocking|concerning|minor"}],
-  "confidence_notes": [{"area": "...", "note": "observation about data quality/coverage", "dataQuality": "strong|adequate|weak|insufficient"}]
+  "root_causes": [
+    {
+      "surfaceSignal": "what the data literally shows",
+      "deepCause": "the actual underlying reason (WHY)",
+      "causalReasoning": "step-by-step reasoning from signal to cause — show your analytical work",
+      "sourceData": "specific data point, quote, or metric that supports this",
+      "confidenceLevel": "high|medium|low"
+    }
+  ],
+  "pain_types": [
+    {
+      "painPoint": "specific pain identified",
+      "painType": "trust|financial|knowledge_gap|status_identity|efficiency",
+      "severity": "critical|moderate|minor",
+      "underlyingCause": "WHY this pain exists — the deeper reason, not just the symptom",
+      "evidence": "data that proves this"
+    }
+  ],
+  "causal_chains": [
+    {
+      "pain": "what hurts",
+      "cause": "why it hurts",
+      "impact": "what happens because of this pain",
+      "behavior": "what the buyer does (or doesn't do) as a result",
+      "conversionEffect": "how this specifically blocks or delays conversion"
+    }
+  ],
+  "buying_barriers": [
+    {
+      "barrier": "specific reason the user is NOT converting",
+      "rootCause": "deeper reason behind this barrier",
+      "userThinking": "what the buyer is actually thinking (their internal monologue)",
+      "requiredResolution": "what would need to change for them to convert",
+      "severity": "blocking|major|moderate"
+    }
+  ],
+  "mechanism_gaps": [
+    {
+      "area": "aspect of the product/service",
+      "whatUserDoesNotUnderstand": "specific comprehension gap",
+      "whyItMatters": "impact on purchase decision",
+      "currentPerception": "what the user currently thinks/believes",
+      "idealPerception": "what they need to understand",
+      "gapSeverity": "critical|moderate|minor"
+    }
+  ],
+  "trust_gaps": [
+    {
+      "gap": "specific trust deficit",
+      "barrier": "what prevents trust from forming",
+      "currentTrustLevel": "none|low|moderate|high",
+      "requiredTrustLevel": "low|moderate|high|very_high",
+      "proofRequired": "specific type of proof that would close this gap"
+    }
+  ],
+  "contradiction_flags": [
+    {
+      "surfaceSignal": "what the data appears to show",
+      "actualReality": "what's really happening underneath",
+      "whyMisleading": "why the surface interpretation is wrong or incomplete",
+      "correctInterpretation": "how this should actually be understood",
+      "severity": "blocking|concerning|minor"
+    }
+  ],
+  "priority_ranking": [
+    {
+      "insight": "the key insight being ranked",
+      "dimension": "which analytical dimension this comes from",
+      "impactOnConversion": "critical|high|moderate|low",
+      "frequency": "pervasive|common|occasional|rare",
+      "actionability": "immediate|short_term|long_term",
+      "rank": 1
+    }
+  ],
+  "confidence_notes": [
+    {
+      "area": "analytical area",
+      "note": "observation about data quality, gaps, or limitations",
+      "dataQuality": "strong|adequate|weak|insufficient"
+    }
+  ]
 }
 
-QUALITY REQUIREMENTS:
-- Be SPECIFIC, not generic. "Users want simplicity" is BAD. "73% of competitor comments mention frustration with multi-step onboarding (avg 5.2 steps)" is GOOD.
-- Cite actual numbers, patterns, and data points from the input
-- Each array should have 3-8 entries based on data richness
-- If data is insufficient for a category, return an empty array — never fabricate`;
+QUALITY GATES (outputs that violate these are REJECTED):
+1. Every root_cause must have a surfaceSignal that DIFFERS from its deepCause
+2. Every causal_chain must follow the complete pain→cause→impact→behavior→conversionEffect flow
+3. Every buying_barrier must include the buyer's internal thinking (userThinking)
+4. At least one contradiction_flag where a surface complaint masks a deeper issue
+5. priority_ranking MUST order insights by conversion impact — the #1 item is the MOST important thing to address
+6. No generic labels without causal justification — "simplicity" alone = REJECTED
+7. Each array should have 3-8 entries based on data richness. Return empty array only if genuinely no data.`;
 
-  const userPrompt = `Analyze the following upstream data and produce a structured analytical package.
+  const userPrompt = `Perform deep causal interpretation of the following market and audience data.
+
+DO NOT organize or label the data. INTERPRET it. Explain WHY things are happening. Find what's hidden beneath the surface.
 
 ${contextBlock}
 
-Return ONLY valid JSON matching the specified format. No markdown, no explanation, no strategy recommendations.`;
+Return ONLY valid JSON matching the specified format. No markdown, no explanation, no strategic recommendations.`;
 
   try {
     const response = await aiChat({
@@ -126,8 +221,8 @@ Return ONLY valid JSON matching the specified format. No markdown, no explanatio
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      max_tokens: 3000,
-      temperature: 0.3,
+      max_tokens: 4000,
+      temperature: 0.4,
     });
 
     const content = response.choices?.[0]?.message?.content || "";
@@ -141,19 +236,23 @@ Return ONLY valid JSON matching the specified format. No markdown, no explanatio
     const elapsed = Date.now() - startTime;
 
     const pkg: AnalyticalPackage = {
-      root_cause_candidates: parsed.root_cause_candidates || [],
-      pain_type_map: parsed.pain_type_map || [],
-      trust_gap_map: parsed.trust_gap_map || [],
-      mechanism_gap_hints: parsed.mechanism_gap_hints || [],
-      proof_need_hints: parsed.proof_need_hints || [],
-      strategic_angle_candidates: parsed.strategic_angle_candidates || [],
-      contradiction_flags: parsed.contradiction_flags || [],
-      confidence_notes: parsed.confidence_notes || [],
+      root_causes: Array.isArray(parsed.root_causes) ? parsed.root_causes : [],
+      pain_types: Array.isArray(parsed.pain_types) ? parsed.pain_types : [],
+      causal_chains: Array.isArray(parsed.causal_chains) ? parsed.causal_chains : [],
+      buying_barriers: Array.isArray(parsed.buying_barriers) ? parsed.buying_barriers : [],
+      mechanism_gaps: Array.isArray(parsed.mechanism_gaps) ? parsed.mechanism_gaps : [],
+      trust_gaps: Array.isArray(parsed.trust_gaps) ? parsed.trust_gaps : [],
+      contradiction_flags: Array.isArray(parsed.contradiction_flags) ? parsed.contradiction_flags : [],
+      priority_ranking: Array.isArray(parsed.priority_ranking) ? parsed.priority_ranking : [],
+      confidence_notes: Array.isArray(parsed.confidence_notes) ? parsed.confidence_notes : [],
       generatedAt: new Date().toISOString(),
+      version: AEL_VERSION,
       inputSummary,
     };
 
-    console.log(`${LOG_PREFIX} BUILD_COMPLETE | campaign=${input.campaignId} | elapsed=${elapsed}ms | rootCauses=${pkg.root_cause_candidates.length} | pains=${pkg.pain_type_map.length} | trustGaps=${pkg.trust_gap_map.length} | mechGaps=${pkg.mechanism_gap_hints.length} | proofNeeds=${pkg.proof_need_hints.length} | angles=${pkg.strategic_angle_candidates.length} | contradictions=${pkg.contradiction_flags.length} | confidenceNotes=${pkg.confidence_notes.length}`);
+    const qualityCheck = validateAELQuality(pkg);
+
+    console.log(`${LOG_PREFIX} BUILD_COMPLETE | campaign=${input.campaignId} | elapsed=${elapsed}ms | rootCauses=${pkg.root_causes.length} | pains=${pkg.pain_types.length} | causalChains=${pkg.causal_chains.length} | barriers=${pkg.buying_barriers.length} | mechGaps=${pkg.mechanism_gaps.length} | trustGaps=${pkg.trust_gaps.length} | contradictions=${pkg.contradiction_flags.length} | priorities=${pkg.priority_ranking.length} | quality=${qualityCheck.passed ? "PASS" : "WARN:" + qualityCheck.issues.join(",")}`);
 
     return pkg;
   } catch (err: any) {
@@ -163,80 +262,146 @@ Return ONLY valid JSON matching the specified format. No markdown, no explanatio
   }
 }
 
+function validateAELQuality(pkg: AnalyticalPackage): { passed: boolean; issues: string[] } {
+  const issues: string[] = [];
+
+  for (const rc of pkg.root_causes) {
+    if (rc.surfaceSignal && rc.deepCause && rc.surfaceSignal.toLowerCase().trim() === rc.deepCause.toLowerCase().trim()) {
+      issues.push(`root_cause_echo: "${rc.surfaceSignal}" same as deepCause`);
+    }
+    if (!rc.causalReasoning || rc.causalReasoning.length < 20) {
+      issues.push(`shallow_reasoning: "${rc.surfaceSignal}"`);
+    }
+  }
+
+  for (const cc of pkg.causal_chains) {
+    if (!cc.pain || !cc.cause || !cc.impact || !cc.behavior || !cc.conversionEffect) {
+      issues.push(`incomplete_chain: missing fields`);
+    }
+  }
+
+  for (const bb of pkg.buying_barriers) {
+    if (!bb.userThinking || bb.userThinking.length < 10) {
+      issues.push(`missing_user_thinking: "${bb.barrier}"`);
+    }
+  }
+
+  if (pkg.contradiction_flags.length === 0 && pkg.root_causes.length > 0) {
+    issues.push(`no_contradictions_detected`);
+  }
+
+  if (pkg.priority_ranking.length === 0 && pkg.root_causes.length > 0) {
+    issues.push(`no_priority_ranking`);
+  }
+
+  const genericTerms = ["simplicity", "ease of use", "quality", "value", "affordability"];
+  for (const pt of pkg.pain_types) {
+    if (genericTerms.some(t => pt.painPoint.toLowerCase() === t) && (!pt.underlyingCause || pt.underlyingCause.length < 15)) {
+      issues.push(`generic_pain_no_cause: "${pt.painPoint}"`);
+    }
+  }
+
+  return { passed: issues.length === 0, issues };
+}
+
 export function formatAELForPrompt(pkg: AnalyticalPackage | null): string {
   if (!pkg) return "";
   const totalInsights =
-    pkg.root_cause_candidates.length +
-    pkg.pain_type_map.length +
-    pkg.trust_gap_map.length +
-    pkg.mechanism_gap_hints.length +
-    pkg.proof_need_hints.length +
-    pkg.strategic_angle_candidates.length;
+    (pkg.root_causes?.length || 0) +
+    (pkg.pain_types?.length || 0) +
+    (pkg.causal_chains?.length || 0) +
+    (pkg.buying_barriers?.length || 0) +
+    (pkg.mechanism_gaps?.length || 0) +
+    (pkg.trust_gaps?.length || 0);
 
   if (totalInsights === 0) return "";
 
   const sections: string[] = [];
-  sections.push("\n═══ ANALYTICAL ENRICHMENT CONTEXT (for depth, NOT for final decisions) ═══");
-  sections.push("USE these insights to DEEPEN your analysis. Do NOT copy them as outputs.");
-  sections.push("Your engine logic remains the sole decision-maker.\n");
+  sections.push("\n═══ DEEP ANALYTICAL CONTEXT (AEL v2 — Causal Interpretation) ═══");
+  sections.push("These are INTERPRETED insights — root causes beneath surface signals.");
+  sections.push("Use them to DEEPEN your analysis. Your engine logic remains the sole decision-maker.\n");
 
-  if (pkg.root_cause_candidates.length > 0) {
-    sections.push("── Root-Cause Candidates ──");
-    for (const rc of pkg.root_cause_candidates) {
-      sections.push(`  • [${rc.confidenceLevel}] ${rc.claim} (source: ${rc.sourceEngine}, evidence: ${rc.evidence})`);
+  if (pkg.root_causes?.length > 0) {
+    sections.push("── ROOT CAUSES (WHY, not WHAT) ──");
+    for (const rc of pkg.root_causes) {
+      sections.push(`  • Surface: "${rc.surfaceSignal}"`);
+      sections.push(`    Deep cause: ${rc.deepCause} [${rc.confidenceLevel}]`);
+      sections.push(`    Reasoning: ${rc.causalReasoning}`);
+      sections.push(`    Evidence: ${rc.sourceData}`);
     }
   }
 
-  if (pkg.pain_type_map.length > 0) {
-    sections.push("── Pain Type Map ──");
-    for (const p of pkg.pain_type_map) {
-      sections.push(`  • [${p.severity}/${p.painType}] ${p.painPoint} (evidence: ${p.evidence})`);
+  if (pkg.causal_chains?.length > 0) {
+    sections.push("\n── CAUSAL CHAINS (pain → cause → impact → behavior) ──");
+    for (const cc of pkg.causal_chains) {
+      sections.push(`  • ${cc.pain} → ${cc.cause} → ${cc.impact} → ${cc.behavior}`);
+      sections.push(`    Conversion effect: ${cc.conversionEffect}`);
     }
   }
 
-  if (pkg.trust_gap_map.length > 0) {
-    sections.push("── Trust Gap Map ──");
-    for (const tg of pkg.trust_gap_map) {
-      sections.push(`  • ${tg.gap} — barrier: ${tg.barrier} (current: ${tg.currentTrustLevel} → needed: ${tg.requiredTrustLevel})`);
+  if (pkg.buying_barriers?.length > 0) {
+    sections.push("\n── BUYING BARRIERS (why users DON'T convert) ──");
+    for (const bb of pkg.buying_barriers) {
+      sections.push(`  • [${bb.severity}] ${bb.barrier}`);
+      sections.push(`    Root cause: ${bb.rootCause}`);
+      sections.push(`    Buyer thinking: "${bb.userThinking}"`);
+      sections.push(`    Required resolution: ${bb.requiredResolution}`);
     }
   }
 
-  if (pkg.mechanism_gap_hints.length > 0) {
-    sections.push("── Mechanism Gap Hints ──");
-    for (const mg of pkg.mechanism_gap_hints) {
-      sections.push(`  • [${mg.gapSeverity}] ${mg.area}: "${mg.currentState}" → "${mg.idealState}"`);
+  if (pkg.pain_types?.length > 0) {
+    sections.push("\n── PAIN TYPES (classified with causal depth) ──");
+    for (const p of pkg.pain_types) {
+      sections.push(`  • [${p.severity}/${p.painType}] ${p.painPoint}`);
+      sections.push(`    Underlying cause: ${p.underlyingCause}`);
+      sections.push(`    Evidence: ${p.evidence}`);
     }
   }
 
-  if (pkg.proof_need_hints.length > 0) {
-    sections.push("── Proof Need Hints ──");
-    for (const pn of pkg.proof_need_hints) {
-      sections.push(`  • [${pn.urgency}/${pn.proofType}] "${pn.claim}"`);
+  if (pkg.mechanism_gaps?.length > 0) {
+    sections.push("\n── MECHANISM COMPREHENSION GAPS ──");
+    for (const mg of pkg.mechanism_gaps) {
+      sections.push(`  • [${mg.gapSeverity}] ${mg.area}`);
+      sections.push(`    User doesn't understand: ${mg.whatUserDoesNotUnderstand}`);
+      sections.push(`    Why it matters: ${mg.whyItMatters}`);
+      sections.push(`    Current belief: "${mg.currentPerception}" → Needs to understand: "${mg.idealPerception}"`);
     }
   }
 
-  if (pkg.strategic_angle_candidates.length > 0) {
-    sections.push("── Strategic Angle Candidates ──");
-    for (const sa of pkg.strategic_angle_candidates) {
-      sections.push(`  • [${sa.differentiationPotential}] ${sa.angle} — ${sa.rationale} (target: ${sa.targetSegment})`);
+  if (pkg.trust_gaps?.length > 0) {
+    sections.push("\n── TRUST GAPS ──");
+    for (const tg of pkg.trust_gaps) {
+      sections.push(`  • ${tg.gap} — barrier: ${tg.barrier}`);
+      sections.push(`    Trust: ${tg.currentTrustLevel} → needed: ${tg.requiredTrustLevel}`);
+      sections.push(`    Proof required: ${tg.proofRequired}`);
     }
   }
 
-  if (pkg.contradiction_flags.length > 0) {
-    sections.push("── Contradiction Flags ──");
+  if (pkg.contradiction_flags?.length > 0) {
+    sections.push("\n── CONTRADICTIONS & MISLEADING SIGNALS ──");
     for (const cf of pkg.contradiction_flags) {
-      sections.push(`  • [${cf.severity}] "${cf.element1}" vs "${cf.element2}" — ${cf.nature}`);
+      sections.push(`  • [${cf.severity}] Surface says: "${cf.surfaceSignal}"`);
+      sections.push(`    Actually: ${cf.actualReality}`);
+      sections.push(`    Why misleading: ${cf.whyMisleading}`);
+      sections.push(`    Correct interpretation: ${cf.correctInterpretation}`);
     }
   }
 
-  if (pkg.confidence_notes.length > 0) {
-    sections.push("── Confidence Notes ──");
+  if (pkg.priority_ranking?.length > 0) {
+    sections.push("\n── STRATEGIC PRIORITY (ranked by conversion impact) ──");
+    for (const pr of pkg.priority_ranking.slice(0, 5)) {
+      sections.push(`  ${pr.rank}. [${pr.impactOnConversion}] ${pr.insight} (${pr.dimension}, ${pr.frequency}, ${pr.actionability})`);
+    }
+  }
+
+  if (pkg.confidence_notes?.length > 0) {
+    sections.push("\n── DATA CONFIDENCE ──");
     for (const cn of pkg.confidence_notes) {
       sections.push(`  • [${cn.dataQuality}] ${cn.area}: ${cn.note}`);
     }
   }
 
-  sections.push("\n═══ END ANALYTICAL ENRICHMENT ═══\n");
+  sections.push("\n═══ END DEEP ANALYTICAL CONTEXT ═══\n");
 
   return sections.join("\n");
 }

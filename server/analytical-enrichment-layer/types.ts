@@ -1,15 +1,42 @@
-export interface RootCauseCandidate {
-  claim: string;
-  sourceEngine: string;
-  evidence: string;
+export interface RootCause {
+  surfaceSignal: string;
+  deepCause: string;
+  causalReasoning: string;
+  sourceData: string;
   confidenceLevel: "high" | "medium" | "low";
 }
 
 export interface PainTypeEntry {
   painPoint: string;
-  painType: "functional" | "emotional" | "social" | "financial" | "identity";
+  painType: "trust" | "financial" | "knowledge_gap" | "status_identity" | "efficiency";
   severity: "critical" | "moderate" | "minor";
+  underlyingCause: string;
   evidence: string;
+}
+
+export interface CausalChain {
+  pain: string;
+  cause: string;
+  impact: string;
+  behavior: string;
+  conversionEffect: string;
+}
+
+export interface BuyingBarrier {
+  barrier: string;
+  rootCause: string;
+  userThinking: string;
+  requiredResolution: string;
+  severity: "blocking" | "major" | "moderate";
+}
+
+export interface MechanismGap {
+  area: string;
+  whatUserDoesNotUnderstand: string;
+  whyItMatters: string;
+  currentPerception: string;
+  idealPerception: string;
+  gapSeverity: "critical" | "moderate" | "minor";
 }
 
 export interface TrustGapEntry {
@@ -17,33 +44,24 @@ export interface TrustGapEntry {
   barrier: string;
   currentTrustLevel: "none" | "low" | "moderate" | "high";
   requiredTrustLevel: "low" | "moderate" | "high" | "very_high";
-}
-
-export interface MechanismGapHint {
-  area: string;
-  currentState: string;
-  idealState: string;
-  gapSeverity: "critical" | "moderate" | "minor";
-}
-
-export interface ProofNeedHint {
-  claim: string;
-  proofType: "testimonial" | "data" | "demonstration" | "authority" | "social";
-  urgency: "immediate" | "important" | "nice_to_have";
-}
-
-export interface StrategicAngleCandidate {
-  angle: string;
-  rationale: string;
-  targetSegment: string;
-  differentiationPotential: "high" | "medium" | "low";
+  proofRequired: string;
 }
 
 export interface ContradictionFlag {
-  element1: string;
-  element2: string;
-  nature: string;
+  surfaceSignal: string;
+  actualReality: string;
+  whyMisleading: string;
+  correctInterpretation: string;
   severity: "blocking" | "concerning" | "minor";
+}
+
+export interface PriorityRanking {
+  insight: string;
+  dimension: string;
+  impactOnConversion: "critical" | "high" | "moderate" | "low";
+  frequency: "pervasive" | "common" | "occasional" | "rare";
+  actionability: "immediate" | "short_term" | "long_term";
+  rank: number;
 }
 
 export interface ConfidenceNote {
@@ -53,15 +71,17 @@ export interface ConfidenceNote {
 }
 
 export interface AnalyticalPackage {
-  root_cause_candidates: RootCauseCandidate[];
-  pain_type_map: PainTypeEntry[];
-  trust_gap_map: TrustGapEntry[];
-  mechanism_gap_hints: MechanismGapHint[];
-  proof_need_hints: ProofNeedHint[];
-  strategic_angle_candidates: StrategicAngleCandidate[];
+  root_causes: RootCause[];
+  pain_types: PainTypeEntry[];
+  causal_chains: CausalChain[];
+  buying_barriers: BuyingBarrier[];
+  mechanism_gaps: MechanismGap[];
+  trust_gaps: TrustGapEntry[];
   contradiction_flags: ContradictionFlag[];
+  priority_ranking: PriorityRanking[];
   confidence_notes: ConfidenceNote[];
   generatedAt: string;
+  version: number;
   inputSummary: {
     hasMI: boolean;
     hasAudience: boolean;
@@ -81,15 +101,17 @@ export interface AELInput {
 }
 
 export const EMPTY_ANALYTICAL_PACKAGE: AnalyticalPackage = {
-  root_cause_candidates: [],
-  pain_type_map: [],
-  trust_gap_map: [],
-  mechanism_gap_hints: [],
-  proof_need_hints: [],
-  strategic_angle_candidates: [],
+  root_causes: [],
+  pain_types: [],
+  causal_chains: [],
+  buying_barriers: [],
+  mechanism_gaps: [],
+  trust_gaps: [],
   contradiction_flags: [],
+  priority_ranking: [],
   confidence_notes: [],
   generatedAt: new Date().toISOString(),
+  version: 2,
   inputSummary: {
     hasMI: false,
     hasAudience: false,
