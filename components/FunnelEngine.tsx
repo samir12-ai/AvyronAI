@@ -319,29 +319,34 @@ export default function FunnelEngine({ isActive }: { isActive?: boolean }) {
 
         {funnel.entryTrigger && funnel.entryTrigger.mechanismType !== "none" && (() => {
           const enf = funnel.entryTrigger?.awarenessEnforcement;
+          const isFailed = funnel.entryTrigger!.mechanismType === "ENFORCEMENT_FAILED";
           const overridden = enf?.wasOverridden;
-          const triggerColor = overridden ? '#F97316' : '#8B5CF6';
+          const triggerColor = isFailed ? '#EF4444' : overridden ? '#F97316' : '#10B981';
           return (
             <View style={[styles.entryTriggerBox, { backgroundColor: triggerColor + '10', borderColor: triggerColor + '30' }]}>
               <View style={styles.entryTriggerHeader}>
-                <Ionicons name="enter-outline" size={14} color={triggerColor} />
-                <Text style={[styles.entryTriggerLabel, { color: triggerColor }]}>Entry Trigger</Text>
-                <View style={[styles.entryMechanismBadge, { backgroundColor: triggerColor + '20' }]}>
-                  <Text style={[styles.entryMechanismText, { color: triggerColor }]}>
-                    {funnel.entryTrigger!.mechanismType.replace(/_/g, ' ')}
-                  </Text>
-                </View>
+                <Ionicons name={isFailed ? "alert-circle" : "enter-outline"} size={14} color={triggerColor} />
+                <Text style={[styles.entryTriggerLabel, { color: triggerColor }]}>
+                  {isFailed ? "Entry Trigger — ENFORCEMENT FAILED" : "Entry Trigger"}
+                </Text>
+                {!isFailed && (
+                  <View style={[styles.entryMechanismBadge, { backgroundColor: triggerColor + '20' }]}>
+                    <Text style={[styles.entryMechanismText, { color: triggerColor }]}>
+                      {funnel.entryTrigger!.mechanismType.replace(/_/g, ' ')}
+                    </Text>
+                  </View>
+                )}
               </View>
-              <Text style={[styles.entryTriggerPurpose, { color: colors.textSecondary }]}>
+              <Text style={[styles.entryTriggerPurpose, { color: isFailed ? '#EF4444' : colors.textSecondary }]}>
                 {funnel.entryTrigger!.purpose}
               </Text>
               {enf && (
                 <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: triggerColor + '20', paddingTop: 8 }}>
-                  {overridden && (
+                  {overridden && !isFailed && (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 }}>
                       <Ionicons name="swap-horizontal" size={12} color="#F97316" />
                       <Text style={{ fontSize: 11, color: '#F97316', fontWeight: '600' as const }}>
-                        Overridden: {enf.originalMechanism.replace(/_/g, ' ')} → {enf.finalMechanism.replace(/_/g, ' ')}
+                        Re-derived: {enf.originalMechanism.replace(/_/g, ' ')} → {enf.finalMechanism.replace(/_/g, ' ')}
                       </Text>
                     </View>
                   )}
@@ -349,11 +354,21 @@ export default function FunnelEngine({ isActive }: { isActive?: boolean }) {
                     {enf.selectionReason}
                   </Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 }}>
-                    <Ionicons name="eye-outline" size={11} color={colors.textMuted} />
-                    <Text style={{ fontSize: 10, color: colors.textMuted }}>
+                    <Ionicons name="shield-checkmark-outline" size={11} color={isFailed ? '#EF4444' : '#10B981'} />
+                    <Text style={{ fontSize: 10, color: isFailed ? '#EF4444' : '#10B981', fontWeight: '600' as const }}>
                       Enforced by: {enf.enforcedBy.replace(/_/g, ' ')}
                     </Text>
                   </View>
+                  {enf.allowedMechanisms.length > 0 && (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>
+                      <Text style={{ fontSize: 10, color: '#10B981', fontWeight: '600' as const }}>Allowed:</Text>
+                      {enf.allowedMechanisms.map((m, i) => (
+                        <View key={i} style={[styles.tag, { backgroundColor: '#10B98115' }]}>
+                          <Text style={[styles.tagText, { color: '#10B981', fontSize: 10 }]}>{m.replace(/_/g, ' ')}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
                   {enf.blockedMechanisms.length > 0 && (
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
                       <Text style={{ fontSize: 10, color: '#EF4444', fontWeight: '600' as const }}>Blocked:</Text>

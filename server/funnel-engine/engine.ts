@@ -488,96 +488,12 @@ export function layer8_funnelStrengthScoring(candidate: FunnelCandidate): number
 }
 
 export function layerEntryTriggerDetection(
-  audience: FunnelAudienceInput,
-  offer: FunnelOfferInput,
-  funnelType: string,
+  _audience: FunnelAudienceInput,
+  _offer: FunnelOfferInput,
+  _funnelType: string,
   awarenessInput?: FunnelAwarenessInput | null,
 ): EntryTrigger {
-  const awarenessStage = awarenessInput?.awarenessStage || audience.awarenessLevel || "problem_aware";
-  const maturity = typeof audience.maturityIndex === "number" ? audience.maturityIndex : (Number(audience.maturityIndex) || 0.5);
-  const offerComplexity = offer.deliverables.length > 5 ? "high" : offer.deliverables.length > 2 ? "medium" : "low";
-  const buyerFriction = offer.frictionLevel;
-  const objectionCount = Object.keys(audience.objectionMap || {}).length;
-
-  const candidateMechanism = selectBaseEntryMechanism(awarenessStage, maturity, offerComplexity, buyerFriction, objectionCount, funnelType);
-
-  if (!awarenessInput) {
-    return {
-      mechanismType: candidateMechanism.type,
-      purpose: candidateMechanism.purpose,
-    };
-  }
-
-  const route = awarenessInput.awarenessRoute || "";
-  const triggerClass = awarenessInput.triggerClass || "";
-  const trustState = awarenessInput.trustState || "";
-
-  const allBlocked = new Set<string>();
-  const allAllowed = new Set<string>(ENTRY_MECHANISM_TYPES);
-  let enforcedBy = "none";
-
-  const routeMapping = AWARENESS_ROUTE_TO_ENTRY_MECHANISMS[route];
-  if (routeMapping) {
-    routeMapping.blocked.forEach(m => allBlocked.add(m));
-    const routeAllowed = new Set(routeMapping.allowed);
-    for (const m of allAllowed) {
-      if (!routeAllowed.has(m)) {
-        allBlocked.add(m);
-        allAllowed.delete(m);
-      }
-    }
-    enforcedBy = `route:${route}`;
-  }
-
-  const triggerMapping = TRIGGER_CLASS_TO_ENTRY_MECHANISMS[triggerClass];
-  if (triggerMapping) {
-    triggerMapping.blocked.forEach(m => {
-      allBlocked.add(m);
-      allAllowed.delete(m);
-    });
-  }
-
-  const trustOverride = TRUST_STATE_ENTRY_OVERRIDES[trustState];
-  if (trustOverride) {
-    trustOverride.blocked.forEach(m => {
-      allBlocked.add(m);
-      allAllowed.delete(m);
-    });
-  }
-
-  if (awarenessStage === "unaware") {
-    allBlocked.add("challenge");
-    allBlocked.add("discovery");
-    allAllowed.delete("challenge");
-    allAllowed.delete("discovery");
-  }
-
-  const allowedArr = Array.from(allAllowed);
-  const blockedArr = Array.from(allBlocked);
-  const needsOverride = !allAllowed.has(candidateMechanism.type);
-  let finalType = candidateMechanism.type;
-  let selectionReason = "Base selection passed awareness constraints";
-
-  if (needsOverride) {
-    const preferred = triggerMapping?.preferred || [];
-    const preferredAllowed = preferred.filter(p => allAllowed.has(p));
-    if (preferredAllowed.length > 0) {
-      finalType = preferredAllowed[0];
-      selectionReason = `Base "${candidateMechanism.type}" blocked by awareness — selected preferred "${finalType}" from trigger_class "${triggerClass}"`;
-    } else if (allowedArr.length > 0) {
-      finalType = allowedArr[0];
-      selectionReason = `Base "${candidateMechanism.type}" blocked by awareness — fell back to allowed "${finalType}"`;
-    } else {
-      finalType = "content_education";
-      selectionReason = `All mechanisms blocked — safe fallback to content_education`;
-    }
-    if (!enforcedBy.startsWith("route:")) {
-      enforcedBy = triggerClass ? `trigger:${triggerClass}` : trustState ? `trust:${trustState}` : `stage:${awarenessStage}`;
-    }
-    console.log(`[FunnelEngine-V3] ENTRY_TRIGGER_OVERRIDE | original=${candidateMechanism.type} → final=${finalType} | ${selectionReason}`);
-  }
-
-  const purposeMap: Record<string, string> = {
+  const PURPOSE_MAP: Record<string, string> = {
     content_education: "Provide foundational education to establish problem awareness before introducing the solution framework",
     audit: "Allow prospects to evaluate their current state against a structured assessment before entering the conversion path",
     diagnostic: "Enable prospects to identify their specific bottleneck or gap before presenting the solution mechanism",
@@ -585,59 +501,160 @@ export function layerEntryTriggerDetection(
     discovery: "Allow prospects to explore the solution approach at their own pace and self-qualify for the next conversion step",
   };
 
+  if (!awarenessInput) {
+    console.log(`[FunnelEngine-V3] ENTRY_TRIGGER_NO_AWARENESS | awareness not available, engine cannot derive entry trigger`);
+    return {
+      mechanismType: "ENFORCEMENT_FAILED",
+      purpose: "Entry trigger cannot be derived — awareness context is required",
+      awarenessEnforcement: {
+        enforcedBy: "MISSING_AWARENESS",
+        awarenessRoute: "",
+        triggerClass: "",
+        trustState: "",
+        originalMechanism: "none",
+        finalMechanism: "ENFORCEMENT_FAILED",
+        wasOverridden: false,
+        allowedMechanisms: [],
+        blockedMechanisms: [],
+        selectionReason: "Awareness context is required to derive entry trigger — no fallback permitted",
+      },
+    };
+  }
+
+  const route = awarenessInput.awarenessRoute || "";
+  const triggerClass = awarenessInput.triggerClass || "";
+  const trustState = awarenessInput.trustState || "";
+  const awarenessStage = awarenessInput.awarenessStage || "";
+
+  const allBlocked = new Set<string>();
+  const allAllowed = new Set<string>(ENTRY_MECHANISM_TYPES);
+  const enforcementChain: string[] = [];
+
+  const routeMapping = AWARENESS_ROUTE_TO_ENTRY_MECHANISMS[route];
+  if (routeMapping) {
+    routeMapping.blocked.forEach(m => { allBlocked.add(m); allAllowed.delete(m); });
+    const routeAllowed = new Set(routeMapping.allowed);
+    for (const m of Array.from(allAllowed)) {
+      if (!routeAllowed.has(m)) { allBlocked.add(m); allAllowed.delete(m); }
+    }
+    enforcementChain.push(`route:${route}`);
+  }
+
+  const triggerMapping = TRIGGER_CLASS_TO_ENTRY_MECHANISMS[triggerClass];
+  if (triggerMapping) {
+    triggerMapping.blocked.forEach(m => { allBlocked.add(m); allAllowed.delete(m); });
+    enforcementChain.push(`trigger:${triggerClass}`);
+  }
+
+  const trustOverride = TRUST_STATE_ENTRY_OVERRIDES[trustState];
+  if (trustOverride) {
+    trustOverride.blocked.forEach(m => { allBlocked.add(m); allAllowed.delete(m); });
+    enforcementChain.push(`trust:${trustState}`);
+  }
+
+  if (awarenessStage === "unaware") {
+    allBlocked.add("challenge"); allAllowed.delete("challenge");
+    allBlocked.add("discovery"); allAllowed.delete("discovery");
+    enforcementChain.push(`stage:unaware`);
+  }
+  if (awarenessStage === "problem_aware") {
+    enforcementChain.push(`stage:problem_aware`);
+  }
+
+  const allowedArr = Array.from(allAllowed);
+  const blockedArr = Array.from(allBlocked);
+
+  if (allowedArr.length === 0) {
+    console.log(`[FunnelEngine-V3] ENTRY_TRIGGER_ALL_BLOCKED | route=${route} trigger=${triggerClass} trust=${trustState} stage=${awarenessStage}`);
+    return {
+      mechanismType: "ENFORCEMENT_FAILED",
+      purpose: "All entry mechanisms blocked by awareness constraints — cannot derive valid trigger",
+      awarenessEnforcement: {
+        enforcedBy: enforcementChain.join(" + "),
+        awarenessRoute: route,
+        triggerClass,
+        trustState,
+        originalMechanism: "none",
+        finalMechanism: "ENFORCEMENT_FAILED",
+        wasOverridden: false,
+        allowedMechanisms: [],
+        blockedMechanisms: blockedArr,
+        selectionReason: "All mechanisms blocked — no valid entry trigger exists under current awareness constraints",
+      },
+    };
+  }
+
+  let finalType: string;
+  let selectionReason: string;
+
+  const preferred = triggerMapping?.preferred?.filter(p => allAllowed.has(p)) || [];
+  const routePreferred = routeMapping?.allowed?.filter(a => allAllowed.has(a)) || [];
+
+  if (preferred.length > 0) {
+    finalType = preferred[0];
+    selectionReason = `Derived from trigger_class "${triggerClass}" preferred list → "${finalType}" (enforced by ${enforcementChain.join(" + ")})`;
+  } else if (routePreferred.length > 0) {
+    finalType = routePreferred[0];
+    selectionReason = `Derived from awareness_route "${route}" allowed list → "${finalType}" (enforced by ${enforcementChain.join(" + ")})`;
+  } else {
+    console.log(`[FunnelEngine-V3] ENTRY_TRIGGER_NO_DETERMINISTIC_RULE | preferred/route lists empty, refusing implicit derivation`);
+    return {
+      mechanismType: "ENFORCEMENT_FAILED",
+      purpose: "No deterministic rule selected a preferred mechanism — refusing implicit array-order fallback",
+      awarenessEnforcement: {
+        enforcedBy: enforcementChain.join(" + "),
+        awarenessRoute: route,
+        triggerClass,
+        trustState,
+        originalMechanism: "none",
+        finalMechanism: "ENFORCEMENT_FAILED",
+        wasOverridden: false,
+        allowedMechanisms: allowedArr,
+        blockedMechanisms: blockedArr,
+        selectionReason: "Constraints narrowed allowed set but no trigger/route rule provided a preferred mechanism — enforcement failed",
+      },
+    };
+  }
+
+  const enforcedBy = enforcementChain.join(" + ") || "ENFORCEMENT_FAILED";
+
+  if (enforcedBy === "ENFORCEMENT_FAILED") {
+    console.log(`[FunnelEngine-V3] ENTRY_TRIGGER_NO_RULES | awareness present but no matching rules for route=${route} trigger=${triggerClass} trust=${trustState}`);
+    return {
+      mechanismType: "ENFORCEMENT_FAILED",
+      purpose: "No awareness rules matched — entry trigger cannot be derived without enforcement",
+      awarenessEnforcement: {
+        enforcedBy: "ENFORCEMENT_FAILED",
+        awarenessRoute: route,
+        triggerClass,
+        trustState,
+        originalMechanism: "none",
+        finalMechanism: "ENFORCEMENT_FAILED",
+        wasOverridden: false,
+        allowedMechanisms: allowedArr,
+        blockedMechanisms: blockedArr,
+        selectionReason: "Awareness context present but no enforcement rules matched — cannot derive trigger without rules",
+      },
+    };
+  }
+
+  console.log(`[FunnelEngine-V3] ENTRY_TRIGGER_DERIVED | type=${finalType} | enforcedBy=${enforcedBy} | allowed=[${allowedArr}] blocked=[${blockedArr}]`);
+
   return {
     mechanismType: finalType,
-    purpose: needsOverride ? purposeMap[finalType] || candidateMechanism.purpose : candidateMechanism.purpose,
+    purpose: PURPOSE_MAP[finalType] || `Awareness-derived entry mechanism: ${finalType.replace(/_/g, " ")}`,
     awarenessEnforcement: {
       enforcedBy,
       awarenessRoute: route,
       triggerClass,
       trustState,
-      originalMechanism: candidateMechanism.type,
+      originalMechanism: finalType,
       finalMechanism: finalType,
-      wasOverridden: needsOverride,
+      wasOverridden: false,
       allowedMechanisms: allowedArr,
       blockedMechanisms: blockedArr,
       selectionReason,
     },
-  };
-}
-
-function selectBaseEntryMechanism(
-  awareness: string,
-  maturity: number,
-  offerComplexity: string,
-  buyerFriction: number,
-  objectionCount: number,
-  funnelType: string,
-): { type: string; purpose: string } {
-  if (awareness === "unaware" || (maturity < 0.3 && objectionCount > 3)) {
-    return {
-      type: "content_education",
-      purpose: "Provide foundational education to establish problem awareness before introducing the solution framework",
-    };
-  }
-  if (offerComplexity === "high" && buyerFriction > 0.6) {
-    return {
-      type: "audit",
-      purpose: "Allow prospects to evaluate their current state against a structured assessment before entering the conversion path",
-    };
-  }
-  if (awareness === "problem_aware" && maturity < 0.5) {
-    return {
-      type: "diagnostic",
-      purpose: "Enable prospects to identify their specific bottleneck or gap before presenting the solution mechanism",
-    };
-  }
-  if (funnelType === "challenge" || (maturity >= 0.4 && maturity < 0.7 && buyerFriction < 0.5)) {
-    return {
-      type: "challenge",
-      purpose: "Guide prospects through a structured experience that demonstrates capability and builds commitment progressively",
-    };
-  }
-  return {
-    type: "discovery",
-    purpose: "Allow prospects to explore the solution approach at their own pace and self-qualify for the next conversion step",
   };
 }
 
@@ -965,6 +982,12 @@ function buildFunnelCandidate(
 
   if (matrixDecision.wasOverridden) {
     candidate.funnelStrengthScore = clamp(candidate.funnelStrengthScore * 0.95);
+  }
+
+  if (entryTrigger.mechanismType === "ENFORCEMENT_FAILED") {
+    candidate.funnelStrengthScore = clamp(candidate.funnelStrengthScore * 0.5);
+    candidate.integrityResult.passed = false;
+    candidate.integrityResult.failures.push("Entry trigger enforcement failed — awareness rules could not derive a valid trigger");
   }
 
   return candidate;
