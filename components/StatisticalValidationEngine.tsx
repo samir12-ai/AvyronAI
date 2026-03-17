@@ -59,6 +59,14 @@ interface DataReliability {
   advisories: string[];
 }
 
+interface ConfidenceExplanation {
+  score: number;
+  state: string;
+  reasoning: string;
+  factors: string[];
+  actionImplication: "PROCEED" | "PROCEED_WITH_CAUTION" | "HOLD" | "BLOCKED";
+}
+
 interface StatisticalValidationData {
   exists: boolean;
   id?: string;
@@ -80,6 +88,8 @@ interface StatisticalValidationData {
   signalBackedClaimCount?: number;
   signalBackedClaimRatio?: number;
   unmappedSignals?: string[];
+  lowConfidenceSignals?: string[];
+  confidenceExplanation?: ConfidenceExplanation;
 }
 
 const LAYER_LABELS: Record<string, string> = {
@@ -180,6 +190,8 @@ export default function StatisticalValidationEngine({ isActive }: { isActive?: b
           signalBackedClaimCount: r.signalBackedClaimCount,
           signalBackedClaimRatio: r.signalBackedClaimRatio,
           unmappedSignals: r.unmappedSignals,
+          lowConfidenceSignals: r.lowConfidenceSignals,
+          confidenceExplanation: r.confidenceExplanation,
         });
       } else {
         setData(json);
@@ -478,7 +490,7 @@ export default function StatisticalValidationEngine({ isActive }: { isActive?: b
             </View>
             <View style={styles.headerMetaItem}>
               <Text style={styles.headerMetaLabel}>Signal %</Text>
-              <Text style={[styles.headerMetaValue, { color: signalRatioPercent >= 40 ? '#10B981' : '#EF4444' }]}>{signalRatioPercent}%</Text>
+              <Text style={[styles.headerMetaValue, { color: signalRatioPercent >= 75 ? '#10B981' : '#EF4444' }]}>{signalRatioPercent}%</Text>
             </View>
           </View>
         )}
@@ -540,13 +552,65 @@ export default function StatisticalValidationEngine({ isActive }: { isActive?: b
             </View>
           </View>
 
-          {signalRatioPercent < 40 && (
+          {data.confidenceExplanation && (
+            <View style={[styles.confidenceExplanationCard, {
+              backgroundColor: colors.card,
+              borderColor: (
+                data.confidenceExplanation.actionImplication === 'PROCEED' ? '#10B981' :
+                data.confidenceExplanation.actionImplication === 'PROCEED_WITH_CAUTION' ? '#F59E0B' :
+                data.confidenceExplanation.actionImplication === 'HOLD' ? '#FF9500' :
+                '#EF4444'
+              ) + '30',
+            }]}>
+              <View style={styles.ceHeader}>
+                <Ionicons name="bulb" size={16} color={
+                  data.confidenceExplanation.actionImplication === 'PROCEED' ? '#10B981' :
+                  data.confidenceExplanation.actionImplication === 'PROCEED_WITH_CAUTION' ? '#F59E0B' :
+                  data.confidenceExplanation.actionImplication === 'HOLD' ? '#FF9500' :
+                  '#EF4444'
+                } />
+                <Text style={[styles.ceTitle, { color: colors.text }]}>Confidence Interpretation</Text>
+                <View style={[styles.ceImplicationBadge, {
+                  backgroundColor: (
+                    data.confidenceExplanation.actionImplication === 'PROCEED' ? '#10B981' :
+                    data.confidenceExplanation.actionImplication === 'PROCEED_WITH_CAUTION' ? '#F59E0B' :
+                    data.confidenceExplanation.actionImplication === 'HOLD' ? '#FF9500' :
+                    '#EF4444'
+                  ) + '15',
+                }]}>
+                  <Text style={[styles.ceImplicationText, {
+                    color: data.confidenceExplanation.actionImplication === 'PROCEED' ? '#10B981' :
+                      data.confidenceExplanation.actionImplication === 'PROCEED_WITH_CAUTION' ? '#F59E0B' :
+                      data.confidenceExplanation.actionImplication === 'HOLD' ? '#FF9500' :
+                      '#EF4444',
+                  }]}>
+                    {data.confidenceExplanation.actionImplication.replace(/_/g, ' ')}
+                  </Text>
+                </View>
+              </View>
+              <Text style={[styles.ceReasoning, { color: colors.textSecondary }]}>
+                {data.confidenceExplanation.reasoning}
+              </Text>
+              {data.confidenceExplanation.factors.length > 0 && (
+                <View style={styles.ceFactors}>
+                  {data.confidenceExplanation.factors.map((f, i) => (
+                    <View key={i} style={styles.ceFactorRow}>
+                      <View style={[styles.ceFactorDot, { backgroundColor: PRIMARY_COLOR }]} />
+                      <Text style={[styles.ceFactorText, { color: colors.textMuted }]}>{f}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          )}
+
+          {signalRatioPercent < 75 && (
             <View style={[styles.warningBox, { backgroundColor: '#EF444415', borderColor: '#EF444430' }]}>
               <Ionicons name="shield" size={16} color="#EF4444" />
               <View style={{ flex: 1 }}>
                 <Text style={[styles.warningTitle, { color: '#EF4444' }]}>Signal Grounding Below Threshold</Text>
                 <Text style={[styles.warningDetail, { color: '#DC2626' }]}>
-                  Only {signalRatioPercent}% of claims are signal-backed (minimum 40% required). Strategy remains provisional until additional signal evidence is provided.
+                  Only {signalRatioPercent}% of claims are signal-backed (minimum 75% required). Strategy remains provisional until additional signal evidence is provided.
                 </Text>
               </View>
             </View>
@@ -656,6 +720,28 @@ export default function StatisticalValidationEngine({ isActive }: { isActive?: b
               ))}
             </View>
           )}
+
+          {data.lowConfidenceSignals && data.lowConfidenceSignals.length > 0 && (
+            <View style={[styles.warningsBox, { backgroundColor: colors.card, borderColor: '#FF950030' }]}>
+              <View style={styles.warningsHeader}>
+                <Ionicons name="trending-down" size={16} color="#FF9500" />
+                <Text style={[styles.warningsTitle, { color: '#FF9500' }]}>
+                  Low-Confidence Signals ({data.lowConfidenceSignals.length})
+                </Text>
+              </View>
+              <View style={[styles.hypothesisNotice, { backgroundColor: '#FF950010' }]}>
+                <Text style={[styles.hypothesisNoticeText, { color: colors.textMuted }]}>
+                  These signals matched a cluster but fell below the 75% confidence threshold. They are excluded from validation scoring until stronger evidence is available.
+                </Text>
+              </View>
+              {data.lowConfidenceSignals.map((ls, i) => (
+                <View key={i} style={styles.warningRow}>
+                  <View style={[styles.warningDot, { backgroundColor: '#FF9500' }]} />
+                  <Text style={[styles.warningText, { color: colors.textSecondary }]}>{ls}</Text>
+                </View>
+              ))}
+            </View>
+          )}
         </>
       )}
     </View>
@@ -753,4 +839,14 @@ const styles = StyleSheet.create({
   warningRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginTop: 4 },
   warningDot: { width: 6, height: 6, borderRadius: 3, marginTop: 5 },
   warningText: { fontSize: 12, flex: 1, lineHeight: 16 },
+  confidenceExplanationCard: { borderRadius: 12, borderWidth: 1, padding: 14, marginBottom: 12 },
+  ceHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  ceTitle: { fontSize: 14, fontWeight: '600' as const, flex: 1 },
+  ceImplicationBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  ceImplicationText: { fontSize: 11, fontWeight: '700' as const, textTransform: 'uppercase' as const },
+  ceReasoning: { fontSize: 13, lineHeight: 19, marginBottom: 8 },
+  ceFactors: { gap: 4 },
+  ceFactorRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+  ceFactorDot: { width: 5, height: 5, borderRadius: 2.5, marginTop: 5 },
+  ceFactorText: { fontSize: 12, flex: 1, lineHeight: 16 },
 });

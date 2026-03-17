@@ -29,6 +29,7 @@ import { BusinessProfileModal, ProfileButton } from '@/components/BusinessProfil
 import { PlanStatus } from '@/components/PlanStatus';
 import { ExecutionPipeline } from '@/components/ExecutionPipeline';
 import { RequiredWorkCard } from '@/components/RequiredWorkCard';
+import DataFreshnessWarning from '@/components/DataFreshnessWarning';
 import { MarketMindAgent, MarketMindAgentRef } from '@/components/MarketMindAgent';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -153,6 +154,7 @@ export default function DashboardScreen() {
   const [planBindingReason, setPlanBindingReason] = useState<string | null>(null);
 
   const [dataMode, setDataMode] = useState<'REAL' | 'MANUAL' | 'UNKNOWN'>('UNKNOWN');
+  const [miFreshnessMetadata, setMiFreshnessMetadata] = useState<any>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [orchestratorRunning, setOrchestratorRunning] = useState(false);
@@ -235,6 +237,19 @@ export default function DashboardScreen() {
     } catch {}
   }, [baseUrl]);
 
+  const fetchMiFreshness = useCallback(async () => {
+    if (!selectedCampaignId) return;
+    try {
+      const res = await fetch(new URL(`/api/ci/mi-v3/snapshot/${selectedCampaignId}?accountId=default`, baseUrl).toString());
+      if (res.ok) {
+        const data = await res.json();
+        setMiFreshnessMetadata(data.freshnessMetadata || null);
+      }
+    } catch {
+      console.warn('[Dashboard] MI freshness fetch failed');
+    }
+  }, [baseUrl, selectedCampaignId]);
+
   useEffect(() => {
     const isSwitch = prevCampaignRef.current !== undefined && prevCampaignRef.current !== selectedCampaignId;
     prevCampaignRef.current = selectedCampaignId;
@@ -252,19 +267,21 @@ export default function DashboardScreen() {
       setPlanBindingId(null);
       setPlanBindingReason(null);
       setDataMode('UNKNOWN');
+      setMiFreshnessMetadata(null);
     }
 
     fetchMetrics();
     fetchConfidence();
     fetchDataMode();
+    fetchMiFreshness();
   }, [selectedCampaignId]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     const agentRefresh = agentRef.current?.refresh() ?? Promise.resolve();
-    await Promise.all([agentRefresh, fetchMetrics(), fetchConfidence(), fetchDataMode()]);
+    await Promise.all([agentRefresh, fetchMetrics(), fetchConfidence(), fetchDataMode(), fetchMiFreshness()]);
     setRefreshing(false);
-  }, [fetchMetrics, fetchConfidence, fetchDataMode]);
+  }, [fetchMetrics, fetchConfidence, fetchDataMode, fetchMiFreshness]);
 
   const formatNumber = (num: number | undefined | null): string => {
     if (num == null || isNaN(num)) return '0';
@@ -543,6 +560,14 @@ export default function DashboardScreen() {
         <RNAnimated.View style={{ opacity: headerFade, transform: [{ translateY: cardSlide }] }}>
           {renderMetricsPanel()}
         </RNAnimated.View>
+
+        {selectedCampaignId && miFreshnessMetadata ? (
+          <DataFreshnessWarning
+            freshnessMetadata={miFreshnessMetadata}
+            onRefresh={() => fetchMiFreshness()}
+            compact={!miFreshnessMetadata.blockedForStrategy && miFreshnessMetadata.freshnessClass !== 'NEEDS_REFRESH'}
+          />
+        ) : null}
 
         {selectedCampaignId ? (
           <>
