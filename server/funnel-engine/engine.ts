@@ -1,4 +1,5 @@
 import { aiChat } from "../ai-client";
+import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
 import { detectGenericOutput, checkCrossEngineAlignment, enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
 
 function safeJsonParse(text: any): any {
@@ -1026,6 +1027,7 @@ export async function aiFunnelGeneration(
   accountId: string,
   mi?: FunnelMIInput | null,
   awarenessCtx?: FunnelAwarenessInput | null,
+  analyticalEnrichment?: any,
 ): Promise<{ primary: { name: string; type: string }; alternative: { name: string; type: string }; rejected: { name: string; type: string; rejectionReason: string } }> {
   const pains = audience.audiencePains || [];
   const desires = Object.entries(audience.desireMap || {});
@@ -1062,8 +1064,11 @@ AWARENESS CONTEXT (use this to guide funnel design):
 CRITICAL: The funnel type MUST be compatible with the detected awareness route. A ${awarenessCtx!.entryMechanism} entry mechanism requires a funnel that supports ${awarenessCtx!.trustState} trust building.`
     : "";
 
-  const prompt = `You are a Funnel Architect. Generate three funnel concepts based on the market intelligence below.
+  const aelBlock = formatAELForPrompt(analyticalEnrichment || null);
+  if (aelBlock) console.log(`[FunnelEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars`);
 
+  const prompt = `You are a Funnel Architect. Generate three funnel concepts based on the market intelligence below.
+${aelBlock}
 STRICT RULES:
 - Do NOT generate strategy decisions, strategic repositioning, offer redesign, pricing logic, budget recommendations, channel selection, media buying, awareness messaging, persuasion copy, scripts, campaign tasks, financial planning, or execution plans
 - ONLY output funnel definitions: name, type (direct, webinar, challenge, vsl, application, consultation, tripwire, product-launch, membership, hybrid)
@@ -1167,6 +1172,7 @@ export async function runFunnelEngine(
   differentiation: FunnelDifferentiationInput,
   accountId: string,
   awareness?: FunnelAwarenessInput | null,
+  analyticalEnrichment?: any,
 ): Promise<FunnelResult> {
   const startTime = Date.now();
   const diagnostics: Record<string, any> = {};
@@ -1253,7 +1259,7 @@ export async function runFunnelEngine(
 
   let aiFunnels;
   try {
-    aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi, awareness);
+    aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi, awareness, analyticalEnrichment);
     diagnostics.aiGeneration = { success: true };
   } catch (err: any) {
     diagnostics.aiGeneration = { success: false, error: err.message };

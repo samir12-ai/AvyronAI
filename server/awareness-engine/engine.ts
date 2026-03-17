@@ -16,6 +16,7 @@ import {
   validateClaimGrounding,
   MIN_QUALIFYING_SIGNALS,
 } from "../shared/signal-lineage";
+import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
 import type {
   AwarenessPositioningInput,
   AwarenessDifferentiationInput,
@@ -724,9 +725,15 @@ export async function runAwarenessEngine(
   accountId: string,
   upstreamLineage: SignalLineageEntry[] = [],
   funnel: AwarenessFunnelInput = EMPTY_FUNNEL,
+  analyticalEnrichment?: any,
 ): Promise<AwarenessResult> {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
+
+  if (analyticalEnrichment) {
+    const aelBlock = formatAELForPrompt(analyticalEnrichment);
+    console.log(`[AwarenessEngine-V3] AEL_RECEIVED | enrichmentSize=${aelBlock.length}chars | dimensions=${Object.keys(analyticalEnrichment).filter(k => analyticalEnrichment[k] && (Array.isArray(analyticalEnrichment[k]) ? analyticalEnrichment[k].length > 0 : true)).length}`);
+  }
 
   const qualifyingSignals = extractQualifyingSignals(upstreamLineage);
   console.log(`[AwarenessEngine-V3] SIGNAL_CHECK | upstream=${upstreamLineage.length} | qualifying=${qualifyingSignals.length} | min=${MIN_QUALIFYING_SIGNALS}`);

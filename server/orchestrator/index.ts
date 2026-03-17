@@ -1,4 +1,5 @@
 import { db } from "../db";
+import { buildAnalyticalPackage } from "../analytical-enrichment-layer/engine";
 import {
   orchestratorJobs,
   strategicPlans,
@@ -85,6 +86,7 @@ interface EngineContext {
   audienceSnapshotId?: string;
   positioningSnapshotId?: string;
   differentiationSnapshotId?: string;
+  analyticalEnrichment?: any;
 }
 
 async function getBusinessData(accountId: string, campaignId: string): Promise<any> {
@@ -217,6 +219,25 @@ async function executeEngine(
         snapshotId = result.snapshotId;
         ctx.audience = result;
         ctx.audienceSnapshotId = result.snapshotId;
+
+        if (ctx.mi && ctx.audience) {
+          try {
+            const aelStart = Date.now();
+            const aelPkg = await buildAnalyticalPackage({
+              mi: ctx.mi,
+              audience: ctx.audience,
+              productDNA: null,
+              competitiveData: null,
+              accountId: config.accountId,
+              campaignId: config.campaignId,
+            });
+            ctx.analyticalEnrichment = aelPkg;
+            console.log(`[Orchestrator] AEL_BUILT | duration=${Date.now() - aelStart}ms | dimensions=${aelPkg ? Object.keys(aelPkg).length : 0} | campaignId=${config.campaignId}`);
+          } catch (aelErr: any) {
+            console.warn(`[Orchestrator] AEL_BUILD_FAILED | error=${aelErr.message} — proceeding without enrichment`);
+            ctx.analyticalEnrichment = null;
+          }
+        }
         break;
       }
 
@@ -234,7 +255,8 @@ async function executeEngine(
           config.accountId,
           config.campaignId,
           ctx.miSnapshotId,
-          ctx.audienceSnapshotId
+          ctx.audienceSnapshotId,
+          ctx.analyticalEnrichment
         );
         output = result;
         snapshotId = result.snapshotId;
@@ -251,7 +273,9 @@ async function executeEngine(
           miInput,
           audInput,
           posInput,
-          config.accountId
+          config.accountId,
+          undefined,
+          ctx.analyticalEnrichment
         );
         output = result;
         snapshotId = result.snapshotId;
@@ -292,7 +316,9 @@ async function executeEngine(
         const result = await runOfferEngine(
           miInput, audInput, posInput, diffInput,
           config.accountId, [],
-          ctx.mechanism || undefined
+          ctx.mechanism || undefined,
+          undefined,
+          ctx.analyticalEnrichment
         );
         output = result;
         snapshotId = result.snapshotId;
@@ -308,7 +334,9 @@ async function executeEngine(
         const offerInput = ctx.offer || {};
         const result = await runAwarenessEngine(
           miInput, audInput, posInput, diffInput, offerInput,
-          config.accountId, []
+          config.accountId, [],
+          undefined,
+          ctx.analyticalEnrichment
         );
         output = result;
         snapshotId = result.snapshotId;
@@ -337,7 +365,8 @@ async function executeEngine(
         } : null;
         const result = await runFunnelEngine(
           miInput, audInput, offerInput, posInput, diffInput,
-          config.accountId, awarenessInput
+          config.accountId, awarenessInput,
+          ctx.analyticalEnrichment
         );
         output = result;
         snapshotId = result.snapshotId;
@@ -371,7 +400,8 @@ async function executeEngine(
         const awarenessInput = ctx.awareness || {};
         const result = await runPersuasionEngine(
           miInput, audInput, posInput, diffInput, offerInput, funnelInput, integrityInput, awarenessInput,
-          config.accountId, []
+          config.accountId, [],
+          ctx.analyticalEnrichment
         );
         output = result;
         snapshotId = result.snapshotId;

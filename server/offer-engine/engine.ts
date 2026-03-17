@@ -1,4 +1,5 @@
 import { aiChat } from "../ai-client";
+import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
 import { loadProductDNA, formatProductDNAForPrompt, type ProductDNA } from "../shared/product-dna";
 import { detectGenericOutput, checkCrossEngineAlignment, enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
 
@@ -1427,6 +1428,7 @@ export async function aiOfferGeneration(
   axisCorrection?: { previousFailures: string[]; attempt: number },
   strategyRoot?: any,
   productDna?: ProductDNA | null,
+  analyticalEnrichment?: any,
 ): Promise<{ primary: { name: string; outcome: string; mechanism: string; deliverables: string[] }; alternative: { name: string; outcome: string; mechanism: string; deliverables: string[] }; rejected: { name: string; outcome: string; mechanism: string; deliverables: string[]; rejectionReason: string } }> {
 
   if (strategyRoot) {
@@ -1439,8 +1441,11 @@ export async function aiOfferGeneration(
 
     const mechName = safeJsonParse(typeof strategyRoot.approvedMechanism === 'string' ? strategyRoot.approvedMechanism : JSON.stringify(strategyRoot.approvedMechanism))?.mechanismName || '';
 
-    const prompt = `You are an Offer Copywriter. You must refine the wording of pre-built offer skeletons.
+    const aelBlock = formatAELForPrompt(analyticalEnrichment || null);
+    if (aelBlock) console.log(`[OfferEngine-V4] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars`);
 
+    const prompt = `You are an Offer Copywriter. You must refine the wording of pre-built offer skeletons.
+${aelBlock}
 CRITICAL: You are NOT generating offers from scratch. The strategic structure has already been decided.
 Your ONLY job is to improve the wording to be more compelling, specific, and market-ready.
 
@@ -1603,8 +1608,11 @@ ${axisCorrection.previousFailures.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}
 You MUST fix these specific issues. Generate offers that directly address these failures.
 ` : "";
 
-  const prompt = `You are an Offer Architect. Generate three offer concepts.
+  const aelBlockFallback = formatAELForPrompt(analyticalEnrichment || null);
+  if (aelBlockFallback) console.log(`[OfferEngine-V4] AEL_INJECTED_FALLBACK | enrichmentSize=${aelBlockFallback.length}chars`);
 
+  const prompt = `You are an Offer Architect. Generate three offer concepts.
+${aelBlockFallback}
 ABSOLUTE RULES:
 - Do NOT generate funnel architecture, advertising strategy, channel selection, media planning, budget recommendations, campaign execution, sales scripts, or strategic master plan decisions
 - Do NOT include financial advisory claims
@@ -1707,6 +1715,7 @@ export async function runOfferEngine(
   upstreamLineage: SignalLineageEntry[] = [],
   mechanismEngineOutput?: any,
   strategyRoot?: any,
+  analyticalEnrichment?: any,
 ): Promise<OfferResult> {
   const startTime = Date.now();
   const diagnostics: Record<string, any> = {};
@@ -1940,7 +1949,7 @@ export async function runOfferEngine(
 
   let aiOffers;
   try {
-    aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot, productDna);
+    aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot, productDna, analyticalEnrichment);
     diagnostics.aiGeneration = { success: true, mode: strategyRoot ? "skeleton_refinement" : "free_generation" };
     if (aiOffers.sourceContext) {
       diagnostics.sourceContext = aiOffers.sourceContext;
@@ -2312,7 +2321,7 @@ export async function runOfferEngine(
   if (!offerAlignmentValidation.aligned && status === STATUS.COMPLETE) {
     console.log(`[OfferEngine-V4] ALIGNMENT_RETRY | First attempt failed: ${offerAlignmentValidation.failures.join("; ")} — regenerating with positioning lock`);
     try {
-      const retryOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot);
+      const retryOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot, productDna, analyticalEnrichment);
       diagnostics.aiGenerationRetry = { success: true, attempt: 2 };
 
       const retryPrimaryOutcome: OutcomeLayer = { ...l1Outcome, primaryOutcome: retryOffers.primary.outcome || l1Outcome.primaryOutcome };

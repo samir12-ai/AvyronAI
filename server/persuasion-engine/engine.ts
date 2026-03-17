@@ -24,6 +24,7 @@ import {
   MESSAGE_ARCHITECTURE_ORDER,
   MESSAGE_STEP_CATEGORY_MAP,
 } from "./constants";
+import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
 import { enforceBoundaryWithSanitization } from "../engine-hardening";
 import { assessStrategyAcceptability } from "../shared/strategy-acceptability";
 import {
@@ -1790,9 +1791,15 @@ export function analyzePersuasion(
   integrity: PersuasionIntegrityInput,
   awareness: PersuasionAwarenessInput,
   upstreamLineage: SignalLineageEntry[] = [],
+  analyticalEnrichment?: any,
 ): PersuasionResult {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
+
+  if (analyticalEnrichment) {
+    const aelBlock = formatAELForPrompt(analyticalEnrichment);
+    console.log(`[PersuasionEngine-V3] AEL_RECEIVED | enrichmentSize=${aelBlock.length}chars | dimensions=${Object.keys(analyticalEnrichment).filter(k => analyticalEnrichment[k] && (Array.isArray(analyticalEnrichment[k]) ? analyticalEnrichment[k].length > 0 : true)).length}`);
+  }
 
   const qualifyingSignals = extractQualifyingSignals(upstreamLineage);
   console.log(`[PersuasionEngine-V3] SIGNAL_CHECK | upstream=${upstreamLineage.length} | qualifying=${qualifyingSignals.length} | min=${MIN_QUALIFYING_SIGNALS}`);
@@ -2045,6 +2052,7 @@ export async function runPersuasionEngine(
   awareness: PersuasionAwarenessInput,
   _accountId?: string,
   upstreamLineage: SignalLineageEntry[] = [],
+  analyticalEnrichment?: any,
 ): Promise<PersuasionResult> {
-  return analyzePersuasion(mi, audience, positioning, differentiation, offer, funnel, integrity, awareness, upstreamLineage);
+  return analyzePersuasion(mi, audience, positioning, differentiation, offer, funnel, integrity, awareness, upstreamLineage, analyticalEnrichment);
 }

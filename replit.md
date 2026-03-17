@@ -32,6 +32,7 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 - **Product DNA**: A source-of-truth layer (`business_data_layer`) injected into all strategic engines for identity context in AI prompts.
 - **Competitive Intelligence (MIv3)**: A 6-layer pipeline for real-data competitor analysis with multi-source intelligence and signal normalization.
 - **Authority Hierarchy Enforcement**: Strict Awareness → Funnel → Persuasion authority hierarchy with cross-engine validation to prevent contradictions.
+- **Analytical Enrichment Layer (AEL)**: A shared pre-analysis layer (`server/analytical-enrichment-layer/`) that enriches all downstream engines with structured analytical context (root cause candidates, pain type maps, trust gap maps, etc.) without replacing engine logic. Built once after MI+Audience in the orchestrator, passed to all 6 downstream engines. Includes AEL Debug Panel in AI Management (Strategies tab). Version 1, 10-min cache TTL.
 - **AI Orchestrator**: Single-entry orchestration engine running 14 engines in priority order with checkpoint persistence, generating coherent 9-section strategic plans via AI synthesis.
 - **Execution Activation Layer**: Auto-triggers the content production pipeline upon plan approval, enforcing content queue minimums and scheduling completeness.
 - **Execution Pipeline**: An 11-stage pipeline for plan execution with real-time status tracking.

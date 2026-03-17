@@ -1,4 +1,5 @@
 import { aiChat } from "../ai-client";
+import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
 import {
   ENGINE_VERSION,
   DIFFERENTIATION_SCORE_WEIGHTS,
@@ -868,12 +869,15 @@ export async function layer11_aiRefinement(
   mechanism: MechanismCandidate,
   authorityMode: AuthorityMode,
   accountId: string,
+  analyticalEnrichment?: any,
 ): Promise<{ refinedPillars: DifferentiationPillar[]; refinedClaims: ClaimStructure[]; refinedMechanism: MechanismCandidate }> {
   const topPillars = pillars.slice(0, 5);
   const topClaims = claims.slice(0, 5);
+  const aelBlock = formatAELForPrompt(analyticalEnrichment || null);
+  if (aelBlock) console.log(`[DifferentiationEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars`);
 
   const prompt = `You are refining differentiation language. You must ONLY improve wording clarity and impact.
-
+${aelBlock}
 STRICT RULES:
 - Do NOT invent new strategy, audience segments, offers, or execution plans
 - Do NOT change the meaning or direction of any pillar or claim
@@ -1075,6 +1079,7 @@ export async function runDifferentiationEngine(
   positioning: PositioningInput,
   accountId: string,
   profile?: ProfileInput | null,
+  analyticalEnrichment?: any,
 ): Promise<DifferentiationResult> {
   const startTime = Date.now();
   const diagnostics: Record<string, any> = {};
@@ -1171,7 +1176,7 @@ export async function runDifferentiationEngine(
   let finalMechanism = l8Mechanism;
 
   try {
-    const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId);
+    const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId, analyticalEnrichment);
     finalPillars = l11.refinedPillars;
     finalClaims = l11.refinedClaims;
     finalMechanism = l11.refinedMechanism;

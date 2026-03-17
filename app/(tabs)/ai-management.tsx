@@ -47,6 +47,7 @@ import IterationEngine from '@/components/IterationEngine';
 import RetentionEngine from '@/components/RetentionEngine';
 import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
 import DataFreshnessWarning from '@/components/DataFreshnessWarning';
+import AELDebugPanel from '@/components/AELDebugPanel';
 
 interface AIAudience {
   name: string;
@@ -1249,7 +1250,12 @@ export default function AIManagementScreen() {
         {activeTab === 'buildplan' && <BuildThePlan onNavigateToCI={() => handleTabChange('intelligence')} onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />}
         {activeTab === 'pipeline' && <StrategicPipeline onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />}
         {activeTab === 'intelligence' && renderIntelligence()}
-        {activeTab === 'strategies' && renderStrategiesBranch()}
+        {activeTab === 'strategies' && (
+          <>
+            {renderStrategiesBranch()}
+            <CampaignGuard><AELDebugPanel /></CampaignGuard>
+          </>
+        )}
         {activeTab === 'control' && renderControlCenter()}
         {activeTab === 'marketdb' && <MarketDatabaseAdmin />}
         {activeTab === 'publisher' && renderPublisher()}

@@ -10,6 +10,7 @@ import { inArray, eq, and, desc } from "drizzle-orm";
 import { aiChat } from "../ai-client";
 import { checkForOrphanClaims, type OrphanCheckResult } from "../shared/signal-quality-gate";
 import { enforceGlobalStateRefresh } from "../shared/engine-health";
+import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
 import {
   POSITIONING_ENGINE_VERSION,
   POSITIONING_THRESHOLDS,
@@ -986,6 +987,7 @@ async function layer11_positioningStatementGeneration(
   accountId: string,
   miData?: any,
   productDna?: any,
+  analyticalEnrichment?: any,
 ): Promise<Territory[]> {
   if (territories.length === 0) return territories;
 
@@ -1016,12 +1018,14 @@ async function layer11_positioningStatementGeneration(
     }
 
     const productDnaBlock = productDna ? formatProductDNAForPrompt(productDna) : "";
+    const aelBlock = formatAELForPrompt(analyticalEnrichment || null);
+    if (aelBlock) console.log(`[PositioningEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars`);
 
     const prompt = `You are a strategic positioning analyst. Generate precise positioning statements for each territory.
 
 MARKET CATEGORY: ${category}
 PRIMARY AUDIENCE SEGMENT: ${topSegment}
-${productDnaBlock ? `\n${productDnaBlock}\n` : ""}
+${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${aelBlock}
 
 TERRITORIES:
 ${territories.map((t, i) => `${i + 1}. "${t.name}" (opportunity: ${t.opportunityScore}, distance: ${t.narrativeDistanceScore})
@@ -1222,6 +1226,7 @@ export async function runPositioningEngine(
   campaignId: string,
   miSnapshotId: string,
   audienceSnapshotId: string,
+  analyticalEnrichment?: any,
 ): Promise<PositioningEngineResult> {
   const startTime = Date.now();
 
@@ -1445,8 +1450,8 @@ export async function runPositioningEngine(
     console.warn(`[PositioningEngine-V3] Cross-campaign diversity check skipped: ${err.message}`);
   }
 
-  territories = await layer11_positioningStatementGeneration(territories, category, segmentPriority, accountId, activeMiSnapshot, productDna);
-  console.log(`[PositioningEngine-V3] L11 Statements generated`);
+  territories = await layer11_positioningStatementGeneration(territories, category, segmentPriority, accountId, activeMiSnapshot, productDna, analyticalEnrichment);
+  console.log(`[PositioningEngine-V3] L11 Statements generated | aelProvided=${!!analyticalEnrichment}`);
 
   const boundaryText = territories.map(t =>
     `${t.name} ${t.enemyDefinition} ${t.contrastAxis} ${t.narrativeDirection} ${t.evidenceSignals?.join(" ") || ""}`
