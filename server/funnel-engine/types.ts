@@ -57,9 +57,23 @@ export interface FunnelDifferentiationInput {
   confidenceScore: number | null;
 }
 
+export interface EntryTriggerEnforcement {
+  enforcedBy: string;
+  awarenessRoute: string;
+  triggerClass: string;
+  trustState: string;
+  originalMechanism: string;
+  finalMechanism: string;
+  wasOverridden: boolean;
+  allowedMechanisms: string[];
+  blockedMechanisms: string[];
+  selectionReason: string;
+}
+
 export interface EntryTrigger {
   mechanismType: string;
   purpose: string;
+  awarenessEnforcement?: EntryTriggerEnforcement;
 }
 
 export interface PriorityMatrixDecision {

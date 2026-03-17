@@ -156,6 +156,66 @@ export const TRIGGER_CLASS_TO_FUNNEL_FAMILY: Record<string, { preferred: string[
 export const LOW_READINESS_STAGES = ["unaware", "problem_aware"];
 export const HIGH_READINESS_STAGES = ["product_aware", "most_aware"];
 
+export const AWARENESS_ROUTE_TO_ENTRY_MECHANISMS: Record<string, { allowed: string[]; blocked: string[] }> = {
+  pain_entry: {
+    allowed: ["diagnostic", "audit", "content_education"],
+    blocked: ["challenge"],
+  },
+  opportunity_entry: {
+    allowed: ["challenge", "discovery", "content_education"],
+    blocked: ["audit"],
+  },
+  myth_breaker_entry: {
+    allowed: ["content_education", "diagnostic", "audit"],
+    blocked: ["challenge"],
+  },
+  authority_entry: {
+    allowed: ["audit", "content_education", "discovery"],
+    blocked: ["challenge"],
+  },
+  proof_led_entry: {
+    allowed: ["audit", "content_education", "discovery"],
+    blocked: ["challenge"],
+  },
+  diagnostic_entry: {
+    allowed: ["diagnostic", "audit", "content_education"],
+    blocked: ["challenge", "discovery"],
+  },
+};
+
+export const TRIGGER_CLASS_TO_ENTRY_MECHANISMS: Record<string, { preferred: string[]; blocked: string[] }> = {
+  hidden_cost: {
+    preferred: ["diagnostic", "audit"],
+    blocked: ["challenge"],
+  },
+  missed_opportunity: {
+    preferred: ["challenge", "discovery"],
+    blocked: [],
+  },
+  outdated_method: {
+    preferred: ["content_education", "diagnostic"],
+    blocked: ["challenge"],
+  },
+  authority_gap: {
+    preferred: ["audit", "content_education"],
+    blocked: ["challenge"],
+  },
+  trust_breakdown: {
+    preferred: ["audit", "content_education", "diagnostic"],
+    blocked: ["challenge"],
+  },
+  competitor_weakness: {
+    preferred: ["challenge", "discovery", "diagnostic"],
+    blocked: [],
+  },
+};
+
+export const TRUST_STATE_ENTRY_OVERRIDES: Record<string, { blocked: string[] }> = {
+  low: { blocked: ["challenge", "discovery"] },
+  broken: { blocked: ["challenge", "discovery"] },
+  fragile: { blocked: ["challenge"] },
+};
+
 export const COMMITMENT_TOLERANCE_MAP: Record<string, number> = {
   challenge: 0.6,
   webinar: 0.4,

@@ -1,0 +1,129 @@
+Hi,
+
+The recent update is a strong improvement — the Priority Matrix is working and funnel selection is now correctly constrained by Awareness.
+
+However, there is still a critical inconsistency that needs to be fixed to fully close the loop.
+
+---
+
+## 🔴 Remaining Issue
+
+We are seeing this pattern:
+
+- Funnel type is correctly selected (e.g. webinar, proof-aligned)
+- BUT entry trigger is still set to: challenge
+
+At the same time:
+
+- Challenge is already blocked by awareness
+
+This creates a contradiction inside the same funnel:
+- Selection logic = correct  
+- Entry logic = outdated / fallback  
+
+---
+
+## 🧠 Root Cause
+
+Entry Trigger logic is still operating independently from Awareness constraints.
+
+So even though:
+- Funnel selection respects Awareness
+
+Entry Trigger:
+- is not bound to Awareness route
+- and may inherit legacy/default values (e.g. challenge)
+
+---
+
+## ✅ Required Fix
+
+### Bind Entry Trigger directly to Awareness
+
+Entry Trigger must follow the same Priority Matrix rules as Funnel selection.
+
+---
+
+## 🔁 Enforcement Rule
+
+Implement the following:
+
+If:
+- awareness_route = proof_led_entry  
+- OR trigger_class = trust_breakdown  
+- OR awareness_stage = unaware  
+
+Then:
+
+- entry_trigger MUST be:
+  - proof
+  - authority
+  - education-led
+
+And:
+
+- challenge trigger MUST be blocked
+
+---
+
+## 🔒 Hard Constraint
+
+Entry Trigger must NOT:
+
+- contradict awareness_route  
+- contradict blocked funnel families  
+- default to generic fallback (challenge)
+
+---
+
+## 🧩 Structural Requirement
+
+Ensure Entry Trigger is:
+
+- derived from Awareness (same source as funnel filtering)
+- not independently generated
+- not inherited from previous pipeline state
+
+---
+
+## 🔗 Root Alignment
+
+Please confirm Entry Trigger uses the same:
+
+- strategyRoot  
+- awareness_route  
+- trigger_class  
+- trust_state  
+
+No parallel logic or legacy fallback paths.
+
+---
+
+## 🖥 Frontend Update
+
+Update UI to reflect:
+
+- why a specific entry trigger was selected  
+- which awareness rule enforced it  
+- when a trigger is blocked  
+
+This should be visible just like funnel blocking.
+
+---
+
+## 🎯 Expected Result
+
+After this fix:
+
+- Funnel type and Entry Trigger will be fully aligned  
+- No internal contradictions  
+- Offer Fit should increase (currently limited by entry mismatch)  
+- System behaves consistently from Awareness → Entry → Funnel  
+
+---
+
+This is the final alignment layer needed to fully stabilize the system.
+
+Please implement and notify once complete so I can validate.
+
+Thanks

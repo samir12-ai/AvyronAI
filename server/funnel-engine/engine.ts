@@ -26,6 +26,9 @@ import {
   HIGH_READINESS_STAGES,
   COMMITMENT_TOLERANCE_MAP,
   FUNNEL_TYPES,
+  AWARENESS_ROUTE_TO_ENTRY_MECHANISMS,
+  TRIGGER_CLASS_TO_ENTRY_MECHANISMS,
+  TRUST_STATE_ENTRY_OVERRIDES,
 } from "./constants";
 import {
   assessDataReliability,
@@ -488,43 +491,152 @@ export function layerEntryTriggerDetection(
   audience: FunnelAudienceInput,
   offer: FunnelOfferInput,
   funnelType: string,
+  awarenessInput?: FunnelAwarenessInput | null,
 ): EntryTrigger {
-  const awareness = audience.awarenessLevel || "problem_aware";
+  const awarenessStage = awarenessInput?.awarenessStage || audience.awarenessLevel || "problem_aware";
   const maturity = typeof audience.maturityIndex === "number" ? audience.maturityIndex : (Number(audience.maturityIndex) || 0.5);
   const offerComplexity = offer.deliverables.length > 5 ? "high" : offer.deliverables.length > 2 ? "medium" : "low";
   const buyerFriction = offer.frictionLevel;
   const objectionCount = Object.keys(audience.objectionMap || {}).length;
 
+  const candidateMechanism = selectBaseEntryMechanism(awarenessStage, maturity, offerComplexity, buyerFriction, objectionCount, funnelType);
+
+  if (!awarenessInput) {
+    return {
+      mechanismType: candidateMechanism.type,
+      purpose: candidateMechanism.purpose,
+    };
+  }
+
+  const route = awarenessInput.awarenessRoute || "";
+  const triggerClass = awarenessInput.triggerClass || "";
+  const trustState = awarenessInput.trustState || "";
+
+  const allBlocked = new Set<string>();
+  const allAllowed = new Set<string>(ENTRY_MECHANISM_TYPES);
+  let enforcedBy = "none";
+
+  const routeMapping = AWARENESS_ROUTE_TO_ENTRY_MECHANISMS[route];
+  if (routeMapping) {
+    routeMapping.blocked.forEach(m => allBlocked.add(m));
+    const routeAllowed = new Set(routeMapping.allowed);
+    for (const m of allAllowed) {
+      if (!routeAllowed.has(m)) {
+        allBlocked.add(m);
+        allAllowed.delete(m);
+      }
+    }
+    enforcedBy = `route:${route}`;
+  }
+
+  const triggerMapping = TRIGGER_CLASS_TO_ENTRY_MECHANISMS[triggerClass];
+  if (triggerMapping) {
+    triggerMapping.blocked.forEach(m => {
+      allBlocked.add(m);
+      allAllowed.delete(m);
+    });
+  }
+
+  const trustOverride = TRUST_STATE_ENTRY_OVERRIDES[trustState];
+  if (trustOverride) {
+    trustOverride.blocked.forEach(m => {
+      allBlocked.add(m);
+      allAllowed.delete(m);
+    });
+  }
+
+  if (awarenessStage === "unaware") {
+    allBlocked.add("challenge");
+    allBlocked.add("discovery");
+    allAllowed.delete("challenge");
+    allAllowed.delete("discovery");
+  }
+
+  const allowedArr = Array.from(allAllowed);
+  const blockedArr = Array.from(allBlocked);
+  const needsOverride = !allAllowed.has(candidateMechanism.type);
+  let finalType = candidateMechanism.type;
+  let selectionReason = "Base selection passed awareness constraints";
+
+  if (needsOverride) {
+    const preferred = triggerMapping?.preferred || [];
+    const preferredAllowed = preferred.filter(p => allAllowed.has(p));
+    if (preferredAllowed.length > 0) {
+      finalType = preferredAllowed[0];
+      selectionReason = `Base "${candidateMechanism.type}" blocked by awareness — selected preferred "${finalType}" from trigger_class "${triggerClass}"`;
+    } else if (allowedArr.length > 0) {
+      finalType = allowedArr[0];
+      selectionReason = `Base "${candidateMechanism.type}" blocked by awareness — fell back to allowed "${finalType}"`;
+    } else {
+      finalType = "content_education";
+      selectionReason = `All mechanisms blocked — safe fallback to content_education`;
+    }
+    if (!enforcedBy.startsWith("route:")) {
+      enforcedBy = triggerClass ? `trigger:${triggerClass}` : trustState ? `trust:${trustState}` : `stage:${awarenessStage}`;
+    }
+    console.log(`[FunnelEngine-V3] ENTRY_TRIGGER_OVERRIDE | original=${candidateMechanism.type} → final=${finalType} | ${selectionReason}`);
+  }
+
+  const purposeMap: Record<string, string> = {
+    content_education: "Provide foundational education to establish problem awareness before introducing the solution framework",
+    audit: "Allow prospects to evaluate their current state against a structured assessment before entering the conversion path",
+    diagnostic: "Enable prospects to identify their specific bottleneck or gap before presenting the solution mechanism",
+    challenge: "Guide prospects through a structured experience that demonstrates capability and builds commitment progressively",
+    discovery: "Allow prospects to explore the solution approach at their own pace and self-qualify for the next conversion step",
+  };
+
+  return {
+    mechanismType: finalType,
+    purpose: needsOverride ? purposeMap[finalType] || candidateMechanism.purpose : candidateMechanism.purpose,
+    awarenessEnforcement: {
+      enforcedBy,
+      awarenessRoute: route,
+      triggerClass,
+      trustState,
+      originalMechanism: candidateMechanism.type,
+      finalMechanism: finalType,
+      wasOverridden: needsOverride,
+      allowedMechanisms: allowedArr,
+      blockedMechanisms: blockedArr,
+      selectionReason,
+    },
+  };
+}
+
+function selectBaseEntryMechanism(
+  awareness: string,
+  maturity: number,
+  offerComplexity: string,
+  buyerFriction: number,
+  objectionCount: number,
+  funnelType: string,
+): { type: string; purpose: string } {
   if (awareness === "unaware" || (maturity < 0.3 && objectionCount > 3)) {
     return {
-      mechanismType: "content_education",
+      type: "content_education",
       purpose: "Provide foundational education to establish problem awareness before introducing the solution framework",
     };
   }
-
   if (offerComplexity === "high" && buyerFriction > 0.6) {
     return {
-      mechanismType: "audit",
+      type: "audit",
       purpose: "Allow prospects to evaluate their current state against a structured assessment before entering the conversion path",
     };
   }
-
   if (awareness === "problem_aware" && maturity < 0.5) {
     return {
-      mechanismType: "diagnostic",
+      type: "diagnostic",
       purpose: "Enable prospects to identify their specific bottleneck or gap before presenting the solution mechanism",
     };
   }
-
   if (funnelType === "challenge" || (maturity >= 0.4 && maturity < 0.7 && buyerFriction < 0.5)) {
     return {
-      mechanismType: "challenge",
+      type: "challenge",
       purpose: "Guide prospects through a structured experience that demonstrates capability and builds commitment progressively",
     };
   }
-
   return {
-    mechanismType: "discovery",
+    type: "discovery",
     purpose: "Allow prospects to explore the solution approach at their own pace and self-qualify for the next conversion step",
   };
 }
@@ -809,7 +921,7 @@ function buildFunnelCandidate(
   const rawStageMap = buildStageMap(effectiveType, awarenessStageStr);
   const { compressed: stageMap, wasCompressed } = compressFunnelStages(rawStageMap);
 
-  const entryTrigger = layerEntryTriggerDetection(audience, offer, effectiveType);
+  const entryTrigger = layerEntryTriggerDetection(audience, offer, effectiveType, awarenessInput);
 
   const eligibility = layer1_funnelEligibilityDetection(audience, offer);
   const fitResult = layer2_offerToFunnelFit(offer, audience);

@@ -43,9 +43,23 @@ interface FrictionPoint {
   mitigation: string;
 }
 
+interface EntryTriggerEnforcement {
+  enforcedBy: string;
+  awarenessRoute: string;
+  triggerClass: string;
+  trustState: string;
+  originalMechanism: string;
+  finalMechanism: string;
+  wasOverridden: boolean;
+  allowedMechanisms: string[];
+  blockedMechanisms: string[];
+  selectionReason: string;
+}
+
 interface EntryTrigger {
   mechanismType: string;
   purpose: string;
+  awarenessEnforcement?: EntryTriggerEnforcement;
 }
 
 interface PriorityMatrixDecision {
@@ -303,22 +317,58 @@ export default function FunnelEngine({ isActive }: { isActive?: boolean }) {
           <Text style={[styles.funnelTypeText, { color: colors.textSecondary }]}>{funnel.funnelType}</Text>
         </View>
 
-        {funnel.entryTrigger && funnel.entryTrigger.mechanismType !== "none" && (
-          <View style={[styles.entryTriggerBox, { backgroundColor: '#8B5CF610', borderColor: '#8B5CF630' }]}>
-            <View style={styles.entryTriggerHeader}>
-              <Ionicons name="enter-outline" size={14} color="#8B5CF6" />
-              <Text style={[styles.entryTriggerLabel, { color: '#8B5CF6' }]}>Entry Trigger</Text>
-              <View style={[styles.entryMechanismBadge, { backgroundColor: '#8B5CF620' }]}>
-                <Text style={[styles.entryMechanismText, { color: '#8B5CF6' }]}>
-                  {funnel.entryTrigger.mechanismType.replace(/_/g, ' ')}
-                </Text>
+        {funnel.entryTrigger && funnel.entryTrigger.mechanismType !== "none" && (() => {
+          const enf = funnel.entryTrigger?.awarenessEnforcement;
+          const overridden = enf?.wasOverridden;
+          const triggerColor = overridden ? '#F97316' : '#8B5CF6';
+          return (
+            <View style={[styles.entryTriggerBox, { backgroundColor: triggerColor + '10', borderColor: triggerColor + '30' }]}>
+              <View style={styles.entryTriggerHeader}>
+                <Ionicons name="enter-outline" size={14} color={triggerColor} />
+                <Text style={[styles.entryTriggerLabel, { color: triggerColor }]}>Entry Trigger</Text>
+                <View style={[styles.entryMechanismBadge, { backgroundColor: triggerColor + '20' }]}>
+                  <Text style={[styles.entryMechanismText, { color: triggerColor }]}>
+                    {funnel.entryTrigger!.mechanismType.replace(/_/g, ' ')}
+                  </Text>
+                </View>
               </View>
+              <Text style={[styles.entryTriggerPurpose, { color: colors.textSecondary }]}>
+                {funnel.entryTrigger!.purpose}
+              </Text>
+              {enf && (
+                <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: triggerColor + '20', paddingTop: 8 }}>
+                  {overridden && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                      <Ionicons name="swap-horizontal" size={12} color="#F97316" />
+                      <Text style={{ fontSize: 11, color: '#F97316', fontWeight: '600' as const }}>
+                        Overridden: {enf.originalMechanism.replace(/_/g, ' ')} → {enf.finalMechanism.replace(/_/g, ' ')}
+                      </Text>
+                    </View>
+                  )}
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4 }}>
+                    {enf.selectionReason}
+                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                    <Ionicons name="eye-outline" size={11} color={colors.textMuted} />
+                    <Text style={{ fontSize: 10, color: colors.textMuted }}>
+                      Enforced by: {enf.enforcedBy.replace(/_/g, ' ')}
+                    </Text>
+                  </View>
+                  {enf.blockedMechanisms.length > 0 && (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                      <Text style={{ fontSize: 10, color: '#EF4444', fontWeight: '600' as const }}>Blocked:</Text>
+                      {enf.blockedMechanisms.map((m, i) => (
+                        <View key={i} style={[styles.tag, { backgroundColor: '#EF444415' }]}>
+                          <Text style={[styles.tagText, { color: '#EF4444', fontSize: 10 }]}>{m.replace(/_/g, ' ')}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              )}
             </View>
-            <Text style={[styles.entryTriggerPurpose, { color: colors.textSecondary }]}>
-              {funnel.entryTrigger.purpose}
-            </Text>
-          </View>
-        )}
+          );
+        })()}
 
         {funnel.priorityMatrixDecision && (
           <View style={[styles.priorityMatrixBox, { backgroundColor: funnel.priorityMatrixDecision.wasOverridden ? '#F97316' + '10' : '#10B981' + '10', borderColor: funnel.priorityMatrixDecision.wasOverridden ? '#F97316' + '30' : '#10B981' + '30' }]}>
