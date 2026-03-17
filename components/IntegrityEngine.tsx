@@ -111,18 +111,20 @@ export default function IntegrityEngine({ isActive }: { isActive?: boolean }) {
   }, [isActive, fetchLatest, fetchFunnelSnapshot]);
 
   const runAnalysis = useCallback(async () => {
-    if (!selectedCampaignId || !funnelSnapshotId) {
-      Alert.alert('Missing Dependency', 'A completed Funnel Engine analysis is required before running the Integrity Engine.');
+    if (!selectedCampaignId) {
+      Alert.alert('No Campaign', 'Please select a campaign first.');
       return;
     }
     setAnalyzing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       const url = new URL('/api/integrity-engine/analyze', getApiUrl());
+      const body: any = { campaignId: selectedCampaignId };
+      if (funnelSnapshotId) body.funnelSnapshotId = funnelSnapshotId;
       const res = await fetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaignId: selectedCampaignId, funnelSnapshotId }),
+        body: JSON.stringify(body),
       });
       const json = await safeApiJson(res);
       if (json.success) {

@@ -15,6 +15,9 @@ import { ENGINE_VERSION } from "./constants";
 import { ENGINE_VERSION as FUNNEL_ENGINE_VERSION } from "../funnel-engine/constants";
 import { ENGINE_VERSION as OFFER_ENGINE_VERSION } from "../offer-engine/constants";
 import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/constants";
+import { AUDIENCE_ENGINE_VERSION } from "../audience-engine/constants";
+import { POSITIONING_ENGINE_VERSION } from "../positioning-engine/constants";
+import { ENGINE_VERSION as DIFF_ENGINE_VERSION } from "../differentiation-engine/constants";
 import { getEngineReadinessState, verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
 import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snapshot-trust";
@@ -49,23 +52,35 @@ export function registerIntegrityEngineRoutes(app: Express) {
         });
       }
 
-      if (!funnelSnapshotId) {
-        return res.status(400).json({ error: "funnelSnapshotId is required" });
+      let funnelSnapshot: any;
+      if (funnelSnapshotId) {
+        [funnelSnapshot] = await db.select().from(funnelSnapshots)
+          .where(and(
+            eq(funnelSnapshots.id, funnelSnapshotId),
+            eq(funnelSnapshots.campaignId, campaignId),
+            eq(funnelSnapshots.accountId, accountId),
+          ))
+          .limit(1);
       }
-
-      let [funnelSnapshot] = await db.select().from(funnelSnapshots)
-        .where(and(
-          eq(funnelSnapshots.id, funnelSnapshotId),
-          eq(funnelSnapshots.campaignId, campaignId),
-          eq(funnelSnapshots.accountId, accountId),
-        ))
-        .limit(1);
-
       if (!funnelSnapshot) {
-        return res.status(400).json({
-          error: "MISSING_DEPENDENCY",
-          message: "Funnel snapshot not found or campaign mismatch",
-        });
+        const [latestFunnel] = await db.select().from(funnelSnapshots)
+          .where(and(
+            eq(funnelSnapshots.campaignId, campaignId),
+            eq(funnelSnapshots.accountId, accountId),
+            eq(funnelSnapshots.engineVersion, FUNNEL_ENGINE_VERSION),
+            eq(funnelSnapshots.status, "COMPLETE"),
+          ))
+          .orderBy(desc(funnelSnapshots.createdAt))
+          .limit(1);
+        if (latestFunnel) {
+          funnelSnapshot = latestFunnel;
+          console.log(`[IntegrityEngine-V3] Funnel snapshot resolved via fallback to latest: ${latestFunnel.id}`);
+        } else {
+          return res.status(400).json({
+            error: "MISSING_DEPENDENCY",
+            message: "No valid Funnel snapshot found — please run Funnel Engine first",
+          });
+        }
       }
 
       if (funnelSnapshot.engineVersion !== FUNNEL_ENGINE_VERSION) {
@@ -143,36 +158,64 @@ export function registerIntegrityEngineRoutes(app: Express) {
       const miFreshnessMetadata = buildFreshnessMetadata(miSnapshot);
       logFreshnessTraceability("IntegrityEngine", miSnapshot, miFreshnessMetadata);
 
-      const [audSnapshot] = await db.select().from(audienceSnapshots)
+      let [audSnapshot] = await db.select().from(audienceSnapshots)
         .where(and(eq(audienceSnapshots.id, audienceSnapshotId), eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.accountId, accountId)))
         .limit(1);
-
       if (!audSnapshot) {
-        return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Audience snapshot not found" });
+        const [latestAud] = await db.select().from(audienceSnapshots)
+          .where(and(eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.accountId, accountId), eq(audienceSnapshots.engineVersion, AUDIENCE_ENGINE_VERSION)))
+          .orderBy(desc(audienceSnapshots.createdAt)).limit(1);
+        if (latestAud) {
+          audSnapshot = latestAud;
+          console.log(`[IntegrityEngine-V3] Audience snapshot resolved via fallback to latest: ${latestAud.id}`);
+        } else {
+          return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid Audience snapshot found — please run Audience Engine first" });
+        }
       }
 
-      const [posSnapshot] = await db.select().from(positioningSnapshots)
+      let [posSnapshot] = await db.select().from(positioningSnapshots)
         .where(and(eq(positioningSnapshots.id, positioningSnapshotId), eq(positioningSnapshots.campaignId, campaignId), eq(positioningSnapshots.accountId, accountId)))
         .limit(1);
-
       if (!posSnapshot) {
-        return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Positioning snapshot not found" });
+        const [latestPos] = await db.select().from(positioningSnapshots)
+          .where(and(eq(positioningSnapshots.campaignId, campaignId), eq(positioningSnapshots.accountId, accountId), eq(positioningSnapshots.status, "COMPLETE"), eq(positioningSnapshots.engineVersion, POSITIONING_ENGINE_VERSION)))
+          .orderBy(desc(positioningSnapshots.createdAt)).limit(1);
+        if (latestPos) {
+          posSnapshot = latestPos;
+          console.log(`[IntegrityEngine-V3] Positioning snapshot resolved via fallback to latest: ${latestPos.id}`);
+        } else {
+          return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid Positioning snapshot found — please run Positioning Engine first" });
+        }
       }
 
-      const [diffSnapshot] = await db.select().from(differentiationSnapshots)
+      let [diffSnapshot] = await db.select().from(differentiationSnapshots)
         .where(and(eq(differentiationSnapshots.id, differentiationSnapshotId), eq(differentiationSnapshots.campaignId, campaignId), eq(differentiationSnapshots.accountId, accountId)))
         .limit(1);
-
       if (!diffSnapshot) {
-        return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Differentiation snapshot not found" });
+        const [latestDiff] = await db.select().from(differentiationSnapshots)
+          .where(and(eq(differentiationSnapshots.campaignId, campaignId), eq(differentiationSnapshots.accountId, accountId), inArray(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"]), eq(differentiationSnapshots.engineVersion, DIFF_ENGINE_VERSION)))
+          .orderBy(desc(differentiationSnapshots.createdAt)).limit(1);
+        if (latestDiff) {
+          diffSnapshot = latestDiff;
+          console.log(`[IntegrityEngine-V3] Differentiation snapshot resolved via fallback to latest: ${latestDiff.id}`);
+        } else {
+          return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid Differentiation snapshot found — please run Differentiation Engine first" });
+        }
       }
 
-      const [offerSnapshot] = await db.select().from(offerSnapshots)
+      let [offerSnapshot] = await db.select().from(offerSnapshots)
         .where(and(eq(offerSnapshots.id, offerSnapshotId), eq(offerSnapshots.campaignId, campaignId), eq(offerSnapshots.accountId, accountId)))
         .limit(1);
-
       if (!offerSnapshot) {
-        return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Offer snapshot not found" });
+        const [latestOffer] = await db.select().from(offerSnapshots)
+          .where(and(eq(offerSnapshots.campaignId, campaignId), eq(offerSnapshots.accountId, accountId), eq(offerSnapshots.status, "COMPLETE"), eq(offerSnapshots.engineVersion, OFFER_ENGINE_VERSION)))
+          .orderBy(desc(offerSnapshots.createdAt)).limit(1);
+        if (latestOffer) {
+          offerSnapshot = latestOffer;
+          console.log(`[IntegrityEngine-V3] Offer snapshot resolved via fallback to latest: ${latestOffer.id}`);
+        } else {
+          return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid Offer snapshot found — please run Offer Engine first" });
+        }
       }
 
       const miInput = {

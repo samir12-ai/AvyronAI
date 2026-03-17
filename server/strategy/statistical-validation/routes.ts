@@ -14,6 +14,12 @@ import { eq, and, desc } from "drizzle-orm";
 import { runStatisticalValidationEngine } from "./engine";
 import { ENGINE_VERSION } from "./constants";
 import { ENGINE_VERSION as PERSUASION_ENGINE_VERSION } from "../../persuasion-engine/constants";
+import { ENGINE_VERSION as FUNNEL_ENGINE_VERSION } from "../../funnel-engine/constants";
+import { ENGINE_VERSION as OFFER_ENGINE_VERSION } from "../../offer-engine/constants";
+import { ENGINE_VERSION as AWARENESS_ENGINE_VERSION } from "../../awareness-engine/constants";
+import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../../market-intelligence-v3/constants";
+import { AUDIENCE_ENGINE_VERSION } from "../../audience-engine/constants";
+import { inArray } from "drizzle-orm";
 import { pruneOldSnapshots, checkValidationSession } from "../../engine-hardening";
 import { parseLineageFromSnapshot, mergeLineageArrays } from "../../shared/signal-lineage";
 
@@ -84,31 +90,76 @@ export function registerStatisticalValidationRoutes(app: Express) {
         persuasionSnapshot = latest;
       }
 
-      const awarenessSnapshotId = persuasionSnapshot.awarenessSnapshotId;
-      const offerSnapshotId = persuasionSnapshot.offerSnapshotId;
-      const funnelSnapshotId = persuasionSnapshot.funnelSnapshotId;
-      const miSnapshotId = persuasionSnapshot.miSnapshotId;
-      const audienceSnapshotId = persuasionSnapshot.audienceSnapshotId;
+      const pAwarenessId = persuasionSnapshot.awarenessSnapshotId;
+      const pOfferId = persuasionSnapshot.offerSnapshotId;
+      const pFunnelId = persuasionSnapshot.funnelSnapshotId;
+      const pMiId = persuasionSnapshot.miSnapshotId;
+      const pAudienceId = persuasionSnapshot.audienceSnapshotId;
 
-      const [awarenessSnap] = await db.select().from(awarenessSnapshots)
-        .where(and(eq(awarenessSnapshots.id, awarenessSnapshotId), eq(awarenessSnapshots.campaignId, campaignId), eq(awarenessSnapshots.accountId, accountId)))
-        .limit(1);
+      let awarenessSnap: any;
+      if (pAwarenessId) {
+        [awarenessSnap] = await db.select().from(awarenessSnapshots)
+          .where(and(eq(awarenessSnapshots.id, pAwarenessId), eq(awarenessSnapshots.campaignId, campaignId), eq(awarenessSnapshots.accountId, accountId)))
+          .limit(1);
+      }
+      if (!awarenessSnap) {
+        [awarenessSnap] = await db.select().from(awarenessSnapshots)
+          .where(and(eq(awarenessSnapshots.campaignId, campaignId), eq(awarenessSnapshots.accountId, accountId), eq(awarenessSnapshots.status, "COMPLETE"), eq(awarenessSnapshots.engineVersion, AWARENESS_ENGINE_VERSION)))
+          .orderBy(desc(awarenessSnapshots.createdAt)).limit(1);
+        if (awarenessSnap) console.log(`[StatisticalValidation] Awareness snapshot resolved via fallback to latest: ${awarenessSnap.id}`);
+      }
 
-      const [offerSnap] = await db.select().from(offerSnapshots)
-        .where(and(eq(offerSnapshots.id, offerSnapshotId), eq(offerSnapshots.campaignId, campaignId), eq(offerSnapshots.accountId, accountId)))
-        .limit(1);
+      let offerSnap: any;
+      if (pOfferId) {
+        [offerSnap] = await db.select().from(offerSnapshots)
+          .where(and(eq(offerSnapshots.id, pOfferId), eq(offerSnapshots.campaignId, campaignId), eq(offerSnapshots.accountId, accountId)))
+          .limit(1);
+      }
+      if (!offerSnap) {
+        [offerSnap] = await db.select().from(offerSnapshots)
+          .where(and(eq(offerSnapshots.campaignId, campaignId), eq(offerSnapshots.accountId, accountId), eq(offerSnapshots.status, "COMPLETE"), eq(offerSnapshots.engineVersion, OFFER_ENGINE_VERSION)))
+          .orderBy(desc(offerSnapshots.createdAt)).limit(1);
+        if (offerSnap) console.log(`[StatisticalValidation] Offer snapshot resolved via fallback to latest: ${offerSnap.id}`);
+      }
 
-      const [funnelSnap] = await db.select().from(funnelSnapshots)
-        .where(and(eq(funnelSnapshots.id, funnelSnapshotId), eq(funnelSnapshots.campaignId, campaignId), eq(funnelSnapshots.accountId, accountId)))
-        .limit(1);
+      let funnelSnap: any;
+      if (pFunnelId) {
+        [funnelSnap] = await db.select().from(funnelSnapshots)
+          .where(and(eq(funnelSnapshots.id, pFunnelId), eq(funnelSnapshots.campaignId, campaignId), eq(funnelSnapshots.accountId, accountId)))
+          .limit(1);
+      }
+      if (!funnelSnap) {
+        [funnelSnap] = await db.select().from(funnelSnapshots)
+          .where(and(eq(funnelSnapshots.campaignId, campaignId), eq(funnelSnapshots.accountId, accountId), eq(funnelSnapshots.status, "COMPLETE"), eq(funnelSnapshots.engineVersion, FUNNEL_ENGINE_VERSION)))
+          .orderBy(desc(funnelSnapshots.createdAt)).limit(1);
+        if (funnelSnap) console.log(`[StatisticalValidation] Funnel snapshot resolved via fallback to latest: ${funnelSnap.id}`);
+      }
 
-      const [miSnap] = await db.select().from(miSnapshots)
-        .where(and(eq(miSnapshots.id, miSnapshotId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId)))
-        .limit(1);
+      let miSnap: any;
+      if (pMiId) {
+        [miSnap] = await db.select().from(miSnapshots)
+          .where(and(eq(miSnapshots.id, pMiId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId)))
+          .limit(1);
+      }
+      if (!miSnap) {
+        [miSnap] = await db.select().from(miSnapshots)
+          .where(and(eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId), inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]), eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION)))
+          .orderBy(desc(miSnapshots.createdAt)).limit(1);
+        if (miSnap) console.log(`[StatisticalValidation] MI snapshot resolved via fallback to latest: ${miSnap.id}`);
+      }
 
-      const [audSnap] = await db.select().from(audienceSnapshots)
-        .where(and(eq(audienceSnapshots.id, audienceSnapshotId), eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.accountId, accountId)))
-        .limit(1);
+      let audSnap: any;
+      if (pAudienceId) {
+        [audSnap] = await db.select().from(audienceSnapshots)
+          .where(and(eq(audienceSnapshots.id, pAudienceId), eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.accountId, accountId)))
+          .limit(1);
+      }
+      if (!audSnap) {
+        [audSnap] = await db.select().from(audienceSnapshots)
+          .where(and(eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.accountId, accountId), eq(audienceSnapshots.engineVersion, AUDIENCE_ENGINE_VERSION)))
+          .orderBy(desc(audienceSnapshots.createdAt)).limit(1);
+        if (audSnap) console.log(`[StatisticalValidation] Audience snapshot resolved via fallback to latest: ${audSnap.id}`);
+      }
 
       if (!awarenessSnap || !offerSnap || !funnelSnap || !miSnap || !audSnap) {
         const missing: string[] = [];
