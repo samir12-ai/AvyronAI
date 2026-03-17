@@ -1,0 +1,282 @@
+Channel 
+
+subject=“FINAL DIRECTIVE: Channel Selection Engine Failure — Mandatory Awareness-Based Rebuild & Proof Required”}
+
+Dear Team,
+
+This is a FINAL escalation regarding a critical failure in the Channel Selection Engine.
+
+Despite multiple corrections and auto-recovery mechanisms, the system continues to produce strategically invalid channel decisions.
+
+This is not acceptable.
+
+From this point forward:
+
+Any channel decision not aligned with audience awareness stage is considered a system failure.
+
+⸻
+
+🔴 CORE FAILURE
+
+Current system output confirms:
+	•	Decision Gate Score: 50% (FAIL)
+	•	Persuasion Compatibility: 31% (CRITICAL FAILURE)
+	•	Awareness Channel Mapping: 35% (FAIL)
+	•	Boundary Violation detected:
+	•	"marketing copy" domain leakage into channel logic
+
+⸻
+
+❌ WHAT THIS MEANS
+
+The system is currently:
+	•	Selecting channels based on performance assumptions, not awareness reality
+	•	Assigning:
+	•	Search (capture channels) to unaware audiences
+	•	Mixing:
+	•	Persuasion outputs with channel decision logic (cross-layer contamination)
+	•	Relying on:
+	•	auto-reassignment (“structural repair”) instead of fixing root logic
+
+👉 In effect:
+
+The system is optimizing channels without understanding WHEN they should be used
+
+⸻
+
+⚠️ ROOT CAUSE
+
+Failure exists in:
+
+👉 Awareness → Channel Mapping Layer
+
+Specifically:
+	•	No enforced relationship between:
+	•	audience stage
+	•	channel role
+	•	Missing channel classification by funnel stage
+	•	Decision engine bypassing awareness constraints
+	•	Recovery system masking core logic failure
+
+⸻
+
+🎯 MANDATORY FIX — EXECUTION PLAN
+
+⸻
+
+1. Enforce Awareness-Based Channel Constraint (NON-NEGOTIABLE)
+
+FOR each selected_channel:
+    REQUIRE channel.role == awareness_stage.allowed_roles
+
+IF mismatch:
+    BLOCK selection
+    THROW ERROR: "INVALID_CHANNEL_FOR_AWARENESS"
+
+⸻
+
+2. Define Canonical Channel Role System
+
+You MUST classify ALL channels:
+
+Awareness (Discovery / Interrupt)
+	•	TikTok (organic/paid)
+	•	Meta (FB/IG)
+	•	YouTube (broad)
+	•	Influencer / UGC
+
+⸻
+
+Consideration (Nurture / Trust)
+	•	Email
+	•	Retargeting
+	•	YouTube (deep)
+	•	Community / content hubs
+
+⸻
+
+Conversion (Capture Demand)
+	•	Google Search Ads
+	•	SEO
+	•	Referral
+	•	Direct intent channels
+
+⸻
+
+❗ Each channel MUST include:
+	•	role
+	•	allowed awareness stages
+	•	restriction rules
+
+⸻
+
+3. Block Invalid Channel Assignments
+
+Example (MANDATORY)
+
+IF audience_stage == "unaware":
+    DISALLOW search_paid
+    DISALLOW direct conversion channels
+
+4. Remove “Fake Recovery” Logic
+
+IF system.auto_reassign == TRUE:
+    REQUIRE root_cause_fixed == TRUE
+
+ELSE:
+    BLOCK execution
+
+❗ No reassignment without fixing source logic
+
+⸻
+
+5. Fix Boundary Isolation (CRITICAL)
+
+You MUST enforce strict separation:
+
+channel_engine.input != persuasion_output.raw_text
+
+	•	Channel logic must ONLY use:
+	•	structured signals
+	•	awareness state
+	•	validated inputs
+
+❗ Any content leakage = system violation
+
+⸻
+
+6. Introduce Channel Role Assignment Logic
+
+channel.role = function(awareness_stage, intent_level)
+
+IF unaware:
+    assign discovery channels ONLY
+
+IF problem-aware:
+    assign nurture + light intent channels
+
+IF solution-aware:
+    allow mixed
+
+IF ready:
+    allow conversion channels
+
+⸻
+
+7. Enforce Multi-Stage Funnel Distribution
+
+System MUST NOT:
+	•	Assign all channels to conversion
+
+System MUST:
+
+allocate channels across:
+    awareness
+    consideration
+    conversion
+
+⸻
+
+⚠️ FAILURE POINTS TO ELIMINATE
+
+You MUST explicitly verify:
+	•	Search channels assigned to unaware audiences
+	•	Channels selected without awareness validation
+	•	Persuasion influencing channel logic
+	•	Auto-repair masking real issues
+	•	Missing role classification for any channel
+	•	Over-allocation to conversion stage
+
+⸻
+
+🔒 EXECUTION RULES
+	•	No partial fixes
+	•	No “best match” logic
+	•	No fallback assumptions
+	•	All channel decisions MUST be deterministic and awareness-driven
+
+⸻
+
+✅ ACCEPTANCE CRITERIA (EXTREMELY STRICT)
+
+⸻
+
+1. Awareness Alignment
+
+Input:
+	•	audience_stage = unaware
+
+Expected:
+	•	100% channels = discovery ONLY
+	•	0% conversion channels
+
+⸻
+
+2. Decision Gate Score
+	•	Must increase from 50% → ≥ 85%
+
+⸻
+
+3. Persuasion Compatibility
+	•	Must increase from 31% → ≥ 75%
+
+⸻
+
+4. Awareness Mapping
+	•	Must increase from 35% → ≥ 80%
+
+⸻
+
+5. Boundary Integrity
+	•	0 boundary violations
+	•	Any violation = automatic rejection
+
+⸻
+
+6. Channel Distribution
+	•	Must include:
+	•	awareness channels ✔
+	•	consideration channels ✔
+	•	conversion channels (ONLY when valid) ✔
+
+⸻
+
+📊 PROOF OF IMPLEMENTATION (MANDATORY)
+
+You MUST provide:
+	1.	Before vs After (channel outputs)
+	2.	Channel role registry (full definition)
+	3.	Logs proving:
+	•	awareness constraint enforcement
+	•	blocked invalid channels
+	4.	Test cases:
+	•	unaware scenario
+	•	mixed awareness scenario
+	5.	Funnel distribution output
+	6.	Proof that auto-repair is disabled or conditional
+
+❗ Missing ANY proof = rejection
+
+⸻
+
+🔥 FINAL STATEMENT
+
+This is not a tuning issue.
+
+This is a fundamental strategic failure in channel intelligence.
+
+The system must evolve from:
+
+“Selecting high-performing channels”
+
+To:
+
+“Selecting the RIGHT channel for the RIGHT user at the RIGHT stage”
+
+⸻
+
+Any solution that does not fully enforce awareness-driven channel logic will be rejected.
+
+Awaiting full implementation with proof.
+
+Best regards,

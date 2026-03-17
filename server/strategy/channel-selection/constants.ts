@@ -1,7 +1,7 @@
 import type { SoftPattern } from "../../engine-hardening/types";
 import type { ChannelDifferentiation } from "./types";
 
-export const ENGINE_VERSION = 3;
+export const ENGINE_VERSION = 4;
 
 export const STATUS = {
   COMPLETE: "COMPLETE",
@@ -10,6 +10,7 @@ export const STATUS = {
   FALLBACK: "FALLBACK",
   DECISION_GATE_DOWNGRADE: "DECISION_GATE_DOWNGRADE",
   FUNNEL_RECONSTRUCTED: "FUNNEL_RECONSTRUCTED",
+  AWARENESS_BLOCKED: "AWARENESS_BLOCKED",
 } as const;
 
 export const FUNNEL_ROLE_THRESHOLDS = {
@@ -218,11 +219,11 @@ export const LAYER_NAMES = [
 ] as const;
 
 export const LAYER_WEIGHTS: Record<string, number> = {
-  audience_density_assessment: 0.18,
-  awareness_channel_mapping: 0.14,
-  persuasion_mode_compatibility: 0.16,
+  audience_density_assessment: 0.16,
+  awareness_channel_mapping: 0.20,
+  persuasion_mode_compatibility: 0.14,
   budget_constraint_check: 0.10,
-  cost_efficiency_scoring: 0.14,
+  cost_efficiency_scoring: 0.12,
   risk_assessment: 0.10,
   channel_fit_scoring: 0.08,
   guard_layer: 0.05,
@@ -296,3 +297,149 @@ export const BOUNDARY_SOFT_PATTERNS: SoftPattern[] = [
   { pattern: /\b(headline|headlines)\b/gi, domain: "headline", replacement: "attention signal" },
   { pattern: /\b(scroll.?stop)\b/gi, domain: "scroll stop", replacement: "attention capture" },
 ];
+
+export type ChannelFunnelRole = "discovery" | "nurture" | "conversion";
+
+export interface ChannelRoleEntry {
+  channelKey: string;
+  role: ChannelFunnelRole;
+  allowedAwarenessStages: string[];
+  blockedAwarenessStages: string[];
+  restrictionRules: string[];
+}
+
+export const CHANNEL_ROLE_REGISTRY: Record<string, ChannelRoleEntry> = {
+  instagram_organic: {
+    channelKey: "instagram_organic",
+    role: "discovery",
+    allowedAwarenessStages: ["unaware", "problem_aware", "solution_aware"],
+    blockedAwarenessStages: [],
+    restrictionRules: ["Interrupt/discovery channel — best for top-of-funnel audience building"],
+  },
+  instagram_paid: {
+    channelKey: "instagram_paid",
+    role: "discovery",
+    allowedAwarenessStages: ["problem_aware", "solution_aware", "product_aware"],
+    blockedAwarenessStages: ["unaware"],
+    restrictionRules: ["Paid discovery requires minimum problem awareness for ad targeting effectiveness"],
+  },
+  facebook_organic: {
+    channelKey: "facebook_organic",
+    role: "discovery",
+    allowedAwarenessStages: ["unaware", "problem_aware", "solution_aware"],
+    blockedAwarenessStages: [],
+    restrictionRules: ["Community-driven discovery — groups and shares for awareness building"],
+  },
+  facebook_paid: {
+    channelKey: "facebook_paid",
+    role: "discovery",
+    allowedAwarenessStages: ["problem_aware", "solution_aware", "product_aware"],
+    blockedAwarenessStages: ["unaware"],
+    restrictionRules: ["Paid discovery requires problem awareness minimum for effective targeting"],
+  },
+  google_search: {
+    channelKey: "google_search",
+    role: "conversion",
+    allowedAwarenessStages: ["solution_aware", "product_aware", "most_aware"],
+    blockedAwarenessStages: ["unaware", "problem_aware"],
+    restrictionRules: ["Intent-capture channel — audience MUST have existing search intent", "HARD BLOCK for unaware/problem_aware — they don't search for solutions they don't know exist"],
+  },
+  google_organic: {
+    channelKey: "google_organic",
+    role: "nurture",
+    allowedAwarenessStages: ["problem_aware", "solution_aware", "product_aware", "most_aware"],
+    blockedAwarenessStages: ["unaware"],
+    restrictionRules: ["SEO content serves problem-aware+ audiences searching for information"],
+  },
+  youtube_organic: {
+    channelKey: "youtube_organic",
+    role: "discovery",
+    allowedAwarenessStages: ["unaware", "problem_aware", "solution_aware"],
+    blockedAwarenessStages: [],
+    restrictionRules: ["Broad discovery via algorithm recommendations — deep content builds trust"],
+  },
+  youtube_paid: {
+    channelKey: "youtube_paid",
+    role: "discovery",
+    allowedAwarenessStages: ["problem_aware", "solution_aware", "product_aware"],
+    blockedAwarenessStages: ["unaware"],
+    restrictionRules: ["Paid video discovery — requires problem awareness for ad relevance"],
+  },
+  email_marketing: {
+    channelKey: "email_marketing",
+    role: "nurture",
+    allowedAwarenessStages: ["problem_aware", "solution_aware", "product_aware", "most_aware"],
+    blockedAwarenessStages: ["unaware"],
+    restrictionRules: ["Owned audience nurture — requires existing relationship/opt-in"],
+  },
+  tiktok_organic: {
+    channelKey: "tiktok_organic",
+    role: "discovery",
+    allowedAwarenessStages: ["unaware", "problem_aware", "solution_aware"],
+    blockedAwarenessStages: [],
+    restrictionRules: ["Strongest discovery channel — FYP algorithm surfaces content to cold audiences"],
+  },
+  tiktok_paid: {
+    channelKey: "tiktok_paid",
+    role: "discovery",
+    allowedAwarenessStages: ["problem_aware", "solution_aware"],
+    blockedAwarenessStages: ["unaware"],
+    restrictionRules: ["Paid channel — unaware audiences must be reached via organic/community channels only"],
+  },
+  linkedin_organic: {
+    channelKey: "linkedin_organic",
+    role: "nurture",
+    allowedAwarenessStages: ["problem_aware", "solution_aware", "product_aware"],
+    blockedAwarenessStages: ["unaware"],
+    restrictionRules: ["Professional network nurture — B2B trust and authority building"],
+  },
+  linkedin_paid: {
+    channelKey: "linkedin_paid",
+    role: "conversion",
+    allowedAwarenessStages: ["solution_aware", "product_aware", "most_aware"],
+    blockedAwarenessStages: ["unaware", "problem_aware"],
+    restrictionRules: ["High-CPM conversion channel — only viable for audiences with solution/product awareness"],
+  },
+  referral_program: {
+    channelKey: "referral_program",
+    role: "conversion",
+    allowedAwarenessStages: ["product_aware", "most_aware"],
+    blockedAwarenessStages: ["unaware", "problem_aware", "solution_aware"],
+    restrictionRules: ["Requires existing customers to refer — audience must already know the product"],
+  },
+  community_building: {
+    channelKey: "community_building",
+    role: "nurture",
+    allowedAwarenessStages: ["unaware", "problem_aware", "solution_aware", "product_aware"],
+    blockedAwarenessStages: [],
+    restrictionRules: ["Long-term nurture through belonging and trust — works across awareness stages"],
+  },
+  partnerships: {
+    channelKey: "partnerships",
+    role: "nurture",
+    allowedAwarenessStages: ["problem_aware", "solution_aware", "product_aware", "most_aware"],
+    blockedAwarenessStages: ["unaware"],
+    restrictionRules: ["Cross-audience trust transfer — partner audience must have minimum awareness"],
+  },
+};
+
+export const AWARENESS_STAGE_ALLOWED_ROLES: Record<string, ChannelFunnelRole[]> = {
+  unaware: ["discovery"],
+  problem_aware: ["discovery", "nurture"],
+  solution_aware: ["discovery", "nurture", "conversion"],
+  product_aware: ["nurture", "conversion"],
+  most_aware: ["conversion", "nurture"],
+};
+
+export const AWARENESS_BLOCKED_CHANNEL_TYPES: Record<string, string[]> = {
+  unaware: ["social_paid", "search_paid", "search_organic", "email", "referral", "direct", "partnerships"],
+  problem_aware: ["search_paid", "referral", "direct"],
+};
+
+export const AWARENESS_INJECTION_PRIORITY: Record<string, readonly string[]> = {
+  unaware: ["tiktok_organic", "instagram_organic", "youtube_organic", "facebook_organic", "community_building"],
+  problem_aware: ["instagram_organic", "youtube_organic", "tiktok_organic", "facebook_organic", "google_organic"],
+  solution_aware: CONVERSION_INJECTION_PRIORITY,
+  product_aware: CONVERSION_INJECTION_PRIORITY,
+  most_aware: ["email_marketing", "referral_program", "google_search"],
+};

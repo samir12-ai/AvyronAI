@@ -17,6 +17,10 @@ import {
   CONVERSION_INJECTION_PRIORITY,
   PERSUASION_CORRECTION_FLOOR,
   CHANNEL_SCALABILITY,
+  CHANNEL_ROLE_REGISTRY,
+  AWARENESS_STAGE_ALLOWED_ROLES,
+  AWARENESS_BLOCKED_CHANNEL_TYPES,
+  AWARENESS_INJECTION_PRIORITY,
 } from "./constants";
 import { enforceBoundaryWithSanitization } from "../../engine-hardening";
 import type {
@@ -141,38 +145,115 @@ function scoreAudienceDensity(audience: ChannelAudienceInput, channelKey: string
   };
 }
 
-function scoreAwarenessMapping(awareness: ChannelAwarenessInput | null, channelDef: { type: string }): LayerResult {
+function enforceAwarenessConstraint(
+  awareness: ChannelAwarenessInput | null,
+  channelKey: string,
+  channelDef: { type: string; label: string },
+): { allowed: boolean; blocked: boolean; blockReason: string | null; role: string | null; diagnostics: string[] } {
+  const diagnostics: string[] = [];
+
+  if (!awareness) {
+    diagnostics.push("No awareness data — awareness constraint not enforced");
+    return { allowed: true, blocked: false, blockReason: null, role: null, diagnostics };
+  }
+
+  const stage = safeString(awareness.targetReadinessStage, "problem_aware").toLowerCase().trim();
+  const registry = CHANNEL_ROLE_REGISTRY[channelKey];
+
+  if (!registry) {
+    diagnostics.push(`No role registry entry for "${channelKey}" — channel allowed with advisory`);
+    return { allowed: true, blocked: false, blockReason: null, role: null, diagnostics };
+  }
+
+  if (registry.blockedAwarenessStages.includes(stage)) {
+    const blockReason = `AWARENESS_BLOCKED: "${channelDef.label}" (role: ${registry.role}) is blocked for "${stage}" audience — ${registry.restrictionRules[0] || "awareness stage mismatch"}`;
+    diagnostics.push(blockReason);
+    return { allowed: false, blocked: true, blockReason, role: registry.role, diagnostics };
+  }
+
+  const blockedTypes = AWARENESS_BLOCKED_CHANNEL_TYPES[stage] || [];
+  if (blockedTypes.includes(channelDef.type)) {
+    const blockReason = `AWARENESS_TYPE_BLOCKED: Channel type "${channelDef.type}" is blocked for "${stage}" audience stage`;
+    diagnostics.push(blockReason);
+    return { allowed: false, blocked: true, blockReason, role: registry.role, diagnostics };
+  }
+
+  const allowedRoles = AWARENESS_STAGE_ALLOWED_ROLES[stage] || ["discovery", "nurture", "conversion"];
+  if (!allowedRoles.includes(registry.role)) {
+    const blockReason = `AWARENESS_ROLE_BLOCKED: Channel role "${registry.role}" is not allowed for "${stage}" audience — only [${allowedRoles.join(", ")}] permitted`;
+    diagnostics.push(blockReason);
+    return { allowed: false, blocked: true, blockReason, role: registry.role, diagnostics };
+  }
+
+  if (registry.allowedAwarenessStages.includes(stage)) {
+    diagnostics.push(`Channel "${channelDef.label}" (role: ${registry.role}) ALLOWED for "${stage}" audience`);
+    return { allowed: true, blocked: false, blockReason: null, role: registry.role, diagnostics };
+  }
+
+  diagnostics.push(`Channel "${channelDef.label}" not explicitly listed for "${stage}" — allowed by role compatibility`);
+  return { allowed: true, blocked: false, blockReason: null, role: registry.role, diagnostics };
+}
+
+function scoreAwarenessMapping(awareness: ChannelAwarenessInput | null, channelKey: string, channelDef: { type: string; label: string }): { layer: LayerResult; awarenessBlocked: boolean; awarenessBlockReason: string | null } {
   const findings: string[] = [];
   const warnings: string[] = [];
 
   if (!awareness) {
     return {
-      layerName: "awareness_channel_mapping",
-      passed: false,
-      score: 0.3,
-      findings: ["No awareness data — using default channel mapping"],
-      warnings: ["Awareness input missing — channel selection less precise"],
+      layer: {
+        layerName: "awareness_channel_mapping",
+        passed: false,
+        score: 0.3,
+        findings: ["No awareness data — using default channel mapping"],
+        warnings: ["Awareness input missing — channel selection less precise"],
+      },
+      awarenessBlocked: false,
+      awarenessBlockReason: null,
+    };
+  }
+
+  const constraint = enforceAwarenessConstraint(awareness, channelKey, channelDef);
+  findings.push(...constraint.diagnostics);
+
+  if (constraint.blocked) {
+    return {
+      layer: {
+        layerName: "awareness_channel_mapping",
+        passed: false,
+        score: 0,
+        findings,
+        warnings: [constraint.blockReason!],
+      },
+      awarenessBlocked: true,
+      awarenessBlockReason: constraint.blockReason,
     };
   }
 
   const stage = safeString(awareness.targetReadinessStage, "problem_aware");
   const compatibleTypes = AWARENESS_CHANNEL_MAP[stage] || AWARENESS_CHANNEL_MAP["problem_aware"];
-  const isCompatible = compatibleTypes.includes(channelDef.type);
-  const score = isCompatible ? 0.8 : 0.35;
+  const isTypeCompatible = compatibleTypes.includes(channelDef.type);
+  const score = isTypeCompatible ? 0.85 : 0.45;
 
   findings.push(`Awareness stage: ${stage}`);
-  findings.push(`Channel type ${channelDef.type} ${isCompatible ? "compatible" : "mismatched"} with stage`);
+  findings.push(`Channel type "${channelDef.type}" ${isTypeCompatible ? "compatible" : "sub-optimal"} for stage`);
+  if (constraint.role) {
+    findings.push(`Channel role: ${constraint.role}`);
+  }
 
-  if (!isCompatible) {
-    warnings.push(`Channel type "${channelDef.type}" is not optimal for "${stage}" awareness stage`);
+  if (!isTypeCompatible) {
+    warnings.push(`Channel type "${channelDef.type}" is sub-optimal for "${stage}" awareness stage — allowed but lower priority`);
   }
 
   return {
-    layerName: "awareness_channel_mapping",
-    passed: isCompatible,
-    score,
-    findings,
-    warnings,
+    layer: {
+      layerName: "awareness_channel_mapping",
+      passed: isTypeCompatible,
+      score,
+      findings,
+      warnings,
+    },
+    awarenessBlocked: false,
+    awarenessBlockReason: null,
   };
 }
 
@@ -455,6 +536,7 @@ function attemptPersuasionCorrection(
 function runFunnelResolutionLayer(
   candidates: { key: string; persuasionLayer: LayerResult; guardLayer: LayerResult; budgetLayer: LayerResult }[],
   persuasion: ChannelPersuasionInput | null,
+  awarenessStage: string = "problem_aware",
 ): { resolution: FunnelReconstructionResult; rescuedChannels: Set<string>; funnelLayer: LayerResult } {
   const reconstructionLog: string[] = [];
   const funnelStages: FunnelReconstructionResult["funnelStages"] = {
@@ -491,7 +573,7 @@ function runFunnelResolutionLayer(
     const reconstructionLog: string[] = ["No persuasion incompatibilities detected — standard channel evaluation applied"];
 
     if (funnelStages.conversion.length === 0) {
-      const injected = injectConversionChannel(funnelStages, candidates, persuasion?.persuasionMode || "trust_building", reconstructionLog);
+      const injected = injectConversionChannel(funnelStages, candidates, persuasion?.persuasionMode || "trust_building", reconstructionLog, awarenessStage);
       if (injected) {
         reconstructionLog.push("Conversion channel injected to ensure funnel completeness");
       }
@@ -628,7 +710,7 @@ function runFunnelResolutionLayer(
   }
 
   if (funnelStages.conversion.length === 0) {
-    const injected = injectConversionChannel(funnelStages, candidates, persuasionMode, reconstructionLog);
+    const injected = injectConversionChannel(funnelStages, candidates, persuasionMode, reconstructionLog, awarenessStage);
     if (injected) channelsRescued++;
   }
 
@@ -675,10 +757,36 @@ function injectConversionChannel(
   candidates: { key: string; persuasionLayer: LayerResult; guardLayer: LayerResult; budgetLayer: LayerResult }[],
   persuasionMode: string,
   reconstructionLog: string[],
+  awarenessStage: string = "problem_aware",
 ): boolean {
-  for (const channelKey of CONVERSION_INJECTION_PRIORITY) {
+  const injectionList = AWARENESS_INJECTION_PRIORITY[awarenessStage] || CONVERSION_INJECTION_PRIORITY;
+
+  for (const channelKey of injectionList) {
     const cap = CHANNEL_FUNNEL_CAPABILITIES[channelKey];
     if (!cap || cap.conversion < FUNNEL_ROLE_THRESHOLDS.conversion) continue;
+
+    const def = CHANNEL_DEFINITIONS[channelKey];
+    if (!def) continue;
+
+    const registry = CHANNEL_ROLE_REGISTRY[channelKey];
+    if (registry && registry.blockedAwarenessStages.includes(awarenessStage)) {
+      reconstructionLog.push(`INJECTION BLOCKED: "${def.label}" blocked by awareness registry constraint for "${awarenessStage}" audience`);
+      continue;
+    }
+
+    const blockedTypes = AWARENESS_BLOCKED_CHANNEL_TYPES[awarenessStage] || [];
+    if (blockedTypes.includes(def.type)) {
+      reconstructionLog.push(`INJECTION BLOCKED: "${def.label}" (type: ${def.type}) blocked by awareness type constraint for "${awarenessStage}" audience`);
+      continue;
+    }
+
+    if (registry) {
+      const allowedRoles = AWARENESS_STAGE_ALLOWED_ROLES[awarenessStage] || ["discovery", "nurture", "conversion"];
+      if (!allowedRoles.includes(registry.role)) {
+        reconstructionLog.push(`INJECTION BLOCKED: "${def.label}" (role: ${registry.role}) blocked by awareness role constraint for "${awarenessStage}" audience`);
+        continue;
+      }
+    }
 
     const candidate = candidates.find(c => c.key === channelKey);
     if (candidate && !candidate.guardLayer.passed) continue;
@@ -690,10 +798,7 @@ function injectConversionChannel(
       ...funnelStages.conversion,
     ].some(a => a.channelKey === channelKey);
 
-    const def = CHANNEL_DEFINITIONS[channelKey];
-    if (!def) continue;
-
-    const injectionReason = `Funnel missing conversion stage — "${def.label}" auto-injected based on conversion capability (${(cap.conversion * 100).toFixed(0)}%)${alreadyAssigned ? ". Channel also serves another funnel stage." : ""}`;
+    const injectionReason = `Funnel missing conversion stage — "${def.label}" auto-injected based on conversion capability (${(cap.conversion * 100).toFixed(0)}%), validated against "${awarenessStage}" awareness constraint${alreadyAssigned ? ". Channel also serves another funnel stage." : ""}`;
 
     funnelStages.conversion.push({
       channelName: def.label,
@@ -706,14 +811,14 @@ function injectConversionChannel(
       injectionReason,
       injectionStage: "conversion",
       persuasionCorrectionApplied: false,
-      reasoning: `CONVERSION INJECTION: "${def.label}" auto-assigned to Conversion stage to ensure funnel completeness (conversion capability: ${(cap.conversion * 100).toFixed(0)}%). ${alreadyAssigned ? "Channel also serves another funnel stage." : ""}`,
+      reasoning: `CONVERSION INJECTION: "${def.label}" auto-assigned to Conversion stage — awareness-validated for "${awarenessStage}" (conversion capability: ${(cap.conversion * 100).toFixed(0)}%). ${alreadyAssigned ? "Channel also serves another funnel stage." : ""}`,
     });
 
-    reconstructionLog.push(`FUNNEL COMPLETION: Injected "${def.label}" into Conversion stage (capability: ${(cap.conversion * 100).toFixed(0)}%) — funnel was missing conversion layer`);
+    reconstructionLog.push(`FUNNEL COMPLETION: Injected "${def.label}" into Conversion stage (capability: ${(cap.conversion * 100).toFixed(0)}%, awareness: ${awarenessStage}) — funnel was missing conversion layer`);
     return true;
   }
 
-  reconstructionLog.push("FUNNEL COMPLETION FAILED: Could not find a viable conversion channel to inject — manual funnel design required");
+  reconstructionLog.push(`FUNNEL COMPLETION FAILED: Could not find a viable awareness-valid conversion channel for "${awarenessStage}" audience — manual funnel design required`);
   return false;
 }
 
@@ -740,7 +845,9 @@ function runDecisionGate(
     violations.push("Budget logic invalid or insufficient");
   }
 
-  if (!awarenessLayer.passed && awarenessLayer.score <= 0.35) {
+  if (!awarenessLayer.passed && awarenessLayer.score === 0) {
+    violations.push(`AWARENESS HARD BLOCK — channel awareness score is 0 (awareness constraint violation)`);
+  } else if (!awarenessLayer.passed && awarenessLayer.score <= 0.35) {
     violations.push(`Channel objective mismatch — awareness mapping score ${(awarenessLayer.score * 100).toFixed(0)}%`);
   }
 
@@ -748,7 +855,10 @@ function runDecisionGate(
   let reason = `Channel "${channelDef.label}" passed all decision gate checks`;
 
   if (violations.length > 0) {
-    if (!guardLayer.passed) {
+    if (awarenessLayer.score === 0) {
+      outcome = "exploratory";
+      reason = `Channel "${channelDef.label}" REJECTED — awareness constraint hard block: channel incompatible with audience awareness stage`;
+    } else if (!guardLayer.passed) {
       outcome = "exploratory";
       reason = `Channel "${channelDef.label}" downgraded to Exploratory — ${violations.length} gate violation(s): ${violations.join("; ")}`;
     } else if (persuasionLayer.score < PERSUASION_COMPATIBILITY_THRESHOLD) {
@@ -908,6 +1018,7 @@ function buildChannelCandidate(
       wasReconstructed: false,
       autoInjectedConversion: false,
       persuasionCorrectionApplied: false,
+      awarenessConstraintViolation: false,
     };
   }
 
@@ -970,6 +1081,7 @@ function buildChannelCandidate(
     wasReconstructed: false,
     autoInjectedConversion: false,
     persuasionCorrectionApplied: false,
+    awarenessConstraintViolation: false,
   };
 }
 
@@ -994,11 +1106,39 @@ export function runChannelSelectionEngine(
   const candidates: { key: string; candidate: ChannelCandidate; layers: LayerResult[] }[] = [];
 
   const preFunnelData: { key: string; persuasionLayer: LayerResult; guardLayer: LayerResult; budgetLayer: LayerResult }[] = [];
+  const awarenessBlockedChannels: { channelKey: string; channelLabel: string; reason: string }[] = [];
+  const awarenessStage = awareness ? safeString(awareness.targetReadinessStage, "problem_aware") : "unknown";
 
   for (const channelKey of channelKeys) {
     const def = CHANNEL_DEFINITIONS[channelKey];
+
+    const { layer: awarenessLayer, awarenessBlocked, awarenessBlockReason } = scoreAwarenessMapping(awareness, channelKey, def);
+
+    if (awarenessBlocked) {
+      awarenessBlockedChannels.push({
+        channelKey,
+        channelLabel: def.label,
+        reason: awarenessBlockReason || "Awareness stage mismatch",
+      });
+
+      const rejectedCandidate = buildChannelCandidate(
+        channelKey,
+        [awarenessLayer],
+        reliability,
+        {
+          outcome: "exploratory",
+          reason: awarenessBlockReason || "INVALID_CHANNEL_FOR_AWARENESS",
+          violations: [awarenessBlockReason || "Awareness constraint violation"],
+        },
+      );
+      rejectedCandidate.rejectionReason = awarenessBlockReason || "INVALID_CHANNEL_FOR_AWARENESS";
+      rejectedCandidate.fitScore = 0;
+      rejectedCandidate.awarenessConstraintViolation = true;
+      candidates.push({ key: channelKey, candidate: rejectedCandidate, layers: [awarenessLayer] });
+      continue;
+    }
+
     const audienceLayer = scoreAudienceDensity(audience, channelKey);
-    const awarenessLayer = scoreAwarenessMapping(awareness, def);
     const persuasionLayer = scorePersuasionCompatibility(persuasion, def, channelKey);
     const budgetLayer = checkBudgetConstraint(budget, def, channelKey);
     const efficiencyLayer = scoreCostEfficiency(def, offer);
@@ -1040,7 +1180,13 @@ export function runChannelSelectionEngine(
     candidates.push({ key: channelKey, candidate, layers: allLayers });
   }
 
-  const { resolution: funnelReconstruction, rescuedChannels, funnelLayer } = runFunnelResolutionLayer(preFunnelData, persuasion);
+  if (awarenessBlockedChannels.length > 0) {
+    structuralWarnings.push(
+      `AWARENESS CONSTRAINT ENFORCEMENT: ${awarenessBlockedChannels.length} channel(s) blocked for "${awarenessStage}" audience stage: ${awarenessBlockedChannels.map(c => c.channelLabel).join(", ")}`
+    );
+  }
+
+  const { resolution: funnelReconstruction, rescuedChannels, funnelLayer } = runFunnelResolutionLayer(preFunnelData, persuasion, awarenessStage);
 
   const allFunnelAssignments = [
     ...funnelReconstruction.funnelStages.awareness,
@@ -1289,5 +1435,6 @@ function buildFallbackChannel(role: string): ChannelCandidate {
     wasReconstructed: false,
     autoInjectedConversion: false,
     persuasionCorrectionApplied: false,
+    awarenessConstraintViolation: false,
   };
 }

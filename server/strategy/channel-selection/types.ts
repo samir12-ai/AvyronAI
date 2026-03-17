@@ -72,6 +72,14 @@ export interface DecisionGateResult {
   violations: string[];
 }
 
+export interface AwarenessConstraintResult {
+  allowed: boolean;
+  blocked: boolean;
+  blockReason: string | null;
+  channelRole: string | null;
+  awarenessStage: string;
+}
+
 export interface ChannelCandidate {
   channelName: string;
   channelType: "social_organic" | "social_paid" | "search_paid" | "search_organic" | "email" | "referral" | "direct" | "community" | "partnerships" | "content_platform";
@@ -91,6 +99,7 @@ export interface ChannelCandidate {
   wasReconstructed: boolean;
   autoInjectedConversion: boolean;
   persuasionCorrectionApplied: boolean;
+  awarenessConstraintViolation: boolean;
 }
 
 export interface LayerResult {
