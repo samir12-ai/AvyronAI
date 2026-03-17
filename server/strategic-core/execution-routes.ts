@@ -14,6 +14,7 @@ import { logAudit } from "../audit";
 import { logAuditEvent } from "./audit-logger";
 import { aiChat } from "../ai-client";
 import { computeFulfillment } from "../fulfillment-engine";
+import { activateExecution } from "../execution-activation/engine";
 
 function deriveDistributionFromBusinessData(bizData: any): {
   reelsPerWeek: number;
@@ -440,7 +441,13 @@ export function registerExecutionRoutes(app: Express) {
           details: { planId: plan.id, decidedBy },
         });
 
-        res.json({ success: true, planId: plan.id, status: "APPROVED" });
+        activateExecution(plan.id).then((result) => {
+          console.log(`[ExecutionActivation] AUTO_TRIGGER | planId=${plan.id} | success=${result.success} | state=${result.newState}`);
+        }).catch((err) => {
+          console.error(`[ExecutionActivation] AUTO_TRIGGER_CRASH | planId=${plan.id} | error=${err.message}`);
+        });
+
+        res.json({ success: true, planId: plan.id, status: "APPROVED", executionActivation: "TRIGGERED" });
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }

@@ -6,6 +6,7 @@ import { registerThinkingRoutes } from "./thinking-routes";
 import { registerValidationRoutes } from "./validation-routes";
 import { registerOrchestratorRoutes } from "./orchestrator-routes";
 import { registerExecutionRoutes } from "./execution-routes";
+import { registerExecutionActivationRoutes } from "../execution-activation/routes";
 
 export function registerStrategicCoreRoutes(app: Express) {
   registerGateRoutes(app);
@@ -15,4 +16,5 @@ export function registerStrategicCoreRoutes(app: Express) {
   registerValidationRoutes(app);
   registerOrchestratorRoutes(app);
   registerExecutionRoutes(app);
+  registerExecutionActivationRoutes(app);
 }

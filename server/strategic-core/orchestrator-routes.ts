@@ -13,6 +13,7 @@ import { evaluateUncertainty, type UncertaintyResult } from "../engine-contracts
 import { validateExecutionRoute } from "../engine-contracts/execution-map";
 import { enforceOutputType } from "../engine-contracts/type-enforcement";
 import { globalRegistry } from "../engine-contracts/engine-registry";
+import { activateExecution } from "../execution-activation/engine";
 import { assertSnapshotReadOnly, assertNoComputeFromExternal } from "../market-intelligence-v3/isolation-guard";
 import { runOrchestrator } from "../orchestrator/index";
 
@@ -1107,10 +1108,20 @@ export function registerOrchestratorRoutes(app: Express) {
         details: { planId: plan.id, blueprintId: id, decidedBy: "client" },
       });
 
+      activateExecution(plan.id).then((result) => {
+        console.log(`[ExecutionActivation] AUTO_TRIGGER | planId=${plan.id} | success=${result.success} | state=${result.newState} | calendar=${result.calendarEntriesGenerated} | content=${result.contentItemsGenerated} | errors=${result.contentGenerationErrors.length}`);
+        if (!result.success) {
+          console.error(`[ExecutionActivation] AUTO_TRIGGER_FAILED | planId=${plan.id} | error=${result.error}`);
+        }
+      }).catch((err) => {
+        console.error(`[ExecutionActivation] AUTO_TRIGGER_CRASH | planId=${plan.id} | error=${err.message}`);
+      });
+
       res.json({
         success: true,
         planId: plan.id,
         status: "APPROVED",
+        executionActivation: "TRIGGERED",
         requestId,
       });
     } catch (error: any) {

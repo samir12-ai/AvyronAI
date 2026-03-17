@@ -1,0 +1,243 @@
+Build a plan 
+
+:::writing{variant=“email” id=“74219” subject=“FINAL DIRECTIVE: Execution Layer Failure & Content Activation Block — Immediate Enforcement Required”}
+
+Dear Team,
+
+This is a FINAL escalation regarding a critical system breakdown in the Execution Layer.
+
+The current system state shows:
+
+Strategy Approved ✔
+Funnel Built ✔
+Content DNA Defined ✔
+Execution Status = IDLE ❌
+
+This is not a minor issue.
+This is a complete failure of system activation.
+
+⸻
+
+🔴 CORE FAILURE
+
+The system is currently:
+	•	Generating a full strategy and funnel ✔
+	•	Validating feasibility (100/100) ✔
+	•	Producing execution blueprint ✔
+
+BUT:
+	•	No content is being created
+	•	No content is being scheduled
+	•	No distribution is happening
+
+👉 Result:
+
+The system is producing plans, not outcomes
+
+⸻
+
+❌ WHAT THIS BREAKS
+
+This failure directly causes:
+	•	Missing Reels in distribution ❌
+	•	No campaign activation ❌
+	•	Funnel exists but not fed with traffic ❌
+	•	KPI targets become meaningless ❌
+
+⸻
+
+⚠️ ROOT CAUSE
+
+Failure exists in:
+
+👉 Execution Activation Layer
+
+Specifically:
+	•	No automatic trigger between:
+	•	Approved plan → Content production
+	•	Execution engine is passive, not state-driven
+	•	Content generation is not enforced as a required step
+	•	System allows “approved but idle” state (this must NOT exist)
+
+⸻
+
+🎯 MANDATORY FIX — EXECUTION PLAN
+
+⸻
+
+1. Enforce Auto-Activation After Approval (NON-NEGOTIABLE)
+
+IF plan.status == "APPROVED":
+    TRIGGER execution_pipeline
+    SET execution.status = "ACTIVE"
+
+❗ System MUST NOT remain idle after approval
+
+⸻
+
+2. Mandatory Content Generation Trigger
+
+IF execution.status == "ACTIVE":
+    REQUIRE content_queue.length >= minimum_required
+
+Minimum required:
+	•	Reels: ≥ 3
+	•	Carousels: ≥ 2
+	•	Stories: ≥ 2
+
+❗ If not met → BLOCK system progression
+
+⸻
+
+3. Enforce Content-Type Priority (CRITICAL)
+
+Based on Content DNA:
+
+IF format_priority == "Reels > Carousels":
+    REQUIRE reels_ratio >= 50%
+
+❗ Current system violates its own strategy
+
+⸻
+
+4. Block “Empty Distribution” State
+
+IF content_queue == EMPTY:
+    BLOCK scheduling
+    THROW ERROR: "NO_CONTENT_TO_DISTRIBUTE"
+
+⸻
+
+5. Enforce Scheduling Layer
+
+FOR each content_item:
+    REQUIRE scheduled_date != NULL
+
+❗ No content without scheduling
+
+⸻
+
+6. Execution State Machine (MANDATORY)
+
+Define strict states:
+	•	DRAFT → GENERATED → SCHEDULED → PUBLISHED
+
+IF content.state NOT IN valid_states:
+    BLOCK execution
+
+7. Funnel Feeding Validation
+
+IF traffic_input == 0:
+    SET funnel.status = "STARVED"
+    THROW WARNING
+
+❗ Funnel without traffic = invalid system
+
+⸻
+
+⚠️ FAILURE POINTS TO ELIMINATE
+
+You MUST explicitly prevent:
+	•	Approved plans with zero execution
+	•	Missing Reels despite priority definition
+	•	Content strategy not reflected in output
+	•	Idle execution state
+	•	Empty content queue
+	•	Distribution without assets
+
+⸻
+
+🔒 EXECUTION RULES
+	•	No manual dependency (system must auto-trigger)
+	•	No optional execution
+	•	No “waiting for user input” after approval
+	•	No silent failure states
+
+⸻
+
+✅ ACCEPTANCE CRITERIA (STRICT)
+
+⸻
+
+1. Execution Activation
+	•	Plan approved → execution automatically ACTIVE
+	•	IDLE state = forbidden
+
+⸻
+
+2. Content Presence
+	•	Minimum:
+	•	≥ 3 Reels
+	•	≥ 2 Carousels
+	•	≥ 2 Stories
+
+⸻
+
+3. Reels Enforcement
+	•	Reels MUST appear in distribution
+	•	Ratio ≥ 50% of total content
+
+⸻
+
+4. Scheduling Validation
+	•	100% of content has scheduled dates
+
+⸻
+
+5. Funnel Activation
+	•	Traffic must be flowing (non-zero reach)
+	•	Funnel cannot remain theoretical
+
+⸻
+
+6. KPI Activation
+	•	Leads generation must begin
+	•	System must move from simulation → real tracking
+
+⸻
+
+📊 PROOF OF IMPLEMENTATION (MANDATORY)
+
+You MUST provide:
+	1.	Execution logs showing:
+	•	auto-trigger after approval
+	2.	Content queue snapshot:
+	•	with actual items (Reels included)
+	3.	Scheduling proof:
+	•	calendar entries
+	4.	Before vs After:
+	•	IDLE vs ACTIVE system
+	5.	Funnel activity proof:
+	•	traffic entering system
+	6.	Content-type distribution report:
+	•	proving Reels dominance
+
+❗ Missing ANY proof = rejection
+
+⸻
+
+🔥 FINAL STATEMENT
+
+This is not a content issue.
+
+This is a system failure to execute its own strategy.
+
+The system must evolve from:
+
+“Planning engine”
+
+To:
+
+“Execution-driven growth system”
+
+⸻
+
+Any system that allows:
+
+Approved plan + Zero execution
+
+is considered broken by design.
+
+Fix immediately and provide full proof.
+
+Best regards,
