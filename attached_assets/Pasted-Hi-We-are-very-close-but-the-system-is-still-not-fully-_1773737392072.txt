@@ -1,0 +1,170 @@
+Hi,
+
+We are very close, but the system is still not fully stable.
+
+The current output is correct, but the logic is not enforced — which means the system can break again under slight variation.
+
+This must be fixed at the root level with strict enforcement and zero fallback behavior.
+
+---
+
+## 🔴 Critical Issue
+
+Current state shows:
+
+- Entry Trigger is correct ✅  
+- Funnel is correct ✅  
+- BUT: "Enforced by: none"
+
+This means:
+
+> The system is producing correct outputs WITHOUT rule enforcement.
+
+This is unacceptable — all outputs must be rule-driven, not incidental.
+
+---
+
+## ✅ REQUIRED: HARD ENFORCEMENT SYSTEM
+
+### 1. Entry Trigger MUST be derived (not selected)
+
+Entry Trigger must:
+
+- Be computed directly from:
+  - awareness_stage  
+  - awareness_route  
+  - trigger_class  
+  - trust_state  
+
+- NOT:
+  - default  
+  - fallback  
+  - reuse previous state  
+  - be AI-influenced  
+
+---
+
+### 2. NO FALLBACK LOGIC — ZERO
+
+Completely remove:
+
+- default triggers (e.g. challenge)
+- generic fallbacks
+- “if undefined → assign X”
+
+Instead:
+
+If no valid trigger exists:
+→ THROW ERROR (do not generate output)
+
+---
+
+### 3. HARD RULE ENGINE (MANDATORY)
+
+Implement explicit mapping:
+
+IF:
+- awareness_route = proof_led_entry  
+OR
+- trigger_class = trust_breakdown  
+OR
+- awareness_stage = unaware  
+
+THEN:
+
+- entry_trigger ∈ {education, proof, authority}
+- entry_trigger = REQUIRED (not optional)
+
+AND:
+
+- challenge, discovery, tripwire = HARD BLOCKED
+
+This must be enforced BEFORE rendering.
+
+---
+
+### 4. ENFORCEMENT TRACE (MANDATORY)
+
+Frontend must show:
+
+- Enforced by: [awareness_rule_id]
+
+NOT:
+
+- "none"
+- "inferred"
+
+If rule not found → FAIL state (no output)
+
+---
+
+### 5. SINGLE SOURCE OF TRUTH
+
+Ensure ALL of these use the SAME root:
+
+- Funnel selection  
+- Entry Trigger  
+- Priority Matrix  
+- Blocking logic  
+
+No parallel logic trees allowed.
+
+---
+
+### 6. PIPELINE VALIDATION GATE
+
+Before final output:
+
+Run validation:
+
+- Entry Trigger matches awareness?  
+- Funnel allowed by awareness?  
+- No blocked families used?  
+- Enforcement exists?  
+
+If ANY fail → block output completely
+
+---
+
+### 7. SYSTEM-WIDE PROPAGATION
+
+Apply this enforcement across:
+
+- Funnel Engine  
+- Offer Engine  
+- Awareness Engine  
+- Any dependent engine  
+
+No exceptions.
+
+---
+
+### 8. FRONTEND UPDATE (MANDATORY)
+
+Display:
+
+- enforcement source  
+- blocked triggers  
+- allowed triggers  
+- reason for selection  
+
+Everything must be transparent.
+
+---
+
+## 🎯 FINAL EXPECTATION
+
+After this update:
+
+- No incorrect trigger can EVER appear  
+- No fallback behavior exists  
+- Every output is enforced, traceable, and deterministic  
+- System becomes stable under all conditions  
+
+---
+
+This is the final structural fix.
+
+Please implement fully, update backend + frontend, and confirm once completed for validation.
+
+Thanks

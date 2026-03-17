@@ -233,10 +233,20 @@ export function registerPersuasionEngineRoutes(app: Express) {
         offerSnapshot = latest;
       }
 
-      let [funnelSnapshot] = await db.select().from(funnelSnapshots)
-        .where(and(eq(funnelSnapshots.id, funnelSnapshotId), eq(funnelSnapshots.campaignId, campaignId), eq(funnelSnapshots.accountId, accountId)))
-        .limit(1);
-      if (!funnelSnapshot) return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Funnel snapshot not found" });
+      let funnelSnapshot: typeof funnelSnapshots.$inferSelect | undefined;
+      if (funnelSnapshotId) {
+        [funnelSnapshot] = await db.select().from(funnelSnapshots)
+          .where(and(eq(funnelSnapshots.id, funnelSnapshotId), eq(funnelSnapshots.campaignId, campaignId), eq(funnelSnapshots.accountId, accountId)))
+          .limit(1);
+      }
+      if (!funnelSnapshot) {
+        const [latest] = await db.select().from(funnelSnapshots)
+          .where(and(eq(funnelSnapshots.campaignId, campaignId), eq(funnelSnapshots.accountId, accountId), eq(funnelSnapshots.status, "COMPLETE"), eq(funnelSnapshots.engineVersion, FUNNEL_ENGINE_VERSION)))
+          .orderBy(desc(funnelSnapshots.createdAt)).limit(1);
+        if (!latest) return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid Funnel snapshot found — please run Funnel Engine first" });
+        funnelSnapshot = latest;
+        console.log(`[PersuasionEngine-V3] Funnel snapshot resolved via fallback to latest: ${latest.id}`);
+      }
       if (funnelSnapshot.engineVersion !== FUNNEL_ENGINE_VERSION) {
         const [latest] = await db.select().from(funnelSnapshots)
           .where(and(eq(funnelSnapshots.campaignId, campaignId), eq(funnelSnapshots.accountId, accountId), eq(funnelSnapshots.status, "COMPLETE"), eq(funnelSnapshots.engineVersion, FUNNEL_ENGINE_VERSION)))
