@@ -11,6 +11,12 @@ import {
   VALIDATION_STATES,
   SIGNAL_GROUNDING_THRESHOLD,
   SIGNAL_EQUIVALENCE_MAP,
+  SIGNAL_MAPPING_CONFIDENCE_THRESHOLD,
+  PROOF_TYPE_CLASSIFIERS,
+  PERSUASION_DRIVER_CLASSIFIERS,
+  AWARENESS_TRIGGER_CLASSIFIERS,
+  AWARENESS_ENTRY_CLASSIFIERS,
+  CANONICAL_SIGNAL_REGISTRY,
 } from "./constants";
 import { enforceBoundaryWithSanitization } from "../../engine-hardening";
 import { assessStrategyAcceptability } from "../../shared/strategy-acceptability";
@@ -141,11 +147,61 @@ function buildSignalClusters(
   return clusters;
 }
 
+function classifyProofSubType(proofText: string): string {
+  const lower = proofText.toLowerCase();
+  for (const [subType, pattern] of Object.entries(PROOF_TYPE_CLASSIFIERS)) {
+    if (pattern.test(lower)) return `offer_proof_${subType}`;
+  }
+  return "offer_proof";
+}
+
+function classifyPersuasionDriverSubType(driverText: string): string {
+  const lower = driverText.toLowerCase();
+  for (const [subType, pattern] of Object.entries(PERSUASION_DRIVER_CLASSIFIERS)) {
+    if (pattern.test(lower)) return `persuasion_driver_${subType}`;
+  }
+  return "persuasion_driver";
+}
+
+function classifyAwarenessTriggerSubType(triggerText: string): string {
+  const lower = triggerText.toLowerCase();
+  for (const [subType, pattern] of Object.entries(AWARENESS_TRIGGER_CLASSIFIERS)) {
+    if (pattern.test(lower)) return `awareness_trigger_${subType}`;
+  }
+  return "awareness_trigger";
+}
+
+function classifyAwarenessEntrySubType(entryText: string): string {
+  const lower = entryText.toLowerCase();
+  for (const [subType, pattern] of Object.entries(AWARENESS_ENTRY_CLASSIFIERS)) {
+    if (pattern.test(lower)) return `awareness_entry_${subType}`;
+  }
+  return "awareness_entry";
+}
+
+function computeKeywordMappingConfidence(claimText: string, sourceTag: string): number {
+  const registryEntries = Object.values(CANONICAL_SIGNAL_REGISTRY).filter(
+    r => r.clusterId === sourceTag || r.parentCategory === sourceTag
+  );
+  if (registryEntries.length === 0) return 0;
+
+  const lower = claimText.toLowerCase();
+  let bestConfidence = 0;
+
+  for (const entry of registryEntries) {
+    const matchCount = entry.mappingKeywords.filter(kw => lower.includes(kw.toLowerCase())).length;
+    const confidence = clamp(matchCount / Math.max(entry.mappingKeywords.length * 0.3, 1), 0, 1);
+    if (confidence > bestConfidence) bestConfidence = confidence;
+  }
+
+  return bestConfidence;
+}
+
 function matchClaimToSignalCluster(
   claimText: string,
   clusters: SignalCluster[],
   sourceTag?: string,
-): { supporting: SignalProvenance | null; contradicting: SignalProvenance | null; mappedViaEquivalence: boolean } {
+): { supporting: SignalProvenance | null; contradicting: SignalProvenance | null; mappedViaEquivalence: boolean; mappingConfidence: number } {
   const lower = claimText.toLowerCase();
   let bestSupporting: SignalProvenance | null = null;
   let bestSupportingScore = 0;
@@ -191,7 +247,16 @@ function matchClaimToSignalCluster(
     }
   }
 
-  return { supporting: bestSupporting, contradicting: bestContradicting, mappedViaEquivalence };
+  let mappingConfidence = 0;
+  if (bestSupporting) {
+    mappingConfidence = clamp(bestSupporting.signalStrength + (bestSupportingScore / 6), 0.3, 1);
+  }
+  if (sourceTag) {
+    const keywordConfidence = computeKeywordMappingConfidence(claimText, sourceTag);
+    mappingConfidence = Math.max(mappingConfidence, keywordConfidence);
+  }
+
+  return { supporting: bestSupporting, contradicting: bestContradicting, mappedViaEquivalence, mappingConfidence };
 }
 
 function computeOverlapScore(a: string, b: string): number {
@@ -329,6 +394,8 @@ interface ExtractedClaim {
   parentSignalId: string | null;
   originEngine: string | null;
   hopDepth: number;
+  mappingConfidence: number;
+  belowConfidenceThreshold: boolean;
 }
 
 function extractClaims(
@@ -337,22 +404,26 @@ function extractClaims(
   awareness: ValidationAwarenessInput,
   signalClusters: SignalCluster[],
   upstreamLineage: SignalLineageEntry[] = [],
-): { claims: ExtractedClaim[]; unmappedSignals: string[] } {
+): { claims: ExtractedClaim[]; unmappedSignals: string[]; lowConfidenceSignals: string[] } {
   const claims: ExtractedClaim[] = [];
   const unmappedSignals: string[] = [];
+  const lowConfidenceSignals: string[] = [];
   let claimIndex = 0;
   const hasLineage = upstreamLineage.length > 0;
 
   const addClaim = (claimText: string, source: string) => {
     if (!claimText) return;
-    const { supporting, mappedViaEquivalence } = matchClaimToSignalCluster(claimText, signalClusters, source);
+    const { supporting, mappedViaEquivalence, mappingConfidence } = matchClaimToSignalCluster(claimText, signalClusters, source);
     const lineageMatch = hasLineage ? findLineageMatch(claimText, upstreamLineage) : null;
     const traceId = generateSignalTraceId(source, claimIndex);
     const signalPath = buildSignalPath(source, supporting, lineageMatch);
     const isHypothesis = supporting === null && lineageMatch === null;
+    const belowConfidenceThreshold = mappingConfidence > 0 && mappingConfidence < SIGNAL_MAPPING_CONFIDENCE_THRESHOLD;
 
     if (isHypothesis) {
-      unmappedSignals.push(`[${traceId}] ${source}: "${claimText.slice(0, 80)}" — no signal cluster match found`);
+      unmappedSignals.push(`[${traceId}] ${source}: "${claimText.slice(0, 80)}" — no signal cluster match found (UNMAPPED)`);
+    } else if (belowConfidenceThreshold) {
+      lowConfidenceSignals.push(`[${traceId}] ${source}: "${claimText.slice(0, 80)}" — mapping confidence ${(mappingConfidence * 100).toFixed(0)}% below ${(SIGNAL_MAPPING_CONFIDENCE_THRESHOLD * 100).toFixed(0)}% threshold`);
     }
 
     claims.push({
@@ -366,6 +437,8 @@ function extractClaims(
       parentSignalId: lineageMatch?.parentSignalId || null,
       originEngine: lineageMatch?.originEngine || null,
       hopDepth: lineageMatch?.hopDepth ?? 0,
+      mappingConfidence,
+      belowConfidenceThreshold,
     });
     claimIndex++;
   };
@@ -373,15 +446,27 @@ function extractClaims(
   addClaim(offer.coreOutcome, "offer_outcome");
   addClaim(offer.mechanismDescription, "offer_mechanism");
   for (const proof of (offer.proofAlignment || []).slice(0, 3)) {
-    addClaim(proof, "offer_proof");
+    if (proof) {
+      const proofSubType = classifyProofSubType(proof);
+      addClaim(proof, proofSubType);
+    }
   }
   for (const driver of (persuasion.primaryInfluenceDrivers || []).slice(0, 3)) {
-    if (driver) addClaim(`Influence driver: ${driver}`, "persuasion_driver");
+    if (driver) {
+      const driverSubType = classifyPersuasionDriverSubType(driver);
+      addClaim(`Influence driver: ${driver}`, driverSubType);
+    }
   }
-  addClaim(awareness.triggerClass ? `Trigger: ${awareness.triggerClass}` : "", "awareness_trigger");
-  addClaim(awareness.entryMechanismType ? `Entry: ${awareness.entryMechanismType}` : "", "awareness_entry");
+  if (awareness.triggerClass) {
+    const triggerSubType = classifyAwarenessTriggerSubType(awareness.triggerClass);
+    addClaim(`Trigger: ${awareness.triggerClass}`, triggerSubType);
+  }
+  if (awareness.entryMechanismType) {
+    const entrySubType = classifyAwarenessEntrySubType(awareness.entryMechanismType);
+    addClaim(`Entry: ${awareness.entryMechanismType}`, entrySubType);
+  }
 
-  return { claims, unmappedSignals };
+  return { claims, unmappedSignals, lowConfidenceSignals };
 }
 
 function validateClaim(
@@ -986,12 +1071,13 @@ export async function runStatisticalValidationEngine(
       signalBackedClaimCount: 0,
       signalBackedClaimRatio: 0,
       unmappedSignals: [],
+      lowConfidenceSignals: [],
     };
   }
 
   const signalClusters = buildSignalClusters(mi, audience);
 
-  let { claims: extractedClaims, unmappedSignals } = extractClaims(offer, persuasion, awareness, signalClusters, upstreamLineage);
+  let { claims: extractedClaims, unmappedSignals, lowConfidenceSignals } = extractClaims(offer, persuasion, awareness, signalClusters, upstreamLineage);
   if (upstreamLineage.length > 0) {
     const orphanedClaims = extractedClaims.filter(c => c.parentSignalId === null && c.signalProvenance === null);
     const lineageLinked = extractedClaims.length - orphanedClaims.length;
@@ -1009,11 +1095,19 @@ export async function runStatisticalValidationEngine(
   const claimValidations = extractedClaims.map(c => {
     const hasLineageAnchor = c.parentSignalId !== null || c.originEngine !== null;
     const validated = validateClaim(c.claim, c.source, c.signalProvenance, c.isHypothesis, c.signalTraceId, c.signalPath, mi, audience, offer, funnel, awareness, persuasion, hasLineageAnchor);
+
+    if (c.belowConfidenceThreshold && validated.validated) {
+      validated.validated = false;
+      validated.evidenceStrength = Math.min(validated.evidenceStrength, SIGNAL_MAPPING_CONFIDENCE_THRESHOLD - 0.01);
+    }
+
     return {
       ...validated,
       parentSignalId: c.parentSignalId,
       originEngine: c.originEngine,
       hopDepth: c.hopDepth,
+      mappingConfidence: c.mappingConfidence,
+      belowConfidenceThreshold: c.belowConfidenceThreshold,
     };
   });
 
@@ -1084,10 +1178,22 @@ export async function runStatisticalValidationEngine(
   }
 
   if (unmappedSignals.length > 0) {
-    structuralWarnings.push(`DIAGNOSTICS: ${unmappedSignals.length} unmapped signal(s) detected in claim extraction`);
+    structuralWarnings.push(`SIGNAL_GROUNDING_FAILURE: ${unmappedSignals.length} unmapped signal(s) detected — these elements lack signal origin and are excluded from validated output`);
     for (const us of unmappedSignals) {
-      structuralWarnings.push(`Unmapped: ${us}`);
+      structuralWarnings.push(`UNMAPPED: ${us}`);
     }
+  }
+
+  if (lowConfidenceSignals.length > 0) {
+    structuralWarnings.push(`SIGNAL_CONFIDENCE_WARNING: ${lowConfidenceSignals.length} signal(s) below ${(SIGNAL_MAPPING_CONFIDENCE_THRESHOLD * 100).toFixed(0)}% mapping confidence threshold — excluded from validated logic`);
+    for (const lcs of lowConfidenceSignals) {
+      structuralWarnings.push(`LOW_CONFIDENCE: ${lcs}`);
+    }
+  }
+
+  const totalGroundingDefects = unmappedSignals.length + lowConfidenceSignals.length;
+  if (totalGroundingDefects > 0) {
+    structuralWarnings.push(`GROUNDING_ENFORCEMENT: ${totalGroundingDefects} total grounding defect(s) — system integrity requires signal grounding for all generated elements`);
   }
 
   let confidenceNormalized = false;
@@ -1175,5 +1281,6 @@ export async function runStatisticalValidationEngine(
     signalBackedClaimCount,
     signalBackedClaimRatio,
     unmappedSignals,
+    lowConfidenceSignals,
   };
 }

@@ -303,6 +303,7 @@ export function registerStatisticalValidationRoutes(app: Express) {
           signalBackedClaimRatio: result.signalBackedClaimRatio,
           signalClusters: result.signalClusters,
           unmappedSignals: result.unmappedSignals,
+          lowConfidenceSignals: result.lowConfidenceSignals,
         }),
         layerResults: JSON.stringify(result.layerResults),
         structuralWarnings: JSON.stringify(result.structuralWarnings),

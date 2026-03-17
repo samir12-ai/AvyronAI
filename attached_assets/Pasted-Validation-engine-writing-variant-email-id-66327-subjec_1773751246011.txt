@@ -1,0 +1,267 @@
+Validation engine 
+
+:::writing{variant=“email” id=“66327” subject=“FINAL DIRECTIVE: Signal Mapping Layer Failure — Full System Grounding Required (Zero Tolerance)”}
+
+Dear Team,
+
+This is a FINAL ESCALATION regarding a critical failure in the Signal Mapping Layer.
+
+Despite improvements in validation, the system is still operating with unmapped signals, which makes parts of the output ungrounded, unreliable, and logically invalid.
+
+This is not a warning — this is a hard failure condition.
+
+From this point forward:
+
+Any element without signal grounding is considered a system defect.
+
+⸻
+
+🔴 CORE FAILURE
+
+Current system state confirms:
+	•	8 unmapped signals detected
+	•	Affected layers:
+	•	Offer Proof (transparency, outcome, process)
+	•	Persuasion Drivers (education, diagnosis, authority)
+	•	Awareness Trigger (trust_breakdown)
+	•	Awareness Entry (proof_led_entry)
+
+⸻
+
+❌ WHY THIS IS CRITICAL
+
+This means:
+	•	The system generates outputs without real signal anchoring
+	•	Logical components are not traceable to market or audience data
+	•	Validation is passing structures that are not grounded in reality
+
+👉 In effect:
+
+The system is partially operating on synthetic logic instead of deterministic signals
+
+⸻
+
+⚠️ ROOT CAUSE
+
+Failure exists in:
+
+👉 Signal → Canonical Cluster Mapping Layer
+
+Likely issues:
+	•	Missing canonical cluster definitions
+	•	Incomplete mapping registry
+	•	No enforcement of mapping requirement
+	•	Generation layer bypassing signal validation
+
+⸻
+
+🎯 MANDATORY FIX — EXECUTION PLAN
+
+1. Enforce Hard Mapping Constraint (NON-NEGOTIABLE)
+
+FOR each generated_element IN system:
+    IF generated_element.signal_cluster == NULL:
+        BLOCK execution
+        THROW ERROR: "UNMAPPED_SIGNAL"
+
+❗ No warnings
+❗ No fallback
+❗ No silent passing
+
+⸻
+
+2. Build Complete Canonical Signal Registry
+
+You MUST define and register ALL required clusters, including but not limited to:
+
+Offer Proof Clusters
+	•	transparency_proof → pricing clarity, refund policy, visibility
+	•	outcome_proof → measurable results, before/after, ROI
+	•	process_proof → steps, methodology, system clarity
+
+⸻
+
+Persuasion Driver Clusters
+	•	education → knowledge gap signals
+	•	diagnosis → problem-awareness signals
+	•	authority → credibility, expertise, trust markers
+
+⸻
+
+Awareness Clusters
+	•	trust_breakdown → skepticism, negative sentiment
+	•	cost_resistance → price sensitivity signals
+	•	feasibility_doubt → complexity / difficulty perception
+
+⸻
+
+Entry Clusters
+	•	education_entry
+	•	proof_supported_entry
+	•	authority_entry
+
+❗ Each must have:
+	•	signal definition
+	•	input criteria
+	•	mapping logic
+
+⸻
+
+3. Enforce Bidirectional Traceability
+
+Every generated element MUST include:
+
+{
+  "source_signal": "...",
+  "cluster": "...",
+  "mapping_confidence": ">= 0.8"
+}
+
+4. Remove Generation Without Signal Origin
+
+IF element.generated AND element.source_signal == NULL:
+    DELETE element
+
+No exceptions.
+
+⸻
+
+5. Normalize Signal Input Layer
+
+You MUST ensure:
+	•	Raw signals are cleaned and standardized
+	•	Duplicate signals merged
+	•	Ambiguous signals resolved before mapping
+
+⸻
+
+6. Add Mapping Confidence Threshold
+
+IF mapping_confidence < 0.75:
+    MARK as invalid
+    EXCLUDE from downstream logic
+
+⸻
+
+7. Synchronize All Engines
+
+Ensure:
+	•	Persuasion Engine uses ONLY mapped drivers
+	•	Proof Engine uses ONLY mapped proofs
+	•	Awareness Engine uses ONLY mapped triggers
+
+❗ No cross-engine leakage without mapping validation
+
+⸻
+
+⚠️ FAILURE POINTS TO ELIMINATE
+
+You MUST explicitly verify:
+	•	Missing cluster definitions
+	•	Partial mapping coverage
+	•	Signals bypassing mapping layer
+	•	Static mappings not adapting to context
+	•	Any “default assignment” without signal basis
+	•	Any element created before mapping
+
+⸻
+
+🔒 EXECUTION RULES
+	•	No partial delivery
+	•	No “best effort” implementation
+	•	No assumptions
+	•	Every component must be traceable, deterministic, and validated
+
+⸻
+
+✅ ACCEPTANCE CRITERIA (EXTREMELY STRICT)
+
+The implementation will ONLY be accepted if ALL conditions are met:
+
+⸻
+
+1. Zero Unmapped Signals
+	•	Unmapped signals = 0
+	•	Any non-zero value = automatic rejection
+
+⸻
+
+2. Full Traceability
+	•	100% of elements must include:
+	•	source signal
+	•	cluster
+	•	confidence score
+
+⸻
+
+3. Mapping Accuracy
+	•	Random sample validation must show:
+	•	≥ 95% correct mapping alignment
+
+⸻
+
+4. System Integrity
+	•	No element generated without signal origin
+	•	No fallback logic used
+
+⸻
+
+5. Cross-Engine Consistency
+	•	All engines must produce:
+	•	aligned, grounded outputs
+	•	no conflicting signal usage
+
+⸻
+
+6. Stress Testing
+
+You MUST provide tests for:
+	•	Missing signals scenario
+	•	Conflicting signals scenario
+	•	Low-confidence signals scenario
+
+Expected behavior:
+	•	System blocks or adapts correctly
+	•	No invalid output generated
+
+⸻
+
+📊 PROOF OF IMPLEMENTATION (MANDATORY)
+
+You MUST submit ALL of the following:
+	1.	Before vs After diagnostics (showing unmapped → 0)
+	2.	Full signal registry documentation
+	3.	Mapping logic implementation (code or pseudo)
+	4.	Sample outputs with traceability metadata
+	5.	Test cases (input → mapped → output)
+	6.	Logs proving enforcement of mapping rules
+
+❗ Missing ANY item = rejection
+
+⸻
+
+🔥 FINAL STATEMENT
+
+This is the foundation layer of the entire system.
+
+If this layer is not fixed:
+	•	All higher layers (persuasion, validation, budget) remain unreliable
+	•	System cannot be considered production-ready
+
+⸻
+
+The system must evolve from:
+
+“Generating intelligent outputs”
+
+To:
+
+“Generating ONLY signal-grounded, deterministic outputs”
+
+⸻
+
+No further iterations will be accepted without full compliance.
+
+Awaiting complete implementation with proof.
+
+Best regards,

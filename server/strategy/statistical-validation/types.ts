@@ -107,6 +107,8 @@ export interface ClaimValidation {
   parentSignalId?: string | null;
   originEngine?: string | null;
   hopDepth?: number;
+  mappingConfidence?: number;
+  belowConfidenceThreshold?: boolean;
 }
 
 export interface DataReliabilityDiagnostics {
@@ -141,4 +143,5 @@ export interface StatisticalValidationResult {
   signalBackedClaimCount: number;
   signalBackedClaimRatio: number;
   unmappedSignals: string[];
+  lowConfidenceSignals: string[];
 }
