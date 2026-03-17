@@ -1,6 +1,12 @@
 import { db } from "../db";
 import { buildAnalyticalPackage } from "../analytical-enrichment-layer/engine";
 import {
+  enforceGenericEngineCompliance,
+  buildCELReport,
+  storeCELReport,
+  type ComplianceResult,
+} from "../causal-enforcement-layer/engine";
+import {
   orchestratorJobs,
   strategicPlans,
   growthCampaigns,
@@ -87,6 +93,7 @@ interface EngineContext {
   positioningSnapshotId?: string;
   differentiationSnapshotId?: string;
   analyticalEnrichment?: any;
+  celResults?: ComplianceResult[];
 }
 
 async function getBusinessData(accountId: string, campaignId: string): Promise<any> {
@@ -262,6 +269,16 @@ async function executeEngine(
         snapshotId = result.snapshotId;
         ctx.positioning = result;
         ctx.positioningSnapshotId = result.snapshotId;
+
+        if (ctx.analyticalEnrichment && result.territories) {
+          const posTexts = result.territories.map((t: any) => `${t.name} ${t.contrastAxis} ${t.narrativeDirection}`);
+          const celResult = enforceGenericEngineCompliance("positioning", posTexts, ctx.analyticalEnrichment);
+          if (!ctx.celResults) ctx.celResults = [];
+          ctx.celResults.push(celResult);
+          if (celResult.violations.length > 0) {
+            console.log(`[Orchestrator] CEL_POSITIONING | violations=${celResult.violations.length} | score=${celResult.score.toFixed(2)} | passed=${celResult.passed}`);
+          }
+        }
         break;
       }
 
@@ -281,6 +298,16 @@ async function executeEngine(
         snapshotId = result.snapshotId;
         ctx.differentiation = result;
         ctx.differentiationSnapshotId = result.snapshotId;
+
+        if (ctx.analyticalEnrichment) {
+          const diffTexts = (result.claims || result.claimStructures || []).map((c: any) => typeof c === "string" ? c : c.claim || c.title || JSON.stringify(c));
+          const celResult = enforceGenericEngineCompliance("differentiation", diffTexts, ctx.analyticalEnrichment);
+          if (!ctx.celResults) ctx.celResults = [];
+          ctx.celResults.push(celResult);
+          if (celResult.violations.length > 0) {
+            console.log(`[Orchestrator] CEL_DIFFERENTIATION | violations=${celResult.violations.length} | score=${celResult.score.toFixed(2)}`);
+          }
+        }
         break;
       }
 
@@ -323,6 +350,16 @@ async function executeEngine(
         output = result;
         snapshotId = result.snapshotId;
         ctx.offer = result;
+
+        if (ctx.analyticalEnrichment) {
+          const offerTexts = [result.offerName, result.coreOutcome, result.mechanismDescription, result.headline].filter(Boolean);
+          const celResult = enforceGenericEngineCompliance("offer", offerTexts, ctx.analyticalEnrichment);
+          if (!ctx.celResults) ctx.celResults = [];
+          ctx.celResults.push(celResult);
+          if (celResult.violations.length > 0) {
+            console.log(`[Orchestrator] CEL_OFFER | violations=${celResult.violations.length} | score=${celResult.score.toFixed(2)}`);
+          }
+        }
         break;
       }
 
@@ -371,6 +408,16 @@ async function executeEngine(
         output = result;
         snapshotId = result.snapshotId;
         ctx.funnel = result;
+
+        if (ctx.analyticalEnrichment) {
+          const funnelTexts = (result.stages || []).map((s: any) => `${s.name || ""} ${s.objective || ""} ${s.contentStrategy || ""}`);
+          const celResult = enforceGenericEngineCompliance("funnel", funnelTexts, ctx.analyticalEnrichment);
+          if (!ctx.celResults) ctx.celResults = [];
+          ctx.celResults.push(celResult);
+          if (celResult.violations.length > 0) {
+            console.log(`[Orchestrator] CEL_FUNNEL | violations=${celResult.violations.length} | score=${celResult.score.toFixed(2)}`);
+          }
+        }
         break;
       }
 
@@ -406,6 +453,16 @@ async function executeEngine(
         output = result;
         snapshotId = result.snapshotId;
         ctx.persuasion = result;
+
+        if (ctx.analyticalEnrichment) {
+          const persTexts = (result.sequences || result.persuasionSequence || []).map((s: any) => typeof s === "string" ? s : s.technique || s.name || JSON.stringify(s));
+          const celResult = enforceGenericEngineCompliance("persuasion", persTexts, ctx.analyticalEnrichment);
+          if (!ctx.celResults) ctx.celResults = [];
+          ctx.celResults.push(celResult);
+          if (celResult.violations.length > 0) {
+            console.log(`[Orchestrator] CEL_PERSUASION | violations=${celResult.violations.length} | score=${celResult.score.toFixed(2)}`);
+          }
+        }
         break;
       }
 
@@ -642,6 +699,17 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       ),
     })
     .where(eq(orchestratorJobs.id, jobId));
+
+  if (ctx.celResults && ctx.celResults.length > 0) {
+    const celReport = buildCELReport(config.campaignId, 2, ctx.celResults);
+    storeCELReport(config.campaignId, celReport);
+    console.log(`[Orchestrator] CEL_REPORT | overall=${celReport.overallPassed ? "PASS" : "FAIL"} | score=${celReport.overallScore} | engines=${celReport.engineResults.length} | summary=${celReport.summary}`);
+    for (const er of celReport.engineResults) {
+      if (er.violations.length > 0) {
+        console.log(`[Orchestrator] CEL_ENGINE | ${er.engineId} | score=${er.score.toFixed(2)} | violations=${er.violations.length} | types=${er.violations.map(v => v.violationType).join(",")}`);
+      }
+    }
+  }
 
   console.log(`[Orchestrator] Complete in ${durationMs}ms | Status: ${overallStatus} | Engines: ${completedEngines.length}/${ENGINE_PRIORITY_ORDER.length}`);
 

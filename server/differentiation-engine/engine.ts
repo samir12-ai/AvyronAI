@@ -1,5 +1,6 @@
 import { aiChat } from "../ai-client";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import { buildCausalDirectiveForPrompt } from "../causal-enforcement-layer/engine";
 import {
   ENGINE_VERSION,
   DIFFERENTIATION_SCORE_WEIGHTS,
@@ -874,10 +875,11 @@ export async function layer11_aiRefinement(
   const topPillars = pillars.slice(0, 5);
   const topClaims = claims.slice(0, 5);
   const aelBlock = formatAELForPrompt(analyticalEnrichment || null);
-  if (aelBlock) console.log(`[DifferentiationEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars`);
+  const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
+  if (aelBlock) console.log(`[DifferentiationEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
 
   const prompt = `You are refining differentiation language. You must ONLY improve wording clarity and impact.
-${aelBlock}
+${aelBlock}${causalDirective}
 STRICT RULES:
 - Do NOT invent new strategy, audience segments, offers, or execution plans
 - Do NOT change the meaning or direction of any pillar or claim

@@ -1,5 +1,6 @@
 import { aiChat } from "../ai-client";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import { buildCausalDirectiveForPrompt } from "../causal-enforcement-layer/engine";
 import { detectGenericOutput, checkCrossEngineAlignment, enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
 
 function safeJsonParse(text: any): any {
@@ -1065,10 +1066,11 @@ CRITICAL: The funnel type MUST be compatible with the detected awareness route. 
     : "";
 
   const aelBlock = formatAELForPrompt(analyticalEnrichment || null);
-  if (aelBlock) console.log(`[FunnelEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars`);
+  const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
+  if (aelBlock) console.log(`[FunnelEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
 
   const prompt = `You are a Funnel Architect. Generate three funnel concepts based on the market intelligence below.
-${aelBlock}
+${aelBlock}${causalDirective}
 STRICT RULES:
 - Do NOT generate strategy decisions, strategic repositioning, offer redesign, pricing logic, budget recommendations, channel selection, media buying, awareness messaging, persuasion copy, scripts, campaign tasks, financial planning, or execution plans
 - ONLY output funnel definitions: name, type (direct, webinar, challenge, vsl, application, consultation, tripwire, product-launch, membership, hybrid)

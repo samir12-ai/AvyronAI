@@ -1,0 +1,193 @@
+Hi,
+
+We need to close this issue properly and permanently. The current AEL v2 upgrade improved analytical depth significantly, but the system is still failing at the decision layer, specifically in how engines (especially Positioning) act on that depth.
+
+---
+
+## 🔴 Core Problem (Root Cause — Not Symptoms)
+
+The system now:
+- Correctly identifies deep causal insights (AEL working ✅)
+- But fails to enforce those insights in downstream decisions (Engines failing ❌)
+
+### Example (Real Case)
+- Root cause identified:  
+  Opacity, hidden pricing, confusion → leads to lack of trust
+  
+- Expected positioning:  
+  → Transparency / clarity / predictable pricing / trust-first system
+
+- Actual output:  
+  → simplicity_and_ease
+
+❌ This is a logical violation  
+❌ This proves engines are still using generic pattern selection instead of causal derivation
+
+---
+
+## ⚠️ What This Means
+
+This is NOT:
+- A data issue
+- A signal issue
+- A root binding issue
+
+This IS:
+- A decision integrity failure
+- A missing enforcement layer between AEL → Engines
+
+> The system understands the truth but does not act on it.
+
+---
+
+## 🛠 Required Fix (Non-Negotiable)
+
+You must implement a Causal Enforcement Layer (CEL) or equivalent logic that ensures:
+
+### 1. Decision Binding
+All downstream engines (Positioning, Differentiation, Offer, Funnel, Awareness, Persuasion) must:
+
+> Derive outputs FROM AEL root causes — not from generic pattern libraries
+
+---
+
+### 2. Hard Constraints (No Bypass Allowed)
+
+Example rule (must be enforced programmatically, not prompt-based):
+
+- IF root_cause = trust / opacity / confusion  
+  → THEN positioning_axis MUST be in:  
+  [transparency, clarity, trust, predictability]  
+  → AND MUST NOT be:  
+  [simplicity, ease, generic benefit framing]
+
+---
+
+### 3. Engine Compliance Check
+
+Before any engine output is accepted:
+
+- Validate alignment between:
+  - AEL root causes
+  - Engine output
+
+If misaligned:
+- Reject output
+- Force regeneration OR mark as invalid
+
+---
+
+### 4. System-Wide Enforcement
+
+This must apply to:
+- Positioning (highest priority)
+- Differentiation
+- Offer construction
+- Funnel logic
+- Awareness entry
+- Persuasion sequencing
+
+---
+
+## 🧪 Mandatory Validation Task
+
+You must run a full system audit:
+
+For each engine:
+1. Input same AEL context
+2. Compare output vs root causes
+3. Detect:
+   - Generic fallback
+   - Pattern override
+   - Causal mismatch
+
+Return a report:
+- Engine-by-engine compliance score
+- List of violations
+- Fix applied per engine
+
+---
+
+## 🧪 Acceptance Criteria (STRICT — NO EXCEPTIONS)
+
+This task is NOT complete unless ALL conditions are met:
+
+### 1. Positioning Correction
+Given:
+- Root cause = trust issue from opacity
+
+Output MUST:
+- Explicitly reflect trust / transparency / clarity
+- NOT contain any generic fallback (simplicity, ease, etc.)
+
+Provide:
+- Before vs After output
+- Reasoning trace showing causal link
+
+---
+
+### 2. Hard Constraint Enforcement
+- Demonstrate at least 3 constraint rules implemented in code (not prompts)
+- Show logs where invalid outputs were rejected
+
+---
+
+### 3. Engine Compliance Report
+Provide:
+- Full audit across all 6 engines
+- Each engine must show:
+  - Input AEL
+  - Output
+  - Alignment score
+  - Pass/Fail
+
+---
+
+### 4. No Silent Failure
+- Any misalignment must:
+  - Be logged
+  - Be visible in system output
+- No silent fallback allowed
+
+---
+
+### 5. Frontend Update (MANDATORY)
+Update UI to reflect:
+- Root cause → decision mapping
+- Alignment status (valid / invalid)
+- Rejection reasons if failed
+
+---
+
+### 6. Proof of Enforcement
+You must provide:
+- Code snippets (constraint logic)
+- Execution logs
+- At least one failed + one corrected case
+
+---
+
+## ❗ Important
+
+Do NOT:
+- Adjust prompts only
+- Add more “analysis layers”
+- Ignore enforcement
+
+This is a logic integrity issue, not a data or prompt issue.
+
+---
+
+## 🎯 Final Objective
+
+We need a system where:
+
+> Understanding (AEL) = Decision (Engines)
+
+No drift. No generic fallback. No interpretation loss.
+
+---
+
+Do not mark this task as complete until ALL acceptance criteria are proven with evidence.
+
+---

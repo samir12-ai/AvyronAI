@@ -204,6 +204,100 @@ function renderInsightItem(key: string, item: any, index: number, isDark: boolea
   }
 }
 
+function CELCompliancePanel({ campaignId, isDark }: { campaignId: string; isDark: boolean }) {
+  const [celData, setCelData] = useState<any>(null);
+  const [celLoading, setCelLoading] = useState(false);
+  const bg = isDark ? '#1e1e36' : '#f0f0ff';
+  const text = isDark ? '#e0e0e0' : '#333';
+  const muted = isDark ? '#999' : '#777';
+
+  const fetchCEL = async () => {
+    setCelLoading(true);
+    try {
+      const url = new URL('/api/cel/report/' + campaignId, getApiUrl());
+      const res = await fetch(url.toString());
+      const data = await res.json();
+      if (data.success) setCelData(data);
+    } catch {}
+    setCelLoading(false);
+  };
+
+  React.useEffect(() => { fetchCEL(); }, [campaignId]);
+
+  if (celLoading) return <ActivityIndicator size="small" color="#7c5cfc" style={{ marginVertical: 8 }} />;
+  if (!celData?.report) return null;
+
+  const report = celData.report;
+  const themes = celData.causalThemes;
+  const scoreColor = report.overallScore >= 0.8 ? '#22c55e' : report.overallScore >= 0.5 ? '#f59e0b' : '#ef4444';
+  const passColor = report.overallPassed ? '#22c55e' : '#ef4444';
+
+  return (
+    <View style={[s.celContainer, { backgroundColor: bg }]}>
+      <View style={s.celHeader}>
+        <Ionicons name="shield-checkmark-outline" size={14} color={passColor} />
+        <Text style={[s.celTitle, { color: text }]}>Causal Enforcement</Text>
+        <View style={[s.confBadge, { backgroundColor: passColor + '22' }]}>
+          <Text style={[s.confText, { color: passColor }]}>{report.overallPassed ? 'PASS' : 'FAIL'}</Text>
+        </View>
+        <View style={[s.confBadge, { backgroundColor: scoreColor + '22' }]}>
+          <Text style={[s.confText, { color: scoreColor }]}>{Math.round(report.overallScore * 100)}%</Text>
+        </View>
+      </View>
+
+      {themes?.primaryTheme && (
+        <View style={{ marginTop: 4 }}>
+          <Text style={[s.reasonLabel, { color: muted }]}>Primary causal theme:</Text>
+          <Text style={[s.deepText, { color: '#7c5cfc' }]}>{themes.primaryTheme.replace(/_/g, ' ')}</Text>
+        </View>
+      )}
+
+      {themes?.activeRules?.length > 0 && (
+        <View style={{ marginTop: 4 }}>
+          <Text style={[s.reasonLabel, { color: muted }]}>Active constraint rules:</Text>
+          {themes.activeRules.map((rule: any, i: number) => (
+            <Text key={i} style={[s.reasonText, { color: text }]}>
+              {i + 1}. {rule.description}
+            </Text>
+          ))}
+        </View>
+      )}
+
+      {report.engineResults?.map((er: any, i: number) => (
+        <View key={i} style={[s.insightCard, { backgroundColor: isDark ? '#252542' : '#ffffff', marginTop: 6 }]}>
+          <View style={s.insightHeader}>
+            <Text style={[s.sectionLabel, { color: text, fontWeight: '600' as const }]}>{er.engineId}</Text>
+            <View style={[s.confBadge, { backgroundColor: (er.passed ? '#22c55e' : '#ef4444') + '22' }]}>
+              <Text style={[s.confText, { color: er.passed ? '#22c55e' : '#ef4444' }]}>{er.passed ? 'PASS' : 'FAIL'}</Text>
+            </View>
+            <Text style={[s.tagText, { color: muted }]}>{Math.round(er.score * 100)}%</Text>
+          </View>
+
+          {er.violations?.length > 0 && er.violations.map((v: any, vi: number) => (
+            <View key={vi} style={{ marginTop: 4 }}>
+              <View style={s.tagRow}>
+                <View style={[s.tag, { backgroundColor: (v.severity === 'blocking' ? '#ef4444' : v.severity === 'major' ? '#f59e0b' : '#3b82f6') + '22' }]}>
+                  <Text style={[s.tagText, { color: v.severity === 'blocking' ? '#ef4444' : v.severity === 'major' ? '#f59e0b' : '#3b82f6' }]}>{v.severity}</Text>
+                </View>
+                <View style={[s.tag, { backgroundColor: '#7c5cfc22' }]}>
+                  <Text style={[s.tagText, { color: '#7c5cfc' }]}>{v.violationType.replace(/_/g, ' ')}</Text>
+                </View>
+              </View>
+              <Text style={[s.reasonText, { color: text, marginTop: 2 }]}>{v.details}</Text>
+              <Text style={[s.evidenceText, { color: muted }]}>Root cause: {v.rootCause}</Text>
+              <Text style={[s.evidenceText, { color: '#22c55e' }]}>Required: {v.requiredDirection}</Text>
+            </View>
+          ))}
+
+          {er.violations?.length === 0 && (
+            <Text style={[s.reasonText, { color: '#22c55e', marginTop: 2 }]}>All outputs aligned with causal root causes</Text>
+          )}
+        </View>
+      ))}
+    </View>
+  );
+}
+
 export default function AELDebugPanel() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -365,6 +459,10 @@ export default function AELDebugPanel() {
             </Pressable>
           )}
 
+          {aelData && activeCampaign && (
+            <CELCompliancePanel campaignId={activeCampaign.id} isDark={isDark} />
+          )}
+
           {aelData && !loading && (
             <Pressable onPress={fetchAEL} style={[s.refreshBtn, { borderColor: accentColor }]}>
               <Ionicons name="refresh-outline" size={14} color={accentColor} />
@@ -423,4 +521,7 @@ const s = StyleSheet.create({
   fetchBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   refreshBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8, borderRadius: 8, borderWidth: 1, marginTop: 8 },
   refreshBtnText: { fontSize: 12, fontWeight: '600' },
+  celContainer: { marginTop: 12, padding: 10, borderRadius: 8 },
+  celHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  celTitle: { fontSize: 12, fontWeight: '600' },
 });

@@ -1,5 +1,6 @@
 import { aiChat } from "../ai-client";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import { buildCausalDirectiveForPrompt } from "../causal-enforcement-layer/engine";
 import { loadProductDNA, formatProductDNAForPrompt, type ProductDNA } from "../shared/product-dna";
 import { detectGenericOutput, checkCrossEngineAlignment, enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
 
@@ -1442,10 +1443,11 @@ export async function aiOfferGeneration(
     const mechName = safeJsonParse(typeof strategyRoot.approvedMechanism === 'string' ? strategyRoot.approvedMechanism : JSON.stringify(strategyRoot.approvedMechanism))?.mechanismName || '';
 
     const aelBlock = formatAELForPrompt(analyticalEnrichment || null);
-    if (aelBlock) console.log(`[OfferEngine-V4] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars`);
+    const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
+    if (aelBlock) console.log(`[OfferEngine-V4] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
 
     const prompt = `You are an Offer Copywriter. You must refine the wording of pre-built offer skeletons.
-${aelBlock}
+${aelBlock}${causalDirective}
 CRITICAL: You are NOT generating offers from scratch. The strategic structure has already been decided.
 Your ONLY job is to improve the wording to be more compelling, specific, and market-ready.
 
@@ -1609,10 +1611,11 @@ You MUST fix these specific issues. Generate offers that directly address these 
 ` : "";
 
   const aelBlockFallback = formatAELForPrompt(analyticalEnrichment || null);
-  if (aelBlockFallback) console.log(`[OfferEngine-V4] AEL_INJECTED_FALLBACK | enrichmentSize=${aelBlockFallback.length}chars`);
+  const causalDirectiveFallback = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
+  if (aelBlockFallback) console.log(`[OfferEngine-V4] AEL_INJECTED_FALLBACK | enrichmentSize=${aelBlockFallback.length}chars | causalDirective=${causalDirectiveFallback.length}chars`);
 
   const prompt = `You are an Offer Architect. Generate three offer concepts.
-${aelBlockFallback}
+${aelBlockFallback}${causalDirectiveFallback}
 ABSOLUTE RULES:
 - Do NOT generate funnel architecture, advertising strategy, channel selection, media planning, budget recommendations, campaign execution, sales scripts, or strategic master plan decisions
 - Do NOT include financial advisory claims

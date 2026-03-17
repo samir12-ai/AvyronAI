@@ -12,6 +12,11 @@ import { checkForOrphanClaims, type OrphanCheckResult } from "../shared/signal-q
 import { enforceGlobalStateRefresh } from "../shared/engine-health";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
 import {
+  enforcePositioningCompliance,
+  buildCausalDirectiveForPrompt,
+  applyCompliancePenalties,
+} from "../causal-enforcement-layer/engine";
+import {
   POSITIONING_ENGINE_VERSION,
   POSITIONING_THRESHOLDS,
   GENERIC_TERRITORY_PATTERNS,
@@ -1019,13 +1024,14 @@ async function layer11_positioningStatementGeneration(
 
     const productDnaBlock = productDna ? formatProductDNAForPrompt(productDna) : "";
     const aelBlock = formatAELForPrompt(analyticalEnrichment || null);
-    if (aelBlock) console.log(`[PositioningEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars`);
+    const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
+    if (aelBlock) console.log(`[PositioningEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
 
     const prompt = `You are a strategic positioning analyst. Generate precise positioning statements for each territory.
 
 MARKET CATEGORY: ${category}
 PRIMARY AUDIENCE SEGMENT: ${topSegment}
-${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${aelBlock}
+${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${aelBlock}${causalDirective}
 
 TERRITORIES:
 ${territories.map((t, i) => `${i + 1}. "${t.name}" (opportunity: ${t.opportunityScore}, distance: ${t.narrativeDistanceScore})
@@ -1551,6 +1557,17 @@ export async function runPositioningEngine(
       territory.confidenceScore = Math.max(0, territory.confidenceScore - genericOutputCheck.penalty);
     }
     console.log(`[PositioningEngine-V3] GENERIC_OUTPUT_PENALTY | phrases=${genericOutputCheck.genericPhrases.length} | penalty=${genericOutputCheck.penalty.toFixed(2)}`);
+  }
+
+  const celCompliance = enforcePositioningCompliance(finalTerritories, analyticalEnrichment || null);
+  if (celCompliance.violations.length > 0) {
+    applyCompliancePenalties(finalTerritories, celCompliance);
+    for (const logEntry of celCompliance.enforcementLog) {
+      console.log(`[PositioningEngine-V3] CEL: ${logEntry}`);
+    }
+    console.log(`[PositioningEngine-V3] CEL_RESULT | passed=${celCompliance.passed} | score=${celCompliance.score.toFixed(2)} | violations=${celCompliance.violations.length} | rules=${celCompliance.appliedRules.join(",")}`);
+  } else {
+    console.log(`[PositioningEngine-V3] CEL_RESULT | CLEAN | score=1.00 | rootCauses=${celCompliance.rootCausesEvaluated}`);
   }
 
   const rawConfidence = primaryTerritory
