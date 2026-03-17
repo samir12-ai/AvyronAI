@@ -18,6 +18,14 @@ import {
   STATUS,
   MAX_FUNNEL_STAGES,
   ENTRY_MECHANISM_TYPES,
+  ENTRY_ROUTE_TO_FUNNEL_FAMILIES,
+  TRUST_HEAVY_FUNNELS,
+  TRUST_LIGHT_FUNNELS,
+  TRIGGER_CLASS_TO_FUNNEL_FAMILY,
+  LOW_READINESS_STAGES,
+  HIGH_READINESS_STAGES,
+  COMMITMENT_TOLERANCE_MAP,
+  FUNNEL_TYPES,
 } from "./constants";
 import {
   assessDataReliability,
@@ -38,6 +46,7 @@ import type {
   FrictionPoint,
   FunnelResult,
   EntryTrigger,
+  PriorityMatrixDecision,
 } from "./types";
 
 function clamp(v: number, min = 0, max = 1): number {
@@ -607,6 +616,179 @@ function buildStageMap(funnelType: string, awareness: string): FunnelStage[] {
   return stages;
 }
 
+export function applyAwarenessPriorityMatrix(
+  proposedType: string,
+  awareness: FunnelAwarenessInput | null | undefined,
+  audience: FunnelAudienceInput,
+  offer: FunnelOfferInput,
+): PriorityMatrixDecision {
+  const allTypes = [...FUNNEL_TYPES] as string[];
+  let eligible = new Set<string>(allTypes);
+  const blocked: { funnelType: string; blockedByPriority: number; reason: string }[] = [];
+  const layers: PriorityMatrixDecision["priorityLayers"] = [];
+  let decidingPriority = 6;
+  let decidingPriorityName = "Offer Fit (default)";
+
+  const entryMechanism = awareness?.entryMechanism || "";
+  const trustState = awareness?.trustState || "";
+  const awarenessStage = awareness?.awarenessStage || audience.awarenessLevel || "problem_aware";
+  const triggerClass = awareness?.triggerClass || "";
+  const awarenessScore = awareness?.awarenessStrengthScore ?? 0;
+
+  const p1Blocked: string[] = [];
+  const p1Eligible: string[] = [];
+  const routeMapping = ENTRY_ROUTE_TO_FUNNEL_FAMILIES[entryMechanism];
+  if (routeMapping && awareness) {
+    for (const ft of routeMapping.blocked) {
+      if (eligible.has(ft)) {
+        eligible.delete(ft);
+        p1Blocked.push(ft);
+        blocked.push({ funnelType: ft, blockedByPriority: 1, reason: `Blocked by awareness route "${entryMechanism}" — incompatible funnel family` });
+      }
+    }
+    const routeAllowed = routeMapping.allowed.filter(ft => eligible.has(ft));
+    if (routeAllowed.length > 0) {
+      for (const ft of allTypes) {
+        if (!routeMapping.allowed.includes(ft) && eligible.has(ft)) {
+          eligible.delete(ft);
+          p1Blocked.push(ft);
+          blocked.push({ funnelType: ft, blockedByPriority: 1, reason: `Not in allowed set for awareness route "${entryMechanism}"` });
+        }
+      }
+    }
+    p1Eligible.push(...Array.from(eligible));
+    if (!eligible.has(proposedType)) {
+      decidingPriority = 1;
+      decidingPriorityName = "Awareness Route";
+    }
+  }
+  layers.push({
+    priority: 1, name: "Awareness Route", action: routeMapping ? `Filtered by ${entryMechanism}` : "No awareness route — skipped",
+    eligible: Array.from(eligible), blocked: p1Blocked,
+  });
+
+  const p2Blocked: string[] = [];
+  const highTrust = trustState === "high" || trustState === "very_high" || trustState === "critical"
+    || entryMechanism === "trust_repair_entry" || entryMechanism === "proof_led_entry";
+  if (highTrust && awareness) {
+    for (const ft of TRUST_LIGHT_FUNNELS) {
+      if (eligible.has(ft)) {
+        eligible.delete(ft);
+        p2Blocked.push(ft);
+        blocked.push({ funnelType: ft, blockedByPriority: 2, reason: `Trust requirement "${trustState}" blocks low-trust funnel "${ft}"` });
+      }
+    }
+    if (!eligible.has(proposedType) && decidingPriority > 2) {
+      decidingPriority = 2;
+      decidingPriorityName = "Trust Requirement";
+    }
+  }
+  layers.push({
+    priority: 2, name: "Trust Requirement", action: highTrust ? `High trust — penalized light funnels` : "Trust level acceptable — no override",
+    eligible: Array.from(eligible), blocked: p2Blocked,
+  });
+
+  const p3Blocked: string[] = [];
+  if (LOW_READINESS_STAGES.includes(awarenessStage) && awareness) {
+    const lowReadinessBlocked = ["direct", "application", "tripwire"];
+    for (const ft of lowReadinessBlocked) {
+      if (eligible.has(ft)) {
+        eligible.delete(ft);
+        p3Blocked.push(ft);
+        blocked.push({ funnelType: ft, blockedByPriority: 3, reason: `Low readiness stage "${awarenessStage}" blocks high-commitment funnel "${ft}"` });
+      }
+    }
+    if (!eligible.has(proposedType) && decidingPriority > 3) {
+      decidingPriority = 3;
+      decidingPriorityName = "Awareness Stage";
+    }
+  } else if (HIGH_READINESS_STAGES.includes(awarenessStage) && awareness) {
+    const highReadinessPreferred = ["direct", "tripwire", "application", "membership"];
+    for (const ft of eligible) {
+      if (!highReadinessPreferred.includes(ft) && ft !== "vsl" && ft !== "webinar" && ft !== "consultation" && ft !== "hybrid") {
+        // Don't block, but note preference
+      }
+    }
+  }
+  layers.push({
+    priority: 3, name: "Awareness Stage", action: LOW_READINESS_STAGES.includes(awarenessStage) ? `Low readiness "${awarenessStage}" — blocked high-commitment` : `Stage "${awarenessStage}" — no constraint`,
+    eligible: Array.from(eligible), blocked: p3Blocked,
+  });
+
+  const p4Blocked: string[] = [];
+  const triggerMapping = TRIGGER_CLASS_TO_FUNNEL_FAMILY[triggerClass];
+  if (triggerMapping && awareness) {
+    for (const ft of triggerMapping.penalized) {
+      if (eligible.has(ft)) {
+        eligible.delete(ft);
+        p4Blocked.push(ft);
+        blocked.push({ funnelType: ft, blockedByPriority: 4, reason: `Trigger class "${triggerClass}" penalizes funnel "${ft}"` });
+      }
+    }
+    if (!eligible.has(proposedType) && decidingPriority > 4) {
+      decidingPriority = 4;
+      decidingPriorityName = "Trigger Class";
+    }
+  }
+  layers.push({
+    priority: 4, name: "Trigger Class", action: triggerMapping ? `Filtered by trigger "${triggerClass}"` : "No trigger class constraint",
+    eligible: Array.from(eligible), blocked: p4Blocked,
+  });
+
+  const p5Blocked: string[] = [];
+  const audienceReadiness = awarenessStage === "most_aware" ? 0.9 : awarenessStage === "product_aware" ? 0.7
+    : awarenessStage === "solution_aware" ? 0.55 : awarenessStage === "problem_aware" ? 0.35 : 0.2;
+  if (audienceReadiness < 0.4 && awareness) {
+    for (const ft of Array.from(eligible)) {
+      const required = COMMITMENT_TOLERANCE_MAP[ft] ?? 0.5;
+      if (required > 0.6) {
+        eligible.delete(ft);
+        p5Blocked.push(ft);
+        blocked.push({ funnelType: ft, blockedByPriority: 5, reason: `Low commitment tolerance (readiness ${audienceReadiness.toFixed(2)}) blocks high-commitment funnel "${ft}" (requires ${required})` });
+      }
+    }
+    if (!eligible.has(proposedType) && decidingPriority > 5) {
+      decidingPriority = 5;
+      decidingPriorityName = "Commitment Tolerance";
+    }
+  }
+  layers.push({
+    priority: 5, name: "Commitment Tolerance", action: audienceReadiness < 0.4 ? `Low readiness ${audienceReadiness.toFixed(2)} — blocked high-commitment` : "Commitment tolerance acceptable",
+    eligible: Array.from(eligible), blocked: p5Blocked,
+  });
+
+  layers.push({
+    priority: 6, name: "Offer Fit", action: "Final refinement by offer characteristics",
+    eligible: Array.from(eligible), blocked: [],
+  });
+
+  let finalType = proposedType;
+  const wasOverridden = !eligible.has(proposedType);
+
+  if (wasOverridden && eligible.size > 0) {
+    const preferenceOrder = triggerMapping?.preferred || routeMapping?.allowed || allTypes;
+    const bestMatch = preferenceOrder.find(ft => eligible.has(ft));
+    finalType = bestMatch || Array.from(eligible)[0];
+    console.log(`[FunnelEngine-V3] PRIORITY_MATRIX_OVERRIDE | proposed=${proposedType} → final=${finalType} | decidingPriority=P${decidingPriority} (${decidingPriorityName})`);
+  } else if (eligible.size === 0) {
+    eligible = new Set([proposedType]);
+    finalType = proposedType;
+    console.log(`[FunnelEngine-V3] PRIORITY_MATRIX_EXHAUSTED | all types blocked — falling back to proposed=${proposedType}`);
+  }
+
+  return {
+    decidingPriority,
+    decidingPriorityName,
+    eligibleFunnels: Array.from(eligible),
+    blockedFunnels: blocked,
+    originalType: proposedType,
+    finalType,
+    wasOverridden,
+    awarenessCompatible: eligible.has(finalType),
+    priorityLayers: layers,
+  };
+}
+
 function buildFunnelCandidate(
   name: string,
   funnelType: string,
@@ -614,25 +796,33 @@ function buildFunnelCandidate(
   offer: FunnelOfferInput,
   positioning: FunnelPositioningInput,
   differentiation: FunnelDifferentiationInput,
+  awarenessInput?: FunnelAwarenessInput | null,
 ): FunnelCandidate {
-  const awareness = audience.awarenessLevel || "problem_aware";
-  const rawStageMap = buildStageMap(funnelType, awareness);
+  const matrixDecision = applyAwarenessPriorityMatrix(funnelType, awarenessInput, audience, offer);
+  const effectiveType = matrixDecision.finalType;
+
+  if (matrixDecision.wasOverridden) {
+    console.log(`[FunnelEngine-V3] CANDIDATE_OVERRIDE | "${name}" type ${funnelType} → ${effectiveType} | P${matrixDecision.decidingPriority} (${matrixDecision.decidingPriorityName})`);
+  }
+
+  const awarenessStageStr = awarenessInput?.awarenessStage || audience.awarenessLevel || "problem_aware";
+  const rawStageMap = buildStageMap(effectiveType, awarenessStageStr);
   const { compressed: stageMap, wasCompressed } = compressFunnelStages(rawStageMap);
 
-  const entryTrigger = layerEntryTriggerDetection(audience, offer, funnelType);
+  const entryTrigger = layerEntryTriggerDetection(audience, offer, effectiveType);
 
   const eligibility = layer1_funnelEligibilityDetection(audience, offer);
   const fitResult = layer2_offerToFunnelFit(offer, audience);
-  const frictionResult = layer3_audienceFrictionModeling(audience, funnelType);
-  const trustResult = layer4_trustPathConstruction(audience, differentiation, funnelType);
+  const frictionResult = layer3_audienceFrictionModeling(audience, effectiveType);
+  const trustResult = layer4_trustPathConstruction(audience, differentiation, effectiveType);
   const proofResult = layer5_proofPlacementLogic(differentiation, stageMap);
-  const commitResult = layer6_commitmentLevelMatching(audience, offer, funnelType);
+  const commitResult = layer6_commitmentLevelMatching(audience, offer, effectiveType);
 
-  const isGeneric = detectGenericFunnel(name) || detectGenericFunnel(funnelType);
+  const isGeneric = detectGenericFunnel(name) || detectGenericFunnel(effectiveType);
 
   const candidate: FunnelCandidate = {
     funnelName: name,
-    funnelType,
+    funnelType: effectiveType,
     stageMap,
     trustPath: trustResult.trustPath,
     proofPlacements: proofResult.proofPlacements,
@@ -649,6 +839,7 @@ function buildFunnelCandidate(
     integrityResult: { passed: true, failures: [] },
     compressionApplied: wasCompressed,
     genericFlag: isGeneric,
+    priorityMatrixDecision: matrixDecision,
   };
 
   const integrityResult = layer7_funnelIntegrityGuard(candidate, audience, offer, positioning, differentiation);
@@ -658,6 +849,10 @@ function buildFunnelCandidate(
 
   if (wasCompressed) {
     candidate.funnelStrengthScore = clamp(candidate.funnelStrengthScore * 0.9);
+  }
+
+  if (matrixDecision.wasOverridden) {
+    candidate.funnelStrengthScore = clamp(candidate.funnelStrengthScore * 0.95);
   }
 
   return candidate;
@@ -693,6 +888,7 @@ export async function aiFunnelGeneration(
   differentiation: FunnelDifferentiationInput,
   accountId: string,
   mi?: FunnelMIInput | null,
+  awarenessCtx?: FunnelAwarenessInput | null,
 ): Promise<{ primary: { name: string; type: string }; alternative: { name: string; type: string }; rejected: { name: string; type: string; rejectionReason: string } }> {
   const pains = audience.audiencePains || [];
   const desires = Object.entries(audience.desireMap || {});
@@ -708,6 +904,27 @@ export async function aiFunnelGeneration(
   - Funnel stages MUST align with mechanism steps`
     : "";
 
+  const matrixPreFilter = awarenessCtx
+    ? applyAwarenessPriorityMatrix("webinar", awarenessCtx, audience, offer)
+    : null;
+  const eligibleTypesBlock = matrixPreFilter
+    ? `\n\nAWARENESS-COMPATIBLE FUNNEL TYPES (you MUST select from these):
+${matrixPreFilter.eligibleFunnels.join(", ")}
+
+BLOCKED FUNNEL TYPES (do NOT use these):
+${matrixPreFilter.blockedFunnels.map(b => `${b.funnelType} — ${b.reason}`).join("\n")}
+
+AWARENESS CONTEXT (use this to guide funnel design):
+- Awareness Stage: ${awarenessCtx!.awarenessStage}
+- Entry Mechanism: ${awarenessCtx!.entryMechanism}
+- Trigger Class: ${awarenessCtx!.triggerClass}
+- Trust State: ${awarenessCtx!.trustState}
+- Awareness Route: ${awarenessCtx!.awarenessRoute}
+- Awareness Strength: ${awarenessCtx!.awarenessStrengthScore.toFixed(2)}
+
+CRITICAL: The funnel type MUST be compatible with the detected awareness route. A ${awarenessCtx!.entryMechanism} entry mechanism requires a funnel that supports ${awarenessCtx!.trustState} trust building.`
+    : "";
+
   const prompt = `You are a Funnel Architect. Generate three funnel concepts based on the market intelligence below.
 
 STRICT RULES:
@@ -715,7 +932,7 @@ STRICT RULES:
 - ONLY output funnel definitions: name, type (direct, webinar, challenge, vsl, application, consultation, tripwire, product-launch, membership, hybrid)
 - Funnels must be specific and non-generic. Avoid "standard funnel" or "basic sales funnel"
 - Each funnel must define the JOURNEY the buyer takes from awareness to commitment
-- Respond with ONLY valid JSON, no markdown${mechanismCoreBlock}
+- Respond with ONLY valid JSON, no markdown${mechanismCoreBlock}${eligibleTypesBlock}
 
 Market Context:
 - Offer: ${offer.offerName} — ${offer.coreOutcome}
@@ -877,15 +1094,9 @@ export async function runFunnelEngine(
       entryMechanism: awareness.entryMechanism,
       triggerClass: awareness.triggerClass,
       trustState: awareness.trustState,
+      awarenessRoute: awareness.awarenessRoute,
       score: awareness.awarenessStrengthScore,
     };
-
-    if (awareness.entryMechanism === "diagnostic_entry" && !["challenge", "quiz"].includes(l2Fit.funnelType)) {
-      console.log(`[FunnelEngine-V3] AWARENESS_OVERRIDE | diagnostic entry suggests challenge/quiz funnel, current=${l2Fit.funnelType}`);
-    }
-    if (awareness.entryMechanism === "authority_entry" && l2Fit.funnelType === "direct") {
-      console.log(`[FunnelEngine-V3] AWARENESS_ADVISORY | authority entry + direct funnel — trust path critical`);
-    }
   }
 
   const l3Friction = layer3_audienceFrictionModeling(audience, l2Fit.funnelType);
@@ -905,7 +1116,7 @@ export async function runFunnelEngine(
 
   let aiFunnels;
   try {
-    aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi);
+    aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi, awareness);
     diagnostics.aiGeneration = { success: true };
   } catch (err: any) {
     diagnostics.aiGeneration = { success: false, error: err.message };
@@ -918,23 +1129,25 @@ export async function runFunnelEngine(
 
   const primaryFunnel = buildFunnelCandidate(
     aiFunnels.primary.name, aiFunnels.primary.type,
-    audience, offer, positioning, differentiation,
+    audience, offer, positioning, differentiation, awareness,
   );
   diagnostics.layer7_primary = primaryFunnel.integrityResult;
   diagnostics.layer8_primary = { strength: primaryFunnel.funnelStrengthScore };
   diagnostics.entryTrigger_primary = primaryFunnel.entryTrigger;
   diagnostics.compression_primary = { applied: primaryFunnel.compressionApplied, stages: primaryFunnel.stageMap.length };
+  diagnostics.priorityMatrix_primary = primaryFunnel.priorityMatrixDecision;
 
   const alternativeFunnel = buildFunnelCandidate(
     aiFunnels.alternative.name, aiFunnels.alternative.type,
-    audience, offer, positioning, differentiation,
+    audience, offer, positioning, differentiation, awareness,
   );
   diagnostics.layer7_alternative = alternativeFunnel.integrityResult;
   diagnostics.layer8_alternative = { strength: alternativeFunnel.funnelStrengthScore };
+  diagnostics.priorityMatrix_alternative = alternativeFunnel.priorityMatrixDecision;
 
   const rejectedFunnel = buildFunnelCandidate(
     aiFunnels.rejected.name, aiFunnels.rejected.type,
-    audience, offer, positioning, differentiation,
+    audience, offer, positioning, differentiation, awareness,
   );
   diagnostics.layer7_rejected = rejectedFunnel.integrityResult;
 
@@ -1021,7 +1234,8 @@ export async function runFunnelEngine(
     const offerCommitmentNum = commitmentLevelOrder[offerCommitmentLevel] || 3;
     const commitmentGap = Math.abs(funnelCommitmentNum - offerCommitmentNum);
 
-    const audienceReadinessNum = awarenessReadinessMap[awareness] || 2;
+    const audienceReadinessStage = awareness?.awarenessStage || audience.awarenessLevel || "problem_aware";
+    const audienceReadinessNum = awarenessReadinessMap[audienceReadinessStage] || 2;
     const funnelMinReadiness = primaryFunnel.funnelType === "direct" || primaryFunnel.funnelType === "application" ? 4
       : primaryFunnel.funnelType === "tripwire" || primaryFunnel.funnelType === "product-launch" ? 2
       : 3;
@@ -1092,7 +1306,8 @@ export async function runFunnelEngine(
   );
   diagnostics.strategyAcceptability = acceptability;
 
-  console.log(`[FunnelEngine-V3] Complete | status=${status} | strength=${primaryFunnel.funnelStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | grade=${acceptability.grade} | generic=${primaryFunnel.genericFlag} | boundary=${boundaryCheck.passed} | alignmentWarnings=${structuralWarnings.length}`);
+  const pmDecision = primaryFunnel.priorityMatrixDecision;
+  console.log(`[FunnelEngine-V3] Complete | status=${status} | type=${primaryFunnel.funnelType} | strength=${primaryFunnel.funnelStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | grade=${acceptability.grade} | generic=${primaryFunnel.genericFlag} | boundary=${boundaryCheck.passed} | alignmentWarnings=${structuralWarnings.length} | priorityMatrix=${pmDecision ? `P${pmDecision.decidingPriority}(${pmDecision.decidingPriorityName})` : 'none'} | overridden=${pmDecision?.wasOverridden ?? false} | blocked=${pmDecision?.blockedFunnels?.length ?? 0}`);
 
   return {
     status,

@@ -1,0 +1,225 @@
+Hi Replit Team,
+
+We need to close the Awareness–Funnel issue from the root, not with another patch.
+
+At this point the structural problem is clear:
+
+- Awareness Engine is producing strong, coherent outputs
+- Funnel Engine structure itself is technically clean
+- but funnel selection is still choosing the wrong type for the detected awareness state
+
+The repeated issue is not UI wording and not stage formatting.  
+It is a priority / decision-order problem inside funnel selection, plus the need to make sure all roots are correctly connected and propagated through the system.
+
+## Core problem
+
+The system is still able to select a funnel that conflicts with the active awareness route.
+
+Example pattern we keep seeing:
+- Awareness detects: unaware + trust breakdown + proof-led entry
+- Funnel still selects: challenge funnel
+
+This is strategically wrong.
+
+A challenge funnel usually expects:
+- curiosity-driven entry
+- diagnostic entry
+- active participation readiness
+
+It should not win over a proof-led trust-entry route unless there is explicit overriding evidence.
+
+So the issue is now:
+the system lacks a strict priority matrix for funnel selection.
+
+---
+
+## Required root fix
+
+Please implement a Priority Matrix inside Funnel Engine selection logic so the system chooses funnel type based on ranked strategic rules, not generic scoring drift.
+
+This must be a root-level correction, not a local tweak.
+
+## Required Priority Matrix
+
+Funnel selection should follow this decision order:
+
+### Priority 1 — Awareness Route
+Awareness route must be the strongest controlling signal.
+
+If Awareness detects:
+- proof-led entry
+- authority-led entry
+- trust breakdown
+- unaware stage
+- high trust requirement
+
+then funnel selection must first filter for compatible funnel classes.
+
+Examples:
+- proof-led entry → proof funnel / authority funnel / webinar proof funnel
+- authority entry → authority funnel / expert-led funnel
+- curiosity / diagnostic entry → challenge funnel / quiz / workshop
+- urgent purchase intent → direct offer / conversion funnel
+
+A funnel that conflicts with awareness route should be blocked or heavily penalized.
+
+---
+
+### Priority 2 — Trust Requirement
+If trust requirement is high, funnel types that rely on proof, case studies, demonstrations, authority, and process explanation should rank above challenge-style engagement funnels.
+
+Trust-heavy markets should not default to “challenge” unless awareness also supports challenge.
+
+---
+
+### Priority 3 — Awareness Stage
+If audience is:
+- unaware
+- problem-unaware
+- low-readiness
+
+then funnel should prioritize:
+- proof-led education
+- authority-led education
+- trust-building entry
+
+not interactive commitment-first structures.
+
+Challenge funnel should only be allowed when awareness stage and trigger class support active engagement.
+
+---
+
+### Priority 4 — Trigger Class
+Trigger class should constrain the funnel family.
+
+Examples:
+- trust_breakdown → proof/authority-first
+- urgency/desperation → decision/comparison/direct-response
+- curiosity → challenge / quiz / discovery-led
+- myth-breaker → contradiction-led / insight-led entry
+
+Trigger class should not be treated as a decorative label. It must affect funnel family eligibility.
+
+---
+
+### Priority 5 — Commitment Tolerance
+If commitment tolerance is low, challenge funnel must be penalized unless there is strong awareness evidence for it.
+
+The system must stop selecting “challenge” in low-readiness, proof-first, trust-sensitive environments just because it is structurally attractive.
+
+---
+
+### Priority 6 — Offer Fit
+Offer fit should refine the choice, but not override awareness-route compatibility.
+
+A clean funnel with poor awareness compatibility is still the wrong funnel.
+
+---
+
+## Required selection behavior
+
+Please enforce the following:
+
+1. Awareness-compatible funnel classes are filtered first  
+2. Funnel candidates are ranked only after awareness compatibility is confirmed  
+3. Any funnel type that conflicts with awareness route gets blocked or strongly penalized  
+4. Funnel Engine must expose which priority layer determined the final decision
+
+---
+
+## Root alignment requirements
+
+This is critical.
+
+Please verify all roots and make sure the whole system is connected correctly.
+
+Awareness and Funnel, and every downstream engine, must share the same:
+
+- strategyRoot
+- run_id
+- root_hash
+- active audience signals
+- positioning axis
+- mechanism context
+- offer context
+
+No parallel roots.  
+No stale route references.  
+No duplicated context trees.  
+No fallback to legacy path assumptions.
+
+Please explicitly review and confirm that the roots are properly propagated and active across the whole dependency chain.
+
+---
+
+## Downstream dependency rules
+
+After Awareness → Funnel ordering, the rest of the system must follow the updated dependency graph correctly:
+
+- engines before Awareness remain unchanged
+- Funnel must consume Awareness outputs directly
+- engines between old Funnel and old Awareness positions must now consume Awareness where appropriate
+- engines after Funnel must consume Awareness + Funnel together
+- no downstream engine should behave as if Funnel was selected before Awareness
+
+Please review all dependency bindings after this change so the system does not silently drift.
+
+---
+
+## Frontend update required
+
+After backend implementation, please update the frontend immediately so the system state is visible and understandable.
+
+I want the UI to show clearly:
+
+### Awareness section
+- awareness stage
+- awareness route
+- trigger class
+- trust requirement
+- selected entry mechanism
+
+### Funnel section
+- selected funnel type
+- why it was selected
+- which priority rule caused selection
+- compatibility with awareness route
+- any blocked funnel families
+
+### Diagnostic visibility
+Please make it visible when:
+- a funnel was blocked because it conflicts with awareness
+- a fallback funnel was selected
+- a route was rejected due to trust/readiness mismatch
+
+The interface should explain the decision logic instead of showing a beautiful but misleading final funnel.
+
+---
+
+## System update after completion
+
+Once implemented, please update the whole system state so:
+- stale outputs are invalidated
+- downstream engines refresh from the corrected roots
+- funnel outputs regenerate using the new priority matrix
+- UI reflects only the latest valid state
+
+No old cached funnel decisions should remain visible after deployment.
+
+---
+
+## Definition of success
+
+I will consider this closed only if:
+
+1. Funnel selection is controlled first by awareness compatibility  
+2. Challenge funnels stop appearing in proof-led trust-breakdown unaware routes unless explicitly justified  
+3. Roots are fully aligned and verified across Awareness, Funnel, and downstream engines  
+4. No stale context or parallel roots remain  
+5. Frontend shows the new logic clearly  
+6. System refreshes end-to-end after deployment  
+7. Funnel choice becomes strategically consistent, not only structurally clean
+
+Please treat this as a root-level strategic decision fix for the Funnel Engine and its dependencies.
+
+Thanks.

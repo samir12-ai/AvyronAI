@@ -339,6 +339,7 @@ export function registerFunnelEngineRoutes(app: Express) {
         boundaryCheck: JSON.stringify(result.boundaryCheck),
         confidenceScore: result.confidenceScore,
         executionTimeMs: result.executionTimeMs,
+        layerDiagnostics: JSON.stringify(result.layerDiagnostics),
       }).returning();
 
       await pruneOldSnapshots(db, funnelSnapshots, campaignId, 20, accountId);
@@ -401,6 +402,7 @@ export function registerFunnelEngineRoutes(app: Express) {
         positioningSnapshotId: latest.positioningSnapshotId,
         miSnapshotId: latest.miSnapshotId,
         audienceSnapshotId: latest.audienceSnapshotId,
+        layerDiagnostics: safeJsonParse(latest.layerDiagnostics),
       });
     } catch (error: any) {
       console.error("[FunnelEngine] Latest fetch error:", error.message);

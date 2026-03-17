@@ -48,6 +48,24 @@ interface EntryTrigger {
   purpose: string;
 }
 
+interface PriorityMatrixDecision {
+  decidingPriority: number;
+  decidingPriorityName: string;
+  eligibleFunnels: string[];
+  blockedFunnels: { funnelType: string; blockedByPriority: number; reason: string }[];
+  originalType: string;
+  finalType: string;
+  wasOverridden: boolean;
+  awarenessCompatible: boolean;
+  priorityLayers: {
+    priority: number;
+    name: string;
+    action: string;
+    eligible: string[];
+    blocked: string[];
+  }[];
+}
+
 interface FunnelCandidate {
   funnelName: string;
   funnelType: string;
@@ -67,6 +85,16 @@ interface FunnelCandidate {
   integrityResult: { passed: boolean; failures: string[] };
   compressionApplied?: boolean;
   genericFlag: boolean;
+  priorityMatrixDecision?: PriorityMatrixDecision;
+}
+
+interface AwarenessBinding {
+  stage: string;
+  entryMechanism: string;
+  triggerClass: string;
+  trustState: string;
+  awarenessRoute: string;
+  score: number;
 }
 
 interface FunnelData {
@@ -86,6 +114,10 @@ interface FunnelData {
   engineVersion?: number;
   selectedOption?: string | null;
   createdAt?: string;
+  layerDiagnostics?: {
+    awarenessBinding?: AwarenessBinding;
+    [key: string]: any;
+  };
 }
 
 export default function FunnelEngine({ isActive }: { isActive?: boolean }) {
@@ -288,6 +320,48 @@ export default function FunnelEngine({ isActive }: { isActive?: boolean }) {
           </View>
         )}
 
+        {funnel.priorityMatrixDecision && (
+          <View style={[styles.priorityMatrixBox, { backgroundColor: funnel.priorityMatrixDecision.wasOverridden ? '#F97316' + '10' : '#10B981' + '10', borderColor: funnel.priorityMatrixDecision.wasOverridden ? '#F97316' + '30' : '#10B981' + '30' }]}>
+            <View style={styles.entryTriggerHeader}>
+              <Ionicons name="analytics-outline" size={14} color={funnel.priorityMatrixDecision.wasOverridden ? '#F97316' : '#10B981'} />
+              <Text style={[styles.entryTriggerLabel, { color: funnel.priorityMatrixDecision.wasOverridden ? '#F97316' : '#10B981' }]}>Priority Matrix</Text>
+              <View style={[styles.entryMechanismBadge, { backgroundColor: funnel.priorityMatrixDecision.wasOverridden ? '#F97316' + '20' : '#10B981' + '20' }]}>
+                <Text style={[styles.entryMechanismText, { color: funnel.priorityMatrixDecision.wasOverridden ? '#F97316' : '#10B981' }]}>
+                  P{funnel.priorityMatrixDecision.decidingPriority} — {funnel.priorityMatrixDecision.decidingPriorityName}
+                </Text>
+              </View>
+            </View>
+            {funnel.priorityMatrixDecision.wasOverridden && (
+              <Text style={{ fontSize: 12, color: '#F97316', marginTop: 4 }}>
+                Type overridden: {funnel.priorityMatrixDecision.originalType} → {funnel.priorityMatrixDecision.finalType}
+              </Text>
+            )}
+            {funnel.priorityMatrixDecision.blockedFunnels.length > 0 && (
+              <View style={{ marginTop: 6 }}>
+                <Text style={{ fontSize: 11, color: colors.textMuted, fontWeight: '600' as const, marginBottom: 3 }}>Blocked Families:</Text>
+                {funnel.priorityMatrixDecision.blockedFunnels.slice(0, 4).map((b, i) => (
+                  <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                    <Ionicons name="close-circle-outline" size={11} color="#EF4444" />
+                    <Text style={{ fontSize: 11, color: '#EF4444' }}>{b.funnelType}</Text>
+                    <Text style={{ fontSize: 10, color: colors.textMuted, flex: 1 }}> — P{b.blockedByPriority}: {b.reason.split('—')[0]}</Text>
+                  </View>
+                ))}
+                {funnel.priorityMatrixDecision.blockedFunnels.length > 4 && (
+                  <Text style={{ fontSize: 10, color: colors.textMuted }}>+{funnel.priorityMatrixDecision.blockedFunnels.length - 4} more blocked</Text>
+                )}
+              </View>
+            )}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+              <Text style={{ fontSize: 11, color: colors.textMuted, fontWeight: '600' as const }}>Eligible:</Text>
+              {funnel.priorityMatrixDecision.eligibleFunnels.map((ft, i) => (
+                <View key={i} style={[styles.tag, { backgroundColor: '#10B981' + '15' }]}>
+                  <Text style={[styles.tagText, { color: '#10B981', fontSize: 10 }]}>{ft}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
         {funnel.compressionApplied && (
           <View style={[styles.compressionBadge, { backgroundColor: '#F59E0B15' }]}>
             <Ionicons name="contract" size={12} color="#F59E0B" />
@@ -474,6 +548,43 @@ export default function FunnelEngine({ isActive }: { isActive?: boolean }) {
         )}
       </LinearGradient>
 
+      {hasData && data?.layerDiagnostics?.awarenessBinding && (
+        <View style={[styles.awarenessBindingBox, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <Ionicons name="eye-outline" size={16} color="#F97316" />
+            <Text style={{ fontSize: 14, fontWeight: '600' as const, color: colors.text }}>Awareness Context</Text>
+          </View>
+          <View style={styles.awarenessGrid}>
+            <View style={styles.awarenessGridItem}>
+              <Text style={[styles.awarenessLabel, { color: colors.textMuted }]}>Stage</Text>
+              <Text style={[styles.awarenessValue, { color: colors.text }]}>{(data.layerDiagnostics.awarenessBinding.stage || '').replace(/_/g, ' ')}</Text>
+            </View>
+            <View style={styles.awarenessGridItem}>
+              <Text style={[styles.awarenessLabel, { color: colors.textMuted }]}>Entry Mechanism</Text>
+              <Text style={[styles.awarenessValue, { color: colors.text }]}>{(data.layerDiagnostics.awarenessBinding.entryMechanism || '').replace(/_/g, ' ')}</Text>
+            </View>
+            <View style={styles.awarenessGridItem}>
+              <Text style={[styles.awarenessLabel, { color: colors.textMuted }]}>Trigger Class</Text>
+              <Text style={[styles.awarenessValue, { color: colors.text }]}>{(data.layerDiagnostics.awarenessBinding.triggerClass || '').replace(/_/g, ' ')}</Text>
+            </View>
+            <View style={styles.awarenessGridItem}>
+              <Text style={[styles.awarenessLabel, { color: colors.textMuted }]}>Trust State</Text>
+              <Text style={[styles.awarenessValue, { color: colors.text }]}>{(data.layerDiagnostics.awarenessBinding.trustState || '').replace(/_/g, ' ')}</Text>
+            </View>
+            <View style={styles.awarenessGridItem}>
+              <Text style={[styles.awarenessLabel, { color: colors.textMuted }]}>Route</Text>
+              <Text style={[styles.awarenessValue, { color: colors.text }]}>{(data.layerDiagnostics.awarenessBinding.awarenessRoute || '').replace(/_/g, ' ')}</Text>
+            </View>
+            <View style={styles.awarenessGridItem}>
+              <Text style={[styles.awarenessLabel, { color: colors.textMuted }]}>Strength</Text>
+              <Text style={[styles.awarenessValue, { color: scoreColor(data.layerDiagnostics.awarenessBinding.score || 0) }]}>
+                {Math.round((data.layerDiagnostics.awarenessBinding.score || 0) * 100)}%
+              </Text>
+            </View>
+          </View>
+        </View>
+      )}
+
       {!hasData && !analyzing && (
         <View style={[styles.emptyState, { backgroundColor: colors.card }]}>
           <Ionicons name="git-network-outline" size={40} color={colors.textMuted} />
@@ -640,4 +751,10 @@ const styles = StyleSheet.create({
   selectBtnSelected: { opacity: 0.8 },
   selectBtnGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 10, padding: 12 },
   selectBtnText: { fontSize: 13, fontWeight: '600' as const, color: '#fff' },
+  priorityMatrixBox: { borderRadius: 10, borderWidth: 1, padding: 12, marginBottom: 10 },
+  awarenessBindingBox: { borderRadius: 12, padding: 14, borderWidth: 1, marginBottom: 12 },
+  awarenessGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  awarenessGridItem: { width: '30%' as any, minWidth: 90 },
+  awarenessLabel: { fontSize: 10, marginBottom: 2 },
+  awarenessValue: { fontSize: 12, fontWeight: '600' as const, textTransform: 'capitalize' as const },
 });

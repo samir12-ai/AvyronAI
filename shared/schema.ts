@@ -1819,6 +1819,7 @@ export const funnelSnapshots = pgTable("funnel_snapshots", {
   selectedOption: varchar("selected_option"),
   strategyRootId: varchar("strategy_root_id"),
   executionTimeMs: integer("execution_time_ms"),
+  layerDiagnostics: text("layer_diagnostics"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

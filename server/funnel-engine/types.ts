@@ -62,6 +62,24 @@ export interface EntryTrigger {
   purpose: string;
 }
 
+export interface PriorityMatrixDecision {
+  decidingPriority: number;
+  decidingPriorityName: string;
+  eligibleFunnels: string[];
+  blockedFunnels: { funnelType: string; blockedByPriority: number; reason: string }[];
+  originalType: string;
+  finalType: string;
+  wasOverridden: boolean;
+  awarenessCompatible: boolean;
+  priorityLayers: {
+    priority: number;
+    name: string;
+    action: string;
+    eligible: string[];
+    blocked: string[];
+  }[];
+}
+
 export interface FunnelCandidate {
   funnelName: string;
   funnelType: string;
@@ -81,6 +99,7 @@ export interface FunnelCandidate {
   integrityResult: { passed: boolean; failures: string[] };
   compressionApplied: boolean;
   genericFlag: boolean;
+  priorityMatrixDecision?: PriorityMatrixDecision;
 }
 
 export interface FunnelStage {

@@ -95,3 +95,76 @@ export const STATUS = {
   INSUFFICIENT_SIGNALS: "INSUFFICIENT_SIGNALS",
   INTEGRITY_FAILED: "INTEGRITY_FAILED",
 } as const;
+
+export const ENTRY_ROUTE_TO_FUNNEL_FAMILIES: Record<string, { allowed: string[]; blocked: string[] }> = {
+  pain_entry: {
+    allowed: ["webinar", "vsl", "consultation", "hybrid"],
+    blocked: ["tripwire", "product-launch"],
+  },
+  opportunity_entry: {
+    allowed: ["challenge", "webinar", "product-launch", "hybrid", "membership"],
+    blocked: ["application"],
+  },
+  myth_breaker_entry: {
+    allowed: ["webinar", "vsl", "challenge", "hybrid"],
+    blocked: ["direct", "tripwire"],
+  },
+  authority_entry: {
+    allowed: ["webinar", "consultation", "application", "vsl", "hybrid"],
+    blocked: ["challenge", "tripwire"],
+  },
+  proof_led_entry: {
+    allowed: ["webinar", "vsl", "consultation", "application", "hybrid"],
+    blocked: ["challenge", "tripwire"],
+  },
+  diagnostic_entry: {
+    allowed: ["challenge", "webinar", "consultation", "hybrid"],
+    blocked: ["direct", "tripwire"],
+  },
+};
+
+export const TRUST_HEAVY_FUNNELS = ["webinar", "vsl", "consultation", "application", "hybrid"];
+export const TRUST_LIGHT_FUNNELS = ["challenge", "tripwire", "direct", "product-launch"];
+
+export const TRIGGER_CLASS_TO_FUNNEL_FAMILY: Record<string, { preferred: string[]; penalized: string[] }> = {
+  hidden_cost: {
+    preferred: ["webinar", "vsl", "consultation"],
+    penalized: ["tripwire", "product-launch"],
+  },
+  missed_opportunity: {
+    preferred: ["challenge", "webinar", "product-launch", "hybrid"],
+    penalized: ["application"],
+  },
+  outdated_method: {
+    preferred: ["webinar", "vsl", "challenge", "hybrid"],
+    penalized: ["direct", "tripwire"],
+  },
+  authority_gap: {
+    preferred: ["webinar", "consultation", "application", "vsl"],
+    penalized: ["challenge", "tripwire"],
+  },
+  trust_breakdown: {
+    preferred: ["webinar", "vsl", "consultation", "application"],
+    penalized: ["direct", "tripwire", "challenge"],
+  },
+  competitor_weakness: {
+    preferred: ["challenge", "webinar", "vsl", "product-launch"],
+    penalized: ["membership"],
+  },
+};
+
+export const LOW_READINESS_STAGES = ["unaware", "problem_aware"];
+export const HIGH_READINESS_STAGES = ["product_aware", "most_aware"];
+
+export const COMMITMENT_TOLERANCE_MAP: Record<string, number> = {
+  challenge: 0.6,
+  webinar: 0.4,
+  vsl: 0.3,
+  direct: 0.7,
+  application: 0.8,
+  consultation: 0.7,
+  tripwire: 0.1,
+  "product-launch": 0.3,
+  membership: 0.6,
+  hybrid: 0.4,
+};
