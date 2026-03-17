@@ -160,11 +160,20 @@ export async function aiGemini(options: AIGeminiOptions) {
 
 const WEEKLY_TOKEN_BUDGET = 500000;
 
+const ACCOUNT_BUDGET_OVERRIDES: Record<string, number> = {
+  "default": 2000000,
+};
+
+function getAccountBudget(accountId: string): number {
+  return ACCOUNT_BUDGET_OVERRIDES[accountId] ?? WEEKLY_TOKEN_BUDGET;
+}
+
 async function checkAndReserveBudget(accountId: string, maxTokens: number): Promise<{ allowed: boolean; reason?: string }> {
   try {
     const { db } = await import("./db");
     const { sql } = await import("drizzle-orm");
     const lockKey = hashAccountId(accountId);
+    const budget = getAccountBudget(accountId);
     await db.execute(sql`SELECT pg_advisory_lock(${lockKey})`);
     try {
       const result = await db.execute(sql`
@@ -173,8 +182,8 @@ async function checkAndReserveBudget(accountId: string, maxTokens: number): Prom
         WHERE account_id = ${accountId} AND created_at > NOW() - INTERVAL '7 days'
       `);
       const totalTokens = Number(result.rows?.[0]?.total_tokens || 0);
-      if (totalTokens + maxTokens > WEEKLY_TOKEN_BUDGET) {
-        return { allowed: false, reason: `Weekly quota ${WEEKLY_TOKEN_BUDGET} tokens exceeded (used: ${totalTokens}, requested: ${maxTokens})` };
+      if (totalTokens + maxTokens > budget) {
+        return { allowed: false, reason: `Weekly quota ${budget} tokens exceeded (used: ${totalTokens}, requested: ${maxTokens})` };
       }
       await db.execute(sql`
         INSERT INTO ai_usage_log (account_id, endpoint, model, max_tokens, estimated_tokens, success, duration_ms, created_at)
@@ -229,11 +238,12 @@ async function reconcileBudgetReservation(entry: ReconcileEntry): Promise<void> 
   }
 }
 
-export function getWeeklyTokenBudget(): number {
+export function getWeeklyTokenBudget(accountId?: string): number {
+  if (accountId) return getAccountBudget(accountId);
   return WEEKLY_TOKEN_BUDGET;
 }
 
-export { WEEKLY_TOKEN_BUDGET };
+export { WEEKLY_TOKEN_BUDGET, ACCOUNT_BUDGET_OVERRIDES };
 
 export async function getWeeklyTokenUsage(accountId: string): Promise<number> {
   try {
