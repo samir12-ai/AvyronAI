@@ -97,6 +97,7 @@ export interface Territory {
   stabilityNotes: string[];
   evidenceSignals: string[];
   confidenceScore: number;
+  mappedSignalIds?: string[];
 }
 
 export interface StrategyCard {
