@@ -57,7 +57,7 @@ export const GENERIC_TERRITORY_PATTERNS: string[] = [
   "lifestyle",
 ];
 
-export type PositioningStatus = "COMPLETE" | "MISSING_DEPENDENCY" | "INSUFFICIENT_SIGNALS" | "UNSTABLE" | "INTEGRITY_FAILED" | "SIGNAL_REQUIRED" | "SIGNAL_DRIFT" | "LOW_CONFIDENCE";
+export type PositioningStatus = "COMPLETE" | "MISSING_DEPENDENCY" | "INSUFFICIENT_SIGNALS" | "UNSTABLE" | "INTEGRITY_FAILED" | "SIGNAL_REQUIRED" | "SIGNAL_DRIFT";
 
 export const BOUNDARY_BLOCKED_PATTERNS: Record<string, RegExp> = {
   "ad copy": /\b(ad copy|sales copy|copywriting|creative copy|ad creative)\b/i,

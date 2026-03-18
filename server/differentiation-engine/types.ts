@@ -96,6 +96,7 @@ export interface TrustGap {
   severity: number;
   relevanceToTerritory: number;
   priorityRank: number;
+  relatedTerritories?: string[];
 }
 
 export interface ProofAsset {

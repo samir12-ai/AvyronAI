@@ -384,7 +384,7 @@ export function layer4_proofDemandMapping(
       category: "transparency_proof",
       priority: 0.8,
       rationale: `${objections.length} objections require transparent proof`,
-      requiredFor: objections.map(([k]) => k),
+      requiredFor: [...objections.map(([k]) => k), ...territories.map(t => t.name)],
     });
   }
 
@@ -428,18 +428,27 @@ export function layer5_trustGapPrioritization(audience: AudienceInput, territori
   const objections = Object.entries(audience.objectionMap || {});
   const territoryNames = territories.map(t => t.name.toLowerCase());
 
+  const territoryDescriptions = territories.map(t => `${t.name} ${t.description || ""}`.toLowerCase());
+
   for (const [objection, data] of objections) {
     const dataObj = typeof data === "object" && data ? data : {};
     const severity = typeof dataObj.severity === "number" ? dataObj.severity : typeof dataObj.frequency === "number" ? dataObj.frequency : 0.5;
-    const relevance = territoryNames.some(t =>
-      jaccardSimilarity(objection, t) > 0.15
-    ) ? 0.8 : 0.4;
+
+    const matchedTerritories = territories.filter((t, i) =>
+      jaccardSimilarity(objection, territoryNames[i]) > 0.15 ||
+      jaccardSimilarity(objection, territoryDescriptions[i]) > 0.08
+    ).map(t => t.name);
+
+    const relevance = matchedTerritories.length > 0 ? 0.8 : 0.4;
 
     gaps.push({
       objection,
       severity: clamp(severity),
       relevanceToTerritory: clamp(relevance),
       priorityRank: 0,
+      relatedTerritories: matchedTerritories.length > 0
+        ? matchedTerritories
+        : territories.map(t => t.name),
     });
   }
 
@@ -775,7 +784,10 @@ export function layer9_differentiationPillarScoring(
     const relevantProof = proofDemands.filter(d => d.requiredFor.includes(tName));
     const marketProofability = clamp(relevantProof.length > 0 ? relevantProof.reduce((s, d) => s + d.priority, 0) / relevantProof.length : 0.3);
 
-    const relevantGaps = trustGaps.filter(g => jaccardSimilarity(g.objection, tLower) > 0.10);
+    const relevantGaps = trustGaps.filter(g =>
+      (g.relatedTerritories && g.relatedTerritories.includes(tName)) ||
+      jaccardSimilarity(g.objection, tLower) > 0.10
+    );
     const marketTrustAlignment = clamp(relevantGaps.length > 0 ? relevantGaps.reduce((s, g) => s + g.relevanceToTerritory, 0) / relevantGaps.length : 0.3);
 
     const avgCompetitorAuthority = competitorAuthorities.length > 0
@@ -983,20 +995,38 @@ export function validateTerritoryEvidenceDensity(
   proofDemands: ProofDemand[],
   trustGaps: TrustGap[],
   competitorClaims: CompetitorClaim[],
+  territories?: Territory[],
 ): { validatedPillars: DifferentiationPillar[]; downgradedCount: number } {
   let downgradedCount = 0;
+
+  const territoryDescMap = new Map<string, string>();
+  if (territories) {
+    for (const t of territories) {
+      territoryDescMap.set(t.name, `${t.name} ${t.description || ""} ${t.category || ""}`.toLowerCase());
+    }
+  }
 
   const validatedPillars = pillars.map(pillar => {
     const tName = pillar.name;
     const tLower = tName.toLowerCase();
+    const tExpanded = territoryDescMap.get(tName) || `${tLower} ${(pillar.description || "").toLowerCase()}`;
 
     const proofClusters = new Set(
       proofDemands
         .filter(d => d.requiredFor.includes(tName))
         .map(d => d.category)
     );
-    const trustClusters = trustGaps.filter(g => jaccardSimilarity(g.objection, tLower) > 0.10);
-    const competitorEvidence = competitorClaims.filter(c => jaccardSimilarity(c.claim, tName) > 0.10);
+
+    const trustClusters = trustGaps.filter(g =>
+      (g.relatedTerritories && g.relatedTerritories.includes(tName)) ||
+      jaccardSimilarity(g.objection, tLower) > 0.10 ||
+      jaccardSimilarity(g.objection, tExpanded) > 0.06
+    );
+
+    const competitorEvidence = competitorClaims.filter(c =>
+      jaccardSimilarity(c.claim, tName) > 0.10 ||
+      jaccardSimilarity(c.claim, tExpanded) > 0.06
+    );
 
     const semanticClusterCount = proofClusters.size;
 
@@ -1162,7 +1192,7 @@ export async function runDifferentiationEngine(
   };
 
   const l9RawPillars = layer9_differentiationPillarScoring(l1.territories, l2Claims, l5TrustGaps, l4ProofDemands, enrichedAudience, mi, profileSignals);
-  const evidenceDensity = validateTerritoryEvidenceDensity(l9RawPillars, l4ProofDemands, l5TrustGaps, l2Claims);
+  const evidenceDensity = validateTerritoryEvidenceDensity(l9RawPillars, l4ProofDemands, l5TrustGaps, l2Claims, l1.territories);
   const l9Pillars = evidenceDensity.validatedPillars.sort((a, b) => b.overallScore - a.overallScore);
   diagnostics.layer9 = { pillarCount: l9Pillars.length, topScore: l9Pillars[0]?.overallScore ?? 0, downgradedPillars: evidenceDensity.downgradedCount };
 
@@ -1319,6 +1349,11 @@ export async function runDifferentiationEngine(
       if (sanitizeGuardrail(finalMechanism.description)) {
         finalMechanism = { ...finalMechanism, description: "Mechanism description redacted — guardrail violation" };
       }
+
+      const revalidated = validateTerritoryEvidenceDensity(finalPillars, l4ProofDemands, l5TrustGaps, l2Claims, l1.territories);
+      finalPillars = revalidated.validatedPillars;
+      finalClaims = layer10_claimStrengthScoring(finalPillars, l3Collisions, l1.territories);
+      diagnostics.layer9 = { ...diagnostics.layer9, revalidatedAttempt: groundingAttempt, downgradedPillars: revalidated.downgradedCount };
     }
 
     l12Stability = layer12_stabilityGuard(finalPillars, finalClaims, l3Collisions, l1.territories, profileSignals.hasProfile);
@@ -1352,8 +1387,13 @@ export async function runDifferentiationEngine(
     console.log(`[DifferentiationEngine-V3] SIGNAL_GROUNDING: Attempt ${groundingAttempt} REJECTED | reasons=${rejectionReasons.length} | ${rejectionReasons.join("; ")}`);
 
     if (groundingAttempt >= signalGroundingMaxAttempts) {
-      console.log(`[DifferentiationEngine-V3] SIGNAL_GROUNDING: EXHAUSTED after ${signalGroundingMaxAttempts} attempts — continuing with LOW_CONFIDENCE output`);
-      break;
+      console.log(`[DifferentiationEngine-V3] SIGNAL_GROUNDING: EXHAUSTED after ${signalGroundingMaxAttempts} attempts — returning SIGNAL_GROUNDING_FAILED`);
+      const failedResult = buildEmptyResult(STATUS.SIGNAL_GROUNDING_FAILED, `Signal grounding enforcement failed after ${signalGroundingMaxAttempts} attempts: ${rejectionReasons.join("; ")}`, Date.now() - startTime);
+      failedResult.confidenceScore = 0;
+      failedResult.layerDiagnostics = { ...diagnostics, signalGroundingLog };
+      (failedResult as any).celDepthCompliance = celDepth;
+      (failedResult as any).depthGateResult = depthGateResult;
+      return failedResult;
     }
 
     groundingRejectionContext = `\nSIGNAL GROUNDING ENFORCEMENT — ATTEMPT ${groundingAttempt} REJECTED:\n${rejectionReasons.map((r, i) => `${i + 1}. ${r}`).join("\n")}\n\nYou MUST fix these issues:\n- Increase proofability by grounding every pillar in specific, verifiable evidence from the input data\n- Increase trust alignment by directly addressing the audience's stated trust barriers\n- Replace ALL generic marketing phrases with causally-specific language derived from root causes\n- Every claim must reference a specific pain point, root cause, or behavioral pattern from the audience signals\n- Do NOT use vague terms like "leverage", "optimize", "drive results", "unlock potential", "cutting-edge", "best-in-class"\n`;
@@ -1367,13 +1407,9 @@ export async function runDifferentiationEngine(
   let status = STATUS.COMPLETE;
   let statusMessage: string | null = null;
 
-  const groundingExhausted = signalGroundingLog.length >= signalGroundingMaxAttempts && !signalGroundingLog.some(l => l.includes("PASSED"));
   if (allHighCollision && l3Collisions.length >= l1.territories.length) {
     status = STATUS.COLLISION_RISK;
     statusMessage = `All differentiation claims have high collision risk with competitor claims`;
-  } else if (groundingExhausted) {
-    status = STATUS.LOW_CONFIDENCE;
-    statusMessage = `Signal grounding enforcement exhausted after ${signalGroundingMaxAttempts} attempts — output produced with reduced confidence`;
   } else if (!l12Stability!.stable) {
     status = STATUS.UNSTABLE;
     statusMessage = `Stability check failed: ${l12Stability!.failures.join("; ")}`;
@@ -1384,8 +1420,7 @@ export async function runDifferentiationEngine(
   const genericPenaltyFactor = genericOutputCheck!.genericDetected ? (1 - genericOutputCheck!.penalty) : 1;
   const depthPenaltyFactor = celDepth!.passed ? 1.0 : Math.max(0.5, celDepth!.score);
   const stabilityFactor = l12Stability!.stable ? 1 : 0.6;
-  const groundingPenalty = groundingExhausted ? 0.5 : 1.0;
-  const rawConfidence = clamp(avgClaimScore * stabilityFactor * objectionDensityFactor * genericPenaltyFactor * depthPenaltyFactor * groundingPenalty);
+  const rawConfidence = clamp(avgClaimScore * stabilityFactor * objectionDensityFactor * genericPenaltyFactor * depthPenaltyFactor);
   const confidenceScore = normalizeConfidence(rawConfidence, dataReliability);
   const confidenceNormalized = rawConfidence !== confidenceScore;
   diagnostics.confidenceNormalized = confidenceNormalized;

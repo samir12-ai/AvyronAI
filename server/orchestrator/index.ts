@@ -247,7 +247,7 @@ async function executeEngine(
   const signalUpstreamDeps = SIGNAL_CASCADE_MAP[engineId] || [];
   for (const upstream of signalUpstreamDeps) {
     const upstreamStatus = ctx.depthGateStatus[upstream];
-    if (upstreamStatus === "SIGNAL_REQUIRED") {
+    if (upstreamStatus === "SIGNAL_REQUIRED" || upstreamStatus === "SIGNAL_DRIFT" || upstreamStatus === "SIGNAL_GROUNDING_FAILED") {
       console.log(`[Orchestrator] SIGNAL_CASCADE_BLOCKED | ${engineId} BLOCKED — upstream ${upstream} has ${upstreamStatus}`);
       ctx.depthGateStatus[engineId] = "SIGNAL_BLOCKED";
       return {
@@ -334,14 +334,11 @@ async function executeEngine(
         ctx.positioning = result;
         ctx.positioningSnapshotId = result.snapshotId;
 
-        if (result.status === "SIGNAL_REQUIRED") {
+        if (result.status === "SIGNAL_REQUIRED" || result.status === "SIGNAL_DRIFT") {
           ctx.depthGateStatus!.positioning = result.status;
           console.log(`[Orchestrator] SIGNAL_GATE_STATUS | positioning=${result.status} — downstream engines will be cascade-blocked`);
         } else {
           ctx.depthGateStatus!.positioning = "SIGNAL_PASSED";
-          if (result.status === "LOW_CONFIDENCE") {
-            console.log(`[Orchestrator] SIGNAL_GATE_STATUS | positioning=SIGNAL_PASSED (LOW_CONFIDENCE — degraded but not blocking)`);
-          }
         }
 
         if (ctx.analyticalEnrichment && result.territories) {
@@ -390,11 +387,11 @@ async function executeEngine(
         if (result.status === "DEPTH_FAILED") {
           ctx.depthGateStatus!.differentiation = "DEPTH_FAILED";
           console.log(`[Orchestrator] DEPTH_GATE_STATUS | differentiation=DEPTH_FAILED`);
+        } else if (result.status === "SIGNAL_GROUNDING_FAILED") {
+          ctx.depthGateStatus!.differentiation = "SIGNAL_GROUNDING_FAILED";
+          console.log(`[Orchestrator] SIGNAL_GROUNDING_STATUS | differentiation=SIGNAL_GROUNDING_FAILED — downstream engines will be cascade-blocked`);
         } else {
           ctx.depthGateStatus!.differentiation = "DEPTH_PASSED";
-          if (result.status === "LOW_CONFIDENCE") {
-            console.log(`[Orchestrator] DEPTH_GATE_STATUS | differentiation=DEPTH_PASSED (LOW_CONFIDENCE — degraded but not blocking)`);
-          }
         }
         if (result.depthGateResult) {
           console.log(`[Orchestrator] DEPTH_GATE_DIFF | status=${result.depthGateResult.status} | attempts=${result.depthGateResult.attempt}/${result.depthGateResult.maxAttempts}`);
