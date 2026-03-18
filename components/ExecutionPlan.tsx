@@ -31,6 +31,16 @@ interface FunnelData {
 interface ContentDnaData {
   weeklyStructure: { reels: number; carousels: number; stories: number };
   contentTypes: { problems: string; proof: string; education: string; conversion: string };
+  contentAngles?: string[];
+  hookStyles?: string[];
+  messagingThemes?: string[];
+  contentMixRatio?: { problemAgitation: number; mechanismEducation: number; proof: number; conversion: number };
+}
+
+interface ExecutionActionsData {
+  daily: string[];
+  weekly: string[];
+  biweekly: string[];
 }
 
 interface KpiRulesData {
@@ -46,6 +56,7 @@ interface BuildPlanData {
   offer: string;
   funnel: FunnelData;
   contentDna: ContentDnaData;
+  executionActions?: ExecutionActionsData;
   kpiRules: KpiRulesData;
 }
 
@@ -71,8 +82,9 @@ const PLAN_CARDS: CardConfig[] = [
   { key: 'mechanism', title: 'Mechanism', icon: 'cog-outline', gradient: ['#F59E0B', '#F97316'] },
   { key: 'offer', title: 'Offer', icon: 'gift-outline', gradient: ['#10B981', '#34D399'] },
   { key: 'funnel', title: 'Funnel', icon: 'funnel-outline', gradient: ['#3B82F6', '#6366F1'] },
-  { key: 'contentDna', title: 'Content DNA Plan', icon: 'calendar-outline', gradient: ['#8B5CF6', '#A78BFA'] },
-  { key: 'kpiRules', title: 'KPI / Execution Rules', icon: 'stats-chart-outline', gradient: ['#14B8A6', '#10B981'] },
+  { key: 'contentDna', title: 'Content DNA', icon: 'color-palette-outline', gradient: ['#8B5CF6', '#A78BFA'] },
+  { key: 'executionActions', title: 'Do This Today', icon: 'flash-outline', gradient: ['#EF4444', '#F97316'] },
+  { key: 'kpiRules', title: 'Targets & Schedule', icon: 'checkmark-circle-outline', gradient: ['#14B8A6', '#10B981'] },
 ];
 
 function PlanCard({ config, plan, isDark }: { config: CardConfig; plan: BuildPlanData; isDark: boolean }) {
@@ -132,6 +144,10 @@ function PlanCard({ config, plan, isDark }: { config: CardConfig; plan: BuildPla
       case 'contentDna': {
         const ws = plan.contentDna.weeklyStructure;
         const ct = plan.contentDna.contentTypes;
+        const angles = plan.contentDna.contentAngles || [];
+        const hooks = plan.contentDna.hookStyles || [];
+        const themes = plan.contentDna.messagingThemes || [];
+        const mix = plan.contentDna.contentMixRatio;
         return (
           <View>
             <View style={s.dnaGrid}>
@@ -148,11 +164,98 @@ function PlanCard({ config, plan, isDark }: { config: CardConfig; plan: BuildPla
                 <Text style={[s.dnaCellLabel, { color: textSecondary }]}>Stories/wk</Text>
               </View>
             </View>
+            {mix && (
+              <View style={[s.mixBar, { backgroundColor: isDark ? '#1E2736' : '#F3F4F6', marginTop: 10, borderRadius: 8, padding: 10 }]}>
+                <Text style={[s.dnaCellLabel, { color: textSecondary, marginBottom: 6, fontWeight: '600' as const }]}>Content Mix</Text>
+                <View style={{ flexDirection: 'row', height: 8, borderRadius: 4, overflow: 'hidden' }}>
+                  <View style={{ flex: mix.problemAgitation, backgroundColor: P.coral }} />
+                  <View style={{ flex: mix.mechanismEducation, backgroundColor: P.blue }} />
+                  <View style={{ flex: mix.proof, backgroundColor: P.mint }} />
+                  <View style={{ flex: mix.conversion, backgroundColor: P.gold }} />
+                </View>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 4, gap: 8 }}>
+                  <Text style={{ fontSize: 10, color: P.coral }}>{mix.problemAgitation}% Problem</Text>
+                  <Text style={{ fontSize: 10, color: P.blue }}>{mix.mechanismEducation}% Education</Text>
+                  <Text style={{ fontSize: 10, color: P.mint }}>{mix.proof}% Proof</Text>
+                  <Text style={{ fontSize: 10, color: P.gold }}>{mix.conversion}% Conversion</Text>
+                </View>
+              </View>
+            )}
             <View style={s.dnaTypes}>
               <DnaTypeRow icon="alert-circle-outline" label="Problems" value={ct.problems} color={P.coral} textColor={textPrimary} subColor={textSecondary} />
               <DnaTypeRow icon="shield-checkmark-outline" label="Proof" value={ct.proof} color={P.mint} textColor={textPrimary} subColor={textSecondary} />
               <DnaTypeRow icon="school-outline" label="Education" value={ct.education} color={P.blue} textColor={textPrimary} subColor={textSecondary} />
               <DnaTypeRow icon="cart-outline" label="Conversion" value={ct.conversion} color={P.gold} textColor={textPrimary} subColor={textSecondary} />
+            </View>
+            {angles.length > 0 && (
+              <View style={{ marginTop: 12 }}>
+                <Text style={[s.dnaCellLabel, { color: textSecondary, fontWeight: '600' as const, marginBottom: 4 }]}>Content Angles</Text>
+                {angles.map((a, i) => (
+                  <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 3 }}>
+                    <Ionicons name="arrow-forward-outline" size={12} color={P.purple} style={{ marginTop: 3, marginRight: 6 }} />
+                    <Text style={[s.dnaTypeValue, { color: textPrimary, flex: 1 }]}>{a}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+            {hooks.length > 0 && (
+              <View style={{ marginTop: 10 }}>
+                <Text style={[s.dnaCellLabel, { color: textSecondary, fontWeight: '600' as const, marginBottom: 4 }]}>Hook Styles</Text>
+                {hooks.map((h, i) => (
+                  <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 3 }}>
+                    <Ionicons name="flash-outline" size={12} color={P.orange} style={{ marginTop: 3, marginRight: 6 }} />
+                    <Text style={[s.dnaTypeValue, { color: textPrimary, flex: 1 }]}>{h}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+            {themes.length > 0 && (
+              <View style={{ marginTop: 10 }}>
+                <Text style={[s.dnaCellLabel, { color: textSecondary, fontWeight: '600' as const, marginBottom: 4 }]}>Messaging Themes</Text>
+                {themes.map((t, i) => (
+                  <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 3 }}>
+                    <Ionicons name="chatbubble-outline" size={12} color={P.blue} style={{ marginTop: 3, marginRight: 6 }} />
+                    <Text style={[s.dnaTypeValue, { color: textPrimary, flex: 1 }]}>{t}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        );
+      }
+
+      case 'executionActions': {
+        const actions = plan.executionActions;
+        if (!actions) return <Text style={[s.cardValue, { color: textSecondary }]}>Run the plan to see your daily actions</Text>;
+        const accentColor = isDark ? '#1E2736' : '#FEF2F2';
+        return (
+          <View>
+            <View style={[{ backgroundColor: accentColor, borderRadius: 8, padding: 10, marginBottom: 8 }]}>
+              <Text style={[s.dnaCellLabel, { color: P.coral, fontWeight: '700' as const, marginBottom: 6 }]}>DAILY</Text>
+              {actions.daily.map((a, i) => (
+                <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 4 }}>
+                  <Ionicons name="checkbox-outline" size={14} color={P.coral} style={{ marginTop: 2, marginRight: 6 }} />
+                  <Text style={[s.dnaTypeValue, { color: textPrimary, flex: 1 }]}>{a}</Text>
+                </View>
+              ))}
+            </View>
+            <View style={[{ backgroundColor: isDark ? '#1E2736' : '#EFF6FF', borderRadius: 8, padding: 10, marginBottom: 8 }]}>
+              <Text style={[s.dnaCellLabel, { color: P.blue, fontWeight: '700' as const, marginBottom: 6 }]}>WEEKLY</Text>
+              {actions.weekly.map((a, i) => (
+                <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 4 }}>
+                  <Ionicons name="checkbox-outline" size={14} color={P.blue} style={{ marginTop: 2, marginRight: 6 }} />
+                  <Text style={[s.dnaTypeValue, { color: textPrimary, flex: 1 }]}>{a}</Text>
+                </View>
+              ))}
+            </View>
+            <View style={[{ backgroundColor: isDark ? '#1E2736' : '#F0FDF4', borderRadius: 8, padding: 10 }]}>
+              <Text style={[s.dnaCellLabel, { color: P.mint, fontWeight: '700' as const, marginBottom: 6 }]}>EVERY 2 WEEKS</Text>
+              {actions.biweekly.map((a, i) => (
+                <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 4 }}>
+                  <Ionicons name="checkbox-outline" size={14} color={P.mint} style={{ marginTop: 2, marginRight: 6 }} />
+                  <Text style={[s.dnaTypeValue, { color: textPrimary, flex: 1 }]}>{a}</Text>
+                </View>
+              ))}
             </View>
           </View>
         );
@@ -161,9 +264,9 @@ function PlanCard({ config, plan, isDark }: { config: CardConfig; plan: BuildPla
       case 'kpiRules':
         return (
           <View style={s.kpiContainer}>
-            <KpiRow icon="time-outline" label="Posting Frequency" value={plan.kpiRules.postingFrequency} textColor={textPrimary} subColor={textSecondary} />
-            <KpiRow icon="pie-chart-outline" label="Content Mix" value={plan.kpiRules.contentMix} textColor={textPrimary} subColor={textSecondary} />
-            <KpiRow icon="trending-up-outline" label="Conversion Targets" value={plan.kpiRules.conversionTargets} textColor={textPrimary} subColor={textSecondary} />
+            <KpiRow icon="time-outline" label="Schedule" value={plan.kpiRules.postingFrequency} textColor={textPrimary} subColor={textSecondary} />
+            <KpiRow icon="pie-chart-outline" label="Content Split" value={plan.kpiRules.contentMix} textColor={textPrimary} subColor={textSecondary} />
+            <KpiRow icon="trending-up-outline" label="Targets" value={plan.kpiRules.conversionTargets} textColor={textPrimary} subColor={textSecondary} />
           </View>
         );
 
@@ -291,7 +394,7 @@ export default function ExecutionPlan() {
           <Ionicons name="bulb-outline" size={32} color={P.purple} />
           <Text style={[s.emptyTitle, { color: textPrimary }]}>Generate Your Execution Plan</Text>
           <Text style={[s.emptyDesc, { color: textSecondary }]}>
-            Convert all strategy engine outputs into 7 clear, actionable decisions
+            Convert all strategy engine outputs into clear, actionable decisions and daily actions
           </Text>
           <Pressable onPress={generatePlan} style={s.generateBtn}>
             <LinearGradient colors={['#6366F1', '#8B5CF6']} style={s.generateBtnInner} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>

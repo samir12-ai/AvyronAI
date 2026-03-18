@@ -1,0 +1,221 @@
+Hi,
+
+We are executing a final corrective update to resolve two critical system failures:
+
+1) Signal contamination (raw comments leaking into engines)  
+2) Build Plan outputs not being actionable or usable  
+
+This must be fixed completely. No partial solutions.
+
+---
+
+# 🔴 ISSUE 1 — SIGNAL CONTAMINATION (ROOT CAUSE)
+
+We are still seeing raw comments like:
+
+- "charged me $250..."
+- "do not use this company..."
+- "I need a refund..."
+
+These are NOT signals.  
+These are unstructured, noisy inputs and must NEVER reach any engine.
+
+This is the reason behind:
+- SIGNAL_TRACE_FAILED  
+- SIGNAL_DRIFT  
+- Mapping failures  
+
+---
+
+# ✅ REQUIRED FIX — SIGNAL PURIFICATION (MANDATORY)
+
+## 1. Hard Signal Purification Layer inside SGL
+
+Before ANY signal is passed downstream:
+
+### ❌ REMOVE COMPLETELY:
+- Raw comments
+- User verbatim text
+- Refund / complaint / spam language
+- Any unclassified string
+
+### ✅ ALLOW ONLY:
+Structured signals in this format:
+
+- pain  
+- desire  
+- objection  
+- root_cause  
+- psychological_driver  
+- pattern  
+
+---
+
+## 2. Mandatory Signal Structuring
+
+Every raw input MUST be transformed into:
+
+Example:
+
+Raw:
+"charged me $250 after cancelling"
+
+→ objection: unexpected billing  
+→ pain: lack of pricing clarity  
+→ root_cause: hidden fee structures  
+
+If transformation is not possible:
+
+> ❌ DISCARD the input completely
+
+---
+
+## 3. Zero Raw Leakage Rule
+
+If any engine receives raw text:
+
+> SYSTEM ERROR — block execution
+
+---
+
+## 4. Signal Trace Integrity Fix
+
+Every output element MUST map to:
+
+> structured signal cluster (NOT text)
+
+If not:
+
+> reject generation before retry
+
+---
+
+# 🔴 ISSUE 2 — BUILD PLAN IS NOT ACTIONABLE
+
+Current Build Plan outputs:
+
+- Abstract
+- KPI-heavy
+- Not usable
+- Not executable
+
+User cannot answer:
+> "What exactly should I do?"
+
+---
+
+# ✅ REQUIRED FIX — ACTIONABLE BUILD PLAN LAYER
+
+Introduce a new layer:
+
+> Execution Synthesis Layer (ESL)
+
+This sits AFTER all engines and produces ONLY:
+
+---
+
+## 1. One-Line Strategic Outputs per Engine
+
+Each engine must collapse into ONE clear directive:
+
+- Positioning → ONE word / phrase  
+- Offer → ONE clear offer  
+- Funnel → ONE clear funnel structure  
+- Mechanism → ONE system name  
+- Audience → ONE core persona insight  
+
+---
+
+## 2. Content DNA (MANDATORY)
+
+System must output:
+
+- What to post  
+- Content angles  
+- Messaging themes  
+- Hook styles  
+
+Example:
+
+- 60% problem agitation  
+- 30% mechanism education  
+- 10% proof  
+
+---
+
+## 3. Execution Instructions (CRITICAL)
+
+User must see:
+
+> EXACT actions
+
+Example:
+
+- Post 2 reels daily  
+- 1 case study every 3 days  
+- 3 hooks per topic  
+- Use these exact angles: [X, Y, Z]
+
+---
+
+## 4. Remove Abstract KPIs
+
+❌ REMOVE:
+- meaningless % projections  
+- unclear funnel math  
+- generic growth simulations  
+
+✅ KEEP ONLY:
+- actionable targets tied to actions  
+
+---
+
+## 5. Build Plan = "DO THIS"
+
+Final output must answer:
+
+> What do I do TODAY?
+
+Not analysis. Not theory.
+
+---
+
+# 🔒 ACCEPTANCE CRITERIA
+
+Do NOT mark complete unless:
+
+---
+
+### Signal Layer
+
+- No raw comments anywhere in system  
+- All signals structured  
+- No SIGNAL_TRACE_FAILED  
+- No SIGNAL_DRIFT from garbage input  
+
+---
+
+### Build Plan
+
+- Outputs are executable  
+- User can follow without interpretation  
+- No abstract fluff  
+- Clear actions + content + direction  
+
+---
+
+# 🎯 FINAL GOAL
+
+Transform system into:
+
+> Clean signals → deep reasoning → actionable execution
+
+No noise.  
+No ambiguity.  
+No useless output.
+
+---
+
+Proceed immediately and confirm with before/after verification.
+
+---

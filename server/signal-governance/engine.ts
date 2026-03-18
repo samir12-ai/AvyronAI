@@ -14,10 +14,42 @@ import {
   MIN_TOTAL_SIGNALS,
   SIGNAL_CONFIDENCE_FLOOR,
   LEAKAGE_PATTERNS,
+  RAW_COMMENT_PATTERNS,
 } from "./constants";
 
 function generateTraceToken(): string {
   return `SGL_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+}
+
+function isRawComment(text: string): boolean {
+  for (const pattern of RAW_COMMENT_PATTERNS) {
+    if (pattern.test(text)) return true;
+  }
+  return false;
+}
+
+function purifyEvidence(rawEvidence: string[]): string[] {
+  const purified: string[] = [];
+  let discarded = 0;
+
+  for (const item of rawEvidence) {
+    if (isRawComment(item)) {
+      discarded++;
+      continue;
+    }
+    const sanitized = sanitizeSignalText(item);
+    if (sanitized.length > 3 && sanitized !== "[SANITIZED]") {
+      purified.push(sanitized);
+    } else {
+      discarded++;
+    }
+  }
+
+  if (discarded > 0 && purified.length === 0) {
+    purified.push(`[${discarded} raw source(s) purified — structured signal only]`);
+  }
+
+  return purified;
 }
 
 function clusterToGovernedSignals(
@@ -28,12 +60,13 @@ function clusterToGovernedSignals(
 ): GovernedSignal[] {
   return clusters
     .filter(c => c.confidence >= SIGNAL_CONFIDENCE_FLOOR)
+    .filter(c => !isRawComment(c.label))
     .map((cluster, idx) => ({
       signalId: `SGL_${category.toUpperCase()}_${String(idx + 1).padStart(3, "0")}`,
       category,
       text: sanitizeSignalText(cluster.label),
       confidence: cluster.confidence,
-      evidence: (cluster.evidence || []).map(e => sanitizeSignalText(e)),
+      evidence: purifyEvidence(cluster.evidence || []),
       sourceEngine,
       sourceLayer: cluster.sourceLayer || "unknown",
       traceId,
@@ -43,6 +76,9 @@ function clusterToGovernedSignals(
 
 function sanitizeSignalText(text: string): string {
   let clean = text.trim();
+  if (isRawComment(clean)) {
+    return "[SANITIZED]";
+  }
   for (const pattern of LEAKAGE_PATTERNS) {
     if (pattern.test(clean)) {
       clean = clean.replace(pattern, "[SANITIZED]");
@@ -105,12 +141,13 @@ export function initializeSignalGovernance(
 
   const objectionSignals: GovernedSignal[] = objectionMap
     .filter(o => (o.confidence || 0.5) >= SIGNAL_CONFIDENCE_FLOOR)
+    .filter(o => !isRawComment(o.label))
     .map((obj, idx) => ({
       signalId: `SGL_OBJECTION_${String(idx + 1).padStart(3, "0")}`,
       category: "objection" as const,
       text: sanitizeSignalText(obj.label),
       confidence: obj.confidence || 0.5,
-      evidence: (obj.evidence || []).map(e => sanitizeSignalText(e)),
+      evidence: purifyEvidence(obj.evidence || []),
       sourceEngine,
       sourceLayer: "surface",
       traceId: traceToken,
@@ -122,15 +159,29 @@ export function initializeSignalGovernance(
     ...patternSignals, ...rootCauseSignals, ...psychDriverSignals,
   ];
 
+  const totalInputClusters =
+    structuredSignals.pain_clusters.length +
+    structuredSignals.desire_clusters.length +
+    structuredSignals.pattern_clusters.length +
+    structuredSignals.root_causes.length +
+    structuredSignals.psychological_drivers.length +
+    objectionMap.length;
+  const purifiedCount = totalInputClusters - allSignals.length;
+
   const coverageReport = buildCoverageReport(allSignals);
 
   console.log(
     `[SGL] INITIALIZED | v=${SGL_VERSION} | trace=${traceToken} | ` +
-    `signals=${allSignals.length} | pains=${coverageReport.pains} | desires=${coverageReport.desires} | ` +
+    `signals=${allSignals.length} | purified=${purifiedCount} | ` +
+    `pains=${coverageReport.pains} | desires=${coverageReport.desires} | ` +
     `objections=${coverageReport.objections} | patterns=${coverageReport.patterns} | ` +
     `rootCauses=${coverageReport.rootCauses} | psychDrivers=${coverageReport.psychologicalDrivers} | ` +
     `sufficient=${coverageReport.coverageSufficient}`
   );
+
+  if (purifiedCount > 0) {
+    console.log(`[SGL] PURIFICATION | removed ${purifiedCount} raw/contaminated input(s) from ${totalInputClusters} total`);
+  }
 
   if (coverageReport.missingCategories.length > 0) {
     console.warn(`[SGL] COVERAGE_GAP | missing=[${coverageReport.missingCategories.join(",")}]`);
@@ -187,37 +238,59 @@ export function resolveSignalsForEngine(
     requiredCategories.includes(s.category)
   );
 
+  const cleanSignals: GovernedSignal[] = [];
+  let contaminatedCount = 0;
   for (const signal of signals) {
+    const leakCheck = checkSignalLeakage(signal.text);
+    if (!leakCheck.clean) {
+      contaminatedCount++;
+      console.warn(`[SGL] PRE_DISPATCH_BLOCK | engine=${engineId} | signal=${signal.signalId} | leaks=[${leakCheck.leaks.join(",")}]`);
+      continue;
+    }
+    const cleanEvidence: string[] = [];
+    for (const ev of signal.evidence) {
+      const evCheck = checkSignalLeakage(ev);
+      if (evCheck.clean) {
+        cleanEvidence.push(ev);
+      }
+    }
+    cleanSignals.push({ ...signal, evidence: cleanEvidence });
+  }
+  if (contaminatedCount > 0) {
+    console.warn(`[SGL] PRE_DISPATCH_PURGE | engine=${engineId} | blocked=${contaminatedCount} contaminated signal(s)`);
+  }
+
+  const coverage = buildEngineCoverageReport(cleanSignals, requiredCategories);
+
+  if (!coverage.coverageSufficient) {
+    console.warn(
+      `[SGL] COVERAGE_INSUFFICIENT | engine=${engineId} | ` +
+      `signals=${cleanSignals.length} | missing=[${coverage.missingCategories.join(",")}] | ` +
+      `required=[${requiredCategories.join(",")}]`
+    );
+  }
+
+  for (const signal of cleanSignals) {
     if (!signal.consumedBy.includes(engineId)) {
       signal.consumedBy.push(engineId);
     }
   }
 
-  const coverage = buildEngineCoverageReport(signals, requiredCategories);
-
-  if (!coverage.coverageSufficient) {
-    console.warn(
-      `[SGL] COVERAGE_INSUFFICIENT | engine=${engineId} | ` +
-      `signals=${signals.length} | missing=[${coverage.missingCategories.join(",")}] | ` +
-      `required=[${requiredCategories.join(",")}]`
-    );
-  }
-
   const consumption: EngineSignalConsumption = {
     engineId,
-    signalsConsumed: signals.map(s => s.signalId),
+    signalsConsumed: cleanSignals.map(s => s.signalId),
     coverageReport: coverage,
     timestamp: new Date().toISOString(),
   };
   state.consumptionLog.push(consumption);
 
   console.log(
-    `[SGL] RESOLVE | engine=${engineId} | signals=${signals.length} | ` +
-    `categories=[${requiredCategories.join(",")}] | sufficient=${coverage.coverageSufficient}`
+    `[SGL] RESOLVE | engine=${engineId} | raw=${signals.length} | clean=${cleanSignals.length} | ` +
+    `blocked=${contaminatedCount} | categories=[${requiredCategories.join(",")}] | sufficient=${coverage.coverageSufficient}`
   );
 
   return {
-    signals,
+    signals: cleanSignals,
     coverage,
     traceToken: state.traceToken,
     engineId,
@@ -230,6 +303,9 @@ export function checkSignalLeakage(text: string): { clean: boolean; leaks: strin
     if (pattern.test(text)) {
       leaks.push(pattern.source);
     }
+  }
+  if (isRawComment(text)) {
+    leaks.push("RAW_COMMENT_CONTAMINATION");
   }
   return { clean: leaks.length === 0, leaks };
 }

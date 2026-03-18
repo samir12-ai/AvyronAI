@@ -22,6 +22,15 @@ export interface BuildPlanOutput {
   contentDna: {
     weeklyStructure: { reels: number; carousels: number; stories: number };
     contentTypes: { problems: string; proof: string; education: string; conversion: string };
+    contentAngles: string[];
+    hookStyles: string[];
+    messagingThemes: string[];
+    contentMixRatio: { problemAgitation: number; mechanismEducation: number; proof: number; conversion: number };
+  };
+  executionActions: {
+    daily: string[];
+    weekly: string[];
+    biweekly: string[];
   };
   kpiRules: {
     postingFrequency: string;
@@ -78,6 +87,19 @@ function enforceActionability(output: BuildPlanOutput): { passed: boolean; score
     { name: "kpi_targets", value: output.kpiRules.conversionTargets },
   ];
 
+  for (const action of output.executionActions.daily) {
+    blocks.push({ name: "execution_daily", value: action });
+  }
+  for (const action of output.executionActions.weekly) {
+    blocks.push({ name: "execution_weekly", value: action });
+  }
+  for (const angle of output.contentDna.contentAngles) {
+    blocks.push({ name: "content_angle", value: angle });
+  }
+  for (const hook of output.contentDna.hookStyles) {
+    blocks.push({ name: "hook_style", value: hook });
+  }
+
   const failedBlocks: string[] = [];
   let passed = 0;
 
@@ -90,8 +112,19 @@ function enforceActionability(output: BuildPlanOutput): { passed: boolean; score
     }
   }
 
+  const minDailyActions = output.executionActions.daily.length >= 2;
+  const minWeeklyActions = output.executionActions.weekly.length >= 1;
+  const minAngles = output.contentDna.contentAngles.length >= 2;
+  const minHooks = output.contentDna.hookStyles.length >= 2;
+
+  if (!minDailyActions) failedBlocks.push("execution_daily_count");
+  if (!minWeeklyActions) failedBlocks.push("execution_weekly_count");
+  if (!minAngles) failedBlocks.push("content_angles_count");
+  if (!minHooks) failedBlocks.push("hook_styles_count");
+
+  const structureOk = minDailyActions && minWeeklyActions && minAngles && minHooks;
   const score = passed / blocks.length;
-  return { passed: score >= 0.85, score, failedBlocks };
+  return { passed: score >= 0.85 && structureOk, score, failedBlocks };
 }
 
 async function getLatestSnapshot(table: any, accountId: string, campaignId: string): Promise<any | null> {
@@ -274,13 +307,13 @@ function buildBuildPlanPrompt(engineContext: string, previousFailures?: string[]
     failureContext = `\n\nPREVIOUS ATTEMPT FAILED ACTIONABILITY CHECK. These blocks were rejected for being vague/generic: ${previousFailures.join(", ")}.\nYou MUST make them more specific, concrete, and directly usable. No generic advice. Only clear, executable decisions.\n`;
   }
 
-  return `You are a Decision Engine. Your ONLY job is to convert analysis into FINAL DECISIONS.
+  return `You are an Execution Synthesis Engine. Convert analysis into EXACT ACTIONS the user does TODAY.
 
 CRITICAL RULES:
-- NO paragraphs, NO explanations, NO multiple options, NO diagnostics
-- ONLY final, usable decisions
-- Every output must be specific enough to execute IMMEDIATELY
-- REJECT any urge to add context, caveats, or alternatives
+- NO paragraphs, NO theory, NO abstract KPIs, NO generic percentages
+- ONLY concrete, specific actions a person can follow without interpretation
+- Every output must answer: "What do I do RIGHT NOW?"
+- REJECT any urge to add context, caveats, alternatives, or meaningless projections
 
 ENGINE DATA:
 ${engineContext}
@@ -288,31 +321,52 @@ ${failureContext}
 Return EXACTLY this JSON structure:
 
 {
-  "positioning": "One specific sentence. Not generic. Example: 'The only AI tool that delivers clear reports in under 5 minutes' — NOT 'Focus on simplicity'",
-  "differentiation": "One dominant angle as a single statement. Not a list. Must be concrete and provable.",
+  "positioning": "ONE phrase or sentence. Not generic. Example: 'The only AI tool that delivers clear reports in under 5 minutes' — NOT 'Focus on simplicity'",
+  "differentiation": "ONE dominant angle as a single statement. Must be concrete and provable.",
   "mechanism": {
     "name": "Clear name for the mechanism (2-4 words)",
     "explanation": "One-line explanation of how it works. Must be specific."
   },
-  "offer": "Ready-to-use offer statement. Must include what they get, the outcome, and any constraint (time/price/guarantee).",
+  "offer": "Ready-to-use offer statement. What they get + outcome + constraint (time/price/guarantee).",
   "funnel": {
-    "top": "Specific attention strategy with format and hook type",
-    "middle": "Specific trust-building tactic with content type",
-    "bottom": "Specific conversion action with CTA format"
+    "top": "Specific attention format: what type of content captures attention and how",
+    "middle": "Specific trust-building content: what to post and why it builds credibility",
+    "bottom": "Specific conversion trigger: exact CTA and mechanism to close"
   },
   "contentDna": {
-    "weeklyStructure": { "reels": 3, "carousels": 2, "stories": 5 },
+    "weeklyStructure": { "reels": 4, "carousels": 2, "stories": 5 },
     "contentTypes": {
-      "problems": "Exact description of problem content to create",
-      "proof": "Exact description of proof content to create",
-      "education": "Exact description of education content to create",
-      "conversion": "Exact description of conversion content to create"
-    }
+      "problems": "EXACT problem content to create (specific topics, not categories)",
+      "proof": "EXACT proof content to create (what results/cases to show)",
+      "education": "EXACT education content to create (what to teach, specific lessons)",
+      "conversion": "EXACT conversion content to create (what offer to push, how)"
+    },
+    "contentAngles": ["Angle 1: specific perspective to post from", "Angle 2: another specific angle", "Angle 3: third angle"],
+    "hookStyles": ["Hook style 1: exact opening pattern", "Hook style 2: another pattern", "Hook style 3: third pattern"],
+    "messagingThemes": ["Theme 1: core topic thread", "Theme 2: secondary theme", "Theme 3: supporting theme"],
+    "contentMixRatio": { "problemAgitation": 60, "mechanismEducation": 25, "proof": 10, "conversion": 5 }
+  },
+  "executionActions": {
+    "daily": [
+      "Post 1 Reel using [specific hook style] about [specific angle]",
+      "Post 2-3 Stories: 1 behind-the-scenes + 1 poll/question + 1 result/tip",
+      "Reply to 10 comments and send 5 DMs to engaged followers"
+    ],
+    "weekly": [
+      "Publish 1 carousel case study showing [specific result type]",
+      "Create 1 educational post about [specific mechanism/topic]",
+      "Review last 7 days: which hook got most saves? Double down on it"
+    ],
+    "biweekly": [
+      "Publish 1 long-form case study or testimonial breakdown",
+      "A/B test 2 different hook styles on similar content",
+      "Audit content mix — adjust if problem content is under 50%"
+    ]
   },
   "kpiRules": {
-    "postingFrequency": "Exact schedule (e.g., '5 posts/week: Mon-Fri at 9am')",
-    "contentMix": "Exact percentages (e.g., '40% education, 30% proof, 20% problem, 10% conversion')",
-    "conversionTargets": "Specific numbers if available, or 'Baseline month — track engagement rate, profile visits, DM inquiries'"
+    "postingFrequency": "Exact schedule: e.g. 'Mon-Sat: 1 Reel at 9am, 2 Stories at 12pm and 6pm. Sunday: rest'",
+    "contentMix": "Exact split tied to actions: e.g. '60% problem reels, 25% mechanism education, 10% proof carousels, 5% direct offer'",
+    "conversionTargets": "Specific measurable targets: e.g. '15 DM conversations/week, 3 booked calls/week, track save rate per post'"
   }
 }
 
@@ -330,6 +384,13 @@ function parseAIResponse(content: string): BuildPlanOutput | null {
     if (!parsed.positioning || !parsed.differentiation || !parsed.mechanism || !parsed.offer || !parsed.funnel || !parsed.contentDna || !parsed.kpiRules) {
       return null;
     }
+
+    const contentAngles = Array.isArray(parsed.contentDna?.contentAngles) ? parsed.contentDna.contentAngles.map(String) : [];
+    const hookStyles = Array.isArray(parsed.contentDna?.hookStyles) ? parsed.contentDna.hookStyles.map(String) : [];
+    const messagingThemes = Array.isArray(parsed.contentDna?.messagingThemes) ? parsed.contentDna.messagingThemes.map(String) : [];
+    const mixRatio = parsed.contentDna?.contentMixRatio || {};
+
+    const execActions = parsed.executionActions || {};
 
     return {
       positioning: String(parsed.positioning),
@@ -356,6 +417,30 @@ function parseAIResponse(content: string): BuildPlanOutput | null {
           education: String(parsed.contentDna?.contentTypes?.education || ""),
           conversion: String(parsed.contentDna?.contentTypes?.conversion || ""),
         },
+        contentAngles: contentAngles.length > 0 ? contentAngles : ["Problem-first angle", "Result-showcase angle", "Behind-the-scenes angle"],
+        hookStyles: hookStyles.length > 0 ? hookStyles : ["Pattern interrupt hook", "Question-based hook", "Bold claim hook"],
+        messagingThemes: messagingThemes.length > 0 ? messagingThemes : ["Core problem theme", "Solution mechanism theme", "Social proof theme"],
+        contentMixRatio: {
+          problemAgitation: Number(mixRatio.problemAgitation || 60),
+          mechanismEducation: Number(mixRatio.mechanismEducation || 25),
+          proof: Number(mixRatio.proof || 10),
+          conversion: Number(mixRatio.conversion || 5),
+        },
+      },
+      executionActions: {
+        daily: Array.isArray(execActions.daily) ? execActions.daily.map(String) : [
+          "Post 1 Reel with problem-agitation hook",
+          "Post 2 Stories: 1 tip + 1 engagement poll",
+          "Reply to comments and send 5 DMs to engaged followers",
+        ],
+        weekly: Array.isArray(execActions.weekly) ? execActions.weekly.map(String) : [
+          "Publish 1 carousel case study",
+          "Review last 7 days: double down on highest-save content",
+        ],
+        biweekly: Array.isArray(execActions.biweekly) ? execActions.biweekly.map(String) : [
+          "A/B test 2 hook styles",
+          "Audit content mix ratios",
+        ],
       },
       kpiRules: {
         postingFrequency: String(parsed.kpiRules?.postingFrequency || ""),
