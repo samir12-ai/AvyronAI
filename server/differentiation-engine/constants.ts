@@ -67,7 +67,7 @@ export const MIN_OBJECTIONS = 1;
 export const MIN_PILLAR_SCORE = 0.35;
 export const COLLISION_THRESHOLD = 0.70;
 export const STABILITY_MIN_PROOFABILITY = 0.30;
-export const STABILITY_MIN_TRUST_ALIGNMENT = 0.25;
+export const STABILITY_MIN_TRUST_ALIGNMENT = 0.20;
 
 export const BOUNDARY_HARD_PATTERNS: Record<string, RegExp> = {
   "marketing copy": /\b(marketing copy|ad copy|sales copy|copywriting|creative copy)\b/i,
