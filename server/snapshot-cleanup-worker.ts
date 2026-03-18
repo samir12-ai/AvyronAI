@@ -16,7 +16,7 @@ import {
   retentionSnapshots,
   performanceSnapshots,
   ciSnapshots,
-  growthCampaigns,
+  campaignSelections,
   snapshotArchive,
 } from "@shared/schema";
 import { eq, lt, sql, notInArray, inArray, and, ne, desc } from "drizzle-orm";
@@ -232,8 +232,8 @@ async function purgeOrphanedSnapshots(protectedIds: Set<string>): Promise<{ tabl
 
   try {
     const activeCampaigns = await db
-      .select({ id: growthCampaigns.id })
-      .from(growthCampaigns);
+      .selectDistinct({ id: campaignSelections.selectedCampaignId })
+      .from(campaignSelections);
     const activeCampaignIds = activeCampaigns.map((c: any) => c.id);
 
     if (activeCampaignIds.length === 0) {

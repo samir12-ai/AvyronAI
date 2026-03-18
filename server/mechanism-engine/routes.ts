@@ -36,15 +36,27 @@ export function registerMechanismEngineRoutes(app: Express) {
         return res.status(400).json({ error: "differentiationSnapshotId is required" });
       }
 
-      const [diffSnapshot] = await db.select().from(differentiationSnapshots)
+      let [diffSnapshot] = await db.select().from(differentiationSnapshots)
         .where(and(eq(differentiationSnapshots.id, differentiationSnapshotId), eq(differentiationSnapshots.campaignId, campaignId), eq(differentiationSnapshots.accountId, accountId)))
         .limit(1);
 
       if (!diffSnapshot) {
-        return res.status(400).json({
-          error: "MISSING_DEPENDENCY",
-          message: "Differentiation snapshot not found or campaign mismatch",
-        });
+        console.warn(`[MechanismEngine] Requested differentiationSnapshotId=${differentiationSnapshotId} not found — falling back to latest for campaign=${campaignId}`);
+        const [fallback] = await db.select().from(differentiationSnapshots)
+          .where(and(
+            eq(differentiationSnapshots.campaignId, campaignId),
+            eq(differentiationSnapshots.accountId, accountId),
+            inArray(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"]),
+          ))
+          .orderBy(desc(differentiationSnapshots.createdAt))
+          .limit(1);
+        if (!fallback) {
+          return res.status(400).json({
+            error: "MISSING_DEPENDENCY",
+            message: "Differentiation snapshot not found or campaign mismatch",
+          });
+        }
+        diffSnapshot = fallback;
       }
 
       let activeDiffSnapshot = diffSnapshot;
