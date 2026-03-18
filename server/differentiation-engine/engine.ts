@@ -927,6 +927,7 @@ Return JSON:
       ],
       accountId,
       endpoint: "differentiation-refinement",
+      max_tokens: 4000,
     });
 
     const rawText = typeof response === "string" ? response : response?.choices?.[0]?.message?.content || "";
