@@ -118,7 +118,7 @@ export default function DifferentiationEngine({ isActive }: { isActive?: boolean
 
       const posRes = await fetch(new URL(`/api/positioning-engine/latest?campaignId=${campaignId}`, base).toString());
       const posData = await safeApiJson(posRes);
-      const posReady = posData && posData.id && (posData.status === 'COMPLETE' || posData.status === 'UNSTABLE');
+      const posReady = posData && posData.id && (posData.status === 'COMPLETE' || posData.status === 'UNSTABLE' || posData.status === 'LOW_CONFIDENCE');
       setPosStatus(posReady ? 'ready' : 'not_ready');
       if (posReady) setPosSnapshotId(posData.id);
     } catch {
@@ -256,21 +256,24 @@ export default function DifferentiationEngine({ isActive }: { isActive?: boolean
         <View style={styles.results}>
           <View style={[styles.statusBar, {
             backgroundColor: data.status === 'COMPLETE' ? '#10B98118'
+              : data.status === 'LOW_CONFIDENCE' ? '#F59E0B18'
               : data.status === 'UNSTABLE' ? '#F59E0B18' : '#EF444418'
           }]}>
             <Ionicons
               name={data.status === 'COMPLETE' ? 'checkmark-circle'
-                : data.status === 'SIGNAL_GROUNDING_FAILED' ? 'alert-circle'
+                : data.status === 'LOW_CONFIDENCE' ? 'information-circle'
                 : data.status === 'UNSTABLE' ? 'warning' : 'alert-circle'}
               size={16}
               color={data.status === 'COMPLETE' ? '#10B981'
+                : data.status === 'LOW_CONFIDENCE' ? '#F59E0B'
                 : data.status === 'UNSTABLE' ? '#F59E0B' : '#EF4444'}
             />
             <Text style={[styles.statusText, {
               color: data.status === 'COMPLETE' ? '#10B981'
+                : data.status === 'LOW_CONFIDENCE' ? '#F59E0B'
                 : data.status === 'UNSTABLE' ? '#F59E0B' : '#EF4444'
             }]}>
-              {data.status === 'SIGNAL_GROUNDING_FAILED' ? 'SIGNAL GROUNDING FAILED' : data.status}
+              {data.status === 'LOW_CONFIDENCE' ? 'LOW CONFIDENCE' : data.status}
               {data.statusMessage ? ` — ${data.statusMessage}` : ''}
             </Text>
           </View>

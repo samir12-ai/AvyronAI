@@ -45,7 +45,7 @@ export const OBJECTION_CONTEXT_RULES: Record<string, { requireKeywords: string[]
   },
 };
 
-export const MIN_EVIDENCE_PER_SIGNAL = 3;
+export const MIN_EVIDENCE_PER_SIGNAL = 1;
 
 export const PAIN_CLUSTERS: PatternCluster[] = [
   { canonical: "frustration with lack of results", patterns: [

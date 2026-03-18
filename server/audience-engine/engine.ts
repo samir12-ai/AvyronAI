@@ -293,7 +293,13 @@ function applyObjectionContextRules(
 }
 
 function applyEvidenceIntegrityFilter(signals: SignalItem[]): SignalItem[] {
-  return signals.filter(s => s.evidenceCount >= MIN_EVIDENCE_PER_SIGNAL && s.frequency >= MIN_EVIDENCE_PER_SIGNAL);
+  return signals.map(s => {
+    if (s.evidenceCount >= 3 && s.frequency >= 3) return s;
+    if (s.evidenceCount >= MIN_EVIDENCE_PER_SIGNAL && s.frequency >= MIN_EVIDENCE_PER_SIGNAL) {
+      return { ...s, confidenceScore: Math.min(s.confidenceScore, 0.35) };
+    }
+    return null;
+  }).filter((s): s is SignalItem => s !== null);
 }
 
 function computeSegmentSimilarity(segA: AudienceSegment, segB: AudienceSegment): number {
@@ -1531,10 +1537,71 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   }
   console.log(`[AudienceEngine-V3] LINEAGE_GENERATED | entries=${audienceLineage.length} | pains=${painMap.length} | desires=${desireMap.length} | objections=${objectionMap.length} | bridged=${bridgeResult?.totalPassed || 0}`);
 
-  const structuredSignals = buildStructuredSignals(
+  let structuredSignals = buildStructuredSignals(
     painMap, desireMap, objectionMap, transformationMap, emotionalDrivers,
     awarenessLevel, intentDistribution,
   );
+
+  const totalClusters = structuredSignals.pain_clusters.length + structuredSignals.desire_clusters.length + structuredSignals.root_causes.length;
+  if (totalClusters === 0 && allText.length > 0) {
+    console.log(`[AudienceEngine-V3] FALLBACK_SIGNALS: All clusters empty — inferring signals from raw content`);
+    const inferredPains: SignalItem[] = [];
+    const inferredDesires: SignalItem[] = [];
+    const sampleTexts = allText.slice(0, 50);
+    const textBlob = sampleTexts.join(" ").toLowerCase();
+
+    const painKeywords = ["problem", "struggle", "hard", "difficult", "frustrated", "confused", "expensive", "slow", "fail", "bad", "مشكلة", "صعب"];
+    const desireKeywords = ["want", "need", "wish", "better", "faster", "easier", "more", "grow", "improve", "أريد", "أحتاج", "أفضل"];
+
+    const foundPains = painKeywords.filter(k => textBlob.includes(k));
+    const foundDesires = desireKeywords.filter(k => textBlob.includes(k));
+
+    if (foundPains.length > 0) {
+      inferredPains.push({
+        canonical: `Content-inferred friction: ${foundPains.slice(0, 3).join(", ")}`,
+        frequency: foundPains.length,
+        evidence: sampleTexts.filter(t => foundPains.some(k => t.toLowerCase().includes(k))).slice(0, 3),
+        evidenceCount: foundPains.length,
+        confidenceScore: 0.2,
+        sourceSignals: ["inferred_from_content"],
+        inputSnapshotId: miSnapshotId,
+      });
+    }
+    if (foundDesires.length > 0) {
+      inferredDesires.push({
+        canonical: `Content-inferred desire: ${foundDesires.slice(0, 3).join(", ")}`,
+        frequency: foundDesires.length,
+        evidence: sampleTexts.filter(t => foundDesires.some(k => t.toLowerCase().includes(k))).slice(0, 3),
+        evidenceCount: foundDesires.length,
+        confidenceScore: 0.2,
+        sourceSignals: ["inferred_from_content"],
+        inputSnapshotId: miSnapshotId,
+      });
+    }
+
+    if (inferredPains.length === 0) {
+      inferredPains.push({
+        canonical: "General audience friction (low data)",
+        frequency: 1, evidence: ["Inferred — insufficient direct evidence"], evidenceCount: 1,
+        confidenceScore: 0.15, sourceSignals: ["fallback"], inputSnapshotId: miSnapshotId,
+      });
+    }
+    if (inferredDesires.length === 0) {
+      inferredDesires.push({
+        canonical: "Audience improvement aspiration (low data)",
+        frequency: 1, evidence: ["Inferred — insufficient direct evidence"], evidenceCount: 1,
+        confidenceScore: 0.15, sourceSignals: ["fallback"], inputSnapshotId: miSnapshotId,
+      });
+    }
+
+    structuredSignals = buildStructuredSignals(
+      [...painMap, ...inferredPains], [...desireMap, ...inferredDesires],
+      objectionMap, transformationMap, emotionalDrivers,
+      awarenessLevel, intentDistribution,
+    );
+    console.log(`[AudienceEngine-V3] FALLBACK_SIGNALS_BUILT | pains=${structuredSignals.pain_clusters.length} | desires=${structuredSignals.desire_clusters.length} | rootCauses=${structuredSignals.root_causes.length}`);
+  }
+
   console.log(`[AudienceEngine-V3] STRUCTURED_SIGNALS | pains=${structuredSignals.pain_clusters.length} | desires=${structuredSignals.desire_clusters.length} | patterns=${structuredSignals.pattern_clusters.length} | rootCauses=${structuredSignals.root_causes.length} | psychDrivers=${structuredSignals.psychological_drivers.length}`);
 
   const [inserted] = await db.insert(audienceSnapshots).values({

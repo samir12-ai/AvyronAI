@@ -1352,13 +1352,8 @@ export async function runDifferentiationEngine(
     console.log(`[DifferentiationEngine-V3] SIGNAL_GROUNDING: Attempt ${groundingAttempt} REJECTED | reasons=${rejectionReasons.length} | ${rejectionReasons.join("; ")}`);
 
     if (groundingAttempt >= signalGroundingMaxAttempts) {
-      console.log(`[DifferentiationEngine-V3] SIGNAL_GROUNDING: EXHAUSTED after ${signalGroundingMaxAttempts} attempts — returning SIGNAL_GROUNDING_FAILED`);
-      const failedResult = buildEmptyResult(STATUS.SIGNAL_GROUNDING_FAILED, `Signal grounding enforcement failed after ${signalGroundingMaxAttempts} attempts: ${rejectionReasons.join("; ")}`, Date.now() - startTime);
-      failedResult.confidenceScore = 0;
-      failedResult.layerDiagnostics = { ...diagnostics, signalGroundingLog };
-      (failedResult as any).celDepthCompliance = celDepth;
-      (failedResult as any).depthGateResult = depthGateResult;
-      return failedResult;
+      console.log(`[DifferentiationEngine-V3] SIGNAL_GROUNDING: EXHAUSTED after ${signalGroundingMaxAttempts} attempts — continuing with LOW_CONFIDENCE output`);
+      break;
     }
 
     groundingRejectionContext = `\nSIGNAL GROUNDING ENFORCEMENT — ATTEMPT ${groundingAttempt} REJECTED:\n${rejectionReasons.map((r, i) => `${i + 1}. ${r}`).join("\n")}\n\nYou MUST fix these issues:\n- Increase proofability by grounding every pillar in specific, verifiable evidence from the input data\n- Increase trust alignment by directly addressing the audience's stated trust barriers\n- Replace ALL generic marketing phrases with causally-specific language derived from root causes\n- Every claim must reference a specific pain point, root cause, or behavioral pattern from the audience signals\n- Do NOT use vague terms like "leverage", "optimize", "drive results", "unlock potential", "cutting-edge", "best-in-class"\n`;
@@ -1372,9 +1367,13 @@ export async function runDifferentiationEngine(
   let status = STATUS.COMPLETE;
   let statusMessage: string | null = null;
 
+  const groundingExhausted = signalGroundingLog.length >= signalGroundingMaxAttempts && !signalGroundingLog.some(l => l.includes("PASSED"));
   if (allHighCollision && l3Collisions.length >= l1.territories.length) {
     status = STATUS.COLLISION_RISK;
     statusMessage = `All differentiation claims have high collision risk with competitor claims`;
+  } else if (groundingExhausted) {
+    status = STATUS.LOW_CONFIDENCE;
+    statusMessage = `Signal grounding enforcement exhausted after ${signalGroundingMaxAttempts} attempts — output produced with reduced confidence`;
   } else if (!l12Stability!.stable) {
     status = STATUS.UNSTABLE;
     statusMessage = `Stability check failed: ${l12Stability!.failures.join("; ")}`;
@@ -1385,7 +1384,8 @@ export async function runDifferentiationEngine(
   const genericPenaltyFactor = genericOutputCheck!.genericDetected ? (1 - genericOutputCheck!.penalty) : 1;
   const depthPenaltyFactor = celDepth!.passed ? 1.0 : Math.max(0.5, celDepth!.score);
   const stabilityFactor = l12Stability!.stable ? 1 : 0.6;
-  const rawConfidence = clamp(avgClaimScore * stabilityFactor * objectionDensityFactor * genericPenaltyFactor * depthPenaltyFactor);
+  const groundingPenalty = groundingExhausted ? 0.5 : 1.0;
+  const rawConfidence = clamp(avgClaimScore * stabilityFactor * objectionDensityFactor * genericPenaltyFactor * depthPenaltyFactor * groundingPenalty);
   const confidenceScore = normalizeConfidence(rawConfidence, dataReliability);
   const confidenceNormalized = rawConfidence !== confidenceScore;
   diagnostics.confidenceNormalized = confidenceNormalized;

@@ -993,6 +993,39 @@ function deduplicateTerritories(territories: Territory[]): Territory[] {
   return result;
 }
 
+function inferStructuredSignalsFromAudience(pains: any[], desires: any[]): StructuredSignals {
+  const toCluster = (items: any[], layer: "surface" | "pattern" | "interpretation"): StructuredSignalCluster[] =>
+    items.slice(0, 10).map((item: any, i: number) => ({
+      id: `inferred_${layer}_${i}_${(item.canonical || item.label || "signal").replace(/\s+/g, "_").toLowerCase().slice(0, 30)}`,
+      label: item.canonical || item.label || item.signal || `Inferred signal ${i + 1}`,
+      frequency: item.frequency || 1,
+      confidence: Math.min(item.confidenceScore || item.confidence || 0.25, 0.4),
+      evidence: (item.evidence || []).slice(0, 2),
+      sourceLayer: layer,
+    }));
+
+  const pain_clusters = toCluster(pains, "surface");
+  const desire_clusters = toCluster(desires, "surface");
+  const pattern_clusters: StructuredSignalCluster[] = [];
+  const root_causes = pain_clusters.length > 0 ? [pain_clusters[0]] : [];
+  const psychological_drivers = desire_clusters.length > 0 ? [desire_clusters[0]] : [];
+
+  if (pain_clusters.length === 0 && desire_clusters.length === 0) {
+    pain_clusters.push({
+      id: "inferred_fallback_pain_0",
+      label: "General audience friction (inferred)",
+      frequency: 1, confidence: 0.15, evidence: [], sourceLayer: "surface",
+    });
+    desire_clusters.push({
+      id: "inferred_fallback_desire_0",
+      label: "Audience improvement aspiration (inferred)",
+      frequency: 1, confidence: 0.15, evidence: [], sourceLayer: "surface",
+    });
+  }
+
+  return { pain_clusters, desire_clusters, pattern_clusters, root_causes, psychological_drivers };
+}
+
 function formatStructuredSignalsForPrompt(signals: StructuredSignals): string {
   const formatClusters = (clusters: StructuredSignalCluster[], label: string): string => {
     if (clusters.length === 0) return "";
@@ -1475,14 +1508,14 @@ export async function runPositioningEngine(
       const totalStructured = getAllSignalLabels(parsedStructuredSignals).length;
       console.log(`[PositioningEngine-V3] STRUCTURED_SIGNALS_LOADED | total=${totalStructured} | pains=${parsedStructuredSignals.pain_clusters.length} | desires=${parsedStructuredSignals.desire_clusters.length} | patterns=${parsedStructuredSignals.pattern_clusters.length} | rootCauses=${parsedStructuredSignals.root_causes.length} | psychDrivers=${parsedStructuredSignals.psychological_drivers.length}`);
     } else {
-      console.log(`[PositioningEngine-V3] STRUCTURED_SIGNALS_MALFORMED — SIGNAL_REQUIRED: invalid signal shape`);
-      const executionTimeMs = Date.now() - startTime;
-      return buildAndPersistEmptyResult("SIGNAL_REQUIRED", "Structured audience signals are malformed. Re-run Audience Engine to regenerate valid signal clusters.", executionTimeMs, miSnapshotId, audienceSnapshotId, accountId, campaignId);
+      console.log(`[PositioningEngine-V3] STRUCTURED_SIGNALS_MALFORMED — inferring from audience pains/desires`);
+      parsedStructuredSignals = inferStructuredSignalsFromAudience(audiencePains, audienceDesires);
+      console.log(`[PositioningEngine-V3] INFERRED_SIGNALS | pains=${parsedStructuredSignals.pain_clusters.length} | desires=${parsedStructuredSignals.desire_clusters.length}`);
     }
   } else {
-    console.log(`[PositioningEngine-V3] STRUCTURED_SIGNALS_ABSENT — SIGNAL_REQUIRED: cannot run without structured audience signals`);
-    const executionTimeMs = Date.now() - startTime;
-    return buildAndPersistEmptyResult("SIGNAL_REQUIRED", "Positioning engine requires structured audience signals. Re-run Audience Engine to generate signal clusters before positioning.", executionTimeMs, miSnapshotId, audienceSnapshotId, accountId, campaignId);
+    console.log(`[PositioningEngine-V3] STRUCTURED_SIGNALS_ABSENT — inferring from audience pains/desires`);
+    parsedStructuredSignals = inferStructuredSignalsFromAudience(audiencePains, audienceDesires);
+    console.log(`[PositioningEngine-V3] INFERRED_SIGNALS | pains=${parsedStructuredSignals.pain_clusters.length} | desires=${parsedStructuredSignals.desire_clusters.length}`);
   }
 
   if (totalSignals < POSITIONING_THRESHOLDS.MIN_AUDIENCE_SIGNALS) {
@@ -1801,13 +1834,7 @@ export async function runPositioningEngine(
   }
 
   if (!signalEnforcementPassed) {
-    const executionTimeMs = Date.now() - startTime;
-    return buildAndPersistEmptyResult(
-      "SIGNAL_DRIFT",
-      `Positioning failed signal enforcement after ${MAX_SIGNAL_ENFORCEMENT_ATTEMPTS} attempts: output contains generic language or untraceable elements. Regeneration log: ${signalRegenerationLog.join(" → ")}`,
-      executionTimeMs, miSnapshotId, audienceSnapshotId, accountId, campaignId,
-      { confidenceScore: 0, signalTraceability },
-    );
+    console.log(`[PositioningEngine-V3] SIGNAL_ENFORCEMENT_DEGRADED — continuing with LOW_CONFIDENCE output instead of blocking`);
   }
 
   const celCompliance = enforcePositioningCompliance(finalTerritories, analyticalEnrichment || null);
@@ -1834,10 +1861,14 @@ export async function runPositioningEngine(
   const overallConfidence = normalizeConfidence(rawConfidence, dataReliability);
   const confidenceNormalized = rawConfidence !== overallConfidence;
 
-  const status: PositioningStatus = !stabilityResult.isStable ? "UNSTABLE" : "COMPLETE";
+  const status: PositioningStatus = !stabilityResult.isStable ? "UNSTABLE"
+    : !signalEnforcementPassed ? "LOW_CONFIDENCE"
+    : "COMPLETE";
   const hasAdvisories = stabilityResult.advisories.length > 0;
   const statusMessage = !stabilityResult.isStable
     ? "Positioning generated but stability checks failed — review recommended"
+    : !signalEnforcementPassed
+      ? `Positioning generated with degraded signal enforcement — output may contain generic elements. ${signalRegenerationLog.slice(-1).join("")}`
     : hasAdvisories
       ? stabilityResult.advisories.map(a => a.message).join("; ")
       : null;

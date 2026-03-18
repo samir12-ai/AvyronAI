@@ -337,6 +337,7 @@ function MetaItem({ label, value, colors }: { label: string; value: string; colo
 function StatusBanner({ status, message, colors, isDark }: { status: string; message: string | null; colors: any; isDark: boolean }) {
   const cfg: Record<string, { icon: any; bg: string; text: string }> = {
     COMPLETE: { icon: 'checkmark-circle', bg: '#10B98120', text: '#10B981' },
+    LOW_CONFIDENCE: { icon: 'information-circle', bg: '#F59E0B20', text: '#F59E0B' },
     UNSTABLE: { icon: 'warning', bg: '#F5920020', text: '#F59200' },
     MISSING_DEPENDENCY: { icon: 'alert-circle', bg: '#EF444420', text: '#EF4444' },
     INSUFFICIENT_SIGNALS: { icon: 'information-circle', bg: '#3B82F620', text: '#3B82F6' },
