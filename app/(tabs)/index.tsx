@@ -28,6 +28,7 @@ import { getApiUrl, apiRequest } from '@/lib/query-client';
 import { BusinessProfileModal, ProfileButton } from '@/components/BusinessProfile';
 import { PlanStatus } from '@/components/PlanStatus';
 import { ExecutionPipeline } from '@/components/ExecutionPipeline';
+import ExecutionPlan from '@/components/ExecutionPlan';
 import { RequiredWorkCard } from '@/components/RequiredWorkCard';
 import DataFreshnessWarning from '@/components/DataFreshnessWarning';
 import { MarketMindAgent, MarketMindAgentRef } from '@/components/MarketMindAgent';
@@ -578,7 +579,7 @@ export default function DashboardScreen() {
               onApprovePlan={handleApprovePlan}
             />
 
-            <ExecutionPipeline campaignId={selectedCampaignId} isDark={isDark} />
+            <ExecutionPlan />
 
             <RequiredWorkCard campaignId={selectedCampaignId} isDark={isDark} />
           </>

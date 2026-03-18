@@ -44,6 +44,7 @@ import { registerTaskComposerRoutes } from "./task-composer";
 import { registerConflictResolverRoutes } from "./conflict-resolver";
 import { registerAELRoutes } from "./analytical-enrichment-layer/routes";
 import { registerCELRoutes } from "./causal-enforcement-layer/routes";
+import { registerBuildPlanLayerRoutes } from "./build-plan-layer/routes";
 import { storeTokensAfterOAuth, runAllHealthChecks } from "./meta-token-manager";
 import { redactToken } from "./meta-crypto";
 import { initMetaMetrics } from "./meta-metrics";
@@ -1451,6 +1452,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerConflictResolverRoutes(app);
   registerAELRoutes(app);
   registerCELRoutes(app);
+  registerBuildPlanLayerRoutes(app);
 
   initMetaMetrics();
 

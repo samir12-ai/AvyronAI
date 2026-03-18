@@ -28,6 +28,7 @@ import { getApiUrl } from '@/lib/query-client';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import LeadControlPanel from '@/components/LeadControlPanel';
 import StrategicPipeline from '@/components/StrategicPipeline';
+import ExecutionPlan from '@/components/ExecutionPlan';
 import BuildThePlan from '@/components/BuildThePlan';
 import CompetitiveIntelligence from '@/components/CompetitiveIntelligence';
 import ControlCenter from '@/components/ControlCenter';
@@ -1249,7 +1250,12 @@ export default function AIManagementScreen() {
         </ScrollView>
 
         {activeTab === 'buildplan' && <BuildThePlan onNavigateToCI={() => handleTabChange('intelligence')} onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />}
-        {activeTab === 'pipeline' && <StrategicPipeline onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />}
+        {activeTab === 'pipeline' && (
+          <>
+            <ExecutionPlan />
+            <StrategicPipeline onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />
+          </>
+        )}
         {activeTab === 'intelligence' && renderIntelligence()}
         {activeTab === 'strategies' && (
           <>
