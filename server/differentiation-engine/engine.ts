@@ -889,16 +889,18 @@ export async function layer11_aiRefinement(
   const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
   if (aelBlock) console.log(`[DifferentiationEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
 
-  const prompt = `You are refining differentiation language. You must ONLY improve wording clarity and impact.
+  const prompt = `You are refining differentiation language. You must improve wording to be clearer, more distinctive, and causally grounded.
 ${aelBlock}${causalDirective}${depthRejectionContext ? `\n${depthRejectionContext}\n` : ""}
 STRICT RULES:
 - Do NOT invent new strategy, audience segments, offers, or execution plans
-- Do NOT change the meaning or direction of any pillar or claim
 - Do NOT add pricing, packaging, guarantees, CTAs, or channel recommendations
 - Do NOT generate strategic decisions, funnel structures, offer designs, or execution plans
 - Do NOT reference downstream engines (Strategy, Offer, Funnel, Financial, Execution)
 - ONLY output differentiation territories, claim strength, proof architecture, and mechanism framing
-- ONLY refine the language to be clearer, more distinctive, and more compelling
+- EVERY pillar description and claim MUST trace back to a specific root cause or causal chain from the AEL analysis above
+- Replace generic marketing terms with causally-derived language from the root causes
+- Reference specific buying barriers and explain WHY your differentiation resolves them
+- Show cause→impact→behavior reasoning, not just surface-level claims
 - Respond with ONLY valid JSON, no markdown
 
 Input pillars:
@@ -921,7 +923,7 @@ Return JSON:
     const response = await aiChat({
       model: "gpt-4.1-mini",
       messages: [
-        { role: "system", content: "You refine differentiation language only. Never invent strategy, audience, offers, channels, or execution plans." },
+        { role: "system", content: "You refine differentiation language with causal depth. Ground every pillar and claim in root causes from the analytical data. Never invent strategy, audience, offers, channels, or execution plans." },
         { role: "user", content: prompt },
       ],
       accountId,
