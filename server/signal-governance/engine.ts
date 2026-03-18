@@ -21,14 +21,14 @@ function generateTraceToken(): string {
   return `SGL_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
 }
 
-function isRawComment(text: string): boolean {
+export function isRawComment(text: string): boolean {
   for (const pattern of RAW_COMMENT_PATTERNS) {
     if (pattern.test(text)) return true;
   }
   return false;
 }
 
-function purifyEvidence(rawEvidence: string[]): string[] {
+export function purifyEvidence(rawEvidence: string[]): string[] {
   const purified: string[] = [];
   let discarded = 0;
 
@@ -74,7 +74,7 @@ function clusterToGovernedSignals(
     }));
 }
 
-function sanitizeSignalText(text: string): string {
+export function sanitizeSignalText(text: string): string {
   let clean = text.trim();
   if (isRawComment(clean)) {
     return "[SANITIZED]";

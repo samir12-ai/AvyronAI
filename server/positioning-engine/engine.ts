@@ -42,6 +42,7 @@ import {
   pruneOldSnapshots,
   type DataReliabilityDiagnostics,
 } from "../engine-hardening";
+import { isRawComment, purifyEvidence } from "../signal-governance/engine";
 import type { StructuredSignals, StructuredSignalCluster } from "../audience-engine/engine";
 import { verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
 import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/constants";
@@ -771,14 +772,14 @@ function layer7_opportunityGapDetection(
   const painTerritories = pains.slice(0, 8).map((p: any) => ({
     name: p.canonical,
     demand: Math.min(1.0, p.frequency / 20),
-    signals: p.evidence || [],
+    signals: purifyEvidence(p.evidence || []),
     type: "pain" as const,
   }));
 
   const desireTerritories = desires.slice(0, 8).map((d: any) => ({
     name: d.canonical,
     demand: Math.min(1.0, d.frequency / 20),
-    signals: d.evidence || [],
+    signals: purifyEvidence(d.evidence || []),
     type: "desire" as const,
   }));
 
@@ -1547,7 +1548,7 @@ export async function runPositioningEngine(
           audienceDemand: Math.min(1.0, rc.frequency / 15),
           competitorAuthority: 0,
           opportunityScore: Math.round((0.40 + Math.min(1.0, rc.frequency / 15) * 0.35 + rc.confidence * 0.15) * 100) / 100,
-          painSignals: rc.evidence.slice(0, 3),
+          painSignals: purifyEvidence(rc.evidence || []).slice(0, 3),
           desireSignals: [],
           signalSource: rc.id,
         });
@@ -1564,7 +1565,7 @@ export async function runPositioningEngine(
           competitorAuthority: 0,
           opportunityScore: Math.round((0.35 + Math.min(1.0, pd.frequency / 15) * 0.30 + pd.confidence * 0.15) * 100) / 100,
           painSignals: [],
-          desireSignals: pd.evidence.slice(0, 3),
+          desireSignals: purifyEvidence(pd.evidence || []).slice(0, 3),
           signalSource: pd.id,
         });
         existingNames.add(pd.label.toLowerCase());
