@@ -7,6 +7,15 @@ import {
   type ComplianceResult,
 } from "../causal-enforcement-layer/engine";
 import {
+  initializeSignalGovernance,
+  resolveSignalsForEngine,
+  getGovernanceSummary,
+} from "../signal-governance/engine";
+import type { SignalGovernanceState } from "../signal-governance/types";
+import { runSystemIntegrityValidation } from "../system-integrity/engine";
+import type { IntegrityReport } from "../system-integrity/types";
+import { storeIntegrityReport } from "../system-integrity/routes";
+import {
   orchestratorJobs,
   strategicPlans,
   growthCampaigns,
@@ -95,6 +104,8 @@ interface EngineContext {
   analyticalEnrichment?: any;
   celResults?: ComplianceResult[];
   depthGateStatus?: Record<string, string>;
+  sglState?: SignalGovernanceState;
+  integrityReport?: IntegrityReport;
 }
 
 async function getBusinessData(accountId: string, campaignId: string): Promise<any> {
@@ -309,6 +320,20 @@ async function executeEngine(
             ctx.analyticalEnrichment = null;
           }
         }
+
+        if (ctx.audience) {
+          try {
+            const sglStart = Date.now();
+            ctx.sglState = initializeSignalGovernance(
+              ctx.audience.structuredSignals || { pain_clusters: [], desire_clusters: [], pattern_clusters: [], root_causes: [], psychological_drivers: [] },
+              ctx.audience.objectionMap || [],
+            );
+            console.log(`[Orchestrator] SGL_INITIALIZED | duration=${Date.now() - sglStart}ms | signals=${ctx.sglState.governedSignals.length} | trace=${ctx.sglState.traceToken}`);
+          } catch (sglErr: any) {
+            console.warn(`[Orchestrator] SGL_INIT_FAILED | error=${sglErr.message} — proceeding without signal governance`);
+            ctx.sglState = undefined;
+          }
+        }
         break;
       }
 
@@ -322,6 +347,7 @@ async function executeEngine(
             blockReason: "Missing MI or Audience snapshot",
           };
         }
+        if (ctx.sglState) resolveSignalsForEngine(ctx.sglState, "positioning");
         const result = await runPositioningEngine(
           config.accountId,
           config.campaignId,
@@ -354,6 +380,7 @@ async function executeEngine(
       }
 
       case "differentiation": {
+        if (ctx.sglState) resolveSignalsForEngine(ctx.sglState, "differentiation");
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -400,6 +427,7 @@ async function executeEngine(
       }
 
       case "mechanism": {
+        if (ctx.sglState) resolveSignalsForEngine(ctx.sglState, "mechanism");
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
         const positioningForMech = {
@@ -441,6 +469,7 @@ async function executeEngine(
       }
 
       case "offer": {
+        if (ctx.sglState) resolveSignalsForEngine(ctx.sglState, "offer");
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -483,6 +512,7 @@ async function executeEngine(
       }
 
       case "awareness": {
+        if (ctx.sglState) resolveSignalsForEngine(ctx.sglState, "awareness");
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -516,6 +546,7 @@ async function executeEngine(
       }
 
       case "funnel": {
+        if (ctx.sglState) resolveSignalsForEngine(ctx.sglState, "funnel");
         if (!ctx.awareness || !ctx.awareness.primaryRoute) {
           console.log(`[Orchestrator] AWARENESS_GATE_BLOCKED | Funnel cannot execute without completed Awareness — awareness output missing or incomplete`);
           output = { status: "MISSING_DEPENDENCY", statusMessage: "Funnel requires completed Awareness output — awareness gate active" };
@@ -585,6 +616,7 @@ async function executeEngine(
       }
 
       case "persuasion": {
+        if (ctx.sglState) resolveSignalsForEngine(ctx.sglState, "persuasion");
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -831,6 +863,23 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       console.log(`[Orchestrator] ${engineDef.name} skipped: ${stepResult.blockReason}`);
       if (overallStatus === "COMPLETED") overallStatus = "PARTIAL";
     }
+  }
+
+  try {
+    const engineOutputs: Record<string, any> = {};
+    for (const [eid, result] of results) {
+      engineOutputs[eid] = result.output;
+    }
+    ctx.integrityReport = runSystemIntegrityValidation(engineOutputs, ctx.sglState || null);
+    storeIntegrityReport(config.campaignId, ctx.integrityReport);
+    console.log(`[Orchestrator] INTEGRITY_REPORT | status=${ctx.integrityReport.overallStatus} | failures=${ctx.integrityReport.failureReasons.length}`);
+  } catch (sivErr: any) {
+    console.warn(`[Orchestrator] SIV_FAILED | error=${sivErr.message}`);
+  }
+
+  if (ctx.sglState) {
+    const sglSummary = getGovernanceSummary(ctx.sglState);
+    console.log(`[Orchestrator] SGL_SUMMARY | signals=${sglSummary.totalSignals} | enginesServed=${sglSummary.enginesServed.length} | coverage=${sglSummary.coverage.coverageSufficient}`);
   }
 
   let planId: string | undefined;

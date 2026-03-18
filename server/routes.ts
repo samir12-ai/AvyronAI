@@ -45,6 +45,7 @@ import { registerConflictResolverRoutes } from "./conflict-resolver";
 import { registerAELRoutes } from "./analytical-enrichment-layer/routes";
 import { registerCELRoutes } from "./causal-enforcement-layer/routes";
 import { registerBuildPlanLayerRoutes } from "./build-plan-layer/routes";
+import { registerIntegrityRoutes } from "./system-integrity/routes";
 import { storeTokensAfterOAuth, runAllHealthChecks } from "./meta-token-manager";
 import { redactToken } from "./meta-crypto";
 import { initMetaMetrics } from "./meta-metrics";
@@ -1453,6 +1454,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerAELRoutes(app);
   registerCELRoutes(app);
   registerBuildPlanLayerRoutes(app);
+  registerIntegrityRoutes(app);
 
   initMetaMetrics();
 

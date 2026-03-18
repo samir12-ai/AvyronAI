@@ -50,6 +50,7 @@ import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
 import DataFreshnessWarning from '@/components/DataFreshnessWarning';
 import AELDebugPanel from '@/components/AELDebugPanel';
 import SignalFlowPanel from '@/components/SignalFlowPanel';
+import SystemIntegrityPanel from '@/components/SystemIntegrityPanel';
 
 interface AIAudience {
   name: string;
@@ -1260,6 +1261,7 @@ export default function AIManagementScreen() {
         {activeTab === 'strategies' && (
           <>
             {renderStrategiesBranch()}
+            <CampaignGuard><SystemIntegrityPanel /></CampaignGuard>
             <CampaignGuard><SignalFlowPanel /></CampaignGuard>
             <CampaignGuard><AELDebugPanel /></CampaignGuard>
           </>
