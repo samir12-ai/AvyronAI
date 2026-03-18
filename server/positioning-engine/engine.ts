@@ -42,6 +42,7 @@ import {
   pruneOldSnapshots,
   type DataReliabilityDiagnostics,
 } from "../engine-hardening";
+import type { StructuredSignals, StructuredSignalCluster } from "../audience-engine/engine";
 import { verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
 import { ENGINE_VERSION as MI_ENGINE_VERSION } from "../market-intelligence-v3/constants";
 import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snapshot-trust";
@@ -79,6 +80,13 @@ interface PositioningEngineResult {
   snapshotId: string;
   executionTimeMs: number;
   createdAt: string;
+  signalTraceability?: {
+    totalSignalsAvailable: number;
+    signalsUsed: string[];
+    signalCoverage: number;
+    unmappedElements: string[];
+    validationPassed: boolean;
+  };
 }
 
 interface CategoryResult {
@@ -985,6 +993,80 @@ function deduplicateTerritories(territories: Territory[]): Territory[] {
   return result;
 }
 
+function formatStructuredSignalsForPrompt(signals: StructuredSignals): string {
+  const formatClusters = (clusters: StructuredSignalCluster[], label: string): string => {
+    if (clusters.length === 0) return "";
+    const lines = clusters.map((c, i) => `  ${i + 1}. [${c.id}] "${c.label}" (freq=${c.frequency}, conf=${c.confidence.toFixed(2)}, layer=${c.sourceLayer})`);
+    return `\n${label}:\n${lines.join("\n")}`;
+  };
+  return [
+    formatClusters(signals.pain_clusters, "PAIN CLUSTERS"),
+    formatClusters(signals.desire_clusters, "DESIRE CLUSTERS"),
+    formatClusters(signals.pattern_clusters, "PATTERN CLUSTERS"),
+    formatClusters(signals.root_causes, "ROOT CAUSES"),
+    formatClusters(signals.psychological_drivers, "PSYCHOLOGICAL DRIVERS"),
+  ].filter(Boolean).join("\n");
+}
+
+function getAllSignalLabels(signals: StructuredSignals): string[] {
+  return [
+    ...signals.pain_clusters,
+    ...signals.desire_clusters,
+    ...signals.pattern_clusters,
+    ...signals.root_causes,
+    ...signals.psychological_drivers,
+  ].map(c => c.label.toLowerCase());
+}
+
+function validateSignalTraceability(
+  territories: Territory[],
+  signals: StructuredSignals,
+): { signalsUsed: string[]; unmappedElements: string[]; coverage: number; passed: boolean } {
+  const allLabels = getAllSignalLabels(signals);
+  const allIds = [
+    ...signals.pain_clusters,
+    ...signals.desire_clusters,
+    ...signals.pattern_clusters,
+    ...signals.root_causes,
+    ...signals.psychological_drivers,
+  ].map(c => c.id);
+
+  const signalsUsed = new Set<string>();
+  const unmappedElements: string[] = [];
+
+  for (const territory of territories) {
+    const elements = [
+      territory.enemyDefinition,
+      territory.contrastAxis,
+      territory.narrativeDirection,
+      ...(territory.painAlignment || []),
+    ].filter(Boolean);
+
+    for (const element of elements) {
+      const elLower = element.toLowerCase();
+      let matched = false;
+      for (let i = 0; i < allLabels.length; i++) {
+        const label = allLabels[i];
+        const words = label.split(/\s+/).filter(w => w.length > 3);
+        const matchCount = words.filter(w => elLower.includes(w)).length;
+        if (matchCount >= Math.max(1, Math.floor(words.length * 0.3))) {
+          signalsUsed.add(allIds[i]);
+          matched = true;
+        }
+      }
+      if (!matched && element.length > 10) {
+        unmappedElements.push(element.slice(0, 80));
+      }
+    }
+  }
+
+  const totalSignals = allLabels.length;
+  const coverage = totalSignals > 0 ? signalsUsed.size / totalSignals : 0;
+  const passed = unmappedElements.length <= Math.max(1, territories.length);
+
+  return { signalsUsed: Array.from(signalsUsed), unmappedElements, coverage, passed };
+}
+
 async function layer11_positioningStatementGeneration(
   territories: Territory[],
   category: string,
@@ -993,6 +1075,7 @@ async function layer11_positioningStatementGeneration(
   miData?: any,
   productDna?: any,
   analyticalEnrichment?: any,
+  structuredSignals?: StructuredSignals | null,
 ): Promise<Territory[]> {
   if (territories.length === 0) return territories;
 
@@ -1027,11 +1110,29 @@ async function layer11_positioningStatementGeneration(
     const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
     if (aelBlock) console.log(`[PositioningEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
 
+    const hasSignals = structuredSignals && getAllSignalLabels(structuredSignals).length > 0;
+    const signalBlock = hasSignals ? formatStructuredSignalsForPrompt(structuredSignals!) : "";
+    if (hasSignals) console.log(`[PositioningEngine-V3] SIGNAL_BOUND_MODE | signals=${getAllSignalLabels(structuredSignals!).length}`);
+
+    const signalConstraint = hasSignals ? `
+
+STRUCTURED AUDIENCE SIGNALS (MANDATORY INPUT — SELECT FROM THESE ONLY):
+${signalBlock}
+
+CRITICAL CONSTRAINT: You are a SELECTION engine, not a generative engine.
+- Every enemyDefinition MUST reference a specific pain cluster, root cause, or psychological driver from above
+- Every contrastAxis MUST map to a desire cluster, pattern cluster, or root cause from above
+- Every narrativeDirection MUST be grounded in the signals listed above
+- Do NOT invent new audience pains, desires, or psychological insights not present in the signals
+- Reference signal IDs in your reasoning
+- If a territory cannot be grounded in the provided signals, return it with "UNMAPPED" in the narrativeDirection field
+` : "";
+
     const prompt = `You are a strategic positioning analyst. Generate precise positioning statements for each territory.
 
 MARKET CATEGORY: ${category}
 PRIMARY AUDIENCE SEGMENT: ${topSegment}
-${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${aelBlock}${causalDirective}
+${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${aelBlock}${causalDirective}${signalConstraint}
 
 TERRITORIES:
 ${territories.map((t, i) => `${i + 1}. "${t.name}" (opportunity: ${t.opportunityScore}, distance: ${t.narrativeDistanceScore})
@@ -1043,12 +1144,13 @@ ${websitePositioningContext}
 For each territory, return a JSON array with objects containing:
 {
   "index": number,
-  "enemyDefinition": "precise enemy statement",
-  "narrativeDirection": "one-sentence positioning narrative",
-  "contrastAxis": "clear contrast axis statement"
+  "enemyDefinition": "precise enemy statement grounded in audience signals",
+  "narrativeDirection": "one-sentence positioning narrative derived from audience signals",
+  "contrastAxis": "clear contrast axis statement mapped to audience signals"${hasSignals ? `,
+  "mappedSignalIds": ["signal_id_1", "signal_id_2"]` : ""}
 }
 
-Keep statements concise, strategic, and evidence-grounded. Return ONLY the JSON array.`;
+Keep statements concise, strategic, and evidence-grounded.${hasSignals ? " Every element must trace back to the structured audience signals provided." : ""} Return ONLY the JSON array.`;
 
     const response = await aiChat({
       model: "gpt-4.1-mini",
@@ -1063,9 +1165,23 @@ Keep statements concise, strategic, and evidence-grounded. Return ONLY the JSON 
     const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const parsed = JSON.parse(cleaned) as any[];
 
+    const allSignalIds = hasSignals ? new Set([
+      ...structuredSignals!.pain_clusters,
+      ...structuredSignals!.desire_clusters,
+      ...structuredSignals!.pattern_clusters,
+      ...structuredSignals!.root_causes,
+      ...structuredSignals!.psychological_drivers,
+    ].map(c => c.id)) : null;
+
     for (const item of parsed) {
       const idx = (item.index || 1) - 1;
       if (idx >= 0 && idx < territories.length) {
+        if (item.narrativeDirection && typeof item.narrativeDirection === "string" && item.narrativeDirection.includes("UNMAPPED")) {
+          territories[idx].confidenceScore = Math.max(0, territories[idx].confidenceScore - 0.15);
+          territories[idx].stabilityNotes.push("[SIGNAL_UNMAPPED] Territory could not be grounded in audience signals");
+          console.log(`[PositioningEngine-V3] L11 UNMAPPED territory: "${territories[idx].name}"`);
+          continue;
+        }
         if (item.enemyDefinition && validateNarrativeOutput(item.enemyDefinition).valid) {
           territories[idx].enemyDefinition = item.enemyDefinition;
         }
@@ -1074,6 +1190,15 @@ Keep statements concise, strategic, and evidence-grounded. Return ONLY the JSON 
         }
         if (item.contrastAxis && validateNarrativeOutput(item.contrastAxis).valid) {
           territories[idx].contrastAxis = item.contrastAxis;
+        }
+        if (hasSignals && Array.isArray(item.mappedSignalIds) && allSignalIds) {
+          const validIds = item.mappedSignalIds.filter((id: string) => allSignalIds.has(id));
+          if (validIds.length > 0) {
+            territories[idx].stabilityNotes.push(`[SIGNAL_GROUNDED] Mapped to ${validIds.length} audience signal(s): ${validIds.join(", ")}`);
+          } else {
+            territories[idx].stabilityNotes.push("[SIGNAL_WEAK] Model claimed signal IDs but none validated");
+            territories[idx].confidenceScore = Math.max(0, territories[idx].confidenceScore - 0.05);
+          }
         }
       }
     }
@@ -1334,6 +1459,27 @@ export async function runPositioningEngine(
   const audienceDesires = safeJsonParse(audienceSnapshot.desireMap, []);
   const totalSignals = audiencePains.length + audienceDesires.length;
 
+  let parsedStructuredSignals: StructuredSignals | null = null;
+  if (audienceSnapshot.structuredSignals) {
+    const raw = safeJsonParse(audienceSnapshot.structuredSignals, null);
+    if (
+      raw &&
+      Array.isArray(raw.pain_clusters) &&
+      Array.isArray(raw.desire_clusters) &&
+      Array.isArray(raw.pattern_clusters) &&
+      Array.isArray(raw.root_causes) &&
+      Array.isArray(raw.psychological_drivers)
+    ) {
+      parsedStructuredSignals = raw as StructuredSignals;
+      const totalStructured = getAllSignalLabels(parsedStructuredSignals).length;
+      console.log(`[PositioningEngine-V3] STRUCTURED_SIGNALS_LOADED | total=${totalStructured} | pains=${parsedStructuredSignals.pain_clusters.length} | desires=${parsedStructuredSignals.desire_clusters.length} | patterns=${parsedStructuredSignals.pattern_clusters.length} | rootCauses=${parsedStructuredSignals.root_causes.length} | psychDrivers=${parsedStructuredSignals.psychological_drivers.length}`);
+    } else {
+      console.log(`[PositioningEngine-V3] STRUCTURED_SIGNALS_MALFORMED — ignoring invalid shape, running in legacy mode`);
+    }
+  } else {
+    console.log(`[PositioningEngine-V3] STRUCTURED_SIGNALS_ABSENT — running in legacy mode (no signal-bound constraint)`);
+  }
+
   if (totalSignals < POSITIONING_THRESHOLDS.MIN_AUDIENCE_SIGNALS) {
     const executionTimeMs = Date.now() - startTime;
     return buildEmptyResult("INSUFFICIENT_SIGNALS", `Insufficient audience signals (${totalSignals}) for positioning — need ≥${POSITIONING_THRESHOLDS.MIN_AUDIENCE_SIGNALS}`, executionTimeMs, miSnapshotId, audienceSnapshotId);
@@ -1456,8 +1602,8 @@ export async function runPositioningEngine(
     console.warn(`[PositioningEngine-V3] Cross-campaign diversity check skipped: ${err.message}`);
   }
 
-  territories = await layer11_positioningStatementGeneration(territories, category, segmentPriority, accountId, activeMiSnapshot, productDna, analyticalEnrichment);
-  console.log(`[PositioningEngine-V3] L11 Statements generated | aelProvided=${!!analyticalEnrichment}`);
+  territories = await layer11_positioningStatementGeneration(territories, category, segmentPriority, accountId, activeMiSnapshot, productDna, analyticalEnrichment, parsedStructuredSignals);
+  console.log(`[PositioningEngine-V3] L11 Statements generated | aelProvided=${!!analyticalEnrichment} | signalBound=${!!parsedStructuredSignals}`);
 
   const boundaryText = territories.map(t =>
     `${t.name} ${t.enemyDefinition} ${t.contrastAxis} ${t.narrativeDirection} ${t.evidenceSignals?.join(" ") || ""}`
@@ -1570,6 +1716,27 @@ export async function runPositioningEngine(
     console.log(`[PositioningEngine-V3] CEL_RESULT | CLEAN | score=1.00 | rootCauses=${celCompliance.rootCausesEvaluated}`);
   }
 
+  let signalTraceability: PositioningEngineResult["signalTraceability"] = undefined;
+  if (parsedStructuredSignals && getAllSignalLabels(parsedStructuredSignals).length > 0) {
+    const traceResult = validateSignalTraceability(finalTerritories, parsedStructuredSignals);
+    signalTraceability = {
+      totalSignalsAvailable: getAllSignalLabels(parsedStructuredSignals).length,
+      signalsUsed: traceResult.signalsUsed,
+      signalCoverage: Math.round(traceResult.coverage * 100) / 100,
+      unmappedElements: traceResult.unmappedElements,
+      validationPassed: traceResult.passed,
+    };
+    if (!traceResult.passed) {
+      for (const territory of finalTerritories) {
+        territory.confidenceScore = Math.max(0, territory.confidenceScore - 0.10);
+        territory.stabilityNotes.push(`[SIGNAL_TRACE] ${traceResult.unmappedElements.length} positioning elements not traceable to audience signals`);
+      }
+      console.log(`[PositioningEngine-V3] SIGNAL_TRACE_FAILED | unmapped=${traceResult.unmappedElements.length} | coverage=${(traceResult.coverage * 100).toFixed(1)}% | used=${traceResult.signalsUsed.length}/${signalTraceability.totalSignalsAvailable}`);
+    } else {
+      console.log(`[PositioningEngine-V3] SIGNAL_TRACE_PASSED | coverage=${(traceResult.coverage * 100).toFixed(1)}% | used=${traceResult.signalsUsed.length}/${signalTraceability.totalSignalsAvailable} | unmapped=${traceResult.unmappedElements.length}`);
+    }
+  }
+
   const rawConfidence = primaryTerritory
     ? Math.round(primaryTerritory.confidenceScore * 100) / 100
     : 0;
@@ -1629,6 +1796,7 @@ export async function runPositioningEngine(
     segmentPriority: JSON.stringify(segmentPriority),
     inputSummary: JSON.stringify(inputSummary),
     confidenceScore: overallConfidence,
+    signalTraceability: signalTraceability ? JSON.stringify(signalTraceability) : null,
     executionTimeMs,
   }).returning({ id: positioningSnapshots.id });
 
@@ -1667,6 +1835,7 @@ export async function runPositioningEngine(
     snapshotId: inserted.id,
     executionTimeMs,
     createdAt: new Date().toISOString(),
+    signalTraceability,
   };
 }
 
@@ -1738,6 +1907,7 @@ export async function getLatestPositioningSnapshot(accountId: string, campaignId
     narrativeSaturation: safeJsonParse(snapshot.narrativeSaturation, {}),
     segmentPriority: safeJsonParse(snapshot.segmentPriority, []),
     inputSummary: safeJsonParse(snapshot.inputSummary, {}),
+    signalTraceability: snapshot.signalTraceability ? safeJsonParse(snapshot.signalTraceability, null) : null,
   };
 }
 

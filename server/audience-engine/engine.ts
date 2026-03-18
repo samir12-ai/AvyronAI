@@ -91,6 +91,23 @@ interface AdsTargetingHint extends EvidenceMeta {
   rationale: string;
 }
 
+export interface StructuredSignalCluster {
+  id: string;
+  label: string;
+  frequency: number;
+  confidence: number;
+  evidence: string[];
+  sourceLayer: "surface" | "pattern" | "interpretation";
+}
+
+export interface StructuredSignals {
+  pain_clusters: StructuredSignalCluster[];
+  desire_clusters: StructuredSignalCluster[];
+  pattern_clusters: StructuredSignalCluster[];
+  root_causes: StructuredSignalCluster[];
+  psychological_drivers: StructuredSignalCluster[];
+}
+
 export type EngineStatus = "COMPLETE" | "DATASET_TOO_SMALL" | "INSUFFICIENT_SIGNALS" | "DEFENSIVE_MODE" | "MISSING_DEPENDENCY";
 
 export interface AudienceEngineV3Result {
@@ -109,6 +126,7 @@ export interface AudienceEngineV3Result {
   maturityIndex: MaturityResult;
   intentDistribution: IntentDistribution;
   adsTargetingHints: AdsTargetingHint[];
+  structuredSignals: StructuredSignals;
   inputSummary: {
     postsAnalyzed: number;
     commentsAnalyzed: number;
@@ -1038,6 +1056,119 @@ Return ONLY a JSON array matching the segments count. Use real Meta Ads targetin
   }
 }
 
+function buildStructuredSignals(
+  painMap: SignalItem[],
+  desireMap: SignalItem[],
+  objectionMap: SignalItem[],
+  transformationMap: SignalItem[],
+  emotionalDrivers: SignalItem[],
+  awarenessLevel: AwarenessResult,
+  intentDistribution: IntentDistribution,
+): StructuredSignals {
+  const toCluster = (items: SignalItem[], layer: "surface" | "pattern" | "interpretation"): StructuredSignalCluster[] =>
+    items.map((item, i) => ({
+      id: `${layer}_${i}_${item.canonical.replace(/\s+/g, "_").toLowerCase().slice(0, 30)}`,
+      label: item.canonical,
+      frequency: item.frequency,
+      confidence: item.confidenceScore,
+      evidence: item.evidence.slice(0, 3),
+      sourceLayer: layer,
+    }));
+
+  const pain_clusters = toCluster(painMap, "surface");
+  const desire_clusters = toCluster(desireMap, "surface");
+
+  const allFrequencyItems = [...painMap, ...desireMap, ...objectionMap].filter(s => s.frequency >= 2);
+  const sortedByFreq = allFrequencyItems.sort((a, b) => b.frequency - a.frequency);
+  const pattern_clusters = toCluster(sortedByFreq.slice(0, 10), "pattern");
+
+  const rootCauseInputs: SignalItem[] = [];
+  const highConfPains = painMap.filter(p => p.confidenceScore >= 0.4);
+  const highConfObjections = objectionMap.filter(o => o.confidenceScore >= 0.3);
+
+  for (const pain of highConfPains) {
+    const relatedDriver = emotionalDrivers.find(d =>
+      d.evidence.some(e => pain.evidence.some(pe => e.toLowerCase().includes(pe.toLowerCase().slice(0, 20)) || pe.toLowerCase().includes(e.toLowerCase().slice(0, 20))))
+    );
+    rootCauseInputs.push({
+      ...pain,
+      canonical: relatedDriver
+        ? `${pain.canonical} driven by ${relatedDriver.canonical}`
+        : `${pain.canonical} (recurring audience friction)`,
+      confidenceScore: Math.min(0.95, pain.confidenceScore + (relatedDriver ? 0.1 : 0)),
+    });
+  }
+
+  for (const obj of highConfObjections.slice(0, 3)) {
+    if (!rootCauseInputs.some(r => r.canonical.toLowerCase().includes(obj.canonical.toLowerCase()))) {
+      rootCauseInputs.push({
+        ...obj,
+        canonical: `Buying barrier: ${obj.canonical}`,
+      });
+    }
+  }
+
+  const root_causes = toCluster(
+    rootCauseInputs.sort((a, b) => b.confidenceScore - a.confidenceScore).slice(0, 8),
+    "interpretation",
+  );
+
+  const psychDriverInputs: SignalItem[] = emotionalDrivers.map(d => ({
+    ...d,
+    canonical: d.canonical,
+  }));
+
+  if (awarenessLevel.level !== "insufficient_signals") {
+    psychDriverInputs.push({
+      canonical: `Awareness state: ${awarenessLevel.level} — audience ${awarenessLevel.level === "unaware" ? "doesn't know the problem exists" : awarenessLevel.level === "problem_aware" ? "feels the pain but doesn't know solutions" : awarenessLevel.level === "solution_aware" ? "knows solutions exist but hasn't chosen" : "is evaluating specific products"}`,
+      frequency: awarenessLevel.evidenceCount,
+      evidence: [],
+      evidenceCount: awarenessLevel.evidenceCount,
+      confidenceScore: awarenessLevel.confidenceScore,
+      sourceSignals: ["awareness"],
+      inputSnapshotId: awarenessLevel.inputSnapshotId,
+    });
+  }
+
+  if (intentDistribution.totalClassified > 0) {
+    const dominantIntent = intentDistribution.purchaseIntent >= 30 ? "purchase-ready"
+      : intentDistribution.comparison >= 30 ? "comparison-shopping"
+      : intentDistribution.learning >= 30 ? "learning-phase"
+      : "curiosity-stage";
+    psychDriverInputs.push({
+      canonical: `Dominant intent: ${dominantIntent} (${intentDistribution.totalClassified} signals classified)`,
+      frequency: intentDistribution.totalClassified,
+      evidence: [],
+      evidenceCount: intentDistribution.totalClassified,
+      confidenceScore: intentDistribution.confidenceScore,
+      sourceSignals: ["intent"],
+      inputSnapshotId: null,
+    });
+  }
+
+  for (const t of transformationMap.slice(0, 3)) {
+    psychDriverInputs.push({
+      ...t,
+      canonical: `Desired transformation: ${t.canonical}`,
+    });
+  }
+
+  const psychological_drivers = toCluster(
+    psychDriverInputs.sort((a, b) => b.confidenceScore - a.confidenceScore).slice(0, 8),
+    "interpretation",
+  );
+
+  return { pain_clusters, desire_clusters, pattern_clusters, root_causes, psychological_drivers };
+}
+
+const EMPTY_STRUCTURED_SIGNALS: StructuredSignals = {
+  pain_clusters: [],
+  desire_clusters: [],
+  pattern_clusters: [],
+  root_causes: [],
+  psychological_drivers: [],
+};
+
 function buildEmptyResult(
   status: EngineStatus,
   statusMessage: string,
@@ -1062,6 +1193,7 @@ function buildEmptyResult(
     maturityIndex: { ...emptyMeta, level: "insufficient_signals", distribution: {}, indicators: [] },
     intentDistribution: { ...emptyMeta, curiosity: 0, learning: 0, comparison: 0, purchaseIntent: 0, totalClassified: 0 },
     adsTargetingHints: [],
+    structuredSignals: EMPTY_STRUCTURED_SIGNALS,
     inputSummary,
     engineVersion: AUDIENCE_ENGINE_VERSION,
     executionTimeMs,
@@ -1399,6 +1531,12 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   }
   console.log(`[AudienceEngine-V3] LINEAGE_GENERATED | entries=${audienceLineage.length} | pains=${painMap.length} | desires=${desireMap.length} | objections=${objectionMap.length} | bridged=${bridgeResult?.totalPassed || 0}`);
 
+  const structuredSignals = buildStructuredSignals(
+    painMap, desireMap, objectionMap, transformationMap, emotionalDrivers,
+    awarenessLevel, intentDistribution,
+  );
+  console.log(`[AudienceEngine-V3] STRUCTURED_SIGNALS | pains=${structuredSignals.pain_clusters.length} | desires=${structuredSignals.desire_clusters.length} | patterns=${structuredSignals.pattern_clusters.length} | rootCauses=${structuredSignals.root_causes.length} | psychDrivers=${structuredSignals.psychological_drivers.length}`);
+
   const [inserted] = await db.insert(audienceSnapshots).values({
     accountId, campaignId, miSnapshotId,
     engineVersion: AUDIENCE_ENGINE_VERSION,
@@ -1416,6 +1554,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     adsTargetingHints: JSON.stringify(adsTargetingHints),
     inputSummary: JSON.stringify(inputSummary),
     signalLineage: JSON.stringify(audienceLineage),
+    structuredSignals: JSON.stringify(structuredSignals),
     executionTimeMs,
   }).returning({ id: audienceSnapshots.id });
 
@@ -1449,6 +1588,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     maturityIndex,
     intentDistribution,
     adsTargetingHints,
+    structuredSignals,
     inputSummary,
     engineVersion: AUDIENCE_ENGINE_VERSION,
     executionTimeMs,
@@ -1493,6 +1633,7 @@ export async function getLatestAudienceSnapshot(accountId: string, campaignId: s
     maturityIndex: JSON.parse(snapshot.maturityIndex || "{}"),
     intentDistribution: JSON.parse(snapshot.audienceIntentDistribution || "{}"),
     adsTargetingHints: JSON.parse(snapshot.adsTargetingHints || "[]"),
+    structuredSignals: JSON.parse(snapshot.structuredSignals || '{"pain_clusters":[],"desire_clusters":[],"pattern_clusters":[],"root_causes":[],"psychological_drivers":[]}'),
     inputSummary: JSON.parse(snapshot.inputSummary || "{}"),
     freshnessMetadata,
   };

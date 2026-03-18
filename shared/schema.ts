@@ -1671,6 +1671,7 @@ export const audienceSnapshots = pgTable("audience_snapshots", {
   adsTargetingHints: text("ads_targeting_hints"),
   inputSummary: text("input_summary"),
   signalLineage: text("signal_lineage"),
+  structuredSignals: text("structured_signals"),
   executionTimeMs: integer("execution_time_ms"),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -1703,6 +1704,7 @@ export const positioningSnapshots = pgTable("positioning_snapshots", {
   segmentPriority: text("segment_priority"),
   inputSummary: text("input_summary"),
   confidenceScore: doublePrecision("confidence_score"),
+  signalTraceability: text("signal_traceability"),
   executionTimeMs: integer("execution_time_ms"),
   createdAt: timestamp("created_at").defaultNow(),
 });

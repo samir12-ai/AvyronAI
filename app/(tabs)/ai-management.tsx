@@ -48,6 +48,7 @@ import RetentionEngine from '@/components/RetentionEngine';
 import { CampaignBar, CampaignGuard } from '@/components/CampaignSelector';
 import DataFreshnessWarning from '@/components/DataFreshnessWarning';
 import AELDebugPanel from '@/components/AELDebugPanel';
+import SignalFlowPanel from '@/components/SignalFlowPanel';
 
 interface AIAudience {
   name: string;
@@ -1253,6 +1254,7 @@ export default function AIManagementScreen() {
         {activeTab === 'strategies' && (
           <>
             {renderStrategiesBranch()}
+            <CampaignGuard><SignalFlowPanel /></CampaignGuard>
             <CampaignGuard><AELDebugPanel /></CampaignGuard>
           </>
         )}
