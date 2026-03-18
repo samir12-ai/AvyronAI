@@ -76,7 +76,7 @@ interface DifferentiationData {
   trustPriorityMap?: TrustGap[];
   claimScores?: { averageScore: number; highestCollision: number; totalClaims: number };
   collisionDiagnostics?: ClaimCollision[];
-  stabilityResult?: { stable: boolean; failures: string[]; warnings?: string[]; lowConfidence?: boolean };
+  stabilityResult?: { stable: boolean; failures: string[]; warnings?: string[]; groundingFailures?: string[] };
   confidenceScore?: number;
   executionTimeMs?: number;
   engineVersion?: number;
@@ -256,24 +256,21 @@ export default function DifferentiationEngine({ isActive }: { isActive?: boolean
         <View style={styles.results}>
           <View style={[styles.statusBar, {
             backgroundColor: data.status === 'COMPLETE' ? '#10B98118'
-              : data.status === 'LOW_CONFIDENCE' ? '#F59E0B18'
               : data.status === 'UNSTABLE' ? '#F59E0B18' : '#EF444418'
           }]}>
             <Ionicons
               name={data.status === 'COMPLETE' ? 'checkmark-circle'
-                : data.status === 'LOW_CONFIDENCE' ? 'information-circle'
+                : data.status === 'SIGNAL_GROUNDING_FAILED' ? 'alert-circle'
                 : data.status === 'UNSTABLE' ? 'warning' : 'alert-circle'}
               size={16}
               color={data.status === 'COMPLETE' ? '#10B981'
-                : data.status === 'LOW_CONFIDENCE' ? '#F59E0B'
                 : data.status === 'UNSTABLE' ? '#F59E0B' : '#EF4444'}
             />
             <Text style={[styles.statusText, {
               color: data.status === 'COMPLETE' ? '#10B981'
-                : data.status === 'LOW_CONFIDENCE' ? '#F59E0B'
                 : data.status === 'UNSTABLE' ? '#F59E0B' : '#EF4444'
             }]}>
-              {data.status === 'LOW_CONFIDENCE' ? 'LIMITED CONFIDENCE' : data.status}
+              {data.status === 'SIGNAL_GROUNDING_FAILED' ? 'SIGNAL GROUNDING FAILED' : data.status}
               {data.statusMessage ? ` — ${data.statusMessage}` : ''}
             </Text>
           </View>
@@ -414,28 +411,27 @@ export default function DifferentiationEngine({ isActive }: { isActive?: boolean
             <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
               <View style={styles.sectionHeader}>
                 <Ionicons name="shield-outline" size={16} color={
-                  data.stabilityResult.stable
-                    ? (data.stabilityResult.lowConfidence ? '#F59E0B' : '#10B981')
-                    : '#EF4444'
+                  data.stabilityResult.stable && (!data.stabilityResult.groundingFailures || data.stabilityResult.groundingFailures.length === 0)
+                    ? '#10B981' : '#EF4444'
                 } />
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>Stability Guard</Text>
               </View>
               <View style={[styles.stabilityBadge, {
-                backgroundColor: data.stabilityResult.stable
-                  ? (data.stabilityResult.lowConfidence ? '#F59E0B18' : '#10B98118')
-                  : '#EF444418'
+                backgroundColor: data.stabilityResult.stable && (!data.stabilityResult.groundingFailures || data.stabilityResult.groundingFailures.length === 0)
+                  ? '#10B98118' : '#EF444418'
               }]}>
                 <Text style={{
-                  color: data.stabilityResult.stable
-                    ? (data.stabilityResult.lowConfidence ? '#F59E0B' : '#10B981')
-                    : '#EF4444',
+                  color: data.stabilityResult.stable && (!data.stabilityResult.groundingFailures || data.stabilityResult.groundingFailures.length === 0)
+                    ? '#10B981' : '#EF4444',
                   fontWeight: '600' as const, fontSize: 12,
                 }}>
-                  {data.stabilityResult.stable
-                    ? (data.stabilityResult.lowConfidence ? 'LIMITED CONFIDENCE' : 'STABLE')
-                    : 'UNSTABLE'}
+                  {data.stabilityResult.stable && (!data.stabilityResult.groundingFailures || data.stabilityResult.groundingFailures.length === 0)
+                    ? 'STABLE' : 'UNSTABLE'}
                 </Text>
               </View>
+              {data.stabilityResult.groundingFailures?.map((g: string, i: number) => (
+                <Text key={`g-${i}`} style={[styles.failureText, { color: '#EF4444' }]}>• {g}</Text>
+              ))}
               {data.stabilityResult.warnings?.map((w: string, i: number) => (
                 <Text key={`w-${i}`} style={[styles.warningText, { color: '#F59E0B' }]}>• {w}</Text>
               ))}

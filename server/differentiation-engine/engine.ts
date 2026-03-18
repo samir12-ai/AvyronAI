@@ -28,8 +28,7 @@ import {
   BOUNDARY_HARD_PATTERNS,
   BOUNDARY_SOFT_PATTERNS,
   SIGNAL_WEIGHTS,
-  SOFT_FAILURE_PROOFABILITY,
-  SOFT_FAILURE_TRUST_ALIGNMENT,
+  SIGNAL_GROUNDING_MAX_RETRIES,
 } from "./constants";
 import {
   enforceBoundaryWithSanitization,
@@ -1034,10 +1033,10 @@ export function layer12_stabilityGuard(
   collisions: ClaimCollision[],
   territories: Territory[],
   hasProfileSignals: boolean = false,
-): { stable: boolean; failures: string[]; warnings: string[]; lowConfidence: boolean } {
+): { stable: boolean; failures: string[]; warnings: string[]; groundingFailures: string[] } {
   const failures: string[] = [];
   const warnings: string[] = [];
-  let groundingWarningCount = 0;
+  const groundingFailures: string[] = [];
   const territoryNames = new Set(territories.map(t => t.name));
 
   for (const pillar of pillars) {
@@ -1052,34 +1051,21 @@ export function layer12_stabilityGuard(
   }
 
   const avgProofability = pillars.length > 0 ? pillars.reduce((s, p) => s + p.proofability, 0) / pillars.length : 0;
-  if (avgProofability < SOFT_FAILURE_PROOFABILITY) {
-    failures.push(`Average proofability critically low (${avgProofability.toFixed(2)}) — insufficient signal grounding`);
-  } else if (avgProofability < STABILITY_MIN_PROOFABILITY) {
-    warnings.push(`Insufficient signal grounding – running analysis with limited confidence (proofability: ${avgProofability.toFixed(2)} < ${STABILITY_MIN_PROOFABILITY})`);
-    groundingWarningCount++;
+  if (avgProofability < STABILITY_MIN_PROOFABILITY) {
+    groundingFailures.push(`Proofability below threshold (${avgProofability.toFixed(2)} < ${STABILITY_MIN_PROOFABILITY}) — insufficient signal grounding`);
   }
 
   const avgTrustAlignment = pillars.length > 0 ? pillars.reduce((s, p) => s + p.trustAlignment, 0) / pillars.length : 0;
-  if (avgTrustAlignment < SOFT_FAILURE_TRUST_ALIGNMENT) {
-    failures.push(`Average trust alignment critically low (${avgTrustAlignment.toFixed(2)}) — insufficient signal grounding`);
-  } else if (avgTrustAlignment < STABILITY_MIN_TRUST_ALIGNMENT) {
-    warnings.push(`Insufficient signal grounding – running analysis with limited confidence (trust alignment: ${avgTrustAlignment.toFixed(2)} < ${STABILITY_MIN_TRUST_ALIGNMENT})`);
-    groundingWarningCount++;
+  if (avgTrustAlignment < STABILITY_MIN_TRUST_ALIGNMENT) {
+    groundingFailures.push(`Trust alignment below threshold (${avgTrustAlignment.toFixed(2)} < ${STABILITY_MIN_TRUST_ALIGNMENT}) — insufficient signal grounding`);
   }
 
   const weakClaims = claims.filter(c => c.overallScore < MIN_PILLAR_SCORE);
   if (weakClaims.length === claims.length && claims.length > 0) {
-    if (hasProfileSignals) {
-      warnings.push(`All claims below minimum score threshold (${MIN_PILLAR_SCORE}) — profile signals provide partial grounding`);
-      groundingWarningCount++;
-    } else {
-      failures.push(`All claims below minimum score threshold (${MIN_PILLAR_SCORE})`);
-    }
+    groundingFailures.push(`All claims below minimum score threshold (${MIN_PILLAR_SCORE})`);
   }
 
-  const lowConfidence = groundingWarningCount > 0 && failures.length === 0;
-
-  return { stable: failures.length === 0, failures, warnings, lowConfidence };
+  return { stable: failures.length === 0, failures, warnings, groundingFailures };
 }
 
 function safeJsonParse(text: any): any {
@@ -1294,8 +1280,90 @@ export async function runDifferentiationEngine(
     depthRejectionContext = buildDepthRejectionDirective(celDepth, depthAttempt);
   }
 
-  const l12Stability = layer12_stabilityGuard(finalPillars, finalClaims, l3Collisions, l1.territories, profileSignals.hasProfile);
-  diagnostics.layer12 = { stable: l12Stability.stable, failures: l12Stability.failures, warnings: l12Stability.warnings, lowConfidence: l12Stability.lowConfidence };
+  const signalGroundingMaxAttempts = SIGNAL_GROUNDING_MAX_RETRIES + 1;
+  const signalGroundingLog: string[] = [];
+  let groundingRejectionContext = "";
+  let l12Stability: ReturnType<typeof layer12_stabilityGuard>;
+  let genericOutputCheck: ReturnType<typeof detectGenericOutput>;
+
+  for (let groundingAttempt = 1; groundingAttempt <= signalGroundingMaxAttempts; groundingAttempt++) {
+    if (groundingAttempt > 1) {
+      console.log(`[DifferentiationEngine-V3] SIGNAL_GROUNDING: Regenerating attempt ${groundingAttempt}/${signalGroundingMaxAttempts}`);
+
+      const combinedRejection = [depthRejectionContext, groundingRejectionContext].filter(Boolean).join("\n");
+
+      finalPillars = JSON.parse(JSON.stringify(l9Pillars));
+      finalClaims = JSON.parse(JSON.stringify(l10Claims));
+      finalMechanism = JSON.parse(JSON.stringify(l8Mechanism));
+
+      try {
+        const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId, analyticalEnrichment, combinedRejection || undefined);
+        finalPillars = l11.refinedPillars;
+        finalClaims = l11.refinedClaims;
+        finalMechanism = l11.refinedMechanism;
+        diagnostics.layer11 = { aiRefined: true, attempt: groundingAttempt, phase: "signal_grounding" };
+      } catch (err: any) {
+        diagnostics.layer11 = { aiRefined: false, error: err.message, attempt: groundingAttempt, phase: "signal_grounding" };
+      }
+
+      finalPillars = finalPillars.map(p => ({
+        ...p,
+        name: sanitizeGuardrail(p.name) ? p.territory : p.name,
+        description: sanitizeGuardrail(p.description) ? `Differentiation pillar based on ${p.territory}` : p.description,
+      }));
+      finalClaims = finalClaims.map(c => ({
+        ...c,
+        claim: sanitizeGuardrail(c.claim) ? `${c.territory}: differentiation claim` : c.claim,
+      }));
+      if (sanitizeGuardrail(finalMechanism.description)) {
+        finalMechanism = { ...finalMechanism, description: "Mechanism description redacted — guardrail violation" };
+      }
+    }
+
+    l12Stability = layer12_stabilityGuard(finalPillars, finalClaims, l3Collisions, l1.territories, profileSignals.hasProfile);
+    diagnostics.layer12 = { stable: l12Stability.stable, failures: l12Stability.failures, warnings: l12Stability.warnings, groundingFailures: l12Stability.groundingFailures, attempt: groundingAttempt };
+
+    const allDiffText = [
+      ...finalPillars.map(p => `${p.name} ${p.description}`),
+      ...finalClaims.map(c => c.claim),
+      finalMechanism.description,
+    ].join(" ");
+    genericOutputCheck = detectGenericOutput(allDiffText);
+    diagnostics.genericOutputCheck = { ...genericOutputCheck, attempt: groundingAttempt };
+
+    const rejectionReasons: string[] = [];
+
+    if (l12Stability.groundingFailures.length > 0) {
+      rejectionReasons.push(...l12Stability.groundingFailures);
+    }
+
+    if (genericOutputCheck.genericDetected) {
+      rejectionReasons.push(`Generic output detected (${genericOutputCheck.genericPhrases.length} phrases: ${genericOutputCheck.genericPhrases.slice(0, 5).join(", ")})`);
+    }
+
+    if (rejectionReasons.length === 0 && l12Stability.stable) {
+      signalGroundingLog.push(`Attempt ${groundingAttempt}: PASSED`);
+      console.log(`[DifferentiationEngine-V3] SIGNAL_GROUNDING: Attempt ${groundingAttempt} PASSED`);
+      break;
+    }
+
+    signalGroundingLog.push(`Attempt ${groundingAttempt}: REJECTED (${rejectionReasons.join("; ")})`);
+    console.log(`[DifferentiationEngine-V3] SIGNAL_GROUNDING: Attempt ${groundingAttempt} REJECTED | reasons=${rejectionReasons.length} | ${rejectionReasons.join("; ")}`);
+
+    if (groundingAttempt >= signalGroundingMaxAttempts) {
+      console.log(`[DifferentiationEngine-V3] SIGNAL_GROUNDING: EXHAUSTED after ${signalGroundingMaxAttempts} attempts — returning SIGNAL_GROUNDING_FAILED`);
+      const failedResult = buildEmptyResult(STATUS.SIGNAL_GROUNDING_FAILED, `Signal grounding enforcement failed after ${signalGroundingMaxAttempts} attempts: ${rejectionReasons.join("; ")}`, Date.now() - startTime);
+      failedResult.confidenceScore = 0;
+      failedResult.layerDiagnostics = { ...diagnostics, signalGroundingLog };
+      (failedResult as any).celDepthCompliance = celDepth;
+      (failedResult as any).depthGateResult = depthGateResult;
+      return failedResult;
+    }
+
+    groundingRejectionContext = `\nSIGNAL GROUNDING ENFORCEMENT — ATTEMPT ${groundingAttempt} REJECTED:\n${rejectionReasons.map((r, i) => `${i + 1}. ${r}`).join("\n")}\n\nYou MUST fix these issues:\n- Increase proofability by grounding every pillar in specific, verifiable evidence from the input data\n- Increase trust alignment by directly addressing the audience's stated trust barriers\n- Replace ALL generic marketing phrases with causally-specific language derived from root causes\n- Every claim must reference a specific pain point, root cause, or behavioral pattern from the audience signals\n- Do NOT use vague terms like "leverage", "optimize", "drive results", "unlock potential", "cutting-edge", "best-in-class"\n`;
+  }
+
+  diagnostics.signalGroundingLog = signalGroundingLog;
 
   const allHighCollision = l3Collisions.every(c => c.collisionRisk >= COLLISION_THRESHOLD) && l3Collisions.length > 0;
   const highCollisionCount = l3Collisions.filter(c => c.collisionRisk >= COLLISION_THRESHOLD).length;
@@ -1306,31 +1374,16 @@ export async function runDifferentiationEngine(
   if (allHighCollision && l3Collisions.length >= l1.territories.length) {
     status = STATUS.COLLISION_RISK;
     statusMessage = `All differentiation claims have high collision risk with competitor claims`;
-  } else if (!l12Stability.stable) {
+  } else if (!l12Stability!.stable) {
     status = STATUS.UNSTABLE;
-    statusMessage = `Stability check failed: ${l12Stability.failures.join("; ")}`;
-  } else if (l12Stability.lowConfidence) {
-    status = STATUS.LOW_CONFIDENCE;
-    statusMessage = `Insufficient signal grounding – running analysis with limited confidence. ${l12Stability.warnings.join("; ")}`;
-    console.log(`[DifferentiationEngine-V3] LOW_CONFIDENCE | warnings=${l12Stability.warnings.length} | profileSignals=${profileSignals.hasProfile}`);
-  }
-
-  const allDiffText = [
-    ...finalPillars.map(p => `${p.name} ${p.description}`),
-    ...finalClaims.map(c => c.claim),
-    finalMechanism.description,
-  ].join(" ");
-  const genericOutputCheck = detectGenericOutput(allDiffText);
-  diagnostics.genericOutputCheck = genericOutputCheck;
-  if (genericOutputCheck.genericDetected) {
-    console.log(`[DifferentiationEngine-V3] GENERIC_OUTPUT_PENALTY | phrases=${genericOutputCheck.genericPhrases.length} | penalty=${genericOutputCheck.penalty.toFixed(2)}`);
+    statusMessage = `Stability check failed: ${l12Stability!.failures.join("; ")}`;
   }
 
   const avgClaimScore = finalClaims.length > 0 ? finalClaims.reduce((s, c) => s + c.overallScore, 0) / finalClaims.length : 0;
   const objectionDensityFactor = lowObjectionDensity ? 0.85 : 1.0;
-  const genericPenaltyFactor = genericOutputCheck.genericDetected ? (1 - genericOutputCheck.penalty) : 1;
+  const genericPenaltyFactor = genericOutputCheck!.genericDetected ? (1 - genericOutputCheck!.penalty) : 1;
   const depthPenaltyFactor = celDepth!.passed ? 1.0 : Math.max(0.5, celDepth!.score);
-  const stabilityFactor = l12Stability.stable ? (l12Stability.lowConfidence ? 0.75 : 1) : 0.6;
+  const stabilityFactor = l12Stability!.stable ? 1 : 0.6;
   const rawConfidence = clamp(avgClaimScore * stabilityFactor * objectionDensityFactor * genericPenaltyFactor * depthPenaltyFactor);
   const confidenceScore = normalizeConfidence(rawConfidence, dataReliability);
   const confidenceNormalized = rawConfidence !== confidenceScore;
@@ -1339,7 +1392,7 @@ export async function runDifferentiationEngine(
     diagnostics.rawConfidence = rawConfidence;
   }
 
-  console.log(`[DifferentiationEngine-V3] Complete | status=${status} | pillars=${finalPillars.length} | claims=${finalClaims.length} | confidence=${confidenceScore.toFixed(2)} | stable=${l12Stability.stable} | lowConfidence=${l12Stability.lowConfidence} | collisions=${highCollisionCount} | profileSignals=${profileSignals.hasProfile}`);
+  console.log(`[DifferentiationEngine-V3] Complete | status=${status} | pillars=${finalPillars.length} | claims=${finalClaims.length} | confidence=${confidenceScore.toFixed(2)} | stable=${l12Stability!.stable} | collisions=${highCollisionCount} | profileSignals=${profileSignals.hasProfile} | groundingAttempts=${signalGroundingLog.length}`);
 
   return {
     status,
@@ -1358,7 +1411,7 @@ export async function runDifferentiationEngine(
       totalClaims: finalClaims.length,
     },
     collisionDiagnostics: l3Collisions,
-    stabilityResult: l12Stability,
+    stabilityResult: l12Stability!,
     confidenceScore,
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,

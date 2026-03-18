@@ -212,6 +212,7 @@ const DEPTH_STATUS_CONFIG: Record<string, { color: string; icon: string; label: 
   SIGNAL_PASSED: { color: '#22c55e', icon: 'shield-checkmark', label: 'SIGNAL OK' },
   SIGNAL_REQUIRED: { color: '#ef4444', icon: 'close-circle', label: 'SIGNALS MISSING' },
   SIGNAL_DRIFT: { color: '#ef4444', icon: 'warning', label: 'SIGNAL DRIFT' },
+  SIGNAL_GROUNDING_FAILED: { color: '#ef4444', icon: 'alert-circle', label: 'GROUNDING FAILED' },
   SIGNAL_BLOCKED: { color: '#f59e0b', icon: 'ban', label: 'SIG BLOCKED' },
   REGENERATING: { color: '#3b82f6', icon: 'reload-circle', label: 'REGENERATING' },
   PENDING: { color: '#888', icon: 'ellipse-outline', label: 'PENDING' },
@@ -243,6 +244,8 @@ function DepthGateStatusPanel({ campaignId, isDark }: { campaignId: string; isDa
               else if (output?.status === 'SIGNAL_DRIFT') status = 'SIGNAL_DRIFT';
               else if (output?.status === 'COMPLETE' || output?.status === 'UNSTABLE') status = 'SIGNAL_PASSED';
               else if (section.status === 'SIGNAL_BLOCKED') status = 'SIGNAL_BLOCKED';
+            } else if (output?.status === 'SIGNAL_GROUNDING_FAILED') {
+              status = 'SIGNAL_GROUNDING_FAILED';
             } else if (section.status === 'SIGNAL_BLOCKED') {
               status = 'SIGNAL_BLOCKED';
             } else if (section.status === 'DEPTH_BLOCKED') {
@@ -274,7 +277,7 @@ function DepthGateStatusPanel({ campaignId, isDark }: { campaignId: string; isDa
   if (!gateData || Object.keys(gateData).length === 0) return null;
 
   const allPassed = Object.values(gateData).every((g: any) => g.status === 'DEPTH_PASSED' || g.status === 'SIGNAL_PASSED');
-  const anyFailed = Object.values(gateData).some((g: any) => g.status === 'DEPTH_FAILED' || g.status === 'DEPTH_BLOCKED' || g.status === 'SIGNAL_REQUIRED' || g.status === 'SIGNAL_DRIFT' || g.status === 'SIGNAL_BLOCKED');
+  const anyFailed = Object.values(gateData).some((g: any) => g.status === 'DEPTH_FAILED' || g.status === 'DEPTH_BLOCKED' || g.status === 'SIGNAL_REQUIRED' || g.status === 'SIGNAL_DRIFT' || g.status === 'SIGNAL_GROUNDING_FAILED' || g.status === 'SIGNAL_BLOCKED');
   const overallColor = allPassed ? '#22c55e' : anyFailed ? '#ef4444' : '#f59e0b';
 
   return (

@@ -212,8 +212,8 @@ async function executeEngine(
 
   const SIGNAL_CASCADE_MAP: Record<string, string[]> = {
     differentiation: ["positioning"],
-    mechanism: ["positioning"],
-    offer: ["positioning"],
+    mechanism: ["positioning", "differentiation"],
+    offer: ["positioning", "differentiation"],
   };
 
   const upstreamDeps = DEPTH_CASCADE_MAP[engineId] || [];
@@ -247,7 +247,7 @@ async function executeEngine(
   const signalUpstreamDeps = SIGNAL_CASCADE_MAP[engineId] || [];
   for (const upstream of signalUpstreamDeps) {
     const upstreamStatus = ctx.depthGateStatus[upstream];
-    if (upstreamStatus === "SIGNAL_REQUIRED" || upstreamStatus === "SIGNAL_DRIFT") {
+    if (upstreamStatus === "SIGNAL_REQUIRED" || upstreamStatus === "SIGNAL_DRIFT" || upstreamStatus === "SIGNAL_GROUNDING_FAILED") {
       console.log(`[Orchestrator] SIGNAL_CASCADE_BLOCKED | ${engineId} BLOCKED — upstream ${upstream} has ${upstreamStatus}`);
       ctx.depthGateStatus[engineId] = "SIGNAL_BLOCKED";
       return {
@@ -387,6 +387,9 @@ async function executeEngine(
         if (result.status === "DEPTH_FAILED") {
           ctx.depthGateStatus!.differentiation = "DEPTH_FAILED";
           console.log(`[Orchestrator] DEPTH_GATE_STATUS | differentiation=DEPTH_FAILED`);
+        } else if (result.status === "SIGNAL_GROUNDING_FAILED") {
+          ctx.depthGateStatus!.differentiation = "SIGNAL_GROUNDING_FAILED";
+          console.log(`[Orchestrator] SIGNAL_GROUNDING_STATUS | differentiation=SIGNAL_GROUNDING_FAILED — downstream engines will be cascade-blocked`);
         } else {
           ctx.depthGateStatus!.differentiation = "DEPTH_PASSED";
         }
