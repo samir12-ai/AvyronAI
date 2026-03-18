@@ -20,6 +20,9 @@ import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
 import {
   enforceEngineDepthCompliance,
   applyDepthPenalty,
+  isDepthBlocking,
+  buildDepthGateResult,
+  type DepthGateResult,
 } from "../causal-enforcement-layer/engine";
 import type {
   AwarenessPositioningInput,
@@ -887,6 +890,35 @@ export async function runAwarenessEngine(
     ],
     analyticalEnrichment || null,
   );
+
+  let depthGateResult: DepthGateResult | null = null;
+
+  if (analyticalEnrichment && isDepthBlocking(celDepth)) {
+    depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length}) — non-generative engine, no retry`]);
+    for (const logEntry of celDepth.enforcementLog) {
+      console.log(`[AwarenessEngine-V3] CEL_DEPTH: ${logEntry}`);
+    }
+    console.log(`[AwarenessEngine-V3] DEPTH_GATE: DEPTH_FAILED — non-generative engine, cannot retry | depthScore=${celDepth.causalDepthScore}`);
+    primaryRoute.awarenessStrengthScore = 0;
+    alternativeRoute.awarenessStrengthScore = 0;
+    return {
+      status: "DEPTH_FAILED",
+      statusMessage: `Depth gate failed: depthScore=${celDepth.causalDepthScore} — non-generative engine, cannot regenerate`,
+      primaryRoute,
+      alternativeRoute,
+      rejectedRoute,
+      layerResults,
+      structuralWarnings: [...structuralWarnings, "DEPTH_FAILED"],
+      boundaryCheck: { passed: true, violations: [], sanitized: boundary.sanitized, sanitizedText: boundary.sanitizedText, warnings: boundary.warnings },
+      dataReliability: reliability,
+      confidenceNormalized,
+      executionTimeMs: Date.now() - startTime,
+      engineVersion: ENGINE_VERSION,
+      celDepthCompliance: celDepth,
+      depthGateResult,
+    };
+  }
+
   if (celDepth.violations.length > 0) {
     for (const logEntry of celDepth.enforcementLog) {
       console.log(`[AwarenessEngine-V3] CEL_DEPTH: ${logEntry}`);
@@ -898,6 +930,8 @@ export async function runAwarenessEngine(
   } else {
     console.log(`[AwarenessEngine-V3] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
   }
+
+  depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: PASSED (depthScore=${celDepth.causalDepthScore})`]);
 
   return {
     status: STATUS.COMPLETE,
@@ -915,6 +949,7 @@ export async function runAwarenessEngine(
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,
     celDepthCompliance: celDepth,
+    depthGateResult,
   };
 }
 

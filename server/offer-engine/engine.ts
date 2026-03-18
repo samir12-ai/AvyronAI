@@ -4,6 +4,12 @@ import {
   buildCausalDirectiveForPrompt,
   enforceEngineDepthCompliance,
   applyDepthPenalty,
+  isDepthBlocking,
+  buildDepthRejectionDirective,
+  buildDepthGateResult,
+  DEPTH_GATE_MAX_RETRIES,
+  type DepthGateResult,
+  type DepthComplianceResult,
 } from "../causal-enforcement-layer/engine";
 import { loadProductDNA, formatProductDNAForPrompt, type ProductDNA } from "../shared/product-dna";
 import { detectGenericOutput, checkCrossEngineAlignment, enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
@@ -1434,6 +1440,7 @@ export async function aiOfferGeneration(
   strategyRoot?: any,
   productDna?: ProductDNA | null,
   analyticalEnrichment?: any,
+  depthRejectionContext?: string,
 ): Promise<{ primary: { name: string; outcome: string; mechanism: string; deliverables: string[] }; alternative: { name: string; outcome: string; mechanism: string; deliverables: string[] }; rejected: { name: string; outcome: string; mechanism: string; deliverables: string[]; rejectionReason: string } }> {
 
   if (strategyRoot) {
@@ -1516,10 +1523,11 @@ Return JSON:
   "rejected": { "name": "Rejected name", "outcome": "Why appealing", "mechanism": "What it promises", "deliverables": [], "rejectionReason": "Why this fails" }
 }`;
 
+    const fullPrompt = depthRejectionContext ? `${prompt}\n\n${depthRejectionContext}` : prompt;
     try {
       const completion = await aiChat({
         model: "gpt-4o-mini",
-        messages: [{ role: "user", content: prompt }],
+        messages: [{ role: "user", content: fullPrompt }],
         max_tokens: 1000,
         temperature: 0.5,
         accountId,
@@ -1669,10 +1677,11 @@ Return JSON:
   "rejected": { "name": "Rejected offer", "outcome": "Why it seems appealing", "mechanism": "What it promises", "deliverables": [], "rejectionReason": "Why this fails" }
 }`;
 
+  const freePrompt = depthRejectionContext ? `${prompt}\n\n${depthRejectionContext}` : prompt;
   try {
     const completion = await aiChat({
       model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
+      messages: [{ role: "user", content: freePrompt }],
       max_tokens: 1000,
       temperature: 0.7,
       accountId,
@@ -1954,7 +1963,11 @@ export async function runOfferEngine(
     console.log(`[OfferEngine-V4] PRE_GENERATION_WARNING | ${preGenCheck.issues.join("; ")}`);
   }
 
-  let aiOffers;
+  let aiOffers: any;
+  let offerDepthRejectionContext = "";
+  const offerDepthGateLog: string[] = [];
+  const offerDepthGateMaxAttempts = DEPTH_GATE_MAX_RETRIES + 1;
+
   try {
     aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot, productDna, analyticalEnrichment);
     diagnostics.aiGeneration = { success: true, mode: strategyRoot ? "skeleton_refinement" : "free_generation" };
@@ -2419,7 +2432,7 @@ export async function runOfferEngine(
     }
     diagnostics.crossEngineAlignment = alignmentResult;
 
-    const celDepth = enforceEngineDepthCompliance(
+    let celDepth = enforceEngineDepthCompliance(
     "offer",
     [
       primaryOffer.offerName || "",
@@ -2430,6 +2443,67 @@ export async function runOfferEngine(
     analyticalEnrichment || null,
   );
   diagnostics.celDepthCompliance = celDepth;
+
+  if (analyticalEnrichment && isDepthBlocking(celDepth)) {
+    for (let offerDepthAttempt = 2; offerDepthAttempt <= offerDepthGateMaxAttempts; offerDepthAttempt++) {
+      offerDepthGateLog.push(`Attempt ${offerDepthAttempt - 1}: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length})`);
+      offerDepthRejectionContext = buildDepthRejectionDirective(celDepth, offerDepthAttempt - 1);
+      console.log(`[OfferEngine-V4] DEPTH_GATE: Attempt ${offerDepthAttempt - 1} BLOCKED — regenerating (${offerDepthAttempt}/${offerDepthGateMaxAttempts})`);
+
+      try {
+        aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot, productDna, analyticalEnrichment, offerDepthRejectionContext);
+        diagnostics.aiGeneration = { success: true, mode: strategyRoot ? "skeleton_refinement" : "free_generation", depthRetry: offerDepthAttempt };
+      } catch (err: any) {
+        offerDepthGateLog.push(`Attempt ${offerDepthAttempt}: AI_ERROR (${err.message})`);
+        continue;
+      }
+
+      celDepth = enforceEngineDepthCompliance(
+        "offer",
+        [
+          aiOffers.primary?.name || "",
+          aiOffers.primary?.outcome || "",
+          aiOffers.primary?.mechanism || "",
+          ...(aiOffers.primary?.deliverables || []),
+        ],
+        analyticalEnrichment || null,
+      );
+      diagnostics.celDepthCompliance = celDepth;
+
+      if (!isDepthBlocking(celDepth)) {
+        offerDepthGateLog.push(`Attempt ${offerDepthAttempt}: PASSED (depthScore=${celDepth.causalDepthScore})`);
+        console.log(`[OfferEngine-V4] DEPTH_GATE: Attempt ${offerDepthAttempt} PASSED | depthScore=${celDepth.causalDepthScore}`);
+        break;
+      }
+
+      if (offerDepthAttempt >= offerDepthGateMaxAttempts) {
+        offerDepthGateLog.push(`Attempt ${offerDepthAttempt}: FINAL FAILURE (depthScore=${celDepth.causalDepthScore})`);
+        const depthGateResult = buildDepthGateResult(celDepth, offerDepthAttempt, offerDepthGateMaxAttempts, offerDepthGateLog);
+        console.log(`[OfferEngine-V4] DEPTH_GATE: FINAL FAILURE after ${offerDepthGateMaxAttempts} attempts — returning DEPTH_FAILED`);
+        return {
+          status: "DEPTH_FAILED",
+          statusMessage: `Depth gate failed after ${offerDepthGateMaxAttempts} attempts: depthScore=${celDepth.causalDepthScore}`,
+          primaryOffer: buildEmptyOffer(),
+          alternativeOffer: buildEmptyOffer(),
+          rejectedOffer: { offer: buildEmptyOffer(), rejectionReason: "DEPTH_FAILED" },
+          offerStrengthScore: 0,
+          positioningConsistency: { consistent: false, failures: ["DEPTH_FAILED"] },
+          hookMechanismAlignment: { aligned: false, failures: ["DEPTH_FAILED"] },
+          boundaryCheck: { passed: false, violations: ["DEPTH_FAILED"] },
+          structuralWarnings: ["DEPTH_FAILED"],
+          confidenceScore: 0,
+          executionTimeMs: Date.now() - startTime,
+          engineVersion: ENGINE_VERSION,
+          layerDiagnostics: { ...diagnostics, depthGate: depthGateResult },
+          strategyAcceptability: { grade: "F", acceptable: false, reasons: ["DEPTH_FAILED"] },
+          signalGrounding: { groundedClaims: 0, totalClaims: 0, groundingRatio: 0, strippedClaims: [] },
+          celDepthCompliance: celDepth,
+          depthGateResult,
+        } as any;
+      }
+    }
+  }
+
   if (celDepth.violations.length > 0) {
     for (const logEntry of celDepth.enforcementLog) {
       console.log(`[OfferEngine-V4] CEL_DEPTH: ${logEntry}`);
@@ -2437,6 +2511,8 @@ export async function runOfferEngine(
   } else {
     console.log(`[OfferEngine-V4] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
   }
+  const depthGateResultOffer = offerDepthGateLog.length > 0 ? buildDepthGateResult(celDepth, offerDepthGateLog.length, offerDepthGateMaxAttempts, offerDepthGateLog) : null;
+  diagnostics.depthGate = depthGateResultOffer;
   const depthPenaltyFactor = celDepth.passed ? 1.0 : Math.max(0.5, celDepth.score);
 
     const rawConfidence = clamp(
@@ -2523,6 +2599,7 @@ export async function runOfferEngine(
       strippedClaims: primaryGrounding.strippedClaims,
     },
     celDepthCompliance: celDepth,
+    depthGateResult: depthGateResultOffer,
   };
 }
 

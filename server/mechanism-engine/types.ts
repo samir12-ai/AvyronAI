@@ -55,4 +55,5 @@ export interface MechanismEngineResult {
   engineVersion: number;
   diagnostics: Record<string, any>;
   celDepthCompliance?: any;
+  depthGateResult?: any;
 }

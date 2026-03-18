@@ -16,6 +16,12 @@ import {
   buildCausalDirectiveForPrompt,
   enforceEngineDepthCompliance,
   applyDepthPenalty,
+  isDepthBlocking,
+  buildDepthRejectionDirective,
+  buildDepthGateResult,
+  DEPTH_GATE_MAX_RETRIES,
+  type DepthGateResult,
+  type DepthComplianceResult,
 } from "../causal-enforcement-layer/engine";
 import type {
   MechanismEnginePositioningInput,
@@ -198,105 +204,150 @@ Respond with ONLY valid JSON, no markdown:
   }
 }`;
 
-  try {
-    const response = await aiChat({
-      model: "gpt-4.1-mini",
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: 2000,
-      temperature: 0.7,
-    });
+  const depthGateMaxAttempts = DEPTH_GATE_MAX_RETRIES + 1;
+  const depthGateLog: string[] = [];
+  let depthRejectionContext = "";
 
-    const content = response?.choices?.[0]?.message?.content || "";
-    const cleaned = content.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-    const parsed = safeJsonParse(cleaned);
+  for (let depthAttempt = 1; depthAttempt <= depthGateMaxAttempts; depthAttempt++) {
+    if (depthAttempt > 1) {
+      console.log(`[MechanismEngine] DEPTH_GATE: Regenerating attempt ${depthAttempt}/${depthGateMaxAttempts}`);
+    }
 
-    if (!parsed || !parsed.primary) {
-      console.log(`[MechanismEngine] AI_PARSE_FAILED | falling back to differentiation core`);
-      diagnostics.aiFailed = true;
+    const fullPrompt = depthRejectionContext ? `${prompt}\n\n${depthRejectionContext}` : prompt;
+
+    try {
+      const response = await aiChat({
+        model: "gpt-4.1-mini",
+        messages: [{ role: "user", content: fullPrompt }],
+        max_tokens: 2000,
+        temperature: 0.7,
+      });
+
+      const content = response?.choices?.[0]?.message?.content || "";
+      const cleaned = content.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+      const parsed = safeJsonParse(cleaned);
+
+      if (!parsed || !parsed.primary) {
+        console.log(`[MechanismEngine] AI_PARSE_FAILED | falling back to differentiation core`);
+        diagnostics.aiFailed = true;
+        return {
+          status: STATUS.FAILED,
+          statusMessage: "Failed to parse AI mechanism generation response",
+          primaryMechanism: buildFallbackMechanism(diffCore, primaryAxis),
+          alternativeMechanism: null,
+          axisConsistency: { consistent: false, primaryAxis, mechanismAxis: "unknown", failures: ["AI generation failed"] },
+          confidenceScore: 0.3,
+          executionTimeMs: Date.now() - startTime,
+          engineVersion: ENGINE_VERSION,
+          diagnostics,
+        };
+      }
+
+      const primaryMech = buildMechanismOutput(parsed.primary, primaryAxis, pillars);
+      const altMech = parsed.alternative ? buildMechanismOutput(parsed.alternative, primaryAxis, pillars) : null;
+
+      const sanitizedPrimary = applySoftSanitization(primaryMech.mechanismDescription, []);
+      if (sanitizedPrimary !== primaryMech.mechanismDescription) {
+        primaryMech.mechanismDescription = sanitizedPrimary;
+        diagnostics.primarySanitized = true;
+      }
+
+      const axisValidation = validateMechanismAxisAlignment(primaryMech, primaryAxis);
+      diagnostics.axisValidation = axisValidation;
+
+      if (!axisValidation.consistent && diffCore) {
+        console.log(`[MechanismEngine] AXIS_MISMATCH | ${axisValidation.failures.join("; ")} — attempting correction`);
+        primaryMech.axisAlignment.primaryAxis = primaryAxis;
+
+        const emphasisFromDiff = extractAxisEmphasisFromCore(diffCore, primaryAxis);
+        if (emphasisFromDiff.length > 0) {
+          primaryMech.axisAlignment.axisEmphasis = [...new Set([...primaryMech.axisAlignment.axisEmphasis, ...emphasisFromDiff])];
+        }
+      }
+
+      const finalValidation = validateMechanismAxisAlignment(primaryMech, primaryAxis);
+
+      const celDepth = enforceEngineDepthCompliance(
+        "mechanism",
+        [
+          primaryMech.mechanismDescription,
+          primaryMech.mechanismLogic,
+          primaryMech.mechanismPromise,
+          primaryMech.mechanismProblem,
+          ...primaryMech.mechanismSteps,
+        ],
+        analyticalEnrichment || null,
+      );
+      diagnostics.celDepthCompliance = celDepth;
+
+      if (analyticalEnrichment && isDepthBlocking(celDepth)) {
+        depthGateLog.push(`Attempt ${depthAttempt}: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length})`);
+        console.log(`[MechanismEngine] DEPTH_GATE: Attempt ${depthAttempt} BLOCKED | depthScore=${celDepth.causalDepthScore} | violations=${celDepth.violations.length}`);
+
+        if (depthAttempt >= depthGateMaxAttempts) {
+          const depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog);
+          console.log(`[MechanismEngine] DEPTH_GATE: FINAL FAILURE after ${depthGateMaxAttempts} attempts — returning DEPTH_FAILED`);
+          return {
+            status: "DEPTH_FAILED",
+            statusMessage: `Depth gate failed after ${depthGateMaxAttempts} attempts: depthScore=${celDepth.causalDepthScore}`,
+            primaryMechanism: primaryMech,
+            alternativeMechanism: altMech,
+            axisConsistency: { consistent: false, primaryAxis, mechanismAxis: primaryMech.axisAlignment.primaryAxis, failures: ["DEPTH_FAILED"] },
+            confidenceScore: 0,
+            executionTimeMs: Date.now() - startTime,
+            engineVersion: ENGINE_VERSION,
+            diagnostics: { ...diagnostics, depthGate: depthGateResult },
+            celDepthCompliance: celDepth,
+            depthGateResult,
+          };
+        }
+
+        depthRejectionContext = buildDepthRejectionDirective(celDepth, depthAttempt);
+        continue;
+      }
+
+      depthGateLog.push(`Attempt ${depthAttempt}: PASSED (depthScore=${celDepth.causalDepthScore})`);
+      if (celDepth.violations.length > 0) {
+        for (const logEntry of celDepth.enforcementLog) {
+          console.log(`[MechanismEngine] CEL_DEPTH: ${logEntry}`);
+        }
+      } else {
+        console.log(`[MechanismEngine] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
+      }
+
+      const rawConfidence = computeConfidence(primaryMech, primaryAxis, pillars, finalValidation.consistent);
+      const depthPenaltyFactor = celDepth.passed ? 1.0 : Math.max(0.5, celDepth.score);
+      const confidence = clamp(rawConfidence * depthPenaltyFactor);
+      const depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog);
+
+      console.log(`[MechanismEngine] COMPLETE | mechanism="${primaryMech.mechanismName}" | axis=${primaryAxis} | consistent=${finalValidation.consistent} | confidence=${confidence.toFixed(2)} | depthScore=${celDepth.causalDepthScore} | depthAttempts=${depthAttempt}`);
+
       return {
-        status: STATUS.FAILED,
-        statusMessage: "Failed to parse AI mechanism generation response",
-        primaryMechanism: buildFallbackMechanism(diffCore, primaryAxis),
-        alternativeMechanism: null,
-        axisConsistency: { consistent: false, primaryAxis, mechanismAxis: "unknown", failures: ["AI generation failed"] },
-        confidenceScore: 0.3,
+        status: finalValidation.consistent ? STATUS.COMPLETE : STATUS.AXIS_REJECTED,
+        statusMessage: finalValidation.consistent ? null : `Mechanism axis mismatch: ${finalValidation.failures.join("; ")}`,
+        primaryMechanism: primaryMech,
+        alternativeMechanism: altMech,
+        axisConsistency: {
+          consistent: finalValidation.consistent,
+          primaryAxis,
+          mechanismAxis: primaryMech.axisAlignment.primaryAxis,
+          failures: finalValidation.failures,
+        },
+        confidenceScore: confidence,
         executionTimeMs: Date.now() - startTime,
         engineVersion: ENGINE_VERSION,
-        diagnostics,
+        diagnostics: { ...diagnostics, depthGate: depthGateResult },
+        celDepthCompliance: celDepth,
+        depthGateResult,
       };
-    }
-
-    const primaryMech = buildMechanismOutput(parsed.primary, primaryAxis, pillars);
-    const altMech = parsed.alternative ? buildMechanismOutput(parsed.alternative, primaryAxis, pillars) : null;
-
-    const sanitizedPrimary = applySoftSanitization(primaryMech.mechanismDescription, []);
-    if (sanitizedPrimary !== primaryMech.mechanismDescription) {
-      primaryMech.mechanismDescription = sanitizedPrimary;
-      diagnostics.primarySanitized = true;
-    }
-
-    const axisValidation = validateMechanismAxisAlignment(primaryMech, primaryAxis);
-    diagnostics.axisValidation = axisValidation;
-
-    if (!axisValidation.consistent && diffCore) {
-      console.log(`[MechanismEngine] AXIS_MISMATCH | ${axisValidation.failures.join("; ")} — attempting correction`);
-      primaryMech.axisAlignment.primaryAxis = primaryAxis;
-
-      const emphasisFromDiff = extractAxisEmphasisFromCore(diffCore, primaryAxis);
-      if (emphasisFromDiff.length > 0) {
-        primaryMech.axisAlignment.axisEmphasis = [...new Set([...primaryMech.axisAlignment.axisEmphasis, ...emphasisFromDiff])];
+    } catch (error: any) {
+      console.error(`[MechanismEngine] ERROR | ${error.message}`);
+      if (depthAttempt < depthGateMaxAttempts) {
+        depthGateLog.push(`Attempt ${depthAttempt}: ERROR (${error.message})`);
+        continue;
       }
-    }
-
-    const finalValidation = validateMechanismAxisAlignment(primaryMech, primaryAxis);
-
-    const celDepth = enforceEngineDepthCompliance(
-      "mechanism",
-      [
-        primaryMech.mechanismDescription,
-        primaryMech.mechanismLogic,
-        primaryMech.mechanismPromise,
-        primaryMech.mechanismProblem,
-        ...primaryMech.mechanismSteps,
-      ],
-      analyticalEnrichment || null,
-    );
-    diagnostics.celDepthCompliance = celDepth;
-    if (celDepth.violations.length > 0) {
-      for (const logEntry of celDepth.enforcementLog) {
-        console.log(`[MechanismEngine] CEL_DEPTH: ${logEntry}`);
-      }
-    } else {
-      console.log(`[MechanismEngine] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
-    }
-
-    const rawConfidence = computeConfidence(primaryMech, primaryAxis, pillars, finalValidation.consistent);
-    const depthPenaltyFactor = celDepth.passed ? 1.0 : Math.max(0.5, celDepth.score);
-    const confidence = clamp(rawConfidence * depthPenaltyFactor);
-
-    console.log(`[MechanismEngine] COMPLETE | mechanism="${primaryMech.mechanismName}" | axis=${primaryAxis} | consistent=${finalValidation.consistent} | confidence=${confidence.toFixed(2)} | depthScore=${celDepth.causalDepthScore}`);
-
-    return {
-      status: finalValidation.consistent ? STATUS.COMPLETE : STATUS.AXIS_REJECTED,
-      statusMessage: finalValidation.consistent ? null : `Mechanism axis mismatch: ${finalValidation.failures.join("; ")}`,
-      primaryMechanism: primaryMech,
-      alternativeMechanism: altMech,
-      axisConsistency: {
-        consistent: finalValidation.consistent,
-        primaryAxis,
-        mechanismAxis: primaryMech.axisAlignment.primaryAxis,
-        failures: finalValidation.failures,
-      },
-      confidenceScore: confidence,
-      executionTimeMs: Date.now() - startTime,
-      engineVersion: ENGINE_VERSION,
-      diagnostics,
-      celDepthCompliance: celDepth,
-    };
-  } catch (error: any) {
-    console.error(`[MechanismEngine] ERROR | ${error.message}`);
-    return {
-      status: STATUS.FAILED,
+      return {
+        status: STATUS.FAILED,
       statusMessage: `Mechanism generation failed: ${error.message}`,
       primaryMechanism: buildFallbackMechanism(diffCore, primaryAxis),
       alternativeMechanism: null,
@@ -306,7 +357,20 @@ Respond with ONLY valid JSON, no markdown:
       engineVersion: ENGINE_VERSION,
       diagnostics: { ...diagnostics, error: error.message },
     };
+    }
   }
+
+  return {
+    status: STATUS.FAILED,
+    statusMessage: "Mechanism generation failed after all depth gate attempts",
+    primaryMechanism: buildFallbackMechanism(diffCore, primaryAxis),
+    alternativeMechanism: null,
+    axisConsistency: { consistent: false, primaryAxis, mechanismAxis: "unknown", failures: ["All attempts failed"] },
+    confidenceScore: 0,
+    executionTimeMs: Date.now() - startTime,
+    engineVersion: ENGINE_VERSION,
+    diagnostics,
+  };
 }
 
 function buildMechanismOutput(raw: any, primaryAxis: string, pillars: any[]): MechanismOutput {

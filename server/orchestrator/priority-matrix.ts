@@ -65,7 +65,7 @@ export function checkPriorityViolation(
 
 export interface EngineStepResult {
   engineId: EngineId;
-  status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "SKIPPED" | "ERROR";
+  status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "SKIPPED" | "ERROR" | "DEPTH_BLOCKED";
   output: any;
   snapshotId?: string;
   durationMs: number;

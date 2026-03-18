@@ -204,6 +204,99 @@ function renderInsightItem(key: string, item: any, index: number, isDark: boolea
   }
 }
 
+const DEPTH_GATE_ENGINES = ['differentiation', 'mechanism', 'offer', 'funnel', 'awareness', 'persuasion'];
+const DEPTH_STATUS_CONFIG: Record<string, { color: string; icon: string; label: string }> = {
+  DEPTH_PASSED: { color: '#22c55e', icon: 'checkmark-circle', label: 'PASSED' },
+  DEPTH_FAILED: { color: '#ef4444', icon: 'close-circle', label: 'FAILED' },
+  DEPTH_BLOCKED: { color: '#f59e0b', icon: 'ban', label: 'BLOCKED' },
+  REGENERATING: { color: '#3b82f6', icon: 'reload-circle', label: 'REGENERATING' },
+  PENDING: { color: '#888', icon: 'ellipse-outline', label: 'PENDING' },
+};
+
+function DepthGateStatusPanel({ campaignId, isDark }: { campaignId: string; isDark: boolean }) {
+  const [gateData, setGateData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const bg = isDark ? '#1e1e36' : '#f0f0ff';
+  const text = isDark ? '#e0e0e0' : '#333';
+  const muted = isDark ? '#999' : '#777';
+
+  const fetchGateData = async () => {
+    setLoading(true);
+    try {
+      const url = new URL('/api/orchestrator/latest/' + campaignId, getApiUrl());
+      const res = await fetch(url.toString());
+      const data = await res.json();
+      if (data.hasRun && data.sections) {
+        const gates: Record<string, any> = {};
+        for (const section of data.sections) {
+          if (DEPTH_GATE_ENGINES.includes(section.engineId)) {
+            const output = section.output;
+            const depthGateResult = output?.depthGateResult;
+            gates[section.engineId] = {
+              status: section.status === 'DEPTH_BLOCKED' ? 'DEPTH_BLOCKED' : (output?.status === 'DEPTH_FAILED' ? 'DEPTH_FAILED' : (depthGateResult?.passed ? 'DEPTH_PASSED' : (depthGateResult ? 'DEPTH_FAILED' : 'PENDING'))),
+              depthGateResult,
+              blockReason: section.blockReason || null,
+            };
+          }
+        }
+        setGateData(gates);
+      }
+    } catch {}
+    setLoading(false);
+  };
+
+  React.useEffect(() => { fetchGateData(); }, [campaignId]);
+
+  if (loading) return <ActivityIndicator size="small" color="#7c5cfc" style={{ marginVertical: 8 }} />;
+  if (!gateData || Object.keys(gateData).length === 0) return null;
+
+  const allPassed = Object.values(gateData).every((g: any) => g.status === 'DEPTH_PASSED');
+  const anyFailed = Object.values(gateData).some((g: any) => g.status === 'DEPTH_FAILED' || g.status === 'DEPTH_BLOCKED');
+  const overallColor = allPassed ? '#22c55e' : anyFailed ? '#ef4444' : '#f59e0b';
+
+  return (
+    <View style={[s.celContainer, { backgroundColor: bg, marginTop: 8 }]}>
+      <View style={s.celHeader}>
+        <Ionicons name="lock-closed-outline" size={14} color={overallColor} />
+        <Text style={[s.celTitle, { color: text }]}>Depth Gate Status</Text>
+        <View style={[s.confBadge, { backgroundColor: overallColor + '22' }]}>
+          <Text style={[s.confText, { color: overallColor }]}>{allPassed ? 'ALL PASSED' : anyFailed ? 'GATE FAILURES' : 'PENDING'}</Text>
+        </View>
+      </View>
+      {DEPTH_GATE_ENGINES.map((eng) => {
+        const gate = gateData[eng];
+        if (!gate) return null;
+        const cfg = DEPTH_STATUS_CONFIG[gate.status] || DEPTH_STATUS_CONFIG.PENDING;
+        const dgr = gate.depthGateResult;
+        return (
+          <View key={eng} style={[s.insightCard, { backgroundColor: isDark ? '#252542' : '#ffffff', marginTop: 4 }]}>
+            <View style={s.insightHeader}>
+              <Ionicons name={cfg.icon as any} size={14} color={cfg.color} />
+              <Text style={[s.sectionLabel, { color: text, fontWeight: '600' as const, marginLeft: 4 }]}>{eng}</Text>
+              <View style={[s.confBadge, { backgroundColor: cfg.color + '22', marginLeft: 'auto' as any }]}>
+                <Text style={[s.confText, { color: cfg.color }]}>{cfg.label}</Text>
+              </View>
+            </View>
+            {dgr && (
+              <View style={{ marginTop: 4 }}>
+                <Text style={[s.evidenceText, { color: muted }]}>
+                  Attempts: {dgr.attempt}/{dgr.maxAttempts} | Score: {dgr.depthResult?.causalDepthScore !== undefined ? Math.round(dgr.depthResult.causalDepthScore * 100) + '%' : 'N/A'}
+                </Text>
+                {dgr.regenerationLog?.length > 0 && dgr.regenerationLog.map((log: string, i: number) => (
+                  <Text key={i} style={[s.evidenceText, { color: gate.status === 'DEPTH_FAILED' ? '#ef4444' : muted, fontSize: 10 }]}>{log}</Text>
+                ))}
+              </View>
+            )}
+            {gate.blockReason && (
+              <Text style={[s.evidenceText, { color: '#f59e0b', marginTop: 2 }]}>{gate.blockReason}</Text>
+            )}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 function CELCompliancePanel({ campaignId, isDark }: { campaignId: string; isDark: boolean }) {
   const [celData, setCelData] = useState<any>(null);
   const [celLoading, setCelLoading] = useState(false);
@@ -524,6 +617,10 @@ export default function AELDebugPanel() {
 
           {aelData && activeCampaign && (
             <CELCompliancePanel campaignId={activeCampaign.id} isDark={isDark} />
+          )}
+
+          {aelData && activeCampaign && (
+            <DepthGateStatusPanel campaignId={activeCampaign.id} isDark={isDark} />
           )}
 
           {aelData && !loading && (

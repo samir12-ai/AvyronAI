@@ -111,4 +111,6 @@ export interface AwarenessResult {
   confidenceNormalized: boolean;
   executionTimeMs: number;
   engineVersion: number;
+  celDepthCompliance?: any;
+  depthGateResult?: any;
 }

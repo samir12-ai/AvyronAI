@@ -165,4 +165,8 @@ export interface DifferentiationResult {
   executionTimeMs: number;
   engineVersion: number;
   layerDiagnostics: Record<string, any>;
+  celDepthCompliance?: any;
+  depthGateResult?: any;
+  snapshotId?: string;
+  claims?: any[];
 }

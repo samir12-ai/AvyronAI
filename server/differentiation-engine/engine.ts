@@ -4,6 +4,12 @@ import {
   buildCausalDirectiveForPrompt,
   enforceEngineDepthCompliance,
   applyDepthPenalty,
+  isDepthBlocking,
+  buildDepthRejectionDirective,
+  buildDepthGateResult,
+  DEPTH_GATE_MAX_RETRIES,
+  type DepthGateResult,
+  type DepthComplianceResult,
 } from "../causal-enforcement-layer/engine";
 import {
   ENGINE_VERSION,
@@ -875,6 +881,7 @@ export async function layer11_aiRefinement(
   authorityMode: AuthorityMode,
   accountId: string,
   analyticalEnrichment?: any,
+  depthRejectionContext?: string,
 ): Promise<{ refinedPillars: DifferentiationPillar[]; refinedClaims: ClaimStructure[]; refinedMechanism: MechanismCandidate }> {
   const topPillars = pillars.slice(0, 5);
   const topClaims = claims.slice(0, 5);
@@ -883,7 +890,7 @@ export async function layer11_aiRefinement(
   if (aelBlock) console.log(`[DifferentiationEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
 
   const prompt = `You are refining differentiation language. You must ONLY improve wording clarity and impact.
-${aelBlock}${causalDirective}
+${aelBlock}${causalDirective}${depthRejectionContext ? `\n${depthRejectionContext}\n` : ""}
 STRICT RULES:
 - Do NOT invent new strategy, audience segments, offers, or execution plans
 - Do NOT change the meaning or direction of any pillar or claim
@@ -1181,53 +1188,108 @@ export async function runDifferentiationEngine(
   let finalClaims = l10Claims;
   let finalMechanism = l8Mechanism;
 
-  try {
-    const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId, analyticalEnrichment);
-    finalPillars = l11.refinedPillars;
-    finalClaims = l11.refinedClaims;
-    finalMechanism = l11.refinedMechanism;
-    diagnostics.layer11 = { aiRefined: true };
-  } catch (err: any) {
-    diagnostics.layer11 = { aiRefined: false, error: err.message };
-  }
+  const depthGateMaxAttempts = DEPTH_GATE_MAX_RETRIES + 1;
+  const depthGateLog: string[] = [];
+  let depthRejectionContext = "";
+  let celDepth: DepthComplianceResult | null = null;
+  let depthGateResult: DepthGateResult | null = null;
 
-  finalPillars = finalPillars.map(p => ({
-    ...p,
-    name: sanitizeGuardrail(p.name) ? p.territory : p.name,
-    description: sanitizeGuardrail(p.description) ? `Differentiation pillar based on ${p.territory}` : p.description,
-  }));
-  finalClaims = finalClaims.map(c => ({
-    ...c,
-    claim: sanitizeGuardrail(c.claim) ? `${c.territory}: differentiation claim` : c.claim,
-  }));
-  if (sanitizeGuardrail(finalMechanism.description)) {
-    finalMechanism = { ...finalMechanism, description: "Mechanism description redacted — guardrail violation" };
-  }
+  for (let depthAttempt = 1; depthAttempt <= depthGateMaxAttempts; depthAttempt++) {
+    if (depthAttempt > 1) {
+      console.log(`[DifferentiationEngine-V3] DEPTH_GATE: Regenerating attempt ${depthAttempt}/${depthGateMaxAttempts}`);
+    }
 
-  const boundaryText = [
-    ...finalPillars.map(p => `${p.name} ${p.description}`),
-    ...finalClaims.map(c => c.claim),
-    finalMechanism.description,
-  ].join(" ");
-  const boundaryResult = enforceBoundaryWithSanitization(boundaryText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
-  if (!boundaryResult.clean) {
-    console.error(`[DifferentiationEngine-V3] BOUNDARY VIOLATION: ${boundaryResult.violations.join("; ")}`);
-    const result = buildEmptyResult("INTEGRITY_FAILED", `Boundary enforcement failed: ${boundaryResult.violations.join("; ")}`, Date.now() - startTime);
-    result.confidenceScore = 0;
-    result.layerDiagnostics = diagnostics;
-    return result;
-  }
-  if (boundaryResult.sanitized && boundaryResult.warnings.length > 0) {
-    console.log(`[DifferentiationEngine-V3] BOUNDARY SANITIZED: ${boundaryResult.warnings.join("; ")}`);
-    diagnostics.boundarySanitization = { sanitized: boundaryResult.sanitized, warnings: boundaryResult.warnings };
-    for (const p of finalPillars) {
-      p.name = applySoftSanitization(p.name, BOUNDARY_SOFT_PATTERNS);
-      p.description = applySoftSanitization(p.description, BOUNDARY_SOFT_PATTERNS);
+    finalPillars = l9Pillars;
+    finalClaims = l10Claims;
+    finalMechanism = l8Mechanism;
+
+    try {
+      const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId, analyticalEnrichment, depthRejectionContext || undefined);
+      finalPillars = l11.refinedPillars;
+      finalClaims = l11.refinedClaims;
+      finalMechanism = l11.refinedMechanism;
+      diagnostics.layer11 = { aiRefined: true, attempt: depthAttempt };
+    } catch (err: any) {
+      diagnostics.layer11 = { aiRefined: false, error: err.message, attempt: depthAttempt };
     }
-    for (const c of finalClaims) {
-      c.claim = applySoftSanitization(c.claim, BOUNDARY_SOFT_PATTERNS);
+
+    finalPillars = finalPillars.map(p => ({
+      ...p,
+      name: sanitizeGuardrail(p.name) ? p.territory : p.name,
+      description: sanitizeGuardrail(p.description) ? `Differentiation pillar based on ${p.territory}` : p.description,
+    }));
+    finalClaims = finalClaims.map(c => ({
+      ...c,
+      claim: sanitizeGuardrail(c.claim) ? `${c.territory}: differentiation claim` : c.claim,
+    }));
+    if (sanitizeGuardrail(finalMechanism.description)) {
+      finalMechanism = { ...finalMechanism, description: "Mechanism description redacted — guardrail violation" };
     }
-    finalMechanism.description = applySoftSanitization(finalMechanism.description, BOUNDARY_SOFT_PATTERNS);
+
+    const boundaryText = [
+      ...finalPillars.map(p => `${p.name} ${p.description}`),
+      ...finalClaims.map(c => c.claim),
+      finalMechanism.description,
+    ].join(" ");
+    const boundaryResult = enforceBoundaryWithSanitization(boundaryText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
+    if (!boundaryResult.clean) {
+      console.error(`[DifferentiationEngine-V3] BOUNDARY VIOLATION: ${boundaryResult.violations.join("; ")}`);
+      const result = buildEmptyResult("INTEGRITY_FAILED", `Boundary enforcement failed: ${boundaryResult.violations.join("; ")}`, Date.now() - startTime);
+      result.confidenceScore = 0;
+      result.layerDiagnostics = diagnostics;
+      return result;
+    }
+    if (boundaryResult.sanitized && boundaryResult.warnings.length > 0) {
+      console.log(`[DifferentiationEngine-V3] BOUNDARY SANITIZED: ${boundaryResult.warnings.join("; ")}`);
+      diagnostics.boundarySanitization = { sanitized: boundaryResult.sanitized, warnings: boundaryResult.warnings };
+      for (const p of finalPillars) {
+        p.name = applySoftSanitization(p.name, BOUNDARY_SOFT_PATTERNS);
+        p.description = applySoftSanitization(p.description, BOUNDARY_SOFT_PATTERNS);
+      }
+      for (const c of finalClaims) {
+        c.claim = applySoftSanitization(c.claim, BOUNDARY_SOFT_PATTERNS);
+      }
+      finalMechanism.description = applySoftSanitization(finalMechanism.description, BOUNDARY_SOFT_PATTERNS);
+    }
+
+    celDepth = enforceEngineDepthCompliance(
+      "differentiation",
+      [
+        ...finalPillars.map(p => `${p.name} ${p.description}`),
+        ...finalClaims.map(c => c.claim),
+        finalMechanism.description,
+      ],
+      analyticalEnrichment || null,
+    );
+
+    if (!analyticalEnrichment || !isDepthBlocking(celDepth)) {
+      depthGateLog.push(`Attempt ${depthAttempt}: PASSED (depthScore=${celDepth.causalDepthScore})`);
+      depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog);
+      if (celDepth.violations.length > 0) {
+        for (const logEntry of celDepth.enforcementLog) {
+          console.log(`[DifferentiationEngine-V3] CEL_DEPTH: ${logEntry}`);
+        }
+      } else {
+        console.log(`[DifferentiationEngine-V3] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
+      }
+      break;
+    }
+
+    depthGateLog.push(`Attempt ${depthAttempt}: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length})`);
+    console.log(`[DifferentiationEngine-V3] DEPTH_GATE: Attempt ${depthAttempt} BLOCKED | depthScore=${celDepth.causalDepthScore} | violations=${celDepth.violations.length}`);
+
+    if (depthAttempt >= depthGateMaxAttempts) {
+      depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog);
+      console.log(`[DifferentiationEngine-V3] DEPTH_GATE: FINAL FAILURE after ${depthGateMaxAttempts} attempts — returning DEPTH_FAILED`);
+      const failedResult = buildEmptyResult("DEPTH_FAILED", `Depth gate failed after ${depthGateMaxAttempts} attempts: depthScore=${celDepth.causalDepthScore}`, Date.now() - startTime);
+      failedResult.confidenceScore = 0;
+      failedResult.layerDiagnostics = { ...diagnostics, depthGate: depthGateResult };
+      (failedResult as any).celDepthCompliance = celDepth;
+      (failedResult as any).depthGateResult = depthGateResult;
+      return failedResult;
+    }
+
+    depthRejectionContext = buildDepthRejectionDirective(celDepth, depthAttempt);
   }
 
   const l12Stability = layer12_stabilityGuard(finalPillars, finalClaims, l3Collisions, l1.territories, profileSignals.hasProfile);
@@ -1262,27 +1324,10 @@ export async function runDifferentiationEngine(
     console.log(`[DifferentiationEngine-V3] GENERIC_OUTPUT_PENALTY | phrases=${genericOutputCheck.genericPhrases.length} | penalty=${genericOutputCheck.penalty.toFixed(2)}`);
   }
 
-  const celDepth = enforceEngineDepthCompliance(
-    "differentiation",
-    [
-      ...finalPillars.map(p => `${p.name} ${p.description}`),
-      ...finalClaims.map(c => c.claim),
-      finalMechanism.description,
-    ],
-    analyticalEnrichment || null,
-  );
-  if (celDepth.violations.length > 0) {
-    for (const logEntry of celDepth.enforcementLog) {
-      console.log(`[DifferentiationEngine-V3] CEL_DEPTH: ${logEntry}`);
-    }
-  } else {
-    console.log(`[DifferentiationEngine-V3] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
-  }
-
   const avgClaimScore = finalClaims.length > 0 ? finalClaims.reduce((s, c) => s + c.overallScore, 0) / finalClaims.length : 0;
   const objectionDensityFactor = lowObjectionDensity ? 0.85 : 1.0;
   const genericPenaltyFactor = genericOutputCheck.genericDetected ? (1 - genericOutputCheck.penalty) : 1;
-  const depthPenaltyFactor = celDepth.passed ? 1.0 : Math.max(0.5, celDepth.score);
+  const depthPenaltyFactor = celDepth!.passed ? 1.0 : Math.max(0.5, celDepth!.score);
   const stabilityFactor = l12Stability.stable ? (l12Stability.lowConfidence ? 0.75 : 1) : 0.6;
   const rawConfidence = clamp(avgClaimScore * stabilityFactor * objectionDensityFactor * genericPenaltyFactor * depthPenaltyFactor);
   const confidenceScore = normalizeConfidence(rawConfidence, dataReliability);
@@ -1316,6 +1361,7 @@ export async function runDifferentiationEngine(
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,
     layerDiagnostics: diagnostics,
-    celDepthCompliance: celDepth,
+    celDepthCompliance: celDepth!,
+    depthGateResult,
   };
 }

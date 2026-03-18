@@ -94,6 +94,7 @@ interface EngineContext {
   differentiationSnapshotId?: string;
   analyticalEnrichment?: any;
   celResults?: ComplianceResult[];
+  depthGateStatus?: Record<string, string>;
 }
 
 async function getBusinessData(accountId: string, campaignId: string): Promise<any> {
@@ -196,6 +197,43 @@ async function executeEngine(
         output: null,
         durationMs: Date.now() - startTime,
         blockReason: `Blocked by upstream failure in ${result.engineId}`,
+      };
+    }
+  }
+
+  if (!ctx.depthGateStatus) ctx.depthGateStatus = {};
+
+  const DEPTH_CASCADE_MAP: Record<string, string[]> = {
+    mechanism: ["differentiation"],
+    offer: ["differentiation", "mechanism"],
+    funnel: ["awareness"],
+    persuasion: ["awareness"],
+  };
+
+  const upstreamDeps = DEPTH_CASCADE_MAP[engineId] || [];
+  for (const upstream of upstreamDeps) {
+    if (ctx.depthGateStatus[upstream] === "DEPTH_FAILED") {
+      console.log(`[Orchestrator] DEPTH_CASCADE_BLOCKED | ${engineId} BLOCKED — upstream ${upstream} has DEPTH_FAILED`);
+      ctx.depthGateStatus[engineId] = "DEPTH_BLOCKED";
+      return {
+        engineId,
+        status: "DEPTH_BLOCKED",
+        output: {
+          status: "DEPTH_BLOCKED",
+          statusMessage: `Cascade blocked: upstream engine '${upstream}' failed depth gate — ${engineId} cannot execute on invalid foundation`,
+          confidenceScore: 0,
+          depthGateResult: {
+            passed: false,
+            blocked: true,
+            attempt: 0,
+            maxAttempts: 0,
+            status: "DEPTH_BLOCKED",
+            failureReason: `Upstream '${upstream}' depth gate failed`,
+            regenerationLog: [`CASCADE_BLOCKED: ${upstream} → ${engineId}`],
+          },
+        },
+        durationMs: Date.now() - startTime,
+        blockReason: `Cascade blocked: upstream '${upstream}' depth gate failed`,
       };
     }
   }
@@ -313,6 +351,15 @@ async function executeEngine(
           ctx.celResults.push(result.celDepthCompliance);
           console.log(`[Orchestrator] CEL_DIFFERENTIATION_DEPTH | depthScore=${result.celDepthCompliance.causalDepthScore} | violations=${result.celDepthCompliance.violations.length}`);
         }
+        if (result.status === "DEPTH_FAILED") {
+          ctx.depthGateStatus!.differentiation = "DEPTH_FAILED";
+          console.log(`[Orchestrator] DEPTH_GATE_STATUS | differentiation=DEPTH_FAILED`);
+        } else {
+          ctx.depthGateStatus!.differentiation = "DEPTH_PASSED";
+        }
+        if (result.depthGateResult) {
+          console.log(`[Orchestrator] DEPTH_GATE_DIFF | status=${result.depthGateResult.status} | attempts=${result.depthGateResult.attempt}/${result.depthGateResult.maxAttempts}`);
+        }
         break;
       }
 
@@ -344,6 +391,15 @@ async function executeEngine(
           if (result.celDepthCompliance.violations.length > 0) {
             console.log(`[Orchestrator] CEL_MECHANISM_DEPTH | violations=${result.celDepthCompliance.violations.length} | score=${result.celDepthCompliance.score.toFixed(2)} | depthScore=${result.celDepthCompliance.causalDepthScore}`);
           }
+        }
+        if (result.status === "DEPTH_FAILED") {
+          ctx.depthGateStatus!.mechanism = "DEPTH_FAILED";
+          console.log(`[Orchestrator] DEPTH_GATE_STATUS | mechanism=DEPTH_FAILED`);
+        } else {
+          ctx.depthGateStatus!.mechanism = "DEPTH_PASSED";
+        }
+        if (result.depthGateResult) {
+          console.log(`[Orchestrator] DEPTH_GATE_MECH | status=${result.depthGateResult.status} | attempts=${result.depthGateResult.attempt}/${result.depthGateResult.maxAttempts}`);
         }
         break;
       }
@@ -378,6 +434,15 @@ async function executeEngine(
           ctx.celResults.push(result.celDepthCompliance);
           console.log(`[Orchestrator] CEL_OFFER_DEPTH | depthScore=${result.celDepthCompliance.causalDepthScore} | violations=${result.celDepthCompliance.violations.length}`);
         }
+        if (result.status === "DEPTH_FAILED") {
+          ctx.depthGateStatus!.offer = "DEPTH_FAILED";
+          console.log(`[Orchestrator] DEPTH_GATE_STATUS | offer=DEPTH_FAILED`);
+        } else {
+          ctx.depthGateStatus!.offer = "DEPTH_PASSED";
+        }
+        if (result.depthGateResult) {
+          console.log(`[Orchestrator] DEPTH_GATE_OFFER | status=${result.depthGateResult.status} | attempts=${result.depthGateResult.attempt}/${result.depthGateResult.maxAttempts}`);
+        }
         break;
       }
 
@@ -401,6 +466,15 @@ async function executeEngine(
           if (!ctx.celResults) ctx.celResults = [];
           ctx.celResults.push(result.celDepthCompliance);
           console.log(`[Orchestrator] CEL_AWARENESS_DEPTH | depthScore=${result.celDepthCompliance.causalDepthScore} | violations=${result.celDepthCompliance.violations.length}`);
+        }
+        if (result.status === "DEPTH_FAILED") {
+          ctx.depthGateStatus!.awareness = "DEPTH_FAILED";
+          console.log(`[Orchestrator] DEPTH_GATE_STATUS | awareness=DEPTH_FAILED`);
+        } else {
+          ctx.depthGateStatus!.awareness = "DEPTH_PASSED";
+        }
+        if (result.depthGateResult) {
+          console.log(`[Orchestrator] DEPTH_GATE_AWARENESS | status=${result.depthGateResult.status} | attempts=${result.depthGateResult.attempt}/${result.depthGateResult.maxAttempts}`);
         }
         break;
       }
@@ -446,6 +520,15 @@ async function executeEngine(
           if (!ctx.celResults) ctx.celResults = [];
           ctx.celResults.push(result.celDepthCompliance);
           console.log(`[Orchestrator] CEL_FUNNEL_DEPTH | depthScore=${result.celDepthCompliance.causalDepthScore} | violations=${result.celDepthCompliance.violations.length}`);
+        }
+        if (result.status === "DEPTH_FAILED") {
+          ctx.depthGateStatus!.funnel = "DEPTH_FAILED";
+          console.log(`[Orchestrator] DEPTH_GATE_STATUS | funnel=DEPTH_FAILED`);
+        } else {
+          ctx.depthGateStatus!.funnel = "DEPTH_PASSED";
+        }
+        if (result.depthGateResult) {
+          console.log(`[Orchestrator] DEPTH_GATE_FUNNEL | status=${result.depthGateResult.status} | attempts=${result.depthGateResult.attempt}/${result.depthGateResult.maxAttempts}`);
         }
         break;
       }
@@ -496,6 +579,15 @@ async function executeEngine(
           if (!ctx.celResults) ctx.celResults = [];
           ctx.celResults.push(result.celDepthCompliance);
           console.log(`[Orchestrator] CEL_PERSUASION_DEPTH | depthScore=${result.celDepthCompliance.causalDepthScore} | violations=${result.celDepthCompliance.violations.length}`);
+        }
+        if (result.status === "DEPTH_FAILED") {
+          ctx.depthGateStatus!.persuasion = "DEPTH_FAILED";
+          console.log(`[Orchestrator] DEPTH_GATE_STATUS | persuasion=DEPTH_FAILED`);
+        } else {
+          ctx.depthGateStatus!.persuasion = "DEPTH_PASSED";
+        }
+        if (result.depthGateResult) {
+          console.log(`[Orchestrator] DEPTH_GATE_PERSUASION | status=${result.depthGateResult.status} | attempts=${result.depthGateResult.attempt}/${result.depthGateResult.maxAttempts}`);
         }
         break;
       }

@@ -28,6 +28,9 @@ import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
 import {
   enforceEngineDepthCompliance,
   applyDepthPenalty,
+  isDepthBlocking,
+  buildDepthGateResult,
+  type DepthGateResult,
 } from "../causal-enforcement-layer/engine";
 import { enforceBoundaryWithSanitization } from "../engine-hardening";
 import { assessStrategyAcceptability } from "../shared/strategy-acceptability";
@@ -2007,6 +2010,40 @@ export function analyzePersuasion(
     ],
     analyticalEnrichment || null,
   );
+
+  let depthGateResult: DepthGateResult | null = null;
+
+  if (analyticalEnrichment && isDepthBlocking(celDepth)) {
+    depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length}) — non-generative engine, no retry`]);
+    for (const logEntry of celDepth.enforcementLog) {
+      console.log(`[PersuasionEngine-V3] CEL_DEPTH: ${logEntry}`);
+    }
+    console.log(`[PersuasionEngine-V3] DEPTH_GATE: DEPTH_FAILED — non-generative engine, cannot retry | depthScore=${celDepth.causalDepthScore}`);
+    routes.primary.persuasionStrengthScore = 0;
+    routes.alternative.persuasionStrengthScore = 0;
+
+    const failedAcceptability = assessStrategyAcceptability(0, 0, allLayers.length, false, [...structuralWarnings, "DEPTH_FAILED"]);
+
+    return {
+      status: "DEPTH_FAILED",
+      statusMessage: `Depth gate failed: depthScore=${celDepth.causalDepthScore} — non-generative engine, cannot regenerate`,
+      primaryRoute: routes.primary,
+      alternativeRoute: routes.alternative,
+      rejectedRoute: routes.rejected,
+      layerResults: allLayers,
+      structuralWarnings: [...structuralWarnings, "DEPTH_FAILED"],
+      boundaryCheck,
+      dataReliability: reliability,
+      confidenceNormalized: true,
+      executionTimeMs: Date.now() - startTime,
+      engineVersion: ENGINE_VERSION,
+      autoCorrection,
+      strategyAcceptability: failedAcceptability,
+      celDepthCompliance: celDepth,
+      depthGateResult,
+    };
+  }
+
   if (celDepth.violations.length > 0) {
     for (const logEntry of celDepth.enforcementLog) {
       console.log(`[PersuasionEngine-V3] CEL_DEPTH: ${logEntry}`);
@@ -2018,6 +2055,8 @@ export function analyzePersuasion(
   } else {
     console.log(`[PersuasionEngine-V3] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
   }
+
+  depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: PASSED (depthScore=${celDepth.causalDepthScore})`]);
 
   const finalLayersPassed = allLayers.filter(l => l.passed).length;
   const finalConfidence = routes.primary.persuasionStrengthScore;
@@ -2043,6 +2082,7 @@ export function analyzePersuasion(
     autoCorrection,
     strategyAcceptability: acceptability,
     celDepthCompliance: celDepth,
+    depthGateResult,
   };
 }
 

@@ -4,6 +4,12 @@ import {
   buildCausalDirectiveForPrompt,
   enforceEngineDepthCompliance,
   applyDepthPenalty,
+  isDepthBlocking,
+  buildDepthRejectionDirective,
+  buildDepthGateResult,
+  DEPTH_GATE_MAX_RETRIES,
+  type DepthGateResult,
+  type DepthComplianceResult,
 } from "../causal-enforcement-layer/engine";
 import { detectGenericOutput, checkCrossEngineAlignment, enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
 
@@ -1033,6 +1039,7 @@ export async function aiFunnelGeneration(
   mi?: FunnelMIInput | null,
   awarenessCtx?: FunnelAwarenessInput | null,
   analyticalEnrichment?: any,
+  depthRejectionContext?: string,
 ): Promise<{ primary: { name: string; type: string }; alternative: { name: string; type: string }; rejected: { name: string; type: string; rejectionReason: string } }> {
   const pains = audience.audiencePains || [];
   const desires = Object.entries(audience.desireMap || {});
@@ -1123,10 +1130,11 @@ Return JSON:
   "rejected": { "name": "Rejected funnel name", "type": "funnel_type", "rejectionReason": "Why this funnel fails" }
 }`;
 
+  const fullPrompt = depthRejectionContext ? `${prompt}\n\n${depthRejectionContext}` : prompt;
   try {
     const completion = await aiChat({
       model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
+      messages: [{ role: "user", content: fullPrompt }],
       max_tokens: 800,
       temperature: 0.7,
       accountId,
@@ -1263,7 +1271,11 @@ export async function runFunnelEngine(
   const l6Commitment = layer6_commitmentLevelMatching(audience, offer, l2Fit.funnelType);
   diagnostics.layer6 = { level: l6Commitment.commitmentLevel, score: l6Commitment.commitmentMatchScore, analysis: l6Commitment.analysis };
 
-  let aiFunnels;
+  let aiFunnels: any;
+  let funnelDepthRejectionContext = "";
+  const funnelDepthGateLog: string[] = [];
+  const funnelDepthGateMaxAttempts = DEPTH_GATE_MAX_RETRIES + 1;
+
   try {
     aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi, awareness, analyticalEnrichment);
     diagnostics.aiGeneration = { success: true };
@@ -1423,7 +1435,7 @@ export async function runFunnelEngine(
 
   const criticalFrictionPoints = primaryFunnel.frictionMap.filter(f => f.severity > 0.7).length;
 
-  const celDepth = enforceEngineDepthCompliance(
+  let celDepth = enforceEngineDepthCompliance(
     "funnel",
     [
       primaryFunnel.funnelType || "",
@@ -1433,6 +1445,65 @@ export async function runFunnelEngine(
     analyticalEnrichment || null,
   );
   diagnostics.celDepthCompliance = celDepth;
+
+  if (analyticalEnrichment && isDepthBlocking(celDepth)) {
+    for (let funnelDepthAttempt = 2; funnelDepthAttempt <= funnelDepthGateMaxAttempts; funnelDepthAttempt++) {
+      funnelDepthGateLog.push(`Attempt ${funnelDepthAttempt - 1}: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length})`);
+      funnelDepthRejectionContext = buildDepthRejectionDirective(celDepth, funnelDepthAttempt - 1);
+      console.log(`[FunnelEngine-V3] DEPTH_GATE: Attempt ${funnelDepthAttempt - 1} BLOCKED — regenerating (${funnelDepthAttempt}/${funnelDepthGateMaxAttempts})`);
+
+      try {
+        aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi, awareness, analyticalEnrichment, funnelDepthRejectionContext);
+        diagnostics.aiGeneration = { success: true, depthRetry: funnelDepthAttempt };
+      } catch (err: any) {
+        funnelDepthGateLog.push(`Attempt ${funnelDepthAttempt}: AI_ERROR (${err.message})`);
+        continue;
+      }
+
+      celDepth = enforceEngineDepthCompliance(
+        "funnel",
+        [
+          aiFunnels.primary?.type || "",
+          aiFunnels.primary?.name || "",
+        ],
+        analyticalEnrichment || null,
+      );
+      diagnostics.celDepthCompliance = celDepth;
+
+      if (!isDepthBlocking(celDepth)) {
+        funnelDepthGateLog.push(`Attempt ${funnelDepthAttempt}: PASSED (depthScore=${celDepth.causalDepthScore})`);
+        console.log(`[FunnelEngine-V3] DEPTH_GATE: Attempt ${funnelDepthAttempt} PASSED | depthScore=${celDepth.causalDepthScore}`);
+        break;
+      }
+
+      if (funnelDepthAttempt >= funnelDepthGateMaxAttempts) {
+        funnelDepthGateLog.push(`Attempt ${funnelDepthAttempt}: FINAL FAILURE (depthScore=${celDepth.causalDepthScore})`);
+        const depthGateResult = buildDepthGateResult(celDepth, funnelDepthAttempt, funnelDepthGateMaxAttempts, funnelDepthGateLog);
+        console.log(`[FunnelEngine-V3] DEPTH_GATE: FINAL FAILURE after ${funnelDepthGateMaxAttempts} attempts — returning DEPTH_FAILED`);
+        return {
+          status: "DEPTH_FAILED",
+          statusMessage: `Depth gate failed after ${funnelDepthGateMaxAttempts} attempts: depthScore=${celDepth.causalDepthScore}`,
+          primaryFunnel: buildEmptyFunnel("DEPTH_FAILED"),
+          alternativeFunnel: buildEmptyFunnel("DEPTH_FAILED_ALT"),
+          rejectedFunnel: { funnel: buildEmptyFunnel("DEPTH_FAILED_REJECTED"), rejectionReason: "DEPTH_FAILED" },
+          funnelStrengthScore: 0,
+          trustPathAnalysis: { score: 0, steps: 0, gaps: ["DEPTH_FAILED"] },
+          proofPlacementLogic: { score: 0, placements: 0, missingPlacements: [] },
+          frictionMap: { totalFriction: 0, criticalPoints: 0, mitigations: 0 },
+          boundaryCheck: { passed: false, violations: ["DEPTH_FAILED"] },
+          structuralWarnings: ["DEPTH_FAILED"],
+          confidenceScore: 0,
+          executionTimeMs: Date.now() - startTime,
+          engineVersion: ENGINE_VERSION,
+          layerDiagnostics: { ...diagnostics, depthGate: depthGateResult },
+          strategyAcceptability: { grade: "F", acceptable: false, reasons: ["DEPTH_FAILED"] },
+          celDepthCompliance: celDepth,
+          depthGateResult,
+        } as any;
+      }
+    }
+  }
+
   if (celDepth.violations.length > 0) {
     for (const logEntry of celDepth.enforcementLog) {
       console.log(`[FunnelEngine-V3] CEL_DEPTH: ${logEntry}`);
@@ -1440,6 +1511,8 @@ export async function runFunnelEngine(
   } else {
     console.log(`[FunnelEngine-V3] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
   }
+  const depthGateResultFunnel = funnelDepthGateLog.length > 0 ? buildDepthGateResult(celDepth, funnelDepthGateLog.length, funnelDepthGateMaxAttempts, funnelDepthGateLog) : null;
+  diagnostics.depthGate = depthGateResultFunnel;
   const depthPenaltyFactor = celDepth.passed ? 1.0 : Math.max(0.5, celDepth.score);
 
   const rawConfidence = clamp(
@@ -1508,5 +1581,6 @@ export async function runFunnelEngine(
     layerDiagnostics: diagnostics,
     strategyAcceptability: acceptability,
     celDepthCompliance: celDepth,
+    depthGateResult: depthGateResultFunnel,
   };
 }

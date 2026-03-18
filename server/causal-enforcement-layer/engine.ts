@@ -473,6 +473,95 @@ const SHALLOW_OUTPUT_PATTERNS: RegExp[] = [
   /\bunlock\b.*\bpotential\b/i,
 ];
 
+export const DEPTH_GATE_THRESHOLD = 0.30;
+export const DEPTH_GATE_MAX_RETRIES = 2;
+
+export interface DepthGateResult {
+  passed: boolean;
+  blocked: boolean;
+  attempt: number;
+  maxAttempts: number;
+  depthResult: DepthComplianceResult;
+  regenerationLog: string[];
+  status: "DEPTH_PASSED" | "DEPTH_FAILED" | "DEPTH_BLOCKED" | "DEPTH_SKIPPED";
+  failureReason: string | null;
+}
+
+export function isDepthBlocking(depthResult: DepthComplianceResult): boolean {
+  if (depthResult.causalDepthScore < DEPTH_GATE_THRESHOLD) return true;
+  if (!depthResult.depthDiagnostics.hasRootCauseGrounding && depthResult.rootCausesEvaluated > 0) return true;
+  if (!depthResult.depthDiagnostics.hasCausalChainUsage && depthResult.causalChainReferences === 0 &&
+      depthResult.rootCausesEvaluated > 0) return true;
+  const blockingViolations = depthResult.violations.filter(v => v.severity === "blocking");
+  if (blockingViolations.length > 0) return true;
+  return false;
+}
+
+export function buildDepthRejectionDirective(
+  depthResult: DepthComplianceResult,
+  attempt: number,
+): string {
+  const lines: string[] = [
+    `\n═══ DEPTH ENFORCEMENT REJECTION (Attempt ${attempt} FAILED — output was BLOCKED) ═══`,
+    `Your previous output was REJECTED because it lacked causal depth.`,
+    `Depth score: ${(depthResult.causalDepthScore * 100).toFixed(0)}% (minimum required: ${(DEPTH_GATE_THRESHOLD * 100).toFixed(0)}%)`,
+    ``,
+  ];
+
+  if (!depthResult.depthDiagnostics.hasRootCauseGrounding) {
+    lines.push(`❌ MISSING: Root cause grounding — your output did not reference any identified root causes.`);
+    lines.push(`   You MUST use specific root causes from the AEL analysis in your output.`);
+  }
+  if (!depthResult.depthDiagnostics.hasCausalChainUsage) {
+    lines.push(`❌ MISSING: Causal chain usage — your output did not reflect cause→impact→behavior chains.`);
+    lines.push(`   You MUST explain WHY things work, not just WHAT they are.`);
+  }
+  if (!depthResult.depthDiagnostics.hasBarrierResolution) {
+    lines.push(`❌ MISSING: Barrier resolution — your output did not address buying barriers.`);
+  }
+  if (depthResult.depthDiagnostics.genericTermCount > 0) {
+    lines.push(`⚠️ GENERIC TERMS (${depthResult.depthDiagnostics.genericTermCount}): Replace all generic marketing language with causally-derived reasoning.`);
+  }
+  if (depthResult.depthDiagnostics.shallowPatternCount > 0) {
+    lines.push(`⚠️ SHALLOW PATTERNS (${depthResult.depthDiagnostics.shallowPatternCount}): Remove marketing fluff — build everything from root causes.`);
+  }
+
+  for (const v of depthResult.violations) {
+    lines.push(`   → ${v.severity.toUpperCase()}: ${v.details}`);
+    if (v.requiredDirection) lines.push(`     FIX: ${v.requiredDirection}`);
+  }
+
+  lines.push(``);
+  lines.push(`YOU MUST FIX ALL ISSUES ABOVE. Your output will be rejected again if depth is insufficient.`);
+  lines.push(`Every claim, step, and description MUST trace back to a specific root cause or causal chain from the AEL analysis.`);
+  lines.push(`═══ END REJECTION DIRECTIVE ═══\n`);
+
+  return lines.join("\n");
+}
+
+export function buildDepthGateResult(
+  depthResult: DepthComplianceResult,
+  attempt: number,
+  maxAttempts: number,
+  regenerationLog: string[],
+): DepthGateResult {
+  const blocked = isDepthBlocking(depthResult);
+  return {
+    passed: !blocked,
+    blocked,
+    attempt,
+    maxAttempts,
+    depthResult,
+    regenerationLog,
+    status: blocked
+      ? (attempt >= maxAttempts ? "DEPTH_FAILED" : "DEPTH_BLOCKED")
+      : "DEPTH_PASSED",
+    failureReason: blocked
+      ? `Depth score ${(depthResult.causalDepthScore * 100).toFixed(0)}% below gate threshold ${(DEPTH_GATE_THRESHOLD * 100).toFixed(0)}% — ${depthResult.violations.length} violations`
+      : null,
+  };
+}
+
 export interface DepthComplianceResult extends ComplianceResult {
   causalDepthScore: number;
   rootCauseReferences: number;
@@ -601,7 +690,7 @@ export function enforceEngineDepthCompliance(
     result.violations.push({
       ruleId: "DEPTH_ROOT_CAUSE",
       violationType: "missing_root_cause",
-      severity: "major",
+      severity: "blocking",
       details: `${engineId} output does not reference any AEL root cause (${rootCauseTexts.length} available)`,
       rootCause: rootCauseTexts.slice(0, 2).join("; "),
       engineOutput: outputTexts[0]?.slice(0, 200) || "",
@@ -613,7 +702,7 @@ export function enforceEngineDepthCompliance(
     result.violations.push({
       ruleId: "DEPTH_CAUSAL_CHAIN",
       violationType: "missing_causal_chain",
-      severity: "major",
+      severity: "blocking",
       details: `${engineId} output does not reflect any causal chain (${(ael.causal_chains || []).length} chains available)`,
       rootCause: (ael.causal_chains || []).slice(0, 2).map(c => `${c.cause}→${c.impact}`).join("; "),
       engineOutput: outputTexts[0]?.slice(0, 200) || "",
