@@ -37,6 +37,25 @@ interface SignalTraceability {
   validationPassed: boolean;
 }
 
+type SignalEnforcementStatus = 'ENFORCED' | 'SIGNAL_REQUIRED' | 'SIGNAL_DRIFT' | 'PENDING' | 'UNKNOWN';
+
+function getEnforcementStatus(posStatus: string | null, traceability: SignalTraceability | null): SignalEnforcementStatus {
+  if (posStatus === 'SIGNAL_REQUIRED') return 'SIGNAL_REQUIRED';
+  if (posStatus === 'SIGNAL_DRIFT') return 'SIGNAL_DRIFT';
+  if (!posStatus) return 'PENDING';
+  if (traceability?.validationPassed) return 'ENFORCED';
+  if (traceability && !traceability.validationPassed) return 'SIGNAL_DRIFT';
+  return 'UNKNOWN';
+}
+
+const ENFORCEMENT_CONFIG: Record<SignalEnforcementStatus, { label: string; color: string; icon: string; description: string }> = {
+  ENFORCED: { label: 'Signal Enforced', color: '#22c55e', icon: 'shield-checkmark', description: 'All positioning elements traceable to audience signals' },
+  SIGNAL_REQUIRED: { label: 'Signals Required', color: '#ef4444', icon: 'close-circle', description: 'Positioning blocked — structured audience signals missing or malformed' },
+  SIGNAL_DRIFT: { label: 'Signal Drift', color: '#ef4444', icon: 'warning', description: 'Positioning failed signal enforcement — output contains generic or untraceable elements' },
+  PENDING: { label: 'Pending', color: '#f59e0b', icon: 'time-outline', description: 'Positioning has not been run yet' },
+  UNKNOWN: { label: 'Unknown', color: '#888', icon: 'help-circle-outline', description: 'Signal enforcement status unavailable' },
+};
+
 const SIGNAL_CATEGORIES: { key: keyof StructuredSignals; label: string; icon: string; color: string }[] = [
   { key: 'pain_clusters', label: 'Pain Clusters', icon: 'heart-dislike-outline', color: '#ef4444' },
   { key: 'desire_clusters', label: 'Desire Clusters', icon: 'sparkles-outline', color: '#22c55e' },
@@ -136,12 +155,14 @@ function TraceabilitySummary({ trace, isDark }: { trace: SignalTraceability; isD
 export default function SignalFlowPanel() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
-  const { activeCampaign } = useCampaign();
+  const { selectedCampaignId } = useCampaign();
   const [expanded, setExpanded] = useState(false);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [signals, setSignals] = useState<StructuredSignals | null>(null);
   const [traceability, setTraceability] = useState<SignalTraceability | null>(null);
+  const [positioningStatus, setPositioningStatus] = useState<string | null>(null);
+  const [positioningMessage, setPositioningMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const bg = isDark ? '#12122a' : '#ffffff';
@@ -151,26 +172,32 @@ export default function SignalFlowPanel() {
   const border = isDark ? '#2a2a4e' : '#e0e0f0';
 
   useEffect(() => {
-    if (!expanded || !activeCampaign?.id) return;
+    if (!expanded || !selectedCampaignId) return;
     fetchData();
-  }, [expanded, activeCampaign?.id]);
+  }, [expanded, selectedCampaignId]);
 
   async function fetchData() {
-    if (!activeCampaign?.id) return;
+    if (!selectedCampaignId) return;
     setLoading(true);
     setError(null);
+    setSignals(null);
+    setTraceability(null);
+    setPositioningStatus(null);
+    setPositioningMessage(null);
     try {
       const baseUrl = getApiUrl();
-      const audRes = await fetch(new URL(`/api/audience-engine/latest?campaignId=${activeCampaign.id}`, baseUrl).toString());
+      const audRes = await fetch(new URL(`/api/audience-engine/latest?campaignId=${selectedCampaignId}`, baseUrl).toString());
       if (!audRes.ok) throw new Error('No audience snapshot available');
       const audData = await audRes.json();
       if (!audData) throw new Error('No audience snapshot available');
       setSignals(audData.structuredSignals || null);
 
-      const posRes = await fetch(new URL(`/api/positioning-engine/latest?campaignId=${activeCampaign.id}`, baseUrl).toString());
+      const posRes = await fetch(new URL(`/api/positioning-engine/latest?campaignId=${selectedCampaignId}`, baseUrl).toString());
       if (posRes.ok) {
         const posData = await posRes.json();
         setTraceability(posData?.signalTraceability || null);
+        setPositioningStatus(posData?.status || null);
+        setPositioningMessage(posData?.statusMessage || null);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load signal flow data');
@@ -184,6 +211,8 @@ export default function SignalFlowPanel() {
     : 0;
 
   const usedSignalIds = new Set(traceability?.signalsUsed || []);
+  const enforcementStatus = getEnforcementStatus(positioningStatus, traceability);
+  const enforcementCfg = ENFORCEMENT_CONFIG[enforcementStatus];
 
   return (
     <View style={[s.container, { backgroundColor: bg, borderColor: border }]}>
@@ -196,15 +225,15 @@ export default function SignalFlowPanel() {
               <Text style={[s.badgeText, { color: '#7c5cfc' }]}>{totalSignals} signals</Text>
             </View>
           )}
-          {traceability && (
-            <View style={[s.badge, { backgroundColor: traceability.validationPassed ? '#22c55e22' : '#ef444422' }]}>
+          {(positioningStatus || traceability) && (
+            <View style={[s.badge, { backgroundColor: enforcementCfg.color + '22' }]}>
               <Ionicons
-                name={traceability.validationPassed ? "checkmark-circle" : "alert-circle"}
+                name={enforcementCfg.icon as any}
                 size={10}
-                color={traceability.validationPassed ? '#22c55e' : '#ef4444'}
+                color={enforcementCfg.color}
               />
-              <Text style={[s.badgeText, { color: traceability.validationPassed ? '#22c55e' : '#ef4444' }]}>
-                {traceability.validationPassed ? 'traced' : 'gaps'}
+              <Text style={[s.badgeText, { color: enforcementCfg.color }]}>
+                {enforcementCfg.label.toLowerCase()}
               </Text>
             </View>
           )}
@@ -223,6 +252,17 @@ export default function SignalFlowPanel() {
 
           {!loading && signals && (
             <ScrollView style={s.scrollBody} nestedScrollEnabled>
+              <View style={[s.enforcementBanner, { backgroundColor: enforcementCfg.color + '15', borderColor: enforcementCfg.color + '44' }]}>
+                <View style={s.enforcementRow}>
+                  <Ionicons name={enforcementCfg.icon as any} size={16} color={enforcementCfg.color} />
+                  <Text style={[s.enforcementLabel, { color: enforcementCfg.color }]}>{enforcementCfg.label}</Text>
+                </View>
+                <Text style={[s.enforcementDesc, { color: isDark ? '#bbb' : '#555' }]}>{enforcementCfg.description}</Text>
+                {positioningMessage && (enforcementStatus === 'SIGNAL_REQUIRED' || enforcementStatus === 'SIGNAL_DRIFT') && (
+                  <Text style={[s.enforcementDetail, { color: isDark ? '#999' : '#777' }]} numberOfLines={3}>{positioningMessage}</Text>
+                )}
+              </View>
+
               {traceability && <TraceabilitySummary trace={traceability} isDark={isDark} />}
 
               {SIGNAL_CATEGORIES.map(cat => {
@@ -296,4 +336,9 @@ const s = StyleSheet.create({
   unmappedSection: { marginTop: 4 },
   unmappedTitle: { fontSize: 11, fontWeight: '600' as const, marginBottom: 4 },
   unmappedItem: { fontSize: 10, marginLeft: 8 },
+  enforcementBanner: { margin: 4, padding: 10, borderRadius: 8, borderWidth: 1, marginBottom: 8 },
+  enforcementRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  enforcementLabel: { fontSize: 13, fontWeight: '700' as const },
+  enforcementDesc: { fontSize: 11, marginBottom: 2 },
+  enforcementDetail: { fontSize: 10, fontStyle: 'italic' as const, marginTop: 4 },
 });

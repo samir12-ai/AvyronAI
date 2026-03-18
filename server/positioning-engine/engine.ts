@@ -499,7 +499,7 @@ export function computeSemanticSaturation(
       let fwOverlap = 0;
       for (const t of tTokens) {
         for (const ft of fwTokens) {
-          if (t.includes(ft) || ft.includes(t)) { fwOverlap++; break; }
+          if (t.includes(ft as string) || (ft as string).includes(t)) { fwOverlap++; break; }
         }
       }
       if (tTokens.size > 0 && fwOverlap / tTokens.size >= 0.25) {
@@ -1076,6 +1076,7 @@ async function layer11_positioningStatementGeneration(
   productDna?: any,
   analyticalEnrichment?: any,
   structuredSignals?: StructuredSignals | null,
+  rejectionContext?: string,
 ): Promise<Territory[]> {
   if (territories.length === 0) return territories;
 
@@ -1150,7 +1151,7 @@ For each territory, return a JSON array with objects containing:
   "mappedSignalIds": ["signal_id_1", "signal_id_2"]` : ""}
 }
 
-Keep statements concise, strategic, and evidence-grounded.${hasSignals ? " Every element must trace back to the structured audience signals provided." : ""} Return ONLY the JSON array.`;
+Keep statements concise, strategic, and evidence-grounded.${hasSignals ? " Every element must trace back to the structured audience signals provided." : ""} Return ONLY the JSON array.${rejectionContext || ""}`;
 
     const response = await aiChat({
       model: "gpt-4.1-mini",
@@ -1474,10 +1475,14 @@ export async function runPositioningEngine(
       const totalStructured = getAllSignalLabels(parsedStructuredSignals).length;
       console.log(`[PositioningEngine-V3] STRUCTURED_SIGNALS_LOADED | total=${totalStructured} | pains=${parsedStructuredSignals.pain_clusters.length} | desires=${parsedStructuredSignals.desire_clusters.length} | patterns=${parsedStructuredSignals.pattern_clusters.length} | rootCauses=${parsedStructuredSignals.root_causes.length} | psychDrivers=${parsedStructuredSignals.psychological_drivers.length}`);
     } else {
-      console.log(`[PositioningEngine-V3] STRUCTURED_SIGNALS_MALFORMED — ignoring invalid shape, running in legacy mode`);
+      console.log(`[PositioningEngine-V3] STRUCTURED_SIGNALS_MALFORMED — SIGNAL_REQUIRED: invalid signal shape`);
+      const executionTimeMs = Date.now() - startTime;
+      return buildAndPersistEmptyResult("SIGNAL_REQUIRED", "Structured audience signals are malformed. Re-run Audience Engine to regenerate valid signal clusters.", executionTimeMs, miSnapshotId, audienceSnapshotId, accountId, campaignId);
     }
   } else {
-    console.log(`[PositioningEngine-V3] STRUCTURED_SIGNALS_ABSENT — running in legacy mode (no signal-bound constraint)`);
+    console.log(`[PositioningEngine-V3] STRUCTURED_SIGNALS_ABSENT — SIGNAL_REQUIRED: cannot run without structured audience signals`);
+    const executionTimeMs = Date.now() - startTime;
+    return buildAndPersistEmptyResult("SIGNAL_REQUIRED", "Positioning engine requires structured audience signals. Re-run Audience Engine to generate signal clusters before positioning.", executionTimeMs, miSnapshotId, audienceSnapshotId, accountId, campaignId);
   }
 
   if (totalSignals < POSITIONING_THRESHOLDS.MIN_AUDIENCE_SIGNALS) {
@@ -1527,8 +1532,51 @@ export async function runPositioningEngine(
   const contentDna = safeJsonParse(activeMiSnapshot.contentDnaData, []);
   const miTrajectory = safeJsonParse(activeMiSnapshot.trajectoryData, {});
   const competitionIntensityFromMI = miTrajectory.competitionIntensityScore || 0;
-  const opportunityGaps = layer7_opportunityGapDetection(narrativeSaturation, audienceSnapshot, marketPower, category, narrativeMap, contentDna, competitionIntensityFromMI);
+  let opportunityGaps = layer7_opportunityGapDetection(narrativeSaturation, audienceSnapshot, marketPower, category, narrativeMap, contentDna, competitionIntensityFromMI);
   console.log(`[PositioningEngine-V3] L7 Opportunities: ${opportunityGaps.length} viable territories`);
+
+  if (parsedStructuredSignals) {
+    const signalTerritories: OpportunityGap[] = [];
+    const existingNames = new Set(opportunityGaps.map(o => o.territory.toLowerCase()));
+
+    for (const rc of parsedStructuredSignals.root_causes) {
+      if (!existingNames.has(rc.label.toLowerCase())) {
+        signalTerritories.push({
+          territory: rc.label,
+          saturationLevel: 0,
+          audienceDemand: Math.min(1.0, rc.frequency / 15),
+          competitorAuthority: 0,
+          opportunityScore: Math.round((0.40 + Math.min(1.0, rc.frequency / 15) * 0.35 + rc.confidence * 0.15) * 100) / 100,
+          painSignals: rc.evidence.slice(0, 3),
+          desireSignals: [],
+          signalSource: rc.id,
+        });
+        existingNames.add(rc.label.toLowerCase());
+      }
+    }
+
+    for (const pd of parsedStructuredSignals.psychological_drivers) {
+      if (!existingNames.has(pd.label.toLowerCase())) {
+        signalTerritories.push({
+          territory: pd.label,
+          saturationLevel: 0,
+          audienceDemand: Math.min(1.0, pd.frequency / 15),
+          competitorAuthority: 0,
+          opportunityScore: Math.round((0.35 + Math.min(1.0, pd.frequency / 15) * 0.30 + pd.confidence * 0.15) * 100) / 100,
+          painSignals: [],
+          desireSignals: pd.evidence.slice(0, 3),
+          signalSource: pd.id,
+        });
+        existingNames.add(pd.label.toLowerCase());
+      }
+    }
+
+    if (signalTerritories.length > 0) {
+      opportunityGaps = [...opportunityGaps, ...signalTerritories]
+        .sort((a, b) => b.opportunityScore - a.opportunityScore);
+      console.log(`[PositioningEngine-V3] SIGNAL_INJECTED_TERRITORIES | added=${signalTerritories.length} from root_causes+psych_drivers | total=${opportunityGaps.length}`);
+    }
+  }
 
   const differentiationAxes = layer8_differentiationAxisConstruction(opportunityGaps, trustGaps, flankingMode);
   console.log(`[PositioningEngine-V3] L8 Differentiation: ${differentiationAxes.join(", ")}`);
@@ -1602,107 +1650,164 @@ export async function runPositioningEngine(
     console.warn(`[PositioningEngine-V3] Cross-campaign diversity check skipped: ${err.message}`);
   }
 
-  territories = await layer11_positioningStatementGeneration(territories, category, segmentPriority, accountId, activeMiSnapshot, productDna, analyticalEnrichment, parsedStructuredSignals);
-  console.log(`[PositioningEngine-V3] L11 Statements generated | aelProvided=${!!analyticalEnrichment} | signalBound=${!!parsedStructuredSignals}`);
+  const MAX_SIGNAL_ENFORCEMENT_ATTEMPTS = 3;
+  const signalRegenerationLog: string[] = [];
+  let signalEnforcementPassed = false;
+  let finalTerritories: Territory[] = [];
+  let stabilityResult: ReturnType<typeof layer12_stabilityGuard>["stabilityResult"] = { isStable: true, fallbackApplied: false, advisories: [], checks: [] };
+  let strategyCards: ReturnType<typeof generateStrategyCards> = [];
+  let signalTraceability: PositioningEngineResult["signalTraceability"] = undefined;
+  let signalEnforcementAttempt = 0;
 
-  const boundaryText = territories.map(t =>
-    `${t.name} ${t.enemyDefinition} ${t.contrastAxis} ${t.narrativeDirection} ${t.evidenceSignals?.join(" ") || ""}`
-  ).join(" ");
-  const boundaryCheck = enforceBoundaryWithSanitization(boundaryText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
-  if (!boundaryCheck.clean) {
-    console.error(`[PositioningEngine-V3] BOUNDARY VIOLATION: ${boundaryCheck.violations.join("; ")}`);
-    const executionTimeMs = Date.now() - startTime;
-    return {
-      ...buildEmptyResult("INTEGRITY_FAILED" as PositioningStatus, `Boundary enforcement failed: ${boundaryCheck.violations.join("; ")}`, executionTimeMs, miSnapshotId, audienceSnapshotId),
-      confidenceScore: 0,
+  for (signalEnforcementAttempt = 1; signalEnforcementAttempt <= MAX_SIGNAL_ENFORCEMENT_ATTEMPTS; signalEnforcementAttempt++) {
+    const rejectionContext = signalRegenerationLog.length > 0
+      ? `\n\nPREVIOUS ATTEMPT REJECTED — you MUST fix these issues:\n${signalRegenerationLog.join("\n")}\nGround EVERY positioning element in the provided audience signal clusters. Do NOT use generic marketing language.`
+      : "";
+
+    const territoriesSnapshot = JSON.parse(JSON.stringify(territories)) as Territory[];
+    let attemptTerritories = await layer11_positioningStatementGeneration(territoriesSnapshot, category, segmentPriority, accountId, activeMiSnapshot, productDna, analyticalEnrichment, parsedStructuredSignals, rejectionContext);
+    console.log(`[PositioningEngine-V3] L11 attempt ${signalEnforcementAttempt}/${MAX_SIGNAL_ENFORCEMENT_ATTEMPTS} | aelProvided=${!!analyticalEnrichment} | signalBound=${!!parsedStructuredSignals}`);
+
+    const boundaryText = attemptTerritories.map(t =>
+      `${t.name} ${t.enemyDefinition} ${t.contrastAxis} ${t.narrativeDirection} ${t.evidenceSignals?.join(" ") || ""}`
+    ).join(" ");
+    const boundaryCheck = enforceBoundaryWithSanitization(boundaryText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
+    if (!boundaryCheck.clean) {
+      console.error(`[PositioningEngine-V3] BOUNDARY VIOLATION: ${boundaryCheck.violations.join("; ")}`);
+      const executionTimeMs = Date.now() - startTime;
+      return {
+        ...buildEmptyResult("INTEGRITY_FAILED" as PositioningStatus, `Boundary enforcement failed: ${boundaryCheck.violations.join("; ")}`, executionTimeMs, miSnapshotId, audienceSnapshotId),
+        confidenceScore: 0,
+      };
+    }
+    if (boundaryCheck.sanitized && boundaryCheck.warnings.length > 0) {
+      for (const warning of boundaryCheck.warnings) {
+        console.log(`[PositioningEngine-V3] BOUNDARY WARNING: ${warning}`);
+      }
+      for (const t of attemptTerritories) {
+        t.name = applySoftSanitization(t.name, BOUNDARY_SOFT_PATTERNS);
+        t.enemyDefinition = applySoftSanitization(t.enemyDefinition, BOUNDARY_SOFT_PATTERNS);
+        t.contrastAxis = applySoftSanitization(t.contrastAxis, BOUNDARY_SOFT_PATTERNS);
+        t.narrativeDirection = applySoftSanitization(t.narrativeDirection, BOUNDARY_SOFT_PATTERNS);
+        if (t.evidenceSignals) {
+          t.evidenceSignals = t.evidenceSignals.map((s: string) => applySoftSanitization(s, BOUNDARY_SOFT_PATTERNS));
+        }
+      }
+    }
+
+    const stabilityOutput = layer12_stabilityGuard(
+      attemptTerritories, narrativeSaturation, marketPower, segmentPriority, narrativeMap,
+      competitors.length, totalSignals,
+    );
+    attemptTerritories = stabilityOutput.territories;
+    stabilityResult = stabilityOutput.stabilityResult;
+    const advisoryCount = stabilityResult.advisories.length;
+    console.log(`[PositioningEngine-V3] L12 Stability: ${stabilityResult.isStable ? "STABLE" : "UNSTABLE"} | fallback=${stabilityResult.fallbackApplied} | advisories=${advisoryCount}`);
+    if (advisoryCount > 0) {
+      for (const adv of stabilityResult.advisories) {
+        console.log(`[PositioningEngine-V3] ADVISORY: ${adv.message}`);
+      }
+    }
+
+    const strategicSignalGate = {
+      passedSignals: allStrategicSignals.map((s, i) => ({
+        signalId: `STR-${i}`,
+        snippet: s.signal,
+        sourceCompetitor: s.source,
+        category: s.cluster,
+        confidenceScore: 1,
+        sourceCount: 1,
+        freshnessFactor: 1,
+        crossValidated: true,
+        qualityScore: 1,
+      })),
+      totalInputSignals: allStrategicSignals.length,
+      rejectedSignals: [] as any[],
+      deduplicatedCount: 0,
+      crossValidatedCount: allStrategicSignals.length,
+      averageQuality: 1,
+      gatePass: allStrategicSignals.length >= 3,
+      gateSummary: "",
     };
-  }
-  if (boundaryCheck.sanitized && boundaryCheck.warnings.length > 0) {
-    for (const warning of boundaryCheck.warnings) {
-      console.log(`[PositioningEngine-V3] BOUNDARY WARNING: ${warning}`);
-    }
-    for (const t of territories) {
-      t.name = applySoftSanitization(t.name, BOUNDARY_SOFT_PATTERNS);
-      t.enemyDefinition = applySoftSanitization(t.enemyDefinition, BOUNDARY_SOFT_PATTERNS);
-      t.contrastAxis = applySoftSanitization(t.contrastAxis, BOUNDARY_SOFT_PATTERNS);
-      t.narrativeDirection = applySoftSanitization(t.narrativeDirection, BOUNDARY_SOFT_PATTERNS);
-      if (t.evidenceSignals) {
-        t.evidenceSignals = t.evidenceSignals.map((s: string) => applySoftSanitization(s, BOUNDARY_SOFT_PATTERNS));
+
+    let totalOrphanedClaims = 0;
+    let totalTracedClaims = 0;
+    for (const territory of attemptTerritories) {
+      const claims = [territory.name, territory.enemyDefinition, territory.contrastAxis, territory.narrativeDirection].filter(Boolean);
+      const orphanResult = checkForOrphanClaims(claims, strategicSignalGate);
+
+      totalOrphanedClaims += orphanResult.orphanedClaims.length;
+      totalTracedClaims += orphanResult.tracedClaims;
+
+      if (orphanResult.orphanedClaims.length > 0) {
+        for (const orphan of orphanResult.orphanedClaims) {
+          if (!territory.stabilityNotes) territory.stabilityNotes = [];
+          territory.stabilityNotes.push(`[HYPOTHESIS] Claim not directly traceable to MIv3 signal: "${orphan.slice(0, 80)}"`);
+        }
+        territory.confidenceScore = Math.max(0, territory.confidenceScore - (orphanResult.orphanedClaims.length * 0.05));
       }
     }
-  }
+    if (totalOrphanedClaims > 0) {
+      console.log(`[PositioningEngine-V3] ORPHAN_AUDIT | orphaned=${totalOrphanedClaims} | traced=${totalTracedClaims} | territories=${attemptTerritories.length} — orphaned claims flagged as [HYPOTHESIS]`);
+    } else {
+      console.log(`[PositioningEngine-V3] ORPHAN_AUDIT | ZERO_ORPHANS | all ${totalTracedClaims} claims traceable to MIv3 signals`);
+    }
 
-  const { territories: finalTerritories, stabilityResult } = layer12_stabilityGuard(
-    territories, narrativeSaturation, marketPower, segmentPriority, narrativeMap,
-    competitors.length, totalSignals,
-  );
-  const advisoryCount = stabilityResult.advisories.length;
-  console.log(`[PositioningEngine-V3] L12 Stability: ${stabilityResult.isStable ? "STABLE" : "UNSTABLE"} | fallback=${stabilityResult.fallbackApplied} | advisories=${advisoryCount}`);
-  if (advisoryCount > 0) {
-    for (const adv of stabilityResult.advisories) {
-      console.log(`[PositioningEngine-V3] ADVISORY: ${adv.message}`);
+    const allPositioningText = attemptTerritories.map(t => [
+      t.name, t.enemyDefinition || "", t.narrativeDirection || "", t.contrastAxis || "",
+      ...(t.evidenceSignals || []),
+    ].join(" ")).join(" ");
+    const genericOutputCheck = detectGenericOutput(allPositioningText);
+
+    let traceResult: { signalsUsed: string[]; unmappedElements: string[]; coverage: number; passed: boolean } | null = null;
+    if (parsedStructuredSignals && getAllSignalLabels(parsedStructuredSignals).length > 0) {
+      traceResult = validateSignalTraceability(attemptTerritories, parsedStructuredSignals);
+      signalTraceability = {
+        totalSignalsAvailable: getAllSignalLabels(parsedStructuredSignals).length,
+        signalsUsed: traceResult.signalsUsed,
+        signalCoverage: Math.round(traceResult.coverage * 100) / 100,
+        unmappedElements: traceResult.unmappedElements,
+        validationPassed: traceResult.passed,
+      };
+    }
+
+    const rejectionReasons: string[] = [];
+
+    if (genericOutputCheck.genericDetected) {
+      rejectionReasons.push(`GENERIC_OUTPUT: ${genericOutputCheck.genericPhrases.length} generic phrases detected (${genericOutputCheck.genericPhrases.slice(0, 5).join(", ")}). Replace ALL generic marketing language with audience-signal-specific positioning.`);
+      console.log(`[PositioningEngine-V3] SIGNAL_ENFORCEMENT attempt=${signalEnforcementAttempt} | GENERIC_REJECTED | phrases=${genericOutputCheck.genericPhrases.length}`);
+    }
+
+    if (traceResult && !traceResult.passed) {
+      rejectionReasons.push(`SIGNAL_TRACE_FAILED: ${traceResult.unmappedElements.length} positioning elements not traceable to audience signals (coverage=${(traceResult.coverage * 100).toFixed(1)}%). Unmapped: ${traceResult.unmappedElements.slice(0, 5).join("; ")}. Every positioning element MUST map to a structured signal cluster.`);
+      console.log(`[PositioningEngine-V3] SIGNAL_ENFORCEMENT attempt=${signalEnforcementAttempt} | TRACE_REJECTED | unmapped=${traceResult.unmappedElements.length} | coverage=${(traceResult.coverage * 100).toFixed(1)}%`);
+    }
+
+    if (rejectionReasons.length === 0) {
+      signalEnforcementPassed = true;
+      finalTerritories = attemptTerritories;
+      strategyCards = generateStrategyCards(finalTerritories);
+      console.log(`[PositioningEngine-V3] SIGNAL_ENFORCEMENT PASSED on attempt ${signalEnforcementAttempt}/${MAX_SIGNAL_ENFORCEMENT_ATTEMPTS}`);
+      break;
+    }
+
+    signalRegenerationLog.push(`[Attempt ${signalEnforcementAttempt}] ${rejectionReasons.join(" | ")}`);
+
+    if (signalEnforcementAttempt === MAX_SIGNAL_ENFORCEMENT_ATTEMPTS) {
+      console.log(`[PositioningEngine-V3] SIGNAL_ENFORCEMENT EXHAUSTED after ${MAX_SIGNAL_ENFORCEMENT_ATTEMPTS} attempts — returning SIGNAL_DRIFT`);
+      finalTerritories = attemptTerritories;
+      strategyCards = generateStrategyCards(finalTerritories);
     }
   }
 
-  const strategyCards = generateStrategyCards(finalTerritories);
-
-  const strategicSignalGate = {
-    passedSignals: allStrategicSignals.map((s, i) => ({
-      signalId: `STR-${i}`,
-      snippet: s.signal,
-      sourceCompetitor: s.source,
-      category: s.cluster,
-      confidenceScore: 1,
-      sourceCount: 1,
-      freshnessFactor: 1,
-      crossValidated: true,
-      qualityScore: 1,
-    })),
-    totalInputSignals: allStrategicSignals.length,
-    rejectedSignals: [] as any[],
-    deduplicatedCount: 0,
-    crossValidatedCount: allStrategicSignals.length,
-    averageQuality: 1,
-    gatePass: allStrategicSignals.length >= 3,
-    gateSummary: "",
-  };
-
-  let totalOrphanedClaims = 0;
-  let totalTracedClaims = 0;
-  for (const territory of finalTerritories) {
-    const claims = [territory.name, territory.enemyDefinition, territory.contrastAxis, territory.narrativeDirection].filter(Boolean);
-    const orphanResult = checkForOrphanClaims(claims, strategicSignalGate);
-
-    totalOrphanedClaims += orphanResult.orphanedClaims.length;
-    totalTracedClaims += orphanResult.tracedClaims;
-
-    if (orphanResult.orphanedClaims.length > 0) {
-      for (const orphan of orphanResult.orphanedClaims) {
-        if (!territory.stabilityNotes) territory.stabilityNotes = [];
-        territory.stabilityNotes.push(`[HYPOTHESIS] Claim not directly traceable to MIv3 signal: "${orphan.slice(0, 80)}"`);
-      }
-      territory.confidenceScore = Math.max(0, territory.confidenceScore - (orphanResult.orphanedClaims.length * 0.05));
-    }
-  }
-  if (totalOrphanedClaims > 0) {
-    console.log(`[PositioningEngine-V3] ORPHAN_AUDIT | orphaned=${totalOrphanedClaims} | traced=${totalTracedClaims} | territories=${finalTerritories.length} — orphaned claims flagged as [HYPOTHESIS]`);
-  } else {
-    console.log(`[PositioningEngine-V3] ORPHAN_AUDIT | ZERO_ORPHANS | all ${totalTracedClaims} claims traceable to MIv3 signals`);
-  }
-
-  const primaryTerritory = finalTerritories[0] || null;
-  const executionTimeMs = Date.now() - startTime;
-
-  const allPositioningText = finalTerritories.map(t => [
-    t.name, t.enemyDefinition || "", t.narrativeDirection || "", t.contrastAxis || "",
-    ...(t.evidenceSignals || []),
-  ].join(" ")).join(" ");
-  const genericOutputCheck = detectGenericOutput(allPositioningText);
-  if (genericOutputCheck.genericDetected) {
-    for (const territory of finalTerritories) {
-      territory.confidenceScore = Math.max(0, territory.confidenceScore - genericOutputCheck.penalty);
-    }
-    console.log(`[PositioningEngine-V3] GENERIC_OUTPUT_PENALTY | phrases=${genericOutputCheck.genericPhrases.length} | penalty=${genericOutputCheck.penalty.toFixed(2)}`);
+  if (!signalEnforcementPassed) {
+    const executionTimeMs = Date.now() - startTime;
+    return buildAndPersistEmptyResult(
+      "SIGNAL_DRIFT",
+      `Positioning failed signal enforcement after ${MAX_SIGNAL_ENFORCEMENT_ATTEMPTS} attempts: output contains generic language or untraceable elements. Regeneration log: ${signalRegenerationLog.join(" → ")}`,
+      executionTimeMs, miSnapshotId, audienceSnapshotId, accountId, campaignId,
+      { confidenceScore: 0, signalTraceability },
+    );
   }
 
   const celCompliance = enforcePositioningCompliance(finalTerritories, analyticalEnrichment || null);
@@ -1716,26 +1821,12 @@ export async function runPositioningEngine(
     console.log(`[PositioningEngine-V3] CEL_RESULT | CLEAN | score=1.00 | rootCauses=${celCompliance.rootCausesEvaluated}`);
   }
 
-  let signalTraceability: PositioningEngineResult["signalTraceability"] = undefined;
-  if (parsedStructuredSignals && getAllSignalLabels(parsedStructuredSignals).length > 0) {
-    const traceResult = validateSignalTraceability(finalTerritories, parsedStructuredSignals);
-    signalTraceability = {
-      totalSignalsAvailable: getAllSignalLabels(parsedStructuredSignals).length,
-      signalsUsed: traceResult.signalsUsed,
-      signalCoverage: Math.round(traceResult.coverage * 100) / 100,
-      unmappedElements: traceResult.unmappedElements,
-      validationPassed: traceResult.passed,
-    };
-    if (!traceResult.passed) {
-      for (const territory of finalTerritories) {
-        territory.confidenceScore = Math.max(0, territory.confidenceScore - 0.10);
-        territory.stabilityNotes.push(`[SIGNAL_TRACE] ${traceResult.unmappedElements.length} positioning elements not traceable to audience signals`);
-      }
-      console.log(`[PositioningEngine-V3] SIGNAL_TRACE_FAILED | unmapped=${traceResult.unmappedElements.length} | coverage=${(traceResult.coverage * 100).toFixed(1)}% | used=${traceResult.signalsUsed.length}/${signalTraceability.totalSignalsAvailable}`);
-    } else {
-      console.log(`[PositioningEngine-V3] SIGNAL_TRACE_PASSED | coverage=${(traceResult.coverage * 100).toFixed(1)}% | used=${traceResult.signalsUsed.length}/${signalTraceability.totalSignalsAvailable} | unmapped=${traceResult.unmappedElements.length}`);
-    }
+  if (signalTraceability?.validationPassed) {
+    console.log(`[PositioningEngine-V3] SIGNAL_TRACE_PASSED | coverage=${(signalTraceability.signalCoverage * 100).toFixed(1)}% | used=${signalTraceability.signalsUsed.length}/${signalTraceability.totalSignalsAvailable} | unmapped=${signalTraceability.unmappedElements.length}`);
   }
+
+  const primaryTerritory = finalTerritories[0] || null;
+  const executionTimeMs = Date.now() - startTime;
 
   const rawConfidence = primaryTerritory
     ? Math.round(primaryTerritory.confidenceScore * 100) / 100
@@ -1837,6 +1928,53 @@ export async function runPositioningEngine(
     createdAt: new Date().toISOString(),
     signalTraceability,
   };
+}
+
+async function buildAndPersistEmptyResult(
+  status: PositioningStatus,
+  message: string,
+  executionTimeMs: number,
+  miSnapshotId: string,
+  audienceSnapshotId: string,
+  accountId: string,
+  campaignId: string,
+  extra?: Partial<PositioningEngineResult>,
+): Promise<PositioningEngineResult> {
+  const result = buildEmptyResult(status, message, executionTimeMs, miSnapshotId, audienceSnapshotId);
+  const merged = { ...result, ...extra };
+  try {
+    const [inserted] = await db.insert(positioningSnapshots).values({
+      accountId,
+      campaignId,
+      miSnapshotId,
+      audienceSnapshotId,
+      engineVersion: POSITIONING_ENGINE_VERSION,
+      status,
+      statusMessage: message,
+      territory: JSON.stringify(null),
+      enemyDefinition: "",
+      contrastAxis: "",
+      narrativeDirection: "",
+      differentiationVector: JSON.stringify([]),
+      proofSignals: JSON.stringify([]),
+      strategyCards: JSON.stringify([]),
+      territories: JSON.stringify([]),
+      stabilityResult: JSON.stringify({ isStable: false, checks: [], advisories: [], fallbackApplied: false }),
+      marketPowerAnalysis: JSON.stringify([]),
+      opportunityGaps: JSON.stringify([]),
+      narrativeSaturation: JSON.stringify({}),
+      segmentPriority: JSON.stringify([]),
+      inputSummary: JSON.stringify(merged.inputSummary),
+      confidenceScore: 0,
+      signalTraceability: extra?.signalTraceability ? JSON.stringify(extra.signalTraceability) : null,
+      executionTimeMs,
+    }).returning({ id: positioningSnapshots.id });
+    merged.snapshotId = inserted.id;
+    console.log(`[PositioningEngine-V3] ${status} persisted | snapshot=${inserted.id} | ${message.slice(0, 80)}`);
+  } catch (err: any) {
+    console.error(`[PositioningEngine-V3] Failed to persist ${status} snapshot: ${err.message}`);
+  }
+  return merged;
 }
 
 function buildEmptyResult(

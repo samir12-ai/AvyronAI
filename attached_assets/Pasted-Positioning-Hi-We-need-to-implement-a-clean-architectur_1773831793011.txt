@@ -1,0 +1,192 @@
+Positioning 
+
+Hi,
+
+We need to implement a clean architectural upgrade to fix the core decision inconsistency without adding complexity or new engines.
+
+This is NOT a feature request. This is a system correction to ensure all engines operate on structured intelligence instead of raw interpretation.
+
+---
+
+## 🔴 Core Issue
+
+Currently:
+- Audience Engine performs analysis but outputs unstructured interpretation
+- Positioning Engine still has room to fallback to generic patterns
+- This leads to decision drift (e.g., defaulting to simplicity instead of true root-cause-driven positioning)
+
+---
+
+## 🧠 Required Architecture (MANDATORY)
+
+We need to enforce a Layered Signal Flow:
+
+Market Data (Posts / Hooks)
+→ Audience Engine (Multi-layer analysis)
+→ Structured Signal Layer
+→ Positioning Engine (Selection ONLY)
+
+---
+
+## 🧩 1. Audience Engine Upgrade (Layered Output)
+
+Audience must no longer output paragraphs.
+
+It MUST output structured signals in 3 layers:
+
+### Layer 1 — Surface Signals
+- Extracted pains (from hooks)
+- Extracted desires
+- Dominant themes
+
+### Layer 2 — Pattern Signals
+- Repetition clusters
+- Frequency-weighted patterns
+- Market narrative trends
+
+### Layer 3 — Interpretation Signals (CRITICAL)
+- Root causes (derived, not copied)
+- Psychological drivers
+- Hidden motivations
+
+---
+
+### ✅ Required Output Format
+
+Audience MUST return structured JSON:
+
+{
+  "pain_clusters": [...],
+  "desire_clusters": [...],
+  "pattern_clusters": [...],
+  "root_causes": [...],
+  "psychological_drivers": [...]
+}
+
+No free-text summaries allowed.
+
+---
+
+## 🧩 2. Signal Layer (New Logical Layer — No New Engine)
+
+This is NOT a new service.
+
+This is a data contract enforcement layer:
+
+- All downstream engines MUST consume signals
+- No engine is allowed to re-interpret raw market data
+
+---
+
+## 🧩 3. Positioning Engine Restriction (CRITICAL)
+
+Positioning must be converted to:
+
+> Selection Engine — NOT Interpretation Engine
+
+---
+
+### Hard Rule:
+
+Positioning MUST:
+- Select from root_causes
+- Select from pain_clusters
+- Build narrative ONLY from provided signals
+
+---
+
+### Forbidden Behavior:
+
+- Generating new pains
+- Using generic patterns (simplicity, ease, innovation…)
+- Ignoring signal inputs
+
+---
+
+## 🧪 Mandatory Enforcement
+
+Before returning output:
+
+- Validate that positioning elements map to signals
+- If not:
+  → Reject output
+  → Regenerate OR flag as invalid
+
+---
+
+## 🧪 Acceptance Criteria (STRICT)
+
+This task is NOT complete unless ALL are proven:
+
+---
+
+### 1. Audience Output Validation
+- Provide actual JSON output from Audience
+- Must include all 5 signal categories
+- No paragraph-based output
+
+---
+
+### 2. Positioning Constraint Proof
+- Provide before/after example
+- Show that positioning is built ONLY from signals
+- No external pattern injection
+
+---
+
+### 3. Drift Prevention Test
+- Run at least 3 different datasets
+- Confirm:
+  - No fallback to generic outputs
+  - No repetition of “simplicity/ease” unless explicitly present in signals
+
+---
+
+### 4. Engine Isolation
+- Confirm Positioning does NOT access:
+  - Raw posts
+  - Raw hooks
+- Only structured signals
+
+---
+
+### 5. Logs / Traceability
+- Provide mapping:
+  signal → positioning element
+- Must be visible in logs
+
+---
+
+### 6. Frontend Update (MANDATORY)
+Update UI to show:
+- Extracted signals (Audience output)
+- What Positioning selected from them
+- Clear mapping between both
+
+---
+
+## ❗ Important Notes
+
+- Do NOT add new engines
+- Do NOT modify scraping
+- Do NOT introduce complexity
+
+This is a flow correction, not a rebuild.
+
+---
+
+## 🎯 Final Goal
+
+We want:
+
+> Audience = Thinking Layer  
+> Signals = Source of Truth  
+> Positioning = Decision Layer (Bound by signals)
+
+No guessing. No drift. No generic fallback.
+
+---
+
+Do not mark this complete without full proof of enforcement across the system.
+
+---
