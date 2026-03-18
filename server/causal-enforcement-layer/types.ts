@@ -18,7 +18,7 @@ export interface ComplianceResult {
 
 export interface ComplianceViolation {
   ruleId: string;
-  violationType: "generic_fallback" | "causal_mismatch" | "blocked_pattern" | "missing_alignment";
+  violationType: "generic_fallback" | "causal_mismatch" | "blocked_pattern" | "missing_alignment" | "missing_root_cause" | "missing_causal_chain" | "generic_without_justification" | "shallow_reasoning" | "theme_misalignment";
   severity: "blocking" | "major" | "minor";
   details: string;
   rootCause: string;

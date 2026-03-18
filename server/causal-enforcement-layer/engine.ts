@@ -454,4 +454,254 @@ export function applyCompliancePenalties(
   }
 }
 
+const SHALLOW_OUTPUT_PATTERNS: RegExp[] = [
+  /\beveryone\b.*\bneeds\b/i,
+  /\bunique\b.*\bapproach\b/i,
+  /\bstand\s+out\b.*\bfrom\b.*\bcrowd\b/i,
+  /\bnext\s+level\b/i,
+  /\bgame\s*changer\b/i,
+  /\bcutting\s*edge\b/i,
+  /\bworld\s*class\b/i,
+  /\bbest\s+in\s+class\b/i,
+  /\bunparalleled\b/i,
+  /\bseamless\b.*\bexperience\b/i,
+  /\bholistic\b.*\bapproach\b/i,
+  /\bone\s*stop\s*shop\b/i,
+  /\btailored\b.*\bsolution\b/i,
+  /\bcomprehensive\b.*\bsolution\b/i,
+  /\bleverage\b.*\bpower\b/i,
+  /\bunlock\b.*\bpotential\b/i,
+];
+
+export interface DepthComplianceResult extends ComplianceResult {
+  causalDepthScore: number;
+  rootCauseReferences: number;
+  causalChainReferences: number;
+  barrierReferences: number;
+  depthDiagnostics: {
+    hasRootCauseGrounding: boolean;
+    hasCausalChainUsage: boolean;
+    hasBarrierResolution: boolean;
+    hasBehavioralImpact: boolean;
+    genericTermCount: number;
+    shallowPatternCount: number;
+  };
+}
+
+export function enforceEngineDepthCompliance(
+  engineId: string,
+  outputTexts: string[],
+  ael: AnalyticalPackage | null,
+): DepthComplianceResult {
+  const result: DepthComplianceResult = {
+    engineId,
+    passed: true,
+    score: 1.0,
+    violations: [],
+    appliedRules: [],
+    rootCausesEvaluated: 0,
+    enforcementLog: [],
+    causalDepthScore: 0,
+    rootCauseReferences: 0,
+    causalChainReferences: 0,
+    barrierReferences: 0,
+    depthDiagnostics: {
+      hasRootCauseGrounding: false,
+      hasCausalChainUsage: false,
+      hasBarrierResolution: false,
+      hasBehavioralImpact: false,
+      genericTermCount: 0,
+      shallowPatternCount: 0,
+    },
+  };
+
+  if (!ael || !ael.root_causes || ael.root_causes.length === 0) {
+    result.enforcementLog.push("NO_AEL: No analytical enrichment — depth enforcement skipped");
+    result.causalDepthScore = 0;
+    return result;
+  }
+
+  const { themes, primaryTheme, rootCauseTexts } = extractDominantCausalThemes(ael);
+  result.rootCausesEvaluated = rootCauseTexts.length;
+  result.appliedRules = themes;
+
+  const allOutput = outputTexts.join(" ").toLowerCase();
+
+  let genericTermCount = 0;
+  for (const pattern of GENERIC_FALLBACK_PATTERNS) {
+    const matches = allOutput.match(new RegExp(pattern.source, "gi"));
+    if (matches) genericTermCount += matches.length;
+  }
+  result.depthDiagnostics.genericTermCount = genericTermCount;
+
+  let shallowPatternCount = 0;
+  for (const pattern of SHALLOW_OUTPUT_PATTERNS) {
+    if (pattern.test(allOutput)) shallowPatternCount++;
+  }
+  result.depthDiagnostics.shallowPatternCount = shallowPatternCount;
+
+  let rootCauseRefCount = 0;
+  for (const rc of ael.root_causes) {
+    const deepCause = (rc.deepCause || "").toLowerCase();
+    const surface = (rc.surfaceSignal || "").toLowerCase();
+    const keywords = deepCause.split(/\s+/).filter(w => w.length > 4);
+    const surfaceKeywords = surface.split(/\s+/).filter(w => w.length > 4);
+    const allKeywords = [...keywords, ...surfaceKeywords];
+    const matchCount = allKeywords.filter(kw => allOutput.includes(kw)).length;
+    if (matchCount >= Math.max(1, Math.floor(allKeywords.length * 0.2))) {
+      rootCauseRefCount++;
+    }
+  }
+  result.rootCauseReferences = rootCauseRefCount;
+  result.depthDiagnostics.hasRootCauseGrounding = rootCauseRefCount > 0;
+
+  let chainRefCount = 0;
+  for (const chain of (ael.causal_chains || [])) {
+    const chainText = `${chain.cause || ""} ${chain.impact || ""} ${chain.behavior || ""}`.toLowerCase();
+    const chainWords = chainText.split(/\s+/).filter(w => w.length > 4);
+    const matched = chainWords.filter(w => allOutput.includes(w)).length;
+    if (matched >= Math.max(1, Math.floor(chainWords.length * 0.2))) {
+      chainRefCount++;
+    }
+  }
+  result.causalChainReferences = chainRefCount;
+  result.depthDiagnostics.hasCausalChainUsage = chainRefCount > 0;
+
+  let barrierRefCount = 0;
+  for (const barrier of (ael.buying_barriers || [])) {
+    const barrierText = `${barrier.barrier || ""} ${barrier.rootCause || ""} ${barrier.userThinking || ""}`.toLowerCase();
+    const barrierWords = barrierText.split(/\s+/).filter(w => w.length > 4);
+    const matched = barrierWords.filter(w => allOutput.includes(w)).length;
+    if (matched >= Math.max(1, Math.floor(barrierWords.length * 0.2))) {
+      barrierRefCount++;
+    }
+  }
+  result.barrierReferences = barrierRefCount;
+  result.depthDiagnostics.hasBarrierResolution = barrierRefCount > 0;
+
+  const behaviorKeywords = [
+    "because", "driven by", "root cause", "underlying", "fear of",
+    "believe that", "thinking", "perceive", "assume", "hesitat",
+    "reluctan", "worried", "concern", "barrier", "friction",
+    "resist", "distrust", "skeptic", "uncertain",
+  ];
+  const behaviorHits = behaviorKeywords.filter(kw => allOutput.includes(kw)).length;
+  result.depthDiagnostics.hasBehavioralImpact = behaviorHits >= 2;
+
+  const depthComponents = [
+    result.depthDiagnostics.hasRootCauseGrounding ? 0.30 : 0,
+    result.depthDiagnostics.hasCausalChainUsage ? 0.25 : 0,
+    result.depthDiagnostics.hasBarrierResolution ? 0.20 : 0,
+    result.depthDiagnostics.hasBehavioralImpact ? 0.15 : 0,
+    Math.max(0, 0.10 - (genericTermCount * 0.02) - (shallowPatternCount * 0.03)),
+  ];
+  result.causalDepthScore = Math.round(depthComponents.reduce((a, b) => a + b, 0) * 100) / 100;
+
+  if (!result.depthDiagnostics.hasRootCauseGrounding) {
+    result.violations.push({
+      ruleId: "DEPTH_ROOT_CAUSE",
+      violationType: "missing_root_cause",
+      severity: "major",
+      details: `${engineId} output does not reference any AEL root cause (${rootCauseTexts.length} available)`,
+      rootCause: rootCauseTexts.slice(0, 2).join("; "),
+      engineOutput: outputTexts[0]?.slice(0, 200) || "",
+      requiredDirection: "Output must be grounded in identified root causes, not surface patterns",
+    });
+  }
+
+  if (!result.depthDiagnostics.hasCausalChainUsage && (ael.causal_chains || []).length > 0) {
+    result.violations.push({
+      ruleId: "DEPTH_CAUSAL_CHAIN",
+      violationType: "missing_causal_chain",
+      severity: "major",
+      details: `${engineId} output does not reflect any causal chain (${(ael.causal_chains || []).length} chains available)`,
+      rootCause: (ael.causal_chains || []).slice(0, 2).map(c => `${c.cause}→${c.impact}`).join("; "),
+      engineOutput: outputTexts[0]?.slice(0, 200) || "",
+      requiredDirection: "Output must demonstrate WHY, not just WHAT — use causal chains",
+    });
+  }
+
+  if (genericTermCount >= 3) {
+    result.violations.push({
+      ruleId: "DEPTH_GENERIC_BLOCK",
+      violationType: "generic_without_justification",
+      severity: genericTermCount >= 5 ? "blocking" : "major",
+      details: `${engineId} uses ${genericTermCount} generic terms without causal justification`,
+      rootCause: rootCauseTexts[0] || "",
+      engineOutput: outputTexts[0]?.slice(0, 200) || "",
+      requiredDirection: "Replace generic labels with causally-derived reasoning from AEL",
+    });
+  }
+
+  if (shallowPatternCount >= 2) {
+    result.violations.push({
+      ruleId: "DEPTH_SHALLOW_PATTERN",
+      violationType: "shallow_reasoning",
+      severity: "major",
+      details: `${engineId} contains ${shallowPatternCount} shallow marketing patterns`,
+      rootCause: rootCauseTexts[0] || "",
+      engineOutput: "",
+      requiredDirection: "Remove marketing fluff — build from root causes and behavioral impact",
+    });
+  }
+
+  if (primaryTheme) {
+    const primaryRule = CAUSAL_CONSTRAINT_RULES.find(r => r.id === primaryTheme);
+    if (primaryRule) {
+      const hasAlignment = primaryRule.requiredAxisPatterns.some(p => p.test(allOutput));
+      if (!hasAlignment) {
+        result.violations.push({
+          ruleId: primaryRule.id,
+          violationType: "theme_misalignment",
+          severity: "minor",
+          details: `${engineId} does not address dominant causal theme: ${primaryRule.description}`,
+          rootCause: rootCauseTexts.slice(0, 2).join("; "),
+          engineOutput: outputTexts[0]?.slice(0, 200) || "",
+          requiredDirection: primaryRule.description,
+        });
+      }
+    }
+  }
+
+  const blockingViolations = result.violations.filter(v => v.severity === "blocking");
+  const majorViolations = result.violations.filter(v => v.severity === "major");
+  const minorViolations = result.violations.filter(v => v.severity === "minor");
+
+  if (blockingViolations.length > 0) {
+    result.score = 0;
+    result.passed = false;
+  } else {
+    result.score = Math.max(0, 1.0 - (majorViolations.length * 0.30) - (minorViolations.length * 0.10));
+    result.passed = result.score >= 0.4;
+  }
+
+  result.enforcementLog.push(
+    `DEPTH_CHECK: depthScore=${result.causalDepthScore} | rootCauseRefs=${rootCauseRefCount} | chainRefs=${chainRefCount} | barrierRefs=${barrierRefCount} | generic=${genericTermCount} | shallow=${shallowPatternCount}`,
+  );
+  result.enforcementLog.push(
+    `RESULT: passed=${result.passed} | score=${result.score.toFixed(2)} | violations=${result.violations.length} (blocking=${blockingViolations.length}, major=${majorViolations.length}, minor=${minorViolations.length})`,
+  );
+
+  return result;
+}
+
+export function applyDepthPenalty(
+  confidenceScore: number,
+  depthResult: DepthComplianceResult,
+): number {
+  if (depthResult.passed && depthResult.violations.length === 0) return confidenceScore;
+
+  let penalty = 0;
+  for (const v of depthResult.violations) {
+    if (v.severity === "blocking") return 0;
+    penalty += v.severity === "major" ? 0.15 : 0.05;
+  }
+
+  if (depthResult.causalDepthScore < 0.3) {
+    penalty += 0.10;
+  }
+
+  return Math.max(0, Math.round((confidenceScore - penalty) * 100) / 100);
+}
+
 export { CAUSAL_CONSTRAINT_RULES };

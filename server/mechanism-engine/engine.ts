@@ -11,6 +11,12 @@ import {
   assessDataReliability,
   normalizeConfidence,
 } from "../engine-hardening";
+import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import {
+  buildCausalDirectiveForPrompt,
+  enforceEngineDepthCompliance,
+  applyDepthPenalty,
+} from "../causal-enforcement-layer/engine";
 import type {
   MechanismEnginePositioningInput,
   MechanismEngineDifferentiationInput,
@@ -79,6 +85,7 @@ export async function runMechanismEngine(
   positioning: MechanismEnginePositioningInput,
   differentiation: MechanismEngineDifferentiationInput,
   accountId: string,
+  analyticalEnrichment?: any,
 ): Promise<MechanismEngineResult> {
   const startTime = Date.now();
   const diagnostics: Record<string, any> = {};
@@ -111,6 +118,12 @@ export async function runMechanismEngine(
     };
   }
 
+  const aelBlock = formatAELForPrompt(analyticalEnrichment || null);
+  const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
+  if (aelBlock.length > 0) {
+    console.log(`[MechanismEngine] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars`);
+  }
+
   const pillarSummary = pillars.slice(0, 5).map((p: any) => `"${p.name || p.territory}": ${p.description || ""}`.slice(0, 120)).join("\n");
   const existingMechanismSection = diffCore && diffCore.mechanismType !== "none" ? `
 EXISTING MECHANISM FROM DIFFERENTIATION ENGINE (use as foundation):
@@ -124,9 +137,15 @@ Logic: ${diffCore.mechanismLogic}
 You MUST keep the core identity of this mechanism. Refine it to strengthen axis alignment, do NOT replace it entirely.` : `
 No validated mechanism exists yet. Generate a NEW mechanism from scratch based on the positioning axis and differentiation pillars.`;
 
-  const prompt = `You are a Mechanism Architect. Your job is to generate a strategic mechanism that is STRICTLY aligned with the positioning axis.
+  const prompt = `You are a Mechanism Architect. Your job is to generate a strategic mechanism that is STRICTLY aligned with the positioning axis and GROUNDED in causal analysis.
 
-═══ POSITIONING AXIS (IMMUTABLE — ALL MECHANISMS MUST ALIGN) ═══
+${aelBlock ? `═══ ANALYTICAL ENRICHMENT LAYER (CAUSAL FOUNDATION — MANDATORY) ═══
+${aelBlock}
+
+${causalDirective}
+
+Your mechanism MUST derive from the root causes and causal chains above. Every step in the mechanism must address a real behavioral barrier or causal factor. Do NOT invent steps that aren't grounded in the analysis.
+` : ""}═══ POSITIONING AXIS (IMMUTABLE — ALL MECHANISMS MUST ALIGN) ═══
 Primary Axis: "${primaryAxis}"
 Contrast Axis: "${positioning.contrastAxis || "not defined"}"
 Enemy: "${positioning.enemyDefinition || "not defined"}"
@@ -230,9 +249,32 @@ Respond with ONLY valid JSON, no markdown:
     }
 
     const finalValidation = validateMechanismAxisAlignment(primaryMech, primaryAxis);
-    const confidence = computeConfidence(primaryMech, primaryAxis, pillars, finalValidation.consistent);
 
-    console.log(`[MechanismEngine] COMPLETE | mechanism="${primaryMech.mechanismName}" | axis=${primaryAxis} | consistent=${finalValidation.consistent} | confidence=${confidence.toFixed(2)}`);
+    const celDepth = enforceEngineDepthCompliance(
+      "mechanism",
+      [
+        primaryMech.mechanismDescription,
+        primaryMech.mechanismLogic,
+        primaryMech.mechanismPromise,
+        primaryMech.mechanismProblem,
+        ...primaryMech.mechanismSteps,
+      ],
+      analyticalEnrichment || null,
+    );
+    diagnostics.celDepthCompliance = celDepth;
+    if (celDepth.violations.length > 0) {
+      for (const logEntry of celDepth.enforcementLog) {
+        console.log(`[MechanismEngine] CEL_DEPTH: ${logEntry}`);
+      }
+    } else {
+      console.log(`[MechanismEngine] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
+    }
+
+    const rawConfidence = computeConfidence(primaryMech, primaryAxis, pillars, finalValidation.consistent);
+    const depthPenaltyFactor = celDepth.passed ? 1.0 : Math.max(0.5, celDepth.score);
+    const confidence = clamp(rawConfidence * depthPenaltyFactor);
+
+    console.log(`[MechanismEngine] COMPLETE | mechanism="${primaryMech.mechanismName}" | axis=${primaryAxis} | consistent=${finalValidation.consistent} | confidence=${confidence.toFixed(2)} | depthScore=${celDepth.causalDepthScore}`);
 
     return {
       status: finalValidation.consistent ? STATUS.COMPLETE : STATUS.AXIS_REJECTED,
@@ -249,6 +291,7 @@ Respond with ONLY valid JSON, no markdown:
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
       diagnostics,
+      celDepthCompliance: celDepth,
     };
   } catch (error: any) {
     console.error(`[MechanismEngine] ERROR | ${error.message}`);

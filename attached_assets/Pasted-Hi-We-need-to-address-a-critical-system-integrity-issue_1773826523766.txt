@@ -1,0 +1,150 @@
+Hi,
+
+We need to address a critical system integrity issue regarding the Analytical Enrichment Layer (AEL v2).
+
+This is not about adding features — this is about enforcement.
+
+---
+
+## 🔴 Core Problem
+
+The AEL (deep reasoning layer) is:
+- Built ✅  
+- Injected into engines ✅  
+- Working in Positioning ✅  
+
+But:
+
+> It is NOT being enforced across all engines (especially Differentiation and Mechanism).
+
+This results in:
+- Generic outputs  
+- Surface-level reasoning  
+- Mechanisms built on weak foundations  
+- False confidence scores  
+
+---
+
+## 🧠 Required Change (MANDATORY)
+
+We must convert AEL from:
+> Optional enrichment layer
+
+To:
+> Hard reasoning constraint across the entire system
+
+---
+
+## ⚙️ System Rule (Non-Negotiable)
+
+No engine is allowed to return output unless:
+
+1. It uses AEL-derived reasoning  
+2. It demonstrates causal depth (WHY, not WHAT)  
+3. It builds outputs from root causes, not surface patterns  
+
+---
+
+## 🧩 Enforcement Layer (Apply to ALL Engines)
+
+This must be enforced at the engine level:
+
+### ❌ Block if:
+- Output contains generic labels (e.g., “simplicity”, “innovation”) without causal justification  
+- No root cause is identified  
+- No causal chain is present  
+- Output is pattern-based instead of reasoning-based  
+
+### ✅ Allow only if:
+- Each output element maps to:
+  - Root cause  
+  - Behavioral impact  
+  - Conversion implication  
+- AEL dimensions are clearly used (causal chains, barriers, contradictions, etc.)
+
+---
+
+## 🔍 Engines That MUST Be Updated
+
+- Differentiation Engine  
+- Mechanism Engine  
+- Offer Engine  
+- Funnel Engine  
+- Awareness Engine  
+- Persuasion Engine  
+
+(All downstream engines — no exceptions)
+
+---
+
+## 🧪 Acceptance Criteria (STRICT)
+
+This task is NOT complete unless ALL conditions are met:
+
+---
+
+### 1. AEL Usage Proof per Engine
+Provide sample outputs from EACH engine showing:
+- Root cause extraction  
+- Causal chain usage  
+- Buyer thinking integration  
+
+---
+
+### 2. Rejection Behavior
+Demonstrate that engines:
+- Reject shallow outputs  
+- Regenerate until causal depth is met  
+
+---
+
+### 3. Before vs After Comparison
+Show:
+- Previous (generic output)  
+- New (causal, deep reasoning output)
+
+---
+
+### 4. Mechanism Validation
+- Mechanism must be derived from causal chains  
+- If no causal chain → mechanism = BLOCKED (not “NONE”, not fallback)
+
+---
+
+### 5. Confidence Correction
+- Confidence must DROP if depth is missing  
+- High confidence is ONLY allowed with strong causal grounding  
+
+---
+
+### 6. Frontend Reflection (MANDATORY)
+UI must show:
+- Root causes used  
+- Causal chain behind each output  
+- “Why this decision was made”
+
+---
+
+## ❗ Important Notes
+
+- Do NOT change scraping  
+- Do NOT add new engines  
+- Do NOT bypass this with fallback logic  
+
+This is a discipline enforcement task, not a feature task.
+
+---
+
+## 🎯 Final Goal
+
+We want a system where:
+
+> No output exists without deep reasoning  
+> No decision exists without causal justification  
+> No engine can bypass AEL
+
+---
+
+Do not mark this complete without full proof across all engines.
+
+---

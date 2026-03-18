@@ -263,7 +263,11 @@ function CELCompliancePanel({ campaignId, isDark }: { campaignId: string; isDark
         </View>
       )}
 
-      {report.engineResults?.map((er: any, i: number) => (
+      {report.engineResults?.map((er: any, i: number) => {
+        const depthScore = er.causalDepthScore;
+        const hasDepth = depthScore !== undefined;
+        const depthColor = depthScore >= 0.6 ? '#22c55e' : depthScore >= 0.3 ? '#f59e0b' : '#ef4444';
+        return (
         <View key={i} style={[s.insightCard, { backgroundColor: isDark ? '#252542' : '#ffffff', marginTop: 6 }]}>
           <View style={s.insightHeader}>
             <Text style={[s.sectionLabel, { color: text, fontWeight: '600' as const }]}>{er.engineId}</Text>
@@ -271,7 +275,65 @@ function CELCompliancePanel({ campaignId, isDark }: { campaignId: string; isDark
               <Text style={[s.confText, { color: er.passed ? '#22c55e' : '#ef4444' }]}>{er.passed ? 'PASS' : 'FAIL'}</Text>
             </View>
             <Text style={[s.tagText, { color: muted }]}>{Math.round(er.score * 100)}%</Text>
+            {hasDepth && (
+              <View style={[s.confBadge, { backgroundColor: depthColor + '22' }]}>
+                <Text style={[s.confText, { color: depthColor }]}>depth {Math.round(depthScore * 100)}%</Text>
+              </View>
+            )}
           </View>
+
+          {hasDepth && er.depthDiagnostics && (
+            <View style={{ marginTop: 4, flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+              {er.depthDiagnostics.hasRootCauseGrounding && (
+                <View style={[s.tag, { backgroundColor: '#22c55e22' }]}>
+                  <Text style={[s.tagText, { color: '#22c55e' }]}>root causes</Text>
+                </View>
+              )}
+              {er.depthDiagnostics.hasCausalChainUsage && (
+                <View style={[s.tag, { backgroundColor: '#22c55e22' }]}>
+                  <Text style={[s.tagText, { color: '#22c55e' }]}>causal chains</Text>
+                </View>
+              )}
+              {er.depthDiagnostics.hasBarrierResolution && (
+                <View style={[s.tag, { backgroundColor: '#22c55e22' }]}>
+                  <Text style={[s.tagText, { color: '#22c55e' }]}>barriers</Text>
+                </View>
+              )}
+              {er.depthDiagnostics.hasBehavioralImpact && (
+                <View style={[s.tag, { backgroundColor: '#22c55e22' }]}>
+                  <Text style={[s.tagText, { color: '#22c55e' }]}>behavioral</Text>
+                </View>
+              )}
+              {!er.depthDiagnostics.hasRootCauseGrounding && (
+                <View style={[s.tag, { backgroundColor: '#ef444422' }]}>
+                  <Text style={[s.tagText, { color: '#ef4444' }]}>no root causes</Text>
+                </View>
+              )}
+              {!er.depthDiagnostics.hasCausalChainUsage && (
+                <View style={[s.tag, { backgroundColor: '#ef444422' }]}>
+                  <Text style={[s.tagText, { color: '#ef4444' }]}>no causal chains</Text>
+                </View>
+              )}
+              {er.depthDiagnostics.genericTermCount > 0 && (
+                <View style={[s.tag, { backgroundColor: '#f59e0b22' }]}>
+                  <Text style={[s.tagText, { color: '#f59e0b' }]}>{er.depthDiagnostics.genericTermCount} generic</Text>
+                </View>
+              )}
+              {er.depthDiagnostics.shallowPatternCount > 0 && (
+                <View style={[s.tag, { backgroundColor: '#f59e0b22' }]}>
+                  <Text style={[s.tagText, { color: '#f59e0b' }]}>{er.depthDiagnostics.shallowPatternCount} shallow</Text>
+                </View>
+              )}
+            </View>
+          )}
+
+          {hasDepth && (er.rootCauseReferences > 0 || er.causalChainReferences > 0 || er.barrierReferences > 0) && (
+            <View style={{ marginTop: 4 }}>
+              <Text style={[s.evidenceText, { color: muted }]}>
+                Refs: {er.rootCauseReferences} root causes, {er.causalChainReferences} chains, {er.barrierReferences} barriers
+              </Text>
+            </View>
+          )}
 
           {er.violations?.length > 0 && er.violations.map((v: any, vi: number) => (
             <View key={vi} style={{ marginTop: 4 }}>
@@ -293,7 +355,8 @@ function CELCompliancePanel({ campaignId, isDark }: { campaignId: string; isDark
             <Text style={[s.reasonText, { color: '#22c55e', marginTop: 2 }]}>All outputs aligned with causal root causes</Text>
           )}
         </View>
-      ))}
+        );
+      })}
     </View>
   );
 }

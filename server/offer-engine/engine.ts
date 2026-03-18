@@ -1,6 +1,10 @@
 import { aiChat } from "../ai-client";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
-import { buildCausalDirectiveForPrompt } from "../causal-enforcement-layer/engine";
+import {
+  buildCausalDirectiveForPrompt,
+  enforceEngineDepthCompliance,
+  applyDepthPenalty,
+} from "../causal-enforcement-layer/engine";
 import { loadProductDNA, formatProductDNAForPrompt, type ProductDNA } from "../shared/product-dna";
 import { detectGenericOutput, checkCrossEngineAlignment, enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
 
@@ -2415,6 +2419,26 @@ export async function runOfferEngine(
     }
     diagnostics.crossEngineAlignment = alignmentResult;
 
+    const celDepth = enforceEngineDepthCompliance(
+    "offer",
+    [
+      primaryOffer.offerName || "",
+      primaryOffer.coreOutcome || "",
+      primaryOffer.mechanismDescription || "",
+      ...(primaryOffer.deliverables || []).map((d: any) => typeof d === "string" ? d : `${d.name || ""} ${d.description || ""}`),
+    ],
+    analyticalEnrichment || null,
+  );
+  diagnostics.celDepthCompliance = celDepth;
+  if (celDepth.violations.length > 0) {
+    for (const logEntry of celDepth.enforcementLog) {
+      console.log(`[OfferEngine-V4] CEL_DEPTH: ${logEntry}`);
+    }
+  } else {
+    console.log(`[OfferEngine-V4] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
+  }
+  const depthPenaltyFactor = celDepth.passed ? 1.0 : Math.max(0.5, celDepth.score);
+
     const rawConfidence = clamp(
     primaryOffer.offerStrengthScore *
     (posConsistency.consistent ? 1 : 0.7) *
@@ -2423,7 +2447,8 @@ export async function runOfferEngine(
     (primaryOffer.completeness.complete ? 1 : 0.6) *
     (genericOutputCheck.genericDetected ? (1 - genericOutputCheck.penalty) : 1) *
     (1 - alignmentResult.confidencePenalty) *
-    (offerAlignmentValidation.aligned ? 1 : 0.75)
+    (offerAlignmentValidation.aligned ? 1 : 0.75) *
+    depthPenaltyFactor
   );
   const confidenceScore = normalizeConfidence(rawConfidence, dataReliability);
   const confidenceNormalized = rawConfidence !== confidenceScore;
@@ -2497,6 +2522,7 @@ export async function runOfferEngine(
       groundingRatio: primaryGrounding.groundingRatio,
       strippedClaims: primaryGrounding.strippedClaims,
     },
+    celDepthCompliance: celDepth,
   };
 }
 

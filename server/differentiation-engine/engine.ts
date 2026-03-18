@@ -1,6 +1,10 @@
 import { aiChat } from "../ai-client";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
-import { buildCausalDirectiveForPrompt } from "../causal-enforcement-layer/engine";
+import {
+  buildCausalDirectiveForPrompt,
+  enforceEngineDepthCompliance,
+  applyDepthPenalty,
+} from "../causal-enforcement-layer/engine";
 import {
   ENGINE_VERSION,
   DIFFERENTIATION_SCORE_WEIGHTS,
@@ -1258,11 +1262,29 @@ export async function runDifferentiationEngine(
     console.log(`[DifferentiationEngine-V3] GENERIC_OUTPUT_PENALTY | phrases=${genericOutputCheck.genericPhrases.length} | penalty=${genericOutputCheck.penalty.toFixed(2)}`);
   }
 
+  const celDepth = enforceEngineDepthCompliance(
+    "differentiation",
+    [
+      ...finalPillars.map(p => `${p.name} ${p.description}`),
+      ...finalClaims.map(c => c.claim),
+      finalMechanism.description,
+    ],
+    analyticalEnrichment || null,
+  );
+  if (celDepth.violations.length > 0) {
+    for (const logEntry of celDepth.enforcementLog) {
+      console.log(`[DifferentiationEngine-V3] CEL_DEPTH: ${logEntry}`);
+    }
+  } else {
+    console.log(`[DifferentiationEngine-V3] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
+  }
+
   const avgClaimScore = finalClaims.length > 0 ? finalClaims.reduce((s, c) => s + c.overallScore, 0) / finalClaims.length : 0;
   const objectionDensityFactor = lowObjectionDensity ? 0.85 : 1.0;
   const genericPenaltyFactor = genericOutputCheck.genericDetected ? (1 - genericOutputCheck.penalty) : 1;
+  const depthPenaltyFactor = celDepth.passed ? 1.0 : Math.max(0.5, celDepth.score);
   const stabilityFactor = l12Stability.stable ? (l12Stability.lowConfidence ? 0.75 : 1) : 0.6;
-  const rawConfidence = clamp(avgClaimScore * stabilityFactor * objectionDensityFactor * genericPenaltyFactor);
+  const rawConfidence = clamp(avgClaimScore * stabilityFactor * objectionDensityFactor * genericPenaltyFactor * depthPenaltyFactor);
   const confidenceScore = normalizeConfidence(rawConfidence, dataReliability);
   const confidenceNormalized = rawConfidence !== confidenceScore;
   diagnostics.confidenceNormalized = confidenceNormalized;
@@ -1294,5 +1316,6 @@ export async function runDifferentiationEngine(
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,
     layerDiagnostics: diagnostics,
+    celDepthCompliance: celDepth,
   };
 }

@@ -17,6 +17,10 @@ import {
   MIN_QUALIFYING_SIGNALS,
 } from "../shared/signal-lineage";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import {
+  enforceEngineDepthCompliance,
+  applyDepthPenalty,
+} from "../causal-enforcement-layer/engine";
 import type {
   AwarenessPositioningInput,
   AwarenessDifferentiationInput,
@@ -870,6 +874,31 @@ export async function runAwarenessEngine(
     }
   }
 
+  const celDepth = enforceEngineDepthCompliance(
+    "awareness",
+    [
+      primaryRoute.routeName || "",
+      primaryRoute.entryMechanismType || "",
+      primaryRoute.targetReadinessStage || "",
+      primaryRoute.triggerClass || "",
+      primaryRoute.trustRequirement || "",
+      primaryRoute.funnelCompatibility || "",
+      ...primaryRoute.frictionNotes,
+    ],
+    analyticalEnrichment || null,
+  );
+  if (celDepth.violations.length > 0) {
+    for (const logEntry of celDepth.enforcementLog) {
+      console.log(`[AwarenessEngine-V3] CEL_DEPTH: ${logEntry}`);
+    }
+    if (!celDepth.passed) {
+      primaryRoute.awarenessStrengthScore = applyDepthPenalty(primaryRoute.awarenessStrengthScore, celDepth);
+      alternativeRoute.awarenessStrengthScore = applyDepthPenalty(alternativeRoute.awarenessStrengthScore, celDepth);
+    }
+  } else {
+    console.log(`[AwarenessEngine-V3] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
+  }
+
   return {
     status: STATUS.COMPLETE,
     statusMessage: confidenceNormalized
@@ -885,6 +914,7 @@ export async function runAwarenessEngine(
     confidenceNormalized,
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,
+    celDepthCompliance: celDepth,
   };
 }
 

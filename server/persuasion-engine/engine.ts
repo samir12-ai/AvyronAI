@@ -25,6 +25,10 @@ import {
   MESSAGE_STEP_CATEGORY_MAP,
 } from "./constants";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import {
+  enforceEngineDepthCompliance,
+  applyDepthPenalty,
+} from "../causal-enforcement-layer/engine";
 import { enforceBoundaryWithSanitization } from "../engine-hardening";
 import { assessStrategyAcceptability } from "../shared/strategy-acceptability";
 import {
@@ -1992,6 +1996,29 @@ export function analyzePersuasion(
     structuralWarnings.push(...outputBoundaryCheck.warnings);
   }
 
+  const celDepth = enforceEngineDepthCompliance(
+    "persuasion",
+    [
+      routes.primary.routeName || "",
+      routes.primary.persuasionMode || "",
+      ...routes.primary.primaryInfluenceDrivers.map((d: any) => typeof d === "string" ? d : `${d.driver || ""} ${d.rationale || ""}`),
+      ...routes.primary.objectionPriorities.map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""}`),
+      ...routes.primary.messageOrderLogic.map((m: any) => typeof m === "string" ? m : `${m.step || ""} ${m.rationale || ""}`),
+    ],
+    analyticalEnrichment || null,
+  );
+  if (celDepth.violations.length > 0) {
+    for (const logEntry of celDepth.enforcementLog) {
+      console.log(`[PersuasionEngine-V3] CEL_DEPTH: ${logEntry}`);
+    }
+    if (!celDepth.passed) {
+      routes.primary.persuasionStrengthScore = applyDepthPenalty(routes.primary.persuasionStrengthScore, celDepth);
+      routes.alternative.persuasionStrengthScore = applyDepthPenalty(routes.alternative.persuasionStrengthScore, celDepth);
+    }
+  } else {
+    console.log(`[PersuasionEngine-V3] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
+  }
+
   const finalLayersPassed = allLayers.filter(l => l.passed).length;
   const finalConfidence = routes.primary.persuasionStrengthScore;
   const acceptability = assessStrategyAcceptability(
@@ -2015,6 +2042,7 @@ export function analyzePersuasion(
     engineVersion: ENGINE_VERSION,
     autoCorrection,
     strategyAcceptability: acceptability,
+    celDepthCompliance: celDepth,
   };
 }
 

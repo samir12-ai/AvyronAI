@@ -308,6 +308,11 @@ async function executeEngine(
             console.log(`[Orchestrator] CEL_DIFFERENTIATION | violations=${celResult.violations.length} | score=${celResult.score.toFixed(2)}`);
           }
         }
+        if (result.celDepthCompliance) {
+          if (!ctx.celResults) ctx.celResults = [];
+          ctx.celResults.push(result.celDepthCompliance);
+          console.log(`[Orchestrator] CEL_DIFFERENTIATION_DEPTH | depthScore=${result.celDepthCompliance.causalDepthScore} | violations=${result.celDepthCompliance.violations.length}`);
+        }
         break;
       }
 
@@ -329,9 +334,17 @@ async function executeEngine(
           claimStructures: ctx.differentiation?.claimStructures || [],
           proofArchitecture: ctx.differentiation?.proofArchitecture || [],
         };
-        const result = await runMechanismEngine(positioningForMech, diffForMech, config.accountId);
+        const result = await runMechanismEngine(positioningForMech, diffForMech, config.accountId, ctx.analyticalEnrichment);
         output = result;
         ctx.mechanism = result;
+
+        if (result.celDepthCompliance) {
+          if (!ctx.celResults) ctx.celResults = [];
+          ctx.celResults.push(result.celDepthCompliance);
+          if (result.celDepthCompliance.violations.length > 0) {
+            console.log(`[Orchestrator] CEL_MECHANISM_DEPTH | violations=${result.celDepthCompliance.violations.length} | score=${result.celDepthCompliance.score.toFixed(2)} | depthScore=${result.celDepthCompliance.causalDepthScore}`);
+          }
+        }
         break;
       }
 
@@ -360,6 +373,11 @@ async function executeEngine(
             console.log(`[Orchestrator] CEL_OFFER | violations=${celResult.violations.length} | score=${celResult.score.toFixed(2)}`);
           }
         }
+        if (result.celDepthCompliance) {
+          if (!ctx.celResults) ctx.celResults = [];
+          ctx.celResults.push(result.celDepthCompliance);
+          console.log(`[Orchestrator] CEL_OFFER_DEPTH | depthScore=${result.celDepthCompliance.causalDepthScore} | violations=${result.celDepthCompliance.violations.length}`);
+        }
         break;
       }
 
@@ -378,6 +396,12 @@ async function executeEngine(
         output = result;
         snapshotId = result.snapshotId;
         ctx.awareness = result;
+
+        if (result.celDepthCompliance) {
+          if (!ctx.celResults) ctx.celResults = [];
+          ctx.celResults.push(result.celDepthCompliance);
+          console.log(`[Orchestrator] CEL_AWARENESS_DEPTH | depthScore=${result.celDepthCompliance.causalDepthScore} | violations=${result.celDepthCompliance.violations.length}`);
+        }
         break;
       }
 
@@ -417,6 +441,11 @@ async function executeEngine(
           if (celResult.violations.length > 0) {
             console.log(`[Orchestrator] CEL_FUNNEL | violations=${celResult.violations.length} | score=${celResult.score.toFixed(2)}`);
           }
+        }
+        if (result.celDepthCompliance) {
+          if (!ctx.celResults) ctx.celResults = [];
+          ctx.celResults.push(result.celDepthCompliance);
+          console.log(`[Orchestrator] CEL_FUNNEL_DEPTH | depthScore=${result.celDepthCompliance.causalDepthScore} | violations=${result.celDepthCompliance.violations.length}`);
         }
         break;
       }
@@ -462,6 +491,11 @@ async function executeEngine(
           if (celResult.violations.length > 0) {
             console.log(`[Orchestrator] CEL_PERSUASION | violations=${celResult.violations.length} | score=${celResult.score.toFixed(2)}`);
           }
+        }
+        if (result.celDepthCompliance) {
+          if (!ctx.celResults) ctx.celResults = [];
+          ctx.celResults.push(result.celDepthCompliance);
+          console.log(`[Orchestrator] CEL_PERSUASION_DEPTH | depthScore=${result.celDepthCompliance.causalDepthScore} | violations=${result.celDepthCompliance.violations.length}`);
         }
         break;
       }

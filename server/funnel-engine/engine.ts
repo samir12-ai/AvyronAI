@@ -1,6 +1,10 @@
 import { aiChat } from "../ai-client";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
-import { buildCausalDirectiveForPrompt } from "../causal-enforcement-layer/engine";
+import {
+  buildCausalDirectiveForPrompt,
+  enforceEngineDepthCompliance,
+  applyDepthPenalty,
+} from "../causal-enforcement-layer/engine";
 import { detectGenericOutput, checkCrossEngineAlignment, enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
 
 function safeJsonParse(text: any): any {
@@ -1419,13 +1423,33 @@ export async function runFunnelEngine(
 
   const criticalFrictionPoints = primaryFunnel.frictionMap.filter(f => f.severity > 0.7).length;
 
+  const celDepth = enforceEngineDepthCompliance(
+    "funnel",
+    [
+      primaryFunnel.funnelType || "",
+      ...(primaryFunnel.frictionMap || []).map((f: any) => `${f.stage || ""} ${f.frictionType || ""} ${f.mitigation || ""}`),
+      ...(primaryFunnel.trustPath || []).map((t: any) => `${t.stage || ""} ${t.proofType || ""} ${t.rationale || ""}`),
+    ],
+    analyticalEnrichment || null,
+  );
+  diagnostics.celDepthCompliance = celDepth;
+  if (celDepth.violations.length > 0) {
+    for (const logEntry of celDepth.enforcementLog) {
+      console.log(`[FunnelEngine-V3] CEL_DEPTH: ${logEntry}`);
+    }
+  } else {
+    console.log(`[FunnelEngine-V3] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
+  }
+  const depthPenaltyFactor = celDepth.passed ? 1.0 : Math.max(0.5, celDepth.score);
+
   const rawConfidence = clamp(
     primaryFunnel.funnelStrengthScore *
     (boundaryCheck.passed ? 1 : 0) *
     (primaryFunnel.integrityResult.passed ? 1 : 0.6) *
     (l1Eligibility.eligible ? 1 : 0.5) *
     (genericOutputCheck.genericDetected ? (1 - genericOutputCheck.penalty) : 1) *
-    (1 - alignmentResult.confidencePenalty)
+    (1 - alignmentResult.confidencePenalty) *
+    depthPenaltyFactor
   );
   const confidenceScore = normalizeConfidence(rawConfidence, dataReliability);
   const confidenceNormalized = rawConfidence !== confidenceScore;
@@ -1483,5 +1507,6 @@ export async function runFunnelEngine(
     engineVersion: ENGINE_VERSION,
     layerDiagnostics: diagnostics,
     strategyAcceptability: acceptability,
+    celDepthCompliance: celDepth,
   };
 }

@@ -54,4 +54,5 @@ export interface MechanismEngineResult {
   executionTimeMs: number;
   engineVersion: number;
   diagnostics: Record<string, any>;
+  celDepthCompliance?: any;
 }
