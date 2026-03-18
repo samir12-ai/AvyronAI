@@ -1,0 +1,322 @@
+:::writing{variant=“email” id=“91827” subject=“Implement BuildPlanLayer + Actionability Enforcement (Final Decision Layer)”}
+Hi,
+
+We are now at the final stage of the system.
+
+All engines are producing deep, validated, and grounded outputs.
+However, the system still lacks one critical capability:
+
+Converting analysis into clear, actionable decisions.
+
+⸻
+
+🔴 Core Problem
+
+The system currently:
+	•	Analyzes deeply ✅
+	•	Enforces signal grounding and depth ✅
+	•	Rejects weak outputs ✅
+
+But:
+
+It does NOT produce a clear execution plan.
+
+Users still don’t know:
+	•	What positioning to use
+	•	What to say
+	•	What to build
+	•	What to publish
+
+⸻
+
+🧠 Required Solution
+
+We need to implement a new final layer:
+
+BuildPlanLayer (Decision + Execution Layer)
+
+This layer must sit AFTER all engines and act as:
+
+The single source of truth for execution
+
+⸻
+
+⚙️ Responsibilities
+
+The BuildPlanLayer must:
+	1.	Consume outputs from ALL engines:
+	•	Market Intelligence
+	•	Audience
+	•	Positioning
+	•	Differentiation
+	•	Mechanism
+	•	Offer
+	•	Funnel
+	•	Awareness
+	•	Persuasion
+	2.	Extract only:
+	•	High-confidence signals
+	•	Validated claims (passed grounding + depth gates)
+	3.	Compress everything into:
+
+Clear, final decisions (not analysis)
+
+⸻
+
+❗ Critical Rule
+
+This layer must NOT output:
+	•	paragraphs
+	•	explanations
+	•	multiple options
+	•	diagnostics
+
+Only:
+
+Final, usable decisions
+
+⸻
+
+🧩 Required Output Structure (STRICT)
+
+Return EXACTLY these 7 blocks:
+
+⸻
+
+1. Positioning
+	•	One sentence only
+	•	Clear and specific
+
+⸻
+
+2. Differentiation
+	•	One dominant angle
+	•	No lists
+
+⸻
+
+3. Mechanism
+	•	Name
+	•	One-line explanation
+
+⸻
+
+4. Offer
+	•	Ready-to-use offer statement
+
+⸻
+
+5. Funnel
+	•	3 steps only:
+	•	Top (attention)
+	•	Middle (trust)
+	•	Bottom (conversion)
+
+⸻
+
+6. Content DNA Plan
+	•	Weekly structure:
+	•	Reels
+	•	Carousels
+	•	Stories
+	•	Content types:
+	•	Problems
+	•	Proof
+	•	Education
+	•	Conversion
+
+⸻
+
+7. KPI / Execution Rules
+	•	Posting frequency
+	•	Content mix
+	•	Conversion targets (if available)
+
+⸻
+
+🔥 NEW REQUIREMENT — Actionability Enforcement
+
+Add a new validation layer:
+
+enforceActionability(output)
+
+This runs AFTER BuildPlanLayer.
+
+⸻
+
+It must reject outputs that are:
+	•	Vague
+	•	Generic
+	•	Not directly usable
+	•	Missing specificity
+
+⸻
+
+Examples
+
+❌ Reject:
+
+“Focus on simplicity”
+
+✅ Accept:
+
+“Position as the only AI tool that delivers clear reports in under 5 minutes”
+
+⸻
+
+⚙️ Actionability Criteria
+
+Each output must pass:
+	•	Specificity (clear claim)
+	•	Clarity (no ambiguity)
+	•	Direct usability (user can execute immediately)
+
+If failed:
+	•	Regenerate (max 2 attempts)
+	•	If still failing → ACTIONABILITY_FAILED
+
+⸻
+
+🔗 Integration Rules
+	•	BuildPlanLayer must only consume:
+	•	Outputs that passed:
+	•	DepthGate
+	•	SignalGrounding
+	•	No raw or failed outputs allowed
+
+⸻
+
+🖥️ Frontend Requirements
+
+Replace current Execution Pipeline section with:
+
+Execution Plan
+
+Display:
+	•	7 cards (one per output block)
+	•	Clean UI
+	•	No scores / no diagnostics
+
+⸻
+
+CTA Flow
+
+Below cards:
+
+“Generate Calendar”
+
+⸻
+
+🧪 Acceptance Criteria
+
+Do NOT mark complete unless:
+
+⸻
+
+1. Full Orchestration
+	•	Layer consumes all engines correctly
+
+⸻
+
+2. Deterministic Output
+	•	Same inputs → same plan
+
+⸻
+
+3. No Analysis Leakage
+	•	Output contains ONLY decisions
+
+⸻
+
+4. Actionability Passed
+	•	All outputs usable immediately
+
+⸻
+
+5. UI Replacement Complete
+	•	Old execution metrics removed
+	•	New plan cards visible
+
+⸻
+
+🎯 Final Goal
+
+Transform the system from:
+
+Analysis System → Decision System
+
+User flow must become:
+
+Run system → Receive plan → Execute immediately
+
+⸻
+
+Do not treat this as a UI improvement.
+
+This is a core architectural layer required for the system to be usable.
+
+⸻
+
+Proceed with implementation.
+
+⸻
+
+:::
+
+⸻
+
+🧠 شرح سريع شو كتبنا:
+
+ببساطة 👇
+
+1. حلينا المشكلة الأساسية
+
+أنت قلت:
+
+“ما عم بعرف شو أعمل”
+
+الإيميل فرض:
+
+Layer جديدة اسمها BuildPlanLayer
+
+⸻
+
+2. حولنا النظام من تحليل → قرارات
+
+بدل:
+	•	cards تحليل
+	•	scores
+
+صار:
+
+7 قرارات واضحة
+
+⸻
+
+3. أضفنا أهم شي جديد 🔥
+
+Actionability Gate
+
+يعني:
+	•	إذا الجواب مو عملي → ينرفض
+
+⸻
+
+4. غيرنا الـ UI بالكامل
+
+قلنا:
+
+شيل Execution Pipeline القديم
+وحط مكانه Execution Plan
+
+⸻
+
+🎯 النتيجة
+
+المستخدم رح يشوف:
+	•	شو يقول
+	•	شو يبيع
+	•	شو ينشر
+	•	شو يعمل
+
+بدون تفكير
