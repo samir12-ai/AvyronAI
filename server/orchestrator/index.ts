@@ -210,6 +210,12 @@ async function executeEngine(
     persuasion: ["awareness"],
   };
 
+  const SIGNAL_CASCADE_MAP: Record<string, string[]> = {
+    differentiation: ["positioning"],
+    mechanism: ["positioning"],
+    offer: ["positioning"],
+  };
+
   const upstreamDeps = DEPTH_CASCADE_MAP[engineId] || [];
   for (const upstream of upstreamDeps) {
     if (ctx.depthGateStatus[upstream] === "DEPTH_FAILED") {
@@ -234,6 +240,26 @@ async function executeEngine(
         },
         durationMs: Date.now() - startTime,
         blockReason: `Cascade blocked: upstream '${upstream}' depth gate failed`,
+      };
+    }
+  }
+
+  const signalUpstreamDeps = SIGNAL_CASCADE_MAP[engineId] || [];
+  for (const upstream of signalUpstreamDeps) {
+    const upstreamStatus = ctx.depthGateStatus[upstream];
+    if (upstreamStatus === "SIGNAL_REQUIRED" || upstreamStatus === "SIGNAL_DRIFT") {
+      console.log(`[Orchestrator] SIGNAL_CASCADE_BLOCKED | ${engineId} BLOCKED — upstream ${upstream} has ${upstreamStatus}`);
+      ctx.depthGateStatus[engineId] = "SIGNAL_BLOCKED";
+      return {
+        engineId,
+        status: "SIGNAL_BLOCKED",
+        output: {
+          status: "SIGNAL_BLOCKED",
+          statusMessage: `Signal cascade blocked: positioning engine has ${upstreamStatus} — ${engineId} cannot execute without valid positioning`,
+          confidenceScore: 0,
+        },
+        durationMs: Date.now() - startTime,
+        blockReason: `Signal cascade blocked: positioning has ${upstreamStatus}`,
       };
     }
   }
@@ -307,6 +333,13 @@ async function executeEngine(
         snapshotId = result.snapshotId;
         ctx.positioning = result;
         ctx.positioningSnapshotId = result.snapshotId;
+
+        if (result.status === "SIGNAL_REQUIRED" || result.status === "SIGNAL_DRIFT") {
+          ctx.depthGateStatus!.positioning = result.status;
+          console.log(`[Orchestrator] SIGNAL_GATE_STATUS | positioning=${result.status} — downstream engines will be cascade-blocked`);
+        } else {
+          ctx.depthGateStatus!.positioning = "SIGNAL_PASSED";
+        }
 
         if (ctx.analyticalEnrichment && result.territories) {
           const posTexts = result.territories.map((t: any) => `${t.name} ${t.contrastAxis} ${t.narrativeDirection}`);

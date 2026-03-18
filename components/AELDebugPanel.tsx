@@ -204,11 +204,15 @@ function renderInsightItem(key: string, item: any, index: number, isDark: boolea
   }
 }
 
-const DEPTH_GATE_ENGINES = ['differentiation', 'mechanism', 'offer', 'funnel', 'awareness', 'persuasion'];
+const DEPTH_GATE_ENGINES = ['positioning', 'differentiation', 'mechanism', 'offer', 'funnel', 'awareness', 'persuasion'];
 const DEPTH_STATUS_CONFIG: Record<string, { color: string; icon: string; label: string }> = {
   DEPTH_PASSED: { color: '#22c55e', icon: 'checkmark-circle', label: 'PASSED' },
   DEPTH_FAILED: { color: '#ef4444', icon: 'close-circle', label: 'FAILED' },
   DEPTH_BLOCKED: { color: '#f59e0b', icon: 'ban', label: 'BLOCKED' },
+  SIGNAL_PASSED: { color: '#22c55e', icon: 'shield-checkmark', label: 'SIGNAL OK' },
+  SIGNAL_REQUIRED: { color: '#ef4444', icon: 'close-circle', label: 'SIGNALS MISSING' },
+  SIGNAL_DRIFT: { color: '#ef4444', icon: 'warning', label: 'SIGNAL DRIFT' },
+  SIGNAL_BLOCKED: { color: '#f59e0b', icon: 'ban', label: 'SIG BLOCKED' },
   REGENERATING: { color: '#3b82f6', icon: 'reload-circle', label: 'REGENERATING' },
   PENDING: { color: '#888', icon: 'ellipse-outline', label: 'PENDING' },
 };
@@ -232,10 +236,29 @@ function DepthGateStatusPanel({ campaignId, isDark }: { campaignId: string; isDa
           if (DEPTH_GATE_ENGINES.includes(section.engineId)) {
             const output = section.output;
             const depthGateResult = output?.depthGateResult;
+
+            let status = 'PENDING';
+            if (section.engineId === 'positioning') {
+              if (output?.status === 'SIGNAL_REQUIRED') status = 'SIGNAL_REQUIRED';
+              else if (output?.status === 'SIGNAL_DRIFT') status = 'SIGNAL_DRIFT';
+              else if (output?.status === 'COMPLETE' || output?.status === 'UNSTABLE') status = 'SIGNAL_PASSED';
+              else if (section.status === 'SIGNAL_BLOCKED') status = 'SIGNAL_BLOCKED';
+            } else if (section.status === 'SIGNAL_BLOCKED') {
+              status = 'SIGNAL_BLOCKED';
+            } else if (section.status === 'DEPTH_BLOCKED') {
+              status = 'DEPTH_BLOCKED';
+            } else if (output?.status === 'DEPTH_FAILED') {
+              status = 'DEPTH_FAILED';
+            } else if (depthGateResult?.passed) {
+              status = 'DEPTH_PASSED';
+            } else if (depthGateResult) {
+              status = 'DEPTH_FAILED';
+            }
+
             gates[section.engineId] = {
-              status: section.status === 'DEPTH_BLOCKED' ? 'DEPTH_BLOCKED' : (output?.status === 'DEPTH_FAILED' ? 'DEPTH_FAILED' : (depthGateResult?.passed ? 'DEPTH_PASSED' : (depthGateResult ? 'DEPTH_FAILED' : 'PENDING'))),
+              status,
               depthGateResult,
-              blockReason: section.blockReason || null,
+              blockReason: section.blockReason || output?.statusMessage || null,
             };
           }
         }
@@ -250,15 +273,15 @@ function DepthGateStatusPanel({ campaignId, isDark }: { campaignId: string; isDa
   if (loading) return <ActivityIndicator size="small" color="#7c5cfc" style={{ marginVertical: 8 }} />;
   if (!gateData || Object.keys(gateData).length === 0) return null;
 
-  const allPassed = Object.values(gateData).every((g: any) => g.status === 'DEPTH_PASSED');
-  const anyFailed = Object.values(gateData).some((g: any) => g.status === 'DEPTH_FAILED' || g.status === 'DEPTH_BLOCKED');
+  const allPassed = Object.values(gateData).every((g: any) => g.status === 'DEPTH_PASSED' || g.status === 'SIGNAL_PASSED');
+  const anyFailed = Object.values(gateData).some((g: any) => g.status === 'DEPTH_FAILED' || g.status === 'DEPTH_BLOCKED' || g.status === 'SIGNAL_REQUIRED' || g.status === 'SIGNAL_DRIFT' || g.status === 'SIGNAL_BLOCKED');
   const overallColor = allPassed ? '#22c55e' : anyFailed ? '#ef4444' : '#f59e0b';
 
   return (
     <View style={[s.celContainer, { backgroundColor: bg, marginTop: 8 }]}>
       <View style={s.celHeader}>
         <Ionicons name="lock-closed-outline" size={14} color={overallColor} />
-        <Text style={[s.celTitle, { color: text }]}>Depth Gate Status</Text>
+        <Text style={[s.celTitle, { color: text }]}>Depth & Signal Gate Status</Text>
         <View style={[s.confBadge, { backgroundColor: overallColor + '22' }]}>
           <Text style={[s.confText, { color: overallColor }]}>{allPassed ? 'ALL PASSED' : anyFailed ? 'GATE FAILURES' : 'PENDING'}</Text>
         </View>

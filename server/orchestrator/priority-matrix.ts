@@ -65,7 +65,7 @@ export function checkPriorityViolation(
 
 export interface EngineStepResult {
   engineId: EngineId;
-  status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "SKIPPED" | "ERROR" | "DEPTH_BLOCKED";
+  status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "SKIPPED" | "ERROR" | "DEPTH_BLOCKED" | "SIGNAL_BLOCKED";
   output: any;
   snapshotId?: string;
   durationMs: number;
@@ -74,7 +74,7 @@ export interface EngineStepResult {
 }
 
 export function shouldBlockDownstream(result: EngineStepResult): boolean {
-  if (result.status === "BLOCKED" || result.status === "ERROR") {
+  if (result.status === "BLOCKED" || result.status === "ERROR" || result.status === "SIGNAL_BLOCKED") {
     const engine = ENGINE_PRIORITY_ORDER.find(e => e.id === result.engineId);
     if (engine && TIER_RANK[engine.tier] <= TIER_RANK["OFFER"]) {
       return true;
