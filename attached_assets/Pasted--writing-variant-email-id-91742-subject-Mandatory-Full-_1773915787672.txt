@@ -1,0 +1,89 @@
+:::writing{variant=“email” id=“91742” subject=“Mandatory Full Implementation & Verification – Zero-Compromise Execution Required”}
+Hi Replit Team,
+
+This is a strict execution request, not a proposal review.
+
+We are moving forward with the finalized architecture updates across SGL, CEL, SIV, and engine contracts, and I need this implemented end-to-end with zero partial delivery.
+
+⸻
+
+Scope (Non-Negotiable)
+
+You are expected to fully implement:
+	•	SGL upgrades
+	•	Confidence-based ranking
+	•	Hard insufficiency blocking (no warning-only flow)
+	•	Complete removal of synthetic_baseline / synthetic_fallback injection
+	•	CEL upgrades
+	•	Replace keyword depth scoring with semantic (embedding-based) similarity
+	•	Reduce retry loop to 1 repair pass
+	•	Preserve and correctly apply DepthRejectionDirective
+	•	SIV upgrades
+	•	Replace keyword overlap with cosine similarity on embeddings
+	•	Maintain ALIGNMENT_CHAIN logic exactly as-is
+	•	Recalibrate thresholds appropriately
+	•	Engine contract anchors
+	•	Add lockedDecisions and nonGenericAnchors
+	•	Enforce them inside downstream engines (especially Persuasion)
+	•	Ensure outputs cannot drift into generic framing
+	•	Claim classification (pre-CEL)
+	•	Rule + embedding-based classification
+	•	Must run before enforcement, not after
+	•	Semantic engine decision
+	•	Use a deterministic embedding-based approach (local or equivalent)
+	•	No LLM self-evaluation anywhere in validation or enforcement
+
+⸻
+
+Critical Requirements
+	1.	No partial implementation
+	•	Do NOT ship this in fragments
+	•	All components must be integrated and working together
+	2.	No fallback loopholes
+	•	Verify that no engine reintroduces synthetic or generic defaults
+	•	This includes hidden or secondary fallback paths
+	3.	Calibration must be included
+	•	Provide threshold justification for:
+	•	SIV similarity
+	•	CEL similarity
+	•	Based on real test cases, not assumptions
+
+⸻
+
+Proof of Completion (Mandatory)
+
+Do NOT mark this complete without providing:
+	•	Code-level confirmation of each modification (files + functions touched)
+	•	Before vs After behavior examples, including:
+	•	Paraphrased but aligned outputs → must PASS
+	•	True drift outputs → must FAIL
+	•	Generic fallback cases → must be BLOCKED, not fabricated
+	•	Cross-engine test (Offer → Persuasion) showing:
+	•	No generic drift
+	•	Anchors preserved or echoed correctly
+	•	Full pipeline run
+	•	From signals → positioning → offer → persuasion
+	•	With verification that:
+	•	grounding holds
+	•	no synthetic signals appear
+	•	no false integrity failures occur
+
+⸻
+
+Final Condition
+
+This is considered complete only if the entire system is verified end-to-end, not just individual components.
+
+Do not confirm completion unless:
+	•	grounding is real (not declared)
+	•	generic drift is measurably reduced
+	•	no backdoor fallback exists
+	•	all enforcement is deterministic and non-circular
+
+⸻
+
+Please proceed with full implementation and return with complete verification evidence.
+
+Best,
+Samir
+:::
