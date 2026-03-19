@@ -1,0 +1,111 @@
+:::writing{id=“90327” variant=“email” subject=“Execution Layer Not Connected — Request for Code-Level Clarification Before Implementation”}
+Hi Replit Team,
+
+Before we proceed with implementing the Execution Layer, we want to pause and validate the current architecture against the actual codebase to avoid building on assumptions.
+
+⸻
+
+⚠️ Current Observation
+
+From the UI behavior:
+	•	“Approve” button does not trigger any state change or execution
+	•	“Run Execution” does not initiate any process
+	•	Execution Plan shows:
+“0 validated engine outputs available”
+
+This suggests that the Execution Layer is not connected to the engine outputs or orchestrator flow, even though all 15 engines are completing successfully.
+
+⸻
+
+🎯 Our Intended Design (for validation)
+
+We want the Execution Layer to act as a translator, not a generator:
+
+On Approve:
+	•	Update plan status → approved
+	•	Lock strategy
+	•	Trigger execution plan build
+
+On Run:
+	•	Pull all engine outputs
+	•	Summarize each engine into 1 actionable insight
+	•	Generate execution tasks (calendar / actions)
+	•	Move execution state → running
+
+⸻
+
+❓ What We Need From You (Code-Level)
+
+To proceed correctly, we need clarity based on the existing implementation:
+
+1. Current Execution Flow
+	•	Is there already a function like:
+	•	buildExecutionPlan() or synthesizeExecution()?
+	•	If yes:
+	•	Where is it located?
+	•	What triggers it?
+
+⸻
+
+2. Engine Outputs → Plan Connection
+	•	Where are engine outputs stored after runOrchestrator()?
+	•	How does synthesizePlan() access them?
+	•	What defines a “validated engine output”?
+
+⸻
+
+3. Validation Layer
+	•	What logic determines:
+“0 validated engine outputs”
+	•	Which engines are required to pass validation?
+	•	Where is this enforced in code?
+
+⸻
+
+4. Approve Action
+	•	Does an endpoint or handler exist for:
+	•	approving a plan?
+	•	If yes:
+	•	What does it currently do?
+	•	If not:
+	•	Where should it be integrated?
+
+⸻
+
+5. Execution Plan Generation
+	•	Is execution plan generation:
+	•	already partially implemented?
+	•	or not implemented at all?
+	•	If implemented:
+	•	which file/function handles it?
+
+⸻
+
+6. Minimal Integration Path
+
+Based on current architecture:
+	•	What is the cleanest way to:
+	•	connect Approve → Execution
+	•	connect Engine Outputs → Execution Plan
+
+Without:
+	•	duplicating logic
+	•	breaking orchestrator flow
+	•	or introducing new layers unnecessarily
+
+⸻
+
+🎯 Goal
+
+We want to ensure:
+	•	Execution Layer correctly consumes engine outputs
+	•	No redundant generation logic is introduced
+	•	System remains consistent with current architecture
+
+⸻
+
+Once we understand the existing structure, we will implement the Execution Layer cleanly on top of it.
+
+Best,
+Samir
+:::
