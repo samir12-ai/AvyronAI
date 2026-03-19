@@ -360,9 +360,15 @@ async function executeEngine(
         if (ctx.audience) {
           try {
             const sglStart = Date.now();
+            const rawObjections = ctx.audience.objectionMap || [];
+            const mappedObjections = rawObjections.map((o: any) => ({
+              label: o.label ?? o.canonical ?? o.pain ?? o.signal ?? "",
+              confidence: o.confidence ?? o.confidenceScore ?? 0.5,
+              evidence: Array.isArray(o.evidence) ? o.evidence : [],
+            }));
             ctx.sglState = initializeSignalGovernance(
               ctx.audience.structuredSignals || { pain_clusters: [], desire_clusters: [], pattern_clusters: [], root_causes: [], psychological_drivers: [] },
-              ctx.audience.objectionMap || [],
+              mappedObjections,
             );
             console.log(`[Orchestrator] SGL_INITIALIZED | duration=${Date.now() - sglStart}ms | signals=${ctx.sglState.governedSignals.length} | trace=${ctx.sglState.traceToken}`);
           } catch (sglErr: any) {

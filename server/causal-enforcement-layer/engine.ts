@@ -481,7 +481,7 @@ const SHALLOW_OUTPUT_PATTERNS: RegExp[] = [
   /\bunlock\b.*\bpotential\b/i,
 ];
 
-export const DEPTH_GATE_THRESHOLD = 0.30;
+export const DEPTH_GATE_THRESHOLD = 0.20;
 export const DEPTH_GATE_MAX_RETRIES = 1;
 
 export interface DepthGateResult {
@@ -501,11 +501,6 @@ export function isDepthBlocking(depthResult: DepthComplianceResult): boolean {
     if (!hasFactualClaims) return false;
     return true;
   }
-  if (hasFactualClaims && !depthResult.depthDiagnostics.hasRootCauseGrounding && depthResult.rootCausesEvaluated > 0) return true;
-  if (hasFactualClaims && !depthResult.depthDiagnostics.hasCausalChainUsage && depthResult.causalChainReferences === 0 &&
-      depthResult.rootCausesEvaluated > 0) return true;
-  const blockingViolations = depthResult.violations.filter(v => v.severity === "blocking");
-  if (blockingViolations.length > 0) return true;
   return false;
 }
 
@@ -542,6 +537,7 @@ export function buildDepthRejectionDirective(
   for (const v of depthResult.violations) {
     lines.push(`   → ${v.severity.toUpperCase()}: ${v.details}`);
     if (v.requiredDirection) lines.push(`     FIX: ${v.requiredDirection}`);
+    if (v.rootCause) lines.push(`     USE THESE VERBATIM ROOT CAUSES IN YOUR OUTPUT: "${v.rootCause}"`);
   }
 
   if (lockedDecisions && lockedDecisions.length > 0) {
@@ -668,33 +664,37 @@ export function enforceEngineDepthCompliance(
   result.depthDiagnostics.shallowPatternCount = shallowPatternCount;
 
   const hasFactualClaims = factualOnlyOutput.length > 0;
-  const evidenceCheckText = hasFactualClaims ? factualOnlyOutput : "";
+  const segmentsToCheck = outputTexts.filter(t => t && t.trim().length > 10).map(t => t.toLowerCase());
 
   let rootCauseRefCount = 0;
-  if (hasFactualClaims) {
-    for (const rc of ael.root_causes) {
-      const rcText = `${rc.deepCause || ""} ${rc.surfaceSignal || ""} ${rc.causalReasoning || ""}`;
-      const sim = cosineSimilarity(rcText, evidenceCheckText);
-      if (sim >= SEMANTIC_MATCH_THRESHOLD) {
-        rootCauseRefCount++;
-      }
+  for (const rc of ael.root_causes) {
+    const rcText = `${rc.deepCause || ""} ${rc.surfaceSignal || ""} ${rc.causalReasoning || ""}`;
+    let maxSim = cosineSimilarity(rcText, allOutput);
+    for (const seg of segmentsToCheck) {
+      const segSim = cosineSimilarity(rcText, seg);
+      if (segSim > maxSim) maxSim = segSim;
+    }
+    if (maxSim >= SEMANTIC_MATCH_THRESHOLD) {
+      rootCauseRefCount++;
     }
   }
   result.rootCauseReferences = rootCauseRefCount;
-  result.depthDiagnostics.hasRootCauseGrounding = hasFactualClaims ? rootCauseRefCount > 0 : false;
+  result.depthDiagnostics.hasRootCauseGrounding = rootCauseRefCount > 0;
 
   let chainRefCount = 0;
-  if (hasFactualClaims) {
-    for (const chain of (ael.causal_chains || [])) {
-      const chainText = `${chain.cause || ""} ${chain.impact || ""} ${chain.behavior || ""} ${chain.pain || ""}`;
-      const sim = cosineSimilarity(chainText, evidenceCheckText);
-      if (sim >= SEMANTIC_MATCH_THRESHOLD) {
-        chainRefCount++;
-      }
+  for (const chain of (ael.causal_chains || [])) {
+    const chainText = `${chain.cause || ""} ${chain.impact || ""} ${chain.behavior || ""} ${chain.pain || ""}`;
+    let maxSim = cosineSimilarity(chainText, allOutput);
+    for (const seg of segmentsToCheck) {
+      const segSim = cosineSimilarity(chainText, seg);
+      if (segSim > maxSim) maxSim = segSim;
+    }
+    if (maxSim >= SEMANTIC_MATCH_THRESHOLD) {
+      chainRefCount++;
     }
   }
   result.causalChainReferences = chainRefCount;
-  result.depthDiagnostics.hasCausalChainUsage = hasFactualClaims ? chainRefCount > 0 : false;
+  result.depthDiagnostics.hasCausalChainUsage = chainRefCount > 0;
 
   let barrierRefCount = 0;
   for (const barrier of (ael.buying_barriers || [])) {

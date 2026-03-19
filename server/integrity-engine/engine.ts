@@ -173,7 +173,7 @@ export function layer2_audienceOfferAlignment(
 
   if (objections.length > 0) {
     const funnelStages = funnel.stageMap || [];
-    const frictionMitigations = (funnel.frictionMap || []).map((f: any) => (f.mitigation || "").toLowerCase());
+    const frictionMitigations = (Array.isArray(funnel.frictionMap) ? funnel.frictionMap : []).map((f: any) => (f.mitigation || "").toLowerCase());
     const trustActions = (funnel.trustPath || []).map((t: any) => (t.action || "").toLowerCase());
     const allFunnelText = [...frictionMitigations, ...trustActions, ...funnelStages.map((s: any) => (s.purpose || "").toLowerCase())].join(" ");
 
@@ -282,7 +282,7 @@ export function layer4_offerFunnelCompatibility(
     score -= 0.2;
   }
 
-  if (offer.deliverables.length > 5 && stages.length < 4) {
+  if ((offer.deliverables || []).length > 5 && stages.length < 4) {
     warnings.push("Complex offer with many deliverables uses too few funnel stages for adequate explanation");
     score -= 0.1;
   }
@@ -384,7 +384,7 @@ export function layer6_proofSufficiency(
     score -= 0.05 * missingTypes.length;
   }
 
-  if (proofArch.length === 0 && offer.deliverables.length > 3) {
+  if (proofArch.length === 0 && (offer.deliverables || []).length > 3) {
     warnings.push("Complex offer has no proof architecture — claims are unsupported");
     score -= 0.2;
   } else if (proofArch.length > 0) {
@@ -417,7 +417,7 @@ export function layer7_conversionFeasibility(
 
   const stages = funnel.stageMap || [];
   const trustPath = funnel.trustPath || [];
-  const frictionMap = funnel.frictionMap || [];
+  const frictionMap = Array.isArray(funnel.frictionMap) ? funnel.frictionMap : [];
 
   if (stages.length > 6) {
     warnings.push(`Excessive funnel complexity: ${stages.length} stages — cognitive load risk`);

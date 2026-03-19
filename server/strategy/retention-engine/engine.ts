@@ -159,10 +159,10 @@ DERIVED METRICS:
 OFFER STRUCTURE:
 - Offer: ${offer.offerName || "Unknown"}
 - Core Outcome: ${offer.coreOutcome || "Not defined"}
-- Deliverables: ${offer.deliverables.length > 0 ? offer.deliverables.join(", ") : "None specified"}
+- Deliverables: ${(offer.deliverables || []).length > 0 ? offer.deliverables.join(", ") : "None specified"}
 - Mechanism: ${offer.mechanismDescription || "Not defined"}
 - Proof Strength: ${offer.proofStrength ?? "Unknown"}
-- Risk Reducers: ${offer.riskReducers.length > 0 ? offer.riskReducers.join(", ") : "None"}
+- Risk Reducers: ${(offer.riskReducers || []).length > 0 ? offer.riskReducers.join(", ") : "None"}
 
 CUSTOMER JOURNEY:
 - Avg Time to Conversion: ${journey.avgTimeToConversion ?? "Unknown"} days

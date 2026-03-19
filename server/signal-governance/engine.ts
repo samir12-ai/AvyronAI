@@ -59,6 +59,7 @@ function clusterToGovernedSignals(
   traceId: string,
 ): GovernedSignal[] {
   return clusters
+    .filter(c => typeof c.label === "string" && c.label.trim().length > 0)
     .filter(c => c.confidence >= SIGNAL_CONFIDENCE_FLOOR)
     .filter(c => !isRawComment(c.label))
     .sort((a, b) => b.confidence - a.confidence)
@@ -76,6 +77,7 @@ function clusterToGovernedSignals(
 }
 
 export function sanitizeSignalText(text: string): string {
+  if (typeof text !== "string" || !text) return "[MISSING]";
   let clean = text.trim();
   if (isRawComment(clean)) {
     return "[SANITIZED]";
@@ -141,6 +143,7 @@ export function initializeSignalGovernance(
   );
 
   const objectionSignals: GovernedSignal[] = objectionMap
+    .filter(o => typeof o.label === "string" && o.label.trim().length > 0)
     .filter(o => (o.confidence || 0.5) >= SIGNAL_CONFIDENCE_FLOOR)
     .filter(o => !isRawComment(o.label))
     .map((obj, idx) => ({

@@ -1,0 +1,87 @@
+:::writing{id=“84726” variant=“email” subject=“Critical Fix Required — SGL Failure + Integrity Bug (Full Pipeline Re-run Needed)”}
+Hi Replit Team,
+
+The latest full pipeline run surfaced two clear blocking issues. The system architecture is now correct, and the Build Plan lock fix is working as intended, but execution is currently limited by these two technical failures.
+
+⸻
+
+🚨 1. Root Cause — SGL Initialization Failure
+
+Error:
+SGL_INIT_FAILED | Cannot read properties of undefined (reading 'trim')
+
+Impact:
+	•	Signal Governance Layer fails to initialize
+	•	Differentiation Engine receives ungrounded input → DEPTH_FAILED
+	•	Mechanism + Offer → BLOCKED (cascade)
+	•	Downstream engines partially or fully skipped
+
+This is the primary blocker preventing full 15/15 execution.
+
+Required:
+	•	Identify where .trim() is being called on undefined inside SGL initialization
+	•	Add proper null/undefined guards
+	•	Ensure SGL always initializes or fails gracefully with controlled output (not crash)
+
+⸻
+
+🚨 2. Integrity Engine Bug — Funnel Fallback Handling
+
+Error:
+(funnel.frictionMap || []).map is not a function
+
+Cause:
+	•	Funnel engine returned a fallback object (not standard structure)
+	•	Integrity engine assumes frictionMap is always an array
+
+Required:
+	•	Add type-safe handling in Integrity Engine
+	•	Support both:
+	•	full funnel object
+	•	fallback/adaptive funnel object
+	•	Prevent runtime crash in all cases
+
+⸻
+
+✅ What Is Already Working (Confirmed)
+	•	Positioning Engine → running correctly
+	•	Build Plan fix → LOCKED_DECISIONS enforced correctly
+	•	Plan is no longer inventing strategy
+	•	Agent layer → functioning as designed
+	•	System behavior is now transparent and deterministic
+
+⸻
+
+🔁 Required After Fix
+
+Once both issues are resolved:
+	1.	Run a full pipeline with forceRefresh
+	2.	Ensure:
+	•	15/15 engines execute (no cascade failure)
+	•	No DEPTH_FAILED due to missing signals
+	•	No runtime errors
+	3.	Return:
+	•	full engine-by-engine report
+	•	final plan output
+	•	confirmation that locked decisions remain preserved
+
+⸻
+
+🎯 Goal
+
+We need a clean full run (15/15) to validate that:
+	•	signal flow is stable
+	•	CEL enforcement works under real conditions
+	•	downstream engines (Mechanism, Offer, Persuasion, etc.) execute normally
+
+⸻
+
+Please fix both issues and rerun the full pipeline.
+
+Do not mark complete until:
+	•	both bugs are resolved
+	•	and a successful end-to-end run is verified
+
+Best,
+Samir
+:::
