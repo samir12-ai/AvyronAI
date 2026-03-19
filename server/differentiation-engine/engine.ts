@@ -833,7 +833,7 @@ export function layer9_differentiationPillarScoring(
 const SERVICE_BUSINESS_TYPES = ["consulting", "coaching", "agency", "saas", "software", "legal", "accounting", "clinic", "medical", "dental", "financial", "advisory", "training", "education"];
 const PRODUCT_BUSINESS_TYPES = ["ecommerce", "retail", "fashion", "beauty", "food", "restaurant", "beverage", "hardware", "electronics", "manufacturing"];
 
-function inferBusinessCategory(profile?: ProfileInput | null): "service" | "product" | "general" {
+export function inferBusinessCategory(profile?: ProfileInput | null): "service" | "product" | "general" {
   if (!profile) return "general";
   const combined = `${profile.businessType || ""} ${profile.coreOffer || ""} ${profile.productCategory || ""}`.toLowerCase();
   if (SERVICE_BUSINESS_TYPES.some(t => combined.includes(t))) return "service";
@@ -949,9 +949,11 @@ export async function layer11_aiRefinement(
   analyticalEnrichment?: any,
   depthRejectionContext?: string,
   domainContext?: { domainFailures: string[]; operationalProblems: string[]; proofRequirements: string[] },
+  mechanismCore?: MechanismCore | null,
+  profile?: ProfileInput | null,
 ): Promise<{ refinedPillars: DifferentiationPillar[]; refinedClaims: ClaimStructure[]; refinedMechanism: MechanismCandidate }> {
-  const topPillars = pillars.slice(0, 5);
-  const topClaims = claims.slice(0, 5);
+  const topPillars = pillars.slice(0, MAX_PILLARS);
+  const topClaims = claims.slice(0, MAX_PILLARS);
   const aelBlock = formatAELForPrompt(analyticalEnrichment || null);
   const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
   if (aelBlock) console.log(`[DifferentiationEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
@@ -965,8 +967,27 @@ ${domainContext.proofRequirements.length > 0 ? `Proof Requirements: ${domainCont
 Every pillar description and claim MUST be grounded in one of the domain failures or operational problems above. Do not use emotional or generic framing — use the domain-specific operational language from this context.
 ` : "";
 
+  const businessCategory = inferBusinessCategory(profile);
+  const mechanismVocab = businessCategory === "service"
+    ? "process, method, approach, methodology, protocol"
+    : businessCategory === "product"
+      ? "flow, conversion path, checkout sequence, delivery pipeline, fulfillment chain"
+      : "system, pipeline, tool, platform, framework, workflow";
+
+  const mechanismCoreBlock = mechanismCore && mechanismCore.mechanismSteps.length > 0
+    ? `
+MECHANISM STRUCTURE (anchor pillars to these):
+Name: ${mechanismCore.mechanismName}
+Type: ${mechanismCore.mechanismType}
+Steps: ${mechanismCore.mechanismSteps.map((s, i) => `${i + 1}. ${s}`).join(" | ")}
+Logic: ${mechanismCore.mechanismLogic}
+Problem it solves: ${mechanismCore.mechanismProblem}
+Promise: ${mechanismCore.mechanismPromise}
+`
+    : "";
+
   const prompt = `You are refining differentiation language. You must improve wording to be clearer, more distinctive, and causally grounded.
-${aelBlock}${causalDirective}${domainContextBlock}${depthRejectionContext ? `\n${depthRejectionContext}\n` : ""}
+${aelBlock}${causalDirective}${domainContextBlock}${mechanismCoreBlock}${depthRejectionContext ? `\n${depthRejectionContext}\n` : ""}
 STRICT RULES:
 - Do NOT invent new strategy, audience segments, offers, or execution plans
 - Do NOT add pricing, packaging, guarantees, CTAs, or channel recommendations
@@ -979,6 +1000,25 @@ STRICT RULES:
 - Show cause→impact→behavior reasoning, not just surface-level claims
 - Respond with ONLY valid JSON, no markdown
 
+COMPRESSION RULES:
+- Output MAXIMUM ${MAX_PILLARS} pillars. Prefer fewer, deeper pillars over broad coverage.
+- If input has more than ${MAX_PILLARS} pillars, merge overlapping ones and keep only the strongest.
+
+MECHANISM ANCHORING (business type: ${businessCategory}):
+- Each pillar MUST map to a specific step, component, or structural element of the mechanism described above.
+- Describe HOW the ${mechanismVocab} works differently — not just what it promises.
+- Use vocabulary appropriate to this business type: ${mechanismVocab}.
+- If the mechanism has named steps, reference them explicitly.
+
+CONTRAST REQUIREMENT:
+- Each pillar description MUST include explicit contrast: "We do X, while the market does Y" or equivalent phrasing showing what is different vs the status quo.
+- Contrast must be specific and operational — not "we are better" or "we are unique".
+
+ANTI-GENERIC CONSTRAINT:
+- REJECT pillar language that could apply across multiple industries without modification.
+- Terms like "trust", "community", "transformation", "simplicity", "innovation" are ONLY acceptable if they are operationalized with specific mechanism references.
+- Each pillar must be non-transferable to a different business domain.
+
 Input pillars:
 ${JSON.stringify(topPillars.map(p => ({ name: p.name, description: p.description })), null, 2)}
 
@@ -990,8 +1030,8 @@ Authority mode: ${authorityMode}
 
 Return JSON:
 {
-  "pillars": [{ "name": "refined name", "description": "refined description" }],
-  "claims": [{ "claim": "refined claim text" }],
+  "pillars": [{ "name": "refined name", "description": "refined description with mechanism anchor and contrast" }],
+  "claims": [{ "claim": "refined claim text with contrast framing" }],
   "mechanismDescription": "refined mechanism description"
 }`;
 
@@ -999,7 +1039,7 @@ Return JSON:
     const response = await aiChat({
       model: "gpt-4.1-mini",
       messages: [
-        { role: "system", content: "You refine differentiation language with causal depth. Ground every pillar and claim in root causes from the analytical data. Never invent strategy, audience, offers, channels, or execution plans." },
+        { role: "system", content: "You refine differentiation language with causal depth and mechanism anchoring. Each pillar MUST reference a specific mechanism step or structural component and include explicit contrast vs the market status quo. Ground every pillar and claim in root causes from the analytical data. Reject generic/emotional language unless operationalized. Never invent strategy, audience, offers, channels, or execution plans." },
         { role: "user", content: prompt },
       ],
       accountId,
@@ -1294,11 +1334,12 @@ export async function runDifferentiationEngine(
         operationalProblems: (positioning as any).operationalProblems || [],
         proofRequirements: (positioning as any).proofRequirements || [],
       };
-      const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId, analyticalEnrichment, depthRejectionContext || undefined, domainCtx);
+      console.log(`[DifferentiationEngine-V3] L11 PROMPT_HARDENED | mechanismCore=${l8MechanismCore.mechanismSteps.length > 0} | businessCategory=${inferBusinessCategory(profile)} | maxPillars=${MAX_PILLARS}`);
+      const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId, analyticalEnrichment, depthRejectionContext || undefined, domainCtx, l8MechanismCore, profile);
       finalPillars = l11.refinedPillars;
       finalClaims = l11.refinedClaims;
       finalMechanism = l11.refinedMechanism;
-      diagnostics.layer11 = { aiRefined: true, attempt: depthAttempt };
+      diagnostics.layer11 = { aiRefined: true, attempt: depthAttempt, promptHardened: true, businessCategory: inferBusinessCategory(profile) };
     } catch (err: any) {
       diagnostics.layer11 = { aiRefined: false, error: err.message, attempt: depthAttempt };
     }
@@ -1404,11 +1445,11 @@ export async function runDifferentiationEngine(
           operationalProblems: (positioning as any).operationalProblems || [],
           proofRequirements: (positioning as any).proofRequirements || [],
         };
-        const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId, analyticalEnrichment, combinedRejection || undefined, domainCtx2);
+        const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId, analyticalEnrichment, combinedRejection || undefined, domainCtx2, l8MechanismCore, profile);
         finalPillars = l11.refinedPillars;
         finalClaims = l11.refinedClaims;
         finalMechanism = l11.refinedMechanism;
-        diagnostics.layer11 = { aiRefined: true, attempt: groundingAttempt, phase: "signal_grounding" };
+        diagnostics.layer11 = { aiRefined: true, attempt: groundingAttempt, phase: "signal_grounding", promptHardened: true };
       } catch (err: any) {
         diagnostics.layer11 = { aiRefined: false, error: err.message, attempt: groundingAttempt, phase: "signal_grounding" };
       }

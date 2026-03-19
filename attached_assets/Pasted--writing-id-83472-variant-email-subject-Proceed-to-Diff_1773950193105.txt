@@ -1,0 +1,113 @@
+:::writing{id=“83472” variant=“email” subject=“Proceed to Differentiation Phase 2 — Prompt Hardening & Mechanism Anchoring”}
+Hi Replit Team,
+
+Phase 1 is working as expected from a system perspective — compression is correctly reducing overlap and forcing selection.
+
+However, based on the latest run, we’re seeing a clear outcome:
+	•	Pillars compressed (2 → 1) ✅
+	•	But the resulting pillar is still broad and non-structural ❌
+	•	Confidence remains low (~0.37)
+
+This confirms that:
+the issue is no longer quantity — it is how pillars are being constructed.
+
+⸻
+
+▶️ Proceeding to Phase 2 — Prompt Hardening
+
+We now want to upgrade the Differentiation Engine at the prompt level.
+
+Objective:
+
+Move from:
+	•	thematic / emotional pillars
+
+To:
+	•	mechanism-grounded + contrast-driven differentiation
+
+⸻
+
+🔧 Required Additions (inside layer11_aiRefinement())
+
+1. Compression Constraint
+	•	Output maximum 3 pillars
+	•	Prefer fewer, deeper pillars over broad coverage
+
+⸻
+
+2. Mechanism Anchoring (Critical)
+
+Each pillar MUST:
+	•	map to a specific mechanism step or structural component
+	•	explain how the system works differently, not just what it promises
+
+⚠️ Important:
+This must remain conditional by business type:
+	•	SaaS → system / pipeline / tool
+	•	Services → process / method / approach
+	•	Ecommerce → flow / conversion / checkout
+
+No hardcoded universal pattern.
+
+⸻
+
+3. Explicit Contrast Rule
+
+Each pillar must include:
+
+“We do X, while the market does Y”
+
+If contrast is missing → pillar is considered invalid.
+
+⸻
+
+4. Anti-Generic Constraint
+
+Reject pillars that:
+	•	could apply across multiple industries
+	•	use abstract categories without operational meaning
+(e.g. trust, community, transformation, simplicity — unless operationalized)
+
+⸻
+
+📥 Prompt Context Upgrade
+
+In addition to mechanism.description, please also pass:
+	•	mechanism.steps
+	•	mechanism.axisEmphasis (if available)
+
+So the model has concrete structure to anchor on.
+
+⸻
+
+❓ Validation Questions
+
+Before implementation, please confirm:
+	1.	Best way to pass mechanism steps into layer11_aiRefinement()
+(extend current structure vs inject new block?)
+	2.	Any conflict with:
+	•	CEL depth scoring
+	•	stability guard
+	•	claim validation layers
+	3.	Should we enforce hard rejection if:
+	•	no contrast present
+	•	no mechanism linkage
+
+or handle via scoring penalties only?
+
+⸻
+
+🎯 Goal
+
+Produce differentiation pillars that are:
+	•	structurally tied to the mechanism
+	•	clearly contrasted vs the market
+	•	not interchangeable across domains
+
+⸻
+
+Once we validate this, we’ll proceed to Phase 3 (post-generation quality scoring).
+
+Best,
+Samir
+:::

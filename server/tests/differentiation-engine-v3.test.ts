@@ -13,6 +13,7 @@ import {
   layer12_stabilityGuard,
   sanitizeGuardrail,
   compressDifferentiationPillars,
+  inferBusinessCategory,
 } from "../differentiation-engine/engine";
 import {
   COLLISION_THRESHOLD,
@@ -549,6 +550,45 @@ describe("Differentiation Engine V3", () => {
       expect(result).toHaveLength(1);
       expect(result[0].uniqueness).toBe(0.8);
       expect(result[0].proofability).toBe(0.9);
+    });
+  });
+
+  describe("Phase 2: Prompt Hardening — inferBusinessCategory", () => {
+    it("should return 'service' for consulting businesses", () => {
+      expect(inferBusinessCategory({ businessType: "consulting", coreOffer: "strategy consulting" } as any)).toBe("service");
+    });
+
+    it("should return 'service' for SaaS businesses", () => {
+      expect(inferBusinessCategory({ businessType: "saas", coreOffer: "marketing platform" } as any)).toBe("service");
+    });
+
+    it("should return 'service' for coaching businesses", () => {
+      expect(inferBusinessCategory({ businessType: "coaching", coreOffer: "executive coaching" } as any)).toBe("service");
+    });
+
+    it("should return 'product' for ecommerce businesses", () => {
+      expect(inferBusinessCategory({ businessType: "ecommerce", coreOffer: "organic skincare" } as any)).toBe("product");
+    });
+
+    it("should return 'product' for retail businesses", () => {
+      expect(inferBusinessCategory({ businessType: "retail", coreOffer: "electronics" } as any)).toBe("product");
+    });
+
+    it("should return 'general' for unrecognized business types", () => {
+      expect(inferBusinessCategory({ businessType: "marketplace", coreOffer: "platform" } as any)).toBe("general");
+    });
+
+    it("should return 'general' for null profile", () => {
+      expect(inferBusinessCategory(null)).toBe("general");
+      expect(inferBusinessCategory(undefined)).toBe("general");
+    });
+
+    it("should infer from coreOffer when businessType is generic", () => {
+      expect(inferBusinessCategory({ businessType: "other", coreOffer: "dental implants" } as any)).toBe("service");
+    });
+
+    it("should infer from productCategory for ecommerce", () => {
+      expect(inferBusinessCategory({ businessType: "online", coreOffer: "gadgets", productCategory: "electronics store" } as any)).toBe("product");
     });
   });
 });
