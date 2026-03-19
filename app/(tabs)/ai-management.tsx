@@ -30,6 +30,7 @@ import LeadControlPanel from '@/components/LeadControlPanel';
 import StrategicPipeline from '@/components/StrategicPipeline';
 import ExecutionPlan from '@/components/ExecutionPlan';
 import BuildThePlan from '@/components/BuildThePlan';
+import OrchestratorPanel from '@/components/OrchestratorPanel';
 import CompetitiveIntelligence from '@/components/CompetitiveIntelligence';
 import ControlCenter from '@/components/ControlCenter';
 import MarketDatabaseAdmin from '@/components/MarketDatabaseAdmin';
@@ -1250,7 +1251,7 @@ export default function AIManagementScreen() {
             })}
         </ScrollView>
 
-        {activeTab === 'buildplan' && <BuildThePlan onNavigateToCI={() => handleTabChange('intelligence')} onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />}
+        {activeTab === 'buildplan' && <OrchestratorPanel />}
         {activeTab === 'pipeline' && (
           <>
             <ExecutionPlan />
