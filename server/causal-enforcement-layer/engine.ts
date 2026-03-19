@@ -6,6 +6,12 @@ import {
 } from "./types";
 import { AnalyticalPackage } from "../analytical-enrichment-layer/types";
 import { cosineSimilarity, SEMANTIC_MATCH_THRESHOLD } from "../shared/embedding";
+import {
+  classifyClaims,
+  buildClaimBreakdown,
+  extractFactualClaims,
+  ClaimBreakdown,
+} from "./claim-classifier";
 
 const LOG_PREFIX = "[CEL]";
 
@@ -580,6 +586,7 @@ export interface DepthComplianceResult extends ComplianceResult {
   rootCauseReferences: number;
   causalChainReferences: number;
   barrierReferences: number;
+  claimBreakdown: ClaimBreakdown;
   depthDiagnostics: {
     hasRootCauseGrounding: boolean;
     hasCausalChainUsage: boolean;
@@ -595,6 +602,12 @@ export function enforceEngineDepthCompliance(
   outputTexts: string[],
   ael: AnalyticalPackage | null,
 ): DepthComplianceResult {
+  const allOutputRaw = outputTexts.join(" ");
+  const classifiedClaims = classifyClaims(allOutputRaw);
+  const claimBreakdown = buildClaimBreakdown(classifiedClaims);
+  const factualOnlyTexts = extractFactualClaims(classifiedClaims);
+  const factualOnlyOutput = factualOnlyTexts.length > 0 ? factualOnlyTexts.join(" ").toLowerCase() : "";
+
   const result: DepthComplianceResult = {
     engineId,
     passed: true,
@@ -607,6 +620,7 @@ export function enforceEngineDepthCompliance(
     rootCauseReferences: 0,
     causalChainReferences: 0,
     barrierReferences: 0,
+    claimBreakdown,
     depthDiagnostics: {
       hasRootCauseGrounding: false,
       hasCausalChainUsage: false,
@@ -619,6 +633,7 @@ export function enforceEngineDepthCompliance(
 
   if (!ael || !ael.root_causes || ael.root_causes.length === 0) {
     result.enforcementLog.push("NO_AEL: No analytical enrichment — depth enforcement skipped");
+    result.enforcementLog.push(`CLAIM_CLASSIFIER: factual=${claimBreakdown.factual} | inferred=${claimBreakdown.inferred} | emotional=${claimBreakdown.emotional}`);
     result.causalDepthScore = 0;
     return result;
   }
@@ -627,7 +642,9 @@ export function enforceEngineDepthCompliance(
   result.rootCausesEvaluated = rootCauseTexts.length;
   result.appliedRules = themes;
 
-  const allOutput = outputTexts.join(" ").toLowerCase();
+  result.enforcementLog.push(`CLAIM_CLASSIFIER: factual=${claimBreakdown.factual} | inferred=${claimBreakdown.inferred} | emotional=${claimBreakdown.emotional} | factual_sentences_for_depth_check=${factualOnlyTexts.length}`);
+
+  const allOutput = allOutputRaw.toLowerCase();
 
   let genericTermCount = 0;
   for (const pattern of GENERIC_FALLBACK_PATTERNS) {
@@ -642,10 +659,12 @@ export function enforceEngineDepthCompliance(
   }
   result.depthDiagnostics.shallowPatternCount = shallowPatternCount;
 
+  const depthCheckText = factualOnlyOutput.length > 0 ? factualOnlyOutput : allOutput;
+
   let rootCauseRefCount = 0;
   for (const rc of ael.root_causes) {
     const rcText = `${rc.deepCause || ""} ${rc.surfaceSignal || ""} ${rc.causalReasoning || ""}`;
-    const sim = cosineSimilarity(rcText, allOutput);
+    const sim = cosineSimilarity(rcText, depthCheckText);
     if (sim >= SEMANTIC_MATCH_THRESHOLD) {
       rootCauseRefCount++;
     }
@@ -656,7 +675,7 @@ export function enforceEngineDepthCompliance(
   let chainRefCount = 0;
   for (const chain of (ael.causal_chains || [])) {
     const chainText = `${chain.cause || ""} ${chain.impact || ""} ${chain.behavior || ""} ${chain.pain || ""}`;
-    const sim = cosineSimilarity(chainText, allOutput);
+    const sim = cosineSimilarity(chainText, depthCheckText);
     if (sim >= SEMANTIC_MATCH_THRESHOLD) {
       chainRefCount++;
     }
@@ -667,7 +686,7 @@ export function enforceEngineDepthCompliance(
   let barrierRefCount = 0;
   for (const barrier of (ael.buying_barriers || [])) {
     const barrierText = `${barrier.barrier || ""} ${barrier.rootCause || ""} ${barrier.userThinking || ""} ${barrier.requiredResolution || ""}`;
-    const sim = cosineSimilarity(barrierText, allOutput);
+    const sim = cosineSimilarity(barrierText, depthCheckText);
     if (sim >= SEMANTIC_MATCH_THRESHOLD) {
       barrierRefCount++;
     }
