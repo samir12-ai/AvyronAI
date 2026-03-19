@@ -456,7 +456,25 @@ export function computeSpecificityScore(
   const hasMechanismLanguage = MECHANISM_ACTION_VERBS.some(v => lower.includes(v));
   const mechanismLanguagePenalty = !hasMechanismLanguage ? 0.10 : 0;
 
-  const totalPenalty = Math.min(0.90, penalty + domainSpecificityPenalty + mechanismLanguagePenalty);
+  const SYSTEM_NOUNS = ["system", "tool", "platform", "pipeline", "process", "framework", "engine", "workflow", "protocol", "method", "mechanism", "infrastructure", "stack", "architecture", "module", "layer", "approach", "model", "structure"];
+  const SERVICE_NOUNS = ["process", "approach", "model", "methodology", "framework", "practice", "protocol", "method", "structure"];
+  const isServiceBusiness = productDna?.businessType
+    ? /consult|agency|service|coach|freelanc|advisor/i.test(productDna.businessType)
+    : false;
+  const relevantNouns = isServiceBusiness ? [...SYSTEM_NOUNS, ...SERVICE_NOUNS] : SYSTEM_NOUNS;
+  const hasSystemNoun = relevantNouns.some(n => tokens.some(t => t === n || t.endsWith(n) || t.startsWith(n)));
+  const systemNounPenalty = !hasSystemNoun ? 0.15 : 0;
+
+  const FAILURE_VERBS = ["fails", "breaks", "lacks", "missing", "blocks", "prevents", "collapses", "stalls", "erodes", "undermines", "fragments", "disconnects", "decays", "degrades"];
+  const hasFailureLanguage = FAILURE_VERBS.some(v => lower.includes(v));
+  const failurePenalty = !hasFailureLanguage ? 0.08 : 0;
+
+  const CROSS_INDUSTRY_GENERICS = ["quality", "growth", "success", "results", "improvement", "performance", "efficiency", "value", "experience", "satisfaction", "engagement", "awareness", "loyalty", "retention", "conversion"];
+  const genericWordCount = CROSS_INDUSTRY_GENERICS.filter(g => tokens.some(t => t === g)).length;
+  const nonGenericCount = tokens.filter(t => !CROSS_INDUSTRY_GENERICS.includes(t)).length;
+  const crossIndustryPenalty = genericWordCount > 0 && nonGenericCount < 2 ? 0.12 : 0;
+
+  const totalPenalty = Math.min(0.90, penalty + domainSpecificityPenalty + mechanismLanguagePenalty + systemNounPenalty + failurePenalty + crossIndustryPenalty);
   return Math.max(0, Math.min(1.15, 1 - totalPenalty + categoryBonus + contrastBonus + lengthBonus));
 }
 
@@ -988,11 +1006,45 @@ function layer10_strategicTerritorySelection(
 
   const sorted = filtered.sort((a, b) => b.opportunityScore - a.opportunityScore);
 
-  if (sorted.length > POSITIONING_THRESHOLDS.MAX_TERRITORIES) {
-    return sorted.slice(0, POSITIONING_THRESHOLDS.MAX_TERRITORIES);
+  const compressed = compressTerritories(sorted);
+
+  if (compressed.length > POSITIONING_THRESHOLDS.MAX_TERRITORIES) {
+    return compressed.slice(0, POSITIONING_THRESHOLDS.MAX_TERRITORIES);
   }
 
-  return sorted;
+  return compressed;
+}
+
+export function compressTerritories(sorted: Territory[]): Territory[] {
+  if (sorted.length <= 1) return sorted;
+
+  const primary = sorted[0];
+  const result: Territory[] = [primary];
+
+  for (let i = 1; i < sorted.length; i++) {
+    const candidate = sorted[i];
+    const primaryTokens = new Set(primary.name.toLowerCase().split(/\s+/));
+    const candidateTokens = candidate.name.toLowerCase().split(/\s+/);
+    const overlap = candidateTokens.filter(t => primaryTokens.has(t)).length;
+    const similarity = candidateTokens.length > 0 ? overlap / Math.max(primaryTokens.size, candidateTokens.length) : 0;
+
+    if (similarity >= 0.60) {
+      const mergedPains = [...new Set([...primary.painAlignment, ...candidate.painAlignment])];
+      const mergedDesires = [...new Set([...primary.desireAlignment, ...candidate.desireAlignment])];
+      const mergedEvidence = [...new Set([...primary.evidenceSignals, ...candidate.evidenceSignals])].slice(0, 8);
+      primary.painAlignment = mergedPains;
+      primary.desireAlignment = mergedDesires;
+      primary.evidenceSignals = mergedEvidence;
+      primary.stabilityNotes.push(`[COMPRESSION] Absorbed similar territory: "${candidate.name}" (similarity: ${(similarity * 100).toFixed(0)}%)`);
+      primary.opportunityScore = Math.max(primary.opportunityScore, candidate.opportunityScore);
+      console.log(`[PositioningEngine] COMPRESSION: Merged "${candidate.name}" into primary "${primary.name}" (overlap: ${(similarity * 100).toFixed(0)}%)`);
+    } else if (result.length < POSITIONING_THRESHOLDS.MAX_TERRITORIES) {
+      result.push(candidate);
+    }
+  }
+
+  console.log(`[PositioningEngine] COMPRESSION: ${sorted.length} territories → ${result.length} (primary: "${result[0].name}")`);
+  return result;
 }
 
 function deduplicateTerritories(territories: Territory[]): Territory[] {
@@ -1216,12 +1268,13 @@ ${websitePositioningContext}
 
 RULES:
 1. DOMAIN TRANSLATION FIRST: Before composing any field, restate each signal label as the operational failure it represents for this specific business type and offer. Use that operational language — not the surface signal label — in every field you write.
-2. enemyDefinition: Compose from the PAIN and ROOT_CAUSE signals mapped to this territory. Translate them into the domain-specific operational failure. Name what specifically fails in this market for this type of buyer.
-3. contrastAxis: Compose from the DESIRE and PATTERN signals. Name what the buyer wants operationally vs what currently breaks — in terms specific to this business type.
-4. narrativeDirection: Synthesize across all mapped signals into one positioning sentence that uses domain-operational language. No surface emotional labels.
-5. mappedSignalIds: List the exact signal IDs you used from the SOURCE SIGNALS.
-6. Do NOT invent concepts outside the provided signals. Every word of substance must trace to a signal label.
-7. If a territory has no usable signals, set narrativeDirection to "UNMAPPED".
+2. COMPRESSION: Focus on the FIRST territory as the PRIMARY positioning. Express it as a specific root-cause SYSTEM FAILURE — not an emotional category. The enemyDefinition must name what specific process, system, or operational component breaks for the buyer. If the territory is broad (e.g. "cost concerns" or "trust issues"), compress it into the ONE operational failure that causes it.
+3. enemyDefinition: Compose from the PAIN and ROOT_CAUSE signals mapped to this territory. Translate them into the domain-specific operational failure. Name what specifically fails in this market for this type of buyer. Must contain a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and a failure verb (fails, breaks, lacks, blocks, collapses, erodes, stalls).
+4. contrastAxis: Compose from the DESIRE and PATTERN signals. Name what the buyer wants operationally vs what currently breaks — in terms specific to this business type.
+5. narrativeDirection: Synthesize across all mapped signals into one positioning sentence that uses domain-operational language. No surface emotional labels. No broad categories — name the specific operational breakdown and its resolution.
+6. mappedSignalIds: List the exact signal IDs you used from the SOURCE SIGNALS.
+7. Do NOT invent concepts outside the provided signals. Every word of substance must trace to a signal label.
+8. If a territory has no usable signals, set narrativeDirection to "UNMAPPED".
 
 Return a JSON array:
 [{ "index": 1, "enemyDefinition": "...", "contrastAxis": "...", "narrativeDirection": "...", "mappedSignalIds": ["id1", "id2"], "domainFailure": "...", "operationalProblem": "...", "proofRequirement": "..." }]
@@ -1238,9 +1291,10 @@ ${websitePositioningContext}
 
 RULES:
 1. DOMAIN TRANSLATION FIRST: Before composing any field, restate each territory name as the operational failure it represents for this specific business type and offer. Use domain-operational language — not generic emotional framing — in every field.
-2. enemyDefinition: Name the specific operational/system failure in this market for this type of buyer. Not emotions — operational breakdown.
-3. contrastAxis: Name what operationally the buyer gains vs what currently fails — specific to this business domain.
-4. narrativeDirection: One sentence using domain-operational language. No surface emotional labels.
+2. COMPRESSION: Focus on the FIRST territory as the PRIMARY positioning. Express it as a specific root-cause SYSTEM FAILURE — not an emotional category. If the territory is broad, compress it into the ONE operational failure that causes it.
+3. enemyDefinition: Name the specific operational/system failure in this market for this type of buyer. Not emotions — operational breakdown. Must include a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and a failure verb (fails, breaks, lacks, blocks, collapses, erodes, stalls).
+4. contrastAxis: Name what operationally the buyer gains vs what currently fails — specific to this business domain.
+5. narrativeDirection: One sentence using domain-operational language. No surface emotional labels. No broad categories — name the specific operational breakdown and its resolution.
 
 For each territory, return a JSON array with objects containing:
 { "index": number, "enemyDefinition": "precise enemy statement", "narrativeDirection": "one-sentence positioning narrative", "contrastAxis": "clear contrast axis", "domainFailure": "...", "operationalProblem": "...", "proofRequirement": "..." }
@@ -1311,7 +1365,40 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
     console.error("[PositioningEngine-V3] Statement generation failed:", err.message);
   }
 
+  for (const t of territories) {
+    const compressionScore = evaluateCompressionQuality(t);
+    if (compressionScore < 0.50) {
+      const penalty = Math.min(0.20, (0.50 - compressionScore) * 0.40);
+      t.confidenceScore = Math.max(0, t.confidenceScore - penalty);
+      t.stabilityNotes.push(`[COMPRESSION_WEAK] Compression quality: ${(compressionScore * 100).toFixed(0)}% — territory may be too broad (penalty: -${(penalty * 100).toFixed(0)}%)`);
+      console.log(`[PositioningEngine] COMPRESSION_QUALITY: "${t.name}" scored ${(compressionScore * 100).toFixed(0)}% — penalty applied: -${(penalty * 100).toFixed(0)}%`);
+    }
+  }
+
   return territories;
+}
+
+export function evaluateCompressionQuality(territory: Territory): number {
+  let score = 0.50;
+
+  const SYSTEM_NOUNS = ["system", "tool", "platform", "pipeline", "process", "framework", "engine", "workflow", "protocol", "method", "mechanism", "infrastructure", "approach", "model", "structure"];
+  const FAILURE_VERBS = ["fails", "breaks", "lacks", "missing", "blocks", "prevents", "collapses", "stalls", "erodes", "undermines", "fragments", "disconnects", "inability", "absence", "breakdown", "failure", "deficit", "gap"];
+
+  const enemy = (territory.enemyDefinition || "").toLowerCase();
+  const narrative = (territory.narrativeDirection || "").toLowerCase();
+  const domainFail = (territory.domainFailure || "").toLowerCase();
+  const combined = `${enemy} ${narrative} ${domainFail}`;
+
+  if (SYSTEM_NOUNS.some(n => combined.includes(n))) score += 0.20;
+  if (FAILURE_VERBS.some(v => combined.includes(v))) score += 0.15;
+  if (territory.domainFailure && territory.domainFailure.trim().length > 10) score += 0.10;
+  if (territory.operationalProblem && territory.operationalProblem.trim().length > 10) score += 0.05;
+
+  const BROAD_MARKERS = ["cost concerns", "trust issues", "affordability", "belonging needs", "community needs", "emotional connection", "personal growth"];
+  const broadCount = BROAD_MARKERS.filter(m => combined.includes(m)).length;
+  if (broadCount >= 2) score -= 0.15;
+
+  return Math.max(0, Math.min(1, score));
 }
 
 function layer12_stabilityGuard(

@@ -16,6 +16,8 @@ import {
   validateNarrativeOutput,
   computeSemanticSaturation,
   checkCrossCampaignDiversity,
+  compressTerritories,
+  evaluateCompressionQuality,
 } from '../positioning-engine/engine';
 
 describe('Positioning Engine V3 — Layer Tests', () => {
@@ -618,6 +620,111 @@ describe('Positioning Engine V3 — Layer Tests', () => {
       const territories = [{ name: 'test territory', opportunityScore: 0.7 }];
       const penalties = checkCrossCampaignDiversity(territories, []);
       expect(penalties[0].penalty).toBe(0);
+    });
+  });
+
+  describe('Compression Layer', () => {
+    const makeTerritory = (overrides: Record<string, any> = {}) => ({
+      name: 'test territory',
+      confidenceScore: 0.6,
+      stabilityNotes: [] as string[],
+      enemyDefinition: '',
+      narrativeDirection: '',
+      domainFailure: '',
+      operationalProblem: '',
+      contrastAxis: '',
+      opportunityScore: 0.5,
+      painAlignment: [] as string[],
+      desireAlignment: [] as string[],
+      evidenceSignals: [] as string[],
+      ...overrides,
+    });
+
+    describe('compressTerritories', () => {
+      it('should return single territory unchanged', () => {
+        const input = [makeTerritory({ name: 'cost concerns' })];
+        const result = compressTerritories(input as any);
+        expect(result).toHaveLength(1);
+        expect(result[0].name).toBe('cost concerns');
+      });
+
+      it('should merge territories with high token overlap', () => {
+        const input = [
+          makeTerritory({ name: 'cost affordability pricing concerns' }),
+          makeTerritory({ name: 'cost affordability budget concerns' }),
+          makeTerritory({ name: 'trust authority credibility' }),
+        ];
+        const result = compressTerritories(input as any);
+        expect(result.length).toBeLessThanOrEqual(2);
+        expect(result[0].name).toBe('cost affordability pricing concerns');
+      });
+
+      it('should preserve distinct territories', () => {
+        const input = [
+          makeTerritory({ name: 'cost concerns pricing' }),
+          makeTerritory({ name: 'trust authority credibility' }),
+        ];
+        const result = compressTerritories(input as any);
+        expect(result).toHaveLength(2);
+      });
+
+      it('should cap output to MAX_TERRITORIES', () => {
+        const input = [
+          makeTerritory({ name: 'alpha beta gamma' }),
+          makeTerritory({ name: 'delta epsilon zeta' }),
+          makeTerritory({ name: 'eta theta iota' }),
+          makeTerritory({ name: 'kappa lambda mu' }),
+        ];
+        const result = compressTerritories(input as any);
+        expect(result.length).toBeLessThanOrEqual(2);
+      });
+    });
+
+    describe('evaluateCompressionQuality', () => {
+      it('should score high for territory with system nouns and failure verbs', () => {
+        const t = makeTerritory({
+          enemyDefinition: 'The lead generation system fails to deliver measurable ROI',
+          domainFailure: 'Lead pipeline system breakdown',
+          operationalProblem: 'Users cannot track conversion metrics',
+        });
+        const score = evaluateCompressionQuality(t as any);
+        expect(score).toBeGreaterThanOrEqual(0.80);
+      });
+
+      it('should score low for broad emotional territory', () => {
+        const t = makeTerritory({
+          enemyDefinition: 'People have trust issues and cost concerns',
+          domainFailure: '',
+          operationalProblem: '',
+          narrativeDirection: 'Affordability and emotional connection matter',
+        });
+        const score = evaluateCompressionQuality(t as any);
+        expect(score).toBeLessThan(0.60);
+      });
+
+      it('should penalize multiple broad markers', () => {
+        const t = makeTerritory({
+          enemyDefinition: 'cost concerns and trust issues with community needs',
+          domainFailure: 'affordability',
+          narrativeDirection: 'belonging needs drive emotional connection',
+        });
+        const score = evaluateCompressionQuality(t as any);
+        expect(score).toBeLessThanOrEqual(0.50);
+      });
+
+      it('should give baseline score for empty territory', () => {
+        const t = makeTerritory({});
+        const score = evaluateCompressionQuality(t as any);
+        expect(score).toBe(0.50);
+      });
+
+      it('should give bonus for substantive domainFailure', () => {
+        const t = makeTerritory({
+          domainFailure: 'Lead attribution pipeline lacks cross-channel tracking',
+        });
+        const score = evaluateCompressionQuality(t as any);
+        expect(score).toBeGreaterThan(0.50);
+      });
     });
   });
 });
