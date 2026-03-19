@@ -65,12 +65,13 @@ describe("buildPositioningLock – lockedDecisions and nonGenericAnchors", () =>
     makeSignal("differentiation", "mechanism", "revenue flywheel system delivers predictable ARR", 3),
   ];
 
-  test("populates lockedDecisions with all three decision types when fully specified", () => {
+  test("populates lockedDecisions with all four decision types when fully specified", () => {
     const lock = buildPositioningLock(basePositioning, baseDifferentiation);
-    expect(lock.lockedDecisions).toHaveLength(3);
+    expect(lock.lockedDecisions.length).toBeGreaterThanOrEqual(3);
     expect(lock.lockedDecisions.some(d => d.startsWith("contrast_axis:"))).toBe(true);
     expect(lock.lockedDecisions.some(d => d.startsWith("enemy:"))).toBe(true);
     expect(lock.lockedDecisions.some(d => d.startsWith("mechanism:"))).toBe(true);
+    expect(lock.lockedDecisions.some(d => d.startsWith("narrative_direction:"))).toBe(true);
   });
 
   test("lockedDecisions includes contrastAxis text verbatim", () => {
@@ -440,6 +441,168 @@ describe("analyzePersuasion – positioning lock drift detection", () => {
     const hasLockDrift = allWarnings.some(w => w.includes("POSITIONING LOCK DRIFT"));
     const hasGenericDrift = allWarnings.some(w => w.includes("GENERIC DRIFT WARNING"));
     expect(hasLockDrift || hasGenericDrift).toBe(true);
+  });
+});
+
+describe("buildPersuasionRoutes – locked decisions enforce route content at generation time", () => {
+  test("routeName includes locked axis suffix when lockedDecisions contains contrast_axis", () => {
+    const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
+    const lockedOffer: PersuasionOfferInput = {
+      offerName: "Revenue Automation Program",
+      coreOutcome: "Predictable ARR growth",
+      mechanismDescription: "Revenue flywheel system",
+      deliverables: [],
+      proofAlignment: [],
+      offerStrengthScore: 0.8,
+      riskNotes: [],
+      frictionLevel: 2,
+      lockedDecisions: ["contrast_axis: automated pipeline vs manual spreadsheet tracking"],
+      nonGenericAnchors: [],
+    };
+    const result = analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    expect(result.primaryRoute.routeName).toMatch(/\[locked axis:/);
+  });
+
+  test("frictionNotes on primaryRoute includes LOCK CONSTRAINT when lockedDecisions provided", () => {
+    const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
+    const lockedOffer: PersuasionOfferInput = {
+      offerName: "Revenue Automation Program",
+      coreOutcome: "Predictable ARR growth",
+      mechanismDescription: "Revenue flywheel system",
+      deliverables: [],
+      proofAlignment: [],
+      offerStrengthScore: 0.8,
+      riskNotes: [],
+      frictionLevel: 2,
+      lockedDecisions: [
+        "contrast_axis: automated pipeline vs manual tracking",
+        "enemy: legacy spreadsheet vendor",
+        "mechanism: RevenueFlywheelOS",
+      ],
+      nonGenericAnchors: [],
+    };
+    const result = analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const lockConstraints = result.primaryRoute.frictionNotes.filter(n => n.startsWith("LOCK CONSTRAINT"));
+    expect(lockConstraints.length).toBeGreaterThanOrEqual(1);
+    expect(lockConstraints.some(n => n.includes("YOU MUST NOT reframe"))).toBe(true);
+  });
+
+  test("frictionNotes includes ENEMY ANCHOR note when enemy is in lockedDecisions", () => {
+    const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
+    const lockedOffer: PersuasionOfferInput = {
+      offerName: "Revenue Automation Program",
+      coreOutcome: "Predictable ARR growth",
+      mechanismDescription: "Revenue flywheel system",
+      deliverables: [],
+      proofAlignment: [],
+      offerStrengthScore: 0.8,
+      riskNotes: [],
+      frictionLevel: 2,
+      lockedDecisions: ["enemy: legacy spreadsheet vendor"],
+      nonGenericAnchors: [],
+    };
+    const result = analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const enemyNote = result.primaryRoute.frictionNotes.find(n => n.startsWith("ENEMY ANCHOR:"));
+    expect(enemyNote).toBeDefined();
+    expect(enemyNote).toMatch(/MUST be reflected in objection handling/);
+  });
+
+  test("frictionNotes includes MECHANISM ANCHOR note when mechanism is in lockedDecisions", () => {
+    const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
+    const lockedOffer: PersuasionOfferInput = {
+      offerName: "Revenue Automation Program",
+      coreOutcome: "Predictable ARR growth",
+      mechanismDescription: "Revenue flywheel system",
+      deliverables: [],
+      proofAlignment: [],
+      offerStrengthScore: 0.8,
+      riskNotes: [],
+      frictionLevel: 2,
+      lockedDecisions: ["mechanism: RevenueFlywheelOS"],
+      nonGenericAnchors: [],
+    };
+    const result = analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const mechNote = result.primaryRoute.frictionNotes.find(n => n.startsWith("MECHANISM ANCHOR:"));
+    expect(mechNote).toBeDefined();
+    expect(mechNote).toMatch(/MUST reflect .* as the solution vehicle/);
+  });
+
+  test("primaryInfluenceDrivers includes a [locked_anchor] entry when nonGenericAnchors provided", () => {
+    const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
+    const lockedOffer: PersuasionOfferInput = {
+      offerName: "Revenue Automation Program",
+      coreOutcome: "Predictable ARR growth",
+      mechanismDescription: "Revenue flywheel system",
+      deliverables: [],
+      proofAlignment: [],
+      offerStrengthScore: 0.8,
+      riskNotes: [],
+      frictionLevel: 2,
+      lockedDecisions: [],
+      nonGenericAnchors: ["flywheel", "revenue", "pipeline"],
+    };
+    const result = analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const lockedDriver = result.primaryRoute.primaryInfluenceDrivers.find(d => d.startsWith("[locked_anchor]"));
+    expect(lockedDriver).toBeDefined();
+    expect(lockedDriver).toContain("flywheel");
+  });
+
+  test("frictionNotes includes ANCHOR REQUIREMENT when nonGenericAnchors provided", () => {
+    const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
+    const lockedOffer: PersuasionOfferInput = {
+      offerName: "Revenue Automation Program",
+      coreOutcome: "Predictable ARR growth",
+      mechanismDescription: "Revenue flywheel system",
+      deliverables: [],
+      proofAlignment: [],
+      offerStrengthScore: 0.8,
+      riskNotes: [],
+      frictionLevel: 2,
+      lockedDecisions: [],
+      nonGenericAnchors: ["flywheel", "revenue", "pipeline"],
+    };
+    const result = analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const anchorReq = result.primaryRoute.frictionNotes.find(n => n.startsWith("ANCHOR REQUIREMENT"));
+    expect(anchorReq).toBeDefined();
+    expect(anchorReq).toContain("flywheel");
+  });
+
+  test("narrative_direction in lockedDecisions generates a LOCK CONSTRAINT for that value", () => {
+    const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
+    const lockedOffer: PersuasionOfferInput = {
+      offerName: "Revenue Automation Program",
+      coreOutcome: "Predictable ARR growth",
+      mechanismDescription: "Revenue flywheel system",
+      deliverables: [],
+      proofAlignment: [],
+      offerStrengthScore: 0.8,
+      riskNotes: [],
+      frictionLevel: 2,
+      lockedDecisions: ["narrative_direction: from chaos to controlled growth"],
+      nonGenericAnchors: [],
+    };
+    const result = analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const lockConstraints = result.primaryRoute.frictionNotes.filter(n => n.startsWith("LOCK CONSTRAINT"));
+    expect(lockConstraints.some(n => n.includes("chaos to controlled growth"))).toBe(true);
+  });
+
+  test("no lock constraint notes injected when lockedDecisions and nonGenericAnchors are both empty", () => {
+    const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
+    const bareOffer: PersuasionOfferInput = {
+      offerName: "Revenue Automation Program",
+      coreOutcome: "Predictable ARR growth",
+      mechanismDescription: "Revenue flywheel system",
+      deliverables: [],
+      proofAlignment: [],
+      offerStrengthScore: 0.8,
+      riskNotes: [],
+      frictionLevel: 2,
+      lockedDecisions: [],
+      nonGenericAnchors: [],
+    };
+    const result = analyzePersuasion(mi, audience, positioning, differentiation, bareOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const lockNotes = result.primaryRoute.frictionNotes.filter(n => n.startsWith("LOCK CONSTRAINT") || n.startsWith("ANCHOR REQUIREMENT") || n.startsWith("ENEMY ANCHOR") || n.startsWith("MECHANISM ANCHOR"));
+    expect(lockNotes).toHaveLength(0);
   });
 });
 

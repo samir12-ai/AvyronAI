@@ -297,6 +297,7 @@ export function buildPositioningLock(
   if (contrastAxis) lockedDecisions.push(`contrast_axis: ${contrastAxis}`);
   if (enemyDefinition) lockedDecisions.push(`enemy: ${enemyDefinition}`);
   if (mechanismName) lockedDecisions.push(`mechanism: ${mechanismName}`);
+  if (narrativeDirection) lockedDecisions.push(`narrative_direction: ${narrativeDirection}`);
 
   const nonGenericAnchors: string[] = [...new Set([
     ...extractCoreAxisTokens(contrastAxis),

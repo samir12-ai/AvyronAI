@@ -1701,15 +1701,58 @@ function buildPersuasionRoutes(
     ? ` via "${core.mechanismName}" (${core.mechanismType})`
     : "";
 
+  const offerLockedDecisions: string[] = offer.lockedDecisions || [];
+  const offerNonGenericAnchors: string[] = offer.nonGenericAnchors || [];
+
+  let lockedRouteNameSuffix = "";
+  const lockConstraintNotes: string[] = [];
+
+  if (offerLockedDecisions.length > 0) {
+    const contrastAxisDecision = offerLockedDecisions.find(d => d.startsWith("contrast_axis:"));
+    const enemyDecision = offerLockedDecisions.find(d => d.startsWith("enemy:"));
+    const mechanismDecision = offerLockedDecisions.find(d => d.startsWith("mechanism:"));
+
+    if (contrastAxisDecision) {
+      const axisCore = contrastAxisDecision.replace(/^contrast_axis:\s*/i, "").trim();
+      if (axisCore) lockedRouteNameSuffix += ` [locked axis: ${axisCore.slice(0, 40)}]`;
+    }
+
+    for (const decision of offerLockedDecisions) {
+      const core = decision.replace(/^(contrast_axis|enemy|mechanism|narrative_direction):\s*/i, "").trim();
+      if (core) lockConstraintNotes.push(`LOCK CONSTRAINT — YOU MUST NOT reframe or contradict: "${core}"`);
+    }
+
+    if (enemyDecision) {
+      const enemyCore = enemyDecision.replace(/^enemy:\s*/i, "").trim();
+      if (enemyCore) lockConstraintNotes.push(`ENEMY ANCHOR: contrast against "${enemyCore}" — MUST be reflected in objection handling`);
+    }
+
+    if (mechanismDecision) {
+      const mechCore = mechanismDecision.replace(/^mechanism:\s*/i, "").trim();
+      if (mechCore) lockConstraintNotes.push(`MECHANISM ANCHOR: route MUST reflect "${mechCore}" as the solution vehicle`);
+    }
+  }
+
+  if (offerNonGenericAnchors.length > 0) {
+    lockConstraintNotes.push(`ANCHOR REQUIREMENT — at least one influence driver MUST echo: [${offerNonGenericAnchors.slice(0, 6).join(", ")}]`);
+  }
+
+  const lockedInfluenceDrivers = offerNonGenericAnchors.length > 0
+    ? [...new Set([
+        ...drivers.slice(0, 3),
+        `[locked_anchor] ${offerNonGenericAnchors[0]}`,
+      ])].slice(0, 4)
+    : drivers.slice(0, 4);
+
   const primary: PersuasionRoute = {
-    routeName: `${primaryMode.replace(/_/g, " ")} persuasion architecture${mechanismRef}`,
+    routeName: `${primaryMode.replace(/_/g, " ")} persuasion architecture${mechanismRef}${lockedRouteNameSuffix}`,
     persuasionMode: primaryMode,
-    primaryInfluenceDrivers: drivers.slice(0, 4),
+    primaryInfluenceDrivers: lockedInfluenceDrivers,
     objectionPriorities: objections,
     trustSequence,
     messageOrderLogic: messageOrder,
     persuasionStrengthScore: strengthScore,
-    frictionNotes: [...(awareness.frictionNotes || []).slice(0, 3), ...routeWarnings],
+    frictionNotes: [...(awareness.frictionNotes || []).slice(0, 3), ...routeWarnings, ...lockConstraintNotes],
     rejectionReason: null,
     trustBarriers,
     awarenessStageProperties,
