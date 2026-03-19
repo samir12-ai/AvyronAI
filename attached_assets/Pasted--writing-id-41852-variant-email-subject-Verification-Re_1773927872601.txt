@@ -1,0 +1,99 @@
+:::writing{id=“41852” variant=“email” subject=“Verification Request — Build Plan Strategy Layer & Card Output Behavior”}
+Hi Replit Team,
+
+I want one final verification specifically on the Build Plan strategy layer and the card output behavior.
+
+From your previous report, I understand that:
+	•	the Agent layer is only for narration, progress streaming, and simplified summaries
+	•	the Build Plan / synthesizePlan() remains the final synthesis layer after all 15 engines complete
+	•	and there is currently no structural conflict between them
+
+I now need a more precise evaluation based on the actual current code, to confirm whether the Build Plan strategy layer is already behaving correctly, or whether it still risks doing things it should not do.
+
+⸻
+
+What I need you to verify
+
+1. Is the Build Plan strategy layer currently staying within the correct boundary?
+
+Meaning:
+	•	does it only interpret, filter, rank, and assemble engine outputs into a final plan
+	•	or is it also:
+	•	re-framing positioning
+	•	re-writing offer logic
+	•	altering mechanism logic
+	•	changing strategic decisions that should remain locked from upstream engines
+
+Please answer based on the code path of the current synthesizePlan() flow.
+
+⸻
+
+2. Are the user-facing cards being generated correctly?
+
+I want to confirm whether the current/future card layer is safe and accurate.
+
+Specifically:
+	•	when Positioning is shown as one sentence
+	•	Offer as one sentence
+	•	Mechanism as one sentence
+	•	Funnel as one short structure
+	•	and so on
+
+Are these summaries:
+	•	purely extracted from existing engine outputs
+	•	or is there any place where they are being reinterpreted too much, simplified incorrectly, or made more generic than the underlying engine result?
+
+⸻
+
+3. Is there any risk that the Build Plan layer or card formatting introduces distortion?
+
+Please check for risks such as:
+	•	loss of specificity
+	•	loss of locked decisions
+	•	over-summarization
+	•	generic rewording
+	•	emotional flattening
+	•	contradiction with engine outputs
+
+If yes, please point to the exact file/function where this risk exists.
+
+⸻
+
+4. What should remain fixed and non-negotiable in the Build Plan layer?
+
+Please identify which upstream elements should be treated as locked inputs when the plan is assembled, for example:
+	•	positioning enemy / contrast
+	•	mechanism name / mechanism direction
+	•	offer core outcome
+	•	persuasion mode
+	•	channel role assignments
+	•	trust path / funnel logic
+
+I want to know exactly what the Build Plan layer must never reinterpret.
+
+⸻
+
+5. If any adjustment is needed, what is the minimal safe change?
+
+Please do not propose a redesign unless necessary.
+
+I need:
+	•	whether the current Build Plan layer is already correct
+	•	and if not, the smallest possible change to make it safe
+
+⸻
+
+Final goal
+
+I want the final system to behave like this:
+	•	engines produce the strategic decisions
+	•	Build Plan assembles them into execution
+	•	Agent narrates and presents them
+	•	cards summarize them
+	•	nothing downstream weakens or rewrites the upstream strategy
+
+Please return a code-structure-based report on whether this is already true, and if not, exactly what must be adjusted.
+
+Best,
+Samir
+:::
