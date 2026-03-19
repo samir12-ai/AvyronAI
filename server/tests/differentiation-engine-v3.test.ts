@@ -14,6 +14,7 @@ import {
   sanitizeGuardrail,
   compressDifferentiationPillars,
   inferBusinessCategory,
+  buildStructuredAELBlock,
 } from "../differentiation-engine/engine";
 import {
   COLLISION_THRESHOLD,
@@ -589,6 +590,90 @@ describe("Differentiation Engine V3", () => {
 
     it("should infer from productCategory for ecommerce", () => {
       expect(inferBusinessCategory({ businessType: "online", coreOffer: "gadgets", productCategory: "electronics store" } as any)).toBe("product");
+    });
+  });
+
+  describe("buildStructuredAELBlock — AEL Injection Strengthening", () => {
+    it("should return empty string when no AEL data", () => {
+      expect(buildStructuredAELBlock(null)).toBe("");
+      expect(buildStructuredAELBlock({})).toBe("");
+      expect(buildStructuredAELBlock({ root_causes: [], causal_chains: [], buying_barriers: [] })).toBe("");
+    });
+
+    it("should format root causes with RC identifiers", () => {
+      const ael = {
+        root_causes: [
+          { surfaceSignal: "users complain about price", deepCause: "value proposition unclear relative to alternatives", confidenceLevel: "high" },
+          { surfaceSignal: "low engagement", deepCause: "onboarding friction creates abandonment", confidenceLevel: "medium" },
+        ],
+        causal_chains: [],
+        buying_barriers: [],
+      };
+      const result = buildStructuredAELBlock(ael);
+      expect(result).toContain("[RC1]");
+      expect(result).toContain("[RC2]");
+      expect(result).toContain("value proposition unclear relative to alternatives");
+      expect(result).toContain("onboarding friction creates abandonment");
+      expect(result).toContain("AEL CAUSAL STRUCTURE");
+    });
+
+    it("should format causal chains with CC identifiers", () => {
+      const ael = {
+        root_causes: [],
+        causal_chains: [
+          { pain: "confusion", cause: "too many options", impact: "decision paralysis", behavior: "abandon cart", conversionEffect: "lost sale" },
+        ],
+        buying_barriers: [],
+      };
+      const result = buildStructuredAELBlock(ael);
+      expect(result).toContain("[CC1]");
+      expect(result).toContain("confusion");
+      expect(result).toContain("too many options");
+      expect(result).toContain("decision paralysis");
+      expect(result).toContain("lost sale");
+    });
+
+    it("should format buying barriers with BB identifiers", () => {
+      const ael = {
+        root_causes: [],
+        causal_chains: [],
+        buying_barriers: [
+          { severity: "blocking", barrier: "no proof of ROI", rootCause: "lack of case studies", requiredResolution: "publish outcome data" },
+        ],
+      };
+      const result = buildStructuredAELBlock(ael);
+      expect(result).toContain("[BB1]");
+      expect(result).toContain("no proof of ROI");
+      expect(result).toContain("lack of case studies");
+      expect(result).toContain("publish outcome data");
+    });
+
+    it("should cap at 5 items per section", () => {
+      const ael = {
+        root_causes: Array.from({ length: 8 }, (_, i) => ({
+          surfaceSignal: `signal ${i}`, deepCause: `cause ${i}`, confidenceLevel: "high",
+        })),
+        causal_chains: [],
+        buying_barriers: [],
+      };
+      const result = buildStructuredAELBlock(ael);
+      expect(result).toContain("[RC5]");
+      expect(result).not.toContain("[RC6]");
+    });
+
+    it("should include all three sections when data is present", () => {
+      const ael = {
+        root_causes: [{ surfaceSignal: "s", deepCause: "d", confidenceLevel: "high" }],
+        causal_chains: [{ pain: "p", cause: "c", impact: "i", behavior: "b", conversionEffect: "e" }],
+        buying_barriers: [{ severity: "major", barrier: "b", rootCause: "r", requiredResolution: "res" }],
+      };
+      const result = buildStructuredAELBlock(ael);
+      expect(result).toContain("ROOT CAUSES:");
+      expect(result).toContain("CAUSAL CHAINS:");
+      expect(result).toContain("BUYING BARRIERS:");
+      expect(result).toContain("[RC1]");
+      expect(result).toContain("[CC1]");
+      expect(result).toContain("[BB1]");
     });
   });
 });

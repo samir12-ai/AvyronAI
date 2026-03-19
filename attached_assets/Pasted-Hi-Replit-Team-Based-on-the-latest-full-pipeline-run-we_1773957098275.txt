@@ -1,0 +1,116 @@
+Hi Replit Team,
+
+Based on the latest full pipeline run, we have a clear conclusion:
+
+The issue is not detection — it is generation quality.
+
+---
+
+🔍 Current State
+
+After the Layer 7 fix:
+- Territories are now system-level ✅  
+- Compression is working (2 pillars) ✅  
+- Emotional leakage is eliminated ✅  
+- Signal grounding passes ✅  
+
+However:
+- Depth score remains low (~0.25) ❌  
+- Root cause / causal chain references = 0 ❌  
+- Confidence is low (~0.18) ❌  
+- Mechanism naming is still superficial ❌  
+
+CEL is already correctly flagging:
+- missing_root_cause  
+- missing_causal_chain  
+
+---
+
+🎯 Conclusion
+
+Phase 3 (post-generation scoring) is not the right next step.
+
+It would only re-diagnose issues that are already detected by CEL.
+
+---
+
+✅ Required Fix — AEL Injection Strengthening
+
+We need to improve how AEL causal data is used inside the Differentiation prompt, specifically in layer11_aiRefinement().
+
+Goal:
+
+Force the model to actively use:
+- root causes  
+- causal chains  
+- barriers  
+
+in the generated claims and pillars.
+
+---
+
+🔧 Proposed Changes
+
+1. Structured AEL Block (Explicit)
+
+Instead of passing AEL as passive context, inject a structured block:
+
+AEL CAUSAL STRUCTURE:
+- Root Causes: [...]
+- Causal Chains: [...]
+- Barriers: [...]
+
+---
+
+2. Hard Prompt Requirement
+
+Add to STRICT RULES:
+- Each pillar MUST reference at least one root cause  
+- Each claim MUST include a causal chain (cause → effect)  
+- Each pillar MUST address a specific barrier  
+
+If missing → considered invalid output
+
+---
+
+3. Output-Level Enforcement
+
+Require the model to explicitly show:
+- which root cause it uses  
+- which barrier it resolves  
+
+(Not hidden reasoning — explicit in output language)
+
+---
+
+❓ Questions
+
+1. Best way to inject AEL data:
+   - extend existing prompt block?  
+   - or create a dedicated AEL STRUCTURE section?  
+
+2. Any risk this creates with:
+   - CEL depth scoring  
+   - retry loop behavior  
+   - token limits  
+
+3. Should we:
+   - enforce hard regeneration if AEL usage is missing  
+   - or rely on CEL retries only?  
+
+---
+
+🎯 Objective
+
+Move differentiation output from:
+- descriptive / thematic  
+
+To:
+- causal, grounded, and mechanism-relevant  
+
+---
+
+Once this is implemented, we will re-run the pipeline before considering any Phase 3 scoring layer.
+
+Best,  
+Samir

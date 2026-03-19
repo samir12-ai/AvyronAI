@@ -940,6 +940,42 @@ export function layer10_claimStrengthScoring(
   return claims.sort((a, b) => b.overallScore - a.overallScore);
 }
 
+export function buildStructuredAELBlock(ael: any): string {
+  if (!ael) return "";
+  const sections: string[] = [];
+  const rootCauses = ael.root_causes || [];
+  const causalChains = ael.causal_chains || [];
+  const buyingBarriers = ael.buying_barriers || [];
+
+  if (rootCauses.length === 0 && causalChains.length === 0 && buyingBarriers.length === 0) return "";
+
+  sections.push("\n═══ AEL CAUSAL STRUCTURE (you MUST use these identifiers in your output) ═══\n");
+
+  if (rootCauses.length > 0) {
+    sections.push("ROOT CAUSES:");
+    rootCauses.slice(0, 5).forEach((rc: any, i: number) => {
+      sections.push(`  [RC${i + 1}] Surface: "${rc.surfaceSignal}" → Deep cause: "${rc.deepCause}" [${rc.confidenceLevel}]`);
+    });
+  }
+
+  if (causalChains.length > 0) {
+    sections.push("\nCAUSAL CHAINS:");
+    causalChains.slice(0, 5).forEach((cc: any, i: number) => {
+      sections.push(`  [CC${i + 1}] ${cc.pain} → ${cc.cause} → ${cc.impact} → ${cc.behavior} (conversion: ${cc.conversionEffect})`);
+    });
+  }
+
+  if (buyingBarriers.length > 0) {
+    sections.push("\nBUYING BARRIERS:");
+    buyingBarriers.slice(0, 5).forEach((bb: any, i: number) => {
+      sections.push(`  [BB${i + 1}] [${bb.severity}] ${bb.barrier} — root: ${bb.rootCause} — resolution: ${bb.requiredResolution}`);
+    });
+  }
+
+  sections.push("\n═══ END AEL STRUCTURE ═══\n");
+  return sections.join("\n");
+}
+
 export async function layer11_aiRefinement(
   pillars: DifferentiationPillar[],
   claims: ClaimStructure[],
@@ -956,7 +992,8 @@ export async function layer11_aiRefinement(
   const topClaims = claims.slice(0, MAX_PILLARS);
   const aelBlock = formatAELForPrompt(analyticalEnrichment || null);
   const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
-  if (aelBlock) console.log(`[DifferentiationEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
+  const aelStructuredBlock = buildStructuredAELBlock(analyticalEnrichment || null);
+  if (aelBlock) console.log(`[DifferentiationEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars | structuredBlock=${aelStructuredBlock.length}chars`);
 
   const domainContextBlock = (domainContext && (domainContext.domainFailures.length > 0 || domainContext.operationalProblems.length > 0)) ? `
 DOMAIN CONTEXT (from positioning engine — ground differentiation in these):
@@ -987,18 +1024,22 @@ Promise: ${mechanismCore.mechanismPromise}
     : "";
 
   const prompt = `You are refining differentiation language. You must improve wording to be clearer, more distinctive, and causally grounded.
-${aelBlock}${causalDirective}${domainContextBlock}${mechanismCoreBlock}${depthRejectionContext ? `\n${depthRejectionContext}\n` : ""}
+${aelBlock}${causalDirective}${aelStructuredBlock}${domainContextBlock}${mechanismCoreBlock}${depthRejectionContext ? `\n${depthRejectionContext}\n` : ""}
 STRICT RULES:
 - Do NOT invent new strategy, audience segments, offers, or execution plans
 - Do NOT add pricing, packaging, guarantees, CTAs, or channel recommendations
 - Do NOT generate strategic decisions, funnel structures, offer designs, or execution plans
 - Do NOT reference downstream engines (Strategy, Offer, Funnel, Financial, Execution)
 - ONLY output differentiation territories, claim strength, proof architecture, and mechanism framing
-- EVERY pillar description and claim MUST trace back to a specific root cause or causal chain from the AEL analysis above
-- Replace generic marketing terms with causally-derived language from the root causes
-- Reference specific buying barriers and explain WHY your differentiation resolves them
-- Show cause→impact→behavior reasoning, not just surface-level claims
 - Respond with ONLY valid JSON, no markdown
+
+AEL CAUSAL GROUNDING (MANDATORY — output will be rejected if missing):
+- EVERY pillar description MUST explicitly reference at least one ROOT CAUSE by its [RC#] identifier from the AEL STRUCTURE above
+- EVERY claim MUST include a causal chain showing cause → effect reasoning using language from the CAUSAL CHAINS [CC#] above
+- EVERY pillar MUST name a specific BARRIER [BB#] it resolves and explain HOW it resolves it
+- CRITICAL: You MUST embed the EXACT "Deep cause" text and EXACT barrier text from the AEL STRUCTURE directly into your pillar descriptions and claims. Do not paraphrase — copy the key phrases verbatim. The depth checker uses text matching to verify AEL usage.
+- Include the cause→impact→behavior chain text from the CAUSAL CHAINS verbatim in each claim
+- The "rootCauseUsed" and "barrierResolved" fields in the output are REQUIRED — not optional
 
 COMPRESSION RULES:
 - Output MAXIMUM ${MAX_PILLARS} pillars. Prefer fewer, deeper pillars over broad coverage.
@@ -1030,16 +1071,16 @@ Authority mode: ${authorityMode}
 
 Return JSON:
 {
-  "pillars": [{ "name": "refined name", "description": "refined description with mechanism anchor and contrast" }],
-  "claims": [{ "claim": "refined claim text with contrast framing" }],
-  "mechanismDescription": "refined mechanism description"
+  "pillars": [{ "name": "refined name", "description": "refined description incorporating root cause language, barrier resolution, and mechanism anchor with contrast", "rootCauseUsed": "RC1: <quote the deep cause text>", "barrierResolved": "BB1: <quote the barrier text>" }],
+  "claims": [{ "claim": "refined claim text showing cause→effect reasoning from causal chains, with contrast framing", "rootCauseUsed": "RC1", "barrierResolved": "BB1" }],
+  "mechanismDescription": "refined mechanism description grounded in root causes"
 }`;
 
   try {
     const response = await aiChat({
       model: "gpt-4.1-mini",
       messages: [
-        { role: "system", content: "You refine differentiation language with causal depth and mechanism anchoring. Each pillar MUST reference a specific mechanism step or structural component and include explicit contrast vs the market status quo. Ground every pillar and claim in root causes from the analytical data. Reject generic/emotional language unless operationalized. Never invent strategy, audience, offers, channels, or execution plans." },
+        { role: "system", content: "You refine differentiation language with causal depth and mechanism anchoring. Each pillar MUST reference a specific root cause [RC#] and barrier [BB#] from the AEL CAUSAL STRUCTURE provided. Each claim MUST incorporate causal chain [CC#] reasoning. You MUST include rootCauseUsed and barrierResolved fields in each pillar and claim — use the EXACT deep cause and barrier language from AEL. Include explicit contrast vs the market status quo. Reject generic/emotional language unless operationalized. Never invent strategy, audience, offers, channels, or execution plans." },
         { role: "user", content: prompt },
       ],
       accountId,
@@ -1051,6 +1092,20 @@ Return JSON:
     const jsonMatch = rawText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON in AI response");
     const parsed = JSON.parse(jsonMatch[0]);
+
+    const aelRefs = (parsed.pillars || []).map((p: any, i: number) => ({
+      pillar: i + 1,
+      rc: p.rootCauseUsed || "MISSING",
+      bb: p.barrierResolved || "MISSING",
+    }));
+    const claimRefs = (parsed.claims || []).map((c: any, i: number) => ({
+      claim: i + 1,
+      rc: c.rootCauseUsed || "MISSING",
+      bb: c.barrierResolved || "MISSING",
+    }));
+    const rcHits = aelRefs.filter((r: any) => r.rc !== "MISSING").length;
+    const bbHits = aelRefs.filter((r: any) => r.bb !== "MISSING").length;
+    console.log(`[DifferentiationEngine-V3] AEL_GROUNDING_RESULT | pillars=${aelRefs.length} | rootCauseRefs=${rcHits}/${aelRefs.length} | barrierRefs=${bbHits}/${aelRefs.length}`);
 
     const refinedPillars = topPillars.map((p, i) => {
       const refined = parsed.pillars?.[i];
