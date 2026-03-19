@@ -61,6 +61,7 @@ function clusterToGovernedSignals(
   return clusters
     .filter(c => c.confidence >= SIGNAL_CONFIDENCE_FLOOR)
     .filter(c => !isRawComment(c.label))
+    .sort((a, b) => b.confidence - a.confidence)
     .map((cluster, idx) => ({
       signalId: `SGL_${category.toUpperCase()}_${String(idx + 1).padStart(3, "0")}`,
       category,
@@ -262,11 +263,13 @@ export function resolveSignalsForEngine(
 
   const coverage = buildEngineCoverageReport(cleanSignals, requiredCategories);
 
-  if (!coverage.coverageSufficient) {
-    console.warn(
-      `[SGL] COVERAGE_INSUFFICIENT | engine=${engineId} | ` +
+  const isBlocked = !coverage.coverageSufficient;
+
+  if (isBlocked) {
+    console.error(
+      `[SGL] COVERAGE_BLOCKED | engine=${engineId} | ` +
       `signals=${cleanSignals.length} | missing=[${coverage.missingCategories.join(",")}] | ` +
-      `required=[${requiredCategories.join(",")}]`
+      `required=[${requiredCategories.join(",")}] | ENGINE_DISPATCH_HALTED`
     );
   }
 
@@ -286,7 +289,7 @@ export function resolveSignalsForEngine(
 
   console.log(
     `[SGL] RESOLVE | engine=${engineId} | raw=${signals.length} | clean=${cleanSignals.length} | ` +
-    `blocked=${contaminatedCount} | categories=[${requiredCategories.join(",")}] | sufficient=${coverage.coverageSufficient}`
+    `purged=${contaminatedCount} | categories=[${requiredCategories.join(",")}] | sufficient=${coverage.coverageSufficient} | blocked=${isBlocked}`
   );
 
   return {
@@ -294,6 +297,8 @@ export function resolveSignalsForEngine(
     coverage,
     traceToken: state.traceToken,
     engineId,
+    blocked: isBlocked,
+    insufficientCategories: coverage.missingCategories,
   };
 }
 

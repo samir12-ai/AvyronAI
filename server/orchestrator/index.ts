@@ -347,7 +347,18 @@ async function executeEngine(
             blockReason: "Missing MI or Audience snapshot",
           };
         }
-        if (ctx.sglState) resolveSignalsForEngine(ctx.sglState, "positioning");
+        if (ctx.sglState) {
+          const sglRes = resolveSignalsForEngine(ctx.sglState, "positioning");
+          if (sglRes.blocked) {
+            return {
+              engineId,
+              status: "SKIPPED",
+              output: null,
+              durationMs: Date.now() - startTime,
+              blockReason: `SGL_COVERAGE_INSUFFICIENT | missing=[${sglRes.insufficientCategories.join(",")}]`,
+            };
+          }
+        }
         const result = await runPositioningEngine(
           config.accountId,
           config.campaignId,
@@ -380,7 +391,18 @@ async function executeEngine(
       }
 
       case "differentiation": {
-        if (ctx.sglState) resolveSignalsForEngine(ctx.sglState, "differentiation");
+        if (ctx.sglState) {
+          const sglRes = resolveSignalsForEngine(ctx.sglState, "differentiation");
+          if (sglRes.blocked) {
+            return {
+              engineId,
+              status: "SKIPPED",
+              output: null,
+              durationMs: Date.now() - startTime,
+              blockReason: `SGL_COVERAGE_INSUFFICIENT | missing=[${sglRes.insufficientCategories.join(",")}]`,
+            };
+          }
+        }
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -427,7 +449,18 @@ async function executeEngine(
       }
 
       case "mechanism": {
-        if (ctx.sglState) resolveSignalsForEngine(ctx.sglState, "mechanism");
+        if (ctx.sglState) {
+          const sglRes = resolveSignalsForEngine(ctx.sglState, "mechanism");
+          if (sglRes.blocked) {
+            return {
+              engineId,
+              status: "SKIPPED",
+              output: null,
+              durationMs: Date.now() - startTime,
+              blockReason: `SGL_COVERAGE_INSUFFICIENT | missing=[${sglRes.insufficientCategories.join(",")}]`,
+            };
+          }
+        }
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
         const positioningForMech = {
@@ -469,7 +502,18 @@ async function executeEngine(
       }
 
       case "offer": {
-        if (ctx.sglState) resolveSignalsForEngine(ctx.sglState, "offer");
+        if (ctx.sglState) {
+          const sglRes = resolveSignalsForEngine(ctx.sglState, "offer");
+          if (sglRes.blocked) {
+            return {
+              engineId,
+              status: "SKIPPED",
+              output: null,
+              durationMs: Date.now() - startTime,
+              blockReason: `SGL_COVERAGE_INSUFFICIENT | missing=[${sglRes.insufficientCategories.join(",")}]`,
+            };
+          }
+        }
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -512,7 +556,18 @@ async function executeEngine(
       }
 
       case "awareness": {
-        if (ctx.sglState) resolveSignalsForEngine(ctx.sglState, "awareness");
+        if (ctx.sglState) {
+          const sglRes = resolveSignalsForEngine(ctx.sglState, "awareness");
+          if (sglRes.blocked) {
+            return {
+              engineId,
+              status: "SKIPPED",
+              output: null,
+              durationMs: Date.now() - startTime,
+              blockReason: `SGL_COVERAGE_INSUFFICIENT | missing=[${sglRes.insufficientCategories.join(",")}]`,
+            };
+          }
+        }
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -546,7 +601,18 @@ async function executeEngine(
       }
 
       case "funnel": {
-        if (ctx.sglState) resolveSignalsForEngine(ctx.sglState, "funnel");
+        if (ctx.sglState) {
+          const sglRes = resolveSignalsForEngine(ctx.sglState, "funnel");
+          if (sglRes.blocked) {
+            return {
+              engineId,
+              status: "SKIPPED",
+              output: null,
+              durationMs: Date.now() - startTime,
+              blockReason: `SGL_COVERAGE_INSUFFICIENT | missing=[${sglRes.insufficientCategories.join(",")}]`,
+            };
+          }
+        }
         if (!ctx.awareness || !ctx.awareness.primaryRoute) {
           console.log(`[Orchestrator] AWARENESS_GATE_BLOCKED | Funnel cannot execute without completed Awareness — awareness output missing or incomplete`);
           output = { status: "MISSING_DEPENDENCY", statusMessage: "Funnel requires completed Awareness output — awareness gate active" };
@@ -616,7 +682,18 @@ async function executeEngine(
       }
 
       case "persuasion": {
-        if (ctx.sglState) resolveSignalsForEngine(ctx.sglState, "persuasion");
+        if (ctx.sglState) {
+          const sglRes = resolveSignalsForEngine(ctx.sglState, "persuasion");
+          if (sglRes.blocked) {
+            return {
+              engineId,
+              status: "SKIPPED",
+              output: null,
+              durationMs: Date.now() - startTime,
+              blockReason: `SGL_COVERAGE_INSUFFICIENT | missing=[${sglRes.insufficientCategories.join(",")}]`,
+            };
+          }
+        }
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);

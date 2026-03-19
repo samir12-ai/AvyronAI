@@ -122,26 +122,8 @@ function deriveObjectionsFromAudienceData(audience: AudienceInput): Record<strin
     }
   }
 
-  if (Object.keys(derived).length < 2 && painTexts.length > 0) {
-    for (let i = 0; i < Math.min(2, painTexts.length) && Object.keys(derived).length < 2; i++) {
-      const fallback = `Concern about: ${painTexts[i]}`;
-      if (!derived[fallback]) {
-        derived[fallback] = { frequency: 0.3, severity: 0.3, source: "synthetic_fallback" };
-      }
-    }
-  }
-
-  if (Object.keys(derived).length < 2) {
-    const defaults = [
-      "This solution may not deliver on its promises",
-      "The approach may not be suitable for my specific situation",
-    ];
-    for (const d of defaults) {
-      if (Object.keys(derived).length >= 2) break;
-      if (!derived[d]) {
-        derived[d] = { frequency: 0.2, severity: 0.2, source: "synthetic_baseline" };
-      }
-    }
+  if (Object.keys(derived).length === 0) {
+    console.warn(`[DifferentiationEngine] OBJECTION_SPARSE | No objections derived from audience data — returning empty map. Upstream signal coverage must improve.`);
   }
 
   return derived;

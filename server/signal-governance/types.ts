@@ -44,6 +44,8 @@ export interface SignalResolution {
   coverage: SignalCoverageReport;
   traceToken: string;
   engineId: string;
+  blocked: boolean;
+  insufficientCategories: string[];
 }
 
 export type EngineId =
