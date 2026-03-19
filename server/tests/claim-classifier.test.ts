@@ -9,6 +9,7 @@ import {
 } from "../causal-enforcement-layer/claim-classifier";
 import {
   enforceEngineDepthCompliance,
+  isDepthBlocking,
 } from "../causal-enforcement-layer/engine";
 import type { AnalyticalPackage } from "../analytical-enrichment-layer/types";
 
@@ -328,5 +329,48 @@ describe("enforceEngineDepthCompliance — claimBreakdown integration", () => {
     const result = enforceEngineDepthCompliance("test-engine", multiTextOutput, ael);
     const total = result.claimBreakdown.factual + result.claimBreakdown.inferred + result.claimBreakdown.emotional;
     expect(total).toBeGreaterThanOrEqual(1);
+  });
+
+  test("isDepthBlocking returns false for purely emotional output (no factual claims)", () => {
+    const ael = makeAel();
+    const emotionalOnlyOutput = [
+      "This creates a feeling of trust and deep resonance with buyers.",
+      "The message taps into the longing for financial freedom and stability.",
+      "The brand inspires passionate commitment from the audience.",
+    ];
+    const result = enforceEngineDepthCompliance("test-engine", emotionalOnlyOutput, ael);
+    expect(result.factualClaimCount).toBe(0);
+    expect(isDepthBlocking(result)).toBe(false);
+  });
+
+  test("isDepthBlocking returns false for purely inferred output (no factual claims)", () => {
+    const ael = makeAel();
+    const inferredOnlyOutput = [
+      "The pattern suggests buyers are holding back due to unclear outcome expectations.",
+      "This implies a structural mismatch between offer framing and audience readiness.",
+      "The signals point toward an emerging shift in buyer expectations around value delivery.",
+    ];
+    const result = enforceEngineDepthCompliance("test-engine", inferredOnlyOutput, ael);
+    expect(result.factualClaimCount).toBe(0);
+    expect(isDepthBlocking(result)).toBe(false);
+  });
+
+  test("isDepthBlocking returns true for ungrounded factual claims even when emotional sentences mention AEL terms", () => {
+    const ael = makeAel();
+    const mixedOutput = [
+      "Conversion rates improved by 42% in completely unrelated gardening verticals.",
+      "The message resonates with buyers who trust transparent billing and distrust hidden fees.",
+      "This taps into the deep concern buyers have about undisclosed costs and pricing anxiety.",
+    ];
+    const result = enforceEngineDepthCompliance("test-engine", mixedOutput, ael);
+    expect(result.factualClaimCount).toBeGreaterThan(0);
+    expect(isDepthBlocking(result)).toBe(true);
+  });
+
+  test("factualClaimCount is present in result and matches claimBreakdown.factual", () => {
+    const ael = makeAel();
+    const output = ["Conversion improved by 32%. This resonates deeply with buyers seeking stability."];
+    const result = enforceEngineDepthCompliance("test-engine", output, ael);
+    expect(result.factualClaimCount).toBe(result.claimBreakdown.factual);
   });
 });

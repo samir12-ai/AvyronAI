@@ -495,9 +495,13 @@ export interface DepthGateResult {
 }
 
 export function isDepthBlocking(depthResult: DepthComplianceResult): boolean {
-  if (depthResult.causalDepthScore < DEPTH_GATE_THRESHOLD) return true;
-  if (!depthResult.depthDiagnostics.hasRootCauseGrounding && depthResult.rootCausesEvaluated > 0) return true;
-  if (!depthResult.depthDiagnostics.hasCausalChainUsage && depthResult.causalChainReferences === 0 &&
+  const hasFactualClaims = depthResult.factualClaimCount > 0;
+  if (depthResult.causalDepthScore < DEPTH_GATE_THRESHOLD) {
+    if (!hasFactualClaims) return false;
+    return true;
+  }
+  if (hasFactualClaims && !depthResult.depthDiagnostics.hasRootCauseGrounding && depthResult.rootCausesEvaluated > 0) return true;
+  if (hasFactualClaims && !depthResult.depthDiagnostics.hasCausalChainUsage && depthResult.causalChainReferences === 0 &&
       depthResult.rootCausesEvaluated > 0) return true;
   const blockingViolations = depthResult.violations.filter(v => v.severity === "blocking");
   if (blockingViolations.length > 0) return true;
@@ -587,6 +591,7 @@ export interface DepthComplianceResult extends ComplianceResult {
   causalChainReferences: number;
   barrierReferences: number;
   claimBreakdown: ClaimBreakdown;
+  factualClaimCount: number;
   depthDiagnostics: {
     hasRootCauseGrounding: boolean;
     hasCausalChainUsage: boolean;
@@ -621,6 +626,7 @@ export function enforceEngineDepthCompliance(
     causalChainReferences: 0,
     barrierReferences: 0,
     claimBreakdown,
+    factualClaimCount: claimBreakdown.factual,
     depthDiagnostics: {
       hasRootCauseGrounding: false,
       hasCausalChainUsage: false,
