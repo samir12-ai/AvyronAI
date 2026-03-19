@@ -5,6 +5,7 @@ import {
   CELReport,
 } from "./types";
 import { AnalyticalPackage } from "../analytical-enrichment-layer/types";
+import { cosineSimilarity, SEMANTIC_MATCH_THRESHOLD } from "../shared/embedding";
 
 const LOG_PREFIX = "[CEL]";
 
@@ -474,7 +475,7 @@ const SHALLOW_OUTPUT_PATTERNS: RegExp[] = [
 ];
 
 export const DEPTH_GATE_THRESHOLD = 0.30;
-export const DEPTH_GATE_MAX_RETRIES = 2;
+export const DEPTH_GATE_MAX_RETRIES = 1;
 
 export interface DepthGateResult {
   passed: boolean;
@@ -631,13 +632,9 @@ export function enforceEngineDepthCompliance(
 
   let rootCauseRefCount = 0;
   for (const rc of ael.root_causes) {
-    const deepCause = (rc.deepCause || "").toLowerCase();
-    const surface = (rc.surfaceSignal || "").toLowerCase();
-    const keywords = deepCause.split(/\s+/).filter(w => w.length > 4);
-    const surfaceKeywords = surface.split(/\s+/).filter(w => w.length > 4);
-    const allKeywords = [...keywords, ...surfaceKeywords];
-    const matchCount = allKeywords.filter(kw => allOutput.includes(kw)).length;
-    if (matchCount >= Math.max(1, Math.floor(allKeywords.length * 0.2))) {
+    const rcText = `${rc.deepCause || ""} ${rc.surfaceSignal || ""} ${rc.causalReasoning || ""}`;
+    const sim = cosineSimilarity(rcText, allOutput);
+    if (sim >= SEMANTIC_MATCH_THRESHOLD) {
       rootCauseRefCount++;
     }
   }
@@ -646,10 +643,9 @@ export function enforceEngineDepthCompliance(
 
   let chainRefCount = 0;
   for (const chain of (ael.causal_chains || [])) {
-    const chainText = `${chain.cause || ""} ${chain.impact || ""} ${chain.behavior || ""}`.toLowerCase();
-    const chainWords = chainText.split(/\s+/).filter(w => w.length > 4);
-    const matched = chainWords.filter(w => allOutput.includes(w)).length;
-    if (matched >= Math.max(1, Math.floor(chainWords.length * 0.2))) {
+    const chainText = `${chain.cause || ""} ${chain.impact || ""} ${chain.behavior || ""} ${chain.pain || ""}`;
+    const sim = cosineSimilarity(chainText, allOutput);
+    if (sim >= SEMANTIC_MATCH_THRESHOLD) {
       chainRefCount++;
     }
   }
@@ -658,10 +654,9 @@ export function enforceEngineDepthCompliance(
 
   let barrierRefCount = 0;
   for (const barrier of (ael.buying_barriers || [])) {
-    const barrierText = `${barrier.barrier || ""} ${barrier.rootCause || ""} ${barrier.userThinking || ""}`.toLowerCase();
-    const barrierWords = barrierText.split(/\s+/).filter(w => w.length > 4);
-    const matched = barrierWords.filter(w => allOutput.includes(w)).length;
-    if (matched >= Math.max(1, Math.floor(barrierWords.length * 0.2))) {
+    const barrierText = `${barrier.barrier || ""} ${barrier.rootCause || ""} ${barrier.userThinking || ""} ${barrier.requiredResolution || ""}`;
+    const sim = cosineSimilarity(barrierText, allOutput);
+    if (sim >= SEMANTIC_MATCH_THRESHOLD) {
       barrierRefCount++;
     }
   }
