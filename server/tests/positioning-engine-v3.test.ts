@@ -21,6 +21,7 @@ import {
   classifyTerritoryLevel,
   validateTerritorySpecificity,
   filterAudienceTerritories,
+  translateToSystemTerritory,
 } from '../positioning-engine/engine';
 
 describe('Positioning Engine V3 — Layer Tests', () => {
@@ -1009,6 +1010,112 @@ describe('Positioning Engine V3 — Layer Tests', () => {
     it('should reject data labels with numeric patterns', () => {
       const { rejected } = filterAudienceTerritories([makeTerr("Top pain (42 signals)")]);
       expect(rejected).toHaveLength(1);
+    });
+  });
+
+  describe('translateToSystemTerritory — Layer 7 System Territory Translation', () => {
+    const marketingDna = { businessType: "AI Marketing Platform", coreOffer: "Marketing Intelligence OS", coreProblemSolved: "Market blindness", uniqueMechanism: "15-engine pipeline" };
+    const fitnessDna = { businessType: "Fitness coaching service", coreOffer: "Personal training programs", coreProblemSolved: null, uniqueMechanism: null };
+    const ecommerceDna = { businessType: "ecommerce store", coreOffer: "Premium shoes", coreProblemSolved: null, uniqueMechanism: null };
+
+    it('should translate "cost and affordability concerns" to system territory for marketing', () => {
+      const result = translateToSystemTerritory("cost and affordability concerns", "pain", marketingDna);
+      expect(result).toContain("pricing-to-value translation gap");
+      expect(result).toMatch(/platform|marketing/);
+      expect(result).not.toContain("concerns");
+    });
+
+    it('should translate "belonging / community" desire to system territory', () => {
+      const result = translateToSystemTerritory("belonging / community", "desire", marketingDna);
+      expect(result).toContain("retention loop gap");
+      expect(result).not.toContain("belonging");
+    });
+
+    it('should translate "desperation / urgency" psych driver to system territory', () => {
+      const result = translateToSystemTerritory("desperation / urgency", "psych_driver", marketingDna);
+      expect(result).toContain("time-to-value pipeline stall");
+      expect(result).not.toContain("desperation");
+    });
+
+    it('should translate "status / social proof" to authority signaling deficit', () => {
+      const result = translateToSystemTerritory("status / social proof", "psych_driver", marketingDna);
+      expect(result).toContain("authority signaling mechanism deficit");
+    });
+
+    it('should infer "service delivery" domain for coaching business', () => {
+      const result = translateToSystemTerritory("cost and affordability concerns", "pain", fitnessDna);
+      expect(result).toContain("service delivery");
+    });
+
+    it('should infer "conversion" domain for ecommerce business', () => {
+      const result = translateToSystemTerritory("cost and affordability concerns", "pain", ecommerceDna);
+      expect(result).toContain("conversion");
+    });
+
+    it('should translate root cause with "driven by" suffix', () => {
+      const result = translateToSystemTerritory("cost and affordability concerns driven by belonging / community", "root_cause", marketingDna);
+      expect(result).toContain("pricing-to-value translation gap");
+      expect(result).not.toContain("belonging");
+    });
+
+    it('should translate data label psych driver', () => {
+      const result = translateToSystemTerritory("Dominant intent: comparison-shopping (115 signals classified)", "psych_driver", marketingDna);
+      expect(result).toContain("comparison evaluation framework failure");
+    });
+
+    it('should translate "Desired transformation: weak → strong"', () => {
+      const result = translateToSystemTerritory("Desired transformation: weak → strong", "psych_driver", marketingDna);
+      expect(result).toContain("capability transformation validation gap");
+    });
+
+    it('should use "operational" as fallback domain with no productDna', () => {
+      const result = translateToSystemTerritory("cost and affordability concerns", "pain", null);
+      expect(result).toContain("operational");
+      expect(result).toContain("pricing-to-value translation gap");
+    });
+
+    it('should produce system-level output for unknown labels via generic builder', () => {
+      const result = translateToSystemTerritory("some unusual new label", "pain", marketingDna);
+      expect(result).toMatch(/platform|marketing/);
+      expect(result).toMatch(/process breakdown|gap|failure|deficit/);
+    });
+
+    it('should translate "confusion and overwhelm" to workflow complexity', () => {
+      const result = translateToSystemTerritory("confusion and overwhelm", "pain", marketingDna);
+      expect(result).toContain("decision workflow complexity bottleneck");
+    });
+
+    it('should translate "trust and credibility doubts" to proof pipeline gap', () => {
+      const result = translateToSystemTerritory("trust and credibility doubts", "pain", marketingDna);
+      expect(result).toContain("proof-of-credibility pipeline gap");
+    });
+
+    it('should translate "save time / efficiency" to workflow automation', () => {
+      const result = translateToSystemTerritory("save time / efficiency", "desire", marketingDna);
+      expect(result).toContain("workflow automation bottleneck");
+    });
+
+    it('should translate "financial improvement" to ROI proof-path', () => {
+      const result = translateToSystemTerritory("financial improvement", "desire", marketingDna);
+      expect(result).toContain("ROI proof-path breakdown");
+    });
+
+    it('should never contain raw audience emotion words in output', () => {
+      const audienceLabels = [
+        "cost and affordability concerns",
+        "belonging / community",
+        "desperation / urgency",
+        "status / social proof",
+        "confusion and overwhelm",
+        "trust and credibility doubts",
+      ];
+      for (const label of audienceLabels) {
+        const result = translateToSystemTerritory(label, "pain", marketingDna);
+        expect(result).not.toMatch(/\bconcerns?\b/);
+        expect(result).not.toMatch(/\bbelonging\b/);
+        expect(result).not.toMatch(/\bdesperation\b/);
+        expect(result).not.toMatch(/\bconfusion\b/);
+      }
     });
   });
 });

@@ -489,7 +489,7 @@ export function classifyTerritoryLevel(territory: Territory): { level: "system" 
   const reasons: string[] = [];
 
   const SYSTEM_STRUCTURE_MARKERS = ["system", "tool", "platform", "pipeline", "process", "framework", "engine", "workflow", "protocol", "method", "mechanism", "infrastructure", "stack", "architecture", "module", "layer", "approach", "model", "structure", "integration", "validation", "verification", "audit"];
-  const FAILURE_MARKERS = ["fails", "breaks", "lacks", "missing", "blocks", "prevents", "collapses", "stalls", "erodes", "undermines", "fragments", "disconnects", "inability", "absence", "breakdown", "failure", "deficit", "gap", "blind spot", "bottleneck"];
+  const FAILURE_MARKERS = ["fail", "fails", "break", "breaks", "lack", "lacks", "missing", "block", "blocks", "prevent", "prevents", "collapse", "collapses", "stall", "stalls", "erode", "erodes", "undermine", "undermines", "fragment", "fragments", "disconnect", "disconnects", "inability", "absence", "breakdown", "failure", "deficit", "gap", "blind spot", "bottleneck"];
   const AUDIENCE_EMOTION_MARKERS = ["concerns", "needs", "desires", "fears", "anxiety", "hesitation", "worry", "belonging", "community", "affordability", "aspiration", "motivation", "trust", "cost", "transformation", "simplicity", "empowerment", "wellness", "satisfaction", "loyalty"];
 
   const hasSystem = SYSTEM_STRUCTURE_MARKERS.some(m => tokens.some(t => t === m || t.endsWith(m) || t.startsWith(m)));
@@ -869,6 +869,130 @@ function validateTerritoryEvidenceDensity(
   };
 }
 
+export function translateToSystemTerritory(
+  audienceLabel: string,
+  signalType: "pain" | "desire" | "root_cause" | "psych_driver",
+  productDna?: { businessType?: string; coreOffer?: string; coreProblemSolved?: string | null; uniqueMechanism?: string | null; productCategory?: string } | null,
+): string {
+  const lower = audienceLabel.toLowerCase().trim();
+
+  const cleanLabel = lower
+    .replace(/\([\d\s\w]+\)/g, "")
+    .replace(/driven by\s+.*/i, "")
+    .replace(/\(recurring audience friction\)/i, "")
+    .replace(/buying barrier:\s*/i, "")
+    .replace(/awareness state:\s*/i, "")
+    .replace(/dominant intent:\s*/i, "")
+    .replace(/desired transformation:\s*/i, "")
+    .trim();
+
+  const domainNoun = inferDomainNoun(productDna);
+
+  const PAIN_TO_SYSTEM: Record<string, string> = {
+    "cost and affordability concerns": `${domainNoun} pricing-to-value translation gap`,
+    "social comparison and pressure": `${domainNoun} competitive differentiation visibility failure`,
+    "frustration with lack of results": `${domainNoun} outcome validation process breakdown`,
+    "confusion and overwhelm": `${domainNoun} decision workflow complexity bottleneck`,
+    "trust and credibility doubts": `${domainNoun} proof-of-credibility pipeline gap`,
+    "fear of commitment": `${domainNoun} risk-mitigation framework absence`,
+    "lack of support": `${domainNoun} onboarding support structure deficit`,
+    "complexity / too hard": `${domainNoun} implementation complexity bottleneck`,
+    "too hard": `${domainNoun} implementation complexity bottleneck`,
+    "lack of results": `${domainNoun} outcome verification process failure`,
+    "cost concerns": `${domainNoun} pricing-to-value translation gap`,
+    "affordability": `${domainNoun} pricing-to-value translation gap`,
+  };
+
+  const DESIRE_TO_SYSTEM: Record<string, string> = {
+    "community and belonging": `${domainNoun} user retention loop gap`,
+    "social recognition / status": `${domainNoun} authority signaling mechanism deficit`,
+    "learn skills / knowledge": `${domainNoun} capability transfer process gap`,
+    "save time / efficiency": `${domainNoun} workflow automation bottleneck`,
+    "financial improvement": `${domainNoun} ROI proof-path breakdown`,
+    "belonging / community": `${domainNoun} user retention loop gap`,
+    "status / social proof": `${domainNoun} authority signaling mechanism deficit`,
+  };
+
+  const PSYCH_TO_SYSTEM: Record<string, string> = {
+    "belonging / community": `${domainNoun} user retention loop gap`,
+    "desperation / urgency": `${domainNoun} time-to-value pipeline stall`,
+    "status / social proof": `${domainNoun} authority signaling mechanism deficit`,
+    "hope / aspiration": `${domainNoun} outcome prediction framework gap`,
+    "desire for attractiveness": `${domainNoun} competitive positioning visibility deficit`,
+    "comparison-shopping": `${domainNoun} comparison evaluation framework failure`,
+    "weak → strong": `${domainNoun} capability transformation validation gap`,
+  };
+
+  if (signalType === "pain" || signalType === "root_cause") {
+    for (const [key, value] of Object.entries(PAIN_TO_SYSTEM)) {
+      if (cleanLabel.includes(key) || lower.includes(key)) return value;
+    }
+  }
+
+  if (signalType === "desire") {
+    for (const [key, value] of Object.entries(DESIRE_TO_SYSTEM)) {
+      if (cleanLabel.includes(key) || lower.includes(key)) return value;
+    }
+  }
+
+  if (signalType === "psych_driver") {
+    for (const [key, value] of Object.entries(PSYCH_TO_SYSTEM)) {
+      if (cleanLabel.includes(key) || lower.includes(key)) return value;
+    }
+  }
+
+  for (const [key, value] of Object.entries({ ...PAIN_TO_SYSTEM, ...DESIRE_TO_SYSTEM, ...PSYCH_TO_SYSTEM })) {
+    if (cleanLabel.includes(key) || lower.includes(key)) return value;
+  }
+
+  return buildGenericSystemTerritory(cleanLabel, domainNoun, signalType);
+}
+
+function inferDomainNoun(
+  productDna?: { businessType?: string; coreOffer?: string; coreProblemSolved?: string | null; uniqueMechanism?: string | null; productCategory?: string } | null,
+): string {
+  if (!productDna) return "operational";
+
+  const offer = (productDna.coreOffer || "").toLowerCase();
+  const bType = (productDna.businessType || "").toLowerCase();
+  const category = (productDna.productCategory || "").toLowerCase();
+
+  if (/saas|software|platform|app|tool/i.test(bType + " " + offer)) return "platform";
+  if (/market|advertis|campaign|brand/i.test(offer + " " + category)) return "marketing";
+  if (/consult|agency|service|coach|freelanc|advisor/i.test(bType)) return "service delivery";
+  if (/ecommerce|shop|store|retail|product/i.test(bType + " " + offer)) return "conversion";
+  if (/health|fitness|wellness|medical/i.test(offer + " " + category)) return "care delivery";
+  if (/education|course|training|learn/i.test(offer + " " + category)) return "learning";
+  if (/finance|invest|trading|banking/i.test(offer + " " + category)) return "financial";
+
+  const offerTokens = offer.split(/\s+/).filter(w => w.length > 4);
+  if (offerTokens.length > 0) return offerTokens[0];
+
+  return "operational";
+}
+
+function buildGenericSystemTerritory(cleanLabel: string, domainNoun: string, signalType: string): string {
+  const FAILURE_SUFFIXES: Record<string, string> = {
+    pain: "process breakdown",
+    desire: "mechanism gap",
+    root_cause: "structural failure",
+    psych_driver: "framework deficit",
+  };
+
+  const suffix = FAILURE_SUFFIXES[signalType] || "operational gap";
+
+  const stripped = cleanLabel
+    .replace(/concerns?|needs?|desires?|fears?|anxiety|hesitation|worry|belonging|community|affordability|aspiration|motivation|trust|cost|transformation|simplicity|empowerment|wellness|satisfaction|loyalty|emotion|feeling|comfort|desperation|urgency|overwhelm|confusion|skepticism|resistance|status|proof|social|intent|dominant|comparison|shopping|credibility|reputation|influence|perception|awareness|recognition|identity/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (stripped.length >= 4) {
+    return `${domainNoun} ${stripped} ${suffix}`;
+  }
+
+  return `${domainNoun} ${suffix}`;
+}
+
 function layer7_opportunityGapDetection(
   narrativeSaturation: Record<string, number>,
   audienceData: any,
@@ -884,14 +1008,14 @@ function layer7_opportunityGapDetection(
   const competitorCount = Object.keys(narrativeMap).length || marketPower.length;
 
   const painTerritories = pains.slice(0, 8).map((p: any) => ({
-    name: p.canonical,
+    name: translateToSystemTerritory(p.canonical, "pain", productDna),
     demand: Math.min(1.0, p.frequency / 20),
     signals: purifyEvidence(p.evidence || []),
     type: "pain" as const,
   }));
 
   const desireTerritories = desires.slice(0, 8).map((d: any) => ({
-    name: d.canonical,
+    name: translateToSystemTerritory(d.canonical, "desire", productDna),
     demand: Math.min(1.0, d.frequency / 20),
     signals: purifyEvidence(d.evidence || []),
     type: "desire" as const,
@@ -1889,9 +2013,10 @@ export async function runPositioningEngine(
     const existingNames = new Set(opportunityGaps.map(o => o.territory.toLowerCase()));
 
     for (const rc of parsedStructuredSignals.root_causes) {
-      if (!existingNames.has(rc.label.toLowerCase())) {
+      const translatedName = translateToSystemTerritory(rc.label, "root_cause", productDna);
+      if (!existingNames.has(translatedName.toLowerCase())) {
         signalTerritories.push({
-          territory: rc.label,
+          territory: translatedName,
           saturationLevel: 0,
           audienceDemand: Math.min(1.0, rc.frequency / 15),
           competitorAuthority: 0,
@@ -1900,14 +2025,15 @@ export async function runPositioningEngine(
           desireSignals: [],
           signalSource: rc.id,
         });
-        existingNames.add(rc.label.toLowerCase());
+        existingNames.add(translatedName.toLowerCase());
       }
     }
 
     for (const pd of parsedStructuredSignals.psychological_drivers) {
-      if (!existingNames.has(pd.label.toLowerCase())) {
+      const translatedName = translateToSystemTerritory(pd.label, "psych_driver", productDna);
+      if (!existingNames.has(translatedName.toLowerCase())) {
         signalTerritories.push({
-          territory: pd.label,
+          territory: translatedName,
           saturationLevel: 0,
           audienceDemand: Math.min(1.0, pd.frequency / 15),
           competitorAuthority: 0,
@@ -1916,7 +2042,7 @@ export async function runPositioningEngine(
           desireSignals: purifyEvidence(pd.evidence || []).slice(0, 3),
           signalSource: pd.id,
         });
-        existingNames.add(pd.label.toLowerCase());
+        existingNames.add(translatedName.toLowerCase());
       }
     }
 
