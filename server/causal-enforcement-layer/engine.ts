@@ -659,12 +659,12 @@ export function enforceEngineDepthCompliance(
   }
   result.depthDiagnostics.shallowPatternCount = shallowPatternCount;
 
-  const depthCheckText = factualOnlyOutput.length > 0 ? factualOnlyOutput : allOutput;
+  const hasFactualClaims = factualOnlyOutput.length > 0;
 
   let rootCauseRefCount = 0;
   for (const rc of ael.root_causes) {
     const rcText = `${rc.deepCause || ""} ${rc.surfaceSignal || ""} ${rc.causalReasoning || ""}`;
-    const sim = cosineSimilarity(rcText, depthCheckText);
+    const sim = cosineSimilarity(rcText, allOutput);
     if (sim >= SEMANTIC_MATCH_THRESHOLD) {
       rootCauseRefCount++;
     }
@@ -675,7 +675,7 @@ export function enforceEngineDepthCompliance(
   let chainRefCount = 0;
   for (const chain of (ael.causal_chains || [])) {
     const chainText = `${chain.cause || ""} ${chain.impact || ""} ${chain.behavior || ""} ${chain.pain || ""}`;
-    const sim = cosineSimilarity(chainText, depthCheckText);
+    const sim = cosineSimilarity(chainText, allOutput);
     if (sim >= SEMANTIC_MATCH_THRESHOLD) {
       chainRefCount++;
     }
@@ -686,7 +686,7 @@ export function enforceEngineDepthCompliance(
   let barrierRefCount = 0;
   for (const barrier of (ael.buying_barriers || [])) {
     const barrierText = `${barrier.barrier || ""} ${barrier.rootCause || ""} ${barrier.userThinking || ""} ${barrier.requiredResolution || ""}`;
-    const sim = cosineSimilarity(barrierText, depthCheckText);
+    const sim = cosineSimilarity(barrierText, allOutput);
     if (sim >= SEMANTIC_MATCH_THRESHOLD) {
       barrierRefCount++;
     }
@@ -712,27 +712,27 @@ export function enforceEngineDepthCompliance(
   ];
   result.causalDepthScore = Math.round(depthComponents.reduce((a, b) => a + b, 0) * 100) / 100;
 
-  if (!result.depthDiagnostics.hasRootCauseGrounding) {
+  if (hasFactualClaims && !result.depthDiagnostics.hasRootCauseGrounding) {
     result.violations.push({
       ruleId: "DEPTH_ROOT_CAUSE",
       violationType: "missing_root_cause",
       severity: "blocking",
-      details: `${engineId} output does not reference any AEL root cause (${rootCauseTexts.length} available)`,
+      details: `${engineId} factual claims do not reference any AEL root cause (${rootCauseTexts.length} available)`,
       rootCause: rootCauseTexts.slice(0, 2).join("; "),
       engineOutput: outputTexts[0]?.slice(0, 200) || "",
-      requiredDirection: "Output must be grounded in identified root causes, not surface patterns",
+      requiredDirection: "Factual claims must be grounded in identified root causes, not surface patterns",
     });
   }
 
-  if (!result.depthDiagnostics.hasCausalChainUsage && (ael.causal_chains || []).length > 0) {
+  if (hasFactualClaims && !result.depthDiagnostics.hasCausalChainUsage && (ael.causal_chains || []).length > 0) {
     result.violations.push({
       ruleId: "DEPTH_CAUSAL_CHAIN",
       violationType: "missing_causal_chain",
       severity: "blocking",
-      details: `${engineId} output does not reflect any causal chain (${(ael.causal_chains || []).length} chains available)`,
+      details: `${engineId} factual claims do not reflect any causal chain (${(ael.causal_chains || []).length} chains available)`,
       rootCause: (ael.causal_chains || []).slice(0, 2).map(c => `${c.cause}→${c.impact}`).join("; "),
       engineOutput: outputTexts[0]?.slice(0, 200) || "",
-      requiredDirection: "Output must demonstrate WHY, not just WHAT — use causal chains",
+      requiredDirection: "Factual claims must demonstrate WHY, not just WHAT — use causal chains",
     });
   }
 

@@ -249,7 +249,7 @@ describe("enforceEngineDepthCompliance — claimBreakdown integration", () => {
     expect(classifierLog).toBeDefined();
   });
 
-  test("output with purely emotional sentences does not block on missing factual evidence", () => {
+  test("output with purely emotional sentences does not trigger blocking root_cause or causal_chain violations", () => {
     const ael = makeAel();
     const emotionalOnlyOutput = [
       "This creates a feeling of trust and deep resonance with buyers.",
@@ -258,6 +258,39 @@ describe("enforceEngineDepthCompliance — claimBreakdown integration", () => {
     ];
     const result = enforceEngineDepthCompliance("test-engine", emotionalOnlyOutput, ael);
     expect(result.claimBreakdown.emotional).toBeGreaterThan(0);
+    const blockingViolations = result.violations.filter(v => v.severity === "blocking");
+    const rootCauseViolation = result.violations.find(v => v.violationType === "missing_root_cause");
+    const causalChainViolation = result.violations.find(v => v.violationType === "missing_causal_chain");
+    expect(rootCauseViolation).toBeUndefined();
+    expect(causalChainViolation).toBeUndefined();
+    expect(result.passed).not.toBe(false);
+  });
+
+  test("purely inferred output does not trigger blocking root_cause violations", () => {
+    const ael = makeAel();
+    const inferredOnlyOutput = [
+      "The pattern suggests buyers are holding back due to unclear outcome expectations.",
+      "This implies a structural mismatch between offer framing and audience readiness.",
+      "The signals point toward an emerging shift in buyer expectations around value delivery.",
+    ];
+    const result = enforceEngineDepthCompliance("test-engine", inferredOnlyOutput, ael);
+    const rootCauseViolation = result.violations.find(v => v.violationType === "missing_root_cause");
+    const causalChainViolation = result.violations.find(v => v.violationType === "missing_causal_chain");
+    expect(rootCauseViolation).toBeUndefined();
+    expect(causalChainViolation).toBeUndefined();
+  });
+
+  test("factual claims without AEL root cause alignment DO trigger missing_root_cause violation", () => {
+    const ael = makeAel();
+    const factualUnalignedOutput = [
+      "Conversion rates improved by 35% in completely unrelated gardening software segments.",
+      "Data indicates a 2x reduction in tomato harvest yield among competing platforms.",
+      "Studies show 40% faster seed germination resulting from unrelated soil treatments.",
+    ];
+    const result = enforceEngineDepthCompliance("test-engine", factualUnalignedOutput, ael);
+    expect(result.claimBreakdown.factual).toBeGreaterThan(0);
+    const rootCauseViolation = result.violations.find(v => v.violationType === "missing_root_cause");
+    expect(rootCauseViolation).toBeDefined();
   });
 
   test("factual claims with root cause alignment pass depth check", () => {
