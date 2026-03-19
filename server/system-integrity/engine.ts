@@ -5,6 +5,22 @@ import type {
 } from "./types";
 import type { SignalGovernanceState } from "../signal-governance/types";
 import { checkSignalLeakage } from "../signal-governance/engine";
+import { cosineSimilarity } from "../shared/embedding";
+
+/**
+ * Minimum semantic alignment score between adjacent engine-stage outputs.
+ *
+ * Threshold rationale — the combined cosine metric (0.35 × unigram + 0.65 × bigram)
+ * produces lower scores than raw cosine similarity on the same texts, so the threshold
+ * is set at 0.35 (same as SEMANTIC_MATCH_THRESHOLD) rather than the 0.50–0.65 range
+ * that applies to raw cosine methods. Calibrated against known test cases:
+ *   Paraphrase (same concept, different words): combined ≈ 0.69 — ALIGNED ✓
+ *   True drift (unrelated domains):             combined ≈ 0.04 — MISALIGNED ✓
+ *
+ * Replaces the previous keyword overlap ratio (threshold=0.05) which passed almost
+ * every pair regardless of actual semantic alignment.
+ */
+const SEMANTIC_ALIGNMENT_THRESHOLD = 0.35;
 
 const ALIGNMENT_CHAIN: Array<[string, string]> = [
   ["audience", "positioning"],
@@ -134,29 +150,15 @@ function checkAlignmentPair(
     };
   }
 
-  const sourceWords = new Set<string>();
-  for (const text of sourceTexts.slice(0, 30)) {
-    for (const word of text.toLowerCase().split(/\s+/).filter(w => w.length > 4)) {
-      sourceWords.add(word);
-    }
-  }
+  const sourceText = sourceTexts.slice(0, 30).join(" ");
+  const targetText = targetTexts.slice(0, 30).join(" ");
 
-  let matchCount = 0;
-  let totalWords = 0;
-  for (const text of targetTexts.slice(0, 30)) {
-    const words = text.toLowerCase().split(/\s+/).filter(w => w.length > 4);
-    totalWords += words.length;
-    for (const word of words) {
-      if (sourceWords.has(word)) matchCount++;
-    }
-  }
-
-  const alignmentScore = totalWords > 0 ? Math.min(1, matchCount / Math.min(totalWords, 50)) : 0;
-  const aligned = alignmentScore >= 0.05;
+  const alignmentScore = Math.round(cosineSimilarity(sourceText, targetText) * 1000) / 1000;
+  const aligned = alignmentScore >= SEMANTIC_ALIGNMENT_THRESHOLD;
 
   const mismatches: string[] = [];
   if (!aligned) {
-    mismatches.push(`Low vocabulary overlap between ${sourceId} and ${targetId} (score=${alignmentScore.toFixed(3)})`);
+    mismatches.push(`Semantic misalignment between ${sourceId} and ${targetId} (score=${alignmentScore.toFixed(3)}, threshold=${SEMANTIC_ALIGNMENT_THRESHOLD})`);
   }
 
   return {
