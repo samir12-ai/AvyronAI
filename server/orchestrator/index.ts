@@ -181,6 +181,25 @@ function extractDifferentiationInput(diffResult: any): any {
   };
 }
 
+function resolveSglOrBlock(
+  engineId: EngineId,
+  ctx: EngineContext,
+  startTime: number,
+): EngineStepResult | null {
+  if (!ctx.sglState) return null;
+  const sglRes = resolveSignalsForEngine(ctx.sglState, engineId);
+  if (sglRes.blocked) {
+    return {
+      engineId,
+      status: "SKIPPED",
+      output: null,
+      durationMs: Date.now() - startTime,
+      blockReason: `SGL_COVERAGE_INSUFFICIENT | missing=[${sglRes.insufficientCategories.join(",")}]`,
+    };
+  }
+  return null;
+}
+
 async function executeEngine(
   engineId: EngineId,
   ctx: EngineContext,
@@ -347,18 +366,7 @@ async function executeEngine(
             blockReason: "Missing MI or Audience snapshot",
           };
         }
-        if (ctx.sglState) {
-          const sglRes = resolveSignalsForEngine(ctx.sglState, "positioning");
-          if (sglRes.blocked) {
-            return {
-              engineId,
-              status: "SKIPPED",
-              output: null,
-              durationMs: Date.now() - startTime,
-              blockReason: `SGL_COVERAGE_INSUFFICIENT | missing=[${sglRes.insufficientCategories.join(",")}]`,
-            };
-          }
-        }
+        { const sglBlock = resolveSglOrBlock("positioning", ctx, startTime); if (sglBlock) return sglBlock; }
         const result = await runPositioningEngine(
           config.accountId,
           config.campaignId,
@@ -391,18 +399,7 @@ async function executeEngine(
       }
 
       case "differentiation": {
-        if (ctx.sglState) {
-          const sglRes = resolveSignalsForEngine(ctx.sglState, "differentiation");
-          if (sglRes.blocked) {
-            return {
-              engineId,
-              status: "SKIPPED",
-              output: null,
-              durationMs: Date.now() - startTime,
-              blockReason: `SGL_COVERAGE_INSUFFICIENT | missing=[${sglRes.insufficientCategories.join(",")}]`,
-            };
-          }
-        }
+        { const sglBlock = resolveSglOrBlock("differentiation", ctx, startTime); if (sglBlock) return sglBlock; }
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -449,18 +446,7 @@ async function executeEngine(
       }
 
       case "mechanism": {
-        if (ctx.sglState) {
-          const sglRes = resolveSignalsForEngine(ctx.sglState, "mechanism");
-          if (sglRes.blocked) {
-            return {
-              engineId,
-              status: "SKIPPED",
-              output: null,
-              durationMs: Date.now() - startTime,
-              blockReason: `SGL_COVERAGE_INSUFFICIENT | missing=[${sglRes.insufficientCategories.join(",")}]`,
-            };
-          }
-        }
+        { const sglBlock = resolveSglOrBlock("mechanism", ctx, startTime); if (sglBlock) return sglBlock; }
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
         const positioningForMech = {
@@ -502,18 +488,7 @@ async function executeEngine(
       }
 
       case "offer": {
-        if (ctx.sglState) {
-          const sglRes = resolveSignalsForEngine(ctx.sglState, "offer");
-          if (sglRes.blocked) {
-            return {
-              engineId,
-              status: "SKIPPED",
-              output: null,
-              durationMs: Date.now() - startTime,
-              blockReason: `SGL_COVERAGE_INSUFFICIENT | missing=[${sglRes.insufficientCategories.join(",")}]`,
-            };
-          }
-        }
+        { const sglBlock = resolveSglOrBlock("offer", ctx, startTime); if (sglBlock) return sglBlock; }
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -556,18 +531,7 @@ async function executeEngine(
       }
 
       case "awareness": {
-        if (ctx.sglState) {
-          const sglRes = resolveSignalsForEngine(ctx.sglState, "awareness");
-          if (sglRes.blocked) {
-            return {
-              engineId,
-              status: "SKIPPED",
-              output: null,
-              durationMs: Date.now() - startTime,
-              blockReason: `SGL_COVERAGE_INSUFFICIENT | missing=[${sglRes.insufficientCategories.join(",")}]`,
-            };
-          }
-        }
+        { const sglBlock = resolveSglOrBlock("awareness", ctx, startTime); if (sglBlock) return sglBlock; }
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -601,18 +565,7 @@ async function executeEngine(
       }
 
       case "funnel": {
-        if (ctx.sglState) {
-          const sglRes = resolveSignalsForEngine(ctx.sglState, "funnel");
-          if (sglRes.blocked) {
-            return {
-              engineId,
-              status: "SKIPPED",
-              output: null,
-              durationMs: Date.now() - startTime,
-              blockReason: `SGL_COVERAGE_INSUFFICIENT | missing=[${sglRes.insufficientCategories.join(",")}]`,
-            };
-          }
-        }
+        { const sglBlock = resolveSglOrBlock("funnel", ctx, startTime); if (sglBlock) return sglBlock; }
         if (!ctx.awareness || !ctx.awareness.primaryRoute) {
           console.log(`[Orchestrator] AWARENESS_GATE_BLOCKED | Funnel cannot execute without completed Awareness — awareness output missing or incomplete`);
           output = { status: "MISSING_DEPENDENCY", statusMessage: "Funnel requires completed Awareness output — awareness gate active" };
@@ -682,18 +635,7 @@ async function executeEngine(
       }
 
       case "persuasion": {
-        if (ctx.sglState) {
-          const sglRes = resolveSignalsForEngine(ctx.sglState, "persuasion");
-          if (sglRes.blocked) {
-            return {
-              engineId,
-              status: "SKIPPED",
-              output: null,
-              durationMs: Date.now() - startTime,
-              blockReason: `SGL_COVERAGE_INSUFFICIENT | missing=[${sglRes.insufficientCategories.join(",")}]`,
-            };
-          }
-        }
+        { const sglBlock = resolveSglOrBlock("persuasion", ctx, startTime); if (sglBlock) return sglBlock; }
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
