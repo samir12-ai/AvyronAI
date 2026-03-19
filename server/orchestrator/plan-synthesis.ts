@@ -184,11 +184,88 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
   return sections.join("\n");
 }
 
+function extractLockedDecisions(results: Map<EngineId, EngineStepResult>): string {
+  const lines: string[] = [];
+
+  const positioning = results.get("positioning");
+  if (positioning?.status === "SUCCESS" && positioning.output) {
+    const out = positioning.output;
+    const territories = out.territories || [];
+    const primary = territories[0];
+    if (primary) {
+      if (primary.name) lines.push(`  Positioning territory: "${primary.name}"`);
+      const enemy = out.enemyDefinition || primary.enemyDefinition;
+      if (enemy) lines.push(`  Positioning enemy: "${enemy}"`);
+      const contrast = out.contrastAxis || primary.contrastAxis;
+      if (contrast) lines.push(`  Contrast axis: "${contrast}"`);
+      const narrative = out.narrativeDirection || primary.narrativeDirection;
+      if (narrative) lines.push(`  Narrative direction: "${narrative}"`);
+    }
+  }
+
+  const mechanism = results.get("mechanism");
+  if (mechanism?.status === "SUCCESS" && mechanism.output) {
+    const out = mechanism.output.output || mechanism.output;
+    if (out.mechanismName) lines.push(`  Mechanism name: "${out.mechanismName}"`);
+    if (out.mechanismType) lines.push(`  Mechanism type: "${out.mechanismType}"`);
+  }
+
+  const offer = results.get("offer");
+  if (offer?.status === "SUCCESS" && offer.output) {
+    const out = offer.output.output || offer.output;
+    if (out.offerName) lines.push(`  Offer name: "${out.offerName}"`);
+    if (out.coreOutcome) lines.push(`  Offer core outcome: "${out.coreOutcome}"`);
+  }
+
+  const diff = results.get("differentiation");
+  if (diff?.status === "SUCCESS" && diff.output) {
+    const out = diff.output.output || diff.output;
+    if (out.pillars && out.pillars.length > 0) {
+      const pillarNames = (out.pillars as any[]).map((p: any) => p.name || p.pillarName).filter(Boolean);
+      if (pillarNames.length > 0) {
+        lines.push(`  Differentiation pillars: ${pillarNames.map((n: string) => `"${n}"`).join(", ")}`);
+      }
+    }
+    const authorityMode = out.authorityMode?.mode || (typeof out.authorityMode === "string" ? out.authorityMode : null);
+    if (authorityMode && authorityMode !== "unknown") lines.push(`  Authority mode: "${authorityMode}"`);
+  }
+
+  const persuasion = results.get("persuasion");
+  if (persuasion?.status === "SUCCESS" && persuasion.output) {
+    const out = persuasion.output.output || persuasion.output;
+    if (out.persuasionMode) lines.push(`  Persuasion mode: "${out.persuasionMode}"`);
+    const primaryRouteName = out.primaryRoute?.routeName || out.primaryRoute?.name;
+    if (primaryRouteName) lines.push(`  Persuasion primary route: "${primaryRouteName}"`);
+  }
+
+  const channel = results.get("channel_selection");
+  if (channel?.status === "SUCCESS" && channel.output) {
+    const out = channel.output.output || channel.output;
+    const primaryName = out.primaryChannel?.channelName || out.primaryChannel?.name;
+    const primaryRole = out.primaryChannel?.channelRole || out.primaryChannel?.role;
+    if (primaryName) lines.push(`  Primary channel: "${primaryName}"${primaryRole ? ` — role: "${primaryRole}"` : ""}`);
+    const secondaryName = out.secondaryChannel?.channelName || out.secondaryChannel?.name;
+    const secondaryRole = out.secondaryChannel?.channelRole || out.secondaryChannel?.role;
+    if (secondaryName) lines.push(`  Secondary channel: "${secondaryName}"${secondaryRole ? ` — role: "${secondaryRole}"` : ""}`);
+  }
+
+  const funnel = results.get("funnel");
+  if (funnel?.status === "SUCCESS" && funnel.output) {
+    const out = funnel.output.output || funnel.output;
+    if (out.trustPathScore !== undefined) lines.push(`  Trust path score: ${out.trustPathScore}`);
+    const funnelLabel = out.funnelType || out.funnelName;
+    if (funnelLabel) lines.push(`  Funnel type: "${funnelLabel}"`);
+  }
+
+  return lines.join("\n");
+}
+
 async function generatePlanWithAI(
   engineInsights: string,
   businessData: any,
   campaign: any,
   goalMathContext?: { goal: any; funnel: any; feasibility: any; archetype: any } | null,
+  lockedDecisions?: string,
 ): Promise<SynthesizedPlan> {
   const objective = campaign?.objective || businessData?.funnelObjective || "AWARENESS";
   const businessType = businessData?.businessType || "general";
@@ -236,14 +313,21 @@ The reelsPerWeek should always be the highest count. Never generate plans where 
 `;
   }
 
-  const prompt = `You are a marketing strategist synthesizing engine outputs into a coherent execution plan.
+  const lockedBlock = lockedDecisions
+    ? `LOCKED DECISIONS — These are verbatim strategic outputs from upstream engines. You MUST reference these exact values in your plan. Do NOT rephrase, paraphrase, generalize, or substitute synonyms for any value below. The mechanism name, positioning territory, offer name, differentiation pillars, and channel assignments must appear exactly as stated:
+${lockedDecisions}
+
+`
+    : "";
+
+  const prompt = `You are a marketing strategist assembling an execution plan from engine outputs. Your job is to ASSEMBLE, not to re-derive strategy.
 
 Business Type: ${businessType}
 Location: ${location}
 Objective: ${objective}
 Monthly Budget: ${budget}
-${goalMathSection}
-Engine Analysis Results:
+${lockedBlock}${goalMathSection}
+Engine Analysis Results (use for volume, timing, and structural decisions):
 ${engineInsights}
 
 Generate a complete execution plan with these 9 sections. Return ONLY valid JSON matching this exact structure:
@@ -598,7 +682,8 @@ export async function synthesizePlan(
   }
 
   const engineInsights = extractEngineInsights(results);
-  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext);
+  const lockedDecisions = extractLockedDecisions(results);
+  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions);
 
   const periodDays = goalMathContext?.goal?.timeHorizonDays || 30;
   const volume = deriveContentVolume(synthesized, periodDays);

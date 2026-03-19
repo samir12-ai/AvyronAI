@@ -62,11 +62,24 @@ import { runChannelSelectionEngine } from "../strategy/channel-selection/engine"
 import { runIterationEngine } from "../strategy/iteration-engine/engine";
 import { runRetentionEngine } from "../strategy/retention-engine/engine";
 
+export interface AgentProgressEvent {
+  engineId: EngineId;
+  engineName: string;
+  tier: string;
+  status: string;
+  engineIndex: number;
+  totalEngines: number;
+  durationMs: number;
+  output?: any;
+  blockReason?: string;
+}
+
 export interface OrchestratorConfig {
   accountId: string;
   campaignId: string;
   forceRefresh?: boolean;
   resumeFromEngine?: EngineId;
+  onProgress?: (event: AgentProgressEvent) => void;
 }
 
 export interface OrchestratorRunResult {
@@ -880,6 +893,18 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     await db.update(orchestratorJobs)
       .set({ sectionStatuses: JSON.stringify(sectionStatuses) })
       .where(eq(orchestratorJobs.id, jobId));
+
+    config.onProgress?.({
+      engineId: engineDef.id,
+      engineName: engineDef.name,
+      tier: engineDef.tier,
+      status: stepResult.status,
+      engineIndex: i + 1,
+      totalEngines: ENGINE_PRIORITY_ORDER.length,
+      durationMs: stepResult.durationMs,
+      output: stepResult.output,
+      blockReason: stepResult.blockReason,
+    });
 
     if (stepResult.status === "SUCCESS" || stepResult.status === "PARTIAL") {
       completedEngines.push(engineDef.name);

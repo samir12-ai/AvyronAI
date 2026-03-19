@@ -1,0 +1,151 @@
+:::writing{id=“59321” variant=“email” subject=“Final Closure — Agent Layer + Build Plan Fix (Execution Approval)”}
+Hi Replit Team,
+
+This is the final alignment email to close the architecture and move to execution.
+
+Based on your full code-level evaluations, we now have a clear, unified system design and a precise list of required changes.
+
+⸻
+
+✅ 1. AI Agent Layer — Approved for Implementation
+
+We are proceeding exactly as discussed:
+	•	Agent = wrapper over orchestrator
+	•	Engines remain untouched
+	•	Orchestrator receives minimal extension only
+
+Confirmed implementation:
+	•	Add onProgress? to OrchestratorConfig
+	•	Emit progress events inside runOrchestrator() loop
+	•	Use SSE (Server-Sent Events) for streaming
+	•	Create:
+	•	server/agent/index.ts
+	•	server/agent/routes.ts
+	•	server/agent/summarizers.ts
+
+Responsibilities:
+	•	Agent = narration + streaming + summaries
+	•	Orchestrator = execution + governance
+	•	Engines = computation only
+	•	Build Plan = final synthesis
+
+No overlap. No duplication. No logic leakage.
+
+⸻
+
+⚠️ 2. Build Plan Layer — Critical Fix Required
+
+Your report confirmed a structural issue:
+
+The Build Plan layer is currently re-deriving strategy because it does not receive actual engine decisions.
+
+Root cause:
+
+extractEngineInsights() passes:
+	•	counts
+	•	statuses
+	•	metadata
+
+But does NOT pass:
+	•	positioning (enemy, narrative, contrast)
+	•	mechanism name
+	•	offer name + core outcome
+	•	differentiation pillar names
+	•	persuasion mode
+	•	channel roles
+
+As a result:
+generatePlanWithAI() is forced to invent strategy, not assemble it.
+
+⸻
+
+🔧 Required Fix (Minimal — No Redesign)
+
+We will proceed with exactly the scoped fix you outlined:
+
+Change 1 — Extend extractEngineInsights()
+
+Extract verbatim strategic decisions, not just counts.
+
+Change 2 — Add LOCKED_DECISIONS block to plan prompt
+
+These must be passed explicitly and treated as non-negotiable:
+	•	Positioning enemy
+	•	Narrative direction
+	•	Contrast axis
+	•	Mechanism name
+	•	Offer name + core outcome
+	•	Differentiation pillar names
+	•	Persuasion mode
+	•	Channel names + roles
+	•	Trust path score
+
+AI must:
+	•	reference them
+	•	not rephrase them
+	•	not override them
+
+⸻
+
+🎯 Final System Behavior (Target State)
+
+After this implementation, the system must behave as follows:
+	•	Engines → produce strategic decisions
+	•	Build Plan → assembles execution only
+	•	Agent → streams + narrates + summarizes
+	•	Cards → extract directly from engine outputs (deterministic)
+	•	No layer downstream may:
+	•	reinterpret
+	•	generalize
+	•	or weaken upstream decisions
+
+⸻
+
+📌 Execution Requirements
+
+Before marking this complete, we need:
+	1.	Code confirmation
+	•	exact files modified
+	•	exact functions updated
+	2.	Proof of behavior
+	•	example plan BEFORE vs AFTER fix
+	•	showing:
+	•	no more invented strategy
+	•	direct use of engine outputs
+	3.	Validation
+	•	confirm all locked decisions are preserved end-to-end
+	•	confirm no regression in existing pipeline
+
+⸻
+
+🚫 Non-Negotiable Constraints
+	•	No new layers
+	•	No schema changes
+	•	No duplication of logic
+	•	No LLM self-evaluation
+	•	Agent remains strictly read-only (no strategic control)
+
+⸻
+
+✅ Final Status
+
+With:
+	•	pipeline upgrades (SGL, CEL, SIV, contracts, claim classifier)
+	•	positioning domain specificity
+	•	agent orchestration layer
+	•	build plan correction
+
+We are closing the system architecture.
+
+⸻
+
+Please proceed with implementation and return:
+	•	confirmation
+	•	proof
+	•	and validation report
+
+Only after full verification, we consider this phase complete.
+
+Best,
+Samir
+:::

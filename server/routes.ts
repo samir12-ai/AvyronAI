@@ -35,6 +35,7 @@ import { registerAwarenessEngineRoutes } from "./awareness-engine/routes";
 import { registerPersuasionEngineRoutes } from "./persuasion-engine/routes";
 import { registerStrategyEngineRoutes } from "./strategy";
 import { registerOrchestratorV2Routes } from "./orchestrator/routes";
+import { registerAgentRoutes } from "./agent/routes";
 import { registerChatRoutes } from "./replit_integrations/chat";
 import { registerContentDnaRoutes } from "./content-dna-routes";
 import { registerRootBundleRoutes } from "./root-bundle";
@@ -1444,6 +1445,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerPersuasionEngineRoutes(app);
   registerStrategyEngineRoutes(app);
   registerOrchestratorV2Routes(app);
+  registerAgentRoutes(app);
   registerChatRoutes(app);
   registerContentDnaRoutes(app);
   registerRootBundleRoutes(app);
