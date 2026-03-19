@@ -11,6 +11,7 @@ import {
   buildClaimBreakdown,
   extractFactualClaims,
   ClaimBreakdown,
+  ClassifiedClaim,
 } from "./claim-classifier";
 
 const LOG_PREFIX = "[CEL]";
@@ -606,9 +607,10 @@ export function enforceEngineDepthCompliance(
   engineId: string,
   outputTexts: string[],
   ael: AnalyticalPackage | null,
+  preClassifiedClaims?: ClassifiedClaim[],
 ): DepthComplianceResult {
   const allOutputRaw = outputTexts.join(" ");
-  const classifiedClaims = classifyClaims(allOutputRaw);
+  const classifiedClaims = preClassifiedClaims ?? classifyClaims(allOutputRaw);
   const claimBreakdown = buildClaimBreakdown(classifiedClaims);
   const factualOnlyTexts = extractFactualClaims(classifiedClaims);
   const factualOnlyOutput = factualOnlyTexts.length > 0 ? factualOnlyTexts.join(" ").toLowerCase() : "";

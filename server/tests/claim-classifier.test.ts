@@ -373,4 +373,17 @@ describe("enforceEngineDepthCompliance — claimBreakdown integration", () => {
     const result = enforceEngineDepthCompliance("test-engine", output, ael);
     expect(result.factualClaimCount).toBe(result.claimBreakdown.factual);
   });
+
+  test("pre-classified claims are honored when passed as fourth argument (no reclassification)", () => {
+    const ael = makeAel();
+    const outputTexts = ["Conversion improved by 32%. This resonates deeply with buyers seeking stability."];
+    const preClassified: ClassifiedClaim[] = [
+      { text: "Conversion improved by 32%.", type: ClaimType.EmotionalSynthesis, classifiedBy: "rule" },
+      { text: "This resonates deeply with buyers seeking stability.", type: ClaimType.EmotionalSynthesis, classifiedBy: "rule" },
+    ];
+    const result = enforceEngineDepthCompliance("test-engine", outputTexts, ael, preClassified);
+    expect(result.factualClaimCount).toBe(0);
+    expect(result.claimBreakdown.emotional).toBe(2);
+    expect(isDepthBlocking(result)).toBe(false);
+  });
 });
