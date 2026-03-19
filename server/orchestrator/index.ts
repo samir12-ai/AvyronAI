@@ -640,7 +640,15 @@ async function executeEngine(
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
-        const offerInput = ctx.offer || {};
+        const offerRaw = ctx.offer || {};
+        const posLockForPersuasion = offerRaw?.layerDiagnostics?.positioningLock || null;
+        const offerInput = posLockForPersuasion
+          ? {
+              ...offerRaw,
+              lockedDecisions: posLockForPersuasion.lockedDecisions || [],
+              nonGenericAnchors: posLockForPersuasion.nonGenericAnchors || [],
+            }
+          : offerRaw;
         const funnelInput = ctx.funnel || {};
         const integrityInput = ctx.integrity || {};
         const awarenessInput = ctx.awareness || {};

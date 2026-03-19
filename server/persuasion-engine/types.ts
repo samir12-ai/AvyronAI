@@ -73,6 +73,8 @@ export interface PersuasionOfferInput {
   offerStrengthScore: number;
   riskNotes: string[];
   frictionLevel: number;
+  lockedDecisions?: string[];
+  nonGenericAnchors?: string[];
 }
 
 export interface PersuasionFunnelInput {

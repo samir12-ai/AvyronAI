@@ -249,6 +249,8 @@ export interface PositioningLock {
   axisTokens: string[];
   problemDomain: string | null;
   solutionDomain: string | null;
+  lockedDecisions: string[];
+  nonGenericAnchors: string[];
 }
 
 export function buildPositioningLock(
@@ -291,6 +293,17 @@ export function buildPositioningLock(
 
   const locked = !!(contrastAxis || enemyDefinition || mechanismName);
 
+  const lockedDecisions: string[] = [];
+  if (contrastAxis) lockedDecisions.push(`contrast_axis: ${contrastAxis}`);
+  if (enemyDefinition) lockedDecisions.push(`enemy: ${enemyDefinition}`);
+  if (mechanismName) lockedDecisions.push(`mechanism: ${mechanismName}`);
+
+  const nonGenericAnchors: string[] = [...new Set([
+    ...extractCoreAxisTokens(contrastAxis),
+    ...extractRobustTokens(enemyDefinition),
+    ...(mechanismName ? extractRobustTokens(mechanismName) : []),
+  ])].filter(t => t.length > 3);
+
   return {
     locked,
     contrastAxis: contrastAxis || null,
@@ -301,6 +314,8 @@ export function buildPositioningLock(
     axisTokens,
     problemDomain,
     solutionDomain,
+    lockedDecisions,
+    nonGenericAnchors,
   };
 }
 

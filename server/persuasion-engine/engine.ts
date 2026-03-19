@@ -34,6 +34,7 @@ import {
 } from "../causal-enforcement-layer/engine";
 import { enforceBoundaryWithSanitization } from "../engine-hardening";
 import { assessStrategyAcceptability } from "../shared/strategy-acceptability";
+import { cosineSimilarity } from "../shared/embedding";
 import {
   type SignalLineageEntry,
   extractQualifyingSignals,
@@ -1926,6 +1927,42 @@ export function analyzePersuasion(
   const pReadiness = safeString(awareness.targetReadinessStage, "unknown");
   const pMode = routes.primary.persuasionMode;
   const pMsgOrder = routes.primary.messageOrderLogic;
+
+  const lockedDecisions: string[] = offer.lockedDecisions || [];
+  const nonGenericAnchors: string[] = offer.nonGenericAnchors || [];
+
+  if (lockedDecisions.length > 0) {
+    const persuasionOutputText = [
+      routes.primary.routeName || "",
+      routes.primary.persuasionMode || "",
+      ...routes.primary.primaryInfluenceDrivers.map((d: any) => typeof d === "string" ? d : `${d.driver || ""} ${d.rationale || ""}`),
+      ...routes.primary.objectionPriorities.map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""}`),
+    ].join(" ");
+
+    for (const decision of lockedDecisions) {
+      const decisionCore = decision.replace(/^(contrast_axis|enemy|mechanism):\s*/i, "").trim();
+      if (!decisionCore) continue;
+      const similarity = cosineSimilarity(decisionCore, persuasionOutputText);
+      if (similarity < 0.20) {
+        crossEngineValidation.push(
+          `POSITIONING LOCK DRIFT: Persuasion output has low semantic alignment (score=${similarity.toFixed(2)}, threshold=0.20) with locked decision "${decisionCore}" — output may have drifted from offer engine contracts`,
+        );
+      }
+    }
+  }
+
+  if (nonGenericAnchors.length > 0) {
+    const routeText = [
+      routes.primary.routeName || "",
+      ...routes.primary.primaryInfluenceDrivers.map((d: any) => typeof d === "string" ? d : d.driver || ""),
+    ].join(" ").toLowerCase();
+    const missingAnchors = nonGenericAnchors.filter(anchor => !routeText.includes(anchor.toLowerCase()));
+    if (missingAnchors.length > nonGenericAnchors.length * 0.6) {
+      crossEngineValidation.push(
+        `GENERIC DRIFT WARNING: Persuasion route references ${nonGenericAnchors.length - missingAnchors.length}/${nonGenericAnchors.length} positioning anchors — risk of generic output (missing: ${missingAnchors.slice(0, 5).join(", ")})`,
+      );
+    }
+  }
 
   if (isLowReadiness(pReadiness)) {
     if (pMode !== "education_led" && pMode !== "empathy_led" && pMode !== "diagnostic_led" && pMode !== "education_proof_hybrid") {
