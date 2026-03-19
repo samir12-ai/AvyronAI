@@ -1,0 +1,143 @@
+Hi Replit Team,
+
+Following the successful implementation of the Positioning Compression Layer, we’re now moving to the next step:
+
+Refining the Differentiation Engine for sharper, non-generic outputs.
+
+---
+
+## 🎯 Problem Observed
+
+From the latest full pipeline run:
+
+- Differentiation completes successfully
+- But pillars remain:
+  - broad
+  - overlapping with positioning themes
+  - not tightly anchored to the mechanism
+
+Example pattern:
+> financial accessibility, community belonging, transformation, social proof
+
+These are valid — but not structurally differentiated.
+
+---
+
+## 💡 Objective
+
+Move Differentiation from:
+- “thematically correct”
+
+To:
+- “mechanism-grounded, contrast-driven, and non-substitutable”
+
+---
+
+## 🧠 Proposed Approach (No New Layers)
+
+We want to extend the existing Differentiation Engine using the same philosophy applied in Positioning:
+
+### 1. Compression (Selection Pressure)
+- Reduce pillar count from 4 → 2–3 max
+- Force prioritization of strongest differentiation drivers
+- Reject pillars that are:
+  - overlapping
+  - broadly applicable across industries
+
+---
+
+### 2. Mechanism Anchoring
+Each pillar must:
+- directly map to a step / logic / structure inside the mechanism
+- describe how the system works differently, not just what it promises
+
+Example shift:
+- from: “community belonging”
+- to: “structured feedback loop converting user signals into pricing decisions”
+
+---
+
+### 3. Explicit Contrast Requirement
+Each pillar must include:
+
+> “We do X, while the market does Y”
+
+No contrast → considered generic.
+
+---
+
+## 🔧 Proposed Implementation Points
+
+Please validate based on current codebase:
+
+### A. Prompt Layer (Differentiation Engine)
+- Extend existing RULES block to include:
+  - compression constraint (max 2–3 pillars)
+  - mechanism anchoring requirement
+  - contrast requirement
+
+### B. Scoring Layer
+Add penalties for:
+- generic pillar language
+- missing mechanism linkage
+- absence of contrast framing
+
+### C. Selection Logic
+- Reduce pillar output count
+- Prefer depth over breadth
+
+---
+
+## ❓ What We Need From You
+
+Please evaluate:
+
+### 1. Where exactly should these changes be implemented?
+- Which functions in the Differentiation Engine handle:
+  - pillar generation
+  - scoring
+  - selection
+
+---
+
+### 2. Is reducing pillar count to 2–3 safe for downstream engines?
+- Any dependency expecting exactly 4 pillars?
+- Any impact on CEL / SIV / contracts?
+
+---
+
+### 3. How should mechanism anchoring be implemented?
+- Prompt-only?
+- Or should we pass structured mechanism steps explicitly into the prompt?
+
+---
+
+### 4. Any conflict with current CEL depth scoring?
+- Could tighter compression reduce causal coverage?
+- Any adjustments needed to avoid false depth failures?
+
+---
+
+### 5. What should remain untouched?
+- Which parts of the Differentiation Engine are critical for stability and must not be modified?
+
+---
+
+## 🎯 Goal
+
+Achieve differentiation outputs that are:
+- structurally tied to the mechanism
+- clearly contrasted vs market
+- non-generic and non-transferable across domains
+
+Without:
+- adding new layers
+- breaking existing architecture
+- or increasing system complexity
+
+---
+
+Please return a code-level evaluation and integration plan, similar to the Positioning upgrade.
+
+Best,  
+Samir
