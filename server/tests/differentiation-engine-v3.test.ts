@@ -12,6 +12,7 @@ import {
   layer10_claimStrengthScoring,
   layer12_stabilityGuard,
   sanitizeGuardrail,
+  compressDifferentiationPillars,
 } from "../differentiation-engine/engine";
 import {
   COLLISION_THRESHOLD,
@@ -462,6 +463,92 @@ describe("Differentiation Engine V3", () => {
       expect(l9.length).toBe(2);
       expect(l10.length).toBe(2);
       expect(l12.stable).toBe(true);
+    });
+  });
+
+  describe("Differentiation Pillar Compression", () => {
+    const makePillar = (overrides: any = {}) => ({
+      name: "test pillar",
+      description: "Test description",
+      uniqueness: 0.5,
+      proofability: 0.5,
+      trustAlignment: 0.5,
+      positioningAlignment: 0.5,
+      objectionCoverage: 0.3,
+      overallScore: 0.5,
+      territory: "test territory",
+      supportingProof: ["case_proof"],
+      ...overrides,
+    });
+
+    it("should return single pillar unchanged", () => {
+      const pillars = [makePillar({ name: "Lead Pipeline Optimization" })];
+      const result = compressDifferentiationPillars(pillars);
+      expect(result).toHaveLength(1);
+      expect(result[0].name).toBe("Lead Pipeline Optimization");
+    });
+
+    it("should merge pillars with high token overlap", () => {
+      const pillars = [
+        makePillar({ name: "cost affordability pricing strategy", overallScore: 0.7 }),
+        makePillar({ name: "cost affordability budget optimization", overallScore: 0.5 }),
+        makePillar({ name: "trust authority credibility", overallScore: 0.4 }),
+      ];
+      const result = compressDifferentiationPillars(pillars);
+      expect(result.length).toBeLessThanOrEqual(2);
+      expect(result[0].name).toBe("cost affordability pricing strategy");
+    });
+
+    it("should preserve distinct pillars up to MAX_PILLARS", () => {
+      const pillars = [
+        makePillar({ name: "lead generation pipeline", overallScore: 0.8 }),
+        makePillar({ name: "trust authority proof", overallScore: 0.6 }),
+        makePillar({ name: "competitive intelligence depth", overallScore: 0.5 }),
+      ];
+      const result = compressDifferentiationPillars(pillars);
+      expect(result).toHaveLength(3);
+    });
+
+    it("should cap output at MAX_PILLARS=3", () => {
+      const pillars = [
+        makePillar({ name: "alpha beta gamma", overallScore: 0.9 }),
+        makePillar({ name: "delta epsilon zeta", overallScore: 0.7 }),
+        makePillar({ name: "eta theta iota", overallScore: 0.5 }),
+        makePillar({ name: "kappa lambda mu", overallScore: 0.3 }),
+        makePillar({ name: "nu xi omicron", overallScore: 0.2 }),
+      ];
+      const result = compressDifferentiationPillars(pillars);
+      expect(result.length).toBeLessThanOrEqual(3);
+    });
+
+    it("should penalize cross-industry generic pillar names", () => {
+      const pillars = [
+        makePillar({ name: "financial accessibility improvement", overallScore: 0.6 }),
+        makePillar({ name: "lead pipeline automation", overallScore: 0.5 }),
+      ];
+      const result = compressDifferentiationPillars(pillars);
+      expect(result[0].overallScore).toBeLessThan(0.6);
+    });
+
+    it("should use different overlap thresholds for service businesses", () => {
+      const pillars = [
+        makePillar({ name: "consulting approach methodology", overallScore: 0.7 }),
+        makePillar({ name: "consulting approach framework", overallScore: 0.5 }),
+      ];
+      const serviceProfile = { businessType: "consulting", coreOffer: "strategy consulting", productCategory: null };
+      const result = compressDifferentiationPillars(pillars, serviceProfile as any);
+      expect(result.length).toBeLessThanOrEqual(2);
+    });
+
+    it("should absorb best scores from merged pillars", () => {
+      const pillars = [
+        makePillar({ name: "cost pricing strategy budget", overallScore: 0.5, uniqueness: 0.3, proofability: 0.4 }),
+        makePillar({ name: "cost pricing approach budget", overallScore: 0.6, uniqueness: 0.8, proofability: 0.9 }),
+      ];
+      const result = compressDifferentiationPillars(pillars);
+      expect(result).toHaveLength(1);
+      expect(result[0].uniqueness).toBe(0.8);
+      expect(result[0].proofability).toBe(0.9);
     });
   });
 });

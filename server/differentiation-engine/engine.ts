@@ -20,6 +20,7 @@ import {
   PROOF_CATEGORIES,
   STATUS,
   MIN_TERRITORIES,
+  MAX_PILLARS,
   MIN_OBJECTIONS,
   MIN_PILLAR_SCORE,
   COLLISION_THRESHOLD,
@@ -829,6 +830,78 @@ export function layer9_differentiationPillarScoring(
   return pillars.sort((a, b) => b.overallScore - a.overallScore);
 }
 
+const SERVICE_BUSINESS_TYPES = ["consulting", "coaching", "agency", "saas", "software", "legal", "accounting", "clinic", "medical", "dental", "financial", "advisory", "training", "education"];
+const PRODUCT_BUSINESS_TYPES = ["ecommerce", "retail", "fashion", "beauty", "food", "restaurant", "beverage", "hardware", "electronics", "manufacturing"];
+
+function inferBusinessCategory(profile?: ProfileInput | null): "service" | "product" | "general" {
+  if (!profile) return "general";
+  const combined = `${profile.businessType || ""} ${profile.coreOffer || ""} ${profile.productCategory || ""}`.toLowerCase();
+  if (SERVICE_BUSINESS_TYPES.some(t => combined.includes(t))) return "service";
+  if (PRODUCT_BUSINESS_TYPES.some(t => combined.includes(t))) return "product";
+  return "general";
+}
+
+export function compressDifferentiationPillars(
+  sorted: DifferentiationPillar[],
+  profile?: ProfileInput | null,
+): DifferentiationPillar[] {
+  if (sorted.length <= 1) return sorted;
+
+  const businessCategory = inferBusinessCategory(profile);
+
+  const overlapThreshold = businessCategory === "service" ? 0.55 : 0.50;
+
+  const primary = sorted[0];
+  const result: DifferentiationPillar[] = [primary];
+
+  for (let i = 1; i < sorted.length; i++) {
+    const candidate = sorted[i];
+    const primaryTokens = new Set(tokenize(primary.name));
+    const candidateTokens = new Set(tokenize(candidate.name));
+
+    let overlap = 0;
+    for (const t of candidateTokens) {
+      if (primaryTokens.has(t)) overlap++;
+    }
+    const similarity = candidateTokens.size > 0 ? overlap / candidateTokens.size : 0;
+
+    if (similarity >= overlapThreshold) {
+      primary.overallScore = Math.min(1, primary.overallScore + candidate.overallScore * 0.15);
+      primary.supportingProof = [...new Set([...primary.supportingProof, ...candidate.supportingProof])];
+
+      if (candidate.uniqueness > primary.uniqueness) primary.uniqueness = candidate.uniqueness;
+      if (candidate.proofability > primary.proofability) primary.proofability = candidate.proofability;
+
+      console.log(`[DifferentiationEngine] COMPRESSION: Merged "${candidate.name}" into primary "${primary.name}" (overlap=${(similarity * 100).toFixed(0)}%, category=${businessCategory})`);
+    } else if (result.length < MAX_PILLARS) {
+      result.push(candidate);
+    } else {
+      console.log(`[DifferentiationEngine] COMPRESSION: Dropped "${candidate.name}" — MAX_PILLARS=${MAX_PILLARS} reached (score=${candidate.overallScore.toFixed(2)})`);
+    }
+  }
+
+  const CROSS_INDUSTRY_GENERIC = [
+    "financial accessibility", "community belonging", "social proof",
+    "transformation", "trust building", "personal growth",
+    "emotional connection", "customer satisfaction", "quality assurance",
+    "innovation", "reliability", "convenience",
+  ];
+
+  for (const pillar of result) {
+    const pLower = pillar.name.toLowerCase();
+    const genericMatches = CROSS_INDUSTRY_GENERIC.filter(g => pLower.includes(g));
+    if (genericMatches.length > 0) {
+      const penalty = Math.min(0.15, genericMatches.length * 0.08);
+      pillar.overallScore = Math.max(0, pillar.overallScore - penalty);
+      console.log(`[DifferentiationEngine] COMPRESSION_GENERIC: "${pillar.name}" matched ${genericMatches.length} cross-industry term(s) — penalty: -${(penalty * 100).toFixed(0)}%`);
+    }
+  }
+
+  console.log(`[DifferentiationEngine] COMPRESSION: ${sorted.length} pillars → ${result.length} (primary: "${primary.name}", category=${businessCategory})`);
+
+  return result;
+}
+
 export function layer10_claimStrengthScoring(
   pillars: DifferentiationPillar[],
   collisions: ClaimCollision[],
@@ -1185,8 +1258,9 @@ export async function runDifferentiationEngine(
 
   const l9RawPillars = layer9_differentiationPillarScoring(l1.territories, l2Claims, l5TrustGaps, l4ProofDemands, enrichedAudience, mi, profileSignals);
   const evidenceDensity = validateTerritoryEvidenceDensity(l9RawPillars, l4ProofDemands, l5TrustGaps, l2Claims, l1.territories);
-  const l9Pillars = evidenceDensity.validatedPillars.sort((a, b) => b.overallScore - a.overallScore);
-  diagnostics.layer9 = { pillarCount: l9Pillars.length, topScore: l9Pillars[0]?.overallScore ?? 0, downgradedPillars: evidenceDensity.downgradedCount };
+  const l9Sorted = evidenceDensity.validatedPillars.sort((a, b) => b.overallScore - a.overallScore);
+  const l9Pillars = compressDifferentiationPillars(l9Sorted, profile);
+  diagnostics.layer9 = { pillarCount: l9Pillars.length, preCompressionCount: l9Sorted.length, topScore: l9Pillars[0]?.overallScore ?? 0, downgradedPillars: evidenceDensity.downgradedCount, businessCategory: inferBusinessCategory(profile) };
 
   const l10Claims = layer10_claimStrengthScoring(l9Pillars, l3Collisions, l1.territories);
   diagnostics.layer10 = { claimCount: l10Claims.length, avgScore: l10Claims.length > 0 ? l10Claims.reduce((s, c) => s + c.overallScore, 0) / l10Claims.length : 0 };

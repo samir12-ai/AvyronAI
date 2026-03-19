@@ -63,6 +63,7 @@ export const SOFT_FAILURE_PROOFABILITY = 0.20;
 export const SOFT_FAILURE_TRUST_ALIGNMENT = 0.15;
 
 export const MIN_TERRITORIES = 1;
+export const MAX_PILLARS = 3;
 export const MIN_OBJECTIONS = 1;
 export const MIN_PILLAR_SCORE = 0.35;
 export const COLLISION_THRESHOLD = 0.70;
