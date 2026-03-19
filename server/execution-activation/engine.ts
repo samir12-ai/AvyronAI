@@ -471,7 +471,10 @@ export async function activateExecution(planId: string): Promise<ActivationResul
     }
 
     const allEntries = await db.select().from(calendarEntries)
-      .where(and(eq(calendarEntries.planId, planId), eq(calendarEntries.status, "DRAFT")));
+      .where(and(
+        eq(calendarEntries.planId, planId),
+        sql`${calendarEntries.status} IN ('DRAFT', 'PENDING')`
+      ));
 
     activationLog.push(`CONTENT_GENERATION: ${allEntries.length} DRAFT entries to process`);
 

@@ -26,11 +26,11 @@ export interface ContentQueueValidation {
 export function validateContentQueue(items: ContentQueueItem[]): ContentQueueValidation {
   const violations: string[] = [];
 
-  const reelsCount = items.filter(i => i.contentType === "reel").length;
-  const carouselsCount = items.filter(i => i.contentType === "carousel").length;
-  const storiesCount = items.filter(i => i.contentType === "story").length;
-  const postsCount = items.filter(i => i.contentType === "post").length;
-  const videosCount = items.filter(i => i.contentType === "video").length;
+  const reelsCount = items.filter(i => (i.contentType || "").toLowerCase() === "reel").length;
+  const carouselsCount = items.filter(i => (i.contentType || "").toLowerCase() === "carousel").length;
+  const storiesCount = items.filter(i => (i.contentType || "").toLowerCase() === "story").length;
+  const postsCount = items.filter(i => (i.contentType || "").toLowerCase() === "post").length;
+  const videosCount = items.filter(i => (i.contentType || "").toLowerCase() === "video").length;
 
   const totalItems = items.length;
   const reelsRatio = totalItems > 0 ? (reelsCount + videosCount) / totalItems : 0;

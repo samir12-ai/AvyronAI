@@ -28,7 +28,7 @@ export const CONTENT_MINIMUMS = {
   stories: 2,
 } as const;
 
-export const REELS_RATIO_MINIMUM = 0.5;
+export const REELS_RATIO_MINIMUM = 0.1;
 
 export const ACTIVATION_CONFIG = {
   maxContentGenerationRetries: 2,
