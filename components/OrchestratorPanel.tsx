@@ -17,6 +17,7 @@ import * as Haptics from 'expo-haptics';
 import { getApiUrl } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
 import PlanDocumentView from '@/components/PlanDocumentView';
+import EngineTableModal from '@/components/EngineTableModal';
 
 const P = {
   mint: '#8B5CF6',
@@ -226,6 +227,7 @@ export default function OrchestratorPanel() {
   const [running, setRunning] = useState(false);
   const [runStartedAt, setRunStartedAt] = useState(0);
   const [showPlan, setShowPlan] = useState(false);
+  const [showTable, setShowTable] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const bg = isDark ? P.darkBg : P.lightBg;
@@ -459,20 +461,31 @@ export default function OrchestratorPanel() {
         <View style={s.enginesSection}>
           <View style={s.enginesSectionHeader}>
             <Text style={[s.enginesSectionTitle, { color: textSec }]}>ENGINE RESULTS</Text>
-            {!running && sections.length > 0 && (
-              <View style={s.completionPillRow}>
-                <View style={[s.completionPill, { backgroundColor: P.green + '15', borderColor: P.green + '30' }]}>
-                  <Ionicons name="checkmark-circle" size={12} color={P.green} />
-                  <Text style={[s.completionPillText, { color: P.green }]}>{completedCount} passed</Text>
-                </View>
-                {failedCount > 0 && (
-                  <View style={[s.completionPill, { backgroundColor: P.coral + '15', borderColor: P.coral + '30' }]}>
-                    <Ionicons name="close-circle" size={12} color={P.coral} />
-                    <Text style={[s.completionPillText, { color: P.coral }]}>{failedCount} issues</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              {!running && sections.length > 0 && (
+                <View style={s.completionPillRow}>
+                  <View style={[s.completionPill, { backgroundColor: P.green + '15', borderColor: P.green + '30' }]}>
+                    <Ionicons name="checkmark-circle" size={12} color={P.green} />
+                    <Text style={[s.completionPillText, { color: P.green }]}>{completedCount} passed</Text>
                   </View>
-                )}
-              </View>
-            )}
+                  {failedCount > 0 && (
+                    <View style={[s.completionPill, { backgroundColor: P.coral + '15', borderColor: P.coral + '30' }]}>
+                      <Ionicons name="close-circle" size={12} color={P.coral} />
+                      <Text style={[s.completionPillText, { color: P.coral }]}>{failedCount} issues</Text>
+                    </View>
+                  )}
+                </View>
+              )}
+              {!running && sections.length > 0 && (
+                <Pressable
+                  onPress={() => setShowTable(true)}
+                  style={[s.tableBtn, { backgroundColor: P.blue + '18', borderColor: P.blue + '40' }]}
+                >
+                  <Ionicons name="grid-outline" size={13} color={P.blue} />
+                  <Text style={[s.tableBtnText, { color: P.blue }]}>Full Table</Text>
+                </Pressable>
+              )}
+            </View>
           </View>
 
           {ENGINE_ORDER.map((engineId, idx) => {
@@ -506,6 +519,12 @@ export default function OrchestratorPanel() {
           </Text>
         </View>
       )}
+
+      <EngineTableModal
+        visible={showTable}
+        onClose={() => setShowTable(false)}
+        campaignId={selectedCampaignId || ''}
+      />
 
       <Modal visible={showPlan} animationType="slide" presentationStyle="pageSheet">
         <View style={[s.planModal, { backgroundColor: isDark ? P.darkBg : P.lightBg }]}>
@@ -686,6 +705,19 @@ const s = StyleSheet.create({
     borderWidth: 1,
   },
   completionPillText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  tableBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 7,
+    borderWidth: 1,
+  },
+  tableBtnText: {
     fontSize: 11,
     fontWeight: '600',
   },

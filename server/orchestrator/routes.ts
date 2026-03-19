@@ -698,4 +698,354 @@ export function registerOrchestratorV2Routes(app: Express) {
       res.status(500).json({ error: error.message });
     }
   });
+
+  // Engine Table Summary — aggregates all 15 engines in parallel
+  app.get("/api/engines/table-summary", async (req: Request, res: Response) => {
+    try {
+      const campaignId = req.query.campaignId as string;
+      if (!campaignId) return res.status(400).json({ error: "campaignId required" });
+
+      const base = `http://localhost:${process.env.PORT || 5000}`;
+      const q = `?campaignId=${encodeURIComponent(campaignId)}`;
+
+      async function safe(url: string) {
+        try {
+          const r = await fetch(url);
+          if (!r.ok) return null;
+          return r.json();
+        } catch { return null; }
+      }
+
+      const [
+        audience, positioning, differentiation, mechanism,
+        offer, awareness, funnel, persuasion,
+        integrity, statVal, budget, channel,
+        iteration, retention,
+      ] = await Promise.all([
+        safe(`${base}/api/audience-engine/latest${q}`),
+        safe(`${base}/api/positioning-engine/latest${q}`),
+        safe(`${base}/api/differentiation-engine/latest${q}`),
+        safe(`${base}/api/mechanism-engine/latest${q}`),
+        safe(`${base}/api/offer-engine/latest${q}`),
+        safe(`${base}/api/awareness-engine/latest${q}`),
+        safe(`${base}/api/funnel-engine/latest${q}`),
+        safe(`${base}/api/persuasion-engine/latest${q}`),
+        safe(`${base}/api/integrity-engine/latest${q}`),
+        safe(`${base}/api/strategy/statistical-validation/latest${q}`),
+        safe(`${base}/api/strategy/budget-governor/latest${q}`),
+        safe(`${base}/api/strategy/channel-selection/latest${q}`),
+        safe(`${base}/api/strategy/iteration-engine/latest${q}`),
+        safe(`${base}/api/strategy/retention-engine/latest${q}`),
+      ]);
+
+      // Pull MI snapshot from DB
+      let miRow: any = null;
+      try {
+        const miRes = await db.execute(
+          sql`SELECT id, status, overall_confidence, narrative_synthesis, market_diagnosis, market_state, created_at
+              FROM mi_snapshots WHERE campaign_id = ${campaignId} ORDER BY created_at DESC LIMIT 1`
+        );
+        miRow = miRes.rows?.[0] ?? null;
+      } catch { /* ignore */ }
+
+      function score(val: number | undefined | null): string {
+        if (val == null) return "—";
+        return (Math.round(val * 1000) / 10).toFixed(1) + "%";
+      }
+
+      const rows = [
+        {
+          num: "01",
+          engine: "Market Intelligence",
+          status: miRow?.status ?? "—",
+          keyOutput: miRow?.market_diagnosis
+            ? String(miRow.market_diagnosis).slice(0, 300)
+            : miRow?.narrative_synthesis
+              ? String(miRow.narrative_synthesis).slice(0, 300)
+              : "No data",
+          score: miRow?.overall_confidence != null ? score(miRow.overall_confidence) : "—",
+          notes: miRow?.market_state ?? "",
+        },
+        {
+          num: "02",
+          engine: "Audience",
+          status: audience?.id ? "COMPLETE" : "—",
+          keyOutput: (() => {
+            const awarenessLvl = audience?.awarenessLevel?.level ?? audience?.awarenessLevel;
+            const maturityLvl = audience?.maturityIndex?.level ?? audience?.maturityIndex;
+            let topPain: string | null = null;
+            try {
+              const pains = typeof audience?.audiencePains === "string"
+                ? JSON.parse(audience.audiencePains)
+                : audience?.audiencePains;
+              topPain = Array.isArray(pains) && pains[0]?.canonical
+                ? `Top pain: ${pains[0].canonical}`
+                : null;
+            } catch { /* ignore */ }
+            const segs = audience?.audienceSegments?.length
+              ? `${audience.audienceSegments.length} segments`
+              : null;
+            return [
+              awarenessLvl ? `Awareness level: ${awarenessLvl}` : null,
+              maturityLvl ? `Maturity: ${maturityLvl}` : null,
+              topPain,
+              segs,
+            ].filter(Boolean).join(" | ") || "No data";
+          })(),
+          score: audience?.maturityIndex?.confidenceScore != null
+            ? score(audience.maturityIndex.confidenceScore)
+            : audience?.awarenessLevel?.confidenceScore != null
+              ? score(audience.awarenessLevel.confidenceScore)
+              : "—",
+          notes: "",
+        },
+        {
+          num: "03",
+          engine: "Positioning",
+          status: positioning?.status ?? (positioning?.id ? "COMPLETE" : "—"),
+          keyOutput: [
+            positioning?.territory?.name ? `Territory: ${positioning.territory.name}` : null,
+            positioning?.narrativeDirection ? `Direction: ${positioning.narrativeDirection}` : null,
+            positioning?.differentiationVector ? `Vector: ${positioning.differentiationVector}` : null,
+          ].filter(Boolean).join(" | ") || "No data",
+          score: positioning?.confidenceScore != null ? score(positioning.confidenceScore) : "—",
+          notes: positioning?.statusMessage ?? "",
+        },
+        {
+          num: "04",
+          engine: "Differentiation",
+          status: differentiation?.status ?? "—",
+          keyOutput: [
+            differentiation?.differentiationPillars?.length
+              ? `${differentiation.differentiationPillars.length} pillars: ${differentiation.differentiationPillars.slice(0, 2).map((p: any) => p.name).join(", ")}`
+              : null,
+            differentiation?.mechanismCore?.mechanismName
+              ? `Mechanism: ${differentiation.mechanismCore.mechanismName}`
+              : null,
+            differentiation?.authorityMode?.mode
+              ? `Authority: ${differentiation.authorityMode.mode}`
+              : null,
+            differentiation?.claimScores?.totalClaims != null
+              ? `${differentiation.claimScores.totalClaims} claims | avg score: ${score(differentiation.claimScores.averageScore)}`
+              : null,
+            differentiation?.stabilityResult?.stable != null
+              ? `Stability: ${differentiation.stabilityResult.stable ? "Stable" : "Unstable"}`
+              : null,
+          ].filter(Boolean).join(" | ") || "No data",
+          score: differentiation?.confidenceScore != null ? score(differentiation.confidenceScore) : "—",
+          notes: differentiation?.statusMessage ?? "",
+        },
+        {
+          num: "05",
+          engine: "Mechanism",
+          status: mechanism?.status ?? (mechanism?.exists ? "COMPLETE" : "—"),
+          keyOutput: mechanism?.primaryMechanism
+            ? [
+                `Name: ${mechanism.primaryMechanism.mechanismName}`,
+                mechanism.primaryMechanism.mechanismDescription
+                  ? mechanism.primaryMechanism.mechanismDescription.slice(0, 200)
+                  : null,
+                mechanism.primaryMechanism.mechanismSteps?.length
+                  ? `${mechanism.primaryMechanism.mechanismSteps.length} steps`
+                  : null,
+              ].filter(Boolean).join(" | ")
+            : "No data",
+          score: mechanism?.confidenceScore != null ? score(mechanism.confidenceScore) : "—",
+          notes: mechanism?.statusMessage ?? "",
+        },
+        {
+          num: "06",
+          engine: "Offer",
+          status: offer?.status ?? "—",
+          keyOutput: offer?.primaryOffer
+            ? [
+                offer.primaryOffer.offerName ? `Offer: ${offer.primaryOffer.offerName}` : null,
+                offer.primaryOffer.pricePoint ? `Price: ${offer.primaryOffer.pricePoint}` : null,
+                offer.primaryOffer.valueStack?.length
+                  ? `${offer.primaryOffer.valueStack.length}-item value stack`
+                  : null,
+                offer.primaryOffer.guarantee ? `Guarantee: ${offer.primaryOffer.guarantee}` : null,
+              ].filter(Boolean).join(" | ")
+            : "No data",
+          score: offer?.offerStrengthScore != null
+            ? score(offer.offerStrengthScore)
+            : offer?.confidenceScore != null
+              ? score(offer.confidenceScore)
+              : "—",
+          notes: offer?.statusMessage ?? "",
+        },
+        {
+          num: "07",
+          engine: "Awareness",
+          status: awareness?.status ?? (awareness?.exists ? "COMPLETE" : "—"),
+          keyOutput: awareness?.primaryRoute
+            ? [
+                `Route: ${awareness.primaryRoute.routeName}`,
+                `Type: ${awareness.primaryRoute.entryMechanismType}`,
+                awareness.primaryRoute.targetReadinessStage
+                  ? `Stage: ${awareness.primaryRoute.targetReadinessStage}`
+                  : null,
+                awareness.primaryRoute.trustRequirement
+                  ? `Trust: ${awareness.primaryRoute.trustRequirement}`
+                  : null,
+              ].filter(Boolean).join(" | ")
+            : "No data",
+          score: awareness?.awarenessStrengthScore != null
+            ? score(awareness.awarenessStrengthScore)
+            : awareness?.primaryRoute?.awarenessStrengthScore != null
+              ? score(awareness.primaryRoute.awarenessStrengthScore)
+              : "—",
+          notes: awareness?.statusMessage ?? "",
+        },
+        {
+          num: "08",
+          engine: "Funnel",
+          status: funnel?.status ?? "—",
+          keyOutput: funnel?.primaryFunnel
+            ? [
+                `Funnel: ${funnel.primaryFunnel.funnelName}`,
+                `Type: ${funnel.primaryFunnel.funnelType}`,
+                funnel.primaryFunnel.stageMap?.length
+                  ? `${funnel.primaryFunnel.stageMap.length} stages`
+                  : null,
+              ].filter(Boolean).join(" | ")
+            : "No data",
+          score: funnel?.confidenceScore != null ? score(funnel.confidenceScore) : "—",
+          notes: funnel?.statusMessage ?? "",
+        },
+        {
+          num: "09",
+          engine: "Persuasion",
+          status: persuasion?.status ?? (persuasion?.exists ? "COMPLETE" : "—"),
+          keyOutput: persuasion?.primaryRoute
+            ? [
+                `Mode: ${persuasion.primaryRoute.persuasionMode}`,
+                persuasion.primaryRoute.primaryInfluenceDrivers?.length
+                  ? `Drivers: ${persuasion.primaryRoute.primaryInfluenceDrivers.slice(0, 3).join(", ")}`
+                  : null,
+              ].filter(Boolean).join(" | ")
+            : "No data",
+          score: persuasion?.persuasionStrengthScore != null
+            ? score(persuasion.persuasionStrengthScore)
+            : persuasion?.primaryRoute?.persuasionStrengthScore != null
+              ? score(persuasion.primaryRoute.persuasionStrengthScore)
+              : "—",
+          notes: persuasion?.statusMessage ?? "",
+        },
+        {
+          num: "10",
+          engine: "Integrity",
+          status: integrity?.status ?? (integrity?.exists ? "COMPLETE" : "—"),
+          keyOutput: [
+            integrity?.overallIntegrityScore != null
+              ? `Integrity score: ${score(integrity.overallIntegrityScore)}`
+              : null,
+            integrity?.safeToExecute != null
+              ? `Safe to execute: ${integrity.safeToExecute ? "YES" : "NO"}`
+              : null,
+            integrity?.layerResults?.filter((l: any) => l.passed === false)?.length
+              ? `${integrity.layerResults.filter((l: any) => !l.passed).length} layer(s) failed`
+              : integrity?.layerResults?.length
+                ? `All ${integrity.layerResults.length} layers passed`
+                : null,
+          ].filter(Boolean).join(" | ") || "No data",
+          score: integrity?.overallIntegrityScore != null ? score(integrity.overallIntegrityScore) : "—",
+          notes: integrity?.statusMessage ?? "",
+        },
+        {
+          num: "11",
+          engine: "Statistical Validation",
+          status: statVal?.status ?? (statVal?.exists ? "COMPLETE" : "—"),
+          keyOutput: statVal?.result
+            ? [
+                `State: ${statVal.result.validationState}`,
+                statVal.result.claimConfidenceScore != null
+                  ? `Claim confidence: ${score(statVal.result.claimConfidenceScore)}`
+                  : null,
+                statVal.result.evidenceStrength != null
+                  ? `Evidence: ${score(statVal.result.evidenceStrength)}`
+                  : null,
+              ].filter(Boolean).join(" | ")
+            : "No data",
+          score: statVal?.result?.claimConfidenceScore != null
+            ? score(statVal.result.claimConfidenceScore)
+            : "—",
+          notes: statVal?.statusMessage ?? "",
+        },
+        {
+          num: "12",
+          engine: "Budget Governor",
+          status: budget?.snapshot?.status ?? "—",
+          keyOutput: budget?.snapshot?.result?.decision
+            ? [
+                `Action: ${budget.snapshot.result.decision.action}`,
+                budget.snapshot.result.decision.reasoning
+                  ? budget.snapshot.result.decision.reasoning.slice(0, 200)
+                  : budget.snapshot.statusMessage
+                    ? budget.snapshot.statusMessage.slice(0, 200)
+                    : null,
+              ].filter(Boolean).join(" | ")
+            : "No data",
+          score: "—",
+          notes: budget?.snapshot?.statusMessage ?? "",
+        },
+        {
+          num: "13",
+          engine: "Channel Selection",
+          status: channel?.status ?? "—",
+          keyOutput: channel?.result?.primaryChannel
+            ? [
+                `Primary: ${channel.result.primaryChannel.channelName}`,
+                `Fit: ${score(channel.result.primaryChannel.fitScore)}`,
+                channel.result.primaryChannel.audienceDensityScore != null
+                  ? `Audience density: ${score(channel.result.primaryChannel.audienceDensityScore)}`
+                  : null,
+                channel.result.channelMix?.length
+                  ? `${channel.result.channelMix.length} channels in mix`
+                  : null,
+              ].filter(Boolean).join(" | ")
+            : "No data",
+          score: channel?.result?.primaryChannel?.fitScore != null
+            ? score(channel.result.primaryChannel.fitScore)
+            : "—",
+          notes: channel?.statusMessage ?? "",
+        },
+        {
+          num: "14",
+          engine: "Iteration",
+          status: iteration?.status ?? (iteration?.exists ? "COMPLETE" : "—"),
+          keyOutput: [
+            iteration?.nextTestHypotheses?.length
+              ? `${iteration.nextTestHypotheses.length} test hypothesis: ${iteration.nextTestHypotheses[0]?.hypothesis ?? ""}`
+              : null,
+            iteration?.optimizationTargets?.length
+              ? `${iteration.optimizationTargets.length} optimization target(s)`
+              : null,
+          ].filter(Boolean).join(" | ") || "No data",
+          score: "—",
+          notes: iteration?.statusMessage ?? "",
+        },
+        {
+          num: "15",
+          engine: "Retention",
+          status: retention?.snapshot?.status ?? "—",
+          keyOutput: retention?.snapshot?.result?.retentionLoops?.length
+            ? [
+                `${retention.snapshot.result.retentionLoops.length} retention loop(s)`,
+                `Loop 1: ${retention.snapshot.result.retentionLoops[0]?.name}`,
+                retention.snapshot.result.retentionLoops[0]?.type
+                  ? `Type: ${retention.snapshot.result.retentionLoops[0].type}`
+                  : null,
+              ].filter(Boolean).join(" | ")
+            : "No data",
+          score: "—",
+          notes: retention?.snapshot?.statusMessage ?? "",
+        },
+      ];
+
+      res.json({ rows });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
 }
