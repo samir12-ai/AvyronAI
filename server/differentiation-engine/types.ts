@@ -56,6 +56,9 @@ export interface PositioningInput {
   flankingMode: boolean;
   stabilityResult: any;
   strategyCards: any[];
+  domainFailures?: string[];
+  operationalProblems?: string[];
+  proofRequirements?: string[];
 }
 
 export interface Territory {

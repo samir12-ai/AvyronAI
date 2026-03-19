@@ -398,7 +398,11 @@ function layer6_marketPowerAnalysis(miData: any, competitors: any[]): {
   return { entries, authorityGap, flankingMode };
 }
 
-export function computeSpecificityScore(territory: string, category: string): number {
+export function computeSpecificityScore(
+  territory: string,
+  category: string,
+  productDna?: { businessType?: string; coreOffer?: string; coreProblemSolved?: string | null; uniqueMechanism?: string | null } | null,
+): number {
   const lower = territory.toLowerCase().trim();
   const tokens = lower.split(/\s+/).filter(Boolean);
 
@@ -428,7 +432,32 @@ export function computeSpecificityScore(territory: string, category: string): nu
   const contrastBonus = hasContrast ? 0.15 : 0;
 
   const lengthBonus = tokens.length >= 4 ? 0.05 : 0;
-  return Math.max(0, Math.min(1.15, 1 - penalty + categoryBonus + contrastBonus + lengthBonus));
+
+  let domainSpecificityPenalty = 0;
+  if (productDna) {
+    const domainVocab = [
+      productDna.businessType,
+      productDna.coreOffer,
+      productDna.coreProblemSolved,
+      productDna.uniqueMechanism,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(w => w.length >= 4);
+    const hasDomainTerm = domainVocab.some(dw => tokens.some(tw => tw.includes(dw) || dw.includes(tw)));
+    if (!hasDomainTerm && domainVocab.length > 0) {
+      domainSpecificityPenalty = 0.15;
+    }
+  }
+
+  const MECHANISM_ACTION_VERBS = ["resolves", "eliminates", "replaces", "converts", "transforms", "removes", "delivers", "solves", "fixes", "prevents", "reduces", "extracts", "generates"];
+  const hasMechanismLanguage = MECHANISM_ACTION_VERBS.some(v => lower.includes(v));
+  const mechanismLanguagePenalty = !hasMechanismLanguage ? 0.10 : 0;
+
+  const totalPenalty = Math.min(0.90, penalty + domainSpecificityPenalty + mechanismLanguagePenalty);
+  return Math.max(0, Math.min(1.15, 1 - totalPenalty + categoryBonus + contrastBonus + lengthBonus));
 }
 
 export function validateNarrativeOutput(text: string): { valid: boolean; reason?: string } {
@@ -764,6 +793,7 @@ function layer7_opportunityGapDetection(
   narrativeMap: Record<string, string[]> = {},
   contentDna: any[] = [],
   competitionIntensityScore: number = 0,
+  productDna?: { businessType?: string; coreOffer?: string; coreProblemSolved?: string | null; uniqueMechanism?: string | null } | null,
 ): OpportunityGap[] {
   const pains = safeJsonParse(audienceData.audiencePains, []);
   const desires = safeJsonParse(audienceData.desireMap, []);
@@ -794,7 +824,7 @@ function layer7_opportunityGapDetection(
     const satLevel = Math.max(baseSatLevel, semanticSat);
     const compAuth = avgCompAuthority;
 
-    const specificity = computeSpecificityScore(t.name, category);
+    const specificity = computeSpecificityScore(t.name, category, productDna);
 
     const intensityPenalty = competitionIntensityScore >= 0.45
       ? Math.min(0.10, competitionIntensityScore * 0.15)
@@ -1162,43 +1192,60 @@ async function layer11_positioningStatementGeneration(
    Desire alignment: ${t.desireAlignment.join(", ") || "general"}${signalSection}`;
     }).join("\n\n");
 
+    const domainTranslationInstruction = productDna ? `
+DOMAIN TRANSLATION REQUIREMENT (apply before composing any field):
+This campaign is for a "${productDna.businessType}" offering "${productDna.coreOffer}".${productDna.coreProblemSolved ? ` Core problem it solves: "${productDna.coreProblemSolved}".` : ""}${productDna.uniqueMechanism ? ` Unique mechanism: "${productDna.uniqueMechanism}".` : ""}
+
+Before composing enemyDefinition, contrastAxis, and narrativeDirection — restate each signal label as an operational failure SPECIFIC to this business type and offer. Do NOT use the surface label (e.g. "cost and affordability concerns") in your output. Instead write what that signal means as a concrete operational breakdown for a buyer of "${productDna.coreOffer}" from a "${productDna.businessType}".
+
+Also return three additional fields per territory:
+- domainFailure: the operational/system failure in this specific domain that the signal represents
+- operationalProblem: what concretely breaks in the buyer's workflow or decision process because of this failure
+- proofRequirement: what type of evidence would resolve the enemy claim (e.g. "live demo", "case study with metrics", "transparent pricing breakdown", "third-party audit")
+` : "";
+
     const prompt = hasSignals
       ? `You are a strategic positioning COMPOSER. You build positioning statements by DIRECTLY COMPOSING from the provided audience signal clusters — not by generating freely.
 
 MARKET CATEGORY: ${category}
 PRIMARY AUDIENCE SEGMENT: ${topSegment}
-${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${aelBlock}${causalDirective}
-
+${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${aelBlock}${causalDirective}${domainTranslationInstruction}
 TERRITORIES WITH THEIR SOURCE SIGNALS:
 ${territoriesBlock}
 ${websitePositioningContext}
 
 RULES:
-1. enemyDefinition: Compose from the PAIN and ROOT_CAUSE signals mapped to this territory. Use the signal vocabulary directly — name the specific pain/cause the audience experiences.
-2. contrastAxis: Compose from the DESIRE and PATTERN signals mapped to this territory. Name what the audience wants vs what they currently get.
-3. narrativeDirection: Synthesize across all mapped signals for this territory into one positioning sentence that uses their language.
-4. mappedSignalIds: List the exact signal IDs you used from the SOURCE SIGNALS.
-5. Do NOT invent concepts outside the provided signals. Every word of substance must trace to a signal label.
-6. If a territory has no usable signals, set narrativeDirection to "UNMAPPED".
+1. DOMAIN TRANSLATION FIRST: Before composing any field, restate each signal label as the operational failure it represents for this specific business type and offer. Use that operational language — not the surface signal label — in every field you write.
+2. enemyDefinition: Compose from the PAIN and ROOT_CAUSE signals mapped to this territory. Translate them into the domain-specific operational failure. Name what specifically fails in this market for this type of buyer.
+3. contrastAxis: Compose from the DESIRE and PATTERN signals. Name what the buyer wants operationally vs what currently breaks — in terms specific to this business type.
+4. narrativeDirection: Synthesize across all mapped signals into one positioning sentence that uses domain-operational language. No surface emotional labels.
+5. mappedSignalIds: List the exact signal IDs you used from the SOURCE SIGNALS.
+6. Do NOT invent concepts outside the provided signals. Every word of substance must trace to a signal label.
+7. If a territory has no usable signals, set narrativeDirection to "UNMAPPED".
 
 Return a JSON array:
-[{ "index": 1, "enemyDefinition": "...", "contrastAxis": "...", "narrativeDirection": "...", "mappedSignalIds": ["id1", "id2"] }]
+[{ "index": 1, "enemyDefinition": "...", "contrastAxis": "...", "narrativeDirection": "...", "mappedSignalIds": ["id1", "id2"], "domainFailure": "...", "operationalProblem": "...", "proofRequirement": "..." }]
 
 Return ONLY the JSON array.`
       : `You are a strategic positioning analyst. Generate precise positioning statements for each territory.
 
 MARKET CATEGORY: ${category}
 PRIMARY AUDIENCE SEGMENT: ${topSegment}
-${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${aelBlock}${causalDirective}
-
+${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${aelBlock}${causalDirective}${domainTranslationInstruction}
 TERRITORIES:
 ${territoriesBlock}
 ${websitePositioningContext}
 
-For each territory, return a JSON array with objects containing:
-{ "index": number, "enemyDefinition": "precise enemy statement", "narrativeDirection": "one-sentence positioning narrative", "contrastAxis": "clear contrast axis" }
+RULES:
+1. DOMAIN TRANSLATION FIRST: Before composing any field, restate each territory name as the operational failure it represents for this specific business type and offer. Use domain-operational language — not generic emotional framing — in every field.
+2. enemyDefinition: Name the specific operational/system failure in this market for this type of buyer. Not emotions — operational breakdown.
+3. contrastAxis: Name what operationally the buyer gains vs what currently fails — specific to this business domain.
+4. narrativeDirection: One sentence using domain-operational language. No surface emotional labels.
 
-Keep statements concise, strategic, and evidence-grounded. Return ONLY the JSON array.`;
+For each territory, return a JSON array with objects containing:
+{ "index": number, "enemyDefinition": "precise enemy statement", "narrativeDirection": "one-sentence positioning narrative", "contrastAxis": "clear contrast axis", "domainFailure": "...", "operationalProblem": "...", "proofRequirement": "..." }
+
+Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON array.`;
 
     const response = await aiChat({
       model: "gpt-4.1-mini",
@@ -1230,6 +1277,15 @@ Keep statements concise, strategic, and evidence-grounded. Return ONLY the JSON 
         }
         if (item.contrastAxis && validateNarrativeOutput(item.contrastAxis).valid) {
           territories[idx].contrastAxis = item.contrastAxis;
+        }
+        if (item.domainFailure && typeof item.domainFailure === "string" && item.domainFailure.trim()) {
+          territories[idx].domainFailure = item.domainFailure.trim();
+        }
+        if (item.operationalProblem && typeof item.operationalProblem === "string" && item.operationalProblem.trim()) {
+          territories[idx].operationalProblem = item.operationalProblem.trim();
+        }
+        if (item.proofRequirement && typeof item.proofRequirement === "string" && item.proofRequirement.trim()) {
+          territories[idx].proofRequirement = item.proofRequirement.trim();
         }
         if (hasSignals && Array.isArray(item.mappedSignalIds) && allSignalIds) {
           const preMapped = signalMapping?.get(idx) || [];
@@ -1580,7 +1636,7 @@ export async function runPositioningEngine(
   const contentDna = safeJsonParse(activeMiSnapshot.contentDnaData, []);
   const miTrajectory = safeJsonParse(activeMiSnapshot.trajectoryData, {});
   const competitionIntensityFromMI = miTrajectory.competitionIntensityScore || 0;
-  let opportunityGaps = layer7_opportunityGapDetection(narrativeSaturation, audienceSnapshot, marketPower, category, narrativeMap, contentDna, competitionIntensityFromMI);
+  let opportunityGaps = layer7_opportunityGapDetection(narrativeSaturation, audienceSnapshot, marketPower, category, narrativeMap, contentDna, competitionIntensityFromMI, productDna);
   console.log(`[PositioningEngine-V3] L7 Opportunities: ${opportunityGaps.length} viable territories`);
 
   if (parsedStructuredSignals) {

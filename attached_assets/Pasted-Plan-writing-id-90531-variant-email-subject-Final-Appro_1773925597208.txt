@@ -1,0 +1,172 @@
+Plan
+
+:::writing{id=“90531” variant=“email” subject=“Final Approval — Full Pipeline Upgrade Execution (Grounding + Anti-Generic + Cross-Domain Positioning)”}
+Hi Replit Team,
+
+We are now aligned on the full upgrade scope. This email is the final approval to proceed with implementation as a single, unified execution plan.
+
+This is not exploratory anymore — this is execution of the finalized architecture.
+
+⸻
+
+✅ Scope to Implement (Fully Integrated)
+
+1. SGL — Signal Quality Control
+	•	Confidence-based signal ranking
+	•	Hard insufficiency blocking (no warning-only continuation)
+	•	Complete removal of all synthetic_baseline / fallback injection
+
+⸻
+
+2. CEL — Semantic Depth Enforcement
+	•	Replace keyword-based depth checks with cosine similarity (deterministic)
+	•	Maintain:
+	•	DepthRejectionDirective
+	•	DEPTH_CASCADE_MAP
+	•	Reduce retry loop to 1 repair pass
+
+⸻
+
+3. SIV — Semantic Alignment Validation
+	•	Replace keyword overlap with embedding-based cosine similarity
+	•	Preserve ALIGNMENT_CHAIN exactly
+	•	Recalibrate thresholds based on semantic distribution
+
+⸻
+
+4. Claim Classifier (Pre-CEL)
+	•	Rule + embedding-based classification:
+	•	factual
+	•	inferred
+	•	emotional
+	•	Must run before CEL enforcement
+	•	No LLM self-evaluation anywhere
+
+⸻
+
+5. Anti-Drift Contracts (PositioningLock)
+	•	Enforce:
+	•	lockedDecisions[]
+	•	nonGenericAnchors[]
+	•	Apply at:
+	•	Persuasion route construction
+	•	Offer generation
+
+⸻
+
+🔥 6. Positioning Domain Specificity Upgrade (Final Gap)
+
+A. Domain Translation (Core Fix)
+
+Add inside:
+server/positioning-engine/engine.ts → RULES block
+
+DOMAIN TRANSLATION REQUIREMENT:
+Before composing any field, restate each signal label as an operational failure specific to:
+- businessType
+- coreOffer
+- coreProblemSolved
+
+Do NOT use surface labels (e.g. "cost concerns") — translate them into domain-specific failure.
+
+❗ No separate translation layer
+❗ No hardcoded mappings
+❗ Must be driven purely by ProductDNA
+
+⸻
+
+B. Anti-Generic Scoring (Extend Existing Logic)
+
+Inside:
+computeSpecificityScore()
+
+Add:
+	•	domainSpecificityPenalty (no product/domain vocabulary)
+	•	mechanismLanguagePenalty (no action/causal verbs)
+
+Do NOT create new scoring system — extend existing one only.
+
+⸻
+
+C. Structured Transfer (Positioning → Differentiation)
+
+Add to territory output:
+	•	domainFailure
+	•	operationalProblem
+	•	proofRequirement
+
+Then:
+	•	pass via extractPositioningInput()
+	•	inject into Differentiation prompt as DOMAIN CONTEXT
+
+No schema changes required (JSONB already supports this)
+
+⸻
+
+D. Mechanism Naming Constraint
+
+Inside:
+server/mechanism-engine/engine.ts
+
+Add:
+	•	Naming rules in prompt (domain object + action + identity)
+	•	Post-parse validation:
+	•	must include ProductDNA vocabulary
+	•	If invalid → single repair pass
+
+⸻
+
+⚙️ Architecture Constraints (Must Be Preserved)
+	•	No new layers
+	•	No schema changes
+	•	No duplication of SGL / CEL / SIV responsibilities
+	•	No LLM self-evaluation
+	•	All logic must remain deterministic and composable
+	•	Must remain cross-domain by design (ProductDNA-driven only)
+
+⸻
+
+🔁 Unified Workflow (Final)
+	1.	SGL → signal ranking + blocking
+	2.	AEL → causal synthesis
+	3.	ProductDNA → context anchor
+	4.	Positioning → (NEW: domain translation + anti-generic scoring)
+	5.	CEL → semantic depth enforcement
+	6.	SIV → semantic alignment validation
+	7.	Differentiation → (NEW: domain-aware input)
+	8.	Mechanism → (NEW: naming constraint + validation)
+	9.	PositioningLock → anti-drift enforcement
+	10.	Downstream engines (Offer → Funnel → Persuasion → Retention)
+	11.	Build Plan → synthesis only (no strategic override)
+
+⸻
+
+❗ Final Requirement
+
+This must be delivered as:
+	•	one coherent implementation
+	•	not fragmented tasks
+	•	not partial upgrades
+
+And validated with:
+	•	full end-to-end pipeline run
+	•	no generic positioning output
+	•	no fallback signal injection
+	•	improved domain specificity across engines
+
+⸻
+
+🎯 Goal
+
+Deliver a system that is:
+	•	grounded
+	•	non-generic
+	•	cross-domain capable
+	•	strategically consistent across all engines
+
+⸻
+
+Proceed with full implementation.
+
+Best,
+Samir

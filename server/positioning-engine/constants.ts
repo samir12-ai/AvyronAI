@@ -98,6 +98,9 @@ export interface Territory {
   evidenceSignals: string[];
   confidenceScore: number;
   mappedSignalIds?: string[];
+  domainFailure?: string;
+  operationalProblem?: string;
+  proofRequirement?: string;
 }
 
 export interface StrategyCard {

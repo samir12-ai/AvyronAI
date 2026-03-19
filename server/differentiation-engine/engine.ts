@@ -875,6 +875,7 @@ export async function layer11_aiRefinement(
   accountId: string,
   analyticalEnrichment?: any,
   depthRejectionContext?: string,
+  domainContext?: { domainFailures: string[]; operationalProblems: string[]; proofRequirements: string[] },
 ): Promise<{ refinedPillars: DifferentiationPillar[]; refinedClaims: ClaimStructure[]; refinedMechanism: MechanismCandidate }> {
   const topPillars = pillars.slice(0, 5);
   const topClaims = claims.slice(0, 5);
@@ -882,8 +883,17 @@ export async function layer11_aiRefinement(
   const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
   if (aelBlock) console.log(`[DifferentiationEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
 
+  const domainContextBlock = (domainContext && (domainContext.domainFailures.length > 0 || domainContext.operationalProblems.length > 0)) ? `
+DOMAIN CONTEXT (from positioning engine — ground differentiation in these):
+${domainContext.domainFailures.length > 0 ? `Domain Failures: ${domainContext.domainFailures.join(" | ")}` : ""}
+${domainContext.operationalProblems.length > 0 ? `Operational Problems: ${domainContext.operationalProblems.join(" | ")}` : ""}
+${domainContext.proofRequirements.length > 0 ? `Proof Requirements: ${domainContext.proofRequirements.join(" | ")}` : ""}
+
+Every pillar description and claim MUST be grounded in one of the domain failures or operational problems above. Do not use emotional or generic framing — use the domain-specific operational language from this context.
+` : "";
+
   const prompt = `You are refining differentiation language. You must improve wording to be clearer, more distinctive, and causally grounded.
-${aelBlock}${causalDirective}${depthRejectionContext ? `\n${depthRejectionContext}\n` : ""}
+${aelBlock}${causalDirective}${domainContextBlock}${depthRejectionContext ? `\n${depthRejectionContext}\n` : ""}
 STRICT RULES:
 - Do NOT invent new strategy, audience segments, offers, or execution plans
 - Do NOT add pricing, packaging, guarantees, CTAs, or channel recommendations
@@ -1205,7 +1215,12 @@ export async function runDifferentiationEngine(
     finalMechanism = l8Mechanism;
 
     try {
-      const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId, analyticalEnrichment, depthRejectionContext || undefined);
+      const domainCtx = {
+        domainFailures: (positioning as any).domainFailures || [],
+        operationalProblems: (positioning as any).operationalProblems || [],
+        proofRequirements: (positioning as any).proofRequirements || [],
+      };
+      const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId, analyticalEnrichment, depthRejectionContext || undefined, domainCtx);
       finalPillars = l11.refinedPillars;
       finalClaims = l11.refinedClaims;
       finalMechanism = l11.refinedMechanism;
@@ -1310,7 +1325,12 @@ export async function runDifferentiationEngine(
       finalMechanism = JSON.parse(JSON.stringify(l8Mechanism));
 
       try {
-        const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId, analyticalEnrichment, combinedRejection || undefined);
+        const domainCtx2 = {
+          domainFailures: (positioning as any).domainFailures || [],
+          operationalProblems: (positioning as any).operationalProblems || [],
+          proofRequirements: (positioning as any).proofRequirements || [],
+        };
+        const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId, analyticalEnrichment, combinedRejection || undefined, domainCtx2);
         finalPillars = l11.refinedPillars;
         finalClaims = l11.refinedClaims;
         finalMechanism = l11.refinedMechanism;

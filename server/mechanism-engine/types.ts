@@ -4,6 +4,7 @@ export interface MechanismEnginePositioningInput {
   narrativeDirection: string | null;
   differentiationVector: string[];
   territories: any[];
+  domainVocab?: string;
 }
 
 export interface MechanismEngineDifferentiationInput {

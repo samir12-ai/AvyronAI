@@ -159,8 +159,9 @@ function extractAudienceInput(audienceResult: any): any {
 function extractPositioningInput(positioningResult: any): any {
   if (!positioningResult) return {};
   const out = positioningResult.output || positioningResult;
+  const territories: any[] = out.territories || positioningResult.territories || [];
   return {
-    territories: out.territories || positioningResult.territories || [],
+    territories,
     narrative: out.narrative || positioningResult.narrative || "",
     narrativeDirection: out.narrativeDirection || positioningResult.narrativeDirection || "",
     specificity: out.specificityScore || positioningResult.specificityScore || 0,
@@ -168,6 +169,9 @@ function extractPositioningInput(positioningResult: any): any {
     stabilityResult: out.stabilityResult || positioningResult.stabilityResult || { isStable: true, checks: [], advisories: [], fallbackApplied: false },
     strategyCards: out.strategyCards || positioningResult.strategyCards || [],
     differentiationVector: out.differentiationVector || positioningResult.differentiationVector || [],
+    domainFailures: territories.map((t: any) => t.domainFailure).filter(Boolean),
+    operationalProblems: territories.map((t: any) => t.operationalProblem).filter(Boolean),
+    proofRequirements: territories.map((t: any) => t.proofRequirement).filter(Boolean),
   };
 }
 
@@ -449,12 +453,17 @@ async function executeEngine(
         { const sglBlock = resolveSglOrBlock("mechanism", ctx, startTime); if (sglBlock) return sglBlock; }
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
+        const domainVocabParts = [
+          ...(posInput.domainFailures || []),
+          ...(posInput.operationalProblems || []),
+        ].join(" ");
         const positioningForMech = {
           contrastAxis: ctx.positioning?.contrastAxis || posInput.narrative || null,
           enemyDefinition: ctx.positioning?.enemyDefinition || null,
           narrativeDirection: ctx.positioning?.narrativeDirection || posInput.narrativeDirection || null,
           differentiationVector: posInput.differentiationVector || [],
           territories: posInput.territories || [],
+          domainVocab: domainVocabParts || undefined,
         };
         const diffForMech = {
           pillars: diffInput.claims || [],

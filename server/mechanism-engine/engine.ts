@@ -170,8 +170,26 @@ ${pillarSummary || "No pillars available"}
 
 ${existingMechanismSection}
 
+═══ MECHANISM NAMING RULES (MUST SATISFY ALL) ═══
+The mechanism name MUST contain all three elements:
+1. DOMAIN OBJECT: A noun from the business type, offer, or core problem (e.g., "SaaS Onboarding", "Lead Qualification", "Menu Pricing", "Clinic Intake", "Campaign ROI")
+2. OPERATIONAL ACTION: A verb or action phrase describing what the mechanism does (e.g., "Diagnostic", "Extraction", "Repair", "Conversion", "Audit", "Compression")
+3. UNIQUE IDENTITY: A descriptor that makes the name specific to this business (e.g., the axis name "${primaryAxis}", or a specific outcome)
+
+INVALID names (too generic — will be rejected):
+- "The Clarity System" — no domain object
+- "Growth Engine" — no operational action
+- "Simplicity Framework" — no domain anchor
+- "The Transformation Protocol" — domain-agnostic
+
+VALID name examples (domain-grounded):
+- "The SaaS ROI Proof Diagnostic" — domain object (SaaS ROI) + action (Proof Diagnostic)
+- "The Agency Lead Qualification Engine" — domain object (Agency Lead) + action (Qualification Engine)
+- "The Clinic Intake Trust Audit" — domain object (Clinic Intake) + action (Trust Audit)
+- "The Campaign Signal-to-Strategy Pipeline" — domain object (Campaign Signal) + action (to-Strategy Pipeline)
+
 ═══ STRUCTURAL REQUIREMENTS ═══
-1. Mechanism must have a clear structural name (e.g., "The [Name] Framework", "[Name] System", "[Name] Protocol")
+1. Mechanism must have a clear structural name that satisfies ALL three naming rules above
 2. Mechanism must have 3-5 concrete steps
 3. Each step must connect to the "${primaryAxis}" axis
 4. The mechanism promise must be specific and measurable
@@ -245,6 +263,42 @@ Respond with ONLY valid JSON, no markdown:
 
       const primaryMech = buildMechanismOutput(parsed.primary, primaryAxis, pillars);
       const altMech = parsed.alternative ? buildMechanismOutput(parsed.alternative, primaryAxis, pillars) : null;
+
+      const nameValidation = validateMechanismName(primaryMech.mechanismName, positioning.domainVocab);
+      if (!nameValidation.valid) {
+        console.log(`[MechanismEngine] NAME_INVALID | reason="${nameValidation.reason}" | attempting name repair`);
+        try {
+          const nameRepairResponse = await aiChat({
+            model: "gpt-4.1-mini",
+            messages: [{ role: "user", content: `The mechanism name "${primaryMech.mechanismName}" is invalid because: ${nameValidation.reason}.
+
+Rename it to satisfy ALL THREE requirements:
+1. DOMAIN OBJECT: A noun specific to this business context: "${positioning.contrastAxis || primaryAxis}" with enemy: "${positioning.enemyDefinition || "unknown"}"
+2. OPERATIONAL ACTION: One of: Diagnostic, Extraction, Audit, Pipeline, Conversion, Qualification, Validation, Assessment, Protocol, Mapping, Tracker
+3. UNIQUE IDENTITY: Must reference the "${primaryAxis}" axis or the specific domain problem
+
+Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Object] [Action] [Identity]"}` }],
+            max_tokens: 100,
+            temperature: 0.3,
+            endpoint: "mechanism-name-repair",
+            accountId,
+          });
+          const repairContent = nameRepairResponse?.choices?.[0]?.message?.content?.trim() || "";
+          const repairCleaned = repairContent.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+          const repairParsed = safeJsonParse(repairCleaned);
+          if (repairParsed?.name && typeof repairParsed.name === "string" && repairParsed.name.trim()) {
+            console.log(`[MechanismEngine] NAME_REPAIRED | old="${primaryMech.mechanismName}" | new="${repairParsed.name.trim()}"`);
+            primaryMech.mechanismName = repairParsed.name.trim();
+            diagnostics.nameRepaired = true;
+          }
+        } catch (repairErr: any) {
+          console.warn(`[MechanismEngine] NAME_REPAIR_FAILED | ${repairErr.message}`);
+          diagnostics.nameRepairFailed = true;
+        }
+      } else {
+        console.log(`[MechanismEngine] NAME_VALID | name="${primaryMech.mechanismName}"`);
+      }
+      diagnostics.nameValidation = nameValidation;
 
       const sanitizedPrimary = applySoftSanitization(primaryMech.mechanismDescription, []);
       if (sanitizedPrimary !== primaryMech.mechanismDescription) {
@@ -435,6 +489,41 @@ function extractAxisEmphasisFromCore(diffCore: any, axis: string): string[] {
   const guidance = getAxisGuidance(axis);
   const coreText = `${diffCore.mechanismName} ${diffCore.mechanismLogic} ${diffCore.mechanismPromise} ${diffCore.mechanismProblem}`.toLowerCase();
   return guidance.emphasis.filter(e => coreText.includes(e.toLowerCase()));
+}
+
+const MECHANISM_GENERIC_NAMES = [
+  "clarity system", "growth engine", "simplicity framework", "transformation protocol",
+  "success system", "results framework", "impact engine", "clarity framework",
+  "growth framework", "performance system", "excellence engine", "solution framework",
+];
+
+const MECHANISM_OPERATION_WORDS = [
+  "diagnostic", "extraction", "repair", "conversion", "audit", "compression",
+  "qualification", "validation", "pipeline", "protocol", "assessment", "mapping",
+  "acquisition", "activation", "detection", "optimization", "analysis", "tracker",
+];
+
+function validateMechanismName(name: string, domainVocab?: string): { valid: boolean; reason?: string } {
+  if (!name || name === "Unnamed Mechanism" || name === "Pending Mechanism") {
+    return { valid: false, reason: "Name is empty or placeholder" };
+  }
+  const lower = name.toLowerCase().replace(/^the\s+/, "");
+  const isGeneric = MECHANISM_GENERIC_NAMES.some(g => lower === g || lower.startsWith(g));
+  if (isGeneric) {
+    return { valid: false, reason: `Name "${name}" is domain-agnostic — matches generic pattern` };
+  }
+  const hasOperationWord = MECHANISM_OPERATION_WORDS.some(w => lower.includes(w));
+  if (!hasOperationWord) {
+    return { valid: false, reason: `Name "${name}" lacks an operational action word` };
+  }
+  if (domainVocab) {
+    const domainWords = domainVocab.toLowerCase().split(/\s+/).filter(w => w.length >= 4);
+    const hasDomainWord = domainWords.some(dw => lower.includes(dw));
+    if (!hasDomainWord && domainWords.length >= 3) {
+      return { valid: false, reason: `Name "${name}" has no domain-specific vocabulary from positioning context` };
+    }
+  }
+  return { valid: true };
 }
 
 function computeConfidence(
