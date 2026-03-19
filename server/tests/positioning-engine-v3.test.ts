@@ -725,6 +725,36 @@ describe('Positioning Engine V3 — Layer Tests', () => {
         const score = evaluateCompressionQuality(t as any);
         expect(score).toBeGreaterThan(0.50);
       });
+
+      it('should penalize false specificity — system+failure vocab without domain anchor', () => {
+        const t = makeTerritory({
+          enemyDefinition: 'The engagement system fails to retain users',
+          domainFailure: 'Engagement system breakdown',
+          narrativeDirection: 'Our platform fixes the broken retention process',
+        });
+        const score = evaluateCompressionQuality(t as any);
+        expect(score).toBeLessThanOrEqual(0.80);
+      });
+
+      it('should not penalize when domain anchor nouns are present', () => {
+        const t = makeTerritory({
+          enemyDefinition: 'The lead generation pipeline fails to deliver qualified prospects',
+          domainFailure: 'Lead pipeline system failure',
+          narrativeDirection: 'Our campaign intelligence system fixes broken funnel conversion',
+        });
+        const score = evaluateCompressionQuality(t as any);
+        expect(score).toBeGreaterThanOrEqual(0.85);
+      });
+
+      it('should penalize cross-domain generic phrases without domain anchor', () => {
+        const t = makeTerritory({
+          enemyDefinition: 'The value delivery system fails to communicate ROI',
+          domainFailure: 'value delivery system fails',
+          narrativeDirection: 'We fix the broken customer experience',
+        });
+        const score = evaluateCompressionQuality(t as any);
+        expect(score).toBeLessThan(0.80);
+      });
     });
   });
 });

@@ -1389,14 +1389,53 @@ export function evaluateCompressionQuality(territory: Territory): number {
   const domainFail = (territory.domainFailure || "").toLowerCase();
   const combined = `${enemy} ${narrative} ${domainFail}`;
 
-  if (SYSTEM_NOUNS.some(n => combined.includes(n))) score += 0.20;
-  if (FAILURE_VERBS.some(v => combined.includes(v))) score += 0.15;
+  const hasSystemNoun = SYSTEM_NOUNS.some(n => combined.includes(n));
+  const hasFailureVerb = FAILURE_VERBS.some(v => combined.includes(v));
+
+  if (hasSystemNoun) score += 0.20;
+  if (hasFailureVerb) score += 0.15;
   if (territory.domainFailure && territory.domainFailure.trim().length > 10) score += 0.10;
   if (territory.operationalProblem && territory.operationalProblem.trim().length > 10) score += 0.05;
 
   const BROAD_MARKERS = ["cost concerns", "trust issues", "affordability", "belonging needs", "community needs", "emotional connection", "personal growth"];
   const broadCount = BROAD_MARKERS.filter(m => combined.includes(m)).length;
   if (broadCount >= 2) score -= 0.15;
+
+  const CROSS_DOMAIN_GENERIC_PHRASES = [
+    "value delivery system fails", "support system lacks", "onboarding process breaks",
+    "communication framework fails", "customer experience breaks", "service delivery fails",
+    "feedback system lacks", "retention process breaks", "engagement system fails",
+    "conversion pipeline stalls", "acquisition process fails", "growth system stalls",
+    "pricing model fails", "billing system breaks", "payment process lacks",
+    "reporting system lacks", "analytics pipeline fails", "tracking system breaks",
+    "collaboration platform fails", "team workflow breaks", "management system lacks",
+  ];
+  const DOMAIN_ANCHOR_NOUNS = [
+    "lead", "campaign", "funnel", "ad", "seo", "keyword", "cpc", "cpa", "roas",
+    "listing", "property", "mortgage", "escrow", "appraisal",
+    "workout", "nutrition", "rep", "set", "calorie", "macro",
+    "patient", "diagnosis", "treatment", "prescription", "clinical",
+    "invoice", "ledger", "reconciliation", "payroll", "tax",
+    "shipment", "inventory", "warehouse", "logistics", "fulfillment",
+    "curriculum", "enrollment", "lesson", "course", "student",
+    "compliance", "regulation", "audit", "filing", "contract",
+    "recipe", "menu", "reservation", "kitchen", "ingredient",
+    "portfolio", "equity", "dividend", "ticker", "hedge",
+    "subscriber", "churn", "mrr", "arr", "saas",
+    "tenant", "deployment", "ci/cd", "devops", "microservice",
+    "competitor", "market intelligence", "audience", "positioning",
+  ];
+
+  const genericHit = CROSS_DOMAIN_GENERIC_PHRASES.some(p => combined.includes(p));
+  const hasDomainAnchor = DOMAIN_ANCHOR_NOUNS.some(n => combined.includes(n));
+
+  if (hasSystemNoun && hasFailureVerb && !hasDomainAnchor) {
+    score -= 0.18;
+    console.log(`[COMPRESSION_QUALITY] FALSE_SPECIFICITY: system+failure vocabulary present but no domain anchor detected`);
+  } else if (genericHit && !hasDomainAnchor) {
+    score -= 0.12;
+    console.log(`[COMPRESSION_QUALITY] CROSS_DOMAIN_GENERIC: matched generic phrase without domain anchor`);
+  }
 
   return Math.max(0, Math.min(1, score));
 }
