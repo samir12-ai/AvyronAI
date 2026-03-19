@@ -1018,6 +1018,38 @@ function layer9_narrativeDistanceScoring(
   return Math.round(minDistance * 100) / 100;
 }
 
+export function filterAudienceTerritories(territories: Territory[]): { systemLevel: Territory[]; rejected: Territory[] } {
+  const SYSTEM_NOUNS = ["system", "tool", "platform", "pipeline", "process", "framework", "engine", "workflow", "protocol", "method", "mechanism", "infrastructure", "stack", "architecture", "module", "layer", "approach", "model", "structure", "integration", "validation", "verification", "audit", "funnel", "loop", "sequence", "automation", "flow", "conversion", "setup", "configuration", "deployment", "routing", "indexing", "tracking", "onboarding", "orchestration", "segmentation", "scoring", "mapping"];
+  const FAILURE_VERBS = ["fails", "breaks", "lacks", "missing", "blocks", "prevents", "collapses", "stalls", "erodes", "undermines", "fragments", "disconnects", "inability", "absence", "breakdown", "failure", "deficit", "gap", "blind spot", "bottleneck", "weak", "broken", "degraded", "inefficient", "unreliable", "inconsistent", "misaligned"];
+  const AUDIENCE_ONLY = ["concerns", "needs", "desires", "fears", "anxiety", "hesitation", "worry", "belonging", "community", "affordability", "aspiration", "motivation", "trust", "cost", "transformation", "simplicity", "empowerment", "wellness", "satisfaction", "loyalty", "emotion", "feeling", "comfort", "happiness", "frustration", "anger", "relief", "hope", "excitement", "desperation", "urgency", "overwhelm", "confusion", "skepticism", "resistance", "apathy", "indifference", "curiosity", "longing", "insecurity", "vulnerability", "pressure", "stress", "burnout", "fatigue", "exhaustion", "isolation", "loneliness", "envy", "jealousy", "shame", "guilt", "regret", "pride", "ambition", "desire", "need", "fear", "pain", "struggle", "suffering", "status", "proof", "social", "intent", "dominant", "comparison", "shopping", "credibility", "reputation", "influence", "perception", "awareness", "recognition", "identity", "self"];
+
+  const systemLevel: Territory[] = [];
+  const rejected: Territory[] = [];
+
+  for (const t of territories) {
+    const nameTokens = t.name.toLowerCase().replace(/[^a-z0-9\s/,→←]/g, "").split(/[\s/,→←]+/).filter(Boolean);
+
+    const hasSystemNoun = SYSTEM_NOUNS.some(n => nameTokens.some(tok => tok === n || tok.endsWith(n)));
+    const hasFailureVerb = FAILURE_VERBS.some(f => nameTokens.some(tok => tok === f || tok.startsWith(f)));
+    const audienceTokenCount = AUDIENCE_ONLY.filter(a => nameTokens.some(tok => tok === a)).length;
+    const nonStopTokens = nameTokens.filter(tok => tok.length > 3 && !["and", "the", "for", "with", "from", "that", "this", "driven", "based", "desired", "strong", "high", "low"].includes(tok));
+    const audienceRatio = nonStopTokens.length > 0 ? audienceTokenCount / nonStopTokens.length : 0;
+
+    const isDataLabel = /\(\d+\s+\w+/.test(t.name) || /\d+\s+signals/.test(t.name.toLowerCase());
+
+    const isSystemLevel = !isDataLabel && (hasSystemNoun || (hasFailureVerb && audienceRatio < 0.5));
+    const isPureAudience = isDataLabel || (!hasSystemNoun && audienceRatio >= 0.5);
+
+    if (isPureAudience) {
+      rejected.push(t);
+    } else {
+      systemLevel.push(t);
+    }
+  }
+
+  return { systemLevel, rejected };
+}
+
 function layer10_strategicTerritorySelection(
   opportunities: OpportunityGap[],
   narrativeMap: Record<string, string[]>,
@@ -1070,7 +1102,18 @@ function layer10_strategicTerritorySelection(
     return true;
   });
 
-  const sorted = filtered.sort((a, b) => b.opportunityScore - a.opportunityScore);
+  const { systemLevel, rejected } = filterAudienceTerritories(filtered);
+
+  if (rejected.length > 0) {
+    console.log(`[PositioningEngine] TERRITORY_FILTER: Rejected ${rejected.length} audience-level territories: ${rejected.map(r => `"${r.name}"`).join(", ")}`);
+  }
+
+  const territoriesToSort = systemLevel.length > 0 ? systemLevel : filtered;
+  if (systemLevel.length === 0 && filtered.length > 0) {
+    console.log(`[PositioningEngine] TERRITORY_FILTER: FALLBACK — all ${filtered.length} territories were audience-level, using best available candidates`);
+  }
+
+  const sorted = territoriesToSort.sort((a, b) => b.opportunityScore - a.opportunityScore);
 
   const compressed = compressTerritories(sorted);
 

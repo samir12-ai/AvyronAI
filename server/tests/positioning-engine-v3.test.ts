@@ -20,6 +20,7 @@ import {
   evaluateCompressionQuality,
   classifyTerritoryLevel,
   validateTerritorySpecificity,
+  filterAudienceTerritories,
 } from '../positioning-engine/engine';
 
 describe('Positioning Engine V3 — Layer Tests', () => {
@@ -880,6 +881,134 @@ describe('Positioning Engine V3 — Layer Tests', () => {
         const score = computeSpecificityScore('trust validation process breaks for AI tool buyers', 'marketing');
         expect(score).toBeGreaterThan(0.50);
       });
+    });
+  });
+
+  describe('filterAudienceTerritories — Layer 10 Upstream Filter', () => {
+    function makeTerr(name: string): any {
+      return {
+        name,
+        opportunityScore: 0.5,
+        narrativeDistanceScore: 0.5,
+        painAlignment: [],
+        desireAlignment: [],
+        enemyDefinition: "The status quo",
+        contrastAxis: "unique_approach",
+        narrativeDirection: "Position around territory",
+        isStable: true,
+        stabilityNotes: [],
+        evidenceSignals: [],
+        confidenceScore: 0.5,
+      };
+    }
+
+    it('should reject pure audience territory: "belonging / community"', () => {
+      const { systemLevel, rejected } = filterAudienceTerritories([makeTerr("belonging / community")]);
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0].name).toBe("belonging / community");
+      expect(systemLevel).toHaveLength(0);
+    });
+
+    it('should reject pure audience territory: "cost and affordability concerns"', () => {
+      const { systemLevel, rejected } = filterAudienceTerritories([makeTerr("cost and affordability concerns")]);
+      expect(rejected).toHaveLength(1);
+      expect(systemLevel).toHaveLength(0);
+    });
+
+    it('should reject "desires and needs driven by trust"', () => {
+      const { rejected } = filterAudienceTerritories([makeTerr("desires and needs driven by trust")]);
+      expect(rejected).toHaveLength(1);
+    });
+
+    it('should pass system-level territory: "pipeline automation failure"', () => {
+      const { systemLevel, rejected } = filterAudienceTerritories([makeTerr("pipeline automation failure")]);
+      expect(systemLevel).toHaveLength(1);
+      expect(rejected).toHaveLength(0);
+    });
+
+    it('should pass territory with failure verb: "lead scoring breaks under scale"', () => {
+      const { systemLevel } = filterAudienceTerritories([makeTerr("lead scoring breaks under scale")]);
+      expect(systemLevel).toHaveLength(1);
+    });
+
+    it('should pass territory with system noun: "onboarding process inefficiency"', () => {
+      const { systemLevel } = filterAudienceTerritories([makeTerr("onboarding process inefficiency")]);
+      expect(systemLevel).toHaveLength(1);
+    });
+
+    it('should correctly split mixed batch of territories', () => {
+      const territories = [
+        makeTerr("belonging / community"),
+        makeTerr("pipeline automation failure"),
+        makeTerr("cost and affordability concerns"),
+        makeTerr("conversion flow bottleneck"),
+      ];
+      const { systemLevel, rejected } = filterAudienceTerritories(territories);
+      expect(systemLevel).toHaveLength(2);
+      expect(rejected).toHaveLength(2);
+      expect(systemLevel.map(t => t.name)).toContain("pipeline automation failure");
+      expect(systemLevel.map(t => t.name)).toContain("conversion flow bottleneck");
+    });
+
+    it('should pass territory with mixed signals if system noun present', () => {
+      const { systemLevel } = filterAudienceTerritories([makeTerr("trust validation process for community")]);
+      expect(systemLevel).toHaveLength(1);
+    });
+
+    it('should handle empty input', () => {
+      const { systemLevel, rejected } = filterAudienceTerritories([]);
+      expect(systemLevel).toHaveLength(0);
+      expect(rejected).toHaveLength(0);
+    });
+
+    it('should reject "transformation and empowerment"', () => {
+      const { rejected } = filterAudienceTerritories([makeTerr("transformation and empowerment")]);
+      expect(rejected).toHaveLength(1);
+    });
+
+    it('should pass "workflow integration gap" with gap as failure marker', () => {
+      const { systemLevel } = filterAudienceTerritories([makeTerr("workflow integration gap")]);
+      expect(systemLevel).toHaveLength(1);
+    });
+
+    it('should reject "desperation / urgency" as audience-level', () => {
+      const { rejected } = filterAudienceTerritories([makeTerr("desperation / urgency")]);
+      expect(rejected).toHaveLength(1);
+    });
+
+    it('should reject "overwhelm and confusion" as audience-level', () => {
+      const { rejected } = filterAudienceTerritories([makeTerr("overwhelm and confusion")]);
+      expect(rejected).toHaveLength(1);
+    });
+
+    it('should reject "skepticism and resistance" as audience-level', () => {
+      const { rejected } = filterAudienceTerritories([makeTerr("skepticism and resistance")]);
+      expect(rejected).toHaveLength(1);
+    });
+
+    it('should reject "Desired transformation: weak → strong" as audience-level', () => {
+      const { rejected } = filterAudienceTerritories([makeTerr("Desired transformation: weak → strong")]);
+      expect(rejected).toHaveLength(1);
+    });
+
+    it('should not reject system territory with "weak" as failure verb: "weak pipeline validation"', () => {
+      const { systemLevel } = filterAudienceTerritories([makeTerr("weak pipeline validation")]);
+      expect(systemLevel).toHaveLength(1);
+    });
+
+    it('should reject "status / social proof" as audience-level', () => {
+      const { rejected } = filterAudienceTerritories([makeTerr("status / social proof")]);
+      expect(rejected).toHaveLength(1);
+    });
+
+    it('should reject data labels with signal counts', () => {
+      const { rejected } = filterAudienceTerritories([makeTerr("Dominant intent: comparison-shopping (115 signals classified)")]);
+      expect(rejected).toHaveLength(1);
+    });
+
+    it('should reject data labels with numeric patterns', () => {
+      const { rejected } = filterAudienceTerritories([makeTerr("Top pain (42 signals)")]);
+      expect(rejected).toHaveLength(1);
     });
   });
 });
