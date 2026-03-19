@@ -1,6 +1,10 @@
 import { cosineSimilarity } from "../shared/embedding";
 
-export type ClaimType = "factual_claim" | "inferred_insight" | "emotional_synthesis";
+export enum ClaimType {
+  FactualClaim = "factual_claim",
+  InferredInsight = "inferred_insight",
+  EmotionalSynthesis = "emotional_synthesis",
+}
 
 export interface ClassifiedClaim {
   text: string;
@@ -77,11 +81,11 @@ function applyRulePass(sentence: string): ClaimType | null {
   const lower = sentence.toLowerCase();
 
   for (const pattern of FACTUAL_RULE_PATTERNS) {
-    if (pattern.test(lower)) return "factual_claim";
+    if (pattern.test(lower)) return ClaimType.FactualClaim;
   }
 
   for (const pattern of EMOTIONAL_RULE_PATTERNS) {
-    if (pattern.test(lower)) return "emotional_synthesis";
+    if (pattern.test(lower)) return ClaimType.EmotionalSynthesis;
   }
 
   return null;
@@ -95,18 +99,18 @@ function applyEmbeddingPass(sentence: string): ClaimType {
   const maxSim = Math.max(factualSim, emotionalSim, inferredSim);
 
   if (maxSim < EMBEDDING_THRESHOLD) {
-    return "inferred_insight";
+    return ClaimType.InferredInsight;
   }
 
   if (factualSim >= emotionalSim && factualSim >= inferredSim) {
-    return "factual_claim";
+    return ClaimType.FactualClaim;
   }
 
   if (emotionalSim >= factualSim && emotionalSim >= inferredSim) {
-    return "emotional_synthesis";
+    return ClaimType.EmotionalSynthesis;
   }
 
-  return "inferred_insight";
+  return ClaimType.InferredInsight;
 }
 
 export function classifyClaims(text: string): ClassifiedClaim[] {
@@ -133,8 +137,8 @@ export function buildClaimBreakdown(claims: ClassifiedClaim[]): ClaimBreakdown {
   let emotional = 0;
 
   for (const c of claims) {
-    if (c.type === "factual_claim") factual++;
-    else if (c.type === "inferred_insight") inferred++;
+    if (c.type === ClaimType.FactualClaim) factual++;
+    else if (c.type === ClaimType.InferredInsight) inferred++;
     else emotional++;
   }
 
@@ -142,9 +146,9 @@ export function buildClaimBreakdown(claims: ClassifiedClaim[]): ClaimBreakdown {
 }
 
 export function extractFactualClaims(claims: ClassifiedClaim[]): string[] {
-  return claims.filter(c => c.type === "factual_claim").map(c => c.text);
+  return claims.filter(c => c.type === ClaimType.FactualClaim).map(c => c.text);
 }
 
 export function extractNonFactualClaims(claims: ClassifiedClaim[]): string[] {
-  return claims.filter(c => c.type !== "factual_claim").map(c => c.text);
+  return claims.filter(c => c.type !== ClaimType.FactualClaim).map(c => c.text);
 }

@@ -660,28 +660,33 @@ export function enforceEngineDepthCompliance(
   result.depthDiagnostics.shallowPatternCount = shallowPatternCount;
 
   const hasFactualClaims = factualOnlyOutput.length > 0;
+  const evidenceCheckText = hasFactualClaims ? factualOnlyOutput : "";
 
   let rootCauseRefCount = 0;
-  for (const rc of ael.root_causes) {
-    const rcText = `${rc.deepCause || ""} ${rc.surfaceSignal || ""} ${rc.causalReasoning || ""}`;
-    const sim = cosineSimilarity(rcText, allOutput);
-    if (sim >= SEMANTIC_MATCH_THRESHOLD) {
-      rootCauseRefCount++;
+  if (hasFactualClaims) {
+    for (const rc of ael.root_causes) {
+      const rcText = `${rc.deepCause || ""} ${rc.surfaceSignal || ""} ${rc.causalReasoning || ""}`;
+      const sim = cosineSimilarity(rcText, evidenceCheckText);
+      if (sim >= SEMANTIC_MATCH_THRESHOLD) {
+        rootCauseRefCount++;
+      }
     }
   }
   result.rootCauseReferences = rootCauseRefCount;
-  result.depthDiagnostics.hasRootCauseGrounding = rootCauseRefCount > 0;
+  result.depthDiagnostics.hasRootCauseGrounding = hasFactualClaims ? rootCauseRefCount > 0 : false;
 
   let chainRefCount = 0;
-  for (const chain of (ael.causal_chains || [])) {
-    const chainText = `${chain.cause || ""} ${chain.impact || ""} ${chain.behavior || ""} ${chain.pain || ""}`;
-    const sim = cosineSimilarity(chainText, allOutput);
-    if (sim >= SEMANTIC_MATCH_THRESHOLD) {
-      chainRefCount++;
+  if (hasFactualClaims) {
+    for (const chain of (ael.causal_chains || [])) {
+      const chainText = `${chain.cause || ""} ${chain.impact || ""} ${chain.behavior || ""} ${chain.pain || ""}`;
+      const sim = cosineSimilarity(chainText, evidenceCheckText);
+      if (sim >= SEMANTIC_MATCH_THRESHOLD) {
+        chainRefCount++;
+      }
     }
   }
   result.causalChainReferences = chainRefCount;
-  result.depthDiagnostics.hasCausalChainUsage = chainRefCount > 0;
+  result.depthDiagnostics.hasCausalChainUsage = hasFactualClaims ? chainRefCount > 0 : false;
 
   let barrierRefCount = 0;
   for (const barrier of (ael.buying_barriers || [])) {

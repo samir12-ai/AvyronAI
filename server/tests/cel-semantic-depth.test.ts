@@ -97,7 +97,7 @@ function makeAel(overrides: Partial<AnalyticalPackage> = {}): AnalyticalPackage 
 }
 
 describe("enforceEngineDepthCompliance — rootCauseReferences", () => {
-  it("recognizes root cause via paraphrase (different words, same meaning)", () => {
+  it("recognizes root cause via paraphrase (different words, same meaning) in factual claim", () => {
     const ael = makeAel({
       root_causes: [{
         surfaceSignal: "users lose trust due to hidden fees",
@@ -107,13 +107,13 @@ describe("enforceEngineDepthCompliance — rootCauseReferences", () => {
         confidenceLevel: "high",
       }],
     });
-    const output = ["audience is skeptical because undisclosed billing creates cost uncertainty"];
+    const output = ["undisclosed billing causes cost uncertainty and leads to 38% higher churn among skeptical audiences"];
     const result = enforceEngineDepthCompliance("test-engine", output, ael);
     expect(result.rootCauseReferences).toBeGreaterThan(0);
     expect(result.depthDiagnostics.hasRootCauseGrounding).toBe(true);
   });
 
-  it("does not recognize root cause when output drifts to unrelated domain", () => {
+  it("does not recognize root cause when output drifts to unrelated domain (factual claim)", () => {
     const ael = makeAel({
       root_causes: [{
         surfaceSignal: "users distrust the platform",
@@ -123,7 +123,7 @@ describe("enforceEngineDepthCompliance — rootCauseReferences", () => {
         confidenceLevel: "high",
       }],
     });
-    const output = ["our innovative technology empowers businesses to scale and grow revenue"];
+    const output = ["technology results in 30% faster delivery times for unrelated logistics software"];
     const result = enforceEngineDepthCompliance("test-engine", output, ael);
     expect(result.rootCauseReferences).toBe(0);
     expect(result.depthDiagnostics.hasRootCauseGrounding).toBe(false);
@@ -131,7 +131,7 @@ describe("enforceEngineDepthCompliance — rootCauseReferences", () => {
 });
 
 describe("enforceEngineDepthCompliance — causalChainReferences", () => {
-  it("recognizes causal chain via synonym paraphrase", () => {
+  it("recognizes causal chain via synonym paraphrase in factual claim", () => {
     const ael = makeAel({
       root_causes: [{ surfaceSignal: "trust issues", deepCause: "hidden fees", causalReasoning: "financial concern", sourceData: "r", confidenceLevel: "high" }],
       causal_chains: [{
@@ -142,7 +142,7 @@ describe("enforceEngineDepthCompliance — causalChainReferences", () => {
         conversionEffect: "conversion drops 40%",
       }],
     });
-    const output = ["customers are reluctant to purchase due to hidden billing that creates cost uncertainty and fear of unexpected fees"];
+    const output = ["hidden billing causes a 40% drop in conversions as buyers resist checkout due to unexpected cost uncertainty"];
     const result = enforceEngineDepthCompliance("test-engine", output, ael);
     expect(result.causalChainReferences).toBeGreaterThan(0);
     expect(result.depthDiagnostics.hasCausalChainUsage).toBe(true);
@@ -186,7 +186,7 @@ describe("buildDepthGateResult — retry count", () => {
     const ael = makeAel({
       root_causes: [{ surfaceSignal: "trust", deepCause: "hidden fees", causalReasoning: "fear", sourceData: "r", confidenceLevel: "high" }],
     });
-    const driftOutput = ["innovation drives scale and growth in modern enterprise markets"];
+    const driftOutput = ["innovation results in 40% faster growth in completely unrelated enterprise logistics markets"];
     const depth = enforceEngineDepthCompliance("test-engine", driftOutput, ael);
     const gate = buildDepthGateResult(depth, DEPTH_GATE_MAX_RETRIES, DEPTH_GATE_MAX_RETRIES, []);
     expect(gate.attempt).toBe(DEPTH_GATE_MAX_RETRIES);

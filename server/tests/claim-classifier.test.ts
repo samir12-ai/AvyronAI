@@ -305,6 +305,20 @@ describe("enforceEngineDepthCompliance — claimBreakdown integration", () => {
     expect(result.claimBreakdown.factual + result.claimBreakdown.inferred + result.claimBreakdown.emotional).toBeGreaterThan(0);
   });
 
+  test("emotional/inferred sentences mentioning AEL terms do NOT rescue ungrounded factual claims", () => {
+    const ael = makeAel();
+    const mixedOutput = [
+      "Conversion rates improved by 42% in completely unrelated gardening verticals.",
+      "The message resonates with buyers who trust transparent billing and distrust hidden fees.",
+      "This taps into the deep concern buyers have about undisclosed costs and pricing anxiety.",
+    ];
+    const result = enforceEngineDepthCompliance("test-engine", mixedOutput, ael);
+    expect(result.claimBreakdown.factual).toBeGreaterThan(0);
+    expect(result.claimBreakdown.emotional).toBeGreaterThan(0);
+    const rootCauseViolation = result.violations.find(v => v.violationType === "missing_root_cause");
+    expect(rootCauseViolation).toBeDefined();
+  });
+
   test("classifyClaims is called on full outputTexts join (not per-text)", () => {
     const ael = makeAel();
     const multiTextOutput = [
