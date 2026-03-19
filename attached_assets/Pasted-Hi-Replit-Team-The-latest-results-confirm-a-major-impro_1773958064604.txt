@@ -1,0 +1,101 @@
+Hi Replit Team,
+
+The latest results confirm a major improvement:
+
+Differentiation is now fully clean on CEL, with depth score increasing from 0.25 → 0.80 and all blocking violations removed.
+
+This validates the approach:
+AEL injection at the prompt level fixes generation quality — not post-scoring.
+
+---
+
+## 🎯 Next Step — Mechanism Engine
+
+The Mechanism Engine is now the clear next bottleneck:
+
+- Depth score: ~0.25 ❌  
+- CEL violations: missing_root_cause, missing_causal_chain ❌  
+- Mechanism naming still partially surface-level ❌  
+
+This is the exact same pattern we previously saw in Differentiation.
+
+---
+
+## ✅ Required Fix — Apply Same AEL Injection Strategy
+
+We should replicate the same approach used in Differentiation, adapted to Mechanism generation.
+
+### 1. Structured AEL Block
+
+Inject into the Mechanism prompt:
+
+AEL CAUSAL STRUCTURE:
+- Root Causes: [...]
+- Causal Chains: [...]
+- Barriers: [...]
+
+---
+
+### 2. Hard Prompt Requirements
+
+Add to mechanism generation rules:
+
+- Mechanism MUST explicitly reference root causes  
+- Mechanism steps MUST follow a causal chain (cause → intervention → outcome)  
+- Mechanism MUST resolve a defined barrier  
+
+---
+
+### 3. Verbatim Usage Enforcement
+
+Same principle as Differentiation:
+
+The model must use:
+- actual root cause language  
+- actual barrier language  
+
+—not abstract summaries.
+
+---
+
+### 4. Mechanism Structure Upgrade
+
+Ensure mechanism output reflects:
+
+- real operational steps (not territory restatements)  
+- transformation logic (input → process → output)  
+- causal resolution, not descriptive framing  
+
+---
+
+## ❓ Questions
+
+1. Best insertion point:
+   - inside mechanism generation prompt?
+   - or within existing mechanismCore construction?
+
+2. Any conflict with:
+   - naming validation logic  
+   - repair pass  
+   - CEL scoring  
+
+3. Should we enforce:
+   - hard regeneration if AEL is not used  
+   - or rely on CEL retry loop only?
+
+---
+
+## 🎯 Goal
+
+Upgrade Mechanism from:
+- descriptive system label  
+
+To:
+- causal execution system grounded in AEL structure
+
+---
+
+Once this is implemented, we will re-run the pipeline and reassess downstream SIGNAL_INSUFFICIENT issues.
+
+Best,  
+Samir
