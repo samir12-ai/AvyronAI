@@ -2021,7 +2021,7 @@ export function analyzePersuasion(
     ].join(" ");
 
     for (const decision of lockedDecisions) {
-      const decisionCore = decision.replace(/^(contrast_axis|enemy|mechanism):\s*/i, "").trim();
+      const decisionCore = decision.replace(/^(contrast_axis|enemy|mechanism|narrative_direction):\s*/i, "").trim();
       if (!decisionCore) continue;
       const similarity = cosineSimilarity(decisionCore, persuasionOutputText);
       if (similarity < 0.20) {

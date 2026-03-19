@@ -537,7 +537,7 @@ export function buildDepthRejectionDirective(
     lines.push(``);
     lines.push(`🔒 POSITIONING LOCK VIOLATIONS — your regenerated output MUST comply with the following locked decisions:`);
     for (const decision of lockedDecisions) {
-      const core = decision.replace(/^(contrast_axis|enemy|mechanism):\s*/i, "").trim();
+      const core = decision.replace(/^(contrast_axis|enemy|mechanism|narrative_direction):\s*/i, "").trim();
       lines.push(`   → YOU MUST NOT reframe or contradict: "${core}"`);
       lines.push(`     FIX: Ensure every claim, mechanism step, and outcome description stays within the locked positioning axis above.`);
     }
