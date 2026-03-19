@@ -1,0 +1,151 @@
+:::writing{id=“77102” variant=“email” subject=“Engine Summary Layer — Full Alignment Plan Before Implementation”}
+Hi Replit Team,
+
+Before we implement the Engine Cards (summary layer), we want to take a structured step back and align on a complete, system-consistent approach, so we don’t repeat the issues we previously encountered in positioning, differentiation, and plan synthesis.
+
+Our goal here is to build this layer once, correctly, and fully aligned with the existing architecture.
+
+⸻
+
+🎯 Objective
+
+We want to introduce a deterministic Engine Summary Layer that:
+	•	Produces one clear, user-facing sentence per engine
+	•	Translates engine outputs into decisions (not analysis)
+	•	Is used across:
+	•	Dashboard (engine cards)
+	•	Pipeline (live progress)
+	•	Does not introduce new AI calls
+	•	Does not re-derive or reinterpret strategy
+
+This layer should act strictly as:
+
+a presentation + interpretation layer on top of existing outputs
+
+⸻
+
+⚠️ Why We’re Pausing Before Implementation
+
+In previous work (Positioning, Differentiation, Build Plan), we faced issues such as:
+	•	Re-derivation of strategy instead of using engine outputs
+	•	Missing or misaligned data between layers
+	•	Logic duplication across layers
+	•	Downstream breakage due to unclear ownership of responsibilities
+
+We want to avoid repeating these issues by ensuring this layer is:
+	•	fully aligned with existing data contracts
+	•	non-invasive to engine logic
+	•	reusable across the system
+
+⸻
+
+🧠 Proposed Approach (for validation)
+
+Before building anything, we want to validate the correct architecture with you.
+
+1. Source of Truth
+	•	Engine summaries must be derived directly from:
+	•	engine outputs (snapshots / orchestrator results)
+	•	No dependency on:
+	•	plan synthesis
+	•	AI-generated summaries
+
+⸻
+
+2. Deterministic Extraction
+	•	Each engine will have a fixed mapping:
+	•	specific fields → single sentence output
+	•	No variability, no re-interpretation
+
+⸻
+
+3. Single Shared Layer
+	•	One centralized function (e.g. summarizeEngine(engineId, output))
+	•	Reused by:
+	•	Agent (streaming)
+	•	Dashboard (cards)
+	•	Future UI layers
+
+⸻
+
+4. Read-Only Boundary
+	•	This layer:
+	•	does not affect engines
+	•	does not trigger logic
+	•	does not modify outputs
+
+⸻
+
+5. Graceful Handling
+	•	Must support:
+	•	PARTIAL / SKIPPED / BLOCKED engines
+	•	missing fields
+	•	Always returns a safe, minimal summary
+
+⸻
+
+❓ What We Need From You
+
+To ensure full alignment with the current system, we need your input on:
+
+1. Existing Summary Logic
+	•	Do we already have:
+	•	deriveEngineSummary() or similar?
+	•	If yes:
+	•	where is it implemented?
+	•	can it be reused instead of building a new layer?
+
+⸻
+
+2. Engine Output Contracts
+	•	For each engine:
+	•	what fields are guaranteed and stable?
+	•	Which fields are safe to use for deterministic summaries?
+
+⸻
+
+3. Best Integration Point
+
+Given the current architecture, where should this layer live?
+
+Options:
+	•	orchestrator (after each engine run)
+	•	agent layer (SSE / streaming)
+	•	separate shared module (recommended if reusable)
+	•	existing formatting utilities (if any)
+
+⸻
+
+4. Data Flow to UI
+	•	How does the dashboard currently consume engine data?
+	•	Should summaries be:
+	•	generated in backend (preferred)
+	•	or mapped in frontend?
+
+⸻
+
+5. Avoiding Conflicts
+
+Do you see any risk of this layer:
+	•	conflicting with:
+	•	plan synthesis
+	•	execution layer
+	•	validation logic
+	•	duplicating any existing responsibility?
+
+⸻
+
+🎯 Goal
+
+We want to ensure this layer:
+	•	fits cleanly into the current architecture
+	•	does not introduce hidden coupling
+	•	can be reused across all UI surfaces
+	•	remains stable long-term
+
+⸻
+
+Once we align on this, we will proceed with a clean implementation.
+
+Best,
+Samir
