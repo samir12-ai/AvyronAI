@@ -474,8 +474,74 @@ export function computeSpecificityScore(
   const nonGenericCount = tokens.filter(t => !CROSS_INDUSTRY_GENERICS.includes(t)).length;
   const crossIndustryPenalty = genericWordCount > 0 && nonGenericCount < 2 ? 0.12 : 0;
 
-  const totalPenalty = Math.min(0.90, penalty + domainSpecificityPenalty + mechanismLanguagePenalty + systemNounPenalty + failurePenalty + crossIndustryPenalty);
+  const AUDIENCE_SIGNAL_MARKERS = ["concerns", "needs", "desires", "fears", "anxiety", "hesitation", "worry", "belonging", "community", "affordability", "aspiration", "motivation", "sentiment", "emotion", "feeling", "perception", "belief", "attitude", "mindset"];
+  const audienceMarkerCount = AUDIENCE_SIGNAL_MARKERS.filter(m => tokens.some(t => t === m || t.endsWith(m))).length;
+  const hasAnySystemNoun = relevantNouns.some(n => tokens.some(t => t === n || t.endsWith(n) || t.startsWith(n)));
+  const audienceLevelPenalty = (audienceMarkerCount >= 1 && !hasAnySystemNoun) ? 0.20 : (audienceMarkerCount >= 2 ? 0.12 : 0);
+
+  const totalPenalty = Math.min(0.90, penalty + domainSpecificityPenalty + mechanismLanguagePenalty + systemNounPenalty + failurePenalty + crossIndustryPenalty + audienceLevelPenalty);
   return Math.max(0, Math.min(1.15, 1 - totalPenalty + categoryBonus + contrastBonus + lengthBonus));
+}
+
+export function classifyTerritoryLevel(territory: Territory): { level: "system" | "audience" | "mixed"; reasons: string[] } {
+  const combined = `${territory.name} ${territory.enemyDefinition || ""} ${territory.narrativeDirection || ""} ${territory.domainFailure || ""}`.toLowerCase();
+  const tokens = combined.split(/\s+/).filter(Boolean);
+  const reasons: string[] = [];
+
+  const SYSTEM_STRUCTURE_MARKERS = ["system", "tool", "platform", "pipeline", "process", "framework", "engine", "workflow", "protocol", "method", "mechanism", "infrastructure", "stack", "architecture", "module", "layer", "approach", "model", "structure", "integration", "validation", "verification", "audit"];
+  const FAILURE_MARKERS = ["fails", "breaks", "lacks", "missing", "blocks", "prevents", "collapses", "stalls", "erodes", "undermines", "fragments", "disconnects", "inability", "absence", "breakdown", "failure", "deficit", "gap", "blind spot", "bottleneck"];
+  const AUDIENCE_EMOTION_MARKERS = ["concerns", "needs", "desires", "fears", "anxiety", "hesitation", "worry", "belonging", "community", "affordability", "aspiration", "motivation", "trust", "cost", "transformation", "simplicity", "empowerment", "wellness", "satisfaction", "loyalty"];
+
+  const hasSystem = SYSTEM_STRUCTURE_MARKERS.some(m => tokens.some(t => t === m || t.endsWith(m) || t.startsWith(m)));
+  const hasFailure = FAILURE_MARKERS.some(m => combined.includes(m));
+  const audienceCount = AUDIENCE_EMOTION_MARKERS.filter(m => tokens.some(t => t === m || t.endsWith(m))).length;
+
+  if (!hasSystem) reasons.push("no system-level noun (tool, process, pipeline, framework, etc.)");
+  if (!hasFailure) reasons.push("no failure condition (fails, breaks, lacks, missing, etc.)");
+  if (audienceCount >= 2) reasons.push(`${audienceCount} audience-level emotional markers detected`);
+
+  const nameTokens = territory.name.toLowerCase().split(/\s+/);
+  const nameAudienceCount = AUDIENCE_EMOTION_MARKERS.filter(m => nameTokens.some(t => t === m)).length;
+  const nameSystemCount = SYSTEM_STRUCTURE_MARKERS.some(m => nameTokens.some(t => t === m));
+  if (nameAudienceCount >= 1 && !nameSystemCount) {
+    reasons.push(`territory name "${territory.name}" is audience-level language, not system-level`);
+  }
+
+  if (hasSystem && hasFailure && audienceCount < 2) return { level: "system", reasons: [] };
+  if (!hasSystem && !hasFailure && audienceCount >= 1) return { level: "audience", reasons };
+  return { level: "mixed", reasons };
+}
+
+export function validateTerritorySpecificity(territories: Territory[]): { passed: boolean; rejections: { name: string; reasons: string[] }[]; systemCount: number; audienceCount: number } {
+  const rejections: { name: string; reasons: string[] }[] = [];
+  let systemCount = 0;
+  let audienceCount = 0;
+
+  for (const t of territories) {
+    const classification = classifyTerritoryLevel(t);
+    if (classification.level === "system") {
+      systemCount++;
+    } else if (classification.level === "audience") {
+      audienceCount++;
+      rejections.push({ name: t.name, reasons: classification.reasons });
+    } else {
+      const hasMinimalStructure = (t.domainFailure && t.domainFailure.trim().length > 15) ||
+        (t.operationalProblem && t.operationalProblem.trim().length > 15);
+      if (hasMinimalStructure) {
+        systemCount++;
+      } else {
+        audienceCount++;
+        rejections.push({ name: t.name, reasons: [...classification.reasons, "mixed but lacks domain failure or operational problem detail"] });
+      }
+    }
+  }
+
+  return {
+    passed: rejections.length === 0,
+    rejections,
+    systemCount,
+    audienceCount,
+  };
 }
 
 export function validateNarrativeOutput(text: string): { valid: boolean; reason?: string } {
@@ -1184,6 +1250,7 @@ async function layer11_positioningStatementGeneration(
   productDna?: any,
   analyticalEnrichment?: any,
   structuredSignals?: StructuredSignals | null,
+  specificityRejectionContext?: string,
 ): Promise<Territory[]> {
   if (territories.length === 0) return territories;
 
@@ -1256,6 +1323,8 @@ Also return three additional fields per territory:
 - proofRequirement: what type of evidence would resolve the enemy claim (e.g. "live demo", "case study with metrics", "transparent pricing breakdown", "third-party audit")
 ` : "";
 
+    const rejectionBlock = specificityRejectionContext ? `\n${specificityRejectionContext}\n` : "";
+
     const prompt = hasSignals
       ? `You are a strategic positioning COMPOSER. You build positioning statements by DIRECTLY COMPOSING from the provided audience signal clusters — not by generating freely.
 
@@ -1265,7 +1334,7 @@ ${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${aelBlock}${causalDirective}$
 TERRITORIES WITH THEIR SOURCE SIGNALS:
 ${territoriesBlock}
 ${websitePositioningContext}
-
+${rejectionBlock}
 RULES:
 1. DOMAIN TRANSLATION FIRST: Before composing any field, restate each signal label as the operational failure it represents for this specific business type and offer. Use that operational language — not the surface signal label — in every field you write.
 2. COMPRESSION: Focus on the FIRST territory as the PRIMARY positioning. Express it as a specific root-cause SYSTEM FAILURE — not an emotional category. The enemyDefinition must name what specific process, system, or operational component breaks for the buyer. If the territory is broad (e.g. "cost concerns" or "trust issues"), compress it into the ONE operational failure that causes it.
@@ -1288,7 +1357,7 @@ ${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${aelBlock}${causalDirective}$
 TERRITORIES:
 ${territoriesBlock}
 ${websitePositioningContext}
-
+${rejectionBlock}
 RULES:
 1. DOMAIN TRANSLATION FIRST: Before composing any field, restate each territory name as the operational failure it represents for this specific business type and offer. Use domain-operational language — not generic emotional framing — in every field.
 2. COMPRESSION: Focus on the FIRST territory as the PRIMARY positioning. Express it as a specific root-cause SYSTEM FAILURE — not an emotional category. If the territory is broad, compress it into the ONE operational failure that causes it.
@@ -1400,6 +1469,13 @@ export function evaluateCompressionQuality(territory: Territory): number {
   const BROAD_MARKERS = ["cost concerns", "trust issues", "affordability", "belonging needs", "community needs", "emotional connection", "personal growth"];
   const broadCount = BROAD_MARKERS.filter(m => combined.includes(m)).length;
   if (broadCount >= 2) score -= 0.15;
+
+  const AUDIENCE_NAME_MARKERS = ["concerns", "needs", "desires", "fears", "belonging", "community", "affordability", "trust", "cost", "transformation", "simplicity", "wellness"];
+  const nameTokens = territory.name.toLowerCase().split(/\s+/);
+  const nameAudienceHits = AUDIENCE_NAME_MARKERS.filter(m => nameTokens.some(t => t === m)).length;
+  const nameHasSystem = SYSTEM_NOUNS.some(n => nameTokens.some(t => t === n));
+  if (nameAudienceHits >= 1 && !nameHasSystem) score -= 0.20;
+  if (nameAudienceHits >= 2) score -= 0.10;
 
   const CROSS_DOMAIN_GENERIC_PHRASES = [
     "value delivery system fails", "support system lacks", "onboarding process breaks",
@@ -1886,9 +1962,58 @@ export async function runPositioningEngine(
   let signalTraceability: PositioningEngineResult["signalTraceability"] = undefined;
 
   {
-    const territoriesSnapshot = JSON.parse(JSON.stringify(territories)) as Territory[];
-    let generatedTerritories = await layer11_positioningStatementGeneration(territoriesSnapshot, category, segmentPriority, accountId, activeMiSnapshot, productDna, analyticalEnrichment, parsedStructuredSignals);
-    console.log(`[PositioningEngine-V3] L11 SIGNAL_DIRECT_COMPOSITION | aelProvided=${!!analyticalEnrichment} | signalBound=${!!parsedStructuredSignals}`);
+    const SPECIFICITY_MAX_RETRIES = 1;
+    let specificityAttempt = 0;
+    let specificityRejectionContext = "";
+    let generatedTerritories: Territory[] = [];
+
+    for (specificityAttempt = 0; specificityAttempt <= SPECIFICITY_MAX_RETRIES; specificityAttempt++) {
+      const territoriesSnapshot = JSON.parse(JSON.stringify(territories)) as Territory[];
+
+      if (specificityAttempt > 0) {
+        console.log(`[PositioningEngine-V3] SPECIFICITY_GATE: Retry attempt ${specificityAttempt + 1}/${SPECIFICITY_MAX_RETRIES + 1} — re-generating with rejection context`);
+      }
+
+      generatedTerritories = await layer11_positioningStatementGeneration(territoriesSnapshot, category, segmentPriority, accountId, activeMiSnapshot, productDna, analyticalEnrichment, parsedStructuredSignals, specificityRejectionContext || undefined);
+      console.log(`[PositioningEngine-V3] L11 SIGNAL_DIRECT_COMPOSITION | aelProvided=${!!analyticalEnrichment} | signalBound=${!!parsedStructuredSignals}${specificityAttempt > 0 ? " | retryAttempt=" + (specificityAttempt + 1) : ""}`);
+
+      const specificityCheck = validateTerritorySpecificity(generatedTerritories);
+
+      if (specificityCheck.passed) {
+        console.log(`[PositioningEngine-V3] SPECIFICITY_GATE: PASSED | system=${specificityCheck.systemCount} | audience=${specificityCheck.audienceCount} | attempt=${specificityAttempt + 1}`);
+        break;
+      }
+
+      console.log(`[PositioningEngine-V3] SPECIFICITY_GATE: FAILED | system=${specificityCheck.systemCount} | audience=${specificityCheck.audienceCount} | rejections=${specificityCheck.rejections.length} | attempt=${specificityAttempt + 1}`);
+      for (const r of specificityCheck.rejections) {
+        console.log(`[PositioningEngine-V3] SPECIFICITY_REJECTED: "${r.name}" — ${r.reasons.join("; ")}`);
+      }
+
+      if (specificityAttempt < SPECIFICITY_MAX_RETRIES) {
+        const rejectionLines = specificityCheck.rejections.map(r =>
+          `REJECTED: "${r.name}" — ${r.reasons.join("; ")}`
+        ).join("\n");
+        specificityRejectionContext = `
+PREVIOUS OUTPUT REJECTED — TERRITORIES WERE AUDIENCE-LEVEL, NOT SYSTEM-LEVEL:
+${rejectionLines}
+
+CORRECTION REQUIRED:
+- Do NOT output emotional/audience-level territory framing (e.g. "cost concerns", "belonging needs", "trust issues").
+- Each territory MUST describe a specific SYSTEM FAILURE or OPERATIONAL BREAKDOWN.
+- Every enemyDefinition MUST name what system/process/tool FAILS — not what the buyer FEELS.
+- Format: "[specific system/process] fails/lacks/breaks because [specific operational cause]"
+- The territory name itself must be rewritten to reflect the operational failure, not the audience emotion.`;
+      } else {
+        for (const t of generatedTerritories) {
+          const classification = classifyTerritoryLevel(t);
+          if (classification.level === "audience") {
+            t.confidenceScore = Math.max(0, t.confidenceScore - 0.15);
+            t.stabilityNotes.push(`[SPECIFICITY_FAILED] Territory remains audience-level after retry: ${classification.reasons.join("; ")}`);
+          }
+        }
+        console.log(`[PositioningEngine-V3] SPECIFICITY_GATE: EXHAUSTED | proceeding with best available output after ${specificityAttempt + 1} attempts`);
+      }
+    }
 
     const boundaryText = generatedTerritories.map(t =>
       `${t.name} ${t.enemyDefinition} ${t.contrastAxis} ${t.narrativeDirection} ${t.evidenceSignals?.join(" ") || ""}`

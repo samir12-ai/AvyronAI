@@ -1,0 +1,124 @@
+:::writing{id=“59321” variant=“email” subject=“Positioning Fix Required — Root Cause Blocking Differentiation Quality”}
+Hi Replit Team,
+
+After completing Phase 2 and running a full pipeline test, we’ve identified a clear root issue affecting the entire system.
+
+⸻
+
+⚠️ Core Problem
+
+The Differentiation Engine is not failing on its own.
+
+It is inheriting low-specificity input from the Positioning Engine.
+
+Current positioning territories look like:
+	•	“cost and affordability concerns”
+	•	“belonging / community”
+
+These are audience-level emotional signals, not:
+	•	market positions
+	•	system failures
+	•	operational breakdowns
+
+⸻
+
+🔍 Observed Impact
+
+From the latest run:
+	•	Pillars: 0 returned
+	•	Claims: broad and cross-industry
+	•	CEL: depth violations (missing root cause + causal chain)
+	•	Mechanism: built on generic territory inputs → remains abstract
+
+Even with:
+	•	compression ✅
+	•	prompt hardening ✅
+
+…the system cannot produce sharp outputs because the foundation is not specific enough.
+
+⸻
+
+🎯 Required Fix — Positioning Enforcement Upgrade
+
+We need to strengthen Positioning at the generation + validation level.
+
+1. Hard Rejection Rule (Critical)
+
+Reject any territory that is:
+	•	purely emotional (trust, cost, belonging, etc.)
+	•	directly matching audience pain/desire language
+
+If detected → regenerate.
+
+⸻
+
+2. System Failure Requirement
+
+Each territory MUST include:
+	•	a system / process / tool / structure
+	•	AND a failure condition
+
+Examples:
+	•	❌ “cost concerns”
+	•	✅ “lack of ROI visibility before committing to AI tools”
+
+⸻
+
+3. Enforced Translation (Not Just Instruction)
+
+The current domain translation step is working partially, but:
+	•	it is not enforced
+	•	the model can still output surface labels
+
+We need:
+	•	either a validation check post-generation
+	•	or a stronger structural constraint in scoring
+
+⸻
+
+4. Scoring Reinforcement
+
+Extend computeSpecificityScore() to penalize:
+	•	pure audience-language territories
+	•	absence of system-level nouns
+	•	absence of operational failure verbs
+
+⸻
+
+❓ What We Need From You
+
+Please evaluate:
+	1.	Best place to implement hard rejection
+	•	inside prompt loop?
+	•	or post-generation validation + retry?
+	2.	How to reliably detect:
+	•	“audience-level territory” vs “system-level territory”
+(without hardcoding domain dictionaries)
+	3.	Whether existing:
+	•	CEL
+	•	SIV
+can be leveraged for this classification
+	4.	Any risk this introduces to:
+	•	stability guard
+	•	retry loops
+	•	cross-domain flexibility
+
+⸻
+
+🎯 Goal
+
+Ensure Positioning outputs:
+	•	domain-specific
+	•	system-level
+	•	non-emotional
+	•	non-transferable across industries
+
+So downstream engines (Differentiation, Mechanism, Offer) can operate on real structural inputs.
+
+⸻
+
+Once this is resolved, we’ll re-run the pipeline before proceeding to Phase 3.
+
+Best,
+Samir
+:::

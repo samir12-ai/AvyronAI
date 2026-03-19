@@ -18,6 +18,8 @@ import {
   checkCrossCampaignDiversity,
   compressTerritories,
   evaluateCompressionQuality,
+  classifyTerritoryLevel,
+  validateTerritorySpecificity,
 } from '../positioning-engine/engine';
 
 describe('Positioning Engine V3 — Layer Tests', () => {
@@ -754,6 +756,129 @@ describe('Positioning Engine V3 — Layer Tests', () => {
         });
         const score = evaluateCompressionQuality(t as any);
         expect(score).toBeLessThan(0.80);
+      });
+
+      it('should heavily penalize audience-level territory names', () => {
+        const t = makeTerritory({
+          name: 'cost and affordability concerns',
+          enemyDefinition: 'The pricing model lacks transparency',
+          domainFailure: '',
+          narrativeDirection: 'We help with cost issues',
+        });
+        const score = evaluateCompressionQuality(t as any);
+        expect(score).toBeLessThan(0.55);
+      });
+
+      it('should not penalize system-level territory names', () => {
+        const t = makeTerritory({
+          name: 'ROI validation pipeline failure',
+          enemyDefinition: 'The analytics pipeline fails to surface ROI data',
+          domainFailure: 'analytics pipeline breaks before ROI reporting',
+          narrativeDirection: 'We surface ROI before commitment',
+        });
+        const score = evaluateCompressionQuality(t as any);
+        expect(score).toBeGreaterThan(0.70);
+      });
+    });
+
+    describe('classifyTerritoryLevel', () => {
+      it('should classify audience-level territories', () => {
+        const t = makeTerritory({
+          name: 'cost and affordability concerns',
+          enemyDefinition: 'buyers worry about pricing',
+          narrativeDirection: 'We address cost hesitation',
+          domainFailure: '',
+        });
+        const result = classifyTerritoryLevel(t as any);
+        expect(result.level).toBe('audience');
+        expect(result.reasons.length).toBeGreaterThan(0);
+      });
+
+      it('should classify system-level territories', () => {
+        const t = makeTerritory({
+          name: 'ROI validation pipeline failure',
+          enemyDefinition: 'The analytics pipeline fails to surface ROI metrics before the buyer commits',
+          narrativeDirection: 'We fix the broken ROI visibility process',
+          domainFailure: 'analytics pipeline lacks real-time ROI reporting',
+        });
+        const result = classifyTerritoryLevel(t as any);
+        expect(result.level).toBe('system');
+        expect(result.reasons).toHaveLength(0);
+      });
+
+      it('should classify mixed territories', () => {
+        const t = makeTerritory({
+          name: 'belonging and community',
+          enemyDefinition: 'The onboarding process lacks community integration steps',
+          narrativeDirection: 'We embed structured community access',
+          domainFailure: '',
+        });
+        const result = classifyTerritoryLevel(t as any);
+        expect(result.level).not.toBe('system');
+      });
+    });
+
+    describe('validateTerritorySpecificity', () => {
+      it('should pass for system-level territories', () => {
+        const territories = [
+          makeTerritory({
+            name: 'ROI validation pipeline failure',
+            enemyDefinition: 'The analytics pipeline fails to report ROI',
+            narrativeDirection: 'Fix the ROI visibility process breakdown',
+            domainFailure: 'analytics pipeline lacks ROI reporting',
+          }),
+        ];
+        const result = validateTerritorySpecificity(territories as any);
+        expect(result.passed).toBe(true);
+        expect(result.systemCount).toBe(1);
+        expect(result.audienceCount).toBe(0);
+      });
+
+      it('should fail for audience-level territories', () => {
+        const territories = [
+          makeTerritory({
+            name: 'cost and affordability concerns',
+            enemyDefinition: 'buyers worry about pricing',
+            narrativeDirection: 'we address cost hesitation',
+            domainFailure: '',
+          }),
+        ];
+        const result = validateTerritorySpecificity(territories as any);
+        expect(result.passed).toBe(false);
+        expect(result.audienceCount).toBe(1);
+        expect(result.rejections.length).toBeGreaterThan(0);
+      });
+
+      it('should pass mixed territories with domain failure detail', () => {
+        const territories = [
+          makeTerritory({
+            name: 'trust concerns in AI tools',
+            enemyDefinition: 'buyers hesitate to trust AI',
+            narrativeDirection: 'transparent AI with proof',
+            domainFailure: 'AI marketing tools lack transparent methodology documentation and verifiable case studies',
+          }),
+        ];
+        const result = validateTerritorySpecificity(territories as any);
+        expect(result.passed).toBe(true);
+      });
+    });
+
+    describe('computeSpecificityScore — audience-level penalty', () => {
+      it('should penalize audience-level territory names without system nouns', () => {
+        const audienceScore = computeSpecificityScore('cost and affordability concerns', 'marketing');
+        const systemScore = computeSpecificityScore('ROI validation pipeline failure in marketing tools', 'marketing');
+        expect(systemScore).toBeGreaterThan(audienceScore);
+        expect(audienceScore).toBeLessThan(0.55);
+      });
+
+      it('should penalize belonging/community audience markers', () => {
+        const score = computeSpecificityScore('belonging and community needs', 'fitness');
+        expect(score).toBeLessThan(0.50);
+      });
+
+      it('should not penalize system-level names that happen to mention audience words', () => {
+        const score = computeSpecificityScore('trust validation process breaks for AI tool buyers', 'marketing');
+        expect(score).toBeGreaterThan(0.50);
       });
     });
   });
