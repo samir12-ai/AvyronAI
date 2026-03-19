@@ -1,0 +1,123 @@
+:::writing{id=“37285” variant=“email” subject=“AI Agent Layer Integration — Execution, Orchestration & UX Alignment”}
+Hi Replit Team,
+
+Following the successful completion of the full pipeline upgrade (SGL, CEL, SIV, Positioning specificity, anti-drift contracts), we are now moving to the next phase:
+
+Building an AI Agent layer on top of the existing system.
+
+This is not a replacement of the current architecture — it is an orchestration and experience layer that sits above the orchestrator and engines.
+
+⸻
+
+🎯 Objective
+
+Enable a user to interact with the system like:
+
+“Build me a strategy”
+
+And have the system:
+	•	Execute the full pipeline
+	•	Stream progress step-by-step (Replit-style)
+	•	Explain what is happening at each stage
+	•	Return simplified, structured outputs (cards + plan)
+
+⸻
+
+🧠 Concept
+
+We want to introduce an AI Agent (Strategist Operator) that:
+	•	Controls execution of engines
+	•	Narrates progress in real-time
+	•	Formats outputs into user-facing insights
+	•	Builds the final plan from engine outputs
+
+Without:
+	•	duplicating logic
+	•	or modifying engine behavior
+
+⸻
+
+❓ What We Need From You
+
+Please evaluate this based on the current codebase structure and provide an implementation-level answer.
+
+⸻
+
+1. Can we build this as a wrapper over the existing orchestrator?
+
+Meaning:
+	•	Agent calls orchestrator.executeEngine() or full pipeline
+	•	Engines remain untouched
+	•	No duplication of business logic
+
+Or:
+	•	Do we need to modify the orchestrator to support this properly?
+
+⸻
+
+2. Where is the best place to hook execution events?
+
+We need real-time signals like:
+	•	onEngineStart
+	•	onEngineComplete
+	•	onEngineError
+
+To enable streaming narration like:
+
+“Running Market Intelligence…”
+“Analyzing audience…”
+“Building positioning…”
+
+Questions:
+	•	Should this be added inside orchestrator?
+	•	Or exposed externally via callbacks/events?
+
+⸻
+
+3. How should we structure execution streaming?
+
+We need:
+	•	step-by-step updates per engine
+	•	partial outputs
+	•	progress visibility
+
+What is the cleanest approach in the current system?
+	•	event emitter?
+	•	async generator?
+	•	observable pattern?
+
+⸻
+
+4. How do we map engine outputs → simplified user outputs?
+
+Each engine returns structured data, but we need:
+	•	Positioning → 1 sentence
+	•	Offer → 1 sentence
+	•	Mechanism → 1 sentence
+	•	Funnel → simplified structure
+	•	Plan → clean execution steps
+
+Question:
+	•	Should this formatting live:
+	•	inside the agent layer?
+	•	or inside each engine as a “summary mode”?
+
+⸻
+
+5. How do we avoid duplication with Build Plan / Strategy Layer?
+
+We already have:
+	•	a strategy layer that synthesizes outputs
+
+We are adding:
+	•	an agent that also presents results
+
+How should responsibilities be split so we avoid:
+	•	duplicated logic
+	•	conflicting interpretations
+
+⸻
+
+6. Suggested Structure — Please Validate
+
+We are considering:
