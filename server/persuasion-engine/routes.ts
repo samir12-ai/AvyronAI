@@ -323,6 +323,9 @@ export function registerPersuasionEngineRoutes(app: Express) {
         selectedOfferKey === "alternative" ? offerSnapshot.alternativeOffer : offerSnapshot.primaryOffer
       );
 
+      const offerLayerDiagnostics = safeJsonParse((offerSnapshot as any).layerDiagnostics);
+      const offerPositioningLock = offerLayerDiagnostics?.positioningLock || null;
+
       const offerInput = {
         offerName: offerData?.offerName || "Primary Offer",
         coreOutcome: offerData?.coreOutcome || "",
@@ -332,6 +335,8 @@ export function registerPersuasionEngineRoutes(app: Express) {
         offerStrengthScore: safeNumber(offerData?.offerStrengthScore, 0),
         riskNotes: offerData?.riskNotes || [],
         frictionLevel: safeNumber(offerData?.frictionLevel, 0),
+        lockedDecisions: offerPositioningLock?.lockedDecisions || [],
+        nonGenericAnchors: offerPositioningLock?.nonGenericAnchors || [],
       };
 
       const selectedFunnelKey = funnelSnapshot.selectedOption || "primary";

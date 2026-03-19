@@ -501,6 +501,7 @@ export function isDepthBlocking(depthResult: DepthComplianceResult): boolean {
 export function buildDepthRejectionDirective(
   depthResult: DepthComplianceResult,
   attempt: number,
+  lockedDecisions?: string[],
 ): string {
   const lines: string[] = [
     `\n═══ DEPTH ENFORCEMENT REJECTION (Attempt ${attempt} FAILED — output was BLOCKED) ═══`,
@@ -530,6 +531,17 @@ export function buildDepthRejectionDirective(
   for (const v of depthResult.violations) {
     lines.push(`   → ${v.severity.toUpperCase()}: ${v.details}`);
     if (v.requiredDirection) lines.push(`     FIX: ${v.requiredDirection}`);
+  }
+
+  if (lockedDecisions && lockedDecisions.length > 0) {
+    lines.push(``);
+    lines.push(`🔒 POSITIONING LOCK VIOLATIONS — your regenerated output MUST comply with the following locked decisions:`);
+    for (const decision of lockedDecisions) {
+      const core = decision.replace(/^(contrast_axis|enemy|mechanism):\s*/i, "").trim();
+      lines.push(`   → YOU MUST NOT reframe or contradict: "${core}"`);
+      lines.push(`     FIX: Ensure every claim, mechanism step, and outcome description stays within the locked positioning axis above.`);
+    }
+    lines.push(`   Ignoring the positioning lock will cause semantic drift from upstream Offer Engine contracts.`);
   }
 
   lines.push(``);

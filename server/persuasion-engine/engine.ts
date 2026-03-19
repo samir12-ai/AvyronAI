@@ -1789,6 +1789,42 @@ function buildPersuasionRoutes(
   return { primary, alternative, rejected };
 }
 
+function applyPositioningLockConstraints(
+  layers: LayerResult[],
+  lockedDecisions: string[],
+  nonGenericAnchors: string[],
+): LayerResult[] {
+  if (lockedDecisions.length === 0 && nonGenericAnchors.length === 0) return layers;
+
+  const l4Index = layers.findIndex(l => l.layerName === "influence_driver_selection");
+  if (l4Index === -1) return layers;
+
+  const l4 = layers[l4Index];
+
+  const lockConstraintLines: string[] = [
+    `POSITIONING LOCK ACTIVE — influence drivers MUST reflect the following locked decisions:`,
+    ...lockedDecisions.map(d => `  YOU MUST NOT reframe or contradict: "${d}"`),
+  ];
+
+  if (nonGenericAnchors.length > 0) {
+    lockConstraintLines.push(`ANCHOR REQUIREMENT — at least one influence driver or message step MUST echo the following positioning tokens: [${nonGenericAnchors.slice(0, 8).join(", ")}]`);
+  }
+
+  const driverFindingIdx = l4.findings.findIndex(f => f.startsWith("Selected influence drivers:"));
+  const updatedFindings = [...l4.findings];
+
+  if (driverFindingIdx !== -1) {
+    updatedFindings.splice(driverFindingIdx, 0, ...lockConstraintLines);
+  } else {
+    updatedFindings.push(...lockConstraintLines);
+  }
+
+  const updatedL4: LayerResult = { ...l4, findings: updatedFindings };
+  const result = [...layers];
+  result[l4Index] = updatedL4;
+  return result;
+}
+
 export function analyzePersuasion(
   mi: PersuasionMIInput,
   audience: PersuasionAudienceInput,
@@ -1921,15 +1957,17 @@ export function analyzePersuasion(
     structuralWarnings.push("WARNING: Trust specificity is weak — trust barrier mapping may lack precision");
   }
 
-  const routes = buildPersuasionRoutes(audience, awareness, differentiation, offer, funnel, mi, allLayers, trustBarriers, awarenessStageProperties, objectionProofLinks, autoCorrection, structuredObjections);
+  const lockedDecisions: string[] = offer.lockedDecisions || [];
+  const nonGenericAnchors: string[] = offer.nonGenericAnchors || [];
+
+  const constrainedLayers = applyPositioningLockConstraints(allLayers, lockedDecisions, nonGenericAnchors);
+
+  const routes = buildPersuasionRoutes(audience, awareness, differentiation, offer, funnel, mi, constrainedLayers, trustBarriers, awarenessStageProperties, objectionProofLinks, autoCorrection, structuredObjections);
 
   const crossEngineValidation: string[] = [];
   const pReadiness = safeString(awareness.targetReadinessStage, "unknown");
   const pMode = routes.primary.persuasionMode;
   const pMsgOrder = routes.primary.messageOrderLogic;
-
-  const lockedDecisions: string[] = offer.lockedDecisions || [];
-  const nonGenericAnchors: string[] = offer.nonGenericAnchors || [];
 
   if (lockedDecisions.length > 0) {
     const persuasionOutputText = [

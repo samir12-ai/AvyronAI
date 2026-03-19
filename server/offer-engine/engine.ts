@@ -2462,7 +2462,7 @@ export async function runOfferEngine(
   if (analyticalEnrichment && isDepthBlocking(celDepth)) {
     for (let offerDepthAttempt = 2; offerDepthAttempt <= offerDepthGateMaxAttempts; offerDepthAttempt++) {
       offerDepthGateLog.push(`Attempt ${offerDepthAttempt - 1}: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length})`);
-      offerDepthRejectionContext = buildDepthRejectionDirective(celDepth, offerDepthAttempt - 1);
+      offerDepthRejectionContext = buildDepthRejectionDirective(celDepth, offerDepthAttempt - 1, posLock.lockedDecisions);
       console.log(`[OfferEngine-V4] DEPTH_GATE: Attempt ${offerDepthAttempt - 1} BLOCKED — regenerating (${offerDepthAttempt}/${offerDepthGateMaxAttempts})`);
 
       try {
