@@ -1,0 +1,127 @@
+Hi Replit Team,
+
+Following the successful upgrades to Positioning, Differentiation, and Mechanism (now fully clean on CEL with strong depth and confidence), we’ve reached the next bottleneck:
+
+Downstream engines (Offer, Awareness, Persuasion) are returning SIGNAL_INSUFFICIENT.
+
+---
+
+## 🎯 Context
+
+Upstream is now stable and high-quality:
+- Positioning → system-level territories ✅  
+- Differentiation → AEL-grounded, depth clean ✅  
+- Mechanism → fully causal, depth score = 1.00 ✅  
+
+Despite this, downstream engines are not receiving enough qualifying signals to operate.
+
+---
+
+## ⚠️ Problem
+
+We are seeing:
+- Offer Engine → SIGNAL_INSUFFICIENT  
+- Awareness Engine → SIGNAL_INSUFFICIENT  
+- Persuasion Engine → SIGNAL_INSUFFICIENT  
+
+This indicates a signal flow / qualification issue, not a generation issue.
+
+---
+
+## 🔍 What We Need From You
+
+Please perform a code-level diagnosis of the full signal pipeline and return:
+
+---
+
+### 1. Signal Flow Mapping (End-to-End)
+
+Trace exactly:
+
+SGL → AEL → Positioning → Differentiation → Mechanism → Offer/Awareness/Persuasion
+
+For each stage:
+- What signals are produced?
+- What signals are expected downstream?
+- Where are signals filtered, reduced, or dropped?
+
+---
+
+### 2. Qualification Logic
+
+For Offer / Awareness / Persuasion:
+
+- What defines a “qualifying signal” in each engine?
+- Where is the threshold enforced?
+- Why are we ending up with 0 qualifying signals despite strong upstream outputs?
+
+---
+
+### 3. Data Contract Gaps
+
+Identify any mismatch between:
+
+- what upstream engines output  
+vs  
+- what downstream engines expect  
+
+Examples:
+- missing fields
+- incorrect structure
+- naming mismatches
+- signal classification differences
+
+---
+
+### 4. Signal Loss Points
+
+Pinpoint exactly where signals are being lost:
+
+- SGL filtering?
+- AEL transformation?
+- Orchestrator extraction?
+- Engine input mapping?
+- Type/interface mismatch?
+
+---
+
+### 5. Minimal Fix Strategy
+
+Based on the current architecture:
+
+- What is the minimal change required to restore valid signal flow?
+- What should be:
+  - added
+  - modified
+  - or removed  
+
+Without:
+- introducing new layers  
+- breaking CEL / SIV  
+- or changing engine contracts unnecessarily  
+
+---
+
+### 6. Architecture Integrity Check
+
+Confirm:
+- Whether this is a pipeline design issue or an implementation bug
+- Whether the current architecture supports proper signal propagation once fixed
+
+---
+
+## 🎯 Goal
+
+Ensure downstream engines receive:
+- sufficient
+- correctly structured
+- properly classified signals  
+
+So they can operate without SIGNAL_INSUFFICIENT blocks.
+
+---
+
+Once we have this diagnosis, we will implement the fix and re-run the full pipeline.
+
+Best,  
+Samir

@@ -254,7 +254,7 @@ export function layer1_marketEntryDetection(
     score -= 0.1;
   }
 
-  if (differentiation.pillars.length === 0) {
+  if ((differentiation.pillars || []).length === 0) {
     warnings.push("No differentiation pillars available — entry mechanism lacks proof structure");
     score -= 0.1;
   }
@@ -350,7 +350,7 @@ export function layer3_attentionTriggerMapping(
   if (threats.length > 2 && pains.length > 3) {
     primaryTrigger = "trust_breakdown";
     findings.push(`High threat signals (${threats.length}) + audience pain (${pains.length}) — trust breakdown trigger [selected:${primaryTrigger}]`);
-  } else if (differentiation.authorityMode && differentiation.proofArchitecture.length > 0) {
+  } else if (differentiation.authorityMode && (differentiation.proofArchitecture || []).length > 0) {
     primaryTrigger = "authority_gap";
     findings.push(`Authority mode active with proof architecture — authority gap trigger aligned [selected:${primaryTrigger}]`);
   } else if (opportunities.length > threats.length) {
@@ -417,11 +417,11 @@ export function layer4_narrativeEntryAlignment(
     findings.push(`Authority entry aligned with differentiation authority mode: ${differentiation.authorityMode}`);
   }
 
-  if (entryRoute === "proof_led_entry" && differentiation.proofArchitecture.length === 0) {
+  if (entryRoute === "proof_led_entry" && (differentiation.proofArchitecture || []).length === 0) {
     warnings.push("Proof-led entry selected but no proof architecture available");
     score -= 0.2;
-  } else if (entryRoute === "proof_led_entry" && differentiation.proofArchitecture.length > 0) {
-    findings.push(`Proof-led entry backed by ${differentiation.proofArchitecture.length} proof element(s)`);
+  } else if (entryRoute === "proof_led_entry" && (differentiation.proofArchitecture || []).length > 0) {
+    findings.push(`Proof-led entry backed by ${(differentiation.proofArchitecture || []).length} proof element(s)`);
   }
 
   if (entryRoute === "diagnostic_entry" && funnel.entryTrigger?.mechanismType !== "diagnostic") {

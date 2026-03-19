@@ -105,14 +105,16 @@ export function layer1_funnelEligibilityDetection(
     reasons.push(`${segments.length} audience segments defined`);
   }
 
-  if (offer.completeness.complete) {
+  if (offer.completeness?.complete) {
     score += 0.25;
     reasons.push("Offer construction complete");
+  } else if (offer.completeness) {
+    reasons.push(`Offer incomplete: ${(offer.completeness.missingLayers || []).join(", ")}`);
   } else {
-    reasons.push(`Offer incomplete: ${offer.completeness.missingLayers.join(", ")}`);
+    reasons.push("Offer completeness data not available");
   }
 
-  if (offer.offerStrengthScore > 0.5) {
+  if ((offer.offerStrengthScore || 0) > 0.5) {
     score += 0.15;
     reasons.push(`Offer strength above threshold: ${offer.offerStrengthScore.toFixed(2)}`);
   }
@@ -139,7 +141,7 @@ export function layer2_offerToFunnelFit(
 ): { funnelType: string; fitScore: number; rationale: string } {
   const awareness = audience.awarenessLevel || "problem_aware";
   const maturity = typeof audience.maturityIndex === "number" ? audience.maturityIndex : (Number(audience.maturityIndex) || 0.5);
-  const offerStrength = offer.offerStrengthScore;
+  const offerStrength = offer.offerStrengthScore || 0;
 
   const candidateTypes = AWARENESS_TO_FUNNEL_MAP[awareness] || AWARENESS_TO_FUNNEL_MAP["problem_aware"];
 
@@ -149,10 +151,10 @@ export function layer2_offerToFunnelFit(
   if (offerStrength > 0.7 && maturity > 0.6) {
     funnelType = "direct";
     fitScore = 0.85;
-  } else if (offerStrength > 0.5 && offer.deliverables.length > 3) {
+  } else if (offerStrength > 0.5 && (offer.deliverables || []).length > 3) {
     funnelType = candidateTypes.includes("webinar") ? "webinar" : candidateTypes[0];
     fitScore = 0.7;
-  } else if (offer.frictionLevel > 0.6) {
+  } else if ((offer.frictionLevel || 0) > 0.6) {
     funnelType = candidateTypes.includes("challenge") ? "challenge" : "webinar";
     fitScore = 0.6;
   } else if (maturity < 0.3) {
@@ -1090,7 +1092,7 @@ STRICT RULES:
 - Respond with ONLY valid JSON, no markdown${mechanismCoreBlock}${eligibleTypesBlock}
 
 Market Context:
-- Offer: ${offer.offerName} — ${offer.coreOutcome}
+- Offer: ${offer.offerName || "Not defined"} — ${offer.coreOutcome || "Not defined"}
 - Top Pains: ${JSON.stringify(pains.slice(0, 5).map((p: any) => typeof p === "string" ? p : p?.pain || p?.name))}
 - Top Desires: ${JSON.stringify(desires.slice(0, 5).map(([k]) => k))}
 - Awareness Level: ${audience.awarenessLevel || "unknown"}
@@ -1099,7 +1101,7 @@ Market Context:
 - Mechanism: ${core?.mechanismLogic || mechanism.description || "No validated mechanism"}
 - Enemy: ${positioning.enemyDefinition || "Not defined"}
 - Narrative: ${positioning.narrativeDirection || "Not defined"}
-- Offer Strength: ${offer.offerStrengthScore.toFixed(2)}
+- Offer Strength: ${(offer.offerStrengthScore || 0).toFixed(2)}
 ${(() => {
   const ms = safeJsonParse(mi?.multiSourceSignals);
   if (!ms || typeof ms !== "object") return "";

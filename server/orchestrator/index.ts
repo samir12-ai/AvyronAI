@@ -56,6 +56,10 @@ import { runFunnelEngine } from "../funnel-engine/engine";
 import { runIntegrityEngine } from "../integrity-engine/engine";
 import { runAwarenessEngine } from "../awareness-engine/engine";
 import { runPersuasionEngine } from "../persuasion-engine/engine";
+import {
+  createSourceLineageEntry,
+  type SignalLineageEntry,
+} from "../shared/signal-lineage";
 import { runStatisticalValidationEngine } from "../strategy/statistical-validation/engine";
 import { runBudgetGovernorEngine } from "../strategy/budget-governor/engine";
 import { runChannelSelectionEngine } from "../strategy/channel-selection/engine";
@@ -192,10 +196,88 @@ function extractDifferentiationInput(diffResult: any): any {
   if (!diffResult) return {};
   return {
     claims: diffResult.validatedClaims || [],
+    pillars: diffResult.pillars || diffResult.validatedClaims || [],
     collisions: diffResult.collisions || [],
     trustGaps: diffResult.trustGaps || [],
     proofMap: diffResult.proofDemandMap || [],
+    mechanismFraming: diffResult.mechanismFraming || diffResult.mechanismCore || null,
+    mechanismCore: diffResult.mechanismCore || null,
+    authorityMode: diffResult.authorityMode || null,
+    claimStructures: diffResult.claimStructures || diffResult.validatedClaims || [],
+    proofArchitecture: diffResult.proofArchitecture || diffResult.proofDemandMap || [],
+    confidenceScore: diffResult.confidenceScore || diffResult.confidence || null,
   };
+}
+
+function buildUpstreamLineage(ctx: EngineContext): SignalLineageEntry[] {
+  const entries: SignalLineageEntry[] = [];
+  let idx = 0;
+
+  const audienceResult = ctx.audience;
+  if (audienceResult) {
+    const pains = audienceResult.painProfiles || [];
+    for (const p of pains.slice(0, 5)) {
+      const text = typeof p === "string" ? p : p.pain || p.name || p.label || JSON.stringify(p);
+      entries.push(createSourceLineageEntry("audience", "pain", text, idx++));
+    }
+    const desires = audienceResult.desireMap || [];
+    for (const d of desires.slice(0, 5)) {
+      const text = typeof d === "string" ? d : d.desire || d.name || d.label || JSON.stringify(d);
+      entries.push(createSourceLineageEntry("audience", "desire", text, idx++));
+    }
+    const objections = audienceResult.objectionMap || [];
+    for (const o of objections.slice(0, 3)) {
+      const text = typeof o === "string" ? o : o.objection || o.name || o.label || JSON.stringify(o);
+      entries.push(createSourceLineageEntry("audience", "objection", text, idx++));
+    }
+  }
+
+  const positioningResult = ctx.positioning;
+  if (positioningResult) {
+    const out = positioningResult.output || positioningResult;
+    const territories: any[] = out.territories || positioningResult.territories || [];
+    for (const t of territories.slice(0, 3)) {
+      const text = typeof t === "string" ? t : t.name || t.territory || JSON.stringify(t);
+      entries.push(createSourceLineageEntry("positioning", "territory", text, idx++));
+    }
+    const cards = out.strategyCards || positioningResult.strategyCards || [];
+    for (const c of cards.slice(0, 3)) {
+      const text = typeof c === "string" ? c : c.claim || c.description || c.name || JSON.stringify(c);
+      entries.push(createSourceLineageEntry("positioning", "strategy_card", text, idx++));
+    }
+  }
+
+  const diffResult = ctx.differentiation;
+  if (diffResult) {
+    const claims = diffResult.validatedClaims || [];
+    for (const c of claims.slice(0, 5)) {
+      const text = typeof c === "string" ? c : c.claim || c.description || c.name || JSON.stringify(c);
+      entries.push(createSourceLineageEntry("differentiation", "claim", text, idx++));
+    }
+    const pillars = diffResult.pillars || [];
+    for (const p of pillars.slice(0, 3)) {
+      const text = typeof p === "string" ? p : p.description || p.name || p.territory || JSON.stringify(p);
+      entries.push(createSourceLineageEntry("differentiation", "pillar", text, idx++));
+    }
+  }
+
+  const mechResult = ctx.mechanism;
+  if (mechResult?.primaryMechanism) {
+    const m = mechResult.primaryMechanism;
+    if (m.mechanismDescription) {
+      entries.push(createSourceLineageEntry("mechanism", "mechanism_description", m.mechanismDescription, idx++));
+    }
+    if (m.mechanismLogic) {
+      entries.push(createSourceLineageEntry("mechanism", "mechanism_logic", m.mechanismLogic, idx++));
+    }
+    const steps = m.mechanismSteps || [];
+    for (const s of steps.slice(0, 5)) {
+      entries.push(createSourceLineageEntry("mechanism", "mechanism_step", s, idx++));
+    }
+  }
+
+  console.log(`[Orchestrator] LINEAGE_BUILT | entries=${entries.length} | sources=[${[...new Set(entries.map(e => e.originEngine))].join(",")}]`);
+  return entries;
 }
 
 function resolveSglOrBlock(
@@ -521,9 +603,10 @@ async function executeEngine(
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
+        const upstreamLineage = buildUpstreamLineage(ctx);
         const result = await runOfferEngine(
           miInput, audInput, posInput, diffInput,
-          config.accountId, [],
+          config.accountId, upstreamLineage,
           ctx.mechanism || undefined,
           undefined,
           ctx.analyticalEnrichment
@@ -565,9 +648,10 @@ async function executeEngine(
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
         const offerInput = ctx.offer || {};
+        const upstreamLineage = buildUpstreamLineage(ctx);
         const result = await runAwarenessEngine(
           miInput, audInput, posInput, diffInput, offerInput,
-          config.accountId, [],
+          config.accountId, upstreamLineage,
           undefined,
           ctx.analyticalEnrichment
         );
@@ -680,9 +764,10 @@ async function executeEngine(
         const funnelInput = ctx.funnel || {};
         const integrityInput = ctx.integrity || {};
         const awarenessInput = ctx.awareness || {};
+        const persuasionLineage = buildUpstreamLineage(ctx);
         const result = await runPersuasionEngine(
           miInput, audInput, posInput, diffInput, offerInput, funnelInput, integrityInput, awarenessInput,
-          config.accountId, [],
+          config.accountId, persuasionLineage,
           ctx.analyticalEnrichment
         );
         output = result;
