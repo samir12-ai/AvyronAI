@@ -263,17 +263,31 @@ export function resolveSignalsForEngine(
 
   const coverage = buildEngineCoverageReport(cleanSignals, requiredCategories);
 
-  const isBlocked = !coverage.coverageSufficient;
-
-  if (isBlocked) {
+  if (!coverage.coverageSufficient) {
     console.error(
       `[SGL] COVERAGE_BLOCKED | engine=${engineId} | ` +
       `signals=${cleanSignals.length} | missing=[${coverage.missingCategories.join(",")}] | ` +
       `required=[${requiredCategories.join(",")}] | ENGINE_DISPATCH_HALTED`
     );
+    state.consumptionLog.push({
+      engineId,
+      signalsConsumed: [],
+      coverageReport: coverage,
+      timestamp: new Date().toISOString(),
+    });
+    return {
+      signals: [],
+      coverage,
+      traceToken: state.traceToken,
+      engineId,
+      blocked: true,
+      insufficientCategories: coverage.missingCategories,
+    };
   }
 
-  for (const signal of cleanSignals) {
+  const rankedSignals = [...cleanSignals].sort((a, b) => b.confidence - a.confidence);
+
+  for (const signal of rankedSignals) {
     if (!signal.consumedBy.includes(engineId)) {
       signal.consumedBy.push(engineId);
     }
@@ -281,7 +295,7 @@ export function resolveSignalsForEngine(
 
   const consumption: EngineSignalConsumption = {
     engineId,
-    signalsConsumed: cleanSignals.map(s => s.signalId),
+    signalsConsumed: rankedSignals.map(s => s.signalId),
     coverageReport: coverage,
     timestamp: new Date().toISOString(),
   };
@@ -289,16 +303,16 @@ export function resolveSignalsForEngine(
 
   console.log(
     `[SGL] RESOLVE | engine=${engineId} | raw=${signals.length} | clean=${cleanSignals.length} | ` +
-    `purged=${contaminatedCount} | categories=[${requiredCategories.join(",")}] | sufficient=${coverage.coverageSufficient} | blocked=${isBlocked}`
+    `purged=${contaminatedCount} | categories=[${requiredCategories.join(",")}] | sufficient=true | ranked=${rankedSignals.length}`
   );
 
   return {
-    signals: cleanSignals,
+    signals: rankedSignals,
     coverage,
     traceToken: state.traceToken,
     engineId,
-    blocked: isBlocked,
-    insufficientCategories: coverage.missingCategories,
+    blocked: false,
+    insufficientCategories: [],
   };
 }
 
