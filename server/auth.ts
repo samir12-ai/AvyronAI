@@ -255,7 +255,7 @@ export function registerAuthRoutes(app: Router) {
 
       await db.update(users).set(updateData).where(eq(users.id, userId));
 
-      console.log(`[Stripe] Updated user ${userId} to status: ${safeStatus}, planType: ${updateData.planType || "unchanged"}`);
+      console.log(`[Conversion] Payment confirmed for user ${userId} — status: ${safeStatus}, planType: ${updateData.planType || "unchanged"}`);
       res.json({ success: true });
     } catch (error) {
       console.error("[Stripe] Webhook error:", error);
@@ -288,6 +288,10 @@ export function registerAuthRoutes(app: Router) {
 
       const status = user.subscriptionStatus === "active" ? "active" :
                      isTrialActive ? "trial" : "expired";
+
+      if (status === "expired") {
+        console.log(`[Conversion] User ${payload.userId} (${user.email}) reached upgrade screen — trial expired`);
+      }
 
       res.json({
         status,

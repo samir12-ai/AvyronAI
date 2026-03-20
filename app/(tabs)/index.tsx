@@ -31,6 +31,7 @@ import ExecutionPlan from '@/components/ExecutionPlan';
 import { RequiredWorkCard } from '@/components/RequiredWorkCard';
 import DashboardChat from '@/components/DashboardChat';
 import NarrativeCard from '@/components/NarrativeCard';
+import { useAuth } from '@/context/AuthContext';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -136,6 +137,7 @@ export default function DashboardScreen() {
   const { t } = useLanguage();
   const { metaConnection } = useApp();
   const { selectedCampaignId } = useCampaign();
+  const { subscriptionStatus, trialDaysRemaining } = useAuth();
 
   const [showInsights, setShowInsights] = useState(false);
 
@@ -538,6 +540,15 @@ export default function DashboardScreen() {
           </View>
         </RNAnimated.View>
 
+        {subscriptionStatus === 'trial' && trialDaysRemaining > 0 && (
+          <View style={[s.trialBanner, { backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : 'rgba(139,92,246,0.06)', borderColor: isDark ? 'rgba(139,92,246,0.15)' : 'rgba(139,92,246,0.12)' }]}>
+            <Ionicons name="time-outline" size={14} color={P.mint} />
+            <Text style={[s.trialBannerText, { color: isDark ? '#C4B5FD' : '#7C3AED' }]}>
+              {trialDaysRemaining} {trialDaysRemaining === 1 ? 'day' : 'days'} left in your free trial
+            </Text>
+          </View>
+        )}
+
         <CampaignBar />
 
         <RNAnimated.View style={{ opacity: headerFade, transform: [{ translateY: cardSlide }] }}>
@@ -705,6 +716,20 @@ const s = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  trialBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 14,
+  },
+  trialBannerText: {
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
   },
 
   heroCard: {

@@ -53,9 +53,9 @@ export default function IntroScreen() {
         </View>
 
         <View style={styles.heroSection}>
-          <Text style={styles.headline}>Your complete marketing{'\n'}system — built in minutes</Text>
+          <Text style={styles.headline}>Stop guessing.{'\n'}Start growing.</Text>
           <Text style={styles.subline}>
-            15 AI engines handle strategy, content, and execution so you can focus on growing your business.
+            MarketMind builds your entire marketing strategy, content, and execution plan — so you don't have to.
           </Text>
         </View>
 

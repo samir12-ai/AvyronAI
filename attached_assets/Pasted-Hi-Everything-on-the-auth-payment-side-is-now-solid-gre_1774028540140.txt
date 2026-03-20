@@ -1,0 +1,96 @@
+Hi,
+
+Everything on the auth + payment side is now solid — great work.
+
+Before we move to launch, there are a few final UX and conversion-focused improvements we should address. These are not structural changes, but they will have a big impact on how users convert.
+
+---
+
+## 🎯 1. Intro Screen — Make It Conversion-Focused
+
+Current copy is good, but still descriptive.
+
+We need it to feel like it solves a real problem, not just explains the product.
+
+Please:
+- Adjust the headline to be slightly more outcome-driven (still one line, clean)
+- Keep design minimal — no extra steps
+
+Goal:
+- User immediately understands “this solves my problem”
+
+---
+
+## ⏳ 2. Trial Visibility (Urgency)
+
+Right now, users have a 7-day trial but there is no visible urgency.
+
+Please add:
+- Simple trial indicator (e.g., “5 days left”)
+- Show it clearly in the UI (top bar or dashboard area)
+
+No complexity — just a clear remaining time indicator.
+
+---
+
+## 💳 3. Upgrade Screen — Stronger Positioning
+
+The upgrade screen needs to feel like activation, not restriction.
+
+Please adjust:
+- Headline → more action-oriented (not just “upgrade to continue”)
+- Emphasize that the system is ready and needs to be activated
+- Keep layout clean, no clutter
+
+Goal:
+- Make upgrade feel like a natural next step, not a forced paywall
+
+---
+
+## 🔁 4. Post-Payment Experience
+
+Please confirm and ensure:
+
+- If webhook completes → access unlocks automatically
+- If webhook is delayed → refresh still works (already implemented ✅)
+
+Important:
+- No user should feel “stuck” after payment
+
+---
+
+## 📊 5. Basic Tracking (Minimal, No Overbuild)
+
+We don’t need a full analytics system.
+
+For now:
+- Rely on Stripe for payment tracking
+- No need to build internal dashboards yet
+
+But internally, make sure we can at least understand:
+- who reached upgrade
+- who completed payment (via Stripe)
+
+---
+
+## ⚠️ Important Constraints
+
+- Do NOT overcomplicate anything
+- No new systems or heavy logic
+- Keep everything lightweight and aligned with current structure
+
+---
+
+## ✅ Final Goal
+
+- Smooth first experience
+- Clear trial → upgrade transition
+- No friction after payment
+- Stronger conversion at key points
+
+---
+
+Once this is done, we’ll finalize pricing structure and prepare for launch.
+
+Best,  
+Samir

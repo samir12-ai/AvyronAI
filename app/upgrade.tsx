@@ -84,9 +84,9 @@ export default function UpgradeScreen() {
         </View>
 
         <View style={styles.mainSection}>
-          <Text style={styles.headline}>Continue building{'\n'}with MarketMind</Text>
+          <Text style={styles.headline}>Your system is ready.{'\n'}Activate it.</Text>
           <Text style={styles.subline}>
-            Your free trial has ended. Upgrade to keep full access to all features.
+            Your marketing engine is built and waiting. Unlock full access to keep everything running.
           </Text>
 
           <View style={styles.featureList}>
@@ -115,7 +115,7 @@ export default function UpgradeScreen() {
                 style={styles.upgradeBtn}
               >
                 <Ionicons name="diamond-outline" size={20} color="#fff" />
-                <Text style={styles.upgradeBtnText}>Upgrade Now</Text>
+                <Text style={styles.upgradeBtnText}>Activate Full Access</Text>
               </LinearGradient>
             </Pressable>
           ) : (
