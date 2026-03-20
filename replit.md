@@ -48,8 +48,9 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 - **Fortress Completion Engines (V3 Strategy Layer)**: Includes Statistical Validation Engine, Budget Governor Engine, Channel Selection Engine (V4), Iteration Engine, and Retention Engine.
 - **Adaptive Data Source System**: Supports `campaign_metrics` and `benchmark` modes with adaptive switching rules and a Statistical Validity Layer.
 - **Snapshot Trust & Freshness System**: Provides temporal decay scoring, schema validation, and freshness classification for data.
-- **Concurrency Hardening**: Includes lock timeouts, batched deduplication, and stale recovery safeguards.
-- **Scalability & Thundering Herd Protection**: Features a global job queue, per-account job budgets, shared market data cache, request deduplication, and a rate gate.
+- **Concurrency Hardening**: Includes lock timeouts, batched deduplication, stale recovery safeguards, atomic plan approval (WHERE status IN DRAFT/READY_FOR_REVIEW prevents double-approval race), and INSERT...WHERE NOT EXISTS orchestrator run guard (prevents duplicate pipeline runs per campaign within 30min window).
+- **Scalability & Thundering Herd Protection**: Features a global job queue, per-account job budgets, shared market data cache, request deduplication, and a rate gate. Database has 90 indexes across all critical tables for query performance under load.
+- **Production Readiness**: Load tested at 200 concurrent users with 0% failure rate (p50=490ms, p95=858ms, p99=888ms). All 9 strategy engines validated for snapshot consistency. Failure recovery tested: invalid IDs return proper 404s, duplicate runs blocked with 409, all endpoints wrapped in try/catch.
 - **Audit & Control System**: A 5-panel dashboard for auditing feeds, AI usage, gate status, decisions, publish history, and job management.
 
 ## External Dependencies

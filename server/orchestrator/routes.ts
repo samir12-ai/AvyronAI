@@ -14,7 +14,7 @@ import {
   executionTasks,
   planAssumptions,
 } from "@shared/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, or, desc, sql } from "drizzle-orm";
 import { validateRootIntegrity, detectStaleness, computeCalendarDeviation } from "../root-bundle";
 import { computeFulfillment } from "../fulfillment-engine";
 import { buildCausalNarrative } from "../narrative-layer";
@@ -28,6 +28,32 @@ export function registerOrchestratorV2Routes(app: Express) {
       }
 
       const accountId = "default";
+
+      const lockResult = await db.execute(
+        sql`INSERT INTO orchestrator_jobs (id, campaign_id, account_id, status, created_at, section_statuses)
+            SELECT ${'lock_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6)},
+                   ${String(campaignId)}, ${accountId}, 'RUNNING', NOW(), '[]'
+            WHERE NOT EXISTS (
+              SELECT 1 FROM orchestrator_jobs
+              WHERE campaign_id = ${String(campaignId)} AND account_id = ${accountId}
+                AND status = 'RUNNING'
+                AND created_at > NOW() - INTERVAL '30 minutes'
+            )
+            RETURNING id`
+      );
+      if (!lockResult.rows?.length) {
+        const existing = await db.execute(
+          sql`SELECT id FROM orchestrator_jobs
+              WHERE campaign_id = ${String(campaignId)} AND account_id = ${accountId}
+                AND status = 'RUNNING' AND created_at > NOW() - INTERVAL '30 minutes'
+              LIMIT 1`
+        );
+        return res.status(409).json({
+          error: "An orchestrator run is already in progress for this campaign",
+          jobId: existing.rows?.[0]?.id || null,
+          status: "ALREADY_RUNNING",
+        });
+      }
 
       res.json({
         message: "Orchestrator started",
@@ -309,9 +335,14 @@ export function registerOrchestratorV2Routes(app: Express) {
         });
       }
 
-      await db.update(strategicPlans)
+      const updated = await db.update(strategicPlans)
         .set({ status: "APPROVED", updatedAt: new Date() })
-        .where(eq(strategicPlans.id, planId));
+        .where(and(eq(strategicPlans.id, planId), or(eq(strategicPlans.status, "DRAFT"), eq(strategicPlans.status, "READY_FOR_REVIEW"))))
+        .returning({ id: strategicPlans.id });
+
+      if (!updated.length) {
+        return res.status(409).json({ error: "Plan was already approved or changed by another request" });
+      }
 
       await db.insert(planApprovals).values({
         planId,
@@ -331,6 +362,9 @@ export function registerOrchestratorV2Routes(app: Express) {
     try {
       const { planId } = req.params;
       const { reason } = req.body;
+
+      const [plan] = await db.select({ id: strategicPlans.id }).from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
+      if (!plan) return res.status(404).json({ error: "Plan not found" });
 
       await db.update(strategicPlans)
         .set({ status: "REJECTED", updatedAt: new Date() })

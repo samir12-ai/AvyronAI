@@ -1,0 +1,148 @@
+Hi Replit Team,
+
+We’re now at the final stage before launch.
+
+The system is functionally complete, and the full pipeline (engines → plan → approval → execution) is working end-to-end.
+
+However, before moving forward, we need a full production readiness audit — not just a code review, but a real validation that the system can handle scale and edge cases reliably.
+
+---
+
+## 🎯 Objective
+
+We want to prove, not assume, that the system is stable under real conditions.
+
+Specifically:
+- 50 concurrent users
+- 100 concurrent users
+- 500–1000 queued/active users
+
+Without:
+- crashes
+- data corruption
+- stuck jobs
+- inconsistent states
+
+---
+
+## 🔍 Required Audit Scope
+
+### 1. Backend / API Stability
+- All critical endpoints tested under concurrent load
+- No race conditions (especially around approve / execute / rerun)
+- Proper error handling (no silent failures or crashes)
+- Retry logic does not create duplication
+
+---
+
+### 2. Orchestrator & Execution Flow
+- Multiple simultaneous orchestrator runs
+- Parallel plan approvals
+- Execution activation under load
+- Queue behavior when many jobs are triggered together
+- No stuck states (e.g., ACTIVATING, PARTIAL, etc.)
+
+---
+
+### 3. Database Integrity
+- Validate snapshot creation across all engines
+- Ensure no missing or duplicated records
+- Check indexes on heavy tables
+- Validate consistency during concurrent writes
+- Ensure plan → execution → calendar flow remains atomic and safe
+
+---
+
+### 4. Load Testing (Critical)
+Please simulate:
+
+- 10 / 50 / 100 concurrent users running pipelines
+- Multiple approvals triggered simultaneously
+- Bulk execution activations
+
+We need:
+- response times
+- failure rates
+- timeout behavior
+- queue delays
+- DB load impact
+
+---
+
+### 5. Failure & Recovery Testing
+We need to intentionally test failure scenarios:
+
+- Engine failure mid-run
+- Partial snapshot availability
+- Interrupted approval
+- Activation failure mid-process
+- API timeout / retry cases
+
+And confirm:
+- system recovery behavior
+- no duplicate executions
+- no corrupted state
+
+---
+
+### 6. Data Flow Validation
+Ensure:
+- All 15 engines produce valid snapshots consistently
+- Narrative layer, summaries, and plan synthesis always reflect actual outputs
+- No mismatch between stored data and UI
+
+---
+
+### 7. Security & Isolation
+- Campaign-level isolation (no cross-data leaks)
+- Auth validation across endpoints
+- Safe handling of user input
+- Stripe / webhook safety (if applicable)
+- Rate limiting where needed
+
+---
+
+### 8. Observability & Monitoring
+Confirm we have:
+- clear logging for each stage
+- error tracking
+- job tracing (orchestrator → execution)
+- ability to debug failures quickly
+
+---
+
+## ❗ Important
+
+We are not looking for a theoretical review.
+
+We need:
+> real testing, real load simulation, real failure validation
+
+---
+
+## 📊 Expected Output
+
+Please provide a report that includes:
+
+- maximum safe concurrent load
+- identified bottlenecks
+- known failure points
+- bugs found and fixed
+- remaining risks (if any)
+- clear “Ready / Not Ready for Launch” recommendation
+
+---
+
+## 🎯 Goal
+
+To confidently move to launch knowing:
+- the system is stable
+- the backend can handle real users
+- no critical failure paths are left untested
+
+---
+
+Once this audit is complete, we will proceed with final launch steps.
+
+Best,  
+Samir
