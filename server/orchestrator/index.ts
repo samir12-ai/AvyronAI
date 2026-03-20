@@ -13,6 +13,7 @@ import {
 } from "../signal-governance/engine";
 import type { SignalGovernanceState } from "../signal-governance/types";
 import { runSystemIntegrityValidation } from "../system-integrity/engine";
+import { summarizeEngine } from "../agent/summarizers";
 import type { IntegrityReport } from "../system-integrity/types";
 import { storeIntegrityReport } from "../system-integrity/routes";
 import {
@@ -979,7 +980,13 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
     const sectionStatuses = ENGINE_PRIORITY_ORDER.map(e => {
       const r = results.get(e.id);
-      return { id: e.id, name: e.name, status: r?.status || "PENDING" };
+      const status = r?.status || "PENDING";
+      return {
+        id: e.id,
+        name: e.name,
+        status,
+        summary: r ? summarizeEngine(e.id, r.output, status, r.blockReason) : null,
+      };
     });
     await db.update(orchestratorJobs)
       .set({ sectionStatuses: JSON.stringify(sectionStatuses) })
@@ -1057,7 +1064,13 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       sectionStatuses: JSON.stringify(
         ENGINE_PRIORITY_ORDER.map(e => {
           const r = results.get(e.id);
-          return { id: e.id, name: e.name, status: r?.status || "PENDING" };
+          const status = r?.status || "PENDING";
+          return {
+            id: e.id,
+            name: e.name,
+            status,
+            summary: r ? summarizeEngine(e.id, r.output, status, r.blockReason) : null,
+          };
         })
       ),
     })

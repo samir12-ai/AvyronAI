@@ -699,6 +699,106 @@ export function registerOrchestratorV2Routes(app: Express) {
     }
   });
 
+  app.get("/api/orchestrator/summaries/:campaignId", async (req: Request, res: Response) => {
+    try {
+      const accountId = "default";
+      const campaignId = req.params.campaignId;
+      const job = await getLatestOrchestratorRun(accountId, campaignId);
+      if (!job) {
+        return res.json({ hasSummaries: false, engines: [] });
+      }
+
+      const sections: Array<{ id: string; name: string; status: string; summary?: string | null }> =
+        job.sectionStatuses ? JSON.parse(job.sectionStatuses) : [];
+
+      let hasSummaries = sections.some(s => s.summary && s.summary !== "Pending");
+
+      if (!hasSummaries && sections.some(s => s.status === "SUCCESS")) {
+        const { summarizeEngine } = await import("../agent/summarizers");
+        const base = `http://localhost:${process.env.PORT || 5000}`;
+        const q = `?campaignId=${encodeURIComponent(campaignId)}`;
+        async function safe(url: string) {
+          try { const r = await fetch(url); if (!r.ok) return null; return r.json(); } catch { return null; }
+        }
+
+        const engineApiMap: Record<string, string> = {
+          audience: `/api/audience-engine/latest${q}`,
+          positioning: `/api/positioning-engine/latest${q}`,
+          differentiation: `/api/differentiation-engine/latest${q}`,
+          mechanism: `/api/mechanism-engine/latest${q}`,
+          offer: `/api/offer-engine/latest${q}`,
+          awareness: `/api/awareness-engine/latest${q}`,
+          funnel: `/api/funnel-engine/latest${q}`,
+          persuasion: `/api/persuasion-engine/latest${q}`,
+          integrity: `/api/integrity-engine/latest${q}`,
+          statistical_validation: `/api/strategy/statistical-validation/latest${q}`,
+          budget_governor: `/api/strategy/budget-governor/latest${q}`,
+          channel_selection: `/api/strategy/channel-selection/latest${q}`,
+          iteration: `/api/strategy/iteration-engine/latest${q}`,
+          retention: `/api/strategy/retention-engine/latest${q}`,
+        };
+
+        const snapshotResults = await Promise.all(
+          sections.filter(s => s.status === "SUCCESS" && engineApiMap[s.id])
+            .map(async s => {
+              const data = await safe(`${base}${engineApiMap[s.id]}`);
+              return { id: s.id, data };
+            })
+        );
+
+        let miOutput: any = null;
+        try {
+          const miRes = await db.execute(
+            sql`SELECT competitor_data, signal_data, market_state, overall_confidence, dominance_data
+                FROM mi_snapshots WHERE campaign_id = ${campaignId} ORDER BY created_at DESC LIMIT 1`
+          );
+          const row = miRes.rows?.[0];
+          if (row) {
+            const safeP = (v: any) => { try { return typeof v === "string" ? JSON.parse(v) : v; } catch { return null; } };
+            const competitors = safeP(row.competitor_data);
+            miOutput = {
+              competitors: Array.isArray(competitors) ? competitors : [],
+              marketState: row.market_state,
+              angleSaturation: undefined,
+            };
+          }
+        } catch {}
+
+        const outputMap: Record<string, any> = {};
+        if (miOutput) outputMap.market_intelligence = miOutput;
+        for (const { id, data } of snapshotResults) {
+          if (data) outputMap[id] = { output: data };
+        }
+
+        for (const sec of sections) {
+          if (sec.status === "SUCCESS" && !sec.summary && outputMap[sec.id]) {
+            sec.summary = summarizeEngine(sec.id as any, outputMap[sec.id], sec.status);
+          }
+        }
+        hasSummaries = sections.some(s => !!s.summary);
+      }
+
+      const engines = sections.map(sec => ({
+        id: sec.id,
+        name: sec.name,
+        status: sec.status,
+        summary: sec.summary || null,
+      }));
+
+      res.json({
+        hasSummaries,
+        jobId: job.id,
+        jobStatus: job.status,
+        durationMs: job.durationMs,
+        createdAt: job.createdAt,
+        completedAt: job.completedAt,
+        engines,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Engine Table Summary — aggregates all 15 engines in parallel
   app.get("/api/engines/table-summary", async (req: Request, res: Response) => {
     try {

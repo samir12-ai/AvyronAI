@@ -71,6 +71,7 @@ interface EngineEntry {
   durationMs?: number;
   confidence?: number;
   grade?: string;
+  summary?: string | null;
 }
 
 function statusIcon(status: string): { name: keyof typeof Ionicons.glyphMap; color: string } {
@@ -108,11 +109,18 @@ export default function EngineTableModal({ visible, onClose, campaignId }: Props
   useEffect(() => {
     if (!visible || !campaignId) return;
     setLoading(true);
-    const url = new URL(`/api/orchestrator/latest/${campaignId}`, getApiUrl());
-    fetch(url.toString())
-      .then(r => r.json())
-      .then(data => {
+    const latestUrl = new URL(`/api/orchestrator/latest/${campaignId}`, getApiUrl());
+    const summariesUrl = new URL(`/api/orchestrator/summaries/${campaignId}`, getApiUrl());
+    Promise.all([
+      fetch(latestUrl.toString()).then(r => r.json()).catch(() => null),
+      fetch(summariesUrl.toString()).then(r => r.json()).catch(() => null),
+    ])
+      .then(([data, summData]) => {
         const sections = data?.sections || data?.engines || [];
+        const summMap: Record<string, string> = {};
+        if (summData?.engines) {
+          summData.engines.forEach((e: any) => { if (e.summary) summMap[e.id] = e.summary; });
+        }
         const mapped: EngineEntry[] = ENGINE_ORDER.map((engineId, idx) => {
           const found = sections.find((s: any) => s.id === engineId || s.engineId === engineId);
           return {
@@ -122,6 +130,7 @@ export default function EngineTableModal({ visible, onClose, campaignId }: Props
             durationMs: found?.durationMs || found?.duration,
             confidence: found?.confidence,
             grade: found?.grade,
+            summary: found?.summary || summMap[engineId] || null,
           };
         });
         setEngines(mapped);
@@ -165,24 +174,32 @@ export default function EngineTableModal({ visible, onClose, campaignId }: Props
             {engines.map((engine, idx) => {
               const meta = ENGINE_META[engine.id] || { icon: 'cube-outline' as any, color: P.blue, shortName: engine.name };
               const si = statusIcon(engine.status);
+              const isComplete = engine.status === 'SUCCESS' || engine.status === 'COMPLETED' || engine.status === 'COMPLETE';
               return (
-                <View key={engine.id} style={[s.row, { backgroundColor: cardBg, borderColor }]}>
-                  <Text style={[s.colNum, { color: textSec }]}>{idx + 1}</Text>
-                  <View style={[s.colName, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
-                    <View style={[s.iconWrap, { backgroundColor: meta.color + '18' }]}>
-                      <Ionicons name={meta.icon} size={14} color={meta.color} />
+                <View key={engine.id} style={[s.row, { backgroundColor: cardBg, borderColor, flexDirection: 'column', alignItems: 'stretch', gap: 0 }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={[s.colNum, { color: textSec }]}>{idx + 1}</Text>
+                    <View style={[s.colName, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
+                      <View style={[s.iconWrap, { backgroundColor: meta.color + '18' }]}>
+                        <Ionicons name={meta.icon} size={14} color={meta.color} />
+                      </View>
+                      <Text style={[s.engineName, { color: textPrimary }]} numberOfLines={1}>{meta.shortName}</Text>
                     </View>
-                    <Text style={[s.engineName, { color: textPrimary }]} numberOfLines={1}>{meta.shortName}</Text>
-                  </View>
-                  <View style={[s.colStatus, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
-                    <Ionicons name={si.name} size={14} color={si.color} />
-                    <Text style={[s.statusText, { color: si.color }]} numberOfLines={1}>
-                      {engine.status === 'SUCCESS' || engine.status === 'COMPLETED' || engine.status === 'COMPLETE' ? 'OK' : engine.status}
+                    <View style={[s.colStatus, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
+                      <Ionicons name={si.name} size={14} color={si.color} />
+                      <Text style={[s.statusText, { color: si.color }]} numberOfLines={1}>
+                        {isComplete ? 'OK' : engine.status}
+                      </Text>
+                    </View>
+                    <Text style={[s.colTime, { color: textSec }]}>
+                      {engine.durationMs ? `${(engine.durationMs / 1000).toFixed(1)}s` : '—'}
                     </Text>
                   </View>
-                  <Text style={[s.colTime, { color: textSec }]}>
-                    {engine.durationMs ? `${(engine.durationMs / 1000).toFixed(1)}s` : '—'}
-                  </Text>
+                  {isComplete && engine.summary && (
+                    <Text style={[s.summaryText, { color: textSec }]} numberOfLines={2}>
+                      {engine.summary}
+                    </Text>
+                  )}
                 </View>
               );
             })}
@@ -275,5 +292,13 @@ const s = StyleSheet.create({
   statusText: {
     fontSize: 11,
     fontFamily: 'Inter_500Medium',
+  },
+  summaryText: {
+    fontSize: 11,
+    fontFamily: 'Inter_400Regular',
+    lineHeight: 15,
+    paddingLeft: 32,
+    paddingTop: 4,
+    paddingBottom: 2,
   },
 });

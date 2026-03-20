@@ -54,6 +54,7 @@ interface EngineSection {
   id: string;
   name: string;
   status: string;
+  summary?: string | null;
 }
 
 interface OrchestratorJob {
@@ -106,10 +107,10 @@ const ENGINE_ORDER = [
 ];
 
 function EngineRow({
-  id, name, status, index, isRunning, runningIdx, isDark,
+  id, name, status, index, isRunning, runningIdx, isDark, summary,
 }: {
   id: string; name: string; status: string; index: number;
-  isRunning: boolean; runningIdx: number; isDark: boolean;
+  isRunning: boolean; runningIdx: number; isDark: boolean; summary?: string | null;
 }) {
   const meta = ENGINE_META[id] || { icon: 'cube-outline' as any, color: P.blue, shortName: name };
   const cardBg = isDark ? P.darkCard : P.lightCard;
@@ -169,6 +170,9 @@ function EngineRow({
     statusIcon = 'checkmark-done-circle-outline';
   }
 
+  const terminalSuccess = ['SUCCESS', 'COMPLETED', 'COMPLETE'].includes(status.toUpperCase());
+  const showSummary = !isRunning && !isPending && !!summary && terminalSuccess;
+
   return (
     <View style={[s.engineRow, {
       backgroundColor: cardBg,
@@ -178,9 +182,16 @@ function EngineRow({
       <View style={[s.engineIconWrap, { backgroundColor: isPending ? textMuted + '10' : meta.color + '15' }]}>
         <Ionicons name={meta.icon} size={18} color={isPending ? textMuted : meta.color} />
       </View>
-      <View style={s.engineInfo}>
-        <Text style={[s.engineNum, { color: textMuted }]}>{String(index + 1).padStart(2, '0')}</Text>
-        <Text style={[s.engineName, { color: textPrimary }]} numberOfLines={1}>{name}</Text>
+      <View style={{ flex: 1, gap: showSummary ? 4 : 0 }}>
+        <View style={s.engineInfo}>
+          <Text style={[s.engineNum, { color: textMuted }]}>{String(index + 1).padStart(2, '0')}</Text>
+          <Text style={[s.engineName, { color: textPrimary }]} numberOfLines={1}>{name}</Text>
+        </View>
+        {showSummary && (
+          <Text style={[s.engineSummary, { color: isDark ? P.textDarkSec : P.textLightSec }]} numberOfLines={2}>
+            {summary}
+          </Text>
+        )}
       </View>
       <View style={s.engineStatus}>
         {isCurrentlyRunning ? (
@@ -244,8 +255,29 @@ export default function OrchestratorPanel() {
       const res = await fetch(url);
       if (!res.ok) return;
       const data: OrchestratorJob = await res.json();
+
+      const hasSummariesInSections = (data.sections || []).some((s: any) => !!s.summary);
+      if (!hasSummariesInSections && data.status === 'COMPLETED') {
+        try {
+          const summUrl = getApiUrl(`/api/orchestrator/summaries/${encodeURIComponent(selectedCampaignId)}`);
+          const summRes = await fetch(summUrl);
+          if (summRes.ok) {
+            const summData = await summRes.json();
+            if (summData.hasSummaries && summData.engines) {
+              const summMap: Record<string, string> = {};
+              summData.engines.forEach((e: any) => { if (e.summary) summMap[e.id] = e.summary; });
+              data.sections = (data.sections || []).map((s: any) => ({
+                ...s,
+                summary: summMap[s.id] || s.summary || null,
+              }));
+            }
+          }
+        } catch {}
+      }
+
       setJob(data);
-      if (data.status === 'COMPLETED' || data.status === 'FAILED') {
+      const terminalStatuses = ['COMPLETED', 'FAILED', 'PARTIAL', 'BLOCKED', 'ERROR'];
+      if (terminalStatuses.includes(data.status)) {
         setRunning(false);
       }
     } catch {}
@@ -502,6 +534,7 @@ export default function OrchestratorPanel() {
                 isRunning={running}
                 runningIdx={running ? runningIdx : -1}
                 isDark={isDark}
+                summary={sec?.summary}
               />
             );
           })}
@@ -754,6 +787,11 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
     flex: 1,
+  },
+  engineSummary: {
+    fontSize: 11,
+    lineHeight: 15,
+    paddingLeft: 30,
   },
   engineStatus: {
     flexDirection: 'row',
