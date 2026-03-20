@@ -162,8 +162,12 @@ function serveLandingPage({
   log(`baseUrl`, baseUrl);
   log(`expsUrl`, expsUrl);
 
+  const isDev = process.env.NODE_ENV === "development";
+  const appUrl = isDev ? `${baseUrl.replace(/:5000$/, '')}:8081` : baseUrl;
+
   const html = landingPageTemplate
     .replace(/BASE_URL_PLACEHOLDER/g, baseUrl)
+    .replace(/APP_URL_PLACEHOLDER/g, appUrl)
     .replace(/EXPS_URL_PLACEHOLDER/g, expsUrl)
     .replace(/APP_NAME_PLACEHOLDER/g, appName);
 
@@ -203,7 +207,11 @@ function configureExpoAndLanding(app: express.Application) {
       const forwardedHost = req.header("x-forwarded-host");
       const host = forwardedHost || req.get("host");
       const baseUrl = `${protocol}://${host}`;
-      const finalHtml = pricingHtml.replace(/BASE_URL_PLACEHOLDER/g, baseUrl);
+      const isDev = process.env.NODE_ENV === "development";
+      const appUrl = isDev ? `${baseUrl.replace(/:5000$/, '')}:8081` : baseUrl;
+      const finalHtml = pricingHtml
+        .replace(/BASE_URL_PLACEHOLDER/g, baseUrl)
+        .replace(/APP_URL_PLACEHOLDER/g, appUrl);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       return res.status(200).send(finalHtml);
     }
