@@ -31,7 +31,7 @@ import { ExecutionPipeline } from '@/components/ExecutionPipeline';
 import ExecutionPlan from '@/components/ExecutionPlan';
 import { RequiredWorkCard } from '@/components/RequiredWorkCard';
 import DataFreshnessWarning from '@/components/DataFreshnessWarning';
-import { MarketMindAgent, MarketMindAgentRef } from '@/components/MarketMindAgent';
+import DashboardChat from '@/components/DashboardChat';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -160,7 +160,6 @@ export default function DashboardScreen() {
   const [showProfile, setShowProfile] = useState(false);
   const [orchestratorRunning, setOrchestratorRunning] = useState(false);
   const prevCampaignRef = useRef<string | null | undefined>(undefined);
-  const agentRef = useRef<MarketMindAgentRef>(null);
 
   const headerFade = useRef(new RNAnimated.Value(0)).current;
   const cardSlide = useRef(new RNAnimated.Value(30)).current;
@@ -279,8 +278,7 @@ export default function DashboardScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    const agentRefresh = agentRef.current?.refresh() ?? Promise.resolve();
-    await Promise.all([agentRefresh, fetchMetrics(), fetchConfidence(), fetchDataMode(), fetchMiFreshness()]);
+    await Promise.all([fetchMetrics(), fetchConfidence(), fetchDataMode(), fetchMiFreshness()]);
     setRefreshing(false);
   }, [fetchMetrics, fetchConfidence, fetchDataMode, fetchMiFreshness]);
 
@@ -585,7 +583,7 @@ export default function DashboardScreen() {
           </>
         ) : null}
 
-        <MarketMindAgent ref={agentRef} campaignId={selectedCampaignId} isDark={isDark} />
+        <DashboardChat />
 
         <View style={[s.metaStrip, { 
           backgroundColor: metaConnection.isConnected 
