@@ -72,7 +72,7 @@ export default function NarrativeCard({ campaignId, isDark }: { campaignId: stri
           <View style={{ flex: 1 }}>
             <Text style={[s.headerTitle, { color: textPrimary }]}>Strategic Narrative</Text>
             <Text style={[s.headerSub, { color: textSecondary }]} numberOfLines={1}>
-              {data.engineCount} engines connected
+              {data.engineCount} engines · simplified
             </Text>
           </View>
         </View>
