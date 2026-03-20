@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { db } from "./db";
 import { users } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 const JWT_SECRET = process.env.JWT_SECRET || "marketmind_jwt_secret_" + (process.env.REPL_ID || "dev");
 if (!process.env.JWT_SECRET) {
@@ -105,6 +105,7 @@ export function registerAuthRoutes(app: Router) {
           name: name || emailLower.split("@")[0],
           subscriptionStatus: "trial",
           planType: "trial",
+          videoCredits: 0,
           trialEnd: trialEnd.toISOString(),
           hasSeenIntro: false,
         },
@@ -153,6 +154,7 @@ export function registerAuthRoutes(app: Router) {
           name: user.email?.split("@")[0] || "User",
           subscriptionStatus: status,
           planType: user.planType || "trial",
+          videoCredits: user.videoCredits ?? 0,
           trialEnd: user.trialEnd?.toISOString() || null,
           hasSeenIntro: user.hasSeenIntro ?? false,
         },
@@ -192,6 +194,7 @@ export function registerAuthRoutes(app: Router) {
           name: user.email?.split("@")[0] || "User",
           subscriptionStatus: status,
           planType: user.planType || "trial",
+          videoCredits: user.videoCredits ?? 0,
           trialEnd: user.trialEnd?.toISOString() || null,
           hasSeenIntro: user.hasSeenIntro ?? false,
         },
@@ -238,7 +241,7 @@ export function registerAuthRoutes(app: Router) {
         }
       }
 
-      const { userId, status } = req.body;
+      const { userId, status, plan, addCredits } = req.body;
       if (!userId) {
         return res.status(400).json({ error: "Missing userId" });
       }
@@ -246,16 +249,33 @@ export function registerAuthRoutes(app: Router) {
       const validStatuses = ["active", "expired"];
       const safeStatus = validStatuses.includes(status) ? status : "active";
 
-      const updateData: Record<string, string> = {
+      const PLAN_VIDEO_CREDITS: Record<string, number> = {
+        growth: 2,
+        ultra: 5,
+      };
+
+      const updateData: Record<string, any> = {
         subscriptionStatus: safeStatus,
       };
+
       if (safeStatus === "active") {
         updateData.planType = "paid";
+
+        if (plan && PLAN_VIDEO_CREDITS[plan]) {
+          updateData.videoCredits = PLAN_VIDEO_CREDITS[plan];
+        }
       }
 
-      await db.update(users).set(updateData).where(eq(users.id, userId));
+      if (typeof addCredits === "number" && addCredits > 0) {
+        await db.update(users).set({
+          ...updateData,
+          videoCredits: sql`COALESCE(${users.videoCredits}, 0) + ${addCredits}`,
+        }).where(eq(users.id, userId));
+      } else {
+        await db.update(users).set(updateData).where(eq(users.id, userId));
+      }
 
-      console.log(`[Conversion] Payment confirmed for user ${userId} — status: ${safeStatus}, planType: ${updateData.planType || "unchanged"}`);
+      console.log(`[Conversion] Payment confirmed for user ${userId} — status: ${safeStatus}, plan: ${plan || "none"}, addCredits: ${addCredits || 0}`);
       res.json({ success: true });
     } catch (error) {
       console.error("[Stripe] Webhook error:", error);
@@ -298,6 +318,7 @@ export function registerAuthRoutes(app: Router) {
         trialEnd: user.trialEnd?.toISOString() || null,
         trialDaysRemaining,
         isActive: status === "active" || status === "trial",
+        videoCredits: user.videoCredits ?? 0,
       });
     } catch (error) {
       console.error("[Auth] Subscription status error:", error);

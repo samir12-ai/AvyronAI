@@ -1,0 +1,120 @@
+Hi,
+
+Before launch, we need to fully lock down the AI Video (Veo) cost layer to prevent uncontrolled usage and protect margins.
+
+This is critical — video generation must NOT behave like standard AI usage.
+
+---
+
+## 🎯 Core Decision (Must Be Enforced)
+
+AI Video generation must be treated as a separate system, not part of the general AI token budget.
+
+- ❌ Do NOT include video usage inside the existing token budget
+- ❌ Do NOT allow unlimited or implicit video generation
+
+- ✅ Video must run on a separate credit system
+
+---
+
+## 💳 1. Video Credits System
+
+Introduce a simple credit model:
+
+- Each video generation = 1 credit
+- Credits are limited per user based on plan
+
+### Initial structure:
+- No dynamic pricing logic needed
+- Just a fixed credit count per account
+
+---
+
+## 📦 2. Plan Allocation
+
+Set initial limits:
+
+- One Shot:
+  - ❌ No video access
+
+- Growth:
+  - 2 video credits
+
+- Ultra:
+  - 5 video credits
+
+---
+
+## ➕ 3. Add-On Purchase (Simple)
+
+Support basic top-up:
+
+- Allow users to purchase additional video credits (via Stripe link)
+- No complex billing system — just:
+  - payment → increase credit count
+
+---
+
+## 🧠 4. Model Control (Important)
+
+For now:
+- Use Veo Fast only
+
+Do NOT expose:
+- Standard / high-cost variants yet
+
+Later we can introduce:
+- “High Quality Mode” as a premium option
+
+---
+
+## 🧩 5. UX Behavior
+
+Update UI:
+
+- Replace:
+  → “Generate Video”
+
+- With:
+  → “Generate Video (1 credit)”
+
+When credits are exhausted:
+- Show:
+  → “You’ve used all your video credits”
+  → CTA: Buy more / Upgrade
+
+---
+
+## ⚠️ 6. Hard Constraints
+
+- Must enforce limits at backend level (not UI only)
+- No way to bypass credits
+- No silent generation without credit deduction
+
+---
+
+## ✅ 7. Validation Checklist
+
+Before marking complete, confirm:
+
+1. Video generation consumes 1 credit per request
+2. Users cannot generate video without credits
+3. Plan-based credit allocation works correctly
+4. Add-on credit increases are reflected immediately
+5. No dependency on AI token budget
+6. Only Veo Fast is used
+
+---
+
+## 🎯 Goal
+
+- Fully isolate video cost from core AI system
+- Prevent margin loss from heavy users
+- Keep implementation simple and controlled
+
+---
+
+Once this is done, the cost structure will be fully secured for launch.
+
+Best,  
+Samir

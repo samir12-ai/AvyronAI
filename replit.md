@@ -71,6 +71,15 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 - Route gating in `app/_layout.tsx` AuthGate: unauthenticated → /login, new user → /intro, expired trial → /upgrade, active → /(tabs)
 - Environment variables: JWT_SECRET, STRIPE_WEBHOOK_SECRET, EXPO_PUBLIC_STRIPE_PAYMENT_LINK
 
+### Video Credits System
+- `videoCredits` column on users table (integer, default 0)
+- Credits allocated per plan via webhook: growth=2, ultra=5. Webhook also supports `addCredits` for top-ups.
+- Backend enforcement: `/api/veo/generate-video` requires `userId`, checks credits > 0, deducts 1 credit per generation
+- Credit balance endpoint: GET `/api/veo/credits?userId=...`
+- Frontend: Generate Video button shows credit count, disables with lock icon when 0, alerts user to upgrade
+- After generation starts, `refreshUser()` updates credit count in AuthContext
+- Files: `server/veo-routes.ts`, `server/auth.ts`, `app/(tabs)/create.tsx`, `context/AuthContext.tsx`, `shared/schema.ts`
+
 ### Social Platforms
 - Instagram
 - Facebook

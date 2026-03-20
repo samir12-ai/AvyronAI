@@ -4,6 +4,10 @@ import multer from "multer";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import { db } from "./db";
+import { users } from "@shared/schema";
+import { eq, sql } from "drizzle-orm";
+import { authMiddleware, type AuthRequest } from "./auth";
 
 const upload = multer({
   dest: "/tmp/veo-uploads",
@@ -107,13 +111,28 @@ export function registerVeoRoutes(app: Express) {
     }
   });
 
-  app.post("/api/veo/generate-video", async (req, res) => {
+  app.get("/api/veo/credits", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const userId = req.userId!;
+      const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json({ videoCredits: user.videoCredits ?? 0 });
+    } catch (error: any) {
+      console.error("[VeoCredits] Error:", error);
+      res.status(500).json({ error: "Failed to fetch credits" });
+    }
+  });
+
+  app.post("/api/veo/generate-video", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const client = getVeoClient();
       if (!client) {
         return res.status(400).json({ error: "GOOGLE_GEMINI_API_KEY not configured. Add it in secrets." });
       }
 
+      const userId = req.userId!;
       const {
         prompt,
         aspectRatio,
@@ -128,6 +147,22 @@ export function registerVeoRoutes(app: Express) {
       if (!prompt) {
         return res.status(400).json({ error: "Prompt is required" });
       }
+
+      const result = await db.update(users).set({
+        videoCredits: sql`COALESCE(${users.videoCredits}, 0) - 1`,
+      }).where(
+        sql`${users.id} = ${userId} AND COALESCE(${users.videoCredits}, 0) > 0`
+      ).returning({ videoCredits: users.videoCredits });
+
+      if (!result.length) {
+        console.log(`[VeoCredits] User ${userId} blocked — 0 credits remaining`);
+        return res.status(403).json({
+          error: "NO_VIDEO_CREDITS",
+          message: "You've used all your video credits. Upgrade your plan or purchase more credits.",
+        });
+      }
+
+      console.log(`[VeoCredits] User ${userId} — deducted 1 credit, remaining: ${result[0].videoCredits}`);
 
       const validAspectRatios = ["16:9", "9:16"];
       const config: any = {

@@ -44,6 +44,7 @@ import { generateId } from '@/lib/storage';
 import { apiRequest, getApiUrl } from '@/lib/query-client';
 import { saveToStudio } from '@/lib/studio-save-service';
 import { useCreativeContext } from '@/context/CreativeContext';
+import { useAuth } from '@/context/AuthContext';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ContentItem, MediaItem } from '@/lib/types';
@@ -287,6 +288,7 @@ export default function CreateScreen() {
   const { brandProfile, addContentItem, addMediaItem } = useApp();
   const { t } = useLanguage();
   const { creativeContext, clearCreativeContext } = useCreativeContext();
+  const { user, token, refreshUser } = useAuth();
   const queryClient = useQueryClient();
   const router = useRouter();
   const { state: ps, updateState, isLoading: psLoading, isSaving, saveError, hydrationVersion } = usePersistedState<CreatePersistedState>('create', defaultCreateState);
@@ -930,9 +932,19 @@ export default function CreateScreen() {
     }
   };
 
+  const videoCredits = user?.videoCredits ?? 0;
+
   const handleGenerateVideo = async () => {
     if (!videoPrompt.trim()) {
       Alert.alert('Missing Prompt', 'Describe the video you want to create.');
+      return;
+    }
+
+    if (videoCredits <= 0) {
+      Alert.alert(
+        'No Video Credits',
+        "You've used all your video credits. Upgrade your plan or purchase more credits to continue.",
+      );
       return;
     }
 
@@ -980,7 +992,10 @@ export default function CreateScreen() {
       setVideoStatus('generating');
       const res = await fetch(new URL('/api/veo/generate-video', apiUrl).toString(), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify(body),
       });
 
@@ -995,6 +1010,7 @@ export default function CreateScreen() {
 
       setVideoOperationName(data.operationName);
       setVideoStatus('processing');
+      refreshUser();
       pollVeoStatus(data.operationName);
     } catch (err: any) {
       setVideoError(err.message || 'Network error');
@@ -2480,13 +2496,21 @@ export default function CreateScreen() {
                 </>
               )}
 
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="videocam" size={14} color={videoCredits > 0 ? '#7C3AED' : '#EF4444'} />
+                  <Text style={{ fontSize: 13, fontFamily: 'Inter_600SemiBold', color: videoCredits > 0 ? '#7C3AED' : '#EF4444' }}>
+                    {videoCredits} credit{videoCredits !== 1 ? 's' : ''} remaining
+                  </Text>
+                </View>
+              </View>
               <Pressable
                 onPress={handleGenerateVideo}
-                disabled={isGeneratingVideo || !videoPrompt.trim()}
-                style={[styles.generateDesignBtn, { opacity: (isGeneratingVideo || !videoPrompt.trim()) ? 0.5 : 1 }]}
+                disabled={isGeneratingVideo || !videoPrompt.trim() || videoCredits <= 0}
+                style={[styles.generateDesignBtn, { opacity: (isGeneratingVideo || !videoPrompt.trim() || videoCredits <= 0) ? 0.5 : 1 }]}
               >
                 <LinearGradient
-                  colors={['#7C3AED', '#A855F7', '#7C3AED']}
+                  colors={videoCredits <= 0 ? ['#9CA3AF', '#6B7280', '#9CA3AF'] : ['#7C3AED', '#A855F7', '#7C3AED']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.generateDesignGradient}
@@ -2494,10 +2518,10 @@ export default function CreateScreen() {
                   {isGeneratingVideo ? (
                     <ActivityIndicator color="#fff" size="small" />
                   ) : (
-                    <Ionicons name="sparkles" size={20} color="#fff" />
+                    <Ionicons name={videoCredits <= 0 ? "lock-closed" : "sparkles"} size={20} color="#fff" />
                   )}
                   <Text style={styles.generateDesignText}>
-                    {isGeneratingVideo ? 'Generating...' : 'Generate Video'}
+                    {isGeneratingVideo ? 'Generating...' : videoCredits <= 0 ? 'No Credits' : `Generate Video (1 credit)`}
                   </Text>
                 </LinearGradient>
               </Pressable>

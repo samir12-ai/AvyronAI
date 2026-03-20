@@ -8,6 +8,7 @@ interface User {
   name: string;
   subscriptionStatus: 'trial' | 'active' | 'expired';
   planType: 'trial' | 'paid';
+  videoCredits: number;
   trialEnd: string | null;
   hasSeenIntro: boolean;
 }
