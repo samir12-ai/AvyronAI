@@ -1,0 +1,117 @@
+:::writing{variant=“email” id=“84527” subject=“Proposal: Add Causal Narrative Layer (Post-Engine, Pre-UI) — Clarifications on Existing Flow”}
+Hi,
+
+After reviewing the current system behavior and outputs across engines, I want to propose a very specific enhancement — but before implementing anything, I’d like to validate it against the actual codebase structure with you.
+
+⸻
+
+🎯 Objective
+
+We’re not trying to modify any engine logic.
+
+Instead, the goal is to introduce a single narrative translation layer that sits:
+
+→ AFTER all engines produce outputs
+→ BEFORE data is sent to the UI
+
+This layer would transform the existing outputs into a clear causal chain that connects all engines into one coherent story for the user.
+
+⸻
+
+🧠 Problem Identified
+
+All engines are working correctly and producing high-quality outputs.
+
+However, at the UI level:
+	•	Each engine appears as a separate insight
+	•	The relationship between them is implicit, not explicit
+	•	Users must mentally connect:
+	•	Positioning
+	•	Differentiation
+	•	Mechanism
+	•	Funnel
+	•	Content
+
+This creates cognitive load, especially for non-expert users.
+
+⸻
+
+💡 Proposed Solution — “Causal Narrative Layer”
+
+A lightweight, read-only transformation layer that:
+	•	Takes outputs from all engines
+	•	Builds a structured cause → solution → mechanism → execution chain
+	•	Returns simplified, connected summaries for UI consumption
+
+Example transformation:
+
+Current:
+	•	Positioning → social proof insight
+	•	Mechanism → pipeline stall diagnostics
+	•	Content → reels + hooks
+
+After layer:
+→ “Your pipeline fails due to missing proof → we diagnose where → then fix it through content execution”
+
+⚠️ Important:
+	•	No modification to engine outputs
+	•	No impact on CEL, AEL, or validation layers
+	•	Pure transformation / formatting layer
+
+⸻
+
+📍 Key Constraint
+
+This must live strictly in the transition layer (post-processing), not inside:
+	•	Engines
+	•	Orchestrator logic
+	•	Validation systems
+
+⸻
+
+❓ Questions (to align with existing code)
+	1.	Where is the best insertion point for this layer?
+	•	Before returning data in /api/orchestrator/latest?
+	•	Inside plan-synthesis?
+	•	Or as a separate summarization endpoint?
+	2.	We already have summarizeEngine():
+	•	Should this new layer extend it?
+	•	Or should it be a separate function (e.g. buildCausalNarrative())?
+	3.	What’s the cleanest way to access ordered engine outputs?
+	•	Via sectionStatuses?
+	•	Or directly from the in-memory results map?
+	4.	Is there any existing structure that already partially connects engines?
+(e.g. shared fields like territory, mechanism, etc.)
+	5.	Any risks with:
+	•	data consistency
+	•	re-runs / stale summaries
+	•	performance (even though this is lightweight)
+	6.	Would you recommend:
+	•	returning this as a parallel field (e.g. narrativeSummary)
+	•	or replacing parts of existing UI payload?
+
+⸻
+
+🧩 Design Principles
+	•	Deterministic (no AI calls)
+	•	Read-only (no DB writes)
+	•	Stateless (derived on request)
+	•	Compatible with current pipeline
+	•	Zero impact on existing validation / scoring systems
+
+⸻
+
+🎯 Goal
+
+Not to change the system’s intelligence —
+but to make it instantly understandable and usable.
+
+⸻
+
+Once we align on where this layer should live and how it should access data, I’ll proceed with implementation in a way that fully respects the current architecture.
+
+Looking forward to your guidance.
+
+Best,
+Samir
+:::
