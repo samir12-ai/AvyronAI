@@ -612,6 +612,7 @@ export default function CreateScreen() {
       }
 
       queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
+      queryClient.invalidateQueries({ queryKey: ['/api/required-work', selectedCampaignId] });
       queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
       setSaveState('done');
       setTimeout(() => {
@@ -847,6 +848,7 @@ export default function CreateScreen() {
       await addMediaItem(newMedia);
 
       queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
+      queryClient.invalidateQueries({ queryKey: ['/api/required-work', selectedCampaignId] });
       queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
 
       try {
@@ -2603,6 +2605,7 @@ export default function CreateScreen() {
                           await addMediaItem(videoMedia);
 
                           queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
+                          queryClient.invalidateQueries({ queryKey: ['/api/required-work', selectedCampaignId] });
                           queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
                           setSaveState('done');
                           setTimeout(() => {

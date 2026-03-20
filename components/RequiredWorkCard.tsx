@@ -18,12 +18,10 @@ interface RequiredWorkCardProps {
   isDark: boolean;
 }
 
-const CONTENT_TYPE_ICONS: Record<string, { icon: keyof typeof Ionicons.glyphMap; color: string }> = {
-  reels: { icon: 'videocam', color: P.coral },
-  posts: { icon: 'image', color: P.blue },
-  stories: { icon: 'flash', color: P.gold },
-  carousels: { icon: 'layers', color: P.mint },
-  videos: { icon: 'film', color: P.orange },
+const BRANCH_CONFIG = {
+  REELS: { icon: 'videocam' as const, color: P.coral, label: 'Reels' },
+  POSTS: { icon: 'image' as const, color: P.blue, label: 'Posts' },
+  STORIES: { icon: 'flash' as const, color: P.gold, label: 'Stories' },
 };
 
 export function RequiredWorkCard({ campaignId, isDark }: RequiredWorkCardProps) {
@@ -51,19 +49,22 @@ export function RequiredWorkCard({ campaignId, isDark }: RequiredWorkCardProps) 
     );
   }
 
-  if (!data?.hasWork) return null;
+  if (!data?.hasWork && !data?.branches) return null;
 
+  const totalRemaining = data.remaining ?? 0;
   const todayItems = data.todayWork || [];
   const weekItems = data.weekWork || [];
-  const breakdown = data.breakdown || {};
+  const branches = data.branches || {};
 
   return (
     <View style={[s.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
       <View style={s.header}>
         <Ionicons name="clipboard-outline" size={18} color={P.mint} />
         <Text style={[s.headerText, { color: textPrimary }]}>Required Work</Text>
-        <View style={[s.headerBadge, { backgroundColor: P.coral + '20' }]}>
-          <Text style={[s.headerBadgeText, { color: P.coral }]}>{data.remaining} remaining</Text>
+        <View style={[s.headerBadge, { backgroundColor: totalRemaining > 0 ? P.coral + '20' : P.neon + '20' }]}>
+          <Text style={[s.headerBadgeText, { color: totalRemaining > 0 ? P.coral : P.neon }]}>
+            {totalRemaining} remaining
+          </Text>
         </View>
       </View>
 
@@ -73,9 +74,9 @@ export function RequiredWorkCard({ campaignId, isDark }: RequiredWorkCardProps) 
           {todayItems.map((item: any) => (
             <View key={item.id} style={[s.workItem, { backgroundColor: isDark ? '#151B24' : '#F4F7F5' }]}>
               <Ionicons
-                name={(CONTENT_TYPE_ICONS[item.contentType?.toLowerCase()]?.icon || 'document') as any}
+                name="document-outline"
                 size={14}
-                color={CONTENT_TYPE_ICONS[item.contentType?.toLowerCase()]?.color || textSecondary}
+                color={textSecondary}
               />
               <Text style={[s.workItemText, { color: textPrimary }]}>{item.title || item.contentType}</Text>
               <Text style={[s.workItemTime, { color: textSecondary }]}>{item.scheduledTime}</Text>
@@ -90,9 +91,9 @@ export function RequiredWorkCard({ campaignId, isDark }: RequiredWorkCardProps) 
           {weekItems.slice(0, 5).map((item: any) => (
             <View key={item.id} style={[s.workItem, { backgroundColor: isDark ? '#151B24' : '#F4F7F5' }]}>
               <Ionicons
-                name={(CONTENT_TYPE_ICONS[item.contentType?.toLowerCase()]?.icon || 'document') as any}
+                name="document-outline"
                 size={14}
-                color={CONTENT_TYPE_ICONS[item.contentType?.toLowerCase()]?.color || textSecondary}
+                color={textSecondary}
               />
               <Text style={[s.workItemText, { color: textPrimary }]}>{item.title || item.contentType}</Text>
               <Text style={[s.workItemTime, { color: textSecondary }]}>{item.scheduledDate}</Text>
@@ -102,18 +103,32 @@ export function RequiredWorkCard({ campaignId, isDark }: RequiredWorkCardProps) 
       )}
 
       <View style={s.breakdownGrid}>
-        {Object.entries(breakdown).map(([type, info]: [string, any]) => {
-          const config = CONTENT_TYPE_ICONS[type] || { icon: 'document', color: textSecondary };
+        {(['REELS', 'POSTS', 'STORIES'] as const).map((key) => {
+          const config = BRANCH_CONFIG[key];
+          const branch = branches[key];
+          if (!branch) return null;
+          const remaining = branch.remaining ?? 0;
+          const required = branch.required ?? 0;
+          const fulfilled = branch.fulfilled ?? 0;
           return (
-            <View key={type} style={[s.breakdownItem, { backgroundColor: isDark ? '#151B24' : '#F4F7F5' }]}>
-              <Ionicons name={config.icon as any} size={16} color={config.color} />
-              <Text style={[s.breakdownValue, { color: textPrimary }]}>{info.required}</Text>
-              <Text style={[s.breakdownLabel, { color: textSecondary }]}>{type}</Text>
-              <Text style={[s.breakdownRate, { color: textSecondary }]}>{info.perWeek || info.perDay}/{info.perDay ? 'day' : 'wk'}</Text>
+            <View key={key} style={[s.breakdownItem, { backgroundColor: isDark ? '#151B24' : '#F4F7F5' }]}>
+              <Ionicons name={config.icon} size={16} color={config.color} />
+              <Text style={[s.breakdownValue, { color: textPrimary }]}>{remaining}</Text>
+              <Text style={[s.breakdownLabel, { color: textSecondary }]}>{config.label}</Text>
+              <Text style={[s.breakdownRate, { color: textSecondary }]}>{fulfilled}/{required}</Text>
             </View>
           );
         })}
       </View>
+
+      {data.progressPercent != null && data.progressPercent > 0 && (
+        <View style={s.progressContainer}>
+          <View style={[s.progressTrack, { backgroundColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+            <View style={[s.progressFill, { width: `${Math.min(100, data.progressPercent)}%`, backgroundColor: P.mint }]} />
+          </View>
+          <Text style={[s.progressText, { color: textSecondary }]}>{data.progressPercent}% complete</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -134,4 +149,8 @@ const s = StyleSheet.create({
   breakdownValue: { fontSize: 20, fontWeight: '700' as const, marginTop: 4 },
   breakdownLabel: { fontSize: 10, textTransform: 'capitalize' as const, marginTop: 2 },
   breakdownRate: { fontSize: 9, marginTop: 1 },
+  progressContainer: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
+  progressTrack: { flex: 1, height: 4, borderRadius: 2, overflow: 'hidden' as const },
+  progressFill: { height: 4, borderRadius: 2 },
+  progressText: { fontSize: 10 },
 });

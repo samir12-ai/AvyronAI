@@ -80,10 +80,13 @@ export async function computeFulfillment(
     workRec = workRows[0] || null;
   }
 
+  const reelReq = (workRec?.totalReels || 0) + (workRec?.totalVideos || 0);
+  const postReq = (workRec?.totalPosts || 0) + (workRec?.totalCarousels || 0);
+  const storyReq = workRec?.totalStories || 0;
   const requiredByBranch = {
-    REELS: workRec?.reelItems || 0,
-    POSTS: workRec?.postItems || 0,
-    STORIES: workRec?.storyItems || 0,
+    REELS: reelReq || workRec?.reelItems || 0,
+    POSTS: postReq || workRec?.postItems || 0,
+    STORIES: storyReq || workRec?.storyItems || 0,
   };
   const totalRequired = workRec?.totalContentPieces || 0;
 

@@ -16,6 +16,7 @@ import {
 } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { validateRootIntegrity, detectStaleness, computeCalendarDeviation } from "../root-bundle";
+import { computeFulfillment } from "../fulfillment-engine";
 
 export function registerOrchestratorV2Routes(app: Express) {
   app.post("/api/orchestrator/run", async (req: Request, res: Response) => {
@@ -360,27 +361,22 @@ export function registerOrchestratorV2Routes(app: Express) {
   app.get("/api/required-work/:campaignId", async (req: Request, res: Response) => {
     try {
       const accountId = "default";
-      const [plan] = await db
-        .select()
-        .from(strategicPlans)
-        .where(
-          and(
-            eq(strategicPlans.accountId, accountId),
-            eq(strategicPlans.campaignId, req.params.campaignId),
-          )
-        )
-        .orderBy(desc(strategicPlans.createdAt))
-        .limit(1);
+      const campaignId = req.params.campaignId;
 
-      if (!plan) return res.json({ hasWork: false });
+      const fulfillment = await computeFulfillment(campaignId, accountId);
+
+      if (!fulfillment.planId && fulfillment.total.required === 0) return res.json({ hasWork: false });
 
       const [work] = await db
         .select()
         .from(requiredWork)
-        .where(eq(requiredWork.planId, plan.id))
+        .where(eq(requiredWork.campaignId, campaignId))
+        .orderBy(desc(requiredWork.createdAt))
         .limit(1);
 
       if (!work) return res.json({ hasWork: false });
+
+      const planId = fulfillment.planId || work.planId;
 
       const todayStr = new Date().toISOString().split("T")[0];
       const weekEnd = new Date();
@@ -392,7 +388,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         .from(calendarEntries)
         .where(
           and(
-            eq(calendarEntries.planId, plan.id),
+            eq(calendarEntries.planId, planId),
             eq(calendarEntries.scheduledDate, todayStr)
           )
         );
@@ -402,7 +398,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         .from(calendarEntries)
         .where(
           and(
-            eq(calendarEntries.planId, plan.id),
+            eq(calendarEntries.planId, planId),
             sql`${calendarEntries.scheduledDate} >= ${todayStr}`,
             sql`${calendarEntries.scheduledDate} <= ${weekEndStr}`
           )
@@ -412,14 +408,18 @@ export function registerOrchestratorV2Routes(app: Express) {
       const pendingWeek = weekEntries.filter(e => e.status === "PENDING" || e.status === "DRAFT");
 
       res.json({
-        hasWork: true,
-        planId: plan.id,
-        planStatus: plan.status,
-        totalPieces: work.totalContentPieces,
-        generated: work.generatedCount || 0,
-        ready: work.readyCount || 0,
-        published: work.publishedCount || 0,
-        remaining: (work.totalContentPieces || 0) - (work.generatedCount || 0) - (work.readyCount || 0) - (work.publishedCount || 0),
+        hasWork: fulfillment.total.remaining > 0,
+        planId,
+        totalPieces: fulfillment.total.required,
+        fulfilled: fulfillment.total.fulfilled,
+        remaining: fulfillment.total.remaining,
+        progressPercent: fulfillment.progressPercent,
+        branches: {
+          STORIES: fulfillment.byBranch.STORIES,
+          POSTS: fulfillment.byBranch.POSTS,
+          REELS: fulfillment.byBranch.REELS,
+        },
+        byStatus: fulfillment.byStatus,
         todayWork: pendingToday.map(e => ({
           id: e.id,
           contentType: e.contentType,
@@ -436,9 +436,9 @@ export function registerOrchestratorV2Routes(app: Express) {
           status: e.status,
         })),
         breakdown: {
-          reels: { required: work.totalReels, perWeek: work.reelsPerWeek },
-          posts: { required: work.totalPosts, perWeek: work.postsPerWeek },
-          stories: { required: work.totalStories, perDay: work.storiesPerDay },
+          reels: { required: fulfillment.byBranch.REELS.required, fulfilled: fulfillment.byBranch.REELS.fulfilled, remaining: fulfillment.byBranch.REELS.remaining, perWeek: work.reelsPerWeek },
+          posts: { required: fulfillment.byBranch.POSTS.required, fulfilled: fulfillment.byBranch.POSTS.fulfilled, remaining: fulfillment.byBranch.POSTS.remaining, perWeek: work.postsPerWeek },
+          stories: { required: fulfillment.byBranch.STORIES.required, fulfilled: fulfillment.byBranch.STORIES.fulfilled, remaining: fulfillment.byBranch.STORIES.remaining, perDay: work.storiesPerDay },
           carousels: { required: work.totalCarousels, perWeek: work.carouselsPerWeek },
           videos: { required: work.totalVideos, perWeek: work.videosPerWeek },
         },
