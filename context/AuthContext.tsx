@@ -55,9 +55,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         try {
           const baseUrl = getApiUrl();
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 5000);
           const res = await fetch(new URL('/api/auth/me', baseUrl).toString(), {
             headers: { Authorization: `Bearer ${storedToken}` },
+            signal: controller.signal,
           });
+          clearTimeout(timeout);
           if (res.ok) {
             const data = await res.json();
             setUser(data.user);
@@ -66,7 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             await clearAuth();
           }
         } catch {
-          // offline - use cached user
+          // offline or timeout - use cached user
         }
       }
     } catch (error) {

@@ -2,6 +2,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Stack, router, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
+import { View, Text, ActivityIndicator, StyleSheet, Image } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { 
@@ -20,6 +21,45 @@ import { CampaignProvider } from "@/context/CampaignContext";
 import { CreativeContextProvider } from "@/context/CreativeContext";
 
 SplashScreen.preventAutoHideAsync();
+
+function LoadingScreen() {
+  return (
+    <View style={loadingStyles.container}>
+      <Image source={require('@/assets/images/logo.jpeg')} style={loadingStyles.logo} />
+      <Text style={loadingStyles.title}>MarketMind AI</Text>
+      <ActivityIndicator size="large" color="#7C3AED" style={loadingStyles.spinner} />
+      <Text style={loadingStyles.subtitle}>Loading your workspace...</Text>
+    </View>
+  );
+}
+
+const loadingStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    backgroundColor: '#0F0F1A',
+  },
+  logo: {
+    width: 80,
+    height: 80,
+    borderRadius: 20,
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: '700' as const,
+    color: '#FFFFFF',
+    marginBottom: 24,
+  },
+  spinner: {
+    marginBottom: 16,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#9CA3AF',
+  },
+});
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading, user, isAccessActive } = useAuth();
@@ -50,6 +90,10 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       }
     }
   }, [isAuthenticated, isLoading, user, isAccessActive, segments]);
+
+  if (isLoading) {
+    return <LoadingScreen />;
+  }
 
   return <>{children}</>;
 }
