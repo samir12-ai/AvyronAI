@@ -1,0 +1,125 @@
+Hi,
+
+We’re now moving into the final user entry + monetization setup before launch.
+
+Please start implementing the following as one clean, connected flow (login + intro + pricing + payment).
+
+---
+
+## 🎯 1. Login + Entry Experience (Connected)
+
+We want a clean, premium first impression.
+
+### Requirements:
+- Login / Signup screen:
+  - Simple (email + password only)
+  - Clean layout
+  - No clutter
+
+- Design:
+  - Use the same colors as the logo
+  - Keep it modern, minimal, and well-aligned
+  - Logo clearly visible (top or centered)
+
+---
+
+## 🎨 2. Intro Screen (After Signup / First Login)
+
+After a new user logs in:
+
+### Show a simple intro screen:
+- Short headline (1 line only)
+- Clean design (same brand colors)
+- One clear CTA button
+
+Example direction:
+- “Build your marketing system”
+- or similar short, strong sentence
+
+### Important:
+- No multi-step onboarding
+- No long text
+- Just a clear starting point
+
+---
+
+## 💳 3. Pricing Setup (Core)
+
+We want to introduce:
+
+### Free Trial:
+- 7-day trial for new users
+- Full system access during trial
+
+### After trial:
+- User must upgrade to continue using
+
+---
+
+## 💰 4. Stripe Integration (Simple Setup)
+
+We don’t need a complex billing system yet.
+
+### Required:
+- Create Stripe payment links for plans
+- Connect them to the app
+
+Flow:
+1. User finishes trial
+2. Clicks upgrade
+3. Redirect to Stripe payment link
+4. After payment → user gets access
+
+---
+
+## 🧩 5. Plans (Structure)
+
+Prepare the system to support:
+
+- Trial (7 days)
+- Paid plans (we’ll finalize exact tiers later)
+
+For now:
+- Just make sure upgrade flow is ready
+- Payment link works
+- Access control can switch from trial → paid
+
+---
+
+## ⚠️ Important Constraints
+
+- Keep everything simple and clean
+- Do NOT overbuild
+- No complex billing logic yet
+- No subscriptions logic unless necessary — start with payment links
+
+---
+
+## ✅ Final Verification (Mandatory)
+
+Before marking this done, confirm:
+
+1. Login / signup works end-to-end
+2. Session persists correctly
+3. Intro screen shows only for new users
+4. Trial activates correctly
+5. Trial expiration logic works
+6. Stripe payment link redirects properly
+7. Paid users regain full access after payment
+8. No broken flows or blank screens
+
+---
+
+## 🎯 Goal
+
+- Smooth first experience
+- Clear entry into the system
+- Simple path from trial → payment
+- Clean, branded UI
+
+---
+
+Once this is implemented, we’ll move to final pricing refinement and launch.
+
+Best,  
+Samir

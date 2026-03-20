@@ -63,7 +63,13 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 - PostgreSQL
 
 ### User Authentication
-- Meta OAuth
+- JWT-based email/password auth (`server/auth.ts`)
+- 7-day free trial on registration, subscription statuses: trial → active → expired
+- Auth routes: POST /api/auth/register, POST /api/auth/login, GET /api/auth/me, POST /api/auth/seen-intro, GET /api/auth/subscription-status
+- Stripe webhook: POST /api/stripe/webhook (requires STRIPE_WEBHOOK_SECRET or x-internal-key header)
+- Frontend auth context (`context/AuthContext.tsx`) with JWT token persistence via AsyncStorage
+- Route gating in `app/_layout.tsx` AuthGate: unauthenticated → /login, new user → /intro, expired trial → /upgrade, active → /(tabs)
+- Environment variables: JWT_SECRET, STRIPE_WEBHOOK_SECRET, EXPO_PUBLIC_STRIPE_PAYMENT_LINK
 
 ### Social Platforms
 - Instagram

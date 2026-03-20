@@ -9,6 +9,13 @@ export const users = pgTable("users", {
     .default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
+  email: text("email").unique(),
+  trialStart: timestamp("trial_start").defaultNow(),
+  trialEnd: timestamp("trial_end"),
+  subscriptionStatus: text("subscription_status").default("trial"),
+  stripeCustomerId: text("stripe_customer_id"),
+  hasSeenIntro: boolean("has_seen_intro").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 export const photographerProfiles = pgTable("photographer_profiles", {

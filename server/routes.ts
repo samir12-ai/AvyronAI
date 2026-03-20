@@ -50,6 +50,7 @@ import { registerIntegrityRoutes } from "./system-integrity/routes";
 import { storeTokensAfterOAuth, runAllHealthChecks } from "./meta-token-manager";
 import { redactToken } from "./meta-crypto";
 import { initMetaMetrics } from "./meta-metrics";
+import { registerAuthRoutes } from "./auth";
 import { db } from "./db";
 import { metaCredentials } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -57,6 +58,8 @@ import { eq } from "drizzle-orm";
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  registerAuthRoutes(app);
+
   app.get("/api/engines/health", async (req, res) => {
     try {
       const accountId = (req.query.accountId as string) || "default";

@@ -1,230 +1,193 @@
 import React, { useState } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  Pressable, 
-  useColorScheme, 
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  useColorScheme,
   Platform,
-  Alert,
+  TextInput,
   ActivityIndicator,
-  Linking,
+  Image,
+  KeyboardAvoidingView,
+  ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import Colors from '@/constants/colors';
 import { useAuth } from '@/context/AuthContext';
-import { useLanguage } from '@/context/LanguageContext';
-import { getApiUrl } from '@/lib/query-client';
 
 export default function LoginScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
-  const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
-  const { login } = useAuth();
-  const { t } = useLanguage();
-  const [isLoading, setIsLoading] = useState<'facebook' | 'instagram' | null>(null);
+  const { login, register } = useAuth();
 
-  const handleFacebookLogin = async () => {
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async () => {
+    if (!email.trim() || !password.trim()) {
+      setError('Please fill in all fields');
+      return;
+    }
+
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setIsLoading('facebook');
+    setIsLoading(true);
+    setError('');
 
-    try {
-      const apiUrl = getApiUrl();
-      const authUrl = `${apiUrl}/api/auth/facebook`;
-      
-      if (Platform.OS === 'web') {
-        window.open(authUrl, '_blank', 'width=600,height=700');
-        
-        const handleMessage = async (event: MessageEvent) => {
-          if (event.data?.type === 'FACEBOOK_AUTH_SUCCESS') {
-            window.removeEventListener('message', handleMessage);
-            await login({
-              id: event.data.user?.id || 'fb_' + Date.now(),
-              name: event.data.user?.name || 'Facebook User',
-              email: event.data.user?.email,
-              picture: event.data.user?.picture,
-              provider: 'facebook',
-            });
-            router.replace('/(tabs)');
-          }
-        };
-        window.addEventListener('message', handleMessage);
-        
-        setTimeout(async () => {
-          window.removeEventListener('message', handleMessage);
-          await login({
-            id: 'fb_' + Date.now(),
-            name: 'Facebook User',
-            provider: 'facebook',
-          });
-          router.replace('/(tabs)');
-        }, 2000);
-      } else {
-        await Linking.openURL(authUrl);
-        setTimeout(async () => {
-          await login({
-            id: 'fb_' + Date.now(),
-            name: 'Facebook User',
-            provider: 'facebook',
-          });
-          router.replace('/(tabs)');
-        }, 1500);
-      }
-    } catch (error) {
-      console.error('Facebook login error:', error);
-      Alert.alert(t('login.loginFailed'), t('login.loginFailedFacebook'));
-    } finally {
-      setIsLoading(null);
+    const result = mode === 'login'
+      ? await login(email.trim(), password)
+      : await register(email.trim(), password);
+
+    setIsLoading(false);
+
+    if (result.success) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else {
+      setError(result.error || 'Something went wrong');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
   };
 
-  const handleInstagramLogin = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setIsLoading('instagram');
-
-    try {
-      const apiUrl = getApiUrl();
-      const authUrl = `${apiUrl}/api/auth/instagram`;
-      
-      if (Platform.OS === 'web') {
-        window.open(authUrl, '_blank', 'width=600,height=700');
-        
-        const handleMessage = async (event: MessageEvent) => {
-          if (event.data?.type === 'INSTAGRAM_AUTH_SUCCESS') {
-            window.removeEventListener('message', handleMessage);
-            await login({
-              id: event.data.user?.id || 'ig_' + Date.now(),
-              name: event.data.user?.name || 'Instagram User',
-              picture: event.data.user?.picture,
-              provider: 'instagram',
-            });
-            router.replace('/(tabs)');
-          }
-        };
-        window.addEventListener('message', handleMessage);
-        
-        setTimeout(async () => {
-          window.removeEventListener('message', handleMessage);
-          await login({
-            id: 'ig_' + Date.now(),
-            name: 'Instagram User',
-            provider: 'instagram',
-          });
-          router.replace('/(tabs)');
-        }, 2000);
-      } else {
-        await Linking.openURL(authUrl);
-        setTimeout(async () => {
-          await login({
-            id: 'ig_' + Date.now(),
-            name: 'Instagram User',
-            provider: 'instagram',
-          });
-          router.replace('/(tabs)');
-        }, 1500);
-      }
-    } catch (error) {
-      console.error('Instagram login error:', error);
-      Alert.alert(t('login.loginFailed'), t('login.loginFailedInstagram'));
-    } finally {
-      setIsLoading(null);
-    }
+  const toggleMode = () => {
+    setMode(m => m === 'login' ? 'signup' : 'login');
+    setError('');
+    Haptics.selectionAsync();
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={styles.container}>
       <LinearGradient
-        colors={isDark ? ['#1a1a2e', '#16213e', '#0f0f23'] : ['#667eea', '#764ba2', '#f093fb']}
+        colors={['#0F0B1E', '#1A1035', '#0F0B1E']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={styles.gradientBg}
+        style={StyleSheet.absoluteFillObject}
       />
-      
-      <View style={[styles.content, { paddingTop: Platform.OS === 'web' ? 100 : insets.top + 60 }]}>
-        <View style={styles.logoContainer}>
-          <View style={styles.logoCircle}>
-            <Ionicons name="analytics" size={48} color="#fff" />
+
+      <View style={styles.accentGlow} />
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.keyboardView}
+      >
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingTop: Platform.OS === 'web' ? 80 : insets.top + 40, paddingBottom: insets.bottom + 20 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.logoSection}>
+            <Image
+              source={require('@/assets/images/logo.jpeg')}
+              style={styles.logo}
+            />
+            <Text style={styles.brandName}>MarketMind</Text>
+            <Text style={styles.brandSub}>AI MARKETING</Text>
           </View>
-          <Text style={styles.appName}>MarketMind AI</Text>
-          <Text style={styles.tagline}>{t('login.tagline')}</Text>
-        </View>
 
-        <View style={styles.loginSection}>
-          <Text style={styles.welcomeText}>{t('login.welcome')}</Text>
-          <Text style={styles.signInText}>{t('login.signIn')}</Text>
+          <View style={styles.formCard}>
+            <Text style={styles.formTitle}>
+              {mode === 'login' ? 'Welcome back' : 'Get started'}
+            </Text>
+            <Text style={styles.formSubtitle}>
+              {mode === 'login' ? 'Sign in to your account' : 'Create your free account'}
+            </Text>
 
-          <View style={styles.buttonContainer}>
+            {error ? (
+              <View style={styles.errorBox}>
+                <Ionicons name="alert-circle" size={16} color="#EF4444" />
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            ) : null}
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Email</Text>
+              <View style={styles.inputWrap}>
+                <Ionicons name="mail-outline" size={18} color="#6B7280" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="you@example.com"
+                  placeholderTextColor="#4B5563"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoComplete="email"
+                  testID="email-input"
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Password</Text>
+              <View style={styles.inputWrap}>
+                <Ionicons name="lock-closed-outline" size={18} color="#6B7280" style={styles.inputIcon} />
+                <TextInput
+                  style={[styles.input, { flex: 1 }]}
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder={mode === 'signup' ? 'Min 6 characters' : 'Enter password'}
+                  placeholderTextColor="#4B5563"
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                  testID="password-input"
+                />
+                <Pressable onPress={() => setShowPassword(!showPassword)} style={styles.eyeBtn}>
+                  <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={18} color="#6B7280" />
+                </Pressable>
+              </View>
+            </View>
+
             <Pressable
-              onPress={handleFacebookLogin}
-              disabled={isLoading !== null}
-              style={({ pressed }) => [
-                styles.loginButton,
-                styles.facebookButton,
-                { opacity: pressed || isLoading === 'facebook' ? 0.8 : 1 }
-              ]}
-            >
-              {isLoading === 'facebook' ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <>
-                  <Ionicons name="logo-facebook" size={24} color="#fff" />
-                  <Text style={styles.loginButtonText}>{t('login.continueWithFacebook')}</Text>
-                </>
-              )}
-            </Pressable>
-
-            <Pressable
-              onPress={handleInstagramLogin}
-              disabled={isLoading !== null}
-              style={({ pressed }) => [
-                styles.loginButton,
-                { opacity: pressed || isLoading === 'instagram' ? 0.8 : 1 }
-              ]}
+              onPress={handleSubmit}
+              disabled={isLoading}
+              style={({ pressed }) => [{ opacity: pressed ? 0.9 : 1 }]}
+              testID="submit-button"
             >
               <LinearGradient
-                colors={['#833AB4', '#FD1D1D', '#F77737']}
+                colors={['#8B5CF6', '#7C3AED']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
-                style={styles.instagramGradient}
+                style={styles.submitBtn}
               >
-                {isLoading === 'instagram' ? (
-                  <ActivityIndicator color="#fff" />
+                {isLoading ? (
+                  <ActivityIndicator color="#fff" size="small" />
                 ) : (
-                  <>
-                    <Ionicons name="logo-instagram" size={24} color="#fff" />
-                    <Text style={styles.loginButtonText}>{t('login.continueWithInstagram')}</Text>
-                  </>
+                  <Text style={styles.submitText}>
+                    {mode === 'login' ? 'Sign In' : 'Create Account'}
+                  </Text>
                 )}
               </LinearGradient>
             </Pressable>
+
+            {mode === 'signup' && (
+              <Text style={styles.trialNote}>
+                7-day free trial · Full access · No credit card required
+              </Text>
+            )}
           </View>
 
-          <View style={styles.divider}>
-            <View style={[styles.dividerLine, { backgroundColor: 'rgba(255,255,255,0.2)' }]} />
-            <Text style={styles.dividerText}>{t('login.or')}</Text>
-            <View style={[styles.dividerLine, { backgroundColor: 'rgba(255,255,255,0.2)' }]} />
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleText}>
+              {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}
+            </Text>
+            <Pressable onPress={toggleMode} testID="toggle-mode">
+              <Text style={styles.toggleLink}>
+                {mode === 'login' ? 'Sign Up' : 'Sign In'}
+              </Text>
+            </Pressable>
           </View>
-
-          <Pressable
-            onPress={() => router.replace('/(tabs)')}
-            style={({ pressed }) => [
-              styles.guestButton,
-              { opacity: pressed ? 0.7 : 1 }
-            ]}
-          >
-            <Text style={styles.guestButtonText}>{t('login.continueAsGuest')}</Text>
-          </Pressable>
-        </View>
-
-        <Text style={styles.termsText}>
-          {t('login.terms')}
-        </Text>
-      </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -232,117 +195,151 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#0F0B1E',
   },
-  gradientBg: {
-    ...StyleSheet.absoluteFillObject,
+  accentGlow: {
+    position: 'absolute',
+    top: -100,
+    right: -100,
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundColor: '#8B5CF6',
+    opacity: 0.08,
   },
-  content: {
+  keyboardView: {
     flex: 1,
-    paddingHorizontal: 32,
-    justifyContent: 'space-between',
-    paddingBottom: 40,
   },
-  logoContainer: {
-    alignItems: 'center',
-    marginTop: 40,
-  },
-  logoCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
-    marginBottom: 20,
+    paddingHorizontal: 24,
   },
-  appName: {
-    fontSize: 32,
-    fontFamily: 'Inter_700Bold',
-    color: '#fff',
-    marginBottom: 8,
-  },
-  tagline: {
-    fontSize: 16,
-    fontFamily: 'Inter_400Regular',
-    color: 'rgba(255,255,255,0.8)',
-    textAlign: 'center',
-  },
-  loginSection: {
+  logoSection: {
     alignItems: 'center',
+    marginBottom: 36,
   },
-  welcomeText: {
+  logo: {
+    width: 72,
+    height: 72,
+    borderRadius: 20,
+    marginBottom: 16,
+  },
+  brandName: {
     fontSize: 28,
     fontFamily: 'Inter_700Bold',
-    color: '#fff',
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
+  },
+  brandSub: {
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+    color: '#8B5CF6',
+    letterSpacing: 4,
+    marginTop: 4,
+  },
+  formCard: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 24,
+    padding: 28,
+    borderWidth: 1,
+    borderColor: 'rgba(139,92,246,0.12)',
+  },
+  formTitle: {
+    fontSize: 24,
+    fontFamily: 'Inter_700Bold',
+    color: '#FFFFFF',
     marginBottom: 4,
   },
-  signInText: {
-    fontSize: 16,
-    fontFamily: 'Inter_400Regular',
-    color: 'rgba(255,255,255,0.7)',
-    marginBottom: 32,
-  },
-  buttonContainer: {
-    width: '100%',
-    gap: 16,
-  },
-  loginButton: {
-    borderRadius: 14,
-    overflow: 'hidden',
-  },
-  facebookButton: {
-    backgroundColor: '#1877F2',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    gap: 12,
-  },
-  instagramGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    gap: 12,
-  },
-  loginButtonText: {
-    fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#fff',
-  },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '100%',
-    marginVertical: 24,
-    gap: 16,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-  },
-  dividerText: {
+  formSubtitle: {
     fontSize: 14,
     fontFamily: 'Inter_400Regular',
-    color: 'rgba(255,255,255,0.5)',
+    color: '#9CA3AF',
+    marginBottom: 24,
   },
-  guestButton: {
-    paddingVertical: 14,
-    paddingHorizontal: 32,
+  errorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(239,68,68,0.1)',
     borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.3)',
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.2)',
   },
-  guestButtonText: {
-    fontSize: 15,
+  errorText: {
+    fontSize: 13,
     fontFamily: 'Inter_500Medium',
-    color: 'rgba(255,255,255,0.9)',
+    color: '#EF4444',
+    flex: 1,
   },
-  termsText: {
+  inputGroup: {
+    marginBottom: 18,
+  },
+  inputLabel: {
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#D1D5DB',
+    marginBottom: 8,
+  },
+  inputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 14,
+  },
+  inputIcon: {
+    marginRight: 10,
+  },
+  input: {
+    flex: 1,
+    fontSize: 15,
+    fontFamily: 'Inter_400Regular',
+    color: '#FFFFFF',
+    paddingVertical: 14,
+  },
+  eyeBtn: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  submitBtn: {
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  submitText: {
+    fontSize: 16,
+    fontFamily: 'Inter_700Bold',
+    color: '#FFFFFF',
+  },
+  trialNote: {
     fontSize: 12,
     fontFamily: 'Inter_400Regular',
-    color: 'rgba(255,255,255,0.5)',
+    color: '#8B5CF6',
     textAlign: 'center',
-    lineHeight: 18,
+    marginTop: 14,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 28,
+  },
+  toggleText: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    color: '#9CA3AF',
+  },
+  toggleLink: {
+    fontSize: 14,
+    fontFamily: 'Inter_700Bold',
+    color: '#8B5CF6',
   },
 });
