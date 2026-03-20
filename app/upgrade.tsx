@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   Platform,
   Linking,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -19,6 +20,7 @@ const STRIPE_PAYMENT_LINK = process.env.EXPO_PUBLIC_STRIPE_PAYMENT_LINK || '';
 export default function UpgradeScreen() {
   const insets = useSafeAreaInsets();
   const { logout, user, refreshUser } = useAuth();
+  const [refreshState, setRefreshState] = useState<'idle' | 'loading' | 'no_change'>('idle');
 
   const handleUpgrade = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -32,7 +34,17 @@ export default function UpgradeScreen() {
 
   const handleRefresh = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await refreshUser();
+    setRefreshState('loading');
+    try {
+      await refreshUser();
+      setTimeout(() => {
+        setRefreshState('no_change');
+        setTimeout(() => setRefreshState('idle'), 4000);
+      }, 600);
+    } catch {
+      setRefreshState('no_change');
+      setTimeout(() => setRefreshState('idle'), 4000);
+    }
   };
 
   const handleLogout = async () => {
@@ -115,9 +127,24 @@ export default function UpgradeScreen() {
             </View>
           )}
 
-          <Pressable onPress={handleRefresh} style={styles.refreshBtn} testID="refresh-status">
-            <Ionicons name="refresh-outline" size={16} color="#8B5CF6" />
-            <Text style={styles.refreshText}>Already paid? Refresh status</Text>
+          <Pressable
+            onPress={handleRefresh}
+            disabled={refreshState === 'loading'}
+            style={styles.refreshBtn}
+            testID="refresh-status"
+          >
+            {refreshState === 'loading' ? (
+              <ActivityIndicator size="small" color="#8B5CF6" />
+            ) : (
+              <Ionicons name="refresh-outline" size={16} color="#8B5CF6" />
+            )}
+            <Text style={styles.refreshText}>
+              {refreshState === 'loading'
+                ? 'Checking payment status...'
+                : refreshState === 'no_change'
+                ? 'Payment not yet received — try again shortly'
+                : 'Already paid? Refresh status'}
+            </Text>
           </Pressable>
 
           <Pressable onPress={handleLogout} style={styles.logoutBtn} testID="upgrade-logout">
@@ -255,7 +282,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   refreshText: {
-    fontSize: 14,
+    fontSize: 13,
     fontFamily: 'Inter_500Medium',
     color: '#8B5CF6',
   },

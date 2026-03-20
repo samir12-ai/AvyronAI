@@ -22,7 +22,7 @@ export interface AuthRequest extends Request {
 }
 
 function generateToken(userId: string, email: string): string {
-  return jwt.sign({ userId, email } as JwtPayload, JWT_SECRET, { expiresIn: "30d" });
+  return jwt.sign({ userId, email } as JwtPayload, JWT_SECRET, { expiresIn: "14d" });
 }
 
 function verifyToken(token: string): JwtPayload | null {
@@ -104,6 +104,7 @@ export function registerAuthRoutes(app: Router) {
           email: emailLower,
           name: name || emailLower.split("@")[0],
           subscriptionStatus: "trial",
+          planType: "trial",
           trialEnd: trialEnd.toISOString(),
           hasSeenIntro: false,
         },
@@ -151,6 +152,7 @@ export function registerAuthRoutes(app: Router) {
           email: user.email,
           name: user.email?.split("@")[0] || "User",
           subscriptionStatus: status,
+          planType: user.planType || "trial",
           trialEnd: user.trialEnd?.toISOString() || null,
           hasSeenIntro: user.hasSeenIntro ?? false,
         },
@@ -189,6 +191,7 @@ export function registerAuthRoutes(app: Router) {
           email: user.email,
           name: user.email?.split("@")[0] || "User",
           subscriptionStatus: status,
+          planType: user.planType || "trial",
           trialEnd: user.trialEnd?.toISOString() || null,
           hasSeenIntro: user.hasSeenIntro ?? false,
         },
@@ -243,11 +246,16 @@ export function registerAuthRoutes(app: Router) {
       const validStatuses = ["active", "expired"];
       const safeStatus = validStatuses.includes(status) ? status : "active";
 
-      await db.update(users).set({
+      const updateData: Record<string, string> = {
         subscriptionStatus: safeStatus,
-      }).where(eq(users.id, userId));
+      };
+      if (safeStatus === "active") {
+        updateData.planType = "paid";
+      }
 
-      console.log(`[Stripe] Updated user ${userId} to status: ${safeStatus}`);
+      await db.update(users).set(updateData).where(eq(users.id, userId));
+
+      console.log(`[Stripe] Updated user ${userId} to status: ${safeStatus}, planType: ${updateData.planType || "unchanged"}`);
       res.json({ success: true });
     } catch (error) {
       console.error("[Stripe] Webhook error:", error);

@@ -53,9 +53,9 @@ export default function IntroScreen() {
         </View>
 
         <View style={styles.heroSection}>
-          <Text style={styles.headline}>Build your marketing{'\n'}system with AI</Text>
+          <Text style={styles.headline}>Your complete marketing{'\n'}system — built in minutes</Text>
           <Text style={styles.subline}>
-            Strategy, content, and execution — powered by 15 intelligent engines working together.
+            15 AI engines handle strategy, content, and execution so you can focus on growing your business.
           </Text>
         </View>
 

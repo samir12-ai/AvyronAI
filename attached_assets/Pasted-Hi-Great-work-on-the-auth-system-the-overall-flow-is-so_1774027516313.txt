@@ -1,0 +1,108 @@
+Hi,
+
+Great work on the auth system — the overall flow is solid and close to launch-ready.
+
+Before we move forward, there are a few important fixes and validations we need to address to ensure stability, security, and a smooth user experience.
+
+---
+
+## 🔧 Required Fixes & Improvements
+
+### 1. Payment Verification (Critical)
+
+The “Already paid? Refresh status” flow needs to be fully reliable.
+
+Please confirm:
+- The refresh action calls a backend endpoint (not just UI refresh)
+- Backend validates payment status from:
+  - Stripe webhook data or
+  - Stored DB state updated by webhook
+
+We must avoid cases where:
+- User pays → access not granted
+- Or refresh does nothing
+
+---
+
+### 2. JWT Expiry Adjustment
+
+Current:
+- JWT expiry = 30 days
+
+Update to:
+- 7–14 days maximum
+
+Reason:
+- Better security
+- Prevent account/session abuse
+
+---
+
+### 3. Clear Access State in DB
+
+We need explicit user state fields (if not already structured this way):
+
+Required clarity:
+- plan type (trial / paid)
+- access status (active / expired)
+
+This will be important for:
+- future pricing tiers
+- upgrade logic
+- access control consistency
+
+---
+
+### 4. Stripe Failure / Edge Case Handling
+
+Please ensure we handle:
+- Delayed or failed webhooks
+- Temporary Stripe issues
+
+Minimum requirement:
+- Retry-safe verification (via refresh)
+- No permanent lockout if payment succeeds but webhook is delayed
+
+---
+
+### 5. Intro Screen Copy (UX Improvement)
+
+Current intro is too minimal.
+
+Please:
+- Replace generic text with a short, strong value statement (1 line)
+- Keep design clean, but messaging clearer
+
+Example direction:
+- “Build your complete marketing system in minutes”
+(or similar level of clarity)
+
+---
+
+## ✅ Mandatory End-to-End Validation
+
+Before marking this complete, please test:
+
+1. New user signup → trial starts
+2. Intro screen shows once only
+3. Trial expiration triggers upgrade screen correctly
+4. Payment via Stripe works end-to-end
+5. Refresh status correctly unlocks access
+6. Login/logout/session persistence works reliably
+7. No blank states or broken redirects
+
+---
+
+## 🎯 Goal
+
+We want:
+- Zero friction in the login → trial → upgrade flow
+- No confusion after payment
+- Stable and secure session handling
+
+---
+
+Once these are confirmed and validated, we’ll move to pricing structure + final launch steps.
+
+Best,  
+Samir

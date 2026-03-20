@@ -7,6 +7,7 @@ interface User {
   email: string;
   name: string;
   subscriptionStatus: 'trial' | 'active' | 'expired';
+  planType: 'trial' | 'paid';
   trialEnd: string | null;
   hasSeenIntro: boolean;
 }

@@ -13,6 +13,7 @@ export const users = pgTable("users", {
   trialStart: timestamp("trial_start").defaultNow(),
   trialEnd: timestamp("trial_end"),
   subscriptionStatus: text("subscription_status").default("trial"),
+  planType: text("plan_type").default("trial"),
   stripeCustomerId: text("stripe_customer_id"),
   hasSeenIntro: boolean("has_seen_intro").default(false),
   createdAt: timestamp("created_at").defaultNow(),
