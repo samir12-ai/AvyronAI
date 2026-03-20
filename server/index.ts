@@ -1,6 +1,5 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
-import { createProxyMiddleware } from "http-proxy-middleware";
 import { registerRoutes } from "./routes";
 import { startAutonomousWorker, stopAutonomousWorker } from "./autonomous-worker";
 import { startPublishWorker, stopPublishWorker } from "./publish-worker";
@@ -252,20 +251,24 @@ function configureExpoAndLanding(app: express.Application) {
       next();
     });
   } else {
-    const expoProxy = createProxyMiddleware({
-      target: "http://localhost:8081",
-      changeOrigin: true,
-      ws: true,
-      logger: undefined,
-    });
+    import("http-proxy-middleware").then(({ createProxyMiddleware }) => {
+      const expoProxy = createProxyMiddleware({
+        target: "http://localhost:8081",
+        changeOrigin: true,
+        ws: true,
+        logger: undefined,
+      });
 
-    app.use((req: Request, res: Response, next: NextFunction) => {
-      if (req.path.startsWith("/api") || req.path === "/" || req.path === "/pricing" || req.path === "/data-deletion") {
-        return next();
-      }
-      return expoProxy(req, res, next);
+      app.use((req: Request, res: Response, next: NextFunction) => {
+        if (req.path.startsWith("/api") || req.path === "/" || req.path === "/pricing" || req.path === "/data-deletion") {
+          return next();
+        }
+        return expoProxy(req, res, next);
+      });
+      log("Dev proxy: non-API routes → Expo dev server on port 8081");
+    }).catch((err) => {
+      log("Dev proxy not available:", err.message);
     });
-    log("Dev proxy: non-API routes → Expo dev server on port 8081");
   }
 
   log("Expo routing: Checking expo-platform header on / and /manifest");
