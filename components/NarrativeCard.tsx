@@ -35,6 +35,7 @@ export default function NarrativeCard({ campaignId, isDark }: { campaignId: stri
   const [data, setData] = useState<NarrativeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(true);
+  const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({});
 
   const bg = isDark ? '#0F1419' : '#FFFFFF';
   const borderColor = isDark ? '#1E2736' : '#E5E7EB';
@@ -85,6 +86,8 @@ export default function NarrativeCard({ campaignId, isDark }: { campaignId: stri
             const color = STEP_COLORS[i % STEP_COLORS.length];
             const isLast = i === data.steps.length - 1;
             const isPending = step.source === 'none';
+            const isStepExpanded = !!expandedSteps[step.key];
+            const needsTruncation = step.text.length > 80;
             return (
               <View key={step.key} style={s.stepRow}>
                 <View style={s.stepTimeline}>
@@ -102,9 +105,20 @@ export default function NarrativeCard({ campaignId, isDark }: { campaignId: stri
                       </View>
                     )}
                   </View>
-                  <Text style={[s.stepText, { color: isPending ? textSecondary : textPrimary, fontStyle: isPending ? 'italic' : 'normal' }]}>
+                  <Text
+                    style={[s.stepText, { color: isPending ? textSecondary : textPrimary, fontStyle: isPending ? 'italic' : 'normal' }]}
+                    numberOfLines={isStepExpanded ? undefined : 2}
+                  >
                     {step.text}
                   </Text>
+                  {needsTruncation && (
+                    <Pressable
+                      onPress={() => setExpandedSteps(prev => ({ ...prev, [step.key]: !prev[step.key] }))}
+                      hitSlop={8}
+                    >
+                      <Text style={[s.readMore, { color }]}>{isStepExpanded ? 'Show less' : 'Read more'}</Text>
+                    </Pressable>
+                  )}
                 </View>
               </View>
             );
@@ -133,4 +147,5 @@ const s = StyleSheet.create({
   sourceTag: { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 },
   sourceTagText: { fontSize: 9, fontWeight: '600' as const },
   stepText: { fontSize: 14, lineHeight: 20 },
+  readMore: { fontSize: 12, fontWeight: '600' as const, marginTop: 4 },
 });
