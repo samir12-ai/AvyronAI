@@ -17,6 +17,7 @@ import {
 import { eq, and, desc, sql } from "drizzle-orm";
 import { validateRootIntegrity, detectStaleness, computeCalendarDeviation } from "../root-bundle";
 import { computeFulfillment } from "../fulfillment-engine";
+import { buildCausalNarrative } from "../narrative-layer";
 
 export function registerOrchestratorV2Routes(app: Express) {
   app.post("/api/orchestrator/run", async (req: Request, res: Response) => {
@@ -1152,7 +1153,6 @@ export function registerOrchestratorV2Routes(app: Express) {
   app.get("/api/narrative/:campaignId", async (req: Request, res: Response) => {
     try {
       const accountId = (req.query.accountId as string) || "default";
-      const { buildCausalNarrative } = await import("../narrative-layer");
       const narrative = await buildCausalNarrative(req.params.campaignId, accountId);
       res.json(narrative);
     } catch (error: any) {

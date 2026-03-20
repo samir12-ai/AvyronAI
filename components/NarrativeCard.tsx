@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, Pressable, useColorScheme, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Pressable, useColorScheme } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getApiUrl } from '@/lib/query-client';
@@ -9,6 +9,7 @@ interface NarrativeStep {
   label: string;
   icon: string;
   text: string;
+  source: string;
 }
 
 interface NarrativeData {
@@ -21,6 +22,15 @@ interface NarrativeData {
 
 const STEP_COLORS = ['#FF6B6B', '#F59E0B', '#8B5CF6', '#3B82F6', '#10B981'];
 
+const SOURCE_LABELS: Record<string, string> = {
+  positioning: 'Positioning',
+  ael: 'AEL',
+  mechanism: 'Mechanism',
+  differentiation: 'Differentiation',
+  'offer+funnel': 'Offer + Funnel',
+  none: 'Pending',
+};
+
 export default function NarrativeCard({ campaignId, isDark }: { campaignId: string | null; isDark: boolean }) {
   const [data, setData] = useState<NarrativeData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -31,6 +41,7 @@ export default function NarrativeCard({ campaignId, isDark }: { campaignId: stri
   const textPrimary = isDark ? '#E8ECF0' : '#1A2332';
   const textSecondary = isDark ? '#8892A4' : '#546478';
   const lineBg = isDark ? '#1E2736' : '#E5E7EB';
+  const tagBg = isDark ? '#1E2736' : '#F3F4F6';
 
   const fetchNarrative = useCallback(async () => {
     if (!campaignId) return;
@@ -73,15 +84,27 @@ export default function NarrativeCard({ campaignId, isDark }: { campaignId: stri
           {data.steps.map((step, i) => {
             const color = STEP_COLORS[i % STEP_COLORS.length];
             const isLast = i === data.steps.length - 1;
+            const isPending = step.source === 'none';
             return (
               <View key={step.key} style={s.stepRow}>
                 <View style={s.stepTimeline}>
-                  <View style={[s.stepDot, { backgroundColor: color }]} />
+                  <View style={[s.stepDot, { backgroundColor: isPending ? textSecondary : color }]} />
                   {!isLast && <View style={[s.stepLine, { backgroundColor: lineBg }]} />}
                 </View>
                 <View style={[s.stepContent, !isLast && { paddingBottom: 16 }]}>
-                  <Text style={[s.stepLabel, { color }]}>{step.label}</Text>
-                  <Text style={[s.stepText, { color: textPrimary }]}>{step.text}</Text>
+                  <View style={s.stepLabelRow}>
+                    <Text style={[s.stepLabel, { color: isPending ? textSecondary : color }]}>{step.label}</Text>
+                    {step.source && step.source !== 'none' && (
+                      <View style={[s.sourceTag, { backgroundColor: tagBg }]}>
+                        <Text style={[s.sourceTagText, { color: textSecondary }]}>
+                          {SOURCE_LABELS[step.source] || step.source}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={[s.stepText, { color: isPending ? textSecondary : textPrimary, fontStyle: isPending ? 'italic' : 'normal' }]}>
+                    {step.text}
+                  </Text>
                 </View>
               </View>
             );
@@ -105,6 +128,9 @@ const s = StyleSheet.create({
   stepDot: { width: 10, height: 10, borderRadius: 5 },
   stepLine: { width: 2, flex: 1, marginTop: 4 },
   stepContent: { flex: 1, paddingTop: 0 },
-  stepLabel: { fontSize: 11, fontWeight: '700' as const, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 2 },
+  stepLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
+  stepLabel: { fontSize: 11, fontWeight: '700' as const, letterSpacing: 0.5, textTransform: 'uppercase' },
+  sourceTag: { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 },
+  sourceTagText: { fontSize: 9, fontWeight: '600' as const },
   stepText: { fontSize: 14, lineHeight: 20 },
 });

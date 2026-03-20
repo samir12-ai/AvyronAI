@@ -1,13 +1,12 @@
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { summarizeEngine } from "./agent/summarizers";
-import type { EngineId } from "./orchestrator/priority-matrix";
 
 interface NarrativeStep {
   key: string;
   label: string;
   icon: string;
   text: string;
+  source: string;
 }
 
 interface CausalNarrative {
@@ -31,6 +30,15 @@ function pick(obj: any, ...keys: string[]): string | null {
   return null;
 }
 
+function pickNested(obj: any, path: string[]): string | null {
+  let cur = obj;
+  for (const k of path) {
+    if (!cur) return null;
+    cur = cur[k];
+  }
+  return typeof cur === "string" && cur.trim() ? cur.trim() : null;
+}
+
 function firstItem(obj: any, ...keys: string[]): any {
   if (!obj) return null;
   for (const k of keys) {
@@ -39,6 +47,11 @@ function firstItem(obj: any, ...keys: string[]): any {
     if (Array.isArray(arr) && arr.length) return arr[0];
   }
   return null;
+}
+
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return s.substring(0, max - 1) + "…";
 }
 
 export async function buildCausalNarrative(campaignId: string, accountId: string = "default"): Promise<CausalNarrative> {
@@ -55,6 +68,8 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
   const completed = sections.filter(s => s.status === "SUCCESS");
   if (completed.length < 3) return empty;
 
+  const completedIds = new Set(completed.map(s => s.id));
+
   const base = `http://localhost:${process.env.PORT || 5000}`;
   const q = `?campaignId=${encodeURIComponent(campaignId)}`;
 
@@ -63,22 +78,19 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
   }
 
   const apiMap: Record<string, string> = {
-    audience: `/api/audience-engine/latest${q}`,
     positioning: `/api/positioning-engine/latest${q}`,
     differentiation: `/api/differentiation-engine/latest${q}`,
     mechanism: `/api/mechanism-engine/latest${q}`,
     offer: `/api/offer-engine/latest${q}`,
     funnel: `/api/funnel-engine/latest${q}`,
-    content_dna: `/api/content-dna/latest${q}`,
   };
 
-  const keysToFetch = ["audience", "positioning", "differentiation", "mechanism", "offer", "funnel", "content_dna"];
   const results: Record<string, any> = {};
   await Promise.all(
-    keysToFetch.map(async (k) => {
-      if (apiMap[k]) {
-        const data = await safe(`${base}${apiMap[k]}`);
-        if (data) results[k] = data;
+    Object.entries(apiMap).map(async ([k, path]) => {
+      if (completedIds.has(k) || k === "positioning") {
+        const data = await safe(`${base}${path}`);
+        if (data && !data.error) results[k] = data;
       }
     })
   );
@@ -98,88 +110,140 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
     }
   } catch {}
 
-  const aud = results.audience?.output || results.audience || {};
-  const pos = results.positioning?.output || results.positioning || {};
-  const diff = results.differentiation?.output || results.differentiation || {};
-  const mech = results.mechanism?.output || results.mechanism || {};
-  const ofr = results.offer?.output || results.offer || {};
-  const fnl = results.funnel?.output || results.funnel || {};
+  const pos = results.positioning || {};
+  const diff = results.differentiation || {};
+  const mech = results.mechanism || {};
+  const ofr = results.offer || {};
+  const fnl = results.funnel || {};
 
-  const topPain = firstItem(aud, "painProfiles", "audiencePains");
-  const painText = topPain?.canonicalPain || topPain?.canonical || topPain?.pain || null;
+  const primaryTerritory = safeP(pos.territory) || firstItem(pos, "territories", "positioningTerritories");
+  const territoryName = primaryTerritory?.name || primaryTerritory?.territoryName || null;
+  const enemy = primaryTerritory?.enemyDefinition || pick(pos, "enemyDefinition") || null;
+  const contrastAxis = primaryTerritory?.contrastAxis || pick(pos, "contrastAxis") || null;
+  const narrativeDirection = primaryTerritory?.narrativeDirection || pick(pos, "narrativeDirection") || null;
 
-  let problemText = "Market has unresolved friction blocking conversions";
-  if (painText) {
-    problemText = painText;
-  } else if (aelData?.rootCauses?.[0]) {
-    const rc = aelData.rootCauses[0];
-    problemText = rc.deepCause || rc.surfaceSignal || problemText;
+  let problemText: string | null = null;
+  let problemSource = "positioning";
+
+  if (enemy) {
+    problemText = truncate(enemy, 120);
+  } else if (contrastAxis) {
+    problemText = truncate(contrastAxis, 120);
+  } else if (narrativeDirection) {
+    problemText = truncate(narrativeDirection, 120);
   }
 
-  let whyText = "Root cause not yet identified";
+  if (!problemText && aelData?.rootCauses?.[0]) {
+    const rc = aelData.rootCauses[0];
+    problemText = rc.deepCause || rc.surfaceSignal || null;
+    problemSource = "ael";
+  }
+
+  if (!problemText) {
+    problemText = "Pending — run strategic engines to identify market problem";
+    problemSource = "none";
+  }
+
+  let whyText: string | null = null;
+  let whySource = "ael";
+
   if (aelData?.causalChains?.[0]) {
     const cc = aelData.causalChains[0];
-    whyText = cc.cause || cc.impact || whyText;
-  } else if (aelData?.rootCauses?.[0]?.causalReasoning) {
-    whyText = aelData.rootCauses[0].causalReasoning;
-  } else if (aelData?.buyingBarriers?.[0]) {
+    whyText = cc.cause || cc.impact || null;
+  }
+  if (!whyText && aelData?.rootCauses?.[0]) {
+    whyText = aelData.rootCauses[0].causalReasoning || aelData.rootCauses[0].deepCause || null;
+  }
+  if (!whyText && aelData?.buyingBarriers?.[0]) {
     const bb = aelData.buyingBarriers[0];
-    whyText = bb.rootCause || bb.barrier || whyText;
-  } else {
-    const objections = safeP(aud.objectionMap) || [];
-    const topObj = Array.isArray(objections) ? objections[0] : null;
-    if (topObj?.canonical) {
-      whyText = topObj.canonical;
-    } else {
-      const pains = safeP(aud.painProfiles || aud.audiencePains) || [];
-      const secondPain = Array.isArray(pains) && pains.length > 1 ? pains[1] : null;
-      if (secondPain?.canonical || secondPain?.canonicalPain) {
-        whyText = `Driven by: ${secondPain.canonical || secondPain.canonicalPain}`;
-      }
-    }
+    whyText = bb.rootCause || bb.barrier || null;
   }
 
-  const territory = firstItem(pos, "territories", "positioningTerritories");
-  const territoryName = territory?.name || territory?.territoryName || null;
-  const enemy = pick(pos, "enemyDefinition") || territory?.enemyDefinition || null;
-  let whatWeDoText = "Position against market defaults";
+  if (!whyText && contrastAxis) {
+    whyText = truncate(contrastAxis, 120);
+    whySource = "positioning";
+  }
+
+  if (!whyText && enemy) {
+    whyText = truncate(enemy, 120);
+    whySource = "positioning";
+  }
+
+  if (!whyText) {
+    whyText = "Pending — AEL root cause analysis needed";
+    whySource = "none";
+  }
+
+  let whatWeDoText: string;
+  let positionSource = "positioning";
   if (territoryName && enemy) {
-    whatWeDoText = `Own "${territoryName}" — fight ${enemy}`;
+    whatWeDoText = `Own "${territoryName}" — fight ${truncate(enemy, 80)}`;
   } else if (territoryName) {
     whatWeDoText = `Own the "${territoryName}" territory`;
+  } else {
+    whatWeDoText = "Pending — positioning engine output needed";
+    positionSource = "none";
   }
 
   const mechObj = mech.primaryMechanism || mech;
   const mechName = pick(mechObj, "mechanismName") || pick(mech, "mechanismName");
-  const diffPillars = (safeP(diff.pillars || diff.differentiationPillars) || []);
-  const topPillar = diffPillars[0]?.name || diffPillars[0]?.pillarName || null;
-  let howText = "Apply differentiated mechanism";
+  const mechType = pick(mechObj, "mechanismType") || pick(mech, "mechanismType");
+  const diffPillars = safeP(diff.pillars || diff.differentiationPillars) || [];
+  const topPillar = Array.isArray(diffPillars) && diffPillars[0]
+    ? (diffPillars[0].name || diffPillars[0].pillarName)
+    : null;
+  const authorityMode = typeof diff.authorityMode === "object"
+    ? diff.authorityMode?.mode
+    : (typeof diff.authorityMode === "string" ? diff.authorityMode : null);
+
+  let howText: string;
+  let howSource = "mechanism";
   if (mechName && topPillar) {
     howText = `"${mechName}" mechanism — anchored on ${topPillar}`;
+  } else if (mechName && mechType) {
+    howText = `"${mechName}" (${mechType}) mechanism`;
   } else if (mechName) {
     howText = `"${mechName}" mechanism drives the fix`;
+  } else if (topPillar && authorityMode) {
+    howText = `${authorityMode} authority — lead with "${topPillar}"`;
+    howSource = "differentiation";
   } else if (topPillar) {
     howText = `Lead with "${topPillar}" as primary differentiator`;
+    howSource = "differentiation";
+  } else {
+    howText = "Pending — mechanism and differentiation engines needed";
+    howSource = "none";
   }
 
-  const funnelType = pick(fnl, "funnelType", "funnelName") ||
-    pick(fnl.primaryFunnel || {}, "funnelType", "funnelName");
-  const offerName = pick(ofr.primaryOffer || ofr, "offerName") || pick(ofr, "offerName");
-  let executeText = "Deploy content through optimized funnel";
-  if (offerName && funnelType) {
-    executeText = `"${offerName}" offer → ${funnelType} funnel`;
+  const funnelObj = fnl.primaryFunnel || fnl;
+  const funnelType = pick(funnelObj, "funnelType", "funnelName") || pick(fnl, "funnelType", "funnelName");
+  const offerObj = ofr.primaryOffer || ofr;
+  const offerName = pick(offerObj, "offerName") || pick(ofr, "offerName");
+  const coreOutcome = pick(offerObj, "coreOutcome") || pick(ofr, "coreOutcome");
+
+  let executeText: string;
+  let executeSource = "offer+funnel";
+  if (offerName && funnelType && coreOutcome) {
+    executeText = `"${truncate(offerName, 60)}" → ${funnelType} funnel → ${truncate(coreOutcome, 60)}`;
+  } else if (offerName && funnelType) {
+    executeText = `"${truncate(offerName, 60)}" offer → ${funnelType} funnel`;
+  } else if (offerName && coreOutcome) {
+    executeText = `"${truncate(offerName, 60)}" → ${truncate(coreOutcome, 60)}`;
   } else if (offerName) {
-    executeText = `Execute with "${offerName}" offer`;
+    executeText = `Execute with "${truncate(offerName, 80)}" offer`;
   } else if (funnelType) {
     executeText = `Execute through ${funnelType} funnel`;
+  } else {
+    executeText = "Pending — offer and funnel engines needed";
+    executeSource = "none";
   }
 
   const steps: NarrativeStep[] = [
-    { key: "problem", label: "Market Problem", icon: "alert-circle-outline", text: problemText },
-    { key: "why", label: "Why It Happens", icon: "git-branch-outline", text: whyText },
-    { key: "position", label: "What We Do", icon: "flag-outline", text: whatWeDoText },
-    { key: "mechanism", label: "How We Fix It", icon: "construct-outline", text: howText },
-    { key: "execute", label: "What To Execute", icon: "rocket-outline", text: executeText },
+    { key: "problem", label: "Market Problem", icon: "alert-circle-outline", text: problemText, source: problemSource },
+    { key: "why", label: "Why It Happens", icon: "git-branch-outline", text: whyText, source: whySource },
+    { key: "position", label: "What We Do", icon: "flag-outline", text: whatWeDoText, source: positionSource },
+    { key: "mechanism", label: "How We Fix It", icon: "construct-outline", text: howText, source: howSource },
+    { key: "execute", label: "What To Execute", icon: "rocket-outline", text: executeText, source: executeSource },
   ];
 
   const oneLiner = `${problemText} → ${whatWeDoText} → ${executeText}`;

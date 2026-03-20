@@ -1,0 +1,222 @@
+:::writing{id=“92746” variant=“email” subject=“Narrative Layer Hardening + Alignment with Engine Cards (Critical Consistency Requirement)”}
+Hi Replit Team,
+
+Following the Narrative Layer implementation, we’ve identified the exact next step.
+
+The architecture is correct, the layer placement is correct, and the output format is strong.
+
+However, we now need to harden the selection logic AND ensure strict consistency with engine outputs.
+
+⸻
+
+🎯 Core Issue
+
+The Narrative Layer is currently:
+	•	Structurally correct ✅
+	•	Deterministic and read-only ✅
+	•	Properly placed post-engines ✅
+
+But:
+	•	It sometimes selects audience-level signals instead of market-level causal truth
+	•	And more importantly:
+
+⚠️ It can drift away from what the engine cards are actually showing
+
+⸻
+
+🚨 Critical Requirement (Most Important)
+
+We need full alignment between:
+	•	Narrative Layer (Strategic Narrative card)
+	•	Engine Cards (Positioning, Differentiation, Mechanism, etc.)
+
+The rule:
+
+The Narrative MUST NOT introduce a different story than the engines.
+
+If the engine cards say:
+	•	Territory = X
+	•	Mechanism = Y
+	•	Root cause = Z
+
+Then the Narrative must:
+	•	Use the SAME logic
+	•	Translate it (simplify it)
+	•	But NEVER reinterpret or override it
+
+⸻
+
+🧠 Intended UX Behavior
+
+We now have two layers:
+
+1. Engine Cards
+	•	Detailed
+	•	Analytical
+	•	For advanced users
+	•	Source of truth
+
+2. Narrative Layer
+	•	Simplified
+	•	Connected
+	•	For clarity
+
+👉 But both must describe the same system reality
+
+Not:
+	•	Engine says one thing
+	•	Narrative says another
+
+⸻
+
+⚠️ Current Problem
+
+Example issue:
+	•	Engines correctly operate on:
+	•	system-level territories
+	•	AEL root causes
+	•	mechanism logic
+
+But Narrative sometimes outputs:
+	•	cost concerns
+	•	generic complexity
+
+Which:
+	•	doesn’t reflect the engine outputs
+	•	breaks trust
+	•	creates inconsistency
+
+⸻
+
+🧩 Hardening Plan (No Architecture Changes)
+
+We do NOT want to:
+	•	modify engines
+	•	modify orchestrator
+	•	add AI
+	•	change validation layers
+
+Only:
+
+strengthen buildCausalNarrative() selection and mapping
+
+⸻
+
+🔧 Required Rules
+
+1. Market Problem
+
+Must:
+	•	derive from system-level outputs (territory / validated signals)
+	•	OR be a deterministic translation of them
+
+Must NOT:
+	•	use raw audience pains directly
+
+⸻
+
+2. Why It Happens
+
+Must:
+	•	come from AEL (root causes / causal chains / barriers)
+
+Must NOT:
+	•	restate symptoms or secondary pains
+
+⸻
+
+3. What We Do
+
+Must:
+	•	reflect positioning output
+	•	simplified only (no reinterpretation)
+
+⸻
+
+4. How We Fix It
+
+Must:
+	•	map directly to mechanism + differentiation
+	•	preserve causal meaning
+
+⸻
+
+5. What To Execute
+
+Must:
+	•	reflect actual offer + funnel + execution path
+	•	not just restate labels
+
+⸻
+
+❓ What We Need From You
+
+To align this properly with the codebase:
+
+1. Exact Source Mapping
+
+For each of the 5 steps:
+	•	Which fields are currently used?
+	•	Which ones should be upgraded to authoritative sources?
+
+⸻
+
+2. Consistency Enforcement
+
+What is the best way (code-wise) to ensure:
+
+Narrative = transformation of engine outputs
+NOT reinterpretation
+
+⸻
+
+3. Selection Strategy
+
+Should we implement:
+	•	strict priority source hierarchy per step?
+	•	hard validation rules?
+	•	or reuse existing classification utilities?
+
+⸻
+
+4. Anti-Patterns to Block
+
+Please define clearly what should be forbidden in this layer, such as:
+	•	audience-level labels as final output
+	•	duplicated symptoms
+	•	mismatch with engine outputs
+	•	generic fallback language
+
+⸻
+
+5. Reusable Components
+
+Can we safely reuse:
+	•	AEL structured blocks
+	•	territory classification logic
+	•	system vs audience detection
+	•	ProductDNA inference utilities
+
+inside the Narrative Layer?
+
+⸻
+
+🎯 Goal
+
+To make the Narrative Layer:
+	•	causally correct
+	•	market-level
+	•	fully aligned with engine outputs
+	•	simplified but not distorted
+
+So that:
+
+Users can trust both the narrative and the engine cards as one consistent system
+
+⸻
+
+Once we align on this, we’ll proceed with hardening.
+
+Best,
+Samir
+:::
