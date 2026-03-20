@@ -1,5 +1,6 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
+import { createProxyMiddleware } from "http-proxy-middleware";
 import { registerRoutes } from "./routes";
 import { startAutonomousWorker, stopAutonomousWorker } from "./autonomous-worker";
 import { startPublishWorker, stopPublishWorker } from "./publish-worker";
@@ -233,22 +234,39 @@ function configureExpoAndLanding(app: express.Application) {
   app.use("/assets", express.static(path.resolve(process.cwd(), "assets")));
   app.use(express.static(path.resolve(process.cwd(), "static-build")));
 
-  const webBuildDir = path.resolve(process.cwd(), "static-build", "web");
-  if (fs.existsSync(webBuildDir)) {
-    app.use(express.static(webBuildDir));
-    log("Serving Expo web build from static-build/web");
-  }
+  if (process.env.NODE_ENV === "production") {
+    const webBuildDir = path.resolve(process.cwd(), "static-build", "web");
+    if (fs.existsSync(webBuildDir)) {
+      app.use(express.static(webBuildDir));
+      log("Serving Expo web build from static-build/web");
+    }
 
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    if (req.method !== "GET" || req.path.startsWith("/api") || req.path.startsWith("/assets")) {
-      return next();
-    }
-    const webIndex = path.resolve(process.cwd(), "static-build", "web", "index.html");
-    if (fs.existsSync(webIndex)) {
-      return res.sendFile(webIndex);
-    }
-    next();
-  });
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      if (req.method !== "GET" || req.path.startsWith("/api") || req.path.startsWith("/assets")) {
+        return next();
+      }
+      const webIndex = path.resolve(process.cwd(), "static-build", "web", "index.html");
+      if (fs.existsSync(webIndex)) {
+        return res.sendFile(webIndex);
+      }
+      next();
+    });
+  } else {
+    const expoProxy = createProxyMiddleware({
+      target: "http://localhost:8081",
+      changeOrigin: true,
+      ws: true,
+      logger: undefined,
+    });
+
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      if (req.path.startsWith("/api") || req.path === "/" || req.path === "/pricing" || req.path === "/data-deletion") {
+        return next();
+      }
+      return expoProxy(req, res, next);
+    });
+    log("Dev proxy: non-API routes → Expo dev server on port 8081");
+  }
 
   log("Expo routing: Checking expo-platform header on / and /manifest");
 }
