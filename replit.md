@@ -21,10 +21,10 @@ The backend employs Express.js with Node.js and TypeScript, exposing RESTful API
 Client-side data is stored using AsyncStorage. Server-side data, including user information and chat conversations, is managed in PostgreSQL with Drizzle ORM. Snapshot lifecycle management operates in DATA_ARCHIVING mode with dual-window retention and latest-per-campaign protection.
 
 ### Key Features
-- **Dashboard**: Displays revenue-focused KPIs, campaign metrics, a Strategic Narrative causal chain card (NarrativeCard), and an inline AI chat box (DashboardChat). The full-screen agent chat is still accessible via FAB button.
+- **Dashboard**: Displays revenue-focused KPIs, campaign metrics, a Strategic Narrative causal chain card (NarrativeCard), and an inline AI chat box (DashboardChat). Header uses the custom MarketMind logo image. The full-screen agent chat is still accessible via FAB button.
 - **Causal Narrative Layer**: A deterministic, read-only, stateless post-processing layer (`server/narrative-layer.ts`) that transforms engine outputs into a 5-step causal chain (Market Problem → Why It Happens → What We Do → How We Fix It → What To Execute). Includes a Human Translation Layer (`humanize()`) that applies ~25 regex replacements to simplify jargon, shorten verbose phrasing, strip template artifacts, and cap output at 120 chars — same meaning, clearer words. Served via `GET /api/narrative/:campaignId`. No AI calls, no DB writes.
 - **Content Creation**: AI Writer for text and AI Designer for image generation.
-- **AI Management**: Auto-Publisher for Meta platforms, AI Audience Engine, and a Performance Intelligence Layer.
+- **AI Management**: AI Audience Engine (always visible), Auto Publish (Coming Soon placeholder), Market DB, and a Performance Intelligence Layer. Leads section removed. Advanced Mode toggle removed — all features always accessible.
 - **Strategic Engines**: Includes Positioning, Differentiation (V8), Mechanism (with AEL causal grounding), Offer, Funnel, Integrity, Awareness, and Persuasion (V4) Engines, designed to generate comprehensive strategic plans. The Offer Engine uses a deterministic skeleton architecture when a Strategy Root is active, ensuring strategic alignment.
 - **Strategy Root System**: A unified source of truth binding all strategic engines via a single enforced root hash, ensuring data consistency and staleness detection.
 - **Product DNA**: A source-of-truth layer injected into all strategic engines for identity context in AI prompts.

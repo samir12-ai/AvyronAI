@@ -1,0 +1,145 @@
+Hi Replit Team,
+
+We’re now moving into final product polish before launch. This is a UI/UX + structure cleanup pass, and it’s important that everything is implemented cleanly without breaking any existing functionality.
+
+Please execute the following changes carefully, and do not mark this as complete until everything is verified end-to-end and no regressions are introduced.
+
+---
+
+## 🔧 1. Remove Leads Section (Full Removal)
+
+- Completely remove the Leads section from:
+  - UI
+  - navigation
+  - any related components/routes
+
+- Ensure:
+  - No orphan references remain
+  - No broken links or empty states
+  - No backend dependency is affected
+
+---
+
+## 🚧 2. Auto Publish → Set as “Coming Soon”
+
+- Keep the section visible, but:
+  - Label it clearly as “Coming Soon”
+  - Disable all interactions
+
+- Ensure:
+  - No backend calls are triggered
+  - No partial logic runs
+  - UI reflects disabled state cleanly
+
+---
+
+## 🔄 3. Audience Engine — Move Out of Advanced Mode
+
+- Move Audience Engine into its own visible section (like other engines)
+
+- Remove dependency on:
+  - “Advanced Mode”
+  - any toggle required to access it
+
+- Ensure:
+  - It displays like a standard engine card
+  - It still pulls and renders correct data
+  - No logic is lost during relocation
+
+---
+
+## ❌ 4. Remove Advanced Mode بالكامل
+
+- Fully remove:
+  - Advanced Mode toggle
+  - related UI elements
+  - any conditional rendering tied to it
+
+- Refactor:
+  - Any logic previously hidden behind Advanced Mode should either:
+    - be visible (if needed)
+    - or removed (if unused)
+
+- Ensure:
+  - No hidden dependencies break other engines or flows
+
+---
+
+## 🎨 5. Logo Placement
+
+- Add logo presence in multiple key areas:
+  - Top navigation (primary)
+  - Possibly sidebar or header area
+  - Optional subtle placement in dashboard
+
+- Ensure:
+  - Clean, non-intrusive placement
+  - Responsive behavior (desktop + mobile)
+  - No layout breaking
+
+---
+
+## 🚀 6. Application Intro (Entry Experience)
+
+We need a clean intro / onboarding entry state:
+
+- When user enters:
+  - Clear first impression (what this system does)
+  - Simple starting point (e.g. create/run first campaign)
+
+- No complexity, no clutter
+
+- Ensure:
+  - Doesn’t block returning users
+  - Doesn’t interfere with existing flow
+
+---
+
+## ❗ Critical Requirement — Stability
+
+For all changes above:
+
+- Do NOT:
+  - break existing engine flows
+  - affect orchestrator / execution
+  - modify backend contracts unless required
+
+- This is a presentation + structure pass, not a system rewrite
+
+---
+
+## ✅ Final Verification (Mandatory)
+
+Before marking as done, you MUST:
+
+1. Run full pipeline (15/15 engines)
+2. Verify:
+   - engine cards render correctly
+   - narrative layer still aligned
+   - plan → approve → execute still works
+3. Check:
+   - no console errors
+   - no broken UI states
+   - no missing data
+4. Confirm:
+   - all removed sections are fully gone (not hidden only)
+
+---
+
+## 🎯 Goal
+
+Clean, simple, focused product:
+- no dead sections
+- no unnecessary complexity
+- no hidden modes
+- clear user flow
+
+---
+
+Please confirm:
+- what was removed
+- what was refactored
+- and that full system testing passed after changes
+
+Best,  
+Samir

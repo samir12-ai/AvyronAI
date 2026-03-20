@@ -8,7 +8,7 @@ import {
   Platform,
   RefreshControl,
   Pressable,
-  Switch,
+  Image,
   Animated as RNAnimated,
   Dimensions,
   ActivityIndicator,
@@ -134,7 +134,7 @@ export default function DashboardScreen() {
   const isDark = colorScheme === 'dark';
   const insets = useSafeAreaInsets();
   const { t } = useLanguage();
-  const { metaConnection, advancedMode, setAdvancedMode } = useApp();
+  const { metaConnection } = useApp();
   const { selectedCampaignId } = useCampaign();
 
   const [showInsights, setShowInsights] = useState(false);
@@ -517,9 +517,10 @@ export default function DashboardScreen() {
         <RNAnimated.View style={{ opacity: headerFade }}>
           <View style={s.headerRow}>
             <View style={s.headerLeft}>
-              <View style={[s.logoMark, { backgroundColor: P.mint }]}>
-                <Ionicons name="trending-up" size={16} color="#fff" />
-              </View>
+              <Image
+                source={require('@/assets/images/logo.jpeg')}
+                style={s.logoImage}
+              />
               <View>
                 <Text style={[s.brandName, { color: textPrimary }]}>MarketMind</Text>
                 <Text style={[s.brandSub, { color: P.mint }]}>AI MARKETING</Text>
@@ -630,20 +631,6 @@ export default function DashboardScreen() {
           </>
         ) : null}
 
-        <View style={[s.modeRow, { borderColor: cardBorder }]}>
-          <View style={s.modeLeft}>
-            <View style={[s.modeIcon, { backgroundColor: isDark ? P.purple + '10' : P.purple + '08' }]}>
-              <Ionicons name="options-outline" size={14} color={P.purple} />
-            </View>
-            <Text style={[s.modeLabel, { color: textSecondary }]}>Advanced Mode</Text>
-          </View>
-          <Switch
-            value={advancedMode}
-            onValueChange={(v) => { setAdvancedMode(v); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-            trackColor={{ false: isDark ? '#1A2030' : '#D8DDD9', true: P.mint + '50' }}
-            thumbColor={advancedMode ? P.mint : isDark ? '#4A5568' : '#B0B8B2'}
-          />
-        </View>
 
         <View style={{ height: Platform.OS === 'web' ? 34 + 60 : 100 }} />
       </ScrollView>
@@ -696,12 +683,10 @@ const s = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  logoMark: {
+  logoImage: {
     width: 36,
     height: 36,
     borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   brandName: {
     fontSize: 22,
@@ -1010,31 +995,6 @@ const s = StyleSheet.create({
     gap: 12,
   },
 
-  modeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: 4,
-    marginBottom: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  modeLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  modeIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modeLabel: {
-    fontSize: 13,
-    fontWeight: '500',
-  },
   fab: {
     position: 'absolute',
     right: 20,

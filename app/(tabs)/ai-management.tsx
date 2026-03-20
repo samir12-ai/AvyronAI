@@ -9,10 +9,7 @@ import {
   Pressable,
   Modal,
   TextInput,
-  Alert,
   ActivityIndicator,
-  FlatList,
-  Switch,
   Animated as RNAnimated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,7 +23,6 @@ import { useLanguage } from '@/context/LanguageContext';
 import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl } from '@/lib/query-client';
 import { usePersistedState } from '@/hooks/usePersistedState';
-import LeadControlPanel from '@/components/LeadControlPanel';
 import ExecutionPlan from '@/components/ExecutionPlan';
 import BuildThePlan from '@/components/BuildThePlan';
 import OrchestratorPanel from '@/components/OrchestratorPanel';
@@ -69,7 +65,7 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'strategies' | 'positioning' | 'differentiation' | 'mechanism' | 'offers' | 'funnels' | 'integrity' | 'awareness' | 'persuasion' | 'statistical_validation' | 'budget_governor' | 'channel_selection' | 'iteration' | 'retention' | 'control' | 'marketdb' | 'publisher' | 'audience' | 'leads';
+type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'strategies' | 'positioning' | 'differentiation' | 'mechanism' | 'offers' | 'funnels' | 'integrity' | 'awareness' | 'persuasion' | 'statistical_validation' | 'budget_governor' | 'channel_selection' | 'iteration' | 'retention' | 'control' | 'marketdb' | 'publisher' | 'audience';
 
 interface AIMgmtPersistedState {
   activeTab: TabView;
@@ -117,14 +113,17 @@ export default function AIManagementScreen() {
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { scheduledPosts, updateScheduledPost, metaConnection, brandProfile, campaigns, advancedMode } = useApp();
+  const { metaConnection, brandProfile, campaigns } = useApp();
   const { t } = useLanguage();
 
   const { selectedCampaignId, isCampaignSelected, dataSourceMode } = useCampaign();
   const { state: ps, updateState, isLoading: psLoading, isSaving, saveError, hydrationVersion } = usePersistedState('ai-management', defaultAIMgmtState);
 
-  const [activeTab, setActiveTab] = useState<TabView>(ps.activeTab);
-  const [visitedTabs, setVisitedTabs] = useState<Set<TabView>>(new Set([ps.activeTab]));
+  const validTabs: Set<string> = new Set(['buildplan', 'pipeline', 'intelligence', 'strategies', 'positioning', 'differentiation', 'mechanism', 'offers', 'funnels', 'integrity', 'awareness', 'persuasion', 'statistical_validation', 'budget_governor', 'channel_selection', 'iteration', 'retention', 'control', 'marketdb', 'publisher', 'audience']);
+  const safeTab = (t: string): TabView => validTabs.has(t) ? t as TabView : 'buildplan';
+
+  const [activeTab, setActiveTab] = useState<TabView>(safeTab(ps.activeTab));
+  const [visitedTabs, setVisitedTabs] = useState<Set<TabView>>(new Set([safeTab(ps.activeTab)]));
 
   const handleTabChange = useCallback((tab: TabView) => {
     Haptics.selectionAsync();
@@ -137,11 +136,6 @@ export default function AIManagementScreen() {
     });
     updateState({ activeTab: tab });
   }, [updateState]);
-
-  const [autoPublishEnabled, setAutoPublishEnabled] = useState(false);
-  const [selectedPosts, setSelectedPosts] = useState<Set<string>>(new Set());
-  const [publishing, setPublishing] = useState(false);
-  const [publishResults, setPublishResults] = useState<any[]>([]);
 
   const [showAudienceModal, setShowAudienceModal] = useState(false);
   const [audienceGoal, setAudienceGoal] = useState(ps.audienceGoal);
@@ -165,9 +159,6 @@ export default function AIManagementScreen() {
     const isSwitch = prevCampaignRef.current !== undefined && prevCampaignRef.current !== selectedCampaignId;
     prevCampaignRef.current = selectedCampaignId;
     if (isSwitch) {
-      setSelectedPosts(new Set());
-      setPublishing(false);
-      setPublishResults([]);
       setShowAudienceModal(false);
       setGeneratingAudience(false);
       setAudienceError('');
@@ -201,7 +192,7 @@ export default function AIManagementScreen() {
     if (hydrationVersion > 0 && hydrationVersion !== lastHydrationRef.current) {
       lastHydrationRef.current = hydrationVersion;
       skipSyncRef.current = true;
-      setActiveTab(ps.activeTab);
+      setActiveTab(safeTab(ps.activeTab));
       setVisitedTabs(prev => {
         if (prev.has(ps.activeTab)) return prev;
         const next = new Set(prev);
@@ -215,80 +206,6 @@ export default function AIManagementScreen() {
       setTimeout(() => { skipSyncRef.current = false; }, 100);
     }
   }, [hydrationVersion, ps]);
-
-  const pendingPosts = useMemo(() => {
-    return scheduledPosts
-      .filter(p => p.status === 'pending')
-      .sort((a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime());
-  }, [scheduledPosts]);
-
-  const publishedPosts = useMemo(() => {
-    return scheduledPosts.filter(p => p.status === 'published').length;
-  }, [scheduledPosts]);
-
-  const togglePostSelection = (id: string) => {
-    Haptics.selectionAsync();
-    setSelectedPosts(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const selectAllPosts = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (selectedPosts.size === pendingPosts.length) {
-      setSelectedPosts(new Set());
-    } else {
-      setSelectedPosts(new Set(pendingPosts.map(p => p.id)));
-    }
-  };
-
-  const handlePublishSelected = async () => {
-    if (selectedPosts.size === 0) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    setPublishing(true);
-    setPublishResults([]);
-
-    try {
-      const postsToPublish = pendingPosts.filter(p => selectedPosts.has(p.id));
-      const baseUrl = getApiUrl();
-      const url = new URL('/api/auto-publish', baseUrl);
-      const response = await fetch(url.toString(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          posts: postsToPublish.map(p => ({
-            id: p.id,
-            content: p.content,
-            platform: p.platform,
-            type: p.type,
-          })),
-          accessToken: metaConnection.accessToken,
-          pageId: metaConnection.pageId,
-        }),
-      });
-
-      const data = await response.json();
-      setPublishResults(data.results || []);
-
-      for (const result of (data.results || [])) {
-        if (result.status === 'published') {
-          const post = scheduledPosts.find(p => p.id === result.postId);
-          if (post) {
-            await updateScheduledPost({ ...post, status: 'published' });
-          }
-        }
-      }
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (error) {
-      Alert.alert(t('aiManagement.publishFailed'), t('aiManagement.publishFailedDesc'));
-    } finally {
-      setPublishing(false);
-      setSelectedPosts(new Set());
-    }
-  };
 
   const handleRunAudienceEngine = async () => {
     if (!selectedCampaignId) return;
@@ -355,20 +272,6 @@ export default function AIManagementScreen() {
       setAudienceError(t('aiManagement.audienceFailed'));
     } finally {
       setGeneratingAudience(false);
-    }
-  };
-
-  const formatDate = (iso: string) => {
-    const d = new Date(iso);
-    return `${d.getDate()}/${d.getMonth() + 1}`;
-  };
-
-  const getTypeIcon = (type: string): keyof typeof Ionicons.glyphMap => {
-    switch (type) {
-      case 'reel': return 'videocam';
-      case 'story': return 'layers';
-      case 'video': return 'play-circle';
-      default: return 'document-text';
     }
   };
 
@@ -484,173 +387,33 @@ export default function AIManagementScreen() {
 
   const renderPublisher = () => (
     <View style={styles.tabContent}>
-      <View style={[styles.connectionBanner, {
-        backgroundColor: metaConnection.isConnected ? colors.success + '15' : colors.accent + '15',
-        borderColor: metaConnection.isConnected ? colors.success + '30' : colors.accent + '30',
-      }]}>
-        <View style={styles.connectionLeft}>
-          <View style={styles.connectionDotWrap}>
-            <View style={[styles.connectionDot, {
-              backgroundColor: metaConnection.isConnected ? colors.success : colors.accent,
-            }]} />
-            {metaConnection.isConnected && <PulseRing color={colors.success} />}
-          </View>
-          <View>
-            <Text style={[styles.connectionTitle, { color: colors.text }]}>
-              {metaConnection.isConnected
-                ? t('aiManagement.metaConnected')
-                : t('aiManagement.metaNotConnected')
-              }
-            </Text>
-            <Text style={[styles.connectionSub, { color: colors.textSecondary }]}>
-              {metaConnection.isConnected
-                ? metaConnection.pageName || 'Facebook & Instagram'
-                : t('aiManagement.connectInSettings')
-              }
-            </Text>
-          </View>
+      <View style={[styles.comingSoonContainer, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <View style={[styles.comingSoonIcon, { backgroundColor: colors.primary + '15' }]}>
+          <Ionicons name="rocket-outline" size={40} color={colors.primary} />
         </View>
-        {!metaConnection.isConnected && (
-          <View style={[styles.statusBadge, { backgroundColor: colors.textMuted }]}>
-            <Text style={styles.statusBadgeText}>Not Connected</Text>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.statsRow}>
-        <View style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <Ionicons name="time-outline" size={20} color={colors.accent} />
-          <Text style={[styles.statNum, { color: colors.text }]}>{pendingPosts.length}</Text>
-          <Text style={[styles.statLabel, { color: colors.textMuted }]}>{t('aiManagement.queued')}</Text>
+        <Text style={[styles.comingSoonTitle, { color: colors.text }]}>Auto Publish</Text>
+        <View style={[styles.comingSoonBadge, { backgroundColor: colors.primary + '20' }]}>
+          <Text style={[styles.comingSoonBadgeText, { color: colors.primary }]}>Coming Soon</Text>
         </View>
-        <View style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <Ionicons name="checkmark-circle-outline" size={20} color={colors.success} />
-          <Text style={[styles.statNum, { color: colors.text }]}>{publishedPosts}</Text>
-          <Text style={[styles.statLabel, { color: colors.textMuted }]}>{t('aiManagement.published')}</Text>
-        </View>
-        <View style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <Ionicons name="flash-outline" size={20} color={colors.primary} />
-          <Text style={[styles.statNum, { color: colors.text }]}>{autoPublishEnabled ? 'ON' : 'OFF'}</Text>
-          <Text style={[styles.statLabel, { color: colors.textMuted }]}>{t('aiManagement.autoMode')}</Text>
-        </View>
-      </View>
-
-      <View style={[styles.autoPublishRow, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-        <View style={styles.autoPublishLeft}>
-          <Ionicons name="flash" size={22} color={colors.primary} />
-          <View>
-            <Text style={[styles.autoPublishTitle, { color: colors.text }]}>
-              {t('aiManagement.autoPublish')}
-            </Text>
-            <Text style={[styles.autoPublishDesc, { color: colors.textSecondary }]}>
-              {t('aiManagement.autoPublishDesc')}
-            </Text>
-          </View>
-        </View>
-        <Switch
-          value={autoPublishEnabled}
-          onValueChange={(val) => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            setAutoPublishEnabled(val);
-          }}
-          trackColor={{ false: colors.inputBackground, true: colors.primary + '60' }}
-          thumbColor={autoPublishEnabled ? colors.primary : colors.textMuted}
-        />
-      </View>
-
-      {pendingPosts.length > 0 && (
-        <View style={styles.queueSection}>
-          <View style={styles.queueHeader}>
-            <Text style={[styles.queueTitle, { color: colors.text }]}>
-              {t('aiManagement.publishQueue')}
-            </Text>
-            <Pressable onPress={selectAllPosts}>
-              <Text style={[styles.selectAllText, { color: colors.primary }]}>
-                {selectedPosts.size === pendingPosts.length
-                  ? t('aiManagement.deselectAll')
-                  : t('aiManagement.selectAll')
-                }
-              </Text>
-            </Pressable>
-          </View>
-
-          {pendingPosts.map(post => (
-            <Pressable
-              key={post.id}
-              onPress={() => togglePostSelection(post.id)}
-              style={[styles.queueCard, {
-                backgroundColor: colors.card,
-                borderColor: selectedPosts.has(post.id) ? colors.primary : colors.cardBorder,
-              }]}
-            >
-              <View style={[styles.queueCheck, {
-                backgroundColor: selectedPosts.has(post.id) ? colors.primary : 'transparent',
-                borderColor: selectedPosts.has(post.id) ? colors.primary : colors.textMuted,
-              }]}>
-                {selectedPosts.has(post.id) && <Ionicons name="checkmark" size={14} color="#fff" />}
+        <Text style={[styles.comingSoonDesc, { color: colors.textSecondary }]}>
+          Automated publishing to Facebook & Instagram is currently in development. Once available, MarketMind will handle scheduling, posting, and performance tracking — all on autopilot.
+        </Text>
+        <View style={styles.comingSoonFeatures}>
+          {[
+            { icon: 'calendar-outline' as const, label: 'Smart scheduling based on audience activity' },
+            { icon: 'analytics-outline' as const, label: 'Real-time performance tracking' },
+            { icon: 'repeat-outline' as const, label: 'Automatic retry & error recovery' },
+            { icon: 'shield-checkmark-outline' as const, label: 'Content safety checks before publish' },
+          ].map((f, i) => (
+            <View key={i} style={[styles.comingSoonFeatureRow, { borderColor: colors.cardBorder }]}>
+              <View style={[styles.comingSoonFeatureIcon, { backgroundColor: colors.primary + '10' }]}>
+                <Ionicons name={f.icon} size={16} color={colors.primary} />
               </View>
-              <View style={styles.queueInfo}>
-                <View style={styles.queueMetaRow}>
-                  <Ionicons name={getTypeIcon(post.type)} size={14} color={colors.textMuted} />
-                  <Text style={[styles.queueType, { color: colors.textSecondary }]}>
-                    {post.type.charAt(0).toUpperCase() + post.type.slice(1)}
-                  </Text>
-                  <Text style={[styles.queueDate, { color: colors.textMuted }]}>
-                    {formatDate(post.scheduledDate)} {post.scheduledTime}
-                  </Text>
-                </View>
-                <Text style={[styles.queueContent, { color: colors.text }]} numberOfLines={2}>
-                  {post.content}
-                </Text>
-                <View style={[styles.queuePlatformBadge, { backgroundColor: colors.primary + '15' }]}>
-                  <Text style={[styles.queuePlatformText, { color: colors.primary }]}>{post.platform}</Text>
-                </View>
-              </View>
-            </Pressable>
+              <Text style={[styles.comingSoonFeatureText, { color: colors.textSecondary }]}>{f.label}</Text>
+            </View>
           ))}
         </View>
-      )}
-
-      {pendingPosts.length === 0 && (
-        <View style={[styles.emptyQueue, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <Ionicons name="checkmark-done-circle-outline" size={48} color={colors.textMuted} />
-          <Text style={[styles.emptyQueueTitle, { color: colors.text }]}>
-            {t('aiManagement.noPostsQueued')}
-          </Text>
-          <Text style={[styles.emptyQueueDesc, { color: colors.textSecondary }]}>
-            {t('aiManagement.noPostsQueuedDesc')}
-          </Text>
-        </View>
-      )}
-
-      {selectedPosts.size > 0 && (
-        <View style={styles.publishBarWrap}>
-          <Pressable
-            onPress={handlePublishSelected}
-            disabled={publishing}
-            style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}
-          >
-            <LinearGradient
-              colors={colors.primaryGradient as [string, string]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.publishBar}
-            >
-              {publishing ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <Ionicons name="send" size={20} color="#fff" />
-              )}
-              <Text style={styles.publishBarText}>
-                {publishing
-                  ? t('aiManagement.publishing')
-                  : `${t('aiManagement.publishNow')} (${selectedPosts.size})`
-                }
-              </Text>
-            </LinearGradient>
-          </Pressable>
-        </View>
-      )}
+      </View>
     </View>
   );
 
@@ -1227,12 +990,11 @@ export default function AIManagementScreen() {
             { key: 'intelligence' as TabView, icon: 'telescope-outline' as const, label: 'Intelligence', color: '#3B82F6', advanced: false },
             { key: 'strategies' as TabView, icon: 'map-outline' as const, label: 'Strategies', color: '#F97316', advanced: false },
             { key: 'control' as TabView, icon: 'shield-checkmark-outline' as const, label: 'Control', color: '#8B5CF6', advanced: false },
-            { key: 'marketdb' as TabView, icon: 'server-outline' as const, label: 'Market DB', color: '#F97316', advanced: true },
+            { key: 'marketdb' as TabView, icon: 'server-outline' as const, label: 'Market DB', color: '#F97316', advanced: false },
             { key: 'publisher' as TabView, icon: 'send-outline' as const, label: 'Publish', color: colors.primary, advanced: false },
-            { key: 'audience' as TabView, icon: 'people-outline' as const, label: 'Audience', color: colors.primary, advanced: true },
-            { key: 'leads' as TabView, icon: 'magnet-outline' as const, label: 'Leads', color: '#8B5CF6', advanced: true },
+            { key: 'audience' as TabView, icon: 'people-outline' as const, label: 'Audience', color: colors.primary, advanced: false },
           ] as const)
-            .filter(t => !t.advanced || advancedMode)
+            .filter(t => !t.advanced)
             .map(t => {
               const isActive = activeTab === t.key;
               return (
@@ -1269,7 +1031,6 @@ export default function AIManagementScreen() {
         {activeTab === 'marketdb' && <MarketDatabaseAdmin />}
         {activeTab === 'publisher' && renderPublisher()}
         {activeTab === 'audience' && <CampaignGuard>{renderAudienceManager()}</CampaignGuard>}
-        {activeTab === 'leads' && <CampaignGuard><LeadControlPanel /></CampaignGuard>}
 
         {visitedTabs.has('positioning') && (
           <View style={{ display: activeTab === 'positioning' ? 'flex' : 'none' }}>
@@ -1727,6 +1488,69 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   publishBarText: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: '#fff' },
+  comingSoonContainer: {
+    alignItems: 'center',
+    padding: 32,
+    borderRadius: 20,
+    borderWidth: 1,
+    gap: 16,
+  },
+  comingSoonIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  comingSoonTitle: {
+    fontSize: 22,
+    fontFamily: 'Inter_700Bold',
+    letterSpacing: -0.3,
+  },
+  comingSoonBadge: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  comingSoonBadgeText: {
+    fontSize: 13,
+    fontFamily: 'Inter_700Bold',
+    letterSpacing: 1,
+    textTransform: 'uppercase' as const,
+  },
+  comingSoonDesc: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    textAlign: 'center' as const,
+    lineHeight: 20,
+    paddingHorizontal: 8,
+  },
+  comingSoonFeatures: {
+    width: '100%' as const,
+    gap: 8,
+    marginTop: 8,
+  },
+  comingSoonFeatureRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 12,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  comingSoonFeatureIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  comingSoonFeatureText: {
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+    flex: 1,
+  },
   audienceCTA: { borderRadius: 20, overflow: 'hidden', marginBottom: 20 },
   audienceCTAIcon: {
     width: 48, height: 48, borderRadius: 14,

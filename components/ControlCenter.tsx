@@ -16,7 +16,6 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import Colors from '@/constants/colors';
-import { useApp } from '@/context/AppContext';
 import { getApiUrl, safeApiJson } from '@/lib/query-client';
 
 type PanelState = 'loading' | 'empty' | 'error' | 'success';
@@ -94,7 +93,6 @@ export default function ControlCenter() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
-  const { advancedMode } = useApp();
 
   const [refreshing, setRefreshing] = useState(false);
 
@@ -513,7 +511,7 @@ export default function ControlCenter() {
                 </View>
               )}
 
-              {advancedMode && aiUsage.models.length > 0 && (
+              {aiUsage.models.length > 0 && (
                 <View style={{ marginTop: 12 }}>
                   <Text style={[s.subSectionTitle, { color: colors.text }]}>Model Breakdown</Text>
                   {aiUsage.models.map((m, i) => (
@@ -538,8 +536,7 @@ export default function ControlCenter() {
           <Ionicons name="time-outline" size={16} color="#A78BFA" />
           <Text style={[s.sectionTitle, { color: colors.text }]}>Recent Activity</Text>
         </View>
-        {advancedMode && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
             <View style={{ flexDirection: 'row', gap: 6 }}>
               {modules.map(mod => (
                 <Pressable
@@ -557,7 +554,6 @@ export default function ControlCenter() {
               ))}
             </View>
           </ScrollView>
-        )}
         {auditState === 'loading' ? renderPanelLoading()
           : auditState === 'error' ? renderPanelError(auditError, () => loadAudit(true))
           : auditState === 'empty' ? renderPanelEmpty('document-text-outline', 'No audit events yet')
@@ -641,8 +637,7 @@ export default function ControlCenter() {
         }
       </View>
 
-      {advancedMode && (
-        <View style={[s.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+      <View style={[s.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
           <View style={s.sectionHeader}>
             <Ionicons name="hammer-outline" size={16} color="#06B6D4" />
             <Text style={[s.sectionTitle, { color: colors.text }]}>Worker & Jobs</Text>
@@ -692,7 +687,6 @@ export default function ControlCenter() {
             )
           }
         </View>
-      )}
 
       <Pressable
         onPress={handleEmergencyStop}
