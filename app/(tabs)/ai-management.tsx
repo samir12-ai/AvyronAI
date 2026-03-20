@@ -27,7 +27,6 @@ import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl } from '@/lib/query-client';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import LeadControlPanel from '@/components/LeadControlPanel';
-import StrategicPipeline from '@/components/StrategicPipeline';
 import ExecutionPlan from '@/components/ExecutionPlan';
 import BuildThePlan from '@/components/BuildThePlan';
 import OrchestratorPanel from '@/components/OrchestratorPanel';
@@ -1255,7 +1254,6 @@ export default function AIManagementScreen() {
         {activeTab === 'pipeline' && (
           <>
             <ExecutionPlan />
-            <StrategicPipeline onNavigateToCalendar={() => router.push('/(tabs)/calendar')} />
           </>
         )}
         {activeTab === 'intelligence' && renderIntelligence()}

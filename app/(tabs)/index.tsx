@@ -27,7 +27,6 @@ import { CampaignBar } from '@/components/CampaignSelector';
 import { getApiUrl, apiRequest } from '@/lib/query-client';
 import { BusinessProfileModal, ProfileButton } from '@/components/BusinessProfile';
 import { PlanStatus } from '@/components/PlanStatus';
-import { ExecutionPipeline } from '@/components/ExecutionPipeline';
 import ExecutionPlan from '@/components/ExecutionPlan';
 import { RequiredWorkCard } from '@/components/RequiredWorkCard';
 import DashboardChat from '@/components/DashboardChat';
