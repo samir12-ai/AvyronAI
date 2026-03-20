@@ -239,6 +239,25 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
     const ctx = data?.layerDiagnostics?.sourceContext;
     if (!ctx) return null;
 
+    const toStr = (val: any): string => {
+      if (val === null || val === undefined) return '';
+      if (typeof val === 'string') return val;
+      if (typeof val === 'number') return String(val);
+      if (typeof val === 'object') {
+        return val.name || val.label || val.pain || val.desire || val.text || val.title || JSON.stringify(val);
+      }
+      return String(val);
+    };
+
+    const toTagStr = (val: any): string => {
+      if (typeof val === 'string') return val.replace(/_/g, ' ');
+      if (typeof val === 'object' && val !== null) {
+        const s = val.type || val.name || val.label || val.title || '';
+        return typeof s === 'string' ? s.replace(/_/g, ' ') : JSON.stringify(val);
+      }
+      return String(val);
+    };
+
     return (
       <View style={[styles.contextCard, { backgroundColor: colors.card, borderColor: '#8B5CF630' }]}>
         <View style={styles.contextHeader}>
@@ -248,31 +267,31 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
         <View style={styles.contextGrid}>
           <View style={styles.contextRow}>
             <Text style={[styles.contextKey, { color: colors.textMuted }]}>Axis</Text>
-            <Text style={[styles.contextVal, { color: colors.text }]}>{ctx.selectedAxis}</Text>
+            <Text style={[styles.contextVal, { color: colors.text }]}>{toStr(ctx.selectedAxis)}</Text>
           </View>
           <View style={styles.contextRow}>
             <Text style={[styles.contextKey, { color: colors.textMuted }]}>Pain</Text>
-            <Text style={[styles.contextVal, { color: colors.text }]} numberOfLines={2}>{ctx.selectedPain}</Text>
+            <Text style={[styles.contextVal, { color: colors.text }]} numberOfLines={2}>{toStr(ctx.selectedPain)}</Text>
           </View>
           <View style={styles.contextRow}>
             <Text style={[styles.contextKey, { color: colors.textMuted }]}>Desired Outcome</Text>
-            <Text style={[styles.contextVal, { color: colors.text }]} numberOfLines={2}>{ctx.selectedDesire}</Text>
+            <Text style={[styles.contextVal, { color: colors.text }]} numberOfLines={2}>{toStr(ctx.selectedDesire)}</Text>
           </View>
           <View style={styles.contextRow}>
             <Text style={[styles.contextKey, { color: colors.textMuted }]}>Mechanism</Text>
-            <Text style={[styles.contextVal, { color: colors.text }]}>{ctx.selectedMechanism}</Text>
+            <Text style={[styles.contextVal, { color: colors.text }]}>{toStr(ctx.selectedMechanism)}</Text>
           </View>
           <View style={styles.contextRow}>
             <Text style={[styles.contextKey, { color: colors.textMuted }]}>Transformation</Text>
-            <Text style={[styles.contextVal, { color: colors.text }]} numberOfLines={2}>{ctx.selectedTransformation}</Text>
+            <Text style={[styles.contextVal, { color: colors.text }]} numberOfLines={2}>{toStr(ctx.selectedTransformation)}</Text>
           </View>
           {Array.isArray(ctx.selectedProofTypes) && ctx.selectedProofTypes.length > 0 && (
             <View style={styles.contextRow}>
               <Text style={[styles.contextKey, { color: colors.textMuted }]}>Proof Path</Text>
               <View style={styles.tagRow}>
-                {ctx.selectedProofTypes.slice(0, 4).map((p, i) => (
+                {ctx.selectedProofTypes.slice(0, 4).map((p: any, i: number) => (
                   <View key={i} style={[styles.miniTag, { backgroundColor: '#3B82F618' }]}>
-                    <Text style={[styles.miniTagText, { color: '#3B82F6' }]}>{p.replace(/_/g, ' ')}</Text>
+                    <Text style={[styles.miniTagText, { color: '#3B82F6' }]}>{toTagStr(p)}</Text>
                   </View>
                 ))}
               </View>

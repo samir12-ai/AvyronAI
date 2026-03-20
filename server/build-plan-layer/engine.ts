@@ -151,81 +151,85 @@ async function collectValidatedEngineOutputs(
   const GATED_PASS_STATES = ["SIGNAL_PASSED", "DEPTH_PASSED"];
 
   const miSnap = await getLatestSnapshot(miSnapshots, accountId, campaignId);
-  if (miSnap?.output) {
-    const parsed = safeParseSnapshot(miSnap.output);
-    if (parsed) snapshots.push({ engineId: "market_intelligence", data: parsed });
+  if (miSnap) {
+    snapshots.push({ engineId: "market_intelligence", data: miSnap });
   }
 
   const audienceSnap = await getLatestSnapshot(audienceSnapshots, accountId, campaignId);
-  if (audienceSnap?.output) {
-    const parsed = safeParseSnapshot(audienceSnap.output);
-    if (parsed) snapshots.push({ engineId: "audience", data: parsed });
+  if (audienceSnap) {
+    snapshots.push({ engineId: "audience", data: audienceSnap });
   }
 
   const posSnap = await getLatestSnapshot(positioningSnapshots, accountId, campaignId);
-  if (posSnap?.output) {
+  if (posSnap) {
     const status = depthGateStatus?.positioning;
     if (!status || GATED_PASS_STATES.includes(status)) {
-      const parsed = safeParseSnapshot(posSnap.output);
-      if (parsed) snapshots.push({ engineId: "positioning", data: parsed, depthGateStatus: status });
+      snapshots.push({ engineId: "positioning", data: posSnap, depthGateStatus: status });
     }
   }
 
   const diffSnap = await getLatestSnapshot(differentiationSnapshots, accountId, campaignId);
-  if (diffSnap?.output) {
+  if (diffSnap) {
     const status = depthGateStatus?.differentiation;
     if (!status || GATED_PASS_STATES.includes(status)) {
-      const parsed = safeParseSnapshot(diffSnap.output);
-      if (parsed) snapshots.push({ engineId: "differentiation", data: parsed, depthGateStatus: status });
+      snapshots.push({ engineId: "differentiation", data: diffSnap, depthGateStatus: status });
     }
   }
 
   const mechSnap = await getLatestSnapshot(mechanismSnapshots, accountId, campaignId);
-  if (mechSnap?.output) {
+  if (mechSnap) {
     const status = depthGateStatus?.mechanism;
     if (!status || GATED_PASS_STATES.includes(status)) {
-      const parsed = safeParseSnapshot(mechSnap.output);
-      if (parsed) snapshots.push({ engineId: "mechanism", data: parsed, depthGateStatus: status });
+      snapshots.push({ engineId: "mechanism", data: mechSnap, depthGateStatus: status });
     }
   }
 
   const offerSnap = await getLatestSnapshot(offerSnapshots, accountId, campaignId);
-  if (offerSnap?.output) {
+  if (offerSnap) {
     const status = depthGateStatus?.offer;
     if (!status || GATED_PASS_STATES.includes(status)) {
-      const parsed = safeParseSnapshot(offerSnap.output);
-      if (parsed) snapshots.push({ engineId: "offer", data: parsed, depthGateStatus: status });
+      snapshots.push({ engineId: "offer", data: offerSnap, depthGateStatus: status });
     }
   }
 
   const funnelSnap = await getLatestSnapshot(funnelSnapshots, accountId, campaignId);
-  if (funnelSnap?.output) {
+  if (funnelSnap) {
     const status = depthGateStatus?.funnel;
     if (!status || GATED_PASS_STATES.includes(status)) {
-      const parsed = safeParseSnapshot(funnelSnap.output);
-      if (parsed) snapshots.push({ engineId: "funnel", data: parsed, depthGateStatus: status });
+      snapshots.push({ engineId: "funnel", data: funnelSnap, depthGateStatus: status });
     }
   }
 
   const awarenessSnap = await getLatestSnapshot(awarenessSnapshots, accountId, campaignId);
-  if (awarenessSnap?.output) {
+  if (awarenessSnap) {
     const status = depthGateStatus?.awareness;
     if (!status || GATED_PASS_STATES.includes(status)) {
-      const parsed = safeParseSnapshot(awarenessSnap.output);
-      if (parsed) snapshots.push({ engineId: "awareness", data: parsed, depthGateStatus: status });
+      snapshots.push({ engineId: "awareness", data: awarenessSnap, depthGateStatus: status });
     }
   }
 
   const persuasionSnap = await getLatestSnapshot(persuasionSnapshots, accountId, campaignId);
-  if (persuasionSnap?.output) {
+  if (persuasionSnap) {
     const status = depthGateStatus?.persuasion;
     if (!status || GATED_PASS_STATES.includes(status)) {
-      const parsed = safeParseSnapshot(persuasionSnap.output);
-      if (parsed) snapshots.push({ engineId: "persuasion", data: parsed, depthGateStatus: status });
+      snapshots.push({ engineId: "persuasion", data: persuasionSnap, depthGateStatus: status });
     }
   }
 
   return snapshots;
+}
+
+function safeParse(val: any): any {
+  if (!val) return val;
+  if (typeof val === "string") { try { return JSON.parse(val); } catch { return val; } }
+  return val;
+}
+
+function safeArr(val: any): any[] {
+  const parsed = safeParse(val);
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === "object") return Object.values(parsed);
+  return [];
 }
 
 function buildEngineContext(snapshots: EngineSnapshot[]): string {
@@ -235,63 +239,62 @@ function buildEngineContext(snapshots: EngineSnapshot[]): string {
     const data = snap.data;
     switch (snap.engineId) {
       case "market_intelligence": {
-        const out = data.output || data;
-        const competitors = (out.competitors || []).slice(0, 5).map((c: any) => c.name || c.handle || "unknown").join(", ");
-        const signals = (out.signals || []).slice(0, 5).map((s: any) => s.text || s.signal || "").join("; ");
-        parts.push(`[Market Intelligence] Competitors: ${competitors}. Key signals: ${signals}. Market state: ${out.marketState || "active"}`);
+        const competitors = safeArr(data.competitorData).slice(0, 5).map((c: any) => c.name || c.handle || "unknown").join(", ");
+        const signals = safeArr(data.signalData).slice(0, 5).map((s: any) => s.text || s.signal || "").join("; ");
+        parts.push(`[Market Intelligence] Competitors: ${competitors}. Key signals: ${signals}. Market state: ${data.marketState || "active"}`);
         break;
       }
       case "audience": {
-        const pains = (data.painProfiles || []).slice(0, 3).map((p: any) => p.pain || p.label || "").join("; ");
-        const desires = (data.desireMap || []).slice(0, 3).map((d: any) => d.desire || d.label || "").join("; ");
-        const segments = (data.audienceSegments || []).slice(0, 2).map((s: any) => s.name || s.segment || "").join(", ");
+        const pains = safeArr(data.audiencePains).slice(0, 3).map((p: any) => typeof p === "string" ? p : p.pain || p.label || p.name || "").join("; ");
+        const desires = safeArr(data.desireMap).slice(0, 3).map((d: any) => typeof d === "string" ? d : d.desire || d.label || d.name || "").join("; ");
+        const segments = safeArr(data.audienceSegments).slice(0, 2).map((s: any) => typeof s === "string" ? s : s.name || s.segment || "").join(", ");
         parts.push(`[Audience] Top pains: ${pains}. Top desires: ${desires}. Segments: ${segments}`);
         break;
       }
       case "positioning": {
-        const out = data.output || data;
-        const narrative = out.narrative || out.narrativeDirection || "";
-        const territories = (out.territories || []).slice(0, 2).map((t: any) => t.name || t.territory || "").join(", ");
+        const result = safeParse(data.result) || data;
+        const narrative = result.narrative || result.narrativeDirection || data.narrativeDirection || "";
+        const territories = safeArr(result.territories || data.territories).slice(0, 2).map((t: any) => typeof t === "string" ? t : t.name || t.territory || "").join(", ");
         parts.push(`[Positioning] Narrative: ${narrative}. Territories: ${territories}`);
         break;
       }
       case "differentiation": {
-        const out = data.output || data;
-        const claims = (out.validatedClaims || out.claimStructures || []).slice(0, 3).map((c: any) => c.claim || c.title || "").join("; ");
-        const mode = out.authorityMode?.mode || out.authorityMode || "";
-        parts.push(`[Differentiation] Claims: ${claims}. Authority mode: ${mode}`);
+        const result = safeParse(data.result) || data;
+        const claims = safeArr(result.validatedClaims || result.claimStructures || data.claimStructures).slice(0, 3).map((c: any) => typeof c === "string" ? c : c.claim || c.title || "").join("; ");
+        const mode = result.authorityMode?.mode || result.authorityMode || data.authorityMode || "";
+        parts.push(`[Differentiation] Claims: ${claims}. Authority mode: ${typeof mode === "object" ? mode.mode || "" : mode}`);
         break;
       }
       case "mechanism": {
-        const out = data.output || data;
-        const name = out.mechanismName || out.name || "";
-        const explanation = out.mechanismExplanation || out.explanation || out.howItWorks || "";
-        parts.push(`[Mechanism] Name: ${name}. Explanation: ${explanation}`);
+        const result = safeParse(data.result) || data;
+        const name = result.mechanismName || result.name || data.mechanismName || "";
+        const explanation = result.mechanismExplanation || result.explanation || result.howItWorks || "";
+        parts.push(`[Mechanism] Name: ${name}. Explanation: ${typeof explanation === "string" ? explanation.substring(0, 200) : ""}`);
         break;
       }
       case "offer": {
-        const out = data.output || data;
-        const headline = out.offerHeadline || out.headline || "";
-        const value = out.primaryValueProp || out.valueProposition || "";
-        parts.push(`[Offer] Headline: ${headline}. Value: ${value}`);
+        const result = safeParse(data.result) || data;
+        const headline = result.offerHeadline || result.headline || data.offerHeadline || "";
+        const value = result.primaryValueProp || result.valueProposition || "";
+        parts.push(`[Offer] Headline: ${typeof headline === "string" ? headline : ""}.  Value: ${typeof value === "string" ? value : ""}`);
         break;
       }
       case "funnel": {
-        const out = data.output || data;
-        const stages = (out.stages || out.funnelStages || []).slice(0, 3).map((s: any) => `${s.name || s.stage}: ${s.objective || s.description || ""}`).join(" → ");
+        const result = safeParse(data.result) || data;
+        const stages = safeArr(result.stages || result.funnelStages || data.stages).slice(0, 3).map((s: any) => `${s.name || s.stage || ""}: ${s.objective || s.description || ""}`).join(" → ");
         parts.push(`[Funnel] ${stages}`);
         break;
       }
       case "awareness": {
-        const out = data.output || data;
-        const route = out.primaryRoute?.routeName || out.primaryRoute?.name || "";
+        const result = safeParse(data.result) || data;
+        const route = result.primaryRoute?.routeName || result.primaryRoute?.name || "";
         parts.push(`[Awareness] Primary route: ${route}`);
         break;
       }
       case "persuasion": {
-        const out = data.output || data;
-        const route = out.primaryRoute?.routeName || out.primaryRoute?.name || "";
-        const alt = out.alternativeRoute?.routeName || "";
+        const result = safeParse(data.result) || data;
+        const route = result.primaryRoute?.routeName || result.primaryRoute?.name || "";
+        const alt = result.alternativeRoute?.routeName || "";
         parts.push(`[Persuasion] Primary: ${route}${alt ? `, Alternative: ${alt}` : ""}`);
         break;
       }

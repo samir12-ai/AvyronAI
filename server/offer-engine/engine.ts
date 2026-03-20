@@ -1315,7 +1315,8 @@ function buildDeterministicOfferSkeletons(
   const rootProofTypes = strategyRoot?.approvedProofTypes ? (typeof strategyRoot.approvedProofTypes === "string" ? safeJsonParse(strategyRoot.approvedProofTypes) : strategyRoot.approvedProofTypes) : null;
   const rootAxis = (strategyRoot?.primaryAxis || "").replace(/_/g, " ");
   const rootContrastText = strategyRoot?.contrastAxisText || "";
-  const rootTransformation = strategyRoot?.approvedTransformation || "";
+  const rawTransformation = strategyRoot?.approvedTransformation || "";
+  const rootTransformation = typeof rawTransformation === "object" ? (rawTransformation?.text || rawTransformation?.label || rawTransformation?.name || JSON.stringify(rawTransformation)) : rawTransformation;
   const rootClaim = strategyRoot?.approvedClaim || "";
   const rootPromise = strategyRoot?.approvedPromise || "";
   const rootMechName = rootMech?.mechanismName || "";
@@ -1334,19 +1335,45 @@ function buildDeterministicOfferSkeletons(
   }
 
   const desiresList: string[] = [];
-  if (rootDesires && typeof rootDesires === "object") {
-    desiresList.push(...Object.keys(rootDesires).slice(0, 5));
+  if (rootDesires) {
+    if (Array.isArray(rootDesires)) {
+      for (const d of rootDesires.slice(0, 5)) {
+        desiresList.push(typeof d === "string" ? d : d?.desire || d?.label || d?.name || String(d));
+      }
+    } else if (typeof rootDesires === "object") {
+      desiresList.push(...Object.keys(rootDesires).slice(0, 5));
+    }
   }
   if (desiresList.length === 0) {
-    desiresList.push(...Object.keys(audience.desireMap || {}).slice(0, 5));
+    const dm = audience.desireMap || {};
+    if (Array.isArray(dm)) {
+      for (const d of dm.slice(0, 5)) {
+        desiresList.push(typeof d === "string" ? d : d?.desire || d?.label || d?.name || String(d));
+      }
+    } else {
+      desiresList.push(...Object.keys(dm).slice(0, 5));
+    }
   }
 
   const objectionsList: string[] = [];
-  if (rootObjections && typeof rootObjections === "object") {
-    objectionsList.push(...Object.keys(rootObjections).slice(0, 5));
+  if (rootObjections) {
+    if (Array.isArray(rootObjections)) {
+      for (const o of rootObjections.slice(0, 5)) {
+        objectionsList.push(typeof o === "string" ? o : o?.objection || o?.label || o?.name || String(o));
+      }
+    } else if (typeof rootObjections === "object") {
+      objectionsList.push(...Object.keys(rootObjections).slice(0, 5));
+    }
   }
   if (objectionsList.length === 0) {
-    objectionsList.push(...Object.keys(audience.objectionMap || {}).slice(0, 5));
+    const om = audience.objectionMap || {};
+    if (Array.isArray(om)) {
+      for (const o of om.slice(0, 5)) {
+        objectionsList.push(typeof o === "string" ? o : o?.objection || o?.label || o?.name || String(o));
+      }
+    } else {
+      objectionsList.push(...Object.keys(om).slice(0, 5));
+    }
   }
 
   const proofTypesList: string[] = [];
