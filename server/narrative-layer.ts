@@ -94,7 +94,6 @@ function humanize(text: string): string {
   out = out.replace(/^[a-z]/, c => c.toUpperCase());
 
   out = out.trim();
-  if (out.length > 120) out = truncate(out, 120);
 
   return out;
 }
@@ -171,11 +170,11 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
   let problemSource = "positioning";
 
   if (enemy) {
-    problemText = truncate(enemy, 120);
+    problemText = enemy;
   } else if (contrastAxis) {
-    problemText = truncate(contrastAxis, 120);
+    problemText = contrastAxis;
   } else if (narrativeDirection) {
-    problemText = truncate(narrativeDirection, 120);
+    problemText = narrativeDirection;
   }
 
   if (!problemText && aelData?.rootCauses?.[0]) {
@@ -205,12 +204,12 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
   }
 
   if (!whyText && contrastAxis) {
-    whyText = truncate(contrastAxis, 120);
+    whyText = contrastAxis;
     whySource = "positioning";
   }
 
   if (!whyText && enemy) {
-    whyText = truncate(enemy, 120);
+    whyText = enemy;
     whySource = "positioning";
   }
 
@@ -222,7 +221,7 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
   let whatWeDoText: string;
   let positionSource = "positioning";
   if (territoryName && enemy) {
-    whatWeDoText = `Own "${territoryName}" — fight ${truncate(enemy, 80)}`;
+    whatWeDoText = `Own "${territoryName}" — fight ${enemy}`;
   } else if (territoryName) {
     whatWeDoText = `Own the "${territoryName}" territory`;
   } else {
@@ -269,13 +268,13 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
   let executeText: string;
   let executeSource = "offer+funnel";
   if (offerName && funnelType && coreOutcome) {
-    executeText = `"${truncate(offerName, 60)}" → ${funnelType} funnel → ${truncate(coreOutcome, 60)}`;
+    executeText = `"${offerName}" → ${funnelType} funnel → ${coreOutcome}`;
   } else if (offerName && funnelType) {
-    executeText = `"${truncate(offerName, 60)}" offer → ${funnelType} funnel`;
+    executeText = `"${offerName}" offer → ${funnelType} funnel`;
   } else if (offerName && coreOutcome) {
-    executeText = `"${truncate(offerName, 60)}" → ${truncate(coreOutcome, 60)}`;
+    executeText = `"${offerName}" → ${coreOutcome}`;
   } else if (offerName) {
-    executeText = `Execute with "${truncate(offerName, 80)}" offer`;
+    executeText = `"${offerName}" offer`;
   } else if (funnelType) {
     executeText = `Execute through ${funnelType} funnel`;
   } else {
