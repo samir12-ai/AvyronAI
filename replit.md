@@ -80,6 +80,16 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 - After generation starts, `refreshUser()` updates credit count in AuthContext
 - Files: `server/veo-routes.ts`, `server/auth.ts`, `app/(tabs)/create.tsx`, `context/AuthContext.tsx`, `shared/schema.ts`
 
+### Website (Landing + Pricing)
+- Landing page served at `/` on port 5000 (Express backend) — `server/templates/landing-page.html`
+- Pricing page served at `/pricing` on port 5000 — `server/templates/pricing.html`
+- Clean SaaS design using Inter font, brand purple (#7C3AED) accents, white background
+- Landing page sections: Hero, How It Works (3 steps), Product (4 cards), What You Get, Pricing Preview, Final CTA
+- Pricing page: 3 plans (One Shot $80, Growth $250, Ultra $500), video credits add-on, FAQ, bottom CTA
+- All "Start Free Trial" CTAs link to the app on port 8081
+- BASE_URL_PLACEHOLDER replaced at serve-time with the actual domain
+- Responsive design with mobile breakpoints
+
 ### Social Platforms
 - Instagram
 - Facebook

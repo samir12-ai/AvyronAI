@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pricing — MarketMind AI</title>
+  <meta name="description" content="Simple pricing for MarketMind AI. Choose the plan that fits your growth." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --purple: #7C3AED;
+      --purple-light: #8B5CF6;
+      --purple-bg: #F5F3FF;
+      --text: #111827;
+      --text-secondary: #6B7280;
+      --text-muted: #9CA3AF;
+      --border: #E5E7EB;
+      --bg: #FFFFFF;
+      --bg-subtle: #F9FAFB;
+      --max-w: 1120px;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: rgba(255,255,255,0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 0 24px;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text);
+    }
+    .nav-logo img {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+    }
+    .nav-logo span {
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: -0.3px;
+    }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 32px;
+    }
+    .nav-links a {
+      text-decoration: none;
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--text); }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 28px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+      cursor: pointer;
+      border: none;
+    }
+    .btn-primary {
+      background: var(--purple);
+      color: #fff;
+    }
+    .btn-primary:hover {
+      background: var(--purple-light);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 16px rgba(124,58,237,0.3);
+    }
+    .btn-outline {
+      background: transparent;
+      color: var(--purple);
+      border: 1.5px solid var(--purple);
+    }
+    .btn-outline:hover {
+      background: var(--purple-bg);
+    }
+    .btn-sm {
+      padding: 10px 20px;
+      font-size: 14px;
+    }
+
+    .container { max-width: var(--max-w); margin: 0 auto; padding: 0 24px; }
+
+    /* HEADER */
+    .pricing-header {
+      padding-top: 140px;
+      padding-bottom: 60px;
+      text-align: center;
+    }
+    .pricing-header .label {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--purple);
+      margin-bottom: 12px;
+    }
+    .pricing-header h1 {
+      font-size: clamp(32px, 5vw, 48px);
+      font-weight: 800;
+      letter-spacing: -1px;
+      line-height: 1.15;
+      margin-bottom: 16px;
+    }
+    .pricing-header p {
+      font-size: 18px;
+      color: var(--text-secondary);
+      max-width: 480px;
+      margin: 0 auto;
+    }
+
+    /* PLANS */
+    .plans {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 28px;
+      padding-bottom: 80px;
+    }
+    .plan {
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 40px 32px;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      transition: all 0.25s;
+      position: relative;
+    }
+    .plan:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.06);
+    }
+    .plan.featured {
+      border-color: var(--purple);
+      box-shadow: 0 8px 32px rgba(124,58,237,0.12);
+    }
+    .plan.featured::before {
+      content: 'Most Popular';
+      position: absolute;
+      top: -13px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--purple);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 18px;
+      border-radius: 100px;
+      white-space: nowrap;
+    }
+    .plan-color {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin-bottom: 16px;
+    }
+    .plan-name {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .plan-desc {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+    .plan-price {
+      font-size: 48px;
+      font-weight: 800;
+      letter-spacing: -1.5px;
+      margin-bottom: 4px;
+    }
+    .plan-period {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-bottom: 32px;
+    }
+    .plan-features {
+      list-style: none;
+      flex: 1;
+      margin-bottom: 32px;
+    }
+    .plan-features li {
+      font-size: 14px;
+      color: var(--text-secondary);
+      padding: 10px 0;
+      border-bottom: 1px solid #F3F4F6;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      line-height: 1.5;
+    }
+    .plan-features li:last-child {
+      border-bottom: none;
+    }
+    .plan-features .check {
+      color: var(--purple);
+      font-weight: 700;
+      font-size: 14px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .plan .btn { width: 100%; }
+
+    /* ADD-ON */
+    .addon-section {
+      padding-bottom: 80px;
+    }
+    .addon-card {
+      max-width: 600px;
+      margin: 0 auto;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      background: var(--bg-subtle);
+    }
+    .addon-info h3 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .addon-info p {
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+
+    /* FAQ */
+    .faq-section {
+      padding-bottom: 100px;
+    }
+    .faq-title {
+      text-align: center;
+      font-size: 28px;
+      font-weight: 800;
+      margin-bottom: 48px;
+      letter-spacing: -0.5px;
+    }
+    .faq-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 32px 48px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .faq-item h4 {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .faq-item p {
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* CTA */
+    .bottom-cta {
+      text-align: center;
+      background: var(--text);
+      padding: 80px 24px;
+      color: #fff;
+    }
+    .bottom-cta h2 {
+      font-size: clamp(24px, 4vw, 36px);
+      font-weight: 800;
+      margin-bottom: 16px;
+      letter-spacing: -0.5px;
+    }
+    .bottom-cta p {
+      color: rgba(255,255,255,0.65);
+      font-size: 16px;
+      margin-bottom: 32px;
+    }
+    .bottom-cta .btn-primary {
+      padding: 16px 40px;
+      font-size: 16px;
+    }
+
+    footer {
+      padding: 40px 24px;
+      border-top: 1px solid var(--border);
+      text-align: center;
+    }
+    footer p {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    footer a {
+      color: var(--text-secondary);
+      text-decoration: none;
+    }
+    footer a:hover { color: var(--purple); }
+
+    @media (max-width: 768px) {
+      .plans { grid-template-columns: 1fr; max-width: 400px; margin-left: auto; margin-right: auto; }
+      .faq-grid { grid-template-columns: 1fr; }
+      .addon-card { flex-direction: column; text-align: center; }
+      .nav-links a.hide-mobile { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="nav-logo">
+        <img src="/assets/images/logo.jpeg" alt="MarketMind" />
+        <span>MarketMind</span>
+      </a>
+      <div class="nav-links">
+        <a href="/" class="hide-mobile">Home</a>
+        <a href="/pricing" class="hide-mobile" style="color: var(--text); font-weight: 600;">Pricing</a>
+        <a href="BASE_URL_PLACEHOLDER:8081" class="btn btn-primary btn-sm">Start Free Trial</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="pricing-header">
+      <p class="label">Pricing</p>
+      <h1>Simple plans, full system</h1>
+      <p>Choose the plan that fits your growth. Start with a free trial.</p>
+    </div>
+
+    <div class="plans">
+      <!-- ONE SHOT -->
+      <div class="plan">
+        <div class="plan-color" style="background: #10B981;"></div>
+        <p class="plan-name">One Shot</p>
+        <p class="plan-desc">Full system for a single campaign</p>
+        <p class="plan-price">$80</p>
+        <p class="plan-period">one-time payment</p>
+        <ul class="plan-features">
+          <li><span class="check">&#10003;</span> Complete strategic analysis</li>
+          <li><span class="check">&#10003;</span> Strategy + narrative + plan</li>
+          <li><span class="check">&#10003;</span> AI content generation</li>
+          <li><span class="check">&#10003;</span> Execution layer access</li>
+          <li><span class="check">&#10003;</span> One campaign</li>
+        </ul>
+        <a href="BASE_URL_PLACEHOLDER:8081" class="btn btn-outline">Start Free Trial</a>
+      </div>
+
+      <!-- GROWTH -->
+      <div class="plan featured">
+        <div class="plan-color" style="background: #3B82F6;"></div>
+        <p class="plan-name">Growth</p>
+        <p class="plan-desc">For teams scaling their marketing</p>
+        <p class="plan-price">$250</p>
+        <p class="plan-period">per month</p>
+        <ul class="plan-features">
+          <li><span class="check">&#10003;</span> Everything in One Shot</li>
+          <li><span class="check">&#10003;</span> Ongoing system usage</li>
+          <li><span class="check">&#10003;</span> Multiple campaigns</li>
+          <li><span class="check">&#10003;</span> 2 video credits included</li>
+          <li><span class="check">&#10003;</span> Competitive intelligence updates</li>
+        </ul>
+        <a href="BASE_URL_PLACEHOLDER:8081" class="btn btn-primary">Start Free Trial</a>
+      </div>
+
+      <!-- ULTRA -->
+      <div class="plan">
+        <div class="plan-color" style="background: #EF4444;"></div>
+        <p class="plan-name">Ultra</p>
+        <p class="plan-desc">Maximum power for high-growth teams</p>
+        <p class="plan-price">$500</p>
+        <p class="plan-period">per month</p>
+        <ul class="plan-features">
+          <li><span class="check">&#10003;</span> Everything in Growth</li>
+          <li><span class="check">&#10003;</span> High usage &amp; scaling</li>
+          <li><span class="check">&#10003;</span> Priority processing</li>
+          <li><span class="check">&#10003;</span> 5 video credits included</li>
+          <li><span class="check">&#10003;</span> Advanced analytics</li>
+        </ul>
+        <a href="BASE_URL_PLACEHOLDER:8081" class="btn btn-outline">Start Free Trial</a>
+      </div>
+    </div>
+
+    <!-- ADD-ON -->
+    <div class="addon-section">
+      <div class="addon-card">
+        <div class="addon-info">
+          <h3>Additional Video Credits</h3>
+          <p>Need more AI video generations? Purchase credits anytime.</p>
+        </div>
+        <a href="BASE_URL_PLACEHOLDER:8081" class="btn btn-outline" style="white-space:nowrap;">Buy Credits</a>
+      </div>
+    </div>
+
+    <!-- FAQ -->
+    <div class="faq-section">
+      <h2 class="faq-title">Common questions</h2>
+      <div class="faq-grid">
+        <div class="faq-item">
+          <h4>What's included in the free trial?</h4>
+          <p>Full access to the entire system for 7 days. No credit card required.</p>
+        </div>
+        <div class="faq-item">
+          <h4>Can I switch plans?</h4>
+          <p>Yes. Upgrade or downgrade anytime. Changes take effect immediately.</p>
+        </div>
+        <div class="faq-item">
+          <h4>What are video credits?</h4>
+          <p>Each credit lets you generate one AI video using our Veo integration. Credits are included in Growth and Ultra plans.</p>
+        </div>
+        <div class="faq-item">
+          <h4>Do I need technical skills?</h4>
+          <p>No. MarketMind handles everything — from strategy to content creation to execution.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM CTA -->
+  <div class="bottom-cta">
+    <h2>Start your marketing system today</h2>
+    <p>7-day free trial. No credit card required.</p>
+    <a href="BASE_URL_PLACEHOLDER:8081" class="btn btn-primary">Start Free Trial</a>
+  </div>
+
+  <footer>
+    <div class="container">
+      <p>&copy; 2025 MarketMind AI. All rights reserved. &nbsp;|&nbsp; <a href="/">Home</a> &nbsp;|&nbsp; <a href="/data-deletion">Data Deletion</a></p>
+    </div>
+  </footer>
+
+</body>
+</html>

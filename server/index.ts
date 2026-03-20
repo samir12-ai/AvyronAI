@@ -195,6 +195,19 @@ function configureExpoAndLanding(app: express.Application) {
       return res.send(deletionHtml);
     }
 
+    if (req.path === "/pricing") {
+      const pricingPath = path.resolve(process.cwd(), "server", "templates", "pricing.html");
+      const pricingHtml = fs.readFileSync(pricingPath, "utf-8");
+      const forwardedProto = req.header("x-forwarded-proto");
+      const protocol = forwardedProto || req.protocol || "https";
+      const forwardedHost = req.header("x-forwarded-host");
+      const host = forwardedHost || req.get("host");
+      const baseUrl = `${protocol}://${host}`;
+      const finalHtml = pricingHtml.replace(/BASE_URL_PLACEHOLDER/g, baseUrl);
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      return res.status(200).send(finalHtml);
+    }
+
     if (req.path !== "/" && req.path !== "/manifest") {
       return next();
     }

@@ -1,0 +1,185 @@
+Hi,
+
+We’re now ready to build the full website (landing + pricing) based on the final product and flow we’ve aligned on.
+
+This needs to be clean, professional, and on par with top SaaS products (Stripe, Notion, Linear) — minimal, structured, and conversion-focused.
+
+---
+
+## 🎯 1. Overall Direction
+
+- Clean, modern SaaS design
+- Minimal layout (no clutter)
+- Strong typography and spacing
+- Use brand/logo colors as accents only (buttons, highlights)
+- Background should remain mostly white / neutral
+
+Goal:
+→ Make the product feel like a premium system, not a basic tool
+
+---
+
+## 🧩 2. Landing Page Structure
+
+### 🔥 Hero Section
+- Headline:
+  → “Stop guessing. Start growing.”
+- Subline:
+  → “MarketMind builds your entire marketing system — from strategy to execution.”
+- CTA:
+  → “Start Free Trial” (links to app login/signup)
+
+Keep this section:
+- Centered
+- Clean
+- No clutter
+
+---
+
+### 🧠 How It Works (3 Steps Only)
+
+Simple horizontal or stacked layout:
+
+1. Analyze your market  
+2. Build your system  
+3. Execute and grow  
+
+No long paragraphs — short and visual
+
+---
+
+### 🔥 Output / Product Section (Very Important)
+
+Show real product outputs:
+
+- Engine cards
+- Narrative layer
+- Strategy / plan view
+- Execution view
+
+Goal:
+→ Make it visually clear this is a full system, not a tool
+
+---
+
+### 💡 What You Get
+
+Short, bold items:
+
+- Strategy  
+- Content  
+- Execution  
+- System  
+
+No long explanations
+
+---
+
+### 💰 Pricing Preview Section
+
+Show 3 plans:
+
+- One Shot
+- Growth
+- Ultra
+
+With short descriptions and CTA:
+→ “Start Free Trial”
+
+Full pricing page will be separate
+
+---
+
+### 🚀 Final CTA Section
+
+- Message:
+  → “Start your marketing system”
+- Button:
+  → Start Free Trial
+
+---
+
+## 💳 3. Pricing Page (Separate Page)
+
+Create a dedicated pricing page with:
+
+### 🟢 One Shot — $80
+- Full system for one campaign
+- Strategy + narrative + plan
+- No video
+
+---
+
+### 🔵 Growth — $250
+- Ongoing system usage
+- Multiple campaigns
+- Includes 2 video credits
+
+---
+
+### 🔴 Ultra — $500
+- High usage / scaling
+- Priority processing
+- Includes 5 video credits
+
+---
+
+### ➕ Add-On (Optional Section)
+- Buy additional video credits
+
+---
+
+## 🔗 4. Stripe Integration (Important)
+
+- Each plan should have a direct Stripe payment link
+- Buttons:
+  → “Start Free Trial” (for new users)
+  → “Upgrade” (can link to Stripe)
+
+No complex billing system needed:
+- Just connect buttons to payment links
+- Webhook already handles access
+
+---
+
+## 🎨 5. Design Requirements
+
+- Use logo colors for:
+  - buttons
+  - highlights
+  - accents
+
+- Keep:
+  - white background
+  - large spacing
+  - modern typography
+
+Avoid:
+- heavy gradients
+- clutter
+- too many sections
+
+---
+
+## ⚠️ Important Constraints
+
+- Do NOT overcomplicate
+- Do NOT add unnecessary sections
+- Keep everything aligned with current product flow
+- This is a conversion-focused site, not a documentation site
+
+---
+
+## ✅ Final Goal
+
+- Clear first impression
+- Strong positioning (system, not tool)
+- Smooth path:
+  → Website → Trial → App → Upgrade
+
+---
+
+Once this is done, we’ll review and finalize for launch.
+
+Best,  
+Samir
