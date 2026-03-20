@@ -233,12 +233,19 @@ function configureExpoAndLanding(app: express.Application) {
   app.use("/assets", express.static(path.resolve(process.cwd(), "assets")));
   app.use(express.static(path.resolve(process.cwd(), "static-build")));
 
-  const expoAppRoutes = ["/login", "/intro", "/upgrade", "/create", "/settings", "/calendar", "/photography", "/studio"];
-  const staticBuildDir = path.resolve(process.cwd(), "static-build");
-  app.get(expoAppRoutes, (_req, res, next) => {
-    const indexPath = path.join(staticBuildDir, "index.html");
-    if (fs.existsSync(indexPath)) {
-      return res.sendFile(indexPath);
+  const webBuildDir = path.resolve(process.cwd(), "static-build", "web");
+  if (fs.existsSync(webBuildDir)) {
+    app.use(express.static(webBuildDir));
+    log("Serving Expo web build from static-build/web");
+  }
+
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.method !== "GET" || req.path.startsWith("/api") || req.path.startsWith("/assets")) {
+      return next();
+    }
+    const webIndex = path.resolve(process.cwd(), "static-build", "web", "index.html");
+    if (fs.existsSync(webIndex)) {
+      return res.sendFile(webIndex);
     }
     next();
   });

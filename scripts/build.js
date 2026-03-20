@@ -546,11 +546,38 @@ async function main() {
   console.log("Updating manifests and creating landing page...");
   updateManifests(manifests, timestamp, baseUrl, assetsByHash);
 
-  console.log("Build complete! Deploy to:", baseUrl);
-
   if (metroProcess) {
     metroProcess.kill();
+    metroProcess = null;
   }
+
+  console.log("Building web export...");
+  try {
+    const webBuildDir = path.join("static-build", "web");
+    const webExport = spawn("npx", ["expo", "export", "--platform", "web", "--output-dir", webBuildDir], {
+      stdio: "inherit",
+      env: { ...process.env, EXPO_PUBLIC_DOMAIN: domain, NODE_ENV: "production" },
+    });
+    await new Promise((resolve, reject) => {
+      webExport.on("close", (code) => {
+        if (code === 0) {
+          console.log("Web export complete");
+          resolve();
+        } else {
+          console.warn("Web export failed (code " + code + "), skipping web build");
+          resolve();
+        }
+      });
+      webExport.on("error", (err) => {
+        console.warn("Web export error:", err.message);
+        resolve();
+      });
+    });
+  } catch (err) {
+    console.warn("Web export skipped:", err.message);
+  }
+
+  console.log("Build complete! Deploy to:", baseUrl);
   process.exit(0);
 }
 
