@@ -154,6 +154,7 @@ function CampaignBar() {
 
   const openModal = () => {
     refreshCampaigns();
+    setShowCreateInModal(false);
     setShowModal(true);
   };
 
@@ -431,6 +432,9 @@ function CampaignListModal({
   useEffect(() => {
     if (visible && initialCreate) {
       setShowCreateForm(true);
+    }
+    if (!visible) {
+      setShowCreateForm(false);
     }
   }, [visible, initialCreate]);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
