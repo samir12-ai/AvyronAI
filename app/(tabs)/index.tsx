@@ -32,6 +32,7 @@ import ExecutionPlan from '@/components/ExecutionPlan';
 import { RequiredWorkCard } from '@/components/RequiredWorkCard';
 import DataFreshnessWarning from '@/components/DataFreshnessWarning';
 import DashboardChat from '@/components/DashboardChat';
+import NarrativeCard from '@/components/NarrativeCard';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -576,6 +577,8 @@ export default function DashboardScreen() {
               onBuildPlan={handleBuildPlan}
               onApprovePlan={handleApprovePlan}
             />
+
+            <NarrativeCard campaignId={selectedCampaignId} isDark={isDark} />
 
             <ExecutionPlan />
 

@@ -6,8 +6,6 @@ import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl } from '@/lib/query-client';
-import EngineTableModal from '@/components/EngineTableModal';
-
 const P = {
   mint: '#34D399',
   neon: '#39FF14',
@@ -323,8 +321,6 @@ export default function ExecutionPlan() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [showEngineTable, setShowEngineTable] = useState(false);
-
   const bg = isDark ? '#0D1117' : '#F8FAFB';
   const textPrimary = isDark ? '#E8ECF0' : '#1A2332';
   const textSecondary = isDark ? '#8892A4' : '#546478';
@@ -389,13 +385,6 @@ export default function ExecutionPlan() {
             <Text style={[s.headerSub, { color: textSecondary }]}>Clear decisions — ready to execute</Text>
           </View>
         </View>
-        <Pressable
-          onPress={() => setShowEngineTable(true)}
-          style={[s.engineTableBtn, { backgroundColor: P.blue + '18', borderColor: P.blue + '40' }]}
-        >
-          <Ionicons name="grid-outline" size={13} color={P.blue} />
-          <Text style={[s.engineTableBtnText, { color: P.blue }]}>Engine Table</Text>
-        </Pressable>
       </View>
 
       {!plan && !loading && !error && (
@@ -454,11 +443,6 @@ export default function ExecutionPlan() {
         </View>
       )}
 
-      <EngineTableModal
-        visible={showEngineTable}
-        onClose={() => setShowEngineTable(false)}
-        campaignId={selectedCampaignId || ''}
-      />
     </View>
   );
 }
@@ -513,8 +497,6 @@ const s = StyleSheet.create({
   kpiContent: { flex: 1 },
   kpiLabel: { fontSize: 11, fontWeight: '600' as const, letterSpacing: 0.3, marginBottom: 2 },
   kpiValue: { fontSize: 13, lineHeight: 18 },
-  engineTableBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1 },
-  engineTableBtnText: { fontSize: 12, fontWeight: '600' as const },
   calendarCta: { borderRadius: 12, overflow: 'hidden', marginTop: 4 },
   calendarCtaInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 14, borderRadius: 12 },
   calendarCtaText: { color: '#FFF', fontSize: 16, fontWeight: '700' as const },

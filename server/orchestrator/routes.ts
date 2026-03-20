@@ -1148,4 +1148,15 @@ export function registerOrchestratorV2Routes(app: Express) {
       res.status(500).json({ error: error.message });
     }
   });
+
+  app.get("/api/narrative/:campaignId", async (req: Request, res: Response) => {
+    try {
+      const accountId = (req.query.accountId as string) || "default";
+      const { buildCausalNarrative } = await import("../narrative-layer");
+      const narrative = await buildCausalNarrative(req.params.campaignId, accountId);
+      res.json(narrative);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
 }

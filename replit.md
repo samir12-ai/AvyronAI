@@ -21,7 +21,8 @@ The backend employs Express.js with Node.js and TypeScript, exposing RESTful API
 Client-side data is stored using AsyncStorage. Server-side data, including user information and chat conversations, is managed in PostgreSQL with Drizzle ORM. Snapshot lifecycle management operates in DATA_ARCHIVING mode with dual-window retention and latest-per-campaign protection.
 
 ### Key Features
-- **Dashboard**: Displays revenue-focused KPIs, campaign metrics, and an inline AI chat box (DashboardChat) replacing the old MarketMindAgent info card. The full-screen agent chat is still accessible via FAB button.
+- **Dashboard**: Displays revenue-focused KPIs, campaign metrics, a Strategic Narrative causal chain card (NarrativeCard), and an inline AI chat box (DashboardChat). The full-screen agent chat is still accessible via FAB button.
+- **Causal Narrative Layer**: A deterministic, read-only, stateless post-processing layer (`server/narrative-layer.ts`) that transforms engine outputs into a 5-step causal chain (Market Problem → Why It Happens → What We Do → How We Fix It → What To Execute). Served via `GET /api/narrative/:campaignId`. No AI calls, no DB writes.
 - **Content Creation**: AI Writer for text and AI Designer for image generation.
 - **AI Management**: Auto-Publisher for Meta platforms, AI Audience Engine, and a Performance Intelligence Layer.
 - **Strategic Engines**: Includes Positioning, Differentiation (V8), Mechanism (with AEL causal grounding), Offer, Funnel, Integrity, Awareness, and Persuasion (V4) Engines, designed to generate comprehensive strategic plans. The Offer Engine uses a deterministic skeleton architecture when a Strategy Root is active, ensuring strategic alignment.
