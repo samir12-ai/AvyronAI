@@ -54,6 +54,51 @@ function truncate(s: string, max: number): string {
   return s.substring(0, max - 1) + "…";
 }
 
+const REPLACEMENTS: Array<[RegExp, string]> = [
+  [/\bthe market\s+(?:is\s+)?(?:currently\s+)?(?:dominated|saturated)\s+(?:by|with)\b/gi, "most brands rely on"],
+  [/\bgeneric\s+(?:and\s+)?commoditized\b/gi, "generic"],
+  [/\black\s+of\s+differentiation\b/gi, "no clear differentiator"],
+  [/\bfailure\s+to\s+(?:adequately\s+)?address\b/gi, "not addressing"],
+  [/\binability\s+to\b/gi, "can't"],
+  [/\bdue\s+to\s+the\s+fact\s+that\b/gi, "because"],
+  [/\bin\s+order\s+to\b/gi, "to"],
+  [/\bleverage\b/gi, "use"],
+  [/\butilize\b/gi, "use"],
+  [/\bfacilitate\b/gi, "enable"],
+  [/\boptimize\b/gi, "improve"],
+  [/\bimplement\b/gi, "build"],
+  [/\bestablish\b/gi, "create"],
+  [/\bdemonstrate\b/gi, "show"],
+  [/\bidentify\b/gi, "find"],
+  [/\bprimary\s+differentiator\b/gi, "key advantage"],
+  [/\bas\s+(?:a\s+)?primary\s+(?:strategic\s+)?advantage\b/gi, "as the edge"],
+  [/\bstrategic\s+positioning\b/gi, "positioning"],
+  [/\bstrategic\s+narrative\b/gi, "narrative"],
+  [/\bstrategic\s+mechanism\b/gi, "mechanism"],
+  [/\bcausal\s+reasoning\b/gi, "root cause"],
+  [/\bsurface\s*-?\s*level\s+signals?\b/gi, "visible symptom"],
+  [/\bmechanism\s+drives\s+the\s+fix\b/gi, "mechanism"],
+  [/\b(?:Execute|Deploy)\s+(?:with|through|via)\s+/gi, ""],
+  [/\s+funnel\s+funnel\b/g, " funnel"],
+  [/\s{2,}/g, " "],
+];
+
+function humanize(text: string): string {
+  if (!text || text.startsWith("Pending")) return text;
+
+  let out = text;
+  for (const [pattern, replacement] of REPLACEMENTS) {
+    out = out.replace(pattern, replacement);
+  }
+
+  out = out.replace(/^[a-z]/, c => c.toUpperCase());
+
+  out = out.trim();
+  if (out.length > 120) out = truncate(out, 120);
+
+  return out;
+}
+
 export async function buildCausalNarrative(campaignId: string, accountId: string = "default"): Promise<CausalNarrative> {
   const empty: CausalNarrative = { hasNarrative: false, steps: [], oneLiner: "", engineCount: 0, completedAt: null };
 
@@ -239,14 +284,14 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
   }
 
   const steps: NarrativeStep[] = [
-    { key: "problem", label: "Market Problem", icon: "alert-circle-outline", text: problemText, source: problemSource },
-    { key: "why", label: "Why It Happens", icon: "git-branch-outline", text: whyText, source: whySource },
-    { key: "position", label: "What We Do", icon: "flag-outline", text: whatWeDoText, source: positionSource },
-    { key: "mechanism", label: "How We Fix It", icon: "construct-outline", text: howText, source: howSource },
-    { key: "execute", label: "What To Execute", icon: "rocket-outline", text: executeText, source: executeSource },
+    { key: "problem", label: "Market Problem", icon: "alert-circle-outline", text: humanize(problemText), source: problemSource },
+    { key: "why", label: "Why It Happens", icon: "git-branch-outline", text: humanize(whyText), source: whySource },
+    { key: "position", label: "What We Do", icon: "flag-outline", text: humanize(whatWeDoText), source: positionSource },
+    { key: "mechanism", label: "How We Fix It", icon: "construct-outline", text: humanize(howText), source: howSource },
+    { key: "execute", label: "What To Execute", icon: "rocket-outline", text: humanize(executeText), source: executeSource },
   ];
 
-  const oneLiner = `${problemText} → ${whatWeDoText} → ${executeText}`;
+  const oneLiner = `${humanize(problemText)} → ${humanize(whatWeDoText)} → ${humanize(executeText)}`;
 
   return {
     hasNarrative: true,
