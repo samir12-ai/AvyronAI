@@ -1,0 +1,92 @@
+subject=“Add a Small Human Translation Layer to Narrative (Keep It Clean, Not Overbuilt)”}
+Hi,
+
+The Narrative Layer is now structurally correct and aligned with the engine outputs.
+
+We do want to improve it further, but I want to be very clear about the direction:
+
+We are OK adding a layer
+
+But it should be:
+	•	small
+	•	focused
+	•	deterministic
+	•	post-processing only
+
+We do not want this to turn into a large new system or a complex branch of logic.
+
+⸻
+
+Objective
+
+Add a light Human Translation Layer on top of the current Narrative Layer so the output becomes:
+	•	easier to understand
+	•	less internal/jargon-heavy
+	•	more direct for non-expert users
+
+Without:
+	•	changing engine logic
+	•	changing sources
+	•	reinterpreting strategy
+	•	introducing AI calls
+
+⸻
+
+What this layer should do
+
+It should only:
+	1.	Simplify language
+	•	turn internal/system phrasing into clearer market language
+	2.	Shorten outputs
+	•	each step should be concise and readable
+	3.	Reduce repetition
+	•	avoid saying the same idea twice across different steps
+	4.	Keep causal truth
+	•	same meaning
+	•	same source alignment
+	•	just better phrasing
+
+⸻
+
+Important constraints
+
+This layer must remain:
+	•	deterministic
+	•	read-only
+	•	post-engine / pre-UI
+	•	lightweight
+	•	fully aligned with engine cards
+
+And most importantly:
+
+It must simplify the same story, not invent a better-sounding one.
+
+⸻
+
+What I need from you
+
+Please review the current code structure and tell me:
+	1.	What is the cleanest way to add this layer without overbuilding it?
+	2.	Should it live:
+	•	inside buildCausalNarrative()
+	•	right after it
+	•	or as a small helper used by it?
+	3.	What exact parts should it transform:
+	•	all 5 narrative steps?
+	•	only specific ones like Market Problem / Why It Happens / What We Do?
+	4.	What should be explicitly forbidden so it stays simple and doesn’t drift?
+	5.	What existing utilities or mappings can be reused so we don’t duplicate work?
+
+⸻
+
+Goal
+
+Build this correctly from the start:
+	•	proper
+	•	minimal
+	•	strong
+	•	not bloated
+
+Best,
+Samir
+:::
