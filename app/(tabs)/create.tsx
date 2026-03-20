@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
   Dimensions,
   Modal,
+  Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Animated, {
@@ -2496,14 +2497,70 @@ export default function CreateScreen() {
                 </>
               )}
 
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Ionicons name="videocam" size={14} color={videoCredits > 0 ? '#7C3AED' : '#EF4444'} />
-                  <Text style={{ fontSize: 13, fontFamily: 'Inter_600SemiBold', color: videoCredits > 0 ? '#7C3AED' : '#EF4444' }}>
-                    {videoCredits} credit{videoCredits !== 1 ? 's' : ''} remaining
+              {videoCredits === 1 && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FEF3C7', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginBottom: 8 }}>
+                  <Ionicons name="warning" size={16} color="#D97706" />
+                  <Text style={{ fontSize: 13, fontFamily: 'Inter_600SemiBold', color: '#92400E', flex: 1 }}>
+                    1 video left
                   </Text>
                 </View>
-              </View>
+              )}
+
+              {videoCredits > 0 && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="videocam" size={14} color="#7C3AED" />
+                    <Text style={{ fontSize: 13, fontFamily: 'Inter_600SemiBold', color: '#7C3AED' }}>
+                      {videoCredits} credit{videoCredits !== 1 ? 's' : ''} remaining
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {videoCredits <= 0 && (
+                <View style={{ backgroundColor: isDark ? '#1F1520' : '#FEF2F2', borderWidth: 1, borderColor: isDark ? '#7C3AED33' : '#FECACA', borderRadius: 12, padding: 16, marginBottom: 8, alignItems: 'center' }}>
+                  <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: isDark ? '#7C3AED20' : '#EDE9FE', alignItems: 'center', justifyContent: 'center', marginBottom: 10 }}>
+                    <Ionicons name="videocam-off" size={22} color="#7C3AED" />
+                  </View>
+                  <Text style={{ fontSize: 15, fontFamily: 'Inter_600SemiBold', color: colors.text, marginBottom: 4, textAlign: 'center' }}>
+                    You've used your video credits
+                  </Text>
+                  <Text style={{ fontSize: 12, fontFamily: 'Inter_400Regular', color: colors.textMuted, marginBottom: 14, textAlign: 'center' }}>
+                    Get more credits to keep creating AI videos
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 10, width: '100%' }}>
+                    <Pressable
+                      onPress={() => {
+                        const link = process.env.EXPO_PUBLIC_STRIPE_PAYMENT_LINK;
+                        if (link) {
+                          Linking.openURL(link);
+                        } else {
+                          Alert.alert('Buy More Credits', 'Credit top-up will be available shortly. Upgrade your plan for more credits.');
+                        }
+                      }}
+                      style={{ flex: 1, backgroundColor: '#7C3AED', borderRadius: 10, paddingVertical: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
+                    >
+                      <Ionicons name="cart" size={16} color="#fff" />
+                      <Text style={{ fontSize: 14, fontFamily: 'Inter_600SemiBold', color: '#fff' }}>Buy More Credits</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => {
+                        const link = process.env.EXPO_PUBLIC_STRIPE_PAYMENT_LINK;
+                        if (link) {
+                          Linking.openURL(link);
+                        } else {
+                          Alert.alert('Upgrade Plan', 'Plan upgrades will be available shortly.');
+                        }
+                      }}
+                      style={{ flex: 1, borderWidth: 1.5, borderColor: '#7C3AED', borderRadius: 10, paddingVertical: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
+                    >
+                      <Ionicons name="arrow-up-circle" size={16} color="#7C3AED" />
+                      <Text style={{ fontSize: 14, fontFamily: 'Inter_600SemiBold', color: '#7C3AED' }}>Upgrade Plan</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
               <Pressable
                 onPress={handleGenerateVideo}
                 disabled={isGeneratingVideo || !videoPrompt.trim() || videoCredits <= 0}
