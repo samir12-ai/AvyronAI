@@ -1,0 +1,162 @@
+Hi,
+
+We need to completely redesign the website to reach a top-tier SaaS standard (Jasper / Notion / Stripe level) — not in terms of copying, but in terms of quality, structure, and visual impact.
+
+Right now the site feels too basic. We want something that feels:
+→ Premium  
+→ Visual  
+→ Structured  
+→ “This is a full system”, not a simple tool  
+
+This is important for launch — it needs to impress immediately.
+
+---
+
+## 🎯 Overall Direction
+
+- Clean, modern SaaS design
+- Strong visual storytelling (not just text)
+- Each section should feel like a designed block, not plain content
+- Use graphics, shapes, icons, and styled visuals
+- Make it feel alive and polished
+
+Think:
+→ Jasper quality  
+→ But adapted to our product (system, not tool)
+
+---
+
+## 🔥 1. Hero Section (Very Important)
+
+We want a strong, high-impact hero:
+
+- Headline:
+  → “Stop guessing. Start growing.”
+
+- Sub:
+  → “Your complete marketing system — built in minutes.”
+
+- CTA:
+  → Start Free Trial
+
+- Under the hero:
+  → Add a strong visual (real product UI):
+    - engine cards
+    - narrative
+    - pipeline
+
+No generic images — must be real product feel.
+
+---
+
+## 🧠 2. Visual Sections (Core of the Site)
+
+Each section should be:
+
+- Title
+- Short description (1–2 lines max)
+- Strong visual (UI, mock, or graphic)
+
+### Example sections:
+
+1. Build your strategy  
+   → show engine cards
+
+2. Connect everything into a system  
+   → show narrative layer
+
+3. Turn insights into execution  
+   → show plan + execution
+
+4. Content that actually converts  
+   → show content DNA / outputs
+
+---
+
+## 🎨 3. Design Style
+
+- Use brand/logo colors as accents
+- Background mostly white
+- Add alternating section backgrounds (light tones)
+
+Very important:
+- Add graphic elements:
+  - shapes
+  - grids
+  - subtle patterns
+  - icons
+  - small illustrations
+
+Make it feel designed — not empty.
+
+---
+
+## 🧩 4. Visual Quality (Push This Hard)
+
+I want this to feel:
+→ “Wow” when you open it
+
+So:
+
+- Add styled UI frames (like Jasper)
+- Add small visual callouts
+- Use emojis/icons where appropriate
+- If needed:
+  → generate simple graphics/images to support sections
+
+Do NOT leave sections plain.
+
+---
+
+## 💬 5. Content Rules
+
+- No long paragraphs
+- Keep everything:
+  - short
+  - sharp
+  - readable
+
+Focus on:
+→ outcome  
+→ clarity  
+→ impact  
+
+---
+
+## 💰 6. Pricing Section
+
+- Clean 3-column layout:
+  - One Shot
+  - Growth
+  - Ultra
+
+- Clear differentiation
+- CTA buttons connected to app / Stripe
+
+No complexity — clean and premium.
+
+---
+
+## ⚠️ Important Constraints
+
+- Do NOT copy Jasper design directly
+- Do NOT overcomplicate structure
+- Do NOT leave sections empty or text-only
+
+---
+
+## ✅ Goal
+
+We want:
+→ A website that feels like a serious product  
+→ Strong first impression  
+→ High conversion potential  
+
+---
+
+Take your time to make this visually strong and polished — this is critical for launch.
+
+Once done, we’ll review together and refine.
+
+Best,  
+Samir
