@@ -225,6 +225,22 @@ export function registerAuthRoutes(app: Router) {
     }
   });
 
+  app.post("/api/onboarding/track", async (req: AuthRequest, res: Response) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    const payload = verifyToken(authHeader.slice(7));
+    if (!payload) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
+    const { event, ...data } = req.body;
+    console.log(`[Onboarding] ${event} | user=${payload.userId}`, JSON.stringify(data));
+    res.json({ success: true });
+  });
+
   app.post("/api/stripe/webhook", async (req: Request, res: Response) => {
     try {
       if (STRIPE_WEBHOOK_SECRET) {

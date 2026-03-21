@@ -19,6 +19,8 @@ import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { LanguageProvider } from "@/context/LanguageContext";
 import { CampaignProvider } from "@/context/CampaignContext";
 import { CreativeContextProvider } from "@/context/CreativeContext";
+import { OnboardingProvider } from "@/context/OnboardingContext";
+import OnboardingAgent from "@/components/OnboardingAgent";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -98,17 +100,29 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function OnboardingOverlay() {
+  const { isAuthenticated, user, isAccessActive } = useAuth();
+  const showOnboarding = isAuthenticated && user?.hasSeenIntro && isAccessActive;
+  if (!showOnboarding) return null;
+  return <OnboardingAgent />;
+}
+
 function RootLayoutNav() {
   return (
     <AuthGate>
-      <Stack screenOptions={{ headerBackTitle: "Back" }}>
-        <Stack.Screen name="login" options={{ headerShown: false }} />
-        <Stack.Screen name="intro" options={{ headerShown: false }} />
-        <Stack.Screen name="upgrade" options={{ headerShown: false }} />
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="studio/[id]" options={{ headerShown: false, presentation: 'card' }} />
-        <Stack.Screen name="agent" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
-      </Stack>
+      <OnboardingProvider>
+        <View style={{ flex: 1 }}>
+          <Stack screenOptions={{ headerBackTitle: "Back" }}>
+            <Stack.Screen name="login" options={{ headerShown: false }} />
+            <Stack.Screen name="intro" options={{ headerShown: false }} />
+            <Stack.Screen name="upgrade" options={{ headerShown: false }} />
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="studio/[id]" options={{ headerShown: false, presentation: 'card' }} />
+            <Stack.Screen name="agent" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
+          </Stack>
+          <OnboardingOverlay />
+        </View>
+      </OnboardingProvider>
     </AuthGate>
   );
 }
