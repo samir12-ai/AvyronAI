@@ -1,0 +1,125 @@
+:::writing{id=“91537” variant=“email” subject=“URGENT: Fix Account Isolation + Shared Data Leak (Multi-Tenant Issue)”}
+Hi,
+
+We need to address a critical architectural issue immediately before we proceed with real users.
+
+Right now, the system is using a shared:
+→ account_id = 'default'
+
+This is causing all users to see the same data, which is not acceptable for a production SaaS.
+
+⸻
+
+🚨 1. Critical Issue — No Account Isolation
+
+Current behavior:
+	•	All campaigns, engine outputs, plans, and content are tied to default
+	•	Any user logging in can see all data (from other users)
+
+Example:
+	•	User A (clothing business) creates a campaign
+	•	User B (fitness business) logs in → sees clothing campaign
+
+❗ This breaks:
+	•	data privacy
+	•	product logic
+	•	SaaS model entirely
+
+⸻
+
+✅ Required Fix — Multi-Tenant Isolation
+
+We need to implement account-based data isolation immediately:
+
+1. Each user must have:
+	•	a unique account_id
+
+2. On signup:
+	•	automatically create a new account
+	•	assign it to the user
+
+3. ALL data must be tied to:
+
+→ account_id = currentUser.accountId
+
+This includes:
+	•	campaigns
+	•	orchestrator_jobs
+	•	engine snapshots (all engines)
+	•	strategic_plans
+	•	calendar_entries
+	•	studio_items
+	•	content_dna
+	•	execution tasks
+	•	any other generated data
+
+⸻
+
+⚠️ 2. Shared Data / Scraping DB Issue
+
+There is another serious problem:
+
+The shared database used to reduce scraping (market data / competitors / etc.):
+
+→ is currently visible across ALL users
+
+This is NOT correct.
+
+⸻
+
+✅ Required Behavior
+	•	This shared dataset should be:
+→ admin-level only
+→ NOT exposed to normal users
+
+Users should:
+	•	only see data generated for their own account
+	•	not global/shared scraped data
+
+⸻
+
+🔒 Access Control Needed
+	•	Add clear separation:
+	•	User data (per account)
+	•	System/global data (admin only)
+	•	Only admin (you / internal) can access:
+	•	aggregated scraped data
+	•	cross-account insights
+
+⸻
+
+⚠️ Constraints
+	•	Do NOT break existing pipelines
+	•	Do NOT lose current data
+	•	Keep system stable
+
+⸻
+
+🎯 Priority
+
+This is high priority / blocking for real users.
+
+We cannot:
+	•	onboard multiple users
+	•	or launch publicly
+
+until this is fixed.
+
+⸻
+
+✅ Deliverables
+	1.	Proper account isolation implemented
+	2.	All queries scoped by account_id
+	3.	Shared/scraped DB restricted to admin only
+	4.	Verified:
+	•	two users cannot see each other’s data
+
+⸻
+
+Please handle this carefully but as soon as possible.
+
+Let me know once done so we can test with multiple users.
+
+Best,
+Samir
+:::
