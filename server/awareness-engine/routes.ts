@@ -37,7 +37,7 @@ function safeNumber(v: any, fallback: number): number {
 export function registerAwarenessEngineRoutes(app: Express) {
   app.post("/api/awareness-engine/analyze", async (req: Request, res: Response) => {
     try {
-      const { campaignId, accountId = "default", offerSnapshotId, validationSessionId } = req.body;
+      const { campaignId, offerSnapshotId, validationSessionId } = req.body;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

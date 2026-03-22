@@ -4,7 +4,7 @@ import { runBuildPlanLayer } from "./engine";
 export function registerBuildPlanLayerRoutes(app: Express) {
   app.post("/api/build-plan-layer/generate", async (req, res) => {
     try {
-      const { accountId = "default", campaignId } = req.body;
+      const { campaignId } = req.body;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }

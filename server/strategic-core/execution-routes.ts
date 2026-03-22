@@ -259,7 +259,8 @@ export async function emergencyStopAllRunningPlans(accountId: string, reason: st
 export function registerExecutionRoutes(app: Express) {
   app.post("/api/execution/plans/generate", async (req: Request, res: Response) => {
     try {
-      const { blueprintId, campaignId, accountId = "default", periodDays = 30 } = req.body;
+      const { blueprintId, campaignId, periodDays = 30 } = req.body;
+      const accountId = (req as any).accountId || "default";
 
       if (!blueprintId || !campaignId) {
         return res.status(400).json({ error: "blueprintId and campaignId are required" });

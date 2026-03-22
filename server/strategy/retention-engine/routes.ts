@@ -17,7 +17,7 @@ function safeJsonParse(text: any): any {
 export function registerRetentionEngineRoutes(app: Express) {
   app.post("/api/strategy/retention-engine/analyze", async (req: Request, res: Response) => {
     try {
-      const { campaignId, accountId = "default", validationSessionId } = req.body;
+      const { campaignId, validationSessionId } = req.body;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

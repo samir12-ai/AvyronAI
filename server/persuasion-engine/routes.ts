@@ -85,7 +85,7 @@ async function resolveSnapshot(table: any, idField: any, id: string, campaignId:
 export function registerPersuasionEngineRoutes(app: Express) {
   app.post("/api/persuasion-engine/analyze", async (req: Request, res: Response) => {
     try {
-      const { campaignId, accountId = "default", awarenessSnapshotId, validationSessionId } = req.body;
+      const { campaignId, awarenessSnapshotId, validationSessionId } = req.body;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

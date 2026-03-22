@@ -30,7 +30,7 @@ function safeNumber(v: any, fallback: number): number {
 export function registerChannelSelectionRoutes(app: Express) {
   app.post("/api/strategy/channel-selection/analyze", async (req: Request, res: Response) => {
     try {
-      const { campaignId, accountId = "default", validationSessionId, channelMode = "automatic" } = req.body;
+      const { campaignId, validationSessionId, channelMode = "automatic" } = req.body;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

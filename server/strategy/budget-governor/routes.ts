@@ -16,7 +16,7 @@ function safeJsonParse(text: any): any {
 export function registerBudgetGovernorRoutes(app: Express) {
   app.post("/api/strategy/budget-governor/analyze", async (req: Request, res: Response) => {
     try {
-      const { campaignId, accountId = "default", validationSnapshotId, validationSessionId } = req.body;
+      const { campaignId, validationSnapshotId, validationSessionId } = req.body;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

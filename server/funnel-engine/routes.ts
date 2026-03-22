@@ -24,7 +24,7 @@ function safeJsonParse(text: any): any {
 export function registerFunnelEngineRoutes(app: Express) {
   app.post("/api/funnel-engine/analyze", async (req: Request, res: Response) => {
     try {
-      const { campaignId, accountId = "default", offerSnapshotId, awarenessSnapshotId, validationSessionId } = req.body;
+      const { campaignId, offerSnapshotId, awarenessSnapshotId, validationSessionId } = req.body;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -436,7 +436,7 @@ export function registerFunnelEngineRoutes(app: Express) {
 
   app.post("/api/funnel-engine/select", async (req: Request, res: Response) => {
     try {
-      const { snapshotId, selectedOption, campaignId, accountId = "default" } = req.body;
+      const { snapshotId, selectedOption, campaignId } = req.body;
 
       if (!snapshotId || !selectedOption || !campaignId) {
         return res.status(400).json({ error: "snapshotId, selectedOption, and campaignId are required" });
@@ -468,7 +468,7 @@ export function registerFunnelEngineRoutes(app: Express) {
 
   app.post("/api/offer-engine/select", async (req: Request, res: Response) => {
     try {
-      const { snapshotId, selectedOption, campaignId, accountId = "default" } = req.body;
+      const { snapshotId, selectedOption, campaignId } = req.body;
 
       if (!snapshotId || !selectedOption || !campaignId) {
         return res.status(400).json({ error: "snapshotId, selectedOption, and campaignId are required" });

@@ -28,7 +28,7 @@ export function setCachedAEL(campaignId: string, pkg: AnalyticalPackage): void {
 export function registerAELRoutes(app: Express) {
   app.post("/api/ael/build", async (req: Request, res: Response) => {
     try {
-      const { campaignId, accountId = "default" } = req.body;
+      const { campaignId } = req.body;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

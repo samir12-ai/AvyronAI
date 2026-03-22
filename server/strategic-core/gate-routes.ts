@@ -70,12 +70,12 @@ export function registerGateRoutes(app: Express) {
   app.post("/api/strategic/init", async (req: Request, res: Response) => {
     try {
       const {
-        accountId = "default",
         campaignId,
         competitorUrls,
         averageSellingPrice,
         metaConnected = false,
       } = req.body;
+      const accountId = (req as any).accountId || "default";
 
       if (!competitorUrls || !Array.isArray(competitorUrls) || competitorUrls.length < 1) {
         return res.status(400).json({
@@ -287,7 +287,8 @@ export function registerGateRoutes(app: Express) {
 
   app.get("/api/strategic/audit-log", async (req: Request, res: Response) => {
     try {
-      const { accountId = "default", blueprintId, limit: queryLimit = "50" } = req.query as Record<string, string>;
+      const { blueprintId, limit: queryLimit = "50" } = req.query as Record<string, string>;
+      const accountId = (req as any).accountId || "default";
       const { strategicAuditLogs: auditTable } = await import("@shared/schema");
 
       let query = db.select().from(auditTable);
@@ -315,7 +316,8 @@ export function registerGateRoutes(app: Express) {
 
   app.get("/api/strategic/blueprint-versions", async (req: Request, res: Response) => {
     try {
-      const { campaignId, blueprintId, accountId = "default" } = req.query as Record<string, string>;
+      const { campaignId, blueprintId } = req.query as Record<string, string>;
+      const accountId = (req as any).accountId || "default";
 
       if (!campaignId && !blueprintId) {
         return res.status(400).json({ error: "Provide campaignId or blueprintId" });
@@ -421,7 +423,8 @@ export function registerGateRoutes(app: Express) {
 
   app.get("/api/strategic/field-diffs", async (req: Request, res: Response) => {
     try {
-      const { blueprintId, campaignId, accountId = "default", limit: queryLimit = "100" } = req.query as Record<string, string>;
+      const { blueprintId, campaignId, limit: queryLimit = "100" } = req.query as Record<string, string>;
+      const accountId = (req as any).accountId || "default";
 
       if (!blueprintId && !campaignId) {
         return res.status(400).json({ error: "Provide blueprintId or campaignId" });

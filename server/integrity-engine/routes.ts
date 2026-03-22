@@ -38,7 +38,7 @@ function safeNumber(v: any, fallback: number): number {
 export function registerIntegrityEngineRoutes(app: Express) {
   app.post("/api/integrity-engine/analyze", async (req: Request, res: Response) => {
     try {
-      const { campaignId, accountId = "default", funnelSnapshotId, validationSessionId } = req.body;
+      const { campaignId, funnelSnapshotId, validationSessionId } = req.body;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

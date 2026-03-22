@@ -18,13 +18,13 @@ export function registerIterationEngineRoutes(app: Express) {
     try {
       const {
         campaignId,
-        accountId = "default",
         validationSessionId,
         performance = null,
         funnel = null,
         creative = null,
         persuasion = null,
       } = req.body;
+      const accountId = (req as any).accountId || "default";
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

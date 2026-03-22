@@ -21,7 +21,7 @@ function safeJsonParse(text: any): any {
 export function registerOfferEngineRoutes(app: Express) {
   app.post("/api/offer-engine/analyze", async (req: Request, res: Response) => {
     try {
-      const { campaignId, accountId = "default", differentiationSnapshotId, validationSessionId } = req.body;
+      const { campaignId, differentiationSnapshotId, validationSessionId } = req.body;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
