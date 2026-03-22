@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import OpenAI from "openai";
 import { chatStorage } from "./storage";
 import { loadSystemContext, buildSystemPrompt } from "../../orchestrator/agent-context";
+import { resolveAccountId } from "../../auth";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -72,7 +73,8 @@ export function registerChatRoutes(app: Express): void {
       let systemPrompt = "You are a helpful marketing AI assistant.";
       try {
         if (campaignId) {
-          const context = await loadSystemContext("default", String(campaignId));
+          const accountId = resolveAccountId(req as any);
+          const context = await loadSystemContext(accountId, String(campaignId));
           systemPrompt = buildSystemPrompt(context);
         }
       } catch (err) {

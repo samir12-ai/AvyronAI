@@ -188,6 +188,16 @@ export function registerMIv3Routes(app: Express) {
   app.get("/api/ci/mi-v3/telemetry/:snapshotId", async (req, res) => {
     try {
       const snapshotId = req.params.snapshotId;
+      const accountId = resolveAccountId(req);
+
+      const [snapshot] = await db.select({ id: miSnapshots.id })
+        .from(miSnapshots)
+        .where(and(eq(miSnapshots.id, snapshotId), eq(miSnapshots.accountId, accountId)))
+        .limit(1);
+
+      if (!snapshot) {
+        return res.status(404).json({ error: "Snapshot not found" });
+      }
 
       const records = await db.select().from(miTelemetry)
         .where(eq(miTelemetry.snapshotId, snapshotId));

@@ -387,7 +387,8 @@ export function registerOrchestratorV2Routes(app: Express) {
 
   app.get("/api/system-context/:campaignId", async (req: Request, res: Response) => {
     try {
-      const context = await loadSystemContext("default", req.params.campaignId);
+      const accountId = resolveAccountId(req);
+      const context = await loadSystemContext(accountId, req.params.campaignId);
       res.json(context);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
