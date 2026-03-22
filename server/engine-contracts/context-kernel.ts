@@ -141,7 +141,7 @@ export async function buildStrategicContext(
   const perfSnapshots = await db
     .select()
     .from(performanceSnapshots)
-    .where(eq(performanceSnapshots.postId, campaignId))
+    .where(and(eq(performanceSnapshots.accountId, accountId), eq(performanceSnapshots.postId, campaignId)))
     .orderBy(desc(performanceSnapshots.fetchedAt))
     .limit(10);
 

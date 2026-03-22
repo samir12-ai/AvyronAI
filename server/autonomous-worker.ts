@@ -117,7 +117,7 @@ async function runStrategyAnalysis(
   const [recentPerformance, memoryItems, recentPublished] = await Promise.all([
     db.select()
       .from(performanceSnapshots)
-      .where(gte(performanceSnapshots.fetchedAt, sevenDaysAgo))
+      .where(and(eq(performanceSnapshots.accountId, accountId), gte(performanceSnapshots.fetchedAt, sevenDaysAgo)))
       .orderBy(desc(performanceSnapshots.fetchedAt))
       .limit(30),
     activeCampaignId

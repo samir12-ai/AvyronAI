@@ -41,7 +41,7 @@ async function checkDailyBudgetCap(accountId: string, config: any): Promise<{ pa
   const spendResult = await db.select({
     totalSpend: sql<number>`coalesce(sum(${performanceSnapshots.spend}), 0)`,
   }).from(performanceSnapshots)
-    .where(gte(performanceSnapshots.fetchedAt, todayStart));
+    .where(and(eq(performanceSnapshots.accountId, accountId), gte(performanceSnapshots.fetchedAt, todayStart)));
 
   const todaySpend = Number(spendResult[0]?.totalSpend) || 0;
   const limit = config?.dailyBudgetLimit || 100;
@@ -60,7 +60,7 @@ async function checkMonthlyBudgetCap(accountId: string, config: any): Promise<{ 
   const spendResult = await db.select({
     totalSpend: sql<number>`coalesce(sum(${performanceSnapshots.spend}), 0)`,
   }).from(performanceSnapshots)
-    .where(gte(performanceSnapshots.fetchedAt, monthStart));
+    .where(and(eq(performanceSnapshots.accountId, accountId), gte(performanceSnapshots.fetchedAt, monthStart)));
 
   const monthlySpend = Number(spendResult[0]?.totalSpend) || 0;
   const limit = config?.monthlyBudgetLimit || 2000;
@@ -86,11 +86,11 @@ async function checkCpaGuard(accountId: string, config: any): Promise<{ passed: 
     db.select({
       avgCpa: sql<number>`coalesce(avg(${performanceSnapshots.cpa}), 0)`,
     }).from(performanceSnapshots)
-      .where(gte(performanceSnapshots.fetchedAt, sevenDaysAgo)),
+      .where(and(eq(performanceSnapshots.accountId, accountId), gte(performanceSnapshots.fetchedAt, sevenDaysAgo))),
     db.select({
       avgCpa: sql<number>`coalesce(avg(${performanceSnapshots.cpa}), 0)`,
     }).from(performanceSnapshots)
-      .where(gte(performanceSnapshots.fetchedAt, oneDayAgo)),
+      .where(and(eq(performanceSnapshots.accountId, accountId), gte(performanceSnapshots.fetchedAt, oneDayAgo))),
   ]);
 
   const rolling7dCpa = Number(rollingResult[0]?.avgCpa) || 0;
@@ -115,7 +115,7 @@ async function checkRoasFloor(accountId: string, config: any): Promise<{ passed:
   const roasResult = await db.select({
     avgRoas: sql<number>`coalesce(avg(${performanceSnapshots.roas}), 0)`,
   }).from(performanceSnapshots)
-    .where(gte(performanceSnapshots.fetchedAt, fortyEightHoursAgo));
+    .where(and(eq(performanceSnapshots.accountId, accountId), gte(performanceSnapshots.fetchedAt, fortyEightHoursAgo)));
 
   const currentRoas = Number(roasResult[0]?.avgRoas) || 0;
   const floor = config?.roasFloor || 1.5;
@@ -142,7 +142,7 @@ export async function computeVolatilityIndex(accountId: string, config: any): Pr
     avgCtr: sql<number>`coalesce(avg(${performanceSnapshots.ctr}), 0)`,
     stddevCtr: sql<number>`coalesce(stddev(${performanceSnapshots.ctr}), 0)`,
   }).from(performanceSnapshots)
-    .where(gte(performanceSnapshots.fetchedAt, sevenDaysAgo));
+    .where(and(eq(performanceSnapshots.accountId, accountId), gte(performanceSnapshots.fetchedAt, sevenDaysAgo)));
 
   const stats = statsResult[0];
   const avgCpa = Number(stats?.avgCpa) || 0;

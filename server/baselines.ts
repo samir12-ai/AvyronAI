@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { performanceSnapshots, baselineHistory, accountState } from "@shared/schema";
-import { eq, desc, gte, sql } from "drizzle-orm";
+import { eq, desc, gte, sql, and } from "drizzle-orm";
 import { logAudit } from "./audit";
 
 export interface BaselineResult {
@@ -26,7 +26,7 @@ export async function computeRollingBaselines(accountId: string): Promise<Baseli
     avgCtr: sql<number>`coalesce(avg(${performanceSnapshots.ctr}), 0)`,
     totalSpend: sql<number>`coalesce(sum(${performanceSnapshots.spend}), 0)`,
   }).from(performanceSnapshots)
-    .where(gte(performanceSnapshots.fetchedAt, sevenDaysAgo));
+    .where(and(eq(performanceSnapshots.accountId, accountId), gte(performanceSnapshots.fetchedAt, sevenDaysAgo)));
 
   const currentCpa = Number(recentData[0]?.avgCpa) || 0;
   const currentRoas = Number(recentData[0]?.avgRoas) || 0;

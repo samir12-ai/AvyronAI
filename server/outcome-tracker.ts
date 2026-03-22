@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { decisionOutcomes, performanceSnapshots, strategyDecisions } from "@shared/schema";
-import { eq, sql, gte, isNull, lte, desc } from "drizzle-orm";
+import { eq, sql, gte, isNull, lte, desc, and } from "drizzle-orm";
 import { logAudit } from "./audit";
 
 export async function snapshotPreMetrics(decisionId: string, accountId: string, decisionType?: string) {
@@ -12,7 +12,7 @@ export async function snapshotPreMetrics(decisionId: string, accountId: string, 
     avgCtr: sql<number>`coalesce(avg(${performanceSnapshots.ctr}), 0)`,
     totalSpend: sql<number>`coalesce(sum(${performanceSnapshots.spend}), 0)`,
   }).from(performanceSnapshots)
-    .where(gte(performanceSnapshots.fetchedAt, oneDayAgo));
+    .where(and(eq(performanceSnapshots.accountId, accountId), gte(performanceSnapshots.fetchedAt, oneDayAgo)));
 
   const m = metricsResult[0];
 
@@ -48,7 +48,7 @@ export async function evaluatePendingOutcomes(accountId: string) {
     avgCtr: sql<number>`coalesce(avg(${performanceSnapshots.ctr}), 0)`,
     totalSpend: sql<number>`coalesce(sum(${performanceSnapshots.spend}), 0)`,
   }).from(performanceSnapshots)
-    .where(gte(performanceSnapshots.fetchedAt, oneDayAgo));
+    .where(and(eq(performanceSnapshots.accountId, accountId), gte(performanceSnapshots.fetchedAt, oneDayAgo)));
 
   const current = currentMetrics[0];
   const postCpa = Number(current?.avgCpa) || 0;
