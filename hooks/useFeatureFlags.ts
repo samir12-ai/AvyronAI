@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
-import { getApiUrl } from '@/lib/query-client';
-import { fetch } from 'expo/fetch';
+import { getApiUrl, authFetch } from '@/lib/query-client';
 
 export interface FeatureFlags {
   lead_capture_enabled: boolean;
@@ -43,7 +42,7 @@ export function useFeatureFlags() {
       setError(null);
       const baseUrl = getApiUrl();
       const url = new URL('/api/feature-flags', baseUrl);
-      const res = await fetch(url.toString(), { credentials: 'include' });
+      const res = await authFetch(url.toString());
       if (!res.ok) throw new Error('Failed to fetch flags');
       const data = await res.json();
       setFlags(data.flags);
@@ -59,11 +58,10 @@ export function useFeatureFlags() {
     try {
       const baseUrl = getApiUrl();
       const url = new URL(`/api/feature-flags/${flagName}`, baseUrl);
-      const res = await fetch(url.toString(), {
+      const res = await authFetch(url.toString(), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled, reason }),
-        credentials: 'include',
       });
       if (!res.ok) throw new Error('Failed to toggle flag');
       const data = await res.json();
@@ -80,11 +78,10 @@ export function useFeatureFlags() {
     try {
       const baseUrl = getApiUrl();
       const url = new URL('/api/feature-flags/global-kill', baseUrl);
-      const res = await fetch(url.toString(), {
+      const res = await authFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
-        credentials: 'include',
       });
       if (!res.ok) throw new Error('Failed to activate kill switch');
       await fetchFlags(true);
@@ -99,11 +96,10 @@ export function useFeatureFlags() {
     try {
       const baseUrl = getApiUrl();
       const url = new URL('/api/feature-flags/global-resume', baseUrl);
-      const res = await fetch(url.toString(), {
+      const res = await authFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
-        credentials: 'include',
       });
       if (!res.ok) throw new Error('Failed to resume');
       await fetchFlags(true);

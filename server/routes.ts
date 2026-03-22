@@ -50,7 +50,7 @@ import { registerIntegrityRoutes } from "./system-integrity/routes";
 import { storeTokensAfterOAuth, runAllHealthChecks } from "./meta-token-manager";
 import { redactToken } from "./meta-crypto";
 import { initMetaMetrics } from "./meta-metrics";
-import { registerAuthRoutes } from "./auth";
+import { registerAuthRoutes, resolveAccountId } from "./auth";
 import { db } from "./db";
 import { metaCredentials } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -62,7 +62,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/engines/health", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.query.campaignId as string;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId query parameter required" });
@@ -86,7 +86,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (campaignId) {
         try {
           const { getLatestContentDna } = await import("./content-dna-routes");
-          const dna = await getLatestContentDna(campaignId, (req as any).accountId || "default");
+          const dna = await getLatestContentDna(campaignId, resolveAccountId(req));
           if (dna) {
             const parts: string[] = ["\n\nContent DNA (use these rules for this business):"];
             if (dna.messagingCore) parts.push(`Messaging: tone=${dna.messagingCore.toneStyle || ""}, persuasion=${dna.messagingCore.persuasionIntensity || ""}, value promise=${dna.messagingCore.primaryValuePromise || ""}`);
@@ -145,7 +145,7 @@ Requirements:
             { role: "user", parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] },
           ],
           config: { maxOutputTokens: 2048 },
-          accountId: (req as any).accountId || "default",
+          accountId: resolveAccountId(req),
           endpoint: "ai-writer-gemini",
         });
         content = geminiResponse.text || "";
@@ -157,7 +157,7 @@ Requirements:
             { role: "user", content: userPrompt },
           ],
           max_tokens: 2048,
-          accountId: (req as any).accountId || "default",
+          accountId: resolveAccountId(req),
           endpoint: "ai-writer-gpt",
         });
         content = response.choices[0]?.message?.content || "";
@@ -224,7 +224,7 @@ Make sure the content works well across all the specified platforms.`;
             { role: "user", parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] },
           ],
           config: { maxOutputTokens: 1024 },
-          accountId: (req as any).accountId || "default",
+          accountId: resolveAccountId(req),
           endpoint: "ai-designer-gemini",
         });
         rawContent = geminiResponse.text || "";
@@ -236,7 +236,7 @@ Make sure the content works well across all the specified platforms.`;
             { role: "user", content: userPrompt },
           ],
           max_tokens: 1024,
-          accountId: (req as any).accountId || "default",
+          accountId: resolveAccountId(req),
           endpoint: "ai-designer-gpt",
         });
         rawContent = response.choices[0]?.message?.content || "";
@@ -288,7 +288,7 @@ Make sure the content works well across all the specified platforms.`;
       if (campaignId) {
         try {
           const { getLatestContentDna } = await import("./content-dna-routes");
-          const dna = await getLatestContentDna(campaignId, (req as any).accountId || "default");
+          const dna = await getLatestContentDna(campaignId, resolveAccountId(req));
           if (dna) {
             const parts: string[] = ["\n\nCONTENT DNA RULES (follow these for this specific business):"];
             if (dna.hookDna) parts.push(`Hook strategy: types=${(dna.hookDna.preferredHookTypes || []).join(", ")}, opening=${dna.hookDna.recommendedOpeningStyle || ""}, duration=${dna.hookDna.recommendedHookDuration || ""}`);
@@ -404,7 +404,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           { role: "user", content: userPrompt },
         ],
         max_tokens: 2000,
-        accountId: (req as any).accountId || "default",
+        accountId: resolveAccountId(req),
         endpoint: "calendar-assistant",
       });
 
@@ -536,7 +536,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           responseModalities: [Modality.TEXT, Modality.IMAGE],
           maxOutputTokens: 800,
         },
-        accountId: (req as any).accountId || "default",
+        accountId: resolveAccountId(req),
         endpoint: "ai-image-gen",
       });
 
@@ -885,7 +885,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
     const META_APP_ID = process.env.META_APP_ID || '';
     const META_APP_SECRET = process.env.META_APP_SECRET || '';
     const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/meta/callback`;
-    const accountId = (req as any).accountId || "default";
+    const accountId = resolveAccountId(req);
 
     if (fbError) {
       console.error(`[Meta OAuth] Facebook returned error: ${fbError} - ${error_description}`);
@@ -1016,7 +1016,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
   app.post("/api/meta/post", requireMetaReal, async (req: any, res) => {
     try {
       const { content, platforms, mediaUrl } = req.body;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const metaMode = req.metaMode;
 
       if (metaMode !== "REAL") {
@@ -1198,7 +1198,7 @@ Generate 25-30 posts. Make EVERY post specific to their products/services - zero
           { role: "user", content: userPrompt },
         ],
         max_tokens: 8000,
-        accountId: (req as any).accountId || "default",
+        accountId: resolveAccountId(req),
         endpoint: "generate-calendar",
       });
 
@@ -1294,7 +1294,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
           { role: "user", content: userPrompt },
         ],
         max_tokens: 4000,
-        accountId: (req as any).accountId || "default",
+        accountId: resolveAccountId(req),
         endpoint: "generate-audience",
       });
 
@@ -1320,7 +1320,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   app.post("/api/auto-publish", requireMetaReal, async (req: any, res) => {
     try {
       const { posts } = req.body;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const metaMode = req.metaMode;
 
       if (metaMode !== "REAL") {

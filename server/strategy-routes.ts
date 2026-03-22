@@ -16,6 +16,7 @@ import { requireCampaign } from "./campaign-routes";
 import { getRevenueSummary, getCampaignMetrics } from "./campaign-data-layer";
 import { logAuditEvent } from "./strategic-core/audit-logger";
 
+import { resolveAccountId } from "./auth";
 const LEGACY_CAMPAIGN = "unscoped_legacy";
 
 async function getAccountAverages() {
@@ -311,7 +312,7 @@ Return ONLY valid JSON with this structure:
           }
         ],
         max_tokens: 4000,
-        accountId: (req as any).accountId || "default",
+        accountId: resolveAccountId(req),
         endpoint: "strategy-analysis",
       });
 
@@ -539,7 +540,7 @@ Return JSON:
           }
         ],
         max_tokens: 4000,
-        accountId: (req as any).accountId || "default",
+        accountId: resolveAccountId(req),
         endpoint: "strategy-weekly",
       });
 
@@ -669,7 +670,7 @@ Return JSON:
           }
         ],
         max_tokens: 3000,
-        accountId: (req as any).accountId || "default",
+        accountId: resolveAccountId(req),
         endpoint: "strategy-insight",
       });
 
@@ -758,7 +759,7 @@ Return ONLY valid JSON:
           }
         ],
         max_tokens: 3000,
-        accountId: (req as any).accountId || "default",
+        accountId: resolveAccountId(req),
         endpoint: "strategy-moat",
       });
 
@@ -882,7 +883,7 @@ Return ONLY valid JSON:
           }
         ],
         max_tokens: 3000,
-        accountId: (req as any).accountId || "default",
+        accountId: resolveAccountId(req),
         endpoint: "strategy-recommendations",
       });
 

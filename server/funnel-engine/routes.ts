@@ -15,6 +15,7 @@ import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snapshot-trust";
 import { getActiveRoot, validateRootBinding } from "../shared/strategy-root";
 
+import { resolveAccountId } from "../auth";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -25,7 +26,7 @@ export function registerFunnelEngineRoutes(app: Express) {
   app.post("/api/funnel-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, offerSnapshotId, awarenessSnapshotId, validationSessionId } = req.body;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -384,7 +385,7 @@ export function registerFunnelEngineRoutes(app: Express) {
   app.get("/api/funnel-engine/latest", async (req: Request, res: Response) => {
     try {
       const campaignId = req.query.campaignId as string;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -438,7 +439,7 @@ export function registerFunnelEngineRoutes(app: Express) {
   app.post("/api/funnel-engine/select", async (req: Request, res: Response) => {
     try {
       const { snapshotId, selectedOption, campaignId } = req.body;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!snapshotId || !selectedOption || !campaignId) {
         return res.status(400).json({ error: "snapshotId, selectedOption, and campaignId are required" });
@@ -471,7 +472,7 @@ export function registerFunnelEngineRoutes(app: Express) {
   app.post("/api/offer-engine/select", async (req: Request, res: Response) => {
     try {
       const { snapshotId, selectedOption, campaignId } = req.body;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!snapshotId || !selectedOption || !campaignId) {
         return res.status(400).json({ error: "snapshotId, selectedOption, and campaignId are required" });

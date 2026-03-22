@@ -3,6 +3,7 @@ import { db } from "./db";
 import { brandConfig } from "@shared/schema";
 import { eq } from "drizzle-orm";
 
+import { resolveAccountId } from "./auth";
 const router = Router();
 
 async function ensureBrandConfig(accountId: string) {
@@ -22,7 +23,7 @@ async function ensureBrandConfig(accountId: string) {
 
 router.get("/api/brand-config", async (req, res) => {
   try {
-    const accountId = (req as any).accountId || "default";
+    const accountId = resolveAccountId(req);
     const config = await ensureBrandConfig(accountId);
     res.json(config);
   } catch (error) {
@@ -33,7 +34,7 @@ router.get("/api/brand-config", async (req, res) => {
 
 router.patch("/api/brand-config", async (req, res) => {
   try {
-    const accountId = (req as any).accountId || "default";
+    const accountId = resolveAccountId(req);
     await ensureBrandConfig(accountId);
 
     const {

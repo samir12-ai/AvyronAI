@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, authFetch } from '@/lib/query-client';
 
 type PersistedStateReturn<T> = {
   state: T;
@@ -49,8 +49,8 @@ export function usePersistedState<T extends Record<string, any>>(
     setIsSaving(true);
     setSaveError(null);
     try {
-      const res = await fetch(
-        new URL(`/api/ui-state/${moduleKey}?accountId=default`, baseUrl).toString(),
+      const res = await authFetch(
+        new URL(`/api/ui-state/${moduleKey}`, baseUrl).toString(),
         {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -110,8 +110,8 @@ export function usePersistedState<T extends Record<string, any>>(
 
     (async () => {
       try {
-        const res = await fetch(
-          new URL(`/api/ui-state/${moduleKey}?accountId=default`, baseUrl).toString()
+        const res = await authFetch(
+          new URL(`/api/ui-state/${moduleKey}`, baseUrl).toString()
         );
         if (res.ok) {
           const data = await res.json();
@@ -167,8 +167,8 @@ export function usePersistedState<T extends Record<string, any>>(
 
     if (!selectedCampaignId) return;
     try {
-      await fetch(
-        new URL(`/api/ui-state/${moduleKey}?accountId=default`, baseUrl).toString(),
+      await authFetch(
+        new URL(`/api/ui-state/${moduleKey}`, baseUrl).toString(),
         { method: 'DELETE' }
       );
     } catch {}

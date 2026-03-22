@@ -3,6 +3,7 @@ import { db } from "./db";
 import { eq, and, desc } from "drizzle-orm";
 import { planAssumptions, strategicPlans } from "../shared/schema";
 
+import { resolveAccountId } from "./auth";
 export const CONFLICT_PRIORITY = [
   "hard_constraints",
   "compliance",
@@ -159,7 +160,7 @@ export function registerConflictResolverRoutes(app: Express) {
     try {
       const { planId, campaignId } = req.body;
       if (!planId || !campaignId) return res.status(400).json({ error: "planId and campaignId required" });
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       const { businessDataLayer } = await import("../shared/schema");
       const [bizData] = await db.select().from(businessDataLayer)

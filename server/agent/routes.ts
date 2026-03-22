@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { AgentOperator } from "./index";
 
+import { resolveAccountId } from "../auth";
 export function registerAgentRoutes(app: Express) {
   app.post("/api/agent/run-stream", async (req: Request, res: Response) => {
     try {
@@ -24,7 +25,7 @@ export function registerAgentRoutes(app: Express) {
       send({ type: "started", campaignId, totalEngines: 15 });
 
       await new AgentOperator().runWithStream(
-        { accountId: (req as any).accountId || "default", campaignId: String(campaignId) },
+        { accountId: resolveAccountId(req), campaignId: String(campaignId) },
         send
       );
 

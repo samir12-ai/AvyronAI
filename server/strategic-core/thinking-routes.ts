@@ -5,6 +5,7 @@ import { strategicBlueprints } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
 
+import { resolveAccountId } from "../auth";
 const MARKET_MAP_PROMPT = `You are a strategic market analyst. Given a confirmed campaign blueprint, competitor data, and pricing information, generate a comprehensive Strategic Market Map.
 
 CRITICAL: All analysis MUST be geo-scoped to the specified LOCATION. Do NOT generate global or country-agnostic strategies.
@@ -158,7 +159,7 @@ Generate the Strategic Market Map now. All analysis scoped to ${campaignContext.
           { role: "user", content: userPrompt },
         ],
         max_tokens: 3000,
-        accountId: (req as any).accountId || "default",
+        accountId: resolveAccountId(req),
         endpoint: "strategic-thinking",
       });
 

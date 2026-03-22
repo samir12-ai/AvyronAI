@@ -3,6 +3,7 @@ import { db } from "./db";
 import { eq, and, desc } from "drizzle-orm";
 import { businessDataLayer, growthCampaigns } from "../shared/schema";
 
+import { resolveAccountId } from "./auth";
 export interface BusinessArchetype {
   id: string;
   name: string;
@@ -208,7 +209,7 @@ export function registerPlanGateRoutes(app: Express) {
     try {
       const { campaignId } = req.body;
       if (!campaignId) return res.status(400).json({ success: false, error: "campaignId required" });
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       const readiness = await checkPlanReadiness(campaignId, accountId);
       res.json({
@@ -229,7 +230,7 @@ export function registerPlanGateRoutes(app: Express) {
 
   app.get("/api/plan-gate/:campaignId", async (req: Request, res: Response) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const readiness = await checkPlanReadiness(req.params.campaignId, accountId);
       res.json({
         success: true,

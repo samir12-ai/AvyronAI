@@ -11,6 +11,7 @@ import { ENGINE_VERSION } from "./constants";
 import type { MIv3Mode } from "./types";
 import { checkValidationSession } from "../engine-hardening";
 
+import { resolveAccountId } from "../auth";
 const ALLOWED_MODES: MIv3Mode[] = ["overview", "dominance", "threats", "history"];
 
 function enforceEngineWhitelist(req: any): void {
@@ -27,7 +28,7 @@ export function registerMIv3Routes(app: Express) {
       enforceEngineWhitelist(req);
       validateEngineIsolation("MARKET_INTELLIGENCE_V3");
 
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.body.campaignId as string;
       const mode = (req.body.mode as MIv3Mode) || "overview";
       const forceRefresh = req.body.forceRefresh === true;
@@ -93,7 +94,7 @@ export function registerMIv3Routes(app: Express) {
 
   app.get("/api/ci/mi-v3/snapshot/:campaignId", requireCampaign, async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.params.campaignId;
 
       const snapshots = await db.select().from(miSnapshots)
@@ -129,7 +130,7 @@ export function registerMIv3Routes(app: Express) {
       enforceEngineWhitelist(req);
       validateEngineIsolation("MARKET_INTELLIGENCE_V3");
 
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.body.campaignId as string;
 
       if (!campaignId) {
@@ -154,7 +155,7 @@ export function registerMIv3Routes(app: Express) {
 
   app.get("/api/ci/mi-v3/history/:campaignId", requireCampaign, async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.params.campaignId;
 
       const snapshots = await db.select().from(miSnapshots)
@@ -226,7 +227,7 @@ export function registerMIv3Routes(app: Express) {
 
   app.post("/api/ci/mi-v3/fetch-job", requireCampaign, async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.body.campaignId as string;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

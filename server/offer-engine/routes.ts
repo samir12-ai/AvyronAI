@@ -12,6 +12,7 @@ import { parseLineageFromSnapshot, mergeLineageArrays, findBestParentSignal, cre
 import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snapshot-trust";
 import { getActiveRoot, validateRootBinding, validatePreGeneration, validatePostGeneration } from "../shared/strategy-root";
 
+import { resolveAccountId } from "../auth";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -22,7 +23,7 @@ export function registerOfferEngineRoutes(app: Express) {
   app.post("/api/offer-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, differentiationSnapshotId, validationSessionId } = req.body;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -299,7 +300,7 @@ export function registerOfferEngineRoutes(app: Express) {
   app.get("/api/offer-engine/latest", async (req: Request, res: Response) => {
     try {
       const campaignId = req.query.campaignId as string;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

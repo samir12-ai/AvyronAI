@@ -4,6 +4,7 @@ import { ciCompetitors } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 import { getCompetitorDataCoverage } from "./data-acquisition";
 
+import { resolveAccountId } from "../auth";
 async function validateCompetitorOwnership(competitorId: string, accountId: string, campaignId: string): Promise<boolean> {
   const [comp] = await db.select({ id: ciCompetitors.id }).from(ciCompetitors)
     .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId)));
@@ -22,7 +23,7 @@ export function registerDataAcquisitionRoutes(app: Express) {
   app.get("/api/ci/competitors/:id/data-coverage", async (req, res) => {
     try {
       const { id } = req.params;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.query.campaignId as string;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

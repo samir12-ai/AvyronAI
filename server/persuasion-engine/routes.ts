@@ -28,6 +28,7 @@ import { verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state"
 import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 import { parseLineageFromSnapshot, mergeLineageArrays, findBestParentSignal, createDerivedLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 
+import { resolveAccountId } from "../auth";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -86,7 +87,7 @@ export function registerPersuasionEngineRoutes(app: Express) {
   app.post("/api/persuasion-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, awarenessSnapshotId, validationSessionId } = req.body;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -455,7 +456,7 @@ export function registerPersuasionEngineRoutes(app: Express) {
   app.get("/api/persuasion-engine/latest", async (req: Request, res: Response) => {
     try {
       const campaignId = req.query.campaignId as string;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

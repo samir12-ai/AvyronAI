@@ -6,6 +6,7 @@ import { miSnapshots } from "@shared/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { AnalyticalPackage } from "./types";
 
+import { resolveAccountId } from "../auth";
 const LOG_PREFIX = "[AEL-Routes]";
 
 const aelCache = new Map<string, { pkg: AnalyticalPackage; timestamp: number }>();
@@ -29,7 +30,7 @@ export function registerAELRoutes(app: Express) {
   app.post("/api/ael/build", async (req: Request, res: Response) => {
     try {
       const { campaignId } = req.body;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

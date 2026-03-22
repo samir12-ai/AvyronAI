@@ -3,6 +3,7 @@ import { db } from "./db";
 import { eq, and, desc } from "drizzle-orm";
 import { executionTasks, strategicPlans, requiredWork } from "../shared/schema";
 
+import { resolveAccountId } from "./auth";
 interface TaskTemplate {
   taskType: string;
   title: string;
@@ -147,7 +148,7 @@ export async function composeTasks(
 export function registerTaskComposerRoutes(app: Express) {
   app.get("/api/execution-tasks/:campaignId", async (req: Request, res: Response) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const [plan] = await db.select().from(strategicPlans)
         .where(and(eq(strategicPlans.accountId, accountId), eq(strategicPlans.campaignId, req.params.campaignId)))
         .orderBy(desc(strategicPlans.createdAt)).limit(1);
@@ -205,7 +206,7 @@ export function registerTaskComposerRoutes(app: Express) {
     try {
       const { campaignId, planId } = req.body;
       if (!campaignId || !planId) return res.status(400).json({ error: "campaignId and planId required" });
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
       if (!plan) return res.status(404).json({ error: "Plan not found" });

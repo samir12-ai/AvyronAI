@@ -1,11 +1,12 @@
 import type { Express } from "express";
 import { runBuildPlanLayer } from "./engine";
 
+import { resolveAccountId } from "../auth";
 export function registerBuildPlanLayerRoutes(app: Express) {
   app.post("/api/build-plan-layer/generate", async (req, res) => {
     try {
       const { campaignId } = req.body;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
@@ -22,7 +23,7 @@ export function registerBuildPlanLayerRoutes(app: Express) {
 
   app.get("/api/build-plan-layer/latest", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.query.campaignId as string;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId query parameter required" });

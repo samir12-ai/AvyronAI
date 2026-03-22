@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { featureFlagService, type LeadEngineModule } from "../feature-flags";
 
+import { resolveAccountId } from "../auth";
 const VALID_FLAGS: LeadEngineModule[] = [
   "lead_capture_enabled", "cta_engine_enabled", "conversion_tracking_enabled",
   "funnel_logic_enabled", "lead_magnet_enabled", "landing_pages_enabled",
@@ -11,7 +12,7 @@ const VALID_FLAGS: LeadEngineModule[] = [
 export function registerFeatureFlagRoutes(app: Express) {
   app.get("/api/feature-flags", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const flags = await featureFlagService.getAllFlags(accountId);
       res.json({ flags });
     } catch (error: any) {
@@ -39,7 +40,7 @@ export function registerFeatureFlagRoutes(app: Express) {
 
   app.get("/api/feature-flags/audit", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const limit = parseInt(req.query.limit as string) || 50;
       const history = await featureFlagService.getFlagAuditHistory(accountId, limit);
       res.json({ history });

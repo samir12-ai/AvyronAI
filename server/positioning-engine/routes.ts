@@ -2,10 +2,11 @@ import type { Express } from "express";
 import { runPositioningEngine, getLatestPositioningSnapshot } from "./engine";
 import { checkValidationSession } from "../engine-hardening";
 
+import { resolveAccountId } from "../auth";
 export function registerPositioningEngineRoutes(app: Express) {
   app.post("/api/positioning-engine/analyze", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const { campaignId, miSnapshotId, audienceSnapshotId, validationSessionId } = req.body;
 
       if (!campaignId) {
@@ -37,7 +38,7 @@ export function registerPositioningEngineRoutes(app: Express) {
 
   app.get("/api/positioning-engine/latest", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.query.campaignId as string;
 
       if (!campaignId) {

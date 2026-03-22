@@ -5,6 +5,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { featureFlagService } from "../feature-flags";
 import { getCompetitorDataCoverage } from "./data-acquisition";
 
+import { resolveAccountId } from "../auth";
 const REQUIRED_EVIDENCE_FIELDS = [
   "profileLink",
   "postingFrequency",
@@ -28,7 +29,7 @@ function validateEvidence(competitor: any): { complete: boolean; missing: string
 export function registerCiCompetitorRoutes(app: Express) {
   app.get("/api/ci/competitors", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.query.campaignId as string;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -54,7 +55,7 @@ export function registerCiCompetitorRoutes(app: Express) {
 
   app.post("/api/ci/competitors", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.body.campaignId as string;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -117,7 +118,7 @@ export function registerCiCompetitorRoutes(app: Express) {
   app.put("/api/ci/competitors/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const enabled = await featureFlagService.isEnabled("competitive_intelligence_enabled", accountId);
       if (!enabled) {
         return res.status(403).json({ error: "Competitive intelligence is disabled" });
@@ -159,7 +160,7 @@ export function registerCiCompetitorRoutes(app: Express) {
   app.delete("/api/ci/competitors/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.query.campaignId as string;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -176,7 +177,7 @@ export function registerCiCompetitorRoutes(app: Express) {
   app.get("/api/ci/competitors/:id/evidence", async (req, res) => {
     try {
       const { id } = req.params;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.query.campaignId as string;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

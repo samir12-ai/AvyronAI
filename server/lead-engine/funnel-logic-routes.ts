@@ -6,6 +6,7 @@ import { featureFlagService } from "../feature-flags";
 import { logAudit } from "../audit";
 import { aiChat } from "../ai-client";
 
+import { resolveAccountId } from "../auth";
 const DEFAULT_FUNNEL_STAGES = JSON.stringify([
   { name: "awareness", label: "Awareness", order: 1, description: "First touchpoint - brand discovery" },
   { name: "engagement", label: "Engagement", order: 2, description: "Active interaction with content" },
@@ -16,7 +17,7 @@ const DEFAULT_FUNNEL_STAGES = JSON.stringify([
 export function registerFunnelLogicRoutes(app: Express) {
   app.get("/api/funnels", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       if (!(await featureFlagService.isEnabled("funnel_logic_enabled", accountId))) {
         return res.json({ funnels: [], disabled: true });
       }
@@ -39,7 +40,7 @@ export function registerFunnelLogicRoutes(app: Express) {
 
   app.post("/api/funnels", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       if (!(await featureFlagService.isEnabled("funnel_logic_enabled", accountId))) {
         return res.status(403).json({ error: "Funnel Logic is not enabled" });
       }
@@ -59,7 +60,7 @@ export function registerFunnelLogicRoutes(app: Express) {
 
   app.post("/api/funnels/map-content", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       if (!(await featureFlagService.isEnabled("funnel_logic_enabled", accountId))) {
         return res.status(403).json({ error: "Funnel Logic is not enabled" });
       }
@@ -85,7 +86,7 @@ export function registerFunnelLogicRoutes(app: Express) {
 
   app.get("/api/funnels/health", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       if (!(await featureFlagService.isEnabled("funnel_logic_enabled", accountId))) {
         return res.json({ health: null, disabled: true });
       }
@@ -134,7 +135,7 @@ export function registerFunnelLogicRoutes(app: Express) {
 
   app.post("/api/funnels/ai-suggestions", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       if (!(await featureFlagService.isEnabled("funnel_logic_enabled", accountId))) {
         return res.status(403).json({ error: "Funnel Logic is not enabled" });
       }

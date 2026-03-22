@@ -8,11 +8,12 @@ import { normalizeMediaType, CANONICAL_MEDIA_TYPES } from "../lib/media-types";
 import { FeatureFlagService } from "./feature-flags";
 import { runStudioAnalysis } from "./studio-analysis-engine";
 
+import { resolveAccountId } from "./auth";
 const router = Router();
 
 router.post("/api/studio/case", async (req, res) => {
   try {
-    const accountId = (req as any).accountId || "default";
+    const accountId = resolveAccountId(req);
     const { goal, audience, cta, series, offer, mediaType: rawMediaType, mediaUri, mediaItemId, platform, scheduledDate, campaignId, title } = req.body;
 
     if (!campaignId || typeof campaignId !== "string" || !campaignId.trim()) {
@@ -150,7 +151,7 @@ router.post("/api/studio/case", async (req, res) => {
 
 router.post("/api/studio/items", async (req, res) => {
   try {
-    const accountId = (req as any).accountId || "default";
+    const accountId = resolveAccountId(req);
     const { campaignId, contentType: rawContentType, title, caption, mediaUrl, calendarEntryId } = req.body;
 
     if (!campaignId || typeof campaignId !== "string" || !campaignId.trim()) {
@@ -231,7 +232,7 @@ router.post("/api/studio/items", async (req, res) => {
 router.delete("/api/studio/items/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const accountId = (req as any).accountId || "default";
+    const accountId = resolveAccountId(req);
 
     const deleted = await db
       .delete(studioItems)
@@ -266,7 +267,7 @@ router.delete("/api/studio/items/:id", async (req, res) => {
 
 router.get("/api/studio/cases", async (req, res) => {
   try {
-    const accountId = (req as any).accountId || "default";
+    const accountId = resolveAccountId(req);
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
 
     const posts = await db.select().from(publishedPosts)
@@ -299,7 +300,7 @@ const featureFlagService = new FeatureFlagService();
 
 router.post("/api/studio/items/save-and-analyze", async (req, res) => {
   try {
-    const accountId = (req as any).accountId || "default";
+    const accountId = resolveAccountId(req);
     const {
       campaignId,
       contentType: rawContentType,
@@ -446,7 +447,7 @@ router.post("/api/studio/items/save-and-analyze", async (req, res) => {
 router.get("/api/studio/items/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const accountId = (req as any).accountId || "default";
+    const accountId = resolveAccountId(req);
 
     const [item] = await db
       .select()
@@ -471,7 +472,7 @@ router.get("/api/studio/items/:id", async (req, res) => {
 router.get("/api/studio/items/:id/analysis-status", async (req, res) => {
   try {
     const { id } = req.params;
-    const accountId = (req as any).accountId || "default";
+    const accountId = resolveAccountId(req);
 
     const [item] = await db
       .select({
@@ -506,7 +507,7 @@ router.get("/api/studio/items/:id/analysis-status", async (req, res) => {
 router.post("/api/studio/items/:id/retry-analysis", async (req, res) => {
   try {
     const { id } = req.params;
-    const accountId = (req as any).accountId || "default";
+    const accountId = resolveAccountId(req);
 
     const [item] = await db
       .select({ id: studioItems.id, analysisStatus: studioItems.analysisStatus })

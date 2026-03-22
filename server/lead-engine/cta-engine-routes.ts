@@ -6,10 +6,11 @@ import { featureFlagService } from "../feature-flags";
 import { logAudit } from "../audit";
 import { aiChat } from "../ai-client";
 
+import { resolveAccountId } from "../auth";
 export function registerCtaEngineRoutes(app: Express) {
   app.post("/api/cta-variants/generate", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const check = await featureFlagService.checkWithDependencies("cta_engine_enabled", accountId);
       if (!check.enabled) {
         return res.status(403).json({ error: "CTA Engine is not enabled" });
@@ -73,7 +74,7 @@ Return a JSON array of objects with fields: "text" (the CTA text), "type" (link/
 
   app.get("/api/cta-variants", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       if (!(await featureFlagService.isEnabled("cta_engine_enabled", accountId))) {
         return res.json({ variants: [], disabled: true });
       }
@@ -171,7 +172,7 @@ Return a JSON array of objects with fields: "text" (the CTA text), "type" (link/
 
   app.post("/api/cta-variants/auto-promote", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const check = await featureFlagService.checkWithDependencies("cta_engine_enabled", accountId);
       if (!check.enabled) {
         return res.status(403).json({ error: "CTA Engine is not enabled" });

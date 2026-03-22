@@ -10,6 +10,7 @@ import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snapshot-trust";
 import type { ProfileInput } from "./types";
 
+import { resolveAccountId } from "../auth";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -20,7 +21,7 @@ export function registerDifferentiationRoutes(app: Express) {
   app.post("/api/differentiation-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, positioningSnapshotId, validationSessionId } = req.body;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -244,7 +245,7 @@ export function registerDifferentiationRoutes(app: Express) {
   app.get("/api/differentiation-engine/latest", async (req: Request, res: Response) => {
     try {
       const campaignId = req.query.campaignId as string;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

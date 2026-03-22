@@ -7,6 +7,7 @@ import { decryptToken, redactToken, isEncryptionConfigured } from "./meta-crypto
 import { getMetaMetrics, getAllMetrics } from "./meta-metrics";
 import { getBackoffDiagnostics } from "./meta-error-classifier";
 
+import { resolveAccountId } from "./auth";
 export type MetaMode = "DISCONNECTED" | "PENDING_APPROVAL" | "PERMISSION_MISSING" | "TOKEN_EXPIRED" | "REVOKED" | "REAL";
 
 const REQUIRED_PUBLISHING_SCOPES = ["pages_manage_posts"];
@@ -166,7 +167,7 @@ export async function getMetaStatus(accountId: string): Promise<MetaStatus> {
 export function registerMetaStatusRoutes(app: Express) {
   app.get("/api/meta/status", async (req: Request, res: Response) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const status = await getMetaStatus(accountId);
       res.json({ success: true, status });
     } catch (error: any) {
@@ -177,7 +178,7 @@ export function registerMetaStatusRoutes(app: Express) {
 
   app.post("/api/meta/disconnect", async (req: Request, res: Response) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       await db.delete(metaCredentials).where(eq(metaCredentials.accountId, accountId));
 
@@ -205,7 +206,7 @@ export function registerMetaStatusRoutes(app: Express) {
 
   app.post("/api/meta/reconnect", async (req: Request, res: Response) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       await db.delete(metaCredentials).where(eq(metaCredentials.accountId, accountId));
 
@@ -240,7 +241,7 @@ export function registerMetaStatusRoutes(app: Express) {
   app.get("/api/meta/diagnostics", async (req: Request, res: Response) => {
     if (!requireAdminAccess(req, res)) return;
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const metrics = getMetaMetrics(accountId);
       const backoff = getBackoffDiagnostics(accountId);
       res.json({
@@ -280,7 +281,7 @@ export type MetaErrorCode = "META_NOT_CONNECTED" | "META_PERMISSION_MISSING" | "
 
 export async function requireMetaReal(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const accountId = (req as any).accountId || "default";
+    const accountId = resolveAccountId(req);
     const state = await getOrCreateAccountState(accountId);
     const metaMode = (state?.metaMode as MetaMode) || "DISCONNECTED";
 

@@ -23,6 +23,7 @@ import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snapshot-trust";
 import { getActiveRoot, validateRootBinding } from "../shared/strategy-root";
 
+import { resolveAccountId } from "../auth";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -39,7 +40,7 @@ export function registerIntegrityEngineRoutes(app: Express) {
   app.post("/api/integrity-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, funnelSnapshotId, validationSessionId } = req.body;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -361,7 +362,7 @@ export function registerIntegrityEngineRoutes(app: Express) {
   app.get("/api/integrity-engine/latest", async (req: Request, res: Response) => {
     try {
       const campaignId = req.query.campaignId as string;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

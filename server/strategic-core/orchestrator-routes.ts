@@ -17,6 +17,7 @@ import { activateExecution } from "../execution-activation/engine";
 import { assertSnapshotReadOnly, assertNoComputeFromExternal } from "../market-intelligence-v3/isolation-guard";
 import { runOrchestrator } from "../orchestrator/index";
 
+import { resolveAccountId } from "../auth";
 function enforceBuildAPlanSnapshotOnly(operation: string): void {
   assertSnapshotReadOnly("BUILD_A_PLAN_ORCHESTRATOR", operation);
 }
@@ -1358,7 +1359,7 @@ export function registerOrchestratorRoutes(app: Express) {
   app.get("/api/plans/:planId/document", async (req: Request, res: Response) => {
     try {
       const { planId } = req.params;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.query.campaignId as string | undefined;
 
       const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);

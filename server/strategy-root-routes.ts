@@ -4,11 +4,12 @@ import { db } from "./db";
 import { miSnapshots, audienceSnapshots, positioningSnapshots, differentiationSnapshots, mechanismSnapshots } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 
+import { resolveAccountId } from "./auth";
 export function registerStrategyRootRoutes(app: Express) {
   app.get("/api/strategy-root/active", async (req: Request, res: Response) => {
     try {
       const campaignId = req.query.campaignId as string;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -77,7 +78,7 @@ export function registerStrategyRootRoutes(app: Express) {
   app.get("/api/strategy-root/validate", async (req: Request, res: Response) => {
     try {
       const campaignId = req.query.campaignId as string;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

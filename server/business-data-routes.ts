@@ -3,6 +3,7 @@ import { db } from "./db";
 import { businessDataLayer, campaignSelections } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 
+import { resolveAccountId } from "./auth";
 const VALID_FUNNEL_OBJECTIVES = ["AWARENESS", "LEADS", "SALES", "AUTHORITY"] as const;
 const VALID_CONVERSION_CHANNELS = ["WHATSAPP", "WEBSITE", "DM", "FORM"] as const;
 
@@ -22,7 +23,7 @@ export function registerBusinessDataRoutes(app: Express) {
   app.get("/api/business-data/:campaignId", async (req: Request, res: Response) => {
     try {
       const { campaignId } = req.params;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -53,7 +54,7 @@ export function registerBusinessDataRoutes(app: Express) {
   app.put("/api/business-data/:campaignId", async (req: Request, res: Response) => {
     try {
       const { campaignId } = req.params;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -159,7 +160,7 @@ export function registerBusinessDataRoutes(app: Express) {
 
 export async function requireBusinessData(req: Request, res: Response, next: NextFunction) {
   try {
-    const accountId = (req as any).accountId || "default";
+    const accountId = resolveAccountId(req);
 
     const selections = await db
       .select()

@@ -6,10 +6,11 @@ import { featureFlagService } from "../feature-flags";
 import { logAudit } from "../audit";
 import { requireCampaign } from "../campaign-routes";
 
+import { resolveAccountId } from "../auth";
 export function registerRevenueAttributionRoutes(app: Express) {
   app.get("/api/revenue", requireCampaign, async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const check = await featureFlagService.checkWithDependencies("revenue_attribution_enabled", accountId);
       if (!check.enabled) {
         return res.json({ entries: [], disabled: true });
@@ -26,7 +27,7 @@ export function registerRevenueAttributionRoutes(app: Express) {
 
   app.post("/api/revenue", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       if (!(await featureFlagService.isEnabled("revenue_attribution_enabled", accountId))) {
         return res.status(403).json({ error: "Revenue Attribution is not enabled" });
       }
@@ -64,7 +65,7 @@ export function registerRevenueAttributionRoutes(app: Express) {
 
   app.post("/api/ad-spend", requireCampaign, async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       if (!(await featureFlagService.isEnabled("revenue_attribution_enabled", accountId))) {
         return res.status(403).json({ error: "Revenue Attribution is not enabled" });
       }
@@ -83,7 +84,7 @@ export function registerRevenueAttributionRoutes(app: Express) {
 
   app.get("/api/ad-spend", requireCampaign, async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       if (!(await featureFlagService.isEnabled("revenue_attribution_enabled", accountId))) {
         return res.json({ entries: [], disabled: true });
       }
@@ -98,7 +99,7 @@ export function registerRevenueAttributionRoutes(app: Express) {
 
   app.get("/api/revenue/stats", requireCampaign, async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const check = await featureFlagService.checkWithDependencies("revenue_attribution_enabled", accountId);
       if (!check.enabled) {
         return res.json({ stats: null, disabled: true });

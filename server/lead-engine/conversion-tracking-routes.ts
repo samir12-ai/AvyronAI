@@ -6,6 +6,7 @@ import { featureFlagService } from "../feature-flags";
 import { logAudit } from "../audit";
 import { requireCampaign } from "../campaign-routes";
 
+import { resolveAccountId } from "../auth";
 export function registerConversionTrackingRoutes(app: Express) {
   app.get("/api/track/:trackingId", async (req, res) => {
     try {
@@ -81,7 +82,7 @@ export function registerConversionTrackingRoutes(app: Express) {
 
   app.post("/api/conversion-events", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       if (!(await featureFlagService.isEnabled("conversion_tracking_enabled", accountId))) {
         return res.status(403).json({ error: "Conversion tracking is not enabled" });
       }
@@ -110,7 +111,7 @@ export function registerConversionTrackingRoutes(app: Express) {
 
   app.get("/api/conversion-events", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       if (!(await featureFlagService.isEnabled("conversion_tracking_enabled", accountId))) {
         return res.json({ events: [], disabled: true });
       }
@@ -135,7 +136,7 @@ export function registerConversionTrackingRoutes(app: Express) {
 
   app.get("/api/conversion-events/stats", requireCampaign, async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       if (!(await featureFlagService.isEnabled("conversion_tracking_enabled", accountId))) {
         return res.json({ stats: null, disabled: true });
       }

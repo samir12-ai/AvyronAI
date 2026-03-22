@@ -8,10 +8,11 @@ import { requireCampaign } from "../campaign-routes";
 import { getRevenueSummary } from "../campaign-data-layer";
 import { aiChat } from "../ai-client";
 
+import { resolveAccountId } from "../auth";
 export function registerAiLeadOptimizationRoutes(app: Express) {
   app.post("/api/lead-optimization/analyze", requireCampaign, async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignContext = (req as any).campaignContext;
       const check = await featureFlagService.checkWithDependencies("ai_lead_optimization_enabled", accountId);
       if (!check.enabled) {
@@ -79,7 +80,7 @@ export function registerAiLeadOptimizationRoutes(app: Express) {
       const response = await aiChat({
         model: "gpt-5.2",
         max_tokens: 800,
-        accountId: (req as any).accountId || "default",
+        accountId: resolveAccountId(req),
         endpoint: "ai-lead-optimization",
         messages: [
           {
@@ -129,7 +130,7 @@ Return JSON with: "insights" (array of {category, finding, recommendation, impac
 
   app.get("/api/lead-optimization/best-content", requireCampaign, async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       if (!(await featureFlagService.isEnabled("ai_lead_optimization_enabled", accountId))) {
         return res.json({ content: [], disabled: true });
       }

@@ -19,6 +19,7 @@ import { validateRootIntegrity, detectStaleness, computeCalendarDeviation } from
 import { computeFulfillment } from "../fulfillment-engine";
 import { buildCausalNarrative } from "../narrative-layer";
 
+import { resolveAccountId } from "../auth";
 export function registerOrchestratorV2Routes(app: Express) {
   app.post("/api/orchestrator/run", async (req: Request, res: Response) => {
     try {
@@ -27,7 +28,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         return res.status(400).json({ error: "campaignId is required" });
       }
 
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       const lockResult = await db.execute(
         sql`INSERT INTO orchestrator_jobs (id, campaign_id, account_id, status, created_at, section_statuses)
@@ -91,7 +92,7 @@ export function registerOrchestratorV2Routes(app: Express) {
 
   app.get("/api/orchestrator/latest/:campaignId", async (req: Request, res: Response) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const job = await getLatestOrchestratorRun(accountId, req.params.campaignId);
       if (!job) {
         return res.json({ hasRun: false });
@@ -114,7 +115,7 @@ export function registerOrchestratorV2Routes(app: Express) {
 
   app.get("/api/plans/active/:campaignId", async (req: Request, res: Response) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const [plan] = await db
         .select()
         .from(strategicPlans)
@@ -372,7 +373,7 @@ export function registerOrchestratorV2Routes(app: Express) {
 
       await db.insert(planApprovals).values({
         planId,
-        accountId: (req as any).accountId || "default",
+        accountId: resolveAccountId(req),
         decision: "REJECTED",
         reason: reason || "Rejected by user",
         decidedBy: "client",
@@ -395,7 +396,7 @@ export function registerOrchestratorV2Routes(app: Express) {
 
   app.get("/api/required-work/:campaignId", async (req: Request, res: Response) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.params.campaignId;
 
       const fulfillment = await computeFulfillment(campaignId, accountId);
@@ -551,7 +552,7 @@ export function registerOrchestratorV2Routes(app: Express) {
 
   app.get("/api/orchestrator/summaries/:campaignId", async (req: Request, res: Response) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.params.campaignId;
       const job = await getLatestOrchestratorRun(accountId, campaignId);
       if (!job) {
@@ -1001,7 +1002,7 @@ export function registerOrchestratorV2Routes(app: Express) {
 
   app.get("/api/narrative/:campaignId", async (req: Request, res: Response) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const narrative = await buildCausalNarrative(req.params.campaignId, accountId);
       res.json(narrative);
     } catch (error: any) {

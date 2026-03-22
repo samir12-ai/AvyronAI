@@ -25,6 +25,7 @@ import {
   requiredWork,
   contentDna,
 } from "../shared/schema";
+import { resolveAccountId } from "./auth";
 
 const safeJson = (v: any) => {
   try { return typeof v === "string" ? JSON.parse(v) : v; } catch { return null; }
@@ -437,7 +438,7 @@ export function registerRootBundleRoutes(app: Express) {
   app.get("/api/root-bundle/:campaignId", async (req: Request, res: Response) => {
     try {
       const campaignId = req.params.campaignId;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const active = await getActiveRootBundle(campaignId, accountId);
 
       if (!active) {
@@ -473,7 +474,7 @@ export function registerRootBundleRoutes(app: Express) {
     try {
       const { campaignId } = req.body;
       if (!campaignId) return res.status(400).json({ success: false, error: "campaignId required" });
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       const locked = await lockRootBundle(campaignId, accountId);
       res.json({ success: true, rootBundle: locked });
@@ -496,7 +497,7 @@ export function registerRootBundleRoutes(app: Express) {
   app.get("/api/root-bundle/:campaignId/staleness", async (req: Request, res: Response) => {
     try {
       const campaignId = req.params.campaignId;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const staleness = await detectStaleness(campaignId, accountId);
       res.json({ success: true, ...staleness });
     } catch (err: any) {

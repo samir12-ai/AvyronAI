@@ -10,13 +10,14 @@ import {
 import { getCachedAEL } from "../analytical-enrichment-layer/routes";
 import { getLatestPositioningSnapshot } from "../positioning-engine/engine";
 
+import { resolveAccountId } from "../auth";
 const LOG_PREFIX = "[CEL-Routes]";
 
 export function registerCELRoutes(app: Express) {
   app.get("/api/cel/report/:campaignId", async (req: Request, res: Response) => {
     try {
       const { campaignId } = req.params;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       const ael = getCachedAEL(campaignId);
       if (!ael) {

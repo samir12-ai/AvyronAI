@@ -7,6 +7,7 @@ import { verifySnapshotIntegrity, getEngineReadinessState } from "../market-inte
 import { ENGINE_VERSION } from "../market-intelligence-v3/constants";
 import { generateBlueprintForId } from "./extraction-routes";
 
+import { resolveAccountId } from "../auth";
 interface CampaignContextObject {
   campaignId: string;
   campaignName: string;
@@ -75,7 +76,7 @@ export function registerGateRoutes(app: Express) {
         averageSellingPrice,
         metaConnected = false,
       } = req.body;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!competitorUrls || !Array.isArray(competitorUrls) || competitorUrls.length < 1) {
         return res.status(400).json({
@@ -266,7 +267,7 @@ export function registerGateRoutes(app: Express) {
 
   app.get("/api/strategic/blueprints", async (req: Request, res: Response) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const blueprints = await db.select().from(strategicBlueprints)
         .where(eq(strategicBlueprints.accountId, accountId))
         .orderBy(desc(strategicBlueprints.createdAt));
@@ -288,7 +289,7 @@ export function registerGateRoutes(app: Express) {
   app.get("/api/strategic/audit-log", async (req: Request, res: Response) => {
     try {
       const { blueprintId, limit: queryLimit = "50" } = req.query as Record<string, string>;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const { strategicAuditLogs: auditTable } = await import("@shared/schema");
 
       let query = db.select().from(auditTable);
@@ -317,7 +318,7 @@ export function registerGateRoutes(app: Express) {
   app.get("/api/strategic/blueprint-versions", async (req: Request, res: Response) => {
     try {
       const { campaignId, blueprintId } = req.query as Record<string, string>;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId && !blueprintId) {
         return res.status(400).json({ error: "Provide campaignId or blueprintId" });
@@ -424,7 +425,7 @@ export function registerGateRoutes(app: Express) {
   app.get("/api/strategic/field-diffs", async (req: Request, res: Response) => {
     try {
       const { blueprintId, campaignId, limit: queryLimit = "100" } = req.query as Record<string, string>;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!blueprintId && !campaignId) {
         return res.status(400).json({ error: "Provide blueprintId or campaignId" });

@@ -19,6 +19,7 @@ import {
 import { aiChat } from "./ai-client";
 import { requireCampaign } from "./campaign-routes";
 
+import { resolveAccountId } from "./auth";
 const safeJson = (v: any) => {
   try {
     return typeof v === "string" ? JSON.parse(v) : v;
@@ -401,7 +402,7 @@ export function registerContentDnaRoutes(app: Express) {
   app.get("/api/content-dna/:campaignId", async (req: Request, res: Response) => {
     try {
       const campaignId = req.params.campaignId;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const dna = await getLatestContentDna(campaignId, accountId);
       if (!dna) {
         return res.json({ success: true, contentDna: null, message: "No Content DNA generated yet" });

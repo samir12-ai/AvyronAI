@@ -8,11 +8,12 @@ import { resolveDataSource } from "./resolver";
 import { evaluateTransitionEligibility, assessStatisticalValidity, TRANSITION_THRESHOLDS } from "./statistical-validity";
 import { logModeTransition, getTransitionLog, getLatestTransition } from "./transition-log";
 
+import { resolveAccountId } from "../auth";
 export function registerDataSourceRoutes(app: Express) {
   app.get("/api/data-source/resolve", async (req: Request, res: Response) => {
     try {
       const campaignId = req.query.campaignId as string;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -70,7 +71,7 @@ export function registerDataSourceRoutes(app: Express) {
   app.get("/api/data-source/transition-eligibility", async (req: Request, res: Response) => {
     try {
       const campaignId = req.query.campaignId as string;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -117,7 +118,7 @@ export function registerDataSourceRoutes(app: Express) {
       const campaignId = req.query.campaignId as string | undefined;
       const limit = parseInt(req.query.limit as string) || 50;
 
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const log = await getTransitionLog(campaignId, accountId, limit);
       res.json({ success: true, transitions: log, count: log.length });
     } catch (error: any) {
@@ -248,7 +249,7 @@ export function registerDataSourceRoutes(app: Express) {
   app.get("/api/data-source/statistical-validity", async (req: Request, res: Response) => {
     try {
       const campaignId = req.query.campaignId as string;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

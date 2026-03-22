@@ -10,6 +10,7 @@ import { promisify } from "util";
 import { aiChat } from "./ai-client";
 import { normalizeMediaType } from "../lib/media-types";
 
+import { resolveAccountId } from "./auth";
 const execAsync = promisify(exec);
 
 const videoUploadsDir = path.join(process.cwd(), "uploads", "videos");
@@ -136,7 +137,7 @@ export function registerVideoRoutes(app: Express) {
       const aiResponse = await aiChat({
         model: "gpt-5.2",
         max_tokens: 800,
-        accountId: (req as any).accountId || "default",
+        accountId: resolveAccountId(req),
         endpoint: "video-brief",
         messages: [
           {
@@ -402,7 +403,7 @@ Based on the creative brief above, create an edit plan that fulfills the client'
       const response = await aiChat({
         model: "gpt-4.1-mini",
         max_tokens: 1800,
-        accountId: (req as any).accountId || "default",
+        accountId: resolveAccountId(req),
         endpoint: "video-analyze",
         messages: [
           {
@@ -499,7 +500,7 @@ Generate a full production-ready script with scene-by-scene breakdown, exact spo
       const response = await aiChat({
         model: "gpt-4.1-mini",
         max_tokens: 600,
-        accountId: (req as any).accountId || "default",
+        accountId: resolveAccountId(req),
         endpoint: "ai-metadata",
         messages: [
           {

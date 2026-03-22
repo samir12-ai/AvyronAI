@@ -7,6 +7,7 @@ import { ENGINE_VERSION, MIN_VALIDATION_CONFIDENCE_FOR_SCALE, PERFORMANCE_OVERRI
 import { pruneOldSnapshots, checkValidationSession } from "../../engine-hardening";
 import { resolveDataSource } from "../../data-source/resolver";
 
+import { resolveAccountId } from "../../auth";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -17,7 +18,7 @@ export function registerBudgetGovernorRoutes(app: Express) {
   app.post("/api/strategy/budget-governor/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, validationSnapshotId, validationSessionId } = req.body;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -208,7 +209,7 @@ export function registerBudgetGovernorRoutes(app: Express) {
   app.get("/api/strategy/budget-governor/latest", async (req: Request, res: Response) => {
     try {
       const campaignId = req.query.campaignId as string;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

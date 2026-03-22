@@ -16,6 +16,7 @@ import { aiChat } from "../ai-client";
 import { computeFulfillment } from "../fulfillment-engine";
 import { activateExecution } from "../execution-activation/engine";
 
+import { resolveAccountId } from "../auth";
 function deriveDistributionFromBusinessData(bizData: any): {
   reelsPerWeek: number;
   postsPerWeek: number;
@@ -261,7 +262,7 @@ export function registerExecutionRoutes(app: Express) {
   app.post("/api/execution/plans/generate", async (req: Request, res: Response) => {
     try {
       const { blueprintId, campaignId, periodDays = 30 } = req.body;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!blueprintId || !campaignId) {
         return res.status(400).json({ error: "blueprintId and campaignId are required" });
@@ -405,7 +406,7 @@ export function registerExecutionRoutes(app: Express) {
 
   app.get("/api/execution/plans", async (req: Request, res: Response) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const plans = await db
         .select()
         .from(strategicPlans)
@@ -822,7 +823,7 @@ export function registerExecutionRoutes(app: Express) {
           entry.title,
           entry.scheduledDate,
           planContext,
-          (req as any).accountId || "default"
+          resolveAccountId(req)
         );
       } catch (aiErr: any) {
         await db
@@ -898,7 +899,7 @@ export function registerExecutionRoutes(app: Express) {
     const requestId = `reset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
       const { planId } = req.params;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = (req.query.campaignId as string) || (req.body?.campaignId as string) || null;
 
       const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
@@ -1012,7 +1013,7 @@ export function registerExecutionRoutes(app: Express) {
 
   app.get("/api/execution/dashboard", async (req: Request, res: Response) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.query.campaignId as string | undefined;
 
       const planConditions = [eq(strategicPlans.accountId, accountId)];
@@ -1072,7 +1073,7 @@ export function registerExecutionRoutes(app: Express) {
 
   app.get("/api/execution/calendar-entries", async (req: Request, res: Response) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.query.campaignId as string;
 
       if (!campaignId) {
@@ -1165,7 +1166,7 @@ export function registerExecutionRoutes(app: Express) {
 
   app.get("/api/execution/required-work", async (req: Request, res: Response) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.query.campaignId as string;
 
       if (!campaignId) {

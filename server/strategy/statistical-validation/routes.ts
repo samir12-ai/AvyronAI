@@ -23,6 +23,7 @@ import { inArray } from "drizzle-orm";
 import { pruneOldSnapshots, checkValidationSession } from "../../engine-hardening";
 import { parseLineageFromSnapshot, mergeLineageArrays } from "../../shared/signal-lineage";
 
+import { resolveAccountId } from "../../auth";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -39,7 +40,7 @@ export function registerStatisticalValidationRoutes(app: Express) {
   app.post("/api/strategy/statistical-validation/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, persuasionSnapshotId, validationSessionId } = req.body;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -330,7 +331,7 @@ export function registerStatisticalValidationRoutes(app: Express) {
   app.get("/api/strategy/statistical-validation/latest", async (req: Request, res: Response) => {
     try {
       const campaignId = req.query.campaignId as string;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

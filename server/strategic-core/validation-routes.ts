@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { logAuditEvent } from "./audit-logger";
 import { cleanJsonString } from "./extraction-routes";
 
+import { resolveAccountId } from "../auth";
 function buildFallbackValidation(): any {
   return {
     contradictions: [],
@@ -160,7 +161,7 @@ Perform full validation now.`;
           { role: "user", content: userPrompt },
         ],
         max_tokens: 2500,
-        accountId: (req as any).accountId || "default",
+        accountId: resolveAccountId(req),
         endpoint: "strategic-validation",
       });
 

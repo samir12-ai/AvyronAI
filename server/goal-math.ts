@@ -10,6 +10,7 @@ import {
 import { aiChat } from "./ai-client";
 import { computeStrategyHash } from "./root-bundle";
 
+import { resolveAccountId } from "./auth";
 interface NormalizedGoal {
   goalType: string;
   target: number;
@@ -513,7 +514,7 @@ export function registerGoalMathRoutes(app: Express) {
     try {
       const { campaignId } = req.body;
       if (!campaignId) return res.status(400).json({ success: false, error: "campaignId required" });
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       const result = await decomposeGoal(campaignId, accountId);
       res.json({ success: true, ...result });
@@ -527,7 +528,7 @@ export function registerGoalMathRoutes(app: Express) {
     try {
       const { campaignId, planId } = req.body;
       if (!campaignId) return res.status(400).json({ success: false, error: "campaignId required" });
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       const [bizData] = await db.select().from(businessDataLayer)
         .where(and(eq(businessDataLayer.campaignId, campaignId), eq(businessDataLayer.accountId, accountId)))
@@ -559,7 +560,7 @@ export function registerGoalMathRoutes(app: Express) {
   app.get("/api/goal-math/:campaignId", async (req: Request, res: Response) => {
     try {
       const campaignId = req.params.campaignId;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       const decomp = await getLatestGoalDecomposition(campaignId, accountId);
       const sim = await getLatestSimulation(campaignId, accountId);

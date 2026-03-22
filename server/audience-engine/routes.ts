@@ -2,10 +2,11 @@ import type { Express } from "express";
 import { runAudienceEngine, getLatestAudienceSnapshot } from "./engine";
 import { checkValidationSession } from "../engine-hardening";
 
+import { resolveAccountId } from "../auth";
 export function registerAudienceEngineRoutes(app: Express) {
   app.post("/api/audience-engine/analyze", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.body.campaignId as string;
       const validationSessionId = req.body.validationSessionId as string | undefined;
       if (!campaignId) {
@@ -31,7 +32,7 @@ export function registerAudienceEngineRoutes(app: Express) {
 
   app.get("/api/audience-engine/latest", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const campaignId = req.query.campaignId as string;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

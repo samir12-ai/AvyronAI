@@ -6,10 +6,11 @@ import { featureFlagService } from "../feature-flags";
 import { logAudit } from "../audit";
 import { aiChat } from "../ai-client";
 
+import { resolveAccountId } from "../auth";
 export function registerLeadMagnetRoutes(app: Express) {
   app.get("/api/lead-magnets", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       if (!(await featureFlagService.isEnabled("lead_magnet_enabled", accountId))) {
         return res.json({ magnets: [], disabled: true });
       }
@@ -24,7 +25,7 @@ export function registerLeadMagnetRoutes(app: Express) {
 
   app.post("/api/lead-magnets/generate", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       if (!(await featureFlagService.isEnabled("lead_magnet_enabled", accountId))) {
         return res.status(403).json({ error: "Lead Magnet Generator is not enabled" });
       }

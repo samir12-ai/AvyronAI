@@ -8,6 +8,7 @@ import { ENGINE_VERSION } from "./constants";
 import { pruneOldSnapshots, checkValidationSession } from "../../engine-hardening";
 import { validateEngineDependencies, logDependencyCheck } from "../dependency-validation";
 
+import { resolveAccountId } from "../../auth";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -18,7 +19,7 @@ export function registerRetentionEngineRoutes(app: Express) {
   app.post("/api/strategy/retention-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, validationSessionId } = req.body;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -189,7 +190,7 @@ export function registerRetentionEngineRoutes(app: Express) {
   app.get("/api/strategy/retention-engine/latest", async (req: Request, res: Response) => {
     try {
       const campaignId = req.query.campaignId as string;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

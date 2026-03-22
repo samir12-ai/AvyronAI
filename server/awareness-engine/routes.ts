@@ -22,6 +22,7 @@ import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snap
 import { parseLineageFromSnapshot, mergeLineageArrays, findBestParentSignal, createDerivedLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 import { getActiveRoot, validateRootBinding } from "../shared/strategy-root";
 
+import { resolveAccountId } from "../auth";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -38,7 +39,7 @@ export function registerAwarenessEngineRoutes(app: Express) {
   app.post("/api/awareness-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, offerSnapshotId, validationSessionId } = req.body;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -383,7 +384,7 @@ export function registerAwarenessEngineRoutes(app: Express) {
   app.get("/api/awareness-engine/latest", async (req: Request, res: Response) => {
     try {
       const campaignId = req.query.campaignId as string;
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

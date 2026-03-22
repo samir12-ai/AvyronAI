@@ -5,10 +5,11 @@ import { eq, desc, sql } from "drizzle-orm";
 import { featureFlagService } from "../feature-flags";
 import { logAudit } from "../audit";
 
+import { resolveAccountId } from "../auth";
 export function registerLandingPageRoutes(app: Express) {
   app.get("/api/landing-pages", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       if (!(await featureFlagService.isEnabled("landing_pages_enabled", accountId))) {
         return res.json({ pages: [], disabled: true });
       }
@@ -23,7 +24,7 @@ export function registerLandingPageRoutes(app: Express) {
 
   app.post("/api/landing-pages", async (req, res) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       if (!(await featureFlagService.isEnabled("landing_pages_enabled", accountId))) {
         return res.status(403).json({ error: "Landing Pages module is not enabled" });
       }

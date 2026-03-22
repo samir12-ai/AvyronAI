@@ -35,6 +35,7 @@ import { aiChat } from "./ai-client";
 import { getLatestContentDna } from "./content-dna-routes";
 import { getActiveRootBundle, detectStaleness, validateRootIntegrity, computeCalendarDeviation } from "./root-bundle";
 
+import { resolveAccountId } from "./auth";
 const LOG_PREFIX = "[Dashboard]";
 
 type SourceTag = "MANUAL_METRICS" | "PLAN_PROGRESS" | "HYBRID" | "PERFORMANCE";
@@ -372,7 +373,7 @@ export function registerDashboardRoutes(app: Express) {
 
   app.get("/api/dashboard/mode", async (req: Request, res: Response) => {
     try {
-      const accountId = (req as any).accountId || "default";
+      const accountId = resolveAccountId(req);
       const mode = await resolveDataMode(accountId);
       res.json({ success: true, mode });
     } catch (error: any) {
