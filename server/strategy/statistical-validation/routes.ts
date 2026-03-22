@@ -39,6 +39,7 @@ export function registerStatisticalValidationRoutes(app: Express) {
   app.post("/api/strategy/statistical-validation/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, persuasionSnapshotId, validationSessionId } = req.body;
+      const accountId = (req as any).accountId || "default";
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

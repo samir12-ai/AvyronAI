@@ -19,6 +19,7 @@ export function registerMechanismEngineRoutes(app: Express) {
   app.post("/api/mechanism-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, differentiationSnapshotId, validationSessionId } = req.body;
+      const accountId = (req as any).accountId || "default";
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

@@ -86,6 +86,7 @@ export function registerPersuasionEngineRoutes(app: Express) {
   app.post("/api/persuasion-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, awarenessSnapshotId, validationSessionId } = req.body;
+      const accountId = (req as any).accountId || "default";
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

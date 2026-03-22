@@ -39,6 +39,7 @@ export function registerIntegrityEngineRoutes(app: Express) {
   app.post("/api/integrity-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, funnelSnapshotId, validationSessionId } = req.body;
+      const accountId = (req as any).accountId || "default";
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

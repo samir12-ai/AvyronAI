@@ -29,6 +29,7 @@ export function registerAELRoutes(app: Express) {
   app.post("/api/ael/build", async (req: Request, res: Response) => {
     try {
       const { campaignId } = req.body;
+      const accountId = (req as any).accountId || "default";
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

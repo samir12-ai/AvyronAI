@@ -31,6 +31,7 @@ export function registerChannelSelectionRoutes(app: Express) {
   app.post("/api/strategy/channel-selection/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, validationSessionId, channelMode = "automatic" } = req.body;
+      const accountId = (req as any).accountId || "default";
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

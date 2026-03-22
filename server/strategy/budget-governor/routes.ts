@@ -17,6 +17,7 @@ export function registerBudgetGovernorRoutes(app: Express) {
   app.post("/api/strategy/budget-governor/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, validationSnapshotId, validationSessionId } = req.body;
+      const accountId = (req as any).accountId || "default";
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
