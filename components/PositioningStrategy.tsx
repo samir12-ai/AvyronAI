@@ -12,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl, safeApiJson } from '@/lib/query-client';
+import { getApiUrl, safeApiJson, authFetch } from '@/lib/query-client';
 import { normalizeEngineSnapshot, isEngineReady } from '@/lib/engine-snapshot';
 import { useColorScheme } from 'react-native';
 
@@ -144,7 +144,7 @@ export default function PositioningStrategy({ isActive }: { isActive?: boolean }
     if (!selectedCampaignId || !hasDependencies) return;
     setAnalyzing(true);
     try {
-      const res = await fetch(new URL('/api/positioning-engine/analyze', getApiUrl()).toString(), {
+      const res = await authFetch(new URL('/api/positioning-engine/analyze', getApiUrl()).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

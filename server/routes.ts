@@ -86,7 +86,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (campaignId) {
         try {
           const { getLatestContentDna } = await import("./content-dna-routes");
-          const dna = await getLatestContentDna(campaignId, "default");
+          const dna = await getLatestContentDna(campaignId, (req as any).accountId || "default");
           if (dna) {
             const parts: string[] = ["\n\nContent DNA (use these rules for this business):"];
             if (dna.messagingCore) parts.push(`Messaging: tone=${dna.messagingCore.toneStyle || ""}, persuasion=${dna.messagingCore.persuasionIntensity || ""}, value promise=${dna.messagingCore.primaryValuePromise || ""}`);
@@ -288,7 +288,7 @@ Make sure the content works well across all the specified platforms.`;
       if (campaignId) {
         try {
           const { getLatestContentDna } = await import("./content-dna-routes");
-          const dna = await getLatestContentDna(campaignId, "default");
+          const dna = await getLatestContentDna(campaignId, (req as any).accountId || "default");
           if (dna) {
             const parts: string[] = ["\n\nCONTENT DNA RULES (follow these for this specific business):"];
             if (dna.hookDna) parts.push(`Hook strategy: types=${(dna.hookDna.preferredHookTypes || []).join(", ")}, opening=${dna.hookDna.recommendedOpeningStyle || ""}, duration=${dna.hookDna.recommendedHookDuration || ""}`);

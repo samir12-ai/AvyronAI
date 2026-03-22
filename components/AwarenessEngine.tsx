@@ -12,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl, safeApiJson } from '@/lib/query-client';
+import { getApiUrl, safeApiJson, authFetch } from '@/lib/query-client';
 import { useColorScheme } from 'react-native';
 
 interface LayerResult {
@@ -115,7 +115,7 @@ export default function AwarenessEngine({ isActive }: { isActive?: boolean }) {
     try {
       const url = new URL('/api/awareness-engine/latest', getApiUrl());
       url.searchParams.set('campaignId', selectedCampaignId);
-      const res = await fetch(url.toString());
+      const res = await authFetch(url.toString());
       const json = await safeApiJson(res);
       setData(json);
     } catch (err) {
@@ -130,7 +130,7 @@ export default function AwarenessEngine({ isActive }: { isActive?: boolean }) {
     try {
       const url = new URL('/api/offer-engine/latest', getApiUrl());
       url.searchParams.set('campaignId', selectedCampaignId);
-      const res = await fetch(url.toString());
+      const res = await authFetch(url.toString());
       const json = await safeApiJson(res);
       if (json.exists && json.id) {
         setOfferSnapshotId(json.id);
@@ -156,7 +156,7 @@ export default function AwarenessEngine({ isActive }: { isActive?: boolean }) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       const url = new URL('/api/awareness-engine/analyze', getApiUrl());
-      const res = await fetch(url.toString(), {
+      const res = await authFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaignId: selectedCampaignId, offerSnapshotId }),

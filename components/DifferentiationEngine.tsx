@@ -13,7 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl, safeApiJson } from '@/lib/query-client';
+import { getApiUrl, safeApiJson, authFetch } from '@/lib/query-client';
 import { normalizeEngineSnapshot, isEngineReady } from '@/lib/engine-snapshot';
 import { useColorScheme } from 'react-native';
 
@@ -107,16 +107,16 @@ export default function DifferentiationEngine({ isActive }: { isActive?: boolean
 
     try {
       const base = getApiUrl();
-      const miRes = await fetch(new URL(`/api/ci/mi-v3/snapshot/${campaignId}`, base).toString());
+      const miRes = await authFetch(new URL(`/api/ci/mi-v3/snapshot/${campaignId}`, base).toString());
       const miData = await safeApiJson(miRes);
       const miNorm = normalizeEngineSnapshot(miData, 'mi');
       setMiStatus(isEngineReady(miNorm, campaignId, miData.engineState) ? 'ready' : 'not_ready');
 
-      const audRes = await fetch(new URL(`/api/audience-engine/latest?campaignId=${campaignId}`, base).toString());
+      const audRes = await authFetch(new URL(`/api/audience-engine/latest?campaignId=${campaignId}`, base).toString());
       const audData = await safeApiJson(audRes);
       setAudStatus(audData && (audData.id || audData.exists) ? 'ready' : 'not_ready');
 
-      const posRes = await fetch(new URL(`/api/positioning-engine/latest?campaignId=${campaignId}`, base).toString());
+      const posRes = await authFetch(new URL(`/api/positioning-engine/latest?campaignId=${campaignId}`, base).toString());
       const posData = await safeApiJson(posRes);
       const posReady = posData && posData.id && (posData.status === 'COMPLETE' || posData.status === 'UNSTABLE');
       setPosStatus(posReady ? 'ready' : 'not_ready');
@@ -133,7 +133,7 @@ export default function DifferentiationEngine({ isActive }: { isActive?: boolean
     setLoading(true);
     try {
       const base = getApiUrl();
-      const res = await fetch(new URL(`/api/differentiation-engine/latest?campaignId=${campaignId}`, base).toString());
+      const res = await authFetch(new URL(`/api/differentiation-engine/latest?campaignId=${campaignId}`, base).toString());
       const json = await safeApiJson(res);
       setData(json);
     } catch {
@@ -156,7 +156,7 @@ export default function DifferentiationEngine({ isActive }: { isActive?: boolean
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       const base = getApiUrl();
-      const res = await fetch(new URL('/api/differentiation-engine/analyze', base).toString(), {
+      const res = await authFetch(new URL('/api/differentiation-engine/analyze', base).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaignId, positioningSnapshotId: posSnapshotId }),

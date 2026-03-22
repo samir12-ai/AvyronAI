@@ -14,7 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, authFetch } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
 import PlanDocumentView from '@/components/PlanDocumentView';
 import EngineTableModal from '@/components/EngineTableModal';
@@ -252,7 +252,7 @@ export default function OrchestratorPanel() {
     if (!selectedCampaignId) return;
     try {
       const url = getApiUrl(`/api/orchestrator/latest/${encodeURIComponent(selectedCampaignId)}`);
-      const res = await fetch(url);
+      const res = await authFetch(url);
       if (!res.ok) return;
       const data: OrchestratorJob = await res.json();
 
@@ -260,7 +260,7 @@ export default function OrchestratorPanel() {
       if (!hasSummariesInSections && data.status === 'COMPLETED') {
         try {
           const summUrl = getApiUrl(`/api/orchestrator/summaries/${encodeURIComponent(selectedCampaignId)}`);
-          const summRes = await fetch(summUrl);
+          const summRes = await authFetch(summUrl);
           if (summRes.ok) {
             const summData = await summRes.json();
             if (summData.hasSummaries && summData.engines) {
@@ -287,7 +287,7 @@ export default function OrchestratorPanel() {
     if (!selectedCampaignId) return;
     try {
       const url = getApiUrl(`/api/plans/active/${encodeURIComponent(selectedCampaignId)}`);
-      const res = await fetch(url);
+      const res = await authFetch(url);
       if (!res.ok) return;
       const data: ActivePlan = await res.json();
       setActivePlan(data);
@@ -320,7 +320,7 @@ export default function OrchestratorPanel() {
     setJob(null);
     try {
       const url = getApiUrl('/api/orchestrator/run');
-      await fetch(url, {
+      await authFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaignId: selectedCampaignId, forceRefresh: true }),

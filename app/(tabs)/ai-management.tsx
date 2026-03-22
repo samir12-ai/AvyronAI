@@ -21,7 +21,7 @@ import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, authFetch } from '@/lib/query-client';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import ExecutionPlan from '@/components/ExecutionPlan';
 import BuildThePlan from '@/components/BuildThePlan';
@@ -176,7 +176,7 @@ export default function AIManagementScreen() {
       try {
         const baseUrl = getApiUrl();
         const url = new URL(`/api/audience-engine/latest?campaignId=${selectedCampaignId}`, baseUrl);
-        const res = await fetch(url.toString());
+        const res = await authFetch(url.toString());
         if (res.ok) {
           const data = await res.json();
           setAudienceEngineData(data);
@@ -216,7 +216,7 @@ export default function AIManagementScreen() {
     try {
       const baseUrl = getApiUrl();
       const url = new URL('/api/audience-engine/analyze', baseUrl);
-      const response = await fetch(url.toString(), {
+      const response = await authFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaignId: selectedCampaignId }),
@@ -246,7 +246,7 @@ export default function AIManagementScreen() {
     try {
       const baseUrl = getApiUrl();
       const url = new URL('/api/generate-audience', baseUrl);
-      const response = await fetch(url.toString(), {
+      const response = await authFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -279,7 +279,7 @@ export default function AIManagementScreen() {
     const loadControlData = async () => {
       try {
         const baseUrl = getApiUrl();
-        const res = await fetch(new URL('/api/strategy/dashboard', baseUrl).toString());
+        const res = await authFetch(new URL('/api/strategy/dashboard', baseUrl).toString());
         if (res.ok) {
           const data = await res.json();
           setControlData(data);

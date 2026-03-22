@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, authFetch } from '@/lib/query-client';
 
 interface SignalCluster {
   id: string;
@@ -186,13 +186,13 @@ export default function SignalFlowPanel() {
     setPositioningMessage(null);
     try {
       const baseUrl = getApiUrl();
-      const audRes = await fetch(new URL(`/api/audience-engine/latest?campaignId=${selectedCampaignId}`, baseUrl).toString());
+      const audRes = await authFetch(new URL(`/api/audience-engine/latest?campaignId=${selectedCampaignId}`, baseUrl).toString());
       if (!audRes.ok) throw new Error('No audience snapshot available');
       const audData = await audRes.json();
       if (!audData) throw new Error('No audience snapshot available');
       setSignals(audData.structuredSignals || null);
 
-      const posRes = await fetch(new URL(`/api/positioning-engine/latest?campaignId=${selectedCampaignId}`, baseUrl).toString());
+      const posRes = await authFetch(new URL(`/api/positioning-engine/latest?campaignId=${selectedCampaignId}`, baseUrl).toString());
       if (posRes.ok) {
         const posData = await posRes.json();
         setTraceability(posData?.signalTraceability || null);
