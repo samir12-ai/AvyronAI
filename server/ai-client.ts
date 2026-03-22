@@ -40,7 +40,7 @@ export interface AIChatOptions {
   max_tokens: number;
   temperature?: number;
   response_format?: any;
-  accountId?: string;
+  accountId: string;
   endpoint?: string;
 }
 
@@ -52,7 +52,7 @@ export interface AIGeminiOptions {
     responseModalities?: any[];
     [key: string]: any;
   };
-  accountId?: string;
+  accountId: string;
   endpoint?: string;
 }
 
@@ -70,7 +70,7 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
     throw new AICallError("max_tokens is required for all AI calls", "MISSING_MAX_TOKENS");
   }
 
-  const { accountId = "default", endpoint = "unknown", ...rest } = options;
+  const { accountId, endpoint = "unknown", ...rest } = options;
 
   const budgetCheck = await checkAndReserveBudget(accountId, rest.max_tokens);
   if (!budgetCheck.allowed) {
@@ -115,7 +115,7 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
 }
 
 export async function aiGemini(options: AIGeminiOptions) {
-  const { accountId = "default", endpoint = "unknown", model, contents, config } = options;
+  const { accountId, endpoint = "unknown", model, contents, config } = options;
 
   const maxTokens = config?.maxOutputTokens || DEFAULT_MAX_TOKENS;
 

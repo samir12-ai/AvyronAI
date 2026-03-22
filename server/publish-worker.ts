@@ -153,7 +153,11 @@ interface PublishResult {
 }
 
 async function publishToMeta(post: any, accessToken: string, pageId: string, accountId?: string): Promise<PublishResult> {
-  const acctId = accountId || post.accountId || "default";
+  const acctId = accountId || post.accountId;
+  if (!acctId) {
+    console.error(`[PublishWorker] No accountId for post ${post.id} — skipping`);
+    return { success: false, error: "Missing accountId" };
+  }
   try {
     const platform = (post.platform || "").toLowerCase();
 
@@ -376,7 +380,11 @@ async function checkAndPublishDuePosts() {
     for (const post of duePosts) {
       if (isShuttingDown) break;
 
-      const accountId = post.accountId || "default";
+      const accountId = post.accountId;
+      if (!accountId) {
+        console.error(`[PublishWorker] No accountId for post ${post.id} — skipping`);
+        continue;
+      }
       const lockToken = await acquireLock(post.id);
       if (!lockToken) {
         console.log(`[PublishWorker] Skipping post ${post.id} — already locked`);
@@ -543,7 +551,8 @@ async function fetchPostMetrics() {
       if (!post.metaPostId) continue;
 
       try {
-        const accountId = post.accountId || "default";
+        const accountId = post.accountId;
+        if (!accountId) continue;
         const metaMode = await getAccountMetaMode(accountId);
         if (metaMode !== "REAL") continue;
 
