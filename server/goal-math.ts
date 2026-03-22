@@ -559,7 +559,7 @@ export function registerGoalMathRoutes(app: Express) {
   app.get("/api/goal-math/:campaignId", async (req: Request, res: Response) => {
     try {
       const campaignId = req.params.campaignId;
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
 
       const decomp = await getLatestGoalDecomposition(campaignId, accountId);
       const sim = await getLatestSimulation(campaignId, accountId);

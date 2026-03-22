@@ -64,7 +64,7 @@ async function resolveActivePlan(accountId: string, campaignId: string) {
 
 router.get("/api/autopilot/status", requireCampaign, async (req, res) => {
   try {
-    const accountId = (req.query.accountId as string) || "default";
+    const accountId = (req as any).accountId || "default";
     const campaignContext = (req as any).campaignContext;
     const campaignId = campaignContext?.campaignId || "";
     const state = await ensureAccountState(accountId);
@@ -193,7 +193,7 @@ router.get("/api/autopilot/status", requireCampaign, async (req, res) => {
 
 router.get("/api/autopilot/actions", requireCampaign, async (req, res) => {
   try {
-    const accountId = (req.query.accountId as string) || "default";
+    const accountId = (req as any).accountId || "default";
     const campaignContext = (req as any).campaignContext;
     const campaignId = campaignContext?.campaignId || "";
 
@@ -420,7 +420,7 @@ router.post("/api/autopilot/emergency-stop", requireCampaign, async (req, res) =
 
 router.get("/api/audit-log", requireCampaign, async (req, res) => {
   try {
-    const accountId = (req.query.accountId as string) || "default";
+    const accountId = (req as any).accountId || "default";
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
     const offset = parseInt(req.query.offset as string) || 0;
 
@@ -449,7 +449,7 @@ router.get("/api/audit-log", requireCampaign, async (req, res) => {
 
 router.get("/api/autopilot/guardrails", requireCampaign, async (req, res) => {
   try {
-    const accountId = (req.query.accountId as string) || "default";
+    const accountId = (req as any).accountId || "default";
     await ensureGuardrailConfig(accountId);
 
     const config = await db.select().from(guardrailConfig)

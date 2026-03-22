@@ -1001,7 +1001,7 @@ export function registerOrchestratorV2Routes(app: Express) {
 
   app.get("/api/narrative/:campaignId", async (req: Request, res: Response) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const narrative = await buildCausalNarrative(req.params.campaignId, accountId);
       res.json(narrative);
     } catch (error: any) {

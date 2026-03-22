@@ -16,7 +16,7 @@ const DEFAULT_FUNNEL_STAGES = JSON.stringify([
 export function registerFunnelLogicRoutes(app: Express) {
   app.get("/api/funnels", async (req, res) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("funnel_logic_enabled", accountId))) {
         return res.json({ funnels: [], disabled: true });
       }
@@ -85,7 +85,7 @@ export function registerFunnelLogicRoutes(app: Express) {
 
   app.get("/api/funnels/health", async (req, res) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("funnel_logic_enabled", accountId))) {
         return res.json({ health: null, disabled: true });
       }

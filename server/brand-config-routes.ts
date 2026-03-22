@@ -22,7 +22,7 @@ async function ensureBrandConfig(accountId: string) {
 
 router.get("/api/brand-config", async (req, res) => {
   try {
-    const accountId = (req.query.accountId as string) || "default";
+    const accountId = (req as any).accountId || "default";
     const config = await ensureBrandConfig(accountId);
     res.json(config);
   } catch (error) {

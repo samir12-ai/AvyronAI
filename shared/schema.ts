@@ -17,6 +17,7 @@ export const users = pgTable("users", {
   videoCredits: integer("video_credits").default(0),
   stripeCustomerId: text("stripe_customer_id"),
   hasSeenIntro: boolean("has_seen_intro").default(false),
+  accountId: varchar("account_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

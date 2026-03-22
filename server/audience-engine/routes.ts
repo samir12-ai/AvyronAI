@@ -31,7 +31,7 @@ export function registerAudienceEngineRoutes(app: Express) {
 
   app.get("/api/audience-engine/latest", async (req, res) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignId = req.query.campaignId as string;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

@@ -437,7 +437,7 @@ export function registerRootBundleRoutes(app: Express) {
   app.get("/api/root-bundle/:campaignId", async (req: Request, res: Response) => {
     try {
       const campaignId = req.params.campaignId;
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const active = await getActiveRootBundle(campaignId, accountId);
 
       if (!active) {
@@ -496,7 +496,7 @@ export function registerRootBundleRoutes(app: Express) {
   app.get("/api/root-bundle/:campaignId/staleness", async (req: Request, res: Response) => {
     try {
       const campaignId = req.params.campaignId;
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const staleness = await detectStaleness(campaignId, accountId);
       res.json({ success: true, ...staleness });
     } catch (err: any) {

@@ -9,7 +9,7 @@ import { requireCampaign } from "../campaign-routes";
 export function registerRevenueAttributionRoutes(app: Express) {
   app.get("/api/revenue", requireCampaign, async (req, res) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const check = await featureFlagService.checkWithDependencies("revenue_attribution_enabled", accountId);
       if (!check.enabled) {
         return res.json({ entries: [], disabled: true });
@@ -83,7 +83,7 @@ export function registerRevenueAttributionRoutes(app: Express) {
 
   app.get("/api/ad-spend", requireCampaign, async (req, res) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("revenue_attribution_enabled", accountId))) {
         return res.json({ entries: [], disabled: true });
       }
@@ -98,7 +98,7 @@ export function registerRevenueAttributionRoutes(app: Express) {
 
   app.get("/api/revenue/stats", requireCampaign, async (req, res) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const check = await featureFlagService.checkWithDependencies("revenue_attribution_enabled", accountId);
       if (!check.enabled) {
         return res.json({ stats: null, disabled: true });

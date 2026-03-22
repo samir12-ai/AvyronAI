@@ -21,7 +21,7 @@ export function registerBuildPlanLayerRoutes(app: Express) {
 
   app.get("/api/build-plan-layer/latest", async (req, res) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignId = req.query.campaignId as string;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId query parameter required" });

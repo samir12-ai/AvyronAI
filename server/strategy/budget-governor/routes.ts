@@ -207,7 +207,7 @@ export function registerBudgetGovernorRoutes(app: Express) {
   app.get("/api/strategy/budget-governor/latest", async (req: Request, res: Response) => {
     try {
       const campaignId = req.query.campaignId as string;
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

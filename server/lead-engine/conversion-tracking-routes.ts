@@ -110,7 +110,7 @@ export function registerConversionTrackingRoutes(app: Express) {
 
   app.get("/api/conversion-events", async (req, res) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("conversion_tracking_enabled", accountId))) {
         return res.json({ events: [], disabled: true });
       }
@@ -135,7 +135,7 @@ export function registerConversionTrackingRoutes(app: Express) {
 
   app.get("/api/conversion-events/stats", requireCampaign, async (req, res) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("conversion_tracking_enabled", accountId))) {
         return res.json({ stats: null, disabled: true });
       }

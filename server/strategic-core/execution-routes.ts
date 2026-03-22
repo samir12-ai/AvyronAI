@@ -403,7 +403,7 @@ export function registerExecutionRoutes(app: Express) {
 
   app.get("/api/execution/plans", async (req: Request, res: Response) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const plans = await db
         .select()
         .from(strategicPlans)
@@ -1009,7 +1009,7 @@ export function registerExecutionRoutes(app: Express) {
 
   app.get("/api/execution/dashboard", async (req: Request, res: Response) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignId = req.query.campaignId as string | undefined;
 
       const planConditions = [eq(strategicPlans.accountId, accountId)];
@@ -1069,7 +1069,7 @@ export function registerExecutionRoutes(app: Express) {
 
   app.get("/api/execution/calendar-entries", async (req: Request, res: Response) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignId = req.query.campaignId as string;
 
       if (!campaignId) {
@@ -1162,7 +1162,7 @@ export function registerExecutionRoutes(app: Express) {
 
   app.get("/api/execution/required-work", async (req: Request, res: Response) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignId = req.query.campaignId as string;
 
       if (!campaignId) {

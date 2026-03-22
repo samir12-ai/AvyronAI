@@ -11,7 +11,7 @@ const VALID_FLAGS: LeadEngineModule[] = [
 export function registerFeatureFlagRoutes(app: Express) {
   app.get("/api/feature-flags", async (req, res) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const flags = await featureFlagService.getAllFlags(accountId);
       res.json({ flags });
     } catch (error: any) {
@@ -39,7 +39,7 @@ export function registerFeatureFlagRoutes(app: Express) {
 
   app.get("/api/feature-flags/audit", async (req, res) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const limit = parseInt(req.query.limit as string) || 50;
       const history = await featureFlagService.getFlagAuditHistory(accountId, limit);
       res.json({ history });

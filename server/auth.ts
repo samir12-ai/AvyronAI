@@ -15,14 +15,20 @@ const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
 interface JwtPayload {
   userId: string;
   email: string;
+  accountId?: string;
 }
 
 export interface AuthRequest extends Request {
   userId?: string;
+  accountId?: string;
 }
 
-function generateToken(userId: string, email: string): string {
-  return jwt.sign({ userId, email } as JwtPayload, JWT_SECRET, { expiresIn: "14d" });
+export function resolveAccountId(req: AuthRequest): string {
+  return req.accountId || "default";
+}
+
+function generateToken(userId: string, email: string, accountId: string): string {
+  return jwt.sign({ userId, email, accountId } as JwtPayload, JWT_SECRET, { expiresIn: "14d" });
 }
 
 function verifyToken(token: string): JwtPayload | null {
@@ -46,6 +52,7 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
   }
 
   req.userId = payload.userId;
+  req.accountId = payload.accountId || payload.userId;
   next();
 }
 
@@ -56,6 +63,7 @@ export function optionalAuth(req: AuthRequest, _res: Response, next: NextFunctio
     const payload = verifyToken(token);
     if (payload) {
       req.userId = payload.userId;
+      req.accountId = payload.accountId || payload.userId;
     }
   }
   next();
@@ -95,7 +103,10 @@ export function registerAuthRoutes(app: Router) {
         hasSeenIntro: false,
       }).returning();
 
-      const token = generateToken(newUser.id, emailLower);
+      const userAccountId = newUser.id;
+      await db.update(users).set({ accountId: userAccountId }).where(eq(users.id, newUser.id));
+
+      const token = generateToken(newUser.id, emailLower, userAccountId);
 
       res.status(201).json({
         token,
@@ -108,6 +119,7 @@ export function registerAuthRoutes(app: Router) {
           videoCredits: 0,
           trialEnd: trialEnd.toISOString(),
           hasSeenIntro: false,
+          accountId: userAccountId,
         },
       });
     } catch (error: any) {
@@ -139,7 +151,12 @@ export function registerAuthRoutes(app: Router) {
         return res.status(401).json({ error: "Invalid email or password" });
       }
 
-      const token = generateToken(user.id, emailLower);
+      const userAccountId = user.accountId || user.id;
+      if (!user.accountId) {
+        await db.update(users).set({ accountId: userAccountId }).where(eq(users.id, user.id));
+      }
+
+      const token = generateToken(user.id, emailLower, userAccountId);
 
       const now = new Date();
       const isTrialActive = user.trialEnd ? now < user.trialEnd : false;
@@ -157,6 +174,7 @@ export function registerAuthRoutes(app: Router) {
           videoCredits: user.videoCredits ?? 0,
           trialEnd: user.trialEnd?.toISOString() || null,
           hasSeenIntro: user.hasSeenIntro ?? false,
+          accountId: userAccountId,
         },
       });
     } catch (error) {
@@ -197,6 +215,7 @@ export function registerAuthRoutes(app: Router) {
           videoCredits: user.videoCredits ?? 0,
           trialEnd: user.trialEnd?.toISOString() || null,
           hasSeenIntro: user.hasSeenIntro ?? false,
+          accountId: user.accountId || user.id,
         },
       });
     } catch (error) {

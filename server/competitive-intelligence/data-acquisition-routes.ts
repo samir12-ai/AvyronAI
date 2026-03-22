@@ -22,7 +22,7 @@ export function registerDataAcquisitionRoutes(app: Express) {
   app.get("/api/ci/competitors/:id/data-coverage", async (req, res) => {
     try {
       const { id } = req.params;
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignId = req.query.campaignId as string;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

@@ -401,7 +401,7 @@ export function registerContentDnaRoutes(app: Express) {
   app.get("/api/content-dna/:campaignId", async (req: Request, res: Response) => {
     try {
       const campaignId = req.params.campaignId;
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const dna = await getLatestContentDna(campaignId, accountId);
       if (!dna) {
         return res.json({ success: true, contentDna: null, message: "No Content DNA generated yet" });

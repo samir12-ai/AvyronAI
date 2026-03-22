@@ -147,7 +147,7 @@ export async function composeTasks(
 export function registerTaskComposerRoutes(app: Express) {
   app.get("/api/execution-tasks/:campaignId", async (req: Request, res: Response) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const [plan] = await db.select().from(strategicPlans)
         .where(and(eq(strategicPlans.accountId, accountId), eq(strategicPlans.campaignId, req.params.campaignId)))
         .orderBy(desc(strategicPlans.createdAt)).limit(1);

@@ -166,7 +166,7 @@ export async function getMetaStatus(accountId: string): Promise<MetaStatus> {
 export function registerMetaStatusRoutes(app: Express) {
   app.get("/api/meta/status", async (req: Request, res: Response) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const status = await getMetaStatus(accountId);
       res.json({ success: true, status });
     } catch (error: any) {
@@ -240,7 +240,7 @@ export function registerMetaStatusRoutes(app: Express) {
   app.get("/api/meta/diagnostics", async (req: Request, res: Response) => {
     if (!requireAdminAccess(req, res)) return;
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const metrics = getMetaMetrics(accountId);
       const backoff = getBackoffDiagnostics(accountId);
       res.json({

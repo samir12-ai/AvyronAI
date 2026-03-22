@@ -9,7 +9,7 @@ import { aiChat } from "../ai-client";
 export function registerLeadMagnetRoutes(app: Express) {
   app.get("/api/lead-magnets", async (req, res) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("lead_magnet_enabled", accountId))) {
         return res.json({ magnets: [], disabled: true });
       }

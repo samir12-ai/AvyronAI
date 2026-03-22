@@ -71,7 +71,7 @@ export function registerAuditRoutes(app: Express) {
   // ─── 1) GET /api/audit/feed ───────────────────────────────────────
   app.get("/api/audit/feed", async (req: Request, res: Response) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 50, 1), 200);
       const cursor = req.query.cursor as string | undefined;
       const eventTypes = req.query.event_type ? (req.query.event_type as string).split(",") : undefined;
@@ -144,7 +144,7 @@ export function registerAuditRoutes(app: Express) {
   // ─── 2) GET /api/audit/ai-usage ───────────────────────────────────
   app.get("/api/audit/ai-usage", async (req: Request, res: Response) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
 
       const weeklyUsage = await getWeeklyTokenUsage(accountId);
       const remaining = Math.max(0, WEEKLY_TOKEN_BUDGET - weeklyUsage);
@@ -261,7 +261,7 @@ export function registerAuditRoutes(app: Express) {
   // ─── 3) GET /api/audit/gates ──────────────────────────────────────
   app.get("/api/audit/gates", async (req: Request, res: Response) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const now = new Date();
 
       const acctRows = await db.select().from(accountState)
@@ -419,7 +419,7 @@ export function registerAuditRoutes(app: Express) {
   // ─── 4) GET /api/audit/decisions ──────────────────────────────────
   app.get("/api/audit/decisions", async (req: Request, res: Response) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
       const campaignId = req.query.campaign_id as string | undefined;
       const planId = req.query.plan_id as string | undefined;
@@ -472,7 +472,7 @@ export function registerAuditRoutes(app: Express) {
   // ─── 5) GET /api/audit/publish-history ────────────────────────────
   app.get("/api/audit/publish-history", async (req: Request, res: Response) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 50);
 
       const publishTypes = [
@@ -521,7 +521,7 @@ export function registerAuditRoutes(app: Express) {
   // ─── 6) GET /api/audit/jobs ───────────────────────────────────────
   app.get("/api/audit/jobs", async (req: Request, res: Response) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 50);
 
       const runningJobs = await db

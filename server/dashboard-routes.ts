@@ -372,7 +372,7 @@ export function registerDashboardRoutes(app: Express) {
 
   app.get("/api/dashboard/mode", async (req: Request, res: Response) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const mode = await resolveDataMode(accountId);
       res.json({ success: true, mode });
     } catch (error: any) {

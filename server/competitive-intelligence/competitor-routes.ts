@@ -28,7 +28,7 @@ function validateEvidence(competitor: any): { complete: boolean; missing: string
 export function registerCiCompetitorRoutes(app: Express) {
   app.get("/api/ci/competitors", async (req, res) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignId = req.query.campaignId as string;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -159,7 +159,7 @@ export function registerCiCompetitorRoutes(app: Express) {
   app.delete("/api/ci/competitors/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignId = req.query.campaignId as string;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -176,7 +176,7 @@ export function registerCiCompetitorRoutes(app: Express) {
   app.get("/api/ci/competitors/:id/evidence", async (req, res) => {
     try {
       const { id } = req.params;
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignId = req.query.campaignId as string;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

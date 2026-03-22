@@ -73,7 +73,7 @@ Return a JSON array of objects with fields: "text" (the CTA text), "type" (link/
 
   app.get("/api/cta-variants", async (req, res) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("cta_engine_enabled", accountId))) {
         return res.json({ variants: [], disabled: true });
       }

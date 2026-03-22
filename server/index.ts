@@ -6,6 +6,7 @@ import { startPublishWorker, stopPublishWorker } from "./publish-worker";
 import { startSnapshotCleanupWorker, stopSnapshotCleanupWorker } from "./snapshot-cleanup-worker";
 import { runAllHealthChecks } from "./meta-token-manager";
 import { invalidateStaleSnapshots } from "./market-intelligence-v3/engine-state";
+import { optionalAuth } from "./auth";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -299,6 +300,8 @@ function setupErrorHandler(app: express.Application) {
   setupCors(app);
   setupBodyParsing(app);
   setupRequestLogging(app);
+
+  app.use("/api", optionalAuth);
 
   configureExpoAndLanding(app);
 

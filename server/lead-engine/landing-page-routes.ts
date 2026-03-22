@@ -8,7 +8,7 @@ import { logAudit } from "../audit";
 export function registerLandingPageRoutes(app: Express) {
   app.get("/api/landing-pages", async (req, res) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("landing_pages_enabled", accountId))) {
         return res.json({ pages: [], disabled: true });
       }

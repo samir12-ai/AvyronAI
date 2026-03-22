@@ -129,7 +129,7 @@ Return JSON with: "insights" (array of {category, finding, recommendation, impac
 
   app.get("/api/lead-optimization/best-content", requireCampaign, async (req, res) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("ai_lead_optimization_enabled", accountId))) {
         return res.json({ content: [], disabled: true });
       }

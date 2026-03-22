@@ -266,7 +266,7 @@ export function registerGateRoutes(app: Express) {
 
   app.get("/api/strategic/blueprints", async (req: Request, res: Response) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const blueprints = await db.select().from(strategicBlueprints)
         .where(eq(strategicBlueprints.accountId, accountId))
         .orderBy(desc(strategicBlueprints.createdAt));

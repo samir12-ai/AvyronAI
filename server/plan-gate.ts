@@ -229,7 +229,7 @@ export function registerPlanGateRoutes(app: Express) {
 
   app.get("/api/plan-gate/:campaignId", async (req: Request, res: Response) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const readiness = await checkPlanReadiness(req.params.campaignId, accountId);
       res.json({
         success: true,

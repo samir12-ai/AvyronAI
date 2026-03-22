@@ -231,7 +231,7 @@ router.post("/api/studio/items", async (req, res) => {
 router.delete("/api/studio/items/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const accountId = (req.query.accountId as string) || "default";
+    const accountId = (req as any).accountId || "default";
 
     const deleted = await db
       .delete(studioItems)
@@ -266,7 +266,7 @@ router.delete("/api/studio/items/:id", async (req, res) => {
 
 router.get("/api/studio/cases", async (req, res) => {
   try {
-    const accountId = (req.query.accountId as string) || "default";
+    const accountId = (req as any).accountId || "default";
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
 
     const posts = await db.select().from(publishedPosts)
@@ -446,7 +446,7 @@ router.post("/api/studio/items/save-and-analyze", async (req, res) => {
 router.get("/api/studio/items/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const accountId = (req.query.accountId as string) || "default";
+    const accountId = (req as any).accountId || "default";
 
     const [item] = await db
       .select()
@@ -471,7 +471,7 @@ router.get("/api/studio/items/:id", async (req, res) => {
 router.get("/api/studio/items/:id/analysis-status", async (req, res) => {
   try {
     const { id } = req.params;
-    const accountId = (req.query.accountId as string) || "default";
+    const accountId = (req as any).accountId || "default";
 
     const [item] = await db
       .select({

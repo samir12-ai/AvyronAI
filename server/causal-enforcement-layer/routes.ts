@@ -16,7 +16,7 @@ export function registerCELRoutes(app: Express) {
   app.get("/api/cel/report/:campaignId", async (req: Request, res: Response) => {
     try {
       const { campaignId } = req.params;
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
 
       const ael = getCachedAEL(campaignId);
       if (!ael) {

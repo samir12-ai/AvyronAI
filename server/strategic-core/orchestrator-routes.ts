@@ -1358,7 +1358,7 @@ export function registerOrchestratorRoutes(app: Express) {
   app.get("/api/plans/:planId/document", async (req: Request, res: Response) => {
     try {
       const { planId } = req.params;
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignId = req.query.campaignId as string | undefined;
 
       const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
