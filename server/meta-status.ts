@@ -177,7 +177,7 @@ export function registerMetaStatusRoutes(app: Express) {
 
   app.post("/api/meta/disconnect", async (req: Request, res: Response) => {
     try {
-      const accountId = req.body?.accountId || "default";
+      const accountId = (req as any).accountId || "default";
 
       await db.delete(metaCredentials).where(eq(metaCredentials.accountId, accountId));
 
@@ -205,7 +205,7 @@ export function registerMetaStatusRoutes(app: Express) {
 
   app.post("/api/meta/reconnect", async (req: Request, res: Response) => {
     try {
-      const accountId = req.body?.accountId || "default";
+      const accountId = (req as any).accountId || "default";
 
       await db.delete(metaCredentials).where(eq(metaCredentials.accountId, accountId));
 
@@ -280,7 +280,7 @@ export type MetaErrorCode = "META_NOT_CONNECTED" | "META_PERMISSION_MISSING" | "
 
 export async function requireMetaReal(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const accountId = (req.query.accountId as string) || (req as any).accountId || "default";
+    const accountId = (req as any).accountId || "default";
     const state = await getOrCreateAccountState(accountId);
     const metaMode = (state?.metaMode as MetaMode) || "DISCONNECTED";
 

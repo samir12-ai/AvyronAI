@@ -200,7 +200,7 @@ export async function generateAndScoreCaptions(
       messages: [{ role: "user", content: prompt }],
       temperature: 0.8,
       max_tokens: 3000,
-      accountId: "default",
+      accountId: accountId,
       endpoint: "caption-engine",
     });
 

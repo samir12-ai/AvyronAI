@@ -136,7 +136,7 @@ export function registerVideoRoutes(app: Express) {
       const aiResponse = await aiChat({
         model: "gpt-5.2",
         max_tokens: 800,
-        accountId: "default",
+        accountId: (req as any).accountId || "default",
         endpoint: "video-brief",
         messages: [
           {

@@ -74,7 +74,8 @@ async function generateCreativeContent(
   contentType: string,
   title: string | null,
   scheduledDate: string,
-  planContext: string
+  planContext: string,
+  accountId: string = "default"
 ): Promise<{ caption: string; creativeBrief: string; ctaCopy: string }> {
   const prompt = `You are an expert social media content creator. Generate content for a ${contentType} post.
 
@@ -94,7 +95,7 @@ Return ONLY valid JSON with these exact keys:
     messages: [{ role: "user", content: prompt }],
     response_format: { type: "json_object" },
     max_tokens: 500,
-    accountId: "default",
+    accountId: accountId,
     endpoint: "strategic-execution",
   });
 
@@ -820,7 +821,8 @@ export function registerExecutionRoutes(app: Express) {
           entry.contentType,
           entry.title,
           entry.scheduledDate,
-          planContext
+          planContext,
+          (req as any).accountId || "default"
         );
       } catch (aiErr: any) {
         await db
@@ -896,7 +898,7 @@ export function registerExecutionRoutes(app: Express) {
     const requestId = `reset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
       const { planId } = req.params;
-      const accountId = (req.query.accountId as string) || (req as any).accountId || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignId = (req.query.campaignId as string) || (req.body?.campaignId as string) || null;
 
       const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);

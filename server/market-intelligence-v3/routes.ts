@@ -93,7 +93,7 @@ export function registerMIv3Routes(app: Express) {
 
   app.get("/api/ci/mi-v3/snapshot/:campaignId", requireCampaign, async (req, res) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignId = req.params.campaignId;
 
       const snapshots = await db.select().from(miSnapshots)
@@ -154,7 +154,7 @@ export function registerMIv3Routes(app: Express) {
 
   app.get("/api/ci/mi-v3/history/:campaignId", requireCampaign, async (req, res) => {
     try {
-      const accountId = (req.query.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignId = req.params.campaignId;
 
       const snapshots = await db.select().from(miSnapshots)

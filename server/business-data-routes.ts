@@ -159,7 +159,7 @@ export function registerBusinessDataRoutes(app: Express) {
 
 export async function requireBusinessData(req: Request, res: Response, next: NextFunction) {
   try {
-    const accountId = (req.query.accountId as string) || (req as any).accountId || "default";
+    const accountId = (req as any).accountId || "default";
 
     const selections = await db
       .select()

@@ -311,7 +311,7 @@ Return ONLY valid JSON with this structure:
           }
         ],
         max_tokens: 4000,
-        accountId: "default",
+        accountId: (req as any).accountId || "default",
         endpoint: "strategy-analysis",
       });
 
@@ -539,7 +539,7 @@ Return JSON:
           }
         ],
         max_tokens: 4000,
-        accountId: "default",
+        accountId: (req as any).accountId || "default",
         endpoint: "strategy-weekly",
       });
 
@@ -669,7 +669,7 @@ Return JSON:
           }
         ],
         max_tokens: 3000,
-        accountId: "default",
+        accountId: (req as any).accountId || "default",
         endpoint: "strategy-insight",
       });
 
@@ -758,7 +758,7 @@ Return ONLY valid JSON:
           }
         ],
         max_tokens: 3000,
-        accountId: "default",
+        accountId: (req as any).accountId || "default",
         endpoint: "strategy-moat",
       });
 
@@ -882,7 +882,7 @@ Return ONLY valid JSON:
           }
         ],
         max_tokens: 3000,
-        accountId: "default",
+        accountId: (req as any).accountId || "default",
         endpoint: "strategy-recommendations",
       });
 

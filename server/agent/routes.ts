@@ -24,7 +24,7 @@ export function registerAgentRoutes(app: Express) {
       send({ type: "started", campaignId, totalEngines: 15 });
 
       await new AgentOperator().runWithStream(
-        { accountId: "default", campaignId: String(campaignId) },
+        { accountId: (req as any).accountId || "default", campaignId: String(campaignId) },
         send
       );
 

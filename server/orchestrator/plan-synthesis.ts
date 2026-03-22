@@ -266,6 +266,7 @@ async function generatePlanWithAI(
   campaign: any,
   goalMathContext?: { goal: any; funnel: any; feasibility: any; archetype: any } | null,
   lockedDecisions?: string,
+  accountId: string = "default",
 ): Promise<SynthesizedPlan> {
   const objective = campaign?.objective || businessData?.funnelObjective || "AWARENESS";
   const businessType = businessData?.businessType || "general";
@@ -390,7 +391,7 @@ Generate a complete execution plan with these 9 sections. Return ONLY valid JSON
       messages: [{ role: "user", content: prompt }],
       response_format: { type: "json_object" },
       max_tokens: 2000,
-      accountId: "default",
+      accountId: accountId,
       endpoint: "orchestrator-plan-synthesis",
     });
 
@@ -683,7 +684,7 @@ export async function synthesizePlan(
 
   const engineInsights = extractEngineInsights(results);
   const lockedDecisions = extractLockedDecisions(results);
-  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions);
+  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId);
 
   const periodDays = goalMathContext?.goal?.timeHorizonDays || 30;
   const volume = deriveContentVolume(synthesized, periodDays);

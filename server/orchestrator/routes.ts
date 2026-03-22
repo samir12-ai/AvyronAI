@@ -372,7 +372,7 @@ export function registerOrchestratorV2Routes(app: Express) {
 
       await db.insert(planApprovals).values({
         planId,
-        accountId: "default",
+        accountId: (req as any).accountId || "default",
         decision: "REJECTED",
         reason: reason || "Rejected by user",
         decidedBy: "client",

@@ -158,7 +158,7 @@ Generate the Strategic Market Map now. All analysis scoped to ${campaignContext.
           { role: "user", content: userPrompt },
         ],
         max_tokens: 3000,
-        accountId: "default",
+        accountId: (req as any).accountId || "default",
         endpoint: "strategic-thinking",
       });
 

@@ -160,8 +160,10 @@ export async function aiGemini(options: AIGeminiOptions) {
 
 const WEEKLY_TOKEN_BUDGET = 500000;
 
+const FOUNDER_ACCOUNT_ID = "a2d87878-a1e9-41ea-a8a5-90beff569673";
+
 const ACCOUNT_BUDGET_OVERRIDES: Record<string, number> = {
-  "default": 2000000,
+  [FOUNDER_ACCOUNT_ID]: Infinity,
 };
 
 function getAccountBudget(accountId: string): number {

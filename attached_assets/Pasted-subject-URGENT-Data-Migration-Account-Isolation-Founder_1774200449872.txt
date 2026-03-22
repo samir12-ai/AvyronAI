@@ -1,0 +1,124 @@
+subject=“URGENT: Data Migration + Account Isolation + Founder Budget Override (Strict Constraints)”}
+Hi,
+
+We need to fix a few critical issues carefully without breaking any existing logic or system flow. Please follow the instructions exactly and verify everything before confirming.
+
+⸻
+
+🚨 1. Data Migration (Preview → Founder Account)
+
+We need to move the Analyze Data for TWO specific campaigns from preview into the founder account.
+	•	I will provide you with the founder email.
+	•	These campaigns must be accessible ONLY inside that founder account.
+
+⚠️ Critical Constraints:
+	•	Do NOT change or break any existing logic
+	•	Do NOT duplicate or mix data across accounts
+	•	Do NOT use default blindly
+	•	Ensure proper account_id ownership is respected
+
+Expected Result:
+	•	Founder logs in → sees ONLY his campaigns + their full analysis
+	•	No other user should see this data
+
+⸻
+
+🔒 2. Strict Account Isolation (Must Be Verified)
+
+This is mandatory:
+	•	No user should EVER see:
+	•	campaigns not belonging to them
+	•	analysis data from another account
+	•	shared preview data
+
+You MUST:
+	•	Audit all queries
+	•	Ensure every read/write is scoped by:
+→ account_id = currentUser.accountId
+
+Provide Proof:
+	•	Test with at least 2 different users
+	•	Confirm:
+	•	zero data leakage
+	•	complete isolation
+
+⸻
+
+💰 3. Founder Budget Override (Very Important)
+
+We need to make the founder account ONLY:
+
+→ Unlimited budget
+
+⚠️ STRICT:
+	•	This applies ONLY to the founder account
+	•	DO NOT affect any other users
+	•	DO NOT remove or break the existing budget system
+
+All other users must:
+	•	Stay on the current weekly budget limits (as defined)
+
+⸻
+
+📊 4. Budget System Audit
+
+You must:
+	•	Verify all budget logic is working correctly
+	•	Confirm:
+	•	weekly limits are enforced
+	•	no bypass exists
+	•	all users (except founder) follow limits
+
+Provide:
+	•	Exact weekly budget values currently enforced
+	•	Confirmation of correct enforcement
+	•	Proof via test (usage + limit behavior)
+
+⸻
+
+🔍 5. Full System Validation
+
+Before marking this complete:
+	•	Re-check:
+	•	data isolation
+	•	campaign ownership
+	•	budget behavior
+	•	execution flow
+	•	Manually test critical paths:
+	•	campaign creation
+	•	analysis
+	•	execution
+	•	login across multiple users
+
+⸻
+
+🔄 6. Final Update
+
+Once everything is:
+	•	verified
+	•	tested
+	•	stable
+
+→ Deploy/update the system
+
+We should NOT face the same issues again.
+
+⸻
+
+🎯 Summary
+	1.	Migrate 2 campaigns safely to founder account
+	2.	Enforce strict account isolation (no leaks)
+	3.	Set unlimited budget for founder ONLY
+	4.	Validate and report all budget limits
+	5.	Fully test and confirm stability
+	6.	Deploy clean version
+
+⸻
+
+Please handle this carefully — no shortcuts, no assumptions.
+
+Let me know once everything is completed with proof.
+
+Best,
+Samir
+:::

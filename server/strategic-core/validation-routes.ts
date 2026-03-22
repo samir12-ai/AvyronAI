@@ -160,7 +160,7 @@ Perform full validation now.`;
           { role: "user", content: userPrompt },
         ],
         max_tokens: 2500,
-        accountId: "default",
+        accountId: (req as any).accountId || "default",
         endpoint: "strategic-validation",
       });
 
