@@ -395,7 +395,7 @@ export default function SettingsScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setMetaActionLoading(true);
     try {
-      await apiRequest('POST', '/api/meta/disconnect', {  });
+      await apiRequest('POST', '/api/meta/disconnect', {});
       await fetchMetaStatus();
     } catch (error) {
       console.error('Meta disconnect error:', error);
@@ -409,7 +409,7 @@ export default function SettingsScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setMetaActionLoading(true);
     try {
-      await apiRequest('POST', '/api/meta/reconnect', {  });
+      await apiRequest('POST', '/api/meta/reconnect', {});
       const apiUrl = getApiUrl();
       const authUrl = `${apiUrl}api/meta/auth`;
       if (Platform.OS === 'web') {

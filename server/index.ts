@@ -6,7 +6,7 @@ import { startPublishWorker, stopPublishWorker } from "./publish-worker";
 import { startSnapshotCleanupWorker, stopSnapshotCleanupWorker } from "./snapshot-cleanup-worker";
 import { runAllHealthChecks } from "./meta-token-manager";
 import { invalidateStaleSnapshots } from "./market-intelligence-v3/engine-state";
-import { optionalAuth } from "./auth";
+import { authMiddleware, optionalAuth } from "./auth";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -301,7 +301,20 @@ function setupErrorHandler(app: express.Application) {
   setupBodyParsing(app);
   setupRequestLogging(app);
 
-  app.use("/api", optionalAuth);
+  const PUBLIC_PATH_PREFIXES = [
+    "/auth/",
+    "/stripe/webhook",
+    "/onboarding/track",
+  ];
+
+  app.use("/api", (req, res, next) => {
+    const subPath = req.path;
+    const isPublic = PUBLIC_PATH_PREFIXES.some(p => subPath.startsWith(p) || subPath === p);
+    if (isPublic) {
+      return optionalAuth(req as any, res, next);
+    }
+    return authMiddleware(req as any, res, next);
+  });
 
   configureExpoAndLanding(app);
 

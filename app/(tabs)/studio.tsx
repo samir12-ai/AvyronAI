@@ -642,7 +642,7 @@ export default function StudioScreen() {
   const handleRetryAnalysis = async (studioItemId: string) => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      await apiRequest('POST', `/api/studio/items/${studioItemId}/retry-analysis`, {  });
+      await apiRequest('POST', `/api/studio/items/${studioItemId}/retry-analysis`, {});
       setAutoAnalysis(prev => ({ ...prev, [studioItemId]: { ...prev[studioItemId], analysisStatus: 'PENDING', analysisError: null } }));
       startPolling(studioItemId);
     } catch (err) {

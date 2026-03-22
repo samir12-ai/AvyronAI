@@ -139,6 +139,7 @@ var init_schema = __esm({
       videoCredits: integer("video_credits").default(0),
       stripeCustomerId: text("stripe_customer_id"),
       hasSeenIntro: boolean("has_seen_intro").default(false),
+      accountId: varchar("account_id"),
       createdAt: timestamp("created_at").defaultNow()
     });
     photographerProfiles = pgTable("photographer_profiles", {
@@ -1970,10 +1971,10 @@ async function aiChat(options) {
   if (!options.max_tokens) {
     throw new AICallError("max_tokens is required for all AI calls", "MISSING_MAX_TOKENS");
   }
-  const { accountId = "default", endpoint = "unknown", ...rest } = options;
-  const budgetCheck = await checkAndReserveBudget(accountId, rest.max_tokens);
+  const { accountId: accountId2 = "default", endpoint = "unknown", ...rest } = options;
+  const budgetCheck = await checkAndReserveBudget(accountId2, rest.max_tokens);
   if (!budgetCheck.allowed) {
-    throw new AICallError(`AI budget exceeded for account ${accountId}: ${budgetCheck.reason}`, "AI_BUDGET_EXCEEDED");
+    throw new AICallError(`AI budget exceeded for account ${accountId2}: ${budgetCheck.reason}`, "AI_BUDGET_EXCEEDED");
   }
   const startTime = Date.now();
   let success = false;
@@ -1997,7 +1998,7 @@ async function aiChat(options) {
     throw new AICallError(err.message || "AI call failed", "AI_CALL_FAILED");
   } finally {
     await reconcileBudgetReservation({
-      accountId,
+      accountId: accountId2,
       endpoint,
       model: rest.model,
       maxTokens: rest.max_tokens,
@@ -2009,11 +2010,11 @@ async function aiChat(options) {
   }
 }
 async function aiGemini(options) {
-  const { accountId = "default", endpoint = "unknown", model, contents, config } = options;
+  const { accountId: accountId2 = "default", endpoint = "unknown", model, contents, config } = options;
   const maxTokens = config?.maxOutputTokens || DEFAULT_MAX_TOKENS;
-  const budgetCheck = await checkAndReserveBudget(accountId, maxTokens);
+  const budgetCheck = await checkAndReserveBudget(accountId2, maxTokens);
   if (!budgetCheck.allowed) {
-    throw new AICallError(`AI budget exceeded for account ${accountId}: ${budgetCheck.reason}`, "AI_BUDGET_EXCEEDED");
+    throw new AICallError(`AI budget exceeded for account ${accountId2}: ${budgetCheck.reason}`, "AI_BUDGET_EXCEEDED");
   }
   const startTime = Date.now();
   let success = false;
@@ -2036,7 +2037,7 @@ async function aiGemini(options) {
     throw new AICallError(err.message || "Gemini call failed", "AI_CALL_FAILED");
   } finally {
     await reconcileBudgetReservation({
-      accountId,
+      accountId: accountId2,
       endpoint,
       model,
       maxTokens,
@@ -2047,21 +2048,21 @@ async function aiGemini(options) {
     });
   }
 }
-function getAccountBudget(accountId) {
-  return ACCOUNT_BUDGET_OVERRIDES[accountId] ?? WEEKLY_TOKEN_BUDGET;
+function getAccountBudget(accountId2) {
+  return ACCOUNT_BUDGET_OVERRIDES[accountId2] ?? WEEKLY_TOKEN_BUDGET;
 }
-async function checkAndReserveBudget(accountId, maxTokens) {
+async function checkAndReserveBudget(accountId2, maxTokens) {
   try {
     const { db: db2 } = await Promise.resolve().then(() => (init_db(), db_exports));
     const { sql: sql41 } = await import("drizzle-orm");
-    const lockKey = hashAccountId(accountId);
-    const budget = getAccountBudget(accountId);
+    const lockKey = hashAccountId(accountId2);
+    const budget = getAccountBudget(accountId2);
     await db2.execute(sql41`SELECT pg_advisory_lock(${lockKey})`);
     try {
       const result = await db2.execute(sql41`
         SELECT COALESCE(SUM(estimated_tokens), 0) as total_tokens
         FROM ai_usage_log
-        WHERE account_id = ${accountId} AND created_at > NOW() - INTERVAL '7 days'
+        WHERE account_id = ${accountId2} AND created_at > NOW() - INTERVAL '7 days'
       `);
       const totalTokens = Number(result.rows?.[0]?.total_tokens || 0);
       if (totalTokens + maxTokens > budget) {
@@ -2069,7 +2070,7 @@ async function checkAndReserveBudget(accountId, maxTokens) {
       }
       await db2.execute(sql41`
         INSERT INTO ai_usage_log (account_id, endpoint, model, max_tokens, estimated_tokens, success, duration_ms, created_at)
-        VALUES (${accountId}, 'budget_reservation', 'reservation', ${maxTokens}, ${maxTokens}, false, 0, NOW())
+        VALUES (${accountId2}, 'budget_reservation', 'reservation', ${maxTokens}, ${maxTokens}, false, 0, NOW())
       `);
       return { allowed: true };
     } finally {
@@ -2079,10 +2080,10 @@ async function checkAndReserveBudget(accountId, maxTokens) {
     return { allowed: true };
   }
 }
-function hashAccountId(accountId) {
+function hashAccountId(accountId2) {
   let hash = 0;
-  for (let i = 0; i < accountId.length; i++) {
-    hash = (hash << 5) - hash + accountId.charCodeAt(i) | 0;
+  for (let i = 0; i < accountId2.length; i++) {
+    hash = (hash << 5) - hash + accountId2.charCodeAt(i) | 0;
   }
   return hash & 2147483647;
 }
@@ -2107,14 +2108,14 @@ async function reconcileBudgetReservation(entry) {
   } catch {
   }
 }
-async function getWeeklyTokenUsage(accountId) {
+async function getWeeklyTokenUsage(accountId2) {
   try {
     const { db: db2 } = await Promise.resolve().then(() => (init_db(), db_exports));
     const { sql: sql41 } = await import("drizzle-orm");
     const result = await db2.execute(sql41`
       SELECT COALESCE(SUM(estimated_tokens), 0) as total_tokens
       FROM ai_usage_log
-      WHERE account_id = ${accountId}
+      WHERE account_id = ${accountId2}
         AND created_at > NOW() - INTERVAL '7 days'
     `);
     return Number(result.rows?.[0]?.total_tokens || 0);
@@ -2122,7 +2123,7 @@ async function getWeeklyTokenUsage(accountId) {
     return 0;
   }
 }
-var DEFAULT_MAX_TOKENS, HARD_TIMEOUT_MS, openaiInstance, geminiInstance, AICallError, WEEKLY_TOKEN_BUDGET, ACCOUNT_BUDGET_OVERRIDES;
+var DEFAULT_MAX_TOKENS, HARD_TIMEOUT_MS, openaiInstance, geminiInstance, AICallError, WEEKLY_TOKEN_BUDGET, FOUNDER_ACCOUNT_ID, ACCOUNT_BUDGET_OVERRIDES;
 var init_ai_client = __esm({
   "server/ai-client.ts"() {
     "use strict";
@@ -2139,8 +2140,9 @@ var init_ai_client = __esm({
       }
     };
     WEEKLY_TOKEN_BUDGET = 5e5;
+    FOUNDER_ACCOUNT_ID = "a2d87878-a1e9-41ea-a8a5-90beff569673";
     ACCOUNT_BUDGET_OVERRIDES = {
-      "default": 2e6
+      [FOUNDER_ACCOUNT_ID]: Infinity
     };
   }
 });
@@ -2536,10 +2538,10 @@ var init_confidence_engine = __esm({
 });
 
 // server/audit.ts
-async function logAudit(accountId, eventType, options = {}) {
+async function logAudit(accountId2, eventType, options = {}) {
   try {
     await db.insert(auditLog).values({
-      accountId,
+      accountId: accountId2,
       eventType,
       decisionId: options.decisionId || null,
       details: options.details ? JSON.stringify(options.details) : null,
@@ -2637,10 +2639,10 @@ async function buildStrategyRoot(input) {
   console.log(`[StrategyRoot] CREATED | id=${created.id} | hash=${rootHash} | runId=${runId} | campaign=${input.campaignId}`);
   return { id: created.id, runId, rootHash, isNew: true };
 }
-async function getActiveRoot(campaignId, accountId = "default") {
+async function getActiveRoot(campaignId, accountId2 = "default") {
   const [active] = await db.select().from(strategyRoots).where(and3(
     eq3(strategyRoots.campaignId, campaignId),
-    eq3(strategyRoots.accountId, accountId),
+    eq3(strategyRoots.accountId, accountId2),
     eq3(strategyRoots.status, "ACTIVE")
   )).orderBy(desc3(strategyRoots.createdAt)).limit(1);
   return active || null;
@@ -2679,10 +2681,10 @@ function validateRootBinding(activeRoot, snapshotIds) {
     runId: activeRoot.runId
   };
 }
-async function invalidateDownstreamOnRegeneration(campaignId, accountId, regeneratedEngine) {
+async function invalidateDownstreamOnRegeneration(campaignId, accountId2, regeneratedEngine) {
   const [activeRoot] = await db.select().from(strategyRoots).where(and3(
     eq3(strategyRoots.campaignId, campaignId),
-    eq3(strategyRoots.accountId, accountId),
+    eq3(strategyRoots.accountId, accountId2),
     eq3(strategyRoots.status, "ACTIVE")
   )).limit(1);
   if (!activeRoot) {
@@ -2691,7 +2693,7 @@ async function invalidateDownstreamOnRegeneration(campaignId, accountId, regener
   const supersededRootId = activeRoot.id;
   await db.update(strategyRoots).set({ status: "SUPERSEDED" }).where(and3(
     eq3(strategyRoots.campaignId, campaignId),
-    eq3(strategyRoots.accountId, accountId),
+    eq3(strategyRoots.accountId, accountId2),
     eq3(strategyRoots.status, "ACTIVE")
   ));
   let invalidatedOffers = 0;
@@ -2700,7 +2702,7 @@ async function invalidateDownstreamOnRegeneration(campaignId, accountId, regener
   try {
     const offerResult = await db.update(offerSnapshots).set({ statusMessage: `Invalidated: upstream ${regeneratedEngine} engine regenerated (root ${supersededRootId} superseded)` }).where(and3(
       eq3(offerSnapshots.campaignId, campaignId),
-      eq3(offerSnapshots.accountId, accountId),
+      eq3(offerSnapshots.accountId, accountId2),
       eq3(offerSnapshots.strategyRootId, supersededRootId)
     ));
     invalidatedOffers = offerResult?.rowCount || 0;
@@ -2710,7 +2712,7 @@ async function invalidateDownstreamOnRegeneration(campaignId, accountId, regener
   try {
     const funnelResult = await db.update(funnelSnapshots).set({ statusMessage: `Invalidated: upstream ${regeneratedEngine} engine regenerated (root ${supersededRootId} superseded)` }).where(and3(
       eq3(funnelSnapshots.campaignId, campaignId),
-      eq3(funnelSnapshots.accountId, accountId),
+      eq3(funnelSnapshots.accountId, accountId2),
       eq3(funnelSnapshots.strategyRootId, supersededRootId)
     ));
     invalidatedFunnels = funnelResult?.rowCount || 0;
@@ -2720,7 +2722,7 @@ async function invalidateDownstreamOnRegeneration(campaignId, accountId, regener
   try {
     const integrityResult = await db.update(integritySnapshots).set({ statusMessage: `Invalidated: upstream ${regeneratedEngine} engine regenerated (root ${supersededRootId} superseded)` }).where(and3(
       eq3(integritySnapshots.campaignId, campaignId),
-      eq3(integritySnapshots.accountId, accountId),
+      eq3(integritySnapshots.accountId, accountId2),
       eq3(integritySnapshots.strategyRootId, supersededRootId)
     ));
     invalidatedIntegrity = integrityResult?.rowCount || 0;
@@ -2880,7 +2882,7 @@ __export(fulfillment_engine_exports, {
   computeFulfillment: () => computeFulfillment
 });
 import { eq as eq8, and as and7, sql as sql4, inArray as inArray5 } from "drizzle-orm";
-async function computeFulfillment(campaignId, accountId = "default") {
+async function computeFulfillment(campaignId, accountId2 = "default") {
   const activePlanStatuses = [
     "APPROVED",
     "GENERATED_TO_CALENDAR",
@@ -2891,7 +2893,7 @@ async function computeFulfillment(campaignId, accountId = "default") {
   ];
   const plans = await db.select({ id: strategicPlans.id }).from(strategicPlans).where(
     and7(
-      eq8(strategicPlans.accountId, accountId),
+      eq8(strategicPlans.accountId, accountId2),
       eq8(strategicPlans.campaignId, campaignId),
       sql4`${strategicPlans.status} IN (${sql4.join(
         activePlanStatuses.map((s) => sql4`${s}`),
@@ -2925,7 +2927,7 @@ async function computeFulfillment(campaignId, accountId = "default") {
   }).from(studioItems).where(
     and7(
       eq8(studioItems.campaignId, campaignId),
-      eq8(studioItems.accountId, accountId)
+      eq8(studioItems.accountId, accountId2)
     )
   );
   const fulfilledByBranch = {
@@ -2984,7 +2986,7 @@ async function computeFulfillment(campaignId, accountId = "default") {
     progressPercent,
     planId: activePlanIds[0] || null,
     campaignId,
-    accountId,
+    accountId: accountId2,
     computedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
@@ -3008,9 +3010,9 @@ var init_fulfillment_engine = __esm({
 
 // server/campaign-data-layer.ts
 import { eq as eq9, desc as desc8, and as and8, isNotNull, min, max, gte, inArray as inArray6 } from "drizzle-orm";
-async function resolveDataMode(accountId) {
+async function resolveDataMode(accountId2) {
   try {
-    const state = await db.select().from(accountState).where(eq9(accountState.accountId, accountId)).limit(1);
+    const state = await db.select().from(accountState).where(eq9(accountState.accountId, accountId2)).limit(1);
     const metaMode = state[0]?.metaMode || "DISCONNECTED";
     if (metaMode === "REAL") return "REAL";
     return "MANUAL";
@@ -3018,23 +3020,23 @@ async function resolveDataMode(accountId) {
     return "MANUAL";
   }
 }
-async function getManualMetrics(campaignId, accountId = "default") {
+async function getManualMetrics(campaignId, accountId2 = "default") {
   try {
     const rows = await db.select().from(manualCampaignMetrics).where(and8(
       eq9(manualCampaignMetrics.campaignId, campaignId),
-      eq9(manualCampaignMetrics.accountId, accountId)
+      eq9(manualCampaignMetrics.accountId, accountId2)
     )).limit(1);
     return rows[0] || null;
   } catch {
     return null;
   }
 }
-async function getPlanDrivenMetrics(campaignId, accountId) {
+async function getPlanDrivenMetrics(campaignId, accountId2) {
   try {
     const activePlans = await db.select().from(strategicPlans).where(
       and8(
         eq9(strategicPlans.campaignId, campaignId),
-        eq9(strategicPlans.accountId, accountId),
+        eq9(strategicPlans.accountId, accountId2),
         inArray6(strategicPlans.status, [...ACTIVE_PLAN_STATUSES])
       )
     ).orderBy(desc8(strategicPlans.createdAt));
@@ -3043,8 +3045,8 @@ async function getPlanDrivenMetrics(campaignId, accountId) {
     }
     const plan = activePlans[0];
     const [fulfillment, nextSched] = await Promise.all([
-      computeFulfillment(campaignId, accountId),
-      db.select({ scheduledDate: calendarEntries.scheduledDate }).from(calendarEntries).where(and8(eq9(calendarEntries.campaignId, campaignId), eq9(calendarEntries.accountId, accountId), eq9(calendarEntries.status, "SCHEDULED"), gte(calendarEntries.scheduledDate, /* @__PURE__ */ new Date()))).orderBy(calendarEntries.scheduledDate).limit(1)
+      computeFulfillment(campaignId, accountId2),
+      db.select({ scheduledDate: calendarEntries.scheduledDate }).from(calendarEntries).where(and8(eq9(calendarEntries.campaignId, campaignId), eq9(calendarEntries.accountId, accountId2), eq9(calendarEntries.status, "SCHEDULED"), gte(calendarEntries.scheduledDate, /* @__PURE__ */ new Date()))).orderBy(calendarEntries.scheduledDate).limit(1)
     ]);
     const plannedPieces = fulfillment.total.required;
     const generatedPieces = fulfillment.total.fulfilled;
@@ -3065,12 +3067,12 @@ async function getPlanDrivenMetrics(campaignId, accountId) {
     return { plannedPieces: 0, generatedPieces: 0, failedPieces: 0, pendingGeneration: 0, completionPct: 0, nextScheduledDate: null, hasPlan: false, planStatus: null };
   }
 }
-async function getDashboardMetrics(campaignId, accountId = "default") {
-  const mode = await resolveDataMode(accountId);
+async function getDashboardMetrics(campaignId, accountId2 = "default") {
+  const mode = await resolveDataMode(accountId2);
   const [realMetrics, planMetrics, manual] = await Promise.all([
-    getCampaignMetrics(campaignId, accountId),
-    getPlanDrivenMetrics(campaignId, accountId),
-    getManualMetrics(campaignId, accountId)
+    getCampaignMetrics(campaignId, accountId2),
+    getPlanDrivenMetrics(campaignId, accountId2),
+    getManualMetrics(campaignId, accountId2)
   ]);
   const hasMetaData = realMetrics.totalSpend > 0 || realMetrics.totalRevenue > 0 || realMetrics.totalConversions > 0;
   const hasManualData = manual && (manual.spend > 0 || manual.revenue > 0 || manual.conversions > 0 || manual.impressions > 0);
@@ -3144,57 +3146,57 @@ async function getDashboardMetrics(campaignId, accountId = "default") {
     planMetrics
   };
 }
-function snapshotFilter(campaignId, accountId) {
+function snapshotFilter(campaignId, accountId2) {
   return and8(
-    eq9(performanceSnapshots.accountId, accountId),
+    eq9(performanceSnapshots.accountId, accountId2),
     eq9(performanceSnapshots.campaignId, campaignId),
     isNotNull(performanceSnapshots.campaignId)
   );
 }
-function revenueFilter(campaignId, accountId) {
+function revenueFilter(campaignId, accountId2) {
   return and8(
-    eq9(revenueEntries.accountId, accountId),
+    eq9(revenueEntries.accountId, accountId2),
     eq9(revenueEntries.campaignId, campaignId),
     isNotNull(revenueEntries.campaignId)
   );
 }
-function spendFilter(campaignId, accountId) {
+function spendFilter(campaignId, accountId2) {
   return and8(
-    eq9(adSpendEntries.accountId, accountId),
+    eq9(adSpendEntries.accountId, accountId2),
     eq9(adSpendEntries.campaignId, campaignId),
     isNotNull(adSpendEntries.campaignId)
   );
 }
-function conversionFilter(campaignId, accountId) {
+function conversionFilter(campaignId, accountId2) {
   return and8(
-    eq9(conversionEvents.accountId, accountId),
+    eq9(conversionEvents.accountId, accountId2),
     eq9(conversionEvents.campaignId, campaignId),
     isNotNull(conversionEvents.campaignId)
   );
 }
-function leadsFilter(campaignId, accountId) {
+function leadsFilter(campaignId, accountId2) {
   return and8(
-    eq9(leads.accountId, accountId),
+    eq9(leads.accountId, accountId2),
     eq9(leads.campaignId, campaignId),
     isNotNull(leads.campaignId)
   );
 }
-function postsFilter(campaignId, accountId) {
+function postsFilter(campaignId, accountId2) {
   return and8(
-    eq9(publishedPosts.accountId, accountId),
+    eq9(publishedPosts.accountId, accountId2),
     eq9(publishedPosts.campaignId, campaignId),
     isNotNull(publishedPosts.campaignId)
   );
 }
-async function getCampaignMetrics(campaignId, accountId = "default") {
+async function getCampaignMetrics(campaignId, accountId2 = "default") {
   const now = /* @__PURE__ */ new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const perfData = await db.select().from(performanceSnapshots).where(snapshotFilter(campaignId, accountId)).orderBy(desc8(performanceSnapshots.fetchedAt)).limit(200);
-  const allRevenue = await db.select().from(revenueEntries).where(revenueFilter(campaignId, accountId));
-  const allSpend = await db.select().from(adSpendEntries).where(spendFilter(campaignId, accountId));
-  const allConversions = await db.select().from(conversionEvents).where(conversionFilter(campaignId, accountId));
-  const allLeads = await db.select().from(leads).where(leadsFilter(campaignId, accountId));
-  const posts = await db.select().from(publishedPosts).where(postsFilter(campaignId, accountId));
+  const perfData = await db.select().from(performanceSnapshots).where(snapshotFilter(campaignId, accountId2)).orderBy(desc8(performanceSnapshots.fetchedAt)).limit(200);
+  const allRevenue = await db.select().from(revenueEntries).where(revenueFilter(campaignId, accountId2));
+  const allSpend = await db.select().from(adSpendEntries).where(spendFilter(campaignId, accountId2));
+  const allConversions = await db.select().from(conversionEvents).where(conversionFilter(campaignId, accountId2));
+  const allLeads = await db.select().from(leads).where(leadsFilter(campaignId, accountId2));
+  const posts = await db.select().from(publishedPosts).where(postsFilter(campaignId, accountId2));
   const totalSpend = allSpend.reduce((s, e) => s + (e.amount || 0), 0);
   const totalRevenue = allRevenue.reduce((s, e) => s + (e.amount || 0), 0);
   const totalConversions = allConversions.length;
@@ -3235,12 +3237,12 @@ async function getCampaignMetrics(campaignId, accountId = "default") {
     costPerLead: monthLeads > 0 ? (monthSpend / monthLeads).toFixed(2) : "0"
   };
 }
-async function getRevenueSummary(campaignId, accountId = "default") {
+async function getRevenueSummary(campaignId, accountId2 = "default") {
   const now = /* @__PURE__ */ new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const allRevenue = await db.select().from(revenueEntries).where(revenueFilter(campaignId, accountId));
+  const allRevenue = await db.select().from(revenueEntries).where(revenueFilter(campaignId, accountId2));
   const monthRevEntries = allRevenue.filter((r) => r.createdAt && r.createdAt >= monthStart);
-  const allSpend = await db.select().from(adSpendEntries).where(spendFilter(campaignId, accountId));
+  const allSpend = await db.select().from(adSpendEntries).where(spendFilter(campaignId, accountId2));
   const monthSpendEntries = allSpend.filter((s) => s.createdAt && s.createdAt >= monthStart);
   const totalRevenue = allRevenue.reduce((s, e) => s + (e.amount || 0), 0);
   const monthRevenue = monthRevEntries.reduce((s, e) => s + (e.amount || 0), 0);
@@ -3255,14 +3257,14 @@ async function getRevenueSummary(campaignId, accountId = "default") {
     if (r.funnelStage) byFunnelStage[r.funnelStage] = (byFunnelStage[r.funnelStage] || 0) + (r.amount || 0);
   }
   const revenueByContent = Object.entries(byPost).map(([postId, revenue]) => ({ postId, revenue })).sort((a, b) => b.revenue - a.revenue);
-  const posts = await db.select().from(publishedPosts).where(postsFilter(campaignId, accountId));
+  const posts = await db.select().from(publishedPosts).where(postsFilter(campaignId, accountId2));
   const postMap = new Map(posts.map((p) => [p.id, p]));
   const topRevenueContent = revenueByContent.slice(0, 10).map((item) => ({
     postId: item.postId,
     revenue: item.revenue,
     caption: postMap.get(item.postId)?.caption?.substring(0, 100)
   }));
-  const perfData = await db.select().from(performanceSnapshots).where(snapshotFilter(campaignId, accountId));
+  const perfData = await db.select().from(performanceSnapshots).where(snapshotFilter(campaignId, accountId2));
   const byContentCluster = {};
   for (const snap of perfData) {
     const cluster = snap.contentAngle || snap.contentType || "unknown";
@@ -3271,7 +3273,7 @@ async function getRevenueSummary(campaignId, accountId = "default") {
       byContentCluster[cluster] = (byContentCluster[cluster] || 0) + snapRevenue;
     }
   }
-  const allCtaVariants = await db.select().from(ctaVariants).where(and8(eq9(ctaVariants.accountId, accountId), eq9(ctaVariants.campaignId, campaignId)));
+  const allCtaVariants = await db.select().from(ctaVariants).where(and8(eq9(ctaVariants.accountId, accountId2), eq9(ctaVariants.campaignId, campaignId)));
   const revenueByCtaVariant = [];
   for (const cta of allCtaVariants) {
     const ctaRevenue = allRevenue.filter((r) => r.ctaVariantId === cta.id).reduce((s, r) => s + (r.amount || 0), 0);
@@ -3284,10 +3286,10 @@ async function getRevenueSummary(campaignId, accountId = "default") {
     });
   }
   revenueByCtaVariant.sort((a, b) => b.revenue - a.revenue);
-  const allLeads = await db.select().from(leads).where(leadsFilter(campaignId, accountId));
+  const allLeads = await db.select().from(leads).where(leadsFilter(campaignId, accountId2));
   const monthLeads = allLeads.filter((l) => l.createdAt && l.createdAt >= monthStart);
   const convertedLeads = allLeads.filter((l) => l.status === "converted");
-  const allConversions = await db.select().from(conversionEvents).where(conversionFilter(campaignId, accountId));
+  const allConversions = await db.select().from(conversionEvents).where(conversionFilter(campaignId, accountId2));
   const conversionByLeadId = /* @__PURE__ */ new Map();
   for (const conv of allConversions) {
     if (conv.leadId && !conversionByLeadId.has(conv.leadId)) {
@@ -3341,19 +3343,19 @@ async function getRevenueSummary(campaignId, accountId = "default") {
     avgTimeToConversionHours: avgTimeToConversion
   };
 }
-async function computeDataTimeSpanHours(campaignId, accountId) {
+async function computeDataTimeSpanHours(campaignId, accountId2) {
   const snapshotSpan = await db.select({
     minTs: min(performanceSnapshots.fetchedAt),
     maxTs: max(performanceSnapshots.fetchedAt)
-  }).from(performanceSnapshots).where(snapshotFilter(campaignId, accountId));
+  }).from(performanceSnapshots).where(snapshotFilter(campaignId, accountId2));
   const spendSpan = await db.select({
     minTs: min(adSpendEntries.createdAt),
     maxTs: max(adSpendEntries.createdAt)
-  }).from(adSpendEntries).where(spendFilter(campaignId, accountId));
+  }).from(adSpendEntries).where(spendFilter(campaignId, accountId2));
   const eventSpan = await db.select({
     minTs: min(conversionEvents.createdAt),
     maxTs: max(conversionEvents.createdAt)
-  }).from(conversionEvents).where(conversionFilter(campaignId, accountId));
+  }).from(conversionEvents).where(conversionFilter(campaignId, accountId2));
   const sources = ["snapshots", "adSpend", "conversionEvents"];
   const results = [snapshotSpan[0], spendSpan[0], eventSpan[0]];
   let maxHours = 0;
@@ -3505,10 +3507,10 @@ function recordSignalEmission(campaignId, metric, deltaPct) {
   const cacheKey = `${campaignId}:${metric}`;
   signalCache.set(cacheKey, { emittedAt: Date.now(), deltaPct });
 }
-async function checkDataIntegrity(campaignId, accountId, totalSpend, snapshotCount, totalConversions) {
+async function checkDataIntegrity(campaignId, accountId2, totalSpend, snapshotCount, totalConversions) {
   if (totalSpend > 0 && snapshotCount === 0 && totalConversions === 0) {
     console.warn(`${LOG_PREFIX} [INTEGRITY] Campaign ${campaignId}: Spend exists ($${totalSpend.toFixed(2)}) but zero snapshots and zero conversions. Possible data gap.`);
-    await logAudit(accountId, "DATA_INTEGRITY_WARNING", {
+    await logAudit(accountId2, "DATA_INTEGRITY_WARNING", {
       details: {
         campaignId,
         issue: "spend_without_data",
@@ -3521,7 +3523,7 @@ async function checkDataIntegrity(campaignId, accountId, totalSpend, snapshotCou
   }
   if (totalSpend > 0 && snapshotCount > 10 && totalConversions === 0) {
     console.warn(`${LOG_PREFIX} [INTEGRITY] Campaign ${campaignId}: Spend ($${totalSpend.toFixed(2)}) with ${snapshotCount} snapshots but zero conversions. Tracking may be broken.`);
-    await logAudit(accountId, "DATA_INTEGRITY_WARNING", {
+    await logAudit(accountId2, "DATA_INTEGRITY_WARNING", {
       details: {
         campaignId,
         issue: "snapshots_without_conversions",
@@ -3533,11 +3535,11 @@ async function checkDataIntegrity(campaignId, accountId, totalSpend, snapshotCou
     });
   }
 }
-async function detectPerformanceSignals(campaignId, accountId = "default") {
+async function detectPerformanceSignals(campaignId, accountId2 = "default") {
   const signals = [];
-  console.log(`${LOG_PREFIX} [SignalDetection] Starting for campaign=${campaignId}, account=${accountId}`);
+  console.log(`${LOG_PREFIX} [SignalDetection] Starting for campaign=${campaignId}, account=${accountId2}`);
   console.log(`${LOG_PREFIX} [ConversionSource] Using conversionEvents table exclusively (unified source)`);
-  const perfData = await db.select().from(performanceSnapshots).where(snapshotFilter(campaignId, accountId)).orderBy(desc8(performanceSnapshots.fetchedAt)).limit(200);
+  const perfData = await db.select().from(performanceSnapshots).where(snapshotFilter(campaignId, accountId2)).orderBy(desc8(performanceSnapshots.fetchedAt)).limit(200);
   const defaultValidation = {
     validationStatus: "ACTIONABLE",
     confidenceScore: 0,
@@ -3563,17 +3565,17 @@ async function detectPerformanceSignals(campaignId, accountId = "default") {
       validation: defaultValidation
     }];
   }
-  const allSpend = await db.select().from(adSpendEntries).where(spendFilter(campaignId, accountId));
+  const allSpend = await db.select().from(adSpendEntries).where(spendFilter(campaignId, accountId2));
   const totalSpend = allSpend.reduce((s, e) => s + (e.amount || 0), 0);
-  const allConversions = await db.select().from(conversionEvents).where(conversionFilter(campaignId, accountId));
+  const allConversions = await db.select().from(conversionEvents).where(conversionFilter(campaignId, accountId2));
   const totalConversions = allConversions.length;
-  const timeSpanResult = await computeDataTimeSpanHours(campaignId, accountId);
+  const timeSpanResult = await computeDataTimeSpanHours(campaignId, accountId2);
   const spendMet = totalSpend >= MIN_SPEND_THRESHOLD;
   const timeMet = timeSpanResult.hours >= MIN_TIMESPAN_HOURS;
   const convMet = totalConversions >= MIN_CONVERSIONS_THRESHOLD;
   const safeguardsPassed = [spendMet, timeMet, convMet].filter(Boolean).length;
   console.log(`${LOG_PREFIX} [Safeguards] Spend: $${totalSpend.toFixed(2)}/${MIN_SPEND_THRESHOLD} (${spendMet ? "PASS" : "FAIL"}), TimeSpan: ${timeSpanResult.hours.toFixed(0)}h/${MIN_TIMESPAN_HOURS}h via ${timeSpanResult.source} (${timeMet ? "PASS" : "FAIL"}), Conversions: ${totalConversions}/${MIN_CONVERSIONS_THRESHOLD} from conversionEvents (${convMet ? "PASS" : "FAIL"}). Result: ${safeguardsPassed}/3 passed (need 2).`);
-  await checkDataIntegrity(campaignId, accountId, totalSpend, perfData.length, totalConversions);
+  await checkDataIntegrity(campaignId, accountId2, totalSpend, perfData.length, totalConversions);
   if (safeguardsPassed < 2) {
     return [{
       signalType: "INSUFFICIENT_DATA_FOR_SIGNALS",
@@ -3646,12 +3648,12 @@ async function detectPerformanceSignals(campaignId, accountId = "default") {
         let finalSignalType = "SCALE_CANDIDATE";
         if (validation.validationStatus === "NORMAL_VARIATION") {
           finalSignalType = "NORMAL_VARIATION";
-          await logAudit(accountId, "SIGNAL_SUPPRESSED", {
+          await logAudit(accountId2, "SIGNAL_SUPPRESSED", {
             details: { campaignId, metric: m.name, postId: post.postId, deltaPct, confidenceScore: validation.confidenceScore, reason: validation.reasonSummary }
           });
         } else if (validation.validationStatus === "LOW_CONFIDENCE") {
           finalSignalType = "LOW_CONFIDENCE";
-          await logAudit(accountId, "SIGNAL_DOWNGRADED", {
+          await logAudit(accountId2, "SIGNAL_DOWNGRADED", {
             details: { campaignId, metric: m.name, postId: post.postId, deltaPct, confidenceScore: validation.confidenceScore, reason: validation.reasonSummary }
           });
         }
@@ -3682,12 +3684,12 @@ async function detectPerformanceSignals(campaignId, accountId = "default") {
         let finalSignalType = "REVIEW_NEEDED";
         if (validation.validationStatus === "NORMAL_VARIATION") {
           finalSignalType = "NORMAL_VARIATION";
-          await logAudit(accountId, "SIGNAL_SUPPRESSED", {
+          await logAudit(accountId2, "SIGNAL_SUPPRESSED", {
             details: { campaignId, metric: m.name, postId: post.postId, deltaPct, confidenceScore: validation.confidenceScore, reason: validation.reasonSummary }
           });
         } else if (validation.validationStatus === "LOW_CONFIDENCE") {
           finalSignalType = "LOW_CONFIDENCE";
-          await logAudit(accountId, "SIGNAL_DOWNGRADED", {
+          await logAudit(accountId2, "SIGNAL_DOWNGRADED", {
             details: { campaignId, metric: m.name, postId: post.postId, deltaPct, confidenceScore: validation.confidenceScore, reason: validation.reasonSummary }
           });
         }
@@ -3719,10 +3721,10 @@ async function detectPerformanceSignals(campaignId, accountId = "default") {
       let finalType = "REVIEW_NEEDED";
       if (validation.validationStatus === "NORMAL_VARIATION") {
         finalType = "NORMAL_VARIATION";
-        await logAudit(accountId, "SIGNAL_SUPPRESSED", { details: { campaignId, metric: "campaign_cpa", deltaPct: cpaDeltaPct, reason: validation.reasonSummary } });
+        await logAudit(accountId2, "SIGNAL_SUPPRESSED", { details: { campaignId, metric: "campaign_cpa", deltaPct: cpaDeltaPct, reason: validation.reasonSummary } });
       } else if (validation.validationStatus === "LOW_CONFIDENCE") {
         finalType = "LOW_CONFIDENCE";
-        await logAudit(accountId, "SIGNAL_DOWNGRADED", { details: { campaignId, metric: "campaign_cpa", deltaPct: cpaDeltaPct, reason: validation.reasonSummary } });
+        await logAudit(accountId2, "SIGNAL_DOWNGRADED", { details: { campaignId, metric: "campaign_cpa", deltaPct: cpaDeltaPct, reason: validation.reasonSummary } });
       }
       signals.push({
         signalType: finalType,
@@ -3741,10 +3743,10 @@ async function detectPerformanceSignals(campaignId, accountId = "default") {
       let finalType = "SCALE_CANDIDATE";
       if (validation.validationStatus === "NORMAL_VARIATION") {
         finalType = "NORMAL_VARIATION";
-        await logAudit(accountId, "SIGNAL_SUPPRESSED", { details: { campaignId, metric: "campaign_cpa", deltaPct: cpaDeltaPct, reason: validation.reasonSummary } });
+        await logAudit(accountId2, "SIGNAL_SUPPRESSED", { details: { campaignId, metric: "campaign_cpa", deltaPct: cpaDeltaPct, reason: validation.reasonSummary } });
       } else if (validation.validationStatus === "LOW_CONFIDENCE") {
         finalType = "LOW_CONFIDENCE";
-        await logAudit(accountId, "SIGNAL_DOWNGRADED", { details: { campaignId, metric: "campaign_cpa", deltaPct: cpaDeltaPct, reason: validation.reasonSummary } });
+        await logAudit(accountId2, "SIGNAL_DOWNGRADED", { details: { campaignId, metric: "campaign_cpa", deltaPct: cpaDeltaPct, reason: validation.reasonSummary } });
       }
       const signal = {
         signalType: finalType,
@@ -3797,8 +3799,8 @@ import { eq as eq10, and as and9, desc as desc9 } from "drizzle-orm";
 function registerCampaignRoutes(app2) {
   app2.get("/api/campaigns", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      const selections = await db.select().from(campaignSelections).where(eq10(campaignSelections.accountId, accountId)).orderBy(desc9(campaignSelections.selectedAt));
+      const accountId2 = req.accountId || "default";
+      const selections = await db.select().from(campaignSelections).where(eq10(campaignSelections.accountId, accountId2)).orderBy(desc9(campaignSelections.selectedAt));
       const campaigns = selections.map((s) => ({
         id: s.selectedCampaignId,
         name: s.selectedCampaignName,
@@ -3820,8 +3822,8 @@ function registerCampaignRoutes(app2) {
   });
   app2.post("/api/campaigns/create", async (req, res) => {
     try {
-      const { name, objective, location, platform, notes, dataSourceMode, accountId: reqAccountId } = req.body;
-      const accountId = reqAccountId || "default";
+      const { name, objective, location, platform, notes, dataSourceMode } = req.body;
+      const accountId2 = req.accountId || "default";
       const requestId = `crt_${Date.now()}`;
       if (!name || !name.trim()) {
         return res.status(400).json({ code: "MISSING_NAME", message: "Campaign name is required", requestId });
@@ -3844,7 +3846,7 @@ function registerCampaignRoutes(app2) {
       const campaignId = `campaign_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
       const campaignName = name.trim();
       const inserted = await db.insert(campaignSelections).values({
-        accountId,
+        accountId: accountId2,
         selectedCampaignId: campaignId,
         selectedCampaignName: campaignName,
         selectedPlatform: platform || "meta",
@@ -3855,7 +3857,7 @@ function registerCampaignRoutes(app2) {
         selectedAt: /* @__PURE__ */ new Date()
       }).returning();
       const selection = inserted[0];
-      console.log(`[Campaigns] Campaign created: ${campaignName} (${objective}) id=${campaignId} account=${accountId}`);
+      console.log(`[Campaigns] Campaign created: ${campaignName} (${objective}) id=${campaignId} account=${accountId2}`);
       res.json({
         success: true,
         requestId,
@@ -3878,8 +3880,8 @@ function registerCampaignRoutes(app2) {
   });
   app2.post("/api/campaigns/select", async (req, res) => {
     try {
-      const { campaignId, campaignName, platform, goalType, campaignLocation, accountId: reqAccountId } = req.body;
-      const accountId = reqAccountId || "default";
+      const { campaignId, campaignName, platform, goalType, campaignLocation } = req.body;
+      const accountId2 = req.accountId || "default";
       const requestId = `sel_${Date.now()}`;
       if (!campaignId || !campaignName || !goalType) {
         return res.status(400).json({ code: "MISSING_FIELDS", message: "campaignId, campaignName, and goalType are required", requestId });
@@ -3893,7 +3895,7 @@ function registerCampaignRoutes(app2) {
       }
       const existing = await db.select().from(campaignSelections).where(
         and9(
-          eq10(campaignSelections.accountId, accountId),
+          eq10(campaignSelections.accountId, accountId2),
           eq10(campaignSelections.selectedCampaignId, campaignId)
         )
       ).limit(1);
@@ -3909,14 +3911,14 @@ function registerCampaignRoutes(app2) {
           updatedAt: /* @__PURE__ */ new Date()
         }).where(
           and9(
-            eq10(campaignSelections.accountId, accountId),
+            eq10(campaignSelections.accountId, accountId2),
             eq10(campaignSelections.selectedCampaignId, campaignId)
           )
         ).returning();
         selection = updated[0];
       } else {
         const inserted = await db.insert(campaignSelections).values({
-          accountId,
+          accountId: accountId2,
           selectedCampaignId: campaignId,
           selectedCampaignName: campaignName,
           selectedPlatform: platform || "meta",
@@ -3926,7 +3928,7 @@ function registerCampaignRoutes(app2) {
         }).returning();
         selection = inserted[0];
       }
-      console.log(`[Campaigns] Campaign selected: ${campaignName} (${goalType}) for account ${accountId}`);
+      console.log(`[Campaigns] Campaign selected: ${campaignName} (${goalType}) for account ${accountId2}`);
       res.json({
         success: true,
         selection
@@ -3938,8 +3940,8 @@ function registerCampaignRoutes(app2) {
   });
   app2.get("/api/campaigns/selected", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      const selections = await db.select().from(campaignSelections).where(eq10(campaignSelections.accountId, accountId)).orderBy(desc9(campaignSelections.selectedAt)).limit(1);
+      const accountId2 = req.accountId || "default";
+      const selections = await db.select().from(campaignSelections).where(eq10(campaignSelections.accountId, accountId2)).orderBy(desc9(campaignSelections.selectedAt)).limit(1);
       if (selections.length === 0) {
         return res.json({
           selected: false,
@@ -3969,8 +3971,8 @@ function registerCampaignRoutes(app2) {
   });
   app2.delete("/api/campaigns/selected", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      await db.delete(campaignSelections).where(eq10(campaignSelections.accountId, accountId));
+      const accountId2 = req.accountId || "default";
+      await db.delete(campaignSelections).where(eq10(campaignSelections.accountId, accountId2));
       res.json({ success: true, message: "Campaign selection cleared" });
     } catch (error) {
       console.error("[Campaigns] Error clearing selection:", error);
@@ -3980,39 +3982,39 @@ function registerCampaignRoutes(app2) {
   app2.delete("/api/campaigns/:campaignId", async (req, res) => {
     try {
       const { campaignId } = req.params;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const requestId = `del_${Date.now()}`;
       if (!campaignId) {
         return res.status(400).json({ code: "MISSING_ID", message: "Campaign ID is required", requestId });
       }
       const existing = await db.select().from(campaignSelections).where(and9(
         eq10(campaignSelections.selectedCampaignId, campaignId),
-        eq10(campaignSelections.accountId, accountId)
+        eq10(campaignSelections.accountId, accountId2)
       )).limit(1);
       if (existing.length === 0) {
         return res.status(404).json({ code: "NOT_FOUND", message: "Campaign not found", requestId });
       }
       await db.delete(manualCampaignMetrics).where(and9(
         eq10(manualCampaignMetrics.campaignId, campaignId),
-        eq10(manualCampaignMetrics.accountId, accountId)
+        eq10(manualCampaignMetrics.accountId, accountId2)
       ));
       await db.delete(manualRetentionMetrics).where(and9(
         eq10(manualRetentionMetrics.campaignId, campaignId),
-        eq10(manualRetentionMetrics.accountId, accountId)
+        eq10(manualRetentionMetrics.accountId, accountId2)
       ));
       await db.delete(iterationGateInputs).where(and9(
         eq10(iterationGateInputs.campaignId, campaignId),
-        eq10(iterationGateInputs.accountId, accountId)
+        eq10(iterationGateInputs.accountId, accountId2)
       ));
       await db.delete(retentionGateInputs).where(and9(
         eq10(retentionGateInputs.campaignId, campaignId),
-        eq10(retentionGateInputs.accountId, accountId)
+        eq10(retentionGateInputs.accountId, accountId2)
       ));
       await db.delete(campaignSelections).where(and9(
         eq10(campaignSelections.selectedCampaignId, campaignId),
-        eq10(campaignSelections.accountId, accountId)
+        eq10(campaignSelections.accountId, accountId2)
       ));
-      console.log(`[Campaigns] Campaign deleted: ${campaignId} account=${accountId}`);
+      console.log(`[Campaigns] Campaign deleted: ${campaignId} account=${accountId2}`);
       res.json({
         success: true,
         requestId,
@@ -4027,8 +4029,8 @@ function registerCampaignRoutes(app2) {
   app2.get("/api/dashboard/metrics", requireCampaign, async (req, res) => {
     try {
       const campaignContext = req.campaignContext;
-      const accountId = req.query.accountId || "default";
-      const dashboardMetrics = await getDashboardMetrics(campaignContext.campaignId, accountId);
+      const accountId2 = req.accountId || "default";
+      const dashboardMetrics = await getDashboardMetrics(campaignContext.campaignId, accountId2);
       res.json({ success: true, ...dashboardMetrics, campaign: campaignContext });
     } catch (error) {
       console.error("[Dashboard] Metrics error:", error);
@@ -4037,8 +4039,8 @@ function registerCampaignRoutes(app2) {
   });
   app2.get("/api/dashboard/mode", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      const mode = await resolveDataMode(accountId);
+      const accountId2 = req.accountId || "default";
+      const mode = await resolveDataMode(accountId2);
       res.json({ success: true, mode });
     } catch (error) {
       console.error("[Dashboard] Mode check error:", error);
@@ -4048,8 +4050,8 @@ function registerCampaignRoutes(app2) {
   app2.get("/api/campaigns/metrics", requireCampaign, async (req, res) => {
     try {
       const campaignContext = req.campaignContext;
-      const accountId = req.query.accountId || "default";
-      const metrics = await getCampaignMetrics(campaignContext.campaignId, accountId);
+      const accountId2 = req.accountId || "default";
+      const metrics = await getCampaignMetrics(campaignContext.campaignId, accountId2);
       res.json({ success: true, metrics, campaign: campaignContext });
     } catch (error) {
       console.error("[Campaigns] Metrics error:", error);
@@ -4059,8 +4061,8 @@ function registerCampaignRoutes(app2) {
   app2.get("/api/campaigns/signals", requireCampaign, async (req, res) => {
     try {
       const campaignContext = req.campaignContext;
-      const accountId = req.query.accountId || "default";
-      const signals = await detectPerformanceSignals(campaignContext.campaignId, accountId);
+      const accountId2 = req.accountId || "default";
+      const signals = await detectPerformanceSignals(campaignContext.campaignId, accountId2);
       const scaleSignals = signals.filter((s) => s.signalType === "SCALE_CANDIDATE");
       const reviewSignals = signals.filter((s) => s.signalType === "REVIEW_NEEDED");
       const normalVariation = signals.filter((s) => s.signalType === "NORMAL_VARIATION");
@@ -4087,8 +4089,8 @@ function registerCampaignRoutes(app2) {
   app2.get("/api/campaigns/revenue-summary", requireCampaign, async (req, res) => {
     try {
       const campaignContext = req.campaignContext;
-      const accountId = req.query.accountId || "default";
-      const summary = await getRevenueSummary(campaignContext.campaignId, accountId);
+      const accountId2 = req.accountId || "default";
+      const summary = await getRevenueSummary(campaignContext.campaignId, accountId2);
       res.json({ success: true, summary, campaign: campaignContext });
     } catch (error) {
       console.error("[Campaigns] Revenue summary error:", error);
@@ -4098,8 +4100,8 @@ function registerCampaignRoutes(app2) {
   app2.get("/api/campaigns/:campaignId/manual-metrics", async (req, res) => {
     try {
       const { campaignId } = req.params;
-      const accountId = req.query.accountId || "default";
-      const metrics = await getManualMetrics(campaignId, accountId);
+      const accountId2 = req.accountId || "default";
+      const metrics = await getManualMetrics(campaignId, accountId2);
       if (!metrics) {
         return res.json({ success: true, metrics: null, message: "No manual metrics entered yet" });
       }
@@ -4117,14 +4119,14 @@ function registerCampaignRoutes(app2) {
   app2.put("/api/campaigns/:campaignId/manual-metrics", async (req, res) => {
     try {
       const { campaignId } = req.params;
-      const accountId = req.body.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const { spend, revenue, leads: leads3, conversions, impressions, clicks } = req.body;
       if (spend === void 0 && revenue === void 0 && leads3 === void 0 && conversions === void 0 && impressions === void 0 && clicks === void 0) {
         return res.status(400).json({ code: "MISSING_METRICS", message: "At least one metric field is required", requestId: `mm_${Date.now()}` });
       }
       const existing = await db.select().from(manualCampaignMetrics).where(and9(
         eq10(manualCampaignMetrics.campaignId, campaignId),
-        eq10(manualCampaignMetrics.accountId, accountId)
+        eq10(manualCampaignMetrics.accountId, accountId2)
       )).limit(1);
       const data = {
         spend: Number(spend) || 0,
@@ -4139,11 +4141,11 @@ function registerCampaignRoutes(app2) {
       if (existing.length > 0) {
         const updated = await db.update(manualCampaignMetrics).set(data).where(and9(
           eq10(manualCampaignMetrics.campaignId, campaignId),
-          eq10(manualCampaignMetrics.accountId, accountId)
+          eq10(manualCampaignMetrics.accountId, accountId2)
         )).returning();
         result = updated[0];
       } else {
-        const inserted = await db.insert(manualCampaignMetrics).values({ campaignId, accountId, ...data }).returning();
+        const inserted = await db.insert(manualCampaignMetrics).values({ campaignId, accountId: accountId2, ...data }).returning();
         result = inserted[0];
       }
       const cpa = result.conversions > 0 ? +(result.spend / result.conversions).toFixed(2) : 0;
@@ -4162,10 +4164,10 @@ function registerCampaignRoutes(app2) {
   app2.get("/api/campaigns/:campaignId/retention-metrics", async (req, res) => {
     try {
       const { campaignId } = req.params;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const rows = await db.select().from(manualRetentionMetrics).where(and9(
         eq10(manualRetentionMetrics.campaignId, campaignId),
-        eq10(manualRetentionMetrics.accountId, accountId)
+        eq10(manualRetentionMetrics.accountId, accountId2)
       )).limit(1);
       const metrics = rows[0] || null;
       if (!metrics) {
@@ -4185,7 +4187,7 @@ function registerCampaignRoutes(app2) {
   app2.put("/api/campaigns/:campaignId/retention-metrics", async (req, res) => {
     try {
       const { campaignId } = req.params;
-      const accountId = req.body.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const { totalCustomers, totalPurchases, returningCustomers, averageOrderValue, refundCount, monthlyCustomers, dataWindowDays } = req.body;
       const tc = totalCustomers !== void 0 ? Number(totalCustomers) || 0 : void 0;
       const tp = totalPurchases !== void 0 ? Number(totalPurchases) || 0 : void 0;
@@ -4209,17 +4211,17 @@ function registerCampaignRoutes(app2) {
       if (rawDerived.purchaseFrequency !== null) data.purchaseFrequency = rawDerived.purchaseFrequency;
       const existing = await db.select().from(manualRetentionMetrics).where(and9(
         eq10(manualRetentionMetrics.campaignId, campaignId),
-        eq10(manualRetentionMetrics.accountId, accountId)
+        eq10(manualRetentionMetrics.accountId, accountId2)
       )).limit(1);
       let result;
       if (existing.length > 0) {
         const updated = await db.update(manualRetentionMetrics).set(data).where(and9(
           eq10(manualRetentionMetrics.campaignId, campaignId),
-          eq10(manualRetentionMetrics.accountId, accountId)
+          eq10(manualRetentionMetrics.accountId, accountId2)
         )).returning();
         result = updated[0];
       } else {
-        const inserted = await db.insert(manualRetentionMetrics).values({ campaignId, accountId, ...data }).returning();
+        const inserted = await db.insert(manualRetentionMetrics).values({ campaignId, accountId: accountId2, ...data }).returning();
         result = inserted[0];
       }
       const derived = computeDerivedRetentionMetrics(result);
@@ -4238,14 +4240,14 @@ function registerCampaignRoutes(app2) {
   app2.get("/api/campaigns/:campaignId/iteration-gate", async (req, res) => {
     try {
       const { campaignId } = req.params;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const [existing] = await db.select().from(iterationGateInputs).where(and9(
         eq10(iterationGateInputs.campaignId, campaignId),
-        eq10(iterationGateInputs.accountId, accountId)
+        eq10(iterationGateInputs.accountId, accountId2)
       )).limit(1);
       const [campaignData] = await db.select().from(manualCampaignMetrics).where(and9(
         eq10(manualCampaignMetrics.campaignId, campaignId),
-        eq10(manualCampaignMetrics.accountId, accountId)
+        eq10(manualCampaignMetrics.accountId, accountId2)
       )).limit(1);
       const missing = [];
       if (!existing || !existing.hasExistingAsset) missing.push("Existing campaign, asset, or funnel to iterate on");
@@ -4275,7 +4277,7 @@ function registerCampaignRoutes(app2) {
   app2.put("/api/campaigns/:campaignId/iteration-gate", async (req, res) => {
     try {
       const { campaignId } = req.params;
-      const accountId = req.body.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const data = {
         hasExistingAsset: !!req.body.hasExistingAsset,
         assetDescription: req.body.assetDescription || null,
@@ -4285,22 +4287,22 @@ function registerCampaignRoutes(app2) {
       };
       const [existing] = await db.select().from(iterationGateInputs).where(and9(
         eq10(iterationGateInputs.campaignId, campaignId),
-        eq10(iterationGateInputs.accountId, accountId)
+        eq10(iterationGateInputs.accountId, accountId2)
       )).limit(1);
       let result;
       if (existing) {
         const [updated] = await db.update(iterationGateInputs).set(data).where(and9(
           eq10(iterationGateInputs.campaignId, campaignId),
-          eq10(iterationGateInputs.accountId, accountId)
+          eq10(iterationGateInputs.accountId, accountId2)
         )).returning();
         result = updated;
       } else {
-        const [inserted] = await db.insert(iterationGateInputs).values({ campaignId, accountId, ...data }).returning();
+        const [inserted] = await db.insert(iterationGateInputs).values({ campaignId, accountId: accountId2, ...data }).returning();
         result = inserted;
       }
       const [campaignData] = await db.select().from(manualCampaignMetrics).where(and9(
         eq10(manualCampaignMetrics.campaignId, campaignId),
-        eq10(manualCampaignMetrics.accountId, accountId)
+        eq10(manualCampaignMetrics.accountId, accountId2)
       )).limit(1);
       const missing = [];
       if (!result.hasExistingAsset) missing.push("Existing campaign, asset, or funnel to iterate on");
@@ -4331,14 +4333,14 @@ function registerCampaignRoutes(app2) {
   app2.get("/api/campaigns/:campaignId/retention-gate", async (req, res) => {
     try {
       const { campaignId } = req.params;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const [existing] = await db.select().from(retentionGateInputs).where(and9(
         eq10(retentionGateInputs.campaignId, campaignId),
-        eq10(retentionGateInputs.accountId, accountId)
+        eq10(retentionGateInputs.accountId, accountId2)
       )).limit(1);
       const [retentionData] = await db.select().from(manualRetentionMetrics).where(and9(
         eq10(manualRetentionMetrics.campaignId, campaignId),
-        eq10(manualRetentionMetrics.accountId, accountId)
+        eq10(manualRetentionMetrics.accountId, accountId2)
       )).limit(1);
       const hasRawData = retentionData && (retentionData.totalCustomers != null && retentionData.totalCustomers > 0 || retentionData.monthlyCustomers != null && retentionData.monthlyCustomers > 0);
       const missing = [];
@@ -4383,7 +4385,7 @@ function registerCampaignRoutes(app2) {
   app2.put("/api/campaigns/:campaignId/retention-gate", async (req, res) => {
     try {
       const { campaignId } = req.params;
-      const accountId = req.body.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const data = {
         hasExistingCustomers: !!req.body.hasExistingCustomers,
         retentionGoal: req.body.retentionGoal || null,
@@ -4393,22 +4395,22 @@ function registerCampaignRoutes(app2) {
       };
       const [existing] = await db.select().from(retentionGateInputs).where(and9(
         eq10(retentionGateInputs.campaignId, campaignId),
-        eq10(retentionGateInputs.accountId, accountId)
+        eq10(retentionGateInputs.accountId, accountId2)
       )).limit(1);
       let result;
       if (existing) {
         const [updated] = await db.update(retentionGateInputs).set(data).where(and9(
           eq10(retentionGateInputs.campaignId, campaignId),
-          eq10(retentionGateInputs.accountId, accountId)
+          eq10(retentionGateInputs.accountId, accountId2)
         )).returning();
         result = updated;
       } else {
-        const [inserted] = await db.insert(retentionGateInputs).values({ campaignId, accountId, ...data }).returning();
+        const [inserted] = await db.insert(retentionGateInputs).values({ campaignId, accountId: accountId2, ...data }).returning();
         result = inserted;
       }
       const [retentionData] = await db.select().from(manualRetentionMetrics).where(and9(
         eq10(manualRetentionMetrics.campaignId, campaignId),
-        eq10(manualRetentionMetrics.accountId, accountId)
+        eq10(manualRetentionMetrics.accountId, accountId2)
       )).limit(1);
       const hasRawData = retentionData && (retentionData.totalCustomers != null && retentionData.totalCustomers > 0 || retentionData.monthlyCustomers != null && retentionData.monthlyCustomers > 0);
       const missing = [];
@@ -4495,19 +4497,19 @@ function computeDerivedRetentionMetrics(metrics) {
 }
 async function requireCampaign(req, res, next) {
   try {
-    const accountId = req.query.accountId || req.body?.accountId || "default";
+    const accountId2 = req.accountId || "default";
     const requestedCampaignId = req.query.campaignId || null;
     let selections;
     if (requestedCampaignId) {
       selections = await db.select().from(campaignSelections).where(
         and9(
-          eq10(campaignSelections.accountId, accountId),
+          eq10(campaignSelections.accountId, accountId2),
           eq10(campaignSelections.selectedCampaignId, requestedCampaignId)
         )
       ).limit(1);
     }
     if (!selections || selections.length === 0) {
-      selections = await db.select().from(campaignSelections).where(eq10(campaignSelections.accountId, accountId)).orderBy(desc9(campaignSelections.selectedAt)).limit(1);
+      selections = await db.select().from(campaignSelections).where(eq10(campaignSelections.accountId, accountId2)).orderBy(desc9(campaignSelections.selectedAt)).limit(1);
     }
     if (selections.length === 0) {
       return res.status(400).json({
@@ -4535,7 +4537,7 @@ async function requireCampaign(req, res, next) {
       });
     }
     req.campaignContext = {
-      accountId,
+      accountId: accountId2,
       campaignId: resolvedCampaignId,
       campaignName: selection.selectedCampaignName,
       platform: selection.selectedPlatform,
@@ -5400,7 +5402,7 @@ __export(content_dna_routes_exports, {
   registerContentDnaRoutes: () => registerContentDnaRoutes
 });
 import { eq as eq51, and as and38, desc as desc37 } from "drizzle-orm";
-async function gatherEngineContext(campaignId, accountId) {
+async function gatherEngineContext(campaignId, accountId2) {
   const [
     miData,
     audData,
@@ -5420,50 +5422,50 @@ async function gatherEngineContext(campaignId, accountId) {
       narrativeSynthesis: miSnapshots.narrativeSynthesis,
       multiSourceSignals: miSnapshots.multiSourceSignals,
       sourceAvailability: miSnapshots.sourceAvailability
-    }).from(miSnapshots).where(and38(eq51(miSnapshots.accountId, accountId), eq51(miSnapshots.campaignId, campaignId))).orderBy(desc37(miSnapshots.createdAt)).limit(1),
+    }).from(miSnapshots).where(and38(eq51(miSnapshots.accountId, accountId2), eq51(miSnapshots.campaignId, campaignId))).orderBy(desc37(miSnapshots.createdAt)).limit(1),
     db.select({
       audiencePains: audienceSnapshots.audiencePains,
       audienceSegments: audienceSnapshots.audienceSegments,
       emotionalDrivers: audienceSnapshots.emotionalDrivers,
       desireMap: audienceSnapshots.desireMap,
       awarenessLevel: audienceSnapshots.awarenessLevel
-    }).from(audienceSnapshots).where(and38(eq51(audienceSnapshots.accountId, accountId), eq51(audienceSnapshots.campaignId, campaignId))).orderBy(desc37(audienceSnapshots.createdAt)).limit(1),
+    }).from(audienceSnapshots).where(and38(eq51(audienceSnapshots.accountId, accountId2), eq51(audienceSnapshots.campaignId, campaignId))).orderBy(desc37(audienceSnapshots.createdAt)).limit(1),
     db.select({
       territory: positioningSnapshots.territory,
       narrativeDirection: positioningSnapshots.narrativeDirection,
       enemyDefinition: positioningSnapshots.enemyDefinition,
       contrastAxis: positioningSnapshots.contrastAxis
-    }).from(positioningSnapshots).where(and38(eq51(positioningSnapshots.accountId, accountId), eq51(positioningSnapshots.campaignId, campaignId))).orderBy(desc37(positioningSnapshots.createdAt)).limit(1),
+    }).from(positioningSnapshots).where(and38(eq51(positioningSnapshots.accountId, accountId2), eq51(positioningSnapshots.campaignId, campaignId))).orderBy(desc37(positioningSnapshots.createdAt)).limit(1),
     db.select({
       differentiationPillars: differentiationSnapshots.differentiationPillars,
       mechanismCore: differentiationSnapshots.mechanismCore,
       mechanismFraming: differentiationSnapshots.mechanismFraming,
       proofArchitecture: differentiationSnapshots.proofArchitecture,
       authorityMode: differentiationSnapshots.authorityMode
-    }).from(differentiationSnapshots).where(and38(eq51(differentiationSnapshots.accountId, accountId), eq51(differentiationSnapshots.campaignId, campaignId))).orderBy(desc37(differentiationSnapshots.createdAt)).limit(1),
+    }).from(differentiationSnapshots).where(and38(eq51(differentiationSnapshots.accountId, accountId2), eq51(differentiationSnapshots.campaignId, campaignId))).orderBy(desc37(differentiationSnapshots.createdAt)).limit(1),
     db.select({
       primaryOffer: offerSnapshots.primaryOffer,
       hookMechanismAlignment: offerSnapshots.hookMechanismAlignment
-    }).from(offerSnapshots).where(and38(eq51(offerSnapshots.accountId, accountId), eq51(offerSnapshots.campaignId, campaignId))).orderBy(desc37(offerSnapshots.createdAt)).limit(1),
+    }).from(offerSnapshots).where(and38(eq51(offerSnapshots.accountId, accountId2), eq51(offerSnapshots.campaignId, campaignId))).orderBy(desc37(offerSnapshots.createdAt)).limit(1),
     db.select({
       primaryFunnel: funnelSnapshots.primaryFunnel,
       trustPathAnalysis: funnelSnapshots.trustPathAnalysis
-    }).from(funnelSnapshots).where(and38(eq51(funnelSnapshots.accountId, accountId), eq51(funnelSnapshots.campaignId, campaignId))).orderBy(desc37(funnelSnapshots.createdAt)).limit(1),
+    }).from(funnelSnapshots).where(and38(eq51(funnelSnapshots.accountId, accountId2), eq51(funnelSnapshots.campaignId, campaignId))).orderBy(desc37(funnelSnapshots.createdAt)).limit(1),
     db.select({
       primaryRoute: awarenessSnapshots.primaryRoute,
       awarenessStrengthScore: awarenessSnapshots.awarenessStrengthScore
-    }).from(awarenessSnapshots).where(and38(eq51(awarenessSnapshots.accountId, accountId), eq51(awarenessSnapshots.campaignId, campaignId))).orderBy(desc37(awarenessSnapshots.createdAt)).limit(1),
+    }).from(awarenessSnapshots).where(and38(eq51(awarenessSnapshots.accountId, accountId2), eq51(awarenessSnapshots.campaignId, campaignId))).orderBy(desc37(awarenessSnapshots.createdAt)).limit(1),
     db.select({
       primaryRoute: persuasionSnapshots.primaryRoute,
       persuasionStrengthScore: persuasionSnapshots.persuasionStrengthScore
-    }).from(persuasionSnapshots).where(and38(eq51(persuasionSnapshots.accountId, accountId), eq51(persuasionSnapshots.campaignId, campaignId))).orderBy(desc37(persuasionSnapshots.createdAt)).limit(1),
+    }).from(persuasionSnapshots).where(and38(eq51(persuasionSnapshots.accountId, accountId2), eq51(persuasionSnapshots.campaignId, campaignId))).orderBy(desc37(persuasionSnapshots.createdAt)).limit(1),
     db.select({
       result: channelSelectionSnapshots.result
-    }).from(channelSelectionSnapshots).where(and38(eq51(channelSelectionSnapshots.accountId, accountId), eq51(channelSelectionSnapshots.campaignId, campaignId))).orderBy(desc37(channelSelectionSnapshots.createdAt)).limit(1),
+    }).from(channelSelectionSnapshots).where(and38(eq51(channelSelectionSnapshots.accountId, accountId2), eq51(channelSelectionSnapshots.campaignId, campaignId))).orderBy(desc37(channelSelectionSnapshots.createdAt)).limit(1),
     db.select({
       result: iterationSnapshots.result
-    }).from(iterationSnapshots).where(and38(eq51(iterationSnapshots.accountId, accountId), eq51(iterationSnapshots.campaignId, campaignId))).orderBy(desc37(iterationSnapshots.createdAt)).limit(1),
-    db.select().from(businessDataLayer).where(and38(eq51(businessDataLayer.accountId, accountId), eq51(businessDataLayer.campaignId, campaignId))).limit(1)
+    }).from(iterationSnapshots).where(and38(eq51(iterationSnapshots.accountId, accountId2), eq51(iterationSnapshots.campaignId, campaignId))).orderBy(desc37(iterationSnapshots.createdAt)).limit(1),
+    db.select().from(businessDataLayer).where(and38(eq51(businessDataLayer.accountId, accountId2), eq51(businessDataLayer.campaignId, campaignId))).limit(1)
   ]);
   const parts = [];
   const biz = businessData[0];
@@ -5580,8 +5582,8 @@ ${blogSignals.join("\n")}`;
   }
   return { contextString: parts.join("\n\n---\n\n"), businessProfile: biz || null };
 }
-async function generateContentDna(campaignId, accountId, planId, rootBundleId, rootBundleVersion) {
-  const { contextString, businessProfile } = await gatherEngineContext(campaignId, accountId);
+async function generateContentDna(campaignId, accountId2, planId, rootBundleId, rootBundleVersion) {
+  const { contextString, businessProfile } = await gatherEngineContext(campaignId, accountId2);
   if (!contextString || contextString.length < 50) {
     throw new Error("Insufficient engine data to generate Content DNA. Run engines first.");
   }
@@ -5697,7 +5699,7 @@ ${contextString}` }
     ],
     max_tokens: 3e3,
     temperature: 0.4,
-    accountId,
+    accountId: accountId2,
     endpoint: "content-dna-generate"
   });
   const raw = response.choices?.[0]?.message?.content || "";
@@ -5710,7 +5712,7 @@ ${contextString}` }
   }
   await db.insert(contentDna).values({
     campaignId,
-    accountId,
+    accountId: accountId2,
     planId: planId || null,
     messagingCore: JSON.stringify(parsed.messagingCore),
     ctaDna: JSON.stringify(parsed.ctaDna),
@@ -5728,10 +5730,10 @@ ${contextString}` }
   });
   return parsed;
 }
-async function getLatestContentDna(campaignId, accountId) {
+async function getLatestContentDna(campaignId, accountId2) {
   const rows = await db.select().from(contentDna).where(and38(
     eq51(contentDna.campaignId, campaignId),
-    eq51(contentDna.accountId, accountId),
+    eq51(contentDna.accountId, accountId2),
     eq51(contentDna.status, "active")
   )).orderBy(desc37(contentDna.generatedAt)).limit(1);
   if (!rows[0]) return null;
@@ -5756,9 +5758,9 @@ async function getLatestContentDna(campaignId, accountId) {
 function registerContentDnaRoutes(app2) {
   app2.post("/api/content-dna/generate", requireCampaign, async (req, res) => {
     try {
-      const { accountId, campaignId } = req.campaignContext;
+      const { accountId: accountId2, campaignId } = req.campaignContext;
       const { planId } = req.body || {};
-      const result = await generateContentDna(campaignId, accountId, planId);
+      const result = await generateContentDna(campaignId, accountId2, planId);
       res.json({ success: true, contentDna: result });
     } catch (err) {
       console.error("[Content DNA] Generation error:", err.message);
@@ -5768,8 +5770,8 @@ function registerContentDnaRoutes(app2) {
   app2.get("/api/content-dna/:campaignId", async (req, res) => {
     try {
       const campaignId = req.params.campaignId;
-      const accountId = req.query.accountId || "default";
-      const dna = await getLatestContentDna(campaignId, accountId);
+      const accountId2 = req.accountId || "default";
+      const dna = await getLatestContentDna(campaignId, accountId2);
       if (!dna) {
         return res.json({ success: true, contentDna: null, message: "No Content DNA generated yet" });
       }
@@ -6030,10 +6032,10 @@ function logSignalDiagnostics(engineName, stats) {
   );
   return diagnostics;
 }
-async function pruneOldSnapshots(db2, table, campaignId, maxRetained = 20, accountId = "default") {
+async function pruneOldSnapshots(db2, table, campaignId, maxRetained = 20, accountId2 = "default") {
   try {
     const { eq: eq90, and: and71, desc: desc68 } = await import("drizzle-orm");
-    const all = await db2.select({ id: table.id, createdAt: table.createdAt }).from(table).where(and71(eq90(table.campaignId, campaignId), eq90(table.accountId, accountId))).orderBy(desc68(table.createdAt));
+    const all = await db2.select({ id: table.id, createdAt: table.createdAt }).from(table).where(and71(eq90(table.campaignId, campaignId), eq90(table.accountId, accountId2))).orderBy(desc68(table.createdAt));
     if (all.length <= maxRetained) return 0;
     const toDelete = all.slice(maxRetained);
     const idsToDelete = toDelete.map((r) => r.id);
@@ -8310,13 +8312,13 @@ function getTimeWeights(count3) {
   const sum = fullWeights.reduce((a, b) => a + b, 0);
   return fullWeights.map((w) => w / sum);
 }
-async function computeMarketBaseline(accountId, campaignId) {
+async function computeMarketBaseline(accountId2, campaignId) {
   try {
     const snapshots = await db.select({
       trajectoryData: miSnapshots.trajectoryData,
       status: miSnapshots.status
     }).from(miSnapshots).where(and(
-      eq(miSnapshots.accountId, accountId),
+      eq(miSnapshots.accountId, accountId2),
       eq(miSnapshots.campaignId, campaignId),
       inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"])
     )).orderBy(desc(miSnapshots.createdAt)).limit(BASELINE_WINDOW);
@@ -8553,18 +8555,18 @@ function computeIpHash(sessionId) {
 }
 var pools = /* @__PURE__ */ new Map();
 var MAX_TELEMETRY_PER_ACCOUNT = 500;
-function getOrCreatePool(accountId) {
-  let pool2 = pools.get(accountId);
+function getOrCreatePool(accountId2) {
+  let pool2 = pools.get(accountId2);
   if (!pool2) {
     pool2 = { sessions: /* @__PURE__ */ new Map(), telemetry: [], stickyBindings: /* @__PURE__ */ new Map() };
-    pools.set(accountId, pool2);
+    pools.set(accountId2, pool2);
   }
   return pool2;
 }
-function createSession(accountId) {
+function createSession(accountId2) {
   const proxy = getProxyConfig();
   if (!proxy) return null;
-  const shortAccount = accountId.substring(0, 8);
+  const shortAccount = accountId2.substring(0, 8);
   const ts = (Date.now() % 1e6).toString(36);
   const rand = Math.random().toString(36).substr(2, 4);
   const sessionId = `s${shortAccount}${ts}${rand}`;
@@ -8587,21 +8589,21 @@ function createSession(accountId) {
     cooldownUntil: null,
     isQuarantined: false
   };
-  const pool2 = getOrCreatePool(accountId);
+  const pool2 = getOrCreatePool(accountId2);
   pool2.sessions.set(sessionId, session);
   return session;
 }
-function quarantineSession(accountId, sessionId) {
-  const pool2 = getOrCreatePool(accountId);
+function quarantineSession(accountId2, sessionId) {
+  const pool2 = getOrCreatePool(accountId2);
   const session = pool2.sessions.get(sessionId);
   if (!session) return;
   session.isQuarantined = true;
   const escalation = Math.min(session.blockCount, 4);
   session.cooldownUntil = Date.now() + Math.min(DEFAULT_QUARANTINE_MS * escalation, MAX_QUARANTINE_MS);
-  console.log(`[ProxyPool] QUARANTINE | account=${accountId} | session=${sessionId} | ipHash=${session.ipHash} | blocks=${session.blockCount} | cooldownUntil=${new Date(session.cooldownUntil).toISOString()}`);
+  console.log(`[ProxyPool] QUARANTINE | account=${accountId2} | session=${sessionId} | ipHash=${session.ipHash} | blocks=${session.blockCount} | cooldownUntil=${new Date(session.cooldownUntil).toISOString()}`);
 }
-function recordBlock(accountId, sessionId) {
-  const pool2 = getOrCreatePool(accountId);
+function recordBlock(accountId2, sessionId) {
+  const pool2 = getOrCreatePool(accountId2);
   const session = pool2.sessions.get(sessionId);
   if (!session) return;
   session.previousBlockAt = session.lastBlockAt;
@@ -8610,17 +8612,17 @@ function recordBlock(accountId, sessionId) {
   if (session.blockCount >= QUARANTINE_THRESHOLD && session.previousBlockAt !== null) {
     const timeBetweenBlocks = session.lastBlockAt - session.previousBlockAt;
     if (timeBetweenBlocks <= QUARANTINE_WINDOW_MS) {
-      quarantineSession(accountId, sessionId);
+      quarantineSession(accountId2, sessionId);
     }
   }
 }
-function recordSuccess(accountId, sessionId) {
-  const pool2 = getOrCreatePool(accountId);
+function recordSuccess(accountId2, sessionId) {
+  const pool2 = getOrCreatePool(accountId2);
   const session = pool2.sessions.get(sessionId);
   if (session) session.successCount++;
 }
-function addTelemetry(accountId, entry) {
-  const pool2 = getOrCreatePool(accountId);
+function addTelemetry(accountId2, entry) {
+  const pool2 = getOrCreatePool(accountId2);
   pool2.telemetry.push(entry);
   if (pool2.telemetry.length > MAX_TELEMETRY_PER_ACCOUNT) {
     pool2.telemetry = pool2.telemetry.slice(-MAX_TELEMETRY_PER_ACCOUNT);
@@ -8635,15 +8637,15 @@ function classifyBlock(httpStatus, errorMessage) {
   if (httpStatus === 403 || msg.includes("blocked") || msg.includes("forbidden")) return "PROXY_BLOCKED";
   return "OTHER";
 }
-function acquireStickySession(accountId, campaignId, competitorHash) {
-  const pool2 = getOrCreatePool(accountId);
-  const bindingKey = `${accountId}:${campaignId}:${competitorHash}`;
+function acquireStickySession(accountId2, campaignId, competitorHash) {
+  const pool2 = getOrCreatePool(accountId2);
+  const bindingKey = `${accountId2}:${campaignId}:${competitorHash}`;
   const existingSessionId = pool2.stickyBindings.get(bindingKey);
   if (existingSessionId) {
     const existingSession = pool2.sessions.get(existingSessionId);
     if (existingSession && !existingSession.isQuarantined && Date.now() - existingSession.createdAt < SESSION_TTL_MS2) {
       return {
-        accountId,
+        accountId: accountId2,
         campaignId,
         competitorHash,
         session: existingSession,
@@ -8653,11 +8655,11 @@ function acquireStickySession(accountId, campaignId, competitorHash) {
     }
     pool2.stickyBindings.delete(bindingKey);
   }
-  const session = createSession(accountId);
+  const session = createSession(accountId2);
   if (!session) return null;
   pool2.stickyBindings.set(bindingKey, session.sessionId);
   return {
-    accountId,
+    accountId: accountId2,
     campaignId,
     competitorHash,
     session,
@@ -8717,8 +8719,8 @@ function logProxyTelemetry(ctx, stageName, httpStatus, blockClass, durationMs, s
   }
   console.log(`[ProxyTelemetry] account=${ctx.accountId} | campaign=${ctx.campaignId} | competitor=${ctx.competitorHash} | session=${ctx.session.sessionId} | ipHash=${ctx.session.ipHash} | stage=${stageName} | attempt=${ctx.attemptNumber} | http=${httpStatus ?? "N/A"} | block=${blockClass ?? "NONE"} | duration=${durationMs}ms | success=${success}`);
 }
-function getPoolDiagnostics(accountId) {
-  const pool2 = getOrCreatePool(accountId);
+function getPoolDiagnostics(accountId2) {
+  const pool2 = getOrCreatePool(accountId2);
   const now = Date.now();
   let active = 0;
   let quarantined = 0;
@@ -8747,8 +8749,8 @@ var TOKEN_REFILL_INTERVAL_MS = 5e3;
 var MAX_BURST_TOKENS = 3;
 var TOKEN_REFILL_JITTER_MS = 7e3;
 var buckets = /* @__PURE__ */ new Map();
-function getBucket(accountId, campaignId) {
-  const key = `${accountId}:${campaignId}`;
+function getBucket(accountId2, campaignId) {
+  const key = `${accountId2}:${campaignId}`;
   let bucket = buckets.get(key);
   if (!bucket) {
     bucket = {
@@ -8771,27 +8773,27 @@ function refillTokens(bucket) {
     bucket.lastRefill = now;
   }
 }
-async function acquireToken(accountId, campaignId, stageName) {
-  const bucket = getBucket(accountId, campaignId);
+async function acquireToken(accountId2, campaignId, stageName) {
+  const bucket = getBucket(accountId2, campaignId);
   refillTokens(bucket);
   if (bucket.tokens > 0) {
     bucket.tokens--;
     bucket.totalConsumed++;
-    console.log(`[RateLimiter] TOKEN_GRANTED | account=${accountId} | campaign=${campaignId} | stage=${stageName} | remaining=${bucket.tokens}/${MAX_BURST_TOKENS} | totalConsumed=${bucket.totalConsumed}`);
+    console.log(`[RateLimiter] TOKEN_GRANTED | account=${accountId2} | campaign=${campaignId} | stage=${stageName} | remaining=${bucket.tokens}/${MAX_BURST_TOKENS} | totalConsumed=${bucket.totalConsumed}`);
     return;
   }
   const waitMs = TOKEN_REFILL_INTERVAL_MS + Math.random() * TOKEN_REFILL_JITTER_MS;
-  console.log(`[RateLimiter] TOKEN_WAIT | account=${accountId} | campaign=${campaignId} | stage=${stageName} | waitMs=${Math.round(waitMs)} | totalWaited=${bucket.totalWaited + 1}`);
+  console.log(`[RateLimiter] TOKEN_WAIT | account=${accountId2} | campaign=${campaignId} | stage=${stageName} | waitMs=${Math.round(waitMs)} | totalWaited=${bucket.totalWaited + 1}`);
   bucket.totalWaited++;
   await new Promise((resolve2) => setTimeout(resolve2, waitMs));
   bucket.tokens = Math.max(0, bucket.tokens);
   bucket.tokens = 0;
   bucket.totalConsumed++;
   bucket.lastRefill = Date.now();
-  console.log(`[RateLimiter] TOKEN_GRANTED_AFTER_WAIT | account=${accountId} | campaign=${campaignId} | stage=${stageName} | remaining=0/${MAX_BURST_TOKENS} | totalConsumed=${bucket.totalConsumed}`);
+  console.log(`[RateLimiter] TOKEN_GRANTED_AFTER_WAIT | account=${accountId2} | campaign=${campaignId} | stage=${stageName} | remaining=0/${MAX_BURST_TOKENS} | totalConsumed=${bucket.totalConsumed}`);
 }
-function getBucketState(accountId, campaignId) {
-  const bucket = getBucket(accountId, campaignId);
+function getBucketState(accountId2, campaignId) {
+  const bucket = getBucket(accountId2, campaignId);
   refillTokens(bucket);
   return {
     tokens: bucket.tokens,
@@ -10189,14 +10191,14 @@ var MAX_COMMENT_POSTS = 12;
 var MIN_POSTS_THRESHOLD = MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR;
 var MIN_COMMENTS_THRESHOLD = MI_THRESHOLDS.MIN_COMMENTS_SAMPLE;
 var activeFetches = /* @__PURE__ */ new Map();
-async function fetchCompetitorData(competitorId, accountId = "default", forceRefresh = false, proxyCtx, collectionMode = "FAST_PASS") {
-  const lockKey = `${accountId}:${competitorId}`;
+async function fetchCompetitorData(competitorId, accountId2 = "default", forceRefresh = false, proxyCtx, collectionMode = "FAST_PASS") {
+  const lockKey = `${accountId2}:${competitorId}`;
   const existing = activeFetches.get(lockKey);
   if (existing) {
     console.log(`[DataAcq] Concurrent fetch detected for ${lockKey}, reusing in-flight`);
     return existing;
   }
-  const promise = _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, collectionMode);
+  const promise = _executeFetch(competitorId, accountId2, forceRefresh, proxyCtx, collectionMode);
   activeFetches.set(lockKey, promise);
   try {
     return await promise;
@@ -10204,8 +10206,8 @@ async function fetchCompetitorData(competitorId, accountId = "default", forceRef
     activeFetches.delete(lockKey);
   }
 }
-async function _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, collectionMode = "FAST_PASS") {
-  const [competitor] = await db.select().from(ciCompetitors).where(and2(eq2(ciCompetitors.id, competitorId), eq2(ciCompetitors.accountId, accountId)));
+async function _executeFetch(competitorId, accountId2, forceRefresh, proxyCtx, collectionMode = "FAST_PASS") {
+  const [competitor] = await db.select().from(ciCompetitors).where(and2(eq2(ciCompetitors.id, competitorId), eq2(ciCompetitors.accountId, accountId2)));
   if (!competitor) {
     return { competitorId, postsCollected: 0, commentsCollected: 0, ctaCoverage: 0, ctaTypes: [], followers: null, engagementRate: null, postingFrequency: null, contentMix: null, fetchMethod: "NONE", status: "BLOCKED", message: "Competitor not found" };
   }
@@ -10213,14 +10215,14 @@ async function _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, co
     console.log(`[DataAcq] DEEP_PASS_CACHE_BYPASS: ${competitor.name} \u2014 skipping cache/cooldown checks for DEEP_PASS post expansion`);
   }
   if (!forceRefresh && collectionMode !== "DEEP_PASS") {
-    const latestMetrics = await db.select().from(ciCompetitorMetricsSnapshot).where(and2(eq2(ciCompetitorMetricsSnapshot.competitorId, competitorId), eq2(ciCompetitorMetricsSnapshot.accountId, accountId))).orderBy(desc2(ciCompetitorMetricsSnapshot.createdAt)).limit(1);
+    const latestMetrics = await db.select().from(ciCompetitorMetricsSnapshot).where(and2(eq2(ciCompetitorMetricsSnapshot.competitorId, competitorId), eq2(ciCompetitorMetricsSnapshot.accountId, accountId2))).orderBy(desc2(ciCompetitorMetricsSnapshot.createdAt)).limit(1);
     if (latestMetrics.length > 0 && latestMetrics[0].lastFetchAt) {
       const elapsed = Date.now() - new Date(latestMetrics[0].lastFetchAt).getTime();
       if (elapsed < CACHE_REUSE_WINDOW_MS) {
-        const livePostCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId)));
+        const livePostCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId2)));
         const cachedPosts = Number(livePostCount[0]?.count || 0);
         if (cachedPosts >= MIN_POSTS_THRESHOLD) {
-          const liveCommentCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId)));
+          const liveCommentCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId2)));
           const cachedComments = Number(liveCommentCount[0]?.count || 0);
           const hoursAgo = Math.round(elapsed / (60 * 60 * 1e3) * 10) / 10;
           console.log(`[DataAcq] CACHE_REUSE: ${competitor.name} fetched ${hoursAgo}h ago with ${cachedPosts} posts (>= ${MIN_POSTS_THRESHOLD}). Reusing cached data.`);
@@ -10243,8 +10245,8 @@ async function _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, co
       }
       if (elapsed < FETCH_COOLDOWN_MS) {
         const hoursLeft = Math.ceil((FETCH_COOLDOWN_MS - elapsed) / (60 * 60 * 1e3));
-        const livePostCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId)));
-        const liveCommentCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId)));
+        const livePostCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId2)));
+        const liveCommentCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId2)));
         const postsCollected = Number(livePostCount[0]?.count || 0);
         const commentsCollected2 = Number(liveCommentCount[0]?.count || 0);
         const coverageMet = postsCollected >= MIN_POSTS_THRESHOLD;
@@ -10272,11 +10274,11 @@ async function _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, co
   }
   const maxPosts = collectionMode === "FAST_PASS" ? TARGET_POSTS_FAST : TARGET_POSTS_DEEP;
   if (collectionMode === "DEEP_PASS") {
-    const storedPostCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId)));
+    const storedPostCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId2)));
     const existingStoredPostTotal = Number(storedPostCount[0]?.count || 0);
     if (existingStoredPostTotal >= TARGET_POSTS_DEEP) {
       console.log(`[DataAcq] DEEP_PASS_SKIP: ${competitor.name} already has ${existingStoredPostTotal} posts (>= ${TARGET_POSTS_DEEP}). Skipping additional post collection.`);
-      const existingCommentCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId)));
+      const existingCommentCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId2)));
       const existingComments = Number(existingCommentCount[0]?.count || 0);
       return {
         competitorId,
@@ -10313,15 +10315,15 @@ async function _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, co
       message: "Scraping blocked. All methods failed. Using cached data if available."
     };
   }
-  const existingPostCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId)));
+  const existingPostCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId2)));
   const existingPosts = Number(existingPostCount[0]?.count || 0);
   if (existingPosts > 0 && scrapeResult.posts.length < existingPosts) {
     console.log(`[DataAcq] DATA_DEGRADATION_GUARD: New fetch returned ${scrapeResult.posts.length} posts, DB has ${existingPosts}. Keeping existing data for ${competitor.name}.`);
-    const existingCommentCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId)));
+    const existingCommentCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId2)));
     const existingComments = Number(existingCommentCount[0]?.count || 0);
     await db.insert(ciCompetitorMetricsSnapshot).values({
       competitorId,
-      accountId,
+      accountId: accountId2,
       postsCollected: existingPosts,
       commentsCollected: existingComments,
       followers: scrapeResult.followers,
@@ -10351,7 +10353,7 @@ async function _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, co
   const existingStoredPosts = await db.select({
     postId: ciCompetitorPosts.postId,
     shortcode: ciCompetitorPosts.shortcode
-  }).from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId)));
+  }).from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId2)));
   const existingPostIds = new Set(existingStoredPosts.map((p) => p.postId));
   const existingShortcodes = new Set(existingStoredPosts.filter((p) => p.shortcode).map((p) => p.shortcode));
   const existingPostIdsWithComments = /* @__PURE__ */ new Set();
@@ -10361,7 +10363,7 @@ async function _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, co
       postId: ciCompetitorComments.postId
     }).from(ciCompetitorComments).where(and2(
       eq2(ciCompetitorComments.competitorId, competitorId),
-      eq2(ciCompetitorComments.accountId, accountId),
+      eq2(ciCompetitorComments.accountId, accountId2),
       inArray2(ciCompetitorComments.postId, postIdsArray)
     ));
     for (const row of postsWithComments) {
@@ -10392,7 +10394,7 @@ async function _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, co
     newPostIds.push(post.postId);
     postInserts.push({
       competitorId,
-      accountId,
+      accountId: accountId2,
       postId: post.postId,
       permalink: post.permalink,
       mediaType: post.mediaType,
@@ -10420,7 +10422,7 @@ async function _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, co
   }
   const existingCommentIds = /* @__PURE__ */ new Set();
   if (realComments.length > 0) {
-    const existingCRows = await db.select({ commentId: ciCompetitorComments.commentId }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId)));
+    const existingCRows = await db.select({ commentId: ciCompetitorComments.commentId }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId2)));
     for (const r of existingCRows) {
       if (r.commentId) existingCommentIds.add(r.commentId);
     }
@@ -10431,7 +10433,7 @@ async function _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, co
     const sentiment = rc.text.length > 0 ? computeBasicSentiment(rc.text) : 0.5;
     commentInserts.push({
       competitorId,
-      accountId,
+      accountId: accountId2,
       postId: rc.postId,
       commentText: rc.text,
       commentId: rc.commentId,
@@ -10463,7 +10465,7 @@ async function _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, co
       for (const comment of fakeComments.slice(0, commentPerPostLimit)) {
         commentInserts.push({
           competitorId,
-          accountId,
+          accountId: accountId2,
           postId: post.postId,
           commentText: comment.text,
           sentiment: comment.sentiment,
@@ -10514,8 +10516,8 @@ async function _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, co
   const imageCount = postsToStore.filter((p) => p.mediaType === "IMAGE").length;
   const carouselCount = postsToStore.filter((p) => p.mediaType === "CAROUSEL").length;
   const contentMix = `Reels:${Math.round(reelCount / postsToStore.length * 100)}%,Posts:${Math.round(imageCount / postsToStore.length * 100)}%,Carousel:${Math.round(carouselCount / postsToStore.length * 100)}%`;
-  const verifyPosts = await db.select({ count: sql2`count(*)` }).from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId)));
-  const verifyComments = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId)));
+  const verifyPosts = await db.select({ count: sql2`count(*)` }).from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId2)));
+  const verifyComments = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId2)));
   const persistedPostCount = Number(verifyPosts[0]?.count || 0);
   const persistedCommentCount = Number(verifyComments[0]?.count || 0);
   const expectedPostCount = existingPostIds.size + postInserts.length;
@@ -10532,7 +10534,7 @@ async function _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, co
   }
   await db.insert(ciCompetitorMetricsSnapshot).values({
     competitorId,
-    accountId,
+    accountId: accountId2,
     postsCollected: persistedPostCount,
     commentsCollected: persistedCommentCount,
     ctaCoverage: Math.round(ctaCoverage * 100) / 100,
@@ -10640,8 +10642,8 @@ function generateSyntheticCommentSamples(post) {
   }
   return samples;
 }
-async function enrichCompetitorWithComments(competitorId, accountId, options) {
-  const [competitor] = await db.select().from(ciCompetitors).where(and2(eq2(ciCompetitors.id, competitorId), eq2(ciCompetitors.accountId, accountId)));
+async function enrichCompetitorWithComments(competitorId, accountId2, options) {
+  const [competitor] = await db.select().from(ciCompetitors).where(and2(eq2(ciCompetitors.id, competitorId), eq2(ciCompetitors.accountId, accountId2)));
   if (!competitor) {
     return { commentsGenerated: 0, status: "COMPETITOR_NOT_FOUND" };
   }
@@ -10654,7 +10656,7 @@ async function enrichCompetitorWithComments(competitorId, accountId, options) {
     console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} \u2014 cooldown active (${daysSince}d since last enrichment, cooldown=${SYNTHETIC_ENRICHMENT_COOLDOWN_DAYS}d). Skipping.`);
     return { commentsGenerated: 0, status: "COOLDOWN_ACTIVE" };
   }
-  const realCommentCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId), eq2(ciCompetitorComments.isSynthetic, false)));
+  const realCommentCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId2), eq2(ciCompetitorComments.isSynthetic, false)));
   const realComments = Number(realCommentCount[0]?.count || 0);
   if (realComments >= MIN_COMMENTS_THRESHOLD) {
     console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} has ${realComments} real comments (>= ${MIN_COMMENTS_THRESHOLD} optimization target). Real data sufficient.`);
@@ -10665,9 +10667,9 @@ async function enrichCompetitorWithComments(competitorId, accountId, options) {
     return { commentsGenerated: 0, status: "ALREADY_ENRICHED" };
   }
   console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} has ${realComments} real comments (optimization target: ${MIN_COMMENTS_THRESHOLD}). Comment text is optional enrichment \u2014 pipeline will not block.`);
-  const existingCommentCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId)));
+  const existingCommentCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId2)));
   const existingComments = Number(existingCommentCount[0]?.count || 0);
-  const storedPosts = await db.select().from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId))).orderBy(desc2(ciCompetitorPosts.createdAt));
+  const storedPosts = await db.select().from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId2))).orderBy(desc2(ciCompetitorPosts.createdAt));
   if (storedPosts.length === 0) {
     console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} has no stored posts. Cannot scrape comments.`);
     return { commentsGenerated: 0, status: "NO_POSTS" };
@@ -10676,7 +10678,7 @@ async function enrichCompetitorWithComments(competitorId, accountId, options) {
   const postIds = storedPosts.map((p) => p.postId);
   const postsWithComments = await db.select({ postId: ciCompetitorComments.postId }).from(ciCompetitorComments).where(and2(
     eq2(ciCompetitorComments.competitorId, competitorId),
-    eq2(ciCompetitorComments.accountId, accountId),
+    eq2(ciCompetitorComments.accountId, accountId2),
     inArray2(ciCompetitorComments.postId, postIds)
   ));
   for (const row of postsWithComments) {
@@ -10696,7 +10698,7 @@ async function enrichCompetitorWithComments(competitorId, accountId, options) {
   }
   let proxyCtx;
   try {
-    proxyCtx = acquireStickySession(accountId, competitor.campaignId || "unknown", competitorId) ?? void 0;
+    proxyCtx = acquireStickySession(accountId2, competitor.campaignId || "unknown", competitorId) ?? void 0;
   } catch (err) {
     console.log(`[DataAcq] DEEP_PASS_ENRICH: Could not acquire proxy for ${competitor.name}: ${err.message}. Proceeding without proxy.`);
   }
@@ -10716,7 +10718,7 @@ async function enrichCompetitorWithComments(competitorId, accountId, options) {
         console.log(`[DataAcq] SPAM_FILTER: Filtered ${embSpamResult.spamCount} spam from DEEP_PASS embedded for ${competitor.name} | reasons: ${JSON.stringify(embSpamResult.spamReasons)}`);
       }
       const existingCIds = /* @__PURE__ */ new Set();
-      const existingCRows = await db.select({ commentId: ciCompetitorComments.commentId }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId)));
+      const existingCRows = await db.select({ commentId: ciCompetitorComments.commentId }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId2)));
       for (const r of existingCRows) {
         if (r.commentId) existingCIds.add(r.commentId);
       }
@@ -10724,7 +10726,7 @@ async function enrichCompetitorWithComments(competitorId, accountId, options) {
         if (existingCIds.has(rc.commentId)) continue;
         commentInserts.push({
           competitorId,
-          accountId,
+          accountId: accountId2,
           postId: rc.postId,
           commentId: rc.commentId,
           username: rc.username,
@@ -10754,7 +10756,7 @@ async function enrichCompetitorWithComments(competitorId, accountId, options) {
       for (const comment of scrapeSpamResult.filtered) {
         commentInserts.push({
           competitorId,
-          accountId,
+          accountId: accountId2,
           postId: comment.postId,
           commentId: comment.commentId,
           username: comment.username,
@@ -10818,16 +10820,16 @@ async function enrichCompetitorWithComments(competitorId, accountId, options) {
   console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} \u2014 real=${realCommentsScraped}, synthetic_fallback=${syntheticFallbackCount}, existing=${existingComments}, total=${totalComments} | status=${status}`);
   return { commentsGenerated: totalComments, status };
 }
-async function getCompetitorDataCoverage(competitorId, accountId = "default") {
-  const [competitor] = await db.select().from(ciCompetitors).where(and2(eq2(ciCompetitors.id, competitorId), eq2(ciCompetitors.accountId, accountId)));
-  const postsResult = await db.select({ count: sql2`count(*)` }).from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId)));
-  const totalCommentsResult = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId)));
+async function getCompetitorDataCoverage(competitorId, accountId2 = "default") {
+  const [competitor] = await db.select().from(ciCompetitors).where(and2(eq2(ciCompetitors.id, competitorId), eq2(ciCompetitors.accountId, accountId2)));
+  const postsResult = await db.select({ count: sql2`count(*)` }).from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId2)));
+  const totalCommentsResult = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId2)));
   const realCommentsResult = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(
     eq2(ciCompetitorComments.competitorId, competitorId),
-    eq2(ciCompetitorComments.accountId, accountId),
+    eq2(ciCompetitorComments.accountId, accountId2),
     eq2(ciCompetitorComments.isSynthetic, false)
   ));
-  const latestMetrics = await db.select().from(ciCompetitorMetricsSnapshot).where(and2(eq2(ciCompetitorMetricsSnapshot.competitorId, competitorId), eq2(ciCompetitorMetricsSnapshot.accountId, accountId))).orderBy(desc2(ciCompetitorMetricsSnapshot.createdAt)).limit(1);
+  const latestMetrics = await db.select().from(ciCompetitorMetricsSnapshot).where(and2(eq2(ciCompetitorMetricsSnapshot.competitorId, competitorId), eq2(ciCompetitorMetricsSnapshot.accountId, accountId2))).orderBy(desc2(ciCompetitorMetricsSnapshot.createdAt)).limit(1);
   const postsCount = Number(postsResult[0]?.count || 0);
   const commentsCount = Number(totalCommentsResult[0]?.count || 0);
   const realCommentsCount = Number(realCommentsResult[0]?.count || 0);
@@ -10835,7 +10837,7 @@ async function getCompetitorDataCoverage(competitorId, accountId = "default") {
   const metrics = latestMetrics[0] || null;
   let dataFreshnessDays = competitor?.dataFreshnessDays ?? 999;
   if (dataFreshnessDays === 999 || dataFreshnessDays === null) {
-    const newestPost = await db.select({ ts: ciCompetitorPosts.timestamp }).from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId))).orderBy(desc2(ciCompetitorPosts.timestamp)).limit(1);
+    const newestPost = await db.select({ ts: ciCompetitorPosts.timestamp }).from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId2))).orderBy(desc2(ciCompetitorPosts.timestamp)).limit(1);
     if (newestPost.length > 0 && newestPost[0].ts) {
       dataFreshnessDays = Math.max(0, Math.round((Date.now() - new Date(newestPost[0].ts).getTime()) / (1e3 * 60 * 60 * 24)));
     } else if (metrics?.lastFetchAt) {
@@ -10862,8 +10864,8 @@ async function getCompetitorDataCoverage(competitorId, accountId = "default") {
     lastCheckedAt: competitor?.lastCheckedAt?.toISOString() || null
   };
 }
-async function getStoredPostsForMIv3(competitorId, accountId = "default") {
-  const posts = await db.select().from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId))).orderBy(desc2(ciCompetitorPosts.createdAt)).limit(40);
+async function getStoredPostsForMIv3(competitorId, accountId2 = "default") {
+  const posts = await db.select().from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId2))).orderBy(desc2(ciCompetitorPosts.createdAt)).limit(40);
   return posts.map((p) => ({
     id: p.postId,
     caption: p.caption || "",
@@ -10877,8 +10879,8 @@ async function getStoredPostsForMIv3(competitorId, accountId = "default") {
     hasOffer: p.hasOffer || false
   }));
 }
-async function getStoredCommentsForMIv3(competitorId, accountId = "default") {
-  const comments = await db.select().from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId))).orderBy(desc2(ciCompetitorComments.createdAt)).limit(150);
+async function getStoredCommentsForMIv3(competitorId, accountId2 = "default") {
+  const comments = await db.select().from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId2))).orderBy(desc2(ciCompetitorComments.createdAt)).limit(150);
   return comments.map((c) => ({
     id: c.id,
     text: c.commentText || "",
@@ -10947,10 +10949,10 @@ async function cleanupExpiredSyntheticComments() {
   diagnostics.syntheticExpiredCount = deleted;
   console.log(`[SyntheticCleanup] Deleted ${deleted} expired synthetic comments from ${competitorsAffected.length} competitors (retention=${SYNTHETIC_RETENTION_DAYS}d)`);
   let reEnriched = 0;
-  for (const [competitorId, accountId] of affectedCompetitors.entries()) {
+  for (const [competitorId, accountId2] of affectedCompetitors.entries()) {
     const [comp] = await db.select().from(ciCompetitors).where(eq2(ciCompetitors.id, competitorId));
     if (!comp || !comp.isActive) continue;
-    const realCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId), eq2(ciCompetitorComments.isSynthetic, false)));
+    const realCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId2), eq2(ciCompetitorComments.isSynthetic, false)));
     const realComments = Number(realCount[0]?.count || 0);
     if (realComments >= MIN_COMMENTS_THRESHOLD) {
       console.log(`[SyntheticCleanup] ${competitorId}: real comments (${realComments}) meet optimization target \u2014 no re-enrichment needed`);
@@ -10962,15 +10964,15 @@ async function cleanupExpiredSyntheticComments() {
       diagnostics.cooldownBlockedCount++;
       continue;
     }
-    const remainingCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId)));
+    const remainingCount = await db.select({ count: sql2`count(*)` }).from(ciCompetitorComments).where(and2(eq2(ciCompetitorComments.competitorId, competitorId), eq2(ciCompetitorComments.accountId, accountId2)));
     const remaining = Number(remainingCount[0]?.count || 0);
     if (remaining >= MIN_COMMENTS_THRESHOLD) {
       continue;
     }
-    const hasPosts = await db.select({ count: sql2`count(*)` }).from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId)));
+    const hasPosts = await db.select({ count: sql2`count(*)` }).from(ciCompetitorPosts).where(and2(eq2(ciCompetitorPosts.competitorId, competitorId), eq2(ciCompetitorPosts.accountId, accountId2)));
     if (Number(hasPosts[0]?.count || 0) > 0) {
       try {
-        const result = await enrichCompetitorWithComments(competitorId, accountId);
+        const result = await enrichCompetitorWithComments(competitorId, accountId2);
         if (result.status === "COOLDOWN_ACTIVE") {
           diagnostics.cooldownBlockedCount++;
         } else if (result.status === "REAL_DATA_SUFFICIENT") {
@@ -11271,8 +11273,8 @@ async function persistValidatedSnapshot(snapshotPayload, caller) {
   }
   return snapshot;
 }
-async function getCompetitorData(accountId, campaignId) {
-  const competitors = await db.select().from(ciCompetitors).where(and4(eq4(ciCompetitors.accountId, accountId), eq4(ciCompetitors.campaignId, campaignId), eq4(ciCompetitors.isActive, true)));
+async function getCompetitorData(accountId2, campaignId) {
+  const competitors = await db.select().from(ciCompetitors).where(and4(eq4(ciCompetitors.accountId, accountId2), eq4(ciCompetitors.campaignId, campaignId), eq4(ciCompetitors.isActive, true)));
   const pendingCount = competitors.filter((c) => c.enrichmentStatus === "PENDING" || !c.enrichmentStatus).length;
   const enrichedCount = competitors.filter((c) => c.enrichmentStatus === "ENRICHED").length;
   const fastPassOnly = competitors.filter((c) => (c.analysisLevel || "FAST_PASS") === "FAST_PASS" && c.enrichmentStatus !== "ENRICHED").length;
@@ -11281,8 +11283,8 @@ async function getCompetitorData(accountId, campaignId) {
   }
   const results = [];
   for (const c of competitors) {
-    const posts = await getStoredPostsForMIv3(c.id, accountId);
-    const comments = await getStoredCommentsForMIv3(c.id, accountId);
+    const posts = await getStoredPostsForMIv3(c.id, accountId2);
+    const comments = await getStoredCommentsForMIv3(c.id, accountId2);
     results.push({
       id: c.id,
       name: c.name,
@@ -11305,9 +11307,9 @@ async function getCompetitorData(accountId, campaignId) {
   }
   return results;
 }
-async function getCachedSnapshot(accountId, campaignId, competitorHash) {
+async function getCachedSnapshot(accountId2, campaignId, competitorHash) {
   const snapshots = await db.select().from(miSnapshots).where(and4(
-    eq4(miSnapshots.accountId, accountId),
+    eq4(miSnapshots.accountId, accountId2),
     eq4(miSnapshots.campaignId, campaignId),
     inArray3(miSnapshots.status, ["COMPLETE", "PARTIAL"])
   )).orderBy(desc4(miSnapshots.createdAt)).limit(1);
@@ -11687,8 +11689,8 @@ function computeSnapshotDeltas(prevSnapshot, currSnapshot) {
   };
 }
 var MarketIntelligenceV3 = class {
-  static async run(mode, accountId, campaignId, forceRefresh = false, goalMode = "STRATEGY_MODE") {
-    const lockKey = `${accountId}:${campaignId}`;
+  static async run(mode, accountId2, campaignId, forceRefresh = false, goalMode = "STRATEGY_MODE") {
+    const lockKey = `${accountId2}:${campaignId}`;
     const LOCK_TIMEOUT_MS = 5 * 60 * 1e3;
     const existingLock = activeLocks.get(lockKey);
     if (existingLock) {
@@ -11703,7 +11705,7 @@ var MarketIntelligenceV3 = class {
         throw new Error(`Analysis for this campaign is already in progress. Please wait and try again.`);
       }
     }
-    const runPromise = this._executeRun(mode, accountId, campaignId, forceRefresh, goalMode);
+    const runPromise = this._executeRun(mode, accountId2, campaignId, forceRefresh, goalMode);
     activeLocks.set(lockKey, runPromise);
     try {
       const result = await runPromise;
@@ -11712,22 +11714,22 @@ var MarketIntelligenceV3 = class {
       activeLocks.delete(lockKey);
     }
   }
-  static async _executeRun(mode, accountId, campaignId, forceRefresh, goalMode = "STRATEGY_MODE") {
+  static async _executeRun(mode, accountId2, campaignId, forceRefresh, goalMode = "STRATEGY_MODE") {
     if (!goalMode || goalMode === "STRATEGY_MODE") {
       const campaignRows = await db.select().from(growthCampaigns).where(eq4(growthCampaigns.id, campaignId)).limit(1);
       if (campaignRows[0]?.goalMode === "REACH_MODE") {
         goalMode = "REACH_MODE";
       }
     }
-    console.log(`[MIv3] MARKET_OVERVIEW_DIAGNOSTIC_RUN | mode=${mode} | accountId=${accountId} | campaignId=${campaignId} | goalMode=${goalMode}`);
+    console.log(`[MIv3] MARKET_OVERVIEW_DIAGNOSTIC_RUN | mode=${mode} | accountId=${accountId2} | campaignId=${campaignId} | goalMode=${goalMode}`);
     logAudit("MARKET_OVERVIEW_DIAGNOSTIC_RUN", {
       mode,
-      accountId,
+      accountId: accountId2,
       campaignId,
       caller: ISOLATION_ALLOWED_CALLER2
     }).catch(() => {
     });
-    const allCompetitors = await getCompetitorData(accountId, campaignId);
+    const allCompetitors = await getCompetitorData(accountId2, campaignId);
     const competitors = allCompetitors.filter((c) => {
       const postCount = c.posts?.length || 0;
       if (postCount === 0) {
@@ -11742,7 +11744,7 @@ var MarketIntelligenceV3 = class {
     const competitorHash = computeCompetitorHash(competitors);
     let cacheInvalidationReason = null;
     if (!forceRefresh) {
-      const cacheResult = await getCachedSnapshot(accountId, campaignId, competitorHash);
+      const cacheResult = await getCachedSnapshot(accountId2, campaignId, competitorHash);
       if (cacheResult.snapshot) {
         console.log(`[MIv3] Returning cached snapshot ${cacheResult.snapshot.id}`);
         return buildResultFromSnapshot(cacheResult.snapshot);
@@ -11801,7 +11803,7 @@ var MarketIntelligenceV3 = class {
     const trajectoryDirection = deriveTrajectoryDirection(trajectory, demandPressure.score);
     const marketState = deriveMarketState(trajectory, confidence.level, demandPressure.score);
     const marketDiagnosis = buildMarketDiagnosis(confidence, trajectory, dominantIntent);
-    const marketBaseline = await computeMarketBaseline(accountId, campaignId);
+    const marketBaseline = await computeMarketBaseline(accountId2, campaignId);
     const signalNoiseRatio = computeSignalNoiseRatio(signalResults, confidence);
     const evidenceCoverage = computeEvidenceCoverage(signalResults, competitors.length);
     const calibrationCtx = {
@@ -11913,7 +11915,7 @@ var MarketIntelligenceV3 = class {
       threatSignals.push(...narrativeOverlap.warnings);
     }
     const previousSnapshots = await db.select().from(miSnapshots).where(and4(
-      eq4(miSnapshots.accountId, accountId),
+      eq4(miSnapshots.accountId, accountId2),
       eq4(miSnapshots.campaignId, campaignId),
       inArray3(miSnapshots.status, ["COMPLETE", "PARTIAL"])
     )).orderBy(desc4(miSnapshots.createdAt)).limit(1);
@@ -12008,7 +12010,7 @@ var MarketIntelligenceV3 = class {
     });
     console.log(`[MIv3] LINEAGE_GENERATED | entries=${miLineage.length} | opportunities=${opportunitySignals.length} | threats=${threatSignals.length} | narrativeObj=${narObjections.length}`);
     const snapshotPayload = {
-      accountId,
+      accountId: accountId2,
       campaignId,
       competitorHash,
       version: (previousSnapshot?.version || 0) + 1,
@@ -12619,9 +12621,9 @@ function validateBridgeIntegrity(bridgeResult) {
 
 // server/shared/engine-health.ts
 var MAX_FRESHNESS_DAYS = 14;
-async function checkMIv3Freshness(accountId, campaignId) {
+async function checkMIv3Freshness(accountId2, campaignId) {
   const [latest] = await db.select().from(miSnapshots).where(and5(
-    eq5(miSnapshots.accountId, accountId),
+    eq5(miSnapshots.accountId, accountId2),
     eq5(miSnapshots.campaignId, campaignId),
     inArray4(miSnapshots.status, ["COMPLETE", "PARTIAL"])
   )).orderBy(desc5(miSnapshots.createdAt)).limit(1);
@@ -12650,11 +12652,11 @@ async function checkMIv3Freshness(accountId, campaignId) {
     versionMatch
   };
 }
-async function validateRoutingIntegrity(accountId, campaignId) {
+async function validateRoutingIntegrity(accountId2, campaignId) {
   const engines = [];
   const brokenRoutes = [];
   let staleSnapshots = 0;
-  const miFreshness = await checkMIv3Freshness(accountId, campaignId);
+  const miFreshness = await checkMIv3Freshness(accountId2, campaignId);
   const miHealth = {
     engine: "MarketIntelligence-V3",
     healthy: miFreshness.isFresh,
@@ -12727,7 +12729,7 @@ async function validateRoutingIntegrity(accountId, campaignId) {
         }
       }
       const [latestAudience] = await db.select().from(audienceSnapshots).where(and5(
-        eq5(audienceSnapshots.accountId, accountId),
+        eq5(audienceSnapshots.accountId, accountId2),
         eq5(audienceSnapshots.campaignId, campaignId)
       )).orderBy(desc5(audienceSnapshots.createdAt)).limit(1);
       if (latestAudience?.signalLineage) {
@@ -12759,8 +12761,8 @@ async function validateRoutingIntegrity(accountId, campaignId) {
     timestamp: Date.now()
   };
 }
-async function enforceGlobalStateRefresh(accountId, campaignId) {
-  const freshness = await checkMIv3Freshness(accountId, campaignId);
+async function enforceGlobalStateRefresh(accountId2, campaignId) {
+  const freshness = await checkMIv3Freshness(accountId2, campaignId);
   return {
     fresh: freshness.isFresh,
     refreshRequired: freshness.requiresRefresh,
@@ -13095,7 +13097,7 @@ function registerVideoRoutes(app2) {
       const aiResponse = await aiChat({
         model: "gpt-5.2",
         max_tokens: 800,
-        accountId: "default",
+        accountId: req.accountId || "default",
         endpoint: "video-brief",
         messages: [
           {
@@ -13341,7 +13343,7 @@ Based on the creative brief above, create an edit plan that fulfills the client'
       const response = await aiChat({
         model: "gpt-4.1-mini",
         max_tokens: 1800,
-        accountId: req.body.accountId || "default",
+        accountId: req.accountId || "default",
         endpoint: "video-analyze",
         messages: [
           {
@@ -13432,7 +13434,7 @@ Generate a full production-ready script with scene-by-scene breakdown, exact spo
       const response = await aiChat({
         model: "gpt-4.1-mini",
         max_tokens: 600,
-        accountId: req.body.accountId || "default",
+        accountId: req.accountId || "default",
         endpoint: "ai-metadata",
         messages: [
           {
@@ -13630,10 +13632,10 @@ function registerStrategyRoutes(app2) {
   app2.post("/api/strategy/analyze", requireCampaign, async (req, res) => {
     try {
       const campaignContext = req.campaignContext;
-      const { accountId, campaignId } = campaignContext;
+      const { accountId: accountId2, campaignId } = campaignContext;
       const allData = await db.select().from(performanceSnapshots).orderBy(desc10(performanceSnapshots.fetchedAt)).limit(50);
       const averages = await getAccountAverages();
-      const memories = await db.select().from(strategyMemory).where(and10(eq11(strategyMemory.accountId, accountId), eq11(strategyMemory.campaignId, campaignId), ne2(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyMemory.updatedAt)).limit(20);
+      const memories = await db.select().from(strategyMemory).where(and10(eq11(strategyMemory.accountId, accountId2), eq11(strategyMemory.campaignId, campaignId), ne2(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyMemory.updatedAt)).limit(20);
       if (allData.length === 0) {
         return res.status(400).json({ error: "No performance data available. Sync your Meta data first." });
       }
@@ -13790,7 +13792,7 @@ ${JSON.stringify(dataForAI, null, 2)}`
           }
         ],
         max_tokens: 4e3,
-        accountId: "default",
+        accountId: req.accountId || "default",
         endpoint: "strategy-analysis"
       });
       const aiContent = aiResponse.choices[0]?.message?.content || "";
@@ -13807,7 +13809,7 @@ ${JSON.stringify(dataForAI, null, 2)}`
       if (analysis.insights?.length) {
         for (const ins of analysis.insights) {
           await db.insert(strategyInsights).values({
-            accountId,
+            accountId: accountId2,
             campaignId,
             category: ins.category,
             insight: ins.insight,
@@ -13823,7 +13825,7 @@ ${JSON.stringify(dataForAI, null, 2)}`
       if (decisions.length) {
         for (const dec of decisions) {
           await db.insert(strategyDecisions).values({
-            accountId,
+            accountId: accountId2,
             trigger: dec.trigger,
             action: dec.action,
             reason: dec.reason,
@@ -13836,7 +13838,7 @@ ${JSON.stringify(dataForAI, null, 2)}`
       if (analysis.memoryUpdates?.length) {
         for (const mem of analysis.memoryUpdates) {
           await db.insert(strategyMemory).values({
-            accountId,
+            accountId: accountId2,
             campaignId,
             memoryType: mem.memoryType,
             label: mem.label,
@@ -13847,7 +13849,7 @@ ${JSON.stringify(dataForAI, null, 2)}`
         }
       }
       await logAuditEvent({
-        accountId,
+        accountId: accountId2,
         campaignId,
         blueprintId: activePlanId || void 0,
         event: "PERFORMANCE_SIGNAL_PROPOSED",
@@ -13879,8 +13881,8 @@ ${JSON.stringify(dataForAI, null, 2)}`
   });
   app2.get("/api/strategy/insights", requireCampaign, async (req, res) => {
     try {
-      const { accountId, campaignId } = req.campaignContext;
-      const insights = await db.select().from(strategyInsights).where(and10(eq11(strategyInsights.isActive, true), eq11(strategyInsights.accountId, accountId), eq11(strategyInsights.campaignId, campaignId), ne2(strategyInsights.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyInsights.createdAt)).limit(30);
+      const { accountId: accountId2, campaignId } = req.campaignContext;
+      const insights = await db.select().from(strategyInsights).where(and10(eq11(strategyInsights.isActive, true), eq11(strategyInsights.accountId, accountId2), eq11(strategyInsights.campaignId, campaignId), ne2(strategyInsights.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyInsights.createdAt)).limit(30);
       res.json(insights);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch insights" });
@@ -13905,8 +13907,8 @@ ${JSON.stringify(dataForAI, null, 2)}`
   });
   app2.get("/api/strategy/memory", requireCampaign, async (req, res) => {
     try {
-      const { accountId, campaignId } = req.campaignContext;
-      const memories = await db.select().from(strategyMemory).where(and10(eq11(strategyMemory.accountId, accountId), eq11(strategyMemory.campaignId, campaignId), ne2(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyMemory.updatedAt)).limit(50);
+      const { accountId: accountId2, campaignId } = req.campaignContext;
+      const memories = await db.select().from(strategyMemory).where(and10(eq11(strategyMemory.accountId, accountId2), eq11(strategyMemory.campaignId, campaignId), ne2(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyMemory.updatedAt)).limit(50);
       res.json(memories);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch memory" });
@@ -13917,11 +13919,11 @@ ${JSON.stringify(dataForAI, null, 2)}`
       const now = /* @__PURE__ */ new Date();
       const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1e3);
       const weekData = await db.select().from(performanceSnapshots).where(gte2(performanceSnapshots.fetchedAt, weekAgo)).orderBy(desc10(performanceSnapshots.fetchedAt));
-      const { accountId, campaignId } = req.campaignContext;
+      const { accountId: accountId2, campaignId } = req.campaignContext;
       const campaignContext = req.campaignContext;
-      const insights = await db.select().from(strategyInsights).where(and10(gte2(strategyInsights.createdAt, weekAgo), eq11(strategyInsights.accountId, accountId), eq11(strategyInsights.campaignId, campaignId), ne2(strategyInsights.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyInsights.createdAt));
+      const insights = await db.select().from(strategyInsights).where(and10(gte2(strategyInsights.createdAt, weekAgo), eq11(strategyInsights.accountId, accountId2), eq11(strategyInsights.campaignId, campaignId), ne2(strategyInsights.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyInsights.createdAt));
       const decisions = await db.select().from(strategyDecisions).where(gte2(strategyDecisions.createdAt, weekAgo));
-      const memories = await db.select().from(strategyMemory).where(and10(eq11(strategyMemory.accountId, accountId), eq11(strategyMemory.campaignId, campaignId), ne2(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyMemory.updatedAt)).limit(20);
+      const memories = await db.select().from(strategyMemory).where(and10(eq11(strategyMemory.accountId, accountId2), eq11(strategyMemory.campaignId, campaignId), ne2(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyMemory.updatedAt)).limit(20);
       const averages = await getAccountAverages();
       const revenueSummary = await getRevenueSummary(campaignContext.campaignId, "default");
       const activePlanId = await getActiveBlueprintId();
@@ -13983,7 +13985,7 @@ ${JSON.stringify(weekData.map((d) => ({ type: d.contentType, angle: d.contentAng
           }
         ],
         max_tokens: 4e3,
-        accountId: "default",
+        accountId: req.accountId || "default",
         endpoint: "strategy-weekly"
       });
       const content = aiResponse.choices[0]?.message?.content || "";
@@ -14013,7 +14015,7 @@ ${JSON.stringify(weekData.map((d) => ({ type: d.contentType, angle: d.contentAng
       if (report.selfImprovements?.length) {
         for (const improvement of report.selfImprovements) {
           await db.insert(strategyMemory).values({
-            accountId,
+            accountId: accountId2,
             campaignId,
             memoryType: "self_improvement",
             label: improvement,
@@ -14024,7 +14026,7 @@ ${JSON.stringify(weekData.map((d) => ({ type: d.contentType, angle: d.contentAng
         }
       }
       await logAuditEvent({
-        accountId,
+        accountId: accountId2,
         campaignId,
         blueprintId: activePlanId || void 0,
         event: "WEEKLY_REPORT_GENERATED",
@@ -14052,9 +14054,9 @@ ${JSON.stringify(weekData.map((d) => ({ type: d.contentType, angle: d.contentAng
   app2.post("/api/strategy/audience-snipe", requireCampaign, async (req, res) => {
     try {
       const { campaignGoal, product, budget } = req.body;
-      const { accountId, campaignId } = req.campaignContext;
-      const memories = await db.select().from(strategyMemory).where(and10(eq11(strategyMemory.accountId, accountId), eq11(strategyMemory.campaignId, campaignId), ne2(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyMemory.updatedAt)).limit(20);
-      const insights = await db.select().from(strategyInsights).where(and10(eq11(strategyInsights.isActive, true), eq11(strategyInsights.accountId, accountId), eq11(strategyInsights.campaignId, campaignId), ne2(strategyInsights.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyInsights.createdAt)).limit(15);
+      const { accountId: accountId2, campaignId } = req.campaignContext;
+      const memories = await db.select().from(strategyMemory).where(and10(eq11(strategyMemory.accountId, accountId2), eq11(strategyMemory.campaignId, campaignId), ne2(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyMemory.updatedAt)).limit(20);
+      const insights = await db.select().from(strategyInsights).where(and10(eq11(strategyInsights.isActive, true), eq11(strategyInsights.accountId, accountId2), eq11(strategyInsights.campaignId, campaignId), ne2(strategyInsights.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyInsights.createdAt)).limit(15);
       const averages = await getAccountAverages();
       const aiResponse = await aiChat({
         model: "gpt-5.2",
@@ -14104,7 +14106,7 @@ Budget: $${budget || "flexible"}`
           }
         ],
         max_tokens: 3e3,
-        accountId: "default",
+        accountId: req.accountId || "default",
         endpoint: "strategy-insight"
       });
       const content = aiResponse.choices[0]?.message?.content || "";
@@ -14126,9 +14128,9 @@ Budget: $${budget || "flexible"}`
   });
   app2.post("/api/strategy/moat-scan", requireCampaign, async (req, res) => {
     try {
-      const { accountId, campaignId } = req.campaignContext;
-      const memories = await db.select().from(strategyMemory).where(and10(eq11(strategyMemory.accountId, accountId), eq11(strategyMemory.campaignId, campaignId), ne2(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyMemory.updatedAt)).limit(30);
-      const insights = await db.select().from(strategyInsights).where(and10(eq11(strategyInsights.isActive, true), eq11(strategyInsights.accountId, accountId), eq11(strategyInsights.campaignId, campaignId), ne2(strategyInsights.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyInsights.createdAt)).limit(20);
+      const { accountId: accountId2, campaignId } = req.campaignContext;
+      const memories = await db.select().from(strategyMemory).where(and10(eq11(strategyMemory.accountId, accountId2), eq11(strategyMemory.campaignId, campaignId), ne2(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyMemory.updatedAt)).limit(30);
+      const insights = await db.select().from(strategyInsights).where(and10(eq11(strategyInsights.isActive, true), eq11(strategyInsights.accountId, accountId2), eq11(strategyInsights.campaignId, campaignId), ne2(strategyInsights.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyInsights.createdAt)).limit(20);
       const allPerf = await db.select().from(performanceSnapshots).orderBy(desc10(performanceSnapshots.fetchedAt)).limit(50);
       const averages = await getAccountAverages();
       if (memories.length === 0 && insights.length === 0) {
@@ -14189,7 +14191,7 @@ ${JSON.stringify(allPerf.filter((p) => (p.saves || 0) > 20 || (p.roas || 0) > 3)
           }
         ],
         max_tokens: 3e3,
-        accountId: "default",
+        accountId: req.accountId || "default",
         endpoint: "strategy-moat"
       });
       const content = aiResponse.choices[0]?.message?.content || "";
@@ -14206,7 +14208,7 @@ ${JSON.stringify(allPerf.filter((p) => (p.saves || 0) > 20 || (p.roas || 0) > 3)
       const saved = [];
       for (const c of result.candidates) {
         const [record] = await db.insert(moatCandidates).values({
-          accountId,
+          accountId: accountId2,
           campaignId,
           sourceType: c.sourceType || "winning_angle",
           label: c.label,
@@ -14221,7 +14223,7 @@ ${JSON.stringify(allPerf.filter((p) => (p.saves || 0) > 20 || (p.roas || 0) > 3)
         saved.push(record);
       }
       await logAuditEvent({
-        accountId,
+        accountId: accountId2,
         campaignId,
         blueprintId: activePlanId || void 0,
         event: "MOAT_SCAN_COMPLETED",
@@ -14246,8 +14248,8 @@ ${JSON.stringify(allPerf.filter((p) => (p.saves || 0) > 20 || (p.roas || 0) > 3)
   });
   app2.get("/api/strategy/moat-candidates", requireCampaign, async (req, res) => {
     try {
-      const { accountId, campaignId } = req.campaignContext;
-      const candidates = await db.select().from(moatCandidates).where(and10(eq11(moatCandidates.accountId, accountId), eq11(moatCandidates.campaignId, campaignId), ne2(moatCandidates.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(moatCandidates.moatScore)).limit(20);
+      const { accountId: accountId2, campaignId } = req.campaignContext;
+      const candidates = await db.select().from(moatCandidates).where(and10(eq11(moatCandidates.accountId, accountId2), eq11(moatCandidates.campaignId, campaignId), ne2(moatCandidates.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(moatCandidates.moatScore)).limit(20);
       res.json(candidates);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch moat candidates" });
@@ -14256,10 +14258,10 @@ ${JSON.stringify(allPerf.filter((p) => (p.saves || 0) > 20 || (p.roas || 0) > 3)
   app2.post("/api/strategy/signature-series", requireCampaign, async (req, res) => {
     try {
       const { candidateId } = req.body;
-      const { accountId, campaignId } = req.campaignContext;
-      const [candidate] = await db.select().from(moatCandidates).where(and10(eq11(moatCandidates.id, candidateId), eq11(moatCandidates.accountId, accountId), eq11(moatCandidates.campaignId, campaignId), ne2(moatCandidates.campaignId, LEGACY_CAMPAIGN)));
+      const { accountId: accountId2, campaignId } = req.campaignContext;
+      const [candidate] = await db.select().from(moatCandidates).where(and10(eq11(moatCandidates.id, candidateId), eq11(moatCandidates.accountId, accountId2), eq11(moatCandidates.campaignId, campaignId), ne2(moatCandidates.campaignId, LEGACY_CAMPAIGN)));
       if (!candidate) return res.status(404).json({ error: "Moat candidate not found" });
-      const memories = await db.select().from(strategyMemory).where(and10(eq11(strategyMemory.accountId, accountId), eq11(strategyMemory.campaignId, campaignId), ne2(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyMemory.updatedAt)).limit(15);
+      const memories = await db.select().from(strategyMemory).where(and10(eq11(strategyMemory.accountId, accountId2), eq11(strategyMemory.campaignId, campaignId), ne2(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyMemory.updatedAt)).limit(15);
       const averages = await getAccountAverages();
       const aiResponse = await aiChat({
         model: "gpt-5.2",
@@ -14306,7 +14308,7 @@ Return ONLY valid JSON:
           }
         ],
         max_tokens: 3e3,
-        accountId: "default",
+        accountId: req.accountId || "default",
         endpoint: "strategy-recommendations"
       });
       const content = aiResponse.choices[0]?.message?.content || "";
@@ -14355,11 +14357,11 @@ Return ONLY valid JSON:
   });
   app2.get("/api/strategy/moat-dashboard", requireCampaign, async (req, res) => {
     try {
-      const { accountId, campaignId } = req.campaignContext;
+      const { accountId: accountId2, campaignId } = req.campaignContext;
       const [candidates, series, memories, averages] = await Promise.all([
-        db.select().from(moatCandidates).where(and10(eq11(moatCandidates.accountId, accountId), eq11(moatCandidates.campaignId, campaignId), ne2(moatCandidates.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(moatCandidates.moatScore)).limit(10),
+        db.select().from(moatCandidates).where(and10(eq11(moatCandidates.accountId, accountId2), eq11(moatCandidates.campaignId, campaignId), ne2(moatCandidates.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(moatCandidates.moatScore)).limit(10),
         db.select().from(signatureSeries).where(eq11(signatureSeries.isActive, true)).orderBy(desc10(signatureSeries.createdAt)),
-        db.select().from(strategyMemory).where(and10(eq11(strategyMemory.accountId, accountId), eq11(strategyMemory.campaignId, campaignId), ne2(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyMemory.updatedAt)).limit(20),
+        db.select().from(strategyMemory).where(and10(eq11(strategyMemory.accountId, accountId2), eq11(strategyMemory.campaignId, campaignId), ne2(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyMemory.updatedAt)).limit(20),
         getAccountAverages()
       ]);
       const activeSeries = series.length;
@@ -14393,12 +14395,12 @@ Return ONLY valid JSON:
   app2.get("/api/strategy/dashboard", requireCampaign, async (req, res) => {
     try {
       const activePlanId = await getActiveBlueprintId();
-      const { accountId, campaignId } = req.campaignContext;
+      const { accountId: accountId2, campaignId } = req.campaignContext;
       const [averages, recentInsights, recentDecisions, memoryItems, latestReport] = await Promise.all([
         getAccountAverages(),
-        db.select().from(strategyInsights).where(and10(eq11(strategyInsights.isActive, true), eq11(strategyInsights.accountId, accountId), eq11(strategyInsights.campaignId, campaignId), ne2(strategyInsights.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyInsights.createdAt)).limit(5),
+        db.select().from(strategyInsights).where(and10(eq11(strategyInsights.isActive, true), eq11(strategyInsights.accountId, accountId2), eq11(strategyInsights.campaignId, campaignId), ne2(strategyInsights.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyInsights.createdAt)).limit(5),
         db.select().from(strategyDecisions).orderBy(desc10(strategyDecisions.createdAt)).limit(5),
-        db.select().from(strategyMemory).where(and10(eq11(strategyMemory.accountId, accountId), eq11(strategyMemory.campaignId, campaignId), ne2(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyMemory.updatedAt)).limit(10),
+        db.select().from(strategyMemory).where(and10(eq11(strategyMemory.accountId, accountId2), eq11(strategyMemory.campaignId, campaignId), ne2(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc10(strategyMemory.updatedAt)).limit(10),
         db.select().from(weeklyReports).orderBy(desc10(weeklyReports.createdAt)).limit(1)
       ]);
       const winners = memoryItems.filter((m) => m.isWinner);
@@ -14486,10 +14488,10 @@ function calculateConfidence(params) {
     }
   };
 }
-async function computeDecisionSuccessRate(accountId) {
+async function computeDecisionSuccessRate(accountId2) {
   const outcomes = await db.select({
     outcome: decisionOutcomes.outcome
-  }).from(decisionOutcomes).where(eq12(decisionOutcomes.accountId, accountId)).orderBy(desc11(decisionOutcomes.evaluatedAt)).limit(20);
+  }).from(decisionOutcomes).where(eq12(decisionOutcomes.accountId, accountId2)).orderBy(desc11(decisionOutcomes.evaluatedAt)).limit(20);
   const evaluated = outcomes.filter((o) => o.outcome !== null && o.outcome !== void 0);
   if (evaluated.length === 0) {
     return { successRate: 100, total: 0 };
@@ -14500,11 +14502,11 @@ async function computeDecisionSuccessRate(accountId) {
     total: evaluated.length
   };
 }
-async function getLast2Outcomes(accountId) {
+async function getLast2Outcomes(accountId2) {
   const outcomes = await db.select({
     outcome: decisionOutcomes.outcome
   }).from(decisionOutcomes).where(
-    sql7`${decisionOutcomes.accountId} = ${accountId} AND ${decisionOutcomes.outcome} IS NOT NULL`
+    sql7`${decisionOutcomes.accountId} = ${accountId2} AND ${decisionOutcomes.outcome} IS NOT NULL`
   ).orderBy(desc11(decisionOutcomes.evaluatedAt)).limit(2);
   return outcomes.map((o) => o.outcome || "").filter(Boolean);
 }
@@ -14532,25 +14534,25 @@ function checkSafeModeExitConditions(params) {
 
 // server/autopilot-routes.ts
 var router = Router();
-async function ensureAccountState(accountId) {
-  const existing = await db.select().from(accountState).where(eq13(accountState.accountId, accountId)).limit(1);
+async function ensureAccountState(accountId2) {
+  const existing = await db.select().from(accountState).where(eq13(accountState.accountId, accountId2)).limit(1);
   if (existing.length === 0) {
-    await db.insert(accountState).values({ accountId });
-    const created = await db.select().from(accountState).where(eq13(accountState.accountId, accountId)).limit(1);
+    await db.insert(accountState).values({ accountId: accountId2 });
+    const created = await db.select().from(accountState).where(eq13(accountState.accountId, accountId2)).limit(1);
     return created[0];
   }
   return existing[0];
 }
-async function ensureGuardrailConfig(accountId) {
-  const existing = await db.select().from(guardrailConfig).where(eq13(guardrailConfig.accountId, accountId)).limit(1);
+async function ensureGuardrailConfig(accountId2) {
+  const existing = await db.select().from(guardrailConfig).where(eq13(guardrailConfig.accountId, accountId2)).limit(1);
   if (existing.length === 0) {
-    await db.insert(guardrailConfig).values({ accountId });
+    await db.insert(guardrailConfig).values({ accountId: accountId2 });
   }
 }
-async function resolveActivePlan(accountId, campaignId) {
+async function resolveActivePlan(accountId2, campaignId) {
   const plans = await db.select().from(strategicPlans).where(
     and11(
-      eq13(strategicPlans.accountId, accountId),
+      eq13(strategicPlans.accountId, accountId2),
       eq13(strategicPlans.campaignId, campaignId),
       sql8`${strategicPlans.status} IN (${sql8.raw(ACTIVE_PLAN_STATUSES_SQL)})`
     )
@@ -14559,11 +14561,11 @@ async function resolveActivePlan(accountId, campaignId) {
 }
 router.get("/api/autopilot/status", requireCampaign, async (req, res) => {
   try {
-    const accountId = req.query.accountId || "default";
+    const accountId2 = req.accountId || "default";
     const campaignContext = req.campaignContext;
     const campaignId = campaignContext?.campaignId || "";
-    const state = await ensureAccountState(accountId);
-    const activePlan = await resolveActivePlan(accountId, campaignId);
+    const state = await ensureAccountState(accountId2);
+    const activePlan = await resolveActivePlan(accountId2, campaignId);
     let planBinding;
     if (!activePlan) {
       planBinding = {
@@ -14585,7 +14587,7 @@ router.get("/api/autopilot/status", requireCampaign, async (req, res) => {
       const failed = entries.filter((e) => e.status === "FAILED").length;
       const recentDecision = await db.select({ createdAt: auditLog.createdAt }).from(auditLog).where(
         and11(
-          eq13(auditLog.accountId, accountId),
+          eq13(auditLog.accountId, accountId2),
           sql8`${auditLog.eventType} IN ('AUTONOMOUS_DECISION', 'AUTOPILOT_DECISION', 'AI_CREATIVE_GENERATED')`
         )
       ).orderBy(desc12(auditLog.createdAt)).limit(1);
@@ -14605,9 +14607,9 @@ router.get("/api/autopilot/status", requireCampaign, async (req, res) => {
         }
       };
     }
-    const config = await db.select().from(guardrailConfig).where(eq13(guardrailConfig.accountId, accountId)).limit(1);
+    const config = await db.select().from(guardrailConfig).where(eq13(guardrailConfig.accountId, accountId2)).limit(1);
     const volThreshold = config[0]?.volatilityThreshold ?? 0.15;
-    const { successRate: decSuccessRate, total: decTotal } = await computeDecisionSuccessRate(accountId);
+    const { successRate: decSuccessRate, total: decTotal } = await computeDecisionSuccessRate(accountId2);
     const confidenceResult = calculateConfidence({
       volatilityIndex: state.volatilityIndex || 0,
       volatilityThreshold: volThreshold,
@@ -14634,7 +14636,7 @@ router.get("/api/autopilot/status", requireCampaign, async (req, res) => {
       liveStatus = "Unstable";
     }
     if (state.confidenceScore !== liveScore || state.confidenceStatus !== liveStatus) {
-      await db.update(accountState).set({ confidenceScore: liveScore, confidenceStatus: liveStatus, updatedAt: /* @__PURE__ */ new Date() }).where(eq13(accountState.accountId, accountId));
+      await db.update(accountState).set({ confidenceScore: liveScore, confidenceStatus: liveStatus, updatedAt: /* @__PURE__ */ new Date() }).where(eq13(accountState.accountId, accountId2));
     }
     res.json({
       autopilotOn: state.autopilotOn,
@@ -14655,10 +14657,10 @@ router.get("/api/autopilot/status", requireCampaign, async (req, res) => {
 });
 router.get("/api/autopilot/actions", requireCampaign, async (req, res) => {
   try {
-    const accountId = req.query.accountId || "default";
+    const accountId2 = req.accountId || "default";
     const campaignContext = req.campaignContext;
     const campaignId = campaignContext?.campaignId || "";
-    const activePlan = await resolveActivePlan(accountId, campaignId);
+    const activePlan = await resolveActivePlan(accountId2, campaignId);
     if (!activePlan) {
       return res.json({
         success: true,
@@ -14674,7 +14676,7 @@ router.get("/api/autopilot/actions", requireCampaign, async (req, res) => {
       db.select().from(requiredWork).where(eq13(requiredWork.planId, activePlan.id)).limit(1),
       db.select().from(strategyInsights).where(
         and11(
-          eq13(strategyInsights.accountId, accountId),
+          eq13(strategyInsights.accountId, accountId2),
           eq13(strategyInsights.campaignId, campaignId),
           eq13(strategyInsights.isActive, true),
           gte4(strategyInsights.createdAt, weekAgo)
@@ -14683,7 +14685,7 @@ router.get("/api/autopilot/actions", requireCampaign, async (req, res) => {
       db.select().from(performanceSnapshots).where(
         and11(
           eq13(performanceSnapshots.campaignId, campaignId),
-          eq13(performanceSnapshots.accountId, accountId)
+          eq13(performanceSnapshots.accountId, accountId2)
         )
       ).orderBy(desc12(performanceSnapshots.fetchedAt)).limit(14)
     ]);
@@ -14767,17 +14769,17 @@ router.get("/api/autopilot/actions", requireCampaign, async (req, res) => {
 });
 router.patch("/api/autopilot/status", requireCampaign, async (req, res) => {
   try {
-    const accountId = req.body.accountId || "default";
+    const accountId2 = req.accountId || "default";
     const { autopilotOn } = req.body;
-    await ensureAccountState(accountId);
-    await ensureGuardrailConfig(accountId);
+    await ensureAccountState(accountId2);
+    await ensureGuardrailConfig(accountId2);
     if (typeof autopilotOn === "boolean") {
-      await db.update(accountState).set({ autopilotOn, updatedAt: /* @__PURE__ */ new Date() }).where(eq13(accountState.accountId, accountId));
-      await logAudit(accountId, "AUTOPILOT_TOGGLED", {
+      await db.update(accountState).set({ autopilotOn, updatedAt: /* @__PURE__ */ new Date() }).where(eq13(accountState.accountId, accountId2));
+      await logAudit(accountId2, "AUTOPILOT_TOGGLED", {
         details: { autopilotOn }
       });
     }
-    const updated = await db.select().from(accountState).where(eq13(accountState.accountId, accountId)).limit(1);
+    const updated = await db.select().from(accountState).where(eq13(accountState.accountId, accountId2)).limit(1);
     res.json({
       autopilotOn: updated[0]?.autopilotOn,
       state: updated[0]?.state,
@@ -14793,23 +14795,23 @@ router.patch("/api/autopilot/status", requireCampaign, async (req, res) => {
 });
 router.post("/api/autopilot/emergency-stop", requireCampaign, async (req, res) => {
   try {
-    const accountId = req.body.accountId || "default";
+    const accountId2 = req.accountId || "default";
     await db.update(accountState).set({
       autopilotOn: false,
       state: "SAFE_MODE",
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq13(accountState.accountId, accountId));
+    }).where(eq13(accountState.accountId, accountId2));
     await db.update(jobQueue).set({
       status: "cancelled",
       completedAt: /* @__PURE__ */ new Date(),
       error: "Emergency stop triggered"
     }).where(
-      sql8`${jobQueue.accountId} = ${accountId} AND ${jobQueue.status} IN ('pending', 'running')`
+      sql8`${jobQueue.accountId} = ${accountId2} AND ${jobQueue.status} IN ('pending', 'running')`
     );
     await db.update(strategyDecisions).set({ status: "blocked" }).where(
-      sql8`${strategyDecisions.accountId} = ${accountId} AND ${strategyDecisions.status} = 'pending' AND ${strategyDecisions.autoExecutable} = true`
+      sql8`${strategyDecisions.accountId} = ${accountId2} AND ${strategyDecisions.status} = 'pending' AND ${strategyDecisions.autoExecutable} = true`
     );
-    await logAudit(accountId, "EMERGENCY_STOP", {
+    await logAudit(accountId2, "EMERGENCY_STOP", {
       details: {
         message: "Emergency stop activated \u2014 autopilot disabled, all jobs cancelled, pending decisions blocked"
       }
@@ -14827,13 +14829,13 @@ router.post("/api/autopilot/emergency-stop", requireCampaign, async (req, res) =
 });
 router.get("/api/audit-log", requireCampaign, async (req, res) => {
   try {
-    const accountId = req.query.accountId || "default";
+    const accountId2 = req.accountId || "default";
     const limit = Math.min(parseInt(req.query.limit) || 50, 200);
     const offset = parseInt(req.query.offset) || 0;
-    const logs = await db.select().from(auditLog).where(eq13(auditLog.accountId, accountId)).orderBy(desc12(auditLog.createdAt)).limit(limit).offset(offset);
+    const logs = await db.select().from(auditLog).where(eq13(auditLog.accountId, accountId2)).orderBy(desc12(auditLog.createdAt)).limit(limit).offset(offset);
     const countResult = await db.select({
       total: sql8`count(*)`
-    }).from(auditLog).where(eq13(auditLog.accountId, accountId));
+    }).from(auditLog).where(eq13(auditLog.accountId, accountId2));
     res.json({
       logs,
       total: Number(countResult[0]?.total) || 0,
@@ -14847,9 +14849,9 @@ router.get("/api/audit-log", requireCampaign, async (req, res) => {
 });
 router.get("/api/autopilot/guardrails", requireCampaign, async (req, res) => {
   try {
-    const accountId = req.query.accountId || "default";
-    await ensureGuardrailConfig(accountId);
-    const config = await db.select().from(guardrailConfig).where(eq13(guardrailConfig.accountId, accountId)).limit(1);
+    const accountId2 = req.accountId || "default";
+    await ensureGuardrailConfig(accountId2);
+    const config = await db.select().from(guardrailConfig).where(eq13(guardrailConfig.accountId, accountId2)).limit(1);
     res.json(config[0] || null);
   } catch (error) {
     console.error("[Autopilot] Error fetching guardrails:", error);
@@ -14866,19 +14868,19 @@ init_schema();
 import { Router as Router2 } from "express";
 import { eq as eq14 } from "drizzle-orm";
 var router2 = Router2();
-async function ensureBrandConfig(accountId) {
-  const existing = await db.select().from(brandConfig).where(eq14(brandConfig.accountId, accountId)).limit(1);
+async function ensureBrandConfig(accountId2) {
+  const existing = await db.select().from(brandConfig).where(eq14(brandConfig.accountId, accountId2)).limit(1);
   if (existing.length === 0) {
-    await db.insert(brandConfig).values({ accountId });
-    const created = await db.select().from(brandConfig).where(eq14(brandConfig.accountId, accountId)).limit(1);
+    await db.insert(brandConfig).values({ accountId: accountId2 });
+    const created = await db.select().from(brandConfig).where(eq14(brandConfig.accountId, accountId2)).limit(1);
     return created[0];
   }
   return existing[0];
 }
 router2.get("/api/brand-config", async (req, res) => {
   try {
-    const accountId = req.query.accountId || "default";
-    const config = await ensureBrandConfig(accountId);
+    const accountId2 = req.accountId || "default";
+    const config = await ensureBrandConfig(accountId2);
     res.json(config);
   } catch (error) {
     console.error("[BrandConfig] Error getting config:", error);
@@ -14887,8 +14889,8 @@ router2.get("/api/brand-config", async (req, res) => {
 });
 router2.patch("/api/brand-config", async (req, res) => {
   try {
-    const accountId = req.body.accountId || "default";
-    await ensureBrandConfig(accountId);
+    const accountId2 = req.accountId || "default";
+    await ensureBrandConfig(accountId2);
     const {
       brandName,
       tone,
@@ -14910,8 +14912,8 @@ router2.patch("/api/brand-config", async (req, res) => {
     if (preferredEmojis !== void 0) updates.preferredEmojis = preferredEmojis;
     if (languageStyle !== void 0) updates.languageStyle = languageStyle;
     if (targetIndustry !== void 0) updates.targetIndustry = targetIndustry;
-    await db.update(brandConfig).set(updates).where(eq14(brandConfig.accountId, accountId));
-    const updated = await db.select().from(brandConfig).where(eq14(brandConfig.accountId, accountId)).limit(1);
+    await db.update(brandConfig).set(updates).where(eq14(brandConfig.accountId, accountId2));
+    const updated = await db.select().from(brandConfig).where(eq14(brandConfig.accountId, accountId2)).limit(1);
     res.json(updated[0]);
   } catch (error) {
     console.error("[BrandConfig] Error updating config:", error);
@@ -14933,8 +14935,8 @@ init_db();
 init_schema();
 init_ai_client();
 import { eq as eq15 } from "drizzle-orm";
-async function getBrandRules(accountId) {
-  const config = await db.select().from(brandConfig).where(eq15(brandConfig.accountId, accountId)).limit(1);
+async function getBrandRules(accountId2) {
+  const config = await db.select().from(brandConfig).where(eq15(brandConfig.accountId, accountId2)).limit(1);
   if (config.length === 0) {
     return {
       brandName: "",
@@ -15065,8 +15067,8 @@ function scoreCaptions(captions, brand, metadata) {
     };
   });
 }
-async function generateAndScoreCaptions(accountId, metadata, publishedPostId) {
-  const brand = await getBrandRules(accountId);
+async function generateAndScoreCaptions(accountId2, metadata, publishedPostId) {
+  const brand = await getBrandRules(accountId2);
   const prompt = buildCaptionPrompt(metadata, brand);
   let captions = [];
   try {
@@ -15075,7 +15077,7 @@ async function generateAndScoreCaptions(accountId, metadata, publishedPostId) {
       messages: [{ role: "user", content: prompt }],
       temperature: 0.8,
       max_tokens: 3e3,
-      accountId: "default",
+      accountId: accountId2,
       endpoint: "caption-engine"
     });
     const content = response.choices[0]?.message?.content || "[]";
@@ -15148,33 +15150,33 @@ var MODULE_DEPENDENCIES = {
   auto_studio_analyze_v2: []
 };
 var FeatureFlagService = class {
-  async isEnabled(flagName, accountId = "default") {
-    const globalKill = await this.getRawFlag("lead_engine_global_off", accountId);
+  async isEnabled(flagName, accountId2 = "default") {
+    const globalKill = await this.getRawFlag("lead_engine_global_off", accountId2);
     if (globalKill) return false;
     if (flagName === "lead_engine_global_off") return false;
-    return this.getRawFlag(flagName, accountId);
+    return this.getRawFlag(flagName, accountId2);
   }
-  async checkWithDependencies(flagName, accountId = "default") {
-    const enabled = await this.isEnabled(flagName, accountId);
+  async checkWithDependencies(flagName, accountId2 = "default") {
+    const enabled = await this.isEnabled(flagName, accountId2);
     if (!enabled) {
       return { enabled: false, safeMode: false, missingDependencies: [] };
     }
     const deps = MODULE_DEPENDENCIES[flagName] || [];
     const missingDependencies = [];
     for (const dep of deps) {
-      const depEnabled = await this.getRawFlag(dep, accountId);
+      const depEnabled = await this.getRawFlag(dep, accountId2);
       if (!depEnabled) {
         missingDependencies.push(dep);
       }
     }
     const safeMode = missingDependencies.length > 0;
     if (safeMode) {
-      await this.logDependencyBlocked(accountId, flagName, missingDependencies);
+      await this.logDependencyBlocked(accountId2, flagName, missingDependencies);
     }
     return { enabled: true, safeMode, missingDependencies };
   }
-  async getAllFlags(accountId = "default") {
-    const flags = await db.select().from(featureFlags).where(eq16(featureFlags.accountId, accountId));
+  async getAllFlags(accountId2 = "default") {
+    const flags = await db.select().from(featureFlags).where(eq16(featureFlags.accountId, accountId2));
     const result = {};
     const allModules = [
       "lead_capture_enabled",
@@ -15203,9 +15205,9 @@ var FeatureFlagService = class {
     }
     return result;
   }
-  async setFlag(flagName, enabled, accountId = "default", userId, reason) {
+  async setFlag(flagName, enabled, accountId2 = "default", userId, reason) {
     const existing = await db.select().from(featureFlags).where(and12(
-      eq16(featureFlags.accountId, accountId),
+      eq16(featureFlags.accountId, accountId2),
       eq16(featureFlags.flagName, flagName)
     )).limit(1);
     const fromValue = existing[0]?.enabled ?? false;
@@ -15213,14 +15215,14 @@ var FeatureFlagService = class {
       await db.update(featureFlags).set({ enabled, updatedBy: userId || null, updatedAt: /* @__PURE__ */ new Date() }).where(eq16(featureFlags.id, existing[0].id));
     } else {
       await db.insert(featureFlags).values({
-        accountId,
+        accountId: accountId2,
         flagName,
         enabled,
         updatedBy: userId || null
       });
     }
     await db.insert(featureFlagAudit).values({
-      accountId,
+      accountId: accountId2,
       userId: userId || null,
       flagName,
       fromValue,
@@ -15228,7 +15230,7 @@ var FeatureFlagService = class {
       reason: reason || null
     });
     await db.insert(auditLog).values({
-      accountId,
+      accountId: accountId2,
       eventType: "FEATURE_FLAG_TOGGLED",
       details: JSON.stringify({
         flagName,
@@ -15241,7 +15243,7 @@ var FeatureFlagService = class {
     });
     if (flagName === "lead_engine_global_off" && enabled) {
       await db.insert(auditLog).values({
-        accountId,
+        accountId: accountId2,
         eventType: "LEAD_ENGINE_GLOBAL_KILL",
         details: JSON.stringify({
           action: "GLOBAL_KILL_SWITCH_ACTIVATED",
@@ -15252,19 +15254,19 @@ var FeatureFlagService = class {
       });
     }
   }
-  async getFlagAuditHistory(accountId = "default", limit = 50) {
-    return db.select().from(featureFlagAudit).where(eq16(featureFlagAudit.accountId, accountId)).orderBy(sql9`${featureFlagAudit.createdAt} DESC`).limit(limit);
+  async getFlagAuditHistory(accountId2 = "default", limit = 50) {
+    return db.select().from(featureFlagAudit).where(eq16(featureFlagAudit.accountId, accountId2)).orderBy(sql9`${featureFlagAudit.createdAt} DESC`).limit(limit);
   }
-  async getRawFlag(flagName, accountId) {
+  async getRawFlag(flagName, accountId2) {
     const flag = await db.select().from(featureFlags).where(and12(
-      eq16(featureFlags.accountId, accountId),
+      eq16(featureFlags.accountId, accountId2),
       eq16(featureFlags.flagName, flagName)
     )).limit(1);
     return flag[0]?.enabled ?? false;
   }
-  async logDependencyBlocked(accountId, flagName, missingDeps) {
+  async logDependencyBlocked(accountId2, flagName, missingDeps) {
     await db.insert(auditLog).values({
-      accountId,
+      accountId: accountId2,
       eventType: "FLAG_DEPENDENCY_BLOCKED",
       details: JSON.stringify({
         module: flagName,
@@ -15369,7 +15371,7 @@ ${contentContext}` }
 var router3 = Router3();
 router3.post("/api/studio/case", async (req, res) => {
   try {
-    const accountId = req.body.accountId || "default";
+    const accountId2 = req.accountId || "default";
     const { goal, audience, cta, series, offer, mediaType: rawMediaType, mediaUri, mediaItemId, platform, scheduledDate, campaignId, title } = req.body;
     if (!campaignId || typeof campaignId !== "string" || !campaignId.trim()) {
       return res.status(422).json({
@@ -15394,7 +15396,7 @@ router3.post("/api/studio/case", async (req, res) => {
     }
     const schedDate = scheduledDate ? new Date(scheduledDate) : new Date(Date.now() + 24 * 60 * 60 * 1e3);
     const inserted = await db.insert(publishedPosts).values({
-      accountId,
+      accountId: accountId2,
       mediaItemId: mediaItemId || null,
       mediaType: normalizedType,
       mediaUri: mediaUri || null,
@@ -15418,7 +15420,7 @@ router3.post("/api/studio/case", async (req, res) => {
     if (existingItem.length === 0) {
       const siInserted = await db.insert(studioItems).values({
         campaignId,
-        accountId,
+        accountId: accountId2,
         contentType: normalizedType,
         title: title || goal || "Untitled",
         caption: "",
@@ -15433,7 +15435,7 @@ router3.post("/api/studio/case", async (req, res) => {
       studioItemId = existingItem[0].id;
     }
     const captionResult = await generateAndScoreCaptions(
-      accountId,
+      accountId2,
       { goal, audience, cta, series, offer, mediaType: normalizedType, platform: platform || "Instagram" },
       postId
     );
@@ -15449,7 +15451,7 @@ router3.post("/api/studio/case", async (req, res) => {
         updatedAt: /* @__PURE__ */ new Date()
       }).where(eq18(studioItems.id, studioItemId));
     }
-    await logAudit(accountId, "AUTO_EXECUTION", {
+    await logAudit(accountId2, "AUTO_EXECUTION", {
       details: {
         action: "auto_caption_generated",
         postId,
@@ -15485,7 +15487,7 @@ router3.post("/api/studio/case", async (req, res) => {
 });
 router3.post("/api/studio/items", async (req, res) => {
   try {
-    const accountId = req.body.accountId || "default";
+    const accountId2 = req.accountId || "default";
     const { campaignId, contentType: rawContentType, title, caption, mediaUrl, calendarEntryId } = req.body;
     if (!campaignId || typeof campaignId !== "string" || !campaignId.trim()) {
       return res.status(422).json({
@@ -15507,7 +15509,7 @@ router3.post("/api/studio/items", async (req, res) => {
     }
     const inserted = await db.insert(studioItems).values({
       campaignId,
-      accountId,
+      accountId: accountId2,
       contentType: normalizedType,
       title: title || "Untitled",
       caption: caption || null,
@@ -15518,7 +15520,7 @@ router3.post("/api/studio/items", async (req, res) => {
       sourcePostId: null
     }).returning();
     const studioItemId = inserted[0]?.id;
-    await logAudit(accountId, "STUDIO_ITEM_CREATED", {
+    await logAudit(accountId2, "STUDIO_ITEM_CREATED", {
       details: {
         studioItemId,
         campaignId,
@@ -15548,15 +15550,15 @@ router3.post("/api/studio/items", async (req, res) => {
 router3.delete("/api/studio/items/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const accountId = req.query.accountId || "default";
-    const deleted = await db.delete(studioItems).where(and13(eq18(studioItems.id, id), eq18(studioItems.accountId, accountId))).returning();
+    const accountId2 = req.accountId || "default";
+    const deleted = await db.delete(studioItems).where(and13(eq18(studioItems.id, id), eq18(studioItems.accountId, accountId2))).returning();
     if (deleted.length === 0) {
       return res.status(404).json({
         error: "STUDIO_ITEM_NOT_FOUND",
         message: "No studio item found with this ID for this account."
       });
     }
-    await logAudit(accountId, "STUDIO_ITEM_DELETED", {
+    await logAudit(accountId2, "STUDIO_ITEM_DELETED", {
       details: {
         studioItemId: id,
         campaignId: deleted[0].campaignId,
@@ -15575,9 +15577,9 @@ router3.delete("/api/studio/items/:id", async (req, res) => {
 });
 router3.get("/api/studio/cases", async (req, res) => {
   try {
-    const accountId = req.query.accountId || "default";
+    const accountId2 = req.accountId || "default";
     const limit = Math.min(parseInt(req.query.limit) || 50, 200);
-    const posts = await db.select().from(publishedPosts).where(eq18(publishedPosts.accountId, accountId)).orderBy(desc13(publishedPosts.createdAt)).limit(limit);
+    const posts = await db.select().from(publishedPosts).where(eq18(publishedPosts.accountId, accountId2)).orderBy(desc13(publishedPosts.createdAt)).limit(limit);
     res.json({ posts });
   } catch (error) {
     console.error("[Pipeline] Error fetching cases:", error);
@@ -15597,7 +15599,7 @@ router3.get("/api/studio/case/:id/variants", async (req, res) => {
 var featureFlagService2 = new FeatureFlagService();
 router3.post("/api/studio/items/save-and-analyze", async (req, res) => {
   try {
-    const accountId = req.body.accountId || "default";
+    const accountId2 = req.accountId || "default";
     const {
       campaignId,
       contentType: rawContentType,
@@ -15642,7 +15644,7 @@ router3.post("/api/studio/items/save-and-analyze", async (req, res) => {
     }
     const inserted = await db.insert(studioItems).values({
       campaignId,
-      accountId,
+      accountId: accountId2,
       contentType: normalizedType,
       title: title || "Untitled",
       caption: caption || null,
@@ -15657,7 +15659,7 @@ router3.post("/api/studio/items/save-and-analyze", async (req, res) => {
       analysisStatus: "PENDING"
     }).returning();
     const studioItemId = inserted[0]?.id;
-    await logAudit(accountId, "STUDIO_ITEM_CREATED", {
+    await logAudit(accountId2, "STUDIO_ITEM_CREATED", {
       details: {
         studioItemId,
         campaignId,
@@ -15667,7 +15669,7 @@ router3.post("/api/studio/items/save-and-analyze", async (req, res) => {
         generationId: generationId || null
       }
     });
-    const flagEnabled = await featureFlagService2.isEnabled("auto_studio_analyze_v2", accountId);
+    const flagEnabled = await featureFlagService2.isEnabled("auto_studio_analyze_v2", accountId2);
     if (flagEnabled) {
       runStudioAnalysis(studioItemId).catch((err) => {
         console.error(`[Pipeline] Background analysis failed for ${studioItemId}:`, err);
@@ -15712,8 +15714,8 @@ router3.post("/api/studio/items/save-and-analyze", async (req, res) => {
 router3.get("/api/studio/items/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const accountId = req.query.accountId || "default";
-    const [item] = await db.select().from(studioItems).where(and13(eq18(studioItems.id, id), eq18(studioItems.accountId, accountId))).limit(1);
+    const accountId2 = req.accountId || "default";
+    const [item] = await db.select().from(studioItems).where(and13(eq18(studioItems.id, id), eq18(studioItems.accountId, accountId2))).limit(1);
     if (!item) {
       return res.status(404).json({
         error: "STUDIO_ITEM_NOT_FOUND",
@@ -15729,7 +15731,7 @@ router3.get("/api/studio/items/:id", async (req, res) => {
 router3.get("/api/studio/items/:id/analysis-status", async (req, res) => {
   try {
     const { id } = req.params;
-    const accountId = req.query.accountId || "default";
+    const accountId2 = req.accountId || "default";
     const [item] = await db.select({
       id: studioItems.id,
       analysisStatus: studioItems.analysisStatus,
@@ -15740,7 +15742,7 @@ router3.get("/api/studio/items/:id/analysis-status", async (req, res) => {
       contentAngle: studioItems.contentAngle,
       suggestedCta: studioItems.suggestedCta,
       suggestedCaption: studioItems.suggestedCaption
-    }).from(studioItems).where(and13(eq18(studioItems.id, id), eq18(studioItems.accountId, accountId))).limit(1);
+    }).from(studioItems).where(and13(eq18(studioItems.id, id), eq18(studioItems.accountId, accountId2))).limit(1);
     if (!item) {
       return res.status(404).json({
         error: "STUDIO_ITEM_NOT_FOUND",
@@ -15756,8 +15758,8 @@ router3.get("/api/studio/items/:id/analysis-status", async (req, res) => {
 router3.post("/api/studio/items/:id/retry-analysis", async (req, res) => {
   try {
     const { id } = req.params;
-    const accountId = req.body.accountId || "default";
-    const [item] = await db.select({ id: studioItems.id, analysisStatus: studioItems.analysisStatus }).from(studioItems).where(and13(eq18(studioItems.id, id), eq18(studioItems.accountId, accountId))).limit(1);
+    const accountId2 = req.accountId || "default";
+    const [item] = await db.select({ id: studioItems.id, analysisStatus: studioItems.analysisStatus }).from(studioItems).where(and13(eq18(studioItems.id, id), eq18(studioItems.accountId, accountId2))).limit(1);
     if (!item) {
       return res.status(404).json({
         error: "STUDIO_ITEM_NOT_FOUND",
@@ -15806,8 +15808,8 @@ if (!process.env.JWT_SECRET) {
 }
 var TRIAL_DAYS = 7;
 var STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
-function generateToken(userId, email) {
-  return jwt.sign({ userId, email }, JWT_SECRET, { expiresIn: "14d" });
+function generateToken(userId, email, accountId2) {
+  return jwt.sign({ userId, email, accountId: accountId2 }, JWT_SECRET, { expiresIn: "14d" });
 }
 function verifyToken(token) {
   try {
@@ -15827,6 +15829,19 @@ function authMiddleware(req, res, next) {
     return res.status(401).json({ error: "Invalid or expired token" });
   }
   req.userId = payload.userId;
+  req.accountId = payload.accountId || payload.userId;
+  next();
+}
+function optionalAuth(req, _res, next) {
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith("Bearer ")) {
+    const token = authHeader.slice(7);
+    const payload = verifyToken(token);
+    if (payload) {
+      req.userId = payload.userId;
+      req.accountId = payload.accountId || payload.userId;
+    }
+  }
   next();
 }
 function registerAuthRoutes(app2) {
@@ -15856,7 +15871,9 @@ function registerAuthRoutes(app2) {
         subscriptionStatus: "trial",
         hasSeenIntro: false
       }).returning();
-      const token = generateToken(newUser.id, emailLower);
+      const userAccountId = newUser.id;
+      await db.update(users).set({ accountId: userAccountId }).where(eq19(users.id, newUser.id));
+      const token = generateToken(newUser.id, emailLower, userAccountId);
       res.status(201).json({
         token,
         user: {
@@ -15867,7 +15884,8 @@ function registerAuthRoutes(app2) {
           planType: "trial",
           videoCredits: 0,
           trialEnd: trialEnd.toISOString(),
-          hasSeenIntro: false
+          hasSeenIntro: false,
+          accountId: userAccountId
         }
       });
     } catch (error) {
@@ -15893,7 +15911,11 @@ function registerAuthRoutes(app2) {
       if (!validPassword) {
         return res.status(401).json({ error: "Invalid email or password" });
       }
-      const token = generateToken(user.id, emailLower);
+      const userAccountId = user.accountId || user.id;
+      if (!user.accountId) {
+        await db.update(users).set({ accountId: userAccountId }).where(eq19(users.id, user.id));
+      }
+      const token = generateToken(user.id, emailLower, userAccountId);
       const now = /* @__PURE__ */ new Date();
       const isTrialActive = user.trialEnd ? now < user.trialEnd : false;
       const status = user.subscriptionStatus === "active" ? "active" : isTrialActive ? "trial" : "expired";
@@ -15907,7 +15929,8 @@ function registerAuthRoutes(app2) {
           planType: user.planType || "trial",
           videoCredits: user.videoCredits ?? 0,
           trialEnd: user.trialEnd?.toISOString() || null,
-          hasSeenIntro: user.hasSeenIntro ?? false
+          hasSeenIntro: user.hasSeenIntro ?? false,
+          accountId: userAccountId
         }
       });
     } catch (error) {
@@ -15941,7 +15964,8 @@ function registerAuthRoutes(app2) {
           planType: user.planType || "trial",
           videoCredits: user.videoCredits ?? 0,
           trialEnd: user.trialEnd?.toISOString() || null,
-          hasSeenIntro: user.hasSeenIntro ?? false
+          hasSeenIntro: user.hasSeenIntro ?? false,
+          accountId: user.accountId || user.id
         }
       });
     } catch (error) {
@@ -15965,6 +15989,19 @@ function registerAuthRoutes(app2) {
       console.error("[Auth] Seen intro error:", error);
       res.status(500).json({ error: "Failed to update" });
     }
+  });
+  app2.post("/api/onboarding/track", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+    const payload = verifyToken(authHeader.slice(7));
+    if (!payload) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+    const { event, ...data } = req.body;
+    console.log(`[Onboarding] ${event} | user=${payload.userId}`, JSON.stringify(data));
+    res.json({ success: true });
   });
   app2.post("/api/stripe/webhook", async (req, res) => {
     try {
@@ -16397,8 +16434,8 @@ var VALID_FLAGS = [
 function registerFeatureFlagRoutes(app2) {
   app2.get("/api/feature-flags", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      const flags = await featureFlagService.getAllFlags(accountId);
+      const accountId2 = req.accountId || "default";
+      const flags = await featureFlagService.getAllFlags(accountId2);
       res.json({ flags });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -16410,12 +16447,12 @@ function registerFeatureFlagRoutes(app2) {
       if (!VALID_FLAGS.includes(flagName)) {
         return res.status(400).json({ error: `Invalid flag name: ${flagName}` });
       }
-      const { enabled, accountId, userId, reason } = req.body;
+      const { enabled, accountId: accountId2, userId, reason } = req.body;
       if (typeof enabled !== "boolean") {
         return res.status(400).json({ error: "enabled must be a boolean" });
       }
-      await featureFlagService.setFlag(flagName, enabled, accountId || "default", userId, reason);
-      const flags = await featureFlagService.getAllFlags(accountId || "default");
+      await featureFlagService.setFlag(flagName, enabled, accountId2 || "default", userId, reason);
+      const flags = await featureFlagService.getAllFlags(accountId2 || "default");
       res.json({ success: true, flags });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -16423,9 +16460,9 @@ function registerFeatureFlagRoutes(app2) {
   });
   app2.get("/api/feature-flags/audit", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const limit = parseInt(req.query.limit) || 50;
-      const history = await featureFlagService.getFlagAuditHistory(accountId, limit);
+      const history = await featureFlagService.getFlagAuditHistory(accountId2, limit);
       res.json({ history });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -16433,8 +16470,8 @@ function registerFeatureFlagRoutes(app2) {
   });
   app2.post("/api/feature-flags/global-kill", async (req, res) => {
     try {
-      const { accountId, userId, reason } = req.body;
-      await featureFlagService.setFlag("lead_engine_global_off", true, accountId || "default", userId, reason || "Emergency global kill switch activated");
+      const { accountId: accountId2, userId, reason } = req.body;
+      await featureFlagService.setFlag("lead_engine_global_off", true, accountId2 || "default", userId, reason || "Emergency global kill switch activated");
       res.json({ success: true, message: "Lead engine globally disabled" });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -16442,8 +16479,8 @@ function registerFeatureFlagRoutes(app2) {
   });
   app2.post("/api/feature-flags/global-resume", async (req, res) => {
     try {
-      const { accountId, userId, reason } = req.body;
-      await featureFlagService.setFlag("lead_engine_global_off", false, accountId || "default", userId, reason || "Global kill switch deactivated");
+      const { accountId: accountId2, userId, reason } = req.body;
+      await featureFlagService.setFlag("lead_engine_global_off", false, accountId2 || "default", userId, reason || "Global kill switch deactivated");
       res.json({ success: true, message: "Lead engine globally re-enabled" });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -16463,15 +16500,15 @@ function generateTrackingId() {
 function registerLeadCaptureRoutes(app2) {
   app2.get("/api/leads", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      if (!await featureFlagService.isEnabled("lead_capture_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("lead_capture_enabled", accountId2)) {
         return res.json({ leads: [], disabled: true });
       }
       const status = req.query.status;
       const limit = parseInt(req.query.limit) || 50;
-      let query = db.select().from(leads).where(eq21(leads.accountId, accountId));
+      let query = db.select().from(leads).where(eq21(leads.accountId, accountId2));
       if (status) {
-        query = db.select().from(leads).where(and14(eq21(leads.accountId, accountId), eq21(leads.status, status)));
+        query = db.select().from(leads).where(and14(eq21(leads.accountId, accountId2), eq21(leads.status, status)));
       }
       const result = await query.orderBy(desc14(leads.createdAt)).limit(limit);
       res.json({ leads: result });
@@ -16481,13 +16518,13 @@ function registerLeadCaptureRoutes(app2) {
   });
   app2.post("/api/leads", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
-      if (!await featureFlagService.isEnabled("lead_capture_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("lead_capture_enabled", accountId2)) {
         return res.status(403).json({ error: "Lead capture is not enabled" });
       }
       const { name, email, phone, customFields, sourceType, sourcePostId, sourceCampaign, sourceCtaVariantId, sourceTrackingId, sourceLandingPageId, sourceLeadMagnetId, campaignId } = req.body;
       const inserted = await db.insert(leads).values({
-        accountId,
+        accountId: accountId2,
         name,
         email,
         phone,
@@ -16501,7 +16538,7 @@ function registerLeadCaptureRoutes(app2) {
         sourceLeadMagnetId,
         campaignId: campaignId || null
       }).returning();
-      await logAudit(accountId, "LEAD_CAPTURED", {
+      await logAudit(accountId2, "LEAD_CAPTURED", {
         details: { leadId: inserted[0].id, sourceType, sourcePostId, sourceTrackingId }
       });
       res.json({ lead: inserted[0] });
@@ -16511,8 +16548,8 @@ function registerLeadCaptureRoutes(app2) {
   });
   app2.put("/api/leads/:id/status", async (req, res) => {
     try {
-      const { status, accountId, notes } = req.body;
-      const acct = accountId || "default";
+      const { status, accountId: accountId2, notes } = req.body;
+      const acct = accountId2 || "default";
       if (!await featureFlagService.isEnabled("lead_capture_enabled", acct)) {
         return res.status(403).json({ error: "Lead capture is not enabled" });
       }
@@ -16541,11 +16578,11 @@ function registerLeadCaptureRoutes(app2) {
   });
   app2.get("/api/lead-forms", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      if (!await featureFlagService.isEnabled("lead_capture_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("lead_capture_enabled", accountId2)) {
         return res.json({ forms: [], disabled: true });
       }
-      const result = await db.select().from(leadForms).where(eq21(leadForms.accountId, accountId)).orderBy(desc14(leadForms.createdAt));
+      const result = await db.select().from(leadForms).where(eq21(leadForms.accountId, accountId2)).orderBy(desc14(leadForms.createdAt));
       res.json({ forms: result });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -16553,8 +16590,8 @@ function registerLeadCaptureRoutes(app2) {
   });
   app2.post("/api/lead-forms", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
-      if (!await featureFlagService.isEnabled("lead_capture_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("lead_capture_enabled", accountId2)) {
         return res.status(403).json({ error: "Lead capture is not enabled" });
       }
       const { name, fields, thankYouMessage, redirectUrl } = req.body;
@@ -16562,7 +16599,7 @@ function registerLeadCaptureRoutes(app2) {
         return res.status(400).json({ error: "name and fields are required" });
       }
       const inserted = await db.insert(leadForms).values({
-        accountId,
+        accountId: accountId2,
         name,
         fields: typeof fields === "string" ? fields : JSON.stringify(fields),
         thankYouMessage,
@@ -16595,13 +16632,13 @@ function registerLeadCaptureRoutes(app2) {
       if (!form[0] || !form[0].isActive) {
         return res.status(404).json({ error: "Form not found or inactive" });
       }
-      const accountId = form[0].accountId;
-      if (!await featureFlagService.isEnabled("lead_capture_enabled", accountId)) {
+      const accountId2 = form[0].accountId;
+      if (!await featureFlagService.isEnabled("lead_capture_enabled", accountId2)) {
         return res.status(403).json({ error: "Lead capture is not enabled" });
       }
       const { name, email, phone, customFields, trackingId, campaignId } = req.body;
       const inserted = await db.insert(leads).values({
-        accountId,
+        accountId: accountId2,
         name,
         email,
         phone,
@@ -16613,17 +16650,17 @@ function registerLeadCaptureRoutes(app2) {
       await db.update(leadForms).set({
         submissions: sql13`${leadForms.submissions} + 1`
       }).where(eq21(leadForms.id, req.params.id));
-      const convTrackingEnabled = await featureFlagService.isEnabled("conversion_tracking_enabled", accountId);
+      const convTrackingEnabled = await featureFlagService.isEnabled("conversion_tracking_enabled", accountId2);
       if (convTrackingEnabled) {
         await db.insert(conversionEvents).values({
-          accountId,
+          accountId: accountId2,
           eventType: "form_submission",
           leadId: inserted[0].id,
           trackingId: trackingId || null,
           metadata: JSON.stringify({ formId: req.params.id })
         });
       }
-      await logAudit(accountId, "LEAD_CAPTURED", {
+      await logAudit(accountId2, "LEAD_CAPTURED", {
         details: { leadId: inserted[0].id, sourceType: "form", formId: req.params.id }
       });
       res.json({
@@ -16638,8 +16675,8 @@ function registerLeadCaptureRoutes(app2) {
   });
   app2.post("/api/tracking-links", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
-      if (!await featureFlagService.isEnabled("lead_capture_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("lead_capture_enabled", accountId2)) {
         return res.status(403).json({ error: "Lead capture is not enabled" });
       }
       const { destinationUrl, linkType, postId, campaignId, ctaVariantId, whatsappNumber, whatsappMessage } = req.body;
@@ -16653,7 +16690,7 @@ function registerLeadCaptureRoutes(app2) {
         finalDestination = `https://wa.me/${whatsappNumber.replace(/[^0-9]/g, "")}?text=${encodedMessage}`;
       }
       const inserted = await db.insert(trackingLinks).values({
-        accountId,
+        accountId: accountId2,
         trackingId,
         destinationUrl: finalDestination,
         linkType: linkType || "cta",
@@ -16670,11 +16707,11 @@ function registerLeadCaptureRoutes(app2) {
   });
   app2.get("/api/tracking-links", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      if (!await featureFlagService.isEnabled("lead_capture_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("lead_capture_enabled", accountId2)) {
         return res.json({ links: [], disabled: true });
       }
-      const result = await db.select().from(trackingLinks).where(eq21(trackingLinks.accountId, accountId)).orderBy(desc14(trackingLinks.createdAt));
+      const result = await db.select().from(trackingLinks).where(eq21(trackingLinks.accountId, accountId2)).orderBy(desc14(trackingLinks.createdAt));
       res.json({ links: result });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -16682,13 +16719,13 @@ function registerLeadCaptureRoutes(app2) {
   });
   app2.get("/api/leads/stats", requireCampaign, async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      if (!await featureFlagService.isEnabled("lead_capture_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("lead_capture_enabled", accountId2)) {
         return res.json({ stats: null, disabled: true });
       }
       const now = /* @__PURE__ */ new Date();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-      const allLeads = await db.select().from(leads).where(eq21(leads.accountId, accountId));
+      const allLeads = await db.select().from(leads).where(eq21(leads.accountId, accountId2));
       const monthLeads = allLeads.filter((l) => l.createdAt && l.createdAt >= monthStart);
       const converted = allLeads.filter((l) => l.status === "converted");
       const totalRevenue = allLeads.reduce((sum, l) => sum + (l.revenue || 0), 0);
@@ -16726,11 +16763,11 @@ function registerConversionTrackingRoutes(app2) {
       if (!link[0] || !link[0].isActive) {
         return res.status(404).json({ error: "Link not found" });
       }
-      const accountId = link[0].accountId;
-      const convEnabled = await featureFlagService.isEnabled("conversion_tracking_enabled", accountId);
+      const accountId2 = link[0].accountId;
+      const convEnabled = await featureFlagService.isEnabled("conversion_tracking_enabled", accountId2);
       if (convEnabled) {
         await db.insert(conversionEvents).values({
-          accountId,
+          accountId: accountId2,
           eventType: link[0].linkType === "whatsapp" ? "whatsapp_click" : "link_click",
           trackingId: req.params.trackingId,
           postId: link[0].postId,
@@ -16754,11 +16791,11 @@ function registerConversionTrackingRoutes(app2) {
       const trackingId = req.params.trackingId;
       const link = await db.select().from(trackingLinks).where(eq22(trackingLinks.trackingId, trackingId)).limit(1);
       if (link[0]) {
-        const accountId = link[0].accountId;
-        const convEnabled = await featureFlagService.isEnabled("conversion_tracking_enabled", accountId);
+        const accountId2 = link[0].accountId;
+        const convEnabled = await featureFlagService.isEnabled("conversion_tracking_enabled", accountId2);
         if (convEnabled) {
           await db.insert(conversionEvents).values({
-            accountId,
+            accountId: accountId2,
             eventType: "page_view",
             trackingId,
             postId: link[0].postId,
@@ -16781,8 +16818,8 @@ function registerConversionTrackingRoutes(app2) {
   });
   app2.post("/api/conversion-events", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
-      if (!await featureFlagService.isEnabled("conversion_tracking_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("conversion_tracking_enabled", accountId2)) {
         return res.status(403).json({ error: "Conversion tracking is not enabled" });
       }
       const { eventType, trackingId, leadId, postId, ctaVariantId, campaignId, landingPageId, leadMagnetId, metadata } = req.body;
@@ -16790,7 +16827,7 @@ function registerConversionTrackingRoutes(app2) {
         return res.status(400).json({ error: "eventType is required" });
       }
       const inserted = await db.insert(conversionEvents).values({
-        accountId,
+        accountId: accountId2,
         eventType,
         trackingId,
         leadId,
@@ -16804,7 +16841,7 @@ function registerConversionTrackingRoutes(app2) {
         userAgent: req.headers["user-agent"] || null,
         referrer: req.headers.referer || null
       }).returning();
-      await logAudit(accountId, "CONVERSION_EVENT", {
+      await logAudit(accountId2, "CONVERSION_EVENT", {
         details: { eventId: inserted[0].id, eventType, trackingId, leadId }
       });
       res.json({ event: inserted[0] });
@@ -16814,17 +16851,17 @@ function registerConversionTrackingRoutes(app2) {
   });
   app2.get("/api/conversion-events", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      if (!await featureFlagService.isEnabled("conversion_tracking_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("conversion_tracking_enabled", accountId2)) {
         return res.json({ events: [], disabled: true });
       }
       const limit = parseInt(req.query.limit) || 100;
       const eventType = req.query.eventType;
       let result;
       if (eventType) {
-        result = await db.select().from(conversionEvents).where(and15(eq22(conversionEvents.accountId, accountId), eq22(conversionEvents.eventType, eventType))).orderBy(desc15(conversionEvents.createdAt)).limit(limit);
+        result = await db.select().from(conversionEvents).where(and15(eq22(conversionEvents.accountId, accountId2), eq22(conversionEvents.eventType, eventType))).orderBy(desc15(conversionEvents.createdAt)).limit(limit);
       } else {
-        result = await db.select().from(conversionEvents).where(eq22(conversionEvents.accountId, accountId)).orderBy(desc15(conversionEvents.createdAt)).limit(limit);
+        result = await db.select().from(conversionEvents).where(eq22(conversionEvents.accountId, accountId2)).orderBy(desc15(conversionEvents.createdAt)).limit(limit);
       }
       res.json({ events: result });
     } catch (error) {
@@ -16833,13 +16870,13 @@ function registerConversionTrackingRoutes(app2) {
   });
   app2.get("/api/conversion-events/stats", requireCampaign, async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      if (!await featureFlagService.isEnabled("conversion_tracking_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("conversion_tracking_enabled", accountId2)) {
         return res.json({ stats: null, disabled: true });
       }
       const now = /* @__PURE__ */ new Date();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-      const allEvents = await db.select().from(conversionEvents).where(eq22(conversionEvents.accountId, accountId));
+      const allEvents = await db.select().from(conversionEvents).where(eq22(conversionEvents.accountId, accountId2));
       const monthEvents = allEvents.filter((e) => e.createdAt && e.createdAt >= monthStart);
       const byType = {};
       for (const event of allEvents) {
@@ -16876,8 +16913,8 @@ init_ai_client();
 function registerCtaEngineRoutes(app2) {
   app2.post("/api/cta-variants/generate", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
-      const check = await featureFlagService.checkWithDependencies("cta_engine_enabled", accountId);
+      const accountId2 = req.accountId || "default";
+      const check = await featureFlagService.checkWithDependencies("cta_engine_enabled", accountId2);
       if (!check.enabled) {
         return res.status(403).json({ error: "CTA Engine is not enabled" });
       }
@@ -16904,7 +16941,7 @@ Return a JSON array of objects with fields: "text" (the CTA text), "type" (link/
         response_format: { type: "json_object" },
         temperature: 0.8,
         max_tokens: 800,
-        accountId,
+        accountId: accountId2,
         endpoint: "cta-generation"
       });
       const parsed = JSON.parse(response.choices[0]?.message?.content || "{}");
@@ -16913,7 +16950,7 @@ Return a JSON array of objects with fields: "text" (the CTA text), "type" (link/
       for (let i = 0; i < variants.length; i++) {
         const v = variants[i];
         const result = await db.insert(ctaVariants).values({
-          accountId,
+          accountId: accountId2,
           postId: postId || null,
           campaignId: campaignId || null,
           ctaText: v.text || v.cta || `CTA ${i + 1}`,
@@ -16923,7 +16960,7 @@ Return a JSON array of objects with fields: "text" (the CTA text), "type" (link/
         }).returning();
         inserted.push(result[0]);
       }
-      await logAudit(accountId, "CTA_VARIANT_GENERATED", {
+      await logAudit(accountId2, "CTA_VARIANT_GENERATED", {
         details: { postId, count: inserted.length, safeMode: check.safeMode }
       });
       res.json({ variants: inserted, safeMode: check.safeMode, missingDependencies: check.missingDependencies });
@@ -16933,16 +16970,16 @@ Return a JSON array of objects with fields: "text" (the CTA text), "type" (link/
   });
   app2.get("/api/cta-variants", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      if (!await featureFlagService.isEnabled("cta_engine_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("cta_engine_enabled", accountId2)) {
         return res.json({ variants: [], disabled: true });
       }
       const postId = req.query.postId;
       let result;
       if (postId) {
-        result = await db.select().from(ctaVariants).where(and16(eq23(ctaVariants.accountId, accountId), eq23(ctaVariants.postId, postId))).orderBy(desc16(ctaVariants.conversionRate));
+        result = await db.select().from(ctaVariants).where(and16(eq23(ctaVariants.accountId, accountId2), eq23(ctaVariants.postId, postId))).orderBy(desc16(ctaVariants.conversionRate));
       } else {
-        result = await db.select().from(ctaVariants).where(eq23(ctaVariants.accountId, accountId)).orderBy(desc16(ctaVariants.createdAt)).limit(100);
+        result = await db.select().from(ctaVariants).where(eq23(ctaVariants.accountId, accountId2)).orderBy(desc16(ctaVariants.createdAt)).limit(100);
       }
       res.json({ variants: result });
     } catch (error) {
@@ -16977,15 +17014,15 @@ Return a JSON array of objects with fields: "text" (the CTA text), "type" (link/
     try {
       const variant = await db.select().from(ctaVariants).where(eq23(ctaVariants.id, req.params.id)).limit(1);
       if (!variant[0]) return res.status(404).json({ error: "CTA variant not found" });
-      const accountId = variant[0].accountId;
+      const accountId2 = variant[0].accountId;
       await db.update(ctaVariants).set({
         clicks: sql15`${ctaVariants.clicks} + 1`,
         conversionRate: sql15`CASE WHEN ${ctaVariants.impressions} > 0 THEN (${ctaVariants.clicks} + 1)::float / ${ctaVariants.impressions} * 100 ELSE 0 END`
       }).where(eq23(ctaVariants.id, req.params.id));
-      const convEnabled = await featureFlagService.isEnabled("conversion_tracking_enabled", accountId);
+      const convEnabled = await featureFlagService.isEnabled("conversion_tracking_enabled", accountId2);
       if (convEnabled) {
         await db.insert(conversionEvents).values({
-          accountId,
+          accountId: accountId2,
           eventType: "cta_click",
           ctaVariantId: req.params.id,
           postId: variant[0].postId
@@ -17011,8 +17048,8 @@ Return a JSON array of objects with fields: "text" (the CTA text), "type" (link/
   });
   app2.post("/api/cta-variants/auto-promote", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
-      const check = await featureFlagService.checkWithDependencies("cta_engine_enabled", accountId);
+      const accountId2 = req.accountId || "default";
+      const check = await featureFlagService.checkWithDependencies("cta_engine_enabled", accountId2);
       if (!check.enabled) {
         return res.status(403).json({ error: "CTA Engine is not enabled" });
       }
@@ -17026,7 +17063,7 @@ Return a JSON array of objects with fields: "text" (the CTA text), "type" (link/
       const { postId, minImpressions } = req.body;
       const threshold = minImpressions || 50;
       const variants = await db.select().from(ctaVariants).where(and16(
-        eq23(ctaVariants.accountId, accountId),
+        eq23(ctaVariants.accountId, accountId2),
         ...postId ? [eq23(ctaVariants.postId, postId)] : [],
         eq23(ctaVariants.isActive, true)
       ));
@@ -17041,7 +17078,7 @@ Return a JSON array of objects with fields: "text" (the CTA text), "type" (link/
       for (const loser of losers) {
         await db.update(ctaVariants).set({ isActive: false }).where(eq23(ctaVariants.id, loser.id));
       }
-      await logAudit(accountId, "CTA_AUTO_PROMOTED", {
+      await logAudit(accountId2, "CTA_AUTO_PROMOTED", {
         details: {
           winnerId: winner.id,
           winnerRate: winner.conversionRate,
@@ -17070,14 +17107,14 @@ var DEFAULT_FUNNEL_STAGES = JSON.stringify([
 function registerFunnelLogicRoutes(app2) {
   app2.get("/api/funnels", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      if (!await featureFlagService.isEnabled("funnel_logic_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("funnel_logic_enabled", accountId2)) {
         return res.json({ funnels: [], disabled: true });
       }
-      const result = await db.select().from(funnelDefinitions).where(eq24(funnelDefinitions.accountId, accountId)).orderBy(desc17(funnelDefinitions.createdAt));
+      const result = await db.select().from(funnelDefinitions).where(eq24(funnelDefinitions.accountId, accountId2)).orderBy(desc17(funnelDefinitions.createdAt));
       if (result.length === 0) {
         const inserted = await db.insert(funnelDefinitions).values({
-          accountId,
+          accountId: accountId2,
           name: "Default Marketing Funnel",
           stages: DEFAULT_FUNNEL_STAGES,
           isDefault: true
@@ -17091,8 +17128,8 @@ function registerFunnelLogicRoutes(app2) {
   });
   app2.post("/api/funnels", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
-      if (!await featureFlagService.isEnabled("funnel_logic_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("funnel_logic_enabled", accountId2)) {
         return res.status(403).json({ error: "Funnel Logic is not enabled" });
       }
       const { name, stages } = req.body;
@@ -17100,7 +17137,7 @@ function registerFunnelLogicRoutes(app2) {
         return res.status(400).json({ error: "name and stages are required" });
       }
       const inserted = await db.insert(funnelDefinitions).values({
-        accountId,
+        accountId: accountId2,
         name,
         stages: typeof stages === "string" ? stages : JSON.stringify(stages)
       }).returning();
@@ -17111,13 +17148,13 @@ function registerFunnelLogicRoutes(app2) {
   });
   app2.post("/api/funnels/map-content", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
-      if (!await featureFlagService.isEnabled("funnel_logic_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("funnel_logic_enabled", accountId2)) {
         return res.status(403).json({ error: "Funnel Logic is not enabled" });
       }
       const { funnelId, stage, postId, contentType } = req.body;
       const inserted = await db.insert(funnelContentMap).values({
-        accountId,
+        accountId: accountId2,
         funnelId,
         stage,
         postId,
@@ -17138,18 +17175,18 @@ function registerFunnelLogicRoutes(app2) {
   });
   app2.get("/api/funnels/health", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      if (!await featureFlagService.isEnabled("funnel_logic_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("funnel_logic_enabled", accountId2)) {
         return res.json({ health: null, disabled: true });
       }
-      const allLeads = await db.select().from(leads).where(eq24(leads.accountId, accountId));
+      const allLeads = await db.select().from(leads).where(eq24(leads.accountId, accountId2));
       const stages = {
         awareness: 0,
         engagement: 0,
         lead: 0,
         customer: 0
       };
-      const events = await db.select().from(conversionEvents).where(eq24(conversionEvents.accountId, accountId));
+      const events = await db.select().from(conversionEvents).where(eq24(conversionEvents.accountId, accountId2));
       stages.awareness = events.filter((e) => e.eventType === "page_view" || e.eventType === "link_click").length;
       stages.engagement = events.filter((e) => e.eventType === "cta_click" || e.eventType === "whatsapp_click").length;
       stages.lead = allLeads.filter((l) => ["new", "contacted", "qualified"].includes(l.status || "")).length;
@@ -17165,7 +17202,7 @@ function registerFunnelLogicRoutes(app2) {
         overall: stages.awareness > 0 ? (stages.customer / stages.awareness * 100).toFixed(2) : "0"
       };
       if (bottlenecks.length > 0) {
-        await logAudit(accountId, "FUNNEL_BOTTLENECK_DETECTED", {
+        await logAudit(accountId2, "FUNNEL_BOTTLENECK_DETECTED", {
           details: { bottlenecks, stages, conversionRates }
         });
       }
@@ -17183,8 +17220,8 @@ function registerFunnelLogicRoutes(app2) {
   });
   app2.post("/api/funnels/ai-suggestions", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
-      if (!await featureFlagService.isEnabled("funnel_logic_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("funnel_logic_enabled", accountId2)) {
         return res.status(403).json({ error: "Funnel Logic is not enabled" });
       }
       const { funnelHealth, brandContext } = req.body;
@@ -17202,7 +17239,7 @@ function registerFunnelLogicRoutes(app2) {
         ],
         response_format: { type: "json_object" },
         max_tokens: 800,
-        accountId,
+        accountId: accountId2,
         endpoint: "funnel-suggestions"
       });
       const parsed = JSON.parse(response.choices[0]?.message?.content || "{}");
@@ -17222,11 +17259,11 @@ init_ai_client();
 function registerLeadMagnetRoutes(app2) {
   app2.get("/api/lead-magnets", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      if (!await featureFlagService.isEnabled("lead_magnet_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("lead_magnet_enabled", accountId2)) {
         return res.json({ magnets: [], disabled: true });
       }
-      const result = await db.select().from(leadMagnets).where(eq25(leadMagnets.accountId, accountId)).orderBy(desc18(leadMagnets.createdAt));
+      const result = await db.select().from(leadMagnets).where(eq25(leadMagnets.accountId, accountId2)).orderBy(desc18(leadMagnets.createdAt));
       res.json({ magnets: result });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -17234,8 +17271,8 @@ function registerLeadMagnetRoutes(app2) {
   });
   app2.post("/api/lead-magnets/generate", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
-      if (!await featureFlagService.isEnabled("lead_magnet_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("lead_magnet_enabled", accountId2)) {
         return res.status(403).json({ error: "Lead Magnet Generator is not enabled" });
       }
       const { magnetType, topic, industry, targetAudience } = req.body;
@@ -17260,13 +17297,13 @@ function registerLeadMagnetRoutes(app2) {
         ],
         response_format: { type: "json_object" },
         max_tokens: 800,
-        accountId,
+        accountId: accountId2,
         endpoint: "lead-magnet-gen"
       });
       const generated = JSON.parse(response.choices[0]?.message?.content || "{}");
       const name = generated.title || generated.headline || `${magnetType} - ${topic}`;
       const inserted = await db.insert(leadMagnets).values({
-        accountId,
+        accountId: accountId2,
         name,
         magnetType,
         content: JSON.stringify(generated),
@@ -17274,7 +17311,7 @@ function registerLeadMagnetRoutes(app2) {
         discountCode: generated.code || null,
         offerDetails: generated.description || null
       }).returning();
-      await logAudit(accountId, "LEAD_MAGNET_GENERATED", {
+      await logAudit(accountId2, "LEAD_MAGNET_GENERATED", {
         details: { magnetId: inserted[0].id, magnetType, topic }
       });
       res.json({ magnet: inserted[0], generated });
@@ -17335,11 +17372,11 @@ init_audit();
 function registerLandingPageRoutes(app2) {
   app2.get("/api/landing-pages", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      if (!await featureFlagService.isEnabled("landing_pages_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("landing_pages_enabled", accountId2)) {
         return res.json({ pages: [], disabled: true });
       }
-      const result = await db.select().from(landingPages).where(eq26(landingPages.accountId, accountId)).orderBy(desc19(landingPages.createdAt));
+      const result = await db.select().from(landingPages).where(eq26(landingPages.accountId, accountId2)).orderBy(desc19(landingPages.createdAt));
       res.json({ pages: result });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -17347,8 +17384,8 @@ function registerLandingPageRoutes(app2) {
   });
   app2.post("/api/landing-pages", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
-      if (!await featureFlagService.isEnabled("landing_pages_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("landing_pages_enabled", accountId2)) {
         return res.status(403).json({ error: "Landing Pages module is not enabled" });
       }
       const { title, slug, headline, subheadline, bodyContent, ctaText, ctaUrl, formId, leadMagnetId, ctaVariantId, backgroundImage, colorScheme } = req.body;
@@ -17360,7 +17397,7 @@ function registerLandingPageRoutes(app2) {
         return res.status(400).json({ error: "A page with this slug already exists" });
       }
       const inserted = await db.insert(landingPages).values({
-        accountId,
+        accountId: accountId2,
         title,
         slug,
         headline,
@@ -17455,12 +17492,12 @@ init_campaign_routes();
 function registerRevenueAttributionRoutes(app2) {
   app2.get("/api/revenue", requireCampaign, async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      const check = await featureFlagService.checkWithDependencies("revenue_attribution_enabled", accountId);
+      const accountId2 = req.accountId || "default";
+      const check = await featureFlagService.checkWithDependencies("revenue_attribution_enabled", accountId2);
       if (!check.enabled) {
         return res.json({ entries: [], disabled: true });
       }
-      const result = await db.select().from(revenueEntries).where(eq27(revenueEntries.accountId, accountId)).orderBy(desc20(revenueEntries.createdAt)).limit(100);
+      const result = await db.select().from(revenueEntries).where(eq27(revenueEntries.accountId, accountId2)).orderBy(desc20(revenueEntries.createdAt)).limit(100);
       res.json({ entries: result, safeMode: check.safeMode });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -17468,8 +17505,8 @@ function registerRevenueAttributionRoutes(app2) {
   });
   app2.post("/api/revenue", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
-      if (!await featureFlagService.isEnabled("revenue_attribution_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("revenue_attribution_enabled", accountId2)) {
         return res.status(403).json({ error: "Revenue Attribution is not enabled" });
       }
       const { leadId, amount, source, postId, campaignId, ctaVariantId, funnelStage, notes } = req.body;
@@ -17477,7 +17514,7 @@ function registerRevenueAttributionRoutes(app2) {
         return res.status(400).json({ error: "amount is required" });
       }
       const inserted = await db.insert(revenueEntries).values({
-        accountId,
+        accountId: accountId2,
         leadId,
         amount,
         source,
@@ -17498,7 +17535,7 @@ function registerRevenueAttributionRoutes(app2) {
           }).where(eq27(leads.id, leadId));
         }
       }
-      await logAudit(accountId, "REVENUE_ATTRIBUTED", {
+      await logAudit(accountId2, "REVENUE_ATTRIBUTED", {
         details: { entryId: inserted[0].id, amount, leadId, postId, campaignId }
       });
       res.json({ entry: inserted[0] });
@@ -17508,8 +17545,8 @@ function registerRevenueAttributionRoutes(app2) {
   });
   app2.post("/api/ad-spend", requireCampaign, async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
-      if (!await featureFlagService.isEnabled("revenue_attribution_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("revenue_attribution_enabled", accountId2)) {
         return res.status(403).json({ error: "Revenue Attribution is not enabled" });
       }
       const { amount, platform, campaignId, period, notes } = req.body;
@@ -17517,7 +17554,7 @@ function registerRevenueAttributionRoutes(app2) {
         return res.status(400).json({ error: "amount is required" });
       }
       const inserted = await db.insert(adSpendEntries).values({
-        accountId,
+        accountId: accountId2,
         amount,
         platform,
         campaignId,
@@ -17531,11 +17568,11 @@ function registerRevenueAttributionRoutes(app2) {
   });
   app2.get("/api/ad-spend", requireCampaign, async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      if (!await featureFlagService.isEnabled("revenue_attribution_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("revenue_attribution_enabled", accountId2)) {
         return res.json({ entries: [], disabled: true });
       }
-      const result = await db.select().from(adSpendEntries).where(eq27(adSpendEntries.accountId, accountId)).orderBy(desc20(adSpendEntries.createdAt));
+      const result = await db.select().from(adSpendEntries).where(eq27(adSpendEntries.accountId, accountId2)).orderBy(desc20(adSpendEntries.createdAt));
       res.json({ entries: result });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -17543,22 +17580,22 @@ function registerRevenueAttributionRoutes(app2) {
   });
   app2.get("/api/revenue/stats", requireCampaign, async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      const check = await featureFlagService.checkWithDependencies("revenue_attribution_enabled", accountId);
+      const accountId2 = req.accountId || "default";
+      const check = await featureFlagService.checkWithDependencies("revenue_attribution_enabled", accountId2);
       if (!check.enabled) {
         return res.json({ stats: null, disabled: true });
       }
       const now = /* @__PURE__ */ new Date();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-      const allRevenue = await db.select().from(revenueEntries).where(eq27(revenueEntries.accountId, accountId));
+      const allRevenue = await db.select().from(revenueEntries).where(eq27(revenueEntries.accountId, accountId2));
       const monthRevenue = allRevenue.filter((r) => r.createdAt && r.createdAt >= monthStart);
-      const allSpend = await db.select().from(adSpendEntries).where(eq27(adSpendEntries.accountId, accountId));
+      const allSpend = await db.select().from(adSpendEntries).where(eq27(adSpendEntries.accountId, accountId2));
       const monthSpend = allSpend.filter((s) => s.createdAt && s.createdAt >= monthStart);
       const totalRevenue = allRevenue.reduce((sum, r) => sum + (r.amount || 0), 0);
       const monthTotalRevenue = monthRevenue.reduce((sum, r) => sum + (r.amount || 0), 0);
       const totalSpend = allSpend.reduce((sum, s) => sum + (s.amount || 0), 0);
       const monthTotalSpend = monthSpend.reduce((sum, s) => sum + (s.amount || 0), 0);
-      const allLeads = await db.select().from(leads).where(eq27(leads.accountId, accountId));
+      const allLeads = await db.select().from(leads).where(eq27(leads.accountId, accountId2));
       const monthLeads = allLeads.filter((l) => l.createdAt && l.createdAt >= monthStart);
       const costPerLead = monthLeads.length > 0 ? (monthTotalSpend / monthLeads.length).toFixed(2) : "0";
       const byPost = {};
@@ -17601,9 +17638,9 @@ init_ai_client();
 function registerAiLeadOptimizationRoutes(app2) {
   app2.post("/api/lead-optimization/analyze", requireCampaign, async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignContext = req.campaignContext;
-      const check = await featureFlagService.checkWithDependencies("ai_lead_optimization_enabled", accountId);
+      const check = await featureFlagService.checkWithDependencies("ai_lead_optimization_enabled", accountId2);
       if (!check.enabled) {
         return res.status(403).json({ error: "AI Lead Optimization is not enabled" });
       }
@@ -17615,10 +17652,10 @@ function registerAiLeadOptimizationRoutes(app2) {
           message: "AI Lead Optimization requires conversion_tracking and funnel_logic modules to be enabled."
         });
       }
-      const allLeads = await db.select().from(leads).where(eq28(leads.accountId, accountId));
-      const events = await db.select().from(conversionEvents).where(eq28(conversionEvents.accountId, accountId)).orderBy(desc21(conversionEvents.createdAt)).limit(500);
-      const ctas = await db.select().from(ctaVariants).where(eq28(ctaVariants.accountId, accountId));
-      const posts = await db.select().from(publishedPosts).where(eq28(publishedPosts.accountId, accountId)).orderBy(desc21(publishedPosts.createdAt)).limit(50);
+      const allLeads = await db.select().from(leads).where(eq28(leads.accountId, accountId2));
+      const events = await db.select().from(conversionEvents).where(eq28(conversionEvents.accountId, accountId2)).orderBy(desc21(conversionEvents.createdAt)).limit(500);
+      const ctas = await db.select().from(ctaVariants).where(eq28(ctaVariants.accountId, accountId2));
+      const posts = await db.select().from(publishedPosts).where(eq28(publishedPosts.accountId, accountId2)).orderBy(desc21(publishedPosts.createdAt)).limit(50);
       const leadSourceCounts = {};
       for (const lead of allLeads) {
         const src = lead.sourceType || "unknown";
@@ -17645,11 +17682,11 @@ function registerAiLeadOptimizationRoutes(app2) {
         topCTAs,
         recentPostCount: posts.length
       };
-      const revenueSummary = await getRevenueSummary(campaignContext.campaignId, accountId);
+      const revenueSummary = await getRevenueSummary(campaignContext.campaignId, accountId2);
       const response = await aiChat({
         model: "gpt-5.2",
         max_tokens: 800,
-        accountId: req.body.accountId || "default",
+        accountId: req.accountId || "default",
         endpoint: "ai-lead-optimization",
         messages: [
           {
@@ -17682,7 +17719,7 @@ ${JSON.stringify(dataPayload)}`
         response_format: { type: "json_object" }
       });
       const analysis = JSON.parse(response.choices[0]?.message?.content || "{}");
-      await logAudit(accountId, "AI_LEAD_OPTIMIZATION_RUN", {
+      await logAudit(accountId2, "AI_LEAD_OPTIMIZATION_RUN", {
         details: {
           leadsAnalyzed: allLeads.length,
           eventsAnalyzed: events.length,
@@ -17696,11 +17733,11 @@ ${JSON.stringify(dataPayload)}`
   });
   app2.get("/api/lead-optimization/best-content", requireCampaign, async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      if (!await featureFlagService.isEnabled("ai_lead_optimization_enabled", accountId)) {
+      const accountId2 = req.accountId || "default";
+      if (!await featureFlagService.isEnabled("ai_lead_optimization_enabled", accountId2)) {
         return res.json({ content: [], disabled: true });
       }
-      const allLeads = await db.select().from(leads).where(eq28(leads.accountId, accountId));
+      const allLeads = await db.select().from(leads).where(eq28(leads.accountId, accountId2));
       const postLeadMap = {};
       for (const lead of allLeads) {
         if (lead.sourcePostId) {
@@ -17709,7 +17746,7 @@ ${JSON.stringify(dataPayload)}`
           if (lead.status === "converted") postLeadMap[lead.sourcePostId].converted++;
         }
       }
-      const posts = await db.select().from(publishedPosts).where(eq28(publishedPosts.accountId, accountId));
+      const posts = await db.select().from(publishedPosts).where(eq28(publishedPosts.accountId, accountId2));
       const bestContent = posts.filter((p) => postLeadMap[p.id]).map((p) => ({
         postId: p.id,
         caption: p.caption?.substring(0, 100),
@@ -17774,19 +17811,19 @@ function validateEvidence(competitor) {
 function registerCiCompetitorRoutes(app2) {
   app2.get("/api/ci/competitors", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.query.campaignId;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
-      const enabled = await featureFlagService.isEnabled("competitive_intelligence_enabled", accountId);
+      const enabled = await featureFlagService.isEnabled("competitive_intelligence_enabled", accountId2);
       if (!enabled) {
         return res.json({ disabled: true, competitors: [] });
       }
-      const competitors = await db.select().from(ciCompetitors).where(and18(eq29(ciCompetitors.accountId, accountId), eq29(ciCompetitors.campaignId, campaignId), eq29(ciCompetitors.isActive, true), eq29(ciCompetitors.isDemo, false))).orderBy(sql21`${ciCompetitors.createdAt} DESC`);
+      const competitors = await db.select().from(ciCompetitors).where(and18(eq29(ciCompetitors.accountId, accountId2), eq29(ciCompetitors.campaignId, campaignId), eq29(ciCompetitors.isActive, true), eq29(ciCompetitors.isDemo, false))).orderBy(sql21`${ciCompetitors.createdAt} DESC`);
       const enriched = await Promise.all(competitors.map(async (c) => {
         const validation = validateEvidence(c);
-        const coverage = await getCompetitorDataCoverage(c.id, accountId);
+        const coverage = await getCompetitorDataCoverage(c.id, accountId2);
         return { ...c, evidenceComplete: validation.complete, missingFields: validation.missing, dataCoverage: coverage };
       }));
       res.json({ competitors: enriched });
@@ -17796,16 +17833,16 @@ function registerCiCompetitorRoutes(app2) {
   });
   app2.post("/api/ci/competitors", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.body.campaignId;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
-      const enabled = await featureFlagService.isEnabled("competitive_intelligence_enabled", accountId);
+      const enabled = await featureFlagService.isEnabled("competitive_intelligence_enabled", accountId2);
       if (!enabled) {
         return res.status(403).json({ error: "Competitive intelligence is disabled" });
       }
-      const existing = await db.select().from(ciCompetitors).where(and18(eq29(ciCompetitors.accountId, accountId), eq29(ciCompetitors.campaignId, campaignId), eq29(ciCompetitors.isActive, true)));
+      const existing = await db.select().from(ciCompetitors).where(and18(eq29(ciCompetitors.accountId, accountId2), eq29(ciCompetitors.campaignId, campaignId), eq29(ciCompetitors.isActive, true)));
       if (existing.length >= 12) {
         return res.status(400).json({ error: "Maximum 12 competitors allowed per campaign" });
       }
@@ -17832,7 +17869,7 @@ function registerCiCompetitorRoutes(app2) {
         return res.status(400).json({ error: "name, profileLink, businessType, primaryObjective are required" });
       }
       const [competitor] = await db.insert(ciCompetitors).values({
-        accountId,
+        accountId: accountId2,
         campaignId,
         name,
         platform: platform || "instagram",
@@ -17867,8 +17904,8 @@ function registerCiCompetitorRoutes(app2) {
   app2.put("/api/ci/competitors/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const accountId = req.body.accountId || "default";
-      const enabled = await featureFlagService.isEnabled("competitive_intelligence_enabled", accountId);
+      const accountId2 = req.accountId || "default";
+      const enabled = await featureFlagService.isEnabled("competitive_intelligence_enabled", accountId2);
       if (!enabled) {
         return res.status(403).json({ error: "Competitive intelligence is disabled" });
       }
@@ -17907,7 +17944,7 @@ function registerCiCompetitorRoutes(app2) {
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
-      const [updated] = await db.update(ciCompetitors).set(updates).where(and18(eq29(ciCompetitors.id, id), eq29(ciCompetitors.accountId, accountId), eq29(ciCompetitors.campaignId, campaignId))).returning();
+      const [updated] = await db.update(ciCompetitors).set(updates).where(and18(eq29(ciCompetitors.id, id), eq29(ciCompetitors.accountId, accountId2), eq29(ciCompetitors.campaignId, campaignId))).returning();
       if (!updated) return res.status(404).json({ error: "Competitor not found" });
       const validation = validateEvidence(updated);
       res.json({ competitor: { ...updated, evidenceComplete: validation.complete, missingFields: validation.missing } });
@@ -17918,12 +17955,12 @@ function registerCiCompetitorRoutes(app2) {
   app2.delete("/api/ci/competitors/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.query.campaignId;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
-      await db.update(ciCompetitors).set({ isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where(and18(eq29(ciCompetitors.id, id), eq29(ciCompetitors.accountId, accountId), eq29(ciCompetitors.campaignId, campaignId)));
+      await db.update(ciCompetitors).set({ isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where(and18(eq29(ciCompetitors.id, id), eq29(ciCompetitors.accountId, accountId2), eq29(ciCompetitors.campaignId, campaignId)));
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -17932,12 +17969,12 @@ function registerCiCompetitorRoutes(app2) {
   app2.get("/api/ci/competitors/:id/evidence", async (req, res) => {
     try {
       const { id } = req.params;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.query.campaignId;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
-      const [competitor] = await db.select().from(ciCompetitors).where(and18(eq29(ciCompetitors.id, id), eq29(ciCompetitors.accountId, accountId), eq29(ciCompetitors.campaignId, campaignId)));
+      const [competitor] = await db.select().from(ciCompetitors).where(and18(eq29(ciCompetitors.id, id), eq29(ciCompetitors.accountId, accountId2), eq29(ciCompetitors.campaignId, campaignId)));
       if (!competitor) return res.status(404).json({ error: "Not found" });
       const validation = validateEvidence(competitor);
       res.json({
@@ -18023,8 +18060,8 @@ function registerDominanceRoutes(app2) {
 init_db();
 init_schema();
 import { eq as eq30, and as and19 } from "drizzle-orm";
-async function validateCompetitorOwnership(competitorId, accountId, campaignId) {
-  const [comp] = await db.select({ id: ciCompetitors.id }).from(ciCompetitors).where(and19(eq30(ciCompetitors.id, competitorId), eq30(ciCompetitors.accountId, accountId), eq30(ciCompetitors.campaignId, campaignId)));
+async function validateCompetitorOwnership(competitorId, accountId2, campaignId) {
+  const [comp] = await db.select({ id: ciCompetitors.id }).from(ciCompetitors).where(and19(eq30(ciCompetitors.id, competitorId), eq30(ciCompetitors.accountId, accountId2), eq30(ciCompetitors.campaignId, campaignId)));
   return !!comp;
 }
 function registerDataAcquisitionRoutes(app2) {
@@ -18037,16 +18074,16 @@ function registerDataAcquisitionRoutes(app2) {
   app2.get("/api/ci/competitors/:id/data-coverage", async (req, res) => {
     try {
       const { id } = req.params;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.query.campaignId;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
-      const owned = await validateCompetitorOwnership(id, accountId, campaignId);
+      const owned = await validateCompetitorOwnership(id, accountId2, campaignId);
       if (!owned) {
         return res.status(403).json({ error: "Competitor does not belong to this campaign" });
       }
-      const coverage = await getCompetitorDataCoverage(id, accountId);
+      const coverage = await getCompetitorDataCoverage(id, accountId2);
       res.json(coverage);
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -18557,11 +18594,11 @@ function computeDynamicBudgets(competitorCount) {
 }
 var activeJobs = /* @__PURE__ */ new Map();
 var creationLocks = /* @__PURE__ */ new Set();
-async function startFetchJob(accountId, campaignId) {
-  const lockKey = `${accountId}:${campaignId}`;
+async function startFetchJob(accountId2, campaignId) {
+  const lockKey = `${accountId2}:${campaignId}`;
   if (creationLocks.has(lockKey)) {
     const existingActive = await db.select().from(miFetchJobs).where(and20(
-      eq31(miFetchJobs.accountId, accountId),
+      eq31(miFetchJobs.accountId, accountId2),
       eq31(miFetchJobs.campaignId, campaignId),
       sql22`${miFetchJobs.status} IN ('RUNNING', 'QUEUED')`
     )).orderBy(desc22(miFetchJobs.createdAt)).limit(1);
@@ -18573,20 +18610,20 @@ async function startFetchJob(accountId, campaignId) {
   }
   creationLocks.add(lockKey);
   try {
-    return await _createAndStartJob(accountId, campaignId, lockKey);
+    return await _createAndStartJob(accountId2, campaignId, lockKey);
   } finally {
     creationLocks.delete(lockKey);
   }
 }
-async function getRunningJobCountForAccount(accountId) {
+async function getRunningJobCountForAccount(accountId2) {
   const result = await db.select({ count: sql22`count(*)` }).from(miFetchJobs).where(and20(
-    eq31(miFetchJobs.accountId, accountId),
+    eq31(miFetchJobs.accountId, accountId2),
     eq31(miFetchJobs.status, "RUNNING")
   ));
   return Number(result[0]?.count ?? 0);
 }
-async function _createAndStartJob(accountId, campaignId, lockKey) {
-  const competitors = await db.select().from(ciCompetitors).where(and20(eq31(ciCompetitors.accountId, accountId), eq31(ciCompetitors.campaignId, campaignId), eq31(ciCompetitors.isActive, true)));
+async function _createAndStartJob(accountId2, campaignId, lockKey) {
+  const competitors = await db.select().from(ciCompetitors).where(and20(eq31(ciCompetitors.accountId, accountId2), eq31(ciCompetitors.campaignId, campaignId), eq31(ciCompetitors.isActive, true)));
   if (competitors.length === 0) {
     throw new Error("No active competitors found for this campaign");
   }
@@ -18611,7 +18648,7 @@ async function _createAndStartJob(accountId, campaignId, lockKey) {
   const STALE_QUEUED_THRESHOLD_MS = 10 * 60 * 1e3;
   const staleQueuedCutoff = new Date(Date.now() - STALE_QUEUED_THRESHOLD_MS);
   const staleQueued = await db.update(miFetchJobs).set({ status: "FAILED", error: "Auto-expired: stuck in QUEUED for >10 minutes", completedAt: /* @__PURE__ */ new Date() }).where(and20(
-    eq31(miFetchJobs.accountId, accountId),
+    eq31(miFetchJobs.accountId, accountId2),
     eq31(miFetchJobs.campaignId, campaignId),
     eq31(miFetchJobs.status, "QUEUED"),
     sql22`${miFetchJobs.createdAt} < ${staleQueuedCutoff}`
@@ -18620,7 +18657,7 @@ async function _createAndStartJob(accountId, campaignId, lockKey) {
     console.log(`[FetchOrch] STALE_QUEUED_CLEANUP: Expired ${staleQueued.length} stale QUEUED jobs for ${lockKey}: ${staleQueued.map((j) => j.id).join(", ")}`);
   }
   const existingActive = await db.select().from(miFetchJobs).where(and20(
-    eq31(miFetchJobs.accountId, accountId),
+    eq31(miFetchJobs.accountId, accountId2),
     eq31(miFetchJobs.campaignId, campaignId),
     sql22`${miFetchJobs.status} IN ('RUNNING', 'QUEUED')`
   )).orderBy(desc22(miFetchJobs.createdAt)).limit(1);
@@ -18636,7 +18673,7 @@ async function _createAndStartJob(accountId, campaignId, lockKey) {
     console.log(`[FetchOrch] DEDUP: Reusing job ${existingDupHash[0].id} with same competitorHash=${hash} (different account/campaign but same competitor set)`);
     return existingDupHash[0].id;
   }
-  const runningCount = await getRunningJobCountForAccount(accountId);
+  const runningCount = await getRunningJobCountForAccount(accountId2);
   if (runningCount >= MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT) {
     const jobId2 = `fetch_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
     const initialStages2 = {};
@@ -18655,7 +18692,7 @@ async function _createAndStartJob(accountId, campaignId, lockKey) {
     }
     await db.insert(miFetchJobs).values({
       id: jobId2,
-      accountId,
+      accountId: accountId2,
       campaignId,
       competitorHash: hash,
       status: "QUEUED",
@@ -18666,15 +18703,15 @@ async function _createAndStartJob(accountId, campaignId, lockKey) {
       totalCommentsFetched: 0,
       competitorCount: competitors.length
     });
-    console.log(`[FetchOrch] QUEUED job ${jobId2} | priority=FAST_PASS(${PRIORITY_FAST_PASS}) | account=${accountId} | runningJobs=${runningCount} >= ceiling=${MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT}`);
+    console.log(`[FetchOrch] QUEUED job ${jobId2} | priority=FAST_PASS(${PRIORITY_FAST_PASS}) | account=${accountId2} | runningJobs=${runningCount} >= ceiling=${MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT}`);
     return jobId2;
   }
-  const lastStart = lastJobStartByAccount.get(accountId);
+  const lastStart = lastJobStartByAccount.get(accountId2);
   if (lastStart) {
     const elapsed = Date.now() - lastStart;
     if (elapsed < STAGGER_DELAY_MS) {
       const waitMs = STAGGER_DELAY_MS - elapsed;
-      console.log(`[FetchOrch] Stagger delay ${waitMs}ms for account ${accountId}`);
+      console.log(`[FetchOrch] Stagger delay ${waitMs}ms for account ${accountId2}`);
       await sleep(waitMs);
     }
   }
@@ -18696,7 +18733,7 @@ async function _createAndStartJob(accountId, campaignId, lockKey) {
   try {
     await db.insert(miFetchJobs).values({
       id: jobId,
-      accountId,
+      accountId: accountId2,
       campaignId,
       competitorHash: hash,
       status: "RUNNING",
@@ -18708,7 +18745,7 @@ async function _createAndStartJob(accountId, campaignId, lockKey) {
     });
   } catch (insertErr) {
     if (insertErr.code === "23505") {
-      const existing = await db.select().from(miFetchJobs).where(and20(eq31(miFetchJobs.accountId, accountId), eq31(miFetchJobs.campaignId, campaignId), eq31(miFetchJobs.status, "RUNNING"))).orderBy(desc22(miFetchJobs.createdAt)).limit(1);
+      const existing = await db.select().from(miFetchJobs).where(and20(eq31(miFetchJobs.accountId, accountId2), eq31(miFetchJobs.campaignId, campaignId), eq31(miFetchJobs.status, "RUNNING"))).orderBy(desc22(miFetchJobs.createdAt)).limit(1);
       if (existing.length > 0) {
         console.log(`[FetchOrch] Unique constraint hit \u2014 reusing DB job ${existing[0].id}`);
         return existing[0].id;
@@ -18716,9 +18753,9 @@ async function _createAndStartJob(accountId, campaignId, lockKey) {
     }
     throw insertErr;
   }
-  lastJobStartByAccount.set(accountId, Date.now());
+  lastJobStartByAccount.set(accountId2, Date.now());
   console.log(`[FetchOrch] Job ${jobId} created for ${competitors.length} competitors`);
-  const promise = executeFetchJob(jobId, accountId, campaignId, competitors).catch((err) => {
+  const promise = executeFetchJob(jobId, accountId2, campaignId, competitors).catch((err) => {
     console.error(`[FetchOrch] Job ${jobId} fatal error:`, err.message);
   }).finally(() => {
     activeJobs.delete(lockKey);
@@ -18726,7 +18763,7 @@ async function _createAndStartJob(accountId, campaignId, lockKey) {
   activeJobs.set(lockKey, promise);
   return jobId;
 }
-async function scrapeWebAndBlogForCompetitor(comp, accountId) {
+async function scrapeWebAndBlogForCompetitor(comp, accountId2) {
   try {
     const websiteBlocked = comp.websiteEnrichmentStatus === "ACCESS_BLOCKED";
     const websiteBlockedCooldown = websiteBlocked && comp.websiteScrapedAt && Date.now() - new Date(comp.websiteScrapedAt).getTime() < 7 * 24 * 60 * 60 * 1e3;
@@ -18737,7 +18774,7 @@ async function scrapeWebAndBlogForCompetitor(comp, accountId) {
       const successCount = extractions.filter((e) => e.extractionStatus === "COMPLETE").length;
       for (const ext of extractions) {
         await db.insert(competitorWebData).values({
-          accountId,
+          accountId: accountId2,
           competitorId: comp.id,
           campaignId: comp.campaignId,
           sourceType: "website",
@@ -18772,7 +18809,7 @@ async function scrapeWebAndBlogForCompetitor(comp, accountId) {
       console.log(`[FetchOrch] Blog scrape starting for ${comp.name}: ${comp.blogUrl}`);
       const blogResult = await scrapeBlog(comp.id, comp.name, comp.blogUrl);
       await db.insert(competitorWebData).values({
-        accountId,
+        accountId: accountId2,
         competitorId: comp.id,
         campaignId: comp.campaignId,
         sourceType: "blog",
@@ -18803,7 +18840,7 @@ async function scrapeWebAndBlogForCompetitor(comp, accountId) {
     console.error(`[FetchOrch] Web/blog scrape error for ${comp.name}:`, err.message);
   }
 }
-async function executeFetchJob(jobId, accountId, campaignId, competitors) {
+async function executeFetchJob(jobId, accountId2, campaignId, competitors) {
   const startTime = Date.now();
   const stages = {};
   const limitReasons = [];
@@ -18816,8 +18853,8 @@ async function executeFetchJob(jobId, accountId, campaignId, competitors) {
   const { requestBudget: dynamicRequestBudget, runtimeBudget: dynamicRuntimeBudget } = computeDynamicBudgets(competitors.length);
   const perCompetitorRequestCap = Math.ceil(dynamicRequestBudget / competitors.length);
   console.log(`[FetchOrch] Dynamic budgets | competitors=${competitors.length} | requestBudget=${dynamicRequestBudget} | runtimeBudget=${dynamicRuntimeBudget}ms | perCompetitorCap=${perCompetitorRequestCap}`);
-  const poolBefore = getPoolDiagnostics(accountId);
-  console.log(`[FetchOrch] ProxyPool state at job start | account=${accountId} | active=${poolBefore.activeSessions} | quarantined=${poolBefore.quarantinedSessions} | stickyBindings=${poolBefore.stickyBindings}`);
+  const poolBefore = getPoolDiagnostics(accountId2);
+  console.log(`[FetchOrch] ProxyPool state at job start | account=${accountId2} | active=${poolBefore.activeSessions} | quarantined=${poolBefore.quarantinedSessions} | stickyBindings=${poolBefore.stickyBindings}`);
   for (const c of competitors) {
     stages[c.id] = {
       competitorId: c.id,
@@ -18909,7 +18946,7 @@ async function executeFetchJob(jobId, accountId, campaignId, competitors) {
         posts: [],
         comments: []
       }]);
-      let proxyCtx = acquireStickySession(accountId, campaignId, compHash);
+      let proxyCtx = acquireStickySession(accountId2, campaignId, compHash);
       if (proxyCtx) {
         console.log(`[FetchOrch] Sticky session acquired | competitor=${comp.name} | session=${proxyCtx.session.sessionId} | ipHash=${proxyCtx.session.ipHash}`);
       }
@@ -18921,12 +18958,12 @@ async function executeFetchJob(jobId, accountId, campaignId, competitors) {
           stage.fetchStatus = "SKIPPED_DUE_TO_BUDGET";
           break;
         }
-        await acquireToken(accountId, campaignId, `POSTS_FETCH:${comp.name}`);
+        await acquireToken(accountId2, campaignId, `POSTS_FETCH:${comp.name}`);
         totalRequests++;
         stage.requestsUsed++;
         const startMs = Date.now();
         try {
-          fetchResult = await fetchCompetitorData(comp.id, accountId, attempt > 1, proxyCtx || void 0, "FAST_PASS");
+          fetchResult = await fetchCompetitorData(comp.id, accountId2, attempt > 1, proxyCtx || void 0, "FAST_PASS");
           if (proxyCtx) {
             logProxyTelemetry(proxyCtx, "POSTS_FETCH", 200, null, Date.now() - startMs, true);
           }
@@ -19032,8 +19069,8 @@ async function executeFetchJob(jobId, accountId, campaignId, competitors) {
           stage.SIGNAL_COMPUTE = "RUNNING";
           await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
           try {
-            const posts = await getStoredPostsForMIv3(comp.id, accountId);
-            const comments = await getStoredCommentsForMIv3(comp.id, accountId);
+            const posts = await getStoredPostsForMIv3(comp.id, accountId2);
+            const comments = await getStoredCommentsForMIv3(comp.id, accountId2);
             const competitorInput = {
               id: comp.id,
               name: comp.name,
@@ -19072,7 +19109,7 @@ async function executeFetchJob(jobId, accountId, campaignId, competitors) {
           reason: "COOLDOWN",
           details: `${fetchResult.message} | existingCoverage: ${fetchResult.postsCollected}p/${fetchResult.commentsCollected}c | thresholdsMet: ${coverageMeetsThresholds}`
         });
-        await scrapeWebAndBlogForCompetitor(comp, accountId);
+        await scrapeWebAndBlogForCompetitor(comp, accountId2);
         await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
         continue;
       }
@@ -19140,8 +19177,8 @@ async function executeFetchJob(jobId, accountId, campaignId, competitors) {
       stage.SIGNAL_COMPUTE = "RUNNING";
       await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
       try {
-        const posts = await getStoredPostsForMIv3(comp.id, accountId);
-        const comments = await getStoredCommentsForMIv3(comp.id, accountId);
+        const posts = await getStoredPostsForMIv3(comp.id, accountId2);
+        const comments = await getStoredCommentsForMIv3(comp.id, accountId2);
         const competitorInput = {
           id: comp.id,
           name: comp.name,
@@ -19168,7 +19205,7 @@ async function executeFetchJob(jobId, accountId, campaignId, competitors) {
         stage.SIGNAL_COMPUTE = "FAILED";
         stage.error = `Signal compute: ${err.message}`;
       }
-      await scrapeWebAndBlogForCompetitor(comp, accountId);
+      await scrapeWebAndBlogForCompetitor(comp, accountId2);
       await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
     }
     const stageValues = Object.values(stages);
@@ -19188,14 +19225,14 @@ async function executeFetchJob(jobId, accountId, campaignId, competitors) {
       const willRunDeepPass = anyFetchExecuted && !allCooldown;
       const fastPassDataStatus = willRunDeepPass ? "LIVE" : "COMPLETE";
       try {
-        await persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverage, stopReason, snapshotSourceType, anyFetchExecuted, fastPassDataStatus, coverageRatio);
-        console.log(`[FetchOrch] Snapshot persisted for ${accountId}/${campaignId} | partial=${isPartialCoverage} | allCooldown=${allCooldown} | snapshotSource=${snapshotSourceType} | fetchExecuted=${anyFetchExecuted} | dataStatus=${fastPassDataStatus} | coverageRatio=${coverageRatio.toFixed(2)}`);
+        await persistSnapshotAfterFetch(accountId2, campaignId, isPartialCoverage, stopReason, snapshotSourceType, anyFetchExecuted, fastPassDataStatus, coverageRatio);
+        console.log(`[FetchOrch] Snapshot persisted for ${accountId2}/${campaignId} | partial=${isPartialCoverage} | allCooldown=${allCooldown} | snapshotSource=${snapshotSourceType} | fetchExecuted=${anyFetchExecuted} | dataStatus=${fastPassDataStatus} | coverageRatio=${coverageRatio.toFixed(2)}`);
       } catch (err) {
         console.error(`[FetchOrch] Snapshot persistence failed:`, err.message);
       }
       if (willRunDeepPass) {
-        console.log(`[FetchOrch] Fast Pass complete. Auto-queuing Deep Pass for ${accountId}/${campaignId}`);
-        queueDeepPass(accountId, campaignId, competitors).catch((err) => {
+        console.log(`[FetchOrch] Fast Pass complete. Auto-queuing Deep Pass for ${accountId2}/${campaignId}`);
+        queueDeepPass(accountId2, campaignId, competitors).catch((err) => {
           console.error(`[FetchOrch] Deep Pass auto-queue failed:`, err.message);
         });
       }
@@ -19206,7 +19243,7 @@ async function executeFetchJob(jobId, accountId, campaignId, competitors) {
     let snapshotIdCreated = null;
     if (anyAnalysisRan) {
       try {
-        const latestSnap = await db.select({ id: miSnapshots.id }).from(miSnapshots).where(and20(eq31(miSnapshots.accountId, accountId), eq31(miSnapshots.campaignId, campaignId), inArray7(miSnapshots.status, ["COMPLETE", "PARTIAL"]))).orderBy(desc22(miSnapshots.createdAt)).limit(1);
+        const latestSnap = await db.select({ id: miSnapshots.id }).from(miSnapshots).where(and20(eq31(miSnapshots.accountId, accountId2), eq31(miSnapshots.campaignId, campaignId), inArray7(miSnapshots.status, ["COMPLETE", "PARTIAL"]))).orderBy(desc22(miSnapshots.createdAt)).limit(1);
         if (latestSnap.length > 0) {
           snapshotIdCreated = latestSnap[0].id;
         }
@@ -19266,9 +19303,9 @@ async function executeFetchJob(jobId, accountId, campaignId, competitors) {
       error: finalStopReason ? `STOP_REASON: ${finalStopReason}` : null
     }).where(eq31(miFetchJobs.id, jobId));
     console.log(`[FetchOrch] Job ${jobId} completed in ${durationMs}ms | posts=${totalPosts} comments=${totalComments} | requests=${totalRequests} | stopReason=${stopReason} | coverage=${competitorsProcessed}/${competitors.length} (${(coverageRatio * 100).toFixed(0)}%)`);
-    const rateBucketState = getBucketState(accountId, campaignId);
+    const rateBucketState = getBucketState(accountId2, campaignId);
     console.log(`[FetchOrch] Rate bucket state at job end | tokens=${rateBucketState.tokens}/${rateBucketState.maxBurst} | consumed=${rateBucketState.totalConsumed} | waited=${rateBucketState.totalWaited} | refillMs=${rateBucketState.refillIntervalMs}`);
-    logAudit(accountId, "MI_FETCH_JOB_COMPLETE", {
+    logAudit(accountId2, "MI_FETCH_JOB_COMPLETE", {
       details: {
         jobId,
         totalPosts,
@@ -19320,15 +19357,15 @@ function classifyBlockReason(result) {
   if (msg.includes("pagination") || msg.includes("cursor")) return "PAGINATION_STOPPED";
   return "ERROR";
 }
-async function persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverage = false, jobStopReason = "COMPLETE", snapshotSource = "FRESH_DATA", fetchExecuted = true, dataStatus = "LIVE", coverageRatio = 1) {
-  const competitors = await db.select().from(ciCompetitors).where(and20(eq31(ciCompetitors.accountId, accountId), eq31(ciCompetitors.campaignId, campaignId), eq31(ciCompetitors.isActive, true)));
+async function persistSnapshotAfterFetch(accountId2, campaignId, isPartialCoverage = false, jobStopReason = "COMPLETE", snapshotSource = "FRESH_DATA", fetchExecuted = true, dataStatus = "LIVE", coverageRatio = 1) {
+  const competitors = await db.select().from(ciCompetitors).where(and20(eq31(ciCompetitors.accountId, accountId2), eq31(ciCompetitors.campaignId, campaignId), eq31(ciCompetitors.isActive, true)));
   if (competitors.length === 0) return;
   const campaignRows = await db.select().from(growthCampaigns).where(eq31(growthCampaigns.id, campaignId)).limit(1);
   const campaignGoalMode = campaignRows[0]?.goalMode === "REACH_MODE" ? "REACH_MODE" : "STRATEGY_MODE";
   const competitorInputs = [];
   for (const c of competitors) {
-    const posts = await getStoredPostsForMIv3(c.id, accountId);
-    const comments = await getStoredCommentsForMIv3(c.id, accountId);
+    const posts = await getStoredPostsForMIv3(c.id, accountId2);
+    const comments = await getStoredCommentsForMIv3(c.id, accountId2);
     competitorInputs.push({
       id: c.id,
       name: c.name,
@@ -19410,7 +19447,7 @@ async function persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverag
   }
   const volatilityIndex = computeVolatilityIndex(signalResults);
   const marketDiagnosis = buildMarketDiagnosis(confidence, trajectory, dominantIntent);
-  const marketBaseline = await computeMarketBaseline(accountId, campaignId);
+  const marketBaseline = await computeMarketBaseline(accountId2, campaignId);
   const snr = computeSignalNoiseRatio(signalResults, confidence);
   const evCov = computeEvidenceCoverage(signalResults, competitorInputs.length);
   const calibrationCtx = {
@@ -19443,7 +19480,7 @@ async function persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverag
     }
   }
   const previousSnapshots = await db.select().from(miSnapshots).where(and20(
-    eq31(miSnapshots.accountId, accountId),
+    eq31(miSnapshots.accountId, accountId2),
     eq31(miSnapshots.campaignId, campaignId),
     inArray7(miSnapshots.status, ["COMPLETE", "PARTIAL"])
   )).orderBy(desc22(miSnapshots.createdAt)).limit(1);
@@ -19454,7 +19491,7 @@ async function persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverag
   let multiSourceSignalsJson = null;
   let sourceAvailabilityJson = null;
   try {
-    const allWebData = await db.select().from(competitorWebData).where(and20(eq31(competitorWebData.accountId, accountId), eq31(competitorWebData.campaignId, campaignId)));
+    const allWebData = await db.select().from(competitorWebData).where(and20(eq31(competitorWebData.accountId, accountId2), eq31(competitorWebData.campaignId, campaignId)));
     const perCompetitorMultiSource = {};
     for (const c of competitors) {
       const sourceAvail = buildSourceAvail(c);
@@ -19529,7 +19566,7 @@ async function persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverag
     console.error(`[FetchOrch] Multi-source signal building failed (non-blocking):`, err.message);
   }
   const snapshotPayload = {
-    accountId,
+    accountId: accountId2,
     campaignId,
     competitorHash,
     version: newVersion,
@@ -19624,8 +19661,8 @@ async function persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverag
     commentsProcessed: totalComments,
     refreshReason: "FETCH_JOB_COMPLETE"
   });
-  console.log(`[FetchOrch] Snapshot v${newVersion} persisted (id=${snapshot.id}) for ${accountId}/${campaignId}`);
-  logAudit(accountId, "MI_SNAPSHOT_PERSISTED_POST_FETCH", {
+  console.log(`[FetchOrch] Snapshot v${newVersion} persisted (id=${snapshot.id}) for ${accountId2}/${campaignId}`);
+  logAudit(accountId2, "MI_SNAPSHOT_PERSISTED_POST_FETCH", {
     details: {
       snapshotId: snapshot.id,
       version: newVersion,
@@ -19636,11 +19673,11 @@ async function persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverag
     }
   }).catch(() => {
   });
-  autoSignalCompletion(accountId, campaignId, signalResults, competitorInputs).catch((err) => {
+  autoSignalCompletion(accountId2, campaignId, signalResults, competitorInputs).catch((err) => {
     console.error(`[FetchOrch] AUTO_SIGNAL_COMPLETION error: ${err.message}`);
   });
 }
-async function autoSignalCompletion(accountId, campaignId, signalResults, competitorInputs) {
+async function autoSignalCompletion(accountId2, campaignId, signalResults, competitorInputs) {
   const deficientCompetitors = [];
   for (const sr of signalResults) {
     const comp = competitorInputs.find((c) => c.id === sr.competitorId);
@@ -19667,10 +19704,10 @@ async function autoSignalCompletion(accountId, campaignId, signalResults, compet
     }
   }
   if (deficientCompetitors.length === 0) {
-    console.log(`[FetchOrch] AUTO_SIGNAL_COMPLETION: all competitors have sufficient signals for ${accountId}/${campaignId}`);
+    console.log(`[FetchOrch] AUTO_SIGNAL_COMPLETION: all competitors have sufficient signals for ${accountId2}/${campaignId}`);
     return;
   }
-  console.log(`[FetchOrch] AUTO_SIGNAL_COMPLETION: ${deficientCompetitors.length} competitors with signal deficiencies for ${accountId}/${campaignId}`);
+  console.log(`[FetchOrch] AUTO_SIGNAL_COMPLETION: ${deficientCompetitors.length} competitors with signal deficiencies for ${accountId2}/${campaignId}`);
   for (const dc of deficientCompetitors) {
     const [existing] = await db.select().from(ciCompetitors).where(eq31(ciCompetitors.id, dc.id));
     if (!existing || existing.analysisLevel === "DEEP_PASS") continue;
@@ -19680,15 +19717,15 @@ async function autoSignalCompletion(accountId, campaignId, signalResults, compet
   for (const dc of deficientCompetitors) {
     const [comp] = await db.select().from(ciCompetitors).where(eq31(ciCompetitors.id, dc.id));
     if (comp) {
-      const postResult = await db.select({ count: sql22`count(*)` }).from(ciCompetitorPosts).where(and20(eq31(ciCompetitorPosts.competitorId, dc.id), eq31(ciCompetitorPosts.accountId, accountId)));
-      const commentResult = await db.select({ count: sql22`count(*)` }).from(ciCompetitorComments).where(and20(eq31(ciCompetitorComments.competitorId, dc.id), eq31(ciCompetitorComments.accountId, accountId)));
+      const postResult = await db.select({ count: sql22`count(*)` }).from(ciCompetitorPosts).where(and20(eq31(ciCompetitorPosts.competitorId, dc.id), eq31(ciCompetitorPosts.accountId, accountId2)));
+      const commentResult = await db.select({ count: sql22`count(*)` }).from(ciCompetitorComments).where(and20(eq31(ciCompetitorComments.competitorId, dc.id), eq31(ciCompetitorComments.accountId, accountId2)));
       const actualPosts = Number(postResult[0]?.count || 0);
       const actualComments = Number(commentResult[0]?.count || 0);
       await db.update(ciCompetitors).set({ postsCollected: actualPosts, commentsCollected: actualComments, updatedAt: /* @__PURE__ */ new Date() }).where(eq31(ciCompetitors.id, dc.id));
       console.log(`[FetchOrch] AUTO_SIGNAL_COMPLETION: inventory refreshed for ${dc.name} | posts=${actualPosts} | comments=${actualComments}`);
     }
   }
-  console.log(`[FetchOrch] AUTO_SIGNAL_COMPLETION_COMPLETE: signal deficiency enrichment queued + inventory refreshed for ${accountId}/${campaignId} | deficientCount=${deficientCompetitors.length}`);
+  console.log(`[FetchOrch] AUTO_SIGNAL_COMPLETION_COMPLETE: signal deficiency enrichment queued + inventory refreshed for ${accountId2}/${campaignId} | deficientCount=${deficientCompetitors.length}`);
 }
 async function getFetchJobStatus(jobId) {
   const [job] = await db.select().from(miFetchJobs).where(eq31(miFetchJobs.id, jobId));
@@ -19724,18 +19761,18 @@ async function getFetchJobStatus(jobId) {
     }
   };
 }
-async function queueDeepPass(accountId, campaignId, competitors) {
+async function queueDeepPass(accountId2, campaignId, competitors) {
   const DEEP_PASS_DELAY_MS = 5e3;
-  console.log(`[FetchOrch] DEEP_PASS enrichment scheduled in ${DEEP_PASS_DELAY_MS}ms for ${accountId}/${campaignId} | ${competitors.length} competitors`);
+  console.log(`[FetchOrch] DEEP_PASS enrichment scheduled in ${DEEP_PASS_DELAY_MS}ms for ${accountId2}/${campaignId} | ${competitors.length} competitors`);
   await sleep(DEEP_PASS_DELAY_MS);
   const eligibleCompetitors = await db.select().from(ciCompetitors).where(and20(
-    eq31(ciCompetitors.accountId, accountId),
+    eq31(ciCompetitors.accountId, accountId2),
     eq31(ciCompetitors.campaignId, campaignId),
     eq31(ciCompetitors.isActive, true)
   ));
   const notReady = eligibleCompetitors.filter((c) => !c.lastCheckedAt);
   if (notReady.length > 0) {
-    console.log(`[FetchOrch] DEEP_PASS_BLOCKED: ${notReady.length} competitors have not completed FAST_PASS (missing lastCheckedAt). Aborting DEEP_PASS for ${accountId}/${campaignId}. Competitors: ${notReady.map((c) => c.name).join(", ")}`);
+    console.log(`[FetchOrch] DEEP_PASS_BLOCKED: ${notReady.length} competitors have not completed FAST_PASS (missing lastCheckedAt). Aborting DEEP_PASS for ${accountId2}/${campaignId}. Competitors: ${notReady.map((c) => c.name).join(", ")}`);
     return;
   }
   const signalDeficientCompetitors = [];
@@ -19752,23 +19789,23 @@ async function queueDeepPass(accountId, campaignId, competitors) {
     }
   }
   if (signalDeficientCompetitors.length > 0) {
-    console.log(`[FetchOrch] SIGNAL_DEFICIENCY_ESCALATION_SUMMARY: ${signalDeficientCompetitors.length} previously-enriched competitors re-queued due to signal deficiency for ${accountId}/${campaignId}`);
+    console.log(`[FetchOrch] SIGNAL_DEFICIENCY_ESCALATION_SUMMARY: ${signalDeficientCompetitors.length} previously-enriched competitors re-queued due to signal deficiency for ${accountId2}/${campaignId}`);
   }
   const refreshedCompetitors = await db.select().from(ciCompetitors).where(and20(
-    eq31(ciCompetitors.accountId, accountId),
+    eq31(ciCompetitors.accountId, accountId2),
     eq31(ciCompetitors.campaignId, campaignId),
     eq31(ciCompetitors.isActive, true)
   ));
   const alreadyEnriched = refreshedCompetitors.filter((c) => c.enrichmentStatus === "ENRICHED");
   const toEnrich = refreshedCompetitors.filter((c) => c.enrichmentStatus !== "ENRICHED");
   if (toEnrich.length === 0) {
-    console.log(`[FetchOrch] DEEP_PASS skipped: all ${refreshedCompetitors.length} competitors already enriched for ${accountId}/${campaignId}`);
+    console.log(`[FetchOrch] DEEP_PASS skipped: all ${refreshedCompetitors.length} competitors already enriched for ${accountId2}/${campaignId}`);
     return;
   }
-  console.log(`[FetchOrch] DEEP_PASS started (ENRICHMENT_ONLY) | ${accountId}/${campaignId} | toEnrich=${toEnrich.length} | alreadyEnriched=${alreadyEnriched.length} | baseline=12 posts per competitor`);
+  console.log(`[FetchOrch] DEEP_PASS started (ENRICHMENT_ONLY) | ${accountId2}/${campaignId} | toEnrich=${toEnrich.length} | alreadyEnriched=${alreadyEnriched.length} | baseline=12 posts per competitor`);
   try {
     await db.update(miSnapshots).set({ dataStatus: "ENRICHING" }).where(and20(
-      eq31(miSnapshots.accountId, accountId),
+      eq31(miSnapshots.accountId, accountId2),
       eq31(miSnapshots.campaignId, campaignId),
       inArray7(miSnapshots.status, ["COMPLETE", "PARTIAL"])
     ));
@@ -19787,15 +19824,15 @@ async function queueDeepPass(accountId, campaignId, competitors) {
   let skippedCount = 0;
   for (const comp of toEnrich) {
     try {
-      const baselinePostResult = await db.select({ count: sql22`count(*)` }).from(ciCompetitorPosts).where(and20(eq31(ciCompetitorPosts.competitorId, comp.id), eq31(ciCompetitorPosts.accountId, accountId)));
+      const baselinePostResult = await db.select({ count: sql22`count(*)` }).from(ciCompetitorPosts).where(and20(eq31(ciCompetitorPosts.competitorId, comp.id), eq31(ciCompetitorPosts.accountId, accountId2)));
       const baselinePostCount = Number(baselinePostResult[0]?.count || 0);
-      const baselineCommentResult = await db.select({ count: sql22`count(*)` }).from(ciCompetitorComments).where(and20(eq31(ciCompetitorComments.competitorId, comp.id), eq31(ciCompetitorComments.accountId, accountId)));
+      const baselineCommentResult = await db.select({ count: sql22`count(*)` }).from(ciCompetitorComments).where(and20(eq31(ciCompetitorComments.competitorId, comp.id), eq31(ciCompetitorComments.accountId, accountId2)));
       const baselineCommentCount = Number(baselineCommentResult[0]?.count || 0);
       console.log(`[FetchOrch] DEEP_PASS enrichment-only for ${comp.name} | posts=${baselinePostCount} (fixed baseline) | comments=${baselineCommentCount} | NO post expansion`);
-      const result = await enrichCompetitorWithComments(comp.id, accountId);
-      const totalCommentCount = await db.select({ count: sql22`count(*)` }).from(ciCompetitorComments).where(and20(eq31(ciCompetitorComments.competitorId, comp.id), eq31(ciCompetitorComments.accountId, accountId)));
+      const result = await enrichCompetitorWithComments(comp.id, accountId2);
+      const totalCommentCount = await db.select({ count: sql22`count(*)` }).from(ciCompetitorComments).where(and20(eq31(ciCompetitorComments.competitorId, comp.id), eq31(ciCompetitorComments.accountId, accountId2)));
       const deepPassCommentCount = Number(totalCommentCount[0]?.count || 0);
-      const realCommentResult = await db.select({ count: sql22`count(*)` }).from(ciCompetitorComments).where(and20(eq31(ciCompetitorComments.competitorId, comp.id), eq31(ciCompetitorComments.accountId, accountId), eq31(ciCompetitorComments.isSynthetic, false)));
+      const realCommentResult = await db.select({ count: sql22`count(*)` }).from(ciCompetitorComments).where(and20(eq31(ciCompetitorComments.competitorId, comp.id), eq31(ciCompetitorComments.accountId, accountId2), eq31(ciCompetitorComments.isSynthetic, false)));
       const realCommentCount = Number(realCommentResult[0]?.count || 0);
       const syntheticCommentCount = deepPassCommentCount - realCommentCount;
       const enrichmentSucceeded = result.status === "ENRICHED" || result.status === "ALREADY_ENRICHED" || result.status === "REAL_DATA_SUFFICIENT" || result.status === "NO_ELIGIBLE_POSTS";
@@ -19834,25 +19871,25 @@ async function queueDeepPass(accountId, campaignId, competitors) {
     }
   }
   try {
-    await persistSnapshotAfterFetch(accountId, campaignId, false, "COMPLETE", "FRESH_DATA", true, "COMPLETE");
-    console.log(`[FetchOrch] DEEP_PASS snapshot recomputed (COMPLETE) for ${accountId}/${campaignId} | enriched=${enrichedCount} | failed=${failedCount} | skipped=${skippedCount} | duration=${Date.now() - startTime}ms`);
+    await persistSnapshotAfterFetch(accountId2, campaignId, false, "COMPLETE", "FRESH_DATA", true, "COMPLETE");
+    console.log(`[FetchOrch] DEEP_PASS snapshot recomputed (COMPLETE) for ${accountId2}/${campaignId} | enriched=${enrichedCount} | failed=${failedCount} | skipped=${skippedCount} | duration=${Date.now() - startTime}ms`);
   } catch (err) {
     console.error(`[FetchOrch] DEEP_PASS snapshot persistence failed: ${err.message}`);
   }
-  await validateInventoryConsistency(accountId, campaignId);
+  await validateInventoryConsistency(accountId2, campaignId);
 }
-async function validateInventoryConsistency(accountId, campaignId) {
+async function validateInventoryConsistency(accountId2, campaignId) {
   try {
     const competitors = await db.select().from(ciCompetitors).where(and20(
-      eq31(ciCompetitors.accountId, accountId),
+      eq31(ciCompetitors.accountId, accountId2),
       eq31(ciCompetitors.campaignId, campaignId),
       eq31(ciCompetitors.isActive, true)
     ));
     let inconsistencies = 0;
     for (const comp of competitors) {
-      const postResult = await db.select({ count: sql22`count(*)` }).from(ciCompetitorPosts).where(and20(eq31(ciCompetitorPosts.competitorId, comp.id), eq31(ciCompetitorPosts.accountId, accountId)));
+      const postResult = await db.select({ count: sql22`count(*)` }).from(ciCompetitorPosts).where(and20(eq31(ciCompetitorPosts.competitorId, comp.id), eq31(ciCompetitorPosts.accountId, accountId2)));
       const actualPosts = Number(postResult[0]?.count || 0);
-      const commentResult = await db.select({ count: sql22`count(*)` }).from(ciCompetitorComments).where(and20(eq31(ciCompetitorComments.competitorId, comp.id), eq31(ciCompetitorComments.accountId, accountId)));
+      const commentResult = await db.select({ count: sql22`count(*)` }).from(ciCompetitorComments).where(and20(eq31(ciCompetitorComments.competitorId, comp.id), eq31(ciCompetitorComments.accountId, accountId2)));
       const actualComments = Number(commentResult[0]?.count || 0);
       if (comp.analysisLevel === "DEEP_PASS") {
         const postsAcceptable = actualPosts >= INSTAGRAM_API_CEILING;
@@ -19877,9 +19914,9 @@ async function validateInventoryConsistency(accountId, campaignId) {
       }
     }
     if (inconsistencies > 0) {
-      console.log(`[FetchOrch] INVENTORY_VALIDATION: ${accountId}/${campaignId} | ${inconsistencies} inconsistencies corrected out of ${competitors.length} competitors`);
+      console.log(`[FetchOrch] INVENTORY_VALIDATION: ${accountId2}/${campaignId} | ${inconsistencies} inconsistencies corrected out of ${competitors.length} competitors`);
     } else {
-      console.log(`[FetchOrch] INVENTORY_VALIDATION: ${accountId}/${campaignId} | all ${competitors.length} competitors consistent`);
+      console.log(`[FetchOrch] INVENTORY_VALIDATION: ${accountId2}/${campaignId} | all ${competitors.length} competitors consistent`);
     }
   } catch (err) {
     console.error(`[FetchOrch] Inventory validation failed: ${err.message}`);
@@ -19893,17 +19930,17 @@ var MAX_PROMOTIONS_PER_MINUTE = 6;
 var PRIORITY_FAST_PASS = 0;
 var accountJobTracker = /* @__PURE__ */ new Map();
 var promotionTracker = { count: 0, windowStart: Date.now() };
-function checkAccountBudget(accountId) {
+function checkAccountBudget(accountId2) {
   const now = Date.now();
-  const tracker = accountJobTracker.get(accountId);
+  const tracker = accountJobTracker.get(accountId2);
   if (!tracker || now > tracker.resetAt) {
-    accountJobTracker.set(accountId, { count: 0, resetAt: now + 36e5 });
+    accountJobTracker.set(accountId2, { count: 0, resetAt: now + 36e5 });
     return true;
   }
   return tracker.count < PER_ACCOUNT_JOB_BUDGET_PER_HOUR;
 }
-function incrementAccountBudget(accountId) {
-  const tracker = accountJobTracker.get(accountId);
+function incrementAccountBudget(accountId2) {
+  const tracker = accountJobTracker.get(accountId2);
   if (tracker) tracker.count++;
 }
 async function getGlobalRunningJobCount() {
@@ -20089,12 +20126,12 @@ async function recoverStuckDeepPass() {
         console.log(`[DeepPassRecovery] Stale freshness detected for ${key} (stored=${row.data_freshness_days}d). Scheduling recompute.`);
       }
     }
-    for (const { accountId, campaignId } of campaignGroups.values()) {
+    for (const { accountId: accountId2, campaignId } of campaignGroups.values()) {
       try {
-        await persistSnapshotAfterFetch(accountId, campaignId, false, "COMPLETE", "FRESH_DATA", true, "COMPLETE");
-        console.log(`[DeepPassRecovery] Snapshot recomputed for ${accountId}/${campaignId}`);
+        await persistSnapshotAfterFetch(accountId2, campaignId, false, "COMPLETE", "FRESH_DATA", true, "COMPLETE");
+        console.log(`[DeepPassRecovery] Snapshot recomputed for ${accountId2}/${campaignId}`);
       } catch (err) {
-        console.error(`[DeepPassRecovery] Snapshot recompute failed for ${accountId}/${campaignId}: ${err.message}`);
+        console.error(`[DeepPassRecovery] Snapshot recompute failed for ${accountId2}/${campaignId}: ${err.message}`);
       }
     }
   } catch (err) {
@@ -20332,7 +20369,7 @@ function registerMIv3Routes(app2) {
     try {
       enforceEngineWhitelist(req);
       validateEngineIsolation("MARKET_INTELLIGENCE_V3");
-      const accountId = req.body.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.body.campaignId;
       const mode = req.body.mode || "overview";
       const forceRefresh = req.body.forceRefresh === true;
@@ -20350,9 +20387,9 @@ function registerMIv3Routes(app2) {
       if (!ALLOWED_MODES.includes(mode)) {
         return res.status(400).json({ error: `Invalid mode: ${mode}. Allowed: ${ALLOWED_MODES.join(", ")}` });
       }
-      console.log(`[MIv3-Route] POST /api/ci/mi-v3/analyze | mode=${mode} | accountId=${accountId} | campaignId=${campaignId}`);
+      console.log(`[MIv3-Route] POST /api/ci/mi-v3/analyze | mode=${mode} | accountId=${accountId2} | campaignId=${campaignId}`);
       const goalMode = req.body.goalMode === "REACH_MODE" ? "REACH_MODE" : "STRATEGY_MODE";
-      const result = await MarketIntelligenceV3.run(mode, accountId, campaignId, forceRefresh, goalMode);
+      const result = await MarketIntelligenceV3.run(mode, accountId2, campaignId, forceRefresh, goalMode);
       if (result.signalDiagnostics) {
         console.log(`[MIv3-Route] SignalDiagnostics | posts=${result.signalDiagnostics.postsProcessed} detected=${result.signalDiagnostics.signalsDetected} filtered=${result.signalDiagnostics.signalsFiltered} used=${result.signalDiagnostics.signalsUsed}`);
       }
@@ -20387,10 +20424,10 @@ function registerMIv3Routes(app2) {
   });
   app2.get("/api/ci/mi-v3/snapshot/:campaignId", requireCampaign, async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.params.campaignId;
       const snapshots = await db.select().from(miSnapshots).where(and22(
-        eq33(miSnapshots.accountId, accountId),
+        eq33(miSnapshots.accountId, accountId2),
         eq33(miSnapshots.campaignId, campaignId),
         inArray9(miSnapshots.status, ["COMPLETE", "PARTIAL"])
       )).orderBy(desc23(miSnapshots.createdAt)).limit(1);
@@ -20415,14 +20452,14 @@ function registerMIv3Routes(app2) {
     try {
       enforceEngineWhitelist(req);
       validateEngineIsolation("MARKET_INTELLIGENCE_V3");
-      const accountId = req.body.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.body.campaignId;
       if (!campaignId) {
         return res.status(422).json({ error: "campaignId is required" });
       }
       console.log(`[MIv3-Route] POST /api/ci/mi-v3/refresh | manual refresh | campaignId=${campaignId}`);
       const goalMode = req.body.goalMode === "REACH_MODE" ? "REACH_MODE" : "STRATEGY_MODE";
-      const result = await MarketIntelligenceV3.run("overview", accountId, campaignId, true, goalMode);
+      const result = await MarketIntelligenceV3.run("overview", accountId2, campaignId, true, goalMode);
       return res.json({
         success: true,
         message: "Snapshot refreshed",
@@ -20435,10 +20472,10 @@ function registerMIv3Routes(app2) {
   });
   app2.get("/api/ci/mi-v3/history/:campaignId", requireCampaign, async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.params.campaignId;
       const snapshots = await db.select().from(miSnapshots).where(and22(
-        eq33(miSnapshots.accountId, accountId),
+        eq33(miSnapshots.accountId, accountId2),
         eq33(miSnapshots.campaignId, campaignId),
         inArray9(miSnapshots.status, ["COMPLETE", "PARTIAL"])
       )).orderBy(desc23(miSnapshots.createdAt)).limit(20);
@@ -20492,12 +20529,12 @@ function registerMIv3Routes(app2) {
   });
   app2.post("/api/ci/mi-v3/fetch-job", requireCampaign, async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.body.campaignId;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
-      const jobId = await startFetchJob(accountId, campaignId);
+      const jobId = await startFetchJob(accountId2, campaignId);
       const status = await getFetchJobStatus(jobId);
       return res.json({ jobId, status: status?.status || "QUEUED", message: "Data collection job queued via Two-Speed system" });
     } catch (err) {
@@ -20678,10 +20715,10 @@ init_schema();
 init_db();
 init_schema();
 import { eq as eq35, and as and24 } from "drizzle-orm";
-async function loadProductDNA(campaignId, accountId = "default") {
+async function loadProductDNA(campaignId, accountId2 = "default") {
   const [bizData] = await db.select().from(businessDataLayer).where(and24(
     eq35(businessDataLayer.campaignId, campaignId),
-    eq35(businessDataLayer.accountId, accountId)
+    eq35(businessDataLayer.accountId, accountId2)
   )).limit(1);
   if (!bizData) return null;
   return {
@@ -22960,7 +22997,7 @@ function computeSegmentDensity(painMap, desireMap, segments, inputSnapshotId) {
     inputSnapshotId
   }));
 }
-async function constructSegments(painMap, desireMap, objectionMap, emotionalDrivers, maturity, awareness, businessContext, commentSamples, accountId, inputSnapshotId) {
+async function constructSegments(painMap, desireMap, objectionMap, emotionalDrivers, maturity, awareness, businessContext, commentSamples, accountId2, inputSnapshotId) {
   try {
     let multiSourceSection = "";
     try {
@@ -23021,7 +23058,7 @@ Return ONLY the JSON array, no markdown.`;
       temperature: 0.4,
       max_tokens: 2e3,
       endpoint: "audience-engine-v3-segments",
-      accountId
+      accountId: accountId2
     });
     const content = response.choices[0]?.message?.content?.trim() || "[]";
     const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
@@ -23113,7 +23150,7 @@ function sanitizeAdsTargetingHint(hint) {
   }
   return hint;
 }
-async function translateToAdsTargeting(segments, maturity, businessContext, accountId, inputSnapshotId) {
+async function translateToAdsTargeting(segments, maturity, businessContext, accountId2, inputSnapshotId) {
   try {
     const prompt = `You are a Meta Ads targeting expert. Translate audience segments into Meta Ads Manager targeting suggestions.
 
@@ -23141,7 +23178,7 @@ Return ONLY a JSON array matching the segments count. Use real Meta Ads targetin
       temperature: 0.3,
       max_tokens: 1500,
       endpoint: "audience-engine-v3-ads-targeting",
-      accountId
+      accountId: accountId2
     });
     const content = response.choices[0]?.message?.content?.trim() || "[]";
     const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
@@ -23279,11 +23316,11 @@ function buildEmptyResult(status, statusMessage, inputSummary, executionTimeMs, 
     snapshotId
   };
 }
-async function runAudienceEngine(accountId, campaignId) {
+async function runAudienceEngine(accountId2, campaignId) {
   const startTime = Date.now();
-  console.log(`[AudienceEngine-V3] Starting analysis for account=${accountId} campaign=${campaignId}`);
+  console.log(`[AudienceEngine-V3] Starting analysis for account=${accountId2} campaign=${campaignId}`);
   const [latestSnapshot] = await db.select().from(miSnapshots).where(and26(
-    eq37(miSnapshots.accountId, accountId),
+    eq37(miSnapshots.accountId, accountId2),
     eq37(miSnapshots.campaignId, campaignId),
     inArray11(miSnapshots.status, ["COMPLETE", "PARTIAL"])
   )).orderBy(desc26(miSnapshots.createdAt)).limit(1);
@@ -23313,7 +23350,7 @@ async function runAudienceEngine(accountId, campaignId) {
     }
   }
   const competitors = await db.select().from(ciCompetitors).where(and26(
-    eq37(ciCompetitors.accountId, accountId),
+    eq37(ciCompetitors.accountId, accountId2),
     eq37(ciCompetitors.campaignId, campaignId),
     eq37(ciCompetitors.isActive, true)
   ));
@@ -23368,14 +23405,14 @@ async function runAudienceEngine(accountId, campaignId) {
       console.log(`[AudienceEngine-V3] ${msg}`);
       const executionTimeMs2 = Date.now() - startTime;
       const [inserted2] = await db.insert(audienceSnapshots).values({
-        accountId,
+        accountId: accountId2,
         campaignId,
         miSnapshotId,
         engineVersion: AUDIENCE_ENGINE_VERSION,
         inputSummary: JSON.stringify({ ...baseInputSummary, status: "DATASET_TOO_SMALL", statusMessage: msg }),
         executionTimeMs: executionTimeMs2
       }).returning({ id: audienceSnapshots.id });
-      await pruneOldSnapshots(db, audienceSnapshots, campaignId, 20, accountId);
+      await pruneOldSnapshots(db, audienceSnapshots, campaignId, 20, accountId2);
       const emptyResult = buildEmptyResult("DATASET_TOO_SMALL", msg, baseInputSummary, executionTimeMs2, inserted2.id);
       return { ...emptyResult, freshnessMetadata: miFreshnessMetadata };
     }
@@ -23384,7 +23421,7 @@ async function runAudienceEngine(accountId, campaignId) {
     console.log(`[AudienceEngine-V3] NO_COMMENT_TEXT \u2014 proceeding with ${captions.length} captions${bridgeCanRescue ? " + semantic bridge signals" : " only"}`);
   }
   const [campaign] = await db.select().from(growthCampaigns).where(eq37(growthCampaigns.id, campaignId)).limit(1);
-  const productDna = await loadProductDNA(campaignId, accountId);
+  const productDna = await loadProductDNA(campaignId, accountId2);
   const businessContext = {
     industry: productDna?.businessType || productDna?.productCategory || campaign?.name || "General",
     coreOffer: productDna?.coreOffer || campaign?.name || "Products/Services",
@@ -23488,7 +23525,7 @@ async function runAudienceEngine(accountId, campaignId) {
       awarenessLevel,
       businessContext,
       commentTexts,
-      accountId,
+      accountId2,
       miSnapshotId
     );
     audienceSegments = canonicalizeSegments(rawSegments);
@@ -23497,7 +23534,7 @@ async function runAudienceEngine(accountId, campaignId) {
       audienceSegments,
       maturityIndex,
       businessContext,
-      accountId,
+      accountId2,
       miSnapshotId
     );
   }
@@ -23564,7 +23601,7 @@ async function runAudienceEngine(accountId, campaignId) {
   );
   console.log(`[AudienceEngine-V3] STRUCTURED_SIGNALS | pains=${structuredSignals.pain_clusters.length} | desires=${structuredSignals.desire_clusters.length} | patterns=${structuredSignals.pattern_clusters.length} | rootCauses=${structuredSignals.root_causes.length} | psychDrivers=${structuredSignals.psychological_drivers.length}`);
   const [inserted] = await db.insert(audienceSnapshots).values({
-    accountId,
+    accountId: accountId2,
     campaignId,
     miSnapshotId,
     engineVersion: AUDIENCE_ENGINE_VERSION,
@@ -23585,10 +23622,10 @@ async function runAudienceEngine(accountId, campaignId) {
     structuredSignals: JSON.stringify(structuredSignals),
     executionTimeMs
   }).returning({ id: audienceSnapshots.id });
-  await pruneOldSnapshots(db, audienceSnapshots, campaignId, 20, accountId);
+  await pruneOldSnapshots(db, audienceSnapshots, campaignId, 20, accountId2);
   try {
     const { invalidateDownstreamOnRegeneration: invalidateDownstreamOnRegeneration3 } = await Promise.resolve().then(() => (init_strategy_root(), strategy_root_exports));
-    const inv = await invalidateDownstreamOnRegeneration3(campaignId, accountId, "audience");
+    const inv = await invalidateDownstreamOnRegeneration3(campaignId, accountId2, "audience");
     if (inv.supersededRoots > 0) {
       console.log(`[AudienceEngine-V3] ROOT_INVALIDATED | superseded=${inv.supersededRoots}`);
     }
@@ -23620,15 +23657,15 @@ async function runAudienceEngine(accountId, campaignId) {
     freshnessMetadata: miFreshnessMetadata
   };
 }
-async function getLatestAudienceSnapshot(accountId, campaignId) {
+async function getLatestAudienceSnapshot(accountId2, campaignId) {
   const [snapshot] = await db.select().from(audienceSnapshots).where(and26(
-    eq37(audienceSnapshots.accountId, accountId),
+    eq37(audienceSnapshots.accountId, accountId2),
     eq37(audienceSnapshots.campaignId, campaignId)
   )).orderBy(desc26(audienceSnapshots.createdAt)).limit(1);
   if (!snapshot) return null;
   let freshnessMetadata = null;
   if (snapshot.miSnapshotId) {
-    const [miSnap] = await db.select().from(miSnapshots).where(and26(eq37(miSnapshots.id, snapshot.miSnapshotId), eq37(miSnapshots.accountId, accountId))).limit(1);
+    const [miSnap] = await db.select().from(miSnapshots).where(and26(eq37(miSnapshots.id, snapshot.miSnapshotId), eq37(miSnapshots.accountId, accountId2))).limit(1);
     if (miSnap) {
       const { buildFreshnessMetadata: buildFreshnessMetadata2 } = await Promise.resolve().then(() => (init_snapshot_trust(), snapshot_trust_exports));
       freshnessMetadata = buildFreshnessMetadata2(miSnap);
@@ -23658,7 +23695,7 @@ async function getLatestAudienceSnapshot(accountId, campaignId) {
 function registerAudienceEngineRoutes(app2) {
   app2.post("/api/audience-engine/analyze", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.body.campaignId;
       const validationSessionId = req.body.validationSessionId;
       if (!campaignId) {
@@ -23671,8 +23708,8 @@ function registerAudienceEngineRoutes(app2) {
           message: sessionCheck.warning
         });
       }
-      console.log(`[AudienceEngine-Route] Analyze request: account=${accountId} campaign=${campaignId}`);
-      const result = await runAudienceEngine(accountId, campaignId);
+      console.log(`[AudienceEngine-Route] Analyze request: account=${accountId2} campaign=${campaignId}`);
+      const result = await runAudienceEngine(accountId2, campaignId);
       return res.json(result);
     } catch (err) {
       console.error("[AudienceEngine-Route] Analyze error:", err.message);
@@ -23681,12 +23718,12 @@ function registerAudienceEngineRoutes(app2) {
   });
   app2.get("/api/audience-engine/latest", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.query.campaignId;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
-      const snapshot = await getLatestAudienceSnapshot(accountId, campaignId);
+      const snapshot = await getLatestAudienceSnapshot(accountId2, campaignId);
       if (!snapshot) {
         return res.status(404).json({ error: "No audience analysis found for this campaign" });
       }
@@ -26893,7 +26930,7 @@ function formatMappedSignalsForTerritory(mapped) {
     (m) => `  - [${m.id}] "${m.label}" (${m.category}, freq=${m.frequency}, conf=${m.confidence.toFixed(2)})`
   ).join("\n");
 }
-async function layer11_positioningStatementGeneration(territories, category, segmentPriority, accountId, miData, productDna, analyticalEnrichment, structuredSignals, specificityRejectionContext) {
+async function layer11_positioningStatementGeneration(territories, category, segmentPriority, accountId2, miData, productDna, analyticalEnrichment, structuredSignals, specificityRejectionContext) {
   if (territories.length === 0) return territories;
   try {
     const topSegment = segmentPriority[0]?.segment || "target audience";
@@ -27016,7 +27053,7 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
       temperature: 0.2,
       max_tokens: 1500,
       endpoint: "positioning-engine-v3-statements",
-      accountId
+      accountId: accountId2
     });
     const content = response.choices[0]?.message?.content?.trim() || "[]";
     const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
@@ -27318,9 +27355,9 @@ function safeJsonParse2(data, fallback) {
     return fallback;
   }
 }
-async function runPositioningEngine(accountId, campaignId, miSnapshotId, audienceSnapshotId, analyticalEnrichment) {
+async function runPositioningEngine(accountId2, campaignId, miSnapshotId, audienceSnapshotId, analyticalEnrichment) {
   const startTime = Date.now();
-  const stateRefresh = await enforceGlobalStateRefresh(accountId, campaignId);
+  const stateRefresh = await enforceGlobalStateRefresh(accountId2, campaignId);
   if (stateRefresh.refreshRequired) {
     console.log(`[PositioningEngine-V3] GLOBAL_STATE_REFRESH_BLOCKED | fresh=${stateRefresh.fresh} | age=${stateRefresh.details.ageInDays}d | versionMatch=${stateRefresh.details.versionMatch}`);
     const executionTimeMs2 = Date.now() - startTime;
@@ -27349,7 +27386,7 @@ async function runPositioningEngine(accountId, campaignId, miSnapshotId, audienc
     console.log(`[PositioningEngine-V3] MI snapshot integrity failed: ${miIntegrity.failures.join(", ")} \u2014 attempting self-healing`);
     const [healed] = await db.select().from(miSnapshots).where(and27(
       eq38(miSnapshots.campaignId, campaignId),
-      eq38(miSnapshots.accountId, accountId),
+      eq38(miSnapshots.accountId, accountId2),
       inArray12(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
       eq38(miSnapshots.analysisVersion, ENGINE_VERSION)
     )).orderBy(desc27(miSnapshots.createdAt)).limit(1);
@@ -27408,12 +27445,12 @@ async function runPositioningEngine(accountId, campaignId, miSnapshotId, audienc
     } else {
       console.log(`[PositioningEngine-V3] STRUCTURED_SIGNALS_MALFORMED \u2014 SIGNAL_REQUIRED: invalid signal shape`);
       const executionTimeMs2 = Date.now() - startTime;
-      return buildAndPersistEmptyResult("SIGNAL_REQUIRED", "Structured audience signals are malformed. Re-run Audience Engine to regenerate valid signal clusters.", executionTimeMs2, miSnapshotId, audienceSnapshotId, accountId, campaignId);
+      return buildAndPersistEmptyResult("SIGNAL_REQUIRED", "Structured audience signals are malformed. Re-run Audience Engine to regenerate valid signal clusters.", executionTimeMs2, miSnapshotId, audienceSnapshotId, accountId2, campaignId);
     }
   } else {
     console.log(`[PositioningEngine-V3] STRUCTURED_SIGNALS_ABSENT \u2014 SIGNAL_REQUIRED: cannot run without structured audience signals`);
     const executionTimeMs2 = Date.now() - startTime;
-    return buildAndPersistEmptyResult("SIGNAL_REQUIRED", "Positioning engine requires structured audience signals. Re-run Audience Engine to generate signal clusters before positioning.", executionTimeMs2, miSnapshotId, audienceSnapshotId, accountId, campaignId);
+    return buildAndPersistEmptyResult("SIGNAL_REQUIRED", "Positioning engine requires structured audience signals. Re-run Audience Engine to generate signal clusters before positioning.", executionTimeMs2, miSnapshotId, audienceSnapshotId, accountId2, campaignId);
   }
   if (totalSignals < POSITIONING_THRESHOLDS.MIN_AUDIENCE_SIGNALS) {
     const executionTimeMs2 = Date.now() - startTime;
@@ -27431,7 +27468,7 @@ async function runPositioningEngine(accountId, campaignId, miSnapshotId, audienc
   if (dataReliability.isWeak) {
     console.log(`[PositioningEngine-V3] WEAK_DATA | reliability=${dataReliability.overallReliability.toFixed(2)} | advisories=${dataReliability.advisories.length}`);
   }
-  const productDna = await loadProductDNA(campaignId, accountId);
+  const productDna = await loadProductDNA(campaignId, accountId2);
   if (productDna) {
     console.log(`[PositioningEngine-V3] PRODUCT_DNA_LOADED | category=${productDna.productCategory || "n/a"} | mechanism=${productDna.uniqueMechanism || "n/a"} | advantage=${productDna.strategicAdvantage || "n/a"}`);
   }
@@ -27533,7 +27570,7 @@ async function runPositioningEngine(accountId, campaignId, miSnapshotId, audienc
       territories: positioningSnapshots.territories,
       inputSummary: positioningSnapshots.inputSummary
     }).from(positioningSnapshots).where(and27(
-      eq38(positioningSnapshots.accountId, accountId)
+      eq38(positioningSnapshots.accountId, accountId2)
     )).orderBy(desc27(positioningSnapshots.createdAt)).limit(20);
     const recentTerritoryNames = [];
     for (const snap of recentSnapshots) {
@@ -27575,7 +27612,7 @@ async function runPositioningEngine(accountId, campaignId, miSnapshotId, audienc
       if (specificityAttempt > 0) {
         console.log(`[PositioningEngine-V3] SPECIFICITY_GATE: Retry attempt ${specificityAttempt + 1}/${SPECIFICITY_MAX_RETRIES + 1} \u2014 re-generating with rejection context`);
       }
-      generatedTerritories = await layer11_positioningStatementGeneration(territoriesSnapshot, category, segmentPriority, accountId, activeMiSnapshot, productDna, analyticalEnrichment, parsedStructuredSignals, specificityRejectionContext || void 0);
+      generatedTerritories = await layer11_positioningStatementGeneration(territoriesSnapshot, category, segmentPriority, accountId2, activeMiSnapshot, productDna, analyticalEnrichment, parsedStructuredSignals, specificityRejectionContext || void 0);
       console.log(`[PositioningEngine-V3] L11 SIGNAL_DIRECT_COMPOSITION | aelProvided=${!!analyticalEnrichment} | signalBound=${!!parsedStructuredSignals}${specificityAttempt > 0 ? " | retryAttempt=" + (specificityAttempt + 1) : ""}`);
       const specificityCheck = validateTerritorySpecificity(generatedTerritories);
       if (specificityCheck.passed) {
@@ -27787,7 +27824,7 @@ CORRECTION REQUIRED:
     rawConfidence: confidenceNormalized ? rawConfidence : void 0
   };
   const [inserted] = await db.insert(positioningSnapshots).values({
-    accountId,
+    accountId: accountId2,
     campaignId,
     miSnapshotId: resolvedMiSnapshotId,
     audienceSnapshotId,
@@ -27812,10 +27849,10 @@ CORRECTION REQUIRED:
     signalTraceability: signalTraceability ? JSON.stringify(signalTraceability) : null,
     executionTimeMs
   }).returning({ id: positioningSnapshots.id });
-  await pruneOldSnapshots(db, positioningSnapshots, campaignId, 20, accountId);
+  await pruneOldSnapshots(db, positioningSnapshots, campaignId, 20, accountId2);
   try {
     const { invalidateDownstreamOnRegeneration: invalidateDownstreamOnRegeneration3 } = await Promise.resolve().then(() => (init_strategy_root(), strategy_root_exports));
-    const inv = await invalidateDownstreamOnRegeneration3(campaignId, accountId, "positioning");
+    const inv = await invalidateDownstreamOnRegeneration3(campaignId, accountId2, "positioning");
     if (inv.supersededRoots > 0) {
       console.log(`[PositioningEngine-V3] ROOT_INVALIDATED | superseded=${inv.supersededRoots}`);
     }
@@ -27847,12 +27884,12 @@ CORRECTION REQUIRED:
     signalTraceability
   };
 }
-async function buildAndPersistEmptyResult(status, message, executionTimeMs, miSnapshotId, audienceSnapshotId, accountId, campaignId, extra) {
+async function buildAndPersistEmptyResult(status, message, executionTimeMs, miSnapshotId, audienceSnapshotId, accountId2, campaignId, extra) {
   const result = buildEmptyResult2(status, message, executionTimeMs, miSnapshotId, audienceSnapshotId);
   const merged = { ...result, ...extra };
   try {
     const [inserted] = await db.insert(positioningSnapshots).values({
-      accountId,
+      accountId: accountId2,
       campaignId,
       miSnapshotId,
       audienceSnapshotId,
@@ -27920,9 +27957,9 @@ function buildEmptyResult2(status, message, executionTimeMs, miSnapshotId, audie
     createdAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
-async function getLatestPositioningSnapshot(accountId, campaignId) {
+async function getLatestPositioningSnapshot(accountId2, campaignId) {
   const [snapshot] = await db.select().from(positioningSnapshots).where(and27(
-    eq38(positioningSnapshots.accountId, accountId),
+    eq38(positioningSnapshots.accountId, accountId2),
     eq38(positioningSnapshots.campaignId, campaignId),
     eq38(positioningSnapshots.engineVersion, POSITIONING_ENGINE_VERSION)
   )).orderBy(desc27(positioningSnapshots.createdAt)).limit(1);
@@ -27948,7 +27985,7 @@ async function getLatestPositioningSnapshot(accountId, campaignId) {
 function registerPositioningEngineRoutes(app2) {
   app2.post("/api/positioning-engine/analyze", async (req, res) => {
     try {
-      const accountId = req.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const { campaignId, miSnapshotId, audienceSnapshotId, validationSessionId } = req.body;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -27966,7 +28003,7 @@ function registerPositioningEngineRoutes(app2) {
       if (!audienceSnapshotId) {
         return res.status(400).json({ error: "audienceSnapshotId is required \u2014 run Audience Engine first" });
       }
-      const result = await runPositioningEngine(accountId, campaignId, miSnapshotId, audienceSnapshotId);
+      const result = await runPositioningEngine(accountId2, campaignId, miSnapshotId, audienceSnapshotId);
       res.json(result);
     } catch (err) {
       console.error("[PositioningEngine-V3] Route error:", err.message);
@@ -27975,12 +28012,12 @@ function registerPositioningEngineRoutes(app2) {
   });
   app2.get("/api/positioning-engine/latest", async (req, res) => {
     try {
-      const accountId = req.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.query.campaignId;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId query parameter is required" });
       }
-      const snapshot = await getLatestPositioningSnapshot(accountId, campaignId);
+      const snapshot = await getLatestPositioningSnapshot(accountId2, campaignId);
       if (!snapshot) {
         return res.json(null);
       }
@@ -28117,10 +28154,10 @@ function safeParseJson2(text2) {
     return null;
   }
 }
-async function loadEngineOutputs(accountId, campaignId) {
+async function loadEngineOutputs(accountId2, campaignId) {
   const sections = [];
   try {
-    const [aud] = await db.select().from(audienceSnapshots).where(and28(eq39(audienceSnapshots.accountId, accountId), eq39(audienceSnapshots.campaignId, campaignId))).orderBy(desc28(audienceSnapshots.createdAt)).limit(1);
+    const [aud] = await db.select().from(audienceSnapshots).where(and28(eq39(audienceSnapshots.accountId, accountId2), eq39(audienceSnapshots.campaignId, campaignId))).orderBy(desc28(audienceSnapshots.createdAt)).limit(1);
     if (aud) {
       sections.push(`AUDIENCE ENGINE:`);
       const pains = safeParseJson2(aud.audiencePains);
@@ -28138,7 +28175,7 @@ async function loadEngineOutputs(accountId, campaignId) {
     console.warn(`[EngineLoad] audience error: ${err.message}`);
   }
   try {
-    const [pos] = await db.select().from(positioningSnapshots).where(and28(eq39(positioningSnapshots.accountId, accountId), eq39(positioningSnapshots.campaignId, campaignId), eq39(positioningSnapshots.status, "COMPLETE"))).orderBy(desc28(positioningSnapshots.createdAt)).limit(1);
+    const [pos] = await db.select().from(positioningSnapshots).where(and28(eq39(positioningSnapshots.accountId, accountId2), eq39(positioningSnapshots.campaignId, campaignId), eq39(positioningSnapshots.status, "COMPLETE"))).orderBy(desc28(positioningSnapshots.createdAt)).limit(1);
     if (pos) {
       sections.push(`POSITIONING ENGINE:`);
       if (pos.territory) {
@@ -28156,7 +28193,7 @@ async function loadEngineOutputs(accountId, campaignId) {
     console.warn(`[EngineLoad] positioning error: ${err.message}`);
   }
   try {
-    const [diff] = await db.select().from(differentiationSnapshots).where(and28(eq39(differentiationSnapshots.accountId, accountId), eq39(differentiationSnapshots.campaignId, campaignId), inArray13(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"]))).orderBy(desc28(differentiationSnapshots.createdAt)).limit(1);
+    const [diff] = await db.select().from(differentiationSnapshots).where(and28(eq39(differentiationSnapshots.accountId, accountId2), eq39(differentiationSnapshots.campaignId, campaignId), inArray13(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"]))).orderBy(desc28(differentiationSnapshots.createdAt)).limit(1);
     if (diff) {
       sections.push(`DIFFERENTIATION ENGINE:`);
       const pillars = safeParseJson2(diff.differentiationPillars);
@@ -28172,7 +28209,7 @@ async function loadEngineOutputs(accountId, campaignId) {
     console.warn(`[EngineLoad] differentiation error: ${err.message}`);
   }
   try {
-    const [offer] = await db.select().from(offerSnapshots).where(and28(eq39(offerSnapshots.accountId, accountId), eq39(offerSnapshots.campaignId, campaignId), eq39(offerSnapshots.status, "COMPLETE"))).orderBy(desc28(offerSnapshots.createdAt)).limit(1);
+    const [offer] = await db.select().from(offerSnapshots).where(and28(eq39(offerSnapshots.accountId, accountId2), eq39(offerSnapshots.campaignId, campaignId), eq39(offerSnapshots.status, "COMPLETE"))).orderBy(desc28(offerSnapshots.createdAt)).limit(1);
     if (offer) {
       sections.push(`OFFER ENGINE:`);
       const primary = safeParseJson2(offer.primaryOffer);
@@ -28190,7 +28227,7 @@ async function loadEngineOutputs(accountId, campaignId) {
     console.warn(`[EngineLoad] offer error: ${err.message}`);
   }
   try {
-    const [funnel] = await db.select().from(funnelSnapshots).where(and28(eq39(funnelSnapshots.accountId, accountId), eq39(funnelSnapshots.campaignId, campaignId), eq39(funnelSnapshots.status, "COMPLETE"))).orderBy(desc28(funnelSnapshots.createdAt)).limit(1);
+    const [funnel] = await db.select().from(funnelSnapshots).where(and28(eq39(funnelSnapshots.accountId, accountId2), eq39(funnelSnapshots.campaignId, campaignId), eq39(funnelSnapshots.status, "COMPLETE"))).orderBy(desc28(funnelSnapshots.createdAt)).limit(1);
     if (funnel) {
       sections.push(`FUNNEL ENGINE:`);
       const primary = safeParseJson2(funnel.primaryFunnel);
@@ -28208,7 +28245,7 @@ async function loadEngineOutputs(accountId, campaignId) {
     console.warn(`[EngineLoad] funnel error: ${err.message}`);
   }
   try {
-    const [integ] = await db.select().from(integritySnapshots).where(and28(eq39(integritySnapshots.accountId, accountId), eq39(integritySnapshots.campaignId, campaignId), eq39(integritySnapshots.status, "COMPLETE"))).orderBy(desc28(integritySnapshots.createdAt)).limit(1);
+    const [integ] = await db.select().from(integritySnapshots).where(and28(eq39(integritySnapshots.accountId, accountId2), eq39(integritySnapshots.campaignId, campaignId), eq39(integritySnapshots.status, "COMPLETE"))).orderBy(desc28(integritySnapshots.createdAt)).limit(1);
     if (integ) {
       sections.push(`INTEGRITY ENGINE:`);
       if (integ.overallIntegrityScore) sections.push(`- Overall Integrity Score: ${integ.overallIntegrityScore}`);
@@ -28222,7 +28259,7 @@ async function loadEngineOutputs(accountId, campaignId) {
     console.warn(`[EngineLoad] integrity error: ${err.message}`);
   }
   try {
-    const [aware] = await db.select().from(awarenessSnapshots).where(and28(eq39(awarenessSnapshots.accountId, accountId), eq39(awarenessSnapshots.campaignId, campaignId), eq39(awarenessSnapshots.status, "COMPLETE"))).orderBy(desc28(awarenessSnapshots.createdAt)).limit(1);
+    const [aware] = await db.select().from(awarenessSnapshots).where(and28(eq39(awarenessSnapshots.accountId, accountId2), eq39(awarenessSnapshots.campaignId, campaignId), eq39(awarenessSnapshots.status, "COMPLETE"))).orderBy(desc28(awarenessSnapshots.createdAt)).limit(1);
     if (aware) {
       sections.push(`AWARENESS ENGINE:`);
       const primary = safeParseJson2(aware.primaryRoute);
@@ -28238,7 +28275,7 @@ async function loadEngineOutputs(accountId, campaignId) {
     console.warn(`[EngineLoad] awareness error: ${err.message}`);
   }
   try {
-    const [pers] = await db.select().from(persuasionSnapshots).where(and28(eq39(persuasionSnapshots.accountId, accountId), eq39(persuasionSnapshots.campaignId, campaignId), eq39(persuasionSnapshots.status, "COMPLETE"))).orderBy(desc28(persuasionSnapshots.createdAt)).limit(1);
+    const [pers] = await db.select().from(persuasionSnapshots).where(and28(eq39(persuasionSnapshots.accountId, accountId2), eq39(persuasionSnapshots.campaignId, campaignId), eq39(persuasionSnapshots.status, "COMPLETE"))).orderBy(desc28(persuasionSnapshots.createdAt)).limit(1);
     if (pers) {
       sections.push(`PERSUASION ENGINE:`);
       const primary = safeParseJson2(pers.primaryRoute);
@@ -28255,7 +28292,7 @@ async function loadEngineOutputs(accountId, campaignId) {
     console.warn(`[EngineLoad] persuasion error: ${err.message}`);
   }
   try {
-    const [statVal] = await db.select().from(strategyValidationSnapshots).where(and28(eq39(strategyValidationSnapshots.accountId, accountId), eq39(strategyValidationSnapshots.campaignId, campaignId), eq39(strategyValidationSnapshots.status, "COMPLETE"))).orderBy(desc28(strategyValidationSnapshots.createdAt)).limit(1);
+    const [statVal] = await db.select().from(strategyValidationSnapshots).where(and28(eq39(strategyValidationSnapshots.accountId, accountId2), eq39(strategyValidationSnapshots.campaignId, campaignId), eq39(strategyValidationSnapshots.status, "COMPLETE"))).orderBy(desc28(strategyValidationSnapshots.createdAt)).limit(1);
     if (statVal) {
       sections.push(`STATISTICAL VALIDATION:`);
       const result = safeParseJson2(statVal.result);
@@ -28270,7 +28307,7 @@ async function loadEngineOutputs(accountId, campaignId) {
     console.warn(`[EngineLoad] statValidation error: ${err.message}`);
   }
   try {
-    const [budget] = await db.select().from(budgetGovernorSnapshots).where(and28(eq39(budgetGovernorSnapshots.accountId, accountId), eq39(budgetGovernorSnapshots.campaignId, campaignId), eq39(budgetGovernorSnapshots.status, "COMPLETE"))).orderBy(desc28(budgetGovernorSnapshots.createdAt)).limit(1);
+    const [budget] = await db.select().from(budgetGovernorSnapshots).where(and28(eq39(budgetGovernorSnapshots.accountId, accountId2), eq39(budgetGovernorSnapshots.campaignId, campaignId), eq39(budgetGovernorSnapshots.status, "COMPLETE"))).orderBy(desc28(budgetGovernorSnapshots.createdAt)).limit(1);
     if (budget) {
       sections.push(`BUDGET GOVERNOR:`);
       const result = safeParseJson2(budget.result);
@@ -28285,7 +28322,7 @@ async function loadEngineOutputs(accountId, campaignId) {
     console.warn(`[EngineLoad] budget error: ${err.message}`);
   }
   try {
-    const [chan] = await db.select().from(channelSelectionSnapshots).where(and28(eq39(channelSelectionSnapshots.accountId, accountId), eq39(channelSelectionSnapshots.campaignId, campaignId), eq39(channelSelectionSnapshots.status, "COMPLETE"))).orderBy(desc28(channelSelectionSnapshots.createdAt)).limit(1);
+    const [chan] = await db.select().from(channelSelectionSnapshots).where(and28(eq39(channelSelectionSnapshots.accountId, accountId2), eq39(channelSelectionSnapshots.campaignId, campaignId), eq39(channelSelectionSnapshots.status, "COMPLETE"))).orderBy(desc28(channelSelectionSnapshots.createdAt)).limit(1);
     if (chan) {
       sections.push(`CHANNEL SELECTION:`);
       const result = safeParseJson2(chan.result);
@@ -28302,7 +28339,7 @@ async function loadEngineOutputs(accountId, campaignId) {
     console.warn(`[EngineLoad] channel error: ${err.message}`);
   }
   try {
-    const [iter] = await db.select().from(iterationSnapshots).where(and28(eq39(iterationSnapshots.accountId, accountId), eq39(iterationSnapshots.campaignId, campaignId), eq39(iterationSnapshots.status, "COMPLETE"))).orderBy(desc28(iterationSnapshots.createdAt)).limit(1);
+    const [iter] = await db.select().from(iterationSnapshots).where(and28(eq39(iterationSnapshots.accountId, accountId2), eq39(iterationSnapshots.campaignId, campaignId), eq39(iterationSnapshots.status, "COMPLETE"))).orderBy(desc28(iterationSnapshots.createdAt)).limit(1);
     if (iter) {
       sections.push(`ITERATION ENGINE:`);
       const result = safeParseJson2(iter.result);
@@ -28317,7 +28354,7 @@ async function loadEngineOutputs(accountId, campaignId) {
     console.warn(`[EngineLoad] iteration error: ${err.message}`);
   }
   try {
-    const [ret] = await db.select().from(retentionSnapshots).where(and28(eq39(retentionSnapshots.accountId, accountId), eq39(retentionSnapshots.campaignId, campaignId), eq39(retentionSnapshots.status, "COMPLETE"))).orderBy(desc28(retentionSnapshots.createdAt)).limit(1);
+    const [ret] = await db.select().from(retentionSnapshots).where(and28(eq39(retentionSnapshots.accountId, accountId2), eq39(retentionSnapshots.campaignId, campaignId), eq39(retentionSnapshots.status, "COMPLETE"))).orderBy(desc28(retentionSnapshots.createdAt)).limit(1);
     if (ret) {
       sections.push(`RETENTION ENGINE:`);
       const result = safeParseJson2(ret.result);
@@ -28609,11 +28646,11 @@ function registerExtractionRoutes(app2) {
 }
 
 // server/strategic-core/gate-routes.ts
-async function resolveCampaignContext(accountId, campaignId, metaConnected) {
+async function resolveCampaignContext(accountId2, campaignId, metaConnected) {
   if (campaignId) {
     const [campaign] = await db.select().from(campaignSelections).where(and29(
       eq40(campaignSelections.selectedCampaignId, campaignId),
-      eq40(campaignSelections.accountId, accountId)
+      eq40(campaignSelections.accountId, accountId2)
     )).limit(1);
     if (!campaign) {
       return { context: null, error: "Selected campaign not found. Please select a valid campaign." };
@@ -28629,7 +28666,7 @@ async function resolveCampaignContext(accountId, campaignId, metaConnected) {
       error: null
     };
   }
-  const [selectedCampaign] = await db.select().from(campaignSelections).where(eq40(campaignSelections.accountId, accountId)).limit(1);
+  const [selectedCampaign] = await db.select().from(campaignSelections).where(eq40(campaignSelections.accountId, accountId2)).limit(1);
   if (selectedCampaign) {
     return {
       context: {
@@ -28648,12 +28685,12 @@ function registerGateRoutes(app2) {
   app2.post("/api/strategic/init", async (req, res) => {
     try {
       const {
-        accountId = "default",
         campaignId,
         competitorUrls,
         averageSellingPrice,
         metaConnected = false
       } = req.body;
+      const accountId2 = req.accountId || "default";
       if (!competitorUrls || !Array.isArray(competitorUrls) || competitorUrls.length < 1) {
         return res.status(400).json({
           error: "GATE_FAILED",
@@ -28687,7 +28724,7 @@ function registerGateRoutes(app2) {
         });
       }
       const { context: campaignContext, error: campaignError } = await resolveCampaignContext(
-        accountId,
+        accountId2,
         campaignId,
         metaConnected
       );
@@ -28699,7 +28736,7 @@ function registerGateRoutes(app2) {
       }
       const resolvedCampaignId = campaignContext.campaignId;
       const [latestMiSnapshot] = await db.select().from(miSnapshots).where(and29(
-        eq40(miSnapshots.accountId, accountId),
+        eq40(miSnapshots.accountId, accountId2),
         eq40(miSnapshots.campaignId, resolvedCampaignId)
       )).orderBy(desc29(miSnapshots.createdAt)).limit(1);
       const miReadiness = getEngineReadinessState(
@@ -28719,7 +28756,7 @@ function registerGateRoutes(app2) {
         });
       }
       const [blueprint] = await db.insert(strategicBlueprints).values({
-        accountId,
+        accountId: accountId2,
         campaignId: campaignContext.campaignId,
         campaignContext: JSON.stringify(campaignContext),
         blueprintVersion: 1,
@@ -28734,7 +28771,7 @@ function registerGateRoutes(app2) {
       }));
       await db.insert(blueprintCompetitors).values(competitorInserts);
       await logAuditEvent({
-        accountId,
+        accountId: accountId2,
         campaignId: campaignContext.campaignId,
         blueprintId: blueprint.id,
         blueprintVersion: 1,
@@ -28822,8 +28859,8 @@ function registerGateRoutes(app2) {
   });
   app2.get("/api/strategic/blueprints", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      const blueprints = await db.select().from(strategicBlueprints).where(eq40(strategicBlueprints.accountId, accountId)).orderBy(desc29(strategicBlueprints.createdAt));
+      const accountId2 = req.accountId || "default";
+      const blueprints = await db.select().from(strategicBlueprints).where(eq40(strategicBlueprints.accountId, accountId2)).orderBy(desc29(strategicBlueprints.createdAt));
       res.json({
         success: true,
         blueprints: blueprints.map((b) => ({
@@ -28839,13 +28876,14 @@ function registerGateRoutes(app2) {
   });
   app2.get("/api/strategic/audit-log", async (req, res) => {
     try {
-      const { accountId = "default", blueprintId, limit: queryLimit = "50" } = req.query;
+      const { blueprintId, limit: queryLimit = "50" } = req.query;
+      const accountId2 = req.accountId || "default";
       const { strategicAuditLogs: auditTable } = await Promise.resolve().then(() => (init_schema(), schema_exports));
       let query = db.select().from(auditTable);
       if (blueprintId) {
         query = query.where(eq40(auditTable.blueprintId, blueprintId));
       } else {
-        query = query.where(eq40(auditTable.accountId, accountId));
+        query = query.where(eq40(auditTable.accountId, accountId2));
       }
       const logs = await query.orderBy(desc29(auditTable.timestamp)).limit(parseInt(queryLimit));
       res.json({
@@ -28862,7 +28900,8 @@ function registerGateRoutes(app2) {
   });
   app2.get("/api/strategic/blueprint-versions", async (req, res) => {
     try {
-      const { campaignId, blueprintId, accountId = "default" } = req.query;
+      const { campaignId, blueprintId } = req.query;
+      const accountId2 = req.accountId || "default";
       if (!campaignId && !blueprintId) {
         return res.status(400).json({ error: "Provide campaignId or blueprintId" });
       }
@@ -28872,7 +28911,7 @@ function registerGateRoutes(app2) {
       } else {
         const blueprints = await db.select({ id: strategicBlueprints.id }).from(strategicBlueprints).where(and29(
           eq40(strategicBlueprints.campaignId, campaignId),
-          eq40(strategicBlueprints.accountId, accountId)
+          eq40(strategicBlueprints.accountId, accountId2)
         ));
         targetBlueprintIds = blueprints.map((b) => b.id);
       }
@@ -28935,7 +28974,8 @@ function registerGateRoutes(app2) {
   });
   app2.get("/api/strategic/field-diffs", async (req, res) => {
     try {
-      const { blueprintId, campaignId, accountId = "default", limit: queryLimit = "100" } = req.query;
+      const { blueprintId, campaignId, limit: queryLimit = "100" } = req.query;
+      const accountId2 = req.accountId || "default";
       if (!blueprintId && !campaignId) {
         return res.status(400).json({ error: "Provide blueprintId or campaignId" });
       }
@@ -28946,7 +28986,7 @@ function registerGateRoutes(app2) {
       } else {
         const blueprints = await db.select({ id: strategicBlueprints.id }).from(strategicBlueprints).where(and29(
           eq40(strategicBlueprints.campaignId, campaignId),
-          eq40(strategicBlueprints.accountId, accountId)
+          eq40(strategicBlueprints.accountId, accountId2)
         ));
         targetBlueprintIds = blueprints.map((b) => b.id);
       }
@@ -29398,7 +29438,7 @@ Generate the Strategic Market Map now. All analysis scoped to ${campaignContext.
           { role: "user", content: userPrompt }
         ],
         max_tokens: 3e3,
-        accountId: "default",
+        accountId: req.accountId || "default",
         endpoint: "strategic-thinking"
       });
       const rawText = response.choices[0]?.message?.content || "";
@@ -29583,7 +29623,7 @@ Perform full validation now.`;
           { role: "user", content: userPrompt }
         ],
         max_tokens: 2500,
-        accountId: "default",
+        accountId: req.accountId || "default",
         endpoint: "strategic-validation"
       });
       const rawText = response.choices[0]?.message?.content || "";
@@ -29723,13 +29763,13 @@ function computeDataConfidence(sources) {
   if (sources.hasPerformance) score += weights.performance;
   return Math.round(Math.min(100, Math.max(0, score)));
 }
-async function buildStrategicContext(campaignId, accountId) {
-  if (!campaignId || !accountId) {
+async function buildStrategicContext(campaignId, accountId2) {
+  if (!campaignId || !accountId2) {
     throw new ContextKernelError("campaignId and accountId are required to build strategic context");
   }
-  const [bdl] = await db.select().from(businessDataLayer).where(and31(eq44(businessDataLayer.campaignId, campaignId), eq44(businessDataLayer.accountId, accountId))).limit(1);
-  const [metrics] = await db.select().from(manualCampaignMetrics).where(and31(eq44(manualCampaignMetrics.campaignId, campaignId), eq44(manualCampaignMetrics.accountId, accountId))).orderBy(desc31(manualCampaignMetrics.updatedAt)).limit(1);
-  const competitors = await db.select().from(ciCompetitors).where(and31(eq44(ciCompetitors.accountId, accountId), eq44(ciCompetitors.campaignId, campaignId), eq44(ciCompetitors.isActive, true)));
+  const [bdl] = await db.select().from(businessDataLayer).where(and31(eq44(businessDataLayer.campaignId, campaignId), eq44(businessDataLayer.accountId, accountId2))).limit(1);
+  const [metrics] = await db.select().from(manualCampaignMetrics).where(and31(eq44(manualCampaignMetrics.campaignId, campaignId), eq44(manualCampaignMetrics.accountId, accountId2))).orderBy(desc31(manualCampaignMetrics.updatedAt)).limit(1);
+  const competitors = await db.select().from(ciCompetitors).where(and31(eq44(ciCompetitors.accountId, accountId2), eq44(ciCompetitors.campaignId, campaignId), eq44(ciCompetitors.isActive, true)));
   const perfSnapshots = await db.select().from(performanceSnapshots).where(eq44(performanceSnapshots.postId, campaignId)).orderBy(desc31(performanceSnapshots.fetchedAt)).limit(10);
   const impressions = metrics?.impressions || 0;
   const clicks = metrics?.clicks || 0;
@@ -29766,7 +29806,7 @@ async function buildStrategicContext(campaignId, accountId) {
     growthDirection: deriveGrowthDirection(revenue, spend, roas),
     dataConfidence,
     campaignId,
-    accountId
+    accountId: accountId2
   };
 }
 
@@ -30307,13 +30347,13 @@ function isValidTransition(from, to) {
   if (!allowed) return false;
   return allowed.includes(to);
 }
-async function transitionState(planId, from, to, accountId) {
+async function transitionState(planId, from, to, accountId2) {
   if (!isValidTransition(from, to)) {
     console.error(`[ExecutionActivation] INVALID_TRANSITION: ${from} \u2192 ${to} for plan ${planId}`);
     return false;
   }
   await db.update(strategicPlans).set({ executionStatus: to, updatedAt: /* @__PURE__ */ new Date() }).where(eq45(strategicPlans.id, planId));
-  await logAudit(accountId, "EXECUTION_STATE_TRANSITION", {
+  await logAudit(accountId2, "EXECUTION_STATE_TRANSITION", {
     details: { planId, from, to }
   });
   console.log(`[ExecutionActivation] STATE_TRANSITION: ${from} \u2192 ${to} | plan=${planId}`);
@@ -30375,7 +30415,7 @@ function calcTotals(distribution, periodDays) {
     ...distribution
   };
 }
-function generateCalendarSlots(planId, campaignId, accountId, work, startDate, periodDays) {
+function generateCalendarSlots(planId, campaignId, accountId2, work, startDate, periodDays) {
   const slots = [];
   const contentQueue = [];
   if (work.totalReels > 0) contentQueue.push({ type: "reel", count: work.totalReels });
@@ -30401,7 +30441,7 @@ function generateCalendarSlots(planId, campaignId, accountId, work, startDate, p
     slots.push({
       planId,
       campaignId,
-      accountId,
+      accountId: accountId2,
       contentType: allItems[i].type,
       scheduledDate: dateStr,
       scheduledTime: time,
@@ -31212,11 +31252,11 @@ function computeStrategyHash(bundle) {
   });
   return crypto6.createHash("sha256").update(data).digest("hex").substring(0, 16);
 }
-async function buildRootBundle(campaignId, accountId) {
+async function buildRootBundle(campaignId, accountId2) {
   const [bizData, campaign, campSel] = await Promise.all([
-    db.select().from(businessDataLayer).where(and33(eq46(businessDataLayer.campaignId, campaignId), eq46(businessDataLayer.accountId, accountId))).orderBy(desc32(businessDataLayer.createdAt)).limit(1).then((r) => r[0]),
+    db.select().from(businessDataLayer).where(and33(eq46(businessDataLayer.campaignId, campaignId), eq46(businessDataLayer.accountId, accountId2))).orderBy(desc32(businessDataLayer.createdAt)).limit(1).then((r) => r[0]),
     db.select().from(growthCampaigns).where(eq46(growthCampaigns.id, campaignId)).limit(1).then((r) => r[0]),
-    db.select().from(campaignSelections).where(and33(eq46(campaignSelections.selectedCampaignId, campaignId), eq46(campaignSelections.accountId, accountId))).orderBy(desc32(campaignSelections.selectedAt)).limit(1).then((r) => r[0])
+    db.select().from(campaignSelections).where(and33(eq46(campaignSelections.selectedCampaignId, campaignId), eq46(campaignSelections.accountId, accountId2))).orderBy(desc32(campaignSelections.selectedAt)).limit(1).then((r) => r[0])
   ]);
   const [
     miData,
@@ -31233,19 +31273,19 @@ async function buildRootBundle(campaignId, accountId) {
     budgetData,
     statValData
   ] = await Promise.all([
-    db.select({ marketDiagnosis: miSnapshots.marketDiagnosis }).from(miSnapshots).where(and33(eq46(miSnapshots.accountId, accountId), eq46(miSnapshots.campaignId, campaignId))).orderBy(desc32(miSnapshots.createdAt)).limit(1).then((r) => r[0]),
-    db.select({ audiencePains: audienceSnapshots.audiencePains, audienceSegments: audienceSnapshots.audienceSegments, emotionalDrivers: audienceSnapshots.emotionalDrivers }).from(audienceSnapshots).where(and33(eq46(audienceSnapshots.accountId, accountId), eq46(audienceSnapshots.campaignId, campaignId))).orderBy(desc32(audienceSnapshots.createdAt)).limit(1).then((r) => r[0]),
-    db.select({ territories: positioningSnapshots.territories, narrativeDirection: positioningSnapshots.narrativeDirection }).from(positioningSnapshots).where(and33(eq46(positioningSnapshots.accountId, accountId), eq46(positioningSnapshots.campaignId, campaignId))).orderBy(desc32(positioningSnapshots.createdAt)).limit(1).then((r) => r[0]),
-    db.select({ differentiationPillars: differentiationSnapshots.differentiationPillars, authorityMode: differentiationSnapshots.authorityMode }).from(differentiationSnapshots).where(and33(eq46(differentiationSnapshots.accountId, accountId), eq46(differentiationSnapshots.campaignId, campaignId))).orderBy(desc32(differentiationSnapshots.createdAt)).limit(1).then((r) => r[0]),
-    db.select({ primaryOffer: offerSnapshots.primaryOffer }).from(offerSnapshots).where(and33(eq46(offerSnapshots.accountId, accountId), eq46(offerSnapshots.campaignId, campaignId))).orderBy(desc32(offerSnapshots.createdAt)).limit(1).then((r) => r[0]),
-    db.select({ primaryFunnel: funnelSnapshots.primaryFunnel }).from(funnelSnapshots).where(and33(eq46(funnelSnapshots.accountId, accountId), eq46(funnelSnapshots.campaignId, campaignId))).orderBy(desc32(funnelSnapshots.createdAt)).limit(1).then((r) => r[0]),
-    db.select({ primaryRoute: awarenessSnapshots.primaryRoute, awarenessStrengthScore: awarenessSnapshots.awarenessStrengthScore }).from(awarenessSnapshots).where(and33(eq46(awarenessSnapshots.accountId, accountId), eq46(awarenessSnapshots.campaignId, campaignId))).orderBy(desc32(awarenessSnapshots.createdAt)).limit(1).then((r) => r[0]),
-    db.select({ primaryRoute: persuasionSnapshots.primaryRoute }).from(persuasionSnapshots).where(and33(eq46(persuasionSnapshots.accountId, accountId), eq46(persuasionSnapshots.campaignId, campaignId))).orderBy(desc32(persuasionSnapshots.createdAt)).limit(1).then((r) => r[0]),
-    db.select({ result: channelSelectionSnapshots.result }).from(channelSelectionSnapshots).where(and33(eq46(channelSelectionSnapshots.accountId, accountId), eq46(channelSelectionSnapshots.campaignId, campaignId))).orderBy(desc32(channelSelectionSnapshots.createdAt)).limit(1).then((r) => r[0]),
-    db.select({ result: iterationSnapshots.result }).from(iterationSnapshots).where(and33(eq46(iterationSnapshots.accountId, accountId), eq46(iterationSnapshots.campaignId, campaignId))).orderBy(desc32(iterationSnapshots.createdAt)).limit(1).then((r) => r[0]),
-    db.select({ result: retentionSnapshots.result }).from(retentionSnapshots).where(and33(eq46(retentionSnapshots.accountId, accountId), eq46(retentionSnapshots.campaignId, campaignId))).orderBy(desc32(retentionSnapshots.createdAt)).limit(1).then((r) => r[0]),
-    db.select({ result: budgetGovernorSnapshots.result }).from(budgetGovernorSnapshots).where(and33(eq46(budgetGovernorSnapshots.accountId, accountId), eq46(budgetGovernorSnapshots.campaignId, campaignId))).orderBy(desc32(budgetGovernorSnapshots.createdAt)).limit(1).then((r) => r[0]),
-    db.select({ result: strategyValidationSnapshots.result, confidenceScore: strategyValidationSnapshots.confidenceScore }).from(strategyValidationSnapshots).where(and33(eq46(strategyValidationSnapshots.accountId, accountId), eq46(strategyValidationSnapshots.campaignId, campaignId))).orderBy(desc32(strategyValidationSnapshots.createdAt)).limit(1).then((r) => r[0])
+    db.select({ marketDiagnosis: miSnapshots.marketDiagnosis }).from(miSnapshots).where(and33(eq46(miSnapshots.accountId, accountId2), eq46(miSnapshots.campaignId, campaignId))).orderBy(desc32(miSnapshots.createdAt)).limit(1).then((r) => r[0]),
+    db.select({ audiencePains: audienceSnapshots.audiencePains, audienceSegments: audienceSnapshots.audienceSegments, emotionalDrivers: audienceSnapshots.emotionalDrivers }).from(audienceSnapshots).where(and33(eq46(audienceSnapshots.accountId, accountId2), eq46(audienceSnapshots.campaignId, campaignId))).orderBy(desc32(audienceSnapshots.createdAt)).limit(1).then((r) => r[0]),
+    db.select({ territories: positioningSnapshots.territories, narrativeDirection: positioningSnapshots.narrativeDirection }).from(positioningSnapshots).where(and33(eq46(positioningSnapshots.accountId, accountId2), eq46(positioningSnapshots.campaignId, campaignId))).orderBy(desc32(positioningSnapshots.createdAt)).limit(1).then((r) => r[0]),
+    db.select({ differentiationPillars: differentiationSnapshots.differentiationPillars, authorityMode: differentiationSnapshots.authorityMode }).from(differentiationSnapshots).where(and33(eq46(differentiationSnapshots.accountId, accountId2), eq46(differentiationSnapshots.campaignId, campaignId))).orderBy(desc32(differentiationSnapshots.createdAt)).limit(1).then((r) => r[0]),
+    db.select({ primaryOffer: offerSnapshots.primaryOffer }).from(offerSnapshots).where(and33(eq46(offerSnapshots.accountId, accountId2), eq46(offerSnapshots.campaignId, campaignId))).orderBy(desc32(offerSnapshots.createdAt)).limit(1).then((r) => r[0]),
+    db.select({ primaryFunnel: funnelSnapshots.primaryFunnel }).from(funnelSnapshots).where(and33(eq46(funnelSnapshots.accountId, accountId2), eq46(funnelSnapshots.campaignId, campaignId))).orderBy(desc32(funnelSnapshots.createdAt)).limit(1).then((r) => r[0]),
+    db.select({ primaryRoute: awarenessSnapshots.primaryRoute, awarenessStrengthScore: awarenessSnapshots.awarenessStrengthScore }).from(awarenessSnapshots).where(and33(eq46(awarenessSnapshots.accountId, accountId2), eq46(awarenessSnapshots.campaignId, campaignId))).orderBy(desc32(awarenessSnapshots.createdAt)).limit(1).then((r) => r[0]),
+    db.select({ primaryRoute: persuasionSnapshots.primaryRoute }).from(persuasionSnapshots).where(and33(eq46(persuasionSnapshots.accountId, accountId2), eq46(persuasionSnapshots.campaignId, campaignId))).orderBy(desc32(persuasionSnapshots.createdAt)).limit(1).then((r) => r[0]),
+    db.select({ result: channelSelectionSnapshots.result }).from(channelSelectionSnapshots).where(and33(eq46(channelSelectionSnapshots.accountId, accountId2), eq46(channelSelectionSnapshots.campaignId, campaignId))).orderBy(desc32(channelSelectionSnapshots.createdAt)).limit(1).then((r) => r[0]),
+    db.select({ result: iterationSnapshots.result }).from(iterationSnapshots).where(and33(eq46(iterationSnapshots.accountId, accountId2), eq46(iterationSnapshots.campaignId, campaignId))).orderBy(desc32(iterationSnapshots.createdAt)).limit(1).then((r) => r[0]),
+    db.select({ result: retentionSnapshots.result }).from(retentionSnapshots).where(and33(eq46(retentionSnapshots.accountId, accountId2), eq46(retentionSnapshots.campaignId, campaignId))).orderBy(desc32(retentionSnapshots.createdAt)).limit(1).then((r) => r[0]),
+    db.select({ result: budgetGovernorSnapshots.result }).from(budgetGovernorSnapshots).where(and33(eq46(budgetGovernorSnapshots.accountId, accountId2), eq46(budgetGovernorSnapshots.campaignId, campaignId))).orderBy(desc32(budgetGovernorSnapshots.createdAt)).limit(1).then((r) => r[0]),
+    db.select({ result: strategyValidationSnapshots.result, confidenceScore: strategyValidationSnapshots.confidenceScore }).from(strategyValidationSnapshots).where(and33(eq46(strategyValidationSnapshots.accountId, accountId2), eq46(strategyValidationSnapshots.campaignId, campaignId))).orderBy(desc32(strategyValidationSnapshots.createdAt)).limit(1).then((r) => r[0])
   ]);
   const offer = safeJson2(offerData?.primaryOffer);
   const funnel = safeJson2(funnelData?.primaryFunnel);
@@ -31319,29 +31359,29 @@ async function buildRootBundle(campaignId, accountId) {
     sourceSnapshot
   };
 }
-async function getActiveRootBundle(campaignId, accountId) {
+async function getActiveRootBundle(campaignId, accountId2) {
   const [bundle] = await db.select().from(rootBundles).where(and33(
     eq46(rootBundles.campaignId, campaignId),
-    eq46(rootBundles.accountId, accountId),
+    eq46(rootBundles.accountId, accountId2),
     eq46(rootBundles.status, "active")
   )).orderBy(desc32(rootBundles.createdAt)).limit(1);
   return bundle || null;
 }
-async function getNextVersion(campaignId, accountId) {
-  const [latest] = await db.select({ version: rootBundles.version }).from(rootBundles).where(and33(eq46(rootBundles.campaignId, campaignId), eq46(rootBundles.accountId, accountId))).orderBy(desc32(rootBundles.version)).limit(1);
+async function getNextVersion(campaignId, accountId2) {
+  const [latest] = await db.select({ version: rootBundles.version }).from(rootBundles).where(and33(eq46(rootBundles.campaignId, campaignId), eq46(rootBundles.accountId, accountId2))).orderBy(desc32(rootBundles.version)).limit(1);
   return (latest?.version || 0) + 1;
 }
-async function lockRootBundle(campaignId, accountId) {
+async function lockRootBundle(campaignId, accountId2) {
   await db.update(rootBundles).set({ status: "stale", staleAt: /* @__PURE__ */ new Date(), staleReason: "new_version_created" }).where(and33(
     eq46(rootBundles.campaignId, campaignId),
-    eq46(rootBundles.accountId, accountId),
+    eq46(rootBundles.accountId, accountId2),
     eq46(rootBundles.status, "active")
   ));
-  const built = await buildRootBundle(campaignId, accountId);
-  const version = await getNextVersion(campaignId, accountId);
+  const built = await buildRootBundle(campaignId, accountId2);
+  const version = await getNextVersion(campaignId, accountId2);
   const [inserted] = await db.insert(rootBundles).values({
     campaignId,
-    accountId,
+    accountId: accountId2,
     version,
     businessRoots: JSON.stringify(built.businessRoots),
     funnelRoots: JSON.stringify(built.funnelRoots),
@@ -31360,10 +31400,10 @@ async function lockRootBundle(campaignId, accountId) {
     strategyHash: built.strategyHash
   };
 }
-async function detectStaleness(campaignId, accountId) {
-  const active = await getActiveRootBundle(campaignId, accountId);
+async function detectStaleness(campaignId, accountId2) {
+  const active = await getActiveRootBundle(campaignId, accountId2);
   if (!active) return { isStale: false, reason: null, currentHash: null, activeHash: null };
-  const currentData = await buildRootBundle(campaignId, accountId);
+  const currentData = await buildRootBundle(campaignId, accountId2);
   const currentHash = currentData.strategyHash;
   const activeHash = active.strategyHash;
   if (currentHash !== activeHash) {
@@ -31447,12 +31487,12 @@ function registerRootBundleRoutes(app2) {
   app2.get("/api/root-bundle/:campaignId", async (req, res) => {
     try {
       const campaignId = req.params.campaignId;
-      const accountId = req.query.accountId || "default";
-      const active = await getActiveRootBundle(campaignId, accountId);
+      const accountId2 = req.accountId || "default";
+      const active = await getActiveRootBundle(campaignId, accountId2);
       if (!active) {
         return res.json({ success: true, rootBundle: null, message: "No root bundle exists yet" });
       }
-      const staleness = await detectStaleness(campaignId, accountId);
+      const staleness = await detectStaleness(campaignId, accountId2);
       res.json({
         success: true,
         rootBundle: {
@@ -31479,8 +31519,8 @@ function registerRootBundleRoutes(app2) {
     try {
       const { campaignId } = req.body;
       if (!campaignId) return res.status(400).json({ success: false, error: "campaignId required" });
-      const accountId = req.body.accountId || "default";
-      const locked = await lockRootBundle(campaignId, accountId);
+      const accountId2 = req.accountId || "default";
+      const locked = await lockRootBundle(campaignId, accountId2);
       res.json({ success: true, rootBundle: locked });
     } catch (err) {
       console.error("[RootBundle] Lock error:", err.message);
@@ -31499,8 +31539,8 @@ function registerRootBundleRoutes(app2) {
   app2.get("/api/root-bundle/:campaignId/staleness", async (req, res) => {
     try {
       const campaignId = req.params.campaignId;
-      const accountId = req.query.accountId || "default";
-      const staleness = await detectStaleness(campaignId, accountId);
+      const accountId2 = req.accountId || "default";
+      const staleness = await detectStaleness(campaignId, accountId2);
       res.json({ success: true, ...staleness });
     } catch (err) {
       console.error("[RootBundle] Staleness check error:", err.message);
@@ -31685,7 +31725,7 @@ function checkFeasibility(goal, funnel, bizData) {
   const explanation = verdict === "feasible" ? "The goal is achievable with the given resources and timeline." : verdict === "borderline" ? `The goal is challenging. ${constraints[0] || "Consider adjusting timeline or budget."}` : `The goal may not be achievable. ${constraints.join(". ")}.`;
   return { verdict, score, explanation, constraints, budgetAdjustment };
 }
-async function generateSimulation(campaignId, accountId, planId, goal, funnel, feasibility, bizData, rootBundleId = null) {
+async function generateSimulation(campaignId, accountId2, planId, goal, funnel, feasibility, bizData, rootBundleId = null) {
   const monthlyBudget = parseFloat(bizData?.monthlyBudget?.replace(/[^0-9.]/g, "") || "0");
   const budgetInfo = monthlyBudget > 0 ? `Current Monthly Budget: $${monthlyBudget}
 Budget x1.5: $${Math.round(monthlyBudget * 1.5)}
@@ -31768,14 +31808,14 @@ Make numbers realistic for this specific business type and budget level.`;
       response_format: { type: "json_object" },
       max_tokens: 2e3,
       temperature: 0.3,
-      accountId,
+      accountId: accountId2,
       endpoint: "goal-math-simulation"
     });
     const raw = response.choices?.[0]?.message?.content || "";
     const parsed = JSON.parse(raw);
     const [sim] = await db.insert(growthSimulations).values({
       campaignId,
-      accountId,
+      accountId: accountId2,
       planId,
       goalDecompositionId: null,
       rootBundleId,
@@ -31795,7 +31835,7 @@ Make numbers realistic for this specific business type and budget level.`;
     try {
       const [sim] = await db.insert(growthSimulations).values({
         campaignId,
-        accountId,
+        accountId: accountId2,
         planId,
         goalDecompositionId: null,
         rootBundleId,
@@ -31865,15 +31905,15 @@ function buildDeterministicSimulation(goal, funnel, feasibility) {
     }
   };
 }
-async function decomposeGoal(campaignId, accountId, rootBundleId = null, rootBundleVersion = null) {
-  const [bizData] = await db.select().from(businessDataLayer).where(and34(eq47(businessDataLayer.campaignId, campaignId), eq47(businessDataLayer.accountId, accountId))).orderBy(desc33(businessDataLayer.createdAt)).limit(1);
+async function decomposeGoal(campaignId, accountId2, rootBundleId = null, rootBundleVersion = null) {
+  const [bizData] = await db.select().from(businessDataLayer).where(and34(eq47(businessDataLayer.campaignId, campaignId), eq47(businessDataLayer.accountId, accountId2))).orderBy(desc33(businessDataLayer.createdAt)).limit(1);
   const [campaign] = await db.select().from(growthCampaigns).where(eq47(growthCampaigns.id, campaignId)).limit(1);
   const goal = normalizeGoal(campaign, bizData);
   const funnel = computeFunnelMath(goal, bizData);
   const feasibility = checkFeasibility(goal, funnel, bizData);
   const [decomp] = await db.insert(goalDecompositions).values({
     campaignId,
-    accountId,
+    accountId: accountId2,
     rootBundleId,
     rootBundleVersion,
     goalType: goal.goalType,
@@ -31895,12 +31935,12 @@ async function decomposeGoal(campaignId, accountId, rootBundleId = null, rootBun
     feasibility
   };
 }
-async function getLatestGoalDecomposition(campaignId, accountId) {
-  const [row] = await db.select().from(goalDecompositions).where(and34(eq47(goalDecompositions.campaignId, campaignId), eq47(goalDecompositions.accountId, accountId), eq47(goalDecompositions.status, "active"))).orderBy(desc33(goalDecompositions.createdAt)).limit(1);
+async function getLatestGoalDecomposition(campaignId, accountId2) {
+  const [row] = await db.select().from(goalDecompositions).where(and34(eq47(goalDecompositions.campaignId, campaignId), eq47(goalDecompositions.accountId, accountId2), eq47(goalDecompositions.status, "active"))).orderBy(desc33(goalDecompositions.createdAt)).limit(1);
   return row || null;
 }
-async function getLatestSimulation(campaignId, accountId) {
-  const [row] = await db.select().from(growthSimulations).where(and34(eq47(growthSimulations.campaignId, campaignId), eq47(growthSimulations.accountId, accountId), eq47(growthSimulations.status, "active"))).orderBy(desc33(growthSimulations.createdAt)).limit(1);
+async function getLatestSimulation(campaignId, accountId2) {
+  const [row] = await db.select().from(growthSimulations).where(and34(eq47(growthSimulations.campaignId, campaignId), eq47(growthSimulations.accountId, accountId2), eq47(growthSimulations.status, "active"))).orderBy(desc33(growthSimulations.createdAt)).limit(1);
   return row || null;
 }
 var safeJson3 = (v) => {
@@ -31915,8 +31955,8 @@ function registerGoalMathRoutes(app2) {
     try {
       const { campaignId } = req.body;
       if (!campaignId) return res.status(400).json({ success: false, error: "campaignId required" });
-      const accountId = req.body.accountId || "default";
-      const result = await decomposeGoal(campaignId, accountId);
+      const accountId2 = req.accountId || "default";
+      const result = await decomposeGoal(campaignId, accountId2);
       res.json({ success: true, ...result });
     } catch (err) {
       console.error("[GoalMath] Decompose error:", err.message);
@@ -31927,8 +31967,8 @@ function registerGoalMathRoutes(app2) {
     try {
       const { campaignId, planId } = req.body;
       if (!campaignId) return res.status(400).json({ success: false, error: "campaignId required" });
-      const accountId = req.body.accountId || "default";
-      const [bizData] = await db.select().from(businessDataLayer).where(and34(eq47(businessDataLayer.campaignId, campaignId), eq47(businessDataLayer.accountId, accountId))).orderBy(desc33(businessDataLayer.createdAt)).limit(1);
+      const accountId2 = req.accountId || "default";
+      const [bizData] = await db.select().from(businessDataLayer).where(and34(eq47(businessDataLayer.campaignId, campaignId), eq47(businessDataLayer.accountId, accountId2))).orderBy(desc33(businessDataLayer.createdAt)).limit(1);
       const [campaign] = await db.select().from(growthCampaigns).where(eq47(growthCampaigns.id, campaignId)).limit(1);
       const goal = normalizeGoal(campaign, bizData);
       const funnel = computeFunnelMath(goal, bizData);
@@ -31938,7 +31978,7 @@ function registerGoalMathRoutes(app2) {
         effectiveGoal.target = feasibility.budgetAdjustment.adjustedTarget;
       }
       const effectiveFunnel = feasibility.budgetAdjustment.needed && feasibility.budgetAdjustment.type === "reduce_target" ? computeFunnelMath(effectiveGoal, bizData) : funnel;
-      const sim = await generateSimulation(campaignId, accountId, planId || null, effectiveGoal, effectiveFunnel, feasibility, bizData);
+      const sim = await generateSimulation(campaignId, accountId2, planId || null, effectiveGoal, effectiveFunnel, feasibility, bizData);
       res.json({ success: true, simulation: sim });
     } catch (err) {
       console.error("[GoalMath] Simulate error:", err.message);
@@ -31948,9 +31988,9 @@ function registerGoalMathRoutes(app2) {
   app2.get("/api/goal-math/:campaignId", async (req, res) => {
     try {
       const campaignId = req.params.campaignId;
-      const accountId = req.query.accountId || "default";
-      const decomp = await getLatestGoalDecomposition(campaignId, accountId);
-      const sim = await getLatestSimulation(campaignId, accountId);
+      const accountId2 = req.accountId || "default";
+      const decomp = await getLatestGoalDecomposition(campaignId, accountId2);
+      const sim = await getLatestSimulation(campaignId, accountId2);
       res.json({
         success: true,
         goalDecomposition: decomp ? {
@@ -32070,8 +32110,8 @@ function resolveArchetype(businessType) {
   if (lower.includes("local")) return ARCHETYPES.local_service;
   return ARCHETYPES.agency;
 }
-async function checkPlanReadiness(campaignId, accountId) {
-  const [bizData] = await db.select().from(businessDataLayer).where(and35(eq48(businessDataLayer.campaignId, campaignId), eq48(businessDataLayer.accountId, accountId))).orderBy(desc34(businessDataLayer.createdAt)).limit(1);
+async function checkPlanReadiness(campaignId, accountId2) {
+  const [bizData] = await db.select().from(businessDataLayer).where(and35(eq48(businessDataLayer.campaignId, campaignId), eq48(businessDataLayer.accountId, accountId2))).orderBy(desc34(businessDataLayer.createdAt)).limit(1);
   const [campaign] = await db.select().from(growthCampaigns).where(eq48(growthCampaigns.id, campaignId)).limit(1);
   const missingItems = [];
   const assumptions = [];
@@ -32160,8 +32200,8 @@ function registerPlanGateRoutes(app2) {
     try {
       const { campaignId } = req.body;
       if (!campaignId) return res.status(400).json({ success: false, error: "campaignId required" });
-      const accountId = req.body.accountId || "default";
-      const readiness = await checkPlanReadiness(campaignId, accountId);
+      const accountId2 = req.accountId || "default";
+      const readiness = await checkPlanReadiness(campaignId, accountId2);
       res.json({
         success: true,
         ...readiness,
@@ -32179,8 +32219,8 @@ function registerPlanGateRoutes(app2) {
   });
   app2.get("/api/plan-gate/:campaignId", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      const readiness = await checkPlanReadiness(req.params.campaignId, accountId);
+      const accountId2 = req.accountId || "default";
+      const readiness = await checkPlanReadiness(req.params.campaignId, accountId2);
       res.json({
         success: true,
         ...readiness,
@@ -32278,7 +32318,7 @@ function generateTasksFromPlan(planData, periodDays) {
   }
   return tasks;
 }
-async function composeTasks(planId, campaignId, accountId, planData, periodDays, rootBundleId = null) {
+async function composeTasks(planId, campaignId, accountId2, planData, periodDays, rootBundleId = null) {
   await db.delete(executionTasks).where(and36(
     eq49(executionTasks.planId, planId),
     eq49(executionTasks.campaignId, campaignId)
@@ -32296,7 +32336,7 @@ async function composeTasks(planId, campaignId, accountId, planData, periodDays,
     return {
       planId,
       campaignId,
-      accountId,
+      accountId: accountId2,
       rootBundleId,
       taskType: t.taskType,
       dayNumber: Math.min(dayNum, periodDays),
@@ -32316,8 +32356,8 @@ async function composeTasks(planId, campaignId, accountId, planData, periodDays,
 function registerTaskComposerRoutes(app2) {
   app2.get("/api/execution-tasks/:campaignId", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      const [plan] = await db.select().from(strategicPlans).where(and36(eq49(strategicPlans.accountId, accountId), eq49(strategicPlans.campaignId, req.params.campaignId))).orderBy(desc35(strategicPlans.createdAt)).limit(1);
+      const accountId2 = req.accountId || "default";
+      const [plan] = await db.select().from(strategicPlans).where(and36(eq49(strategicPlans.accountId, accountId2), eq49(strategicPlans.campaignId, req.params.campaignId))).orderBy(desc35(strategicPlans.createdAt)).limit(1);
       if (!plan) return res.json({ hasTasks: false, tasks: [] });
       const tasks = await db.select().from(executionTasks).where(and36(eq49(executionTasks.planId, plan.id), eq49(executionTasks.campaignId, req.params.campaignId)));
       const today = tasks.filter((t) => t.dayNumber === 1 || t.priority === "high");
@@ -32368,13 +32408,13 @@ function registerTaskComposerRoutes(app2) {
     try {
       const { campaignId, planId } = req.body;
       if (!campaignId || !planId) return res.status(400).json({ error: "campaignId and planId required" });
-      const accountId = req.body.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const [plan] = await db.select().from(strategicPlans).where(eq49(strategicPlans.id, planId)).limit(1);
       if (!plan) return res.status(404).json({ error: "Plan not found" });
       const planData = plan.planJson ? JSON.parse(plan.planJson) : null;
       const [work] = await db.select().from(requiredWork).where(eq49(requiredWork.planId, planId)).limit(1);
       const periodDays = work?.periodDays || 30;
-      const tasks = await composeTasks(planId, campaignId, accountId, planData, periodDays, plan.rootBundleId);
+      const tasks = await composeTasks(planId, campaignId, accountId2, planData, periodDays, plan.rootBundleId);
       res.json({ success: true, count: tasks.length });
     } catch (err) {
       console.error("[TaskComposer] Generate error:", err.message);
@@ -32399,12 +32439,12 @@ var CONFLICT_PRIORITY = [
   "content_preference",
   "stylistic_suggestions"
 ];
-async function logAssumptions(planId, campaignId, accountId, assumptions) {
+async function logAssumptions(planId, campaignId, accountId2, assumptions) {
   if (assumptions.length === 0) return;
   const values = assumptions.map((a) => ({
     planId,
     campaignId,
-    accountId,
+    accountId: accountId2,
     assumption: a.assumption,
     confidence: a.confidence,
     impactSeverity: a.impactSeverity,
@@ -32489,14 +32529,14 @@ function registerConflictResolverRoutes(app2) {
     try {
       const { planId, campaignId } = req.body;
       if (!planId || !campaignId) return res.status(400).json({ error: "planId and campaignId required" });
-      const accountId = req.body.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const { businessDataLayer: businessDataLayer2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-      const [bizData] = await db.select().from(businessDataLayer2).where(and37(eq50(businessDataLayer2.campaignId, campaignId), eq50(businessDataLayer2.accountId, accountId))).orderBy(desc36(businessDataLayer2.createdAt)).limit(1);
+      const [bizData] = await db.select().from(businessDataLayer2).where(and37(eq50(businessDataLayer2.campaignId, campaignId), eq50(businessDataLayer2.accountId, accountId2))).orderBy(desc36(businessDataLayer2.createdAt)).limit(1);
       const [plan] = await db.select().from(strategicPlans).where(eq50(strategicPlans.id, planId)).limit(1);
       const planData = plan?.planJson ? JSON.parse(plan.planJson) : null;
       const detected = detectImplicitAssumptions(planData, bizData);
       if (detected.length > 0) {
-        await logAssumptions(planId, campaignId, accountId, detected);
+        await logAssumptions(planId, campaignId, accountId2, detected);
       }
       res.json({ success: true, detected: detected.length, assumptions: detected });
     } catch (err) {
@@ -32678,7 +32718,7 @@ function extractLockedDecisions(results) {
   }
   return lines.join("\n");
 }
-async function generatePlanWithAI(engineInsights, businessData, campaign, goalMathContext, lockedDecisions) {
+async function generatePlanWithAI(engineInsights, businessData, campaign, goalMathContext, lockedDecisions, accountId2 = "default") {
   const objective = campaign?.objective || businessData?.funnelObjective || "AWARENESS";
   const businessType = businessData?.businessType || "general";
   const location = campaign?.location || businessData?.geoScope || "Not specified";
@@ -32801,7 +32841,7 @@ Generate a complete execution plan with these 9 sections. Return ONLY valid JSON
       messages: [{ role: "user", content: prompt }],
       response_format: { type: "json_object" },
       max_tokens: 2e3,
-      accountId: "default",
+      accountId: accountId2,
       endpoint: "orchestrator-plan-synthesis"
     });
     const content = response.choices[0]?.message?.content;
@@ -32920,7 +32960,7 @@ function deriveContentVolume(plan, periodDays) {
     totalContentPieces: plan.contentDistribution.reelsPerWeek * weeks + plan.contentDistribution.postsPerWeek * weeks + plan.contentDistribution.storiesPerDay * periodDays + plan.contentDistribution.carouselsPerWeek * weeks + plan.contentDistribution.videosPerWeek * weeks
   };
 }
-function generateCalendarSlots2(plan, periodDays, campaignId, accountId, planId, rootBundleId = null, rootBundleVersion = null) {
+function generateCalendarSlots2(plan, periodDays, campaignId, accountId2, planId, rootBundleId = null, rootBundleVersion = null) {
   const slots = [];
   const startDate = /* @__PURE__ */ new Date();
   startDate.setHours(0, 0, 0, 0);
@@ -32942,7 +32982,7 @@ function generateCalendarSlots2(plan, periodDays, campaignId, accountId, planId,
         slots.push({
           planId,
           campaignId,
-          accountId,
+          accountId: accountId2,
           contentType: "REEL",
           scheduledDate: dateStr,
           scheduledTime: postingTimes.REEL,
@@ -32956,7 +32996,7 @@ function generateCalendarSlots2(plan, periodDays, campaignId, accountId, planId,
         slots.push({
           planId,
           campaignId,
-          accountId,
+          accountId: accountId2,
           contentType: "POST",
           scheduledDate: dateStr,
           scheduledTime: postingTimes.POST,
@@ -32970,7 +33010,7 @@ function generateCalendarSlots2(plan, periodDays, campaignId, accountId, planId,
         slots.push({
           planId,
           campaignId,
-          accountId,
+          accountId: accountId2,
           contentType: "CAROUSEL",
           scheduledDate: dateStr,
           scheduledTime: postingTimes.CAROUSEL,
@@ -32985,7 +33025,7 @@ function generateCalendarSlots2(plan, periodDays, campaignId, accountId, planId,
       slots.push({
         planId,
         campaignId,
-        accountId,
+        accountId: accountId2,
         contentType: "STORY",
         scheduledDate: dateStr,
         scheduledTime: s === 0 ? "10:00" : "17:00",
@@ -33038,7 +33078,7 @@ async function synthesizePlan(config, ctx, results) {
   }
   const engineInsights = extractEngineInsights(results);
   const lockedDecisions = extractLockedDecisions(results);
-  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions);
+  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId);
   const periodDays = goalMathContext?.goal?.timeHorizonDays || 30;
   const volume = deriveContentVolume(synthesized, periodDays);
   const [plan] = await db.insert(strategicPlans).values({
@@ -33940,7 +33980,7 @@ function buildStructuredAELBlock(ael) {
   sections.push("\n\u2550\u2550\u2550 END AEL STRUCTURE \u2550\u2550\u2550\n");
   return sections.join("\n");
 }
-async function layer11_aiRefinement(pillars, claims, mechanism, authorityMode, accountId, analyticalEnrichment, depthRejectionContext, domainContext, mechanismCore, profile) {
+async function layer11_aiRefinement(pillars, claims, mechanism, authorityMode, accountId2, analyticalEnrichment, depthRejectionContext, domainContext, mechanismCore, profile) {
   const topPillars = pillars.slice(0, MAX_PILLARS);
   const topClaims = claims.slice(0, MAX_PILLARS);
   const aelBlock = formatAELForPrompt(analyticalEnrichment || null);
@@ -34027,7 +34067,7 @@ Return JSON:
         { role: "system", content: "You refine differentiation language with causal depth and mechanism anchoring. Each pillar MUST reference a specific root cause [RC#] and barrier [BB#] from the AEL CAUSAL STRUCTURE provided. Each claim MUST incorporate causal chain [CC#] reasoning. You MUST include rootCauseUsed and barrierResolved fields in each pillar and claim \u2014 use the EXACT deep cause and barrier language from AEL. Include explicit contrast vs the market status quo. Reject generic/emotional language unless operationalized. Never invent strategy, audience, offers, channels, or execution plans." },
         { role: "user", content: prompt }
       ],
-      accountId,
+      accountId: accountId2,
       endpoint: "differentiation-refinement",
       max_tokens: 4e3
     });
@@ -34167,7 +34207,7 @@ function safeJsonParse3(text2) {
     return null;
   }
 }
-async function runDifferentiationEngine(mi, audience, positioning, accountId, profile, analyticalEnrichment) {
+async function runDifferentiationEngine(mi, audience, positioning, accountId2, profile, analyticalEnrichment) {
   const startTime = Date.now();
   const diagnostics = {};
   const profileSignals = extractProfileSignals(profile || null);
@@ -34263,7 +34303,7 @@ async function runDifferentiationEngine(mi, audience, positioning, accountId, pr
         proofRequirements: positioning.proofRequirements || []
       };
       console.log(`[DifferentiationEngine-V3] L11 PROMPT_HARDENED | mechanismCore=${l8MechanismCore.mechanismSteps.length > 0} | businessCategory=${inferBusinessCategory(profile)} | maxPillars=${MAX_PILLARS}`);
-      const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId, analyticalEnrichment, depthRejectionContext || void 0, domainCtx, l8MechanismCore, profile);
+      const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId2, analyticalEnrichment, depthRejectionContext || void 0, domainCtx, l8MechanismCore, profile);
       finalPillars = l11.refinedPillars;
       finalClaims = l11.refinedClaims;
       finalMechanism = l11.refinedMechanism;
@@ -34361,7 +34401,7 @@ async function runDifferentiationEngine(mi, audience, positioning, accountId, pr
           operationalProblems: positioning.operationalProblems || [],
           proofRequirements: positioning.proofRequirements || []
         };
-        const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId, analyticalEnrichment, combinedRejection || void 0, domainCtx2, l8MechanismCore, profile);
+        const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId2, analyticalEnrichment, combinedRejection || void 0, domainCtx2, l8MechanismCore, profile);
         finalPillars = l11.refinedPillars;
         finalClaims = l11.refinedClaims;
         finalMechanism = l11.refinedMechanism;
@@ -34579,7 +34619,7 @@ function validateMechanismAxisAlignment(mechanism, primaryAxis) {
   }
   return { consistent: failures.length === 0, failures };
 }
-async function runMechanismEngine(positioning, differentiation, accountId, analyticalEnrichment) {
+async function runMechanismEngine(positioning, differentiation, accountId2, analyticalEnrichment) {
   const startTime = Date.now();
   const diagnostics = {};
   const primaryAxis = resolvePrimaryAxis(positioning);
@@ -34773,7 +34813,7 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
             max_tokens: 100,
             temperature: 0.3,
             endpoint: "mechanism-name-repair",
-            accountId
+            accountId: accountId2
           });
           const repairContent = nameRepairResponse?.choices?.[0]?.message?.content?.trim() || "";
           const repairCleaned = repairContent.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
@@ -36326,7 +36366,7 @@ function buildDeterministicOfferSkeletons(strategyRoot, audience, positioning, d
     sourceContext
   };
 }
-async function aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, positioningLock, axisCorrection, strategyRoot, productDna, analyticalEnrichment, depthRejectionContext) {
+async function aiOfferGeneration(audience, positioning, differentiation, accountId2, marketLanguage, qualifyingSignals, positioningLock, axisCorrection, strategyRoot, productDna, analyticalEnrichment, depthRejectionContext) {
   if (strategyRoot) {
     const skeletonResult = buildDeterministicOfferSkeletons(strategyRoot, audience, positioning, differentiation);
     const skeletons = skeletonResult;
@@ -36413,7 +36453,7 @@ ${depthRejectionContext}` : prompt2;
         messages: [{ role: "user", content: fullPrompt }],
         max_tokens: 1e3,
         temperature: 0.5,
-        accountId,
+        accountId: accountId2,
         endpoint: "offer-engine"
       });
       const response = completion.choices?.[0]?.message?.content || "{}";
@@ -36558,7 +36598,7 @@ ${depthRejectionContext}` : prompt;
       messages: [{ role: "user", content: freePrompt }],
       max_tokens: 1e3,
       temperature: 0.7,
-      accountId,
+      accountId: accountId2,
       endpoint: "offer-engine"
     });
     const response = completion.choices?.[0]?.message?.content || "{}";
@@ -36594,7 +36634,7 @@ ${depthRejectionContext}` : prompt;
     };
   }
 }
-async function runOfferEngine(mi, audience, positioning, differentiation, accountId, upstreamLineage = [], mechanismEngineOutput, strategyRoot, analyticalEnrichment) {
+async function runOfferEngine(mi, audience, positioning, differentiation, accountId2, upstreamLineage = [], mechanismEngineOutput, strategyRoot, analyticalEnrichment) {
   const startTime = Date.now();
   const diagnostics = {};
   if (mechanismEngineOutput?.primaryMechanism) {
@@ -36676,7 +36716,7 @@ async function runOfferEngine(mi, audience, positioning, differentiation, accoun
     };
   }
   const campaignId = mi?._campaignId || "";
-  const productDna = campaignId ? await loadProductDNA(campaignId, accountId) : null;
+  const productDna = campaignId ? await loadProductDNA(campaignId, accountId2) : null;
   if (productDna) {
     console.log(`[OfferEngine-V4] PRODUCT_DNA_LOADED | category=${productDna.productCategory || "n/a"} | mechanism=${productDna.uniqueMechanism || "n/a"}`);
     diagnostics.productDnaLoaded = true;
@@ -36803,7 +36843,7 @@ async function runOfferEngine(mi, audience, positioning, differentiation, accoun
   const offerDepthGateLog = [];
   const offerDepthGateMaxAttempts = DEPTH_GATE_MAX_RETRIES + 1;
   try {
-    aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, void 0, strategyRoot, productDna, analyticalEnrichment);
+    aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId2, marketLanguage, qualifyingSignals, posLock, void 0, strategyRoot, productDna, analyticalEnrichment);
     diagnostics.aiGeneration = { success: true, mode: strategyRoot ? "skeleton_refinement" : "free_generation" };
     if (aiOffers.sourceContext) {
       diagnostics.sourceContext = aiOffers.sourceContext;
@@ -37161,7 +37201,7 @@ async function runOfferEngine(mi, audience, positioning, differentiation, accoun
   if (!offerAlignmentValidation.aligned && status === STATUS3.COMPLETE) {
     console.log(`[OfferEngine-V4] ALIGNMENT_RETRY | First attempt failed: ${offerAlignmentValidation.failures.join("; ")} \u2014 regenerating with positioning lock`);
     try {
-      const retryOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, void 0, strategyRoot, productDna, analyticalEnrichment);
+      const retryOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId2, marketLanguage, qualifyingSignals, posLock, void 0, strategyRoot, productDna, analyticalEnrichment);
       diagnostics.aiGenerationRetry = { success: true, attempt: 2 };
       const retryPrimaryOutcome = { ...l1Outcome, primaryOutcome: retryOffers.primary.outcome || l1Outcome.primaryOutcome };
       const retryMechDesc = retryOffers.primary.mechanism || l2Mechanism.mechanismDescription;
@@ -37262,7 +37302,7 @@ async function runOfferEngine(mi, audience, positioning, differentiation, accoun
       offerDepthRejectionContext = buildDepthRejectionDirective(celDepth, offerDepthAttempt - 1, posLock.lockedDecisions);
       console.log(`[OfferEngine-V4] DEPTH_GATE: Attempt ${offerDepthAttempt - 1} BLOCKED \u2014 regenerating (${offerDepthAttempt}/${offerDepthGateMaxAttempts})`);
       try {
-        aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, void 0, strategyRoot, productDna, analyticalEnrichment, offerDepthRejectionContext);
+        aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId2, marketLanguage, qualifyingSignals, posLock, void 0, strategyRoot, productDna, analyticalEnrichment, offerDepthRejectionContext);
         diagnostics.aiGeneration = { success: true, mode: strategyRoot ? "skeleton_refinement" : "free_generation", depthRetry: offerDepthAttempt };
       } catch (err) {
         offerDepthGateLog.push(`Attempt ${offerDepthAttempt}: AI_ERROR (${err.message})`);
@@ -38463,7 +38503,7 @@ function buildEmptyFunnel() {
     genericFlag: false
   };
 }
-async function aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi, awarenessCtx, analyticalEnrichment, depthRejectionContext) {
+async function aiFunnelGeneration(audience, offer, positioning, differentiation, accountId2, mi, awarenessCtx, analyticalEnrichment, depthRejectionContext) {
   const pains = audience.audiencePains || [];
   const desires = Object.entries(audience.desireMap || {});
   const pillars = differentiation.pillars || [];
@@ -38556,7 +38596,7 @@ ${depthRejectionContext}` : prompt;
       messages: [{ role: "user", content: fullPrompt }],
       max_tokens: 800,
       temperature: 0.7,
-      accountId,
+      accountId: accountId2,
       endpoint: "funnel-engine"
     });
     const response = completion.choices?.[0]?.message?.content || "{}";
@@ -38586,7 +38626,7 @@ ${depthRejectionContext}` : prompt;
     };
   }
 }
-async function runFunnelEngine(mi, audience, offer, positioning, differentiation, accountId, awareness, analyticalEnrichment) {
+async function runFunnelEngine(mi, audience, offer, positioning, differentiation, accountId2, awareness, analyticalEnrichment) {
   const startTime = Date.now();
   const diagnostics = {};
   console.log(`[FunnelEngine-V3] Starting 8-layer pipeline | awarenessProvided=${!!awareness}`);
@@ -38661,7 +38701,7 @@ async function runFunnelEngine(mi, audience, offer, positioning, differentiation
   const funnelDepthGateLog = [];
   const funnelDepthGateMaxAttempts = DEPTH_GATE_MAX_RETRIES + 1;
   try {
-    aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi, awareness, analyticalEnrichment);
+    aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId2, mi, awareness, analyticalEnrichment);
     diagnostics.aiGeneration = { success: true };
   } catch (err) {
     diagnostics.aiGeneration = { success: false, error: err.message };
@@ -38846,7 +38886,7 @@ async function runFunnelEngine(mi, audience, offer, positioning, differentiation
       funnelDepthRejectionContext = buildDepthRejectionDirective(celDepth, funnelDepthAttempt - 1);
       console.log(`[FunnelEngine-V3] DEPTH_GATE: Attempt ${funnelDepthAttempt - 1} BLOCKED \u2014 regenerating (${funnelDepthAttempt}/${funnelDepthGateMaxAttempts})`);
       try {
-        aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi, awareness, analyticalEnrichment, funnelDepthRejectionContext);
+        aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId2, mi, awareness, analyticalEnrichment, funnelDepthRejectionContext);
         diagnostics.aiGeneration = { success: true, depthRetry: funnelDepthAttempt };
       } catch (err) {
         funnelDepthGateLog.push(`Attempt ${funnelDepthAttempt}: AI_ERROR (${err.message})`);
@@ -40118,7 +40158,7 @@ function buildFunnelCompatibility(entryRoute, funnel) {
   }
   return "adequate \u2014 entry route is compatible with funnel structure";
 }
-async function runAwarenessEngine(mi, audience, positioning, differentiation, offer, accountId, upstreamLineage = [], funnel = EMPTY_FUNNEL, analyticalEnrichment) {
+async function runAwarenessEngine(mi, audience, positioning, differentiation, offer, accountId2, upstreamLineage = [], funnel = EMPTY_FUNNEL, analyticalEnrichment) {
   const startTime = Date.now();
   const structuralWarnings = [];
   if (analyticalEnrichment) {
@@ -43418,7 +43458,7 @@ function buildConfidenceExplanation(score, evidenceStrength, state, wasNormalize
   }
   return { score, state, reasoning, factors, actionImplication };
 }
-async function runStatisticalValidationEngine(mi, audience, offer, funnel, awareness, persuasion, accountId, upstreamLineage = []) {
+async function runStatisticalValidationEngine(mi, audience, offer, funnel, awareness, persuasion, accountId2, upstreamLineage = []) {
   const startTime = Date.now();
   const reliability = assessDataReliability5(mi, audience, offer, funnel, awareness, persuasion);
   const allText = [
@@ -46819,10 +46859,10 @@ async function runRetentionEngine(input) {
 }
 
 // server/orchestrator/index.ts
-async function getBusinessData(accountId, campaignId) {
+async function getBusinessData(accountId2, campaignId) {
   const [biz] = await db.select().from(businessDataLayer).where(
     and40(
-      eq53(businessDataLayer.accountId, accountId),
+      eq53(businessDataLayer.accountId, accountId2),
       eq53(businessDataLayer.campaignId, campaignId)
     )
   ).limit(1);
@@ -47776,10 +47816,10 @@ async function getOrchestratorStatus(jobId) {
     completedAt: job.completedAt
   };
 }
-async function getLatestOrchestratorRun(accountId, campaignId) {
+async function getLatestOrchestratorRun(accountId2, campaignId) {
   const [job] = await db.select().from(orchestratorJobs).where(
     and40(
-      eq53(orchestratorJobs.accountId, accountId),
+      eq53(orchestratorJobs.accountId, accountId2),
       eq53(orchestratorJobs.campaignId, campaignId)
     )
   ).orderBy(desc38(orchestratorJobs.createdAt)).limit(1);
@@ -48139,7 +48179,7 @@ function repairTruncatedJson(jsonStr) {
   }
   return s;
 }
-async function generateSingleSection(spec, contextBlock, accountId, log2) {
+async function generateSingleSection(spec, contextBlock, accountId2, log2) {
   const MAX_RETRIES2 = 1;
   const userPrompt = `${contextBlock}
 
@@ -48158,7 +48198,7 @@ Respond with ONLY valid JSON matching the schema above.`;
           { role: "user", content: userPrompt }
         ],
         max_tokens: spec.maxTokens,
-        accountId,
+        accountId: accountId2,
         endpoint: `strategic-orchestrator-${spec.key}`
       });
       const rawText = response.choices[0]?.message?.content || "";
@@ -48200,7 +48240,7 @@ Respond with ONLY valid JSON matching the schema above.`;
 async function executeOrchestratorJob(jobId, blueprintId) {
   const startMs = Date.now();
   const stageTimes = {};
-  let accountId = "default";
+  let accountId2 = "default";
   let campaignId = "";
   const log2 = (stage, extra) => {
     const elapsed = Date.now() - startMs;
@@ -48217,9 +48257,9 @@ async function executeOrchestratorJob(jobId, blueprintId) {
       await updateJob({ status: "FAILED", error: "Blueprint not found", errorCode: "BLUEPRINT_NOT_FOUND", completedAt: /* @__PURE__ */ new Date() });
       return;
     }
-    accountId = blueprint.accountId;
+    accountId2 = blueprint.accountId;
     campaignId = blueprint.campaignId || "";
-    log2("LOAD_CONTEXT", { accountId, campaignId, status: blueprint.status });
+    log2("LOAD_CONTEXT", { accountId: accountId2, campaignId, status: blueprint.status });
     enforceBuildAPlanSnapshotOnly("READ_BLUEPRINT");
     log2("ISOLATION_CHECK", { result: "PASS", rule: "BUILD_A_PLAN reads snapshot only, no MIv3 compute calls" });
     const confirmedBlueprint = blueprint.confirmedBlueprint ? JSON.parse(blueprint.confirmedBlueprint) : null;
@@ -48264,9 +48304,9 @@ Moats: ${capJson(moats.map((m) => ({ label: m.label, moatScore: m.moatScore })),
     }
     log2("CONTEXT_BUILT");
     try {
-      log2("V2_ORCHESTRATOR_START", { accountId, campaignId });
+      log2("V2_ORCHESTRATOR_START", { accountId: accountId2, campaignId });
       const v2Result = await runOrchestrator({
-        accountId,
+        accountId: accountId2,
         campaignId: campaignId || "default",
         forceRefresh: false
       });
@@ -48281,7 +48321,7 @@ Moats: ${capJson(moats.map((m) => ({ label: m.label, moatScore: m.moatScore })),
     }
     let strategicContext = null;
     try {
-      strategicContext = await buildStrategicContext(campaignId || "default", accountId);
+      strategicContext = await buildStrategicContext(campaignId || "default", accountId2);
       log2("STRATEGIC_CONTEXT_BUILT", {
         marketMode: strategicContext.marketMode,
         awarenessLevel: strategicContext.awarenessLevel,
@@ -48315,7 +48355,7 @@ Moats: ${capJson(moats.map((m) => ({ label: m.label, moatScore: m.moatScore })),
       sectionStatuses[spec.key] = "GENERATING";
       await updateJob({ sectionStatuses: JSON.stringify(sectionStatuses) });
       log2(`SECTION_START_${spec.key}`, { label: spec.label });
-      const { result, aiGenerated, error } = await generateSingleSection(spec, contextBlock, accountId, log2);
+      const { result, aiGenerated, error } = await generateSingleSection(spec, contextBlock, accountId2, log2);
       const sectionDurationMs = Date.now() - sectionStartMs;
       stageTimes[`section_${spec.key}`] = sectionDurationMs;
       if (aiGenerated && result) {
@@ -48380,7 +48420,7 @@ Moats: ${capJson(moats.map((m) => ({ label: m.label, moatScore: m.moatScore })),
       if (orchestratorEngine && !eligibleEngineIds.includes("strategic-orchestrator")) {
         log2("ENGINE_ORCHESTRATOR_INELIGIBLE", { reason: "Strategic orchestrator failed eligibility \u2014 skipping plan generation" });
         await updateJob({ status: "FAILED", error: "Strategic orchestrator engine is not eligible for current context", errorCode: "ENGINE_INELIGIBLE", completedAt: /* @__PURE__ */ new Date() });
-        await logAuditEvent({ accountId, campaignId: campaignId || void 0, blueprintId, blueprintVersion: blueprint.blueprintVersion, event: "ENGINE_INELIGIBLE", details: { engineId: "strategic-orchestrator", strategicContext } });
+        await logAuditEvent({ accountId: accountId2, campaignId: campaignId || void 0, blueprintId, blueprintVersion: blueprint.blueprintVersion, event: "ENGINE_INELIGIBLE", details: { engineId: "strategic-orchestrator", strategicContext } });
         return;
       }
     }
@@ -48427,7 +48467,7 @@ Moats: ${capJson(moats.map((m) => ({ label: m.label, moatScore: m.moatScore })),
         log2("UNCERTAINTY_BLOCK", { reasoning: uncertaintyResult.reasoning });
         await db.update(strategicBlueprints).set({ status: "ORCHESTRATED", orchestratorPlan: JSON.stringify(orchestratorPlan), orchestratedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq54(strategicBlueprints.id, blueprintId));
         const [blockedPlan] = await db.insert(strategicPlans).values({
-          accountId,
+          accountId: accountId2,
           blueprintId,
           campaignId: campaignId || "default",
           planJson: JSON.stringify(orchestratorPlan),
@@ -48436,7 +48476,7 @@ Moats: ${capJson(moats.map((m) => ({ label: m.label, moatScore: m.moatScore })),
           executionStatus: "IDLE"
         }).returning();
         await updateJob({ status: "COMPLETE", sectionStatuses: JSON.stringify(sectionStatuses), planJson: JSON.stringify(orchestratorPlan), planId: blockedPlan.id, fallback: true, fallbackReason: `Uncertainty guard BLOCK: ${uncertaintyResult.reasoning}`, stageTimes: JSON.stringify(stageTimes), durationMs: Date.now() - startMs, completedAt: /* @__PURE__ */ new Date() });
-        await logAuditEvent({ accountId, campaignId: campaignId || void 0, blueprintId, blueprintVersion: blueprint.blueprintVersion, event: "UNCERTAINTY_BLOCK", details: { jobId, planId: blockedPlan.id, uncertaintyGuard: uncertaintyResult, strategicContext: strategicContext || void 0 } });
+        await logAuditEvent({ accountId: accountId2, campaignId: campaignId || void 0, blueprintId, blueprintVersion: blueprint.blueprintVersion, event: "UNCERTAINTY_BLOCK", details: { jobId, planId: blockedPlan.id, uncertaintyGuard: uncertaintyResult, strategicContext: strategicContext || void 0 } });
         return;
       }
       if (uncertaintyResult.decision === "DOWNGRADE") {
@@ -48458,7 +48498,7 @@ Moats: ${capJson(moats.map((m) => ({ label: m.label, moatScore: m.moatScore })),
     const planSectionKeys = PLAN_SECTIONS.filter((k) => orchestratorPlan[k] && typeof orchestratorPlan[k] === "object");
     const summary = usedFallback ? `Execution plan \u2014 ${aiGeneratedCount} AI-generated, ${fallbackCount} fallback` : `Execution plan \u2014 ${planSectionKeys.length} AI-generated sections`;
     const [planRow] = await db.insert(strategicPlans).values({
-      accountId,
+      accountId: accountId2,
       blueprintId,
       campaignId: campaignId || "default",
       planJson: JSON.stringify(orchestratorPlan),
@@ -48478,7 +48518,7 @@ Moats: ${capJson(moats.map((m) => ({ label: m.label, moatScore: m.moatScore })),
         sectionsJson.metadata = { isFallback: fallbackCount === SECTION_SPECS.length, fallbackReason, aiGeneratedCount, fallbackCount, fallbackReasons, sectionStatuses };
       }
       const confirmedBlueprintForDoc = blueprint.confirmedBlueprint ? JSON.parse(blueprint.confirmedBlueprint) : null;
-      const workRows = await db.select().from(requiredWork).where(and41(eq54(requiredWork.planId, planRow.id), eq54(requiredWork.accountId, accountId))).limit(1);
+      const workRows = await db.select().from(requiredWork).where(and41(eq54(requiredWork.planId, planRow.id), eq54(requiredWork.accountId, accountId2))).limit(1);
       const calEntryCount = await db.select({ count: sql27`count(*)` }).from(calendarEntries).where(eq54(calendarEntries.planId, planRow.id));
       const markdown = generatePlanMarkdown({
         blueprint,
@@ -48493,7 +48533,7 @@ Moats: ${capJson(moats.map((m) => ({ label: m.label, moatScore: m.moatScore })),
         planId: planRow.id,
         blueprintId,
         campaignId: campaignId || "default",
-        accountId,
+        accountId: accountId2,
         version: nextVersion,
         fileName,
         content: markdown,
@@ -48508,7 +48548,7 @@ Moats: ${capJson(moats.map((m) => ({ label: m.label, moatScore: m.moatScore })),
     }
     const auditEvent = aiGeneratedCount === 0 ? "ORCHESTRATOR_FALLBACK" : usedFallback ? "ORCHESTRATOR_PARTIAL" : "ORCHESTRATOR_GENERATED";
     await logAuditEvent({
-      accountId,
+      accountId: accountId2,
       campaignId: campaignId || void 0,
       blueprintId,
       blueprintVersion: blueprint.blueprintVersion,
@@ -48532,7 +48572,7 @@ Moats: ${capJson(moats.map((m) => ({ label: m.label, moatScore: m.moatScore })),
     log2("UNHANDLED_ERROR", { code: error.code, message: error.message, durationMs, stageTimes });
     await updateJob({ status: "FAILED", error: error.message, errorCode: error.code || "INTERNAL_ERROR", stageTimes: JSON.stringify(stageTimes), durationMs, completedAt: /* @__PURE__ */ new Date() }).catch(() => {
     });
-    await logAuditEvent({ accountId, campaignId: campaignId || void 0, blueprintId, blueprintVersion: 0, event: "ORCHESTRATOR_FAILED", details: { jobId, error: error.code || "INTERNAL_ERROR", message: error.message, durationMs, stageTimes } }).catch(() => {
+    await logAuditEvent({ accountId: accountId2, campaignId: campaignId || void 0, blueprintId, blueprintVersion: 0, event: "ORCHESTRATOR_FAILED", details: { jobId, error: error.code || "INTERNAL_ERROR", message: error.message, durationMs, stageTimes } }).catch(() => {
     });
   }
 }
@@ -48685,11 +48725,11 @@ function registerOrchestratorRoutes(app2) {
           requestId
         });
       }
-      const accountId = blueprint.accountId;
+      const accountId2 = blueprint.accountId;
       const campaignId = blueprint.campaignId || "";
       const plans = await db.select().from(strategicPlans).where(and41(
         eq54(strategicPlans.blueprintId, id),
-        eq54(strategicPlans.accountId, accountId)
+        eq54(strategicPlans.accountId, accountId2)
       )).orderBy(desc39(strategicPlans.createdAt)).limit(1);
       if (plans.length === 0) {
         return res.status(404).json({
@@ -48729,20 +48769,20 @@ function registerOrchestratorRoutes(app2) {
       await db.update(strategicPlans).set({ status: "APPROVED", updatedAt: /* @__PURE__ */ new Date() }).where(eq54(strategicPlans.id, plan.id));
       await db.insert(planApprovals).values({
         planId: plan.id,
-        accountId,
+        accountId: accountId2,
         decision: "APPROVED",
         reason: "Approved via Build The Plan Phase 5",
         decidedBy: "client"
       });
       await logAuditEvent({
-        accountId,
+        accountId: accountId2,
         campaignId: campaignId || void 0,
         blueprintId: id,
         blueprintVersion: blueprint.blueprintVersion,
         event: "PLAN_APPROVED",
         details: { requestId, planId: plan.id, blueprintId: id, campaignId }
       });
-      await logAudit(accountId, "PLAN_APPROVED", {
+      await logAudit(accountId2, "PLAN_APPROVED", {
         details: { planId: plan.id, blueprintId: id, decidedBy: "client" }
       });
       activateExecution(plan.id).then((result) => {
@@ -48781,11 +48821,11 @@ function registerOrchestratorRoutes(app2) {
           requestId
         });
       }
-      const accountId = blueprint.accountId;
+      const accountId2 = blueprint.accountId;
       const campaignId = blueprint.campaignId || "";
       const existingPlans = await db.select().from(strategicPlans).where(and41(
         eq54(strategicPlans.blueprintId, id),
-        eq54(strategicPlans.accountId, accountId)
+        eq54(strategicPlans.accountId, accountId2)
       ));
       let previousStatus = "NONE";
       for (const p of existingPlans) {
@@ -48799,7 +48839,7 @@ function registerOrchestratorRoutes(app2) {
         updatedAt: /* @__PURE__ */ new Date()
       }).where(eq54(strategicBlueprints.id, id));
       await logAuditEvent({
-        accountId,
+        accountId: accountId2,
         campaignId: campaignId || void 0,
         blueprintId: id,
         blueprintVersion: blueprint.blueprintVersion,
@@ -48826,11 +48866,11 @@ function registerOrchestratorRoutes(app2) {
       if (!blueprint) {
         return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", requestId });
       }
-      const accountId = blueprint.accountId;
+      const accountId2 = blueprint.accountId;
       const campaignId = blueprint.campaignId || "default";
       const plans = await db.select().from(strategicPlans).where(and41(
         eq54(strategicPlans.blueprintId, blueprintId),
-        eq54(strategicPlans.accountId, accountId),
+        eq54(strategicPlans.accountId, accountId2),
         ne6(strategicPlans.status, "SUPERSEDED")
       )).orderBy(desc39(strategicPlans.createdAt)).limit(1);
       if (plans.length === 0) {
@@ -48843,8 +48883,8 @@ function registerOrchestratorRoutes(app2) {
       } catch (e) {
         console.warn(`[Orchestrator] Plan JSON parse failed for ${plan.id}: ${e.message}`);
       }
-      const work = await db.select().from(requiredWork).where(and41(eq54(requiredWork.planId, plan.id), eq54(requiredWork.accountId, accountId))).limit(1);
-      const calEntries = await db.select().from(calendarEntries).where(and41(eq54(calendarEntries.planId, plan.id), eq54(calendarEntries.accountId, accountId)));
+      const work = await db.select().from(requiredWork).where(and41(eq54(requiredWork.planId, plan.id), eq54(requiredWork.accountId, accountId2))).limit(1);
+      const calEntries = await db.select().from(calendarEntries).where(and41(eq54(calendarEntries.planId, plan.id), eq54(calendarEntries.accountId, accountId2)));
       const confirmedBlueprint = blueprint.confirmedBlueprint ? JSON.parse(blueprint.confirmedBlueprint) : null;
       const markdown = generatePlanMarkdown({
         blueprint,
@@ -48858,13 +48898,13 @@ function registerOrchestratorRoutes(app2) {
       const [doc] = await db.insert(planDocuments).values({
         planId: plan.id,
         campaignId,
-        accountId,
+        accountId: accountId2,
         fileName,
         content: markdown,
         format: "markdown"
       }).returning();
       await logAuditEvent({
-        accountId,
+        accountId: accountId2,
         campaignId: campaignId || void 0,
         blueprintId,
         blueprintVersion: blueprint.blueprintVersion,
@@ -48943,16 +48983,16 @@ function registerOrchestratorRoutes(app2) {
   app2.get("/api/plans/:planId/document", async (req, res) => {
     try {
       const { planId } = req.params;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.query.campaignId;
       const [plan] = await db.select().from(strategicPlans).where(eq54(strategicPlans.id, planId)).limit(1);
       if (!plan) {
         return res.status(404).json({ success: false, error: "PLAN_NOT_FOUND", message: "Plan not found." });
       }
-      if (plan.accountId !== accountId) {
+      if (plan.accountId !== accountId2) {
         return res.status(403).json({ success: false, error: "ACCOUNT_MISMATCH", message: "Plan does not belong to this account." });
       }
-      const conditions = [eq54(planDocuments.planId, planId), eq54(planDocuments.accountId, accountId)];
+      const conditions = [eq54(planDocuments.planId, planId), eq54(planDocuments.accountId, accountId2)];
       if (campaignId) conditions.push(eq54(planDocuments.campaignId, campaignId));
       const docs = await db.select().from(planDocuments).where(and41(...conditions)).orderBy(desc39(planDocuments.createdAt)).limit(1);
       if (docs.length === 0) {
@@ -49082,7 +49122,7 @@ function deriveDistributionFromBusinessData(bizData) {
     videosPerWeek: Math.max(0, Math.round(base.videosPerWeek * volumeMultiplier))
   };
 }
-async function generateCreativeContent(contentType, title, scheduledDate, planContext) {
+async function generateCreativeContent(contentType, title, scheduledDate, planContext, accountId2 = "default") {
   const prompt = `You are an expert social media content creator. Generate content for a ${contentType} post.
 
 Title/Theme: ${title || "Brand content"}
@@ -49100,7 +49140,7 @@ Return ONLY valid JSON with these exact keys:
     messages: [{ role: "user", content: prompt }],
     response_format: { type: "json_object" },
     max_tokens: 500,
-    accountId: "default",
+    accountId: accountId2,
     endpoint: "strategic-execution"
   });
   const content = response.choices[0]?.message?.content;
@@ -49179,7 +49219,7 @@ function calcTotals2(distribution, periodDays) {
     reelItems
   };
 }
-function generateCalendarSlots3(planId, campaignId, accountId, work, startDate, periodDays) {
+function generateCalendarSlots3(planId, campaignId, accountId2, work, startDate, periodDays) {
   const slots = [];
   const contentQueue = [];
   if (work.totalReels > 0) contentQueue.push({ type: "reel", count: work.totalReels });
@@ -49205,7 +49245,7 @@ function generateCalendarSlots3(planId, campaignId, accountId, work, startDate, 
     slots.push({
       planId,
       campaignId,
-      accountId,
+      accountId: accountId2,
       contentType: allItems[i].type,
       scheduledDate: dateStr,
       scheduledTime: time,
@@ -49216,20 +49256,21 @@ function generateCalendarSlots3(planId, campaignId, accountId, work, startDate, 
   }
   return slots;
 }
-async function emergencyStopAllRunningPlans(accountId, reason) {
+async function emergencyStopAllRunningPlans(accountId2, reason) {
   await db.update(strategicPlans).set({
     emergencyStopped: true,
     emergencyStoppedAt: /* @__PURE__ */ new Date(),
     emergencyStoppedReason: reason
   }).where(and42(
-    eq55(strategicPlans.accountId, accountId),
+    eq55(strategicPlans.accountId, accountId2),
     eq55(strategicPlans.executionStatus, "RUNNING")
   ));
 }
 function registerExecutionRoutes(app2) {
   app2.post("/api/execution/plans/generate", async (req, res) => {
     try {
-      const { blueprintId, campaignId, accountId = "default", periodDays = 30 } = req.body;
+      const { blueprintId, campaignId, periodDays = 30 } = req.body;
+      const accountId2 = req.accountId || "default";
       if (!blueprintId || !campaignId) {
         return res.status(400).json({ error: "blueprintId and campaignId are required" });
       }
@@ -49253,7 +49294,7 @@ function registerExecutionRoutes(app2) {
       try {
         const bizRows = await db.select().from(businessDataLayer).where(and42(
           eq55(businessDataLayer.campaignId, campaignId),
-          eq55(businessDataLayer.accountId, accountId)
+          eq55(businessDataLayer.accountId, accountId2)
         )).limit(1);
         if (bizRows.length > 0) bizData = bizRows[0];
       } catch (err) {
@@ -49281,7 +49322,7 @@ function registerExecutionRoutes(app2) {
         `Total Content: ${totals.totalContentPieces} pieces over ${periodDays} days`
       ].filter(Boolean).join(" | ");
       const [plan] = await db.insert(strategicPlans).values({
-        accountId,
+        accountId: accountId2,
         blueprintId,
         campaignId,
         planJson: JSON.stringify(planJson),
@@ -49289,7 +49330,7 @@ function registerExecutionRoutes(app2) {
         status: "DRAFT",
         executionStatus: "IDLE"
       }).returning();
-      await logAudit(accountId, "PLAN_GENERATED", {
+      await logAudit(accountId2, "PLAN_GENERATED", {
         details: { planId: plan.id, blueprintId, campaignId, summary, totalContent: totals.totalContentPieces }
       });
       res.json({
@@ -49342,8 +49383,8 @@ function registerExecutionRoutes(app2) {
   });
   app2.get("/api/execution/plans", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      const plans = await db.select().from(strategicPlans).where(eq55(strategicPlans.accountId, accountId)).orderBy(sql28`${strategicPlans.createdAt} DESC`);
+      const accountId2 = req.accountId || "default";
+      const plans = await db.select().from(strategicPlans).where(eq55(strategicPlans.accountId, accountId2)).orderBy(sql28`${strategicPlans.createdAt} DESC`);
       res.json({ success: true, plans });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -49629,7 +49670,8 @@ function registerExecutionRoutes(app2) {
           entry.contentType,
           entry.title,
           entry.scheduledDate,
-          planContext
+          planContext,
+          req.accountId || "default"
         );
       } catch (aiErr) {
         await db.update(calendarEntries).set({ status: "FAILED", errorReason: aiErr.message, updatedAt: /* @__PURE__ */ new Date() }).where(eq55(calendarEntries.id, entry.id));
@@ -49685,11 +49727,11 @@ function registerExecutionRoutes(app2) {
     const requestId = `reset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
       const { planId } = req.params;
-      const accountId = req.query.accountId || req.body?.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.query.campaignId || req.body?.campaignId || null;
       const [plan] = await db.select().from(strategicPlans).where(eq55(strategicPlans.id, planId)).limit(1);
       if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND", message: "Plan not found. It may have been deleted.", requestId });
-      if (plan.accountId !== accountId) {
+      if (plan.accountId !== accountId2) {
         return res.status(403).json({ error: "ACCOUNT_MISMATCH", message: "Plan does not belong to this account.", requestId });
       }
       if (campaignId && plan.campaignId !== campaignId) {
@@ -49771,9 +49813,9 @@ function registerExecutionRoutes(app2) {
   });
   app2.get("/api/execution/dashboard", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.query.campaignId;
-      const planConditions = [eq55(strategicPlans.accountId, accountId)];
+      const planConditions = [eq55(strategicPlans.accountId, accountId2)];
       if (campaignId) planConditions.push(eq55(strategicPlans.campaignId, campaignId));
       const plans = await db.select().from(strategicPlans).where(and42(...planConditions));
       const totalPlans = plans.length;
@@ -49781,7 +49823,7 @@ function registerExecutionRoutes(app2) {
       const emergencyStoppedPlans = plans.filter((p) => p.emergencyStopped).length;
       let fulfillment = null;
       if (campaignId) {
-        fulfillment = await computeFulfillment(campaignId, accountId);
+        fulfillment = await computeFulfillment(campaignId, accountId2);
       }
       const totalRequired = fulfillment?.total.required || 0;
       const totalPublished = fulfillment?.byStatus.published || 0;
@@ -49821,14 +49863,14 @@ function registerExecutionRoutes(app2) {
   });
   app2.get("/api/execution/calendar-entries", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.query.campaignId;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId query parameter is required" });
       }
       let matchingPlans = await db.select().from(strategicPlans).where(
         and42(
-          eq55(strategicPlans.accountId, accountId),
+          eq55(strategicPlans.accountId, accountId2),
           eq55(strategicPlans.campaignId, campaignId),
           sql28`${strategicPlans.status} IN ('APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'REVIEW', 'SCHEDULED', 'PUBLISHED')`
         )
@@ -49842,7 +49884,7 @@ function registerExecutionRoutes(app2) {
         const planEntries = await db.select().from(calendarEntries).where(
           and42(
             eq55(calendarEntries.planId, plan.id),
-            eq55(calendarEntries.accountId, accountId)
+            eq55(calendarEntries.accountId, accountId2)
           )
         ).orderBy(sql28`${calendarEntries.scheduledDate} ASC, ${calendarEntries.scheduledTime} ASC`);
         if (planEntries.length > 0) {
@@ -49851,7 +49893,7 @@ function registerExecutionRoutes(app2) {
           break;
         }
       }
-      const fulfillment = await computeFulfillment(campaignId, accountId);
+      const fulfillment = await computeFulfillment(campaignId, accountId2);
       res.json({
         success: true,
         planId: bestPlan.id,
@@ -49885,14 +49927,14 @@ function registerExecutionRoutes(app2) {
   });
   app2.get("/api/execution/required-work", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.query.campaignId;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId query parameter is required" });
       }
       const matchingPlans = await db.select().from(strategicPlans).where(
         and42(
-          eq55(strategicPlans.accountId, accountId),
+          eq55(strategicPlans.accountId, accountId2),
           eq55(strategicPlans.campaignId, campaignId),
           sql28`${strategicPlans.status} IN ('APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'REVIEW', 'SCHEDULED', 'PUBLISHED')`
         )
@@ -49911,7 +49953,7 @@ function registerExecutionRoutes(app2) {
         eq55(requiredWork.campaignId, campaignId)
       )).orderBy(sql28`${requiredWork.createdAt} DESC`).limit(1);
       const workRec = work[0] || null;
-      const fulfillment = await computeFulfillment(campaignId, accountId);
+      const fulfillment = await computeFulfillment(campaignId, accountId2);
       res.json({
         success: true,
         planId: workRec?.planId || activePlanIds[0],
@@ -50483,9 +50525,9 @@ function mapRow(row) {
     statisticalEvidence: row.statisticalEvidence ? JSON.parse(row.statisticalEvidence) : null
   };
 }
-async function getTransitionLog(campaignId, accountId = "default", limit = 50) {
+async function getTransitionLog(campaignId, accountId2 = "default", limit = 50) {
   try {
-    const conditions = [eq56(dataSourceTransitions.accountId, accountId)];
+    const conditions = [eq56(dataSourceTransitions.accountId, accountId2)];
     if (campaignId) {
       conditions.push(eq56(dataSourceTransitions.campaignId, campaignId));
     }
@@ -50496,11 +50538,11 @@ async function getTransitionLog(campaignId, accountId = "default", limit = 50) {
     return [];
   }
 }
-async function getLatestTransition(campaignId, accountId = "default") {
+async function getLatestTransition(campaignId, accountId2 = "default") {
   try {
     const [row] = await db.select().from(dataSourceTransitions).where(and43(
       eq56(dataSourceTransitions.campaignId, campaignId),
-      eq56(dataSourceTransitions.accountId, accountId)
+      eq56(dataSourceTransitions.accountId, accountId2)
     )).orderBy(desc40(dataSourceTransitions.createdAt)).limit(1);
     if (!row) return null;
     return mapRow(row);
@@ -50511,10 +50553,10 @@ async function getLatestTransition(campaignId, accountId = "default") {
 }
 
 // server/data-source/resolver.ts
-async function resolveDataSource(campaignId, accountId = "default") {
+async function resolveDataSource(campaignId, accountId2 = "default") {
   const [selection] = await db.select().from(campaignSelections).where(and44(
     eq57(campaignSelections.selectedCampaignId, campaignId),
-    eq57(campaignSelections.accountId, accountId)
+    eq57(campaignSelections.accountId, accountId2)
   )).limit(1);
   const configuredMode = selection?.dataSourceMode || "benchmark";
   const location = selection?.campaignLocation || "global";
@@ -50522,7 +50564,7 @@ async function resolveDataSource(campaignId, accountId = "default") {
   const goalType = selection?.campaignGoalType || "";
   const [metrics] = await db.select().from(manualCampaignMetrics).where(and44(
     eq57(manualCampaignMetrics.campaignId, campaignId),
-    eq57(manualCampaignMetrics.accountId, accountId)
+    eq57(manualCampaignMetrics.accountId, accountId2)
   )).orderBy(desc41(manualCampaignMetrics.updatedAt)).limit(1);
   const campaignConversions = metrics ? metrics.leads + metrics.conversions : 0;
   const campaignSpend = metrics?.spend ?? 0;
@@ -50542,7 +50584,7 @@ async function resolveDataSource(campaignId, accountId = "default") {
     await logModeTransition({
       timestamp: (/* @__PURE__ */ new Date()).toISOString(),
       campaignId,
-      accountId,
+      accountId: accountId2,
       previousMode: "benchmark",
       newMode: "campaign_metrics",
       transitionReason: switchReason || "Adaptive switch \u2014 thresholds met",
@@ -50556,7 +50598,7 @@ async function resolveDataSource(campaignId, accountId = "default") {
     await logModeTransition({
       timestamp: (/* @__PURE__ */ new Date()).toISOString(),
       campaignId,
-      accountId,
+      accountId: accountId2,
       previousMode: "campaign_metrics",
       newMode: "benchmark",
       transitionReason: switchReason || "Adaptive downgrade \u2014 statistical validity lost",
@@ -50668,11 +50710,11 @@ function registerDataSourceRoutes(app2) {
   app2.get("/api/data-source/resolve", async (req, res) => {
     try {
       const campaignId = req.query.campaignId;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
-      const resolved = await resolveDataSource(campaignId, accountId);
+      const resolved = await resolveDataSource(campaignId, accountId2);
       res.json({ success: true, dataSource: resolved });
     } catch (error) {
       console.error("[DataSource] Resolve error:", error);
@@ -50716,24 +50758,24 @@ function registerDataSourceRoutes(app2) {
   app2.get("/api/data-source/transition-eligibility", async (req, res) => {
     try {
       const campaignId = req.query.campaignId;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
       const [selection] = await db.select().from(campaignSelections).where(and45(
         eq58(campaignSelections.selectedCampaignId, campaignId),
-        eq58(campaignSelections.accountId, accountId)
+        eq58(campaignSelections.accountId, accountId2)
       )).limit(1);
       const currentMode = selection?.dataSourceMode || "benchmark";
       const [metrics] = await db.select().from(manualCampaignMetrics).where(and45(
         eq58(manualCampaignMetrics.campaignId, campaignId),
-        eq58(manualCampaignMetrics.accountId, accountId)
+        eq58(manualCampaignMetrics.accountId, accountId2)
       )).orderBy(desc42(manualCampaignMetrics.updatedAt)).limit(1);
       const conversions = metrics ? metrics.leads + metrics.conversions : 0;
       const spend = metrics?.spend ?? 0;
       const revenue = metrics?.revenue ?? 0;
       const eligibility = evaluateTransitionEligibility(currentMode, conversions, spend, revenue);
-      const latestTransition = await getLatestTransition(campaignId, accountId);
+      const latestTransition = await getLatestTransition(campaignId, accountId2);
       res.json({
         success: true,
         eligibility,
@@ -50749,8 +50791,8 @@ function registerDataSourceRoutes(app2) {
     try {
       const campaignId = req.query.campaignId;
       const limit = parseInt(req.query.limit) || 50;
-      const accountId = req.query.accountId || "default";
-      const log2 = await getTransitionLog(campaignId, accountId, limit);
+      const accountId2 = req.accountId || "default";
+      const log2 = await getTransitionLog(campaignId, accountId2, limit);
       res.json({ success: true, transitions: log2, count: log2.length });
     } catch (error) {
       console.error("[DataSource] Transition log error:", error);
@@ -50760,7 +50802,7 @@ function registerDataSourceRoutes(app2) {
   app2.put("/api/data-source/mode", async (req, res) => {
     try {
       const { campaignId, mode, accountId: reqAccountId } = req.body;
-      const accountId = reqAccountId || "default";
+      const accountId2 = reqAccountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
@@ -50769,13 +50811,13 @@ function registerDataSourceRoutes(app2) {
       }
       const [selection] = await db.select().from(campaignSelections).where(and45(
         eq58(campaignSelections.selectedCampaignId, campaignId),
-        eq58(campaignSelections.accountId, accountId)
+        eq58(campaignSelections.accountId, accountId2)
       )).limit(1);
       const previousMode = selection?.dataSourceMode || "benchmark";
       if (mode === "campaign_metrics") {
         const [metrics] = await db.select().from(manualCampaignMetrics).where(and45(
           eq58(manualCampaignMetrics.campaignId, campaignId),
-          eq58(manualCampaignMetrics.accountId, accountId)
+          eq58(manualCampaignMetrics.accountId, accountId2)
         )).orderBy(desc42(manualCampaignMetrics.updatedAt)).limit(1);
         if (!metrics || metrics.spend <= 0 || metrics.leads + metrics.conversions <= 0) {
           return res.status(400).json({
@@ -50813,7 +50855,7 @@ function registerDataSourceRoutes(app2) {
         await logModeTransition({
           timestamp: (/* @__PURE__ */ new Date()).toISOString(),
           campaignId,
-          accountId,
+          accountId: accountId2,
           previousMode,
           newMode: mode,
           transitionReason: `Manual mode switch \u2014 statistical evidence: conversions=${conversions}, spend=$${metrics.spend.toFixed(2)}`,
@@ -50823,7 +50865,7 @@ function registerDataSourceRoutes(app2) {
       } else if (previousMode !== mode) {
         const [metrics] = await db.select().from(manualCampaignMetrics).where(and45(
           eq58(manualCampaignMetrics.campaignId, campaignId),
-          eq58(manualCampaignMetrics.accountId, accountId)
+          eq58(manualCampaignMetrics.accountId, accountId2)
         )).orderBy(desc42(manualCampaignMetrics.updatedAt)).limit(1);
         const conversions = metrics ? metrics.leads + metrics.conversions : 0;
         const spend = metrics?.spend ?? 0;
@@ -50831,7 +50873,7 @@ function registerDataSourceRoutes(app2) {
         await logModeTransition({
           timestamp: (/* @__PURE__ */ new Date()).toISOString(),
           campaignId,
-          accountId,
+          accountId: accountId2,
           previousMode,
           newMode: mode,
           transitionReason: "Manual mode switch to benchmark",
@@ -50841,7 +50883,7 @@ function registerDataSourceRoutes(app2) {
       }
       await db.update(campaignSelections).set({ dataSourceMode: mode, updatedAt: /* @__PURE__ */ new Date() }).where(and45(
         eq58(campaignSelections.selectedCampaignId, campaignId),
-        eq58(campaignSelections.accountId, accountId)
+        eq58(campaignSelections.accountId, accountId2)
       ));
       console.log(`[DataSource] Mode changed for campaign ${campaignId}: ${previousMode} \u2192 ${mode}`);
       res.json({ success: true, mode, previousMode });
@@ -50853,13 +50895,13 @@ function registerDataSourceRoutes(app2) {
   app2.get("/api/data-source/statistical-validity", async (req, res) => {
     try {
       const campaignId = req.query.campaignId;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
       const [metrics] = await db.select().from(manualCampaignMetrics).where(and45(
         eq58(manualCampaignMetrics.campaignId, campaignId),
-        eq58(manualCampaignMetrics.accountId, accountId)
+        eq58(manualCampaignMetrics.accountId, accountId2)
       )).orderBy(desc42(manualCampaignMetrics.updatedAt)).limit(1);
       const conversions = metrics ? metrics.leads + metrics.conversions : 0;
       const spend = metrics?.spend ?? 0;
@@ -50941,11 +50983,11 @@ var ROLLING_WINDOW_MS = 24 * 60 * 60 * 1e3;
 var CLEANUP_INTERVAL_MS = 60 * 60 * 1e3;
 var cleanupTimer = null;
 var initialized = false;
-function ensureAccount(accountId) {
-  let metrics = metricsStore.get(accountId);
+function ensureAccount(accountId2) {
+  let metrics = metricsStore.get(accountId2);
   if (!metrics) {
     metrics = { calls: [], consecutiveFailures: 0 };
-    metricsStore.set(accountId, metrics);
+    metricsStore.set(accountId2, metrics);
   }
   return metrics;
 }
@@ -50953,8 +50995,8 @@ function pruneExpiredCalls(metrics) {
   const cutoff = Date.now() - ROLLING_WINDOW_MS;
   metrics.calls = metrics.calls.filter((c) => c.timestamp > cutoff);
 }
-function recordMetaApiCall(accountId, success, latencyMs, errorType) {
-  const metrics = ensureAccount(accountId);
+function recordMetaApiCall(accountId2, success, latencyMs, errorType) {
+  const metrics = ensureAccount(accountId2);
   metrics.calls.push({
     timestamp: Date.now(),
     success,
@@ -50970,8 +51012,8 @@ function recordMetaApiCall(accountId, success, latencyMs, errorType) {
     pruneExpiredCalls(metrics);
   }
 }
-function getMetaMetrics(accountId) {
-  const metrics = ensureAccount(accountId);
+function getMetaMetrics(accountId2) {
+  const metrics = ensureAccount(accountId2);
   pruneExpiredCalls(metrics);
   const calls = metrics.calls;
   const totalCalls = calls.length;
@@ -50979,7 +51021,7 @@ function getMetaMetrics(accountId) {
   const failureRate = totalCalls > 0 ? failures / totalCalls : 0;
   const avgLatencyMs = totalCalls > 0 ? Math.round(calls.reduce((sum, c) => sum + c.latencyMs, 0) / totalCalls) : 0;
   return {
-    accountId,
+    accountId: accountId2,
     rollingWindow24h: {
       totalCalls,
       failures,
@@ -50993,16 +51035,16 @@ function getMetaMetrics(accountId) {
 }
 function getAllMetrics() {
   const results = [];
-  for (const accountId of metricsStore.keys()) {
-    results.push(getMetaMetrics(accountId));
+  for (const accountId2 of metricsStore.keys()) {
+    results.push(getMetaMetrics(accountId2));
   }
   return results;
 }
 function runCleanup() {
-  for (const [accountId, metrics] of metricsStore.entries()) {
+  for (const [accountId2, metrics] of metricsStore.entries()) {
     pruneExpiredCalls(metrics);
     if (metrics.calls.length === 0 && metrics.consecutiveFailures === 0) {
-      metricsStore.delete(accountId);
+      metricsStore.delete(accountId2);
     }
   }
 }
@@ -51168,16 +51210,16 @@ var BASE_BACKOFF_MS = 5e3;
 var MAX_BACKOFF_MS = 5 * 60 * 1e3;
 var MAX_CONSECUTIVE_RETRIES = 10;
 var COOLDOWN_MS = 30 * 60 * 1e3;
-function getBackoffState(accountId) {
-  let state = backoffStates.get(accountId);
+function getBackoffState(accountId2) {
+  let state = backoffStates.get(accountId2);
   if (!state) {
     state = { consecutiveTemporaryErrors: 0, lastBackoffAt: 0, currentBackoffMs: 0 };
-    backoffStates.set(accountId, state);
+    backoffStates.set(accountId2, state);
   }
   return state;
 }
-function recordTemporaryError(accountId) {
-  const state = getBackoffState(accountId);
+function recordTemporaryError(accountId2) {
+  const state = getBackoffState(accountId2);
   state.consecutiveTemporaryErrors++;
   state.lastBackoffAt = Date.now();
   if (state.consecutiveTemporaryErrors > MAX_CONSECUTIVE_RETRIES) {
@@ -51199,15 +51241,15 @@ function recordTemporaryError(accountId) {
     totalErrors: state.consecutiveTemporaryErrors
   };
 }
-function recordSuccess2(accountId) {
-  const state = backoffStates.get(accountId);
+function recordSuccess2(accountId2) {
+  const state = backoffStates.get(accountId2);
   if (state) {
     state.consecutiveTemporaryErrors = 0;
     state.currentBackoffMs = 0;
   }
 }
-function isInBackoff(accountId) {
-  const state = backoffStates.get(accountId);
+function isInBackoff(accountId2) {
+  const state = backoffStates.get(accountId2);
   if (!state || state.consecutiveTemporaryErrors === 0) return false;
   if (state.consecutiveTemporaryErrors > MAX_CONSECUTIVE_RETRIES) {
     const elapsed2 = Date.now() - state.lastBackoffAt;
@@ -51222,9 +51264,9 @@ function isInBackoff(accountId) {
   const elapsed = Date.now() - state.lastBackoffAt;
   return elapsed < state.currentBackoffMs;
 }
-function getBackoffDiagnostics(accountId) {
-  const state = getBackoffState(accountId);
-  const paused = isInBackoff(accountId);
+function getBackoffDiagnostics(accountId2) {
+  const state = getBackoffState(accountId2);
+  const paused = isInBackoff(accountId2);
   const exceeded = state.consecutiveTemporaryErrors > MAX_CONSECUTIVE_RETRIES;
   let cooldownRemainingMs = null;
   if (exceeded && paused) {
@@ -51259,27 +51301,27 @@ function computeMissingScopes(grantedScopes) {
   const coreRequired = ["pages_manage_posts", "pages_read_engagement", "read_insights", "pages_show_list", "instagram_basic"];
   return coreRequired.filter((s) => !grantedScopes.includes(s));
 }
-async function getOrCreateAccountState(accountId) {
-  let state = await db.select().from(accountState).where(eq59(accountState.accountId, accountId)).limit(1);
+async function getOrCreateAccountState(accountId2) {
+  let state = await db.select().from(accountState).where(eq59(accountState.accountId, accountId2)).limit(1);
   if (!state[0]) {
-    await db.insert(accountState).values({ accountId }).onConflictDoNothing();
-    state = await db.select().from(accountState).where(eq59(accountState.accountId, accountId)).limit(1);
+    await db.insert(accountState).values({ accountId: accountId2 }).onConflictDoNothing();
+    state = await db.select().from(accountState).where(eq59(accountState.accountId, accountId2)).limit(1);
   }
   return state[0];
 }
-async function getCredentials(accountId) {
-  const creds = await db.select().from(metaCredentials).where(eq59(metaCredentials.accountId, accountId)).limit(1);
+async function getCredentials(accountId2) {
+  const creds = await db.select().from(metaCredentials).where(eq59(metaCredentials.accountId, accountId2)).limit(1);
   return creds[0] || null;
 }
-async function transitionMetaMode(accountId, newMode, reason) {
-  const state = await getOrCreateAccountState(accountId);
+async function transitionMetaMode(accountId2, newMode, reason) {
+  const state = await getOrCreateAccountState(accountId2);
   const oldMode = state?.metaMode || "DISCONNECTED";
   if (oldMode === newMode) return;
   await db.update(accountState).set({
     metaMode: newMode,
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq59(accountState.accountId, accountId));
-  await logAudit(accountId, "META_MODE_TRANSITION", {
+  }).where(eq59(accountState.accountId, accountId2));
+  await logAudit(accountId2, "META_MODE_TRANSITION", {
     details: {
       oldMode,
       newMode,
@@ -51287,11 +51329,11 @@ async function transitionMetaMode(accountId, newMode, reason) {
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     }
   });
-  console.log(`[MetaStatus] Mode transition: ${oldMode} \u2192 ${newMode} (${reason}) for account ${accountId}`);
+  console.log(`[MetaStatus] Mode transition: ${oldMode} \u2192 ${newMode} (${reason}) for account ${accountId2}`);
 }
-async function getMetaStatus(accountId) {
-  const state = await getOrCreateAccountState(accountId);
-  const creds = await getCredentials(accountId);
+async function getMetaStatus(accountId2) {
+  const state = await getOrCreateAccountState(accountId2);
+  const creds = await getCredentials(accountId2);
   const metaMode = state?.metaMode || "DISCONNECTED";
   const grantedScopes = state?.metaGrantedScopes ? JSON.parse(state.metaGrantedScopes) : [];
   const missingScopes = state?.metaMissingScopes ? JSON.parse(state.metaMissingScopes) : computeMissingScopes(grantedScopes);
@@ -51306,7 +51348,7 @@ async function getMetaStatus(accountId) {
   }
   if (creds?.userTokenExpiresAt && new Date(creds.userTokenExpiresAt) < /* @__PURE__ */ new Date()) {
     if (metaMode === "REAL") {
-      await transitionMetaMode(accountId, "TOKEN_EXPIRED", "User token has expired");
+      await transitionMetaMode(accountId2, "TOKEN_EXPIRED", "User token has expired");
     }
     hasValidPageToken = false;
   }
@@ -51343,8 +51385,8 @@ async function getMetaStatus(accountId) {
 function registerMetaStatusRoutes(app2) {
   app2.get("/api/meta/status", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      const status = await getMetaStatus(accountId);
+      const accountId2 = req.accountId || "default";
+      const status = await getMetaStatus(accountId2);
       res.json({ success: true, status });
     } catch (error) {
       console.error("[MetaStatus] Error fetching status:", error.message);
@@ -51353,8 +51395,8 @@ function registerMetaStatusRoutes(app2) {
   });
   app2.post("/api/meta/disconnect", async (req, res) => {
     try {
-      const accountId = req.body?.accountId || "default";
-      await db.delete(metaCredentials).where(eq59(metaCredentials.accountId, accountId));
+      const accountId2 = req.accountId || "default";
+      await db.delete(metaCredentials).where(eq59(metaCredentials.accountId, accountId2));
       await db.update(accountState).set({
         metaMode: "DISCONNECTED",
         metaGrantedScopes: null,
@@ -51362,8 +51404,8 @@ function registerMetaStatusRoutes(app2) {
         metaLastVerifiedAt: null,
         metaDemoModeEnabled: false,
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq59(accountState.accountId, accountId));
-      await logAudit(accountId, "META_DISCONNECTED", {
+      }).where(eq59(accountState.accountId, accountId2));
+      await logAudit(accountId2, "META_DISCONNECTED", {
         details: { reason: "User requested disconnect", timestamp: (/* @__PURE__ */ new Date()).toISOString() }
       });
       res.json({ success: true, message: "Meta integration disconnected. All tokens removed." });
@@ -51374,9 +51416,9 @@ function registerMetaStatusRoutes(app2) {
   });
   app2.post("/api/meta/reconnect", async (req, res) => {
     try {
-      const accountId = req.body?.accountId || "default";
-      await db.delete(metaCredentials).where(eq59(metaCredentials.accountId, accountId));
-      await transitionMetaMode(accountId, "DISCONNECTED", "Reconnect initiated \u2014 clearing old credentials");
+      const accountId2 = req.accountId || "default";
+      await db.delete(metaCredentials).where(eq59(metaCredentials.accountId, accountId2));
+      await transitionMetaMode(accountId2, "DISCONNECTED", "Reconnect initiated \u2014 clearing old credentials");
       res.json({
         success: true,
         message: "Old credentials cleared. Please initiate Meta OAuth to reconnect.",
@@ -51404,9 +51446,9 @@ function registerMetaStatusRoutes(app2) {
   app2.get("/api/meta/diagnostics", async (req, res) => {
     if (!requireAdminAccess(req, res)) return;
     try {
-      const accountId = req.query.accountId || "default";
-      const metrics = getMetaMetrics(accountId);
-      const backoff = getBackoffDiagnostics(accountId);
+      const accountId2 = req.accountId || "default";
+      const metrics = getMetaMetrics(accountId2);
+      const backoff = getBackoffDiagnostics(accountId2);
       res.json({
         success: true,
         diagnostics: {
@@ -51439,12 +51481,12 @@ function registerMetaStatusRoutes(app2) {
 }
 async function requireMetaReal(req, res, next) {
   try {
-    const accountId = req.query.accountId || req.body?.accountId || "default";
-    const state = await getOrCreateAccountState(accountId);
+    const accountId2 = req.accountId || "default";
+    const state = await getOrCreateAccountState(accountId2);
     const metaMode = state?.metaMode || "DISCONNECTED";
     if (metaMode === "REAL") {
       req.metaMode = "REAL";
-      req.metaAccountId = accountId;
+      req.metaAccountId = accountId2;
       next();
       return;
     }
@@ -51476,15 +51518,15 @@ async function requireMetaReal(req, res, next) {
     res.status(500).json({ error: "Failed to verify Meta integration status" });
   }
 }
-async function getDecryptedPageToken(accountId) {
-  const creds = await getCredentials(accountId);
+async function getDecryptedPageToken(accountId2) {
+  const creds = await getCredentials(accountId2);
   if (!creds?.encryptedPageToken || !creds?.ivPage || !creds?.encryptionKeyVersion) {
     return null;
   }
   try {
     return decryptToken(creds.encryptedPageToken, creds.ivPage, creds.encryptionKeyVersion);
   } catch (error) {
-    console.error("[MetaStatus] Failed to decrypt page token for account:", accountId);
+    console.error("[MetaStatus] Failed to decrypt page token for account:", accountId2);
     return null;
   }
 }
@@ -51610,7 +51652,7 @@ function errorResponse(code, message, httpStatus, res) {
 function registerAuditRoutes(app2) {
   app2.get("/api/audit/feed", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 200);
       const cursor = req.query.cursor;
       const eventTypes = req.query.event_type ? req.query.event_type.split(",") : void 0;
@@ -51618,7 +51660,7 @@ function registerAuditRoutes(app2) {
       const riskLevel = req.query.risk_level;
       const fromDate = req.query.from;
       const toDate = req.query.to;
-      const conditions = [eq60(auditLog.accountId, accountId)];
+      const conditions = [eq60(auditLog.accountId, accountId2)];
       let resolvedEventTypes = eventTypes;
       if (module && MODULE_EVENT_MAP[module]) {
         resolvedEventTypes = MODULE_EVENT_MAP[module];
@@ -51668,8 +51710,8 @@ function registerAuditRoutes(app2) {
   });
   app2.get("/api/audit/ai-usage", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      const weeklyUsage = await getWeeklyTokenUsage(accountId);
+      const accountId2 = req.accountId || "default";
+      const weeklyUsage = await getWeeklyTokenUsage(accountId2);
       const remaining = Math.max(0, WEEKLY_TOKEN_BUDGET - weeklyUsage);
       const usagePct = Math.round(weeklyUsage / WEEKLY_TOKEN_BUDGET * 100);
       const modelBreakdown = await db.execute(sql29`
@@ -51679,7 +51721,7 @@ function registerAuditRoutes(app2) {
                COALESCE(AVG(duration_ms), 0) as avg_duration_ms,
                COUNT(*) FILTER (WHERE success = false) as failure_count
         FROM ai_usage_log
-        WHERE account_id = ${accountId}
+        WHERE account_id = ${accountId2}
           AND created_at > NOW() - INTERVAL '7 days'
           AND endpoint != 'budget_reservation'
         GROUP BY model
@@ -51691,7 +51733,7 @@ function registerAuditRoutes(app2) {
                COALESCE(SUM(estimated_tokens), 0) as total_tokens,
                COUNT(*) FILTER (WHERE success = false) as failure_count
         FROM ai_usage_log
-        WHERE account_id = ${accountId}
+        WHERE account_id = ${accountId2}
           AND created_at > NOW() - INTERVAL '7 days'
           AND endpoint != 'budget_reservation'
         GROUP BY endpoint
@@ -51702,7 +51744,7 @@ function registerAuditRoutes(app2) {
                COALESCE(SUM(estimated_tokens), 0) as tokens,
                COUNT(*) as calls
         FROM ai_usage_log
-        WHERE account_id = ${accountId}
+        WHERE account_id = ${accountId2}
           AND created_at > NOW() - INTERVAL '7 days'
           AND endpoint != 'budget_reservation'
         GROUP BY DATE(created_at)
@@ -51711,7 +51753,7 @@ function registerAuditRoutes(app2) {
       const lastCall = await db.execute(sql29`
         SELECT model, endpoint, estimated_tokens, duration_ms, success, created_at
         FROM ai_usage_log
-        WHERE account_id = ${accountId}
+        WHERE account_id = ${accountId2}
           AND endpoint != 'budget_reservation'
         ORDER BY created_at DESC
         LIMIT 1
@@ -51775,21 +51817,21 @@ function registerAuditRoutes(app2) {
   });
   app2.get("/api/audit/gates", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const now = /* @__PURE__ */ new Date();
-      const acctRows = await db.select().from(accountState).where(eq60(accountState.accountId, accountId)).limit(1);
+      const acctRows = await db.select().from(accountState).where(eq60(accountState.accountId, accountId2)).limit(1);
       const acct = acctRows[0] || null;
       const approvedPlans = await db.select({ id: strategicPlans.id, status: strategicPlans.status }).from(strategicPlans).where(and46(
-        eq60(strategicPlans.accountId, accountId),
+        eq60(strategicPlans.accountId, accountId2),
         inArray15(strategicPlans.status, [...ACTIVE_PLAN_STATUSES])
       )).limit(1);
       const runningJobs = await db.select({ id: jobQueue.id, status: jobQueue.status }).from(jobQueue).where(and46(
-        eq60(jobQueue.accountId, accountId),
+        eq60(jobQueue.accountId, accountId2),
         eq60(jobQueue.status, "running")
       )).limit(5);
-      const weeklyUsage = await getWeeklyTokenUsage(accountId);
+      const weeklyUsage = await getWeeklyTokenUsage(accountId2);
       const budgetExceeded = weeklyUsage >= WEEKLY_TOKEN_BUDGET;
-      const flagRows = await db.select().from(featureFlags).where(eq60(featureFlags.accountId, accountId));
+      const flagRows = await db.select().from(featureFlags).where(eq60(featureFlags.accountId, accountId2));
       const flagMap = {};
       for (const f of flagRows) {
         flagMap[f.flagName] = f.enabled ?? false;
@@ -51887,7 +51929,7 @@ function registerAuditRoutes(app2) {
   });
   app2.get("/api/audit/decisions", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
       const campaignId = req.query.campaign_id;
       const planId = req.query.plan_id;
@@ -51905,7 +51947,7 @@ function registerAuditRoutes(app2) {
         "CONFIDENCE_UPDATED"
       ];
       const conditions = [
-        eq60(auditLog.accountId, accountId),
+        eq60(auditLog.accountId, accountId2),
         inArray15(auditLog.eventType, decisionTypes)
       ];
       if (campaignId) {
@@ -51934,7 +51976,7 @@ function registerAuditRoutes(app2) {
   });
   app2.get("/api/audit/publish-history", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 50);
       const publishTypes = [
         "PUBLISH_SUCCESS",
@@ -51946,7 +51988,7 @@ function registerAuditRoutes(app2) {
         "MONTHLY_CAP_BLOCKED"
       ];
       const items = await db.select().from(auditLog).where(and46(
-        eq60(auditLog.accountId, accountId),
+        eq60(auditLog.accountId, accountId2),
         inArray15(auditLog.eventType, publishTypes)
       )).orderBy(desc43(auditLog.createdAt)).limit(limit);
       res.json(successResponse({
@@ -51973,14 +52015,14 @@ function registerAuditRoutes(app2) {
   });
   app2.get("/api/audit/jobs", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 50);
       const runningJobs = await db.select().from(jobQueue).where(and46(
-        eq60(jobQueue.accountId, accountId),
+        eq60(jobQueue.accountId, accountId2),
         eq60(jobQueue.status, "running")
       )).orderBy(desc43(jobQueue.startedAt)).limit(10);
       const recentJobs = await db.select().from(jobQueue).where(and46(
-        eq60(jobQueue.accountId, accountId),
+        eq60(jobQueue.accountId, accountId2),
         or(
           eq60(jobQueue.status, "completed"),
           eq60(jobQueue.status, "failed")
@@ -52022,19 +52064,19 @@ function registerAuditRoutes(app2) {
   });
   app2.post("/api/audit/autopilot", async (req, res) => {
     try {
-      const accountId = req.body?.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const enabled = !!req.body?.enabled;
-      const existing = await db.select().from(accountState).where(eq60(accountState.accountId, accountId)).limit(1);
+      const existing = await db.select().from(accountState).where(eq60(accountState.accountId, accountId2)).limit(1);
       if (existing.length > 0) {
-        await db.update(accountState).set({ autopilotOn: enabled, updatedAt: /* @__PURE__ */ new Date() }).where(eq60(accountState.accountId, accountId));
+        await db.update(accountState).set({ autopilotOn: enabled, updatedAt: /* @__PURE__ */ new Date() }).where(eq60(accountState.accountId, accountId2));
       } else {
         await db.insert(accountState).values({
-          accountId,
+          accountId: accountId2,
           autopilotOn: enabled,
           state: "ACTIVE"
         });
       }
-      await logAudit(accountId, "AUTOPILOT_TOGGLED", {
+      await logAudit(accountId2, "AUTOPILOT_TOGGLED", {
         details: { enabled, timestamp: (/* @__PURE__ */ new Date()).toISOString() },
         riskLevel: "low"
       });
@@ -52048,24 +52090,24 @@ function registerAuditRoutes(app2) {
   });
   app2.post("/api/audit/emergency-stop", async (req, res) => {
     try {
-      const accountId = req.body?.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const reason = req.body?.reason || "Manual emergency stop triggered";
-      const existing = await db.select().from(accountState).where(eq60(accountState.accountId, accountId)).limit(1);
+      const existing = await db.select().from(accountState).where(eq60(accountState.accountId, accountId2)).limit(1);
       if (existing.length > 0) {
         await db.update(accountState).set({
           autopilotOn: false,
           state: "SAFE_MODE",
           updatedAt: /* @__PURE__ */ new Date()
-        }).where(eq60(accountState.accountId, accountId));
+        }).where(eq60(accountState.accountId, accountId2));
       } else {
         await db.insert(accountState).values({
-          accountId,
+          accountId: accountId2,
           autopilotOn: false,
           state: "SAFE_MODE"
         });
       }
-      await emergencyStopAllRunningPlans(accountId, reason);
-      await logAudit(accountId, "EMERGENCY_STOP", {
+      await emergencyStopAllRunningPlans(accountId2, reason);
+      await logAudit(accountId2, "EMERGENCY_STOP", {
         details: { reason, timestamp: (/* @__PURE__ */ new Date()).toISOString() },
         riskLevel: "critical"
       });
@@ -52107,14 +52149,14 @@ function registerBusinessDataRoutes(app2) {
   app2.get("/api/business-data/:campaignId", async (req, res) => {
     try {
       const { campaignId } = req.params;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
       const rows = await db.select().from(businessDataLayer).where(
         and47(
           eq61(businessDataLayer.campaignId, campaignId),
-          eq61(businessDataLayer.accountId, accountId)
+          eq61(businessDataLayer.accountId, accountId2)
         )
       ).limit(1);
       if (rows.length === 0) {
@@ -52129,7 +52171,7 @@ function registerBusinessDataRoutes(app2) {
   app2.put("/api/business-data/:campaignId", async (req, res) => {
     try {
       const { campaignId } = req.params;
-      const accountId = req.body.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
@@ -52183,7 +52225,7 @@ function registerBusinessDataRoutes(app2) {
       const existing = await db.select().from(businessDataLayer).where(
         and47(
           eq61(businessDataLayer.campaignId, campaignId),
-          eq61(businessDataLayer.accountId, accountId)
+          eq61(businessDataLayer.accountId, accountId2)
         )
       ).limit(1);
       let result;
@@ -52191,19 +52233,19 @@ function registerBusinessDataRoutes(app2) {
         const updated = await db.update(businessDataLayer).set(dataValues).where(
           and47(
             eq61(businessDataLayer.campaignId, campaignId),
-            eq61(businessDataLayer.accountId, accountId)
+            eq61(businessDataLayer.accountId, accountId2)
           )
         ).returning();
         result = updated[0];
       } else {
         const inserted = await db.insert(businessDataLayer).values({
           campaignId,
-          accountId,
+          accountId: accountId2,
           ...dataValues
         }).returning();
         result = inserted[0];
       }
-      console.log(`[BusinessData] Saved for campaign ${campaignId}, account ${accountId}`);
+      console.log(`[BusinessData] Saved for campaign ${campaignId}, account ${accountId2}`);
       res.json({ success: true, data: result });
     } catch (error) {
       console.error("[BusinessData] PUT error:", error);
@@ -52225,17 +52267,17 @@ var LOG_PREFIX4 = "[Dashboard]";
 function registerDashboardRoutes(app2) {
   app2.get("/api/dashboard/ai-actions", requireCampaign, async (req, res) => {
     try {
-      const { accountId, campaignId } = req.campaignContext;
-      const mode = await resolveDataMode(accountId);
+      const { accountId: accountId2, campaignId } = req.campaignContext;
+      const mode = await resolveDataMode(accountId2);
       const approvedPlans = await db.select().from(strategicPlans).where(
         and48(
           eq62(strategicPlans.campaignId, campaignId),
-          eq62(strategicPlans.accountId, accountId),
+          eq62(strategicPlans.accountId, accountId2),
           inArray16(strategicPlans.status, [...ACTIVE_PLAN_STATUSES])
         )
       ).orderBy(desc44(strategicPlans.createdAt)).limit(1);
       if (approvedPlans.length === 0) {
-        const manualOnly = await getManualMetrics(campaignId, accountId);
+        const manualOnly = await getManualMetrics(campaignId, accountId2);
         if (manualOnly && (manualOnly.spend > 0 || manualOnly.revenue > 0 || manualOnly.impressions > 0 || manualOnly.clicks > 0 || manualOnly.leads > 0)) {
           const actions2 = buildManualOnlyActions(manualOnly, campaignId);
           return res.json({
@@ -52259,7 +52301,7 @@ function registerDashboardRoutes(app2) {
       const [recentInsights, recentSnapshots, work, manual, calendarStats, studioStats] = await Promise.all([
         db.select().from(strategyInsights).where(
           and48(
-            eq62(strategyInsights.accountId, accountId),
+            eq62(strategyInsights.accountId, accountId2),
             eq62(strategyInsights.campaignId, campaignId),
             eq62(strategyInsights.isActive, true),
             gte11(strategyInsights.createdAt, weekAgo)
@@ -52268,17 +52310,17 @@ function registerDashboardRoutes(app2) {
         db.select().from(performanceSnapshots).where(
           and48(
             eq62(performanceSnapshots.campaignId, campaignId),
-            eq62(performanceSnapshots.accountId, accountId)
+            eq62(performanceSnapshots.accountId, accountId2)
           )
         ).orderBy(desc44(performanceSnapshots.fetchedAt)).limit(14),
         db.select().from(requiredWork).where(
           and48(
             eq62(requiredWork.campaignId, campaignId),
-            eq62(requiredWork.accountId, accountId),
+            eq62(requiredWork.accountId, accountId2),
             eq62(requiredWork.planId, plan.id)
           )
         ).limit(1),
-        getManualMetrics(campaignId, accountId),
+        getManualMetrics(campaignId, accountId2),
         db.select({
           total: sql30`count(*)`,
           draft: sql30`count(*) filter (where ${calendarEntries.status} = 'DRAFT')`,
@@ -52289,7 +52331,7 @@ function registerDashboardRoutes(app2) {
         }).from(calendarEntries).where(
           and48(
             eq62(calendarEntries.campaignId, campaignId),
-            eq62(calendarEntries.accountId, accountId),
+            eq62(calendarEntries.accountId, accountId2),
             eq62(calendarEntries.planId, plan.id)
           )
         ),
@@ -52301,7 +52343,7 @@ function registerDashboardRoutes(app2) {
         }).from(studioItems).where(
           and48(
             eq62(studioItems.campaignId, campaignId),
-            eq62(studioItems.accountId, accountId),
+            eq62(studioItems.accountId, accountId2),
             eq62(studioItems.planId, plan.id)
           )
         )
@@ -52309,7 +52351,7 @@ function registerDashboardRoutes(app2) {
       const actions = [];
       const hasManualData = manual && (manual.spend > 0 || manual.revenue > 0 || manual.conversions > 0 || manual.impressions > 0 || manual.clicks > 0 || manual.leads > 0);
       const { computeFulfillment: computeFulfillmentForActions } = await Promise.resolve().then(() => (init_fulfillment_engine(), fulfillment_engine_exports));
-      const actionFulfillment = await computeFulfillmentForActions(campaignId, accountId);
+      const actionFulfillment = await computeFulfillmentForActions(campaignId, accountId2);
       const totalPieces = actionFulfillment.total.required;
       const publishedPieces = actionFulfillment.total.fulfilled;
       const failedPieces = 0;
@@ -52489,8 +52531,8 @@ function registerDashboardRoutes(app2) {
   });
   app2.get("/api/dashboard/mode", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      const mode = await resolveDataMode(accountId);
+      const accountId2 = req.accountId || "default";
+      const mode = await resolveDataMode(accountId2);
       res.json({ success: true, mode });
     } catch (error) {
       console.error(`${LOG_PREFIX4} Mode check error:`, error);
@@ -52499,11 +52541,11 @@ function registerDashboardRoutes(app2) {
   });
   app2.get("/api/dashboard/plan-status", requireCampaign, async (req, res) => {
     try {
-      const { accountId, campaignId } = req.campaignContext;
+      const { accountId: accountId2, campaignId } = req.campaignContext;
       const plans = await db.select().from(strategicPlans).where(
         and48(
           eq62(strategicPlans.campaignId, campaignId),
-          eq62(strategicPlans.accountId, accountId)
+          eq62(strategicPlans.accountId, accountId2)
         )
       ).orderBy(desc44(strategicPlans.createdAt)).limit(1);
       if (plans.length === 0) {
@@ -52513,12 +52555,12 @@ function registerDashboardRoutes(app2) {
       const approvals = await db.select().from(planApprovals).where(eq62(planApprovals.planId, plan.id)).orderBy(desc44(planApprovals.createdAt)).limit(1);
       const isApproved = approvals.length > 0 && approvals[0].decision === "APPROVED";
       const { computeFulfillment: computeFulfillment2 } = await Promise.resolve().then(() => (init_fulfillment_engine(), fulfillment_engine_exports));
-      const fulfillment = await computeFulfillment2(campaignId, accountId);
+      const fulfillment = await computeFulfillment2(campaignId, accountId2);
       let rootInfo = null;
       try {
-        const activeRoot = await getActiveRootBundle(campaignId, accountId);
+        const activeRoot = await getActiveRootBundle(campaignId, accountId2);
         if (activeRoot) {
-          const staleness = await detectStaleness(campaignId, accountId);
+          const staleness = await detectStaleness(campaignId, accountId2);
           rootInfo = {
             id: activeRoot.id,
             version: activeRoot.version,
@@ -52553,8 +52595,8 @@ function registerDashboardRoutes(app2) {
   });
   app2.get("/api/dashboard/agent-brief", requireCampaign, async (req, res) => {
     try {
-      const { accountId, campaignId } = req.campaignContext;
-      const mode = await resolveDataMode(accountId);
+      const { accountId: accountId2, campaignId } = req.campaignContext;
+      const mode = await resolveDataMode(accountId2);
       const safeJson5 = (v) => {
         try {
           return typeof v === "string" ? JSON.parse(v) : v;
@@ -52563,22 +52605,22 @@ function registerDashboardRoutes(app2) {
         }
       };
       const [plans, manual, miData, audData, posData, diffData, offerData, funnelData, awarenessData, persuasionData, statValData, budgetData, channelData, iterData, retentionData, blueprint, goalDecompData, simulationData] = await Promise.all([
-        db.select().from(strategicPlans).where(and48(eq62(strategicPlans.campaignId, campaignId), eq62(strategicPlans.accountId, accountId), inArray16(strategicPlans.status, [...ACTIVE_PLAN_STATUSES]))).orderBy(desc44(strategicPlans.createdAt)).limit(1),
-        getManualMetrics(campaignId, accountId),
-        db.select({ marketDiagnosis: miSnapshots.marketDiagnosis, competitorData: miSnapshots.competitorData, status: miSnapshots.status }).from(miSnapshots).where(and48(eq62(miSnapshots.accountId, accountId), eq62(miSnapshots.campaignId, campaignId))).orderBy(desc44(miSnapshots.createdAt)).limit(1),
-        db.select({ audiencePains: audienceSnapshots.audiencePains, audienceSegments: audienceSnapshots.audienceSegments, emotionalDrivers: audienceSnapshots.emotionalDrivers }).from(audienceSnapshots).where(and48(eq62(audienceSnapshots.accountId, accountId), eq62(audienceSnapshots.campaignId, campaignId))).orderBy(desc44(audienceSnapshots.createdAt)).limit(1),
-        db.select({ territories: positioningSnapshots.territories, narrativeDirection: positioningSnapshots.narrativeDirection }).from(positioningSnapshots).where(and48(eq62(positioningSnapshots.accountId, accountId), eq62(positioningSnapshots.campaignId, campaignId))).orderBy(desc44(positioningSnapshots.createdAt)).limit(1),
-        db.select({ differentiationPillars: differentiationSnapshots.differentiationPillars, authorityMode: differentiationSnapshots.authorityMode }).from(differentiationSnapshots).where(and48(eq62(differentiationSnapshots.accountId, accountId), eq62(differentiationSnapshots.campaignId, campaignId))).orderBy(desc44(differentiationSnapshots.createdAt)).limit(1),
-        db.select({ primaryOffer: offerSnapshots.primaryOffer }).from(offerSnapshots).where(and48(eq62(offerSnapshots.accountId, accountId), eq62(offerSnapshots.campaignId, campaignId))).orderBy(desc44(offerSnapshots.createdAt)).limit(1),
-        db.select({ primaryFunnel: funnelSnapshots.primaryFunnel }).from(funnelSnapshots).where(and48(eq62(funnelSnapshots.accountId, accountId), eq62(funnelSnapshots.campaignId, campaignId))).orderBy(desc44(funnelSnapshots.createdAt)).limit(1),
-        db.select({ primaryRoute: awarenessSnapshots.primaryRoute, awarenessStrengthScore: awarenessSnapshots.awarenessStrengthScore }).from(awarenessSnapshots).where(and48(eq62(awarenessSnapshots.accountId, accountId), eq62(awarenessSnapshots.campaignId, campaignId))).orderBy(desc44(awarenessSnapshots.createdAt)).limit(1),
-        db.select({ primaryRoute: persuasionSnapshots.primaryRoute, persuasionStrengthScore: persuasionSnapshots.persuasionStrengthScore }).from(persuasionSnapshots).where(and48(eq62(persuasionSnapshots.accountId, accountId), eq62(persuasionSnapshots.campaignId, campaignId))).orderBy(desc44(persuasionSnapshots.createdAt)).limit(1),
-        db.select({ result: strategyValidationSnapshots.result, confidenceScore: strategyValidationSnapshots.confidenceScore, status: strategyValidationSnapshots.status }).from(strategyValidationSnapshots).where(and48(eq62(strategyValidationSnapshots.accountId, accountId), eq62(strategyValidationSnapshots.campaignId, campaignId))).orderBy(desc44(strategyValidationSnapshots.createdAt)).limit(1),
-        db.select({ result: budgetGovernorSnapshots.result, status: budgetGovernorSnapshots.status }).from(budgetGovernorSnapshots).where(and48(eq62(budgetGovernorSnapshots.accountId, accountId), eq62(budgetGovernorSnapshots.campaignId, campaignId))).orderBy(desc44(budgetGovernorSnapshots.createdAt)).limit(1),
-        db.select({ result: channelSelectionSnapshots.result, status: channelSelectionSnapshots.status }).from(channelSelectionSnapshots).where(and48(eq62(channelSelectionSnapshots.accountId, accountId), eq62(channelSelectionSnapshots.campaignId, campaignId))).orderBy(desc44(channelSelectionSnapshots.createdAt)).limit(1),
-        db.select({ result: iterationSnapshots.result, status: iterationSnapshots.status }).from(iterationSnapshots).where(and48(eq62(iterationSnapshots.accountId, accountId), eq62(iterationSnapshots.campaignId, campaignId))).orderBy(desc44(iterationSnapshots.createdAt)).limit(1),
-        db.select({ result: retentionSnapshots.result, status: retentionSnapshots.status }).from(retentionSnapshots).where(and48(eq62(retentionSnapshots.accountId, accountId), eq62(retentionSnapshots.campaignId, campaignId))).orderBy(desc44(retentionSnapshots.createdAt)).limit(1),
-        db.select().from(strategicBlueprints).where(and48(eq62(strategicBlueprints.accountId, accountId), eq62(strategicBlueprints.campaignId, campaignId))).orderBy(desc44(strategicBlueprints.createdAt)).limit(1),
+        db.select().from(strategicPlans).where(and48(eq62(strategicPlans.campaignId, campaignId), eq62(strategicPlans.accountId, accountId2), inArray16(strategicPlans.status, [...ACTIVE_PLAN_STATUSES]))).orderBy(desc44(strategicPlans.createdAt)).limit(1),
+        getManualMetrics(campaignId, accountId2),
+        db.select({ marketDiagnosis: miSnapshots.marketDiagnosis, competitorData: miSnapshots.competitorData, status: miSnapshots.status }).from(miSnapshots).where(and48(eq62(miSnapshots.accountId, accountId2), eq62(miSnapshots.campaignId, campaignId))).orderBy(desc44(miSnapshots.createdAt)).limit(1),
+        db.select({ audiencePains: audienceSnapshots.audiencePains, audienceSegments: audienceSnapshots.audienceSegments, emotionalDrivers: audienceSnapshots.emotionalDrivers }).from(audienceSnapshots).where(and48(eq62(audienceSnapshots.accountId, accountId2), eq62(audienceSnapshots.campaignId, campaignId))).orderBy(desc44(audienceSnapshots.createdAt)).limit(1),
+        db.select({ territories: positioningSnapshots.territories, narrativeDirection: positioningSnapshots.narrativeDirection }).from(positioningSnapshots).where(and48(eq62(positioningSnapshots.accountId, accountId2), eq62(positioningSnapshots.campaignId, campaignId))).orderBy(desc44(positioningSnapshots.createdAt)).limit(1),
+        db.select({ differentiationPillars: differentiationSnapshots.differentiationPillars, authorityMode: differentiationSnapshots.authorityMode }).from(differentiationSnapshots).where(and48(eq62(differentiationSnapshots.accountId, accountId2), eq62(differentiationSnapshots.campaignId, campaignId))).orderBy(desc44(differentiationSnapshots.createdAt)).limit(1),
+        db.select({ primaryOffer: offerSnapshots.primaryOffer }).from(offerSnapshots).where(and48(eq62(offerSnapshots.accountId, accountId2), eq62(offerSnapshots.campaignId, campaignId))).orderBy(desc44(offerSnapshots.createdAt)).limit(1),
+        db.select({ primaryFunnel: funnelSnapshots.primaryFunnel }).from(funnelSnapshots).where(and48(eq62(funnelSnapshots.accountId, accountId2), eq62(funnelSnapshots.campaignId, campaignId))).orderBy(desc44(funnelSnapshots.createdAt)).limit(1),
+        db.select({ primaryRoute: awarenessSnapshots.primaryRoute, awarenessStrengthScore: awarenessSnapshots.awarenessStrengthScore }).from(awarenessSnapshots).where(and48(eq62(awarenessSnapshots.accountId, accountId2), eq62(awarenessSnapshots.campaignId, campaignId))).orderBy(desc44(awarenessSnapshots.createdAt)).limit(1),
+        db.select({ primaryRoute: persuasionSnapshots.primaryRoute, persuasionStrengthScore: persuasionSnapshots.persuasionStrengthScore }).from(persuasionSnapshots).where(and48(eq62(persuasionSnapshots.accountId, accountId2), eq62(persuasionSnapshots.campaignId, campaignId))).orderBy(desc44(persuasionSnapshots.createdAt)).limit(1),
+        db.select({ result: strategyValidationSnapshots.result, confidenceScore: strategyValidationSnapshots.confidenceScore, status: strategyValidationSnapshots.status }).from(strategyValidationSnapshots).where(and48(eq62(strategyValidationSnapshots.accountId, accountId2), eq62(strategyValidationSnapshots.campaignId, campaignId))).orderBy(desc44(strategyValidationSnapshots.createdAt)).limit(1),
+        db.select({ result: budgetGovernorSnapshots.result, status: budgetGovernorSnapshots.status }).from(budgetGovernorSnapshots).where(and48(eq62(budgetGovernorSnapshots.accountId, accountId2), eq62(budgetGovernorSnapshots.campaignId, campaignId))).orderBy(desc44(budgetGovernorSnapshots.createdAt)).limit(1),
+        db.select({ result: channelSelectionSnapshots.result, status: channelSelectionSnapshots.status }).from(channelSelectionSnapshots).where(and48(eq62(channelSelectionSnapshots.accountId, accountId2), eq62(channelSelectionSnapshots.campaignId, campaignId))).orderBy(desc44(channelSelectionSnapshots.createdAt)).limit(1),
+        db.select({ result: iterationSnapshots.result, status: iterationSnapshots.status }).from(iterationSnapshots).where(and48(eq62(iterationSnapshots.accountId, accountId2), eq62(iterationSnapshots.campaignId, campaignId))).orderBy(desc44(iterationSnapshots.createdAt)).limit(1),
+        db.select({ result: retentionSnapshots.result, status: retentionSnapshots.status }).from(retentionSnapshots).where(and48(eq62(retentionSnapshots.accountId, accountId2), eq62(retentionSnapshots.campaignId, campaignId))).orderBy(desc44(retentionSnapshots.createdAt)).limit(1),
+        db.select().from(strategicBlueprints).where(and48(eq62(strategicBlueprints.accountId, accountId2), eq62(strategicBlueprints.campaignId, campaignId))).orderBy(desc44(strategicBlueprints.createdAt)).limit(1),
         db.select({
           goalType: goalDecompositions.goalType,
           goalTarget: goalDecompositions.goalTarget,
@@ -52588,14 +52630,14 @@ function registerDashboardRoutes(app2) {
           feasibilityScore: goalDecompositions.feasibilityScore,
           confidenceScore: goalDecompositions.confidenceScore,
           funnelMath: goalDecompositions.funnelMath
-        }).from(goalDecompositions).where(and48(eq62(goalDecompositions.accountId, accountId), eq62(goalDecompositions.campaignId, campaignId), eq62(goalDecompositions.status, "active"))).orderBy(desc44(goalDecompositions.createdAt)).limit(1),
+        }).from(goalDecompositions).where(and48(eq62(goalDecompositions.accountId, accountId2), eq62(goalDecompositions.campaignId, campaignId), eq62(goalDecompositions.status, "active"))).orderBy(desc44(goalDecompositions.createdAt)).limit(1),
         db.select({
           conservativeCase: growthSimulations.conservativeCase,
           baseCase: growthSimulations.baseCase,
           upsideCase: growthSimulations.upsideCase,
           confidenceScore: growthSimulations.confidenceScore,
           bottleneckAlerts: growthSimulations.bottleneckAlerts
-        }).from(growthSimulations).where(and48(eq62(growthSimulations.accountId, accountId), eq62(growthSimulations.campaignId, campaignId), eq62(growthSimulations.status, "active"))).orderBy(desc44(growthSimulations.createdAt)).limit(1)
+        }).from(growthSimulations).where(and48(eq62(growthSimulations.accountId, accountId2), eq62(growthSimulations.campaignId, campaignId), eq62(growthSimulations.status, "active"))).orderBy(desc44(growthSimulations.createdAt)).limit(1)
       ]);
       const plan = plans[0] || null;
       const goalDecomp = goalDecompData[0] || null;
@@ -52609,7 +52651,7 @@ function registerDashboardRoutes(app2) {
       let fulfillmentData = null;
       if (plan) {
         const { computeFulfillment: computeFulfillment2 } = await Promise.resolve().then(() => (init_fulfillment_engine(), fulfillment_engine_exports));
-        fulfillmentData = await computeFulfillment2(campaignId, accountId);
+        fulfillmentData = await computeFulfillment2(campaignId, accountId2);
       }
       let taskSummary = null;
       let assumptionsSummary = null;
@@ -52751,7 +52793,7 @@ function registerDashboardRoutes(app2) {
       let dnaStatusLine = "Content DNA: Not generated yet";
       let dnaSnapshot = null;
       try {
-        const dna = await getLatestContentDna(campaignId, accountId);
+        const dna = await getLatestContentDna(campaignId, accountId2);
         if (dna?.snapshot) {
           dnaSnapshot = dna.snapshot;
           const snap = dna.snapshot;
@@ -52808,7 +52850,7 @@ Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simul
             { role: "user", content: contextForAI }
           ],
           max_tokens: 300,
-          accountId,
+          accountId: accountId2,
           endpoint: "dashboard-agent-brief"
         });
         const rawText = typeof response === "string" ? response : response?.choices?.[0]?.message?.content || "";
@@ -52882,22 +52924,22 @@ Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simul
   });
   app2.post("/api/dashboard/agent-explain", requireCampaign, async (req, res) => {
     try {
-      const { accountId, campaignId } = req.campaignContext;
+      const { accountId: accountId2, campaignId } = req.campaignContext;
       const { question } = req.body;
       if (!question || typeof question !== "string") {
         return res.status(400).json({ success: false, error: "Question is required" });
       }
       const [plans, miData, audData, posData, diffData, offerData, funnelData, awarenessData, persuasionData, blueprint, goalDecompExplain, simulationExplain] = await Promise.all([
-        db.select().from(strategicPlans).where(and48(eq62(strategicPlans.campaignId, campaignId), eq62(strategicPlans.accountId, accountId), inArray16(strategicPlans.status, [...ACTIVE_PLAN_STATUSES]))).orderBy(desc44(strategicPlans.createdAt)).limit(1),
-        db.select({ marketDiagnosis: miSnapshots.marketDiagnosis, narrativeSynthesis: miSnapshots.narrativeSynthesis, threatSignals: miSnapshots.threatSignals, opportunitySignals: miSnapshots.opportunitySignals }).from(miSnapshots).where(and48(eq62(miSnapshots.accountId, accountId), eq62(miSnapshots.campaignId, campaignId))).orderBy(desc44(miSnapshots.createdAt)).limit(1),
-        db.select({ audiencePains: audienceSnapshots.audiencePains, audienceSegments: audienceSnapshots.audienceSegments, emotionalDrivers: audienceSnapshots.emotionalDrivers }).from(audienceSnapshots).where(and48(eq62(audienceSnapshots.accountId, accountId), eq62(audienceSnapshots.campaignId, campaignId))).orderBy(desc44(audienceSnapshots.createdAt)).limit(1),
-        db.select({ territories: positioningSnapshots.territories, narrativeDirection: positioningSnapshots.narrativeDirection }).from(positioningSnapshots).where(and48(eq62(positioningSnapshots.accountId, accountId), eq62(positioningSnapshots.campaignId, campaignId))).orderBy(desc44(positioningSnapshots.createdAt)).limit(1),
-        db.select({ differentiationPillars: differentiationSnapshots.differentiationPillars, authorityMode: differentiationSnapshots.authorityMode }).from(differentiationSnapshots).where(and48(eq62(differentiationSnapshots.accountId, accountId), eq62(differentiationSnapshots.campaignId, campaignId))).orderBy(desc44(differentiationSnapshots.createdAt)).limit(1),
-        db.select({ primaryOffer: offerSnapshots.primaryOffer }).from(offerSnapshots).where(and48(eq62(offerSnapshots.accountId, accountId), eq62(offerSnapshots.campaignId, campaignId))).orderBy(desc44(offerSnapshots.createdAt)).limit(1),
-        db.select({ primaryFunnel: funnelSnapshots.primaryFunnel }).from(funnelSnapshots).where(and48(eq62(funnelSnapshots.accountId, accountId), eq62(funnelSnapshots.campaignId, campaignId))).orderBy(desc44(funnelSnapshots.createdAt)).limit(1),
-        db.select({ primaryRoute: awarenessSnapshots.primaryRoute, awarenessStrengthScore: awarenessSnapshots.awarenessStrengthScore }).from(awarenessSnapshots).where(and48(eq62(awarenessSnapshots.accountId, accountId), eq62(awarenessSnapshots.campaignId, campaignId))).orderBy(desc44(awarenessSnapshots.createdAt)).limit(1),
-        db.select({ primaryRoute: persuasionSnapshots.primaryRoute, persuasionStrengthScore: persuasionSnapshots.persuasionStrengthScore }).from(persuasionSnapshots).where(and48(eq62(persuasionSnapshots.accountId, accountId), eq62(persuasionSnapshots.campaignId, campaignId))).orderBy(desc44(persuasionSnapshots.createdAt)).limit(1),
-        db.select().from(strategicBlueprints).where(and48(eq62(strategicBlueprints.accountId, accountId), eq62(strategicBlueprints.campaignId, campaignId))).orderBy(desc44(strategicBlueprints.createdAt)).limit(1),
+        db.select().from(strategicPlans).where(and48(eq62(strategicPlans.campaignId, campaignId), eq62(strategicPlans.accountId, accountId2), inArray16(strategicPlans.status, [...ACTIVE_PLAN_STATUSES]))).orderBy(desc44(strategicPlans.createdAt)).limit(1),
+        db.select({ marketDiagnosis: miSnapshots.marketDiagnosis, narrativeSynthesis: miSnapshots.narrativeSynthesis, threatSignals: miSnapshots.threatSignals, opportunitySignals: miSnapshots.opportunitySignals }).from(miSnapshots).where(and48(eq62(miSnapshots.accountId, accountId2), eq62(miSnapshots.campaignId, campaignId))).orderBy(desc44(miSnapshots.createdAt)).limit(1),
+        db.select({ audiencePains: audienceSnapshots.audiencePains, audienceSegments: audienceSnapshots.audienceSegments, emotionalDrivers: audienceSnapshots.emotionalDrivers }).from(audienceSnapshots).where(and48(eq62(audienceSnapshots.accountId, accountId2), eq62(audienceSnapshots.campaignId, campaignId))).orderBy(desc44(audienceSnapshots.createdAt)).limit(1),
+        db.select({ territories: positioningSnapshots.territories, narrativeDirection: positioningSnapshots.narrativeDirection }).from(positioningSnapshots).where(and48(eq62(positioningSnapshots.accountId, accountId2), eq62(positioningSnapshots.campaignId, campaignId))).orderBy(desc44(positioningSnapshots.createdAt)).limit(1),
+        db.select({ differentiationPillars: differentiationSnapshots.differentiationPillars, authorityMode: differentiationSnapshots.authorityMode }).from(differentiationSnapshots).where(and48(eq62(differentiationSnapshots.accountId, accountId2), eq62(differentiationSnapshots.campaignId, campaignId))).orderBy(desc44(differentiationSnapshots.createdAt)).limit(1),
+        db.select({ primaryOffer: offerSnapshots.primaryOffer }).from(offerSnapshots).where(and48(eq62(offerSnapshots.accountId, accountId2), eq62(offerSnapshots.campaignId, campaignId))).orderBy(desc44(offerSnapshots.createdAt)).limit(1),
+        db.select({ primaryFunnel: funnelSnapshots.primaryFunnel }).from(funnelSnapshots).where(and48(eq62(funnelSnapshots.accountId, accountId2), eq62(funnelSnapshots.campaignId, campaignId))).orderBy(desc44(funnelSnapshots.createdAt)).limit(1),
+        db.select({ primaryRoute: awarenessSnapshots.primaryRoute, awarenessStrengthScore: awarenessSnapshots.awarenessStrengthScore }).from(awarenessSnapshots).where(and48(eq62(awarenessSnapshots.accountId, accountId2), eq62(awarenessSnapshots.campaignId, campaignId))).orderBy(desc44(awarenessSnapshots.createdAt)).limit(1),
+        db.select({ primaryRoute: persuasionSnapshots.primaryRoute, persuasionStrengthScore: persuasionSnapshots.persuasionStrengthScore }).from(persuasionSnapshots).where(and48(eq62(persuasionSnapshots.accountId, accountId2), eq62(persuasionSnapshots.campaignId, campaignId))).orderBy(desc44(persuasionSnapshots.createdAt)).limit(1),
+        db.select().from(strategicBlueprints).where(and48(eq62(strategicBlueprints.accountId, accountId2), eq62(strategicBlueprints.campaignId, campaignId))).orderBy(desc44(strategicBlueprints.createdAt)).limit(1),
         db.select({
           goalType: goalDecompositions.goalType,
           goalTarget: goalDecompositions.goalTarget,
@@ -52909,7 +52951,7 @@ Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simul
           funnelMath: goalDecompositions.funnelMath,
           feasibilityExplanation: goalDecompositions.feasibilityExplanation,
           assumptions: goalDecompositions.assumptions
-        }).from(goalDecompositions).where(and48(eq62(goalDecompositions.accountId, accountId), eq62(goalDecompositions.campaignId, campaignId), eq62(goalDecompositions.status, "active"))).orderBy(desc44(goalDecompositions.createdAt)).limit(1),
+        }).from(goalDecompositions).where(and48(eq62(goalDecompositions.accountId, accountId2), eq62(goalDecompositions.campaignId, campaignId), eq62(goalDecompositions.status, "active"))).orderBy(desc44(goalDecompositions.createdAt)).limit(1),
         db.select({
           conservativeCase: growthSimulations.conservativeCase,
           baseCase: growthSimulations.baseCase,
@@ -52917,7 +52959,7 @@ Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simul
           confidenceScore: growthSimulations.confidenceScore,
           keyAssumptions: growthSimulations.keyAssumptions,
           bottleneckAlerts: growthSimulations.bottleneckAlerts
-        }).from(growthSimulations).where(and48(eq62(growthSimulations.accountId, accountId), eq62(growthSimulations.campaignId, campaignId), eq62(growthSimulations.status, "active"))).orderBy(desc44(growthSimulations.createdAt)).limit(1)
+        }).from(growthSimulations).where(and48(eq62(growthSimulations.accountId, accountId2), eq62(growthSimulations.campaignId, campaignId), eq62(growthSimulations.status, "active"))).orderBy(desc44(growthSimulations.createdAt)).limit(1)
       ]);
       const plan = plans[0] || null;
       let planJson = null;
@@ -52982,7 +53024,7 @@ ${JSON.stringify(sData).substring(0, 800)}`);
       }
       let dnaContext = "";
       try {
-        const dna = await getLatestContentDna(campaignId, accountId);
+        const dna = await getLatestContentDna(campaignId, accountId2);
         if (dna) {
           const dnaParts = ["CONTENT DNA:"];
           if (dna.messagingCore) dnaParts.push(`Messaging Core: ${JSON.stringify(dna.messagingCore).substring(0, 600)}`);
@@ -53078,7 +53120,7 @@ ${contextStr}
 USER QUESTION: ${question}` }
         ],
         max_tokens: 400,
-        accountId,
+        accountId: accountId2,
         endpoint: "dashboard-agent-explain"
       });
       const rawText = typeof response === "string" ? response : response?.choices?.[0]?.message?.content || "";
@@ -53158,14 +53200,14 @@ var VALID_MODULES = ["create", "studio", "ai-management", "calendar", "settings"
 function registerUIStateRoutes(app2) {
   app2.get("/api/ui-state/:moduleKey", requireCampaign, async (req, res) => {
     try {
-      const { accountId, campaignId } = req.campaignContext;
+      const { accountId: accountId2, campaignId } = req.campaignContext;
       const { moduleKey } = req.params;
       if (!VALID_MODULES.includes(moduleKey)) {
         return res.status(400).json({ success: false, code: 400, message: `Invalid moduleKey: ${moduleKey}` });
       }
       const rows = await db.select().from(uiStateStore).where(
         and49(
-          eq63(uiStateStore.accountId, accountId),
+          eq63(uiStateStore.accountId, accountId2),
           eq63(uiStateStore.campaignId, campaignId),
           eq63(uiStateStore.moduleKey, moduleKey)
         )
@@ -53192,7 +53234,7 @@ function registerUIStateRoutes(app2) {
   });
   app2.put("/api/ui-state/:moduleKey", requireCampaign, async (req, res) => {
     try {
-      const { accountId, campaignId } = req.campaignContext;
+      const { accountId: accountId2, campaignId } = req.campaignContext;
       const { moduleKey } = req.params;
       const { stateData } = req.body;
       if (!VALID_MODULES.includes(moduleKey)) {
@@ -53205,7 +53247,7 @@ function registerUIStateRoutes(app2) {
       const now = /* @__PURE__ */ new Date();
       const existing = await db.select({ id: uiStateStore.id }).from(uiStateStore).where(
         and49(
-          eq63(uiStateStore.accountId, accountId),
+          eq63(uiStateStore.accountId, accountId2),
           eq63(uiStateStore.campaignId, campaignId),
           eq63(uiStateStore.moduleKey, moduleKey)
         )
@@ -53214,7 +53256,7 @@ function registerUIStateRoutes(app2) {
         await db.update(uiStateStore).set({ stateData: serialized, updatedAt: now }).where(eq63(uiStateStore.id, existing[0].id));
       } else {
         await db.insert(uiStateStore).values({
-          accountId,
+          accountId: accountId2,
           campaignId,
           moduleKey,
           stateData: serialized,
@@ -53229,14 +53271,14 @@ function registerUIStateRoutes(app2) {
   });
   app2.delete("/api/ui-state/:moduleKey", requireCampaign, async (req, res) => {
     try {
-      const { accountId, campaignId } = req.campaignContext;
+      const { accountId: accountId2, campaignId } = req.campaignContext;
       const { moduleKey } = req.params;
       if (!VALID_MODULES.includes(moduleKey)) {
         return res.status(400).json({ success: false, code: 400, message: `Invalid moduleKey: ${moduleKey}` });
       }
       await db.delete(uiStateStore).where(
         and49(
-          eq63(uiStateStore.accountId, accountId),
+          eq63(uiStateStore.accountId, accountId2),
           eq63(uiStateStore.campaignId, campaignId),
           eq63(uiStateStore.moduleKey, moduleKey)
         )
@@ -53267,7 +53309,8 @@ function safeJsonParse11(text2) {
 function registerDifferentiationRoutes(app2) {
   app2.post("/api/differentiation-engine/analyze", async (req, res) => {
     try {
-      const { campaignId, accountId = "default", positioningSnapshotId, validationSessionId } = req.body;
+      const { campaignId, positioningSnapshotId, validationSessionId } = req.body;
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
@@ -53281,7 +53324,7 @@ function registerDifferentiationRoutes(app2) {
       if (!positioningSnapshotId) {
         return res.status(400).json({ error: "positioningSnapshotId is required" });
       }
-      const [posSnapshot] = await db.select().from(positioningSnapshots).where(and50(eq64(positioningSnapshots.id, positioningSnapshotId), eq64(positioningSnapshots.campaignId, campaignId), eq64(positioningSnapshots.accountId, accountId))).limit(1);
+      const [posSnapshot] = await db.select().from(positioningSnapshots).where(and50(eq64(positioningSnapshots.id, positioningSnapshotId), eq64(positioningSnapshots.campaignId, campaignId), eq64(positioningSnapshots.accountId, accountId2))).limit(1);
       if (!posSnapshot) {
         return res.status(400).json({
           error: "MISSING_DEPENDENCY",
@@ -53290,7 +53333,7 @@ function registerDifferentiationRoutes(app2) {
       }
       let miSnapshotId = posSnapshot.miSnapshotId;
       const audienceSnapshotId = posSnapshot.audienceSnapshotId;
-      let [miSnapshot] = await db.select().from(miSnapshots).where(and50(eq64(miSnapshots.id, miSnapshotId), eq64(miSnapshots.campaignId, campaignId), eq64(miSnapshots.accountId, accountId))).limit(1);
+      let [miSnapshot] = await db.select().from(miSnapshots).where(and50(eq64(miSnapshots.id, miSnapshotId), eq64(miSnapshots.campaignId, campaignId), eq64(miSnapshots.accountId, accountId2))).limit(1);
       if (miSnapshot) {
         const integrityResult = verifySnapshotIntegrity(miSnapshot, ENGINE_VERSION, campaignId);
         const miReadiness = integrityResult.valid ? getEngineReadinessState(miSnapshot, campaignId, ENGINE_VERSION, 14) : null;
@@ -53298,7 +53341,7 @@ function registerDifferentiationRoutes(app2) {
           console.log(`[DifferentiationEngine] MI snapshot ${miSnapshotId} failed integrity/readiness check, searching for latest valid MI snapshot`);
           const [latestMI] = await db.select().from(miSnapshots).where(and50(
             eq64(miSnapshots.campaignId, campaignId),
-            eq64(miSnapshots.accountId, accountId),
+            eq64(miSnapshots.accountId, accountId2),
             inArray17(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
             eq64(miSnapshots.analysisVersion, ENGINE_VERSION)
           )).orderBy(desc45(miSnapshots.createdAt)).limit(1);
@@ -53317,7 +53360,7 @@ function registerDifferentiationRoutes(app2) {
       } else {
         const [latestMI] = await db.select().from(miSnapshots).where(and50(
           eq64(miSnapshots.campaignId, campaignId),
-          eq64(miSnapshots.accountId, accountId),
+          eq64(miSnapshots.accountId, accountId2),
           inArray17(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
           eq64(miSnapshots.analysisVersion, ENGINE_VERSION)
         )).orderBy(desc45(miSnapshots.createdAt)).limit(1);
@@ -53331,7 +53374,7 @@ function registerDifferentiationRoutes(app2) {
       }
       const miFreshnessMetadata = buildFreshnessMetadata(miSnapshot);
       logFreshnessTraceability("DifferentiationEngine", miSnapshot, miFreshnessMetadata);
-      const [audSnapshot] = await db.select().from(audienceSnapshots).where(and50(eq64(audienceSnapshots.id, audienceSnapshotId), eq64(audienceSnapshots.campaignId, campaignId), eq64(audienceSnapshots.accountId, accountId))).limit(1);
+      const [audSnapshot] = await db.select().from(audienceSnapshots).where(and50(eq64(audienceSnapshots.id, audienceSnapshotId), eq64(audienceSnapshots.campaignId, campaignId), eq64(audienceSnapshots.accountId, accountId2))).limit(1);
       if (!audSnapshot) {
         return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Audience snapshot not found or campaign mismatch" });
       }
@@ -53370,7 +53413,7 @@ function registerDifferentiationRoutes(app2) {
       };
       let profileInput = null;
       try {
-        const [bizData] = await db.select().from(businessDataLayer).where(and50(eq64(businessDataLayer.campaignId, campaignId), eq64(businessDataLayer.accountId, accountId))).limit(1);
+        const [bizData] = await db.select().from(businessDataLayer).where(and50(eq64(businessDataLayer.campaignId, campaignId), eq64(businessDataLayer.accountId, accountId2))).limit(1);
         if (bizData) {
           profileInput = {
             businessType: bizData.businessType,
@@ -53394,7 +53437,7 @@ function registerDifferentiationRoutes(app2) {
       } catch (err) {
         console.log(`[DifferentiationEngine] Profile data fetch failed (non-blocking): ${err.message}`);
       }
-      const result = await runDifferentiationEngine(miInput, audienceInput, positioningInput, accountId, profileInput);
+      const result = await runDifferentiationEngine(miInput, audienceInput, positioningInput, accountId2, profileInput);
       if (result.status === "INTEGRITY_FAILED") {
         return res.status(400).json({
           success: false,
@@ -53405,7 +53448,7 @@ function registerDifferentiationRoutes(app2) {
         });
       }
       const [saved] = await db.insert(differentiationSnapshots).values({
-        accountId,
+        accountId: accountId2,
         campaignId,
         miSnapshotId,
         audienceSnapshotId,
@@ -53426,10 +53469,10 @@ function registerDifferentiationRoutes(app2) {
         confidenceScore: result.confidenceScore,
         executionTimeMs: result.executionTimeMs
       }).returning();
-      await pruneOldSnapshots(db, differentiationSnapshots, campaignId, 20, accountId);
+      await pruneOldSnapshots(db, differentiationSnapshots, campaignId, 20, accountId2);
       try {
         const { invalidateDownstreamOnRegeneration: invalidateDownstreamOnRegeneration3 } = await Promise.resolve().then(() => (init_strategy_root(), strategy_root_exports));
-        const inv = await invalidateDownstreamOnRegeneration3(campaignId, accountId, "differentiation");
+        const inv = await invalidateDownstreamOnRegeneration3(campaignId, accountId2, "differentiation");
         if (inv.supersededRoots > 0) {
           console.log(`[DifferentiationEngine] ROOT_INVALIDATED | superseded=${inv.supersededRoots}`);
         }
@@ -53450,13 +53493,13 @@ function registerDifferentiationRoutes(app2) {
   app2.get("/api/differentiation-engine/latest", async (req, res) => {
     try {
       const campaignId = req.query.campaignId;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
       const [latest] = await db.select().from(differentiationSnapshots).where(and50(
         eq64(differentiationSnapshots.campaignId, campaignId),
-        eq64(differentiationSnapshots.accountId, accountId),
+        eq64(differentiationSnapshots.accountId, accountId2),
         eq64(differentiationSnapshots.engineVersion, ENGINE_VERSION2)
       )).orderBy(desc45(differentiationSnapshots.createdAt)).limit(1);
       if (!latest) {
@@ -53510,7 +53553,8 @@ function safeJsonParse12(text2) {
 function registerMechanismEngineRoutes(app2) {
   app2.post("/api/mechanism-engine/analyze", async (req, res) => {
     try {
-      const { campaignId, accountId = "default", differentiationSnapshotId, validationSessionId } = req.body;
+      const { campaignId, differentiationSnapshotId, validationSessionId } = req.body;
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
@@ -53524,12 +53568,12 @@ function registerMechanismEngineRoutes(app2) {
       if (!differentiationSnapshotId) {
         return res.status(400).json({ error: "differentiationSnapshotId is required" });
       }
-      let [diffSnapshot] = await db.select().from(differentiationSnapshots).where(and51(eq65(differentiationSnapshots.id, differentiationSnapshotId), eq65(differentiationSnapshots.campaignId, campaignId), eq65(differentiationSnapshots.accountId, accountId))).limit(1);
+      let [diffSnapshot] = await db.select().from(differentiationSnapshots).where(and51(eq65(differentiationSnapshots.id, differentiationSnapshotId), eq65(differentiationSnapshots.campaignId, campaignId), eq65(differentiationSnapshots.accountId, accountId2))).limit(1);
       if (!diffSnapshot) {
         console.warn(`[MechanismEngine] Requested differentiationSnapshotId=${differentiationSnapshotId} not found \u2014 falling back to latest for campaign=${campaignId}`);
         const [fallback] = await db.select().from(differentiationSnapshots).where(and51(
           eq65(differentiationSnapshots.campaignId, campaignId),
-          eq65(differentiationSnapshots.accountId, accountId),
+          eq65(differentiationSnapshots.accountId, accountId2),
           inArray18(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"])
         )).orderBy(desc46(differentiationSnapshots.createdAt)).limit(1);
         if (!fallback) {
@@ -53544,7 +53588,7 @@ function registerMechanismEngineRoutes(app2) {
       if (activeDiffSnapshot.engineVersion !== ENGINE_VERSION2) {
         const [latestDiff] = await db.select().from(differentiationSnapshots).where(and51(
           eq65(differentiationSnapshots.campaignId, campaignId),
-          eq65(differentiationSnapshots.accountId, accountId),
+          eq65(differentiationSnapshots.accountId, accountId2),
           inArray18(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"]),
           eq65(differentiationSnapshots.engineVersion, ENGINE_VERSION2)
         )).orderBy(desc46(differentiationSnapshots.createdAt)).limit(1);
@@ -53558,7 +53602,7 @@ function registerMechanismEngineRoutes(app2) {
         }
       }
       const positioningSnapshotId = activeDiffSnapshot.positioningSnapshotId;
-      const [posSnapshot] = await db.select().from(positioningSnapshots).where(and51(eq65(positioningSnapshots.id, positioningSnapshotId), eq65(positioningSnapshots.campaignId, campaignId), eq65(positioningSnapshots.accountId, accountId))).limit(1);
+      const [posSnapshot] = await db.select().from(positioningSnapshots).where(and51(eq65(positioningSnapshots.id, positioningSnapshotId), eq65(positioningSnapshots.campaignId, campaignId), eq65(positioningSnapshots.accountId, accountId2))).limit(1);
       if (!posSnapshot) {
         return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Positioning snapshot not found" });
       }
@@ -53578,9 +53622,9 @@ function registerMechanismEngineRoutes(app2) {
         proofArchitecture: safeJsonParse12(activeDiffSnapshot.proofArchitecture) || []
       };
       console.log(`[MechanismEngine] Analyzing for campaign=${campaignId} | diffSnapshot=${activeDiffSnapshot.id} | posSnapshot=${posSnapshot.id}`);
-      const result = await runMechanismEngine(positioningInput, differentiationInput, accountId);
+      const result = await runMechanismEngine(positioningInput, differentiationInput, accountId2);
       const [saved] = await db.insert(mechanismSnapshots).values({
-        accountId,
+        accountId: accountId2,
         campaignId,
         positioningSnapshotId,
         differentiationSnapshotId: activeDiffSnapshot.id,
@@ -53593,7 +53637,7 @@ function registerMechanismEngineRoutes(app2) {
         confidenceScore: result.confidenceScore,
         executionTimeMs: result.executionTimeMs
       }).returning();
-      await pruneOldSnapshots(db, mechanismSnapshots, campaignId, 20, accountId);
+      await pruneOldSnapshots(db, mechanismSnapshots, campaignId, 20, accountId2);
       console.log(`[MechanismEngine] SAVED | snapshotId=${saved.id} | status=${result.status} | confidence=${result.confidenceScore.toFixed(2)}`);
       let strategyRootResult = null;
       if (result.status === "COMPLETE" || result.status === "LOW_CONFIDENCE") {
@@ -53626,7 +53670,7 @@ function registerMechanismEngineRoutes(app2) {
           const mechClaim = primaryMech?.mechanismPromise || null;
           strategyRootResult = await buildStrategyRoot({
             campaignId,
-            accountId,
+            accountId: accountId2,
             miSnapshotId: miSnapshotId || "",
             audienceSnapshotId: audienceSnapshotId || "",
             positioningSnapshotId,
@@ -53663,13 +53707,13 @@ function registerMechanismEngineRoutes(app2) {
   app2.get("/api/mechanism-engine/latest", async (req, res) => {
     try {
       const campaignId = req.query.campaignId;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
       const [latest] = await db.select().from(mechanismSnapshots).where(and51(
         eq65(mechanismSnapshots.campaignId, campaignId),
-        eq65(mechanismSnapshots.accountId, accountId),
+        eq65(mechanismSnapshots.accountId, accountId2),
         eq65(mechanismSnapshots.engineVersion, ENGINE_VERSION3)
       )).orderBy(desc46(mechanismSnapshots.createdAt)).limit(1);
       if (!latest) {
@@ -53717,7 +53761,8 @@ function safeJsonParse13(text2) {
 function registerOfferEngineRoutes(app2) {
   app2.post("/api/offer-engine/analyze", async (req, res) => {
     try {
-      const { campaignId, accountId = "default", differentiationSnapshotId, validationSessionId } = req.body;
+      const { campaignId, differentiationSnapshotId, validationSessionId } = req.body;
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
@@ -53728,7 +53773,7 @@ function registerOfferEngineRoutes(app2) {
           message: sessionCheck.warning
         });
       }
-      const activeRoot = await getActiveRoot(campaignId, accountId);
+      const activeRoot = await getActiveRoot(campaignId, accountId2);
       if (!activeRoot) {
         console.log(`[OfferEngine] ROOT_REQUIRED_BLOCK | campaign=${campaignId} | no active strategy root`);
         return res.status(400).json({
@@ -53750,14 +53795,14 @@ function registerOfferEngineRoutes(app2) {
       const rootDiffId = activeRoot.differentiationSnapshotId;
       const rootMechId = activeRoot.mechanismSnapshotId;
       console.log(`[OfferEngine] ROOT_SCOPED_ROUTING | rootId=${activeRoot.id} | hash=${activeRoot.rootHash} | runId=${activeRoot.runId} | mi=${rootMiId} | aud=${rootAudienceId} | pos=${rootPositioningId} | diff=${rootDiffId} | mech=${rootMechId}`);
-      const [activeDiffSnapshot] = await db.select().from(differentiationSnapshots).where(and52(eq66(differentiationSnapshots.id, rootDiffId), eq66(differentiationSnapshots.campaignId, campaignId), eq66(differentiationSnapshots.accountId, accountId))).limit(1);
+      const [activeDiffSnapshot] = await db.select().from(differentiationSnapshots).where(and52(eq66(differentiationSnapshots.id, rootDiffId), eq66(differentiationSnapshots.campaignId, campaignId), eq66(differentiationSnapshots.accountId, accountId2))).limit(1);
       if (!activeDiffSnapshot) {
         return res.status(400).json({
           error: "ROOT_SNAPSHOT_MISSING",
           message: `Differentiation snapshot ${rootDiffId} referenced by Strategy Root not found. Re-run the pipeline to regenerate.`
         });
       }
-      let [miSnapshot] = await db.select().from(miSnapshots).where(and52(eq66(miSnapshots.id, rootMiId), eq66(miSnapshots.campaignId, campaignId), eq66(miSnapshots.accountId, accountId))).limit(1);
+      let [miSnapshot] = await db.select().from(miSnapshots).where(and52(eq66(miSnapshots.id, rootMiId), eq66(miSnapshots.campaignId, campaignId), eq66(miSnapshots.accountId, accountId2))).limit(1);
       if (!miSnapshot) {
         return res.status(400).json({
           error: "ROOT_SNAPSHOT_MISSING",
@@ -53770,14 +53815,14 @@ function registerOfferEngineRoutes(app2) {
       }
       const miFreshnessMetadata = buildFreshnessMetadata(miSnapshot);
       logFreshnessTraceability("OfferEngine", miSnapshot, miFreshnessMetadata);
-      const [audSnapshot] = await db.select().from(audienceSnapshots).where(and52(eq66(audienceSnapshots.id, rootAudienceId), eq66(audienceSnapshots.campaignId, campaignId), eq66(audienceSnapshots.accountId, accountId))).limit(1);
+      const [audSnapshot] = await db.select().from(audienceSnapshots).where(and52(eq66(audienceSnapshots.id, rootAudienceId), eq66(audienceSnapshots.campaignId, campaignId), eq66(audienceSnapshots.accountId, accountId2))).limit(1);
       if (!audSnapshot) {
         return res.status(400).json({
           error: "ROOT_SNAPSHOT_MISSING",
           message: `Audience snapshot ${rootAudienceId} referenced by Strategy Root not found. Re-run the Audience Engine to regenerate.`
         });
       }
-      const [posSnapshot] = await db.select().from(positioningSnapshots).where(and52(eq66(positioningSnapshots.id, rootPositioningId), eq66(positioningSnapshots.campaignId, campaignId), eq66(positioningSnapshots.accountId, accountId))).limit(1);
+      const [posSnapshot] = await db.select().from(positioningSnapshots).where(and52(eq66(positioningSnapshots.id, rootPositioningId), eq66(positioningSnapshots.campaignId, campaignId), eq66(positioningSnapshots.accountId, accountId2))).limit(1);
       if (!posSnapshot) {
         return res.status(400).json({
           error: "ROOT_SNAPSHOT_MISSING",
@@ -53839,7 +53884,7 @@ function registerOfferEngineRoutes(app2) {
       const [rootMechanism] = await db.select().from(mechanismSnapshots).where(and52(
         eq66(mechanismSnapshots.id, rootMechId),
         eq66(mechanismSnapshots.campaignId, campaignId),
-        eq66(mechanismSnapshots.accountId, accountId)
+        eq66(mechanismSnapshots.accountId, accountId2)
       )).limit(1);
       if (rootMechanism) {
         mechanismEngineOutput = {
@@ -53855,7 +53900,7 @@ function registerOfferEngineRoutes(app2) {
           message: `Mechanism snapshot ${rootMechId} referenced by Strategy Root not found. Re-run the Mechanism Engine to regenerate.`
         });
       }
-      const result = await runOfferEngine(miInput, audienceInput, positioningInput, differentiationInput, accountId, upstreamLineage, mechanismEngineOutput, activeRoot);
+      const result = await runOfferEngine(miInput, audienceInput, positioningInput, differentiationInput, accountId2, upstreamLineage, mechanismEngineOutput, activeRoot);
       if (result.status === "INSUFFICIENT_SIGNALS") {
         return res.status(422).json({
           success: false,
@@ -53908,7 +53953,7 @@ function registerOfferEngineRoutes(app2) {
         }
       };
       const [saved] = await db.insert(offerSnapshots).values({
-        accountId,
+        accountId: accountId2,
         campaignId,
         miSnapshotId: miSnapshot.id,
         audienceSnapshotId: rootAudienceId,
@@ -53932,7 +53977,7 @@ function registerOfferEngineRoutes(app2) {
         layerDiagnostics: JSON.stringify(diagnostics),
         executionTimeMs: result.executionTimeMs
       }).returning();
-      await pruneOldSnapshots(db, offerSnapshots, campaignId, 20, accountId);
+      await pruneOldSnapshots(db, offerSnapshots, campaignId, 20, accountId2);
       res.json({
         success: true,
         snapshotId: saved.id,
@@ -53947,19 +53992,19 @@ function registerOfferEngineRoutes(app2) {
   app2.get("/api/offer-engine/latest", async (req, res) => {
     try {
       const campaignId = req.query.campaignId;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
       const [latest] = await db.select().from(offerSnapshots).where(and52(
         eq66(offerSnapshots.campaignId, campaignId),
-        eq66(offerSnapshots.accountId, accountId),
+        eq66(offerSnapshots.accountId, accountId2),
         eq66(offerSnapshots.engineVersion, ENGINE_VERSION4)
       )).orderBy(desc47(offerSnapshots.createdAt)).limit(1);
       if (!latest) {
         return res.json({ exists: false });
       }
-      const activeRoot = await getActiveRoot(campaignId, accountId);
+      const activeRoot = await getActiveRoot(campaignId, accountId2);
       let rootSyncStatus = "no_root";
       if (activeRoot) {
         rootSyncStatus = latest.strategyRootId === activeRoot.id ? "synced" : "stale";
@@ -54020,7 +54065,8 @@ function safeJsonParse14(text2) {
 function registerFunnelEngineRoutes(app2) {
   app2.post("/api/funnel-engine/analyze", async (req, res) => {
     try {
-      const { campaignId, accountId = "default", offerSnapshotId, awarenessSnapshotId, validationSessionId } = req.body;
+      const { campaignId, offerSnapshotId, awarenessSnapshotId, validationSessionId } = req.body;
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
@@ -54037,7 +54083,7 @@ function registerFunnelEngineRoutes(app2) {
       const [offerSnapshot] = await db.select().from(offerSnapshots).where(and53(
         eq67(offerSnapshots.id, offerSnapshotId),
         eq67(offerSnapshots.campaignId, campaignId),
-        eq67(offerSnapshots.accountId, accountId)
+        eq67(offerSnapshots.accountId, accountId2)
       )).limit(1);
       if (!offerSnapshot) {
         return res.status(400).json({
@@ -54050,7 +54096,7 @@ function registerFunnelEngineRoutes(app2) {
         console.log(`[FunnelEngine-V3] Offer snapshot ${offerSnapshotId} version mismatch (v${offerSnapshot.engineVersion} vs v${ENGINE_VERSION4}), searching for latest valid offer snapshot`);
         const [latestOffer] = await db.select().from(offerSnapshots).where(and53(
           eq67(offerSnapshots.campaignId, campaignId),
-          eq67(offerSnapshots.accountId, accountId),
+          eq67(offerSnapshots.accountId, accountId2),
           eq67(offerSnapshots.status, "COMPLETE"),
           eq67(offerSnapshots.engineVersion, ENGINE_VERSION4)
         )).orderBy(desc48(offerSnapshots.createdAt)).limit(1);
@@ -54068,14 +54114,14 @@ function registerFunnelEngineRoutes(app2) {
       const audienceSnapshotId = activeOfferSnapshot.audienceSnapshotId;
       const positioningSnapshotId = activeOfferSnapshot.positioningSnapshotId;
       const differentiationSnapshotId = activeOfferSnapshot.differentiationSnapshotId;
-      let [miSnapshot] = await db.select().from(miSnapshots).where(and53(eq67(miSnapshots.id, miSnapshotId), eq67(miSnapshots.campaignId, campaignId), eq67(miSnapshots.accountId, accountId))).limit(1);
+      let [miSnapshot] = await db.select().from(miSnapshots).where(and53(eq67(miSnapshots.id, miSnapshotId), eq67(miSnapshots.campaignId, campaignId), eq67(miSnapshots.accountId, accountId2))).limit(1);
       if (miSnapshot) {
         const integrityResult = verifySnapshotIntegrity(miSnapshot, ENGINE_VERSION, campaignId);
         if (!integrityResult.valid) {
           console.log(`[FunnelEngine-V3] MI snapshot ${miSnapshotId} failed integrity check (v${miSnapshot.analysisVersion} vs v${ENGINE_VERSION}), searching for latest valid MI snapshot`);
           const [latestMI] = await db.select().from(miSnapshots).where(and53(
             eq67(miSnapshots.campaignId, campaignId),
-            eq67(miSnapshots.accountId, accountId),
+            eq67(miSnapshots.accountId, accountId2),
             inArray20(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
             eq67(miSnapshots.analysisVersion, ENGINE_VERSION)
           )).orderBy(desc48(miSnapshots.createdAt)).limit(1);
@@ -54093,7 +54139,7 @@ function registerFunnelEngineRoutes(app2) {
       } else {
         const [latestMI] = await db.select().from(miSnapshots).where(and53(
           eq67(miSnapshots.campaignId, campaignId),
-          eq67(miSnapshots.accountId, accountId),
+          eq67(miSnapshots.accountId, accountId2),
           inArray20(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
           eq67(miSnapshots.analysisVersion, ENGINE_VERSION)
         )).orderBy(desc48(miSnapshots.createdAt)).limit(1);
@@ -54113,9 +54159,9 @@ function registerFunnelEngineRoutes(app2) {
           diagnostics: miReadiness.diagnostics
         });
       }
-      let [audSnapshot] = await db.select().from(audienceSnapshots).where(and53(eq67(audienceSnapshots.id, audienceSnapshotId), eq67(audienceSnapshots.campaignId, campaignId), eq67(audienceSnapshots.accountId, accountId))).limit(1);
+      let [audSnapshot] = await db.select().from(audienceSnapshots).where(and53(eq67(audienceSnapshots.id, audienceSnapshotId), eq67(audienceSnapshots.campaignId, campaignId), eq67(audienceSnapshots.accountId, accountId2))).limit(1);
       if (!audSnapshot) {
-        const [latestAud] = await db.select().from(audienceSnapshots).where(and53(eq67(audienceSnapshots.campaignId, campaignId), eq67(audienceSnapshots.accountId, accountId), eq67(audienceSnapshots.engineVersion, AUDIENCE_ENGINE_VERSION))).orderBy(desc48(audienceSnapshots.createdAt)).limit(1);
+        const [latestAud] = await db.select().from(audienceSnapshots).where(and53(eq67(audienceSnapshots.campaignId, campaignId), eq67(audienceSnapshots.accountId, accountId2), eq67(audienceSnapshots.engineVersion, AUDIENCE_ENGINE_VERSION))).orderBy(desc48(audienceSnapshots.createdAt)).limit(1);
         if (latestAud) {
           audSnapshot = latestAud;
           console.log(`[FunnelEngine-V3] Audience snapshot resolved via fallback to latest: ${latestAud.id}`);
@@ -54123,9 +54169,9 @@ function registerFunnelEngineRoutes(app2) {
           return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid Audience snapshot found \u2014 please run Audience Engine first" });
         }
       }
-      let [posSnapshot] = await db.select().from(positioningSnapshots).where(and53(eq67(positioningSnapshots.id, positioningSnapshotId), eq67(positioningSnapshots.campaignId, campaignId), eq67(positioningSnapshots.accountId, accountId))).limit(1);
+      let [posSnapshot] = await db.select().from(positioningSnapshots).where(and53(eq67(positioningSnapshots.id, positioningSnapshotId), eq67(positioningSnapshots.campaignId, campaignId), eq67(positioningSnapshots.accountId, accountId2))).limit(1);
       if (!posSnapshot) {
-        const [latestPos] = await db.select().from(positioningSnapshots).where(and53(eq67(positioningSnapshots.campaignId, campaignId), eq67(positioningSnapshots.accountId, accountId), eq67(positioningSnapshots.status, "COMPLETE"), eq67(positioningSnapshots.engineVersion, POSITIONING_ENGINE_VERSION))).orderBy(desc48(positioningSnapshots.createdAt)).limit(1);
+        const [latestPos] = await db.select().from(positioningSnapshots).where(and53(eq67(positioningSnapshots.campaignId, campaignId), eq67(positioningSnapshots.accountId, accountId2), eq67(positioningSnapshots.status, "COMPLETE"), eq67(positioningSnapshots.engineVersion, POSITIONING_ENGINE_VERSION))).orderBy(desc48(positioningSnapshots.createdAt)).limit(1);
         if (latestPos) {
           posSnapshot = latestPos;
           console.log(`[FunnelEngine-V3] Positioning snapshot resolved via fallback to latest: ${latestPos.id}`);
@@ -54133,9 +54179,9 @@ function registerFunnelEngineRoutes(app2) {
           return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid Positioning snapshot found \u2014 please run Positioning Engine first" });
         }
       }
-      let [diffSnapshot] = await db.select().from(differentiationSnapshots).where(and53(eq67(differentiationSnapshots.id, differentiationSnapshotId), eq67(differentiationSnapshots.campaignId, campaignId), eq67(differentiationSnapshots.accountId, accountId))).limit(1);
+      let [diffSnapshot] = await db.select().from(differentiationSnapshots).where(and53(eq67(differentiationSnapshots.id, differentiationSnapshotId), eq67(differentiationSnapshots.campaignId, campaignId), eq67(differentiationSnapshots.accountId, accountId2))).limit(1);
       if (!diffSnapshot) {
-        const [latestDiff] = await db.select().from(differentiationSnapshots).where(and53(eq67(differentiationSnapshots.campaignId, campaignId), eq67(differentiationSnapshots.accountId, accountId), inArray20(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"]), eq67(differentiationSnapshots.engineVersion, ENGINE_VERSION2))).orderBy(desc48(differentiationSnapshots.createdAt)).limit(1);
+        const [latestDiff] = await db.select().from(differentiationSnapshots).where(and53(eq67(differentiationSnapshots.campaignId, campaignId), eq67(differentiationSnapshots.accountId, accountId2), inArray20(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"]), eq67(differentiationSnapshots.engineVersion, ENGINE_VERSION2))).orderBy(desc48(differentiationSnapshots.createdAt)).limit(1);
         if (latestDiff) {
           diffSnapshot = latestDiff;
           console.log(`[FunnelEngine-V3] Differentiation snapshot resolved via fallback to latest: ${latestDiff.id}`);
@@ -54195,11 +54241,11 @@ function registerFunnelEngineRoutes(app2) {
       let awarenessInput = null;
       let activeAwarenessSnapshotId = null;
       if (awarenessSnapshotId) {
-        let [awarenessSnapshot] = await db.select().from(awarenessSnapshots).where(and53(eq67(awarenessSnapshots.id, awarenessSnapshotId), eq67(awarenessSnapshots.campaignId, campaignId), eq67(awarenessSnapshots.accountId, accountId))).limit(1);
+        let [awarenessSnapshot] = await db.select().from(awarenessSnapshots).where(and53(eq67(awarenessSnapshots.id, awarenessSnapshotId), eq67(awarenessSnapshots.campaignId, campaignId), eq67(awarenessSnapshots.accountId, accountId2))).limit(1);
         if (awarenessSnapshot && awarenessSnapshot.engineVersion !== ENGINE_VERSION7) {
           const [latestAwareness] = await db.select().from(awarenessSnapshots).where(and53(
             eq67(awarenessSnapshots.campaignId, campaignId),
-            eq67(awarenessSnapshots.accountId, accountId),
+            eq67(awarenessSnapshots.accountId, accountId2),
             eq67(awarenessSnapshots.engineVersion, ENGINE_VERSION7)
           )).orderBy(desc48(awarenessSnapshots.createdAt)).limit(1);
           if (latestAwareness) {
@@ -54224,7 +54270,7 @@ function registerFunnelEngineRoutes(app2) {
       if (!awarenessInput) {
         const [latestAwareness] = await db.select().from(awarenessSnapshots).where(and53(
           eq67(awarenessSnapshots.campaignId, campaignId),
-          eq67(awarenessSnapshots.accountId, accountId),
+          eq67(awarenessSnapshots.accountId, accountId2),
           eq67(awarenessSnapshots.engineVersion, ENGINE_VERSION7)
         )).orderBy(desc48(awarenessSnapshots.createdAt)).limit(1);
         if (latestAwareness) {
@@ -54247,7 +54293,7 @@ function registerFunnelEngineRoutes(app2) {
           });
         }
       }
-      const activeRoot = await getActiveRoot(campaignId, accountId);
+      const activeRoot = await getActiveRoot(campaignId, accountId2);
       let strategyRootId = null;
       if (activeRoot) {
         const rootValidation = validateRootBinding(activeRoot, {
@@ -54264,7 +54310,7 @@ function registerFunnelEngineRoutes(app2) {
       } else {
         console.log(`[FunnelEngine] NO_ACTIVE_ROOT | campaign=${campaignId}`);
       }
-      const result = await runFunnelEngine(miInput, audienceInput, offerInput, positioningInput, differentiationInput, accountId, awarenessInput);
+      const result = await runFunnelEngine(miInput, audienceInput, offerInput, positioningInput, differentiationInput, accountId2, awarenessInput);
       if (result.status === "INTEGRITY_FAILED") {
         console.error(`[FunnelEngine] HARD-FAIL: Boundary violation detected \u2014 not persisting`);
         return res.status(422).json({
@@ -54276,7 +54322,7 @@ function registerFunnelEngineRoutes(app2) {
         });
       }
       const [saved] = await db.insert(funnelSnapshots).values({
-        accountId,
+        accountId: accountId2,
         campaignId,
         offerSnapshotId: activeOfferSnapshot.id,
         awarenessSnapshotId: activeAwarenessSnapshotId,
@@ -54300,7 +54346,7 @@ function registerFunnelEngineRoutes(app2) {
         executionTimeMs: result.executionTimeMs,
         layerDiagnostics: JSON.stringify(result.layerDiagnostics)
       }).returning();
-      await pruneOldSnapshots(db, funnelSnapshots, campaignId, 20, accountId);
+      await pruneOldSnapshots(db, funnelSnapshots, campaignId, 20, accountId2);
       res.json({
         success: true,
         snapshotId: saved.id,
@@ -54315,13 +54361,13 @@ function registerFunnelEngineRoutes(app2) {
   app2.get("/api/funnel-engine/latest", async (req, res) => {
     try {
       const campaignId = req.query.campaignId;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
       const [latest] = await db.select().from(funnelSnapshots).where(and53(
         eq67(funnelSnapshots.campaignId, campaignId),
-        eq67(funnelSnapshots.accountId, accountId),
+        eq67(funnelSnapshots.accountId, accountId2),
         eq67(funnelSnapshots.engineVersion, ENGINE_VERSION5)
       )).orderBy(desc48(funnelSnapshots.createdAt)).limit(1);
       if (!latest) {
@@ -54360,7 +54406,7 @@ function registerFunnelEngineRoutes(app2) {
   });
   app2.post("/api/funnel-engine/select", async (req, res) => {
     try {
-      const { snapshotId, selectedOption, campaignId, accountId = "default" } = req.body;
+      const { snapshotId, selectedOption, campaignId } = req.body;
       if (!snapshotId || !selectedOption || !campaignId) {
         return res.status(400).json({ error: "snapshotId, selectedOption, and campaignId are required" });
       }
@@ -54383,7 +54429,7 @@ function registerFunnelEngineRoutes(app2) {
   });
   app2.post("/api/offer-engine/select", async (req, res) => {
     try {
-      const { snapshotId, selectedOption, campaignId, accountId = "default" } = req.body;
+      const { snapshotId, selectedOption, campaignId } = req.body;
       if (!snapshotId || !selectedOption || !campaignId) {
         return res.status(400).json({ error: "snapshotId, selectedOption, and campaignId are required" });
       }
@@ -54436,7 +54482,8 @@ function safeNumber6(v, fallback) {
 function registerIntegrityEngineRoutes(app2) {
   app2.post("/api/integrity-engine/analyze", async (req, res) => {
     try {
-      const { campaignId, accountId = "default", funnelSnapshotId, validationSessionId } = req.body;
+      const { campaignId, funnelSnapshotId, validationSessionId } = req.body;
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
@@ -54452,13 +54499,13 @@ function registerIntegrityEngineRoutes(app2) {
         [funnelSnapshot] = await db.select().from(funnelSnapshots).where(and54(
           eq68(funnelSnapshots.id, funnelSnapshotId),
           eq68(funnelSnapshots.campaignId, campaignId),
-          eq68(funnelSnapshots.accountId, accountId)
+          eq68(funnelSnapshots.accountId, accountId2)
         )).limit(1);
       }
       if (!funnelSnapshot) {
         const [latestFunnel] = await db.select().from(funnelSnapshots).where(and54(
           eq68(funnelSnapshots.campaignId, campaignId),
-          eq68(funnelSnapshots.accountId, accountId),
+          eq68(funnelSnapshots.accountId, accountId2),
           eq68(funnelSnapshots.engineVersion, ENGINE_VERSION5),
           eq68(funnelSnapshots.status, "COMPLETE")
         )).orderBy(desc49(funnelSnapshots.createdAt)).limit(1);
@@ -54476,7 +54523,7 @@ function registerIntegrityEngineRoutes(app2) {
         console.log(`[IntegrityEngine-V3] Funnel snapshot ${funnelSnapshotId} version mismatch (v${funnelSnapshot.engineVersion} vs v${ENGINE_VERSION5}), searching for latest valid funnel snapshot`);
         const [latestFunnel] = await db.select().from(funnelSnapshots).where(and54(
           eq68(funnelSnapshots.campaignId, campaignId),
-          eq68(funnelSnapshots.accountId, accountId),
+          eq68(funnelSnapshots.accountId, accountId2),
           eq68(funnelSnapshots.engineVersion, ENGINE_VERSION5),
           eq68(funnelSnapshots.status, "COMPLETE")
         )).orderBy(desc49(funnelSnapshots.createdAt)).limit(1);
@@ -54495,14 +54542,14 @@ function registerIntegrityEngineRoutes(app2) {
       const audienceSnapshotId = funnelSnapshot.audienceSnapshotId;
       const positioningSnapshotId = funnelSnapshot.positioningSnapshotId;
       const differentiationSnapshotId = funnelSnapshot.differentiationSnapshotId;
-      let [miSnapshot] = await db.select().from(miSnapshots).where(and54(eq68(miSnapshots.id, miSnapshotId), eq68(miSnapshots.campaignId, campaignId), eq68(miSnapshots.accountId, accountId))).limit(1);
+      let [miSnapshot] = await db.select().from(miSnapshots).where(and54(eq68(miSnapshots.id, miSnapshotId), eq68(miSnapshots.campaignId, campaignId), eq68(miSnapshots.accountId, accountId2))).limit(1);
       if (miSnapshot) {
         const integrityResult = verifySnapshotIntegrity(miSnapshot, ENGINE_VERSION, campaignId);
         if (!integrityResult.valid) {
           console.log(`[IntegrityEngine-V3] MI snapshot ${miSnapshotId} failed version check (v${miSnapshot.analysisVersion} vs v${ENGINE_VERSION}), searching for latest valid MI snapshot`);
           const [latestMI] = await db.select().from(miSnapshots).where(and54(
             eq68(miSnapshots.campaignId, campaignId),
-            eq68(miSnapshots.accountId, accountId),
+            eq68(miSnapshots.accountId, accountId2),
             inArray21(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
             eq68(miSnapshots.analysisVersion, ENGINE_VERSION)
           )).orderBy(desc49(miSnapshots.createdAt)).limit(1);
@@ -54519,7 +54566,7 @@ function registerIntegrityEngineRoutes(app2) {
       } else {
         const [latestMI] = await db.select().from(miSnapshots).where(and54(
           eq68(miSnapshots.campaignId, campaignId),
-          eq68(miSnapshots.accountId, accountId),
+          eq68(miSnapshots.accountId, accountId2),
           inArray21(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
           eq68(miSnapshots.analysisVersion, ENGINE_VERSION)
         )).orderBy(desc49(miSnapshots.createdAt)).limit(1);
@@ -54531,9 +54578,9 @@ function registerIntegrityEngineRoutes(app2) {
       }
       const miFreshnessMetadata = buildFreshnessMetadata(miSnapshot);
       logFreshnessTraceability("IntegrityEngine", miSnapshot, miFreshnessMetadata);
-      let [audSnapshot] = await db.select().from(audienceSnapshots).where(and54(eq68(audienceSnapshots.id, audienceSnapshotId), eq68(audienceSnapshots.campaignId, campaignId), eq68(audienceSnapshots.accountId, accountId))).limit(1);
+      let [audSnapshot] = await db.select().from(audienceSnapshots).where(and54(eq68(audienceSnapshots.id, audienceSnapshotId), eq68(audienceSnapshots.campaignId, campaignId), eq68(audienceSnapshots.accountId, accountId2))).limit(1);
       if (!audSnapshot) {
-        const [latestAud] = await db.select().from(audienceSnapshots).where(and54(eq68(audienceSnapshots.campaignId, campaignId), eq68(audienceSnapshots.accountId, accountId), eq68(audienceSnapshots.engineVersion, AUDIENCE_ENGINE_VERSION))).orderBy(desc49(audienceSnapshots.createdAt)).limit(1);
+        const [latestAud] = await db.select().from(audienceSnapshots).where(and54(eq68(audienceSnapshots.campaignId, campaignId), eq68(audienceSnapshots.accountId, accountId2), eq68(audienceSnapshots.engineVersion, AUDIENCE_ENGINE_VERSION))).orderBy(desc49(audienceSnapshots.createdAt)).limit(1);
         if (latestAud) {
           audSnapshot = latestAud;
           console.log(`[IntegrityEngine-V3] Audience snapshot resolved via fallback to latest: ${latestAud.id}`);
@@ -54541,9 +54588,9 @@ function registerIntegrityEngineRoutes(app2) {
           return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid Audience snapshot found \u2014 please run Audience Engine first" });
         }
       }
-      let [posSnapshot] = await db.select().from(positioningSnapshots).where(and54(eq68(positioningSnapshots.id, positioningSnapshotId), eq68(positioningSnapshots.campaignId, campaignId), eq68(positioningSnapshots.accountId, accountId))).limit(1);
+      let [posSnapshot] = await db.select().from(positioningSnapshots).where(and54(eq68(positioningSnapshots.id, positioningSnapshotId), eq68(positioningSnapshots.campaignId, campaignId), eq68(positioningSnapshots.accountId, accountId2))).limit(1);
       if (!posSnapshot) {
-        const [latestPos] = await db.select().from(positioningSnapshots).where(and54(eq68(positioningSnapshots.campaignId, campaignId), eq68(positioningSnapshots.accountId, accountId), eq68(positioningSnapshots.status, "COMPLETE"), eq68(positioningSnapshots.engineVersion, POSITIONING_ENGINE_VERSION))).orderBy(desc49(positioningSnapshots.createdAt)).limit(1);
+        const [latestPos] = await db.select().from(positioningSnapshots).where(and54(eq68(positioningSnapshots.campaignId, campaignId), eq68(positioningSnapshots.accountId, accountId2), eq68(positioningSnapshots.status, "COMPLETE"), eq68(positioningSnapshots.engineVersion, POSITIONING_ENGINE_VERSION))).orderBy(desc49(positioningSnapshots.createdAt)).limit(1);
         if (latestPos) {
           posSnapshot = latestPos;
           console.log(`[IntegrityEngine-V3] Positioning snapshot resolved via fallback to latest: ${latestPos.id}`);
@@ -54551,9 +54598,9 @@ function registerIntegrityEngineRoutes(app2) {
           return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid Positioning snapshot found \u2014 please run Positioning Engine first" });
         }
       }
-      let [diffSnapshot] = await db.select().from(differentiationSnapshots).where(and54(eq68(differentiationSnapshots.id, differentiationSnapshotId), eq68(differentiationSnapshots.campaignId, campaignId), eq68(differentiationSnapshots.accountId, accountId))).limit(1);
+      let [diffSnapshot] = await db.select().from(differentiationSnapshots).where(and54(eq68(differentiationSnapshots.id, differentiationSnapshotId), eq68(differentiationSnapshots.campaignId, campaignId), eq68(differentiationSnapshots.accountId, accountId2))).limit(1);
       if (!diffSnapshot) {
-        const [latestDiff] = await db.select().from(differentiationSnapshots).where(and54(eq68(differentiationSnapshots.campaignId, campaignId), eq68(differentiationSnapshots.accountId, accountId), inArray21(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"]), eq68(differentiationSnapshots.engineVersion, ENGINE_VERSION2))).orderBy(desc49(differentiationSnapshots.createdAt)).limit(1);
+        const [latestDiff] = await db.select().from(differentiationSnapshots).where(and54(eq68(differentiationSnapshots.campaignId, campaignId), eq68(differentiationSnapshots.accountId, accountId2), inArray21(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"]), eq68(differentiationSnapshots.engineVersion, ENGINE_VERSION2))).orderBy(desc49(differentiationSnapshots.createdAt)).limit(1);
         if (latestDiff) {
           diffSnapshot = latestDiff;
           console.log(`[IntegrityEngine-V3] Differentiation snapshot resolved via fallback to latest: ${latestDiff.id}`);
@@ -54561,9 +54608,9 @@ function registerIntegrityEngineRoutes(app2) {
           return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid Differentiation snapshot found \u2014 please run Differentiation Engine first" });
         }
       }
-      let [offerSnapshot] = await db.select().from(offerSnapshots).where(and54(eq68(offerSnapshots.id, offerSnapshotId), eq68(offerSnapshots.campaignId, campaignId), eq68(offerSnapshots.accountId, accountId))).limit(1);
+      let [offerSnapshot] = await db.select().from(offerSnapshots).where(and54(eq68(offerSnapshots.id, offerSnapshotId), eq68(offerSnapshots.campaignId, campaignId), eq68(offerSnapshots.accountId, accountId2))).limit(1);
       if (!offerSnapshot) {
-        const [latestOffer] = await db.select().from(offerSnapshots).where(and54(eq68(offerSnapshots.campaignId, campaignId), eq68(offerSnapshots.accountId, accountId), eq68(offerSnapshots.status, "COMPLETE"), eq68(offerSnapshots.engineVersion, ENGINE_VERSION4))).orderBy(desc49(offerSnapshots.createdAt)).limit(1);
+        const [latestOffer] = await db.select().from(offerSnapshots).where(and54(eq68(offerSnapshots.campaignId, campaignId), eq68(offerSnapshots.accountId, accountId2), eq68(offerSnapshots.status, "COMPLETE"), eq68(offerSnapshots.engineVersion, ENGINE_VERSION4))).orderBy(desc49(offerSnapshots.createdAt)).limit(1);
         if (latestOffer) {
           offerSnapshot = latestOffer;
           console.log(`[IntegrityEngine-V3] Offer snapshot resolved via fallback to latest: ${latestOffer.id}`);
@@ -54634,7 +54681,7 @@ function registerIntegrityEngineRoutes(app2) {
         funnelStrengthScore: safeNumber6(funnelData?.funnelStrengthScore, 0),
         compressionApplied: funnelData?.compressionApplied || false
       };
-      const activeRoot = await getActiveRoot(campaignId, accountId);
+      const activeRoot = await getActiveRoot(campaignId, accountId2);
       let strategyRootId = null;
       if (activeRoot) {
         const rootValidation = validateRootBinding(activeRoot, {
@@ -54663,7 +54710,7 @@ function registerIntegrityEngineRoutes(app2) {
         });
       }
       const [saved] = await db.insert(integritySnapshots).values({
-        accountId,
+        accountId: accountId2,
         campaignId,
         funnelSnapshotId: funnelSnapshot.id,
         offerSnapshotId,
@@ -54683,7 +54730,7 @@ function registerIntegrityEngineRoutes(app2) {
         boundaryCheck: JSON.stringify(result.boundaryCheck),
         executionTimeMs: result.executionTimeMs
       }).returning();
-      await pruneOldSnapshots(db, integritySnapshots, campaignId, 20, accountId);
+      await pruneOldSnapshots(db, integritySnapshots, campaignId, 20, accountId2);
       res.json({
         success: true,
         snapshotId: saved.id,
@@ -54698,13 +54745,13 @@ function registerIntegrityEngineRoutes(app2) {
   app2.get("/api/integrity-engine/latest", async (req, res) => {
     try {
       const campaignId = req.query.campaignId;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
       const [latest] = await db.select().from(integritySnapshots).where(and54(
         eq68(integritySnapshots.campaignId, campaignId),
-        eq68(integritySnapshots.accountId, accountId),
+        eq68(integritySnapshots.accountId, accountId2),
         eq68(integritySnapshots.engineVersion, ENGINE_VERSION6)
       )).orderBy(desc49(integritySnapshots.createdAt)).limit(1);
       if (!latest) {
@@ -54749,11 +54796,11 @@ function registerStrategyRootRoutes(app2) {
   app2.get("/api/strategy-root/active", async (req, res) => {
     try {
       const campaignId = req.query.campaignId;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
-      const root = await getActiveRoot(campaignId, accountId);
+      const root = await getActiveRoot(campaignId, accountId2);
       if (!root) {
         return res.json({ exists: false });
       }
@@ -54805,11 +54852,11 @@ function registerStrategyRootRoutes(app2) {
   app2.get("/api/strategy-root/validate", async (req, res) => {
     try {
       const campaignId = req.query.campaignId;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
-      const root = await getActiveRoot(campaignId, accountId);
+      const root = await getActiveRoot(campaignId, accountId2);
       if (!root) {
         return res.json({
           valid: false,
@@ -54818,15 +54865,15 @@ function registerStrategyRootRoutes(app2) {
         });
       }
       const latestSnapshots = {};
-      const [latestMi] = await db.select({ id: miSnapshots.id, createdAt: miSnapshots.createdAt }).from(miSnapshots).where(and55(eq69(miSnapshots.campaignId, campaignId), eq69(miSnapshots.accountId, accountId))).orderBy(desc50(miSnapshots.createdAt)).limit(1);
+      const [latestMi] = await db.select({ id: miSnapshots.id, createdAt: miSnapshots.createdAt }).from(miSnapshots).where(and55(eq69(miSnapshots.campaignId, campaignId), eq69(miSnapshots.accountId, accountId2))).orderBy(desc50(miSnapshots.createdAt)).limit(1);
       latestSnapshots.mi = latestMi ? { id: latestMi.id, createdAt: latestMi.createdAt?.toISOString() || "" } : null;
-      const [latestAud] = await db.select({ id: audienceSnapshots.id, createdAt: audienceSnapshots.createdAt }).from(audienceSnapshots).where(and55(eq69(audienceSnapshots.campaignId, campaignId), eq69(audienceSnapshots.accountId, accountId))).orderBy(desc50(audienceSnapshots.createdAt)).limit(1);
+      const [latestAud] = await db.select({ id: audienceSnapshots.id, createdAt: audienceSnapshots.createdAt }).from(audienceSnapshots).where(and55(eq69(audienceSnapshots.campaignId, campaignId), eq69(audienceSnapshots.accountId, accountId2))).orderBy(desc50(audienceSnapshots.createdAt)).limit(1);
       latestSnapshots.audience = latestAud ? { id: latestAud.id, createdAt: latestAud.createdAt?.toISOString() || "" } : null;
-      const [latestPos] = await db.select({ id: positioningSnapshots.id, createdAt: positioningSnapshots.createdAt }).from(positioningSnapshots).where(and55(eq69(positioningSnapshots.campaignId, campaignId), eq69(positioningSnapshots.accountId, accountId))).orderBy(desc50(positioningSnapshots.createdAt)).limit(1);
+      const [latestPos] = await db.select({ id: positioningSnapshots.id, createdAt: positioningSnapshots.createdAt }).from(positioningSnapshots).where(and55(eq69(positioningSnapshots.campaignId, campaignId), eq69(positioningSnapshots.accountId, accountId2))).orderBy(desc50(positioningSnapshots.createdAt)).limit(1);
       latestSnapshots.positioning = latestPos ? { id: latestPos.id, createdAt: latestPos.createdAt?.toISOString() || "" } : null;
-      const [latestDiff] = await db.select({ id: differentiationSnapshots.id, createdAt: differentiationSnapshots.createdAt }).from(differentiationSnapshots).where(and55(eq69(differentiationSnapshots.campaignId, campaignId), eq69(differentiationSnapshots.accountId, accountId))).orderBy(desc50(differentiationSnapshots.createdAt)).limit(1);
+      const [latestDiff] = await db.select({ id: differentiationSnapshots.id, createdAt: differentiationSnapshots.createdAt }).from(differentiationSnapshots).where(and55(eq69(differentiationSnapshots.campaignId, campaignId), eq69(differentiationSnapshots.accountId, accountId2))).orderBy(desc50(differentiationSnapshots.createdAt)).limit(1);
       latestSnapshots.differentiation = latestDiff ? { id: latestDiff.id, createdAt: latestDiff.createdAt?.toISOString() || "" } : null;
-      const [latestMech] = await db.select({ id: mechanismSnapshots.id, createdAt: mechanismSnapshots.createdAt }).from(mechanismSnapshots).where(and55(eq69(mechanismSnapshots.campaignId, campaignId), eq69(mechanismSnapshots.accountId, accountId))).orderBy(desc50(mechanismSnapshots.createdAt)).limit(1);
+      const [latestMech] = await db.select({ id: mechanismSnapshots.id, createdAt: mechanismSnapshots.createdAt }).from(mechanismSnapshots).where(and55(eq69(mechanismSnapshots.campaignId, campaignId), eq69(mechanismSnapshots.accountId, accountId2))).orderBy(desc50(mechanismSnapshots.createdAt)).limit(1);
       latestSnapshots.mechanism = latestMech ? { id: latestMech.id, createdAt: latestMech.createdAt?.toISOString() || "" } : null;
       const drift = [];
       if (latestSnapshots.mi && latestSnapshots.mi.id !== root.miSnapshotId) drift.push("MI");
@@ -54893,7 +54940,8 @@ function safeNumber7(v, fallback) {
 function registerAwarenessEngineRoutes(app2) {
   app2.post("/api/awareness-engine/analyze", async (req, res) => {
     try {
-      const { campaignId, accountId = "default", offerSnapshotId, validationSessionId } = req.body;
+      const { campaignId, offerSnapshotId, validationSessionId } = req.body;
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
@@ -54910,7 +54958,7 @@ function registerAwarenessEngineRoutes(app2) {
       let [offerSnapshot] = await db.select().from(offerSnapshots).where(and56(
         eq70(offerSnapshots.id, offerSnapshotId),
         eq70(offerSnapshots.campaignId, campaignId),
-        eq70(offerSnapshots.accountId, accountId)
+        eq70(offerSnapshots.accountId, accountId2)
       )).limit(1);
       if (!offerSnapshot) {
         return res.status(400).json({
@@ -54923,7 +54971,7 @@ function registerAwarenessEngineRoutes(app2) {
         console.log(`[AwarenessEngine-V3] Offer snapshot ${offerSnapshotId} version mismatch (v${offerSnapshot.engineVersion} vs v${ENGINE_VERSION4}), searching for latest valid`);
         const [latestOffer] = await db.select().from(offerSnapshots).where(and56(
           eq70(offerSnapshots.campaignId, campaignId),
-          eq70(offerSnapshots.accountId, accountId),
+          eq70(offerSnapshots.accountId, accountId2),
           eq70(offerSnapshots.status, "COMPLETE"),
           eq70(offerSnapshots.engineVersion, ENGINE_VERSION4)
         )).orderBy(desc51(offerSnapshots.createdAt)).limit(1);
@@ -54941,14 +54989,14 @@ function registerAwarenessEngineRoutes(app2) {
       const audienceSnapshotId = activeOfferSnapshot.audienceSnapshotId;
       const positioningSnapshotId = activeOfferSnapshot.positioningSnapshotId;
       const differentiationSnapshotId = activeOfferSnapshot.differentiationSnapshotId;
-      let [miSnapshot] = await db.select().from(miSnapshots).where(and56(eq70(miSnapshots.id, miSnapshotId), eq70(miSnapshots.campaignId, campaignId), eq70(miSnapshots.accountId, accountId))).limit(1);
+      let [miSnapshot] = await db.select().from(miSnapshots).where(and56(eq70(miSnapshots.id, miSnapshotId), eq70(miSnapshots.campaignId, campaignId), eq70(miSnapshots.accountId, accountId2))).limit(1);
       if (miSnapshot) {
         const integrityResult = verifySnapshotIntegrity(miSnapshot, ENGINE_VERSION, campaignId);
         if (!integrityResult.valid) {
           console.log(`[AwarenessEngine-V3] MI snapshot ${miSnapshotId} failed version check (v${miSnapshot.analysisVersion} vs v${ENGINE_VERSION}), searching for latest valid MI snapshot`);
           const [latestMI] = await db.select().from(miSnapshots).where(and56(
             eq70(miSnapshots.campaignId, campaignId),
-            eq70(miSnapshots.accountId, accountId),
+            eq70(miSnapshots.accountId, accountId2),
             inArray22(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
             eq70(miSnapshots.analysisVersion, ENGINE_VERSION)
           )).orderBy(desc51(miSnapshots.createdAt)).limit(1);
@@ -54965,7 +55013,7 @@ function registerAwarenessEngineRoutes(app2) {
       } else {
         const [latestMI] = await db.select().from(miSnapshots).where(and56(
           eq70(miSnapshots.campaignId, campaignId),
-          eq70(miSnapshots.accountId, accountId),
+          eq70(miSnapshots.accountId, accountId2),
           inArray22(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
           eq70(miSnapshots.analysisVersion, ENGINE_VERSION)
         )).orderBy(desc51(miSnapshots.createdAt)).limit(1);
@@ -54977,7 +55025,7 @@ function registerAwarenessEngineRoutes(app2) {
       }
       const miFreshnessMetadata = buildFreshnessMetadata(miSnapshot);
       logFreshnessTraceability("AwarenessEngine", miSnapshot, miFreshnessMetadata);
-      let [audSnapshot] = await db.select().from(audienceSnapshots).where(and56(eq70(audienceSnapshots.id, audienceSnapshotId), eq70(audienceSnapshots.campaignId, campaignId), eq70(audienceSnapshots.accountId, accountId))).limit(1);
+      let [audSnapshot] = await db.select().from(audienceSnapshots).where(and56(eq70(audienceSnapshots.id, audienceSnapshotId), eq70(audienceSnapshots.campaignId, campaignId), eq70(audienceSnapshots.accountId, accountId2))).limit(1);
       if (!audSnapshot) {
         return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Audience snapshot not found" });
       }
@@ -54985,7 +55033,7 @@ function registerAwarenessEngineRoutes(app2) {
         console.log(`[AwarenessEngine-V3] Audience snapshot ${audienceSnapshotId} version mismatch (v${audSnapshot.engineVersion} vs v${AUDIENCE_ENGINE_VERSION}), searching for latest valid`);
         const [latestAud] = await db.select().from(audienceSnapshots).where(and56(
           eq70(audienceSnapshots.campaignId, campaignId),
-          eq70(audienceSnapshots.accountId, accountId),
+          eq70(audienceSnapshots.accountId, accountId2),
           eq70(audienceSnapshots.engineVersion, AUDIENCE_ENGINE_VERSION)
         )).orderBy(desc51(audienceSnapshots.createdAt)).limit(1);
         if (latestAud) {
@@ -54995,7 +55043,7 @@ function registerAwarenessEngineRoutes(app2) {
           return res.status(400).json({ error: "VERSION_MISMATCH", message: `Audience snapshot version ${audSnapshot.engineVersion} does not match current version ${AUDIENCE_ENGINE_VERSION} \u2014 please re-run Audience Engine` });
         }
       }
-      let [posSnapshot] = await db.select().from(positioningSnapshots).where(and56(eq70(positioningSnapshots.id, positioningSnapshotId), eq70(positioningSnapshots.campaignId, campaignId), eq70(positioningSnapshots.accountId, accountId))).limit(1);
+      let [posSnapshot] = await db.select().from(positioningSnapshots).where(and56(eq70(positioningSnapshots.id, positioningSnapshotId), eq70(positioningSnapshots.campaignId, campaignId), eq70(positioningSnapshots.accountId, accountId2))).limit(1);
       if (!posSnapshot) {
         return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Positioning snapshot not found" });
       }
@@ -55003,7 +55051,7 @@ function registerAwarenessEngineRoutes(app2) {
         console.log(`[AwarenessEngine-V3] Positioning snapshot ${positioningSnapshotId} version mismatch (v${posSnapshot.engineVersion} vs v${POSITIONING_ENGINE_VERSION}), searching for latest valid`);
         const [latestPos] = await db.select().from(positioningSnapshots).where(and56(
           eq70(positioningSnapshots.campaignId, campaignId),
-          eq70(positioningSnapshots.accountId, accountId),
+          eq70(positioningSnapshots.accountId, accountId2),
           eq70(positioningSnapshots.status, "COMPLETE"),
           eq70(positioningSnapshots.engineVersion, POSITIONING_ENGINE_VERSION)
         )).orderBy(desc51(positioningSnapshots.createdAt)).limit(1);
@@ -55014,7 +55062,7 @@ function registerAwarenessEngineRoutes(app2) {
           return res.status(400).json({ error: "VERSION_MISMATCH", message: `Positioning snapshot version ${posSnapshot.engineVersion} does not match current version ${POSITIONING_ENGINE_VERSION} \u2014 please re-run Positioning Engine` });
         }
       }
-      let [diffSnapshot] = await db.select().from(differentiationSnapshots).where(and56(eq70(differentiationSnapshots.id, differentiationSnapshotId), eq70(differentiationSnapshots.campaignId, campaignId), eq70(differentiationSnapshots.accountId, accountId))).limit(1);
+      let [diffSnapshot] = await db.select().from(differentiationSnapshots).where(and56(eq70(differentiationSnapshots.id, differentiationSnapshotId), eq70(differentiationSnapshots.campaignId, campaignId), eq70(differentiationSnapshots.accountId, accountId2))).limit(1);
       if (!diffSnapshot) {
         return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Differentiation snapshot not found" });
       }
@@ -55022,7 +55070,7 @@ function registerAwarenessEngineRoutes(app2) {
         console.log(`[AwarenessEngine-V3] Differentiation snapshot ${differentiationSnapshotId} version mismatch (v${diffSnapshot.engineVersion} vs v${ENGINE_VERSION2}), searching for latest valid`);
         const [latestDiff] = await db.select().from(differentiationSnapshots).where(and56(
           eq70(differentiationSnapshots.campaignId, campaignId),
-          eq70(differentiationSnapshots.accountId, accountId),
+          eq70(differentiationSnapshots.accountId, accountId2),
           inArray22(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"]),
           eq70(differentiationSnapshots.engineVersion, ENGINE_VERSION2)
         )).orderBy(desc51(differentiationSnapshots.createdAt)).limit(1);
@@ -55091,7 +55139,7 @@ function registerAwarenessEngineRoutes(app2) {
         riskNotes: offerData?.riskNotes || [],
         frictionLevel: safeNumber7(offerData?.frictionLevel, 0)
       };
-      const activeRoot = await getActiveRoot(campaignId, accountId);
+      const activeRoot = await getActiveRoot(campaignId, accountId2);
       let strategyRootId = null;
       if (activeRoot) {
         const rootValidation = validateRootBinding(activeRoot, {
@@ -55114,7 +55162,7 @@ function registerAwarenessEngineRoutes(app2) {
         parseLineageFromSnapshot(activeOfferSnapshot.signalLineage)
       );
       console.log(`[AwarenessEngine] UPSTREAM_LINEAGE | mi=${parseLineageFromSnapshot(miSnapshot.signalLineage).length} | audience=${parseLineageFromSnapshot(audSnapshot.signalLineage).length} | offer=${parseLineageFromSnapshot(activeOfferSnapshot.signalLineage).length} | merged=${upstreamLineage.length}`);
-      const result = await runAwarenessEngine(miInput, audienceInput, positioningInput, differentiationInput, offerInput, accountId, upstreamLineage);
+      const result = await runAwarenessEngine(miInput, audienceInput, positioningInput, differentiationInput, offerInput, accountId2, upstreamLineage);
       if (result.status === "INTEGRITY_FAILED") {
         console.error(`[AwarenessEngine] HARD-FAIL: ${result.statusMessage || "Boundary violation"} \u2014 not persisting`);
         return res.status(422).json({
@@ -55140,7 +55188,7 @@ function registerAwarenessEngineRoutes(app2) {
       });
       console.log(`[AwarenessEngine] LINEAGE_BUILT | upstream=${upstreamLineage.length} | derived=${awarenessLineage.length} | claims=${awarenessClaims.length}`);
       const [saved] = await db.insert(awarenessSnapshots).values({
-        accountId,
+        accountId: accountId2,
         campaignId,
         integritySnapshotId: null,
         funnelSnapshotId: null,
@@ -55164,7 +55212,7 @@ function registerAwarenessEngineRoutes(app2) {
         signalLineage: JSON.stringify(mergeLineageArrays(upstreamLineage, awarenessLineage)),
         executionTimeMs: result.executionTimeMs
       }).returning();
-      await pruneOldSnapshots(db, awarenessSnapshots, campaignId, 20, accountId);
+      await pruneOldSnapshots(db, awarenessSnapshots, campaignId, 20, accountId2);
       res.json({
         success: true,
         snapshotId: saved.id,
@@ -55179,13 +55227,13 @@ function registerAwarenessEngineRoutes(app2) {
   app2.get("/api/awareness-engine/latest", async (req, res) => {
     try {
       const campaignId = req.query.campaignId;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
       const [latest] = await db.select().from(awarenessSnapshots).where(and56(
         eq70(awarenessSnapshots.campaignId, campaignId),
-        eq70(awarenessSnapshots.accountId, accountId),
+        eq70(awarenessSnapshots.accountId, accountId2),
         eq70(awarenessSnapshots.engineVersion, ENGINE_VERSION7)
       )).orderBy(desc51(awarenessSnapshots.createdAt)).limit(1);
       if (!latest) {
@@ -55247,7 +55295,8 @@ function safeNumber8(v, fallback) {
 function registerPersuasionEngineRoutes(app2) {
   app2.post("/api/persuasion-engine/analyze", async (req, res) => {
     try {
-      const { campaignId, accountId = "default", awarenessSnapshotId, validationSessionId } = req.body;
+      const { campaignId, awarenessSnapshotId, validationSessionId } = req.body;
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
@@ -55264,7 +55313,7 @@ function registerPersuasionEngineRoutes(app2) {
       let [awarenessSnapshot] = await db.select().from(awarenessSnapshots).where(and57(
         eq71(awarenessSnapshots.id, awarenessSnapshotId),
         eq71(awarenessSnapshots.campaignId, campaignId),
-        eq71(awarenessSnapshots.accountId, accountId)
+        eq71(awarenessSnapshots.accountId, accountId2)
       )).limit(1);
       if (!awarenessSnapshot) {
         return res.status(400).json({
@@ -55276,7 +55325,7 @@ function registerPersuasionEngineRoutes(app2) {
         console.log(`[PersuasionEngine-V3] Awareness snapshot ${awarenessSnapshotId} version mismatch (v${awarenessSnapshot.engineVersion} vs v${ENGINE_VERSION7}), searching for latest valid`);
         const [latestAwareness] = await db.select().from(awarenessSnapshots).where(and57(
           eq71(awarenessSnapshots.campaignId, campaignId),
-          eq71(awarenessSnapshots.accountId, accountId),
+          eq71(awarenessSnapshots.accountId, accountId2),
           eq71(awarenessSnapshots.status, "COMPLETE"),
           eq71(awarenessSnapshots.engineVersion, ENGINE_VERSION7)
         )).orderBy(desc52(awarenessSnapshots.createdAt)).limit(1);
@@ -55296,77 +55345,77 @@ function registerPersuasionEngineRoutes(app2) {
       const audienceSnapshotId = awarenessSnapshot.audienceSnapshotId;
       const positioningSnapshotId = awarenessSnapshot.positioningSnapshotId;
       const differentiationSnapshotId = awarenessSnapshot.differentiationSnapshotId;
-      let [integritySnapshot] = await db.select().from(integritySnapshots).where(and57(eq71(integritySnapshots.id, integritySnapshotId), eq71(integritySnapshots.campaignId, campaignId), eq71(integritySnapshots.accountId, accountId))).limit(1);
+      let [integritySnapshot] = await db.select().from(integritySnapshots).where(and57(eq71(integritySnapshots.id, integritySnapshotId), eq71(integritySnapshots.campaignId, campaignId), eq71(integritySnapshots.accountId, accountId2))).limit(1);
       if (!integritySnapshot) {
-        const [latest] = await db.select().from(integritySnapshots).where(and57(eq71(integritySnapshots.campaignId, campaignId), eq71(integritySnapshots.accountId, accountId), eq71(integritySnapshots.status, "COMPLETE"), eq71(integritySnapshots.engineVersion, ENGINE_VERSION6))).orderBy(desc52(integritySnapshots.createdAt)).limit(1);
+        const [latest] = await db.select().from(integritySnapshots).where(and57(eq71(integritySnapshots.campaignId, campaignId), eq71(integritySnapshots.accountId, accountId2), eq71(integritySnapshots.status, "COMPLETE"), eq71(integritySnapshots.engineVersion, ENGINE_VERSION6))).orderBy(desc52(integritySnapshots.createdAt)).limit(1);
         if (!latest) return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid Integrity snapshot found" });
         integritySnapshot = latest;
       }
       let miSnapshot;
       {
-        let [snap] = await db.select().from(miSnapshots).where(and57(eq71(miSnapshots.id, miSnapshotId), eq71(miSnapshots.campaignId, campaignId), eq71(miSnapshots.accountId, accountId))).limit(1);
+        let [snap] = await db.select().from(miSnapshots).where(and57(eq71(miSnapshots.id, miSnapshotId), eq71(miSnapshots.campaignId, campaignId), eq71(miSnapshots.accountId, accountId2))).limit(1);
         if (snap) {
           const integrityResult = verifySnapshotIntegrity(snap, ENGINE_VERSION, campaignId);
           if (!integrityResult.valid) {
-            const [latest] = await db.select().from(miSnapshots).where(and57(eq71(miSnapshots.campaignId, campaignId), eq71(miSnapshots.accountId, accountId), inArray23(miSnapshots.status, ["COMPLETE", "PARTIAL"]), eq71(miSnapshots.analysisVersion, ENGINE_VERSION))).orderBy(desc52(miSnapshots.createdAt)).limit(1);
+            const [latest] = await db.select().from(miSnapshots).where(and57(eq71(miSnapshots.campaignId, campaignId), eq71(miSnapshots.accountId, accountId2), inArray23(miSnapshots.status, ["COMPLETE", "PARTIAL"]), eq71(miSnapshots.analysisVersion, ENGINE_VERSION))).orderBy(desc52(miSnapshots.createdAt)).limit(1);
             if (latest) snap = latest;
             else return res.status(400).json({ error: "MI_VERSION_MISMATCH", message: "MI snapshot version mismatch \u2014 please re-run Market Intelligence" });
           }
           miSnapshot = snap;
         } else {
-          const [latest] = await db.select().from(miSnapshots).where(and57(eq71(miSnapshots.campaignId, campaignId), eq71(miSnapshots.accountId, accountId), inArray23(miSnapshots.status, ["COMPLETE", "PARTIAL"]), eq71(miSnapshots.analysisVersion, ENGINE_VERSION))).orderBy(desc52(miSnapshots.createdAt)).limit(1);
+          const [latest] = await db.select().from(miSnapshots).where(and57(eq71(miSnapshots.campaignId, campaignId), eq71(miSnapshots.accountId, accountId2), inArray23(miSnapshots.status, ["COMPLETE", "PARTIAL"]), eq71(miSnapshots.analysisVersion, ENGINE_VERSION))).orderBy(desc52(miSnapshots.createdAt)).limit(1);
           if (!latest) return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid MI snapshot found" });
           miSnapshot = latest;
         }
       }
       const miFreshnessMetadata = buildFreshnessMetadata(miSnapshot);
       logFreshnessTraceability("PersuasionEngine", miSnapshot, miFreshnessMetadata);
-      let [audSnapshot] = await db.select().from(audienceSnapshots).where(and57(eq71(audienceSnapshots.id, audienceSnapshotId), eq71(audienceSnapshots.campaignId, campaignId), eq71(audienceSnapshots.accountId, accountId))).limit(1);
+      let [audSnapshot] = await db.select().from(audienceSnapshots).where(and57(eq71(audienceSnapshots.id, audienceSnapshotId), eq71(audienceSnapshots.campaignId, campaignId), eq71(audienceSnapshots.accountId, accountId2))).limit(1);
       if (!audSnapshot) return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Audience snapshot not found" });
       if (audSnapshot.engineVersion !== AUDIENCE_ENGINE_VERSION) {
-        const [latest] = await db.select().from(audienceSnapshots).where(and57(eq71(audienceSnapshots.campaignId, campaignId), eq71(audienceSnapshots.accountId, accountId), eq71(audienceSnapshots.engineVersion, AUDIENCE_ENGINE_VERSION))).orderBy(desc52(audienceSnapshots.createdAt)).limit(1);
+        const [latest] = await db.select().from(audienceSnapshots).where(and57(eq71(audienceSnapshots.campaignId, campaignId), eq71(audienceSnapshots.accountId, accountId2), eq71(audienceSnapshots.engineVersion, AUDIENCE_ENGINE_VERSION))).orderBy(desc52(audienceSnapshots.createdAt)).limit(1);
         if (!latest) return res.status(400).json({ error: "VERSION_MISMATCH", message: "Audience snapshot version mismatch \u2014 please re-run Audience Engine" });
         audSnapshot = latest;
       }
-      let [posSnapshot] = await db.select().from(positioningSnapshots).where(and57(eq71(positioningSnapshots.id, positioningSnapshotId), eq71(positioningSnapshots.campaignId, campaignId), eq71(positioningSnapshots.accountId, accountId))).limit(1);
+      let [posSnapshot] = await db.select().from(positioningSnapshots).where(and57(eq71(positioningSnapshots.id, positioningSnapshotId), eq71(positioningSnapshots.campaignId, campaignId), eq71(positioningSnapshots.accountId, accountId2))).limit(1);
       if (!posSnapshot) return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Positioning snapshot not found" });
       if (posSnapshot.engineVersion !== POSITIONING_ENGINE_VERSION) {
-        const [latest] = await db.select().from(positioningSnapshots).where(and57(eq71(positioningSnapshots.campaignId, campaignId), eq71(positioningSnapshots.accountId, accountId), eq71(positioningSnapshots.status, "COMPLETE"), eq71(positioningSnapshots.engineVersion, POSITIONING_ENGINE_VERSION))).orderBy(desc52(positioningSnapshots.createdAt)).limit(1);
+        const [latest] = await db.select().from(positioningSnapshots).where(and57(eq71(positioningSnapshots.campaignId, campaignId), eq71(positioningSnapshots.accountId, accountId2), eq71(positioningSnapshots.status, "COMPLETE"), eq71(positioningSnapshots.engineVersion, POSITIONING_ENGINE_VERSION))).orderBy(desc52(positioningSnapshots.createdAt)).limit(1);
         if (!latest) return res.status(400).json({ error: "VERSION_MISMATCH", message: "Positioning snapshot version mismatch \u2014 please re-run Positioning" });
         posSnapshot = latest;
       }
-      let [diffSnapshot] = await db.select().from(differentiationSnapshots).where(and57(eq71(differentiationSnapshots.id, differentiationSnapshotId), eq71(differentiationSnapshots.campaignId, campaignId), eq71(differentiationSnapshots.accountId, accountId))).limit(1);
+      let [diffSnapshot] = await db.select().from(differentiationSnapshots).where(and57(eq71(differentiationSnapshots.id, differentiationSnapshotId), eq71(differentiationSnapshots.campaignId, campaignId), eq71(differentiationSnapshots.accountId, accountId2))).limit(1);
       if (!diffSnapshot) return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Differentiation snapshot not found" });
       if (diffSnapshot.engineVersion !== ENGINE_VERSION2) {
-        const [latest] = await db.select().from(differentiationSnapshots).where(and57(eq71(differentiationSnapshots.campaignId, campaignId), eq71(differentiationSnapshots.accountId, accountId), inArray23(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"]), eq71(differentiationSnapshots.engineVersion, ENGINE_VERSION2))).orderBy(desc52(differentiationSnapshots.createdAt)).limit(1);
+        const [latest] = await db.select().from(differentiationSnapshots).where(and57(eq71(differentiationSnapshots.campaignId, campaignId), eq71(differentiationSnapshots.accountId, accountId2), inArray23(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"]), eq71(differentiationSnapshots.engineVersion, ENGINE_VERSION2))).orderBy(desc52(differentiationSnapshots.createdAt)).limit(1);
         if (!latest) return res.status(400).json({ error: "VERSION_MISMATCH", message: "Differentiation snapshot version mismatch \u2014 please re-run Differentiation" });
         diffSnapshot = latest;
       }
-      let [offerSnapshot] = await db.select().from(offerSnapshots).where(and57(eq71(offerSnapshots.id, offerSnapshotId), eq71(offerSnapshots.campaignId, campaignId), eq71(offerSnapshots.accountId, accountId))).limit(1);
+      let [offerSnapshot] = await db.select().from(offerSnapshots).where(and57(eq71(offerSnapshots.id, offerSnapshotId), eq71(offerSnapshots.campaignId, campaignId), eq71(offerSnapshots.accountId, accountId2))).limit(1);
       if (!offerSnapshot) return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "Offer snapshot not found" });
       if (offerSnapshot.engineVersion !== ENGINE_VERSION4) {
-        const [latest] = await db.select().from(offerSnapshots).where(and57(eq71(offerSnapshots.campaignId, campaignId), eq71(offerSnapshots.accountId, accountId), eq71(offerSnapshots.status, "COMPLETE"), eq71(offerSnapshots.engineVersion, ENGINE_VERSION4))).orderBy(desc52(offerSnapshots.createdAt)).limit(1);
+        const [latest] = await db.select().from(offerSnapshots).where(and57(eq71(offerSnapshots.campaignId, campaignId), eq71(offerSnapshots.accountId, accountId2), eq71(offerSnapshots.status, "COMPLETE"), eq71(offerSnapshots.engineVersion, ENGINE_VERSION4))).orderBy(desc52(offerSnapshots.createdAt)).limit(1);
         if (!latest) return res.status(400).json({ error: "VERSION_MISMATCH", message: "Offer snapshot version mismatch \u2014 please re-run Offer Engine" });
         offerSnapshot = latest;
       }
       let funnelSnapshot;
       if (funnelSnapshotId) {
-        [funnelSnapshot] = await db.select().from(funnelSnapshots).where(and57(eq71(funnelSnapshots.id, funnelSnapshotId), eq71(funnelSnapshots.campaignId, campaignId), eq71(funnelSnapshots.accountId, accountId))).limit(1);
+        [funnelSnapshot] = await db.select().from(funnelSnapshots).where(and57(eq71(funnelSnapshots.id, funnelSnapshotId), eq71(funnelSnapshots.campaignId, campaignId), eq71(funnelSnapshots.accountId, accountId2))).limit(1);
       }
       if (!funnelSnapshot) {
-        const [latest] = await db.select().from(funnelSnapshots).where(and57(eq71(funnelSnapshots.campaignId, campaignId), eq71(funnelSnapshots.accountId, accountId), eq71(funnelSnapshots.status, "COMPLETE"), eq71(funnelSnapshots.engineVersion, ENGINE_VERSION5))).orderBy(desc52(funnelSnapshots.createdAt)).limit(1);
+        const [latest] = await db.select().from(funnelSnapshots).where(and57(eq71(funnelSnapshots.campaignId, campaignId), eq71(funnelSnapshots.accountId, accountId2), eq71(funnelSnapshots.status, "COMPLETE"), eq71(funnelSnapshots.engineVersion, ENGINE_VERSION5))).orderBy(desc52(funnelSnapshots.createdAt)).limit(1);
         if (!latest) return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "No valid Funnel snapshot found \u2014 please run Funnel Engine first" });
         funnelSnapshot = latest;
         console.log(`[PersuasionEngine-V3] Funnel snapshot resolved via fallback to latest: ${latest.id}`);
       }
       if (funnelSnapshot.engineVersion !== ENGINE_VERSION5) {
-        const [latest] = await db.select().from(funnelSnapshots).where(and57(eq71(funnelSnapshots.campaignId, campaignId), eq71(funnelSnapshots.accountId, accountId), eq71(funnelSnapshots.status, "COMPLETE"), eq71(funnelSnapshots.engineVersion, ENGINE_VERSION5))).orderBy(desc52(funnelSnapshots.createdAt)).limit(1);
+        const [latest] = await db.select().from(funnelSnapshots).where(and57(eq71(funnelSnapshots.campaignId, campaignId), eq71(funnelSnapshots.accountId, accountId2), eq71(funnelSnapshots.status, "COMPLETE"), eq71(funnelSnapshots.engineVersion, ENGINE_VERSION5))).orderBy(desc52(funnelSnapshots.createdAt)).limit(1);
         if (!latest) return res.status(400).json({ error: "VERSION_MISMATCH", message: "Funnel snapshot version mismatch \u2014 please re-run Funnel Engine" });
         funnelSnapshot = latest;
       }
       let rawObjMapData = miSnapshot.objectionMapData;
       if (!rawObjMapData) {
-        const [latestMi] = await db.select({ objectionMapData: miSnapshots.objectionMapData }).from(miSnapshots).where(and57(eq71(miSnapshots.campaignId, campaignId), eq71(miSnapshots.accountId, accountId), inArray23(miSnapshots.status, ["COMPLETE", "PARTIAL"]))).orderBy(desc52(miSnapshots.createdAt)).limit(1);
+        const [latestMi] = await db.select({ objectionMapData: miSnapshots.objectionMapData }).from(miSnapshots).where(and57(eq71(miSnapshots.campaignId, campaignId), eq71(miSnapshots.accountId, accountId2), inArray23(miSnapshots.status, ["COMPLETE", "PARTIAL"]))).orderBy(desc52(miSnapshots.createdAt)).limit(1);
         if (latestMi?.objectionMapData) rawObjMapData = latestMi.objectionMapData;
       }
       const narrativeObjMap = safeJsonParse18(rawObjMapData) || null;
@@ -55378,7 +55427,7 @@ function registerPersuasionEngineRoutes(app2) {
         signalType: item.signalType || "objection",
         competitorSources: item.competitorSources || []
       }));
-      const productDna = await loadProductDNA(campaignId, accountId);
+      const productDna = await loadProductDNA(campaignId, accountId2);
       if (productDna) {
         console.log(`[PersuasionEngine-V3] PRODUCT_DNA_LOADED | category=${productDna.productCategory || "n/a"} | mechanism=${productDna.uniqueMechanism || "n/a"}`);
       }
@@ -55475,7 +55524,7 @@ function registerPersuasionEngineRoutes(app2) {
         parseLineageFromSnapshot(awarenessSnapshot.signalLineage)
       );
       console.log(`[PersuasionEngine] UPSTREAM_LINEAGE | mi=${parseLineageFromSnapshot(miSnapshot.signalLineage).length} | audience=${parseLineageFromSnapshot(audSnapshot.signalLineage).length} | offer=${parseLineageFromSnapshot(offerSnapshot.signalLineage).length} | awareness=${parseLineageFromSnapshot(awarenessSnapshot.signalLineage).length} | merged=${upstreamLineage.length}`);
-      const result = await runPersuasionEngine(miInput, audienceInput, positioningInput, differentiationInput, offerInput, funnelInput, integrityInput, awarenessInput, accountId, upstreamLineage);
+      const result = await runPersuasionEngine(miInput, audienceInput, positioningInput, differentiationInput, offerInput, funnelInput, integrityInput, awarenessInput, accountId2, upstreamLineage);
       if (result.status === "INTEGRITY_FAILED") {
         console.error(`[PersuasionEngine] HARD-FAIL: ${result.statusMessage || "Boundary violation"} \u2014 not persisting`);
         return res.status(422).json({
@@ -55501,7 +55550,7 @@ function registerPersuasionEngineRoutes(app2) {
       });
       console.log(`[PersuasionEngine] LINEAGE_BUILT | upstream=${upstreamLineage.length} | derived=${persuasionLineage.length} | claims=${persuasionClaims.length}`);
       const [saved] = await db.insert(persuasionSnapshots).values({
-        accountId,
+        accountId: accountId2,
         campaignId,
         awarenessSnapshotId: awarenessSnapshot.id,
         integritySnapshotId: integritySnapshot.id,
@@ -55526,7 +55575,7 @@ function registerPersuasionEngineRoutes(app2) {
         signalLineage: JSON.stringify(mergeLineageArrays(upstreamLineage, persuasionLineage)),
         executionTimeMs: result.executionTimeMs
       }).returning();
-      await pruneOldSnapshots(db, persuasionSnapshots, campaignId, 20, accountId);
+      await pruneOldSnapshots(db, persuasionSnapshots, campaignId, 20, accountId2);
       res.json({
         success: true,
         snapshotId: saved.id,
@@ -55541,13 +55590,13 @@ function registerPersuasionEngineRoutes(app2) {
   app2.get("/api/persuasion-engine/latest", async (req, res) => {
     try {
       const campaignId = req.query.campaignId;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
       const [latest] = await db.select().from(persuasionSnapshots).where(and57(
         eq71(persuasionSnapshots.campaignId, campaignId),
-        eq71(persuasionSnapshots.accountId, accountId),
+        eq71(persuasionSnapshots.accountId, accountId2),
         eq71(persuasionSnapshots.engineVersion, ENGINE_VERSION8)
       )).orderBy(desc52(persuasionSnapshots.createdAt)).limit(1);
       if (!latest) {
@@ -55611,7 +55660,8 @@ function safeNumber9(v, fallback) {
 function registerStatisticalValidationRoutes(app2) {
   app2.post("/api/strategy/statistical-validation/analyze", async (req, res) => {
     try {
-      const { campaignId, accountId = "default", persuasionSnapshotId, validationSessionId } = req.body;
+      const { campaignId, persuasionSnapshotId, validationSessionId } = req.body;
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
@@ -55627,7 +55677,7 @@ function registerStatisticalValidationRoutes(app2) {
         const [snap] = await db.select().from(persuasionSnapshots).where(and58(
           eq72(persuasionSnapshots.id, persuasionSnapshotId),
           eq72(persuasionSnapshots.campaignId, campaignId),
-          eq72(persuasionSnapshots.accountId, accountId)
+          eq72(persuasionSnapshots.accountId, accountId2)
         )).limit(1);
         if (snap && snap.engineVersion === ENGINE_VERSION8) {
           persuasionSnapshot = snap;
@@ -55638,7 +55688,7 @@ function registerStatisticalValidationRoutes(app2) {
       if (!persuasionSnapshot) {
         const [latest] = await db.select().from(persuasionSnapshots).where(and58(
           eq72(persuasionSnapshots.campaignId, campaignId),
-          eq72(persuasionSnapshots.accountId, accountId),
+          eq72(persuasionSnapshots.accountId, accountId2),
           eq72(persuasionSnapshots.status, "COMPLETE"),
           eq72(persuasionSnapshots.engineVersion, ENGINE_VERSION8)
         )).orderBy(desc53(persuasionSnapshots.createdAt)).limit(1);
@@ -55657,42 +55707,42 @@ function registerStatisticalValidationRoutes(app2) {
       const pAudienceId = persuasionSnapshot.audienceSnapshotId;
       let awarenessSnap;
       if (pAwarenessId) {
-        [awarenessSnap] = await db.select().from(awarenessSnapshots).where(and58(eq72(awarenessSnapshots.id, pAwarenessId), eq72(awarenessSnapshots.campaignId, campaignId), eq72(awarenessSnapshots.accountId, accountId))).limit(1);
+        [awarenessSnap] = await db.select().from(awarenessSnapshots).where(and58(eq72(awarenessSnapshots.id, pAwarenessId), eq72(awarenessSnapshots.campaignId, campaignId), eq72(awarenessSnapshots.accountId, accountId2))).limit(1);
       }
       if (!awarenessSnap) {
-        [awarenessSnap] = await db.select().from(awarenessSnapshots).where(and58(eq72(awarenessSnapshots.campaignId, campaignId), eq72(awarenessSnapshots.accountId, accountId), eq72(awarenessSnapshots.status, "COMPLETE"), eq72(awarenessSnapshots.engineVersion, ENGINE_VERSION7))).orderBy(desc53(awarenessSnapshots.createdAt)).limit(1);
+        [awarenessSnap] = await db.select().from(awarenessSnapshots).where(and58(eq72(awarenessSnapshots.campaignId, campaignId), eq72(awarenessSnapshots.accountId, accountId2), eq72(awarenessSnapshots.status, "COMPLETE"), eq72(awarenessSnapshots.engineVersion, ENGINE_VERSION7))).orderBy(desc53(awarenessSnapshots.createdAt)).limit(1);
         if (awarenessSnap) console.log(`[StatisticalValidation] Awareness snapshot resolved via fallback to latest: ${awarenessSnap.id}`);
       }
       let offerSnap;
       if (pOfferId) {
-        [offerSnap] = await db.select().from(offerSnapshots).where(and58(eq72(offerSnapshots.id, pOfferId), eq72(offerSnapshots.campaignId, campaignId), eq72(offerSnapshots.accountId, accountId))).limit(1);
+        [offerSnap] = await db.select().from(offerSnapshots).where(and58(eq72(offerSnapshots.id, pOfferId), eq72(offerSnapshots.campaignId, campaignId), eq72(offerSnapshots.accountId, accountId2))).limit(1);
       }
       if (!offerSnap) {
-        [offerSnap] = await db.select().from(offerSnapshots).where(and58(eq72(offerSnapshots.campaignId, campaignId), eq72(offerSnapshots.accountId, accountId), eq72(offerSnapshots.status, "COMPLETE"), eq72(offerSnapshots.engineVersion, ENGINE_VERSION4))).orderBy(desc53(offerSnapshots.createdAt)).limit(1);
+        [offerSnap] = await db.select().from(offerSnapshots).where(and58(eq72(offerSnapshots.campaignId, campaignId), eq72(offerSnapshots.accountId, accountId2), eq72(offerSnapshots.status, "COMPLETE"), eq72(offerSnapshots.engineVersion, ENGINE_VERSION4))).orderBy(desc53(offerSnapshots.createdAt)).limit(1);
         if (offerSnap) console.log(`[StatisticalValidation] Offer snapshot resolved via fallback to latest: ${offerSnap.id}`);
       }
       let funnelSnap;
       if (pFunnelId) {
-        [funnelSnap] = await db.select().from(funnelSnapshots).where(and58(eq72(funnelSnapshots.id, pFunnelId), eq72(funnelSnapshots.campaignId, campaignId), eq72(funnelSnapshots.accountId, accountId))).limit(1);
+        [funnelSnap] = await db.select().from(funnelSnapshots).where(and58(eq72(funnelSnapshots.id, pFunnelId), eq72(funnelSnapshots.campaignId, campaignId), eq72(funnelSnapshots.accountId, accountId2))).limit(1);
       }
       if (!funnelSnap) {
-        [funnelSnap] = await db.select().from(funnelSnapshots).where(and58(eq72(funnelSnapshots.campaignId, campaignId), eq72(funnelSnapshots.accountId, accountId), eq72(funnelSnapshots.status, "COMPLETE"), eq72(funnelSnapshots.engineVersion, ENGINE_VERSION5))).orderBy(desc53(funnelSnapshots.createdAt)).limit(1);
+        [funnelSnap] = await db.select().from(funnelSnapshots).where(and58(eq72(funnelSnapshots.campaignId, campaignId), eq72(funnelSnapshots.accountId, accountId2), eq72(funnelSnapshots.status, "COMPLETE"), eq72(funnelSnapshots.engineVersion, ENGINE_VERSION5))).orderBy(desc53(funnelSnapshots.createdAt)).limit(1);
         if (funnelSnap) console.log(`[StatisticalValidation] Funnel snapshot resolved via fallback to latest: ${funnelSnap.id}`);
       }
       let miSnap;
       if (pMiId) {
-        [miSnap] = await db.select().from(miSnapshots).where(and58(eq72(miSnapshots.id, pMiId), eq72(miSnapshots.campaignId, campaignId), eq72(miSnapshots.accountId, accountId))).limit(1);
+        [miSnap] = await db.select().from(miSnapshots).where(and58(eq72(miSnapshots.id, pMiId), eq72(miSnapshots.campaignId, campaignId), eq72(miSnapshots.accountId, accountId2))).limit(1);
       }
       if (!miSnap) {
-        [miSnap] = await db.select().from(miSnapshots).where(and58(eq72(miSnapshots.campaignId, campaignId), eq72(miSnapshots.accountId, accountId), inArray24(miSnapshots.status, ["COMPLETE", "PARTIAL"]), eq72(miSnapshots.analysisVersion, ENGINE_VERSION))).orderBy(desc53(miSnapshots.createdAt)).limit(1);
+        [miSnap] = await db.select().from(miSnapshots).where(and58(eq72(miSnapshots.campaignId, campaignId), eq72(miSnapshots.accountId, accountId2), inArray24(miSnapshots.status, ["COMPLETE", "PARTIAL"]), eq72(miSnapshots.analysisVersion, ENGINE_VERSION))).orderBy(desc53(miSnapshots.createdAt)).limit(1);
         if (miSnap) console.log(`[StatisticalValidation] MI snapshot resolved via fallback to latest: ${miSnap.id}`);
       }
       let audSnap;
       if (pAudienceId) {
-        [audSnap] = await db.select().from(audienceSnapshots).where(and58(eq72(audienceSnapshots.id, pAudienceId), eq72(audienceSnapshots.campaignId, campaignId), eq72(audienceSnapshots.accountId, accountId))).limit(1);
+        [audSnap] = await db.select().from(audienceSnapshots).where(and58(eq72(audienceSnapshots.id, pAudienceId), eq72(audienceSnapshots.campaignId, campaignId), eq72(audienceSnapshots.accountId, accountId2))).limit(1);
       }
       if (!audSnap) {
-        [audSnap] = await db.select().from(audienceSnapshots).where(and58(eq72(audienceSnapshots.campaignId, campaignId), eq72(audienceSnapshots.accountId, accountId), eq72(audienceSnapshots.engineVersion, AUDIENCE_ENGINE_VERSION))).orderBy(desc53(audienceSnapshots.createdAt)).limit(1);
+        [audSnap] = await db.select().from(audienceSnapshots).where(and58(eq72(audienceSnapshots.campaignId, campaignId), eq72(audienceSnapshots.accountId, accountId2), eq72(audienceSnapshots.engineVersion, AUDIENCE_ENGINE_VERSION))).orderBy(desc53(audienceSnapshots.createdAt)).limit(1);
         if (audSnap) console.log(`[StatisticalValidation] Audience snapshot resolved via fallback to latest: ${audSnap.id}`);
       }
       if (!awarenessSnap || !offerSnap || !funnelSnap || !miSnap || !audSnap) {
@@ -55798,7 +55848,7 @@ function registerStatisticalValidationRoutes(app2) {
         funnelInput,
         awarenessInput,
         persuasionInput,
-        accountId,
+        accountId2,
         upstreamLineage
       );
       if (result.status === "INTEGRITY_FAILED") {
@@ -55812,7 +55862,7 @@ function registerStatisticalValidationRoutes(app2) {
         });
       }
       const [saved] = await db.insert(strategyValidationSnapshots).values({
-        accountId,
+        accountId: accountId2,
         campaignId,
         persuasionSnapshotId: persuasionSnapshot.id,
         engineVersion: ENGINE_VERSION9,
@@ -55839,7 +55889,7 @@ function registerStatisticalValidationRoutes(app2) {
         confidenceScore: result.claimConfidenceScore,
         executionTimeMs: result.executionTimeMs
       }).returning();
-      await pruneOldSnapshots(db, strategyValidationSnapshots, campaignId, 20, accountId);
+      await pruneOldSnapshots(db, strategyValidationSnapshots, campaignId, 20, accountId2);
       res.json({
         success: true,
         snapshotId: saved.id,
@@ -55853,13 +55903,13 @@ function registerStatisticalValidationRoutes(app2) {
   app2.get("/api/strategy/statistical-validation/latest", async (req, res) => {
     try {
       const campaignId = req.query.campaignId;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
       const [latest] = await db.select().from(strategyValidationSnapshots).where(and58(
         eq72(strategyValidationSnapshots.campaignId, campaignId),
-        eq72(strategyValidationSnapshots.accountId, accountId),
+        eq72(strategyValidationSnapshots.accountId, accountId2),
         eq72(strategyValidationSnapshots.engineVersion, ENGINE_VERSION9)
       )).orderBy(desc53(strategyValidationSnapshots.createdAt)).limit(1);
       if (!latest) {
@@ -55906,7 +55956,8 @@ function safeJsonParse20(text2) {
 function registerBudgetGovernorRoutes(app2) {
   app2.post("/api/strategy/budget-governor/analyze", async (req, res) => {
     try {
-      const { campaignId, accountId = "default", validationSnapshotId, validationSessionId } = req.body;
+      const { campaignId, validationSnapshotId, validationSessionId } = req.body;
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
@@ -55923,7 +55974,7 @@ function registerBudgetGovernorRoutes(app2) {
         const [valSnapshot] = await db.select().from(strategyValidationSnapshots).where(and59(
           eq73(strategyValidationSnapshots.id, validationSnapshotId),
           eq73(strategyValidationSnapshots.campaignId, campaignId),
-          eq73(strategyValidationSnapshots.accountId, accountId)
+          eq73(strategyValidationSnapshots.accountId, accountId2)
         )).limit(1);
         if (valSnapshot) {
           validationResult = safeJsonParse20(valSnapshot.result);
@@ -55932,7 +55983,7 @@ function registerBudgetGovernorRoutes(app2) {
       if (!validationResult) {
         const [latestValidation] = await db.select().from(strategyValidationSnapshots).where(and59(
           eq73(strategyValidationSnapshots.campaignId, campaignId),
-          eq73(strategyValidationSnapshots.accountId, accountId),
+          eq73(strategyValidationSnapshots.accountId, accountId2),
           eq73(strategyValidationSnapshots.status, "COMPLETE")
         )).orderBy(desc54(strategyValidationSnapshots.createdAt)).limit(1);
         if (latestValidation) {
@@ -55943,7 +55994,7 @@ function registerBudgetGovernorRoutes(app2) {
       let offerData = null;
       const [latestOffer] = await db.select().from(offerSnapshots).where(and59(
         eq73(offerSnapshots.campaignId, campaignId),
-        eq73(offerSnapshots.accountId, accountId),
+        eq73(offerSnapshots.accountId, accountId2),
         eq73(offerSnapshots.status, "COMPLETE")
       )).orderBy(desc54(offerSnapshots.createdAt)).limit(1);
       if (latestOffer) {
@@ -55955,7 +56006,7 @@ function registerBudgetGovernorRoutes(app2) {
       let funnelData = null;
       const [latestFunnel] = await db.select().from(funnelSnapshots).where(and59(
         eq73(funnelSnapshots.campaignId, campaignId),
-        eq73(funnelSnapshots.accountId, accountId),
+        eq73(funnelSnapshots.accountId, accountId2),
         eq73(funnelSnapshots.status, "COMPLETE")
       )).orderBy(desc54(funnelSnapshots.createdAt)).limit(1);
       if (latestFunnel) {
@@ -55965,7 +56016,7 @@ function registerBudgetGovernorRoutes(app2) {
           frictionMap: safeJsonParse20(latestFunnel.frictionMap)
         };
       }
-      const dataSource = await resolveDataSource(campaignId, accountId);
+      const dataSource = await resolveDataSource(campaignId, accountId2);
       const statValidity = dataSource.statisticalValidity;
       const campaignPerformance = statValidity ? {
         conversions: statValidity.conversions,
@@ -56032,7 +56083,7 @@ function registerBudgetGovernorRoutes(app2) {
       const snapshotId = crypto.randomUUID();
       await db.insert(budgetGovernorSnapshots).values({
         id: snapshotId,
-        accountId,
+        accountId: accountId2,
         campaignId,
         validationSnapshotId: resolvedValidationSnapshotId,
         engineVersion: ENGINE_VERSION10,
@@ -56046,7 +56097,7 @@ function registerBudgetGovernorRoutes(app2) {
         confidenceScore: result.confidenceScore,
         executionTimeMs: result.executionTimeMs
       });
-      await pruneOldSnapshots(db, budgetGovernorSnapshots, campaignId, 20, accountId);
+      await pruneOldSnapshots(db, budgetGovernorSnapshots, campaignId, 20, accountId2);
       const perfOverrideLabel = hasPerformanceOverride ? " | PerfOverride: YES" : "";
       console.log(`[BudgetGovernor] Campaign ${campaignId} | Decision: ${result.decision.action} | Confidence: ${(result.confidenceScore * 100).toFixed(0)}% | DataSource: ${dataSource.mode} | Kill: ${result.killFlag}${perfOverrideLabel} | Time: ${result.executionTimeMs}ms`);
       return res.json({
@@ -56062,13 +56113,13 @@ function registerBudgetGovernorRoutes(app2) {
   app2.get("/api/strategy/budget-governor/latest", async (req, res) => {
     try {
       const campaignId = req.query.campaignId;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
       const [latest] = await db.select().from(budgetGovernorSnapshots).where(and59(
         eq73(budgetGovernorSnapshots.campaignId, campaignId),
-        eq73(budgetGovernorSnapshots.accountId, accountId)
+        eq73(budgetGovernorSnapshots.accountId, accountId2)
       )).orderBy(desc54(budgetGovernorSnapshots.createdAt)).limit(1);
       if (!latest) {
         return res.json({ success: true, snapshot: null });
@@ -56112,7 +56163,8 @@ function safeNumber10(v, fallback) {
 function registerChannelSelectionRoutes(app2) {
   app2.post("/api/strategy/channel-selection/analyze", async (req, res) => {
     try {
-      const { campaignId, accountId = "default", validationSessionId, channelMode = "automatic" } = req.body;
+      const { campaignId, validationSessionId, channelMode = "automatic" } = req.body;
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
@@ -56127,7 +56179,7 @@ function registerChannelSelectionRoutes(app2) {
       }
       const [latestAudience] = await db.select().from(audienceSnapshots).where(and60(
         eq74(audienceSnapshots.campaignId, campaignId),
-        eq74(audienceSnapshots.accountId, accountId)
+        eq74(audienceSnapshots.accountId, accountId2)
       )).orderBy(desc55(audienceSnapshots.createdAt)).limit(1);
       if (!latestAudience) {
         return res.status(400).json({
@@ -56137,27 +56189,27 @@ function registerChannelSelectionRoutes(app2) {
       }
       const [latestAwareness] = await db.select().from(awarenessSnapshots).where(and60(
         eq74(awarenessSnapshots.campaignId, campaignId),
-        eq74(awarenessSnapshots.accountId, accountId),
+        eq74(awarenessSnapshots.accountId, accountId2),
         eq74(awarenessSnapshots.status, "COMPLETE")
       )).orderBy(desc55(awarenessSnapshots.createdAt)).limit(1);
       const [latestPersuasion] = await db.select().from(persuasionSnapshots).where(and60(
         eq74(persuasionSnapshots.campaignId, campaignId),
-        eq74(persuasionSnapshots.accountId, accountId),
+        eq74(persuasionSnapshots.accountId, accountId2),
         eq74(persuasionSnapshots.status, "COMPLETE")
       )).orderBy(desc55(persuasionSnapshots.createdAt)).limit(1);
       const [latestOffer] = await db.select().from(offerSnapshots).where(and60(
         eq74(offerSnapshots.campaignId, campaignId),
-        eq74(offerSnapshots.accountId, accountId),
+        eq74(offerSnapshots.accountId, accountId2),
         eq74(offerSnapshots.status, "COMPLETE")
       )).orderBy(desc55(offerSnapshots.createdAt)).limit(1);
       const [latestValidation] = await db.select().from(strategyValidationSnapshots).where(and60(
         eq74(strategyValidationSnapshots.campaignId, campaignId),
-        eq74(strategyValidationSnapshots.accountId, accountId),
+        eq74(strategyValidationSnapshots.accountId, accountId2),
         eq74(strategyValidationSnapshots.status, "COMPLETE")
       )).orderBy(desc55(strategyValidationSnapshots.createdAt)).limit(1);
       const [latestBudget] = await db.select().from(budgetGovernorSnapshots).where(and60(
         eq74(budgetGovernorSnapshots.campaignId, campaignId),
-        eq74(budgetGovernorSnapshots.accountId, accountId),
+        eq74(budgetGovernorSnapshots.accountId, accountId2),
         eq74(budgetGovernorSnapshots.status, "COMPLETE")
       )).orderBy(desc55(budgetGovernorSnapshots.createdAt)).limit(1);
       const awarenessRoute = latestAwareness ? safeJsonParse21(latestAwareness.primaryRoute) : null;
@@ -56233,7 +56285,7 @@ function registerChannelSelectionRoutes(app2) {
       const snapshotId = `cs-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       await db.insert(channelSelectionSnapshots).values({
         id: snapshotId,
-        accountId,
+        accountId: accountId2,
         campaignId,
         validationSnapshotId: latestValidation?.id || null,
         budgetSnapshotId: latestBudget?.id || null,
@@ -56248,7 +56300,7 @@ function registerChannelSelectionRoutes(app2) {
         confidenceScore: result.confidenceScore,
         executionTimeMs: result.executionTimeMs
       });
-      await pruneOldSnapshots(db, channelSelectionSnapshots, campaignId, 20, accountId);
+      await pruneOldSnapshots(db, channelSelectionSnapshots, campaignId, 20, accountId2);
       console.log(`[ChannelSelection-V${ENGINE_VERSION11}] Analysis complete for campaign ${campaignId} | status=${result.status} confidence=${result.confidenceScore.toFixed(2)} primary=${result.primaryChannel.channelName}`);
       return res.json({
         snapshotId,
@@ -56262,13 +56314,13 @@ function registerChannelSelectionRoutes(app2) {
   app2.get("/api/strategy/channel-selection/latest", async (req, res) => {
     try {
       const campaignId = req.query.campaignId;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId query parameter is required" });
       }
       const [latest] = await db.select().from(channelSelectionSnapshots).where(and60(
         eq74(channelSelectionSnapshots.campaignId, campaignId),
-        eq74(channelSelectionSnapshots.accountId, accountId)
+        eq74(channelSelectionSnapshots.accountId, accountId2)
       )).orderBy(desc55(channelSelectionSnapshots.createdAt)).limit(1);
       if (!latest) {
         return res.status(404).json({ error: "No channel selection snapshot found for this campaign" });
@@ -56312,13 +56364,13 @@ function registerIterationEngineRoutes(app2) {
     try {
       const {
         campaignId,
-        accountId = "default",
         validationSessionId,
         performance = null,
         funnel = null,
         creative = null,
         persuasion = null
       } = req.body;
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
@@ -56340,11 +56392,11 @@ function registerIterationEngineRoutes(app2) {
       }
       const [gateInputs] = await db.select().from(iterationGateInputs).where(and61(
         eq75(iterationGateInputs.campaignId, campaignId),
-        eq75(iterationGateInputs.accountId, accountId)
+        eq75(iterationGateInputs.accountId, accountId2)
       )).limit(1);
       const [campaignData] = await db.select().from(manualCampaignMetrics).where(and61(
         eq75(manualCampaignMetrics.campaignId, campaignId),
-        eq75(manualCampaignMetrics.accountId, accountId)
+        eq75(manualCampaignMetrics.accountId, accountId2)
       )).limit(1);
       const gateMissing = [];
       if (!gateInputs || !gateInputs.hasExistingAsset) gateMissing.push("Existing campaign, asset, or funnel to iterate on");
@@ -56377,7 +56429,7 @@ function registerIterationEngineRoutes(app2) {
       const effectivePerformance = performance || dbPerformance;
       const result = await runIterationEngine(effectivePerformance, funnel, creative, persuasion);
       const [saved] = await db.insert(iterationSnapshots).values({
-        accountId,
+        accountId: accountId2,
         campaignId,
         engineVersion: ENGINE_VERSION12,
         status: result.status,
@@ -56395,7 +56447,7 @@ function registerIterationEngineRoutes(app2) {
         confidenceScore: result.confidenceScore,
         executionTimeMs: result.executionTimeMs
       }).returning();
-      await pruneOldSnapshots(db, iterationSnapshots, campaignId, 20, accountId);
+      await pruneOldSnapshots(db, iterationSnapshots, campaignId, 20, accountId2);
       res.json({
         success: true,
         snapshotId: saved.id,
@@ -56409,13 +56461,13 @@ function registerIterationEngineRoutes(app2) {
   app2.get("/api/strategy/iteration-engine/latest", async (req, res) => {
     try {
       const campaignId = req.query.campaignId;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
       const [latest] = await db.select().from(iterationSnapshots).where(and61(
         eq75(iterationSnapshots.campaignId, campaignId),
-        eq75(iterationSnapshots.accountId, accountId),
+        eq75(iterationSnapshots.accountId, accountId2),
         eq75(iterationSnapshots.engineVersion, ENGINE_VERSION12)
       )).orderBy(desc56(iterationSnapshots.createdAt)).limit(1);
       if (!latest) {
@@ -56464,7 +56516,8 @@ function safeJsonParse23(text2) {
 function registerRetentionEngineRoutes(app2) {
   app2.post("/api/strategy/retention-engine/analyze", async (req, res) => {
     try {
-      const { campaignId, accountId = "default", validationSessionId } = req.body;
+      const { campaignId, validationSessionId } = req.body;
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
@@ -56486,11 +56539,11 @@ function registerRetentionEngineRoutes(app2) {
       }
       const [gateInputs] = await db.select().from(retentionGateInputs).where(and62(
         eq76(retentionGateInputs.campaignId, campaignId),
-        eq76(retentionGateInputs.accountId, accountId)
+        eq76(retentionGateInputs.accountId, accountId2)
       )).limit(1);
       const [retentionData] = await db.select().from(manualRetentionMetrics).where(and62(
         eq76(manualRetentionMetrics.campaignId, campaignId),
-        eq76(manualRetentionMetrics.accountId, accountId)
+        eq76(manualRetentionMetrics.accountId, accountId2)
       )).limit(1);
       const gateMissing = [];
       if (!retentionData || !retentionData.totalCustomers || retentionData.totalCustomers <= 0) {
@@ -56575,12 +56628,12 @@ function registerRetentionEngineRoutes(app2) {
         purchaseMotivations: Array.isArray(req.body.purchaseMotivations) ? req.body.purchaseMotivations : [],
         postPurchaseObjections: Array.isArray(req.body.postPurchaseObjections) ? req.body.postPurchaseObjections : [],
         campaignId,
-        accountId,
+        accountId: accountId2,
         hasManualRetentionMetrics: !!retentionData
       };
       const result = await runRetentionEngine(input);
       const [snapshot] = await db.insert(retentionSnapshots).values({
-        accountId,
+        accountId: accountId2,
         campaignId,
         engineVersion: ENGINE_VERSION13,
         status: result.status,
@@ -56599,7 +56652,7 @@ function registerRetentionEngineRoutes(app2) {
         confidenceScore: result.confidenceScore,
         executionTimeMs: result.executionTimeMs
       }).returning();
-      await pruneOldSnapshots(db, retentionSnapshots, campaignId, 20, accountId);
+      await pruneOldSnapshots(db, retentionSnapshots, campaignId, 20, accountId2);
       return res.json({
         success: true,
         snapshotId: snapshot.id,
@@ -56613,13 +56666,13 @@ function registerRetentionEngineRoutes(app2) {
   app2.get("/api/strategy/retention-engine/latest", async (req, res) => {
     try {
       const campaignId = req.query.campaignId;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
       const [latest] = await db.select().from(retentionSnapshots).where(and62(
         eq76(retentionSnapshots.campaignId, campaignId),
-        eq76(retentionSnapshots.accountId, accountId)
+        eq76(retentionSnapshots.accountId, accountId2)
       )).orderBy(desc57(retentionSnapshots.createdAt)).limit(1);
       if (!latest) {
         return res.json({ found: false, snapshot: null });
@@ -56698,12 +56751,12 @@ function registerStrategyEngineRoutes(app2) {
 init_db();
 init_schema();
 import { eq as eq77, and as and63, desc as desc58, count as count2, sql as sql32 } from "drizzle-orm";
-async function loadSystemContext(accountId, campaignId) {
+async function loadSystemContext(accountId2, campaignId) {
   const warnings = [];
   const [campaign] = await db.select().from(growthCampaigns).where(eq77(growthCampaigns.id, campaignId)).limit(1);
   const [bizData] = await db.select().from(businessDataLayer).where(
     and63(
-      eq77(businessDataLayer.accountId, accountId),
+      eq77(businessDataLayer.accountId, accountId2),
       eq77(businessDataLayer.campaignId, campaignId)
     )
   ).orderBy(desc58(businessDataLayer.createdAt)).limit(1);
@@ -56711,7 +56764,7 @@ async function loadSystemContext(accountId, campaignId) {
   if (!bizData) warnings.push("Business profile not configured");
   const [activePlan] = await db.select().from(strategicPlans).where(
     and63(
-      eq77(strategicPlans.accountId, accountId),
+      eq77(strategicPlans.accountId, accountId2),
       eq77(strategicPlans.campaignId, campaignId)
     )
   ).orderBy(desc58(strategicPlans.createdAt)).limit(1);
@@ -56771,7 +56824,7 @@ async function loadSystemContext(accountId, campaignId) {
   }
   const [latestOrchJob] = await db.select().from(orchestratorJobs).where(
     and63(
-      eq77(orchestratorJobs.accountId, accountId),
+      eq77(orchestratorJobs.accountId, accountId2),
       eq77(orchestratorJobs.campaignId, campaignId)
     )
   ).orderBy(desc58(orchestratorJobs.createdAt)).limit(1);
@@ -56795,7 +56848,7 @@ async function loadSystemContext(accountId, campaignId) {
   ];
   for (const { name, table } of snapshotTablesWithStatus) {
     try {
-      const [snap] = await db.select({ id: table.id, status: table.status, createdAt: table.createdAt }).from(table).where(and63(eq77(table.campaignId, campaignId), eq77(table.accountId, accountId))).orderBy(desc58(table.createdAt)).limit(1);
+      const [snap] = await db.select({ id: table.id, status: table.status, createdAt: table.createdAt }).from(table).where(and63(eq77(table.campaignId, campaignId), eq77(table.accountId, accountId2))).orderBy(desc58(table.createdAt)).limit(1);
       if (snap) {
         engineSnapshots[name] = { id: snap.id, status: snap.status || "COMPLETE", createdAt: snap.createdAt };
       }
@@ -56803,7 +56856,7 @@ async function loadSystemContext(accountId, campaignId) {
     }
   }
   try {
-    const [audSnap] = await db.select({ id: audienceSnapshots.id, createdAt: audienceSnapshots.createdAt }).from(audienceSnapshots).where(and63(eq77(audienceSnapshots.campaignId, campaignId), eq77(audienceSnapshots.accountId, accountId))).orderBy(desc58(audienceSnapshots.createdAt)).limit(1);
+    const [audSnap] = await db.select({ id: audienceSnapshots.id, createdAt: audienceSnapshots.createdAt }).from(audienceSnapshots).where(and63(eq77(audienceSnapshots.campaignId, campaignId), eq77(audienceSnapshots.accountId, accountId2))).orderBy(desc58(audienceSnapshots.createdAt)).limit(1);
     if (audSnap) {
       engineSnapshots["audience"] = { id: audSnap.id, status: "COMPLETE", createdAt: audSnap.createdAt };
     }
@@ -56818,7 +56871,7 @@ async function loadSystemContext(accountId, campaignId) {
       hookDna: contentDna.hookDna,
       narrativeDna: contentDna.narrativeDna,
       executionRules: contentDna.executionRules
-    }).from(contentDna).where(and63(eq77(contentDna.accountId, accountId), eq77(contentDna.campaignId, campaignId), eq77(contentDna.status, "active"))).orderBy(desc58(contentDna.generatedAt)).limit(1);
+    }).from(contentDna).where(and63(eq77(contentDna.accountId, accountId2), eq77(contentDna.campaignId, campaignId), eq77(contentDna.status, "active"))).orderBy(desc58(contentDna.generatedAt)).limit(1);
     if (dnaRow) {
       const safeP3 = (v) => {
         try {
@@ -56850,7 +56903,7 @@ async function loadSystemContext(accountId, campaignId) {
   let executionTasksSummary = null;
   let assumptionsSummary = null;
   try {
-    const [gd] = await db.select().from(goalDecompositions).where(and63(eq77(goalDecompositions.campaignId, campaignId), eq77(goalDecompositions.accountId, accountId), eq77(goalDecompositions.status, "active"))).orderBy(desc58(goalDecompositions.createdAt)).limit(1);
+    const [gd] = await db.select().from(goalDecompositions).where(and63(eq77(goalDecompositions.campaignId, campaignId), eq77(goalDecompositions.accountId, accountId2), eq77(goalDecompositions.status, "active"))).orderBy(desc58(goalDecompositions.createdAt)).limit(1);
     if (gd) {
       goalDecomposition = {
         goalType: gd.goalType,
@@ -56866,7 +56919,7 @@ async function loadSystemContext(accountId, campaignId) {
   } catch {
   }
   try {
-    const [sim] = await db.select().from(growthSimulations).where(and63(eq77(growthSimulations.campaignId, campaignId), eq77(growthSimulations.accountId, accountId), eq77(growthSimulations.status, "active"))).orderBy(desc58(growthSimulations.createdAt)).limit(1);
+    const [sim] = await db.select().from(growthSimulations).where(and63(eq77(growthSimulations.campaignId, campaignId), eq77(growthSimulations.accountId, accountId2), eq77(growthSimulations.status, "active"))).orderBy(desc58(growthSimulations.createdAt)).limit(1);
     if (sim) {
       simulation = {
         conservativeCase: safeP2(sim.conservativeCase),
@@ -56950,7 +57003,7 @@ async function loadSystemContext(accountId, campaignId) {
         const [miSnap] = await db.select({
           sourceAvailability: miSnapshots.sourceAvailability,
           multiSourceSignals: miSnapshots.multiSourceSignals
-        }).from(miSnapshots).where(and63(eq77(miSnapshots.campaignId, campaignId), eq77(miSnapshots.accountId, accountId))).orderBy(desc58(miSnapshots.createdAt)).limit(1);
+        }).from(miSnapshots).where(and63(eq77(miSnapshots.campaignId, campaignId), eq77(miSnapshots.accountId, accountId2))).orderBy(desc58(miSnapshots.createdAt)).limit(1);
         if (!miSnap?.sourceAvailability) return null;
         return typeof miSnap.sourceAvailability === "string" ? JSON.parse(miSnap.sourceAvailability) : miSnap.sourceAvailability;
       } catch {
@@ -56960,9 +57013,9 @@ async function loadSystemContext(accountId, campaignId) {
     contentDnaSnapshot: dnaData,
     rootBundle: await (async () => {
       try {
-        const active = await getActiveRootBundle(campaignId, accountId);
+        const active = await getActiveRootBundle(campaignId, accountId2);
         if (!active) return null;
-        const staleness = await detectStaleness(campaignId, accountId);
+        const staleness = await detectStaleness(campaignId, accountId2);
         return {
           id: active.id,
           version: active.version,
@@ -57215,11 +57268,11 @@ function humanize(text2) {
   out = out.trim();
   return out;
 }
-async function buildCausalNarrative(campaignId, accountId = "default") {
+async function buildCausalNarrative(campaignId, accountId2 = "default") {
   const empty = { hasNarrative: false, steps: [], oneLiner: "", engineCount: 0, completedAt: null };
   const jobRows = await db.execute(
     sql33`SELECT section_statuses, status, completed_at FROM orchestrator_jobs
-        WHERE campaign_id = ${campaignId} AND account_id = ${accountId} ORDER BY created_at DESC LIMIT 1`
+        WHERE campaign_id = ${campaignId} AND account_id = ${accountId2} ORDER BY created_at DESC LIMIT 1`
   );
   const job = jobRows.rows?.[0];
   if (!job || !job.section_statuses) return empty;
@@ -57402,14 +57455,14 @@ function registerOrchestratorV2Routes(app2) {
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
-      const accountId = "default";
+      const accountId2 = req.accountId || "default";
       const lockResult = await db.execute(
         sql34`INSERT INTO orchestrator_jobs (id, campaign_id, account_id, status, created_at, section_statuses)
             SELECT ${"lock_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6)},
-                   ${String(campaignId)}, ${accountId}, 'RUNNING', NOW(), '[]'
+                   ${String(campaignId)}, ${accountId2}, 'RUNNING', NOW(), '[]'
             WHERE NOT EXISTS (
               SELECT 1 FROM orchestrator_jobs
-              WHERE campaign_id = ${String(campaignId)} AND account_id = ${accountId}
+              WHERE campaign_id = ${String(campaignId)} AND account_id = ${accountId2}
                 AND status = 'RUNNING'
                 AND created_at > NOW() - INTERVAL '30 minutes'
             )
@@ -57418,7 +57471,7 @@ function registerOrchestratorV2Routes(app2) {
       if (!lockResult.rows?.length) {
         const existing = await db.execute(
           sql34`SELECT id FROM orchestrator_jobs
-              WHERE campaign_id = ${String(campaignId)} AND account_id = ${accountId}
+              WHERE campaign_id = ${String(campaignId)} AND account_id = ${accountId2}
                 AND status = 'RUNNING' AND created_at > NOW() - INTERVAL '30 minutes'
               LIMIT 1`
         );
@@ -57434,7 +57487,7 @@ function registerOrchestratorV2Routes(app2) {
         campaignId
       });
       runOrchestrator({
-        accountId,
+        accountId: accountId2,
         campaignId: String(campaignId),
         forceRefresh: forceRefresh || false,
         resumeFromEngine
@@ -57461,8 +57514,8 @@ function registerOrchestratorV2Routes(app2) {
   });
   app2.get("/api/orchestrator/latest/:campaignId", async (req, res) => {
     try {
-      const accountId = "default";
-      const job = await getLatestOrchestratorRun(accountId, req.params.campaignId);
+      const accountId2 = req.accountId || "default";
+      const job = await getLatestOrchestratorRun(accountId2, req.params.campaignId);
       if (!job) {
         return res.json({ hasRun: false });
       }
@@ -57483,10 +57536,10 @@ function registerOrchestratorV2Routes(app2) {
   });
   app2.get("/api/plans/active/:campaignId", async (req, res) => {
     try {
-      const accountId = "default";
+      const accountId2 = req.accountId || "default";
       const [plan] = await db.select().from(strategicPlans).where(
         and64(
-          eq78(strategicPlans.accountId, accountId),
+          eq78(strategicPlans.accountId, accountId2),
           eq78(strategicPlans.campaignId, req.params.campaignId)
         )
       ).orderBy(desc59(strategicPlans.createdAt)).limit(1);
@@ -57514,8 +57567,8 @@ function registerOrchestratorV2Routes(app2) {
           return null;
         }
       };
-      const [goalDecomp] = await db.select().from(goalDecompositions).where(and64(eq78(goalDecompositions.campaignId, req.params.campaignId), eq78(goalDecompositions.accountId, accountId))).orderBy(desc59(goalDecompositions.createdAt)).limit(1);
-      const [simulation] = await db.select().from(growthSimulations).where(and64(eq78(growthSimulations.campaignId, req.params.campaignId), eq78(growthSimulations.accountId, accountId))).orderBy(desc59(growthSimulations.createdAt)).limit(1);
+      const [goalDecomp] = await db.select().from(goalDecompositions).where(and64(eq78(goalDecompositions.campaignId, req.params.campaignId), eq78(goalDecompositions.accountId, accountId2))).orderBy(desc59(goalDecompositions.createdAt)).limit(1);
+      const [simulation] = await db.select().from(growthSimulations).where(and64(eq78(growthSimulations.campaignId, req.params.campaignId), eq78(growthSimulations.accountId, accountId2))).orderBy(desc59(growthSimulations.createdAt)).limit(1);
       const tasks = await db.select().from(executionTasks).where(eq78(executionTasks.planId, plan.id));
       const assumptions = await db.select().from(planAssumptions).where(eq78(planAssumptions.planId, plan.id));
       res.json({
@@ -57690,7 +57743,7 @@ function registerOrchestratorV2Routes(app2) {
       await db.update(strategicPlans).set({ status: "REJECTED", updatedAt: /* @__PURE__ */ new Date() }).where(eq78(strategicPlans.id, planId));
       await db.insert(planApprovals).values({
         planId,
-        accountId: "default",
+        accountId: req.accountId || "default",
         decision: "REJECTED",
         reason: reason || "Rejected by user",
         decidedBy: "client"
@@ -57710,9 +57763,9 @@ function registerOrchestratorV2Routes(app2) {
   });
   app2.get("/api/required-work/:campaignId", async (req, res) => {
     try {
-      const accountId = "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.params.campaignId;
-      const fulfillment = await computeFulfillment(campaignId, accountId);
+      const fulfillment = await computeFulfillment(campaignId, accountId2);
       if (!fulfillment.planId && fulfillment.total.required === 0) return res.json({ hasWork: false });
       const [work] = await db.select().from(requiredWork).where(eq78(requiredWork.campaignId, campaignId)).orderBy(desc59(requiredWork.createdAt)).limit(1);
       if (!work) return res.json({ hasWork: false });
@@ -57821,9 +57874,9 @@ function registerOrchestratorV2Routes(app2) {
   });
   app2.get("/api/orchestrator/summaries/:campaignId", async (req, res) => {
     try {
-      const accountId = "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.params.campaignId;
-      const job = await getLatestOrchestratorRun(accountId, campaignId);
+      const job = await getLatestOrchestratorRun(accountId2, campaignId);
       if (!job) {
         return res.json({ hasSummaries: false, engines: [] });
       }
@@ -58178,8 +58231,8 @@ function registerOrchestratorV2Routes(app2) {
   });
   app2.get("/api/narrative/:campaignId", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
-      const narrative = await buildCausalNarrative(req.params.campaignId, accountId);
+      const accountId2 = req.accountId || "default";
+      const narrative = await buildCausalNarrative(req.params.campaignId, accountId2);
       res.json(narrative);
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -58243,7 +58296,7 @@ function registerAgentRoutes(app2) {
       };
       send({ type: "started", campaignId, totalEngines: 15 });
       await new AgentOperator().runWithStream(
-        { accountId: "default", campaignId: String(campaignId) },
+        { accountId: req.accountId || "default", campaignId: String(campaignId) },
         send
       );
       if (!res.writableEnded) res.end();
@@ -58429,14 +58482,15 @@ function setCachedAEL(campaignId, pkg) {
 function registerAELRoutes(app2) {
   app2.post("/api/ael/build", async (req, res) => {
     try {
-      const { campaignId, accountId = "default" } = req.body;
+      const { campaignId } = req.body;
+      const accountId2 = req.accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
       console.log(`${LOG_PREFIX6} BUILD_REQUEST | campaign=${campaignId}`);
       const [miSnapshot] = await db.select().from(miSnapshots).where(and65(
         eq80(miSnapshots.campaignId, campaignId),
-        eq80(miSnapshots.accountId, accountId),
+        eq80(miSnapshots.accountId, accountId2),
         inArray25(miSnapshots.status, ["COMPLETE", "PARTIAL"])
       )).orderBy(desc61(miSnapshots.createdAt)).limit(1);
       if (!miSnapshot) {
@@ -58447,12 +58501,12 @@ function registerAELRoutes(app2) {
         });
       }
       const miResult = typeof miSnapshot.result === "string" ? JSON.parse(miSnapshot.result) : miSnapshot.result;
-      const productDNA = await loadProductDNA(campaignId, accountId);
+      const productDNA = await loadProductDNA(campaignId, accountId2);
       const pkg = await buildAnalyticalPackage({
         mi: miResult,
         audience: null,
         productDNA,
-        accountId,
+        accountId: accountId2,
         campaignId
       });
       setCachedAEL(campaignId, pkg);
@@ -58492,7 +58546,7 @@ function registerCELRoutes(app2) {
   app2.get("/api/cel/report/:campaignId", async (req, res) => {
     try {
       const { campaignId } = req.params;
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const ael = getCachedAEL(campaignId);
       if (!ael) {
         return res.json({
@@ -58520,7 +58574,7 @@ function registerCELRoutes(app2) {
         });
       }
       const results = [];
-      const posSnapshot = await getLatestPositioningSnapshot(accountId, campaignId);
+      const posSnapshot = await getLatestPositioningSnapshot(accountId2, campaignId);
       if (posSnapshot && posSnapshot.territories) {
         const territories = Array.isArray(posSnapshot.territories) ? posSnapshot.territories : [];
         const posCompliance = enforcePositioningCompliance(territories, ael);
@@ -58622,68 +58676,68 @@ function enforceActionability(output) {
   const score = passed / blocks.length;
   return { passed: score >= 0.85 && structureOk, score, failedBlocks };
 }
-async function getLatestSnapshot(table, accountId, campaignId) {
+async function getLatestSnapshot(table, accountId2, campaignId) {
   try {
-    const [snap] = await db.select().from(table).where(and66(eq81(table.accountId, accountId), eq81(table.campaignId, campaignId))).orderBy(desc62(table.createdAt)).limit(1);
+    const [snap] = await db.select().from(table).where(and66(eq81(table.accountId, accountId2), eq81(table.campaignId, campaignId))).orderBy(desc62(table.createdAt)).limit(1);
     return snap || null;
   } catch {
     return null;
   }
 }
-async function collectValidatedEngineOutputs(accountId, campaignId, depthGateStatus) {
+async function collectValidatedEngineOutputs(accountId2, campaignId, depthGateStatus) {
   const snapshots = [];
   const GATED_PASS_STATES = ["SIGNAL_PASSED", "DEPTH_PASSED"];
-  const miSnap = await getLatestSnapshot(miSnapshots, accountId, campaignId);
+  const miSnap = await getLatestSnapshot(miSnapshots, accountId2, campaignId);
   if (miSnap) {
     snapshots.push({ engineId: "market_intelligence", data: miSnap });
   }
-  const audienceSnap = await getLatestSnapshot(audienceSnapshots, accountId, campaignId);
+  const audienceSnap = await getLatestSnapshot(audienceSnapshots, accountId2, campaignId);
   if (audienceSnap) {
     snapshots.push({ engineId: "audience", data: audienceSnap });
   }
-  const posSnap = await getLatestSnapshot(positioningSnapshots, accountId, campaignId);
+  const posSnap = await getLatestSnapshot(positioningSnapshots, accountId2, campaignId);
   if (posSnap) {
     const status = depthGateStatus?.positioning;
     if (!status || GATED_PASS_STATES.includes(status)) {
       snapshots.push({ engineId: "positioning", data: posSnap, depthGateStatus: status });
     }
   }
-  const diffSnap = await getLatestSnapshot(differentiationSnapshots, accountId, campaignId);
+  const diffSnap = await getLatestSnapshot(differentiationSnapshots, accountId2, campaignId);
   if (diffSnap) {
     const status = depthGateStatus?.differentiation;
     if (!status || GATED_PASS_STATES.includes(status)) {
       snapshots.push({ engineId: "differentiation", data: diffSnap, depthGateStatus: status });
     }
   }
-  const mechSnap = await getLatestSnapshot(mechanismSnapshots, accountId, campaignId);
+  const mechSnap = await getLatestSnapshot(mechanismSnapshots, accountId2, campaignId);
   if (mechSnap) {
     const status = depthGateStatus?.mechanism;
     if (!status || GATED_PASS_STATES.includes(status)) {
       snapshots.push({ engineId: "mechanism", data: mechSnap, depthGateStatus: status });
     }
   }
-  const offerSnap = await getLatestSnapshot(offerSnapshots, accountId, campaignId);
+  const offerSnap = await getLatestSnapshot(offerSnapshots, accountId2, campaignId);
   if (offerSnap) {
     const status = depthGateStatus?.offer;
     if (!status || GATED_PASS_STATES.includes(status)) {
       snapshots.push({ engineId: "offer", data: offerSnap, depthGateStatus: status });
     }
   }
-  const funnelSnap = await getLatestSnapshot(funnelSnapshots, accountId, campaignId);
+  const funnelSnap = await getLatestSnapshot(funnelSnapshots, accountId2, campaignId);
   if (funnelSnap) {
     const status = depthGateStatus?.funnel;
     if (!status || GATED_PASS_STATES.includes(status)) {
       snapshots.push({ engineId: "funnel", data: funnelSnap, depthGateStatus: status });
     }
   }
-  const awarenessSnap = await getLatestSnapshot(awarenessSnapshots, accountId, campaignId);
+  const awarenessSnap = await getLatestSnapshot(awarenessSnapshots, accountId2, campaignId);
   if (awarenessSnap) {
     const status = depthGateStatus?.awareness;
     if (!status || GATED_PASS_STATES.includes(status)) {
       snapshots.push({ engineId: "awareness", data: awarenessSnap, depthGateStatus: status });
     }
   }
-  const persuasionSnap = await getLatestSnapshot(persuasionSnapshots, accountId, campaignId);
+  const persuasionSnap = await getLatestSnapshot(persuasionSnapshots, accountId2, campaignId);
   if (persuasionSnap) {
     const status = depthGateStatus?.persuasion;
     if (!status || GATED_PASS_STATES.includes(status)) {
@@ -58927,9 +58981,9 @@ function parseAIResponse(content) {
     return null;
   }
 }
-async function runBuildPlanLayer(accountId, campaignId, depthGateStatus) {
+async function runBuildPlanLayer(accountId2, campaignId, depthGateStatus) {
   const MAX_ATTEMPTS = 3;
-  const snapshots = await collectValidatedEngineOutputs(accountId, campaignId, depthGateStatus);
+  const snapshots = await collectValidatedEngineOutputs(accountId2, campaignId, depthGateStatus);
   if (snapshots.length < 3) {
     return {
       status: "INSUFFICIENT_DATA",
@@ -58950,7 +59004,7 @@ async function runBuildPlanLayer(accountId, campaignId, depthGateStatus) {
         messages: [{ role: "user", content: prompt }],
         max_tokens: 1500,
         temperature: 0.3,
-        accountId,
+        accountId: accountId2,
         endpoint: "build-plan-layer"
       });
       const content = response.choices?.[0]?.message?.content;
@@ -59012,7 +59066,7 @@ async function runBuildPlanLayer(accountId, campaignId, depthGateStatus) {
 function registerBuildPlanLayerRoutes(app2) {
   app2.post("/api/build-plan-layer/generate", async (req, res) => {
     try {
-      const { accountId = "default", campaignId } = req.body;
+      const { campaignId } = req.body;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
@@ -59026,12 +59080,12 @@ function registerBuildPlanLayerRoutes(app2) {
   });
   app2.get("/api/build-plan-layer/latest", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.query.campaignId;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId query parameter required" });
       }
-      const result = await runBuildPlanLayer(accountId, campaignId);
+      const result = await runBuildPlanLayer(accountId2, campaignId);
       res.json(result);
     } catch (err) {
       console.error("[BuildPlanLayer] Latest route error:", err.message);
@@ -59141,7 +59195,7 @@ async function verifyPermissions(userToken) {
   }
   return result;
 }
-async function storeTokensAfterOAuth(accountId, shortLivedToken) {
+async function storeTokensAfterOAuth(accountId2, shortLivedToken) {
   try {
     const exchangeResult = await exchangeForLongLivedToken(shortLivedToken);
     if (!exchangeResult.success || !exchangeResult.longLivedToken) {
@@ -59149,7 +59203,7 @@ async function storeTokensAfterOAuth(accountId, shortLivedToken) {
     }
     const longLivedToken = exchangeResult.longLivedToken;
     const expiresAt = new Date(Date.now() + (exchangeResult.expiresIn || 5184e3) * 1e3);
-    await logAudit(accountId, "META_TOKEN_EXCHANGED", {
+    await logAudit(accountId2, "META_TOKEN_EXCHANGED", {
       details: {
         tokenType: "long_lived",
         expiresAt: expiresAt.toISOString(),
@@ -59158,7 +59212,7 @@ async function storeTokensAfterOAuth(accountId, shortLivedToken) {
     });
     const permissions = await verifyPermissions(longLivedToken);
     const missingScopes = computeMissingScopes(permissions.granted);
-    await logAudit(accountId, "META_PERMISSION_VERIFIED", {
+    await logAudit(accountId2, "META_PERMISSION_VERIFIED", {
       details: {
         granted: permissions.granted,
         declined: permissions.declined,
@@ -59168,15 +59222,15 @@ async function storeTokensAfterOAuth(accountId, shortLivedToken) {
     });
     const pagesResult = await fetchPages(longLivedToken);
     if (!pagesResult.success || !pagesResult.pages || pagesResult.pages.length === 0) {
-      await transitionMetaMode(accountId, "PERMISSION_MISSING", pagesResult.error || "No pages found");
+      await transitionMetaMode(accountId2, "PERMISSION_MISSING", pagesResult.error || "No pages found");
       return { success: false, status: "NO_PAGES", error: pagesResult.error };
     }
     const selectedPage = pagesResult.pages[0];
     const encryptedUser = encryptToken(longLivedToken);
     const encryptedPage = encryptToken(selectedPage.accessToken);
-    await db.delete(metaCredentials).where(eq82(metaCredentials.accountId, accountId));
+    await db.delete(metaCredentials).where(eq82(metaCredentials.accountId, accountId2));
     await db.insert(metaCredentials).values({
-      accountId,
+      accountId: accountId2,
       encryptedUserToken: encryptedUser.ciphertext,
       ivUser: encryptedUser.iv,
       encryptedPageToken: encryptedPage.ciphertext,
@@ -59198,7 +59252,7 @@ async function storeTokensAfterOAuth(accountId, shortLivedToken) {
         metaMissingScopes: JSON.stringify(missingScopes),
         metaLastVerifiedAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq82(accountState.accountId, accountId));
+      }).where(eq82(accountState.accountId, accountId2));
       return { success: true, status: "PERMISSION_MISSING" };
     }
     await db.update(accountState).set({
@@ -59208,8 +59262,8 @@ async function storeTokensAfterOAuth(accountId, shortLivedToken) {
       metaLastVerifiedAt: /* @__PURE__ */ new Date(),
       metaDemoModeEnabled: false,
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq82(accountState.accountId, accountId));
-    await logAudit(accountId, "META_CONNECTED", {
+    }).where(eq82(accountState.accountId, accountId2));
+    await logAudit(accountId2, "META_CONNECTED", {
       details: {
         pageId: selectedPage.id,
         pageName: selectedPage.name,
@@ -59219,16 +59273,16 @@ async function storeTokensAfterOAuth(accountId, shortLivedToken) {
         grantedScopes: permissions.granted
       }
     });
-    console.log(`[MetaTokenManager] Account ${accountId} connected: page=${selectedPage.name}, ig=${selectedPage.igUsername || "none"}`);
+    console.log(`[MetaTokenManager] Account ${accountId2} connected: page=${selectedPage.name}, ig=${selectedPage.igUsername || "none"}`);
     return { success: true, status: "REAL" };
   } catch (error) {
     console.error("[MetaTokenManager] storeTokensAfterOAuth error:", error);
     return { success: false, status: "ERROR", error: String(error) };
   }
 }
-async function runHealthCheck(accountId) {
+async function runHealthCheck(accountId2) {
   try {
-    const creds = await db.select().from(metaCredentials).where(eq82(metaCredentials.accountId, accountId)).limit(1);
+    const creds = await db.select().from(metaCredentials).where(eq82(metaCredentials.accountId, accountId2)).limit(1);
     if (!creds[0]) {
       return { healthy: false, action: "no_credentials" };
     }
@@ -59240,14 +59294,14 @@ async function runHealthCheck(accountId) {
       }
     }
     if (!cred.encryptedUserToken || !cred.ivUser || !cred.encryptionKeyVersion) {
-      await transitionMetaMode(accountId, "DISCONNECTED", "Missing encrypted tokens");
+      await transitionMetaMode(accountId2, "DISCONNECTED", "Missing encrypted tokens");
       return { healthy: false, action: "missing_tokens" };
     }
     let userToken;
     try {
       userToken = decryptToken(cred.encryptedUserToken, cred.ivUser, cred.encryptionKeyVersion);
     } catch {
-      await transitionMetaMode(accountId, "TOKEN_EXPIRED", "Failed to decrypt token \u2014 possible key rotation");
+      await transitionMetaMode(accountId2, "TOKEN_EXPIRED", "Failed to decrypt token \u2014 possible key rotation");
       return { healthy: false, action: "decryption_failed" };
     }
     const appId = process.env.META_APP_ID || "";
@@ -59269,38 +59323,38 @@ async function runHealthCheck(accountId) {
             const errorSubcode = debugData.data.error?.subcode;
             const errorCode = debugData.data.error?.code || null;
             const classified = classifyMetaError(null, errorCode, errorSubcode, debugData.data.error?.message || null);
-            recordMetaApiCall(accountId, false, debugLatency, classified.category);
+            recordMetaApiCall(accountId2, false, debugLatency, classified.category);
             if (classified.classification === "PERMANENT" && classified.shouldTransitionMode) {
               if (errorSubcode === 458 || errorSubcode === 460) {
-                await transitionMetaMode(accountId, "REVOKED", `Token revoked (subcode: ${errorSubcode})`);
-                await logAudit(accountId, "META_TOKEN_REVOKED", { details: { subcode: errorSubcode } });
+                await transitionMetaMode(accountId2, "REVOKED", `Token revoked (subcode: ${errorSubcode})`);
+                await logAudit(accountId2, "META_TOKEN_REVOKED", { details: { subcode: errorSubcode } });
                 return { healthy: false, action: "revoked" };
               }
               if (errorSubcode === 463) {
-                await transitionMetaMode(accountId, "TOKEN_EXPIRED", "Token expired (debug_token)");
-                await logAudit(accountId, "META_TOKEN_EXPIRED", { details: {} });
+                await transitionMetaMode(accountId2, "TOKEN_EXPIRED", "Token expired (debug_token)");
+                await logAudit(accountId2, "META_TOKEN_EXPIRED", { details: {} });
                 return { healthy: false, action: "expired" };
               }
-              await transitionMetaMode(accountId, "TOKEN_EXPIRED", "Token invalid (unknown reason)");
+              await transitionMetaMode(accountId2, "TOKEN_EXPIRED", "Token invalid (unknown reason)");
               return { healthy: false, action: "invalid" };
             } else {
-              const backoff = recordTemporaryError(accountId);
-              await logAudit(accountId, "META_TEMPORARY_ERROR", {
+              const backoff = recordTemporaryError(accountId2);
+              await logAudit(accountId2, "META_TEMPORARY_ERROR", {
                 details: { category: classified.category, backoff, errorSubcode, source: "health_check_debug_token" }
               });
               tokenValid = true;
             }
           } else {
-            recordMetaApiCall(accountId, true, debugLatency);
-            recordSuccess2(accountId);
+            recordMetaApiCall(accountId2, true, debugLatency);
+            recordSuccess2(accountId2);
           }
         }
       } catch (debugError) {
         const debugLatency = Date.now() - debugStart;
         const classified = classifyNetworkError();
-        recordMetaApiCall(accountId, false, debugLatency, classified.category);
-        const backoff = recordTemporaryError(accountId);
-        await logAudit(accountId, "META_TEMPORARY_ERROR", {
+        recordMetaApiCall(accountId2, false, debugLatency, classified.category);
+        const backoff = recordTemporaryError(accountId2);
+        await logAudit(accountId2, "META_TEMPORARY_ERROR", {
           details: { category: classified.category, backoff, error: String(debugError), source: "health_check_debug_token" }
         });
         console.warn("[MetaTokenManager] debug_token API call failed (temporary):", String(debugError));
@@ -59317,26 +59371,26 @@ async function runHealthCheck(accountId) {
           const code = testData.error.code;
           const subcode = testData.error.error_subcode || null;
           const classified = classifyMetaError(null, code, subcode, testData.error.message || null);
-          recordMetaApiCall(accountId, false, meLatency, classified.category);
+          recordMetaApiCall(accountId2, false, meLatency, classified.category);
           if (classified.classification === "PERMANENT" && classified.shouldTransitionMode) {
-            await transitionMetaMode(accountId, classified.suggestedMode || "TOKEN_EXPIRED", `Token issue (/me check, code=${code})`);
-            await logAudit(accountId, "META_TOKEN_EXPIRED", { details: { errorCode: code } });
+            await transitionMetaMode(accountId2, classified.suggestedMode || "TOKEN_EXPIRED", `Token issue (/me check, code=${code})`);
+            await logAudit(accountId2, "META_TOKEN_EXPIRED", { details: { errorCode: code } });
             return { healthy: false, action: "expired" };
           } else {
-            const backoff = recordTemporaryError(accountId);
-            await logAudit(accountId, "META_TEMPORARY_ERROR", {
+            const backoff = recordTemporaryError(accountId2);
+            await logAudit(accountId2, "META_TEMPORARY_ERROR", {
               details: { category: classified.category, backoff, errorCode: code, source: "health_check_me" }
             });
             tokenValid = true;
           }
         } else {
-          recordMetaApiCall(accountId, true, meLatency);
-          recordSuccess2(accountId);
+          recordMetaApiCall(accountId2, true, meLatency);
+          recordSuccess2(accountId2);
         }
       } catch (meError) {
         const meLatency = Date.now() - meStart;
-        recordMetaApiCall(accountId, false, meLatency, "NETWORK_ERROR");
-        recordTemporaryError(accountId);
+        recordMetaApiCall(accountId2, false, meLatency, "NETWORK_ERROR");
+        recordTemporaryError(accountId2);
         tokenValid = true;
       }
     }
@@ -59354,17 +59408,17 @@ async function runHealthCheck(accountId) {
             encryptionKeyVersion: encryptedNew.keyVersion,
             userTokenExpiresAt: newExpiry,
             updatedAt: /* @__PURE__ */ new Date()
-          }).where(eq82(metaCredentials.accountId, accountId));
-          await logAudit(accountId, "META_AUTO_EXTENSION", {
+          }).where(eq82(metaCredentials.accountId, accountId2));
+          await logAudit(accountId2, "META_AUTO_EXTENSION", {
             details: {
               oldExpiresAt: expiresDate.toISOString(),
               newExpiresAt: newExpiry.toISOString(),
               daysRemaining: Math.round(daysUntilExpiry)
             }
           });
-          console.log(`[MetaTokenManager] Auto-extended token for ${accountId}: ${Math.round(daysUntilExpiry)}d \u2192 ~60d`);
+          console.log(`[MetaTokenManager] Auto-extended token for ${accountId2}: ${Math.round(daysUntilExpiry)}d \u2192 ~60d`);
         } else {
-          console.warn(`[MetaTokenManager] Auto-extension failed for ${accountId}: ${extensionResult.error}`);
+          console.warn(`[MetaTokenManager] Auto-extension failed for ${accountId2}: ${extensionResult.error}`);
         }
       }
     }
@@ -59375,22 +59429,22 @@ async function runHealthCheck(accountId) {
       metaMissingScopes: missingScopes.length > 0 ? JSON.stringify(missingScopes) : null,
       metaLastVerifiedAt: /* @__PURE__ */ new Date(),
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq82(accountState.accountId, accountId));
-    await db.update(metaCredentials).set({ lastHealthCheckAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq82(metaCredentials.accountId, accountId));
+    }).where(eq82(accountState.accountId, accountId2));
+    await db.update(metaCredentials).set({ lastHealthCheckAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq82(metaCredentials.accountId, accountId2));
     const capabilities = computeCapabilities(
       permissions.granted,
       !!cred.encryptedPageToken,
       cred.igBusinessId || null
     );
     if (missingScopes.length > 0 && !capabilities.fbPublishingEnabled) {
-      await transitionMetaMode(accountId, "PERMISSION_MISSING", "Health check found missing required scopes");
+      await transitionMetaMode(accountId2, "PERMISSION_MISSING", "Health check found missing required scopes");
     } else {
-      const state = await db.select().from(accountState).where(eq82(accountState.accountId, accountId)).limit(1);
+      const state = await db.select().from(accountState).where(eq82(accountState.accountId, accountId2)).limit(1);
       if (state[0]?.metaMode !== "REAL") {
-        await transitionMetaMode(accountId, "REAL", "Health check verified all requirements");
+        await transitionMetaMode(accountId2, "REAL", "Health check verified all requirements");
       }
     }
-    await logAudit(accountId, "META_HEALTH_CHECK", {
+    await logAudit(accountId2, "META_HEALTH_CHECK", {
       details: {
         tokenValid,
         capabilities,
@@ -59400,7 +59454,7 @@ async function runHealthCheck(accountId) {
     });
     return { healthy: true, action: "verified", details: { capabilities, missingScopes } };
   } catch (error) {
-    console.error("[MetaTokenManager] Health check error for account:", accountId, error);
+    console.error("[MetaTokenManager] Health check error for account:", accountId2, error);
     return { healthy: false, action: "error", details: { error: String(error) } };
   }
 }
@@ -59424,12 +59478,12 @@ async function registerRoutes(app2) {
   registerAuthRoutes(app2);
   app2.get("/api/engines/health", async (req, res) => {
     try {
-      const accountId = req.query.accountId || "default";
+      const accountId2 = req.accountId || "default";
       const campaignId = req.query.campaignId;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId query parameter required" });
       }
-      const result = await validateRoutingIntegrity(accountId, campaignId);
+      const result = await validateRoutingIntegrity(accountId2, campaignId);
       res.json(result);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -59445,7 +59499,7 @@ async function registerRoutes(app2) {
       if (campaignId) {
         try {
           const { getLatestContentDna: getLatestContentDna2 } = await Promise.resolve().then(() => (init_content_dna_routes(), content_dna_routes_exports));
-          const dna = await getLatestContentDna2(campaignId, "default");
+          const dna = await getLatestContentDna2(campaignId, req.accountId || "default");
           if (dna) {
             const parts = ["\n\nContent DNA (use these rules for this business):"];
             if (dna.messagingCore) parts.push(`Messaging: tone=${dna.messagingCore.toneStyle || ""}, persuasion=${dna.messagingCore.persuasionIntensity || ""}, value promise=${dna.messagingCore.primaryValuePromise || ""}`);
@@ -59503,7 +59557,7 @@ Requirements:
 ${userPrompt}` }] }
           ],
           config: { maxOutputTokens: 2048 },
-          accountId: "default",
+          accountId: req.accountId || "default",
           endpoint: "ai-writer-gemini"
         });
         content = geminiResponse.text || "";
@@ -59515,7 +59569,7 @@ ${userPrompt}` }] }
             { role: "user", content: userPrompt }
           ],
           max_tokens: 2048,
-          accountId: "default",
+          accountId: req.accountId || "default",
           endpoint: "ai-writer-gpt"
         });
         content = response.choices[0]?.message?.content || "";
@@ -59576,7 +59630,7 @@ Make sure the content works well across all the specified platforms.`;
 ${userPrompt}` }] }
           ],
           config: { maxOutputTokens: 1024 },
-          accountId: "default",
+          accountId: req.accountId || "default",
           endpoint: "ai-designer-gemini"
         });
         rawContent = geminiResponse.text || "";
@@ -59588,7 +59642,7 @@ ${userPrompt}` }] }
             { role: "user", content: userPrompt }
           ],
           max_tokens: 1024,
-          accountId: "default",
+          accountId: req.accountId || "default",
           endpoint: "ai-designer-gpt"
         });
         rawContent = response.choices[0]?.message?.content || "";
@@ -59634,7 +59688,7 @@ ${userPrompt}` }] }
       if (campaignId) {
         try {
           const { getLatestContentDna: getLatestContentDna2 } = await Promise.resolve().then(() => (init_content_dna_routes(), content_dna_routes_exports));
-          const dna = await getLatestContentDna2(campaignId, "default");
+          const dna = await getLatestContentDna2(campaignId, req.accountId || "default");
           if (dna) {
             const parts = ["\n\nCONTENT DNA RULES (follow these for this specific business):"];
             if (dna.hookDna) parts.push(`Hook strategy: types=${(dna.hookDna.preferredHookTypes || []).join(", ")}, opening=${dna.hookDna.recommendedOpeningStyle || ""}, duration=${dna.hookDna.recommendedHookDuration || ""}`);
@@ -59748,7 +59802,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT \u2014 every word spoken. Cam
           { role: "user", content: userPrompt }
         ],
         max_tokens: 2e3,
-        accountId: "default",
+        accountId: req.accountId || "default",
         endpoint: "calendar-assistant"
       });
       const content = response.choices[0]?.message?.content || "";
@@ -59862,7 +59916,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT \u2014 every word spoken. Cam
           responseModalities: [Modality.TEXT, Modality.IMAGE],
           maxOutputTokens: 800
         },
-        accountId: "default",
+        accountId: req.accountId || "default",
         endpoint: "ai-image-gen"
       });
       const candidate = response.candidates?.[0];
@@ -60179,7 +60233,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT \u2014 every word spoken. Cam
     const META_APP_ID = process.env.META_APP_ID || "";
     const META_APP_SECRET = process.env.META_APP_SECRET || "";
     const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/meta/callback`;
-    const accountId = req.query.state || "default";
+    const accountId2 = req.accountId || "default";
     if (fbError) {
       console.error(`[Meta OAuth] Facebook returned error: ${fbError} - ${error_description}`);
       res.send(`
@@ -60253,7 +60307,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT \u2014 every word spoken. Cam
         return;
       }
       console.log(`[Meta OAuth] Short-lived token received, exchanging for long-lived + storing server-side`);
-      const storeResult = await storeTokensAfterOAuth(accountId, tokenData.access_token);
+      const storeResult = await storeTokensAfterOAuth(accountId2, tokenData.access_token);
       if (storeResult.success) {
         res.send(`
           <html>
@@ -60302,7 +60356,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT \u2014 every word spoken. Cam
   app2.post("/api/meta/post", requireMetaReal, async (req, res) => {
     try {
       const { content, platforms, mediaUrl } = req.body;
-      const accountId = req.metaAccountId || "default";
+      const accountId2 = req.accountId || "default";
       const metaMode = req.metaMode;
       if (metaMode !== "REAL") {
         return res.status(403).json({
@@ -60311,11 +60365,11 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT \u2014 every word spoken. Cam
           message: "Meta must be connected in REAL mode to publish posts. Connect Meta in Settings."
         });
       }
-      const pageToken = await getDecryptedPageToken(accountId);
+      const pageToken = await getDecryptedPageToken(accountId2);
       if (!pageToken) {
         return res.status(403).json({ error: "META_TOKEN_EXPIRED", message: "Page token not available. Please reconnect." });
       }
-      const creds = await db.select().from(metaCredentials).where(eq83(metaCredentials.accountId, accountId)).limit(1);
+      const creds = await db.select().from(metaCredentials).where(eq83(metaCredentials.accountId, accountId2)).limit(1);
       const cred = creds[0];
       if (!cred?.pageId) {
         return res.status(403).json({ error: "META_NOT_CONNECTED", message: "No Facebook Page configured." });
@@ -60471,7 +60525,7 @@ Generate 25-30 posts. Make EVERY post specific to their products/services - zero
           { role: "user", content: userPrompt }
         ],
         max_tokens: 8e3,
-        accountId: "default",
+        accountId: req.accountId || "default",
         endpoint: "generate-calendar"
       });
       const content = response.choices[0]?.message?.content || "";
@@ -60559,7 +60613,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
           { role: "user", content: userPrompt }
         ],
         max_tokens: 4e3,
-        accountId: "default",
+        accountId: req.accountId || "default",
         endpoint: "generate-audience"
       });
       const content = response.choices[0]?.message?.content || "";
@@ -60582,7 +60636,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   app2.post("/api/auto-publish", requireMetaReal, async (req, res) => {
     try {
       const { posts } = req.body;
-      const accountId = req.metaAccountId || "default";
+      const accountId2 = req.accountId || "default";
       const metaMode = req.metaMode;
       if (metaMode !== "REAL") {
         return res.status(403).json({
@@ -60591,11 +60645,11 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
           message: "Meta must be connected in REAL mode to auto-publish. Connect Meta in Settings."
         });
       }
-      const pageToken = await getDecryptedPageToken(accountId);
+      const pageToken = await getDecryptedPageToken(accountId2);
       if (!pageToken) {
         return res.status(403).json({ error: "META_TOKEN_EXPIRED", message: "Page token not available. Please reconnect." });
       }
-      const creds = await db.select().from(metaCredentials).where(eq83(metaCredentials.accountId, accountId)).limit(1);
+      const creds = await db.select().from(metaCredentials).where(eq83(metaCredentials.accountId, accountId2)).limit(1);
       const cred = creds[0];
       if (!cred?.pageId) {
         return res.status(403).json({ error: "META_NOT_CONNECTED", message: "No Facebook Page configured." });
@@ -60910,7 +60964,7 @@ init_db();
 init_schema();
 init_audit();
 import { eq as eq84, desc as desc63, gte as gte12, sql as sql35 } from "drizzle-orm";
-async function computeRollingBaselines(accountId) {
+async function computeRollingBaselines(accountId2) {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1e3);
   const recentData = await db.select({
     avgCpa: sql35`coalesce(avg(${performanceSnapshots.cpa}), 0)`,
@@ -60922,7 +60976,7 @@ async function computeRollingBaselines(accountId) {
   const currentRoas = Number(recentData[0]?.avgRoas) || 0;
   const currentCtr = Number(recentData[0]?.avgCtr) || 0;
   const currentSpend = Number(recentData[0]?.totalSpend) || 0;
-  const previousBaselines = await db.select().from(baselineHistory).where(eq84(baselineHistory.accountId, accountId)).orderBy(desc63(baselineHistory.cycleTimestamp)).limit(3);
+  const previousBaselines = await db.select().from(baselineHistory).where(eq84(baselineHistory.accountId, accountId2)).orderBy(desc63(baselineHistory.cycleTimestamp)).limit(3);
   let cpaDriftPercent = 0;
   let roasDriftPercent = 0;
   let ctrDriftPercent = 0;
@@ -60944,7 +60998,7 @@ async function computeRollingBaselines(accountId) {
   }
   const driftDetected = driftSustainedCycles >= 3;
   await db.insert(baselineHistory).values({
-    accountId,
+    accountId: accountId2,
     rollingCpa: currentCpa,
     rollingRoas: currentRoas,
     rollingCtr: currentCtr,
@@ -60957,9 +61011,9 @@ async function computeRollingBaselines(accountId) {
   await db.update(accountState).set({
     driftFlag: driftDetected,
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq84(accountState.accountId, accountId));
+  }).where(eq84(accountState.accountId, accountId2));
   if (driftDetected) {
-    await logAudit(accountId, "DRIFT_DETECTED", {
+    await logAudit(accountId2, "DRIFT_DETECTED", {
       details: {
         cpaDriftPercent,
         roasDriftPercent,
@@ -60968,7 +61022,7 @@ async function computeRollingBaselines(accountId) {
       }
     });
   } else if (previousBaselines.length > 0 && (previousBaselines[0].driftSustainedCycles || 0) >= 3 && driftSustainedCycles < 3) {
-    await logAudit(accountId, "DRIFT_CLEARED", {
+    await logAudit(accountId2, "DRIFT_CLEARED", {
       details: { sustainedCycles: driftSustainedCycles }
     });
   }
@@ -60992,13 +61046,13 @@ init_db();
 init_schema();
 init_audit();
 import { eq as eq85, desc as desc64, gte as gte13, sql as sql36 } from "drizzle-orm";
-async function getConfig(accountId) {
-  const configs = await db.select().from(guardrailConfig).where(eq85(guardrailConfig.accountId, accountId)).limit(1);
+async function getConfig(accountId2) {
+  const configs = await db.select().from(guardrailConfig).where(eq85(guardrailConfig.accountId, accountId2)).limit(1);
   if (configs.length > 0) return configs[0];
   const defaultConfigs = await db.select().from(guardrailConfig).where(eq85(guardrailConfig.accountId, "default")).limit(1);
   return defaultConfigs[0] || null;
 }
-async function checkDailyBudgetCap(accountId, config) {
+async function checkDailyBudgetCap(accountId2, config) {
   const todayStart = /* @__PURE__ */ new Date();
   todayStart.setHours(0, 0, 0, 0);
   const spendResult = await db.select({
@@ -61011,7 +61065,7 @@ async function checkDailyBudgetCap(accountId, config) {
   }
   return { passed: true };
 }
-async function checkMonthlyBudgetCap(accountId, config) {
+async function checkMonthlyBudgetCap(accountId2, config) {
   const monthStart = /* @__PURE__ */ new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
@@ -61021,7 +61075,7 @@ async function checkMonthlyBudgetCap(accountId, config) {
   const monthlySpend = Number(spendResult[0]?.totalSpend) || 0;
   const limit = config?.monthlyBudgetLimit || 2e3;
   if (monthlySpend >= limit) {
-    await logAudit(accountId, "MONTHLY_CAP_BLOCKED", {
+    await logAudit(accountId2, "MONTHLY_CAP_BLOCKED", {
       details: {
         monthlySpend: monthlySpend.toFixed(2),
         limit,
@@ -61032,7 +61086,7 @@ async function checkMonthlyBudgetCap(accountId, config) {
   }
   return { passed: true, monthlySpend, limit };
 }
-async function checkCpaGuard(accountId, config) {
+async function checkCpaGuard(accountId2, config) {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1e3);
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1e3);
   const [rollingResult, currentResult] = await Promise.all([
@@ -61057,7 +61111,7 @@ async function checkCpaGuard(accountId, config) {
   }
   return { passed: true, currentCpa, thresholdCpa: threshold };
 }
-async function checkRoasFloor(accountId, config) {
+async function checkRoasFloor(accountId2, config) {
   const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1e3);
   const roasResult = await db.select({
     avgRoas: sql36`coalesce(avg(${performanceSnapshots.roas}), 0)`
@@ -61074,7 +61128,7 @@ async function checkRoasFloor(accountId, config) {
   }
   return { passed: true, currentRoas, floor };
 }
-async function computeVolatilityIndex2(accountId, config) {
+async function computeVolatilityIndex2(accountId2, config) {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1e3);
   const statsResult = await db.select({
     avgCpa: sql36`coalesce(avg(${performanceSnapshots.cpa}), 0)`,
@@ -61102,7 +61156,7 @@ async function computeVolatilityIndex2(accountId, config) {
     volatilityRoas: roasCv,
     volatilityCtr: ctrCv,
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq85(accountState.accountId, accountId));
+  }).where(eq85(accountState.accountId, accountId2));
   if (volatilityIndex > threshold) {
     return {
       passed: false,
@@ -61116,7 +61170,7 @@ async function computeVolatilityIndex2(accountId, config) {
   }
   return { passed: true, index: volatilityIndex, threshold, cpaCv, roasCv, ctrCv };
 }
-async function detectCreativeFatigue(accountId) {
+async function detectCreativeFatigue(accountId2) {
   const recentData = await db.select({
     ctr: performanceSnapshots.ctr,
     impressions: performanceSnapshots.impressions,
@@ -61146,12 +61200,12 @@ async function detectCreativeFatigue(accountId) {
   }
   return { detected: false };
 }
-async function checkSafeModeConditions(accountId) {
-  const state = await db.select().from(accountState).where(eq85(accountState.accountId, accountId)).limit(1);
+async function checkSafeModeConditions(accountId2) {
+  const state = await db.select().from(accountState).where(eq85(accountState.accountId, accountId2)).limit(1);
   if (!state[0]) return { shouldActivate: false, reasons: [] };
   const s = state[0];
   const reasons = [];
-  const config = await getConfig(accountId);
+  const config = await getConfig(accountId2);
   const volThreshold = config?.volatilityThreshold || 0.35;
   if ((s.volatilityIndex || 0) > volThreshold) {
     reasons.push(`Volatility ${(s.volatilityIndex || 0).toFixed(3)} > threshold ${volThreshold}`);
@@ -61162,7 +61216,7 @@ async function checkSafeModeConditions(accountId) {
   const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1e3);
   const lastReset = s.lastGuardrailReset || twentyFourHoursAgo;
   if (lastReset < twentyFourHoursAgo) {
-    await db.update(accountState).set({ guardrailTriggers24h: 0, lastGuardrailReset: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq85(accountState.accountId, accountId));
+    await db.update(accountState).set({ guardrailTriggers24h: 0, lastGuardrailReset: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq85(accountState.accountId, accountId2));
   }
   if ((s.guardrailTriggers24h || 0) >= 3) {
     reasons.push(`${s.guardrailTriggers24h} guardrail triggers in 24h (>= 3)`);
@@ -61175,15 +61229,15 @@ async function checkSafeModeConditions(accountId) {
     reasons
   };
 }
-async function runAllGuardrails(accountId) {
-  const config = await getConfig(accountId);
+async function runAllGuardrails(accountId2) {
+  const config = await getConfig(accountId2);
   const [budgetCap, monthlyBudgetCap, cpaGuard, roasFloor, volatility, fatigue] = await Promise.all([
-    checkDailyBudgetCap(accountId, config),
-    checkMonthlyBudgetCap(accountId, config),
-    checkCpaGuard(accountId, config),
-    checkRoasFloor(accountId, config),
-    computeVolatilityIndex2(accountId, config),
-    detectCreativeFatigue(accountId)
+    checkDailyBudgetCap(accountId2, config),
+    checkMonthlyBudgetCap(accountId2, config),
+    checkCpaGuard(accountId2, config),
+    checkRoasFloor(accountId2, config),
+    computeVolatilityIndex2(accountId2, config),
+    detectCreativeFatigue(accountId2)
   ]);
   const triggeredCount = [
     !budgetCap.passed,
@@ -61197,14 +61251,14 @@ async function runAllGuardrails(accountId) {
     await db.update(accountState).set({
       guardrailTriggers24h: sql36`${accountState.guardrailTriggers24h} + ${triggeredCount}`,
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq85(accountState.accountId, accountId));
+    }).where(eq85(accountState.accountId, accountId2));
     const triggeredRules = [];
     if (!budgetCap.passed) triggeredRules.push("BUDGET_CAP");
     if (!monthlyBudgetCap.passed) triggeredRules.push("MONTHLY_BUDGET_CAP");
     if (!cpaGuard.passed) triggeredRules.push("CPA_GUARD");
     if (!roasFloor.passed) triggeredRules.push("ROAS_FLOOR");
     if (!volatility.passed) triggeredRules.push("VOLATILITY");
-    await logAudit(accountId, "GUARDRAIL_TRIGGER", {
+    await logAudit(accountId2, "GUARDRAIL_TRIGGER", {
       details: {
         triggeredRules,
         budgetCap: budgetCap.reason,
@@ -61216,11 +61270,11 @@ async function runAllGuardrails(accountId) {
     });
   }
   if (fatigue.detected) {
-    await logAudit(accountId, "FATIGUE_DETECTED", {
+    await logAudit(accountId2, "FATIGUE_DETECTED", {
       details: { reason: fatigue.reason }
     });
     await db.insert(strategyDecisions).values({
-      accountId,
+      accountId: accountId2,
       trigger: "Creative fatigue detected by algorithmic analysis",
       action: "Refresh creative assets \u2014 new hooks, visuals, and angles needed",
       reason: fatigue.reason || "CTR declining with rising frequency and impressions",
@@ -61233,7 +61287,7 @@ async function runAllGuardrails(accountId) {
     });
   }
   if (!cpaGuard.passed) {
-    await db.update(accountState).set({ state: "UNSTABLE", updatedAt: /* @__PURE__ */ new Date() }).where(eq85(accountState.accountId, accountId));
+    await db.update(accountState).set({ state: "UNSTABLE", updatedAt: /* @__PURE__ */ new Date() }).where(eq85(accountState.accountId, accountId2));
   }
   return {
     budgetCap,
@@ -61346,7 +61400,7 @@ init_db();
 init_schema();
 init_audit();
 import { eq as eq86, sql as sql37, gte as gte14, desc as desc65 } from "drizzle-orm";
-async function snapshotPreMetrics(decisionId, accountId, decisionType) {
+async function snapshotPreMetrics(decisionId, accountId2, decisionType) {
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1e3);
   const metricsResult = await db.select({
     avgCpa: sql37`coalesce(avg(${performanceSnapshots.cpa}), 0)`,
@@ -61357,7 +61411,7 @@ async function snapshotPreMetrics(decisionId, accountId, decisionType) {
   const m = metricsResult[0];
   await db.insert(decisionOutcomes).values({
     decisionId,
-    accountId,
+    accountId: accountId2,
     decisionType: decisionType || "unknown",
     preMetricsCpa: Number(m?.avgCpa) || 0,
     preMetricsRoas: Number(m?.avgRoas) || 0,
@@ -61365,10 +61419,10 @@ async function snapshotPreMetrics(decisionId, accountId, decisionType) {
     preMetricsSpend: Number(m?.totalSpend) || 0
   });
 }
-async function evaluatePendingOutcomes(accountId) {
+async function evaluatePendingOutcomes(accountId2) {
   const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1e3);
   const pending = await db.select().from(decisionOutcomes).where(
-    sql37`${decisionOutcomes.accountId} = ${accountId} 
+    sql37`${decisionOutcomes.accountId} = ${accountId2} 
           AND ${decisionOutcomes.outcome} IS NULL 
           AND ${decisionOutcomes.executedAt} <= ${fortyEightHoursAgo}`
   ).limit(20);
@@ -61411,7 +61465,7 @@ async function evaluatePendingOutcomes(accountId) {
       evaluatedAt: /* @__PURE__ */ new Date()
     }).where(eq86(decisionOutcomes.id, p.id));
     await db.update(strategyDecisions).set({ outcomeStatus: outcome }).where(eq86(strategyDecisions.id, p.decisionId));
-    await logAudit(accountId, "OUTCOME_EVALUATED", {
+    await logAudit(accountId2, "OUTCOME_EVALUATED", {
       decisionId: p.decisionId,
       details: {
         outcome,
@@ -61424,9 +61478,9 @@ async function evaluatePendingOutcomes(accountId) {
     });
   }
 }
-async function computeSuccessRates(accountId) {
+async function computeSuccessRates(accountId2) {
   const outcomes = await db.select().from(decisionOutcomes).where(
-    sql37`${decisionOutcomes.accountId} = ${accountId} AND ${decisionOutcomes.outcome} IS NOT NULL`
+    sql37`${decisionOutcomes.accountId} = ${accountId2} AND ${decisionOutcomes.outcome} IS NOT NULL`
   ).orderBy(desc65(decisionOutcomes.evaluatedAt)).limit(50);
   const rates = {};
   for (const o of outcomes) {
@@ -61444,7 +61498,7 @@ async function computeSuccessRates(accountId) {
   }
   return result;
 }
-async function getRecentOutcomesForPrompt(accountId) {
+async function getRecentOutcomesForPrompt(accountId2) {
   const outcomes = await db.select({
     decisionType: decisionOutcomes.decisionType,
     outcome: decisionOutcomes.outcome,
@@ -61453,10 +61507,10 @@ async function getRecentOutcomesForPrompt(accountId) {
     preRoas: decisionOutcomes.preMetricsRoas,
     postRoas: decisionOutcomes.postMetricsRoas
   }).from(decisionOutcomes).where(
-    sql37`${decisionOutcomes.accountId} = ${accountId} AND ${decisionOutcomes.outcome} IS NOT NULL`
+    sql37`${decisionOutcomes.accountId} = ${accountId2} AND ${decisionOutcomes.outcome} IS NOT NULL`
   ).orderBy(desc65(decisionOutcomes.evaluatedAt)).limit(20);
   if (outcomes.length === 0) return "No previous decision outcomes available yet.";
-  const rates = await computeSuccessRates(accountId);
+  const rates = await computeSuccessRates(accountId2);
   const ratesStr = Object.entries(rates).map(([type, data]) => `${type}: ${data.successRate.toFixed(0)}% success (${data.total} decisions)`).join(", ");
   const outcomesSummary = outcomes.map((o) => `${o.decisionType}: ${o.outcome} (CPA: ${o.preCpa?.toFixed(2)}\u2192${o.postCpa?.toFixed(2)}, ROAS: ${o.preRoas?.toFixed(2)}\u2192${o.postRoas?.toFixed(2)})`).join("\n");
   return `DECISION OUTCOME HISTORY (last 20):
@@ -61477,21 +61531,21 @@ var MAX_DECISIONS_PER_HOUR = 1;
 var CIRCUIT_BREAKER_THRESHOLD = 3;
 var IDLE_SKIP_DAYS = 7;
 var workerTimer = null;
-async function acquireLock(accountId) {
+async function acquireLock(accountId2) {
   const now = /* @__PURE__ */ new Date();
   const staleThreshold = new Date(now.getTime() - STALE_LOCK_MS);
   const runningJobs = await db.select().from(jobQueue).where(
-    sql38`${jobQueue.accountId} = ${accountId} AND ${jobQueue.status} = 'running' AND ${jobQueue.lockedAt} > ${staleThreshold}`
+    sql38`${jobQueue.accountId} = ${accountId2} AND ${jobQueue.status} = 'running' AND ${jobQueue.lockedAt} > ${staleThreshold}`
   ).limit(1);
   if (runningJobs.length > 0) {
     return null;
   }
   await db.update(jobQueue).set({ status: "failed", error: "Stale lock released", completedAt: now }).where(
-    sql38`${jobQueue.accountId} = ${accountId} AND ${jobQueue.status} = 'running' AND ${jobQueue.lockedAt} <= ${staleThreshold}`
+    sql38`${jobQueue.accountId} = ${accountId2} AND ${jobQueue.status} = 'running' AND ${jobQueue.lockedAt} <= ${staleThreshold}`
   );
-  const cycleId = `cycle_${accountId}_${now.getTime()}`;
+  const cycleId = `cycle_${accountId2}_${now.getTime()}`;
   const inserted = await db.insert(jobQueue).values({
-    accountId,
+    accountId: accountId2,
     status: "running",
     cycleId,
     lockedAt: now,
@@ -61513,22 +61567,22 @@ async function getAccountsDueForProcessing() {
   );
   return accounts.map((a) => a.accountId);
 }
-async function getActiveCampaignId(accountId) {
-  const [selection] = await db.select({ campaignId: campaignSelections.selectedCampaignId }).from(campaignSelections).where(eq87(campaignSelections.accountId, accountId)).limit(1);
+async function getActiveCampaignId(accountId2) {
+  const [selection] = await db.select({ campaignId: campaignSelections.selectedCampaignId }).from(campaignSelections).where(eq87(campaignSelections.accountId, accountId2)).limit(1);
   return selection?.campaignId || null;
 }
-async function runStrategyAnalysis(accountId, baselines, guardrailResult, outcomeContext, planContext) {
+async function runStrategyAnalysis(accountId2, baselines, guardrailResult, outcomeContext, planContext) {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1e3);
-  const activeCampaignId = await getActiveCampaignId(accountId);
+  const activeCampaignId = await getActiveCampaignId(accountId2);
   const [recentPerformance, memoryItems, recentPublished] = await Promise.all([
     db.select().from(performanceSnapshots).where(gte15(performanceSnapshots.fetchedAt, sevenDaysAgo)).orderBy(desc66(performanceSnapshots.fetchedAt)).limit(30),
     activeCampaignId ? db.select().from(strategyMemory).where(and68(
-      eq87(strategyMemory.accountId, accountId),
+      eq87(strategyMemory.accountId, accountId2),
       eq87(strategyMemory.campaignId, activeCampaignId),
       ne8(strategyMemory.campaignId, LEGACY_CAMPAIGN2)
     )).orderBy(desc66(strategyMemory.updatedAt)).limit(20) : Promise.resolve([]),
     db.select().from(publishedPosts).where(
-      sql38`${publishedPosts.accountId} = ${accountId} AND ${publishedPosts.status} = 'published' AND ${publishedPosts.publishedAt} >= ${sevenDaysAgo}`
+      sql38`${publishedPosts.accountId} = ${accountId2} AND ${publishedPosts.status} = 'published' AND ${publishedPosts.publishedAt} >= ${sevenDaysAgo}`
     ).orderBy(desc66(publishedPosts.publishedAt)).limit(20)
   ]);
   const perfSummary = recentPerformance.length > 0 ? `Recent performance (${recentPerformance.length} data points, 7d): Avg CPA $${baselines.rollingCpa.toFixed(2)}, Avg ROAS ${baselines.rollingRoas.toFixed(2)}, Avg CTR ${(baselines.rollingCtr * 100).toFixed(1)}%, Total Spend $${baselines.rollingSpend.toFixed(2)}` : "No recent performance data available.";
@@ -61597,7 +61651,7 @@ Return ONLY the JSON array, no other text.`;
         { role: "user", content: userPrompt }
       ],
       max_tokens: 1500,
-      accountId,
+      accountId: accountId2,
       endpoint: "autonomous-worker"
     });
     const content = response.choices[0]?.message?.content || "[]";
@@ -61611,8 +61665,8 @@ Return ONLY the JSON array, no other text.`;
   }
   return [];
 }
-async function getVolatilityThreshold(accountId) {
-  const config = await db.select().from(guardrailConfig).where(eq87(guardrailConfig.accountId, accountId)).limit(1);
+async function getVolatilityThreshold(accountId2) {
+  const config = await db.select().from(guardrailConfig).where(eq87(guardrailConfig.accountId, accountId2)).limit(1);
   return config[0]?.volatilityThreshold || 0.35;
 }
 function enforceRecoveryModeLimits(decision) {
@@ -61631,79 +61685,79 @@ function enforceRecoveryModeLimits(decision) {
   }
   return { blocked: false, reason: "" };
 }
-async function getWorkerLimits(accountId) {
-  const config = await db.select().from(guardrailConfig).where(eq87(guardrailConfig.accountId, accountId)).limit(1);
+async function getWorkerLimits(accountId2) {
+  const config = await db.select().from(guardrailConfig).where(eq87(guardrailConfig.accountId, accountId2)).limit(1);
   return {
     maxDecisionsPerHour: config[0]?.maxDecisionsPerHour ?? MAX_DECISIONS_PER_HOUR,
     circuitBreakerThreshold: config[0]?.circuitBreakerThreshold ?? CIRCUIT_BREAKER_THRESHOLD,
     idleSkipDays: config[0]?.idleSkipDays ?? IDLE_SKIP_DAYS
   };
 }
-async function checkHourlyDecisionCap(accountId, limit) {
+async function checkHourlyDecisionCap(accountId2, limit) {
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1e3);
   const recent = await db.select().from(strategyDecisions).where(
-    sql38`${strategyDecisions.accountId} = ${accountId} AND ${strategyDecisions.autoGenerated} = true AND ${strategyDecisions.createdAt} >= ${oneHourAgo}`
+    sql38`${strategyDecisions.accountId} = ${accountId2} AND ${strategyDecisions.autoGenerated} = true AND ${strategyDecisions.createdAt} >= ${oneHourAgo}`
   );
   return { allowed: recent.length < limit, count: recent.length, limit };
 }
-async function checkCircuitBreaker(accountId, threshold) {
-  const acct = await db.select().from(accountState).where(eq87(accountState.accountId, accountId)).limit(1);
+async function checkCircuitBreaker(accountId2, threshold) {
+  const acct = await db.select().from(accountState).where(eq87(accountState.accountId, accountId2)).limit(1);
   const failures = acct[0]?.consecutiveFailures || 0;
   return { tripped: failures >= threshold, failures };
 }
-async function checkIdleAccount(accountId, days) {
+async function checkIdleAccount(accountId2, days) {
   const threshold = new Date(Date.now() - days * 24 * 60 * 60 * 1e3);
   const recentPosts = await db.select().from(publishedPosts).where(
-    sql38`${publishedPosts.accountId} = ${accountId} AND ${publishedPosts.createdAt} >= ${threshold}`
+    sql38`${publishedPosts.accountId} = ${accountId2} AND ${publishedPosts.createdAt} >= ${threshold}`
   ).limit(1);
   const recentSnapshots = await db.select().from(performanceSnapshots).where(
-    sql38`${performanceSnapshots.accountId} = ${accountId} AND ${performanceSnapshots.fetchedAt} >= ${threshold}`
+    sql38`${performanceSnapshots.accountId} = ${accountId2} AND ${performanceSnapshots.fetchedAt} >= ${threshold}`
   ).limit(1);
   return recentPosts.length === 0 && recentSnapshots.length === 0;
 }
-async function processAccount(accountId) {
-  const jobId = await acquireLock(accountId);
+async function processAccount(accountId2) {
+  const jobId = await acquireLock(accountId2);
   if (!jobId) {
-    console.log(`[Worker] Account ${accountId} is locked, skipping`);
+    console.log(`[Worker] Account ${accountId2} is locked, skipping`);
     return;
   }
-  await logAudit(accountId, "JOB_STARTED", {
+  await logAudit(accountId2, "JOB_STARTED", {
     details: { jobId }
   });
   try {
-    const limits = await getWorkerLimits(accountId);
-    const isIdle = await checkIdleAccount(accountId, limits.idleSkipDays);
+    const limits = await getWorkerLimits(accountId2);
+    const isIdle = await checkIdleAccount(accountId2, limits.idleSkipDays);
     if (isIdle) {
-      console.log(`[Worker] Account ${accountId} idle for ${limits.idleSkipDays}d, skipping`);
+      console.log(`[Worker] Account ${accountId2} idle for ${limits.idleSkipDays}d, skipping`);
       await releaseLock(jobId, "completed");
-      await logAudit(accountId, "JOB_SKIPPED", { details: { reason: "idle_account", threshold_days: limits.idleSkipDays } });
+      await logAudit(accountId2, "JOB_SKIPPED", { details: { reason: "idle_account", threshold_days: limits.idleSkipDays } });
       return;
     }
-    const circuitBreaker = await checkCircuitBreaker(accountId, limits.circuitBreakerThreshold);
+    const circuitBreaker = await checkCircuitBreaker(accountId2, limits.circuitBreakerThreshold);
     if (circuitBreaker.tripped) {
-      console.log(`[Worker] Circuit breaker tripped for ${accountId} (${circuitBreaker.failures} consecutive failures, threshold: ${limits.circuitBreakerThreshold})`);
+      console.log(`[Worker] Circuit breaker tripped for ${accountId2} (${circuitBreaker.failures} consecutive failures, threshold: ${limits.circuitBreakerThreshold})`);
       await releaseLock(jobId, "completed");
-      await logAudit(accountId, "JOB_SKIPPED", { details: { reason: "circuit_breaker", consecutive_failures: circuitBreaker.failures, threshold: limits.circuitBreakerThreshold } });
+      await logAudit(accountId2, "JOB_SKIPPED", { details: { reason: "circuit_breaker", consecutive_failures: circuitBreaker.failures, threshold: limits.circuitBreakerThreshold } });
       return;
     }
-    const hourlyCheck = await checkHourlyDecisionCap(accountId, limits.maxDecisionsPerHour);
+    const hourlyCheck = await checkHourlyDecisionCap(accountId2, limits.maxDecisionsPerHour);
     if (!hourlyCheck.allowed) {
-      console.log(`[Worker] Hourly cap reached for ${accountId} (${hourlyCheck.count}/${hourlyCheck.limit})`);
+      console.log(`[Worker] Hourly cap reached for ${accountId2} (${hourlyCheck.count}/${hourlyCheck.limit})`);
       await releaseLock(jobId, "completed");
-      await logAudit(accountId, "JOB_SKIPPED", { details: { reason: "hourly_cap", decisions_this_hour: hourlyCheck.count, limit: hourlyCheck.limit } });
+      await logAudit(accountId2, "JOB_SKIPPED", { details: { reason: "hourly_cap", decisions_this_hour: hourlyCheck.count, limit: hourlyCheck.limit } });
       return;
     }
-    const state = await db.select().from(accountState).where(eq87(accountState.accountId, accountId)).limit(1);
+    const state = await db.select().from(accountState).where(eq87(accountState.accountId, accountId2)).limit(1);
     if (!state[0] || !state[0].autopilotOn) {
       await releaseLock(jobId, "completed");
       return;
     }
-    const activeCampaign = await getActiveCampaignId(accountId);
+    const activeCampaign = await getActiveCampaignId(accountId2);
     let activePlanContext = null;
     if (activeCampaign) {
       let planQuery = await db.select().from(strategicPlans).where(
         and68(
-          eq87(strategicPlans.accountId, accountId),
+          eq87(strategicPlans.accountId, accountId2),
           eq87(strategicPlans.campaignId, activeCampaign),
           sql38`${strategicPlans.status} IN (${sql38.raw(ACTIVE_PLAN_STATUSES_SQL)})`
         )
@@ -61711,15 +61765,15 @@ async function processAccount(accountId) {
       if (planQuery.length === 0) {
         planQuery = await db.select().from(strategicPlans).where(
           and68(
-            eq87(strategicPlans.accountId, accountId),
+            eq87(strategicPlans.accountId, accountId2),
             sql38`${strategicPlans.status} IN (${sql38.raw(ACTIVE_PLAN_STATUSES_SQL)})`
           )
         ).orderBy(desc66(strategicPlans.createdAt)).limit(1);
       }
       if (planQuery.length === 0) {
-        console.log(`[Worker] Account ${accountId}: No approved plan found \u2014 autopilot BLOCKED`);
+        console.log(`[Worker] Account ${accountId2}: No approved plan found \u2014 autopilot BLOCKED`);
         await releaseLock(jobId, "completed");
-        await logAudit(accountId, "AUTOPILOT_BLOCKED_NO_PLAN", {
+        await logAudit(accountId2, "AUTOPILOT_BLOCKED_NO_PLAN", {
           details: { campaignId: activeCampaign, reason: "NO_APPROVED_PLAN" }
         });
         return;
@@ -61739,20 +61793,20 @@ async function processAccount(accountId) {
         calendarProgress: `Total required: ${totalReq}, Calendar entries: ${planEntries.length}, Draft: ${draftCount}, Generated: ${generatedCount}, Failed: ${failedCount}`
       };
     } else {
-      console.log(`[Worker] Account ${accountId}: No active campaign \u2014 autopilot BLOCKED`);
+      console.log(`[Worker] Account ${accountId2}: No active campaign \u2014 autopilot BLOCKED`);
       await releaseLock(jobId, "completed");
-      await logAudit(accountId, "AUTOPILOT_BLOCKED_NO_PLAN", {
+      await logAudit(accountId2, "AUTOPILOT_BLOCKED_NO_PLAN", {
         details: { reason: "NO_ACTIVE_CAMPAIGN" }
       });
       return;
     }
-    const baselines = await computeRollingBaselines(accountId);
-    const guardrailResult = await runAllGuardrails(accountId);
-    await evaluatePendingOutcomes(accountId);
-    const volThreshold = await getVolatilityThreshold(accountId);
-    const { successRate: decSuccessRate, total: decTotal } = await computeDecisionSuccessRate(accountId);
-    const last2Outcomes = await getLast2Outcomes(accountId);
-    const currentAcct = await db.select().from(accountState).where(eq87(accountState.accountId, accountId)).limit(1);
+    const baselines = await computeRollingBaselines(accountId2);
+    const guardrailResult = await runAllGuardrails(accountId2);
+    await evaluatePendingOutcomes(accountId2);
+    const volThreshold = await getVolatilityThreshold(accountId2);
+    const { successRate: decSuccessRate, total: decTotal } = await computeDecisionSuccessRate(accountId2);
+    const last2Outcomes = await getLast2Outcomes(accountId2);
+    const currentAcct = await db.select().from(accountState).where(eq87(accountState.accountId, accountId2)).limit(1);
     const acctState = currentAcct[0] || state[0];
     const currentMode = acctState.state || "ACTIVE";
     let prevRecoveryCycles = acctState.recoveryCyclesStable || 0;
@@ -61769,8 +61823,8 @@ async function processAccount(accountId) {
       confidenceScore: confidenceResult.score,
       confidenceStatus: confidenceResult.status,
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq87(accountState.accountId, accountId));
-    await logAudit(accountId, "CONFIDENCE_UPDATED", {
+    }).where(eq87(accountState.accountId, accountId2));
+    await logAudit(accountId2, "CONFIDENCE_UPDATED", {
       details: {
         score: confidenceResult.score,
         status: confidenceResult.status,
@@ -61779,7 +61833,7 @@ async function processAccount(accountId) {
       }
     });
     let newMode = currentMode;
-    const safeModeCheck = await checkSafeModeConditions(accountId);
+    const safeModeCheck = await checkSafeModeConditions(accountId2);
     if (currentMode === "SAFE_MODE") {
       const exitCheck = checkSafeModeExitConditions({
         volatilityIndex: acctState.volatilityIndex || 0,
@@ -61792,8 +61846,8 @@ async function processAccount(accountId) {
         const newCount = prevRecoveryCycles + 1;
         if (newCount >= 2) {
           newMode = "RECOVERY_MODE";
-          await db.update(accountState).set({ state: "RECOVERY_MODE", recoveryCyclesStable: 0, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId));
-          await logAudit(accountId, "STATE_TRANSITION", {
+          await db.update(accountState).set({ state: "RECOVERY_MODE", recoveryCyclesStable: 0, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId2));
+          await logAudit(accountId2, "STATE_TRANSITION", {
             details: {
               from: "SAFE_MODE",
               to: "RECOVERY_MODE",
@@ -61803,20 +61857,20 @@ async function processAccount(accountId) {
           });
           prevRecoveryCycles = 0;
         } else {
-          await db.update(accountState).set({ recoveryCyclesStable: newCount, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId));
+          await db.update(accountState).set({ recoveryCyclesStable: newCount, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId2));
           prevRecoveryCycles = newCount;
         }
       } else {
         if (prevRecoveryCycles > 0) {
-          await db.update(accountState).set({ recoveryCyclesStable: 0, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId));
+          await db.update(accountState).set({ recoveryCyclesStable: 0, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId2));
         }
         prevRecoveryCycles = 0;
       }
     } else if (currentMode === "RECOVERY_MODE") {
       if (safeModeCheck.shouldActivate || confidenceResult.score < 40) {
         newMode = "SAFE_MODE";
-        await db.update(accountState).set({ state: "SAFE_MODE", recoveryCyclesStable: 0, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId));
-        await logAudit(accountId, "STATE_TRANSITION", {
+        await db.update(accountState).set({ state: "SAFE_MODE", recoveryCyclesStable: 0, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId2));
+        await logAudit(accountId2, "STATE_TRANSITION", {
           details: {
             from: "RECOVERY_MODE",
             to: "SAFE_MODE",
@@ -61838,8 +61892,8 @@ async function processAccount(accountId) {
           const newCount = prevRecoveryCycles + 1;
           if (newCount >= 2) {
             newMode = "FULL_AUTOPILOT";
-            await db.update(accountState).set({ state: "FULL_AUTOPILOT", recoveryCyclesStable: 0, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId));
-            await logAudit(accountId, "STATE_TRANSITION", {
+            await db.update(accountState).set({ state: "FULL_AUTOPILOT", recoveryCyclesStable: 0, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId2));
+            await logAudit(accountId2, "STATE_TRANSITION", {
               details: {
                 from: "RECOVERY_MODE",
                 to: "FULL_AUTOPILOT",
@@ -61849,13 +61903,13 @@ async function processAccount(accountId) {
             });
             prevRecoveryCycles = 0;
           } else {
-            await db.update(accountState).set({ recoveryCyclesStable: newCount, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId));
+            await db.update(accountState).set({ recoveryCyclesStable: newCount, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId2));
             prevRecoveryCycles = newCount;
           }
         } else {
           newMode = "SAFE_MODE";
-          await db.update(accountState).set({ state: "SAFE_MODE", recoveryCyclesStable: 0, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId));
-          await logAudit(accountId, "STATE_TRANSITION", {
+          await db.update(accountState).set({ state: "SAFE_MODE", recoveryCyclesStable: 0, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId2));
+          await logAudit(accountId2, "STATE_TRANSITION", {
             details: {
               from: "RECOVERY_MODE",
               to: "SAFE_MODE",
@@ -61869,9 +61923,9 @@ async function processAccount(accountId) {
     } else {
       if (safeModeCheck.shouldActivate || confidenceResult.score < 40) {
         newMode = "SAFE_MODE";
-        await db.update(accountState).set({ state: "SAFE_MODE", recoveryCyclesStable: 0, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId));
+        await db.update(accountState).set({ state: "SAFE_MODE", recoveryCyclesStable: 0, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId2));
         const reason = confidenceResult.score < 40 ? `Confidence ${confidenceResult.score} dropped below 40 \u2014 auto-triggered SAFE_MODE` : "SAFE_MODE conditions detected";
-        await logAudit(accountId, "STATE_TRANSITION", {
+        await logAudit(accountId2, "STATE_TRANSITION", {
           details: {
             from: currentMode,
             to: "SAFE_MODE",
@@ -61882,23 +61936,23 @@ async function processAccount(accountId) {
         });
       }
     }
-    const outcomeContext = await getRecentOutcomesForPrompt(accountId);
-    const successRates = await computeSuccessRates(accountId);
-    const refreshedState = await db.select().from(accountState).where(eq87(accountState.accountId, accountId)).limit(1);
+    const outcomeContext = await getRecentOutcomesForPrompt(accountId2);
+    const successRates = await computeSuccessRates(accountId2);
+    const refreshedState = await db.select().from(accountState).where(eq87(accountState.accountId, accountId2)).limit(1);
     const finalState = refreshedState[0] || acctState;
     const activeMode = finalState.state || "ACTIVE";
     const finalConfidence = finalState.confidenceScore || confidenceResult.score;
     const canAutoExecute = activeMode === "ACTIVE" || activeMode === "FULL_AUTOPILOT" || activeMode === "RECOVERY_MODE";
     const isRecovery = activeMode === "RECOVERY_MODE";
     if (activeMode === "SAFE_MODE") {
-      await db.update(accountState).set({ lastWorkerRun: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId));
+      await db.update(accountState).set({ lastWorkerRun: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId2));
       await releaseLock(jobId, "completed");
-      await logAudit(accountId, "JOB_COMPLETED", {
+      await logAudit(accountId2, "JOB_COMPLETED", {
         details: { jobId, mode: "SAFE_MODE", decisionsGenerated: 0, confidence: finalConfidence }
       });
       return;
     }
-    const aiDecisions = await runStrategyAnalysis(accountId, baselines, guardrailResult, outcomeContext, activePlanContext);
+    const aiDecisions = await runStrategyAnalysis(accountId2, baselines, guardrailResult, outcomeContext, activePlanContext);
     for (const decision of aiDecisions) {
       const riskResult = classifyDecisionRisk(
         {
@@ -61951,7 +62005,7 @@ async function processAccount(accountId) {
         }
       }
       const inserted = await db.insert(strategyDecisions).values({
-        accountId,
+        accountId: accountId2,
         trigger: decision.trigger,
         action: decision.action,
         reason: decision.reason,
@@ -61968,8 +62022,8 @@ async function processAccount(accountId) {
       const canExec = riskResult.autoExecutable && !blocked && finalState.autopilotOn && canAutoExecute;
       if (canExec) {
         await db.update(strategyDecisions).set({ status: "executed", executedAt: /* @__PURE__ */ new Date() }).where(eq87(strategyDecisions.id, decisionId));
-        await snapshotPreMetrics(decisionId, accountId, decisionType);
-        await logAudit(accountId, "AUTO_EXECUTION", {
+        await snapshotPreMetrics(decisionId, accountId2, decisionType);
+        await logAudit(accountId2, "AUTO_EXECUTION", {
           decisionId,
           riskLevel: riskResult.riskLevel,
           details: {
@@ -61980,10 +62034,10 @@ async function processAccount(accountId) {
             confidence: finalConfidence
           }
         });
-        await db.update(accountState).set({ consecutiveFailures: 0, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId));
+        await db.update(accountState).set({ consecutiveFailures: 0, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId2));
       } else if (riskResult.riskLevel === "high" || blocked) {
         await db.update(strategyDecisions).set({ status: "blocked" }).where(eq87(strategyDecisions.id, decisionId));
-        await logAudit(accountId, "BLOCKED_DECISION", {
+        await logAudit(accountId2, "BLOCKED_DECISION", {
           decisionId,
           riskLevel: riskResult.riskLevel,
           details: {
@@ -61995,8 +62049,8 @@ async function processAccount(accountId) {
         if (isRecovery && blocked) {
           const recoveryCheck = enforceRecoveryModeLimits(decision);
           if (recoveryCheck.blocked) {
-            await db.update(accountState).set({ state: "SAFE_MODE", recoveryCyclesStable: 0, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId));
-            await logAudit(accountId, "STATE_TRANSITION", {
+            await db.update(accountState).set({ state: "SAFE_MODE", recoveryCyclesStable: 0, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId2));
+            await logAudit(accountId2, "STATE_TRANSITION", {
               details: {
                 from: "RECOVERY_MODE",
                 to: "SAFE_MODE",
@@ -62011,21 +62065,21 @@ async function processAccount(accountId) {
     let leadEngineProcessed = false;
     try {
       const flagService = new FeatureFlagService();
-      const flags = await flagService.getAllFlags(accountId);
+      const flags = await flagService.getAllFlags(accountId2);
       if (!flags.lead_engine_global_off) {
         if (flags.ai_lead_optimization_enabled && flags.lead_capture_enabled && flags.conversion_tracking_enabled) {
-          await logAudit(accountId, "LEAD_ENGINE_CYCLE", {
+          await logAudit(accountId2, "LEAD_ENGINE_CYCLE", {
             details: { jobId, modules: Object.entries(flags).filter(([k, v]) => v && k !== "lead_engine_global_off").map(([k]) => k) }
           });
           leadEngineProcessed = true;
         }
       }
     } catch (leadErr) {
-      console.error(`[Worker] Lead engine processing error for ${accountId}:`, leadErr);
+      console.error(`[Worker] Lead engine processing error for ${accountId2}:`, leadErr);
     }
-    await db.update(accountState).set({ lastWorkerRun: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId));
+    await db.update(accountState).set({ lastWorkerRun: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId2));
     await releaseLock(jobId, "completed");
-    await logAudit(accountId, "JOB_COMPLETED", {
+    await logAudit(accountId2, "JOB_COMPLETED", {
       details: {
         jobId,
         decisionsGenerated: aiDecisions.length,
@@ -62037,12 +62091,12 @@ async function processAccount(accountId) {
       }
     });
   } catch (error) {
-    console.error(`[Worker] Error processing account ${accountId}:`, error);
+    console.error(`[Worker] Error processing account ${accountId2}:`, error);
     await releaseLock(jobId, "failed", String(error));
-    const currentState = await db.select().from(accountState).where(eq87(accountState.accountId, accountId)).limit(1);
+    const currentState = await db.select().from(accountState).where(eq87(accountState.accountId, accountId2)).limit(1);
     const currentFailures = currentState[0]?.consecutiveFailures || 0;
-    await db.update(accountState).set({ consecutiveFailures: currentFailures + 1, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId));
-    await logAudit(accountId, "JOB_FAILED", {
+    await db.update(accountState).set({ consecutiveFailures: currentFailures + 1, updatedAt: /* @__PURE__ */ new Date() }).where(eq87(accountState.accountId, accountId2));
+    await logAudit(accountId2, "JOB_FAILED", {
       details: { jobId, error: String(error), consecutiveFailures: currentFailures + 1 }
     });
   }
@@ -62064,8 +62118,8 @@ async function workerTick() {
       return;
     }
     console.log(`[Worker] Processing ${accountIds.length} account(s): ${accountIds.join(", ")}`);
-    for (const accountId of accountIds) {
-      await processAccount(accountId);
+    for (const accountId2 of accountIds) {
+      await processAccount(accountId2);
     }
   } catch (error) {
     console.error("[Worker] Tick error:", error);
@@ -62091,14 +62145,14 @@ async function runMonthlyCompetitiveIntelligence() {
     const flagService = new FeatureFlagService();
     const accounts = await db.select().from(accountState);
     for (const account of accounts) {
-      const accountId = account.accountId;
-      const enabled = await flagService.isEnabled("competitive_intelligence_enabled", accountId);
+      const accountId2 = account.accountId;
+      const enabled = await flagService.isEnabled("competitive_intelligence_enabled", accountId2);
       if (!enabled) continue;
       const { miSnapshots: miSnapshots3 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1e3);
-      const recentSnapshot = await db.select().from(miSnapshots3).where(sql38`${miSnapshots3.accountId} = ${accountId} AND ${miSnapshots3.createdAt} > ${thirtyDaysAgo.toISOString()}`).limit(1);
+      const recentSnapshot = await db.select().from(miSnapshots3).where(sql38`${miSnapshots3.accountId} = ${accountId2} AND ${miSnapshots3.createdAt} > ${thirtyDaysAgo.toISOString()}`).limit(1);
       if (recentSnapshot.length > 0) continue;
-      console.log(`[CI Worker] MIv3 snapshot stale for account: ${accountId} \u2014 manual refresh via /api/ci/mi-v3/analyze recommended`);
+      console.log(`[CI Worker] MIv3 snapshot stale for account: ${accountId2} \u2014 manual refresh via /api/ci/mi-v3/analyze recommended`);
     }
   } catch (error) {
     console.error("[CI Worker] Monthly check error:", error);
@@ -62145,11 +62199,11 @@ function generateLockToken() {
 async function sleep2(ms) {
   return new Promise((resolve2) => setTimeout(resolve2, ms));
 }
-async function publishToMetaWithRetry(post, accessToken, pageId, accountId) {
+async function publishToMetaWithRetry(post, accessToken, pageId, accountId2) {
   let lastError = "";
   let lastClassification = "";
-  if (isInBackoff(accountId)) {
-    await logAudit(accountId, "META_BACKOFF_APPLIED", {
+  if (isInBackoff(accountId2)) {
+    await logAudit(accountId2, "META_BACKOFF_APPLIED", {
       details: { postId: post.id, reason: "Account in backoff \u2014 skipping publish attempt" }
     });
     return { success: false, error: "Account in temporary backoff due to repeated errors", attempts: 0, classified: "BACKOFF_ACTIVE" };
@@ -62159,7 +62213,7 @@ async function publishToMetaWithRetry(post, accessToken, pageId, accountId) {
       return { success: false, error: "Worker shutting down", attempts: attempt };
     }
     try {
-      const result = await publishToMeta(post, accessToken, pageId, accountId);
+      const result = await publishToMeta(post, accessToken, pageId, accountId2);
       if (result.success) {
         return { ...result, attempts: attempt };
       }
@@ -62172,7 +62226,7 @@ async function publishToMetaWithRetry(post, accessToken, pageId, accountId) {
       );
       lastClassification = classified.category;
       if (classified.classification === "PERMANENT") {
-        await logAudit(accountId, "META_API_ERROR", {
+        await logAudit(accountId2, "META_API_ERROR", {
           details: {
             postId: post.id,
             error: lastError,
@@ -62185,8 +62239,8 @@ async function publishToMetaWithRetry(post, accessToken, pageId, accountId) {
         return { success: false, error: lastError, attempts: attempt, classified: classified.category };
       }
       if (classified.category === "RATE_LIMITED") {
-        const backoffResult = recordTemporaryError(accountId);
-        await logAudit(accountId, "META_RATE_LIMITED", {
+        const backoffResult = recordTemporaryError(accountId2);
+        await logAudit(accountId2, "META_RATE_LIMITED", {
           details: {
             postId: post.id,
             attempt,
@@ -62200,9 +62254,9 @@ async function publishToMetaWithRetry(post, accessToken, pageId, accountId) {
         await sleep2(backoffResult.backoffMs);
         continue;
       }
-      recordTemporaryError(accountId);
+      recordTemporaryError(accountId2);
       if (isNonRetryableError(lastError)) {
-        await logAudit(accountId, "META_API_ERROR", {
+        await logAudit(accountId2, "META_API_ERROR", {
           details: { postId: post.id, error: lastError, attempt, retryable: false }
         });
         return { success: false, error: lastError, attempts: attempt, classified: lastClassification };
@@ -62214,14 +62268,14 @@ async function publishToMetaWithRetry(post, accessToken, pageId, accountId) {
       }
     } catch (error) {
       lastError = String(error);
-      recordTemporaryError(accountId);
+      recordTemporaryError(accountId2);
       if (attempt < MAX_RETRY_ATTEMPTS) {
         const backoff = BASE_BACKOFF_MS2 * Math.pow(2, attempt - 1) + Math.random() * 1e3;
         await sleep2(backoff);
       }
     }
   }
-  await logAudit(accountId, "PUBLISH_RETRY_FAILED", {
+  await logAudit(accountId2, "PUBLISH_RETRY_FAILED", {
     details: {
       postId: post.id,
       platform: post.platform,
@@ -62244,8 +62298,8 @@ function isNonRetryableError(error) {
   ];
   return nonRetryable.some((e) => error.toLowerCase().includes(e.toLowerCase()));
 }
-async function publishToMeta(post, accessToken, pageId, accountId) {
-  const acctId = accountId || post.accountId || "default";
+async function publishToMeta(post, accessToken, pageId, accountId2) {
+  const acctId = accountId2 || post.accountId || "default";
   try {
     const platform = (post.platform || "").toLowerCase();
     if (platform === "facebook" || platform.includes("facebook")) {
@@ -62409,12 +62463,12 @@ async function cleanupStaleLocks() {
   }
   return stale.length;
 }
-async function getAccountMetaMode(accountId) {
-  const state = await db.select().from(accountState).where(eq88(accountState.accountId, accountId)).limit(1);
+async function getAccountMetaMode(accountId2) {
+  const state = await db.select().from(accountState).where(eq88(accountState.accountId, accountId2)).limit(1);
   return state[0]?.metaMode || "DISCONNECTED";
 }
-async function getServerSidePageToken(accountId) {
-  const creds = await db.select().from(metaCredentials).where(eq88(metaCredentials.accountId, accountId)).limit(1);
+async function getServerSidePageToken(accountId2) {
+  const creds = await db.select().from(metaCredentials).where(eq88(metaCredentials.accountId, accountId2)).limit(1);
   const cred = creds[0];
   if (!cred?.encryptedPageToken || !cred?.ivPage || !cred?.encryptionKeyVersion || !cred?.pageId) {
     return null;
@@ -62437,7 +62491,7 @@ async function checkAndPublishDuePosts() {
     if (duePosts.length === 0) return;
     for (const post of duePosts) {
       if (isShuttingDown) break;
-      const accountId = post.accountId || "default";
+      const accountId2 = post.accountId || "default";
       const lockToken = await acquireLock2(post.id);
       if (!lockToken) {
         console.log(`[PublishWorker] Skipping post ${post.id} \u2014 already locked`);
@@ -62445,7 +62499,7 @@ async function checkAndPublishDuePosts() {
       }
       activePublishCount++;
       try {
-        const state = await db.select().from(accountState).where(eq88(accountState.accountId, accountId)).limit(1);
+        const state = await db.select().from(accountState).where(eq88(accountState.accountId, accountId2)).limit(1);
         const acctState = state[0];
         if (!acctState?.autopilotOn) {
           await releaseLock2(post.id, lockToken);
@@ -62459,9 +62513,9 @@ async function checkAndPublishDuePosts() {
         let publishMode = "BLOCKED";
         let result;
         if (metaMode === "REAL") {
-          const serverTokens = await getServerSidePageToken(accountId);
+          const serverTokens = await getServerSidePageToken(accountId2);
           if (!serverTokens) {
-            await logAudit(accountId, "PUBLISH_FAILED", {
+            await logAudit(accountId2, "PUBLISH_FAILED", {
               details: {
                 postId: post.id,
                 reason: "Server-side page token not available despite meta_mode=REAL"
@@ -62479,9 +62533,9 @@ async function checkAndPublishDuePosts() {
             continue;
           }
           publishMode = "REAL";
-          result = await publishToMetaWithRetry(post, serverTokens.token, serverTokens.pageId, accountId);
+          result = await publishToMetaWithRetry(post, serverTokens.token, serverTokens.pageId, accountId2);
         } else {
-          await logAudit(accountId, "PUBLISH_FAILED", {
+          await logAudit(accountId2, "PUBLISH_FAILED", {
             details: {
               postId: post.id,
               reason: `Cannot publish: meta_mode=${metaMode}`,
@@ -62516,7 +62570,7 @@ async function checkAndPublishDuePosts() {
               eq88(publishedPosts.publishLockToken, lockToken)
             )
           );
-          await logAudit(accountId, "PUBLISH_SUCCESS", {
+          await logAudit(accountId2, "PUBLISH_SUCCESS", {
             details: {
               postId: post.id,
               metaPostId: result.postId,
@@ -62544,7 +62598,7 @@ async function checkAndPublishDuePosts() {
             )
           );
           const finalStatus = currentAttempts >= MAX_RETRY_ATTEMPTS * 2 ? "PUBLISH_FAILED" : "META_API_ERROR";
-          await logAudit(accountId, finalStatus, {
+          await logAudit(accountId2, finalStatus, {
             details: {
               postId: post.id,
               platform: post.platform,
@@ -62574,10 +62628,10 @@ async function fetchPostMetrics() {
       if (isShuttingDown) break;
       if (!post.metaPostId) continue;
       try {
-        const accountId = post.accountId || "default";
-        const metaMode = await getAccountMetaMode(accountId);
+        const accountId2 = post.accountId || "default";
+        const metaMode = await getAccountMetaMode(accountId2);
         if (metaMode !== "REAL") continue;
-        const serverTokens = await getServerSidePageToken(accountId);
+        const serverTokens = await getServerSidePageToken(accountId2);
         if (!serverTokens) continue;
         const metricsRes = await fetch(
           `https://graph.facebook.com/v21.0/${post.metaPostId}/insights?metric=post_impressions,post_engaged_users,post_clicks&access_token=${serverTokens.token}`
@@ -63113,6 +63167,7 @@ function setupErrorHandler(app2) {
   setupCors(app);
   setupBodyParsing(app);
   setupRequestLogging(app);
+  app.use("/api", optionalAuth);
   configureExpoAndLanding(app);
   const server = await registerRoutes(app);
   setupErrorHandler(app);

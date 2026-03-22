@@ -99,7 +99,7 @@ export default function StudioItemDetailScreen() {
     if (!id) return;
     setRetrying(true);
     try {
-      await apiRequest('POST', `/api/studio/items/${id}/retry-analysis`, {  });
+      await apiRequest('POST', `/api/studio/items/${id}/retry-analysis`, {});
       setItem(prev => prev ? { ...prev, analysisStatus: 'PENDING', analysisError: null } : prev);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch {

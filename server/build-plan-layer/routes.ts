@@ -5,6 +5,7 @@ export function registerBuildPlanLayerRoutes(app: Express) {
   app.post("/api/build-plan-layer/generate", async (req, res) => {
     try {
       const { campaignId } = req.body;
+      const accountId = (req as any).accountId || "default";
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }

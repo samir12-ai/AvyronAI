@@ -438,6 +438,7 @@ export function registerFunnelEngineRoutes(app: Express) {
   app.post("/api/funnel-engine/select", async (req: Request, res: Response) => {
     try {
       const { snapshotId, selectedOption, campaignId } = req.body;
+      const accountId = (req as any).accountId || "default";
 
       if (!snapshotId || !selectedOption || !campaignId) {
         return res.status(400).json({ error: "snapshotId, selectedOption, and campaignId are required" });
@@ -470,6 +471,7 @@ export function registerFunnelEngineRoutes(app: Express) {
   app.post("/api/offer-engine/select", async (req: Request, res: Response) => {
     try {
       const { snapshotId, selectedOption, campaignId } = req.body;
+      const accountId = (req as any).accountId || "default";
 
       if (!snapshotId || !selectedOption || !campaignId) {
         return res.status(400).json({ error: "snapshotId, selectedOption, and campaignId are required" });

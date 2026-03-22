@@ -178,7 +178,7 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
       const res = await authFetch(getApiUrl(`/api/business-data/${campaignId}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data,  }),
+        body: JSON.stringify(data),
       });
       const json = await safeApiJson(res);
       if (!res.ok || !json.success) {
