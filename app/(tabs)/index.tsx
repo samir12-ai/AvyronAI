@@ -558,6 +558,8 @@ export default function DashboardScreen() {
 
         <OnboardingAgent />
 
+        <DashboardChat />
+
         {selectedCampaignId ? (
           <>
             <PlanStatus
@@ -574,8 +576,6 @@ export default function DashboardScreen() {
             <RequiredWorkCard campaignId={selectedCampaignId} isDark={isDark} />
           </>
         ) : null}
-
-        <DashboardChat />
 
         <View style={[s.metaStrip, { 
           backgroundColor: metaConnection.isConnected 
