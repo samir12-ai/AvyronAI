@@ -112,9 +112,9 @@ export default function PositioningStrategy({ isActive }: { isActive?: boolean }
     try {
       const baseUrl = getApiUrl();
       const [posRes, miRes, audRes] = await Promise.all([
-        fetch(new URL(`/api/positioning-engine/latest?campaignId=${selectedCampaignId}`, baseUrl).toString()),
-        fetch(new URL(`/api/ci/mi-v3/snapshot/${selectedCampaignId}`, baseUrl).toString()),
-        fetch(new URL(`/api/audience-engine/latest?campaignId=${selectedCampaignId}`, baseUrl).toString()),
+        authFetch(new URL(`/api/positioning-engine/latest?campaignId=${selectedCampaignId}`, baseUrl).toString()),
+        authFetch(new URL(`/api/ci/mi-v3/snapshot/${selectedCampaignId}`, baseUrl).toString()),
+        authFetch(new URL(`/api/audience-engine/latest?campaignId=${selectedCampaignId}`, baseUrl).toString()),
       ]);
       if (posRes.ok) {
         const d = await safeApiJson(posRes);

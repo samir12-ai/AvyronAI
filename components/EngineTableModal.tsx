@@ -11,7 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, authFetch } from '@/lib/query-client';
 
 const P = {
   green: '#10B981',
@@ -112,8 +112,8 @@ export default function EngineTableModal({ visible, onClose, campaignId }: Props
     const latestUrl = new URL(`/api/orchestrator/latest/${campaignId}`, getApiUrl());
     const summariesUrl = new URL(`/api/orchestrator/summaries/${campaignId}`, getApiUrl());
     Promise.all([
-      fetch(latestUrl.toString()).then(r => r.json()).catch(() => null),
-      fetch(summariesUrl.toString()).then(r => r.json()).catch(() => null),
+      authFetch(latestUrl.toString()).then(r => r.json()).catch(() => null),
+      authFetch(summariesUrl.toString()).then(r => r.json()).catch(() => null),
     ])
       .then(([data, summData]) => {
         const sections = data?.sections || data?.engines || [];

@@ -157,8 +157,8 @@ export function registerStrategyRoutes(app: Express) {
         return res.status(400).json({ error: "No performance data available. Sync your Meta data first." });
       }
 
-      const revenueSummary = await getRevenueSummary(campaignContext.campaignId, "default");
-      const campaignMetrics = await getCampaignMetrics(campaignContext.campaignId, "default");
+      const revenueSummary = await getRevenueSummary(campaignContext.campaignId, accountId);
+      const campaignMetrics = await getCampaignMetrics(campaignContext.campaignId, accountId);
 
       const activePlanId = await getActiveBlueprintId();
 
@@ -481,7 +481,7 @@ Return ONLY valid JSON with this structure:
         .orderBy(desc(strategyMemory.updatedAt)).limit(20);
 
       const averages = await getAccountAverages();
-      const revenueSummary = await getRevenueSummary(campaignContext.campaignId, "default");
+      const revenueSummary = await getRevenueSummary(campaignContext.campaignId, accountId);
       const activePlanId = await getActiveBlueprintId();
 
       const aiResponse = await aiChat({

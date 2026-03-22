@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, authFetch } from '@/lib/query-client';
 
 interface EngineCheck {
   engineId: string;
@@ -161,7 +161,7 @@ export default function SystemIntegrityPanel() {
     setLoading(true);
     setError(null);
     const url = new URL(`/api/system-integrity/${activeCampaignId}`, getApiUrl());
-    fetch(url.toString())
+    authFetch(url.toString())
       .then(r => r.json())
       .then(data => {
         if (data.hasReport) {

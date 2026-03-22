@@ -2075,6 +2075,7 @@ export type DataSourceTransition = typeof dataSourceTransitions.$inferSelect;
 
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),
+  accountId: varchar("account_id").notNull().default("default"),
   title: text("title").notNull().default("New Chat"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

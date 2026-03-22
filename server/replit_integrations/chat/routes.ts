@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import OpenAI from "openai";
 import { chatStorage } from "./storage";
 import { loadSystemContext, buildSystemPrompt } from "../../orchestrator/agent-context";
-import { resolveAccountId } from "../../auth";
+import { resolveAccountId, AuthRequest } from "../../auth";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -12,7 +12,8 @@ const openai = new OpenAI({
 export function registerChatRoutes(app: Express): void {
   app.get("/api/conversations", async (req: Request, res: Response) => {
     try {
-      const conversations = await chatStorage.getAllConversations();
+      const accountId = resolveAccountId(req as AuthRequest);
+      const conversations = await chatStorage.getAllConversations(accountId);
       res.json(conversations);
     } catch (error) {
       console.error("Error fetching conversations:", error);
@@ -22,12 +23,13 @@ export function registerChatRoutes(app: Express): void {
 
   app.get("/api/conversations/:id", async (req: Request, res: Response) => {
     try {
+      const accountId = resolveAccountId(req as AuthRequest);
       const id = parseInt(req.params.id);
-      const conversation = await chatStorage.getConversation(id);
+      const conversation = await chatStorage.getConversation(id, accountId);
       if (!conversation) {
         return res.status(404).json({ error: "Conversation not found" });
       }
-      const messages = await chatStorage.getMessagesByConversation(id);
+      const messages = await chatStorage.getMessagesByConversation(id, accountId);
       res.json({ ...conversation, messages });
     } catch (error) {
       console.error("Error fetching conversation:", error);
@@ -37,8 +39,9 @@ export function registerChatRoutes(app: Express): void {
 
   app.post("/api/conversations", async (req: Request, res: Response) => {
     try {
+      const accountId = resolveAccountId(req as AuthRequest);
       const { title } = req.body;
-      const conversation = await chatStorage.createConversation(title || "New Chat");
+      const conversation = await chatStorage.createConversation(title || "New Chat", accountId);
       res.status(201).json(conversation);
     } catch (error) {
       console.error("Error creating conversation:", error);
@@ -48,8 +51,9 @@ export function registerChatRoutes(app: Express): void {
 
   app.delete("/api/conversations/:id", async (req: Request, res: Response) => {
     try {
+      const accountId = resolveAccountId(req as AuthRequest);
       const id = parseInt(req.params.id);
-      await chatStorage.deleteConversation(id);
+      await chatStorage.deleteConversation(id, accountId);
       res.status(204).send();
     } catch (error) {
       console.error("Error deleting conversation:", error);
@@ -59,12 +63,18 @@ export function registerChatRoutes(app: Express): void {
 
   app.post("/api/conversations/:id/messages", async (req: Request, res: Response) => {
     try {
+      const accountId = resolveAccountId(req as AuthRequest);
       const conversationId = parseInt(req.params.id);
       const { content, campaignId } = req.body;
 
+      const conv = await chatStorage.getConversation(conversationId, accountId);
+      if (!conv) {
+        return res.status(404).json({ error: "Conversation not found" });
+      }
+
       await chatStorage.createMessage(conversationId, "user", content);
 
-      const messages = await chatStorage.getMessagesByConversation(conversationId);
+      const messages = await chatStorage.getMessagesByConversation(conversationId, accountId);
       const chatMessages = messages.map((m) => ({
         role: m.role as "user" | "assistant",
         content: m.content,
@@ -73,7 +83,6 @@ export function registerChatRoutes(app: Express): void {
       let systemPrompt = "You are a helpful marketing AI assistant.";
       try {
         if (campaignId) {
-          const accountId = resolveAccountId(req as any);
           const context = await loadSystemContext(accountId, String(campaignId));
           systemPrompt = buildSystemPrompt(context);
         }
