@@ -12,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl, safeApiJson } from '@/lib/query-client';
+import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
 import { useColorScheme } from 'react-native';
 
 interface BudgetRange {
@@ -78,7 +78,7 @@ export default function BudgetGovernorEngine({ isActive }: { isActive?: boolean 
     try {
       const url = new URL('/api/strategy/budget-governor/latest', getApiUrl());
       url.searchParams.set('campaignId', selectedCampaignId);
-      const res = await fetch(url.toString());
+      const res = await authFetch(url.toString());
       const json = await safeApiJson(res);
       if (json.success && json.snapshot) {
         const s = json.snapshot;
@@ -120,7 +120,7 @@ export default function BudgetGovernorEngine({ isActive }: { isActive?: boolean 
     try {
       const url = new URL('/api/strategy/statistical-validation/latest', getApiUrl());
       url.searchParams.set('campaignId', selectedCampaignId);
-      const res = await fetch(url.toString());
+      const res = await authFetch(url.toString());
       const json = await safeApiJson(res);
       if (json.exists && json.id) {
         setValidationSnapshotId(json.id);
@@ -146,7 +146,7 @@ export default function BudgetGovernorEngine({ isActive }: { isActive?: boolean 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       const url = new URL('/api/strategy/budget-governor/analyze', getApiUrl());
-      const res = await fetch(url.toString(), {
+      const res = await authFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -18,7 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useLanguage } from '@/context/LanguageContext';
-import { getApiUrl, safeApiJson } from '@/lib/query-client';
+import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
 
 type StrategyView = 'overview' | 'insights' | 'decisions' | 'memory' | 'growth' | 'reports' | 'sniper' | 'moat';
 
@@ -107,7 +107,7 @@ export default function StrategyHub() {
   const fetchDashboard = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch(new URL('/api/strategy/dashboard', baseUrl).toString());
+      const res = await authFetch(new URL('/api/strategy/dashboard', baseUrl).toString());
       if (res.ok) {
         const data = await safeApiJson(res);
         setDashboard(data);
@@ -125,7 +125,7 @@ export default function StrategyHub() {
     setSyncing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const res = await fetch(new URL('/api/strategy/sync-performance', baseUrl).toString(), {
+      const res = await authFetch(new URL('/api/strategy/sync-performance', baseUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
@@ -146,7 +146,7 @@ export default function StrategyHub() {
     setAnalyzing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     try {
-      const res = await fetch(new URL('/api/strategy/analyze', baseUrl).toString(), {
+      const res = await authFetch(new URL('/api/strategy/analyze', baseUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
@@ -168,42 +168,42 @@ export default function StrategyHub() {
 
   const fetchInsights = async () => {
     try {
-      const res = await fetch(new URL('/api/strategy/insights', baseUrl).toString());
+      const res = await authFetch(new URL('/api/strategy/insights', baseUrl).toString());
       if (res.ok) setInsights(await safeApiJson(res));
     } catch {}
   };
 
   const fetchDecisions = async () => {
     try {
-      const res = await fetch(new URL('/api/strategy/decisions', baseUrl).toString());
+      const res = await authFetch(new URL('/api/strategy/decisions', baseUrl).toString());
       if (res.ok) setDecisions(await safeApiJson(res));
     } catch {}
   };
 
   const fetchMemory = async () => {
     try {
-      const res = await fetch(new URL('/api/strategy/memory', baseUrl).toString());
+      const res = await authFetch(new URL('/api/strategy/memory', baseUrl).toString());
       if (res.ok) setMemoryItems(await safeApiJson(res));
     } catch {}
   };
 
   const fetchCampaigns = async () => {
     try {
-      const res = await fetch(new URL('/api/strategy/growth-campaigns', baseUrl).toString());
+      const res = await authFetch(new URL('/api/strategy/growth-campaigns', baseUrl).toString());
       if (res.ok) setCampaigns(await safeApiJson(res));
     } catch {}
   };
 
   const fetchReports = async () => {
     try {
-      const res = await fetch(new URL('/api/strategy/weekly-reports', baseUrl).toString());
+      const res = await authFetch(new URL('/api/strategy/weekly-reports', baseUrl).toString());
       if (res.ok) setReports(await safeApiJson(res));
     } catch {}
   };
 
   const fetchMoatDashboard = async () => {
     try {
-      const res = await fetch(new URL('/api/strategy/moat-dashboard', baseUrl).toString());
+      const res = await authFetch(new URL('/api/strategy/moat-dashboard', baseUrl).toString());
       if (res.ok) setMoatDashboard(await safeApiJson(res));
     } catch {}
   };
@@ -212,7 +212,7 @@ export default function StrategyHub() {
     setMoatScanning(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     try {
-      const res = await fetch(new URL('/api/strategy/moat-scan', baseUrl).toString(), {
+      const res = await authFetch(new URL('/api/strategy/moat-scan', baseUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -235,7 +235,7 @@ export default function StrategyHub() {
     setConvertingSeries(candidateId);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     try {
-      const res = await fetch(new URL('/api/strategy/signature-series', baseUrl).toString(), {
+      const res = await authFetch(new URL('/api/strategy/signature-series', baseUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ candidateId }),
@@ -265,7 +265,7 @@ export default function StrategyHub() {
   const handleCreateCampaign = async () => {
     setCreatingCampaign(true);
     try {
-      const res = await fetch(new URL('/api/strategy/growth-campaign', baseUrl).toString(), {
+      const res = await authFetch(new URL('/api/strategy/growth-campaign', baseUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: campaignName, budget: parseFloat(campaignBudget) || 0 }),
@@ -284,7 +284,7 @@ export default function StrategyHub() {
     setAdvancingCampaign(id);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     try {
-      const res = await fetch(new URL(`/api/strategy/growth-campaign/${id}/advance`, baseUrl).toString(), {
+      const res = await authFetch(new URL(`/api/strategy/growth-campaign/${id}/advance`, baseUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -299,7 +299,7 @@ export default function StrategyHub() {
     setSniping(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     try {
-      const res = await fetch(new URL('/api/strategy/audience-snipe', baseUrl).toString(), {
+      const res = await authFetch(new URL('/api/strategy/audience-snipe', baseUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaignGoal: sniperGoal, product: sniperProduct, budget: sniperBudget }),
@@ -316,7 +316,7 @@ export default function StrategyHub() {
     setGeneratingReport(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     try {
-      const res = await fetch(new URL('/api/strategy/weekly-report', baseUrl).toString(), {
+      const res = await authFetch(new URL('/api/strategy/weekly-report', baseUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -330,7 +330,7 @@ export default function StrategyHub() {
   const handleUpdateDecision = async (id: string, status: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     try {
-      await fetch(new URL(`/api/strategy/decisions/${id}`, baseUrl).toString(), {
+      await authFetch(new URL(`/api/strategy/decisions/${id}`, baseUrl).toString(), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),

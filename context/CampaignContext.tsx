@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { fetch } from 'expo/fetch';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, authFetch } from '@/lib/query-client';
+import { useAuth } from './AuthContext';
 
 interface CampaignInfo {
   id: string;
@@ -59,6 +59,7 @@ interface CampaignContextValue {
 const CampaignContext = createContext<CampaignContextValue | null>(null);
 
 export function CampaignProvider({ children }: { children: ReactNode }) {
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [campaigns, setCampaigns] = useState<CampaignInfo[]>([]);
   const [selectedCampaign, setSelectedCampaign] = useState<CampaignSelection | null>(null);
   const [warning, setWarning] = useState<CampaignWarning | null>(null);
@@ -66,7 +67,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const refreshCampaigns = useCallback(async () => {
     try {
-      const res = await fetch(getApiUrl('/api/campaigns'));
+      const res = await authFetch(getApiUrl('/api/campaigns'));
       if (res.ok) {
         const data = await res.json();
         setCampaigns(data.campaigns || []);
@@ -78,7 +79,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const refreshSelection = useCallback(async () => {
     try {
-      const res = await fetch(getApiUrl('/api/campaigns/selected'));
+      const res = await authFetch(getApiUrl('/api/campaigns/selected'));
       if (res.ok) {
         const data = await res.json();
         if (data.selected && data.selection) {
@@ -96,7 +97,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const selectCampaign = useCallback(async (campaign: CampaignInfo) => {
     try {
-      const res = await fetch(getApiUrl('/api/campaigns/select'), {
+      const res = await authFetch(getApiUrl('/api/campaigns/select'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -124,7 +125,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const createCampaign = useCallback(async (input: CreateCampaignInput) => {
     try {
-      const res = await fetch(getApiUrl('/api/campaigns/create'), {
+      const res = await authFetch(getApiUrl('/api/campaigns/create'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(input),
@@ -148,7 +149,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const deleteCampaign = useCallback(async (campaignId: string) => {
     try {
-      const res = await fetch(getApiUrl(`/api/campaigns/${campaignId}`), {
+      const res = await authFetch(getApiUrl(`/api/campaigns/${campaignId}`), {
         method: 'DELETE',
       });
 
@@ -170,7 +171,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const clearSelection = useCallback(async () => {
     try {
-      await fetch(getApiUrl('/api/campaigns/selected'), { method: 'DELETE' });
+      await authFetch(getApiUrl('/api/campaigns/selected'), { method: 'DELETE' });
       setSelectedCampaign(null);
       setWarning(null);
     } catch (err) {
@@ -179,13 +180,20 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated) {
+      setCampaigns([]);
+      setSelectedCampaign(null);
+      setIsLoading(false);
+      return;
+    }
     async function init() {
       setIsLoading(true);
       await Promise.all([refreshCampaigns(), refreshSelection()]);
       setIsLoading(false);
     }
     init();
-  }, [refreshCampaigns, refreshSelection]);
+  }, [refreshCampaigns, refreshSelection, isAuthenticated, authLoading]);
 
   const isCampaignSelected = !!selectedCampaign && !warning;
   const selectedCampaignId = selectedCampaign?.selectedCampaignId ?? null;

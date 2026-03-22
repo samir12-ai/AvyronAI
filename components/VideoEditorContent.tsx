@@ -19,7 +19,7 @@ import { File } from 'expo-file-system';
 import { fetch as expoFetch } from 'expo/fetch';
 import Colors from '@/constants/colors';
 import { useLanguage } from '@/context/LanguageContext';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl , authFetch } from '@/lib/query-client';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -297,7 +297,7 @@ export function VideoEditorContent({ colors, isDark }: Props) {
   const loadProjects = useCallback(async () => {
     try {
       const url = new URL('/api/video/projects', baseUrl);
-      const response = await fetch(url.toString());
+      const response = await authFetch(url.toString());
       const data = await response.json();
       setProjects(data);
     } catch {}

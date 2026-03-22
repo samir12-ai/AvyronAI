@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Colors from '@/constants/colors';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl , authFetch } from '@/lib/query-client';
 
 interface OverviewData {
   inventory: {
@@ -111,7 +111,7 @@ type AdminTab = 'overview' | 'competitors' | 'freshness' | 'crawler';
 
 async function adminFetch(path: string) {
   const url = new URL(path, getApiUrl());
-  const resp = await fetch(url.toString());
+  const resp = await authFetch(url.toString());
   if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
   return resp.json();
 }

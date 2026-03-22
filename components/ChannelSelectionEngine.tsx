@@ -12,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl, safeApiJson } from '@/lib/query-client';
+import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
 import { useColorScheme } from 'react-native';
 
 interface LayerResult {
@@ -165,7 +165,7 @@ export default function ChannelSelectionEngine({ isActive }: { isActive?: boolea
     try {
       const url = new URL('/api/strategy/channel-selection/latest', getApiUrl());
       url.searchParams.set('campaignId', selectedCampaignId);
-      const res = await fetch(url.toString());
+      const res = await authFetch(url.toString());
       if (res.status === 404) {
         setData({ exists: false });
         return;
@@ -213,7 +213,7 @@ export default function ChannelSelectionEngine({ isActive }: { isActive?: boolea
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       const url = new URL('/api/strategy/channel-selection/analyze', getApiUrl());
-      const res = await fetch(url.toString(), {
+      const res = await authFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaignId: selectedCampaignId, channelMode }),

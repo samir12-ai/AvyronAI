@@ -14,7 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl, safeApiJson } from '@/lib/query-client';
+import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
 import { useColorScheme } from 'react-native';
 
 interface RetentionLoop {
@@ -176,7 +176,7 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
     if (!selectedCampaignId) return;
     try {
       const url = new URL(`/api/campaigns/${selectedCampaignId}/retention-gate`, getApiUrl());
-      const res = await fetch(url.toString());
+      const res = await authFetch(url.toString());
       const json = await safeApiJson(res);
       setGateStatus(json.gateStatus === 'unlocked' ? 'unlocked' : 'locked');
       setGateMissing(json.missingRequirements || []);
@@ -213,7 +213,7 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
     setSavingMetrics(true);
     try {
       const url = new URL(`/api/campaigns/${selectedCampaignId}/retention-metrics`, getApiUrl());
-      const res = await fetch(url.toString(), {
+      const res = await authFetch(url.toString(), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -244,7 +244,7 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
     setSavingGate(true);
     try {
       const url = new URL(`/api/campaigns/${selectedCampaignId}/retention-gate`, getApiUrl());
-      const res = await fetch(url.toString(), {
+      const res = await authFetch(url.toString(), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(gateInputs),
@@ -273,7 +273,7 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
     try {
       const url = new URL('/api/strategy/retention-engine/latest', getApiUrl());
       url.searchParams.set('campaignId', selectedCampaignId);
-      const res = await fetch(url.toString());
+      const res = await authFetch(url.toString());
       const json = await safeApiJson(res);
       if (json.found && json.snapshot) {
         const s = json.snapshot;
@@ -322,7 +322,7 @@ export default function RetentionEngine({ isActive }: { isActive?: boolean }) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       const url = new URL('/api/strategy/retention-engine/analyze', getApiUrl());
-      const res = await fetch(url.toString(), {
+      const res = await authFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaignId: selectedCampaignId }),

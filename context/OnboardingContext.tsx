@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '@/context/AuthContext';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl , authFetch } from '@/lib/query-client';
 
 const ONBOARDING_KEY = 'marketmind_onboarding_state';
 
@@ -160,7 +160,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     if (!token) return;
     try {
       const baseUrl = getApiUrl();
-      await fetch(new URL('/api/onboarding/track', baseUrl).toString(), {
+      await authFetch(new URL('/api/onboarding/track', baseUrl).toString(), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
