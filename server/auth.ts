@@ -23,8 +23,19 @@ export interface AuthRequest extends Request {
   accountId?: string;
 }
 
+const ADMIN_ACCOUNT_IDS = new Set([
+  "a2d87878-a1e9-41ea-a8a5-90beff569673",
+]);
+
 export function resolveAccountId(req: AuthRequest): string {
   return req.accountId || "default";
+}
+
+export function adminMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
+  if (!req.accountId || !ADMIN_ACCOUNT_IDS.has(req.accountId)) {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+  next();
 }
 
 function generateToken(userId: string, email: string, accountId: string): string {

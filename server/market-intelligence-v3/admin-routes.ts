@@ -3,10 +3,11 @@ import { db } from "../db";
 import { ciCompetitors, ciCompetitorPosts, ciCompetitorComments, miFetchJobs, miSnapshots } from "@shared/schema";
 import { eq, sql, desc, and, gte, count } from "drizzle-orm";
 import { getQueueDiagnostics } from "./fetch-orchestrator";
+import { adminMiddleware } from "../auth";
 
 export function registerAdminMarketRoutes(app: Express) {
 
-  app.get("/api/admin/market/overview", async (_req: Request, res: Response) => {
+  app.get("/api/admin/market/overview", adminMiddleware, async (_req: Request, res: Response) => {
     try {
       const [competitorCount] = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitors);
       const [activeCompetitorCount] = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitors).where(eq(ciCompetitors.isActive, true));
@@ -49,7 +50,7 @@ export function registerAdminMarketRoutes(app: Express) {
     }
   });
 
-  app.get("/api/admin/market/competitors", async (_req: Request, res: Response) => {
+  app.get("/api/admin/market/competitors", adminMiddleware, async (_req: Request, res: Response) => {
     try {
       const competitors = await db.select({
         id: ciCompetitors.id,
@@ -83,7 +84,7 @@ export function registerAdminMarketRoutes(app: Express) {
     }
   });
 
-  app.get("/api/admin/market/freshness", async (_req: Request, res: Response) => {
+  app.get("/api/admin/market/freshness", adminMiddleware, async (_req: Request, res: Response) => {
     try {
       const latestSnapshots = await db.select({
         accountId: miSnapshots.accountId,
@@ -115,7 +116,7 @@ export function registerAdminMarketRoutes(app: Express) {
     }
   });
 
-  app.get("/api/admin/market/crawler-status", async (_req: Request, res: Response) => {
+  app.get("/api/admin/market/crawler-status", adminMiddleware, async (_req: Request, res: Response) => {
     try {
       const queueDiagnostics = await getQueueDiagnostics();
 
