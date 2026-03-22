@@ -11,7 +11,7 @@ import { aiChat } from "../ai-client";
 export function registerAiLeadOptimizationRoutes(app: Express) {
   app.post("/api/lead-optimization/analyze", requireCampaign, async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignContext = (req as any).campaignContext;
       const check = await featureFlagService.checkWithDependencies("ai_lead_optimization_enabled", accountId);
       if (!check.enabled) {
@@ -79,7 +79,7 @@ export function registerAiLeadOptimizationRoutes(app: Express) {
       const response = await aiChat({
         model: "gpt-5.2",
         max_tokens: 800,
-        accountId: req.body.accountId || "default",
+        accountId: (req as any).accountId || "default",
         endpoint: "ai-lead-optimization",
         messages: [
           {

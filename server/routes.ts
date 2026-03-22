@@ -145,7 +145,7 @@ Requirements:
             { role: "user", parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] },
           ],
           config: { maxOutputTokens: 2048 },
-          accountId: "default",
+          accountId: (req as any).accountId || "default",
           endpoint: "ai-writer-gemini",
         });
         content = geminiResponse.text || "";
@@ -157,7 +157,7 @@ Requirements:
             { role: "user", content: userPrompt },
           ],
           max_tokens: 2048,
-          accountId: "default",
+          accountId: (req as any).accountId || "default",
           endpoint: "ai-writer-gpt",
         });
         content = response.choices[0]?.message?.content || "";
@@ -224,7 +224,7 @@ Make sure the content works well across all the specified platforms.`;
             { role: "user", parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] },
           ],
           config: { maxOutputTokens: 1024 },
-          accountId: "default",
+          accountId: (req as any).accountId || "default",
           endpoint: "ai-designer-gemini",
         });
         rawContent = geminiResponse.text || "";
@@ -236,7 +236,7 @@ Make sure the content works well across all the specified platforms.`;
             { role: "user", content: userPrompt },
           ],
           max_tokens: 1024,
-          accountId: "default",
+          accountId: (req as any).accountId || "default",
           endpoint: "ai-designer-gpt",
         });
         rawContent = response.choices[0]?.message?.content || "";
@@ -404,7 +404,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           { role: "user", content: userPrompt },
         ],
         max_tokens: 2000,
-        accountId: "default",
+        accountId: (req as any).accountId || "default",
         endpoint: "calendar-assistant",
       });
 
@@ -536,7 +536,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           responseModalities: [Modality.TEXT, Modality.IMAGE],
           maxOutputTokens: 800,
         },
-        accountId: "default",
+        accountId: (req as any).accountId || "default",
         endpoint: "ai-image-gen",
       });
 
@@ -885,7 +885,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
     const META_APP_ID = process.env.META_APP_ID || '';
     const META_APP_SECRET = process.env.META_APP_SECRET || '';
     const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/meta/callback`;
-    const accountId = (req.query.state as string) || "default";
+    const accountId = (req as any).accountId || "default";
 
     if (fbError) {
       console.error(`[Meta OAuth] Facebook returned error: ${fbError} - ${error_description}`);
@@ -1016,7 +1016,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
   app.post("/api/meta/post", requireMetaReal, async (req: any, res) => {
     try {
       const { content, platforms, mediaUrl } = req.body;
-      const accountId = req.metaAccountId || "default";
+      const accountId = (req as any).accountId || "default";
       const metaMode = req.metaMode;
 
       if (metaMode !== "REAL") {
@@ -1198,7 +1198,7 @@ Generate 25-30 posts. Make EVERY post specific to their products/services - zero
           { role: "user", content: userPrompt },
         ],
         max_tokens: 8000,
-        accountId: "default",
+        accountId: (req as any).accountId || "default",
         endpoint: "generate-calendar",
       });
 
@@ -1294,7 +1294,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
           { role: "user", content: userPrompt },
         ],
         max_tokens: 4000,
-        accountId: "default",
+        accountId: (req as any).accountId || "default",
         endpoint: "generate-audience",
       });
 
@@ -1320,7 +1320,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   app.post("/api/auto-publish", requireMetaReal, async (req: any, res) => {
     try {
       const { posts } = req.body;
-      const accountId = req.metaAccountId || "default";
+      const accountId = (req as any).accountId || "default";
       const metaMode = req.metaMode;
 
       if (metaMode !== "REAL") {

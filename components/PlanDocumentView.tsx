@@ -10,7 +10,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Colors from '@/constants/colors';
-import { getApiUrl, safeApiJson } from '@/lib/query-client';
+import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
 
 const C = {
@@ -64,8 +64,8 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
         return;
       }
 
-      const activeUrl = getApiUrl(`/api/plans/active/${encodeURIComponent(campaignId)}?accountId=default`);
-      const activeRes = await fetch(activeUrl);
+      const activeUrl = getApiUrl(`/api/plans/active/${encodeURIComponent(campaignId)}`);
+      const activeRes = await authFetch(activeUrl);
       const activeData = await safeApiJson(activeRes);
 
       if (!activeRes.ok || !activeData.hasPlan) {
@@ -77,8 +77,8 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
       let docData: any = null;
       if (activeData.plan?.id) {
         try {
-          const docUrl = getApiUrl(`/api/plans/${activeData.plan.id}/document?accountId=default&campaignId=${encodeURIComponent(campaignId)}`);
-          const docRes = await fetch(docUrl);
+          const docUrl = getApiUrl(`/api/plans/${activeData.plan.id}/document?campaignId=${encodeURIComponent(campaignId)}`);
+          const docRes = await authFetch(docUrl);
           const docJson = await safeApiJson(docRes);
           if (docRes.ok && docJson.success) {
             docData = docJson;

@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl , authFetch } from '@/lib/query-client';
 const P = {
   mint: '#34D399',
   neon: '#39FF14',
@@ -332,8 +332,7 @@ export default function ExecutionPlan() {
     try {
       const url = new URL('/api/build-plan-layer/latest', getApiUrl());
       url.searchParams.set('campaignId', selectedCampaignId);
-      url.searchParams.set('accountId', 'default');
-      const resp = await fetch(url.toString());
+      const resp = await authFetch(url.toString());
       if (!resp.ok) return;
       const data: BuildPlanResponse = await resp.json();
       if ((data.status === 'SUCCESS' || data.status === 'ACTIONABILITY_FAILED') && data.plan) {
@@ -365,10 +364,10 @@ export default function ExecutionPlan() {
       }
 
       const url = new URL('/api/build-plan-layer/generate', getApiUrl());
-      const resp = await fetch(url.toString(), {
+      const resp = await authFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaignId: selectedCampaignId, accountId: 'default' }),
+        body: JSON.stringify({ campaignId: selectedCampaignId,  }),
       });
 
       const data: BuildPlanResponse = await resp.json();

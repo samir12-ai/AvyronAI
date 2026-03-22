@@ -402,7 +402,7 @@ Based on the creative brief above, create an edit plan that fulfills the client'
       const response = await aiChat({
         model: "gpt-4.1-mini",
         max_tokens: 1800,
-        accountId: req.body.accountId || "default",
+        accountId: (req as any).accountId || "default",
         endpoint: "video-analyze",
         messages: [
           {
@@ -499,7 +499,7 @@ Generate a full production-ready script with scene-by-scene breakdown, exact spo
       const response = await aiChat({
         model: "gpt-4.1-mini",
         max_tokens: 600,
-        accountId: req.body.accountId || "default",
+        accountId: (req as any).accountId || "default",
         endpoint: "ai-metadata",
         messages: [
           {

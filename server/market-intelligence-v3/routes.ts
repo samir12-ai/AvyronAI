@@ -27,7 +27,7 @@ export function registerMIv3Routes(app: Express) {
       enforceEngineWhitelist(req);
       validateEngineIsolation("MARKET_INTELLIGENCE_V3");
 
-      const accountId = (req.body.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignId = req.body.campaignId as string;
       const mode = (req.body.mode as MIv3Mode) || "overview";
       const forceRefresh = req.body.forceRefresh === true;
@@ -129,7 +129,7 @@ export function registerMIv3Routes(app: Express) {
       enforceEngineWhitelist(req);
       validateEngineIsolation("MARKET_INTELLIGENCE_V3");
 
-      const accountId = (req.body.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignId = req.body.campaignId as string;
 
       if (!campaignId) {
@@ -226,7 +226,7 @@ export function registerMIv3Routes(app: Express) {
 
   app.post("/api/ci/mi-v3/fetch-job", requireCampaign, async (req, res) => {
     try {
-      const accountId = (req.body.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignId = req.body.campaignId as string;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

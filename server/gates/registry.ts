@@ -79,7 +79,7 @@ export async function runGates(accountId: string, gates: Array<() => Promise<Gat
 
 export function requireGates(...gates: Array<(accountId: string) => Promise<GateResult>>) {
   return async (req: Request, res: Response, next: NextFunction) => {
-    const accountId = (req.query.accountId as string) || (req.body?.accountId as string) || "default";
+    const accountId = (req.query.accountId as string) || (req as any).accountId || "default";
     for (const gate of gates) {
       const result = await gate(accountId);
       if (!result.passed) {

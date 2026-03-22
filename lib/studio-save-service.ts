@@ -29,7 +29,6 @@ export async function saveToStudio(
 
   const res = await apiRequest("POST", "/api/studio/items/save-and-analyze", {
     campaignId: params.campaignId,
-    accountId: params.accountId || "default",
     contentType: params.contentType,
     title: params.title,
     caption: params.caption || null,

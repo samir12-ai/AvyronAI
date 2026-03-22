@@ -588,7 +588,7 @@ export function registerAuditRoutes(app: Express) {
   // ─── 7) POST /api/audit/autopilot ─────────────────────────────────
   app.post("/api/audit/autopilot", async (req: Request, res: Response) => {
     try {
-      const accountId = (req.body?.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const enabled = !!req.body?.enabled;
 
       const existing = await db.select().from(accountState)
@@ -624,7 +624,7 @@ export function registerAuditRoutes(app: Express) {
   // ─── 8) POST /api/audit/emergency-stop ────────────────────────────
   app.post("/api/audit/emergency-stop", async (req: Request, res: Response) => {
     try {
-      const accountId = (req.body?.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const reason = (req.body?.reason as string) || "Manual emergency stop triggered";
 
       const existing = await db.select().from(accountState)

@@ -39,7 +39,7 @@ export function registerFunnelLogicRoutes(app: Express) {
 
   app.post("/api/funnels", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("funnel_logic_enabled", accountId))) {
         return res.status(403).json({ error: "Funnel Logic is not enabled" });
       }
@@ -59,7 +59,7 @@ export function registerFunnelLogicRoutes(app: Express) {
 
   app.post("/api/funnels/map-content", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("funnel_logic_enabled", accountId))) {
         return res.status(403).json({ error: "Funnel Logic is not enabled" });
       }
@@ -134,7 +134,7 @@ export function registerFunnelLogicRoutes(app: Express) {
 
   app.post("/api/funnels/ai-suggestions", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("funnel_logic_enabled", accountId))) {
         return res.status(403).json({ error: "Funnel Logic is not enabled" });
       }

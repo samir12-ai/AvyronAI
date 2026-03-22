@@ -12,7 +12,7 @@ const router = Router();
 
 router.post("/api/studio/case", async (req, res) => {
   try {
-    const accountId = (req.body.accountId as string) || "default";
+    const accountId = (req as any).accountId || "default";
     const { goal, audience, cta, series, offer, mediaType: rawMediaType, mediaUri, mediaItemId, platform, scheduledDate, campaignId, title } = req.body;
 
     if (!campaignId || typeof campaignId !== "string" || !campaignId.trim()) {
@@ -150,7 +150,7 @@ router.post("/api/studio/case", async (req, res) => {
 
 router.post("/api/studio/items", async (req, res) => {
   try {
-    const accountId = (req.body.accountId as string) || "default";
+    const accountId = (req as any).accountId || "default";
     const { campaignId, contentType: rawContentType, title, caption, mediaUrl, calendarEntryId } = req.body;
 
     if (!campaignId || typeof campaignId !== "string" || !campaignId.trim()) {
@@ -299,7 +299,7 @@ const featureFlagService = new FeatureFlagService();
 
 router.post("/api/studio/items/save-and-analyze", async (req, res) => {
   try {
-    const accountId = (req.body.accountId as string) || "default";
+    const accountId = (req as any).accountId || "default";
     const {
       campaignId,
       contentType: rawContentType,
@@ -506,7 +506,7 @@ router.get("/api/studio/items/:id/analysis-status", async (req, res) => {
 router.post("/api/studio/items/:id/retry-analysis", async (req, res) => {
   try {
     const { id } = req.params;
-    const accountId = (req.body.accountId as string) || "default";
+    const accountId = (req as any).accountId || "default";
 
     const [item] = await db
       .select({ id: studioItems.id, analysisStatus: studioItems.analysisStatus })

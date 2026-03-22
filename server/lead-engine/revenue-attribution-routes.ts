@@ -26,7 +26,7 @@ export function registerRevenueAttributionRoutes(app: Express) {
 
   app.post("/api/revenue", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("revenue_attribution_enabled", accountId))) {
         return res.status(403).json({ error: "Revenue Attribution is not enabled" });
       }
@@ -64,7 +64,7 @@ export function registerRevenueAttributionRoutes(app: Express) {
 
   app.post("/api/ad-spend", requireCampaign, async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("revenue_attribution_enabled", accountId))) {
         return res.status(403).json({ error: "Revenue Attribution is not enabled" });
       }

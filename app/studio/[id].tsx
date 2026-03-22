@@ -63,7 +63,7 @@ export default function StudioItemDetailScreen() {
     try {
       setLoading(true);
       setError(null);
-      const res = await apiRequest('GET', `/api/studio/items/${id}?accountId=default`);
+      const res = await apiRequest('GET', `/api/studio/items/${id}`);
       const data = await res.json();
       setItem(data.item);
     } catch (err: any) {
@@ -82,7 +82,7 @@ export default function StudioItemDetailScreen() {
     if (item.analysisStatus === 'PENDING' || item.analysisStatus === 'RUNNING') {
       const timer = setInterval(async () => {
         try {
-          const res = await apiRequest('GET', `/api/studio/items/${id}/analysis-status?accountId=default`);
+          const res = await apiRequest('GET', `/api/studio/items/${id}/analysis-status`);
           const data = await res.json();
           setItem(prev => prev ? { ...prev, ...data } : prev);
           if (data.analysisStatus !== 'PENDING' && data.analysisStatus !== 'RUNNING') {
@@ -99,7 +99,7 @@ export default function StudioItemDetailScreen() {
     if (!id) return;
     setRetrying(true);
     try {
-      await apiRequest('POST', `/api/studio/items/${id}/retry-analysis`, { accountId: 'default' });
+      await apiRequest('POST', `/api/studio/items/${id}/retry-analysis`, {  });
       setItem(prev => prev ? { ...prev, analysisStatus: 'PENDING', analysisError: null } : prev);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch {

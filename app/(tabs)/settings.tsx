@@ -26,7 +26,7 @@ import { useLanguage } from '@/context/LanguageContext';
 import { SUPPORTED_LANGUAGES } from '@/lib/i18n';
 import { PlatformConnection } from '@/components/PlatformConnection';
 import { BusinessProfileModal } from '@/components/BusinessProfile';
-import { getApiUrl, apiRequest } from '@/lib/query-client';
+import { getApiUrl, apiRequest , authFetch } from '@/lib/query-client';
 import { router } from 'expo-router';
 import { fetch } from 'expo/fetch';
 
@@ -144,7 +144,7 @@ export default function SettingsScreen() {
     try {
       const apiUrl = getApiUrl();
       const url = new URL(`/api/campaigns/${selectedCampaignId}/manual-metrics`, apiUrl);
-      const res = await fetch(url.toString(), { credentials: 'include' });
+      const res = await authFetch(url.toString(), { credentials: 'include' });
       const data = await res.json();
       if (data.success && data.metrics) {
         const m = data.metrics;
@@ -183,7 +183,7 @@ export default function SettingsScreen() {
     try {
       const apiUrl = getApiUrl();
       const url = new URL(`/api/campaigns/${selectedCampaignId}/manual-metrics`, apiUrl);
-      const res = await fetch(url.toString(), {
+      const res = await authFetch(url.toString(), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -215,7 +215,7 @@ export default function SettingsScreen() {
     try {
       const apiUrl = getApiUrl();
       const url = new URL(`/api/campaigns/${selectedCampaignId}/retention-metrics`, apiUrl);
-      const res = await fetch(url.toString(), { credentials: 'include' });
+      const res = await authFetch(url.toString(), { credentials: 'include' });
       const data = await res.json();
       if (data.success && data.metrics) {
         const m = data.metrics;
@@ -279,7 +279,7 @@ export default function SettingsScreen() {
     try {
       const apiUrl = getApiUrl();
       const url = new URL(`/api/campaigns/${selectedCampaignId}/retention-metrics`, apiUrl);
-      const res = await fetch(url.toString(), {
+      const res = await authFetch(url.toString(), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -318,8 +318,8 @@ export default function SettingsScreen() {
   const fetchMetaStatus = useCallback(async () => {
     try {
       const apiUrl = getApiUrl();
-      const url = new URL('/api/meta/status?accountId=default', apiUrl);
-      const res = await fetch(url.toString(), { credentials: 'include' });
+      const url = new URL('/api/meta/status', apiUrl);
+      const res = await authFetch(url.toString(), { credentials: 'include' });
       const data = await res.json();
       if (data.success && data.status) {
         setMetaStatus(data.status);
@@ -357,8 +357,8 @@ export default function SettingsScreen() {
       }
       try {
         const apiUrl = getApiUrl();
-        const url = new URL('/api/meta/status?accountId=default', apiUrl);
-        const res = await fetch(url.toString(), { credentials: 'include' });
+        const url = new URL('/api/meta/status', apiUrl);
+        const res = await authFetch(url.toString(), { credentials: 'include' });
         const data = await res.json();
         if (data.success && data.status) {
           setMetaStatus(data.status);
@@ -395,7 +395,7 @@ export default function SettingsScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setMetaActionLoading(true);
     try {
-      await apiRequest('POST', '/api/meta/disconnect', { accountId: 'default' });
+      await apiRequest('POST', '/api/meta/disconnect', {  });
       await fetchMetaStatus();
     } catch (error) {
       console.error('Meta disconnect error:', error);
@@ -409,7 +409,7 @@ export default function SettingsScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setMetaActionLoading(true);
     try {
-      await apiRequest('POST', '/api/meta/reconnect', { accountId: 'default' });
+      await apiRequest('POST', '/api/meta/reconnect', {  });
       const apiUrl = getApiUrl();
       const authUrl = `${apiUrl}api/meta/auth`;
       if (Platform.OS === 'web') {

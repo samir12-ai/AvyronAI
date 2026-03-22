@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl , authFetch } from '@/lib/query-client';
 
 interface AELSection {
   label: string;
@@ -229,7 +229,7 @@ function DepthGateStatusPanel({ campaignId, isDark }: { campaignId: string; isDa
     setLoading(true);
     try {
       const url = new URL('/api/orchestrator/latest/' + campaignId, getApiUrl());
-      const res = await fetch(url.toString());
+      const res = await authFetch(url.toString());
       const data = await res.json();
       if (data.hasRun && data.sections) {
         const gates: Record<string, any> = {};
@@ -334,7 +334,7 @@ function CELCompliancePanel({ campaignId, isDark }: { campaignId: string; isDark
     setCelLoading(true);
     try {
       const url = new URL('/api/cel/report/' + campaignId, getApiUrl());
-      const res = await fetch(url.toString());
+      const res = await authFetch(url.toString());
       const data = await res.json();
       if (data.success) setCelData(data);
     } catch {}
@@ -497,19 +497,18 @@ export default function AELDebugPanel() {
     setError(null);
     try {
       const url = new URL('/api/ael/status/' + activeCampaign.id, getApiUrl());
-      const res = await fetch(url.toString());
+      const res = await authFetch(url.toString());
       const data = await res.json();
       if (data.hasCachedPackage && data.package) {
         setAelData(data.package);
         setAelVersion(data.version || null);
       } else {
         const buildUrl = new URL('/api/ael/build', getApiUrl());
-        const buildRes = await fetch(buildUrl.toString(), {
+        const buildRes = await authFetch(buildUrl.toString(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             campaignId: activeCampaign.id,
-            accountId: activeCampaign.accountId || 'default',
           }),
         });
         const buildData = await buildRes.json();

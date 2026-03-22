@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, useColorScheme } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl , authFetch } from '@/lib/query-client';
 
 interface NarrativeStep {
   key: string;
@@ -49,7 +49,7 @@ export default function NarrativeCard({ campaignId, isDark }: { campaignId: stri
     setLoading(true);
     try {
       const url = new URL(`/api/narrative/${campaignId}`, getApiUrl());
-      const resp = await fetch(url.toString());
+      const resp = await authFetch(url.toString());
       if (resp.ok) {
         const json = await resp.json();
         setData(json);

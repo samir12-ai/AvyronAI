@@ -1,5 +1,28 @@
 import { fetch } from "expo/fetch";
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  try {
+    const token = await AsyncStorage.getItem("marketmind_auth_token");
+    if (token) {
+      return { Authorization: `Bearer ${token}` };
+    }
+  } catch {}
+  return {};
+}
+
+export async function authFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  const authHeaders = await getAuthHeaders();
+  const existingHeaders = (init?.headers as Record<string, string>) || {};
+  return fetch(typeof input === 'object' && 'toString' in input ? input.toString() : input as string, {
+    ...init,
+    headers: {
+      ...authHeaders,
+      ...existingHeaders,
+    },
+  });
+}
 
 export function getApiUrl(path?: string): string {
   let host = process.env.EXPO_PUBLIC_DOMAIN;
@@ -52,10 +75,14 @@ export async function apiRequest(
   data?: unknown | undefined,
 ): Promise<Response> {
   const url = getApiUrl(route);
+  const authHeaders = await getAuthHeaders();
 
   const res = await fetch(url, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
+    headers: {
+      ...authHeaders,
+      ...(data ? { "Content-Type": "application/json" } : {}),
+    },
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
   });
@@ -71,8 +98,10 @@ export const getQueryFn: <T>(options: {
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
     const url = getApiUrl(queryKey.join("/") as string);
+    const authHeaders = await getAuthHeaders();
 
     const res = await fetch(url, {
+      headers: authHeaders,
       credentials: "include",
     });
 

@@ -5,7 +5,7 @@ import { checkValidationSession } from "../engine-hardening";
 export function registerAudienceEngineRoutes(app: Express) {
   app.post("/api/audience-engine/analyze", async (req, res) => {
     try {
-      const accountId = (req.body.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignId = req.body.campaignId as string;
       const validationSessionId = req.body.validationSessionId as string | undefined;
       if (!campaignId) {

@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl , authFetch } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
 import { fetch } from 'expo/fetch';
 
@@ -103,7 +103,7 @@ export default function DashboardChat() {
     setExpanded(true);
 
     try {
-      const res = await fetch(
+      const res = await authFetch(
         new URL(`/api/conversations/${convId}/messages`, baseUrl).toString(),
         {
           method: 'POST',

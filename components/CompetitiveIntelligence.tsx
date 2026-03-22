@@ -17,7 +17,7 @@ import DataFreshnessWarning from '@/components/DataFreshnessWarning';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
-import { getApiUrl, safeApiJson } from '@/lib/query-client';
+import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCreativeContext } from '@/context/CreativeContext';
 import { useApp } from '@/context/AppContext';
@@ -108,7 +108,7 @@ export default function CompetitiveIntelligence() {
     enabled: !!activeCampaignId,
     gcTime: 30 * 60 * 1000,
     queryFn: async () => {
-      const res = await fetch(new URL(`/api/ci/competitors?accountId=default&campaignId=${activeCampaignId}`, baseUrl).toString());
+      const res = await authFetch(new URL(`/api/ci/competitors?campaignId=${activeCampaignId}`, baseUrl).toString());
       return safeApiJson(res);
     },
   });
@@ -124,7 +124,7 @@ export default function CompetitiveIntelligence() {
       return false;
     },
     queryFn: async () => {
-      const res = await fetch(new URL(`/api/ci/mi-v3/snapshot/${activeCampaignId}?accountId=default`, baseUrl).toString());
+      const res = await authFetch(new URL(`/api/ci/mi-v3/snapshot/${activeCampaignId}`, baseUrl).toString());
       const data = await safeApiJson(res);
       const normalized = normalizeEngineSnapshot(data, 'mi');
       if (normalized && data.output) return { ...data, snapshot: normalized.snapshot };
@@ -150,16 +150,16 @@ export default function CompetitiveIntelligence() {
     enabled: !!activeCampaignId,
     gcTime: 30 * 60 * 1000,
     queryFn: async () => {
-      const res = await fetch(new URL(`/api/ci/mi-v3/history/${activeCampaignId}?accountId=default`, baseUrl).toString());
+      const res = await authFetch(new URL(`/api/ci/mi-v3/history/${activeCampaignId}`, baseUrl).toString());
       return safeApiJson(res);
     },
   });
 
   const addCompetitorMutation = useMutation({
     mutationFn: async (comp: any) => {
-      const res = await fetch(new URL('/api/ci/competitors', baseUrl).toString(), {
+      const res = await authFetch(new URL('/api/ci/competitors', baseUrl).toString(), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...comp, accountId: 'default', campaignId: activeCampaignId }),
+        body: JSON.stringify({ ...comp,  campaignId: activeCampaignId }),
       });
       if (!res.ok) { const err = await safeApiJson(res); throw new Error(err.error); }
       return safeApiJson(res);
@@ -181,9 +181,9 @@ export default function CompetitiveIntelligence() {
 
   const updateCompetitorMutation = useMutation({
     mutationFn: async ({ id, comp }: { id: string; comp: any }) => {
-      const res = await fetch(new URL(`/api/ci/competitors/${id}`, baseUrl).toString(), {
+      const res = await authFetch(new URL(`/api/ci/competitors/${id}`, baseUrl).toString(), {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...comp, accountId: 'default', campaignId: activeCampaignId }),
+        body: JSON.stringify({ ...comp,  campaignId: activeCampaignId }),
       });
       if (!res.ok) { const err = await safeApiJson(res); throw new Error(err.error); }
       return safeApiJson(res);
@@ -222,9 +222,9 @@ export default function CompetitiveIntelligence() {
 
   const analyzeMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(new URL('/api/ci/mi-v3/analyze', baseUrl).toString(), {
+      const res = await authFetch(new URL('/api/ci/mi-v3/analyze', baseUrl).toString(), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accountId: 'default', campaignId: activeCampaignId || 'default', mode: 'overview' }),
+        body: JSON.stringify({  campaignId: activeCampaignId || 'default', mode: 'overview' }),
       });
       const data = await safeApiJson(res);
       if (!res.ok) throw new Error(data.message || data.error);
@@ -243,7 +243,7 @@ export default function CompetitiveIntelligence() {
 
   const deleteCompetitorMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(new URL(`/api/ci/competitors/${id}?accountId=default&campaignId=${activeCampaignId}`, baseUrl).toString(), { method: 'DELETE' });
+      const res = await authFetch(new URL(`/api/ci/competitors/${id}?campaignId=${activeCampaignId}`, baseUrl).toString(), { method: 'DELETE' });
       if (!res.ok) { const err = await safeApiJson(res); throw new Error(err.error || 'Delete failed'); }
       return safeApiJson(res);
     },
@@ -259,9 +259,9 @@ export default function CompetitiveIntelligence() {
   const fetchDataMutation = useMutation({
     mutationFn: async () => {
       setIsFetchingCampaign(true);
-      const res = await fetch(new URL(`/api/ci/mi-v3/fetch-job`, baseUrl).toString(), {
+      const res = await authFetch(new URL(`/api/ci/mi-v3/fetch-job`, baseUrl).toString(), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accountId: 'default', campaignId: activeCampaignId }),
+        body: JSON.stringify({  campaignId: activeCampaignId }),
       });
       if (!res.ok) {
         const err = await safeApiJson(res);

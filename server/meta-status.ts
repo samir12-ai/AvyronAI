@@ -280,7 +280,7 @@ export type MetaErrorCode = "META_NOT_CONNECTED" | "META_PERMISSION_MISSING" | "
 
 export async function requireMetaReal(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const accountId = (req.query.accountId as string) || (req.body?.accountId as string) || "default";
+    const accountId = (req.query.accountId as string) || (req as any).accountId || "default";
     const state = await getOrCreateAccountState(accountId);
     const metaMode = (state?.metaMode as MetaMode) || "DISCONNECTED";
 

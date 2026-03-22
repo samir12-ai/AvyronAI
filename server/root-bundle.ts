@@ -473,7 +473,7 @@ export function registerRootBundleRoutes(app: Express) {
     try {
       const { campaignId } = req.body;
       if (!campaignId) return res.status(400).json({ success: false, error: "campaignId required" });
-      const accountId = (req.body.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
 
       const locked = await lockRootBundle(campaignId, accountId);
       res.json({ success: true, rootBundle: locked });

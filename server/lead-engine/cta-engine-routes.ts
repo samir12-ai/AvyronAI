@@ -9,7 +9,7 @@ import { aiChat } from "../ai-client";
 export function registerCtaEngineRoutes(app: Express) {
   app.post("/api/cta-variants/generate", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
       const check = await featureFlagService.checkWithDependencies("cta_engine_enabled", accountId);
       if (!check.enabled) {
         return res.status(403).json({ error: "CTA Engine is not enabled" });
@@ -171,7 +171,7 @@ Return a JSON array of objects with fields: "text" (the CTA text), "type" (link/
 
   app.post("/api/cta-variants/auto-promote", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
       const check = await featureFlagService.checkWithDependencies("cta_engine_enabled", accountId);
       if (!check.enabled) {
         return res.status(403).json({ error: "CTA Engine is not enabled" });

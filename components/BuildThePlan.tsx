@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
-import { getApiUrl, safeApiJson } from '@/lib/query-client';
+import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
 import { useApp } from '@/context/AppContext';
 import { useCampaign } from '@/context/CampaignContext';
 import { BusinessProfileModal } from '@/components/BusinessProfile';
@@ -168,10 +168,10 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     if (!profileCampaignId) return;
     setGateChecking(true);
     try {
-      const res = await fetch(getApiUrl('/api/plan-gate/check'), {
+      const res = await authFetch(getApiUrl('/api/plan-gate/check'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaignId: profileCampaignId, accountId: 'default' }),
+        body: JSON.stringify({ campaignId: profileCampaignId,  }),
       });
       if (res.ok) {
         const data = await safeApiJson(res);
@@ -196,7 +196,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
       return;
     }
     try {
-      const res = await fetch(getApiUrl(`/api/business-data/${profileCampaignId}?accountId=default`));
+      const res = await authFetch(getApiUrl(`/api/business-data/${profileCampaignId}`));
       const json = await safeApiJson(res);
       if (json.exists && json.data) {
         const d = json.data;
@@ -227,7 +227,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     }
     setMiChecking(true);
     try {
-      const res = await fetch(getApiUrl(`/api/ci/mi-v3/snapshot/${profileCampaignId}`));
+      const res = await authFetch(getApiUrl(`/api/ci/mi-v3/snapshot/${profileCampaignId}`));
       if (res.ok) {
         const data = await safeApiJson(res);
         const state = data.engineState || null;
@@ -266,7 +266,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     if (!profileCampaignId) return;
     setCiLoading(true);
     try {
-      const res = await fetch(getApiUrl(`/api/ci/competitors?accountId=default&campaignId=${profileCampaignId}`));
+      const res = await authFetch(getApiUrl(`/api/ci/competitors?campaignId=${profileCampaignId}`));
       const data = await safeApiJson(res);
       if (data.competitors && Array.isArray(data.competitors)) {
         setCiCompetitors(data.competitors);
@@ -311,7 +311,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     try {
       const initUrl = getApiUrl('/api/strategic/init');
       console.log('[BuildThePlan] Gate request URL:', initUrl);
-      const res = await fetch(initUrl, {
+      const res = await authFetch(initUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -329,7 +329,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
       }
 
       const bpUrl = getApiUrl(`/api/strategic/blueprint/${data.blueprintId}`);
-      const bpRes = await fetch(bpUrl);
+      const bpRes = await authFetch(bpUrl);
       const bpData = await safeApiJson(bpRes);
       setBlueprint(bpData.blueprint);
       setCurrentPhase(1);
@@ -338,7 +338,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
       console.log('[BuildThePlan] Gate passed, auto-generating blueprint for', data.blueprintId);
       try {
         const genUrl = getApiUrl('/api/strategic/generate-creative-blueprint');
-        const genRes = await fetch(genUrl, {
+        const genRes = await authFetch(genUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ blueprintId: data.blueprintId }),
@@ -383,7 +383,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     try {
       const url = getApiUrl('/api/strategic/generate-creative-blueprint');
       console.log('[BuildThePlan] POST', url);
-      const res = await fetch(url, {
+      const res = await authFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ blueprintId: blueprint.id }),
@@ -422,7 +422,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     setLoading(true);
 
     try {
-      const res = await fetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/confirm`), {
+      const res = await authFetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/confirm`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -459,7 +459,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     setLoading(true);
 
     try {
-      const res = await fetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/edit`), {
+      const res = await authFetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/edit`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields: { [editingField]: editValue } }),
@@ -506,7 +506,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     setLoading(true);
 
     try {
-      const res = await fetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/analyze`), {
+      const res = await authFetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/analyze`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -541,7 +541,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
 
     try {
       const url = getApiUrl(`/api/strategic/blueprint/${blueprint.id}/validate`);
-      const res = await fetch(url, {
+      const res = await authFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -603,7 +603,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
         return;
       }
 
-      const res = await fetch(getApiUrl(`/api/strategic/orchestrate-status/${jId}`));
+      const res = await authFetch(getApiUrl(`/api/strategic/orchestrate-status/${jId}`));
       const data = await safeApiJson(res);
 
       if (data.sectionStatuses) setSectionStatuses(data.sectionStatuses);
@@ -681,7 +681,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     setLoading(true);
 
     try {
-      const res = await fetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/orchestrate`), {
+      const res = await authFetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/orchestrate`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -730,7 +730,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     setLoading(true);
 
     try {
-      const res = await fetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/approve-plan`), {
+      const res = await authFetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/approve-plan`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -779,7 +779,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
             setError('');
             setLoading(true);
             try {
-              const res = await fetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/regenerate-plan`), {
+              const res = await authFetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/regenerate-plan`), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
               });
@@ -2169,7 +2169,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     setPiLoading(true);
     try {
       const baseUrl = getApiUrl();
-      const res = await fetch(new URL('/api/strategy/dashboard', baseUrl).toString());
+      const res = await authFetch(new URL('/api/strategy/dashboard', baseUrl).toString());
       if (res.ok) {
         const data = await safeApiJson(res);
         setPiData(data);

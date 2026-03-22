@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
-import { getApiUrl, safeApiJson } from '@/lib/query-client';
+import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
 
 const FUNNEL_OBJECTIVES = [
@@ -119,7 +119,7 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
     (async () => {
       setFetching(true);
       try {
-        const res = await fetch(getApiUrl(`/api/business-data/${campaignId}?accountId=default`));
+        const res = await authFetch(getApiUrl(`/api/business-data/${campaignId}`));
         const json = await safeApiJson(res);
         if (!cancelled && json.exists && json.data) {
           const d = json.data;
@@ -175,10 +175,10 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(getApiUrl(`/api/business-data/${campaignId}`), {
+      const res = await authFetch(getApiUrl(`/api/business-data/${campaignId}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, accountId: 'default' }),
+        body: JSON.stringify({ ...data,  }),
       });
       const json = await safeApiJson(res);
       if (!res.ok || !json.success) {

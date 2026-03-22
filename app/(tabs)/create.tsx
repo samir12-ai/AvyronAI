@@ -42,7 +42,7 @@ import { useCampaign } from '@/context/CampaignContext';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { generateId } from '@/lib/storage';
-import { apiRequest, getApiUrl } from '@/lib/query-client';
+import { apiRequest, getApiUrl , authFetch } from '@/lib/query-client';
 import { saveToStudio } from '@/lib/studio-save-service';
 import { useCreativeContext } from '@/context/CreativeContext';
 import { useAuth } from '@/context/AuthContext';
@@ -459,7 +459,7 @@ export default function CreateScreen() {
       (async () => {
         try {
           const baseUrl = getApiUrl();
-          const res = await fetch(new URL(`/api/execution/calendar-entries/${entryId}`, baseUrl).toString());
+          const res = await authFetch(new URL(`/api/execution/calendar-entries/${entryId}`, baseUrl).toString());
           if (res.ok) {
             const data = await res.json();
             if (data.success && data.entry) {
@@ -712,7 +712,7 @@ export default function CreateScreen() {
         }
       }
 
-      const response = await fetch(new URL('/api/generate-poster', apiUrl).toString(), {
+      const response = await authFetch(new URL('/api/generate-poster', apiUrl).toString(), {
         method: 'POST',
         body: formData,
       });
@@ -905,7 +905,7 @@ export default function CreateScreen() {
       const type = mimeMap[ext] || 'image/jpeg';
 
       if (Platform.OS === 'web') {
-        const response = await fetch(uri);
+        const response = await authFetch(uri);
         const blob = await response.blob();
         const safeFilename = filename.includes('.') ? filename : `${filename}.${ext}`;
         formData.append('image', new File([blob], safeFilename, { type }));
@@ -913,7 +913,7 @@ export default function CreateScreen() {
         formData.append('image', { uri, name: filename, type } as any);
       }
 
-      const res = await fetch(new URL('/api/veo/upload-image', apiUrl).toString(), {
+      const res = await authFetch(new URL('/api/veo/upload-image', apiUrl).toString(), {
         method: 'POST',
         body: formData,
       });
@@ -991,7 +991,7 @@ export default function CreateScreen() {
       }
 
       setVideoStatus('generating');
-      const res = await fetch(new URL('/api/veo/generate-video', apiUrl).toString(), {
+      const res = await authFetch(new URL('/api/veo/generate-video', apiUrl).toString(), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1027,7 +1027,7 @@ export default function CreateScreen() {
 
     const poll = async () => {
       try {
-        const res = await fetch(new URL('/api/veo/status', apiUrl).toString(), {
+        const res = await authFetch(new URL('/api/veo/status', apiUrl).toString(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ operationName }),

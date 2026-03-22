@@ -286,7 +286,7 @@ export default function OrchestratorPanel() {
   const fetchActivePlan = useCallback(async () => {
     if (!selectedCampaignId) return;
     try {
-      const url = getApiUrl(`/api/plans/active/${encodeURIComponent(selectedCampaignId)}?accountId=default`);
+      const url = getApiUrl(`/api/plans/active/${encodeURIComponent(selectedCampaignId)}`);
       const res = await fetch(url);
       if (!res.ok) return;
       const data: ActivePlan = await res.json();

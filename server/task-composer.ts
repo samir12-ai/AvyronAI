@@ -205,7 +205,7 @@ export function registerTaskComposerRoutes(app: Express) {
     try {
       const { campaignId, planId } = req.body;
       if (!campaignId || !planId) return res.status(400).json({ error: "campaignId and planId required" });
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
 
       const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
       if (!plan) return res.status(404).json({ error: "Plan not found" });

@@ -14,7 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl , authFetch } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
 import { fetch } from 'expo/fetch';
 
@@ -162,7 +162,7 @@ export default function AgentScreen() {
     setStreamingContent('');
 
     try {
-      const res = await fetch(
+      const res = await authFetch(
         new URL(`/api/conversations/${convId}/messages`, baseUrl).toString(),
         {
           method: 'POST',

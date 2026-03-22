@@ -81,7 +81,7 @@ export function registerConversionTrackingRoutes(app: Express) {
 
   app.post("/api/conversion-events", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("conversion_tracking_enabled", accountId))) {
         return res.status(403).json({ error: "Conversion tracking is not enabled" });
       }

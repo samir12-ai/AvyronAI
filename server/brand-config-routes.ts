@@ -33,7 +33,7 @@ router.get("/api/brand-config", async (req, res) => {
 
 router.patch("/api/brand-config", async (req, res) => {
   try {
-    const accountId = (req.body.accountId as string) || "default";
+    const accountId = (req as any).accountId || "default";
     await ensureBrandConfig(accountId);
 
     const {

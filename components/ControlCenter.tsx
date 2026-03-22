@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import Colors from '@/constants/colors';
-import { getApiUrl, safeApiJson } from '@/lib/query-client';
+import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
 
 type PanelState = 'loading' | 'empty' | 'error' | 'success';
 
@@ -78,7 +78,7 @@ interface JobItem {
 
 async function apiFetch(path: string, method = 'GET', body?: any) {
   const url = getApiUrl(path);
-  const res = await fetch(url, {
+  const res = await authFetch(url, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : {},
     body: body ? JSON.stringify(body) : undefined,
@@ -138,7 +138,7 @@ export default function ControlCenter() {
   const loadPlanBinding = useCallback(async () => {
     try {
       const url = getApiUrl('/api/autopilot/status');
-      const res = await fetch(url, { credentials: 'include' });
+      const res = await authFetch(url, { credentials: 'include' });
       if (res.ok) {
         const data = await safeApiJson(res);
         if (data.planBinding) {

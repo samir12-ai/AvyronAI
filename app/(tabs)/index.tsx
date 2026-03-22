@@ -24,7 +24,7 @@ import { useLanguage } from '@/context/LanguageContext';
 import { useCampaign } from '@/context/CampaignContext';
 import { MetricCard } from '@/components/MetricCard';
 import { CampaignBar } from '@/components/CampaignSelector';
-import { getApiUrl, apiRequest } from '@/lib/query-client';
+import { getApiUrl, apiRequest , authFetch } from '@/lib/query-client';
 import { BusinessProfileModal, ProfileButton } from '@/components/BusinessProfile';
 import { PlanStatus } from '@/components/PlanStatus';
 import ExecutionPlan from '@/components/ExecutionPlan';
@@ -185,7 +185,7 @@ export default function DashboardScreen() {
     }
     setMetricsState('loading');
     try {
-      const res = await fetch(new URL(`/api/dashboard/metrics?accountId=default&campaignId=${requestCampaign}`, baseUrl).toString());
+      const res = await authFetch(new URL(`/api/dashboard/metrics?campaignId=${requestCampaign}`, baseUrl).toString());
       if (activeCampaignRef.current !== requestCampaign) return;
       if (!res.ok) {
         setMetricsState('error');
@@ -213,7 +213,7 @@ export default function DashboardScreen() {
 
   const fetchConfidence = useCallback(async () => {
     try {
-      const res = await fetch(new URL('/api/autopilot/status', baseUrl).toString());
+      const res = await authFetch(new URL('/api/autopilot/status', baseUrl).toString());
       if (res.ok) {
         const data = await res.json();
         setConfidenceScore(data.confidenceScore ?? 0);
@@ -230,7 +230,7 @@ export default function DashboardScreen() {
 
   const fetchDataMode = useCallback(async () => {
     try {
-      const res = await fetch(new URL('/api/dashboard/mode', baseUrl).toString());
+      const res = await authFetch(new URL('/api/dashboard/mode', baseUrl).toString());
       if (res.ok) {
         const data = await res.json();
         setDataMode(data.mode || 'UNKNOWN');
@@ -285,7 +285,7 @@ export default function DashboardScreen() {
     if (!selectedCampaignId || orchestratorRunning) return;
     setOrchestratorRunning(true);
     try {
-      await fetch(new URL('/api/orchestrator/run', baseUrl).toString(), {
+      await authFetch(new URL('/api/orchestrator/run', baseUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaignId: selectedCampaignId }),
@@ -299,7 +299,7 @@ export default function DashboardScreen() {
 
   const handleApprovePlan = useCallback(async (planId: string) => {
     try {
-      await fetch(new URL(`/api/plans/${planId}/approve`, baseUrl).toString(), {
+      await authFetch(new URL(`/api/plans/${planId}/approve`, baseUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),

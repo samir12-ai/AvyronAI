@@ -23,7 +23,7 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import Colors from '@/constants/colors';
 import { useLanguage } from '@/context/LanguageContext';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl , authFetch } from '@/lib/query-client';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = (SCREEN_WIDTH - 52) / 2;
@@ -158,7 +158,7 @@ function PhotographerView({ colors, t }: { colors: any; t: any }) {
     setLoading(true);
     try {
       const url = new URL('/api/photography/photographers', baseUrl);
-      const response = await fetch(url.toString(), {
+      const response = await authFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, phone, bio, specialties, priceRange, instagram }),
@@ -195,7 +195,7 @@ function PhotographerView({ colors, t }: { colors: any; t: any }) {
       formData.append('image', { uri, name: filename, type: 'image/jpeg' } as any);
 
       const url = new URL('/api/photography/upload-image', baseUrl);
-      const response = await fetch(url.toString(), { method: 'POST', body: formData });
+      const response = await authFetch(url.toString(), { method: 'POST', body: formData });
       if (!response.ok) throw new Error('Upload failed');
       const data = await response.json();
       return data.imageUrl;
@@ -212,7 +212,7 @@ function PhotographerView({ colors, t }: { colors: any; t: any }) {
     setLoading(true);
     try {
       const url = new URL('/api/photography/posts', baseUrl);
-      const response = await fetch(url.toString(), {
+      const response = await authFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -240,7 +240,7 @@ function PhotographerView({ colors, t }: { colors: any; t: any }) {
     if (!profile) return;
     try {
       const url = new URL(`/api/photography/posts?photographerId=${profile.id}`, baseUrl);
-      const response = await fetch(url.toString());
+      const response = await authFetch(url.toString());
       const data = await response.json();
       setPosts(data);
     } catch {}
@@ -250,7 +250,7 @@ function PhotographerView({ colors, t }: { colors: any; t: any }) {
     if (!profile) return;
     try {
       const url = new URL(`/api/photography/reservations/${profile.id}`, baseUrl);
-      const response = await fetch(url.toString());
+      const response = await authFetch(url.toString());
       const data = await response.json();
       setReservationsList(data);
     } catch {}
@@ -263,7 +263,7 @@ function PhotographerView({ colors, t }: { colors: any; t: any }) {
   const updateReservationStatus = async (id: string, status: string) => {
     try {
       const url = new URL(`/api/photography/reservations/${id}/status`, baseUrl);
-      await fetch(url.toString(), {
+      await authFetch(url.toString(), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
@@ -587,7 +587,7 @@ function CustomerView({ colors, t }: { colors: any; t: any }) {
   const loadPhotographers = useCallback(async () => {
     try {
       const url = new URL('/api/photography/photographers?city=Dubai', baseUrl);
-      const response = await fetch(url.toString());
+      const response = await authFetch(url.toString());
       const data = await response.json();
       setPhotographers(data);
     } catch {} finally { setLoading(false); }
@@ -596,7 +596,7 @@ function CustomerView({ colors, t }: { colors: any; t: any }) {
   const loadAllPosts = useCallback(async () => {
     try {
       const url = new URL('/api/photography/posts', baseUrl);
-      const response = await fetch(url.toString());
+      const response = await authFetch(url.toString());
       const data = await response.json();
       setAllPosts(data);
     } catch {}
@@ -614,7 +614,7 @@ function CustomerView({ colors, t }: { colors: any; t: any }) {
     setSelectedPhotographer(photographer);
     try {
       const url = new URL(`/api/photography/posts?photographerId=${photographer.id}`, baseUrl);
-      const response = await fetch(url.toString());
+      const response = await authFetch(url.toString());
       const data = await response.json();
       setSelectedPosts(data);
     } catch { setSelectedPosts([]); }
@@ -626,7 +626,7 @@ function CustomerView({ colors, t }: { colors: any; t: any }) {
     const userId = 'customer_' + Date.now().toString(36);
     try {
       const url = new URL(`/api/photography/posts/${postId}/interact`, baseUrl);
-      await fetch(url.toString(), {
+      await authFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'like', userId }),
@@ -644,7 +644,7 @@ function CustomerView({ colors, t }: { colors: any; t: any }) {
     setSubmitting(true);
     try {
       const url = new URL('/api/photography/reservations', baseUrl);
-      const response = await fetch(url.toString(), {
+      const response = await authFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

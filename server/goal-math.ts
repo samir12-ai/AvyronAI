@@ -513,7 +513,7 @@ export function registerGoalMathRoutes(app: Express) {
     try {
       const { campaignId } = req.body;
       if (!campaignId) return res.status(400).json({ success: false, error: "campaignId required" });
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
 
       const result = await decomposeGoal(campaignId, accountId);
       res.json({ success: true, ...result });
@@ -527,7 +527,7 @@ export function registerGoalMathRoutes(app: Express) {
     try {
       const { campaignId, planId } = req.body;
       if (!campaignId) return res.status(400).json({ success: false, error: "campaignId required" });
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
 
       const [bizData] = await db.select().from(businessDataLayer)
         .where(and(eq(businessDataLayer.campaignId, campaignId), eq(businessDataLayer.accountId, accountId)))

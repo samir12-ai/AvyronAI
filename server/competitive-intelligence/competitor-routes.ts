@@ -54,7 +54,7 @@ export function registerCiCompetitorRoutes(app: Express) {
 
   app.post("/api/ci/competitors", async (req, res) => {
     try {
-      const accountId = (req.body.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const campaignId = req.body.campaignId as string;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
@@ -117,7 +117,7 @@ export function registerCiCompetitorRoutes(app: Express) {
   app.put("/api/ci/competitors/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const accountId = (req.body.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
       const enabled = await featureFlagService.isEnabled("competitive_intelligence_enabled", accountId);
       if (!enabled) {
         return res.status(403).json({ error: "Competitive intelligence is disabled" });

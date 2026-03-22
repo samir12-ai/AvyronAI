@@ -895,7 +895,7 @@ export function registerExecutionRoutes(app: Express) {
     const requestId = `reset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
       const { planId } = req.params;
-      const accountId = (req.query.accountId as string) || (req.body?.accountId as string) || "default";
+      const accountId = (req.query.accountId as string) || (req as any).accountId || "default";
       const campaignId = (req.query.campaignId as string) || (req.body?.campaignId as string) || null;
 
       const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);

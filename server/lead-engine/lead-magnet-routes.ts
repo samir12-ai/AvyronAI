@@ -24,7 +24,7 @@ export function registerLeadMagnetRoutes(app: Express) {
 
   app.post("/api/lead-magnets/generate", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("lead_magnet_enabled", accountId))) {
         return res.status(403).json({ error: "Lead Magnet Generator is not enabled" });
       }

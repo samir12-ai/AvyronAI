@@ -208,7 +208,7 @@ export function registerPlanGateRoutes(app: Express) {
     try {
       const { campaignId } = req.body;
       if (!campaignId) return res.status(400).json({ success: false, error: "campaignId required" });
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
 
       const readiness = await checkPlanReadiness(campaignId, accountId);
       res.json({

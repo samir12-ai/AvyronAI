@@ -159,7 +159,7 @@ export function registerConflictResolverRoutes(app: Express) {
     try {
       const { planId, campaignId } = req.body;
       if (!planId || !campaignId) return res.status(400).json({ error: "planId and campaignId required" });
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
 
       const { businessDataLayer } = await import("../shared/schema");
       const [bizData] = await db.select().from(businessDataLayer)

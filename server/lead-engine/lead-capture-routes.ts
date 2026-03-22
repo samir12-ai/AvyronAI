@@ -33,7 +33,7 @@ export function registerLeadCaptureRoutes(app: Express) {
 
   app.post("/api/leads", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("lead_capture_enabled", accountId))) {
         return res.status(403).json({ error: "Lead capture is not enabled" });
       }
@@ -111,7 +111,7 @@ export function registerLeadCaptureRoutes(app: Express) {
 
   app.post("/api/lead-forms", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("lead_capture_enabled", accountId))) {
         return res.status(403).json({ error: "Lead capture is not enabled" });
       }
@@ -199,7 +199,7 @@ export function registerLeadCaptureRoutes(app: Express) {
 
   app.post("/api/tracking-links", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("lead_capture_enabled", accountId))) {
         return res.status(403).json({ error: "Lead capture is not enabled" });
       }

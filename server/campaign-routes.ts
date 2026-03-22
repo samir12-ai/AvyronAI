@@ -40,8 +40,8 @@ export function registerCampaignRoutes(app: Express) {
 
   app.post("/api/campaigns/create", async (req, res) => {
     try {
-      const { name, objective, location, platform, notes, dataSourceMode, accountId: reqAccountId } = req.body;
-      const accountId = reqAccountId || "default";
+      const { name, objective, location, platform, notes, dataSourceMode } = req.body;
+      const accountId = (req as any).accountId || "default";
       const requestId = `crt_${Date.now()}`;
 
       if (!name || !name.trim()) {
@@ -109,8 +109,8 @@ export function registerCampaignRoutes(app: Express) {
 
   app.post("/api/campaigns/select", async (req, res) => {
     try {
-      const { campaignId, campaignName, platform, goalType, campaignLocation, accountId: reqAccountId } = req.body;
-      const accountId = reqAccountId || "default";
+      const { campaignId, campaignName, platform, goalType, campaignLocation } = req.body;
+      const accountId = (req as any).accountId || "default";
 
       const requestId = `sel_${Date.now()}`;
       if (!campaignId || !campaignName || !goalType) {
@@ -407,7 +407,7 @@ export function registerCampaignRoutes(app: Express) {
   app.put("/api/campaigns/:campaignId/manual-metrics", async (req: Request, res: Response) => {
     try {
       const { campaignId } = req.params;
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
       const { spend, revenue, leads, conversions, impressions, clicks } = req.body;
 
       if (spend === undefined && revenue === undefined && leads === undefined && conversions === undefined && impressions === undefined && clicks === undefined) {
@@ -493,7 +493,7 @@ export function registerCampaignRoutes(app: Express) {
   app.put("/api/campaigns/:campaignId/retention-metrics", async (req: Request, res: Response) => {
     try {
       const { campaignId } = req.params;
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
       const { totalCustomers, totalPurchases, returningCustomers, averageOrderValue, refundCount, monthlyCustomers, dataWindowDays } = req.body;
 
       const tc = totalCustomers !== undefined ? (Number(totalCustomers) || 0) : undefined;
@@ -616,7 +616,7 @@ export function registerCampaignRoutes(app: Express) {
   app.put("/api/campaigns/:campaignId/iteration-gate", async (req: Request, res: Response) => {
     try {
       const { campaignId } = req.params;
-      const accountId = (req.body.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
 
       const data = {
         hasExistingAsset: !!req.body.hasExistingAsset,
@@ -762,7 +762,7 @@ export function registerCampaignRoutes(app: Express) {
   app.put("/api/campaigns/:campaignId/retention-gate", async (req: Request, res: Response) => {
     try {
       const { campaignId } = req.params;
-      const accountId = (req.body.accountId as string) || "default";
+      const accountId = (req as any).accountId || "default";
 
       const data = {
         hasExistingCustomers: !!req.body.hasExistingCustomers,
@@ -910,7 +910,7 @@ function computeDerivedRetentionMetrics(metrics: any) {
 
 export async function requireCampaign(req: Request, res: Response, next: NextFunction) {
   try {
-    const accountId = (req.query.accountId as string) || (req.body?.accountId as string) || "default";
+    const accountId = (req as any).accountId || "default";
 
     const requestedCampaignId = (req.query.campaignId as string) || null;
 

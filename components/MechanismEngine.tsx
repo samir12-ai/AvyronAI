@@ -13,7 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
-import { getApiUrl, safeApiJson } from '@/lib/query-client';
+import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
 import { useQuery } from '@tanstack/react-query';
 import { useColorScheme } from 'react-native';
 
@@ -51,7 +51,7 @@ export default function MechanismEngine({ isActive }: Props) {
     try {
       const url = new URL('/api/strategy-root/active', baseUrl);
       url.searchParams.set('campaignId', selectedCampaignId);
-      const res = await fetch(url.toString());
+      const res = await authFetch(url.toString());
       const json = await safeApiJson(res);
       setStrategyRoot(json);
     } catch (err) {
@@ -70,7 +70,7 @@ export default function MechanismEngine({ isActive }: Props) {
     enabled: !!selectedCampaignId && isActive,
     gcTime: 30 * 60 * 1000,
     queryFn: async () => {
-      const res = await fetch(new URL(`/api/mechanism-engine/latest?campaignId=${selectedCampaignId}&accountId=default`, baseUrl).toString());
+      const res = await authFetch(new URL(`/api/mechanism-engine/latest?campaignId=${selectedCampaignId}`, baseUrl).toString());
       return safeApiJson(res);
     },
   });
@@ -80,7 +80,7 @@ export default function MechanismEngine({ isActive }: Props) {
     enabled: !!selectedCampaignId && isActive,
     gcTime: 30 * 60 * 1000,
     queryFn: async () => {
-      const res = await fetch(new URL(`/api/differentiation-engine/latest?campaignId=${selectedCampaignId}&accountId=default`, baseUrl).toString());
+      const res = await authFetch(new URL(`/api/differentiation-engine/latest?campaignId=${selectedCampaignId}`, baseUrl).toString());
       return safeApiJson(res);
     },
   });
@@ -91,12 +91,12 @@ export default function MechanismEngine({ isActive }: Props) {
     if (!selectedCampaignId || !hasDiffData) return;
     setAnalyzing(true);
     try {
-      const res = await fetch(new URL('/api/mechanism-engine/analyze', baseUrl).toString(), {
+      const res = await authFetch(new URL('/api/mechanism-engine/analyze', baseUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           campaignId: selectedCampaignId,
-          accountId: 'default',
+          
           differentiationSnapshotId: diffData.id,
         }),
       });

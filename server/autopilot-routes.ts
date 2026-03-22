@@ -338,7 +338,7 @@ router.get("/api/autopilot/actions", requireCampaign, async (req, res) => {
 
 router.patch("/api/autopilot/status", requireCampaign, async (req, res) => {
   try {
-    const accountId = (req.body.accountId as string) || "default";
+    const accountId = (req as any).accountId || "default";
     const { autopilotOn } = req.body;
 
     await ensureAccountState(accountId);
@@ -374,7 +374,7 @@ router.patch("/api/autopilot/status", requireCampaign, async (req, res) => {
 
 router.post("/api/autopilot/emergency-stop", requireCampaign, async (req, res) => {
   try {
-    const accountId = (req.body.accountId as string) || "default";
+    const accountId = (req as any).accountId || "default";
 
     await db.update(accountState)
       .set({

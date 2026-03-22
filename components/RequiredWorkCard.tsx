@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl , authFetch } from '@/lib/query-client';
 
 const P = {
   mint: '#8B5CF6',
@@ -34,7 +34,7 @@ export function RequiredWorkCard({ campaignId, isDark }: RequiredWorkCardProps) 
   const { data, isLoading } = useQuery({
     queryKey: ['/api/required-work', campaignId],
     queryFn: async () => {
-      const res = await fetch(new URL(`/api/required-work/${campaignId}`, baseUrl).toString());
+      const res = await authFetch(new URL(`/api/required-work/${campaignId}`, baseUrl).toString());
       return res.json();
     },
     enabled: !!campaignId,

@@ -23,7 +23,7 @@ export function registerLandingPageRoutes(app: Express) {
 
   app.post("/api/landing-pages", async (req, res) => {
     try {
-      const accountId = req.body.accountId || "default";
+      const accountId = (req as any).accountId || "default";
       if (!(await featureFlagService.isEnabled("landing_pages_enabled", accountId))) {
         return res.status(403).json({ error: "Landing Pages module is not enabled" });
       }

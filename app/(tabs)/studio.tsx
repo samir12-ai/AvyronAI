@@ -24,7 +24,7 @@ import { useCampaign } from '@/context/CampaignContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import { generateId } from '@/lib/storage';
-import { getApiUrl, apiRequest } from '@/lib/query-client';
+import { getApiUrl, apiRequest , authFetch } from '@/lib/query-client';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { normalizeMediaType } from '@/lib/media-types';
 import type { MediaItem } from '@/lib/types';
@@ -131,7 +131,7 @@ export default function StudioScreen() {
 
   const fetchAnalysisStatus = useCallback(async (studioItemId: string) => {
     try {
-      const res = await apiRequest('GET', `/api/studio/items/${studioItemId}/analysis-status?accountId=default`);
+      const res = await apiRequest('GET', `/api/studio/items/${studioItemId}/analysis-status`);
       const data: AutoAnalysisData = await res.json();
       setAutoAnalysis(prev => ({ ...prev, [studioItemId]: data }));
       if (data.analysisStatus !== 'PENDING' && data.analysisStatus !== 'RUNNING') {
@@ -265,11 +265,11 @@ export default function StudioScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       const apiUrl = getApiUrl();
-      const res = await fetch(new URL('/api/studio/ai-metadata', apiUrl).toString(), {
+      const res = await authFetch(new URL('/api/studio/ai-metadata', apiUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          accountId: 'default',
+          
           title: mediaTitle.trim(),
           mediaType: mediaType,
           platform: mediaPlatform[0] || 'Instagram',
@@ -335,11 +335,11 @@ export default function StudioScreen() {
 
     try {
       const apiUrl = getApiUrl();
-      const res = await fetch(new URL('/api/studio/case', apiUrl).toString(), {
+      const res = await authFetch(new URL('/api/studio/case', apiUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          accountId: 'default',
+          
           campaignId: selectedCampaignId,
           mediaItemId: newMedia.id,
           mediaType: canonicalType,
@@ -388,7 +388,7 @@ export default function StudioScreen() {
     if (item?.studioItemId) {
       try {
         const apiUrl = getApiUrl();
-        await fetch(new URL(`/api/studio/items/${item.studioItemId}?accountId=default`, apiUrl).toString(), {
+        await authFetch(new URL(`/api/studio/items/${item.studioItemId}`, apiUrl).toString(), {
           method: 'DELETE',
         });
       } catch (err) {
@@ -405,11 +405,11 @@ export default function StudioScreen() {
 
     try {
       const apiUrl = getApiUrl();
-      const res = await fetch(new URL('/api/studio/video-analyze', apiUrl).toString(), {
+      const res = await authFetch(new URL('/api/studio/video-analyze', apiUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          accountId: 'default',
+          
           title: item.title,
           platform: item.platform,
           goal: item.goal || '',
@@ -642,7 +642,7 @@ export default function StudioScreen() {
   const handleRetryAnalysis = async (studioItemId: string) => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      await apiRequest('POST', `/api/studio/items/${studioItemId}/retry-analysis`, { accountId: 'default' });
+      await apiRequest('POST', `/api/studio/items/${studioItemId}/retry-analysis`, {  });
       setAutoAnalysis(prev => ({ ...prev, [studioItemId]: { ...prev[studioItemId], analysisStatus: 'PENDING', analysisError: null } }));
       startPolling(studioItemId);
     } catch (err) {

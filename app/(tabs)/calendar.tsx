@@ -29,7 +29,7 @@ import { CalendarDay } from '@/components/CalendarDay';
 import { ContentCard } from '@/components/ContentCard';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import { generateId } from '@/lib/storage';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl , authFetch } from '@/lib/query-client';
 import { createRouteForContentType } from '@/lib/media-types';
 import type { ScheduledPost } from '@/lib/types';
 
@@ -123,8 +123,7 @@ export default function CalendarScreen() {
       const baseUrl = getApiUrl();
       const url = new URL('/api/execution/calendar-entries', baseUrl);
       url.searchParams.set('campaignId', selectedCampaign.selectedCampaignId);
-      url.searchParams.set('accountId', 'default');
-      const response = await fetch(url.toString());
+      const response = await authFetch(url.toString());
       if (response.ok) {
         const data = await response.json();
         setDbCalendarEntries(data.entries || []);
@@ -199,11 +198,10 @@ export default function CalendarScreen() {
             try {
               const baseUrl = getApiUrl();
               const resetUrl = new URL(`/api/execution/plans/${dbPlanId}/reset-failed`, baseUrl);
-              resetUrl.searchParams.set('accountId', 'default');
               if (selectedCampaign?.selectedCampaignId) {
                 resetUrl.searchParams.set('campaignId', selectedCampaign.selectedCampaignId);
               }
-              const res = await fetch(resetUrl.toString(), {
+              const res = await authFetch(resetUrl.toString(), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
               });
@@ -407,7 +405,7 @@ export default function CalendarScreen() {
     try {
       const baseUrl = getApiUrl();
       const url = new URL('/api/generate-calendar', baseUrl);
-      const response = await fetch(url.toString(), {
+      const response = await authFetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl , authFetch } from '@/lib/query-client';
 
 const P = {
   mint: '#8B5CF6',
@@ -146,8 +146,8 @@ export const MarketMindAgent = forwardRef<MarketMindAgentRef, Props>(function Ma
     const thisRequest = ++requestIdRef.current;
     setState('loading');
     try {
-      const res = await fetch(
-        new URL(`/api/dashboard/agent-brief?accountId=default&campaignId=${campaignId}`, baseUrl).toString()
+      const res = await authFetch(
+        new URL(`/api/dashboard/agent-brief?campaignId=${campaignId}`, baseUrl).toString()
       );
       if (thisRequest !== requestIdRef.current) return;
       if (!res.ok) { setState('error'); return; }
@@ -173,8 +173,8 @@ export const MarketMindAgent = forwardRef<MarketMindAgentRef, Props>(function Ma
     setAnswering(true);
     setAnswer('');
     try {
-      const res = await fetch(
-        new URL(`/api/dashboard/agent-explain?accountId=default&campaignId=${campaignId}`, baseUrl).toString(),
+      const res = await authFetch(
+        new URL(`/api/dashboard/agent-explain?campaignId=${campaignId}`, baseUrl).toString(),
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

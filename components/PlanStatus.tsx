@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl , authFetch } from '@/lib/query-client';
 
 const P = {
   mint: '#8B5CF6',
@@ -30,7 +30,7 @@ export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onV
   const { data, isLoading } = useQuery({
     queryKey: ['/api/plans/active', campaignId],
     queryFn: async () => {
-      const res = await fetch(new URL(`/api/plans/active/${campaignId}`, baseUrl).toString());
+      const res = await authFetch(new URL(`/api/plans/active/${campaignId}`, baseUrl).toString());
       return res.json();
     },
     enabled: !!campaignId,
