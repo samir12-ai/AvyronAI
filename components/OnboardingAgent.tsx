@@ -6,15 +6,11 @@ import {
   StyleSheet,
   Animated,
   Image,
-  Platform,
-  Dimensions,
+  useColorScheme,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useOnboarding } from '@/context/OnboardingContext';
-
-const BUBBLE_SIZE = 56;
-const PANEL_WIDTH = Math.min(340, Dimensions.get('window').width - 40);
 
 export default function OnboardingAgent() {
   const {
@@ -28,62 +24,28 @@ export default function OnboardingAgent() {
     dismiss,
   } = useOnboarding();
 
-  const slideAnim = useRef(new Animated.Value(0)).current;
+  const isDark = useColorScheme() === 'dark';
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     if (isVisible && currentStepData) {
-      Animated.parallel([
-        Animated.spring(slideAnim, {
-          toValue: 1,
-          friction: 8,
-          tension: 40,
-          useNativeDriver: true,
-        }),
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start();
-
-      const pulse = Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.05,
-            duration: 1500,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 1500,
-            useNativeDriver: true,
-          }),
-        ])
-      );
-      pulse.start();
-      return () => pulse.stop();
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
     } else {
-      Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ]).start();
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
     }
   }, [isVisible, currentStepData]);
 
   if (!isVisible || !currentStepData) return null;
 
   const isLastStep = currentStep === totalSteps - 1;
-  const isFirstStep = currentStep === 0;
 
   const handleDeepLink = () => {
     if (currentStepData.deepLink) {
@@ -99,25 +61,19 @@ export default function OnboardingAgent() {
     skip();
   };
 
+  const panelBg = isDark ? '#151B24' : '#FFFFFF';
+  const borderC = isDark ? '#1E2736' : '#E2E8F0';
+  const textPrimary = isDark ? '#E8ECF0' : '#0F172A';
+  const textSecondary = isDark ? '#8892A4' : '#475569';
+  const textMuted = isDark ? '#4A5568' : '#94A3B8';
+  const progressBg = isDark ? '#1E2736' : '#F1F5F9';
+  const deepLinkBg = isDark ? 'rgba(124,58,237,0.12)' : '#F5F3FF';
+  const deepLinkBorder = isDark ? 'rgba(124,58,237,0.2)' : 'rgba(124,58,237,0.1)';
+  const closeBg = isDark ? '#1E2736' : '#F1F5F9';
+
   return (
-    <Animated.View
-      style={[
-        styles.container,
-        {
-          opacity: fadeAnim,
-          transform: [
-            {
-              translateY: slideAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [100, 0],
-              }),
-            },
-          ],
-        },
-      ]}
-      pointerEvents="box-none"
-    >
-      <Animated.View style={[styles.panel, { transform: [{ scale: pulseAnim }] }]}>
+    <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
+      <View style={[styles.panel, { backgroundColor: panelBg, borderColor: borderC }]}>
         <View style={styles.header}>
           <View style={styles.avatarRow}>
             <View style={styles.avatarContainer}>
@@ -128,32 +84,32 @@ export default function OnboardingAgent() {
               <View style={styles.statusDot} />
             </View>
             <View style={styles.headerText}>
-              <Text style={styles.agentName}>MarketMind Agent</Text>
-              <Text style={styles.stepIndicator}>
+              <Text style={[styles.agentName, { color: textPrimary }]}>MarketMind Agent</Text>
+              <Text style={[styles.stepIndicator, { color: textMuted }]}>
                 Step {currentStep + 1} of {totalSteps}
               </Text>
             </View>
           </View>
           <TouchableOpacity
             onPress={dismiss}
-            style={styles.closeButton}
+            style={[styles.closeButton, { backgroundColor: closeBg }]}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Ionicons name="close" size={18} color="#94A3B8" />
+            <Ionicons name="close" size={18} color={textMuted} />
           </TouchableOpacity>
         </View>
 
-        <View style={styles.progressBar}>
+        <View style={[styles.progressBar, { backgroundColor: progressBg }]}>
           <View style={[styles.progressFill, { width: `${((currentStep + 1) / totalSteps) * 100}%` }]} />
         </View>
 
         <View style={styles.body}>
-          <Text style={styles.stepTitle}>{currentStepData.title}</Text>
-          <Text style={styles.message}>{currentStepData.message}</Text>
+          <Text style={[styles.stepTitle, { color: textPrimary }]}>{currentStepData.title}</Text>
+          <Text style={[styles.message, { color: textSecondary }]}>{currentStepData.message}</Text>
         </View>
 
         {currentStepData.deepLink && (
-          <TouchableOpacity style={styles.deepLinkButton} onPress={handleDeepLink} activeOpacity={0.7}>
+          <TouchableOpacity style={[styles.deepLinkButton, { backgroundColor: deepLinkBg, borderColor: deepLinkBorder }]} onPress={handleDeepLink} activeOpacity={0.7}>
             <Ionicons name="navigate-outline" size={16} color="#7C3AED" />
             <Text style={styles.deepLinkText}>{currentStepData.deepLinkLabel || 'Take me there'}</Text>
           </TouchableOpacity>
@@ -162,7 +118,7 @@ export default function OnboardingAgent() {
         <View style={styles.footer}>
           {!isLastStep ? (
             <TouchableOpacity onPress={handleSkip} style={styles.skipButton} activeOpacity={0.7}>
-              <Text style={styles.skipText}>Skip guide</Text>
+              <Text style={[styles.skipText, { color: textMuted }]}>Skip guide</Text>
             </TouchableOpacity>
           ) : (
             <View />
@@ -178,32 +134,19 @@ export default function OnboardingAgent() {
             />
           </TouchableOpacity>
         </View>
-      </Animated.View>
+      </View>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    position: 'absolute',
-    bottom: Platform.OS === 'web' ? 100 : 110,
-    left: 0,
-    right: 0,
-    alignItems: 'center' as const,
-    zIndex: 9999,
-    pointerEvents: 'box-none' as const,
+    marginHorizontal: 16,
+    marginBottom: 16,
   },
   panel: {
-    width: PANEL_WIDTH,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 24,
-    elevation: 12,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.12)',
     overflow: 'hidden' as const,
   },
   header: {
@@ -246,25 +189,21 @@ const styles = StyleSheet.create({
   agentName: {
     fontSize: 15,
     fontWeight: '700' as const,
-    color: '#0F172A',
     letterSpacing: -0.3,
   },
   stepIndicator: {
     fontSize: 12,
-    color: '#94A3B8',
     fontWeight: '500' as const,
   },
   closeButton: {
     width: 32,
     height: 32,
     borderRadius: 10,
-    backgroundColor: '#F1F5F9',
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
   },
   progressBar: {
     height: 3,
-    backgroundColor: '#F1F5F9',
     marginHorizontal: 16,
     borderRadius: 2,
     overflow: 'hidden' as const,
@@ -282,13 +221,11 @@ const styles = StyleSheet.create({
   stepTitle: {
     fontSize: 16,
     fontWeight: '700' as const,
-    color: '#0F172A',
     marginBottom: 6,
     letterSpacing: -0.3,
   },
   message: {
     fontSize: 14,
-    color: '#475569',
     lineHeight: 21,
   },
   deepLinkButton: {
@@ -299,10 +236,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     paddingVertical: 10,
     paddingHorizontal: 14,
-    backgroundColor: '#F5F3FF',
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.1)',
   },
   deepLinkText: {
     fontSize: 13,
@@ -323,7 +258,6 @@ const styles = StyleSheet.create({
   },
   skipText: {
     fontSize: 13,
-    color: '#94A3B8',
     fontWeight: '500' as const,
   },
   nextButton: {

@@ -327,6 +327,31 @@ export default function ExecutionPlan() {
   const surfaceBg = isDark ? '#151B24' : '#FFFFFF';
   const borderColor = isDark ? '#1E2736' : '#E5E7EB';
 
+  const loadLatestPlan = useCallback(async () => {
+    if (!selectedCampaignId) return;
+    try {
+      const url = new URL('/api/build-plan-layer/latest', getApiUrl());
+      url.searchParams.set('campaignId', selectedCampaignId);
+      url.searchParams.set('accountId', 'default');
+      const resp = await fetch(url.toString());
+      if (!resp.ok) return;
+      const data: BuildPlanResponse = await resp.json();
+      if ((data.status === 'SUCCESS' || data.status === 'ACTIONABILITY_FAILED') && data.plan) {
+        setPlan(data.plan);
+        setStatus(data.status);
+        if (data.status === 'ACTIONABILITY_FAILED') {
+          setError(`Some decisions need more specificity (${data.failedBlocks?.join(', ') || 'unknown'})`);
+        }
+      }
+    } catch {}
+  }, [selectedCampaignId]);
+
+  useEffect(() => {
+    if (selectedCampaignId) {
+      loadLatestPlan();
+    }
+  }, [selectedCampaignId, loadLatestPlan]);
+
   const generatePlan = useCallback(async () => {
     if (!selectedCampaignId) return;
     setLoading(true);

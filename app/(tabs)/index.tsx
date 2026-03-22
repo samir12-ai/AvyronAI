@@ -32,6 +32,7 @@ import { RequiredWorkCard } from '@/components/RequiredWorkCard';
 import DashboardChat from '@/components/DashboardChat';
 import NarrativeCard from '@/components/NarrativeCard';
 import { useAuth } from '@/context/AuthContext';
+import OnboardingAgent from '@/components/OnboardingAgent';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -554,6 +555,8 @@ export default function DashboardScreen() {
         <RNAnimated.View style={{ opacity: headerFade, transform: [{ translateY: cardSlide }] }}>
           {renderMetricsPanel()}
         </RNAnimated.View>
+
+        <OnboardingAgent />
 
         {selectedCampaignId ? (
           <>
