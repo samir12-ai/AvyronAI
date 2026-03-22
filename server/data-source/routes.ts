@@ -129,8 +129,8 @@ export function registerDataSourceRoutes(app: Express) {
 
   app.put("/api/data-source/mode", async (req: Request, res: Response) => {
     try {
-      const { campaignId, mode, accountId: reqAccountId } = req.body;
-      const accountId = reqAccountId || "default";
+      const { campaignId, mode } = req.body;
+      const accountId = resolveAccountId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });

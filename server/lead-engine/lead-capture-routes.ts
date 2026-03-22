@@ -59,24 +59,24 @@ export function registerLeadCaptureRoutes(app: Express) {
 
   app.put("/api/leads/:id/status", async (req, res) => {
     try {
-      const { status, accountId, notes } = req.body;
-      const acct = accountId || "default";
-      if (!(await featureFlagService.isEnabled("lead_capture_enabled", acct))) {
+      const accountId = resolveAccountId(req);
+      const { status, notes } = req.body;
+      if (!(await featureFlagService.isEnabled("lead_capture_enabled", accountId))) {
         return res.status(403).json({ error: "Lead capture is not enabled" });
       }
       const validStatuses = ["new", "contacted", "qualified", "converted", "lost"];
       if (!validStatuses.includes(status)) {
         return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(", ")}` });
       }
-      const existing = await db.select().from(leads).where(eq(leads.id, req.params.id)).limit(1);
+      const existing = await db.select().from(leads).where(and(eq(leads.id, req.params.id), eq(leads.accountId, accountId))).limit(1);
       if (!existing[0]) return res.status(404).json({ error: "Lead not found" });
 
       const updated = await db.update(leads)
         .set({ status, notes: notes || existing[0].notes, updatedAt: new Date() })
-        .where(eq(leads.id, req.params.id))
+        .where(and(eq(leads.id, req.params.id), eq(leads.accountId, accountId)))
         .returning();
 
-      await logAudit(acct, "LEAD_STATUS_CHANGED", {
+      await logAudit(accountId, "LEAD_STATUS_CHANGED", {
         details: { leadId: req.params.id, fromStatus: existing[0].status, toStatus: status },
       });
 
@@ -88,7 +88,10 @@ export function registerLeadCaptureRoutes(app: Express) {
 
   app.delete("/api/leads/:id", async (req, res) => {
     try {
-      await db.delete(leads).where(eq(leads.id, req.params.id));
+      const accountId = resolveAccountId(req);
+      const existing = await db.select().from(leads).where(and(eq(leads.id, req.params.id), eq(leads.accountId, accountId))).limit(1);
+      if (!existing[0]) return res.status(404).json({ error: "Lead not found" });
+      await db.delete(leads).where(and(eq(leads.id, req.params.id), eq(leads.accountId, accountId)));
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -133,6 +136,9 @@ export function registerLeadCaptureRoutes(app: Express) {
 
   app.put("/api/lead-forms/:id", async (req, res) => {
     try {
+      const accountId = resolveAccountId(req);
+      const existing = await db.select().from(leadForms).where(and(eq(leadForms.id, req.params.id), eq(leadForms.accountId, accountId))).limit(1);
+      if (!existing[0]) return res.status(404).json({ error: "Lead form not found" });
       const { name, fields, thankYouMessage, redirectUrl, isActive } = req.body;
       const updated = await db.update(leadForms).set({
         ...(name && { name }),
@@ -141,7 +147,7 @@ export function registerLeadCaptureRoutes(app: Express) {
         ...(redirectUrl !== undefined && { redirectUrl }),
         ...(isActive !== undefined && { isActive }),
         updatedAt: new Date(),
-      }).where(eq(leadForms.id, req.params.id)).returning();
+      }).where(and(eq(leadForms.id, req.params.id), eq(leadForms.accountId, accountId))).returning();
       res.json({ form: updated[0] });
     } catch (error: any) {
       res.status(500).json({ error: error.message });

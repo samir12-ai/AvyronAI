@@ -26,12 +26,13 @@ export function registerFeatureFlagRoutes(app: Express) {
       if (!VALID_FLAGS.includes(flagName)) {
         return res.status(400).json({ error: `Invalid flag name: ${flagName}` });
       }
-      const { enabled, accountId, userId, reason } = req.body;
+      const { enabled, userId, reason } = req.body;
+      const accountId = resolveAccountId(req);
       if (typeof enabled !== "boolean") {
         return res.status(400).json({ error: "enabled must be a boolean" });
       }
-      await featureFlagService.setFlag(flagName, enabled, accountId || "default", userId, reason);
-      const flags = await featureFlagService.getAllFlags(accountId || "default");
+      await featureFlagService.setFlag(flagName, enabled, accountId, userId, reason);
+      const flags = await featureFlagService.getAllFlags(accountId);
       res.json({ success: true, flags });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -51,8 +52,9 @@ export function registerFeatureFlagRoutes(app: Express) {
 
   app.post("/api/feature-flags/global-kill", async (req, res) => {
     try {
-      const { accountId, userId, reason } = req.body;
-      await featureFlagService.setFlag("lead_engine_global_off", true, accountId || "default", userId, reason || "Emergency global kill switch activated");
+      const accountId = resolveAccountId(req);
+      const { userId, reason } = req.body;
+      await featureFlagService.setFlag("lead_engine_global_off", true, accountId, userId, reason || "Emergency global kill switch activated");
       res.json({ success: true, message: "Lead engine globally disabled" });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -61,8 +63,9 @@ export function registerFeatureFlagRoutes(app: Express) {
 
   app.post("/api/feature-flags/global-resume", async (req, res) => {
     try {
-      const { accountId, userId, reason } = req.body;
-      await featureFlagService.setFlag("lead_engine_global_off", false, accountId || "default", userId, reason || "Global kill switch deactivated");
+      const accountId = resolveAccountId(req);
+      const { userId, reason } = req.body;
+      await featureFlagService.setFlag("lead_engine_global_off", false, accountId, userId, reason || "Global kill switch deactivated");
       res.json({ success: true, message: "Lead engine globally re-enabled" });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
