@@ -7,7 +7,7 @@ import crypto from "crypto";
 import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
-import { authMiddleware, type AuthRequest } from "./auth";
+import { authMiddleware, adminMiddleware, type AuthRequest } from "./auth";
 
 const upload = multer({
   dest: "/tmp/veo-uploads",
@@ -111,7 +111,7 @@ export function registerVeoRoutes(app: Express) {
     }
   });
 
-  app.get("/api/veo/credits", authMiddleware, async (req: AuthRequest, res) => {
+  app.get("/api/veo/credits", authMiddleware, adminMiddleware, async (req: AuthRequest, res) => {
     try {
       const userId = req.userId!;
       const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
@@ -125,7 +125,7 @@ export function registerVeoRoutes(app: Express) {
     }
   });
 
-  app.post("/api/veo/generate-video", authMiddleware, async (req: AuthRequest, res) => {
+  app.post("/api/veo/generate-video", authMiddleware, adminMiddleware, async (req: AuthRequest, res) => {
     try {
       const client = getVeoClient();
       if (!client) {

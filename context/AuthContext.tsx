@@ -11,6 +11,7 @@ interface User {
   videoCredits: number;
   trialEnd: string | null;
   hasSeenIntro: boolean;
+  isAdmin: boolean;
 }
 
 interface AuthContextValue {

@@ -131,6 +131,7 @@ export function registerAuthRoutes(app: Router) {
           trialEnd: trialEnd.toISOString(),
           hasSeenIntro: false,
           accountId: userAccountId,
+          isAdmin: ADMIN_ACCOUNT_IDS.has(userAccountId),
         },
       });
     } catch (error: any) {
@@ -186,6 +187,7 @@ export function registerAuthRoutes(app: Router) {
           trialEnd: user.trialEnd?.toISOString() || null,
           hasSeenIntro: user.hasSeenIntro ?? false,
           accountId: userAccountId,
+          isAdmin: ADMIN_ACCOUNT_IDS.has(userAccountId),
         },
       });
     } catch (error) {
@@ -227,6 +229,7 @@ export function registerAuthRoutes(app: Router) {
           trialEnd: user.trialEnd?.toISOString() || null,
           hasSeenIntro: user.hasSeenIntro ?? false,
           accountId: user.accountId || user.id,
+          isAdmin: ADMIN_ACCOUNT_IDS.has(user.accountId || user.id),
         },
       });
     } catch (error) {

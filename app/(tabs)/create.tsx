@@ -1298,6 +1298,7 @@ export default function CreateScreen() {
                 {t('create.aiDesigner')}
               </Text>
             </Pressable>
+            {user?.isAdmin && (
             <Pressable
               onPress={() => setActiveTab('video')}
               style={[
@@ -1319,6 +1320,7 @@ export default function CreateScreen() {
                 AI Video
               </Text>
             </Pressable>
+            )}
           </View>
 
           {calendarEntryId && (
@@ -2305,7 +2307,7 @@ export default function CreateScreen() {
             </>
           )}
 
-          {activeTab === 'video' && (
+          {activeTab === 'video' && user?.isAdmin && (
             <>
               <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
                 <View style={styles.cardHeader}>
