@@ -677,6 +677,8 @@ async function _executeFetch(
       shortcode: post.shortcode,
       batchId,
     });
+    existingPostIds.add(post.postId);
+    if (post.shortcode) existingShortcodes.add(post.shortcode);
   }
 
   if (cachedPostsReused > 0) {
@@ -885,11 +887,20 @@ async function _executeFetch(
     fetchMessage = `${collectionMode}: Low data: ${persistedPostCount} posts, ${persistedCommentCount} comments${cacheInfo}. Scrape may be blocked or account is private.`;
   }
 
-  const newPostTimestamps = postInserts
-    .map((p: any) => p.timestamp instanceof Date ? p.timestamp : null)
-    .filter((t: Date | null): t is Date => t !== null);
-  const newWatermark: Date | null = newPostTimestamps.length > 0
-    ? new Date(Math.max(...newPostTimestamps.map((t: Date) => t.getTime())))
+  const confirmedBatchPosts = postInserts.length > 0
+    ? await db.select({ timestamp: ciCompetitorPosts.timestamp })
+        .from(ciCompetitorPosts)
+        .where(and(
+          eq(ciCompetitorPosts.competitorId, competitorId),
+          eq(ciCompetitorPosts.accountId, accountId),
+          eq(ciCompetitorPosts.batchId, batchId),
+        ))
+    : [];
+  const confirmedTimestamps = confirmedBatchPosts
+    .map(p => p.timestamp)
+    .filter((t): t is Date => t instanceof Date);
+  const newWatermark: Date | null = confirmedTimestamps.length > 0
+    ? new Date(Math.max(...confirmedTimestamps.map(t => t.getTime())))
     : null;
 
   console.log(

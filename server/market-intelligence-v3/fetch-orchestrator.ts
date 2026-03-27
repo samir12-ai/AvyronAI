@@ -1,5 +1,6 @@
 import { db } from "../db";
 import { miFetchJobs, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, miSnapshots, miSignalLogs, miTelemetry, growthCampaigns, competitorWebData } from "@shared/schema";
+type CiCompetitorRow = typeof ciCompetitors.$inferSelect;
 import { inArray, eq, and, desc, sql } from "drizzle-orm";
 import { fetchCompetitorData, enrichCompetitorWithComments, cleanupExpiredSyntheticComments, type FetchResult, type CollectionMode, type FetchOptions, type ScrapeMode } from "../competitive-intelligence/data-acquisition";
 import { computeAllSignals, aggregateMissingFlags, clusterSemanticSignals } from "./signal-engine";
@@ -433,7 +434,7 @@ async function executeFetchJob(
   jobId: string,
   accountId: string,
   campaignId: string,
-  competitors: any[],
+  competitors: CiCompetitorRow[],
 ): Promise<void> {
   const startTime = Date.now();
   const stages: Record<string, CompetitorStage> = {};
@@ -550,15 +551,15 @@ async function executeFetchJob(
       }
 
       const hasExistingPosts = (comp.postsCollected ?? 0) > 0;
-      const compWatermark = (comp as any).lastPostWatermark as Date | null | undefined;
-      const hasWatermark = !!compWatermark;
+      const compWatermark: Date | null = comp.lastPostWatermark ?? null;
+      const hasWatermark = compWatermark !== null;
       const detectedScrapeMode: ScrapeMode = hasExistingPosts ? "INCREMENTAL" : "INITIAL";
       const compFetchOptions: FetchOptions = {
         scrapeMode: detectedScrapeMode,
         windowDays: INCREMENTAL_WINDOW_DAYS,
-        watermark: hasWatermark ? new Date(compWatermark!) : null,
+        watermark: hasWatermark ? new Date(compWatermark!.getTime()) : null,
       };
-      console.log(`[FetchOrch] scrapeMode=${detectedScrapeMode} | competitor=${comp.name} | existingPosts=${comp.postsCollected ?? 0} | watermark=${hasWatermark ? new Date(compWatermark!).toISOString() : "none"} | windowDays=${INCREMENTAL_WINDOW_DAYS}`);
+      console.log(`[FetchOrch] scrapeMode=${detectedScrapeMode} | competitor=${comp.name} | existingPosts=${comp.postsCollected ?? 0} | watermark=${compWatermark?.toISOString() ?? "none"} | windowDays=${INCREMENTAL_WINDOW_DAYS}`);
 
       let attempt = 1;
       while (attempt <= MAX_RETRIES) {

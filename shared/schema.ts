@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, serial, timestamp, boolean, doublePrecision } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, serial, timestamp, boolean, doublePrecision, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -1582,7 +1582,9 @@ export const ciCompetitorPosts = pgTable("ci_competitor_posts", {
   shortcode: text("shortcode"),
   batchId: varchar("batch_id"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  competitorPostUnique: uniqueIndex("idx_ci_posts_competitor_postid").on(table.competitorId, table.postId),
+}));
 
 export type CiCompetitorPost = typeof ciCompetitorPosts.$inferSelect;
 
