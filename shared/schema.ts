@@ -824,6 +824,7 @@ export const ciCompetitors = pgTable("ci_competitors", {
   lastSyntheticEnrichmentAt: timestamp("last_synthetic_enrichment_at"),
   syntheticEnrichmentCount: integer("synthetic_enrichment_count").notNull().default(0),
   syntheticChurnFlag: text("synthetic_churn_flag"),
+  lastPostWatermark: timestamp("last_post_watermark"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

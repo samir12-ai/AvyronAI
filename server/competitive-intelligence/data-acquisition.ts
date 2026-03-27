@@ -315,9 +315,18 @@ export function filterSpamComments<T extends { text?: string; commentText?: stri
 }
 
 export type CollectionMode = "FAST_PASS" | "DEEP_PASS";
+export type ScrapeMode = "INITIAL" | "INCREMENTAL";
+
+export interface FetchOptions {
+  scrapeMode?: ScrapeMode;
+  windowDays?: number;
+  watermark?: Date | null;
+}
 
 const TARGET_POSTS_FAST = 12;
 const TARGET_POSTS_BASELINE = 12;
+const TARGET_POSTS_INCREMENTAL = 5;
+const CONSECUTIVE_DUPLICATE_THRESHOLD = 3;
 
 const TARGET_POSTS_DEEP = 12;
 const MAX_COMMENT_POSTS_DEEP = 12;
@@ -353,6 +362,8 @@ export interface FetchResult {
   paginationStopReason?: string;
   collectionMode?: CollectionMode;
   cachedPostsReused?: number;
+  newWatermark?: Date | null;
+  scrapeMode?: ScrapeMode;
 }
 
 export async function fetchCompetitorData(
@@ -361,6 +372,7 @@ export async function fetchCompetitorData(
   forceRefresh: boolean = false,
   proxyCtx?: import("./proxy-pool-manager").StickySessionContext,
   collectionMode: CollectionMode = "FAST_PASS",
+  fetchOptions?: FetchOptions,
 ): Promise<FetchResult> {
   const lockKey = `${accountId}:${competitorId}`;
   const existing = activeFetches.get(lockKey);
@@ -369,7 +381,7 @@ export async function fetchCompetitorData(
     return existing;
   }
 
-  const promise = _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, collectionMode);
+  const promise = _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, collectionMode, fetchOptions);
   activeFetches.set(lockKey, promise);
   try {
     return await promise;
@@ -384,6 +396,7 @@ async function _executeFetch(
   forceRefresh: boolean,
   proxyCtx?: import("./proxy-pool-manager").StickySessionContext,
   collectionMode: CollectionMode = "FAST_PASS",
+  fetchOptions?: FetchOptions,
 ): Promise<FetchResult> {
   const [competitor] = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId)));
@@ -473,7 +486,24 @@ async function _executeFetch(
     }
   }
 
-  const maxPosts = collectionMode === "FAST_PASS" ? TARGET_POSTS_FAST : TARGET_POSTS_DEEP;
+  const scrapeMode: ScrapeMode = fetchOptions?.scrapeMode ?? "INITIAL";
+  const windowDays = fetchOptions?.windowDays ?? 7;
+  const watermark = fetchOptions?.watermark ?? null;
+
+  const isIncremental = scrapeMode === "INCREMENTAL" && collectionMode !== "DEEP_PASS";
+  const cutoffDate: Date | null = isIncremental
+    ? (() => {
+        const windowCutoff = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+        if (watermark && watermark > windowCutoff) return watermark;
+        return windowCutoff;
+      })()
+    : null;
+
+  if (isIncremental) {
+    console.log(`[DataAcq] INCREMENTAL mode for ${competitor.name} | windowDays=${windowDays} | watermark=${watermark?.toISOString() ?? "none"} | cutoff=${cutoffDate!.toISOString()}`);
+  }
+
+  const maxPosts = isIncremental ? TARGET_POSTS_INCREMENTAL : (collectionMode === "FAST_PASS" ? TARGET_POSTS_FAST : TARGET_POSTS_DEEP);
 
   if (collectionMode === "DEEP_PASS") {
     const storedPostCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
@@ -519,7 +549,7 @@ async function _executeFetch(
     .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
   const existingPosts = Number(existingPostCount[0]?.count || 0);
 
-  if (existingPosts > 0 && scrapeResult.posts.length < existingPosts) {
+  if (!isIncremental && existingPosts > 0 && scrapeResult.posts.length < existingPosts) {
     console.log(`[DataAcq] DATA_DEGRADATION_GUARD: New fetch returned ${scrapeResult.posts.length} posts, DB has ${existingPosts}. Keeping existing data for ${competitor.name}.`);
     const existingCommentCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
       .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
@@ -582,12 +612,42 @@ async function _executeFetch(
   const allCtaTypes: string[] = [];
   let commentsCollected = 0;
   let cachedPostsReused = 0;
+  let consecutiveDuplicates = 0;
+  let dateCutoffSkipped = 0;
+  let earlyStopReason: string | null = null;
 
   const postInserts: Parameters<typeof db.insert>[0] extends any ? any[] : never = [];
   const commentInserts: any[] = [];
   const newPostIds: string[] = [];
 
   for (const post of postsToStore) {
+    if (earlyStopReason) break;
+
+    const isDuplicate = existingPostIds.has(post.postId) ||
+      (post.shortcode && existingShortcodes.has(post.shortcode));
+
+    if (isDuplicate) {
+      cachedPostsReused++;
+      if (isIncremental) {
+        consecutiveDuplicates++;
+        if (consecutiveDuplicates >= CONSECUTIVE_DUPLICATE_THRESHOLD) {
+          earlyStopReason = `CONSECUTIVE_DUPLICATES_${consecutiveDuplicates}`;
+          console.log(`[DataAcq] INCREMENTAL early-stop for ${competitor.name}: ${consecutiveDuplicates} consecutive duplicates hit`);
+        }
+      }
+      continue;
+    }
+
+    consecutiveDuplicates = 0;
+
+    if (isIncremental && cutoffDate && post.timestamp) {
+      const postDate = new Date(post.timestamp);
+      if (postDate < cutoffDate) {
+        dateCutoffSkipped++;
+        continue;
+      }
+    }
+
     const cta = detectCTA(post.caption);
     const hashtags = extractHashtags(post.caption);
 
@@ -596,14 +656,6 @@ async function _executeFetch(
       for (const t of cta.ctaType.split(",")) {
         if (!allCtaTypes.includes(t)) allCtaTypes.push(t);
       }
-    }
-
-    const isDuplicate = existingPostIds.has(post.postId) ||
-      (post.shortcode && existingShortcodes.has(post.shortcode));
-
-    if (isDuplicate) {
-      cachedPostsReused++;
-      continue;
     }
 
     newPostIds.push(post.postId);
@@ -833,7 +885,18 @@ async function _executeFetch(
     fetchMessage = `${collectionMode}: Low data: ${persistedPostCount} posts, ${persistedCommentCount} comments${cacheInfo}. Scrape may be blocked or account is private.`;
   }
 
-  console.log(`[DataAcq] Completed for ${competitor.name}: ${persistedPostCount} posts (verified, ${cachedPostsReused} cached), ${persistedCommentCount} comments (verified), status=${fetchStatus}, CTA coverage ${Math.round(ctaCoverage * 100)}%, method=${scrapeResult.collectionMethodUsed}, pagination=${scrapeResult.paginationPages || 1} pages, stopReason=${scrapeResult.paginationStopReason || "N/A"}`);
+  const newPostTimestamps = postInserts
+    .map((p: any) => p.timestamp instanceof Date ? p.timestamp : null)
+    .filter((t: Date | null): t is Date => t !== null);
+  const newWatermark: Date | null = newPostTimestamps.length > 0
+    ? new Date(Math.max(...newPostTimestamps.map((t: Date) => t.getTime())))
+    : null;
+
+  if (isIncremental) {
+    console.log(`[DataAcq] INCREMENTAL result for ${competitor.name}: newPosts=${postInserts.length} | dateCutoffSkipped=${dateCutoffSkipped} | duplicatesSkipped=${cachedPostsReused} | earlyStop=${earlyStopReason ?? "none"} | newWatermark=${newWatermark?.toISOString() ?? "none"}`);
+  } else {
+    console.log(`[DataAcq] Completed for ${competitor.name}: ${persistedPostCount} posts (verified, ${cachedPostsReused} cached), ${persistedCommentCount} comments (verified), status=${fetchStatus}, CTA coverage ${Math.round(ctaCoverage * 100)}%, method=${scrapeResult.collectionMethodUsed}, pagination=${scrapeResult.paginationPages || 1} pages, stopReason=${scrapeResult.paginationStopReason || "N/A"}`);
+  }
 
   return {
     competitorId,
@@ -850,9 +913,11 @@ async function _executeFetch(
     message: fetchMessage,
     rawFetchedCount: scrapeResult.rawFetchedCount,
     paginationPages: scrapeResult.paginationPages,
-    paginationStopReason: scrapeResult.paginationStopReason,
+    paginationStopReason: earlyStopReason || scrapeResult.paginationStopReason,
     collectionMode,
     cachedPostsReused,
+    newWatermark,
+    scrapeMode,
   };
 }
 

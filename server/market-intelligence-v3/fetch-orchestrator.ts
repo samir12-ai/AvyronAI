@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { miFetchJobs, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, miSnapshots, miSignalLogs, miTelemetry, growthCampaigns, competitorWebData } from "@shared/schema";
 import { inArray, eq, and, desc, sql } from "drizzle-orm";
-import { fetchCompetitorData, enrichCompetitorWithComments, cleanupExpiredSyntheticComments, type FetchResult, type CollectionMode } from "../competitive-intelligence/data-acquisition";
+import { fetchCompetitorData, enrichCompetitorWithComments, cleanupExpiredSyntheticComments, type FetchResult, type CollectionMode, type FetchOptions, type ScrapeMode } from "../competitive-intelligence/data-acquisition";
 import { computeAllSignals, aggregateMissingFlags, clusterSemanticSignals } from "./signal-engine";
 import { classifyAllIntents, computeDominantMarketIntent } from "./intent-engine";
 import { computeTrajectory, deriveTrajectoryDirection, deriveMarketState } from "./trajectory-engine";
@@ -22,6 +22,8 @@ import { applyQualityGate, filterClustersByQuality } from "../shared/signal-qual
 import { logAudit } from "../audit";
 import { acquireStickySession, releaseStickySession, rotateSessionOnBlock, classifyBlock, logProxyTelemetry, getPoolDiagnostics, type StickySessionContext, type BlockClass } from "../competitive-intelligence/proxy-pool-manager";
 import { acquireToken, getBucketState } from "../competitive-intelligence/rate-limiter";
+
+const INCREMENTAL_WINDOW_DAYS = 7;
 
 function safeParseJson(val: string | null | undefined, fallback: any): any {
   if (!val) return fallback;
@@ -547,6 +549,17 @@ async function executeFetchJob(
         console.log(`[FetchOrch] Sticky session acquired | competitor=${comp.name} | session=${proxyCtx.session.sessionId} | ipHash=${proxyCtx.session.ipHash}`);
       }
 
+      const hasExistingPosts = (comp.postsCollected ?? 0) > 0;
+      const compWatermark = (comp as any).lastPostWatermark as Date | null | undefined;
+      const hasWatermark = !!compWatermark;
+      const detectedScrapeMode: ScrapeMode = hasExistingPosts ? "INCREMENTAL" : "INITIAL";
+      const compFetchOptions: FetchOptions = {
+        scrapeMode: detectedScrapeMode,
+        windowDays: INCREMENTAL_WINDOW_DAYS,
+        watermark: hasWatermark ? new Date(compWatermark!) : null,
+      };
+      console.log(`[FetchOrch] scrapeMode=${detectedScrapeMode} | competitor=${comp.name} | existingPosts=${comp.postsCollected ?? 0} | watermark=${hasWatermark ? new Date(compWatermark!).toISOString() : "none"} | windowDays=${INCREMENTAL_WINDOW_DAYS}`);
+
       let attempt = 1;
       while (attempt <= MAX_RETRIES) {
         if (checkRuntimeCeiling() || checkRequestCeiling()) break;
@@ -560,7 +573,7 @@ async function executeFetchJob(
         stage.requestsUsed++;
         const startMs = Date.now();
         try {
-          fetchResult = await fetchCompetitorData(comp.id, accountId, attempt > 1, proxyCtx || undefined, "FAST_PASS");
+          fetchResult = await fetchCompetitorData(comp.id, accountId, attempt > 1, proxyCtx || undefined, "FAST_PASS", compFetchOptions);
           if (proxyCtx) {
             logProxyTelemetry(proxyCtx, "POSTS_FETCH", 200, null, Date.now() - startMs, true);
           }
@@ -737,18 +750,23 @@ async function executeFetchJob(
       totalPosts += fetchResult.postsCollected;
 
       try {
+        const watermarkUpdate: Record<string, any> = {
+          analysisLevel: "FAST_PASS",
+          enrichmentStatus: "PENDING",
+          fetchMethod: "FAST_PASS",
+          postsCollected: fetchResult.postsCollected,
+          commentsCollected: fetchResult.commentsCollected,
+          lastCheckedAt: new Date(),
+          updatedAt: new Date(),
+        };
+        if (fetchResult.newWatermark != null) {
+          watermarkUpdate.lastPostWatermark = fetchResult.newWatermark;
+          console.log(`[FetchOrch] Watermark updated for ${comp.name}: ${fetchResult.newWatermark.toISOString()} (scrapeMode=${fetchResult.scrapeMode ?? "INITIAL"})`);
+        }
         await db.update(ciCompetitors)
-          .set({
-            analysisLevel: "FAST_PASS",
-            enrichmentStatus: "PENDING",
-            fetchMethod: "FAST_PASS",
-            postsCollected: fetchResult.postsCollected,
-            commentsCollected: fetchResult.commentsCollected,
-            lastCheckedAt: new Date(),
-            updatedAt: new Date(),
-          })
+          .set(watermarkUpdate)
           .where(eq(ciCompetitors.id, comp.id));
-        console.log(`[FetchOrch] FAST_PASS completed | competitor=${comp.name} | analysisLevel=FAST_PASS | enrichmentStatus=PENDING | posts=${fetchResult.postsCollected} | comments=${fetchResult.commentsCollected}`);
+        console.log(`[FetchOrch] FAST_PASS completed | competitor=${comp.name} | analysisLevel=FAST_PASS | enrichmentStatus=PENDING | posts=${fetchResult.postsCollected} | comments=${fetchResult.commentsCollected} | scrapeMode=${fetchResult.scrapeMode ?? "INITIAL"}`);
       } catch (invErr: any) {
         console.error(`[FetchOrch] Failed to update inventory for ${comp.name}: ${invErr.message}`);
       }
