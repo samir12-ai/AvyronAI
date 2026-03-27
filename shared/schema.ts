@@ -1584,6 +1584,7 @@ export const ciCompetitorPosts = pgTable("ci_competitor_posts", {
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   competitorPostUnique: uniqueIndex("idx_ci_posts_competitor_postid").on(table.competitorId, table.postId),
+  competitorShortcodeUnique: uniqueIndex("idx_ci_posts_competitor_shortcode").on(table.competitorId, table.shortcode).where(sql`${table.shortcode} IS NOT NULL`),
 }));
 
 export type CiCompetitorPost = typeof ciCompetitorPosts.$inferSelect;
