@@ -764,10 +764,10 @@ async function _executeFetch(
 
   await db.transaction(async (tx) => {
     for (const postRow of postInserts) {
-      await tx.insert(ciCompetitorPosts).values(postRow);
+      await tx.insert(ciCompetitorPosts).values(postRow).onConflictDoNothing();
     }
     for (const commentRow of commentInserts) {
-      await tx.insert(ciCompetitorComments).values(commentRow);
+      await tx.insert(ciCompetitorComments).values(commentRow).onConflictDoNothing();
     }
   });
   console.log(`[DataAcq] Transaction complete: inserted ${postInserts.length} new posts + ${commentInserts.length} comments (reused ${cachedPostsReused} cached posts) for ${competitor.name}`);
@@ -813,7 +813,7 @@ async function _executeFetch(
 
   const expectedPostCount = existingPostIds.size + postInserts.length;
   if (persistedPostCount !== expectedPostCount) {
-    console.error(`[DataAcq] DATA_MISMATCH_ERROR for ${competitor.name}: expected ${expectedPostCount} posts (${existingPostIds.size} existing + ${postInserts.length} new) but DB has ${persistedPostCount}`);
+    console.warn(`[DataAcq] DATA_MISMATCH_WARN for ${competitor.name}: expected ${expectedPostCount} posts (${existingPostIds.size} existing + ${postInserts.length} attempted) but DB has ${persistedPostCount} — likely caused by concurrent scrape or ON CONFLICT skip`);
   }
 
   let dataFreshnessDays = 0;
@@ -892,11 +892,20 @@ async function _executeFetch(
     ? new Date(Math.max(...newPostTimestamps.map((t: Date) => t.getTime())))
     : null;
 
-  if (isIncremental) {
-    console.log(`[DataAcq] INCREMENTAL result for ${competitor.name}: newPosts=${postInserts.length} | dateCutoffSkipped=${dateCutoffSkipped} | duplicatesSkipped=${cachedPostsReused} | earlyStop=${earlyStopReason ?? "none"} | newWatermark=${newWatermark?.toISOString() ?? "none"}`);
-  } else {
-    console.log(`[DataAcq] Completed for ${competitor.name}: ${persistedPostCount} posts (verified, ${cachedPostsReused} cached), ${persistedCommentCount} comments (verified), status=${fetchStatus}, CTA coverage ${Math.round(ctaCoverage * 100)}%, method=${scrapeResult.collectionMethodUsed}, pagination=${scrapeResult.paginationPages || 1} pages, stopReason=${scrapeResult.paginationStopReason || "N/A"}`);
-  }
+  console.log(
+    `[DataAcq] SCRAPE_COMPLETE | competitor=${competitor.name}` +
+    ` | scrapeMode=${scrapeMode}` +
+    ` | window=${isIncremental ? `${windowDays}d` : "N/A"}` +
+    ` | watermarkBefore=${watermark?.toISOString() ?? "none"}` +
+    ` | rawFetched=${scrapeResult.posts.length}` +
+    ` | inserted=${postInserts.length}` +
+    ` | duplicatesSkipped=${cachedPostsReused}` +
+    ` | cutoffSkipped=${dateCutoffSkipped}` +
+    ` | stopReason=${earlyStopReason ?? scrapeResult.paginationStopReason ?? "N/A"}` +
+    ` | watermarkAfter=${newWatermark?.toISOString() ?? "none"}` +
+    ` | totalDBPosts=${persistedPostCount}` +
+    ` | status=${fetchStatus}`
+  );
 
   return {
     competitorId,
