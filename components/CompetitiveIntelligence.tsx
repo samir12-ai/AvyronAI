@@ -172,7 +172,7 @@ export default function CompetitiveIntelligence() {
       if (addAndFetch && data?.competitor?.id) {
         setAddAndFetch(false);
         setTimeout(() => {
-          fetchDataMutation.mutate({ id: data.competitor.id });
+          fetchDataMutation.mutate();
         }, 500);
       }
     },
@@ -502,7 +502,7 @@ export default function CompetitiveIntelligence() {
                   </View>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                     <Text style={{ fontSize: 11, color: colors.textMuted }}>Data freshness</Text>
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.dataFreshnessDays || 999) <= 7 ? '#10B981' : '#F59E0B' }}>{dc?.postsCollected > 0 ? `${dc.dataFreshnessDays}d ago` : 'No data'}</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: (dc?.dataFreshnessDays || 999) <= 7 ? '#10B981' : '#F59E0B' }}>{(dc?.postsCollected ?? 0) > 0 ? `${dc?.dataFreshnessDays}d ago` : 'No data'}</Text>
                   </View>
                   {dc?.followers != null && (
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>

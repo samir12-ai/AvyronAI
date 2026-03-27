@@ -6,3 +6,9 @@ id = "p_lruz88rKkRy-6mcG_ml"
 uri = "file://.local/signal-coverage-map.md"
 type = "text"
 title = "Signal Coverage Map — All Engines"
+
+[[outputs]]
+id = "H9eda_1OVZsyiZLicwi-j"
+uri = "file://CAMPAIGN_PREVIEW_AUDIT_REPORT.md"
+type = "text"
+title = "Campaign Preview Bug Audit Report"

@@ -580,26 +580,26 @@ function CampaignListModal({
               />
 
               {confirmDeleteId && (
-                <View style={styles.confirmDeleteBar}>
-                  <Text style={styles.confirmDeleteText} numberOfLines={2}>
+                <View style={formStyles.confirmDeleteBar}>
+                  <Text style={formStyles.confirmDeleteText} numberOfLines={2}>
                     Delete "{confirmDeleteName}"? This removes all metrics.
                   </Text>
-                  <View style={styles.confirmDeleteActions}>
+                  <View style={formStyles.confirmDeleteActions}>
                     <TouchableOpacity
-                      style={styles.confirmDeleteCancel}
+                      style={formStyles.confirmDeleteCancel}
                       onPress={() => setConfirmDeleteId(null)}
                     >
-                      <Text style={styles.confirmDeleteCancelText}>Cancel</Text>
+                      <Text style={formStyles.confirmDeleteCancelText}>Cancel</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={styles.confirmDeleteBtn}
+                      style={formStyles.confirmDeleteBtn}
                       onPress={handleConfirmDelete}
                       disabled={deleting}
                     >
                       {deleting ? (
                         <ActivityIndicator size="small" color="#fff" />
                       ) : (
-                        <Text style={styles.confirmDeleteBtnText}>Delete</Text>
+                        <Text style={formStyles.confirmDeleteBtnText}>Delete</Text>
                       )}
                     </TouchableOpacity>
                   </View>

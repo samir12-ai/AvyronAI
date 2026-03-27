@@ -22,6 +22,33 @@ interface BudgetRange {
   currency: string;
 }
 
+interface DataSourceStatisticalValidity {
+  isStatisticallyValid: boolean;
+  confidenceLevel: number;
+  conversions: number;
+  minimumConversions: number;
+  spend?: number;
+  minimumSpend?: number;
+}
+
+interface DataSourceTransitionEligibility {
+  eligible: boolean;
+  currentMode: string;
+  recommendedMode: string;
+}
+
+interface DataSource {
+  isBenchmark: boolean;
+  confidence?: number | null;
+  benchmarkLabel?: string;
+  anomalies?: Array<{ severity: string; message: string }>;
+  warnings?: string[];
+  isProjectionOnly?: boolean;
+  switchReason?: string;
+  statisticalValidity?: DataSourceStatisticalValidity;
+  transitionEligibility?: DataSourceTransitionEligibility;
+}
+
 interface BudgetGovernorData {
   exists: boolean;
   id?: string;
@@ -53,6 +80,7 @@ interface BudgetGovernorData {
   executionTimeMs?: number;
   engineVersion?: number;
   layerDiagnostics?: Record<string, any>;
+  dataSource?: DataSource | null;
 }
 
 const DECISION_CONFIG: Record<string, { color: string; icon: keyof typeof Ionicons.glyphMap; label: string }> = {
@@ -343,7 +371,7 @@ export default function BudgetGovernorEngine({ isActive }: { isActive?: boolean 
                 }]}>
                   <View style={styles.dataSourceBannerRow}>
                     <Ionicons
-                      name={data.dataSource.statisticalValidity.isStatisticallyValid ? 'checkmark-shield-outline' : 'shield-outline'}
+                      name={data.dataSource.statisticalValidity.isStatisticallyValid ? 'shield-checkmark-outline' : 'shield-outline'}
                       size={13}
                       color={data.dataSource.statisticalValidity.isStatisticallyValid ? '#10B981' : '#EF4444'}
                     />
@@ -474,7 +502,7 @@ export default function BudgetGovernorEngine({ isActive }: { isActive?: boolean 
               <Pressable onPress={() => toggleSection('expansion')} style={styles.sectionHeader}>
                 <View style={styles.sectionHeaderLeft}>
                   <Ionicons
-                    name={data.expansionPermission.allowed ? "checkmark-shield" : "close-circle"}
+                    name={data.expansionPermission.allowed ? "shield-checkmark" : "close-circle"}
                     size={16}
                     color={data.expansionPermission.allowed ? '#10B981' : '#EF4444'}
                   />
