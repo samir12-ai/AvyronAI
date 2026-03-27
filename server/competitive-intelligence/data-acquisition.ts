@@ -608,6 +608,8 @@ async function _executeFetch(
     }
   }
 
+  const initialExistingPostCount = existingPostIds.size;
+
   let ctaCount = 0;
   const allCtaTypes: string[] = [];
   let commentsCollected = 0;
@@ -683,6 +685,11 @@ async function _executeFetch(
 
   if (cachedPostsReused > 0) {
     console.log(`[DataAcq] CACHE_FIRST: ${cachedPostsReused} existing posts reused, ${postInserts.length} new posts to insert for ${competitor.name}`);
+  }
+
+  if (isIncremental && !earlyStopReason && dateCutoffSkipped > 0) {
+    earlyStopReason = `INCREMENTAL_WINDOW_EXHAUSTED_cutoff=${dateCutoffSkipped}`;
+    console.log(`[DataAcq] INCREMENTAL window exhausted for ${competitor.name}: ${dateCutoffSkipped} posts outside ${windowDays}d window, ${postInserts.length} new posts inserted`);
   }
 
   const rawEmbeddedComments = scrapeResult.embeddedComments || [];
@@ -813,9 +820,9 @@ async function _executeFetch(
   const persistedPostCount = Number(verifyPosts[0]?.count || 0);
   const persistedCommentCount = Number(verifyComments[0]?.count || 0);
 
-  const expectedPostCount = existingPostIds.size + postInserts.length;
+  const expectedPostCount = initialExistingPostCount + postInserts.length;
   if (persistedPostCount !== expectedPostCount) {
-    console.warn(`[DataAcq] DATA_MISMATCH_WARN for ${competitor.name}: expected ${expectedPostCount} posts (${existingPostIds.size} existing + ${postInserts.length} attempted) but DB has ${persistedPostCount} — likely caused by concurrent scrape or ON CONFLICT skip`);
+    console.warn(`[DataAcq] DATA_MISMATCH_WARN for ${competitor.name}: expected ${expectedPostCount} posts (${initialExistingPostCount} existing + ${postInserts.length} attempted) but DB has ${persistedPostCount} — likely caused by concurrent scrape or ON CONFLICT skip`);
   }
 
   let dataFreshnessDays = 0;
