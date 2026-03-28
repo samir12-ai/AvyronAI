@@ -12,3 +12,9 @@ id = "H9eda_1OVZsyiZLicwi-j"
 uri = "file://CAMPAIGN_PREVIEW_AUDIT_REPORT.md"
 type = "text"
 title = "Campaign Preview Bug Audit Report"
+
+[[outputs]]
+id = "VlJ7pJqwW54M9fpNRK3th"
+uri = "file://STAGING_SETUP.md"
+type = "text"
+title = "Staging Environment Setup Guide"

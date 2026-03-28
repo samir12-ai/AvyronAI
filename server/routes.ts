@@ -51,6 +51,7 @@ import { storeTokensAfterOAuth, runAllHealthChecks } from "./meta-token-manager"
 import { redactToken } from "./meta-crypto";
 import { initMetaMetrics } from "./meta-metrics";
 import { registerAuthRoutes, resolveAccountId } from "./auth";
+import { registerStagingAdminRoutes } from "./staging-admin-routes";
 import { db } from "./db";
 import { metaCredentials } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -59,6 +60,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 
 export async function registerRoutes(app: Express): Promise<Server> {
   registerAuthRoutes(app);
+  registerStagingAdminRoutes(app);
 
   app.get("/api/engines/health", async (req, res) => {
     try {
