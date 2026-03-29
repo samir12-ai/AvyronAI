@@ -1,5 +1,13 @@
 import { db } from "./db";
 import { sql } from "drizzle-orm";
+import {
+  positioningSnapshots,
+  differentiationSnapshots,
+  mechanismSnapshots,
+  offerSnapshots,
+  funnelSnapshots,
+} from "@shared/schema";
+import { eq, and, or, desc } from "drizzle-orm";
 
 interface NarrativeStep {
   key: string;
@@ -28,15 +36,6 @@ function pick(obj: any, ...keys: string[]): string | null {
     if (typeof v === "string" && v.trim()) return v.trim();
   }
   return null;
-}
-
-function pickNested(obj: any, path: string[]): string | null {
-  let cur = obj;
-  for (const k of path) {
-    if (!cur) return null;
-    cur = cur[k];
-  }
-  return typeof cur === "string" && cur.trim() ? cur.trim() : null;
 }
 
 function firstItem(obj: any, ...keys: string[]): any {
@@ -92,7 +91,6 @@ function humanize(text: string): string {
   }
 
   out = out.replace(/^[a-z]/, c => c.toUpperCase());
-
   out = out.trim();
 
   return out;
@@ -109,41 +107,78 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
   if (!job || !job.section_statuses) return empty;
 
   const sections: Array<{ id: string; status: string }> = safeP(job.section_statuses) || [];
-  const completed = sections.filter(s => s.status === "SUCCESS");
+  const completed = sections.filter(s => s.status === "SUCCESS" || s.status === "COMPLETE");
   if (completed.length < 3) return empty;
 
   const completedIds = new Set(completed.map(s => s.id));
 
-  const base = `http://localhost:${process.env.PORT || 5000}`;
-  const q = `?campaignId=${encodeURIComponent(campaignId)}`;
+  const COMPLETE_STATUS = ["COMPLETE", "SUCCESS"];
 
-  async function safe(url: string): Promise<any> {
-    try { const r = await fetch(url); if (!r.ok) return null; return r.json(); } catch { return null; }
-  }
+  const [posRows, diffRows, mechRows, offerRows, funnelRows] = await Promise.all([
+    db.select().from(positioningSnapshots)
+      .where(and(
+        eq(positioningSnapshots.campaignId, campaignId),
+        eq(positioningSnapshots.accountId, accountId),
+        or(...COMPLETE_STATUS.map(s => eq(positioningSnapshots.status, s)))
+      ))
+      .orderBy(desc(positioningSnapshots.createdAt))
+      .limit(1)
+      .catch(() => []),
 
-  const apiMap: Record<string, string> = {
-    positioning: `/api/positioning-engine/latest${q}`,
-    differentiation: `/api/differentiation-engine/latest${q}`,
-    mechanism: `/api/mechanism-engine/latest${q}`,
-    offer: `/api/offer-engine/latest${q}`,
-    funnel: `/api/funnel-engine/latest${q}`,
-  };
+    completedIds.has("differentiation")
+      ? db.select().from(differentiationSnapshots)
+          .where(and(
+            eq(differentiationSnapshots.campaignId, campaignId),
+            eq(differentiationSnapshots.accountId, accountId),
+            or(...COMPLETE_STATUS.map(s => eq(differentiationSnapshots.status, s)))
+          ))
+          .orderBy(desc(differentiationSnapshots.createdAt))
+          .limit(1)
+          .catch(() => [])
+      : Promise.resolve([]),
 
-  const results: Record<string, any> = {};
-  await Promise.all(
-    Object.entries(apiMap).map(async ([k, path]) => {
-      if (completedIds.has(k) || k === "positioning") {
-        const data = await safe(`${base}${path}`);
-        if (data && !data.error) results[k] = data;
-      }
-    })
-  );
+    completedIds.has("mechanism")
+      ? db.select().from(mechanismSnapshots)
+          .where(and(
+            eq(mechanismSnapshots.campaignId, campaignId),
+            eq(mechanismSnapshots.accountId, accountId),
+            or(...COMPLETE_STATUS.map(s => eq(mechanismSnapshots.status, s)))
+          ))
+          .orderBy(desc(mechanismSnapshots.createdAt))
+          .limit(1)
+          .catch(() => [])
+      : Promise.resolve([]),
+
+    completedIds.has("offer")
+      ? db.select().from(offerSnapshots)
+          .where(and(
+            eq(offerSnapshots.campaignId, campaignId),
+            eq(offerSnapshots.accountId, accountId),
+            or(...COMPLETE_STATUS.map(s => eq(offerSnapshots.status, s)))
+          ))
+          .orderBy(desc(offerSnapshots.createdAt))
+          .limit(1)
+          .catch(() => [])
+      : Promise.resolve([]),
+
+    completedIds.has("funnel")
+      ? db.select().from(funnelSnapshots)
+          .where(and(
+            eq(funnelSnapshots.campaignId, campaignId),
+            eq(funnelSnapshots.accountId, accountId),
+            or(...COMPLETE_STATUS.map(s => eq(funnelSnapshots.status, s)))
+          ))
+          .orderBy(desc(funnelSnapshots.createdAt))
+          .limit(1)
+          .catch(() => [])
+      : Promise.resolve([]),
+  ]);
 
   let aelData: any = null;
   try {
     const aelRows = await db.execute(
       sql`SELECT root_causes, causal_chains, buying_barriers
-          FROM ael_snapshots WHERE campaign_id = ${campaignId} ORDER BY created_at DESC LIMIT 1`
+          FROM ael_snapshots WHERE campaign_id = ${campaignId} AND account_id = ${accountId} ORDER BY created_at DESC LIMIT 1`
     );
     if (aelRows.rows?.[0]) {
       aelData = {
@@ -154,17 +189,21 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
     }
   } catch {}
 
-  const pos = results.positioning || {};
-  const diff = results.differentiation || {};
-  const mech = results.mechanism || {};
-  const ofr = results.offer || {};
-  const fnl = results.funnel || {};
+  const posRow = posRows[0] || null;
+  const diffRow = diffRows[0] || null;
+  const mechRow = mechRows[0] || null;
+  const offerRow = offerRows[0] || null;
+  const funnelRow = funnelRows[0] || null;
 
-  const primaryTerritory = safeP(pos.territory) || firstItem(pos, "territories", "positioningTerritories");
+  const primaryTerritory = safeP(posRow?.territory) || firstItem({ territories: posRow?.territories }, "territories");
   const territoryName = primaryTerritory?.name || primaryTerritory?.territoryName || null;
-  const enemy = primaryTerritory?.enemyDefinition || pick(pos, "enemyDefinition") || null;
-  const contrastAxis = primaryTerritory?.contrastAxis || pick(pos, "contrastAxis") || null;
-  const narrativeDirection = primaryTerritory?.narrativeDirection || pick(pos, "narrativeDirection") || null;
+  const enemy = primaryTerritory?.enemyDefinition
+    || (posRow?.enemyDefinition ? posRow.enemyDefinition : null)
+    || pick(primaryTerritory, "enemy") || null;
+  const contrastAxis = primaryTerritory?.contrastAxis
+    || (posRow?.contrastAxis ? posRow.contrastAxis : null) || null;
+  const narrativeDirection = primaryTerritory?.narrativeDirection
+    || (posRow?.narrativeDirection ? posRow.narrativeDirection : null) || null;
 
   let problemText: string | null = null;
   let problemSource = "positioning";
@@ -229,16 +268,18 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
     positionSource = "none";
   }
 
-  const mechObj = mech.primaryMechanism || mech;
-  const mechName = pick(mechObj, "mechanismName") || pick(mech, "mechanismName");
-  const mechType = pick(mechObj, "mechanismType") || pick(mech, "mechanismType");
-  const diffPillars = safeP(diff.pillars || diff.differentiationPillars) || [];
+  const mechObj = safeP(mechRow?.primaryMechanism) || {};
+  const mechName = pick(mechObj, "mechanismName") || null;
+  const mechType = pick(mechObj, "mechanismType") || null;
+
+  const diffPillars = safeP(diffRow?.differentiationPillars) || [];
   const topPillar = Array.isArray(diffPillars) && diffPillars[0]
     ? (diffPillars[0].name || diffPillars[0].pillarName)
     : null;
-  const authorityMode = typeof diff.authorityMode === "object"
-    ? diff.authorityMode?.mode
-    : (typeof diff.authorityMode === "string" ? diff.authorityMode : null);
+  const authorityModeRaw = safeP(diffRow?.authorityMode);
+  const authorityMode = typeof authorityModeRaw === "object"
+    ? authorityModeRaw?.mode
+    : (typeof authorityModeRaw === "string" ? authorityModeRaw : null);
 
   let howText: string;
   let howSource = "mechanism";
@@ -259,11 +300,11 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
     howSource = "none";
   }
 
-  const funnelObj = fnl.primaryFunnel || fnl;
-  const funnelType = pick(funnelObj, "funnelType", "funnelName") || pick(fnl, "funnelType", "funnelName");
-  const offerObj = ofr.primaryOffer || ofr;
-  const offerName = pick(offerObj, "offerName") || pick(ofr, "offerName");
-  const coreOutcome = pick(offerObj, "coreOutcome") || pick(ofr, "coreOutcome");
+  const funnelObj = safeP(funnelRow?.primaryFunnel) || {};
+  const funnelType = pick(funnelObj, "funnelType", "funnelName") || null;
+  const offerObj = safeP(offerRow?.primaryOffer) || {};
+  const offerName = pick(offerObj, "offerName") || null;
+  const coreOutcome = pick(offerObj, "coreOutcome") || null;
 
   let executeText: string;
   let executeSource = "offer+funnel";

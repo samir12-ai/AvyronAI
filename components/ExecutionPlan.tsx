@@ -313,7 +313,7 @@ function KpiRow({ icon, label, value, textColor, subColor }: { icon: keyof typeo
   );
 }
 
-export default function ExecutionPlan() {
+export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: () => void } = {}) {
   const isDark = useColorScheme() === 'dark';
   const router = useRouter();
   const { selectedCampaignId } = useCampaign();
@@ -378,9 +378,11 @@ export default function ExecutionPlan() {
         if (Platform.OS !== 'web') {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         }
+        onPlanGenerated?.();
       } else if (data.status === 'ACTIONABILITY_FAILED' && data.plan) {
         setPlan(data.plan);
         setError(`Some decisions need more specificity (${data.failedBlocks.join(', ')})`);
+        onPlanGenerated?.();
       } else if (data.status === 'INSUFFICIENT_DATA') {
         setError(data.error || 'Not enough engine data. Run the strategy engines first.');
       } else {

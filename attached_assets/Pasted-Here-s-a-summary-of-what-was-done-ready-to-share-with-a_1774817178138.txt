@@ -1,0 +1,38 @@
+Here's a summary of what was done, ready to share with another agent:
+
+Strategic Narrative ↔ Execution Plan Linking
+What Was Done
+Linked the Strategic Narrative and Execution Plan so that generating an execution plan automatically refreshes the strategic narrative — no separate step needed.
+
+Changes Made
+1. Backend — server/build-plan-layer/routes.ts
+
+After the execution plan is generated via POST /api/build-plan-layer/generate, the server now also calls buildCausalNarrative() and includes the narrative in the response.
+The narrative generation is wrapped in a try/catch so it never blocks or breaks the plan generation.
+2. Backend — server/narrative-layer.ts (critical fix)
+
+The narrative layer was previously fetching engine data through internal HTTP calls to localhost endpoints (e.g., /api/positioning-engine/latest). These endpoints require authentication, so the calls always failed silently, causing all narrative steps to show "Pending."
+Replaced all HTTP calls with direct database queries against the snapshot tables (positioning_snapshots, differentiation_snapshots, mechanism_snapshots, offer_snapshots, funnel_snapshots).
+Fixed status filter: engine snapshots use COMPLETE (not SUCCESS), so the query now checks for both.
+Added account_id filter to all queries (including ael_snapshots) for proper multi-tenant isolation.
+3. Frontend — components/ExecutionPlan.tsx
+
+Added an onPlanGenerated callback prop. It fires when the plan is successfully generated (both SUCCESS and ACTIONABILITY_FAILED with a plan).
+4. Frontend — components/NarrativeCard.tsx
+
+Added an optional refreshKey prop. When it changes, the component re-fetches the narrative from the API.
+5. Frontend — app/(tabs)/index.tsx (Dashboard)
+
+Added a narrativeRefreshKey state counter.
+Passes onPlanGenerated to ExecutionPlan that increments the counter.
+Passes refreshKey to NarrativeCard so it auto-refreshes when a plan is generated.
+Key Files
+server/build-plan-layer/routes.ts
+server/narrative-layer.ts
+components/ExecutionPlan.tsx
+components/NarrativeCard.tsx
+app/(tabs)/index.tsx
+Important Notes
+The narrative is a read-only post-processing layer — it doesn't make AI calls. It aggregates existing engine snapshot data into a 5-step causal chain (Market Problem → Why It Happens → What We Do → How We Fix It → What To Execute).
+Engine snapshot tables use COMPLETE as status, not SUCCESS. Any new queries against these tables must account for this.
+The ael_snapshots table may not exist in all environments — queries against it must be wrapped in try/catch.

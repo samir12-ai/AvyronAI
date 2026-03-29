@@ -1,7 +1,8 @@
 import type { Express } from "express";
 import { runBuildPlanLayer } from "./engine";
-
 import { resolveAccountId } from "../auth";
+import { buildCausalNarrative } from "../narrative-layer";
+
 export function registerBuildPlanLayerRoutes(app: Express) {
   app.post("/api/build-plan-layer/generate", async (req, res) => {
     try {
@@ -14,7 +15,14 @@ export function registerBuildPlanLayerRoutes(app: Express) {
       const depthGateStatus = req.body.depthGateStatus || undefined;
       const result = await runBuildPlanLayer(accountId, campaignId, depthGateStatus);
 
-      res.json(result);
+      let narrative = null;
+      try {
+        narrative = await buildCausalNarrative(campaignId, accountId);
+      } catch (narrativeErr: any) {
+        console.warn("[BuildPlanLayer] Narrative generation failed (non-blocking):", narrativeErr?.message);
+      }
+
+      res.json({ ...result, narrative });
     } catch (err: any) {
       console.error("[BuildPlanLayer] Route error:", err.message);
       res.status(500).json({ error: err.message });

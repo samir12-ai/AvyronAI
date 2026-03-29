@@ -31,7 +31,7 @@ const SOURCE_LABELS: Record<string, string> = {
   none: 'Pending',
 };
 
-export default function NarrativeCard({ campaignId, isDark }: { campaignId: string | null; isDark: boolean }) {
+export default function NarrativeCard({ campaignId, isDark, refreshKey }: { campaignId: string | null; isDark: boolean; refreshKey?: number }) {
   const [data, setData] = useState<NarrativeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(true);
@@ -58,7 +58,7 @@ export default function NarrativeCard({ campaignId, isDark }: { campaignId: stri
     setLoading(false);
   }, [campaignId]);
 
-  useEffect(() => { fetchNarrative(); }, [fetchNarrative]);
+  useEffect(() => { fetchNarrative(); }, [fetchNarrative, refreshKey]);
 
   if (loading) return null;
   if (!data?.hasNarrative || !data.steps.length) return null;

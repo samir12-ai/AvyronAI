@@ -160,6 +160,7 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [orchestratorRunning, setOrchestratorRunning] = useState(false);
+  const [narrativeRefreshKey, setNarrativeRefreshKey] = useState(0);
   const prevCampaignRef = useRef<string | null | undefined>(undefined);
 
   const headerFade = useRef(new RNAnimated.Value(0)).current;
@@ -569,9 +570,9 @@ export default function DashboardScreen() {
               onApprovePlan={handleApprovePlan}
             />
 
-            <NarrativeCard campaignId={selectedCampaignId} isDark={isDark} />
+            <NarrativeCard campaignId={selectedCampaignId} isDark={isDark} refreshKey={narrativeRefreshKey} />
 
-            <ExecutionPlan />
+            <ExecutionPlan onPlanGenerated={() => setNarrativeRefreshKey(k => k + 1)} />
 
             <RequiredWorkCard campaignId={selectedCampaignId} isDark={isDark} />
           </>
