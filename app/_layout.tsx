@@ -20,6 +20,7 @@ import { LanguageProvider } from "@/context/LanguageContext";
 import { CampaignProvider } from "@/context/CampaignContext";
 import { CreativeContextProvider } from "@/context/CreativeContext";
 import { OnboardingProvider } from "@/context/OnboardingContext";
+import { AccountSwitcherModal } from "@/components/AccountSwitcherModal";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -111,6 +112,7 @@ function RootLayoutNav() {
           <Stack.Screen name="studio/[id]" options={{ headerShown: false, presentation: 'card' }} />
           <Stack.Screen name="agent" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
         </Stack>
+        <AccountSwitcherModal />
       </OnboardingProvider>
     </AuthGate>
   );

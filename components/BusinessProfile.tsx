@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Colors from '@/constants/colors';
 import BusinessDataForm from '@/components/BusinessDataForm';
+import { useAuth } from '@/context/AuthContext';
 
 interface BusinessProfileProps {
   visible: boolean;
@@ -67,13 +68,40 @@ export function BusinessProfileModal({ visible, onClose, onComplete }: BusinessP
   );
 }
 
-export function ProfileButton({ onPress }: { onPress: () => void }) {
+export function ProfileButton({ onPress }: { onPress?: () => void }) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const { user, savedAccounts, openAccountSwitcher } = useAuth();
+
+  const initials = user?.email
+    ? user.email.slice(0, 2).toUpperCase()
+    : '??';
+
+  const hasMultiple = savedAccounts.length > 1;
+
+  const handlePress = () => {
+    if (onPress) {
+      onPress();
+    } else {
+      openAccountSwitcher();
+    }
+  };
 
   return (
-    <Pressable onPress={onPress} style={[s.profileBtn, { backgroundColor: isDark ? '#151B24' : '#EDF2EE' }]}>
-      <Ionicons name="person-circle-outline" size={22} color={isDark ? '#8892A4' : '#546478'} />
+    <Pressable
+      onPress={handlePress}
+      onLongPress={openAccountSwitcher}
+      style={({ pressed }) => [
+        s.profileBtn,
+        { backgroundColor: isDark ? '#1E2535' : '#EDF2EE', opacity: pressed ? 0.8 : 1 },
+      ]}
+    >
+      <Text style={[s.profileInitials, { color: isDark ? '#C4BDFF' : '#7C3AED' }]}>{initials}</Text>
+      {hasMultiple && (
+        <View style={[s.accountDot, { backgroundColor: isDark ? '#2A3347' : '#E2E8F0', borderColor: isDark ? '#161D2B' : '#F8FAFC' }]}>
+          <Text style={s.accountDotText}>{savedAccounts.length}</Text>
+        </View>
+      )}
     </Pressable>
   );
 }
@@ -121,5 +149,27 @@ const s = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
+  },
+  profileInitials: {
+    fontSize: 13,
+    fontWeight: '700' as const,
+    letterSpacing: 0.5,
+  },
+  accountDot: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  accountDotText: {
+    fontSize: 8,
+    fontWeight: '700' as const,
+    color: '#7C3AED',
   },
 });

@@ -101,7 +101,7 @@ export default function SettingsScreen() {
     metaConnection,
     setMetaConnection,
   } = useApp();
-  const { user, logout } = useAuth();
+  const { user, logout, openAccountSwitcher, savedAccounts } = useAuth();
   const { selectedCampaignId } = useCampaign();
   const { t, locale, setLocale, languages } = useLanguage();
 
@@ -545,30 +545,42 @@ export default function SettingsScreen() {
         {user && (
           <View style={[styles.userCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             <View style={styles.userInfo}>
-              <View style={[styles.userAvatar, { backgroundColor: user.provider === 'facebook' ? '#1877F2' : '#E1306C' }]}>
-                <Ionicons 
-                  name={user.provider === 'facebook' ? 'logo-facebook' : 'logo-instagram'} 
-                  size={24} 
-                  color="#fff" 
-                />
+              <View style={[styles.userAvatar, { backgroundColor: '#7C3AED' }]}>
+                <Text style={styles.userAvatarText}>
+                  {user.email ? user.email.slice(0, 2).toUpperCase() : '??'}
+                </Text>
               </View>
               <View style={styles.userDetails}>
-                <Text style={[styles.userName, { color: colors.text }]}>{user.name}</Text>
-                <Text style={[styles.userProvider, { color: colors.textMuted }]}>
-                  {t('settings.signedInWith', { provider: user.provider === 'facebook' ? 'Facebook' : 'Instagram' })}
+                <Text style={[styles.userName, { color: colors.text }]}>{user.name || user.email?.split('@')[0]}</Text>
+                <Text style={[styles.userProvider, { color: colors.textMuted }]} numberOfLines={1}>
+                  {user.email}
                 </Text>
               </View>
             </View>
-            <Pressable
-              onPress={handleLogout}
-              style={({ pressed }) => [
-                styles.logoutButton,
-                { backgroundColor: colors.error + '15', opacity: pressed ? 0.7 : 1 }
-              ]}
-            >
-              <Ionicons name="log-out-outline" size={18} color={colors.error} />
-              <Text style={[styles.logoutText, { color: colors.error }]}>{t('settings.signOut')}</Text>
-            </Pressable>
+            <View style={styles.userActions}>
+              <Pressable
+                onPress={() => { Haptics.selectionAsync(); openAccountSwitcher(); }}
+                style={({ pressed }) => [
+                  styles.switchAccountBtn,
+                  { backgroundColor: colors.primary + '15', opacity: pressed ? 0.7 : 1 }
+                ]}
+              >
+                <Ionicons name="swap-horizontal-outline" size={16} color={colors.primary} />
+                <Text style={[styles.switchAccountText, { color: colors.primary }]}>
+                  Switch{savedAccounts.length > 1 ? ` (${savedAccounts.length})` : ''}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={handleLogout}
+                style={({ pressed }) => [
+                  styles.logoutButton,
+                  { backgroundColor: colors.error + '15', opacity: pressed ? 0.7 : 1 }
+                ]}
+              >
+                <Ionicons name="log-out-outline" size={18} color={colors.error} />
+                <Text style={[styles.logoutText, { color: colors.error }]}>{t('settings.signOut')}</Text>
+              </Pressable>
+            </View>
           </View>
         )}
 
@@ -1400,8 +1412,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  userAvatarText: {
+    fontSize: 18,
+    fontFamily: 'Inter_700Bold',
+    color: '#FFFFFF',
+  },
   userDetails: {
     gap: 2,
+    flex: 1,
+    maxWidth: 140,
   },
   userName: {
     fontSize: 16,
@@ -1411,16 +1430,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Inter_400Regular',
   },
+  userActions: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  switchAccountBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 4,
+  },
+  switchAccountText: {
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+  },
   logoutButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 20,
-    gap: 6,
+    gap: 4,
   },
   logoutText: {
-    fontSize: 13,
+    fontSize: 12,
     fontFamily: 'Inter_600SemiBold',
   },
   languageSelector: {

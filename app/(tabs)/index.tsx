@@ -530,7 +530,7 @@ export default function DashboardScreen() {
               </View>
             </View>
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <ProfileButton onPress={() => setShowProfile(true)} />
+              <ProfileButton />
               <Pressable 
                 onPress={() => router.push('/(tabs)/ai-management')}
                 style={[s.headerBtn, { backgroundColor: isDark ? P.darkSurface : P.lightSurface }]}

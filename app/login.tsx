@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 
 export default function LoginScreen() {
@@ -24,6 +24,8 @@ export default function LoginScreen() {
   const isDark = colorScheme === 'dark';
   const insets = useSafeAreaInsets();
   const { login, register } = useAuth();
+  const { addAccount } = useLocalSearchParams<{ addAccount?: string }>();
+  const isAddingAccount = addAccount === '1';
 
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
@@ -50,10 +52,18 @@ export default function LoginScreen() {
 
     if (result.success) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (isAddingAccount) {
+        router.replace('/(tabs)');
+      }
     } else {
       setError(result.error || 'Something went wrong');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
+  };
+
+  const handleCancel = () => {
+    Haptics.selectionAsync();
+    router.back();
   };
 
   const toggleMode = () => {
@@ -94,12 +104,19 @@ export default function LoginScreen() {
             <Text style={styles.brandSub}>AI MARKETING</Text>
           </View>
 
+          {isAddingAccount && (
+            <Pressable onPress={handleCancel} style={styles.cancelRow}>
+              <Ionicons name="arrow-back" size={18} color="#9CA3AF" />
+              <Text style={styles.cancelText}>Cancel</Text>
+            </Pressable>
+          )}
+
           <View style={styles.formCard}>
             <Text style={styles.formTitle}>
-              {mode === 'login' ? 'Welcome back' : 'Get started'}
+              {isAddingAccount ? 'Add account' : mode === 'login' ? 'Welcome back' : 'Get started'}
             </Text>
             <Text style={styles.formSubtitle}>
-              {mode === 'login' ? 'Sign in to your account' : 'Create your free account'}
+              {isAddingAccount ? 'Sign in to another account' : mode === 'login' ? 'Sign in to your account' : 'Create your free account'}
             </Text>
 
             {error ? (
@@ -341,5 +358,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Inter_700Bold',
     color: '#8B5CF6',
+  },
+  cancelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+    paddingVertical: 4,
+  },
+  cancelText: {
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+    color: '#9CA3AF',
   },
 });
