@@ -6,11 +6,11 @@ import {
   Pressable,
   Platform,
   Linking,
-  Image,
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import AvyronLogo from '@/components/AvyronLogo';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/context/AuthContext';
@@ -73,10 +73,9 @@ export default function UpgradeScreen() {
         paddingBottom: Platform.OS === 'web' ? 60 : insets.bottom + 40,
       }]}>
         <View style={styles.topSection}>
-          <Image
-            source={require('@/assets/images/logo.jpeg')}
-            style={styles.logo}
-          />
+          <View style={styles.logo}>
+            <AvyronLogo size={46} />
+          </View>
           <View style={styles.expiredBadge}>
             <Ionicons name="time-outline" size={14} color="#F59E0B" />
             <Text style={styles.expiredText}>Trial ended</Text>
@@ -174,6 +173,9 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 18,
+    backgroundColor: 'rgba(124,58,237,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   expiredBadge: {
     flexDirection: 'row',

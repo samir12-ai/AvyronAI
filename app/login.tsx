@@ -8,11 +8,11 @@ import {
   Platform,
   TextInput,
   ActivityIndicator,
-  Image,
   KeyboardAvoidingView,
   ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AvyronLogo from '@/components/AvyronLogo';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -96,10 +96,9 @@ export default function LoginScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.logoSection}>
-            <Image
-              source={require('@/assets/images/logo.jpeg')}
-              style={styles.logo}
-            />
+            <View style={styles.logo}>
+              <AvyronLogo size={54} />
+            </View>
             <Text style={styles.brandName}>Avyron</Text>
             <Text style={styles.brandSub}>AI INTELLIGENCE</Text>
           </View>
@@ -241,6 +240,9 @@ const styles = StyleSheet.create({
     height: 72,
     borderRadius: 20,
     marginBottom: 16,
+    backgroundColor: 'rgba(124,58,237,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   brandName: {
     fontSize: 28,

@@ -8,7 +8,6 @@ import {
   Platform,
   RefreshControl,
   Pressable,
-  Image,
   Animated as RNAnimated,
   Dimensions,
   ActivityIndicator,
@@ -18,6 +17,7 @@ import { router } from 'expo-router';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import AvyronLogo from '@/components/AvyronLogo';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
@@ -521,10 +521,9 @@ export default function DashboardScreen() {
         <RNAnimated.View style={{ opacity: headerFade }}>
           <View style={s.headerRow}>
             <View style={s.headerLeft}>
-              <Image
-                source={require('@/assets/images/logo.jpeg')}
-                style={s.logoImage}
-              />
+              <View style={s.logoImage}>
+                <AvyronLogo size={26} />
+              </View>
               <View>
                 <Text style={[s.brandName, { color: textPrimary }]}>Avyron</Text>
                 <Text style={[s.brandSub, { color: P.mint }]}>AI INTELLIGENCE</Text>
@@ -702,6 +701,9 @@ const s = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
+    backgroundColor: 'rgba(124,58,237,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   brandName: {
     fontSize: 22,

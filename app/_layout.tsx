@@ -2,7 +2,8 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Stack, router, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
-import { View, Text, ActivityIndicator, StyleSheet, Image } from "react-native";
+import { View, Text, ActivityIndicator, StyleSheet } from "react-native";
+import AvyronLogo from "@/components/AvyronLogo";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { 
@@ -27,7 +28,9 @@ SplashScreen.preventAutoHideAsync();
 function LoadingScreen() {
   return (
     <View style={loadingStyles.container}>
-      <Image source={require('@/assets/images/logo.jpeg')} style={loadingStyles.logo} />
+      <View style={loadingStyles.logo}>
+        <AvyronLogo size={56} />
+      </View>
       <Text style={loadingStyles.title}>Avyron AI</Text>
       <ActivityIndicator size="large" color="#7C3AED" style={loadingStyles.spinner} />
       <Text style={loadingStyles.subtitle}>Loading your workspace...</Text>
@@ -47,6 +50,9 @@ const loadingStyles = StyleSheet.create({
     height: 80,
     borderRadius: 20,
     marginBottom: 16,
+    backgroundColor: 'rgba(124,58,237,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   title: {
     fontSize: 24,

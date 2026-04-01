@@ -5,9 +5,9 @@ import {
   TouchableOpacity,
   StyleSheet,
   Animated,
-  Image,
   useColorScheme,
 } from 'react-native';
+import AvyronLogo from '@/components/AvyronLogo';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useOnboarding } from '@/context/OnboardingContext';
@@ -77,10 +77,9 @@ export default function OnboardingAgent() {
         <View style={styles.header}>
           <View style={styles.avatarRow}>
             <View style={styles.avatarContainer}>
-              <Image
-                source={require('@/assets/images/logo.jpeg')}
-                style={styles.avatar}
-              />
+              <View style={styles.avatar}>
+                <AvyronLogo size={28} />
+              </View>
               <View style={styles.statusDot} />
             </View>
             <View style={styles.headerText}>
@@ -171,6 +170,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 2,
     borderColor: 'rgba(124, 58, 237, 0.2)',
+    backgroundColor: 'rgba(124,58,237,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   statusDot: {
     position: 'absolute' as const,
