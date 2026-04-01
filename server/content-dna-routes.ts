@@ -211,7 +211,7 @@ export async function generateContentDna(campaignId: string, accountId: string, 
   const coreOffer = businessProfile?.coreOffer || "Not specified";
   const conversionChannel = businessProfile?.primaryConversionChannel || "Not specified";
 
-  const systemPrompt = `You are a senior content strategist for a marketing AI system called MarketMind.
+  const systemPrompt = `You are a senior content strategist for a marketing AI system called Avyron AI.
 Your job is to synthesize deep engine analysis into a practical Content DNA blueprint.
 
 CRITICAL RULE: The user's real business offer is "${coreOffer}" with conversion via ${conversionChannel}.

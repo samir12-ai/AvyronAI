@@ -217,7 +217,7 @@ export default function DashboardChat() {
       <View style={st.header}>
         <View style={st.headerLeft}>
           <View style={[st.agentDot, { backgroundColor: P.mint }]} />
-          <Text style={[st.headerTitle, { color: textPrimary }]}>MarketMind Agent</Text>
+          <Text style={[st.headerTitle, { color: textPrimary }]}>Avyron Agent</Text>
           {selectedCampaignId && (
             <View style={[st.connectedBadge, { backgroundColor: P.neon + '20' }]}>
               <View style={[st.connectedDotSmall, { backgroundColor: P.neon }]} />

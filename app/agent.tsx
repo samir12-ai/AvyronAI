@@ -266,7 +266,7 @@ export default function AgentScreen() {
       <View style={[s.emptyIcon, { backgroundColor: P.mint + '15' }]}>
         <Ionicons name="sparkles" size={32} color={P.mint} />
       </View>
-      <Text style={[s.emptyTitle, { color: textPrimary }]}>MarketMind Agent</Text>
+      <Text style={[s.emptyTitle, { color: textPrimary }]}>Avyron Agent</Text>
       <Text style={[s.emptySubtitle, { color: textMuted }]}>
         Your strategic operations manager. Ask about your plan, execution status, what to create next, or get marketing guidance.
       </Text>

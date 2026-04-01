@@ -96,7 +96,7 @@ async function cleanupTestData() {
   await db.delete(auditLog).where(eq(auditLog.accountId, TEST_ACCOUNT));
 }
 
-describe("MarketMind AI Integrity Suite", () => {
+describe("Avyron AI Integrity Suite", () => {
   beforeAll(async () => {
     await setupTestAccount();
   });

@@ -357,7 +357,7 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
           {goalsFilled === 3 && <Ionicons name="checkmark-circle" size={14} color={colors.success} />}
         </View>
         <Text style={[s.goalSectionSubtitle, { color: colors.textSecondary }]}>
-          Set a specific target so MarketMind can calculate feasibility and build your funnel math
+          Set a specific target so Avyron can calculate feasibility and build your funnel math
         </Text>
         {renderTextField('goalTarget', 'Goal Target Number', 'e.g. 50 new clients, $10,000 revenue, 500 leads', 'trending-up-outline')}
         {renderChipSelector('goalTimeline', 'Goal Timeline', GOAL_TIMELINES)}

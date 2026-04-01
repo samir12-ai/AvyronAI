@@ -24,7 +24,7 @@ import { logAuditEvent } from "./audit-logger";
 import { getEngineReadinessState } from "../market-intelligence-v3/engine-state";
 import { ENGINE_VERSION } from "../market-intelligence-v3/constants";
 
-const CREATIVE_BLUEPRINT_PROMPT = `You are a marketing creative strategist. Given campaign context, business data, competitor intelligence, market signals, and ENGINE OUTPUTS from the MarketMind pipeline, generate a structured Creative Blueprint.
+const CREATIVE_BLUEPRINT_PROMPT = `You are a marketing creative strategist. Given campaign context, business data, competitor intelligence, market signals, and ENGINE OUTPUTS from the Avyron pipeline, generate a structured Creative Blueprint.
 
 Your task is to synthesize the engine outputs into actionable creative direction.
 

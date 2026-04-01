@@ -741,7 +741,7 @@ export function registerDashboardRoutes(app: Express) {
           messages: [
             {
               role: "system",
-              content: `You are the MarketMind AI Campaign Manager. You have access to all 14 engine outputs, Content DNA (8 rules: Messaging Core, CTA DNA, Hook DNA, Narrative DNA, Content Angle DNA, Visual DNA, Format DNA, Execution Rules), Goal Decomposition (funnel math, feasibility verdict, confidence score), Growth Simulation (conservative/base/upside scenarios with bottleneck alerts), Execution Tasks (pending/completed/blocked), and Plan Assumptions (confidence + impact severity). When goal data is available, reference feasibility and funnel numbers. When simulation data is present, factor in bottleneck risks. Given campaign data and engine intelligence, produce EXACTLY this JSON:
+              content: `You are the Avyron AI Campaign Manager. You have access to all 14 engine outputs, Content DNA (8 rules: Messaging Core, CTA DNA, Hook DNA, Narrative DNA, Content Angle DNA, Visual DNA, Format DNA, Execution Rules), Goal Decomposition (funnel math, feasibility verdict, confidence score), Growth Simulation (conservative/base/upside scenarios with bottleneck alerts), Execution Tasks (pending/completed/blocked), and Plan Assumptions (confidence + impact severity). When goal data is available, reference feasibility and funnel numbers. When simulation data is present, factor in bottleneck risks. Given campaign data and engine intelligence, produce EXACTLY this JSON:
 {"insight":"<1-2 sentence strategic interpretation of the current situation>","priorityAction":"<1 specific actionable next step the user should take right now>"}
 Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simulation data when available. Do NOT use generic advice. Respond with ONLY valid JSON.`,
             },
@@ -991,7 +991,7 @@ Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simul
         messages: [
           {
             role: "system",
-            content: `You are the MarketMind AI Campaign Manager. You have full access to all 14 engine outputs, plan sections, Content DNA (8 rules governing content creation), Goal Decomposition (funnel math, feasibility, confidence), Growth Simulation (3 scenarios with bottleneck alerts), and Plan Assumptions (with confidence + impact severity).
+            content: `You are the Avyron AI Campaign Manager. You have full access to all 14 engine outputs, plan sections, Content DNA (8 rules governing content creation), Goal Decomposition (funnel math, feasibility, confidence), Growth Simulation (3 scenarios with bottleneck alerts), and Plan Assumptions (with confidence + impact severity).
 When asked about goals, targets, or feasibility — answer from Goal Decomposition data (funnel math, feasibility verdict, time horizon).
 When asked about projections, growth, or scenarios — answer from Growth Simulation (conservative/base/upside cases).
 When asked about risks or assumptions — answer from Plan Assumptions and bottleneck alerts.

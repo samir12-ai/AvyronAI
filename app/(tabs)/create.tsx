@@ -749,7 +749,7 @@ export default function CreateScreen() {
       if (Platform.OS === 'web') {
         const link = document.createElement('a');
         link.href = imageUri;
-        link.download = `MarketMind_${Date.now()}.png`;
+        link.download = `Avyron_${Date.now()}.png`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -773,7 +773,7 @@ export default function CreateScreen() {
         return;
       }
 
-      const filename = `MarketMind_${Date.now()}.png`;
+      const filename = `Avyron_${Date.now()}.png`;
       const fileUri = `${FileSystem.cacheDirectory}${filename}`;
 
       if (imageUri.startsWith('data:')) {
@@ -1114,7 +1114,7 @@ export default function CreateScreen() {
       if (Platform.OS === 'web') {
         const link = document.createElement('a');
         link.href = videoProxyUrl;
-        link.download = `MarketMind_Video_${Date.now()}.mp4`;
+        link.download = `Avyron_Video_${Date.now()}.mp4`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -1138,7 +1138,7 @@ export default function CreateScreen() {
         return;
       }
 
-      const filename = `MarketMind_Video_${Date.now()}.mp4`;
+      const filename = `Avyron_Video_${Date.now()}.mp4`;
       const fileUri = `${FileSystem.cacheDirectory}${filename}`;
 
       let downloadUrl = videoProxyUrl;

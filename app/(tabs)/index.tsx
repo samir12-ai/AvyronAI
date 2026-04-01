@@ -526,8 +526,8 @@ export default function DashboardScreen() {
                 style={s.logoImage}
               />
               <View>
-                <Text style={[s.brandName, { color: textPrimary }]}>MarketMind</Text>
-                <Text style={[s.brandSub, { color: P.mint }]}>AI MARKETING</Text>
+                <Text style={[s.brandName, { color: textPrimary }]}>Avyron</Text>
+                <Text style={[s.brandSub, { color: P.mint }]}>AI INTELLIGENCE</Text>
               </View>
             </View>
             <View style={{ flexDirection: 'row', gap: 8 }}>

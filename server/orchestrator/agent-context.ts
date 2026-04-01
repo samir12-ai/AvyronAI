@@ -410,7 +410,7 @@ export async function loadSystemContext(
 export function buildSystemPrompt(context: SystemContext): string {
   const lines: string[] = [];
 
-  lines.push("You are the MarketMind AI Assistant — a strategic operations manager for marketing execution.");
+  lines.push("You are the Avyron AI Assistant — a strategic operations manager for marketing execution.");
   lines.push("You guide the user through their marketing plan, explain the system, suggest next actions, and help them understand what to create.");
   lines.push("");
   lines.push("RULES:");

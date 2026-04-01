@@ -84,7 +84,7 @@ export default function OnboardingAgent() {
               <View style={styles.statusDot} />
             </View>
             <View style={styles.headerText}>
-              <Text style={[styles.agentName, { color: textPrimary }]}>MarketMind Agent</Text>
+              <Text style={[styles.agentName, { color: textPrimary }]}>Avyron Agent</Text>
               <Text style={[styles.stepIndicator, { color: textMuted }]}>
                 Step {currentStep + 1} of {totalSteps}
               </Text>

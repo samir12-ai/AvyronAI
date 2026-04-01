@@ -1536,7 +1536,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Data Deletion Status - MarketMind AI</title>
+  <title>Data Deletion Status - Avyron AI</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0A0E14; color: #E5E7EB; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
@@ -1554,10 +1554,10 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
     <div class="icon">&#10003;</div>
     <h1>Data Deletion Request</h1>
     <div class="status">Status: Processed</div>
-    <p>Your data deletion request has been received and processed. All personal data associated with your Facebook login has been removed from MarketMind AI.</p>
+    <p>Your data deletion request has been received and processed. All personal data associated with your Facebook login has been removed from Avyron AI.</p>
     ${code ? `<div class="code">Confirmation Code: ${code}</div>` : ""}
     <p>This typically completes within 24 hours. If you have questions, contact our support team.</p>
-    <div class="footer">MarketMind AI &copy; ${new Date().getFullYear()}</div>
+    <div class="footer">Avyron AI &copy; ${new Date().getFullYear()}</div>
   </div>
 </body>
 </html>`);
@@ -1570,7 +1570,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Privacy Policy - MarketMind AI</title>
+  <title>Privacy Policy - Avyron AI</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0A0E14; color: #D1D5DB; line-height: 1.7; padding: 20px; }
@@ -1593,7 +1593,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
     </div>
 
     <h2>1. Introduction</h2>
-    <p>MarketMind AI ("we", "our", or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our mobile application and services.</p>
+    <p>Avyron AI ("we", "our", or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our mobile application and services.</p>
 
     <h2>2. Information We Collect</h2>
     <p>We may collect the following types of information:</p>
@@ -1655,7 +1655,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
     <p>If you have questions about this Privacy Policy or wish to exercise your data rights, please contact us through the app's support feature.</p>
 
     <div class="footer">
-      <p>MarketMind AI &copy; ${new Date().getFullYear()} &mdash; All Rights Reserved</p>
+      <p>Avyron AI &copy; ${new Date().getFullYear()} &mdash; All Rights Reserved</p>
     </div>
   </div>
 </body>

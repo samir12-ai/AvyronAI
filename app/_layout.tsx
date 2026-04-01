@@ -28,7 +28,7 @@ function LoadingScreen() {
   return (
     <View style={loadingStyles.container}>
       <Image source={require('@/assets/images/logo.jpeg')} style={loadingStyles.logo} />
-      <Text style={loadingStyles.title}>MarketMind AI</Text>
+      <Text style={loadingStyles.title}>Avyron AI</Text>
       <ActivityIndicator size="large" color="#7C3AED" style={loadingStyles.spinner} />
       <Text style={loadingStyles.subtitle}>Loading your workspace...</Text>
     </View>

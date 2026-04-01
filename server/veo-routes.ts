@@ -358,7 +358,7 @@ export function registerVeoRoutes(app: Express) {
       if (contentLength) res.setHeader("Content-Length", contentLength);
       res.setHeader("Cache-Control", "public, max-age=3600");
       res.setHeader("Accept-Ranges", acceptRanges || "bytes");
-      res.setHeader("Content-Disposition", "inline; filename=\"MarketMind_Video.mp4\"");
+      res.setHeader("Content-Disposition", "inline; filename=\"Avyron_Video.mp4\"");
 
       if (contentRange) {
         res.setHeader("Content-Range", contentRange);

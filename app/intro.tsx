@@ -5,7 +5,6 @@ import {
   StyleSheet,
   Pressable,
   Platform,
-  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -13,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
+import AvyronLogo from '@/components/AvyronLogo';
 
 export default function IntroScreen() {
   const insets = useSafeAreaInsets();
@@ -41,10 +41,14 @@ export default function IntroScreen() {
         paddingBottom: Platform.OS === 'web' ? 60 : insets.bottom + 40,
       }]}>
         <View style={styles.topSection}>
-          <Image
-            source={require('@/assets/images/logo.jpeg')}
-            style={styles.logo}
-          />
+          <View style={styles.logoContainer}>
+            <AvyronLogo size={64} />
+          </View>
+
+          <View style={styles.brandRow}>
+            <Text style={styles.brandWordmark}>AVYRON</Text>
+            <Text style={styles.brandAi}>AI</Text>
+          </View>
 
           <View style={styles.trialBadge}>
             <Ionicons name="gift-outline" size={14} color="#8B5CF6" />
@@ -53,9 +57,9 @@ export default function IntroScreen() {
         </View>
 
         <View style={styles.heroSection}>
-          <Text style={styles.headline}>Stop guessing.{'\n'}Start growing.</Text>
+          <Text style={styles.headline}>See the market{'\n'}before it moves.</Text>
           <Text style={styles.subline}>
-            MarketMind builds your entire marketing strategy, content, and execution plan — so you don't have to.
+            Avyron analyzes your market, competitors, and signals — and turns them into strategy, content, and growth.
           </Text>
         </View>
 
@@ -119,10 +123,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 20,
   },
-  logo: {
+  logoContainer: {
     width: 80,
     height: 80,
     borderRadius: 22,
+    backgroundColor: 'rgba(124,58,237,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  brandWordmark: {
+    fontSize: 26,
+    fontFamily: 'Inter_700Bold',
+    color: '#E8ECF0',
+    letterSpacing: 4,
+  },
+  brandAi: {
+    fontSize: 14,
+    fontFamily: 'Inter_700Bold',
+    color: '#7C3AED',
+    letterSpacing: 3,
+    paddingBottom: 4,
   },
   trialBadge: {
     flexDirection: 'row',

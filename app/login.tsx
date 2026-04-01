@@ -100,8 +100,8 @@ export default function LoginScreen() {
               source={require('@/assets/images/logo.jpeg')}
               style={styles.logo}
             />
-            <Text style={styles.brandName}>MarketMind</Text>
-            <Text style={styles.brandSub}>AI MARKETING</Text>
+            <Text style={styles.brandName}>Avyron</Text>
+            <Text style={styles.brandSub}>AI INTELLIGENCE</Text>
           </View>
 
           {isAddingAccount && (

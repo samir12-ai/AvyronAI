@@ -396,7 +396,7 @@ export default function AIManagementScreen() {
           <Text style={[styles.comingSoonBadgeText, { color: colors.primary }]}>Coming Soon</Text>
         </View>
         <Text style={[styles.comingSoonDesc, { color: colors.textSecondary }]}>
-          Automated publishing to Facebook & Instagram is currently in development. Once available, MarketMind will handle scheduling, posting, and performance tracking — all on autopilot.
+          Automated publishing to Facebook & Instagram is currently in development. Once available, Avyron will handle scheduling, posting, and performance tracking — all on autopilot.
         </Text>
         <View style={styles.comingSoonFeatures}>
           {[

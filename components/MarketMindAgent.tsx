@@ -197,7 +197,7 @@ export const MarketMindAgent = forwardRef<MarketMindAgentRef, Props>(function Ma
         <View style={st.headerRow}>
           <View style={st.headerLeft}>
             <RNAnimated.View style={[st.agentDot, { backgroundColor: P.mint, opacity: pulseAnim }]} />
-            <Text style={[st.title, { color: textPrimary }]}>MarketMind Agent</Text>
+            <Text style={[st.title, { color: textPrimary }]}>Avyron Agent</Text>
           </View>
         </View>
         <View style={{ paddingVertical: 16, alignItems: 'center' }}>
@@ -214,7 +214,7 @@ export const MarketMindAgent = forwardRef<MarketMindAgentRef, Props>(function Ma
         <View style={st.headerRow}>
           <View style={st.headerLeft}>
             <View style={[st.agentDot, { backgroundColor: P.coral }]} />
-            <Text style={[st.title, { color: P.coral }]}>MarketMind Agent</Text>
+            <Text style={[st.title, { color: P.coral }]}>Avyron Agent</Text>
           </View>
         </View>
         <Text style={[st.subText, { color: textMuted }]}>Failed to load agent intelligence</Text>
@@ -231,7 +231,7 @@ export const MarketMindAgent = forwardRef<MarketMindAgentRef, Props>(function Ma
         <View style={st.headerRow}>
           <View style={st.headerLeft}>
             <View style={[st.agentDot, { backgroundColor: P.silver }]} />
-            <Text style={[st.title, { color: textMuted }]}>MarketMind Agent</Text>
+            <Text style={[st.title, { color: textMuted }]}>Avyron Agent</Text>
           </View>
         </View>
         <Text style={[st.subText, { color: textMuted }]}>
@@ -249,7 +249,7 @@ export const MarketMindAgent = forwardRef<MarketMindAgentRef, Props>(function Ma
         <View style={st.headerLeft}>
           <RNAnimated.View style={[st.agentDot, { backgroundColor: P.mint, opacity: pulseAnim }]} />
           <View>
-            <Text style={[st.title, { color: textPrimary }]}>MarketMind Agent</Text>
+            <Text style={[st.title, { color: textPrimary }]}>Avyron Agent</Text>
             <Text style={[st.statusLine, { color: textMuted }]}>{brief.campaignStatus}</Text>
           </View>
         </View>
