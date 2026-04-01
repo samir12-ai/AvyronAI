@@ -44,9 +44,9 @@ interface AuthContextValue {
   closeAccountSwitcher: () => void;
 }
 
-const AUTH_TOKEN_KEY = 'marketmind_auth_token';
-const AUTH_USER_KEY = 'marketmind_auth_user_v2';
-const SAVED_ACCOUNTS_KEY = 'marketmind_saved_accounts_v1';
+const AUTH_TOKEN_KEY = 'avyron_auth_token';
+const AUTH_USER_KEY = 'avyron_auth_user_v2';
+const SAVED_ACCOUNTS_KEY = 'avyron_saved_accounts_v1';
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 

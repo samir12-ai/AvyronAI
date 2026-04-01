@@ -1,7 +1,7 @@
-# MarketMind AI
+# Avyron AI
 
 ## Overview
-MarketMind AI is a cross-platform marketing automation application designed to streamline marketing workflows, enhance brand presence, and provide strategic insights using AI. Its core purpose is to automate content generation, campaign management, post scheduling, and analytics across various platforms. The project aims to be a comprehensive, autonomous marketing solution focused on revenue generation and controlled content execution for businesses, offering a competitive edge through advanced AI capabilities and strategic intelligence.
+Avyron AI is a cross-platform marketing automation application designed to streamline marketing workflows, enhance brand presence, and provide strategic insights using AI. Its core purpose is to automate content generation, campaign management, post scheduling, and analytics across various platforms. The project aims to be a comprehensive, autonomous marketing solution focused on revenue generation and controlled content execution for businesses, offering a competitive edge through advanced AI capabilities and strategic intelligence.
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
@@ -21,7 +21,7 @@ The backend employs Express.js with Node.js and TypeScript, exposing RESTful API
 Client-side data is stored using AsyncStorage. Server-side data, including user information and chat conversations, is managed in PostgreSQL with Drizzle ORM. Snapshot lifecycle management operates in DATA_ARCHIVING mode with dual-window retention and latest-per-campaign protection.
 
 ### Key Features
-- **Dashboard**: Displays revenue-focused KPIs, campaign metrics, a Strategic Narrative causal chain card (NarrativeCard), and an inline AI chat box (DashboardChat). Header uses the custom MarketMind logo image. The full-screen agent chat is still accessible via FAB button.
+- **Dashboard**: Displays revenue-focused KPIs, campaign metrics, a Strategic Narrative causal chain card (NarrativeCard), and an inline AI chat box (DashboardChat). Header uses the AvyronLogo SVG component. The full-screen agent chat is still accessible via FAB button.
 - **Causal Narrative Layer**: A deterministic, read-only, stateless post-processing layer (`server/narrative-layer.ts`) that transforms engine outputs into a 5-step causal chain (Market Problem → Why It Happens → What We Do → How We Fix It → What To Execute). Includes a Human Translation Layer (`humanize()`) that applies ~25 regex replacements to simplify jargon, shorten verbose phrasing, strip template artifacts, and cap output at 120 chars — same meaning, clearer words. Served via `GET /api/narrative/:campaignId`. No AI calls, no DB writes.
 - **Content Creation**: AI Writer for text and AI Designer for image generation.
 - **AI Management**: AI Audience Engine (always visible), Auto Publish (Coming Soon placeholder), Market DB, and a Performance Intelligence Layer. Leads section removed. Advanced Mode toggle removed — all features always accessible.

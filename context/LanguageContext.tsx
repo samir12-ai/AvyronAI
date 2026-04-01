@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Localization from 'expo-localization';
 import i18n, { SUPPORTED_LANGUAGES, type LanguageCode } from '@/lib/i18n';
 
-const LANGUAGE_STORAGE_KEY = '@marketmind_language';
+const LANGUAGE_STORAGE_KEY = '@avyron_language';
 
 interface LanguageContextValue {
   locale: LanguageCode;

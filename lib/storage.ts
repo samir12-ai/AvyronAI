@@ -2,15 +2,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { BrandProfile, ContentItem, Campaign, Ad, PlatformConnection, PostingSchedule, MediaItem, ScheduledPost, MetaConnection } from './types';
 
 const KEYS = {
-  BRAND_PROFILE: 'marketmind_brand_profile',
-  CONTENT_ITEMS: 'marketmind_content_items',
-  CAMPAIGNS: 'marketmind_campaigns',
-  ADS: 'marketmind_ads',
-  PLATFORM_CONNECTIONS: 'marketmind_platform_connections',
-  POSTING_SCHEDULES: 'marketmind_posting_schedules',
-  MEDIA_ITEMS: 'marketmind_media_items',
-  SCHEDULED_POSTS: 'marketmind_scheduled_posts',
-  META_CONNECTION: 'marketmind_meta_connection',
+  BRAND_PROFILE: 'avyron_brand_profile',
+  CONTENT_ITEMS: 'avyron_content_items',
+  CAMPAIGNS: 'avyron_campaigns',
+  ADS: 'avyron_ads',
+  PLATFORM_CONNECTIONS: 'avyron_platform_connections',
+  POSTING_SCHEDULES: 'avyron_posting_schedules',
+  MEDIA_ITEMS: 'avyron_media_items',
+  SCHEDULED_POSTS: 'avyron_scheduled_posts',
+  META_CONNECTION: 'avyron_meta_connection',
 };
 
 const defaultBrandProfile: BrandProfile = {

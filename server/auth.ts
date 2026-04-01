@@ -5,7 +5,7 @@ import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 
-const JWT_SECRET = process.env.JWT_SECRET || "marketmind_jwt_secret_" + (process.env.REPL_ID || "dev");
+const JWT_SECRET = process.env.JWT_SECRET || "avyron_jwt_secret_" + (process.env.REPL_ID || "dev");
 if (!process.env.JWT_SECRET) {
   console.warn("[Auth] WARNING: JWT_SECRET not set — using fallback. Set JWT_SECRET in production.");
 }

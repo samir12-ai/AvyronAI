@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '@/context/AuthContext';
 import { getApiUrl , authFetch } from '@/lib/query-client';
 
-const ONBOARDING_KEY = 'marketmind_onboarding_state';
+const ONBOARDING_KEY = 'avyron_onboarding_state';
 
 export interface OnboardingStep {
   id: string;
@@ -16,8 +16,8 @@ export interface OnboardingStep {
 const ONBOARDING_STEPS: OnboardingStep[] = [
   {
     id: 'welcome',
-    title: 'Welcome to MarketMind',
-    message: 'I\'m your MarketMind agent. I\'ll walk you through your marketing system in a few quick steps.',
+    title: 'Welcome to Avyron',
+    message: 'I\'m your Avyron agent. I\'ll walk you through your marketing system in a few quick steps.',
   },
   {
     id: 'profile',
@@ -78,7 +78,7 @@ const ONBOARDING_STEPS: OnboardingStep[] = [
   {
     id: 'ready',
     title: 'You\'re all set!',
-    message: 'Your marketing system is ready. Run engines, create content, and let MarketMind handle the strategy.',
+    message: 'Your marketing system is ready. Run engines, create content, and let Avyron handle the strategy.',
   },
 ];
 

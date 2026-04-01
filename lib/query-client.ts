@@ -4,7 +4,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   try {
-    const token = await AsyncStorage.getItem("marketmind_auth_token");
+    const token = await AsyncStorage.getItem("avyron_auth_token");
     if (token) {
       return { Authorization: `Bearer ${token}` };
     }
