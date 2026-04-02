@@ -18,3 +18,9 @@ id = "VlJ7pJqwW54M9fpNRK3th"
 uri = "file://STAGING_SETUP.md"
 type = "text"
 title = "Staging Environment Setup Guide"
+
+[[outputs]]
+id = "UJnvJXBGXDhWjdzhXkrb_"
+uri = "file://landing-page-preview.jpeg"
+type = "image"
+title = "Avyron AI — New Landing Page (Dark Premium Design)"
