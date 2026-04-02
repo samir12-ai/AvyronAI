@@ -736,6 +736,13 @@ async function executeFetchJob(
           competitorId: comp.id, competitorName: comp.name,
           stage: "POSTS_FETCH", reason, details: fetchResult.message,
         });
+        try {
+          await db.update(ciCompetitors)
+            .set({ lastCheckedAt: new Date(), fetchMethod: "BLOCKED_BY_PLATFORM", updatedAt: new Date() })
+            .where(eq(ciCompetitors.id, comp.id));
+        } catch (blockStampErr: any) {
+          console.warn(`[FetchOrch] Failed to stamp blocked state for ${comp.name}: ${blockStampErr.message}`);
+        }
         await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
         continue;
       }

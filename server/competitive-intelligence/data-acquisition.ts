@@ -447,6 +447,30 @@ async function _executeFetch(
     }
   }
 
+  const BLOCKED_PLATFORM_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+  if (!forceRefresh && collectionMode !== "DEEP_PASS" && competitor.fetchMethod === "BLOCKED_BY_PLATFORM" && competitor.lastCheckedAt) {
+    const elapsedSinceBlock = Date.now() - new Date(competitor.lastCheckedAt).getTime();
+    if (elapsedSinceBlock < BLOCKED_PLATFORM_COOLDOWN_MS) {
+      const hoursLeft = Math.ceil((BLOCKED_PLATFORM_COOLDOWN_MS - elapsedSinceBlock) / (60 * 60 * 1000));
+      const hoursAgo = Math.round(elapsedSinceBlock / (60 * 60 * 1000) * 10) / 10;
+      console.log(`[DataAcq] BLOCKED_COOLDOWN: ${competitor.name} was platform-blocked ${hoursAgo}h ago. Cooling down for ${hoursLeft}h more.`);
+      return {
+        competitorId,
+        postsCollected: 0,
+        commentsCollected: 0,
+        ctaCoverage: 0,
+        ctaTypes: [],
+        followers: null,
+        engagementRate: null,
+        postingFrequency: null,
+        contentMix: null,
+        fetchMethod: "BLOCKED_COOLDOWN",
+        status: "BLOCKED",
+        message: `Platform blocked ${hoursAgo}h ago — cooling down for ${hoursLeft}h more.`,
+      };
+    }
+  }
+
   if (!forceRefresh && collectionMode !== "DEEP_PASS") {
     const latestMetrics = await db.select().from(ciCompetitorMetricsSnapshot)
       .where(and(eq(ciCompetitorMetricsSnapshot.competitorId, competitorId), eq(ciCompetitorMetricsSnapshot.accountId, accountId)))
