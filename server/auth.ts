@@ -130,7 +130,7 @@ export function registerAuthRoutes(app: Router) {
       const userAccountId = newUser.id;
       await db.update(users).set({ accountId: userAccountId }).where(eq(users.id, newUser.id));
 
-      featureFlagService.seedDefaultFlags(userAccountId).catch(err =>
+      await featureFlagService.seedDefaultFlags(userAccountId).catch(err =>
         console.error("[Auth] Failed to seed default flags for new account:", err)
       );
 
@@ -185,7 +185,7 @@ export function registerAuthRoutes(app: Router) {
         await db.update(users).set({ accountId: userAccountId }).where(eq(users.id, user.id));
       }
 
-      featureFlagService.seedDefaultFlags(userAccountId).catch(err =>
+      await featureFlagService.seedDefaultFlags(userAccountId).catch(err =>
         console.error("[Auth] Failed to seed default flags on login:", err)
       );
 

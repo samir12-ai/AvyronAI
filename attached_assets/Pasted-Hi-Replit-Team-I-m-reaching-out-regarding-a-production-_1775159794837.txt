@@ -1,0 +1,72 @@
+Hi Replit Team,
+
+I'm reaching out regarding a production issue affecting our Competitive Intelligence (CI) endpoints.
+
+## Summary of the Issue
+
+All requests to:
+
+* `POST /api/ci/competitors`
+* `GET /api/ci/competitors`
+
+are returning:
+
+* `403 Forbidden` with message: **"Competitive intelligence is disabled"**
+* or `{ "disabled": true }`
+
+## Root Cause
+
+After investigation, the issue is caused by our feature flag system:
+
+* Feature flags default to **false** when no database row exists (`getRawFlag`)
+* Newly created accounts in production do **not have any feature flags seeded**
+* As a result, `competitive_intelligence_enabled` is missing → resolves to `false`
+* This blocks all CI-related routes
+
+## Implemented Fix
+
+We implemented a fix to ensure feature flags are properly initialized:
+
+### 1. Added `seedDefaultFlags(accountId)`
+
+* Checks for missing feature flags
+* Inserts all required flags with `enabled: true`
+* Runs as a batch operation
+* Idempotent (safe to call multiple times)
+
+### 2. Integrated Seeding into Auth Flow
+
+#### On Registration
+
+* Immediately seeds all flags after account creation
+
+#### On Login
+
+* Seeds missing flags for existing accounts (lazy migration)
+
+## Important Consideration
+
+To avoid race conditions (where CI requests occur before flags are seeded), we ensured:
+
+* `seedDefaultFlags(accountId)` is **awaited**, not fire-and-forget
+
+## Expected Outcome
+
+* New accounts will have CI enabled by default
+* Existing production users will be automatically fixed on next login
+* Both GET and POST CI endpoints should function correctly without 403 errors
+
+## Request
+
+Please confirm:
+
+1. There are no environment-level restrictions or overrides that could still disable CI
+2. Database writes for feature flags are not being blocked or rolled back in production
+3. There are no caching layers (edge/server) returning stale flag states
+
+If needed, I can provide logs or additional context.
+
+Thanks for your support.
+
+Best regards,
+[Your Name]
