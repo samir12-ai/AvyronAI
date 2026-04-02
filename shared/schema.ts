@@ -825,6 +825,7 @@ export const ciCompetitors = pgTable("ci_competitors", {
   syntheticEnrichmentCount: integer("synthetic_enrichment_count").notNull().default(0),
   syntheticChurnFlag: text("synthetic_churn_flag"),
   lastPostWatermark: timestamp("last_post_watermark"),
+  sharedProfileId: varchar("shared_profile_id"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -983,6 +984,29 @@ export const competitorWebData = pgTable("competitor_web_data", {
 });
 
 export type CompetitorWebData = typeof competitorWebData.$inferSelect;
+
+export const ciSharedProfiles = pgTable("ci_shared_profiles", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  platform: text("platform").notNull().default("instagram"),
+  normalizedHandle: text("normalized_handle").notNull(),
+  followers: integer("followers"),
+  bioText: text("bio_text"),
+  linkInBio: text("link_in_bio"),
+  postCount: integer("post_count").default(0),
+  commentCount: integer("comment_count").default(0),
+  scrapeQuality: text("scrape_quality").default("FAST_PASS"),
+  lastScrapedAt: timestamp("last_scraped_at"),
+  fetchMethod: text("fetch_method"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => ({
+  platformHandleUnique: uniqueIndex("idx_ci_shared_profiles_platform_handle").on(table.platform, table.normalizedHandle),
+}));
+
+export type CiSharedProfile = typeof ciSharedProfiles.$inferSelect;
+
 export type CiCompetitor = typeof ciCompetitors.$inferSelect;
 export type CiSnapshot = typeof ciSnapshots.$inferSelect;
 export type CiMarketAnalysis = typeof ciMarketAnalyses.$inferSelect;

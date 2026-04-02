@@ -111,7 +111,7 @@ const CACHE_TTL = 24 * 60 * 60 * 1000;
 const rateLimitMap = new Map<string, number>();
 const RATE_LIMIT_MS = 10000;
 
-function normalizeInstagramUrl(url: string): string {
+export function normalizeInstagramUrl(url: string): string {
   let handle = url.trim();
   handle = handle.split("?")[0].split("#")[0];
   handle = handle.replace(/\/$/, "");
@@ -121,7 +121,7 @@ function normalizeInstagramUrl(url: string): string {
   return `https://www.instagram.com/${handle}/`;
 }
 
-function extractHandleFromUrl(url: string): string {
+export function extractHandleFromUrl(url: string): string {
   let cleaned = url.trim().split("?")[0].split("#")[0];
   const match = cleaned.match(/instagram\.com\/([^\/\?#]+)/);
   return (match ? match[1] : url.replace(/^@/, "").split("/")[0]).toLowerCase();

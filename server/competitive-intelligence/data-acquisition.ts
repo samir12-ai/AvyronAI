@@ -1,7 +1,8 @@
 import { db } from "../db";
 import { ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot } from "@shared/schema";
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
-import { scrapeInstagramProfile, scrapeCommentsForPosts, type ScrapedPost, type ScrapedComment } from "./profile-scraper";
+import { scrapeInstagramProfile, scrapeCommentsForPosts, extractHandleFromUrl, type ScrapedPost, type ScrapedComment } from "./profile-scraper";
+import { lookupSharedProfile, upsertSharedProfile, linkCompetitorToSharedProfile, reuseFromSharedPool } from "./shared-profile-store";
 import { acquireStickySession, releaseStickySession, type StickySessionContext } from "./proxy-pool-manager";
 import * as crypto from "crypto";
 import { MI_THRESHOLDS } from "../market-intelligence-v3/constants";
@@ -407,6 +408,43 @@ async function _executeFetch(
 
   if (collectionMode === "DEEP_PASS") {
     console.log(`[DataAcq] DEEP_PASS_CACHE_BYPASS: ${competitor.name} — skipping cache/cooldown checks for DEEP_PASS post expansion`);
+  }
+
+  const normalizedHandle = extractHandleFromUrl(competitor.profileLink ?? "");
+
+  if (!forceRefresh && collectionMode !== "DEEP_PASS" && normalizedHandle) {
+    const sharedLookup = await lookupSharedProfile("instagram", normalizedHandle, MIN_POSTS_THRESHOLD);
+
+    if (sharedLookup.found && !sharedLookup.isStale && sharedLookup.sharedProfileId) {
+      const reuseResult = await reuseFromSharedPool(
+        competitorId,
+        accountId,
+        sharedLookup.sharedProfileId,
+        sharedLookup
+      );
+
+      if (reuseResult) {
+        const hoursAgo = sharedLookup.lastScrapedAt
+          ? Math.round((Date.now() - sharedLookup.lastScrapedAt.getTime()) / (60 * 60 * 1000) * 10) / 10
+          : 0;
+
+        return {
+          competitorId,
+          postsCollected: reuseResult.postsCollected,
+          commentsCollected: reuseResult.commentsCollected,
+          ctaCoverage: reuseResult.ctaCoverage,
+          ctaTypes: reuseResult.ctaTypes,
+          followers: reuseResult.followers,
+          engagementRate: reuseResult.engagementRate,
+          postingFrequency: reuseResult.postingFrequency,
+          contentMix: reuseResult.contentMix,
+          fetchMethod: "SHARED_REUSE",
+          status: "SUCCESS",
+          message: `Shared pool reuse: data from ${hoursAgo}h ago with ${reuseResult.postsCollected} posts — no re-scrape needed.`,
+          cachedPostsReused: reuseResult.postsCollected,
+        };
+      }
+    }
   }
 
   if (!forceRefresh && collectionMode !== "DEEP_PASS") {
@@ -873,6 +911,22 @@ async function _executeFetch(
       updatedAt: new Date(),
     })
     .where(eq(ciCompetitors.id, competitorId));
+
+  if (normalizedHandle) {
+    try {
+      const sharedProfileId = await upsertSharedProfile("instagram", normalizedHandle, {
+        followers: scrapeResult.followers,
+        postCount: persistedPostCount,
+        commentCount: persistedCommentCount,
+        scrapeQuality: collectionMode === "DEEP_PASS" ? "DEEP_PASS" : "FAST_PASS",
+        fetchMethod: collectionMode || scrapeResult.collectionMethodUsed || null,
+      });
+      await linkCompetitorToSharedProfile(competitorId, sharedProfileId);
+      console.log(`[SharedPool] Upserted shared profile for @${normalizedHandle} (id=${sharedProfileId}, posts=${persistedPostCount})`);
+    } catch (err) {
+      console.warn(`[SharedPool] Non-fatal: failed to upsert shared profile for @${normalizedHandle}:`, err);
+    }
+  }
 
   const postsTarget = collectionMode === "FAST_PASS" ? TARGET_POSTS_FAST : MIN_POSTS_THRESHOLD;
   const coverageSufficient = persistedPostCount >= postsTarget;
