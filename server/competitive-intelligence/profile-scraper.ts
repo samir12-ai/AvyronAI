@@ -1272,7 +1272,7 @@ export async function scrapeCommentsForPosts(
 export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySessionContext, maxPosts: number = TARGET_POSTS, accountId: string = "unknown"): Promise<ScrapeResult> {
   const profileUrl = normalizeInstagramUrl(rawUrl);
   const handle = extractHandleFromUrl(rawUrl);
-  const cacheKey = `${accountId}:${handle}`;
+  const cacheKey = `instagram:${handle}`;
 
   const cached = profileCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {

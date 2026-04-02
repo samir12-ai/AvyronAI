@@ -1,0 +1,81 @@
+:::writing{variant=“chat_message” id=“73591”}
+This looks solid. Let’s move forward with a phased implementation based on your analysis.
+
+Phase 1 (Immediate – low risk, high impact)
+	1.	Re-key in-memory cache (cross-account reuse)
+
+	•	Change cache key from:
+${accountId}:${handle}
+to:
+${platform}:${handle}
+	•	This should immediately eliminate duplicate scraping across accounts within the 24h window
+	•	No migration required
+
+	2.	Hide internal fields from API responses
+
+	•	Update:
+	•	GET /api/ci/competitors
+	•	GET /api/ci/competitors/:id/inventory
+	•	Remove internal fields from responses:
+	•	fetchMethod
+	•	enrichmentStatus
+	•	any other internal-only metadata (analysisLevel, synthetic flags, etc. if not needed by UI)
+	•	Ensure responses only include user-facing fields
+
+⸻
+
+Phase 2 (Core architecture – hybrid model)
+	3.	Introduce shared layer
+
+	•	Add new table: ci_shared_profiles
+	•	Structure based on what you outlined (platform, normalizedHandle, lastScrapedAt, postCount, etc.)
+
+	4.	Link account layer to shared layer
+
+	•	Add sharedProfileId to:
+	•	ciCompetitors
+	•	(and optionally posts/comments tables as discussed)
+
+	5.	Update fetch flow
+Inside _executeFetch:
+
+	•	Step 1: normalize handle
+	•	Step 2: check ci_shared_profiles:
+	•	if fresh + sufficient coverage → reuse
+	•	link ciCompetitors.sharedProfileId
+	•	return data (no scrape)
+	•	Step 3: if not found or stale:
+	•	run scrape
+	•	write to shared table
+	•	write posts/comments with sharedProfileId
+	•	link competitor
+
+Important:
+	•	keep existing logic (TTL, thresholds, forceRefresh, DEEP_PASS) unchanged — just switch data source from per-account → shared
+
+⸻
+
+Phase 3 (Optional / later)
+	6.	Backfill existing data
+
+	•	Background job to map existing ciCompetitors to ci_shared_profiles by normalized handle
+
+⸻
+
+What to keep unchanged
+	•	All per-account tables (ciCompetitors, analyses, recommendations, etc.)
+	•	Existing reuse logic (TTL, thresholds, bypass rules)
+	•	Frontend behavior
+
+⸻
+
+What I need from you
+
+Please confirm:
+	1.	Any edge cases or risks with re-keying the in-memory cache to cross-account
+	2.	Whether any existing logic depends on accountId being part of the cache key
+	3.	The safest way to introduce ci_shared_profiles without breaking current queries
+	4.	Whether posts/comments should be duplicated per account or referenced via sharedProfileId only
+
+Let’s implement Phase 1 first, then proceed to Phase 2.
+:::

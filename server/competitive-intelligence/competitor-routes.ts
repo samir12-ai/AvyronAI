@@ -45,7 +45,34 @@ export function registerCiCompetitorRoutes(app: Express) {
       const enriched = await Promise.all(competitors.map(async c => {
         const validation = validateEvidence(c);
         const coverage = await getCompetitorDataCoverage(c.id, accountId);
-        return { ...c, evidenceComplete: validation.complete, missingFields: validation.missing, dataCoverage: coverage };
+        return {
+          id: c.id,
+          accountId: c.accountId,
+          campaignId: c.campaignId,
+          name: c.name,
+          platform: c.platform,
+          profileLink: c.profileLink,
+          businessType: c.businessType,
+          primaryObjective: c.primaryObjective,
+          postingFrequency: c.postingFrequency,
+          contentTypeRatio: c.contentTypeRatio,
+          engagementRatio: c.engagementRatio,
+          ctaPatterns: c.ctaPatterns,
+          discountFrequency: c.discountFrequency,
+          hookStyles: c.hookStyles,
+          messagingTone: c.messagingTone,
+          socialProofPresence: c.socialProofPresence,
+          screenshotUrls: c.screenshotUrls,
+          notes: c.notes,
+          websiteUrl: c.websiteUrl,
+          blogUrl: c.blogUrl,
+          isActive: c.isActive,
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+          evidenceComplete: validation.complete,
+          missingFields: validation.missing,
+          dataCoverage: coverage,
+        };
       }));
       res.json({ competitors: enriched });
     } catch (error: any) {
@@ -193,9 +220,6 @@ export function registerCiCompetitorRoutes(app: Express) {
         missingFields: validation.missing,
         requiredFields: REQUIRED_EVIDENCE_FIELDS,
         inventory: {
-          analysisLevel: competitor.analysisLevel || "FAST_PASS",
-          enrichmentStatus: competitor.enrichmentStatus || "PENDING",
-          fetchMethod: competitor.fetchMethod,
           postsCollected: competitor.postsCollected || 0,
           commentsCollected: competitor.commentsCollected || 0,
           dataFreshnessDays: competitor.dataFreshnessDays,
