@@ -10,6 +10,15 @@ if (!process.env.JWT_SECRET) {
   console.warn("[Auth] WARNING: JWT_SECRET not set — using fallback. Set JWT_SECRET in production.");
 }
 const TRIAL_DAYS = 7;
+
+export class AuthConfigurationError extends Error {
+  status: number;
+  constructor(message: string) {
+    super(message);
+    this.name = "AuthConfigurationError";
+    this.status = 401;
+  }
+}
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
 
 interface JwtPayload {
@@ -29,7 +38,7 @@ const ADMIN_ACCOUNT_IDS = new Set([
 
 export function resolveAccountId(req: AuthRequest): string {
   if (!req.accountId) {
-    throw new Error("resolveAccountId: no accountId on request. Ensure authMiddleware is applied to this route before calling resolveAccountId.");
+    throw new AuthConfigurationError("Authentication required: no account context found on request. Ensure this route is protected by authMiddleware.");
   }
   return req.accountId;
 }

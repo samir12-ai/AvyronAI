@@ -182,10 +182,32 @@ describe("Cache Isolation — integrityReports (storeIntegrityReport)", () => {
 });
 
 describe("Auth Hardening — resolveAccountId", () => {
-  it("throws when req has no accountId", async () => {
-    const { resolveAccountId } = await import("../auth");
+  it("throws AuthConfigurationError (status 401) when req has no accountId", async () => {
+    const { resolveAccountId, AuthConfigurationError } = await import("../auth");
     const fakeReq = {} as any;
-    expect(() => resolveAccountId(fakeReq)).toThrow("resolveAccountId: no accountId on request");
+    expect(() => resolveAccountId(fakeReq)).toThrow(AuthConfigurationError);
+  });
+
+  it("thrown error carries status 401 — not 500", async () => {
+    const { resolveAccountId } = await import("../auth");
+    try {
+      resolveAccountId({} as any);
+      expect.fail("should have thrown");
+    } catch (err: any) {
+      expect(err.status).toBe(401);
+      expect(err.name).toBe("AuthConfigurationError");
+    }
+  });
+
+  it("thrown error message identifies auth misconfiguration, not a generic crash", async () => {
+    const { resolveAccountId } = await import("../auth");
+    try {
+      resolveAccountId({} as any);
+      expect.fail("should have thrown");
+    } catch (err: any) {
+      expect(err.message).toContain("Authentication required");
+      expect(err.message).toContain("authMiddleware");
+    }
   });
 
   it("returns accountId when it exists on req", async () => {
@@ -284,6 +306,6 @@ describe("Cache Isolation — all in-memory Maps sweep", () => {
       content.indexOf("export function resolveAccountId") + 300
     );
     expect(resolveBlock).not.toContain('return "default"');
-    expect(resolveBlock).toContain("throw new Error");
+    expect(resolveBlock).toContain("throw new AuthConfigurationError");
   });
 });

@@ -281,12 +281,17 @@ function setupErrorHandler(app: express.Application) {
       status?: number;
       statusCode?: number;
       message?: string;
+      name?: string;
     };
 
     const status = error.status || error.statusCode || 500;
     const message = error.message || "Internal Server Error";
 
-    console.error("Internal Server Error:", err);
+    if (status >= 500) {
+      console.error(`[ErrorHandler] ${status} — ${error.name || "Error"}:`, err);
+    } else {
+      console.warn(`[ErrorHandler] ${status} — ${error.name || "Error"}: ${message}`);
+    }
 
     if (res.headersSent) {
       return next(err);
