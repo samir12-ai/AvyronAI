@@ -1,5 +1,10 @@
 uploads = []
-generated = []
+
+[[generated]]
+id = "F_leitkGi7lj9ZCw-z9sf"
+uri = "file://server/static/og-image.png"
+type = "image"
+title = "generated_image"
 
 [[outputs]]
 id = "p_lruz88rKkRy-6mcG_ml"
@@ -24,3 +29,9 @@ id = "UJnvJXBGXDhWjdzhXkrb_"
 uri = "file://landing-page-preview.jpeg"
 type = "image"
 title = "Avyron AI — New Landing Page (Dark Premium Design)"
+
+[[outputs]]
+id = "AVYw_Gd2FKYolFGp4uAxo"
+uri = "file://avyron-cover-photo.png"
+type = "image"
+title = "Avyron AI — New Cover Photo (Social Preview Image)"
