@@ -1,0 +1,65 @@
+I have 3 things I need you to verify and/or implement based strictly on the current codebase (not general suggestions). Please inspect the actual implementation and respond accordingly:
+
+---
+
+### 1) Competitors Database + Hidden from UX
+
+I want to introduce a persistence layer for scraped competitors data بحيث:
+
+- If a domain was already scraped, we don’t re-scrape unnecessarily  
+- Data is stored in the backend/database  
+- This database layer must be completely invisible to users in the UX  
+- Users should not see anything like “cache”, “stored data”, or “database”  
+- Only I (via Replit/backend) should be able to access and inspect it  
+
+Please verify in the current code:
+
+- Where and how competitor data would be stored  
+- Whether storage is per-account, global shared pool, or hybrid  
+- How this layer is hidden from API responses / frontend  
+- Whether any current route or response leaks that data is coming from cache/database  
+- If this is not implemented yet, specify exactly what needs to be added and in which files  
+
+---
+
+### 2) Real Reuse Logic (Not Cosmetic)
+
+I don’t want a “fake” database — I want actual reuse logic:
+
+Expected behavior:
+- If a user enters a domain (e.g. burgers niche)
+- And we already have recently scraped data for that domain
+- And the data is still fresh/valid
+
+👉 Then:
+- Return stored data directly  
+- Do NOT trigger a new scrape  
+
+Please confirm from the code:
+
+- Is there currently any deduplication or reuse logic?  
+- How “freshness” would be determined (timestamp, TTL, etc.)  
+- Where the decision happens: reuse vs re-scrape  
+- Whether the system guarantees we don’t duplicate scraping for the same domain unnecessarily  
+
+---
+
+### 3) Multi-Account Visibility (Cross-Device Behavior)
+
+I created a second account with a different email, and now I can switch between two accounts.
+
+I need to confirm:
+
+- Is this multi-account state tied only to my current device/session?  
+- Or are both accounts accessible from any device after login?  
+
+Please verify from the code:
+
+- How accounts and sessions are stored (cookies, JWT, local storage, etc.)  
+- Whether account switching is persisted server-side or only client-side  
+- If I log in from a different device, will I see both accounts or only one per login session?  
+
+---
+
+Please answer strictly based on the current implementation in the codebase.
+If something is missing, specify exactly what needs to be built and where.
