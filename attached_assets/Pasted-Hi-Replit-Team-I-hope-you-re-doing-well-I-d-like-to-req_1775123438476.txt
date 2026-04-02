@@ -1,0 +1,297 @@
+Hi Replit Team,
+
+I hope you're doing well.
+
+I’d like to request a **comprehensive redesign and brand transformation** for my project. Please read carefully, as this is not a simple UI tweak — the goal is to elevate the product to a **global, world-class AI brand**.
+
+---
+
+# 🚀 Project Direction
+
+We are transitioning from:
+
+❌ MarketMind (generic SaaS tool)
+➡️ To:
+✅ **Avyron AI — A high-end AI-powered market intelligence system**
+
+This product should feel like:
+
+> **A powerful AI brain that understands, predicts, and drives marketing decisions**
+
+---
+
+# ❗ Critical Rules (Must Follow)
+
+* DO NOT delete or remove existing features
+* DO NOT change backend logic or system behavior
+* DO NOT break any workflows
+* DO NOT simplify or remove sections without replacing them with better versions
+
+👉 You are allowed to:
+
+* Redesign UI
+* Improve UX
+* Enhance layout and structure
+* Refactor frontend styling
+
+---
+
+# 🧠 1. FULL BRANDING TRANSFORMATION
+
+### Replace everywhere:
+
+* “MarketMind” → **“Avyron AI”**
+
+### Apply to:
+
+* Navbar
+* Footer
+* Metadata (title, description)
+* Buttons
+* Dashboard
+* Any text across the system
+
+---
+
+### Logo:
+
+* Replace with a **modern, minimal AI-style logo**
+* Style:
+
+  * Geometric / abstract “A”
+  * Smooth curves or sharp futuristic edges
+  * Gradient (purple → blue)
+* Must work in:
+
+  * Navbar
+  * App icon
+  * Dark backgrounds
+
+---
+
+# 🎨 2. DESIGN SYSTEM (GLOBAL LEVEL)
+
+Move to a **premium AI design language** similar to:
+
+* OpenAI
+* Stripe
+* Vercel
+* Linear
+
+### Core Style:
+
+* Dark-first UI
+* Deep backgrounds (#0B0B14 or similar)
+* Soft gradients (purple / blue)
+* Glow effects (subtle, not excessive)
+* Glass / depth / layering
+
+---
+
+### Color System:
+
+* Primary: Purple (#7C3AED)
+* Secondary: Blue (#3B82F6)
+* Accent glow gradients
+* Neutral grays for text hierarchy
+
+---
+
+### Typography:
+
+* Clean, modern sans-serif
+* Strong hierarchy:
+
+  * Large bold headlines
+  * Medium subtext
+  * Light secondary text
+
+---
+
+# 🧩 3. HERO SECTION (CRITICAL)
+
+### Replace current hero completely
+
+#### Headline:
+
+**“See the market before it moves.”**
+
+#### Subtext:
+
+Avyron analyzes your market, competitors, and signals —
+and turns them into strategy, content, and growth.
+
+---
+
+### CTA:
+
+* Primary: “Start Free Trial”
+* Secondary: “See How It Works”
+
+---
+
+### Visual:
+
+* Add abstract AI background
+* Gradient lighting
+* Subtle motion (if possible)
+
+---
+
+# 🧠 4. STRUCTURE CHANGE (IMPORTANT)
+
+Currently the site shows “features”.
+
+❌ This feels like a basic tool
+
+---
+
+### Replace with SYSTEM FLOW:
+
+#### Section: “How Avyron Works”
+
+1. Scan → market + competitors
+2. Understand → positioning + insights
+3. Generate → strategy + content
+4. Optimize → continuous iteration
+
+👉 This should feel like an **AI thinking process**
+
+---
+
+# 🔥 5. NARRATIVE SECTION (KEEP BUT UPGRADE)
+
+Current:
+Problem → Cause → Intervention → Result
+
+---
+
+### Improve:
+
+* Turn into a **visual timeline**
+* Add better spacing and hierarchy
+* Use colored indicators with glow
+* Make it feel like:
+
+> “AI reasoning engine”
+
+---
+
+# 📊 6. DASHBOARD / APP UI
+
+This is VERY important.
+
+### Current:
+
+Looks like a standard dashboard
+
+---
+
+### Upgrade to:
+
+* Glassmorphism cards
+* Glow borders
+* Depth shadows
+* Smooth rounded corners
+* Clean spacing
+
+---
+
+### Add:
+
+* Status indicators (live / processing / ready)
+* Smooth UI hierarchy
+* Consistent component system
+
+---
+
+# 💰 7. PRICING (UPGRADE, NOT REMOVE)
+
+Keep structure but improve:
+
+### Rename plans:
+
+* One Shot → **Launch**
+* Growth → **Scale**
+* Ultra → **Dominion**
+
+---
+
+### Improve:
+
+* Card design (highlight middle plan)
+* Add glow / border emphasis
+* Better spacing and readability
+
+---
+
+# 🧭 8. NAVBAR
+
+Update structure:
+
+Replace:
+
+* Features
+
+With:
+
+* Intelligence
+* System
+* Output
+* Pricing
+
+---
+
+# ⚙️ 9. CONSISTENCY (VERY IMPORTANT)
+
+Ensure:
+
+* Website + App feel like ONE product
+* Same:
+
+  * Colors
+  * Buttons
+  * Typography
+  * Spacing
+  * Components
+
+---
+
+# ✨ 10. MICRO-INTERACTIONS (IF POSSIBLE)
+
+* Button hover effects
+* Smooth transitions
+* Subtle animations
+* Loading states
+
+---
+
+# 🧠 FINAL GOAL
+
+The product should feel like:
+
+❌ Not a marketing tool
+✅ A powerful AI intelligence system
+
+---
+
+# 🏁 DELIVERABLE
+
+* Fully rebranded to **Avyron AI**
+* Modern, premium UI
+* Consistent design across web + app
+* No logic changes
+* No feature loss
+* Strong visual identity
+
+---
+
+Take full creative freedom in design decisions —
+but always aim for a **world-class, global AI product level**.
+
+If anything is unclear, please ask before proceeding.
+
+Thank you.
+
+Best regards,
+[Your Name]

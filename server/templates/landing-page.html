@@ -3,60 +3,67 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Avyron AI — Stop Guessing. Start Growing.</title>
-  <meta name="description" content="Avyron builds your entire marketing system — from strategy to execution. AI-powered marketing intelligence for growth." />
+  <title>Avyron AI — See the market before it moves.</title>
+  <meta name="description" content="Avyron analyzes your market, competitors, and signals — and turns them into strategy, content, and growth." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
       --purple: #7C3AED;
-      --purple-dark: #6D28D9;
-      --purple-light: #8B5CF6;
-      --purple-glow: rgba(124,58,237,0.15);
-      --purple-bg: #F5F3FF;
-      --purple-bg-deep: #EDE9FE;
-      --text: #0F172A;
-      --text-secondary: #475569;
-      --text-muted: #94A3B8;
-      --border: #E2E8F0;
-      --bg: #FFFFFF;
-      --bg-subtle: #F8FAFC;
-      --bg-dark: #0F0F1A;
-      --bg-dark-card: #1A1A2E;
-      --max-w: 1200px;
+      --purple-bright: #8B5CF6;
+      --blue: #3B82F6;
+      --blue-bright: #60A5FA;
+      --bg: #07070F;
+      --bg-2: #0D0D1A;
+      --bg-3: #12121F;
+      --bg-card: rgba(255,255,255,0.03);
+      --bg-card-hover: rgba(255,255,255,0.06);
+      --border: rgba(255,255,255,0.07);
+      --border-bright: rgba(124,58,237,0.4);
+      --text: #F0F0FF;
+      --text-secondary: rgba(240,240,255,0.55);
+      --text-muted: rgba(240,240,255,0.3);
+      --glow-purple: rgba(124,58,237,0.18);
+      --glow-blue: rgba(59,130,246,0.12);
+      --max-w: 1160px;
       --radius: 16px;
       --radius-lg: 24px;
     }
 
+    html { scroll-behavior: smooth; }
+
     body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       background: var(--bg);
+      color: var(--text);
       line-height: 1.6;
       -webkit-font-smoothing: antialiased;
       overflow-x: hidden;
     }
 
+    /* SCROLLBAR */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.4); border-radius: 3px; }
+
     /* NAV */
     nav {
       position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
+      top: 0; left: 0; right: 0;
       z-index: 100;
-      background: rgba(255,255,255,0.8);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border-bottom: 1px solid rgba(226,232,240,0.6);
+      background: rgba(7,7,15,0.7);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border-bottom: 1px solid var(--border);
     }
     .nav-inner {
       max-width: var(--max-w);
       margin: 0 auto;
       padding: 0 32px;
-      height: 72px;
+      height: 68px;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -66,18 +73,28 @@
       align-items: center;
       gap: 12px;
       text-decoration: none;
-      color: var(--text);
     }
-    .nav-logo img {
-      width: 40px;
-      height: 40px;
+    .nav-logo-icon {
+      width: 36px;
+      height: 36px;
       border-radius: 10px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      background: linear-gradient(135deg, rgba(124,58,237,0.2), rgba(59,130,246,0.15));
+      border: 1px solid rgba(124,58,237,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
-    .nav-logo span {
+    .nav-logo-text {
+      font-size: 18px;
       font-weight: 800;
-      font-size: 20px;
-      letter-spacing: -0.5px;
+      color: var(--text);
+      letter-spacing: -0.3px;
+    }
+    .nav-logo-text span {
+      background: linear-gradient(135deg, var(--purple-bright), var(--blue-bright));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
     }
     .nav-links {
       display: flex;
@@ -98,762 +115,813 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      padding: 14px 32px;
+      gap: 8px;
+      padding: 13px 28px;
       border-radius: 12px;
       font-size: 15px;
       font-weight: 600;
       text-decoration: none;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
       cursor: pointer;
       border: none;
-      letter-spacing: -0.2px;
+      letter-spacing: -0.1px;
+      white-space: nowrap;
     }
     .btn-primary {
-      background: linear-gradient(135deg, var(--purple), var(--purple-dark));
+      background: linear-gradient(135deg, var(--purple), #6D28D9);
       color: #fff;
-      box-shadow: 0 4px 16px rgba(124,58,237,0.25);
+      box-shadow: 0 0 0 1px rgba(124,58,237,0.3), 0 4px 20px rgba(124,58,237,0.25);
     }
     .btn-primary:hover {
       transform: translateY(-2px);
-      box-shadow: 0 8px 32px rgba(124,58,237,0.35);
+      box-shadow: 0 0 0 1px rgba(124,58,237,0.5), 0 8px 32px rgba(124,58,237,0.4);
     }
-    .btn-outline {
+    .btn-ghost {
       background: transparent;
-      color: var(--purple);
-      border: 2px solid rgba(124,58,237,0.3);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
     }
-    .btn-outline:hover {
-      background: var(--purple-bg);
-      border-color: var(--purple);
+    .btn-ghost:hover {
+      background: var(--bg-card-hover);
+      color: var(--text);
+      border-color: rgba(255,255,255,0.15);
     }
-    .btn-white {
-      background: #fff;
-      color: var(--purple);
-      box-shadow: 0 4px 16px rgba(0,0,0,0.1);
-    }
-    .btn-white:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-    }
-    .btn-sm {
-      padding: 10px 22px;
-      font-size: 14px;
-      border-radius: 10px;
-    }
-    .btn-lg {
-      padding: 18px 40px;
-      font-size: 16px;
-      border-radius: 14px;
-    }
-    .btn-icon {
-      gap: 8px;
-    }
+    .btn-sm { padding: 9px 20px; font-size: 13px; border-radius: 10px; }
+    .btn-lg { padding: 16px 36px; font-size: 16px; border-radius: 14px; }
 
-    /* SECTIONS */
+    /* LAYOUT */
     section { padding: 120px 32px; position: relative; }
     .container { max-width: var(--max-w); margin: 0 auto; }
-    .section-label {
-      font-size: 13px;
-      font-weight: 700;
+
+    /* SECTION LABELS */
+    .label-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 100px;
+      background: rgba(124,58,237,0.1);
+      border: 1px solid rgba(124,58,237,0.2);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--purple-bright);
+      letter-spacing: 0.5px;
       text-transform: uppercase;
-      letter-spacing: 2px;
-      color: var(--purple);
-      margin-bottom: 12px;
+      margin-bottom: 20px;
     }
     .section-title {
-      font-size: clamp(32px, 4vw, 48px);
+      font-size: clamp(30px, 3.5vw, 44px);
       font-weight: 800;
       letter-spacing: -1px;
       line-height: 1.15;
       margin-bottom: 16px;
       color: var(--text);
     }
-    .section-subtitle {
-      font-size: 18px;
+    .section-sub {
+      font-size: 17px;
       color: var(--text-secondary);
-      max-width: 600px;
+      max-width: 560px;
       line-height: 1.7;
     }
     .section-header { text-align: center; margin-bottom: 72px; }
-    .section-header .section-subtitle { margin: 0 auto; }
+    .section-header .section-sub { margin: 0 auto; }
+
+    /* GLOW ORBS */
+    .orb {
+      position: absolute;
+      border-radius: 50%;
+      pointer-events: none;
+      filter: blur(80px);
+      opacity: 0.35;
+    }
+    .orb-purple { background: var(--purple); }
+    .orb-blue { background: var(--blue); }
 
     /* HERO */
     .hero {
-      padding-top: 140px;
-      padding-bottom: 40px;
+      padding-top: 148px;
+      padding-bottom: 80px;
       text-align: center;
       position: relative;
       overflow: hidden;
     }
-    .hero::before {
-      content: '';
+    .hero .orb { opacity: 0.2; }
+    .hero-orb-1 { width: 600px; height: 600px; top: -200px; left: 50%; transform: translateX(-60%); }
+    .hero-orb-2 { width: 400px; height: 400px; top: 0; right: -100px; }
+    .hero-grid {
       position: absolute;
-      top: -200px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 800px;
-      height: 800px;
-      background: radial-gradient(circle, rgba(124,58,237,0.08) 0%, transparent 70%);
-      pointer-events: none;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(124,58,237,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(124,58,237,0.04) 1px, transparent 1px);
+      background-size: 64px 64px;
+      mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, black 40%, transparent 100%);
+      -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, black 40%, transparent 100%);
     }
     .hero-badge {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      padding: 8px 20px;
+      padding: 7px 18px;
       border-radius: 100px;
-      background: linear-gradient(135deg, var(--purple-bg), var(--purple-bg-deep));
-      color: var(--purple);
+      background: rgba(124,58,237,0.1);
+      border: 1px solid rgba(124,58,237,0.25);
+      color: var(--purple-bright);
       font-size: 13px;
-      font-weight: 700;
+      font-weight: 600;
       margin-bottom: 32px;
-      border: 1px solid rgba(124,58,237,0.15);
+    }
+    .hero-badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--purple-bright);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
     }
     .hero h1 {
-      font-size: clamp(44px, 7vw, 72px);
+      font-size: clamp(44px, 6.5vw, 80px);
       font-weight: 900;
-      line-height: 1.05;
-      letter-spacing: -2px;
+      line-height: 1.04;
+      letter-spacing: -2.5px;
+      margin-bottom: 28px;
       color: var(--text);
-      margin-bottom: 24px;
     }
-    .hero h1 .gradient-text {
-      background: linear-gradient(135deg, var(--purple), #EC4899);
+    .hero h1 .gradient {
+      background: linear-gradient(135deg, var(--purple-bright) 0%, var(--blue-bright) 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
     }
-    .hero p {
-      font-size: clamp(18px, 2.2vw, 22px);
+    .hero-sub {
+      font-size: clamp(16px, 2vw, 20px);
       color: var(--text-secondary);
-      max-width: 580px;
+      max-width: 520px;
       margin: 0 auto 44px;
-      line-height: 1.6;
+      line-height: 1.7;
+      font-weight: 400;
     }
     .hero-ctas {
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 16px;
+      gap: 14px;
       flex-wrap: wrap;
-      margin-bottom: 16px;
+      margin-bottom: 20px;
     }
     .hero-note {
       font-size: 13px;
       color: var(--text-muted);
-      margin-top: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
     }
-    .hero-note svg { vertical-align: -2px; margin-right: 4px; }
 
-    /* HERO PRODUCT VISUAL */
+    /* HERO DASHBOARD MOCKUP */
     .hero-visual {
-      margin-top: 72px;
+      margin-top: 80px;
       position: relative;
-      max-width: 1000px;
+      max-width: 960px;
       margin-left: auto;
       margin-right: auto;
     }
     .hero-visual::before {
       content: '';
       position: absolute;
-      inset: -40px;
-      background: radial-gradient(ellipse at center, rgba(124,58,237,0.06) 0%, transparent 70%);
-      border-radius: 40px;
-      pointer-events: none;
+      inset: -2px;
+      border-radius: 30px;
+      background: linear-gradient(135deg, rgba(124,58,237,0.4), rgba(59,130,246,0.2), transparent, rgba(124,58,237,0.15));
+      z-index: 0;
     }
-    .product-frame {
-      background: var(--bg-dark);
-      border-radius: var(--radius-lg);
-      padding: 3px;
-      box-shadow: 0 32px 80px rgba(0,0,0,0.15), 0 0 0 1px rgba(255,255,255,0.05) inset;
+    .dash-frame {
       position: relative;
+      z-index: 1;
+      background: var(--bg-2);
+      border-radius: 28px;
       overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.07);
+      box-shadow: 0 40px 100px rgba(0,0,0,0.6), 0 0 60px rgba(124,58,237,0.08);
     }
-    .product-frame-header {
-      background: #1E1E2E;
-      border-radius: 21px 21px 0 0;
+    .dash-topbar {
       padding: 14px 20px;
+      background: rgba(255,255,255,0.03);
+      border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
       gap: 8px;
     }
-    .frame-dot {
-      width: 12px;
-      height: 12px;
+    .mac-dot {
+      width: 11px; height: 11px;
       border-radius: 50%;
-      background: #374151;
     }
-    .frame-dot.red { background: #EF4444; }
-    .frame-dot.yellow { background: #F59E0B; }
-    .frame-dot.green { background: #10B981; }
-    .product-frame-content {
-      background: linear-gradient(135deg, #F8FAFC, #F1F5F9);
-      border-radius: 0 0 21px 21px;
-      padding: 32px;
-      min-height: 380px;
-    }
-
-    /* MOCK UI CARDS */
-    .mock-dashboard {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 20px;
-    }
-    .mock-card {
-      background: #fff;
-      border-radius: 14px;
-      padding: 24px;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-      border: 1px solid var(--border);
-    }
-    .mock-card-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 16px;
-    }
-    .mock-card-icon {
-      width: 40px;
-      height: 40px;
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-    }
-    .mock-card-icon.purple { background: var(--purple-bg); }
-    .mock-card-icon.blue { background: #EFF6FF; }
-    .mock-card-icon.green { background: #ECFDF5; }
-    .mock-card-icon.amber { background: #FFFBEB; }
-    .mock-card-icon.rose { background: #FFF1F2; }
-    .mock-card-badge {
-      font-size: 11px;
-      font-weight: 600;
-      padding: 4px 10px;
-      border-radius: 100px;
-      background: #ECFDF5;
-      color: #059669;
-    }
-    .mock-card h4 {
-      font-size: 14px;
-      font-weight: 700;
-      color: var(--text);
-      margin-bottom: 6px;
-    }
-    .mock-card p {
-      font-size: 12px;
-      color: var(--text-secondary);
-      line-height: 1.5;
-    }
-    .mock-bar {
-      height: 6px;
-      border-radius: 3px;
-      background: #E2E8F0;
-      margin-top: 12px;
-      position: relative;
-      overflow: hidden;
-    }
-    .mock-bar-fill {
-      position: absolute;
-      left: 0;
-      top: 0;
-      height: 100%;
-      border-radius: 3px;
-    }
-    .mock-bar-fill.purple { background: var(--purple); }
-    .mock-bar-fill.blue { background: #3B82F6; }
-    .mock-bar-fill.green { background: #10B981; }
-    .mock-stat {
-      font-size: 28px;
-      font-weight: 800;
-      letter-spacing: -1px;
-      color: var(--text);
-      margin-bottom: 2px;
-    }
-    .mock-stat-label {
+    .mac-dot.r { background: #FF5F57; }
+    .mac-dot.y { background: #FFBD2E; }
+    .mac-dot.g { background: #28CA41; }
+    .dash-url {
+      flex: 1;
+      text-align: center;
       font-size: 12px;
       color: var(--text-muted);
       font-weight: 500;
     }
-
-    /* PIPELINE MOCK (bottom of hero) */
-    .mock-pipeline {
-      grid-column: 1 / -1;
-      background: #fff;
-      border-radius: 14px;
-      padding: 20px 24px;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-      border: 1px solid var(--border);
+    .dash-body {
+      padding: 28px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
     }
-    .pipeline-label {
-      font-size: 12px;
+    .d-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 14px;
+      padding: 20px;
+      transition: border-color 0.2s;
+    }
+    .d-card:hover { border-color: rgba(124,58,237,0.3); }
+    .d-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .d-icon {
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+    .d-icon.p { background: rgba(124,58,237,0.15); }
+    .d-icon.b { background: rgba(59,130,246,0.15); }
+    .d-icon.g { background: rgba(16,185,129,0.15); }
+    .d-badge {
+      padding: 3px 10px;
+      border-radius: 100px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .d-badge.live { background: rgba(16,185,129,0.15); color: #34D399; }
+    .d-badge.ready { background: rgba(59,130,246,0.15); color: #60A5FA; }
+    .d-card h4 {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+    .d-card p {
+      font-size: 11px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+    .d-bar {
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(255,255,255,0.08);
+      margin-top: 12px;
+      overflow: hidden;
+    }
+    .d-bar-fill {
+      height: 100%;
+      border-radius: 2px;
+    }
+    .d-bar-fill.p { background: linear-gradient(90deg, var(--purple), var(--blue)); }
+    .d-bar-fill.b { background: var(--blue); }
+    .d-bar-fill.g { background: #10B981; }
+    .d-stat { font-size: 28px; font-weight: 800; color: var(--text); letter-spacing: -1px; }
+    .d-stat-lbl { font-size: 11px; color: var(--text-muted); margin-top: 2px; font-weight: 500; }
+    .d-pipeline {
+      grid-column: 1 / -1;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px 20px;
+    }
+    .d-pipeline-lbl {
+      font-size: 11px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 1px;
       color: var(--text-muted);
-      margin-bottom: 14px;
+      margin-bottom: 12px;
     }
-    .pipeline-stages {
+    .d-stages {
       display: flex;
-      gap: 8px;
       align-items: center;
+      gap: 6px;
     }
-    .pipeline-stage {
+    .d-stage {
       flex: 1;
-      padding: 10px 14px;
-      border-radius: 10px;
+      padding: 9px 12px;
+      border-radius: 9px;
       font-size: 12px;
       font-weight: 600;
       text-align: center;
-      position: relative;
     }
-    .pipeline-stage.active {
-      background: var(--purple);
-      color: #fff;
-    }
-    .pipeline-stage.done {
-      background: #ECFDF5;
-      color: #059669;
-    }
-    .pipeline-stage.pending {
-      background: #F1F5F9;
-      color: var(--text-muted);
-    }
-    .pipeline-arrow {
-      color: var(--text-muted);
-      font-size: 14px;
-      flex-shrink: 0;
-    }
+    .d-stage.done { background: rgba(16,185,129,0.12); color: #34D399; }
+    .d-stage.active { background: linear-gradient(135deg, rgba(124,58,237,0.3), rgba(59,130,246,0.2)); color: var(--text); border: 1px solid rgba(124,58,237,0.3); }
+    .d-stage.idle { background: rgba(255,255,255,0.04); color: var(--text-muted); }
+    .d-arrow { color: var(--text-muted); font-size: 12px; flex-shrink: 0; }
 
-    /* LOGO BAR */
-    .logo-bar {
-      padding: 64px 32px;
-      text-align: center;
+    /* DIVIDER */
+    .divider {
+      padding: 56px 32px;
+      border-top: 1px solid var(--border);
       border-bottom: 1px solid var(--border);
+      background: var(--bg-2);
+      text-align: center;
     }
-    .logo-bar p {
-      font-size: 13px;
-      font-weight: 600;
+    .divider p {
+      font-size: 12px;
+      font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 2px;
       color: var(--text-muted);
-      margin-bottom: 32px;
+      margin-bottom: 28px;
     }
-    .logo-row {
+    .industry-row {
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 48px;
       flex-wrap: wrap;
-      opacity: 0.4;
     }
-    .logo-item {
-      font-size: 20px;
-      font-weight: 800;
+    .industry-tag {
+      font-size: 15px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.18);
+      letter-spacing: -0.3px;
+    }
+
+    /* HOW IT WORKS */
+    .how-section { background: var(--bg-2); }
+    .steps-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
+    }
+    .step-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 32px 24px;
+      position: relative;
+      transition: all 0.3s;
+      overflow: hidden;
+    }
+    .step-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--purple), var(--blue));
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .step-card:hover::before { opacity: 1; }
+    .step-card:hover {
+      background: var(--bg-card-hover);
+      border-color: rgba(124,58,237,0.2);
+      transform: translateY(-4px);
+    }
+    .step-num {
+      width: 48px; height: 48px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, rgba(124,58,237,0.2), rgba(59,130,246,0.1));
+      border: 1px solid rgba(124,58,237,0.25);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      font-weight: 900;
+      color: var(--purple-bright);
+      margin-bottom: 20px;
+    }
+    .step-card h3 {
+      font-size: 17px;
+      font-weight: 700;
+      margin-bottom: 8px;
       color: var(--text);
-      letter-spacing: -0.5px;
+    }
+    .step-card p {
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+    .step-keyword {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--purple-bright);
+      margin-bottom: 8px;
     }
 
     /* VISUAL SECTIONS */
-    .visual-section {
+    .visual-split {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 80px;
       align-items: center;
     }
-    .visual-section.reverse { direction: rtl; }
-    .visual-section.reverse > * { direction: ltr; }
-    .visual-content { max-width: 480px; }
-    .visual-content .section-label { margin-bottom: 12px; }
-    .visual-content h2 {
-      font-size: clamp(28px, 3.5vw, 40px);
+    .visual-split.flip { direction: rtl; }
+    .visual-split.flip > * { direction: ltr; }
+    .v-content { max-width: 460px; }
+    .v-content h2 {
+      font-size: clamp(26px, 3vw, 38px);
       font-weight: 800;
       letter-spacing: -0.8px;
-      line-height: 1.15;
+      line-height: 1.2;
       margin-bottom: 16px;
       color: var(--text);
     }
-    .visual-content p {
+    .v-content p {
       font-size: 16px;
       color: var(--text-secondary);
       line-height: 1.7;
-      margin-bottom: 24px;
+      margin-bottom: 28px;
     }
-    .visual-checklist {
-      list-style: none;
+    .v-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+    .v-list li {
       display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-    .visual-checklist li {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 15px;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 14px;
       color: var(--text-secondary);
       font-weight: 500;
     }
-    .check-icon {
-      width: 24px;
-      height: 24px;
-      border-radius: 8px;
-      background: var(--purple-bg);
+    .v-check {
+      width: 20px; height: 20px;
+      border-radius: 6px;
+      background: rgba(124,58,237,0.15);
       display: flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
+      margin-top: 1px;
     }
-    .check-icon svg { width: 14px; height: 14px; }
+    .v-check svg { width: 12px; height: 12px; }
 
-    /* VISUAL FRAME */
-    .visual-frame {
-      background: linear-gradient(135deg, var(--purple-bg), #EDE9FE);
+    /* GLASS CARD PANEL */
+    .glass-panel {
+      background: rgba(13,13,26,0.8);
+      border: 1px solid var(--border);
       border-radius: var(--radius-lg);
-      padding: 32px;
+      padding: 28px;
+      backdrop-filter: blur(12px);
       position: relative;
       overflow: hidden;
     }
-    .visual-frame::before {
+    .glass-panel::before {
       content: '';
       position: absolute;
-      top: -50%;
-      right: -50%;
-      width: 100%;
-      height: 100%;
-      background: radial-gradient(circle, rgba(124,58,237,0.1) 0%, transparent 60%);
+      top: -60px; right: -60px;
+      width: 200px; height: 200px;
+      background: radial-gradient(circle, rgba(124,58,237,0.12) 0%, transparent 70%);
       pointer-events: none;
     }
-    .visual-frame.dark {
-      background: linear-gradient(135deg, #1A1A2E, #16213E);
-    }
-    .visual-frame.dark .mock-card {
-      background: rgba(255,255,255,0.08);
-      border-color: rgba(255,255,255,0.1);
-    }
-    .visual-frame.dark .mock-card h4 { color: #fff; }
-    .visual-frame.dark .mock-card p { color: rgba(255,255,255,0.6); }
 
-    /* ENGINE CARDS MOCK */
-    .engine-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-    }
-    .engine-mini {
-      background: #fff;
+    /* ENGINE GRID INSIDE PANEL */
+    .eng-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .eng-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
       border-radius: 12px;
-      padding: 16px;
-      border: 1px solid var(--border);
-      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+      padding: 14px;
+      transition: border-color 0.2s;
     }
-    .engine-mini-header {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 8px;
-    }
-    .engine-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-    }
-    .engine-dot.live { background: #10B981; }
-    .engine-dot.processing { background: #F59E0B; }
-    .engine-mini h5 {
-      font-size: 12px;
-      font-weight: 700;
-      color: var(--text);
-    }
-    .engine-mini p {
-      font-size: 11px;
-      color: var(--text-muted);
-      line-height: 1.4;
-    }
+    .eng-card:hover { border-color: rgba(124,58,237,0.3); }
+    .eng-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .eng-dot { width: 7px; height: 7px; border-radius: 50%; }
+    .eng-dot.live { background: #10B981; box-shadow: 0 0 6px #10B981; }
+    .eng-dot.proc { background: #F59E0B; box-shadow: 0 0 6px #F59E0B; }
+    .eng-card h5 { font-size: 12px; font-weight: 700; color: var(--text); }
+    .eng-card p { font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; }
+    .eng-bar { height: 3px; border-radius: 2px; background: rgba(255,255,255,0.06); overflow: hidden; }
+    .eng-fill { height: 100%; border-radius: 2px; }
+    .eng-fill.p { background: linear-gradient(90deg, var(--purple), var(--blue)); }
+    .eng-fill.b { background: var(--blue); }
+    .eng-fill.g { background: #10B981; }
 
-    /* NARRATIVE MOCK */
-    .narrative-mock {
-      background: #fff;
-      border-radius: 14px;
-      padding: 24px;
-      border: 1px solid var(--border);
-      box-shadow: 0 2px 12px rgba(0,0,0,0.04);
-    }
-    .narrative-chain {
+    /* NARRATIVE TIMELINE */
+    .timeline { display: flex; flex-direction: column; gap: 0; }
+    .t-node {
       display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-    .narrative-node {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 12px 16px;
-      border-radius: 10px;
-      font-size: 13px;
-      font-weight: 600;
-    }
-    .narrative-node.problem { background: #FEF2F2; color: #DC2626; }
-    .narrative-node.cause { background: #FFFBEB; color: #D97706; }
-    .narrative-node.intervention { background: #EFF6FF; color: #2563EB; }
-    .narrative-node.result { background: #ECFDF5; color: #059669; }
-    .narrative-connector {
-      width: 2px;
-      height: 16px;
-      background: var(--border);
-      margin-left: 24px;
-    }
-
-    /* STATS BAR */
-    .stats-bar {
-      padding: 80px 32px;
-      background: var(--bg-dark);
+      align-items: flex-start;
+      gap: 16px;
+      padding: 16px 0;
       position: relative;
-      overflow: hidden;
     }
-    .stats-bar::before {
+    .t-node:not(:last-child)::after {
       content: '';
       position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
-      pointer-events: none;
+      left: 15px;
+      top: 52px;
+      bottom: -4px;
+      width: 2px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.1), transparent);
+    }
+    .t-dot {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      flex-shrink: 0;
+      position: relative;
+      z-index: 1;
+    }
+    .t-dot.prob { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); }
+    .t-dot.caus { background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.3); }
+    .t-dot.intv { background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.3); }
+    .t-dot.rslt { background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); }
+    .t-content {
+      flex: 1;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 16px;
+    }
+    .t-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+    .t-label.prob { color: #F87171; }
+    .t-label.caus { color: #FCD34D; }
+    .t-label.intv { color: #60A5FA; }
+    .t-label.rslt { color: #34D399; }
+    .t-text { font-size: 13px; color: var(--text); font-weight: 500; }
+
+    /* CONTENT CARDS */
+    .content-stack { display: flex; flex-direction: column; gap: 10px; }
+    .c-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      transition: all 0.2s;
+    }
+    .c-card:hover { border-color: rgba(124,58,237,0.3); background: rgba(255,255,255,0.06); }
+    .c-icon {
+      width: 44px; height: 44px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+    .c-icon.p { background: rgba(124,58,237,0.15); }
+    .c-icon.b { background: rgba(59,130,246,0.15); }
+    .c-icon.a { background: rgba(245,158,11,0.15); }
+    .c-info { flex: 1; }
+    .c-info h4 { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 2px; }
+    .c-info p { font-size: 12px; color: var(--text-secondary); }
+    .c-status {
+      padding: 4px 12px;
+      border-radius: 100px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .c-status.ready { background: rgba(16,185,129,0.12); color: #34D399; }
+    .c-status.gen { background: rgba(124,58,237,0.12); color: var(--purple-bright); }
+    .c-status.sched { background: rgba(245,158,11,0.12); color: #FCD34D; }
+
+    /* STATS */
+    .stats-section {
+      background: var(--bg-2);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 80px 32px;
     }
     .stats-grid {
       max-width: var(--max-w);
       margin: 0 auto;
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 40px;
+      gap: 48px;
       text-align: center;
-      position: relative;
     }
-    .stat-item h3 {
-      font-size: clamp(36px, 5vw, 56px);
+    .stat-num {
+      font-size: clamp(40px, 5vw, 60px);
       font-weight: 900;
       letter-spacing: -2px;
-      background: linear-gradient(135deg, #fff, rgba(255,255,255,0.7));
+      background: linear-gradient(135deg, var(--text), rgba(240,240,255,0.6));
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
       margin-bottom: 8px;
+      line-height: 1;
     }
-    .stat-item p {
+    .stat-lbl {
       font-size: 14px;
-      color: rgba(255,255,255,0.5);
+      color: var(--text-muted);
       font-weight: 500;
     }
 
-    /* FEATURES GRID */
-    .features-section { background: var(--bg-subtle); }
+    /* FEATURES */
     .features-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 24px;
+      gap: 20px;
     }
-    .feature-card {
-      background: #fff;
-      border-radius: var(--radius);
-      padding: 36px 28px;
+    .feat-card {
+      background: var(--bg-card);
       border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px 26px;
       transition: all 0.3s;
       position: relative;
       overflow: hidden;
     }
-    .feature-card::before {
+    .feat-card::after {
       content: '';
       position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 3px;
-      background: linear-gradient(90deg, var(--purple), #EC4899);
+      bottom: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(124,58,237,0.4), transparent);
       opacity: 0;
       transition: opacity 0.3s;
     }
-    .feature-card:hover::before { opacity: 1; }
-    .feature-card:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 12px 40px rgba(0,0,0,0.08);
-      border-color: transparent;
+    .feat-card:hover::after { opacity: 1; }
+    .feat-card:hover {
+      background: var(--bg-card-hover);
+      border-color: rgba(124,58,237,0.2);
+      transform: translateY(-3px);
     }
-    .feature-icon {
-      width: 56px;
-      height: 56px;
+    .feat-icon {
+      width: 48px; height: 48px;
       border-radius: 14px;
       display: flex;
       align-items: center;
       justify-content: center;
-      margin-bottom: 20px;
-      font-size: 24px;
+      font-size: 22px;
+      margin-bottom: 18px;
     }
-    .feature-icon.purple { background: var(--purple-bg); }
-    .feature-icon.blue { background: #EFF6FF; }
-    .feature-icon.green { background: #ECFDF5; }
-    .feature-icon.amber { background: #FFFBEB; }
-    .feature-icon.rose { background: #FFF1F2; }
-    .feature-icon.cyan { background: #ECFEFF; }
-    .feature-card h3 {
-      font-size: 18px;
-      font-weight: 700;
-      margin-bottom: 8px;
-      letter-spacing: -0.3px;
-    }
-    .feature-card p {
-      font-size: 14px;
-      color: var(--text-secondary);
-      line-height: 1.7;
-    }
+    .feat-icon.p { background: rgba(124,58,237,0.12); }
+    .feat-icon.b { background: rgba(59,130,246,0.12); }
+    .feat-icon.g { background: rgba(16,185,129,0.12); }
+    .feat-icon.a { background: rgba(245,158,11,0.12); }
+    .feat-icon.r { background: rgba(239,68,68,0.12); }
+    .feat-icon.c { background: rgba(6,182,212,0.12); }
+    .feat-card h3 { font-size: 17px; font-weight: 700; margin-bottom: 8px; color: var(--text); }
+    .feat-card p { font-size: 14px; color: var(--text-secondary); line-height: 1.65; }
 
     /* PRICING */
-    .pricing-section { background: var(--bg-subtle); }
+    .pricing-section { background: var(--bg-2); }
     .pricing-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 24px;
+      gap: 20px;
       max-width: 960px;
       margin: 0 auto;
     }
-    .price-card {
-      background: var(--bg);
+    .p-card {
+      background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
-      padding: 40px 32px;
-      text-align: center;
-      transition: all 0.3s;
+      padding: 36px 28px;
       position: relative;
+      transition: all 0.3s;
+      display: flex;
+      flex-direction: column;
     }
-    .price-card:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 16px 48px rgba(0,0,0,0.08);
-    }
-    .price-card.featured {
-      border: 2px solid var(--purple);
-      box-shadow: 0 8px 32px rgba(124,58,237,0.12);
+    .p-card:hover { transform: translateY(-4px); border-color: rgba(255,255,255,0.12); }
+    .p-card.featured {
+      background: rgba(124,58,237,0.06);
+      border-color: rgba(124,58,237,0.35);
+      box-shadow: 0 0 40px rgba(124,58,237,0.1), inset 0 1px 0 rgba(124,58,237,0.2);
       transform: scale(1.03);
     }
-    .price-card.featured:hover { transform: scale(1.03) translateY(-4px); }
-    .price-popular {
+    .p-card.featured:hover { transform: scale(1.03) translateY(-4px); }
+    .p-popular {
       position: absolute;
-      top: -14px;
-      left: 50%;
+      top: -13px; left: 50%;
       transform: translateX(-50%);
-      background: linear-gradient(135deg, var(--purple), var(--purple-dark));
+      background: linear-gradient(135deg, var(--purple), var(--blue));
       color: #fff;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 700;
-      padding: 6px 20px;
+      padding: 5px 18px;
       border-radius: 100px;
       letter-spacing: 0.5px;
+      white-space: nowrap;
     }
-    .price-name {
-      font-size: 18px;
+    .p-name {
+      font-size: 14px;
       font-weight: 700;
-      margin-bottom: 12px;
-      color: var(--text);
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
     }
-    .price-amount {
-      font-size: 48px;
+    .p-name.featured-text { color: var(--purple-bright); }
+    .p-price {
+      font-size: 52px;
       font-weight: 900;
       letter-spacing: -2px;
-      margin-bottom: 4px;
       color: var(--text);
+      line-height: 1;
+      margin-bottom: 4px;
     }
-    .price-period {
-      font-size: 14px;
-      color: var(--text-muted);
-      margin-bottom: 32px;
-    }
-    .price-features {
-      list-style: none;
-      text-align: left;
-      margin-bottom: 32px;
-    }
-    .price-features li {
+    .p-period { font-size: 13px; color: var(--text-muted); margin-bottom: 28px; }
+    .p-desc { font-size: 14px; color: var(--text-secondary); margin-bottom: 24px; line-height: 1.6; }
+    .p-features { list-style: none; flex: 1; margin-bottom: 28px; }
+    .p-features li {
       font-size: 14px;
       color: var(--text-secondary);
       padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
       display: flex;
-      align-items: center;
-      gap: 12px;
-      border-bottom: 1px solid #F1F5F9;
+      align-items: flex-start;
+      gap: 10px;
+      line-height: 1.5;
     }
-    .price-features li:last-child { border-bottom: none; }
-    .price-check {
-      width: 20px;
-      height: 20px;
-      border-radius: 6px;
-      background: #ECFDF5;
+    .p-features li:last-child { border-bottom: none; }
+    .p-check {
+      width: 18px; height: 18px;
+      border-radius: 5px;
+      background: rgba(124,58,237,0.15);
       display: flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
+      margin-top: 1px;
     }
-    .price-check svg { width: 12px; height: 12px; color: #059669; }
+    .p-check svg { width: 10px; height: 10px; }
 
     /* FINAL CTA */
     .final-cta {
       text-align: center;
-      background: var(--bg-dark);
-      color: #fff;
       position: relative;
       overflow: hidden;
     }
-    .final-cta::before {
-      content: '';
-      position: absolute;
-      top: -300px;
-      left: 50%;
+    .final-cta .orb-purple {
+      width: 600px; height: 600px;
+      top: -200px; left: 50%;
       transform: translateX(-50%);
-      width: 600px;
-      height: 600px;
-      background: radial-gradient(circle, rgba(124,58,237,0.2) 0%, transparent 70%);
-      pointer-events: none;
+      opacity: 0.15;
     }
-    .final-cta .section-label { color: var(--purple-light); }
-    .final-cta .section-title {
-      color: #fff;
+    .final-cta .orb-blue {
+      width: 400px; height: 400px;
+      bottom: -100px; right: -100px;
+      opacity: 0.08;
+    }
+    .cta-box {
+      position: relative;
+      z-index: 1;
+      background: rgba(124,58,237,0.05);
+      border: 1px solid rgba(124,58,237,0.2);
+      border-radius: 32px;
+      padding: 80px 40px;
+      max-width: 720px;
+      margin: 0 auto;
+      backdrop-filter: blur(12px);
+    }
+    .cta-box h2 {
+      font-size: clamp(32px, 4vw, 52px);
+      font-weight: 900;
+      letter-spacing: -1.5px;
+      line-height: 1.1;
       margin-bottom: 16px;
-      font-size: clamp(32px, 4.5vw, 52px);
+      color: var(--text);
     }
-    .final-cta p {
-      color: rgba(255,255,255,0.6);
-      font-size: 18px;
-      max-width: 500px;
-      margin: 0 auto 40px;
-      line-height: 1.7;
-    }
-    .final-cta-buttons {
+    .cta-box p { font-size: 17px; color: var(--text-secondary); margin-bottom: 40px; line-height: 1.6; }
+    .cta-btns { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; }
+    .trust-row {
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 16px;
+      gap: 28px;
+      margin-top: 32px;
       flex-wrap: wrap;
     }
-    .trust-badges {
+    .trust-item {
       display: flex;
       align-items: center;
-      justify-content: center;
-      gap: 32px;
-      margin-top: 40px;
-      flex-wrap: wrap;
-    }
-    .trust-badge {
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      gap: 6px;
       font-size: 13px;
-      color: rgba(255,255,255,0.5);
+      color: var(--text-muted);
       font-weight: 500;
     }
-    .trust-badge svg { opacity: 0.5; }
 
     /* FOOTER */
     footer {
-      padding: 48px 32px;
+      padding: 44px 32px;
       border-top: 1px solid var(--border);
-      background: var(--bg-subtle);
+      background: var(--bg);
     }
     .footer-inner {
       max-width: var(--max-w);
@@ -864,45 +932,40 @@
       flex-wrap: wrap;
       gap: 16px;
     }
-    footer p {
-      font-size: 13px;
-      color: var(--text-muted);
-    }
-    .footer-links {
+    .footer-logo {
       display: flex;
-      gap: 24px;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
     }
+    .footer-logo-text {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--text);
+    }
+    footer p { font-size: 13px; color: var(--text-muted); }
+    .footer-links { display: flex; gap: 24px; }
     .footer-links a {
       font-size: 13px;
       color: var(--text-secondary);
       text-decoration: none;
       font-weight: 500;
+      transition: color 0.2s;
     }
-    .footer-links a:hover { color: var(--purple); }
-
-    /* DECORATIVE ELEMENTS */
-    .grid-pattern {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background-image: 
-        linear-gradient(rgba(124,58,237,0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(124,58,237,0.03) 1px, transparent 1px);
-      background-size: 60px 60px;
-      pointer-events: none;
-    }
+    .footer-links a:hover { color: var(--purple-bright); }
 
     /* RESPONSIVE */
-    @media (max-width: 968px) {
-      .visual-section { grid-template-columns: 1fr; gap: 40px; }
-      .visual-section.reverse { direction: ltr; }
+    @media (max-width: 1024px) {
+      .steps-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 900px) {
+      .visual-split { grid-template-columns: 1fr; gap: 40px; }
+      .visual-split.flip { direction: ltr; }
       .features-grid { grid-template-columns: 1fr 1fr; }
-      .pricing-grid { grid-template-columns: 1fr; max-width: 420px; }
-      .price-card.featured { transform: none; }
-      .price-card.featured:hover { transform: translateY(-4px); }
-      .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 32px; }
+      .pricing-grid { grid-template-columns: 1fr; max-width: 400px; }
+      .p-card.featured { transform: none; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 40px; }
+      .dash-body { grid-template-columns: 1fr 1fr; }
     }
     @media (max-width: 768px) {
       section { padding: 80px 20px; }
@@ -910,15 +973,17 @@
       .nav-inner { padding: 0 20px; }
       .nav-links { gap: 16px; }
       .nav-links a.hide-mobile { display: none; }
-      .mock-dashboard { grid-template-columns: 1fr; }
-      .engine-grid { grid-template-columns: 1fr; }
       .features-grid { grid-template-columns: 1fr; }
-      .logo-row { gap: 32px; }
+      .steps-grid { grid-template-columns: 1fr; }
       .footer-inner { flex-direction: column; text-align: center; }
+      .industry-row { gap: 28px; }
+      .dash-body { grid-template-columns: 1fr; }
+      .eng-grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 480px) {
-      .pipeline-stages { flex-direction: column; }
-      .pipeline-arrow { transform: rotate(90deg); }
+      .hero h1 { font-size: 38px; letter-spacing: -1.5px; }
+      .hero-ctas { flex-direction: column; }
+      .cta-btns { flex-direction: column; }
     }
   </style>
 </head>
@@ -928,87 +993,100 @@
   <nav>
     <div class="nav-inner">
       <a href="/" class="nav-logo">
-        <img src="/assets/images/logo.jpeg" alt="Avyron" />
-        <span>Avyron</span>
+        <div class="nav-logo-icon">
+          <svg width="20" height="20" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="nav-g" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#8B5CF6"/>
+                <stop offset="100%" stop-color="#3B82F6"/>
+              </linearGradient>
+            </defs>
+            <path d="M50 8L88 82H12L50 8Z" stroke="url(#nav-g)" stroke-width="7" stroke-linejoin="round" fill="none"/>
+            <path d="M32 60L50 26L68 60" stroke="url(#nav-g)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </div>
+        <span class="nav-logo-text">Avyron <span>AI</span></span>
       </a>
       <div class="nav-links">
-        <a href="#how-it-works" class="hide-mobile">How It Works</a>
-        <a href="#features" class="hide-mobile">Features</a>
+        <a href="#intelligence" class="hide-mobile">Intelligence</a>
+        <a href="#system" class="hide-mobile">System</a>
+        <a href="#output" class="hide-mobile">Output</a>
         <a href="/pricing" class="hide-mobile">Pricing</a>
-        <a href="/login" class="btn btn-primary btn-sm">Start Free Trial</a>
+        <a href="BASE_URL_PLACEHOLDER/login" class="btn btn-primary btn-sm">Start Free Trial</a>
       </div>
     </div>
   </nav>
 
   <!-- HERO -->
   <section class="hero">
-    <div class="grid-pattern"></div>
-    <div class="container">
+    <div class="hero-grid"></div>
+    <div class="orb orb-purple hero-orb-1"></div>
+    <div class="orb orb-blue hero-orb-2"></div>
+    <div class="container" style="position:relative;z-index:1;">
       <div class="hero-badge">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-        AI-Powered Marketing System
+        <div class="hero-badge-dot"></div>
+        AI-Powered Market Intelligence
       </div>
-      <h1>Stop guessing.<br/><span class="gradient-text">Start growing.</span></h1>
-      <p>Your complete marketing system &mdash; built in minutes. Strategy, content, and execution, all connected.</p>
+      <h1>See the market<br/><span class="gradient">before it moves.</span></h1>
+      <p class="hero-sub">Avyron analyzes your market, competitors, and signals — and turns them into strategy, content, and growth.</p>
       <div class="hero-ctas">
-        <a href="/login" class="btn btn-primary btn-lg btn-icon">
+        <a href="BASE_URL_PLACEHOLDER/login" class="btn btn-primary btn-lg">
           Start Free Trial
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </a>
-        <a href="#how-it-works" class="btn btn-outline btn-lg">See How It Works</a>
+        <a href="#system" class="btn btn-ghost btn-lg">See How It Works</a>
       </div>
       <p class="hero-note">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.4;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
         7-day free trial &middot; No credit card required
       </p>
 
-      <!-- PRODUCT VISUAL -->
+      <!-- DASHBOARD MOCKUP -->
       <div class="hero-visual">
-        <div class="product-frame">
-          <div class="product-frame-header">
-            <div class="frame-dot red"></div>
-            <div class="frame-dot yellow"></div>
-            <div class="frame-dot green"></div>
+        <div class="dash-frame">
+          <div class="dash-topbar">
+            <div class="mac-dot r"></div>
+            <div class="mac-dot y"></div>
+            <div class="mac-dot g"></div>
+            <div class="dash-url">avyron.ai — Intelligence Dashboard</div>
           </div>
-          <div class="product-frame-content">
-            <div class="mock-dashboard">
-              <div class="mock-card">
-                <div class="mock-card-header">
-                  <div class="mock-card-icon purple">&#x1F9E0;</div>
-                  <div class="mock-card-badge">Live</div>
-                </div>
-                <h4>Market Intelligence</h4>
-                <p>3 competitors analyzed, 12 gaps found</p>
-                <div class="mock-bar"><div class="mock-bar-fill purple" style="width:85%"></div></div>
+          <div class="dash-body">
+            <div class="d-card">
+              <div class="d-card-head">
+                <div class="d-icon p">🧠</div>
+                <div class="d-badge live">Live</div>
               </div>
-              <div class="mock-card">
-                <div class="mock-card-header">
-                  <div class="mock-card-icon blue">&#x1F4CA;</div>
-                  <div class="mock-card-badge">Ready</div>
-                </div>
-                <h4>Strategic Narrative</h4>
-                <p>Problem → Cause → Intervention → Result</p>
-                <div class="mock-bar"><div class="mock-bar-fill blue" style="width:100%"></div></div>
+              <h4>Market Intelligence</h4>
+              <p>3 competitors · 12 gaps identified</p>
+              <div class="d-bar"><div class="d-bar-fill p" style="width:85%"></div></div>
+            </div>
+            <div class="d-card">
+              <div class="d-card-head">
+                <div class="d-icon b">📊</div>
+                <div class="d-badge ready">Ready</div>
               </div>
-              <div class="mock-card">
-                <div class="mock-card-header">
-                  <div class="mock-card-icon green">&#x26A1;</div>
-                </div>
-                <div class="mock-stat">94%</div>
-                <div class="mock-stat-label">System Readiness</div>
-                <div class="mock-bar"><div class="mock-bar-fill green" style="width:94%"></div></div>
+              <h4>Strategic Narrative</h4>
+              <p>Problem → Cause → Intervention → Result</p>
+              <div class="d-bar"><div class="d-bar-fill b" style="width:100%"></div></div>
+            </div>
+            <div class="d-card">
+              <div class="d-card-head">
+                <div class="d-icon g">⚡</div>
               </div>
-              <div class="mock-pipeline">
-                <div class="pipeline-label">Execution Pipeline</div>
-                <div class="pipeline-stages">
-                  <div class="pipeline-stage done">&#x2713; Analysis</div>
-                  <span class="pipeline-arrow">&#x2192;</span>
-                  <div class="pipeline-stage done">&#x2713; Strategy</div>
-                  <span class="pipeline-arrow">&#x2192;</span>
-                  <div class="pipeline-stage active">&#x25CF; Content</div>
-                  <span class="pipeline-arrow">&#x2192;</span>
-                  <div class="pipeline-stage pending">Publish</div>
-                </div>
+              <div class="d-stat">94%</div>
+              <div class="d-stat-lbl">System Readiness</div>
+              <div class="d-bar" style="margin-top:10px;"><div class="d-bar-fill g" style="width:94%"></div></div>
+            </div>
+            <div class="d-pipeline">
+              <div class="d-pipeline-lbl">Execution Pipeline</div>
+              <div class="d-stages">
+                <div class="d-stage done">✓ Analysis</div>
+                <span class="d-arrow">→</span>
+                <div class="d-stage done">✓ Strategy</div>
+                <span class="d-arrow">→</span>
+                <div class="d-stage active">◉ Content</div>
+                <span class="d-arrow">→</span>
+                <div class="d-stage idle">Publish</div>
               </div>
             </div>
           </div>
@@ -1017,113 +1095,169 @@
     </div>
   </section>
 
-  <!-- TRUSTED BY -->
-  <div class="logo-bar">
-    <p>Built for modern marketing teams</p>
-    <div class="logo-row">
-      <span class="logo-item">Startups</span>
-      <span class="logo-item">E-Commerce</span>
-      <span class="logo-item">SaaS</span>
-      <span class="logo-item">Agencies</span>
-      <span class="logo-item">Creators</span>
+  <!-- INDUSTRY DIVIDER -->
+  <div class="divider">
+    <p>Built for modern teams across every industry</p>
+    <div class="industry-row">
+      <span class="industry-tag">Startups</span>
+      <span class="industry-tag">E-Commerce</span>
+      <span class="industry-tag">SaaS</span>
+      <span class="industry-tag">Agencies</span>
+      <span class="industry-tag">Creators</span>
+      <span class="industry-tag">Consultants</span>
     </div>
   </div>
 
-  <!-- HOW IT WORKS -->
-  <section id="how-it-works" style="background: var(--bg-subtle)">
+  <!-- HOW AVYRON WORKS -->
+  <section class="how-section" id="system">
     <div class="container">
       <div class="section-header">
-        <p class="section-label">How It Works</p>
-        <h2 class="section-title">Three steps to a complete system</h2>
-        <p class="section-subtitle">From zero to a fully operational marketing machine — powered by AI, structured by engineering.</p>
+        <div class="label-pill">How Avyron Works</div>
+        <h2 class="section-title">An AI reasoning engine for your market</h2>
+        <p class="section-sub">Four intelligent phases that take you from raw market data to a fully executed marketing system.</p>
       </div>
-      <div style="display:grid; grid-template-columns: repeat(3,1fr); gap:32px;">
-        <div style="text-align:center; padding:40px 24px; background:#fff; border-radius:var(--radius-lg); border:1px solid var(--border); position:relative;">
-          <div style="width:64px; height:64px; border-radius:20px; background:linear-gradient(135deg, var(--purple), var(--purple-dark)); color:#fff; font-size:26px; font-weight:900; display:flex; align-items:center; justify-content:center; margin:0 auto 24px; box-shadow: 0 8px 24px rgba(124,58,237,0.3);">1</div>
-          <h3 style="font-size:20px; font-weight:700; margin-bottom:10px;">Analyze your market</h3>
-          <p style="font-size:15px; color:var(--text-secondary); line-height:1.7;">AI scans competitors, audience signals, and market gaps to build your intelligence layer.</p>
+      <div class="steps-grid">
+        <div class="step-card">
+          <div class="step-num">1</div>
+          <span class="step-keyword">Scan</span>
+          <h3>Market + Competitors</h3>
+          <p>Avyron scans your competitive landscape, captures audience signals, and identifies market gaps your competitors are missing.</p>
         </div>
-        <div style="text-align:center; padding:40px 24px; background:#fff; border-radius:var(--radius-lg); border:1px solid var(--border);">
-          <div style="width:64px; height:64px; border-radius:20px; background:linear-gradient(135deg, var(--purple), var(--purple-dark)); color:#fff; font-size:26px; font-weight:900; display:flex; align-items:center; justify-content:center; margin:0 auto 24px; box-shadow: 0 8px 24px rgba(124,58,237,0.3);">2</div>
-          <h3 style="font-size:20px; font-weight:700; margin-bottom:10px;">Build your system</h3>
-          <p style="font-size:15px; color:var(--text-secondary); line-height:1.7;">15 engines generate strategy, positioning, content, and execution plans — all connected.</p>
+        <div class="step-card">
+          <div class="step-num">2</div>
+          <span class="step-keyword">Understand</span>
+          <h3>Positioning + Insights</h3>
+          <p>15 specialized engines transform raw data into strategic positioning, differentiation pillars, and a clear causal narrative.</p>
         </div>
-        <div style="text-align:center; padding:40px 24px; background:#fff; border-radius:var(--radius-lg); border:1px solid var(--border);">
-          <div style="width:64px; height:64px; border-radius:20px; background:linear-gradient(135deg, var(--purple), var(--purple-dark)); color:#fff; font-size:26px; font-weight:900; display:flex; align-items:center; justify-content:center; margin:0 auto 24px; box-shadow: 0 8px 24px rgba(124,58,237,0.3);">3</div>
-          <h3 style="font-size:20px; font-weight:700; margin-bottom:10px;">Execute and grow</h3>
-          <p style="font-size:15px; color:var(--text-secondary); line-height:1.7;">Publish content, track performance, and let the system iterate for continuous growth.</p>
+        <div class="step-card">
+          <div class="step-num">3</div>
+          <span class="step-keyword">Generate</span>
+          <h3>Strategy + Content</h3>
+          <p>From the intelligence layer, Avyron generates aligned posts, reels, stories, scripts, and execution plans — all connected.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-num">4</div>
+          <span class="step-keyword">Optimize</span>
+          <h3>Continuous Iteration</h3>
+          <p>Performance data feeds back into the system. Avyron iterates your strategy automatically, improving with every cycle.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- VISUAL SECTION 1: Build Your Strategy -->
-  <section>
+  <!-- VISUAL 1: INTELLIGENCE -->
+  <section id="intelligence">
     <div class="container">
-      <div class="visual-section">
-        <div class="visual-content">
-          <p class="section-label">Strategic Intelligence</p>
+      <div class="visual-split">
+        <div class="v-content">
+          <div class="label-pill">Strategic Intelligence</div>
           <h2>Build your strategy with AI-powered engines</h2>
-          <p>15 specialized engines analyze your market, competitors, and audience to build a complete strategic foundation — automatically.</p>
-          <ul class="visual-checklist">
-            <li><span class="check-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Market Intelligence & competitor analysis</li>
-            <li><span class="check-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Positioning & differentiation engine</li>
-            <li><span class="check-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Funnel, offer & awareness mapping</li>
-            <li><span class="check-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Statistical validation & budget allocation</li>
+          <p>15 specialized engines analyze your market, competitors, and audience to build a complete strategic foundation — automatically and continuously.</p>
+          <ul class="v-list">
+            <li>
+              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+              Market Intelligence & competitor analysis
+            </li>
+            <li>
+              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+              Positioning, differentiation & offer engines
+            </li>
+            <li>
+              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+              Funnel, awareness & persuasion mapping
+            </li>
+            <li>
+              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+              Statistical validation & budget intelligence
+            </li>
           </ul>
         </div>
-        <div class="visual-frame">
-          <div class="engine-grid">
-            <div class="engine-mini">
-              <div class="engine-mini-header"><div class="engine-dot live"></div><h5>Market Intel</h5></div>
-              <p>3 competitors · 12 gaps found</p>
-              <div class="mock-bar"><div class="mock-bar-fill purple" style="width:92%"></div></div>
+        <div class="glass-panel">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:14px;">Active Engines</div>
+          <div class="eng-grid">
+            <div class="eng-card">
+              <div class="eng-head"><div class="eng-dot live"></div><h5>Market Intel</h5></div>
+              <p>3 competitors · 12 gaps</p>
+              <div class="eng-bar"><div class="eng-fill p" style="width:92%"></div></div>
             </div>
-            <div class="engine-mini">
-              <div class="engine-mini-header"><div class="engine-dot live"></div><h5>Positioning</h5></div>
-              <p>Differentiation score: 8.4/10</p>
-              <div class="mock-bar"><div class="mock-bar-fill blue" style="width:84%"></div></div>
+            <div class="eng-card">
+              <div class="eng-head"><div class="eng-dot live"></div><h5>Positioning</h5></div>
+              <p>Score: 8.4/10</p>
+              <div class="eng-bar"><div class="eng-fill b" style="width:84%"></div></div>
             </div>
-            <div class="engine-mini">
-              <div class="engine-mini-header"><div class="engine-dot live"></div><h5>Funnel Engine</h5></div>
-              <p>5 stages mapped · Optimized</p>
-              <div class="mock-bar"><div class="mock-bar-fill green" style="width:100%"></div></div>
+            <div class="eng-card">
+              <div class="eng-head"><div class="eng-dot live"></div><h5>Funnel Engine</h5></div>
+              <p>5 stages mapped</p>
+              <div class="eng-bar"><div class="eng-fill g" style="width:100%"></div></div>
             </div>
-            <div class="engine-mini">
-              <div class="engine-mini-header"><div class="engine-dot processing"></div><h5>Persuasion</h5></div>
+            <div class="eng-card">
+              <div class="eng-head"><div class="eng-dot proc"></div><h5>Persuasion</h5></div>
               <p>Building argument chains...</p>
-              <div class="mock-bar"><div class="mock-bar-fill purple" style="width:67%"></div></div>
+              <div class="eng-bar"><div class="eng-fill p" style="width:67%"></div></div>
             </div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
+            <span style="font-size:12px;color:var(--text-muted);">System Readiness</span>
+            <span style="font-size:13px;font-weight:700;color:#34D399;">94% Active</span>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- VISUAL SECTION 2: Narrative Layer -->
-  <section style="background: var(--bg-subtle)">
+  <!-- VISUAL 2: NARRATIVE -->
+  <section style="background:var(--bg-2);" id="narrative">
     <div class="container">
-      <div class="visual-section reverse">
-        <div class="visual-content">
-          <p class="section-label">Narrative Layer</p>
+      <div class="visual-split flip">
+        <div class="v-content">
+          <div class="label-pill">AI Reasoning Layer</div>
           <h2>Connect everything into one clear story</h2>
-          <p>Raw analysis becomes a coherent causal chain: market problem, root cause, your intervention, and the expected result. One narrative that drives everything.</p>
-          <ul class="visual-checklist">
-            <li><span class="check-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Causal chain from problem to outcome</li>
-            <li><span class="check-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Drives all content and messaging</li>
-            <li><span class="check-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Validated by integrity checks</li>
+          <p>Raw analysis becomes a coherent causal chain — market problem, root cause, your intervention, and the measurable result. One narrative that drives all messaging.</p>
+          <ul class="v-list">
+            <li>
+              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+              Causal chain from problem to outcome
+            </li>
+            <li>
+              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+              Drives all content and messaging decisions
+            </li>
+            <li>
+              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+              Validated by integrity & coherence engines
+            </li>
           </ul>
         </div>
-        <div class="visual-frame">
-          <div class="narrative-mock">
-            <div class="narrative-chain">
-              <div class="narrative-node problem">&#x1F534; Market Problem: Fragmented marketing with no system</div>
-              <div class="narrative-connector"></div>
-              <div class="narrative-node cause">&#x1F7E1; Root Cause: Tools don't connect strategy to execution</div>
-              <div class="narrative-connector"></div>
-              <div class="narrative-node intervention">&#x1F535; Intervention: AI-built system connecting all layers</div>
-              <div class="narrative-connector"></div>
-              <div class="narrative-node result">&#x1F7E2; Result: Complete marketing machine in minutes</div>
+        <div class="glass-panel">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:16px;">Strategic Narrative</div>
+          <div class="timeline">
+            <div class="t-node">
+              <div class="t-dot prob">🔴</div>
+              <div class="t-content">
+                <div class="t-label prob">Market Problem</div>
+                <div class="t-text">Fragmented marketing with no connected system</div>
+              </div>
+            </div>
+            <div class="t-node">
+              <div class="t-dot caus">🟡</div>
+              <div class="t-content">
+                <div class="t-label caus">Root Cause</div>
+                <div class="t-text">Tools don't connect strategy to execution</div>
+              </div>
+            </div>
+            <div class="t-node">
+              <div class="t-dot intv">🔵</div>
+              <div class="t-content">
+                <div class="t-label intv">Intervention</div>
+                <div class="t-text">AI system connecting all marketing layers</div>
+              </div>
+            </div>
+            <div class="t-node">
+              <div class="t-dot rslt">🟢</div>
+              <div class="t-content">
+                <div class="t-label rslt">Result</div>
+                <div class="t-text">Complete marketing machine, live in minutes</div>
+              </div>
             </div>
           </div>
         </div>
@@ -1131,45 +1265,55 @@
     </div>
   </section>
 
-  <!-- VISUAL SECTION 3: Execution -->
-  <section>
+  <!-- VISUAL 3: OUTPUT -->
+  <section id="output">
     <div class="container">
-      <div class="visual-section">
-        <div class="visual-content">
-          <p class="section-label">Execution Engine</p>
+      <div class="visual-split">
+        <div class="v-content">
+          <div class="label-pill">Execution Engine</div>
           <h2>Turn insights into real content and results</h2>
-          <p>Generate posts, reels, stories, carousels, and even AI videos — all aligned with your strategy. Schedule, publish, and track performance automatically.</p>
-          <ul class="visual-checklist">
-            <li><span class="check-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>AI content generation (text, image, video)</li>
-            <li><span class="check-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Content calendar & auto-scheduling</li>
-            <li><span class="check-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Performance tracking & iteration</li>
+          <p>Generate posts, reels, stories, carousels, and AI videos — all strategy-aligned and ready to publish. Schedule, track, and iterate automatically.</p>
+          <ul class="v-list">
+            <li>
+              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+              AI content generation (text, image, video)
+            </li>
+            <li>
+              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+              Content calendar & scheduling system
+            </li>
+            <li>
+              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+              Performance tracking & auto-iteration
+            </li>
           </ul>
         </div>
-        <div class="visual-frame dark">
-          <div style="display:grid; gap:12px;">
-            <div class="mock-card" style="display:flex; gap:16px; align-items:center;">
-              <div style="width:48px; height:48px; border-radius:12px; background:rgba(124,58,237,0.2); display:flex; align-items:center; justify-content:center; font-size:20px; flex-shrink:0;">&#x1F4DD;</div>
-              <div style="flex:1;">
-                <h4 style="font-size:14px; margin-bottom:2px;">Instagram Post</h4>
-                <p style="font-size:12px;">Strategy-aligned caption generated</p>
+        <div class="glass-panel">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:14px;">Content Queue</div>
+          <div class="content-stack">
+            <div class="c-card">
+              <div class="c-icon p">📝</div>
+              <div class="c-info">
+                <h4>Instagram Post</h4>
+                <p>Strategy-aligned caption generated</p>
               </div>
-              <div style="padding:4px 12px; border-radius:100px; background:rgba(16,185,129,0.2); color:#10B981; font-size:11px; font-weight:700;">Ready</div>
+              <div class="c-status ready">Ready</div>
             </div>
-            <div class="mock-card" style="display:flex; gap:16px; align-items:center;">
-              <div style="width:48px; height:48px; border-radius:12px; background:rgba(59,130,246,0.2); display:flex; align-items:center; justify-content:center; font-size:20px; flex-shrink:0;">&#x1F3AC;</div>
-              <div style="flex:1;">
-                <h4 style="font-size:14px; margin-bottom:2px;">AI Video Reel</h4>
-                <p style="font-size:12px;">30s video with motion graphics</p>
+            <div class="c-card">
+              <div class="c-icon b">🎬</div>
+              <div class="c-info">
+                <h4>AI Video Reel</h4>
+                <p>30s video with motion graphics</p>
               </div>
-              <div style="padding:4px 12px; border-radius:100px; background:rgba(124,58,237,0.2); color:#8B5CF6; font-size:11px; font-weight:700;">Generating</div>
+              <div class="c-status gen">Generating</div>
             </div>
-            <div class="mock-card" style="display:flex; gap:16px; align-items:center;">
-              <div style="width:48px; height:48px; border-radius:12px; background:rgba(245,158,11,0.2); display:flex; align-items:center; justify-content:center; font-size:20px; flex-shrink:0;">&#x1F4F8;</div>
-              <div style="flex:1;">
-                <h4 style="font-size:14px; margin-bottom:2px;">Story Sequence</h4>
-                <p style="font-size:12px;">3-part story arc for engagement</p>
+            <div class="c-card">
+              <div class="c-icon a">📸</div>
+              <div class="c-info">
+                <h4>Story Sequence</h4>
+                <p>3-part story arc for engagement</p>
               </div>
-              <div style="padding:4px 12px; border-radius:100px; background:rgba(245,158,11,0.2); color:#F59E0B; font-size:11px; font-weight:700;">Scheduled</div>
+              <div class="c-status sched">Scheduled</div>
             </div>
           </div>
         </div>
@@ -1177,66 +1321,66 @@
     </div>
   </section>
 
-  <!-- STATS BAR -->
-  <div class="stats-bar">
+  <!-- STATS -->
+  <div class="stats-section">
     <div class="stats-grid">
-      <div class="stat-item">
-        <h3>15</h3>
-        <p>AI Engines</p>
+      <div>
+        <div class="stat-num">15</div>
+        <div class="stat-lbl">AI Engines</div>
       </div>
-      <div class="stat-item">
-        <h3>1</h3>
-        <p>Unified System</p>
+      <div>
+        <div class="stat-num">1</div>
+        <div class="stat-lbl">Unified System</div>
       </div>
-      <div class="stat-item">
-        <h3>5min</h3>
-        <p>To Full Strategy</p>
+      <div>
+        <div class="stat-num">5min</div>
+        <div class="stat-lbl">To Full Strategy</div>
       </div>
-      <div class="stat-item">
-        <h3>24/7</h3>
-        <p>Always Running</p>
+      <div>
+        <div class="stat-num">24/7</div>
+        <div class="stat-lbl">Always Running</div>
       </div>
     </div>
   </div>
 
-  <!-- FEATURES GRID -->
-  <section class="features-section" id="features">
+  <!-- FEATURES -->
+  <section id="features">
     <div class="container">
       <div class="section-header">
-        <p class="section-label">Everything You Need</p>
+        <div class="label-pill">Full Capability Set</div>
         <h2 class="section-title">A full system, not another tool</h2>
-        <p class="section-subtitle">Every capability you need to run marketing at scale — integrated, automated, and always improving.</p>
+        <p class="section-sub">Every capability you need to run marketing at scale — integrated, automated, and always improving.</p>
       </div>
       <div class="features-grid">
-        <div class="feature-card">
-          <div class="feature-icon purple">&#x1F9E0;</div>
+        <div class="feat-card">
+          <div class="feat-icon p">🧠</div>
           <h3>Market Intelligence</h3>
-          <p>Deep competitor analysis, market gaps, and audience signals — updated continuously.</p>
+          <p>Deep competitor analysis, market gaps, and audience signals — updated continuously with our 6-layer pipeline.</p>
         </div>
-        <div class="feature-card">
-          <div class="feature-icon blue">&#x1F3AF;</div>
+        <div class="feat-card">
+          <div class="feat-icon b">🎯</div>
           <h3>Strategic Positioning</h3>
-          <p>Find your unique angle, differentiation, and competitive advantage automatically.</p>
+          <p>Find your unique angle, differentiation pillars, and competitive advantage with statistical validation.</p>
         </div>
-        <div class="feature-card">
-          <div class="feature-icon green">&#x1F4CA;</div>
+        <div class="feat-card">
+          <div class="feat-icon g">📊</div>
           <h3>Narrative Engine</h3>
-          <p>Transform raw data into a clear story that drives all your messaging.</p>
+          <p>Transform raw data into a clear causal story that drives all your messaging and content decisions.</p>
         </div>
-        <div class="feature-card">
-          <div class="feature-icon amber">&#x270D;&#xFE0F;</div>
+        <div class="feat-card">
+          <div class="feat-icon a">✍️</div>
           <h3>Content Studio</h3>
-          <p>Generate posts, reels, stories, and carousels — all strategy-aligned.</p>
+          <p>Generate posts, reels, stories, and carousels — all strategy-aligned and ready to publish.</p>
         </div>
-        <div class="feature-card">
-          <div class="feature-icon rose">&#x1F3AC;</div>
+        <div class="feat-card">
+          <div class="feat-icon r">🎬</div>
           <h3>AI Video Creation</h3>
-          <p>Create professional marketing videos with AI-powered generation.</p>
+          <p>Create professional marketing videos with AI-powered generation — no editing skills required.</p>
         </div>
-        <div class="feature-card">
-          <div class="feature-icon cyan">&#x1F504;</div>
+        <div class="feat-card">
+          <div class="feat-icon c">🔄</div>
           <h3>Auto-Iteration</h3>
-          <p>The system learns from performance data and optimizes your strategy continuously.</p>
+          <p>The system learns from performance data and continuously optimizes your strategy for better results.</p>
         </div>
       </div>
     </div>
@@ -1246,79 +1390,90 @@
   <section class="pricing-section" id="pricing">
     <div class="container">
       <div class="section-header">
-        <p class="section-label">Pricing</p>
+        <div class="label-pill">Pricing</div>
         <h2 class="section-title">Simple plans, full system access</h2>
-        <p class="section-subtitle">Start with a free trial. Upgrade when you're ready to scale.</p>
+        <p class="section-sub">Start with a 7-day free trial. Upgrade when you're ready to scale.</p>
       </div>
       <div class="pricing-grid">
-        <div class="price-card">
-          <p class="price-name">One Shot</p>
-          <p class="price-amount">$80</p>
-          <p class="price-period">one-time payment</p>
-          <ul class="price-features">
-            <li><span class="price-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Full system for 1 campaign</li>
-            <li><span class="price-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Strategy + narrative + plan</li>
-            <li><span class="price-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Content generation</li>
+        <!-- LAUNCH -->
+        <div class="p-card">
+          <p class="p-name">Launch</p>
+          <p class="p-price">$80</p>
+          <p class="p-period">one-time payment</p>
+          <p class="p-desc">Full system for a single campaign. Everything you need to launch.</p>
+          <ul class="p-features">
+            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Complete strategic analysis</li>
+            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Strategy + narrative + plan</li>
+            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>AI content generation</li>
+            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>One campaign</li>
           </ul>
-          <a href="/login" class="btn btn-outline" style="width:100%">Get Started</a>
+          <a href="BASE_URL_PLACEHOLDER/login" class="btn btn-ghost" style="width:100%;justify-content:center;">Get Started</a>
         </div>
-        <div class="price-card featured">
-          <div class="price-popular">Most Popular</div>
-          <p class="price-name">Growth</p>
-          <p class="price-amount">$250</p>
-          <p class="price-period">per month</p>
-          <ul class="price-features">
-            <li><span class="price-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Unlimited campaigns</li>
-            <li><span class="price-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>2 AI video credits/month</li>
-            <li><span class="price-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Full system + auto-iteration</li>
-            <li><span class="price-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Priority support</li>
+        <!-- SCALE -->
+        <div class="p-card featured">
+          <div class="p-popular">Most Popular</div>
+          <p class="p-name featured-text">Scale</p>
+          <p class="p-price">$250</p>
+          <p class="p-period">per month</p>
+          <p class="p-desc">For teams scaling their marketing operation with full system access.</p>
+          <ul class="p-features">
+            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Everything in Launch</li>
+            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Unlimited campaigns</li>
+            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>2 AI video credits/month</li>
+            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Competitive intelligence updates</li>
           </ul>
-          <a href="/login" class="btn btn-primary" style="width:100%">Start Free Trial</a>
+          <a href="BASE_URL_PLACEHOLDER/login" class="btn btn-primary" style="width:100%;justify-content:center;">Start Free Trial</a>
         </div>
-        <div class="price-card">
-          <p class="price-name">Ultra</p>
-          <p class="price-amount">$500</p>
-          <p class="price-period">per month</p>
-          <ul class="price-features">
-            <li><span class="price-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Everything in Growth</li>
-            <li><span class="price-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>5 AI video credits/month</li>
-            <li><span class="price-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>High-volume processing</li>
-            <li><span class="price-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Dedicated scaling support</li>
+        <!-- DOMINION -->
+        <div class="p-card">
+          <p class="p-name">Dominion</p>
+          <p class="p-price">$500</p>
+          <p class="p-period">per month</p>
+          <p class="p-desc">Maximum intelligence power for high-growth teams and agencies.</p>
+          <ul class="p-features">
+            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Everything in Scale</li>
+            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Priority processing</li>
+            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>5 AI video credits/month</li>
+            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Advanced analytics</li>
           </ul>
-          <a href="/login" class="btn btn-outline" style="width:100%">Start Free Trial</a>
+          <a href="BASE_URL_PLACEHOLDER/login" class="btn btn-ghost" style="width:100%;justify-content:center;">Get Started</a>
         </div>
       </div>
-      <p style="text-align:center; margin-top:28px;">
-        <a href="/pricing" style="color:var(--purple); font-weight:600; font-size:14px; text-decoration:none;">View full pricing details &rarr;</a>
-      </p>
+      <div style="text-align:center;margin-top:32px;">
+        <a href="/pricing" style="font-size:14px;color:var(--purple-bright);text-decoration:none;font-weight:600;">View full pricing details →</a>
+      </div>
     </div>
   </section>
 
   <!-- FINAL CTA -->
   <section class="final-cta">
-    <div class="container" style="position:relative;">
-      <p class="section-label">Ready to grow?</p>
-      <h2 class="section-title">Your marketing system<br/>starts here</h2>
-      <p>Join the next generation of marketers who build systems, not guesswork.</p>
-      <div class="final-cta-buttons">
-        <a href="/login" class="btn btn-primary btn-lg btn-icon">
-          Start Free Trial
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-        </a>
-        <a href="/pricing" class="btn btn-white btn-lg">View Pricing</a>
-      </div>
-      <div class="trust-badges">
-        <div class="trust-badge">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-          No credit card required
+    <div class="orb orb-purple"></div>
+    <div class="orb orb-blue"></div>
+    <div class="container" style="position:relative;z-index:1;">
+      <div class="cta-box">
+        <div class="label-pill" style="margin-bottom:24px;">Ready to start?</div>
+        <h2>The market doesn't wait.<br/>Neither should you.</h2>
+        <p>Start your free trial and get a complete AI-powered marketing system up and running in minutes.</p>
+        <div class="cta-btns">
+          <a href="BASE_URL_PLACEHOLDER/login" class="btn btn-primary btn-lg">
+            Start Free Trial
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </a>
+          <a href="/pricing" class="btn btn-ghost btn-lg">See Pricing</a>
         </div>
-        <div class="trust-badge">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-          7-day free trial
-        </div>
-        <div class="trust-badge">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>
-          Full system access
+        <div class="trust-row">
+          <span class="trust-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.5;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            7-day free trial
+          </span>
+          <span class="trust-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.5;"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+            No credit card required
+          </span>
+          <span class="trust-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.5;"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+            Live in minutes
+          </span>
         </div>
       </div>
     </div>
@@ -1327,10 +1482,26 @@
   <!-- FOOTER -->
   <footer>
     <div class="footer-inner">
-      <p>&copy; 2025 Avyron AI. All rights reserved.</p>
+      <a href="/" class="footer-logo">
+        <div class="nav-logo-icon">
+          <svg width="16" height="16" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="foot-g" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#8B5CF6"/>
+                <stop offset="100%" stop-color="#3B82F6"/>
+              </linearGradient>
+            </defs>
+            <path d="M50 8L88 82H12L50 8Z" stroke="url(#foot-g)" stroke-width="7" stroke-linejoin="round" fill="none"/>
+            <path d="M32 60L50 26L68 60" stroke="url(#foot-g)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </div>
+        <span class="footer-logo-text">Avyron AI</span>
+      </a>
+      <p>&copy; 2026 Avyron AI. All rights reserved.</p>
       <div class="footer-links">
         <a href="/pricing">Pricing</a>
-        <a href="/data-deletion">Data Deletion</a>
+        <a href="/data-deletion">Privacy</a>
+        <a href="BASE_URL_PLACEHOLDER/login">Sign In</a>
       </div>
     </div>
   </footer>
