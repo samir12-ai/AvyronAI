@@ -340,3 +340,137 @@ export async function reuseFromSharedPool(
     hoursAgo,
   };
 }
+
+export interface StaleSharedProfile {
+  sharedProfileId: string;
+  platform: string;
+  normalizedHandle: string;
+  postCount: number;
+  lastScrapedAt: Date;
+  ageHours: number;
+  linkedCompetitors: Array<{
+    competitorId: string;
+    accountId: string;
+    name: string;
+    profileLink: string;
+  }>;
+}
+
+export async function getStaleSharedProfiles(maxAgeHours: number = 12): Promise<StaleSharedProfile[]> {
+  const cutoffMs = Date.now() - maxAgeHours * 60 * 60 * 1000;
+  const cutoff = new Date(cutoffMs);
+
+  const staleProfiles = await db
+    .select()
+    .from(ciSharedProfiles)
+    .where(
+      sql`${ciSharedProfiles.lastScrapedAt} IS NOT NULL AND ${ciSharedProfiles.lastScrapedAt} < ${cutoff.toISOString()}`
+    );
+
+  const results: StaleSharedProfile[] = [];
+
+  for (const profile of staleProfiles) {
+    const linked = await db
+      .select({
+        id: ciCompetitors.id,
+        accountId: ciCompetitors.accountId,
+        name: ciCompetitors.name,
+        profileLink: ciCompetitors.profileLink,
+      })
+      .from(ciCompetitors)
+      .where(
+        and(
+          eq(ciCompetitors.sharedProfileId, profile.id),
+          eq(ciCompetitors.isActive, true)
+        )
+      );
+
+    if (linked.length === 0) continue;
+
+    const ageHours = profile.lastScrapedAt
+      ? Math.round((Date.now() - new Date(profile.lastScrapedAt).getTime()) / (60 * 60 * 1000) * 10) / 10
+      : 999;
+
+    results.push({
+      sharedProfileId: profile.id,
+      platform: profile.platform,
+      normalizedHandle: profile.normalizedHandle,
+      postCount: profile.postCount ?? 0,
+      lastScrapedAt: new Date(profile.lastScrapedAt!),
+      ageHours,
+      linkedCompetitors: linked.map((c) => ({
+        competitorId: c.id,
+        accountId: c.accountId,
+        name: c.name,
+        profileLink: c.profileLink,
+      })),
+    });
+  }
+
+  return results.sort((a, b) => a.lastScrapedAt.getTime() - b.lastScrapedAt.getTime());
+}
+
+export async function fanOutSharedReuse(
+  sharedProfileId: string,
+  sourceCompetitorId: string,
+  sourceAccountId: string
+): Promise<{ fanned: number; skipped: number }> {
+  const linked = await db
+    .select({
+      id: ciCompetitors.id,
+      accountId: ciCompetitors.accountId,
+      name: ciCompetitors.name,
+    })
+    .from(ciCompetitors)
+    .where(
+      and(
+        eq(ciCompetitors.sharedProfileId, sharedProfileId),
+        eq(ciCompetitors.isActive, true)
+      )
+    );
+
+  const sharedLookup = await db
+    .select()
+    .from(ciSharedProfiles)
+    .where(eq(ciSharedProfiles.id, sharedProfileId))
+    .limit(1);
+
+  if (!sharedLookup[0]) return { fanned: 0, skipped: 0 };
+
+  const profile = sharedLookup[0];
+  const lookupData: SharedProfileLookup = {
+    found: true,
+    sharedProfileId,
+    postCount: profile.postCount ?? 0,
+    commentCount: profile.commentCount ?? 0,
+    followers: profile.followers,
+    scrapeQuality: profile.scrapeQuality ?? "FAST_PASS",
+    lastScrapedAt: profile.lastScrapedAt ? new Date(profile.lastScrapedAt) : undefined,
+    isStale: false,
+  };
+
+  let fanned = 0;
+  let skipped = 0;
+
+  for (const comp of linked) {
+    if (comp.id === sourceCompetitorId && comp.accountId === sourceAccountId) {
+      skipped++;
+      continue;
+    }
+
+    try {
+      const result = await reuseFromSharedPool(comp.id, comp.accountId, sharedProfileId, lookupData);
+      if (result) {
+        fanned++;
+        console.log(`[SharedPool] FAN_OUT: ${comp.name} (${comp.accountId}) ← fresh data from @${profile.normalizedHandle}`);
+      } else {
+        skipped++;
+      }
+    } catch (err) {
+      console.warn(`[SharedPool] FAN_OUT error for ${comp.name}:`, err);
+      skipped++;
+    }
+  }
+
+  return { fanned, skipped };
+}

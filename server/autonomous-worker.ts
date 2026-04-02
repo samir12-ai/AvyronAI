@@ -859,32 +859,106 @@ async function ensureDefaultConfig() {
   }
 }
 
-const CI_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const CI_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const SHARED_POOL_STALE_HOURS = 12;
+const SHARED_POOL_MAX_SCRAPES_PER_RUN = 3;
+const FOUNDER_ACCOUNT_ID = "a2d87878-a1e9-41ea-a8a5-90beff569673";
 let ciTimer: ReturnType<typeof setInterval> | null = null;
+let sharedPoolRunning = false;
 
-async function runMonthlyCompetitiveIntelligence() {
+async function runSharedPoolRefresh() {
+  if (sharedPoolRunning) {
+    console.log("[CI Worker] Shared pool refresh already running — skipping this tick");
+    return;
+  }
+  sharedPoolRunning = true;
+
   try {
+    const { getStaleSharedProfiles, fanOutSharedReuse } = await import("./competitive-intelligence/shared-profile-store");
+    const { fetchCompetitorData } = await import("./competitive-intelligence/data-acquisition");
+    const { acquireStickySession, releaseStickySession } = await import("./competitive-intelligence/proxy-pool-manager");
     const flagService = new FeatureFlagService();
-    const accounts = await db.select().from(accountState);
 
-    for (const account of accounts) {
-      const accountId = account.accountId;
-      const enabled = await flagService.isEnabled("competitive_intelligence_enabled", accountId);
-      if (!enabled) continue;
+    const staleProfiles = await getStaleSharedProfiles(SHARED_POOL_STALE_HOURS);
 
-      const { miSnapshots } = await import("@shared/schema");
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
-      const recentSnapshot = await db.select().from(miSnapshots)
-        .where(sql`${miSnapshots.accountId} = ${accountId} AND ${miSnapshots.createdAt} > ${thirtyDaysAgo.toISOString()}`)
-        .limit(1);
-
-      if (recentSnapshot.length > 0) continue;
-
-      console.log(`[CI Worker] MIv3 snapshot stale for account: ${accountId} — manual refresh via /api/ci/mi-v3/analyze recommended`);
+    if (staleProfiles.length === 0) {
+      console.log("[CI Worker] Shared pool refresh: all profiles are fresh — nothing to do");
+      return;
     }
+
+    console.log(`[CI Worker] Shared pool refresh: ${staleProfiles.length} stale profile(s) found (>${SHARED_POOL_STALE_HOURS}h old)`);
+
+    let scraped = 0;
+
+    for (const profile of staleProfiles) {
+      if (scraped >= SHARED_POOL_MAX_SCRAPES_PER_RUN) {
+        console.log(`[CI Worker] Shared pool refresh: reached per-run scrape cap (${SHARED_POOL_MAX_SCRAPES_PER_RUN}). Remaining handles deferred to next cycle.`);
+        break;
+      }
+
+      const { sharedProfileId, normalizedHandle, linkedCompetitors, ageHours } = profile;
+
+      const ciEnabledCompetitors: typeof linkedCompetitors = [];
+      for (const comp of linkedCompetitors) {
+        const enabled = await flagService.isEnabled("competitive_intelligence_enabled", comp.accountId);
+        if (enabled) ciEnabledCompetitors.push(comp);
+      }
+
+      if (ciEnabledCompetitors.length === 0) {
+        console.log(`[CI Worker] @${normalizedHandle}: no CI-enabled accounts linked — skipping`);
+        continue;
+      }
+
+      const founderComp = ciEnabledCompetitors.find(c => c.accountId === FOUNDER_ACCOUNT_ID);
+      const canonicalComp = founderComp ?? ciEnabledCompetitors[0];
+
+      console.log(`[CI Worker] Refreshing @${normalizedHandle} (${ageHours}h stale) via account=${canonicalComp.accountId}, competitor=${canonicalComp.name}`);
+
+      let proxyCtx: import("./competitive-intelligence/proxy-pool-manager").StickySessionContext | null = null;
+      try {
+        proxyCtx = await acquireStickySession(normalizedHandle);
+      } catch {
+        console.warn(`[CI Worker] Could not acquire proxy session for @${normalizedHandle} — proceeding without proxy`);
+      }
+
+      try {
+        const fetchResult = await fetchCompetitorData(
+          canonicalComp.competitorId,
+          canonicalComp.accountId,
+          true,
+          proxyCtx ?? undefined,
+          "FAST_PASS"
+        );
+
+        console.log(`[CI Worker] @${normalizedHandle} fresh scrape: status=${fetchResult.status}, posts=${fetchResult.postsCollected}, method=${fetchResult.fetchMethod}`);
+        scraped++;
+
+        if (fetchResult.status === "SUCCESS" || fetchResult.status === "PARTIAL") {
+          const { fanned, skipped } = await fanOutSharedReuse(
+            sharedProfileId,
+            canonicalComp.competitorId,
+            canonicalComp.accountId
+          );
+          console.log(`[CI Worker] @${normalizedHandle} fan-out: fanned=${fanned} accounts, skipped=${skipped}`);
+        } else {
+          console.warn(`[CI Worker] @${normalizedHandle} scrape did not succeed (status=${fetchResult.status}) — skipping fan-out`);
+        }
+      } catch (err) {
+        console.error(`[CI Worker] Error refreshing @${normalizedHandle}:`, err);
+      } finally {
+        if (proxyCtx) {
+          try { releaseStickySession(proxyCtx); } catch {}
+        }
+      }
+
+      await new Promise(r => setTimeout(r, 5000 + Math.random() * 5000));
+    }
+
+    console.log(`[CI Worker] Shared pool refresh complete — ${scraped} handle(s) re-scraped this cycle`);
   } catch (error) {
-    console.error("[CI Worker] Monthly check error:", error);
+    console.error("[CI Worker] Shared pool refresh error:", error);
+  } finally {
+    sharedPoolRunning = false;
   }
 }
 
@@ -893,10 +967,10 @@ export function startAutonomousWorker() {
   ensureDefaultConfig().catch(err => console.error("[Worker] Failed to seed defaults:", err));
   workerTick();
   workerTimer = setInterval(workerTick, WORKER_INTERVAL_MS);
-  
-  setTimeout(() => runMonthlyCompetitiveIntelligence(), 30000);
-  ciTimer = setInterval(runMonthlyCompetitiveIntelligence, CI_CHECK_INTERVAL_MS);
-  console.log("[CI Worker] Monthly competitive intelligence checker started (daily check, 30-day cycle)");
+
+  setTimeout(() => runSharedPoolRefresh(), 60000);
+  ciTimer = setInterval(runSharedPoolRefresh, CI_CHECK_INTERVAL_MS);
+  console.log("[CI Worker] Shared pool refresh worker started (6h interval, initial run in 60s)");
 }
 
 export function stopAutonomousWorker() {
