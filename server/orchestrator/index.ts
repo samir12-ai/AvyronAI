@@ -112,9 +112,14 @@ interface EngineContext {
   persuasion?: any;
   statisticalValidation?: any;
   budgetGovernor?: any;
+  budgetGovernorSnapshotId?: string;
   channelSelection?: any;
+  channelSelectionSnapshotId?: string;
   iteration?: any;
+  iterationSnapshotId?: string;
   retention?: any;
+  retentionSnapshotId?: string;
+  integritySnapshotId?: string;
   miSnapshotId?: string;
   audienceSnapshotId?: string;
   positioningSnapshotId?: string;
@@ -579,6 +584,28 @@ async function executeEngine(
         output = result;
         ctx.mechanism = result;
 
+        try {
+          const [mechSnapshot] = await db.insert(mechanismSnapshots).values({
+            accountId: config.accountId,
+            campaignId: config.campaignId,
+            positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
+            differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
+            engineVersion: result.engineVersion || 1,
+            status: result.status || "COMPLETE",
+            statusMessage: result.statusMessage || null,
+            primaryMechanism: result.primaryMechanism ? JSON.stringify(result.primaryMechanism) : null,
+            alternativeMechanism: result.alternativeMechanism ? JSON.stringify(result.alternativeMechanism) : null,
+            axisConsistency: result.axisConsistency ? JSON.stringify(result.axisConsistency) : null,
+            confidenceScore: result.confidenceScore || null,
+            executionTimeMs: result.executionTimeMs || null,
+          }).returning();
+          snapshotId = mechSnapshot.id;
+          ctx.mechanismSnapshotId = mechSnapshot.id;
+          console.log(`[Orchestrator] MECH_SNAPSHOT_SAVED | id=${mechSnapshot.id}`);
+        } catch (mechDbErr: any) {
+          console.warn(`[Orchestrator] MECH_SNAPSHOT_SAVE_FAILED | error=${mechDbErr.message}`);
+        }
+
         if (result.celDepthCompliance) {
           if (!ctx.celResults) ctx.celResults = [];
           ctx.celResults.push(result.celDepthCompliance);
@@ -744,6 +771,34 @@ async function executeEngine(
         );
         output = result;
         ctx.integrity = result;
+
+        try {
+          const [intSnap] = await db.insert(integritySnapshots).values({
+            accountId: config.accountId,
+            campaignId: config.campaignId,
+            funnelSnapshotId: ctx.funnel?.snapshotId || "N/A",
+            offerSnapshotId: ctx.offer?.snapshotId || "N/A",
+            miSnapshotId: ctx.miSnapshotId || "N/A",
+            audienceSnapshotId: ctx.audienceSnapshotId || "N/A",
+            positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
+            differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
+            engineVersion: result.engineVersion || 1,
+            status: result.status || "COMPLETE",
+            statusMessage: result.statusMessage || null,
+            overallIntegrityScore: result.overallIntegrityScore || null,
+            safeToExecute: result.safeToExecute || false,
+            layerResults: result.layerResults ? JSON.stringify(result.layerResults) : null,
+            structuralWarnings: result.structuralWarnings ? JSON.stringify(result.structuralWarnings) : null,
+            flaggedInconsistencies: result.flaggedInconsistencies ? JSON.stringify(result.flaggedInconsistencies) : null,
+            boundaryCheck: result.boundaryCheck ? JSON.stringify(result.boundaryCheck) : null,
+            executionTimeMs: result.executionTimeMs || null,
+          }).returning();
+          snapshotId = intSnap.id;
+          ctx.integritySnapshotId = intSnap.id;
+          console.log(`[Orchestrator] INTEGRITY_SNAPSHOT_SAVED | id=${intSnap.id}`);
+        } catch (intDbErr: any) {
+          console.warn(`[Orchestrator] INTEGRITY_SNAPSHOT_SAVE_FAILED | error=${intDbErr.message}`);
+        }
         break;
       }
 
@@ -837,6 +892,24 @@ async function executeEngine(
         });
         output = result;
         ctx.budgetGovernor = result;
+
+        try {
+          const [bgSnap] = await db.insert(budgetGovernorSnapshots).values({
+            accountId: config.accountId,
+            campaignId: config.campaignId,
+            validationSnapshotId: ctx.statisticalValidation?.snapshotId || null,
+            engineVersion: 1,
+            status: "COMPLETE",
+            result: JSON.stringify(result),
+            confidenceScore: result.confidenceScore || null,
+            executionTimeMs: result.executionTimeMs || null,
+          }).returning();
+          snapshotId = bgSnap.id;
+          ctx.budgetGovernorSnapshotId = bgSnap.id;
+          console.log(`[Orchestrator] BUDGET_GOVERNOR_SNAPSHOT_SAVED | id=${bgSnap.id}`);
+        } catch (bgDbErr: any) {
+          console.warn(`[Orchestrator] BUDGET_SNAPSHOT_SAVE_FAILED | error=${bgDbErr.message}`);
+        }
         break;
       }
 
@@ -853,6 +926,25 @@ async function executeEngine(
         );
         output = result;
         ctx.channelSelection = result;
+
+        try {
+          const [csSnap] = await db.insert(channelSelectionSnapshots).values({
+            accountId: config.accountId,
+            campaignId: config.campaignId,
+            validationSnapshotId: ctx.statisticalValidation?.snapshotId || null,
+            budgetSnapshotId: ctx.budgetGovernorSnapshotId || null,
+            engineVersion: 1,
+            status: "COMPLETE",
+            result: JSON.stringify(result),
+            confidenceScore: result.confidenceScore || null,
+            executionTimeMs: result.executionTimeMs || null,
+          }).returning();
+          snapshotId = csSnap.id;
+          ctx.channelSelectionSnapshotId = csSnap.id;
+          console.log(`[Orchestrator] CHANNEL_SELECTION_SNAPSHOT_SAVED | id=${csSnap.id}`);
+        } catch (csDbErr: any) {
+          console.warn(`[Orchestrator] CHANNEL_SNAPSHOT_SAVE_FAILED | error=${csDbErr.message}`);
+        }
         break;
       }
 
@@ -873,6 +965,28 @@ async function executeEngine(
         );
         output = result;
         ctx.iteration = result;
+
+        try {
+          const [iterSnap] = await db.insert(iterationSnapshots).values({
+            accountId: config.accountId,
+            campaignId: config.campaignId,
+            engineVersion: result.engineVersion || 1,
+            status: result.status || "COMPLETE",
+            statusMessage: result.statusMessage || null,
+            result: JSON.stringify(result),
+            layerResults: result.layerResults ? JSON.stringify(result.layerResults) : null,
+            structuralWarnings: result.structuralWarnings ? JSON.stringify(result.structuralWarnings) : null,
+            boundaryCheck: result.boundaryCheck ? JSON.stringify(result.boundaryCheck) : null,
+            dataReliability: result.dataReliability ? JSON.stringify(result.dataReliability) : null,
+            confidenceScore: result.confidenceScore || null,
+            executionTimeMs: result.executionTimeMs || null,
+          }).returning();
+          snapshotId = iterSnap.id;
+          ctx.iterationSnapshotId = iterSnap.id;
+          console.log(`[Orchestrator] ITERATION_SNAPSHOT_SAVED | id=${iterSnap.id}`);
+        } catch (iterDbErr: any) {
+          console.warn(`[Orchestrator] ITERATION_SNAPSHOT_SAVE_FAILED | error=${iterDbErr.message}`);
+        }
         break;
       }
 
@@ -900,6 +1014,28 @@ async function executeEngine(
         });
         output = result;
         ctx.retention = result;
+
+        try {
+          const [retSnap] = await db.insert(retentionSnapshots).values({
+            accountId: config.accountId,
+            campaignId: config.campaignId,
+            engineVersion: result.engineVersion || 1,
+            status: result.status || "COMPLETE",
+            statusMessage: result.statusMessage || null,
+            result: JSON.stringify(result),
+            layerResults: result.layerResults ? JSON.stringify(result.layerResults) : null,
+            structuralWarnings: result.structuralWarnings ? JSON.stringify(result.structuralWarnings) : null,
+            boundaryCheck: result.boundaryCheck ? JSON.stringify(result.boundaryCheck) : null,
+            dataReliability: result.dataReliability ? JSON.stringify(result.dataReliability) : null,
+            confidenceScore: result.confidenceScore || null,
+            executionTimeMs: result.executionTimeMs || null,
+          }).returning();
+          snapshotId = retSnap.id;
+          ctx.retentionSnapshotId = retSnap.id;
+          console.log(`[Orchestrator] RETENTION_SNAPSHOT_SAVED | id=${retSnap.id}`);
+        } catch (retDbErr: any) {
+          console.warn(`[Orchestrator] RETENTION_SNAPSHOT_SAVE_FAILED | error=${retDbErr.message}`);
+        }
         break;
       }
 
