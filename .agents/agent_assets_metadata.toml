@@ -6,6 +6,18 @@ uri = "file://server/static/og-image.png"
 type = "image"
 title = "generated_image"
 
+[[generated]]
+id = "TM8jfyiK8rbooBaDI2ToL"
+uri = "file://assets/images/favicon.png"
+type = "image"
+title = "avyron-favicon"
+
+[[generated]]
+id = "trz-5PRQfC3vl5idMESPW"
+uri = "file://assets/images/icon.png"
+type = "image"
+title = "avyron-icon"
+
 [[outputs]]
 id = "p_lruz88rKkRy-6mcG_ml"
 uri = "file://.local/signal-coverage-map.md"
@@ -35,3 +47,9 @@ id = "AVYw_Gd2FKYolFGp4uAxo"
 uri = "file://avyron-cover-photo.png"
 type = "image"
 title = "Avyron AI — New Cover Photo (Social Preview Image)"
+
+[[outputs]]
+id = "oIFwc0PID1pgoTuRCx1mA"
+uri = "file://avyron-favicon-preview.png"
+type = "image"
+title = "Avyron AI — New Browser Tab Icon (Favicon)"
