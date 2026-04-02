@@ -1,0 +1,133 @@
+Hi,
+
+I want you to generate a complete, professional documentation (README-style + system documentation) for my AI product.
+
+This documentation should be at the same level of quality and structure as top open-source AI marketing projects, including:
+
+* Clear explanation of what the system does
+* Architecture breakdown
+* Commands / usage (if applicable)
+* System components
+* Value proposition
+* Use cases
+* Installation / setup (if relevant)
+* Technical structure (engines, layers, etc.)
+
+---
+
+## 🚀 About My Product
+
+This is an advanced AI marketing system — not a tool, but a full **end-to-end marketing intelligence pipeline**.
+
+It works as a **single-track system**, meaning:
+
+* The user provides minimal input
+* The system handles everything else automatically
+
+---
+
+## 🧠 Core Capabilities
+
+The system performs:
+
+1. Market intelligence extraction
+
+   * From competitor websites and social platforms (e.g. Instagram)
+
+2. Content DNA extraction
+
+   * Identifies tone, style, messaging patterns, and winning content structures
+
+3. Market problem analysis
+
+   * Detects real customer pain points and demand signals
+
+4. Audience definition
+
+   * Builds clear target audience profiles
+
+5. Positioning strategy
+
+   * Defines differentiation and market angle
+
+6. Narrative strategy generation
+
+   * Produces a structured, story-driven marketing plan
+
+7. Content system generation
+
+   * Outputs a full content plan aligned with the strategy
+
+8. 30-day content calendar
+
+   * Ready-to-execute content schedule
+
+---
+
+## ⚙️ System Design
+
+* Built as a **single orchestrated pipeline (single-track system)**
+* Not modular for the user — everything is automated end-to-end
+
+### Engines:
+
+* Multiple internal engines responsible for:
+
+  * Data analysis
+  * Strategic reasoning
+  * Content generation
+
+### Validation Layers:
+
+* 4+ validation layers
+* Strict separation between:
+
+  * Data analysis (grounded)
+  * Output generation
+* System is designed to **minimize or eliminate hallucination**
+
+---
+
+## 🧩 Key Differentiators
+
+* End-to-end system (not fragmented tools)
+* Narrative-based outputs (not raw data or bullet points)
+* Content DNA integration
+* Works for both beginners and experts
+* High reliability due to validation architecture
+
+---
+
+## 🎯 Goal of Documentation
+
+I want the documentation to:
+
+* Position this as a **next-generation AI marketing system**
+* Clearly differentiate it from:
+
+  * Skill libraries
+  * Command-based tools
+* Make it feel like:
+
+  > “AI CMO in a box”
+
+---
+
+## 🧱 Deliverables
+
+Please generate:
+
+1. Full README.md
+2. System Architecture section (detailed)
+3. Feature breakdown
+4. Example output (mocked if needed)
+5. Use cases (agencies, founders, creators)
+6. Clear explanation of how it works step-by-step
+7. Clean, professional formatting (like top GitHub repos)
+
+---
+
+If anything is unclear, make reasonable assumptions — but keep the system positioned as:
+**highly structured, reliable, and strategic (not just generative).**
+
+Thanks.

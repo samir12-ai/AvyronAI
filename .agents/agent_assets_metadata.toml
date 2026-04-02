@@ -53,3 +53,9 @@ id = "oIFwc0PID1pgoTuRCx1mA"
 uri = "file://avyron-favicon-preview.png"
 type = "image"
 title = "Avyron AI — New Browser Tab Icon (Favicon)"
+
+[[outputs]]
+id = "isGnzzCgF4b_63ai5ByKu"
+uri = "file://README.md"
+type = "text"
+title = "Avyron AI — Full System Documentation"
