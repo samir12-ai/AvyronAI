@@ -1,0 +1,43 @@
+لهم:
+
+:::writing{variant=“email” id=“53124” subject=“Re: Data Isolation Audit — Follow-up on Fix Validation and Hardening”}
+Hello,
+
+Thank you for the audit and the fixes. The findings align with the contamination symptoms we were seeing, especially around cache key scoping and the silent fallback to the shared “default” account bucket.
+
+I’m glad the following were identified and fixed:
+	•	signalCache missing accountId in the cache key
+	•	profileCache missing accountId in the cache key
+	•	silent fallback to "default" when accountId is missing
+
+Before we consider this fully resolved, I need confirmation on a few important points:
+	1.	Was this review limited only to signalCache and profileCache, or was a full sweep done across all caching/state layers, including:
+
+	•	in-memory caches
+	•	Redis or external cache layers
+	•	temp stores
+	•	vector stores / embeddings stores
+	•	background workers / queues
+	•	websocket/session state
+
+	2.	Were all database reads/writes audited to ensure they are always scoped by accountId and campaign context where required?
+	3.	For resolveAccountId, I appreciate the warning log, but I would strongly prefer that missing accountId becomes a hard failure rather than returning "default". A warning improves visibility, but it still leaves room for future cross-account contamination if a route is missed later. Can you confirm whether you can replace this fallback with a hard error/reject path?
+	4.	Have you added regression tests for isolation scenarios such as:
+
+	•	two accounts using the same campaign ID pattern
+	•	two accounts scraping the same competitor handle
+	•	same metric/campaign combinations across separate accounts
+	•	account-to-account separation across the full analysis pipeline
+
+	5.	Please also confirm whether there is any historical contamination in persisted data that now needs cleanup, reprocessing, or invalidation after these fixes.
+
+I’d like a final validation report confirming:
+	•	all affected components reviewed
+	•	all fixes applied
+	•	tests run
+	•	whether any existing contaminated cached or persisted data must be cleared
+
+Thanks.
+:::
+
+إذا بدك، بقدر كمان أصيغ ل

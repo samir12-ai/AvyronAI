@@ -1030,7 +1030,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       engineOutputs[eid] = result.output;
     }
     ctx.integrityReport = runSystemIntegrityValidation(engineOutputs, ctx.sglState || null);
-    storeIntegrityReport(config.campaignId, ctx.integrityReport);
+    storeIntegrityReport(config.campaignId, config.accountId, ctx.integrityReport);
     console.log(`[Orchestrator] INTEGRITY_REPORT | status=${ctx.integrityReport.overallStatus} | failures=${ctx.integrityReport.failureReasons.length}`);
   } catch (sivErr: any) {
     console.warn(`[Orchestrator] SIV_FAILED | error=${sivErr.message}`);
@@ -1078,7 +1078,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
   if (ctx.celResults && ctx.celResults.length > 0) {
     const celReport = buildCELReport(config.campaignId, 2, ctx.celResults);
-    storeCELReport(config.campaignId, celReport);
+    storeCELReport(config.campaignId, config.accountId, celReport);
     console.log(`[Orchestrator] CEL_REPORT | overall=${celReport.overallPassed ? "PASS" : "FAIL"} | score=${celReport.overallScore} | engines=${celReport.engineResults.length} | summary=${celReport.summary}`);
     for (const er of celReport.engineResults) {
       if (er.violations.length > 0) {

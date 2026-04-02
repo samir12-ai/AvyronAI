@@ -19,16 +19,18 @@ const LOG_PREFIX = "[CEL]";
 const celReportCache = new Map<string, { report: CELReport; storedAt: number }>();
 const CEL_REPORT_TTL = 30 * 60 * 1000;
 
-export function storeCELReport(campaignId: string, report: CELReport): void {
-  celReportCache.set(campaignId, { report, storedAt: Date.now() });
-  console.log(`${LOG_PREFIX} REPORT_STORED | campaign=${campaignId} | engines=${report.engineResults.length} | score=${report.overallScore}`);
+export function storeCELReport(campaignId: string, accountId: string, report: CELReport): void {
+  const key = `${accountId}:${campaignId}`;
+  celReportCache.set(key, { report, storedAt: Date.now() });
+  console.log(`${LOG_PREFIX} REPORT_STORED | campaign=${campaignId} | account=${accountId} | engines=${report.engineResults.length} | score=${report.overallScore}`);
 }
 
-export function getCachedCELReport(campaignId: string): CELReport | null {
-  const entry = celReportCache.get(campaignId);
+export function getCachedCELReport(campaignId: string, accountId: string): CELReport | null {
+  const key = `${accountId}:${campaignId}`;
+  const entry = celReportCache.get(key);
   if (!entry) return null;
   if (Date.now() - entry.storedAt > CEL_REPORT_TTL) {
-    celReportCache.delete(campaignId);
+    celReportCache.delete(key);
     return null;
   }
   return entry.report;

@@ -6,28 +6,30 @@ import { miSnapshots } from "@shared/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { AnalyticalPackage } from "./types";
 
-import { resolveAccountId } from "../auth";
+import { authMiddleware, resolveAccountId, type AuthRequest } from "../auth";
 const LOG_PREFIX = "[AEL-Routes]";
 
 const aelCache = new Map<string, { pkg: AnalyticalPackage; timestamp: number }>();
 const CACHE_TTL_MS = 10 * 60 * 1000;
 
-export function getCachedAEL(campaignId: string): AnalyticalPackage | null {
-  const entry = aelCache.get(campaignId);
+export function getCachedAEL(campaignId: string, accountId: string): AnalyticalPackage | null {
+  const key = `${accountId}:${campaignId}`;
+  const entry = aelCache.get(key);
   if (!entry) return null;
   if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
-    aelCache.delete(campaignId);
+    aelCache.delete(key);
     return null;
   }
   return entry.pkg;
 }
 
-export function setCachedAEL(campaignId: string, pkg: AnalyticalPackage): void {
-  aelCache.set(campaignId, { pkg, timestamp: Date.now() });
+export function setCachedAEL(campaignId: string, accountId: string, pkg: AnalyticalPackage): void {
+  const key = `${accountId}:${campaignId}`;
+  aelCache.set(key, { pkg, timestamp: Date.now() });
 }
 
 export function registerAELRoutes(app: Express) {
-  app.post("/api/ael/build", async (req: Request, res: Response) => {
+  app.post("/api/ael/build", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const { campaignId } = req.body;
       const accountId = resolveAccountId(req);
@@ -69,7 +71,7 @@ export function registerAELRoutes(app: Express) {
         campaignId,
       });
 
-      setCachedAEL(campaignId, pkg);
+      setCachedAEL(campaignId, accountId, pkg);
 
       return res.json({
         success: true,
@@ -83,17 +85,19 @@ export function registerAELRoutes(app: Express) {
     }
   });
 
-  app.get("/api/ael/status/:campaignId", async (req: Request, res: Response) => {
+  app.get("/api/ael/status/:campaignId", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const { campaignId } = req.params;
-      const cached = getCachedAEL(campaignId);
+      const accountId = resolveAccountId(req);
+      const cacheKey = `${accountId}:${campaignId}`;
+      const cached = getCachedAEL(campaignId, accountId);
 
       return res.json({
         success: true,
         hasCachedPackage: !!cached,
         version: getAELVersion(),
         package: cached || null,
-        cacheAge: cached ? Date.now() - (aelCache.get(campaignId)?.timestamp || 0) : null,
+        cacheAge: cached ? Date.now() - (aelCache.get(cacheKey)?.timestamp || 0) : null,
       });
     } catch (err: any) {
       console.error(`${LOG_PREFIX} STATUS_ERROR | ${err.message}`);

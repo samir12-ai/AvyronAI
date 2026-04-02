@@ -19,7 +19,7 @@ export function registerCELRoutes(app: Express) {
       const { campaignId } = req.params;
       const accountId = resolveAccountId(req);
 
-      const ael = getCachedAEL(campaignId);
+      const ael = getCachedAEL(campaignId, accountId);
       if (!ael) {
         return res.json({
           success: false,
@@ -30,7 +30,7 @@ export function registerCELRoutes(app: Express) {
 
       const { themes, primaryTheme, rootCauseTexts } = extractDominantCausalThemes(ael);
 
-      const cachedReport = getCachedCELReport(campaignId);
+      const cachedReport = getCachedCELReport(campaignId, accountId);
       if (cachedReport && cachedReport.engineResults.length > 0) {
         return res.json({
           success: true,
