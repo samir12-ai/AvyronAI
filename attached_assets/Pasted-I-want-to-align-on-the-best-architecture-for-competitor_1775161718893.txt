@@ -1,0 +1,83 @@
+I want to align on the best architecture for competitors persistence and reuse, based on the current codebase.
+
+My proposed direction is hybrid, not fully per-account and not fully global:
+
+## Proposed architecture
+
+### 1) Global shared scraped data layer
+A backend-only shared pool for raw competitor intelligence data, such as:
+- normalized domain / handle
+- scraped profile data
+- posts / comments / metrics
+- last scraped timestamp
+- freshness / TTL status
+- scrape quality / completeness markers
+
+Goal:
+- avoid repeated scraping for the same domain/handle across multiple accounts
+- reuse recent valid data when it already exists
+- keep this layer completely invisible to end users in the UX
+
+### 2) Per-account ownership / presentation layer
+A separate account-scoped layer for:
+- which competitors a given account has added
+- when they added them
+- which ones should appear in that account’s dashboard
+- account-specific notes, labels, workflow state, analysis state, etc.
+
+Goal:
+- preserve account isolation in the product experience
+- avoid mixing user-facing state between different accounts
+- let multiple accounts benefit from the same underlying scraped source data without duplicating scraping work
+
+## Expected behavior
+When a user adds a competitor:
+1. normalize the domain / handle
+2. check whether recent valid scraped data already exists in the shared pool
+3. if valid shared data exists, use it directly and link it to that account
+4. if not, scrape fresh data, save/update the shared pool, then link it to the account
+5. never expose “cache”, “database”, “shared pool”, or similar concepts in the UX
+
+---
+
+Please review this proposal against the current implementation in the codebase and answer based on the actual code:
+
+### A) Is any part of this already implemented?
+Please identify what already exists today, for example:
+- reusable scraping logic
+- freshness checks
+- deduplication logic
+- competitor tables that could be repurposed
+- account-linking logic that already exists
+- hidden backend-only fields or services already in place
+
+### B) What is missing?
+Please be specific:
+- what exactly is not implemented yet
+- which parts are partially implemented
+- which parts would need refactoring rather than full rebuild
+- which files / services / tables should be changed
+
+### C) Do we need a full rebuild, or can we evolve the current structure?
+I want a practical answer here:
+- can the current per-account model be extended into hybrid without rebuilding everything?
+- which existing tables and flows can stay?
+- what should be split into shared vs account-scoped?
+
+### D) UX / API exposure
+Please verify from the current code:
+- whether any API response currently exposes internal fields like fetch source, cache reuse, enrichment status, or storage behavior
+- what needs to be removed from API responses to keep the shared layer fully hidden from users
+
+### E) Reuse correctness
+Please confirm whether the current code is already doing real reuse in a way that could be adapted to a hybrid model, including:
+- reuse window / TTL behavior
+- minimum data threshold behavior
+- force refresh bypasses
+- whether same-domain scraping is currently prevented only per account or could be generalized safely
+
+Please answer strictly from the current codebase and tell me:
+1. what we already have,
+2. what we should keep,
+3. what we should change,
+4. and the safest migration path to this hybrid design.
