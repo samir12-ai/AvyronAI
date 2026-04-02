@@ -776,8 +776,8 @@ function getExpansionSuggestion(metric: string, ratio: number): ExpansionSuggest
   };
 }
 
-function isDuplicateSignal(campaignId: string, metric: string, deltaPct: number): boolean {
-  const cacheKey = `${campaignId}:${metric}`;
+function isDuplicateSignal(campaignId: string, metric: string, deltaPct: number, accountId: string): boolean {
+  const cacheKey = `${accountId}:${campaignId}:${metric}`;
   const cached = signalCache.get(cacheKey);
   if (!cached) return false;
 
@@ -788,8 +788,8 @@ function isDuplicateSignal(campaignId: string, metric: string, deltaPct: number)
   return deltaShift < SIGNAL_DEDUP_DELTA_SHIFT;
 }
 
-function recordSignalEmission(campaignId: string, metric: string, deltaPct: number): void {
-  const cacheKey = `${campaignId}:${metric}`;
+function recordSignalEmission(campaignId: string, metric: string, deltaPct: number, accountId: string): void {
+  const cacheKey = `${accountId}:${campaignId}:${metric}`;
   signalCache.set(cacheKey, { emittedAt: Date.now(), deltaPct });
 }
 
@@ -951,7 +951,7 @@ export async function detectPerformanceSignals(campaignId: string, accountId: st
       const deltaPct = ((m.value - baseline) / baseline) * 100;
 
       if (ratio >= SCALE_THRESHOLD) {
-        if (isDuplicateSignal(campaignId, `post_${m.name}`, deltaPct)) {
+        if (isDuplicateSignal(campaignId, `post_${m.name}`, deltaPct, accountId)) {
           console.log(`${LOG_PREFIX} [Dedup] Skipping duplicate SCALE signal for ${m.name} (deltaPct=${deltaPct.toFixed(1)}%)`);
           continue;
         }
@@ -990,10 +990,10 @@ export async function detectPerformanceSignals(campaignId: string, accountId: st
         }
 
         signals.push(signal);
-        recordSignalEmission(campaignId, `post_${m.name}`, deltaPct);
+        recordSignalEmission(campaignId, `post_${m.name}`, deltaPct, accountId);
 
       } else if (ratio <= REVIEW_THRESHOLD) {
-        if (isDuplicateSignal(campaignId, `post_${m.name}`, deltaPct)) {
+        if (isDuplicateSignal(campaignId, `post_${m.name}`, deltaPct, accountId)) {
           console.log(`${LOG_PREFIX} [Dedup] Skipping duplicate REVIEW signal for ${m.name} (deltaPct=${deltaPct.toFixed(1)}%)`);
           continue;
         }
@@ -1026,7 +1026,7 @@ export async function detectPerformanceSignals(campaignId: string, accountId: st
           reasoning: validation.reasonSummary,
           validation,
         });
-        recordSignalEmission(campaignId, `post_${m.name}`, deltaPct);
+        recordSignalEmission(campaignId, `post_${m.name}`, deltaPct, accountId);
       }
     }
   }
@@ -1038,7 +1038,7 @@ export async function detectPerformanceSignals(campaignId: string, accountId: st
     const cpaRatio = recentCpa / cpaBaseline;
     const cpaDeltaPct = ((recentCpa - cpaBaseline) / cpaBaseline) * 100;
 
-    if (cpaRatio >= SCALE_THRESHOLD && !isDuplicateSignal(campaignId, "campaign_cpa", cpaDeltaPct)) {
+    if (cpaRatio >= SCALE_THRESHOLD && !isDuplicateSignal(campaignId, "campaign_cpa", cpaDeltaPct, accountId)) {
       const validation = validateSignal("campaign_cpa", recentCpa, cpaBaseline, cpRolling, "REVIEW_NEEDED");
       let finalType: PerformanceSignal["signalType"] = "REVIEW_NEEDED";
       if (validation.validationStatus === "NORMAL_VARIATION") {
@@ -1059,8 +1059,8 @@ export async function detectPerformanceSignals(campaignId: string, accountId: st
         reasoning: validation.reasonSummary,
         validation,
       });
-      recordSignalEmission(campaignId, "campaign_cpa", cpaDeltaPct);
-    } else if (cpaRatio <= REVIEW_THRESHOLD && !isDuplicateSignal(campaignId, "campaign_cpa", cpaDeltaPct)) {
+      recordSignalEmission(campaignId, "campaign_cpa", cpaDeltaPct, accountId);
+    } else if (cpaRatio <= REVIEW_THRESHOLD && !isDuplicateSignal(campaignId, "campaign_cpa", cpaDeltaPct, accountId)) {
       const validation = validateSignal("campaign_cpa", recentCpa, cpaBaseline, cpRolling, "SCALE_CANDIDATE");
       let finalType: PerformanceSignal["signalType"] = "SCALE_CANDIDATE";
       if (validation.validationStatus === "NORMAL_VARIATION") {
@@ -1085,7 +1085,7 @@ export async function detectPerformanceSignals(campaignId: string, accountId: st
         signal.expansionSuggestion = getExpansionSuggestion("campaign_cpa", 1 / cpaRatio);
       }
       signals.push(signal);
-      recordSignalEmission(campaignId, "campaign_cpa", cpaDeltaPct);
+      recordSignalEmission(campaignId, "campaign_cpa", cpaDeltaPct, accountId);
     }
   }
 

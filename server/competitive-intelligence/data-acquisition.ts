@@ -531,7 +531,7 @@ async function _executeFetch(
 
   console.log(`[DataAcq] Starting ${collectionMode} fetch for ${competitor.name} (${competitor.profileLink})${proxyCtx ? ` | session=${proxyCtx.session.sessionId}` : ""} | maxPosts=${maxPosts}`);
 
-  const scrapeResult = await scrapeInstagramProfile(competitor.profileLink, proxyCtx, maxPosts);
+  const scrapeResult = await scrapeInstagramProfile(competitor.profileLink, proxyCtx, maxPosts, accountId);
 
   if (!scrapeResult.success || scrapeResult.posts.length === 0) {
     console.log(`[DataAcq] Scrape blocked for ${competitor.name}`);
@@ -1091,7 +1091,7 @@ export async function enrichCompetitorWithComments(competitorId: string, account
 
   try {
     console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — attempting profile re-scrape for embedded comments`);
-    const profileRescrape = await scrapeInstagramProfile(competitor.profileLink, proxyCtx, 30);
+    const profileRescrape = await scrapeInstagramProfile(competitor.profileLink, proxyCtx, 30, accountId);
     const embeddedComments = profileRescrape.embeddedComments || [];
 
     if (embeddedComments.length > 0) {

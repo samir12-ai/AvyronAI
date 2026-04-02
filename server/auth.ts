@@ -28,7 +28,11 @@ const ADMIN_ACCOUNT_IDS = new Set([
 ]);
 
 export function resolveAccountId(req: AuthRequest): string {
-  return req.accountId || "default";
+  if (!req.accountId) {
+    console.warn("[Auth] resolveAccountId called with no accountId on req — returning 'default'. Ensure authMiddleware is applied to this route.");
+    return "default";
+  }
+  return req.accountId;
 }
 
 export function adminMiddleware(req: AuthRequest, res: Response, next: NextFunction) {

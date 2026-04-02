@@ -1269,26 +1269,27 @@ export async function scrapeCommentsForPosts(
   return { totalScraped, results };
 }
 
-export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySessionContext, maxPosts: number = TARGET_POSTS): Promise<ScrapeResult> {
+export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySessionContext, maxPosts: number = TARGET_POSTS, accountId: string = "unknown"): Promise<ScrapeResult> {
   const profileUrl = normalizeInstagramUrl(rawUrl);
   const handle = extractHandleFromUrl(rawUrl);
+  const cacheKey = `${accountId}:${handle}`;
 
-  const cached = profileCache.get(handle);
+  const cached = profileCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    console.log(`[CI Scraper] CACHE_HIT for ${handle}`);
+    console.log(`[CI Scraper] CACHE_HIT for ${handle} (account=${accountId})`);
     return { ...cached.data, attempts: [...cached.data.attempts, "CACHE_HIT"] };
   }
 
   const lastRequest = rateLimitMap.get(handle);
   if (lastRequest && Date.now() - lastRequest < RATE_LIMIT_MS) {
-    const cachedAny = profileCache.get(handle);
+    const cachedAny = profileCache.get(cacheKey);
     if (cachedAny) return { ...cachedAny.data, attempts: ["RATE_LIMITED", "CACHE_HIT"] };
   }
   rateLimitMap.set(handle, Date.now());
 
   if (!checkBatchLimit()) {
     console.log(`[CI Scraper] BATCH_LIMIT reached (${MAX_BATCH_SIZE} profiles/hour). Returning cached or blocked.`);
-    const cachedFallback = profileCache.get(handle);
+    const cachedFallback = profileCache.get(cacheKey);
     if (cachedFallback) return { ...cachedFallback.data, attempts: ["BATCH_LIMIT", "CACHE_HIT"] };
     return {
       success: false,
@@ -1424,6 +1425,6 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
     paginationStopReason,
   };
 
-  profileCache.set(handle, { data: result, timestamp: Date.now() });
+  profileCache.set(cacheKey, { data: result, timestamp: Date.now() });
   return result;
 }
