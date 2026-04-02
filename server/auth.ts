@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
+import { featureFlagService } from "./feature-flags";
 
 const JWT_SECRET = process.env.JWT_SECRET || "avyron_jwt_secret_" + (process.env.REPL_ID || "dev");
 if (!process.env.JWT_SECRET) {
@@ -129,6 +130,10 @@ export function registerAuthRoutes(app: Router) {
       const userAccountId = newUser.id;
       await db.update(users).set({ accountId: userAccountId }).where(eq(users.id, newUser.id));
 
+      featureFlagService.seedDefaultFlags(userAccountId).catch(err =>
+        console.error("[Auth] Failed to seed default flags for new account:", err)
+      );
+
       const token = generateToken(newUser.id, emailLower, userAccountId);
 
       res.status(201).json({
@@ -179,6 +184,10 @@ export function registerAuthRoutes(app: Router) {
       if (!user.accountId) {
         await db.update(users).set({ accountId: userAccountId }).where(eq(users.id, user.id));
       }
+
+      featureFlagService.seedDefaultFlags(userAccountId).catch(err =>
+        console.error("[Auth] Failed to seed default flags on login:", err)
+      );
 
       const token = generateToken(user.id, emailLower, userAccountId);
 

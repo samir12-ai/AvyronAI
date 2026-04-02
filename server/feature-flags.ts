@@ -34,6 +34,18 @@ export interface FlagCheckResult {
   missingDependencies: string[];
 }
 
+const DEFAULT_ENABLED_FLAGS: LeadEngineModule[] = [
+  "competitive_intelligence_enabled",
+  "lead_capture_enabled",
+  "conversion_tracking_enabled",
+  "funnel_logic_enabled",
+  "lead_magnet_enabled",
+  "landing_pages_enabled",
+  "revenue_attribution_enabled",
+  "cta_engine_enabled",
+  "ai_lead_optimization_enabled",
+];
+
 export class FeatureFlagService {
   async isEnabled(flagName: LeadEngineModule, accountId: string = "default"): Promise<boolean> {
     const globalKill = await this.getRawFlag("lead_engine_global_off", accountId);
@@ -42,6 +54,28 @@ export class FeatureFlagService {
     if (flagName === "lead_engine_global_off") return false;
 
     return this.getRawFlag(flagName, accountId);
+  }
+
+  async seedDefaultFlags(accountId: string): Promise<void> {
+    const existing = await db.select({ flagName: featureFlags.flagName })
+      .from(featureFlags)
+      .where(eq(featureFlags.accountId, accountId));
+
+    const existingNames = new Set(existing.map(f => f.flagName));
+    const toInsert = DEFAULT_ENABLED_FLAGS.filter(f => !existingNames.has(f));
+
+    if (toInsert.length === 0) return;
+
+    await db.insert(featureFlags).values(
+      toInsert.map(flagName => ({
+        accountId,
+        flagName,
+        enabled: true,
+        updatedBy: null,
+      }))
+    );
+
+    console.log(`[FeatureFlags] Seeded ${toInsert.length} default flags for account=${accountId}: ${toInsert.join(", ")}`);
   }
 
   async checkWithDependencies(flagName: LeadEngineModule, accountId: string = "default"): Promise<FlagCheckResult> {
