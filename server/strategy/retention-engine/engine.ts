@@ -325,7 +325,21 @@ export async function runRetentionEngine(input: RetentionInput): Promise<Retenti
 
   const guardResult = runGuardLayer(input);
 
-  if (!guardResult.passed && guardResult.flags.length >= 3) {
+  // Short-circuit when there is no real data — skip the AI call entirely
+  const hasAnySparseData = (
+    input.customerJourneyData.touchpoints.length === 0 &&
+    input.customerJourneyData.repeatPurchaseRate === null &&
+    input.customerJourneyData.churnRate === null &&
+    input.purchaseMotivations.length === 0 &&
+    (input.offerStructure.coreOutcome === null || input.offerStructure.coreOutcome === "") &&
+    input.offerStructure.deliverables.length === 0
+  );
+  if (hasAnySparseData) {
+    console.log("[RetentionEngine] No real data provided — returning fallback without AI call");
+    return buildFallbackResult(input, guardResult, startTime);
+  }
+
+  if (!guardResult.passed && guardResult.flags.length >= 2) {
     return buildFallbackResult(input, guardResult, startTime);
   }
 

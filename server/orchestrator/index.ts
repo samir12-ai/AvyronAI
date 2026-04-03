@@ -991,6 +991,31 @@ async function executeEngine(
       }
 
       case "retention": {
+        // Extract real data from upstream engine outputs to enrich retention analysis
+        const offerCtx = ctx.offer || {};
+        const audCtx = ctx.audience || {};
+        const mechCtx = ctx.mechanism || {};
+
+        const safeParseArr = (v: any): any[] => {
+          if (Array.isArray(v)) return v;
+          if (typeof v === "string") { try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; } }
+          return [];
+        };
+
+        const audiencePains = safeParseArr(audCtx.audiencePains);
+        const purchaseMotivations = audiencePains.slice(0, 4).map((p: any) => ({
+          motivation: p.canonical || p.pain || p.description || "Unknown motivation",
+          strength: typeof p.intensity === "number" ? p.intensity : (typeof p.severity === "number" ? p.severity : 0.5),
+          category: "pain_alleviation" as const,
+        })).filter((m: any) => m.motivation !== "Unknown motivation");
+
+        const primaryOffer = offerCtx.primaryOffer || offerCtx.selectedOffer || offerCtx;
+        const offerName = primaryOffer?.name || primaryOffer?.offerName || offerCtx.name || null;
+        const coreOutcome = primaryOffer?.coreOutcome || primaryOffer?.outcome || offerCtx.coreOutcome || null;
+        const deliverables = safeParseArr(primaryOffer?.deliverables || offerCtx.deliverables);
+        const mechanismDesc = mechCtx.primaryMechanism?.name || mechCtx.name || null;
+        const riskReducers = safeParseArr(primaryOffer?.riskReducers || offerCtx.riskReducers);
+
         const result = await runRetentionEngine({
           customerJourneyData: {
             touchpoints: [],
@@ -1002,12 +1027,14 @@ async function executeEngine(
             engagementDecayRate: null,
           },
           offerStructure: {
-            offerName: null,
-            coreOutcome: null,
-            deliverables: [],
-            pricingModel: null,
+            offerName,
+            coreOutcome,
+            deliverables,
+            proofStrength: null,
+            mechanismDescription: mechanismDesc,
+            riskReducers,
           },
-          purchaseMotivations: [],
+          purchaseMotivations,
           postPurchaseObjections: [],
           campaignId: config.campaignId,
           accountId: config.accountId,
@@ -1107,11 +1134,27 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     ? ENGINE_PRIORITY_ORDER.findIndex(e => e.id === config.resumeFromEngine)
     : 0;
 
+  const ENGINE_TIMEOUT_MS = 120_000; // 2-minute hard ceiling per engine
+
   for (let i = startIndex >= 0 ? startIndex : 0; i < ENGINE_PRIORITY_ORDER.length; i++) {
     const engineDef = ENGINE_PRIORITY_ORDER[i];
     console.log(`[Orchestrator] Running engine ${i + 1}/${ENGINE_PRIORITY_ORDER.length}: ${engineDef.name}`);
 
-    const stepResult = await executeEngine(engineDef.id, ctx, config, results);
+    const stepResult = await Promise.race([
+      executeEngine(engineDef.id, ctx, config, results),
+      new Promise<EngineStepResult>((resolve) =>
+        setTimeout(() => {
+          console.warn(`[Orchestrator] ENGINE_TIMEOUT | ${engineDef.name} exceeded ${ENGINE_TIMEOUT_MS / 1000}s — forcing ERROR`);
+          resolve({
+            engineId: engineDef.id,
+            status: "ERROR",
+            output: null,
+            durationMs: ENGINE_TIMEOUT_MS,
+            error: `Engine timed out after ${ENGINE_TIMEOUT_MS / 1000}s`,
+          });
+        }, ENGINE_TIMEOUT_MS)
+      ),
+    ]);
     results.set(engineDef.id, stepResult);
 
     const sectionStatuses = ENGINE_PRIORITY_ORDER.map(e => {
