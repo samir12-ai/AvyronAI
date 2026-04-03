@@ -582,9 +582,14 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
   const [fallbackReason, setFallbackReason] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [sectionStatuses, setSectionStatuses] = useState<Record<string, string> | null>(null);
+
+  const [needsInputPayload, setNeedsInputPayload] = useState<{ engine: string; missingFields: string[]; prefillableFields?: Record<string, any> } | null>(null);
+  const [pausedJobId, setPausedJobId] = useState<string | null>(null);
+  const [needsInputValues, setNeedsInputValues] = useState<Record<string, string>>({});
+
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollingStartRef = useRef<number>(0);
-  const POLLING_TIMEOUT_MS = 90000;
+  const POLLING_TIMEOUT_MS = 180000;
 
   const stopPolling = useCallback(() => {
     if (pollingRef.current) {
@@ -593,72 +598,89 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     }
   }, []);
 
+  const mapV2PlanToLegacyKeys = (v2Plan: any): any => {
+    if (!v2Plan) return null;
+    return {
+      ...v2Plan,
+      contentDistributionPlan: v2Plan.contentDistribution || v2Plan.contentDistributionPlan || null,
+      creativeTestingMatrix: v2Plan.creativeTesting || v2Plan.creativeTestingMatrix || null,
+      budgetAllocationStructure: v2Plan.budgetAllocation || v2Plan.budgetAllocationStructure || null,
+      kpiMonitoringPriority: v2Plan.kpiMonitoring || v2Plan.kpiMonitoringPriority || null,
+      competitiveWatchTargets: v2Plan.competitiveWatch || v2Plan.competitiveWatchTargets || null,
+      riskMonitoringTriggers: v2Plan.riskTriggers || v2Plan.riskMonitoringTriggers || null,
+    };
+  };
+
   const pollJobStatus = useCallback(async (jId: string) => {
     try {
       if (Date.now() - pollingStartRef.current > POLLING_TIMEOUT_MS) {
         stopPolling();
         setLoading(false);
         setJobId(null);
-        setError('[POLL_TIMEOUT] Generation took too long (90s). The job may still complete — retry to check.');
+        setError('[POLL_TIMEOUT] Generation took too long. The job may still complete — retry to check.');
         return;
       }
 
-      const res = await authFetch(getApiUrl(`/api/strategic/orchestrate-status/${jId}`));
+      const res = await authFetch(getApiUrl(`/api/orchestrator/status/${jId}`));
       const data = await safeApiJson(res);
 
-      if (data.sectionStatuses) setSectionStatuses(data.sectionStatuses);
-      if (data.jobId) setLastRequestId(data.jobId);
+      if (data.sections && Array.isArray(data.sections)) {
+        const mapped: Record<string, string> = {};
+        for (const s of data.sections) { mapped[s.id] = s.status; }
+        setSectionStatuses(mapped);
+      }
+      if (data.id) setLastRequestId(data.id);
 
-      if (data.status === 'COMPLETE') {
+      if (data.status === 'NEEDS_INPUT') {
+        stopPolling();
+        setLoading(false);
+        setPausedJobId(jId);
+        setNeedsInputPayload(data.needsInput || { engine: data.pausedEngine || 'unknown', missingFields: [] });
+        const prefills: Record<string, string> = {};
+        if (data.needsInput?.prefillableFields) {
+          for (const [k, v] of Object.entries(data.needsInput.prefillableFields)) {
+            prefills[k] = String(v ?? '');
+          }
+        }
+        setNeedsInputValues(prefills);
+        return;
+      }
+
+      const isComplete = data.status === 'COMPLETED' || data.status === 'PARTIAL' || data.status === 'COMPLETE';
+      if (isComplete && data.planId) {
+        const planRes = await authFetch(getApiUrl(`/api/plans/active/${data.campaignId || blueprint?.campaignContext?.campaignId}`));
+        const planData = await safeApiJson(planRes);
+        const rawPlan = planData?.plan?.sections || null;
+        const plan = mapV2PlanToLegacyKeys(rawPlan);
+
         stopPolling();
         setLoading(false);
         setJobId(null);
-
-        const requiredKeys = [
-          'contentDistributionPlan',
-          'creativeTestingMatrix',
-          'budgetAllocationStructure',
-          'kpiMonitoringPriority',
-          'competitiveWatchTargets',
-          'riskMonitoringTriggers',
-        ];
-        const plan = data.orchestratorPlan;
-        const missing = plan ? requiredKeys.filter(k => !plan[k] || typeof plan[k] !== 'object') : requiredKeys;
-
-        if (missing.length > 0) {
-          setError(`[SCHEMA_INVALID] Plan missing sections: ${missing.join(', ')}. Retry or contact support.`);
-          return;
-        }
-
-        if (data.fallback) {
-          setIsFallbackPlan(true);
-          setFallbackReason(data.fallbackReason || 'AI generation failed — using skeleton plan');
-        }
+        setPausedJobId(null);
+        setNeedsInputPayload(null);
 
         setBlueprint(prev => prev ? {
           ...prev,
           status: 'ORCHESTRATED' as BlueprintStatus,
           orchestratorPlan: plan,
           planId: data.planId || null,
-          planStatus: data.planStatus || 'DRAFT',
+          planStatus: 'DRAFT',
         } : null);
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         return;
       }
 
-      if (data.status === 'FAILED') {
+      if (data.status === 'BLOCKED' || data.status === 'ERROR') {
         stopPolling();
         setLoading(false);
         setJobId(null);
-        const code = data.error || 'JOB_FAILED';
-        const msg = data.message || 'Generation failed';
-        setError(`[${code}] ${msg}`);
+        setError(`[${data.status}] ${data.error || 'Pipeline blocked. Check campaign data and retry.'}`);
         return;
       }
     } catch (err: any) {
       console.warn('[BuildThePlan] Poll error:', err.message);
     }
-  }, [stopPolling]);
+  }, [stopPolling, blueprint?.campaignContext?.campaignId]);
 
   useEffect(() => {
     return () => stopPolling();
@@ -671,50 +693,44 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
   }, [blueprint?.id, stopPolling]);
 
   const runOrchestrator = useCallback(async () => {
-    if (!blueprint) return;
+    if (!blueprint?.campaignContext?.campaignId) return;
     setError('');
     setLastRequestId(null);
     setIsFallbackPlan(false);
     setFallbackReason(null);
     setSectionStatuses(null);
+    setNeedsInputPayload(null);
+    setPausedJobId(null);
     stopPolling();
     setLoading(true);
 
     try {
-      const res = await authFetch(getApiUrl(`/api/strategic/blueprint/${blueprint.id}/orchestrate`), {
+      const res = await authFetch(getApiUrl('/api/orchestrator/run'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaignId: blueprint.campaignContext.campaignId }),
       });
       const data = await safeApiJson(res);
 
-      if (data.requestId) setLastRequestId(data.requestId);
-
-      if (!res.ok || !data.success) {
-        const code = data.error || 'UNKNOWN';
-        const msg = data.message || 'Orchestrator failed';
-        setError(`[${code}] ${msg}`);
+      if (!res.ok) {
+        if (res.status === 409 && data.jobId) {
+          setJobId(data.jobId);
+          setLastRequestId(data.jobId);
+          pollingStartRef.current = Date.now();
+          pollingRef.current = setInterval(() => { pollJobStatus(data.jobId); }, 3000);
+          return;
+        }
+        setError(`[${data.status || 'ERROR'}] ${data.error || 'Failed to start pipeline'}`);
         setLoading(false);
         return;
       }
 
-      if (data.jobId) {
-        setJobId(data.jobId);
-        setLastRequestId(data.jobId);
-
-        const initialStatuses: Record<string, string> = {
-          contentDistributionPlan: 'PENDING',
-          creativeTestingMatrix: 'PENDING',
-          budgetAllocationStructure: 'PENDING',
-          kpiMonitoringPriority: 'PENDING',
-          competitiveWatchTargets: 'PENDING',
-          riskMonitoringTriggers: 'PENDING',
-        };
-        setSectionStatuses(initialStatuses);
-
+      const jId = data.jobId;
+      if (jId) {
+        setJobId(jId);
+        setLastRequestId(jId);
         pollingStartRef.current = Date.now();
-        pollingRef.current = setInterval(() => {
-          pollJobStatus(data.jobId);
-        }, 2000);
+        pollingRef.current = setInterval(() => { pollJobStatus(jId); }, 3000);
       } else {
         setLoading(false);
       }
@@ -723,6 +739,54 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
       setLoading(false);
     }
   }, [blueprint, stopPolling, pollJobStatus]);
+
+  const submitNeedsInput = useCallback(async () => {
+    if (!needsInputPayload || !pausedJobId || !blueprint?.campaignContext?.campaignId) return;
+    setError('');
+    setLoading(true);
+
+    try {
+      const engine = needsInputPayload.engine;
+      const values = needsInputValues;
+
+      const metricEndpoint = engine === 'iteration'
+        ? '/api/strategy/manual-campaign-metrics'
+        : '/api/strategy/manual-retention-metrics';
+
+      const saveRes = await authFetch(getApiUrl(metricEndpoint), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaignId: blueprint.campaignContext.campaignId, ...values }),
+      });
+      if (!saveRes.ok) {
+        const errData = await safeApiJson(saveRes);
+        setError(`[SAVE_FAILED] ${errData?.error || 'Could not save metrics'}`);
+        setLoading(false);
+        return;
+      }
+
+      setNeedsInputPayload(null);
+
+      const res = await authFetch(getApiUrl('/api/orchestrator/run'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaignId: blueprint.campaignContext.campaignId,
+          pausedJobId,
+          resumeFromEngine: engine,
+        }),
+      });
+      const data = await safeApiJson(res);
+      const jId = data.jobId || pausedJobId;
+      setPausedJobId(null);
+      setJobId(jId);
+      pollingStartRef.current = Date.now();
+      pollingRef.current = setInterval(() => { pollJobStatus(jId); }, 3000);
+    } catch (err: any) {
+      setError(`[NETWORK] ${err.message}`);
+      setLoading(false);
+    }
+  }, [needsInputPayload, pausedJobId, needsInputValues, blueprint, pollJobStatus]);
 
   const approvePlan = useCallback(async () => {
     if (!blueprint) return;
@@ -1776,24 +1840,37 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
 
     if (loading) {
       const sectionLabels: Record<string, string> = {
-        contentDistributionPlan: 'Content Distribution',
-        creativeTestingMatrix: 'Creative Testing',
-        budgetAllocationStructure: 'Budget Allocation',
-        kpiMonitoringPriority: 'KPI Monitoring',
-        competitiveWatchTargets: 'Competitive Watch',
-        riskMonitoringTriggers: 'Risk Triggers',
+        market_intelligence: 'Market Intelligence',
+        sgl: 'Signal Governor',
+        audience: 'Audience Engine',
+        offer: 'Offer Engine',
+        mechanism: 'Mechanism Engine',
+        pricing: 'Pricing Engine',
+        messaging: 'Messaging Engine',
+        funnel: 'Funnel Engine',
+        creative: 'Creative Engine',
+        iteration: 'Iteration Engine',
+        retention: 'Retention Engine',
       };
       const sectionColors: Record<string, string> = {
         PENDING: '#6B7280',
-        GENERATING: '#3B82F6',
-        COMPLETE: '#10B981',
-        FALLBACK: '#F59E0B',
+        RUNNING: '#3B82F6',
+        SUCCESS: '#10B981',
+        PARTIAL: '#F59E0B',
+        ERROR: '#EF4444',
+        BLOCKED: '#EF4444',
+        SKIPPED: '#9CA3AF',
+        NEEDS_INPUT: '#F59E0B',
       };
       const sectionIcons: Record<string, string> = {
         PENDING: 'ellipse-outline',
-        GENERATING: 'sync',
-        COMPLETE: 'checkmark-circle',
-        FALLBACK: 'warning',
+        RUNNING: 'sync',
+        SUCCESS: 'checkmark-circle',
+        PARTIAL: 'alert-circle-outline',
+        ERROR: 'close-circle',
+        BLOCKED: 'ban',
+        SKIPPED: 'remove-circle-outline',
+        NEEDS_INPUT: 'pause-circle',
       };
 
       return (
@@ -1828,6 +1905,94 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
                 })}
               </View>
             )}
+          </View>
+        </View>
+      );
+    }
+
+    if (needsInputPayload && !loading) {
+      const engine = needsInputPayload.engine;
+      const missing = needsInputPayload.missingFields;
+      const isIteration = engine === 'iteration';
+
+      const fieldMeta: Record<string, { label: string; placeholder: string; keyboardType?: 'numeric' | 'default' }> = {
+        primaryKpi: { label: 'Primary KPI', placeholder: 'e.g. ROAS, CPL, CTR' },
+        dataWindowDays: { label: 'Data Window (days)', placeholder: 'e.g. 30', keyboardType: 'numeric' },
+        impressions: { label: 'Impressions', placeholder: 'Total impressions', keyboardType: 'numeric' },
+        clicks: { label: 'Clicks', placeholder: 'Total clicks', keyboardType: 'numeric' },
+        conversions: { label: 'Conversions', placeholder: 'Total conversions', keyboardType: 'numeric' },
+        spend: { label: 'Ad Spend ($)', placeholder: 'Total spend', keyboardType: 'numeric' },
+        revenue: { label: 'Revenue ($)', placeholder: 'Total revenue', keyboardType: 'numeric' },
+        retentionGoal: { label: 'Retention Goal', placeholder: 'e.g. Increase repeat purchases by 20%' },
+        businessModel: { label: 'Business Model', placeholder: 'e.g. subscription, ecommerce, SaaS' },
+        totalCustomers: { label: 'Total Customers', placeholder: 'Total customer count', keyboardType: 'numeric' },
+        returningCustomers: { label: 'Returning Customers', placeholder: 'Count of returning customers', keyboardType: 'numeric' },
+        averageOrderValue: { label: 'Average Order Value ($)', placeholder: 'e.g. 75', keyboardType: 'numeric' },
+        purchaseFrequency: { label: 'Purchase Frequency / year', placeholder: 'e.g. 3', keyboardType: 'numeric' },
+      };
+
+      return (
+        <View style={s.phaseContent}>
+          {renderCampaignBadge()}
+          {renderPhase5Header()}
+          <View style={[s.phaseCard, { backgroundColor: colors.card, borderColor: '#F59E0B' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <Ionicons name="pause-circle" size={20} color="#F59E0B" />
+              <Text style={{ color: '#F59E0B', fontWeight: '700', fontSize: 14 }}>
+                Pipeline Paused — Input Needed
+              </Text>
+            </View>
+            <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 16 }}>
+              The {isIteration ? 'Iteration' : 'Retention'} engine requires campaign metrics to continue. Enter what you have below.
+            </Text>
+
+            {missing.map(field => {
+              const meta = fieldMeta[field] || { label: field, placeholder: '' };
+              return (
+                <View key={field} style={{ marginBottom: 14 }}>
+                  <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600', marginBottom: 4 }}>
+                    {meta.label}
+                  </Text>
+                  <TextInput
+                    style={{
+                      backgroundColor: isDark ? '#1F2937' : '#F9FAFB',
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: colors.cardBorder,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      color: colors.text,
+                      fontSize: 14,
+                    }}
+                    placeholder={meta.placeholder}
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType={meta.keyboardType || 'default'}
+                    value={needsInputValues[field] || ''}
+                    onChangeText={val => setNeedsInputValues(prev => ({ ...prev, [field]: val }))}
+                  />
+                </View>
+              );
+            })}
+
+            <Pressable
+              onPress={submitNeedsInput}
+              style={{
+                backgroundColor: '#F59E0B',
+                borderRadius: 10,
+                paddingVertical: 14,
+                alignItems: 'center',
+                marginTop: 4,
+              }}>
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>
+                Submit & Resume Pipeline
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => { setNeedsInputPayload(null); setPausedJobId(null); setLoading(false); }}
+              style={{ alignItems: 'center', marginTop: 12 }}>
+              <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Skip for now</Text>
+            </Pressable>
           </View>
         </View>
       );

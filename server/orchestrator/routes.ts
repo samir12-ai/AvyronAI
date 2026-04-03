@@ -13,6 +13,7 @@ import {
   growthSimulations,
   executionTasks,
   planAssumptions,
+  orchestratorJobs,
 } from "@shared/schema";
 import { eq, and, or, desc, sql } from "drizzle-orm";
 import { validateRootIntegrity, detectStaleness, computeCalendarDeviation } from "../root-bundle";
@@ -23,36 +24,46 @@ import { resolveAccountId } from "../auth";
 export function registerOrchestratorV2Routes(app: Express) {
   app.post("/api/orchestrator/run", async (req: Request, res: Response) => {
     try {
-      const { campaignId, forceRefresh, resumeFromEngine } = req.body;
+      const { campaignId, forceRefresh, resumeFromEngine, pausedJobId } = req.body;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
 
       const accountId = resolveAccountId(req);
 
-      const lockResult = await db.execute(
-        sql`INSERT INTO orchestrator_jobs (id, campaign_id, account_id, status, created_at, section_statuses)
-            SELECT ${'lock_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6)},
-                   ${String(campaignId)}, ${accountId}, 'RUNNING', NOW(), '[]'
-            WHERE NOT EXISTS (
-              SELECT 1 FROM orchestrator_jobs
-              WHERE campaign_id = ${String(campaignId)} AND account_id = ${accountId}
-                AND status = 'RUNNING'
-                AND created_at > NOW() - INTERVAL '30 minutes'
-            )
-            RETURNING id`
-      );
-      if (!lockResult.rows?.length) {
+      if (!pausedJobId) {
         const existing = await db.execute(
           sql`SELECT id FROM orchestrator_jobs
               WHERE campaign_id = ${String(campaignId)} AND account_id = ${accountId}
                 AND status = 'RUNNING' AND created_at > NOW() - INTERVAL '30 minutes'
               LIMIT 1`
         );
-        return res.status(409).json({
-          error: "An orchestrator run is already in progress for this campaign",
-          jobId: existing.rows?.[0]?.id || null,
-          status: "ALREADY_RUNNING",
+        if (existing.rows?.length) {
+          const runningId = existing.rows[0]?.id as string;
+          return res.status(409).json({
+            error: "An orchestrator run is already in progress for this campaign",
+            jobId: runningId,
+            status: "ALREADY_RUNNING",
+          });
+        }
+      }
+
+      const pendingJobId = pausedJobId || `orch_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+      if (!pausedJobId) {
+        await db.insert(orchestratorJobs).values({
+          id: pendingJobId,
+          blueprintId: "orchestrator-v2",
+          accountId,
+          campaignId: String(campaignId),
+          status: "RUNNING",
+          sectionStatuses: JSON.stringify(
+            Array.from({ length: 11 }, (_, i) => {
+              const ids = ["market_intelligence","sgl","audience","offer","mechanism","pricing","messaging","funnel","creative","iteration","retention"];
+              const names = ["Market Intelligence","Signal Governor","Audience","Offer","Mechanism","Pricing","Messaging","Funnel","Creative","Iteration","Retention"];
+              return { id: ids[i], name: names[i], status: "PENDING" };
+            })
+          ),
         });
       }
 
@@ -60,6 +71,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         message: "Orchestrator started",
         status: "RUNNING",
         campaignId,
+        jobId: pendingJobId,
       });
 
       runOrchestrator({
@@ -67,8 +79,10 @@ export function registerOrchestratorV2Routes(app: Express) {
         campaignId: String(campaignId),
         forceRefresh: forceRefresh || false,
         resumeFromEngine,
+        pausedJobId: pausedJobId || undefined,
+        preassignedJobId: pausedJobId ? undefined : pendingJobId,
       }).then(result => {
-        console.log(`[OrchestratorV2] Run complete: ${result.status} | ${result.completedEngines.length} engines | Plan: ${result.planId || "none"}`);
+        console.log(`[OrchestratorV2] Run complete: ${result.status} | ${result.completedEngines.length} engines | Plan: ${result.planId || "none"} | NeedsInput: ${result.needsInput?.engine || "none"}`);
       }).catch(err => {
         console.error(`[OrchestratorV2] Run failed:`, err.message);
       });
@@ -97,6 +111,10 @@ export function registerOrchestratorV2Routes(app: Express) {
       if (!job) {
         return res.json({ hasRun: false });
       }
+      let needsInput: any = null;
+      if (job.status === "NEEDS_INPUT" && job.needsInputFields) {
+        try { needsInput = JSON.parse(job.needsInputFields); } catch {}
+      }
       res.json({
         hasRun: true,
         id: job.id,
@@ -107,6 +125,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         createdAt: job.createdAt,
         completedAt: job.completedAt,
         error: job.error,
+        pausedEngine: job.pausedEngine || null,
+        needsInput,
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });

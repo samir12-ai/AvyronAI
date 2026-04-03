@@ -1,0 +1,313 @@
+F
+
+:::writing{variant=“email” id=“91842” subject=“Full Migration to Orchestrator V2 + Inline Needs-Input Flow (Build Up Plan Fix)”}
+Hi,
+
+After reviewing the full codebase (Build Up Plan, orchestrators, and engine execution paths), we need to align on a complete and correct implementation, not partial fixes.
+
+This is not a small bug — it is an architecture alignment issue between:
+	•	Build Up Plan (currently using the old strategic orchestrator)
+	•	and the actual engine system (orchestrator V2 with 15 engines)
+
+⸻
+
+🔴 Core Problem
+
+Currently:
+	1.	Build Up Plan uses the old orchestrator
+	•	/api/strategic/blueprint/:id/orchestrate
+	•	Generates plan sections only
+	•	Does NOT run Iteration or Retention engines
+	2.	Orchestrator V2 (/api/orchestrator/run)
+	•	Runs all 15 engines correctly
+	•	Bypasses route gates
+	•	But:
+	•	does NOT support NEEDS_INPUT
+	•	does NOT persist context for resume
+	•	does NOT read manual gate inputs (iteration/retention)
+	3.	Standalone engine routes
+	•	enforce hard gates (422)
+	•	not suitable for pipeline execution
+
+⸻
+
+🎯 Required Outcome
+
+We need:
+
+A single unified pipeline inside Build Up Plan that:
+
+	•	runs ALL engines (via orchestrator V2)
+	•	never hard-blocks
+	•	pauses only when required inputs are missing
+	•	requests inputs inline (inside Build Up Plan)
+	•	resumes from the same engine
+	•	and saves each engine’s analyze output into its correct section
+
+⸻
+
+✅ FINAL IMPLEMENTATION PLAN
+
+1) FULL MIGRATION TO ORCHESTRATOR V2
+
+Replace Build Up Plan execution path:
+
+FROM:
+	•	/api/strategic/blueprint/:id/orchestrate
+
+TO:
+	•	/api/orchestrator/run
+
+Build Up Plan must use orchestrator V2 as the single source of truth for execution.
+
+No hybrid, no partial reuse of the old system.
+
+⸻
+
+2) ADD NEEDS_INPUT STATE (CORE)
+
+Update:
+
+server/orchestrator/priority-matrix.ts
+
+Add new status:
+
+status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "ERROR" | "NEEDS_INPUT"
+
+Rules:
+	•	NEEDS_INPUT is not failure
+	•	it is a controlled pause
+	•	must NOT trigger downstream blocking
+
+⸻
+
+3) ENGINE-LEVEL INPUT DETECTION (INSIDE ORCHESTRATOR)
+
+File:
+
+server/orchestrator/index.ts
+
+Inside:
+
+case "iteration":
+case "retention":
+
+Before calling engines:
+
+Iteration:
+	•	query:
+	•	iterationGateInputs
+	•	manualCampaignMetrics
+	•	detect missing required fields:
+	•	hasExistingAsset
+	•	primaryKpi
+	•	dataWindowDays
+	•	performance metrics > 0
+
+If missing:
+
+return {
+  status: "NEEDS_INPUT",
+  engine: "iteration",
+  missingFields: [...],
+  prefillableFields: [...]
+}
+
+⸻
+
+Retention:
+	•	query:
+	•	retentionGateInputs
+	•	manualRetentionMetrics
+
+If missing:
+
+return {
+  status: "NEEDS_INPUT",
+  engine: "retention",
+  missingFields: [...],
+  prefillableFields: [...]
+}
+
+⸻
+
+4) CONTEXT PERSISTENCE (CRITICAL)
+
+Problem:
+
+ctx is currently in-memory only → lost on resume
+
+Solution:
+
+Add column to orchestratorJobs:
+
+pausedContext TEXT
+
+On NEEDS_INPUT:
+	•	serialize and save:
+	•	ctx.funnel
+	•	ctx.persuasion
+	•	ctx.offer
+	•	ctx.audience
+	•	ctx.mechanism
+
+On resume:
+	•	load pausedContext
+	•	restore ctx before continuing
+
+⸻
+
+5) RESUME EXECUTION (ALREADY PARTIAL)
+
+Use existing:
+
+resumeFromEngine
+
+Frontend sends:
+
+{
+  "resumeFromEngine": "iteration",
+  "pausedJobId": "..."
+}
+
+Backend:
+	•	loads paused ctx
+	•	resumes from correct engine index
+
+⸻
+
+6) FIX ENGINE DATA SOURCES (VERY IMPORTANT)
+
+Iteration engine fix:
+
+Currently uses:
+	•	growthCampaigns
+
+Must also read:
+	•	manualCampaignMetrics
+
+Merge both into performance input.
+
+⸻
+
+Retention engine fix:
+
+Currently uses:
+	•	ctx.offer / ctx.audience
+
+Must also read:
+	•	manualRetentionMetrics
+	•	retentionGateInputs
+
+Inject into:
+	•	customerJourneyData
+	•	retention parameters
+
+⸻
+
+7) API RESPONSE FORMAT
+
+Update /api/orchestrator/run:
+
+If paused:
+
+{
+  "status": "needs_input",
+  "engine": "iteration",
+  "missingFields": [...],
+  "prefillableFields": [...],
+  "jobId": "...",
+  "pausedAt": "..."
+}
+
+IMPORTANT:
+	•	HTTP 200
+	•	NOT 422
+
+⸻
+
+8) FRONTEND (Build Up Plan)
+
+Behavior:
+
+When:
+
+status === "needs_input"
+
+Render:
+	•	inline mini form inside Build Up Plan (NOT separate page)
+
+User:
+	•	fills required fields
+
+On submit:
+	•	save via existing endpoints
+	•	re-call orchestrator with:
+	•	resumeFromEngine
+	•	pausedJobId
+
+⸻
+
+9) OUTPUT STORAGE GUARANTEE
+
+For each engine:
+	•	its analyze result MUST be saved in:
+	•	its own section/table
+
+Examples:
+	•	iteration → iterationSnapshots
+	•	retention → retentionSnapshots
+	•	others → respective snapshot tables
+
+No skipping.
+No overwriting previous results incorrectly.
+
+⸻
+
+10) REMOVE WRONG BEHAVIOR
+
+Explicitly REMOVE:
+	•	timeouts as workaround
+	•	error suppression
+	•	fake success responses
+	•	dependency on standalone route gates
+
+⸻
+
+🧠 KEY PRINCIPLE
+
+We are moving from:
+
+❌ blocking execution
+❌ forcing manual navigation
+❌ fake hydration
+
+TO:
+
+✅ inline input resolution
+✅ resumable execution
+✅ real validated outputs
+
+⸻
+
+✅ WHAT I NEED FROM YOU
+
+Please confirm:
+	1.	Build Up Plan is fully migrated to orchestrator V2
+	2.	NEEDS_INPUT implemented end-to-end
+	3.	context persistence working
+	4.	resume flow working correctly
+	5.	iteration + retention reading manual inputs properly
+	6.	frontend inline form implemented
+	7.	all engine outputs saved correctly in their sections
+
+⸻
+
+This must be implemented cleanly and fully — not partially.
+
+Let me know once complete, and include:
+	•	files changed
+	•	flow verification
+	•	test scenario (missing inputs → fill → resume → full pipeline success)
+
+Thanks.

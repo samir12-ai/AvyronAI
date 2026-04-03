@@ -35,6 +35,10 @@ import {
   channelSelectionSnapshots,
   iterationSnapshots,
   retentionSnapshots,
+  iterationGateInputs,
+  manualCampaignMetrics,
+  retentionGateInputs,
+  manualRetentionMetrics,
 } from "@shared/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { sql } from "drizzle-orm";
@@ -44,6 +48,7 @@ import {
   shouldBlockDownstream,
   type EngineId,
   type EngineStepResult,
+  type NeedsInputPayload,
 } from "./priority-matrix";
 import { synthesizePlan } from "./plan-synthesis";
 
@@ -84,18 +89,21 @@ export interface OrchestratorConfig {
   campaignId: string;
   forceRefresh?: boolean;
   resumeFromEngine?: EngineId;
+  pausedJobId?: string;
+  preassignedJobId?: string;
   onProgress?: (event: AgentProgressEvent) => void;
 }
 
 export interface OrchestratorRunResult {
   jobId: string;
-  status: "COMPLETED" | "PARTIAL" | "BLOCKED" | "ERROR";
+  status: "COMPLETED" | "PARTIAL" | "BLOCKED" | "ERROR" | "NEEDS_INPUT";
   completedEngines: string[];
   failedEngine?: string;
   blockReason?: string;
   planId?: string;
   results: Map<EngineId, EngineStepResult>;
   durationMs: number;
+  needsInput?: NeedsInputPayload;
 }
 
 interface EngineContext {
@@ -152,6 +160,89 @@ async function getCampaignData(campaignId: string): Promise<any> {
     .where(eq(growthCampaigns.id, campaignId))
     .limit(1);
   return campaign || null;
+}
+
+async function getIterationGateData(accountId: string, campaignId: string): Promise<{
+  gateInputs: any;
+  campaignMetrics: any;
+  missingFields: string[];
+  prefillableFields: string[];
+  isReady: boolean;
+}> {
+  const [gateRow] = await db
+    .select()
+    .from(iterationGateInputs)
+    .where(and(eq(iterationGateInputs.accountId, accountId), eq(iterationGateInputs.campaignId, campaignId)))
+    .limit(1);
+
+  const [metricsRow] = await db
+    .select()
+    .from(manualCampaignMetrics)
+    .where(and(eq(manualCampaignMetrics.accountId, accountId), eq(manualCampaignMetrics.campaignId, campaignId)))
+    .limit(1);
+
+  const missing: string[] = [];
+  const prefillable: string[] = [];
+
+  if (!gateRow?.primaryKpi) missing.push("primaryKpi");
+  if (!gateRow?.dataWindowDays) missing.push("dataWindowDays");
+
+  if (!metricsRow || (
+    (metricsRow.spend || 0) === 0 &&
+    (metricsRow.impressions || 0) === 0 &&
+    (metricsRow.clicks || 0) === 0 &&
+    (metricsRow.leads || 0) === 0 &&
+    (metricsRow.revenue || 0) === 0 &&
+    (metricsRow.conversions || 0) === 0
+  )) {
+    missing.push("campaignMetrics");
+  }
+
+  return {
+    gateInputs: gateRow || null,
+    campaignMetrics: metricsRow || null,
+    missingFields: missing,
+    prefillableFields: prefillable,
+    isReady: missing.length === 0,
+  };
+}
+
+async function getRetentionGateData(accountId: string, campaignId: string): Promise<{
+  gateInputs: any;
+  retentionMetrics: any;
+  missingFields: string[];
+  prefillableFields: string[];
+  isReady: boolean;
+}> {
+  const [gateRow] = await db
+    .select()
+    .from(retentionGateInputs)
+    .where(and(eq(retentionGateInputs.accountId, accountId), eq(retentionGateInputs.campaignId, campaignId)))
+    .limit(1);
+
+  const [metricsRow] = await db
+    .select()
+    .from(manualRetentionMetrics)
+    .where(and(eq(manualRetentionMetrics.accountId, accountId), eq(manualRetentionMetrics.campaignId, campaignId)))
+    .limit(1);
+
+  const missing: string[] = [];
+  const prefillable: string[] = [];
+
+  if (!gateRow?.retentionGoal) missing.push("retentionGoal");
+  if (!gateRow?.businessModel) missing.push("businessModel");
+
+  if (!metricsRow || (metricsRow.totalCustomers || 0) === 0) {
+    missing.push("totalCustomers");
+  }
+
+  return {
+    gateInputs: gateRow || null,
+    retentionMetrics: metricsRow || null,
+    missingFields: missing,
+    prefillableFields: prefillable,
+    isReady: missing.length === 0,
+  };
 }
 
 function extractMiInput(miResult: any): any {
@@ -949,16 +1040,39 @@ async function executeEngine(
       }
 
       case "iteration": {
+        const iterGate = await getIterationGateData(config.accountId, config.campaignId);
+        if (!iterGate.isReady) {
+          console.log(`[Orchestrator] ITERATION_NEEDS_INPUT | missing=${iterGate.missingFields.join(",")}`);
+          return {
+            engineId,
+            status: "NEEDS_INPUT",
+            output: null,
+            durationMs: Date.now() - startTime,
+            needsInput: {
+              engine: "iteration",
+              missingFields: iterGate.missingFields,
+              prefillableFields: iterGate.prefillableFields,
+            },
+          };
+        }
+
         const campaignData = await getCampaignData(config.campaignId);
-        const performance = campaignData ? {
-          impressions: campaignData.impressions || 0,
-          clicks: campaignData.clicks || 0,
-          conversions: campaignData.conversions || 0,
-          spend: parseFloat(campaignData.spend || "0"),
-          revenue: parseFloat(campaignData.revenue || "0"),
-        } : null;
+        const mcm = iterGate.campaignMetrics;
+        const gi = iterGate.gateInputs;
+
+        const performance = {
+          impressions: (mcm?.impressions || 0) + (campaignData?.impressions || 0),
+          clicks: (mcm?.clicks || 0) + (campaignData?.clicks || 0),
+          conversions: (mcm?.conversions || 0) + (campaignData?.conversions || 0),
+          spend: (mcm?.spend || 0) + parseFloat(campaignData?.spend || "0"),
+          revenue: (mcm?.revenue || 0) + parseFloat(campaignData?.revenue || "0"),
+        };
+
+        const hasAnyPerf = performance.impressions > 0 || performance.clicks > 0 ||
+          performance.conversions > 0 || performance.spend > 0 || performance.revenue > 0;
+
         const result = await runIterationEngine(
-          performance,
+          hasAnyPerf ? performance : null,
           ctx.funnel || null,
           null,
           ctx.persuasion || null
@@ -991,10 +1105,27 @@ async function executeEngine(
       }
 
       case "retention": {
-        // Extract real data from upstream engine outputs to enrich retention analysis
+        const retGate = await getRetentionGateData(config.accountId, config.campaignId);
+        if (!retGate.isReady) {
+          console.log(`[Orchestrator] RETENTION_NEEDS_INPUT | missing=${retGate.missingFields.join(",")}`);
+          return {
+            engineId,
+            status: "NEEDS_INPUT",
+            output: null,
+            durationMs: Date.now() - startTime,
+            needsInput: {
+              engine: "retention",
+              missingFields: retGate.missingFields,
+              prefillableFields: retGate.prefillableFields,
+            },
+          };
+        }
+
         const offerCtx = ctx.offer || {};
         const audCtx = ctx.audience || {};
         const mechCtx = ctx.mechanism || {};
+        const rm = retGate.retentionMetrics;
+        const rg = retGate.gateInputs;
 
         const safeParseArr = (v: any): any[] => {
           if (Array.isArray(v)) return v;
@@ -1016,15 +1147,25 @@ async function executeEngine(
         const mechanismDesc = mechCtx.primaryMechanism?.name || mechCtx.name || null;
         const riskReducers = safeParseArr(primaryOffer?.riskReducers || offerCtx.riskReducers);
 
+        const repeatPurchaseRate = rm?.repeatPurchaseRate ||
+          (rm?.totalCustomers && rm?.returningCustomers
+            ? rm.returningCustomers / rm.totalCustomers
+            : null);
+        const churnRate = repeatPurchaseRate != null ? 1 - repeatPurchaseRate : null;
+        const avgOrderValue = rm?.averageOrderValue || null;
+        const clv = (avgOrderValue && rm?.purchaseFrequency)
+          ? avgOrderValue * rm.purchaseFrequency * (rm.customerLifespan || 1)
+          : null;
+
         const result = await runRetentionEngine({
           customerJourneyData: {
             touchpoints: [],
             avgTimeToConversion: null,
-            repeatPurchaseRate: null,
-            churnRate: null,
-            customerLifetimeValue: null,
-            retentionWindowDays: null,
-            engagementDecayRate: null,
+            repeatPurchaseRate,
+            churnRate,
+            customerLifetimeValue: clv,
+            retentionWindowDays: rm?.dataWindowDays || null,
+            engagementDecayRate: rm?.refundRate || null,
           },
           offerStructure: {
             offerName,
@@ -1110,25 +1251,55 @@ async function executeEngine(
 
 export async function runOrchestrator(config: OrchestratorConfig): Promise<OrchestratorRunResult> {
   const startTime = Date.now();
-  const jobId = `orch_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
 
-  const [job] = await db.insert(orchestratorJobs).values({
-    id: jobId,
-    blueprintId: "orchestrator-v2",
-    accountId: config.accountId,
-    campaignId: config.campaignId,
-    status: "RUNNING",
-    sectionStatuses: JSON.stringify(
-      ENGINE_PRIORITY_ORDER.map(e => ({ id: e.id, name: e.name, status: "PENDING" }))
-    ),
-  }).returning();
+  let jobId: string;
+  let ctx: EngineContext = {};
+  let previousSectionStatuses: any[] = [];
+
+  if (config.pausedJobId) {
+    jobId = config.pausedJobId;
+    const [pausedJob] = await db
+      .select()
+      .from(orchestratorJobs)
+      .where(eq(orchestratorJobs.id, config.pausedJobId))
+      .limit(1);
+
+    if (pausedJob?.pausedContext) {
+      try {
+        ctx = JSON.parse(pausedJob.pausedContext);
+        console.log(`[Orchestrator] CONTEXT_RESTORED | job=${jobId} | keys=${Object.keys(ctx).join(",")}`);
+      } catch {
+        console.warn(`[Orchestrator] CONTEXT_RESTORE_FAILED | job=${jobId}`);
+      }
+    }
+    if (pausedJob?.sectionStatuses) {
+      try { previousSectionStatuses = JSON.parse(pausedJob.sectionStatuses); } catch {}
+    }
+    await db.update(orchestratorJobs)
+      .set({ status: "RUNNING", completedAt: null, pausedEngine: null, needsInputFields: null })
+      .where(eq(orchestratorJobs.id, jobId));
+  } else {
+    jobId = config.preassignedJobId || `orch_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    if (!config.preassignedJobId) {
+      await db.insert(orchestratorJobs).values({
+        id: jobId,
+        blueprintId: "orchestrator-v2",
+        accountId: config.accountId,
+        campaignId: config.campaignId,
+        status: "RUNNING",
+        sectionStatuses: JSON.stringify(
+          ENGINE_PRIORITY_ORDER.map(e => ({ id: e.id, name: e.name, status: "PENDING" }))
+        ),
+      });
+    }
+  }
 
   const results = new Map<EngineId, EngineStepResult>();
-  const ctx: EngineContext = {};
   const completedEngines: string[] = [];
   let failedEngine: string | undefined;
   let blockReason: string | undefined;
-  let overallStatus: "COMPLETED" | "PARTIAL" | "BLOCKED" | "ERROR" = "COMPLETED";
+  let overallStatus: "COMPLETED" | "PARTIAL" | "BLOCKED" | "ERROR" | "NEEDS_INPUT" = "COMPLETED";
+  let needsInputPayload: NeedsInputPayload | undefined;
 
   const startIndex = config.resumeFromEngine
     ? ENGINE_PRIORITY_ORDER.findIndex(e => e.id === config.resumeFromEngine)
@@ -1186,6 +1357,33 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     if (stepResult.status === "SUCCESS" || stepResult.status === "PARTIAL") {
       completedEngines.push(engineDef.name);
       console.log(`[Orchestrator] ${engineDef.name} completed in ${stepResult.durationMs}ms`);
+    } else if (stepResult.status === "NEEDS_INPUT") {
+      needsInputPayload = stepResult.needsInput;
+      overallStatus = "NEEDS_INPUT";
+      console.log(`[Orchestrator] NEEDS_INPUT at ${engineDef.name} | missing=${needsInputPayload?.missingFields.join(",")}`);
+
+      const ctxToSave: any = { ...ctx };
+      delete ctxToSave.integrityReport;
+      delete ctxToSave.sglState;
+
+      const sectionStatuses = ENGINE_PRIORITY_ORDER.map(e => {
+        const r = results.get(e.id);
+        const st = r?.status || "PENDING";
+        return { id: e.id, name: e.name, status: st, summary: r ? summarizeEngine(e.id, r.output, st, r.blockReason) : null };
+      });
+
+      await db.update(orchestratorJobs)
+        .set({
+          status: "NEEDS_INPUT",
+          pausedEngine: engineDef.id,
+          pausedContext: JSON.stringify(ctxToSave),
+          needsInputFields: JSON.stringify(needsInputPayload),
+          sectionStatuses: JSON.stringify(sectionStatuses),
+          completedAt: new Date(),
+        })
+        .where(eq(orchestratorJobs.id, jobId));
+
+      break;
     } else if (stepResult.status === "BLOCKED" || stepResult.status === "ERROR") {
       if (shouldBlockDownstream(stepResult)) {
         failedEngine = engineDef.name;
@@ -1201,6 +1399,11 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       console.log(`[Orchestrator] ${engineDef.name} skipped: ${stepResult.blockReason}`);
       if (overallStatus === "COMPLETED") overallStatus = "PARTIAL";
     }
+  }
+
+  if (overallStatus === "NEEDS_INPUT") {
+    const durationMs = Date.now() - startTime;
+    return { jobId, status: "NEEDS_INPUT", completedEngines, durationMs, results, needsInput: needsInputPayload };
   }
 
   try {
@@ -1240,6 +1443,9 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       durationMs,
       completedAt: new Date(),
       error: failedEngine ? `Blocked at ${failedEngine}: ${blockReason}` : null,
+      pausedContext: null,
+      pausedEngine: null,
+      needsInputFields: null,
       sectionStatuses: JSON.stringify(
         ENGINE_PRIORITY_ORDER.map(e => {
           const r = results.get(e.id);
@@ -1289,6 +1495,11 @@ export async function getOrchestratorStatus(jobId: string) {
 
   if (!job) return null;
 
+  let needsInput: any = null;
+  if (job.status === "NEEDS_INPUT" && job.needsInputFields) {
+    try { needsInput = JSON.parse(job.needsInputFields); } catch {}
+  }
+
   return {
     id: job.id,
     status: job.status,
@@ -1299,6 +1510,8 @@ export async function getOrchestratorStatus(jobId: string) {
     sections: job.sectionStatuses ? JSON.parse(job.sectionStatuses) : [],
     createdAt: job.createdAt,
     completedAt: job.completedAt,
+    pausedEngine: job.pausedEngine || null,
+    needsInput,
   };
 }
 

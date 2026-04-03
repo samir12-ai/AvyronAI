@@ -63,14 +63,21 @@ export function checkPriorityViolation(
   return null;
 }
 
+export interface NeedsInputPayload {
+  engine: EngineId;
+  missingFields: string[];
+  prefillableFields: string[];
+}
+
 export interface EngineStepResult {
   engineId: EngineId;
-  status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "SKIPPED" | "ERROR" | "DEPTH_BLOCKED" | "SIGNAL_BLOCKED";
+  status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "SKIPPED" | "ERROR" | "DEPTH_BLOCKED" | "SIGNAL_BLOCKED" | "NEEDS_INPUT";
   output: any;
   snapshotId?: string;
   durationMs: number;
   error?: string;
   blockReason?: string;
+  needsInput?: NeedsInputPayload;
 }
 
 export function shouldBlockDownstream(result: EngineStepResult): boolean {

@@ -1471,6 +1471,9 @@ export const orchestratorJobs = pgTable("orchestrator_jobs", {
   errorCode: text("error_code"),
   stageTimes: text("stage_times"),
   durationMs: integer("duration_ms"),
+  pausedContext: text("paused_context"),
+  pausedEngine: varchar("paused_engine", { length: 50 }),
+  needsInputFields: text("needs_input_fields"),
   createdAt: timestamp("created_at").defaultNow(),
   completedAt: timestamp("completed_at"),
 });
