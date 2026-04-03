@@ -1,0 +1,168 @@
+:::writing{variant=“email” id=“66214” subject=“Pipeline Strategy Fix: Inline Gate Resolution + Correct Engine Invocation Path”}
+Hi,
+
+Based on the full code review and analysis, I want to align on a correct and final solution for the Pipeline Strategy (Build Up Plan), because the current behavior (timeouts / suppressing errors / hard 422 gates) is not solving the real problem.
+
+⸻
+
+🎯 Objective
+
+We want:
+
+A fully automated pipeline that runs end-to-end without forcing the user to leave the Build Up Plan,
+while still ensuring real, validated, trustworthy outputs (not fake or auto-filled assumptions).
+
+⸻
+
+🔴 Root Problem (Confirmed from Code)
+	•	Iteration and Retention engines are correct and resilient internally
+	•	The blocking happens in the HTTP route layer (INPUT_GATE_LOCKED → 422)
+	•	The orchestrator already bypasses gates and hydrates context partially
+	•	BUT:
+	•	either the frontend is calling individual engine routes
+	•	or we are not handling missing manual inputs properly inside the pipeline
+
+⸻
+
+❌ What We Do NOT Want
+	•	No timeouts
+	•	No retry loops
+	•	No suppressing errors
+	•	No fake autohydration for real business metrics
+	•	No forcing users to navigate into each engine manually
+
+⸻
+
+✅ New Required Solution (Final Direction)
+
+🔹 1) Inline Gate Resolution inside Build Up Plan
+
+When the pipeline reaches Iteration or Retention and required inputs are missing:
+
+Instead of:
+	•	returning 422
+	•	or silently faking inputs
+
+We want:
+
+👉 The pipeline returns a structured response like:
+	•	status: needs_input
+	•	engine: iteration | retention
+	•	missingFields: [...]
+	•	prefillableFields: [...]
+
+👉 The frontend (Build Up Plan) should:
+	•	render a small inline input card (mini-form)
+	•	allow the user to fill required fields without leaving the page
+
+👉 Once submitted:
+	•	values are saved into:
+	•	iterationGateInputs
+	•	manualCampaignMetrics
+	•	retentionGateInputs
+	•	manualRetentionMetrics
+	•	pipeline resumes execution from the same point
+
+⸻
+
+🔹 2) Smart Hybrid Filling
+
+We want a hybrid model:
+	•	✅ Auto-fill fields that can be derived safely from context (offer, audience, mechanism, etc.)
+	•	❗ Ask user inline for fields that require real business truth:
+	•	KPIs
+	•	spend / revenue / conversions
+	•	customer counts
+	•	retention metrics
+
+⸻
+
+🔹 3) Correct Engine Invocation Path
+
+We need to clarify and possibly fix this:
+	•	Should Pipeline Strategy call:
+	•	/api/orchestrator/run (recommended)
+	•	Or individual routes:
+	•	/api/strategy/iteration-engine/analyze
+	•	/api/strategy/retention-engine/analyze
+
+Based on your findings:
+	•	orchestrator already supports auto-hydrated execution
+	•	routes enforce hard gates
+
+👉 We need to confirm:
+	•	what the frontend is currently calling
+	•	whether switching fully to orchestrator supports the new inline input model
+	•	or whether we need to adapt the orchestrator to return needs_input states
+
+⸻
+
+❓ What I Need From You (Based on Actual Code)
+
+Please answer strictly based on the current implementation:
+
+1) Current Call Path
+	•	What exactly does the Build Up Plan call today?
+	•	File + function responsible
+
+⸻
+
+2) Compatibility with Inline Input Model
+	•	Can the orchestrator support a needs_input response?
+	•	Or does it currently assume full execution always?
+
+⸻
+
+3) Where Should Gate Detection Live?
+	•	In route layer?
+	•	In orchestrator?
+	•	Inside engine wrapper?
+
+⸻
+
+4) Minimal Changes Required
+	•	What files must be modified to implement:
+	•	inline gate detection
+	•	structured needs_input response
+	•	resume execution after input
+
+⸻
+
+5) Resume Execution Strategy
+	•	After user fills missing inputs:
+	•	how do we resume from the exact step?
+	•	do we need state tracking in orchestrator?
+	•	or can we re-run safely from start?
+
+⸻
+
+6) Data Integrity
+	•	Confirm that once inputs are saved:
+	•	engines will produce validated outputs (not fallback)
+	•	and store them in their respective tables correctly
+
+⸻
+
+🧠 Key Principle
+
+We are shifting from:
+
+❌ hard execution gates (block or fail)
+
+to:
+
+✅ interactive gate resolution (ask → fill → continue)
+
+without:
+	•	breaking the pipeline
+	•	or degrading output quality
+
+⸻
+
+Please provide a code-based response explaining:
+	•	what already supports this,
+	•	what needs to change,
+	•	and the cleanest implementation path.
+
+Thanks.
+:::
