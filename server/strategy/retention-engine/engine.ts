@@ -378,12 +378,18 @@ export async function runRetentionEngine(input: RetentionInput): Promise<Retenti
   let finalBoundaryCheck: { clean: boolean; violations: string[] } = { clean: true, violations: [] };
 
   try {
-    const response = await aiChat({
-      model: "gpt-4.1-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.4,
-      max_tokens: 3000,
-    });
+    const AI_CALL_TIMEOUT_MS = 60_000;
+    const response = await Promise.race([
+      aiChat({
+        model: "gpt-4.1-mini",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.4,
+        max_tokens: 3000,
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`RetentionEngine AI call timed out after ${AI_CALL_TIMEOUT_MS / 1000}s`)), AI_CALL_TIMEOUT_MS)
+      ),
+    ]);
 
     const rawContent = response.choices?.[0]?.message?.content || "";
 
