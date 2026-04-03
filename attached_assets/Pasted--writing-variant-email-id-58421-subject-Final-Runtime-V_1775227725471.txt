@@ -1,0 +1,82 @@
+:::writing{variant=“email” id=“58421” subject=“Final Runtime Verification Required – End-to-End Pipeline”}
+Hi,
+
+This is a strong update — the identified bugs and fixes make sense, and the system is now much closer to being production-ready.
+
+Before we close this fully, I need final runtime verification (not just code correctness) to confirm everything works end-to-end as intended.
+
+🔴 Required: Full End-to-End Execution Proof
+
+Please run and report the following exact scenario:
+
+Scenario 1 — Iteration Gate
+	1.	Start Build Up Plan with missing Iteration inputs
+	2.	Confirm system returns needs_input
+	3.	Verify inline form shows correct individual fields (not generic tokens)
+	4.	Submit inputs
+	5.	Confirm:
+	•	data is saved in correct tables
+	•	orchestrator resumes from Iteration (not from start)
+	•	Iteration engine runs with real inputs (not fallback mode)
+	•	output is saved in iterationSnapshots
+	•	UI displays correct result in its section
+
+⸻
+
+Scenario 2 — Retention Gate
+	1.	Continue pipeline until Retention pauses
+	2.	Confirm needs_input triggers again
+	3.	Submit inputs
+	4.	Confirm:
+	•	correct split between gate + metrics tables
+	•	orchestrator resumes from Retention
+	•	engine uses real inputs (not fallback path)
+	•	output saved in retentionSnapshots
+	•	UI displays correct section
+
+⸻
+
+Scenario 3 — Multiple Pause/Resume
+	•	Confirm pipeline handles:
+Iteration pause → resume → Retention pause → resume
+	•	No restart from beginning
+	•	No loss of context
+
+⸻
+
+⚠️ Additional Verification Points
+
+1. Skip Behavior
+
+Please confirm clearly:
+	•	What happens when user clicks Skip
+	•	Does engine become PARTIAL, remain incomplete, or get bypassed?
+	•	Does this affect final plan synthesis?
+
+⸻
+
+2. Data Usage Confirmation
+	•	Confirm that saved manual inputs are actually read by orchestrator after resume
+	•	Confirm they change engine behavior (not ignored)
+
+⸻
+
+3. Section Integrity
+	•	Confirm every engine result is:
+	•	saved correctly
+	•	mapped correctly (V2 → UI)
+	•	displayed in the correct section
+
+⸻
+
+📩 What I need in your reply
+	•	Step-by-step result of the above scenarios
+	•	Confirmation of actual behavior (not expected behavior)
+	•	Any remaining edge cases or inconsistencies
+
+⸻
+
+Once this runtime verification is confirmed, we can consider this fully complete.
+
+Thanks.
+:::
