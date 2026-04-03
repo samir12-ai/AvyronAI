@@ -1,0 +1,118 @@
+Hi,
+
+I need to clarify a critical issue in the Pipeline Strategy flow — there was a misunderstanding in the previous implementation, and the current fix (timeouts + suppressing errors) does not solve the root problem.
+
+## Problem Summary
+
+The goal of the Pipeline Strategy (Build Up Plan) is:
+
+> Trigger all engines (including Iterations and Retention) in one flow without requiring the user to manually enter each engine and run/fill data step-by-step.
+
+However, currently:
+
+- Iterations and Retention engines contain gates that require manual data filling
+- When required data (keys/inputs) is missing, the pipeline:
+  - either stops
+  - or throws errors
+- The recent change only added:
+  - timeouts
+  - error suppression
+
+This results in:
+- the pipeline not completing properly
+- engines not running as intended
+- and the UX still requiring manual intervention (which defeats the purpose of Pipeline Strategy)
+
+## What Should Actually Happen
+
+Instead of blocking or failing:
+
+When the pipeline reaches Iterations or Retention and required inputs are missing:
+
+1. The system should detect missing required fields (keys/inputs)
+2. Automatically inject / pre-fill the required data
+   - either from existing context (previous engines, outputs, user inputs)
+   - or from predefined defaults / derived values
+3. Continue execution without requiring the user to:
+   - leave the Build Up Plan
+   - go into each engine manually
+   - fill fields one by one
+
+4. After execution:
+   - results should be saved in their respective sections (Iterations / Retention)
+   - as if the user had manually completed them
+
+## The Core Issue
+
+The issue is not error handling — it is:
+
+> ❌ Missing data required by engine gates  
+> ❌ No automatic data hydration mechanism  
+> ❌ Pipeline assumes manual completion of each engine  
+
+So the fix must be:
+
+> ✅ Solve data dependency / input hydration  
+> ❌ Not hide errors or add retries/timeouts  
+
+## What I Need From You (Based on Actual Code)
+
+Please review the current implementation and explain:
+
+### 1) Gates & Required Inputs
+- Where exactly are the gates for Iterations and Retention implemented?
+- What required fields/keys are blocking execution?
+- How are these validations enforced?
+
+### 2) Current Data Flow
+- When Pipeline Strategy triggers engines:
+  - what data is passed into Iterations and Retention?
+  - what is missing that causes the gates to fail?
+
+### 3) Data Hydration Options
+From the current codebase:
+
+- What existing data sources can be used to auto-fill missing fields?
+  - previous engine outputs?
+  - stored campaign data?
+  - defaults?
+
+- Is there already partial logic for fallback/default values?
+
+### 4) Where the Fix Should Live
+- Should auto-filling happen:
+  - inside each engine?
+  - inside the pipeline orchestrator?
+  - or as a shared pre-processing layer?
+
+### 5) Required Changes (Concrete)
+Please specify:
+
+- exact files/services that need modification
+- whether this is:
+  - a small extension
+  - or requires refactoring execution flow
+
+### 6) Execution Guarantee
+How do we ensure that:
+- pipeline always completes end-to-end
+- without manual user input
+- and without silently skipping engines
+
+---
+
+## Key Requirement
+
+We need:
+
+> A fully automated pipeline where missing inputs are resolved programmatically, not manually.
+
+The user should never be forced to:
+- navigate to individual engines
+- or fill required fields just to make the pipeline run
+
+---
+
+Please base your answer strictly on the current code implementation and explain what is missing and how to fix it properly.
+
+Thanks.
