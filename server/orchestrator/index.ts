@@ -166,7 +166,7 @@ async function getIterationGateData(accountId: string, campaignId: string): Prom
   gateInputs: any;
   campaignMetrics: any;
   missingFields: string[];
-  prefillableFields: string[];
+  prefillableFields: Record<string, any>;
   isReady: boolean;
 }> {
   const [gateRow] = await db
@@ -182,20 +182,34 @@ async function getIterationGateData(accountId: string, campaignId: string): Prom
     .limit(1);
 
   const missing: string[] = [];
-  const prefillable: string[] = [];
+  const prefillable: Record<string, any> = {};
 
   if (!gateRow?.primaryKpi) missing.push("primaryKpi");
-  if (!gateRow?.dataWindowDays) missing.push("dataWindowDays");
+  else prefillable["primaryKpi"] = gateRow.primaryKpi;
 
-  if (!metricsRow || (
-    (metricsRow.spend || 0) === 0 &&
-    (metricsRow.impressions || 0) === 0 &&
-    (metricsRow.clicks || 0) === 0 &&
-    (metricsRow.leads || 0) === 0 &&
-    (metricsRow.revenue || 0) === 0 &&
-    (metricsRow.conversions || 0) === 0
-  )) {
-    missing.push("campaignMetrics");
+  if (!gateRow?.dataWindowDays) missing.push("dataWindowDays");
+  else prefillable["dataWindowDays"] = String(gateRow.dataWindowDays);
+
+  const hasAnyMetric = metricsRow && (
+    (metricsRow.spend || 0) > 0 ||
+    (metricsRow.impressions || 0) > 0 ||
+    (metricsRow.clicks || 0) > 0 ||
+    (metricsRow.leads || 0) > 0 ||
+    (metricsRow.revenue || 0) > 0 ||
+    (metricsRow.conversions || 0) > 0
+  );
+
+  if (!hasAnyMetric) {
+    missing.push("spend");
+    missing.push("impressions");
+    missing.push("conversions");
+    missing.push("revenue");
+  } else {
+    if (metricsRow?.spend) prefillable["spend"] = String(metricsRow.spend);
+    if (metricsRow?.impressions) prefillable["impressions"] = String(metricsRow.impressions);
+    if (metricsRow?.clicks) prefillable["clicks"] = String(metricsRow.clicks);
+    if (metricsRow?.conversions) prefillable["conversions"] = String(metricsRow.conversions);
+    if (metricsRow?.revenue) prefillable["revenue"] = String(metricsRow.revenue);
   }
 
   return {
@@ -211,7 +225,7 @@ async function getRetentionGateData(accountId: string, campaignId: string): Prom
   gateInputs: any;
   retentionMetrics: any;
   missingFields: string[];
-  prefillableFields: string[];
+  prefillableFields: Record<string, any>;
   isReady: boolean;
 }> {
   const [gateRow] = await db
@@ -227,14 +241,28 @@ async function getRetentionGateData(accountId: string, campaignId: string): Prom
     .limit(1);
 
   const missing: string[] = [];
-  const prefillable: string[] = [];
+  const prefillable: Record<string, any> = {};
 
   if (!gateRow?.retentionGoal) missing.push("retentionGoal");
-  if (!gateRow?.businessModel) missing.push("businessModel");
+  else prefillable["retentionGoal"] = gateRow.retentionGoal;
 
-  if (!metricsRow || (metricsRow.totalCustomers || 0) === 0) {
-    missing.push("totalCustomers");
-  }
+  if (!gateRow?.businessModel) missing.push("businessModel");
+  else prefillable["businessModel"] = gateRow.businessModel;
+
+  if (!gateRow?.reachableAudience) missing.push("reachableAudience");
+  else prefillable["reachableAudience"] = gateRow.reachableAudience;
+
+  if (!metricsRow || (metricsRow.totalCustomers || 0) <= 0) missing.push("totalCustomers");
+  else prefillable["totalCustomers"] = String(metricsRow.totalCustomers);
+
+  if (!metricsRow || metricsRow.returningCustomers == null) missing.push("returningCustomers");
+  else prefillable["returningCustomers"] = String(metricsRow.returningCustomers);
+
+  if (!metricsRow || (metricsRow.totalPurchases || 0) <= 0) missing.push("totalPurchases");
+  else prefillable["totalPurchases"] = String(metricsRow.totalPurchases);
+
+  if (!metricsRow || ![30, 60, 90].includes(metricsRow.dataWindowDays || 0)) missing.push("dataWindowDays");
+  else prefillable["dataWindowDays"] = String(metricsRow.dataWindowDays);
 
   return {
     gateInputs: gateRow || null,

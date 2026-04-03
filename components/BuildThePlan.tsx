@@ -745,24 +745,80 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     setError('');
     setLoading(true);
 
+    const cid = blueprint.campaignContext.campaignId;
+    const engine = needsInputPayload.engine;
+    const vals = needsInputValues;
+
     try {
-      const engine = needsInputPayload.engine;
-      const values = needsInputValues;
+      const ITERATION_GATE_FIELDS = new Set(['primaryKpi', 'dataWindowDays']);
+      const ITERATION_METRIC_FIELDS = new Set(['spend', 'impressions', 'clicks', 'conversions', 'revenue']);
+      const RETENTION_GATE_FIELDS = new Set(['retentionGoal', 'businessModel', 'reachableAudience']);
+      const RETENTION_METRIC_FIELDS = new Set(['totalCustomers', 'returningCustomers', 'totalPurchases', 'averageOrderValue', 'dataWindowDays']);
 
-      const metricEndpoint = engine === 'iteration'
-        ? '/api/strategy/manual-campaign-metrics'
-        : '/api/strategy/manual-retention-metrics';
+      if (engine === 'iteration') {
+        const gatePayload: Record<string, any> = { hasExistingAsset: true };
+        const metricPayload: Record<string, any> = {};
+        for (const [k, v] of Object.entries(vals)) {
+          if (v === '' || v == null) continue;
+          if (ITERATION_GATE_FIELDS.has(k)) gatePayload[k] = v;
+          if (ITERATION_METRIC_FIELDS.has(k)) metricPayload[k] = v;
+        }
 
-      const saveRes = await authFetch(getApiUrl(metricEndpoint), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaignId: blueprint.campaignContext.campaignId, ...values }),
-      });
-      if (!saveRes.ok) {
-        const errData = await safeApiJson(saveRes);
-        setError(`[SAVE_FAILED] ${errData?.error || 'Could not save metrics'}`);
-        setLoading(false);
-        return;
+        const gateRes = await authFetch(getApiUrl(`/api/campaigns/${cid}/iteration-gate`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(gatePayload),
+        });
+        if (!gateRes.ok) {
+          const e = await safeApiJson(gateRes);
+          setError(`[GATE_SAVE_FAILED] ${e?.message || 'Could not save iteration gate inputs'}`);
+          setLoading(false); return;
+        }
+
+        if (Object.keys(metricPayload).length > 0) {
+          const metricsRes = await authFetch(getApiUrl(`/api/campaigns/${cid}/manual-metrics`), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(metricPayload),
+          });
+          if (!metricsRes.ok) {
+            const e = await safeApiJson(metricsRes);
+            setError(`[METRICS_SAVE_FAILED] ${e?.message || 'Could not save campaign metrics'}`);
+            setLoading(false); return;
+          }
+        }
+      } else if (engine === 'retention') {
+        const gatePayload: Record<string, any> = { hasExistingCustomers: true };
+        const metricsPayload: Record<string, any> = {};
+        for (const [k, v] of Object.entries(vals)) {
+          if (v === '' || v == null) continue;
+          if (RETENTION_GATE_FIELDS.has(k)) gatePayload[k] = v;
+          if (RETENTION_METRIC_FIELDS.has(k)) metricsPayload[k] = v;
+        }
+
+        const gateRes = await authFetch(getApiUrl(`/api/campaigns/${cid}/retention-gate`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(gatePayload),
+        });
+        if (!gateRes.ok) {
+          const e = await safeApiJson(gateRes);
+          setError(`[GATE_SAVE_FAILED] ${e?.message || 'Could not save retention gate inputs'}`);
+          setLoading(false); return;
+        }
+
+        if (Object.keys(metricsPayload).length > 0) {
+          const metricsRes = await authFetch(getApiUrl(`/api/campaigns/${cid}/retention-metrics`), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(metricsPayload),
+          });
+          if (!metricsRes.ok) {
+            const e = await safeApiJson(metricsRes);
+            setError(`[METRICS_SAVE_FAILED] ${e?.message || 'Could not save retention metrics'}`);
+            setLoading(false); return;
+          }
+        }
       }
 
       setNeedsInputPayload(null);
@@ -771,7 +827,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          campaignId: blueprint.campaignContext.campaignId,
+          campaignId: cid,
           pausedJobId,
           resumeFromEngine: engine,
         }),
@@ -1917,18 +1973,19 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
 
       const fieldMeta: Record<string, { label: string; placeholder: string; keyboardType?: 'numeric' | 'default' }> = {
         primaryKpi: { label: 'Primary KPI', placeholder: 'e.g. ROAS, CPL, CTR' },
-        dataWindowDays: { label: 'Data Window (days)', placeholder: 'e.g. 30', keyboardType: 'numeric' },
+        dataWindowDays: { label: 'Data Window (days)', placeholder: 'e.g. 30  — enter 30, 60, or 90', keyboardType: 'numeric' },
         impressions: { label: 'Impressions', placeholder: 'Total impressions', keyboardType: 'numeric' },
         clicks: { label: 'Clicks', placeholder: 'Total clicks', keyboardType: 'numeric' },
         conversions: { label: 'Conversions', placeholder: 'Total conversions', keyboardType: 'numeric' },
-        spend: { label: 'Ad Spend ($)', placeholder: 'Total spend', keyboardType: 'numeric' },
+        spend: { label: 'Ad Spend ($)', placeholder: 'Total spend (fill at least one metric)', keyboardType: 'numeric' },
         revenue: { label: 'Revenue ($)', placeholder: 'Total revenue', keyboardType: 'numeric' },
-        retentionGoal: { label: 'Retention Goal', placeholder: 'e.g. Increase repeat purchases by 20%' },
-        businessModel: { label: 'Business Model', placeholder: 'e.g. subscription, ecommerce, SaaS' },
-        totalCustomers: { label: 'Total Customers', placeholder: 'Total customer count', keyboardType: 'numeric' },
-        returningCustomers: { label: 'Returning Customers', placeholder: 'Count of returning customers', keyboardType: 'numeric' },
+        retentionGoal: { label: 'Retention Goal', placeholder: 'e.g. repeat_purchase, churn_reduction, renewal, win_back' },
+        businessModel: { label: 'Business Model', placeholder: 'e.g. one_time_purchase, subscription, retainer' },
+        reachableAudience: { label: 'Reachable Audience After Purchase', placeholder: 'e.g. email, whatsapp, community, phone' },
+        totalCustomers: { label: 'Total Customers', placeholder: 'Customers acquired in data window', keyboardType: 'numeric' },
+        returningCustomers: { label: 'Returning Customers', placeholder: 'Customers with 2+ purchases', keyboardType: 'numeric' },
+        totalPurchases: { label: 'Total Purchases / Orders', placeholder: 'Total number of orders', keyboardType: 'numeric' },
         averageOrderValue: { label: 'Average Order Value ($)', placeholder: 'e.g. 75', keyboardType: 'numeric' },
-        purchaseFrequency: { label: 'Purchase Frequency / year', placeholder: 'e.g. 3', keyboardType: 'numeric' },
       };
 
       return (

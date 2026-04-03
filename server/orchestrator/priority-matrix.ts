@@ -66,7 +66,7 @@ export function checkPriorityViolation(
 export interface NeedsInputPayload {
   engine: EngineId;
   missingFields: string[];
-  prefillableFields: string[];
+  prefillableFields: Record<string, any>;
 }
 
 export interface EngineStepResult {
