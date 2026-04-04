@@ -164,6 +164,17 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
   const [memoryEntries, setMemoryEntries] = useState<any[]>([]);
   const [memoryExpanded, setMemoryExpanded] = useState(false);
   const [memoryLoading, setMemoryLoading] = useState(false);
+
+  const [dualAnalysis, setDualAnalysis] = useState<any>(null);
+  const [dualAnalysisLoading, setDualAnalysisLoading] = useState(false);
+  const [dualAnalysisDismissed, setDualAnalysisDismissed] = useState(false);
+  const [runNowLoading, setRunNowLoading] = useState(false);
+
+  const [userChannels, setUserChannels] = useState<{ instagram: string; website: string }>({ instagram: '', website: '' });
+  const [userChannelsEditing, setUserChannelsEditing] = useState(false);
+  const [userChannelsSaving, setUserChannelsSaving] = useState(false);
+  const [userChannelsLoaded, setUserChannelsLoaded] = useState(false);
+
   const prevBlueprintStatus = useRef<string | null>(null);
 
   const isMetaReal = metaConnection?.isConnected === true;
@@ -288,6 +299,95 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
   useEffect(() => {
     fetchCICompetitors();
   }, [fetchCICompetitors]);
+
+  const fetchUserChannels = useCallback(async () => {
+    if (!profileCampaignId) return;
+    try {
+      const res = await authFetch(getApiUrl(`/api/campaigns/${profileCampaignId}/user-channels`));
+      if (res.ok) {
+        const data = await safeApiJson(res);
+        if (data.profiles && Array.isArray(data.profiles)) {
+          const ig = data.profiles.find((p: any) => p.platform === 'instagram');
+          const web = data.profiles.find((p: any) => p.platform === 'website');
+          setUserChannels({
+            instagram: ig?.handle ? `@${ig.handle}` : '',
+            website: web?.url || '',
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[BuildThePlan] Failed to fetch user channels:', err);
+    } finally {
+      setUserChannelsLoaded(true);
+    }
+  }, [profileCampaignId]);
+
+  useEffect(() => {
+    fetchUserChannels();
+  }, [fetchUserChannels]);
+
+  const fetchDualAnalysis = useCallback(async () => {
+    if (!profileCampaignId) return;
+    setDualAnalysisLoading(true);
+    try {
+      const res = await authFetch(getApiUrl(`/api/agent/dual-analysis/${profileCampaignId}`));
+      if (res.ok) {
+        const data = await safeApiJson(res);
+        if (data.analysis) {
+          setDualAnalysis(data.analysis);
+          setDualAnalysisDismissed(false);
+        }
+      }
+    } catch (err) {
+      console.error('[BuildThePlan] Dual analysis fetch failed:', err);
+    } finally {
+      setDualAnalysisLoading(false);
+    }
+  }, [profileCampaignId]);
+
+  useEffect(() => {
+    fetchDualAnalysis();
+  }, [fetchDualAnalysis]);
+
+  const handleRunNow = useCallback(async () => {
+    if (!profileCampaignId) return;
+    setRunNowLoading(true);
+    try {
+      await authFetch(getApiUrl('/api/orchestrator/run'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaignId: profileCampaignId }),
+      });
+      setDualAnalysisDismissed(true);
+    } catch (err) {
+      console.error('[BuildThePlan] Run now failed:', err);
+    } finally {
+      setRunNowLoading(false);
+    }
+  }, [profileCampaignId]);
+
+  const saveUserChannels = useCallback(async () => {
+    if (!profileCampaignId) return;
+    setUserChannelsSaving(true);
+    try {
+      const res = await authFetch(getApiUrl(`/api/campaigns/${profileCampaignId}/user-channels`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instagramHandle: userChannels.instagram.replace(/^@/, '').trim() || null,
+          websiteUrl: userChannels.website.trim() || null,
+        }),
+      });
+      if (res.ok) {
+        setUserChannelsEditing(false);
+        fetchDualAnalysis();
+      }
+    } catch (err) {
+      console.error('[BuildThePlan] Failed to save user channels:', err);
+    } finally {
+      setUserChannelsSaving(false);
+    }
+  }, [profileCampaignId, userChannels, fetchDualAnalysis]);
 
   const toggleCompetitor = useCallback((id: string) => {
     Haptics.selectionAsync();
@@ -1202,6 +1302,175 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
               )}
             </View>
           </>
+        )}
+
+        <Text style={[s.sectionLabel, { color: colors.text, marginTop: 16 }]}>Your Channels</Text>
+        {userChannelsEditing ? (
+          <View style={[s.userChannelEditCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <View style={s.userChannelRow}>
+              <Ionicons name="logo-instagram" size={18} color="#E1306C" />
+              <TextInput
+                style={[s.userChannelInput, { color: colors.text, borderColor: colors.cardBorder, backgroundColor: colors.background }]}
+                placeholder="@yourhandle"
+                placeholderTextColor={colors.textMuted}
+                value={userChannels.instagram}
+                onChangeText={(t) => setUserChannels(prev => ({ ...prev, instagram: t }))}
+                autoCapitalize="none"
+              />
+            </View>
+            <View style={s.userChannelRow}>
+              <Ionicons name="globe-outline" size={18} color="#3B82F6" />
+              <TextInput
+                style={[s.userChannelInput, { color: colors.text, borderColor: colors.cardBorder, backgroundColor: colors.background }]}
+                placeholder="https://yoursite.com"
+                placeholderTextColor={colors.textMuted}
+                value={userChannels.website}
+                onChangeText={(t) => setUserChannels(prev => ({ ...prev, website: t }))}
+                autoCapitalize="none"
+                keyboardType="url"
+              />
+            </View>
+            <View style={s.userChannelBtnRow}>
+              <Pressable
+                onPress={() => setUserChannelsEditing(false)}
+                style={[s.userChannelCancelBtn, { borderColor: colors.cardBorder }]}
+              >
+                <Text style={[s.userChannelCancelText, { color: colors.textSecondary }]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={saveUserChannels}
+                disabled={userChannelsSaving}
+                style={[s.userChannelSaveBtn, { opacity: userChannelsSaving ? 0.6 : 1 }]}
+              >
+                <LinearGradient colors={['#6366F1', '#8B5CF6']} style={s.userChannelSaveGrad}>
+                  {userChannelsSaving ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={s.userChannelSaveText}>Save Channels</Text>
+                  )}
+                </LinearGradient>
+              </Pressable>
+            </View>
+          </View>
+        ) : (
+          <Pressable
+            onPress={() => setUserChannelsEditing(true)}
+            style={[s.userChannelSummary, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
+          >
+            <View style={{ flex: 1 }}>
+              {userChannels.instagram || userChannels.website ? (
+                <View style={{ gap: 4 }}>
+                  {userChannels.instagram ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="logo-instagram" size={14} color="#E1306C" />
+                      <Text style={[{ fontSize: 13, color: colors.text }]}>{userChannels.instagram}</Text>
+                    </View>
+                  ) : null}
+                  {userChannels.website ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="globe-outline" size={14} color="#3B82F6" />
+                      <Text style={[{ fontSize: 13, color: colors.text }]} numberOfLines={1}>{userChannels.website}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              ) : (
+                <Text style={[{ fontSize: 13, color: colors.textMuted }]}>
+                  Add your Instagram & website for weekly self-analysis
+                </Text>
+              )}
+            </View>
+            <Ionicons name="pencil" size={16} color={colors.textSecondary} />
+          </Pressable>
+        )}
+
+        {dualAnalysis && !dualAnalysisDismissed && dualAnalysis.classification !== 'no_data' && (
+          <View style={[s.dualAnalysisCard, {
+            backgroundColor: dualAnalysis.classification === 'no_change'
+              ? (isDark ? '#1F2937' : '#F9FAFB')
+              : dualAnalysis.classification === 'both_changed'
+              ? '#7C3AED12'
+              : '#3B82F612',
+            borderColor: dualAnalysis.classification === 'no_change'
+              ? colors.cardBorder
+              : dualAnalysis.classification === 'both_changed'
+              ? '#7C3AED40'
+              : '#3B82F640',
+          }]}>
+            <View style={s.dualAnalysisHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons
+                  name={
+                    dualAnalysis.classification === 'no_change' ? 'checkmark-circle' :
+                    dualAnalysis.classification === 'both_changed' ? 'git-compare' :
+                    dualAnalysis.classification === 'market_shift_only' ? 'trending-up' :
+                    'pulse'
+                  }
+                  size={18}
+                  color={
+                    dualAnalysis.classification === 'no_change' ? '#10B981' :
+                    dualAnalysis.classification === 'both_changed' ? '#7C3AED' :
+                    '#3B82F6'
+                  }
+                />
+                <Text style={[s.dualAnalysisTitle, {
+                  color: dualAnalysis.classification === 'no_change' ? '#10B981' :
+                    dualAnalysis.classification === 'both_changed' ? '#7C3AED' : '#3B82F6',
+                }]}>
+                  {dualAnalysis.classification === 'no_change' ? 'Strategy Stable' :
+                   dualAnalysis.classification === 'both_changed' ? 'Market + Execution Shift' :
+                   dualAnalysis.classification === 'market_shift_only' ? 'Market Shift Detected' :
+                   'Execution Gap Detected'}
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                {dualAnalysis.confidence != null && (
+                  <Text style={[{ fontSize: 11, color: colors.textMuted }]}>{dualAnalysis.confidence}% conf.</Text>
+                )}
+                <Pressable onPress={() => setDualAnalysisDismissed(true)}>
+                  <Ionicons name="close" size={18} color={colors.textMuted} />
+                </Pressable>
+              </View>
+            </View>
+            <Text style={[s.dualAnalysisSummary, { color: colors.textSecondary }]}>
+              {dualAnalysis.summary}
+            </Text>
+            {dualAnalysis.recommendedEngines && dualAnalysis.recommendedEngines.length > 0 && (
+              <View style={s.dualAnalysisEngines}>
+                {dualAnalysis.recommendedEngines.map((e: string) => (
+                  <View key={e} style={[s.engineChip, { backgroundColor: '#6366F115', borderColor: '#6366F130' }]}>
+                    <Text style={[s.engineChipText, { color: '#6366F1' }]}>{e.replace('_', ' ')}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+            {dualAnalysis.classification !== 'no_change' && (
+              <Pressable
+                onPress={handleRunNow}
+                disabled={runNowLoading}
+                style={[s.runNowBtn, { opacity: runNowLoading ? 0.6 : 1 }]}
+              >
+                <LinearGradient
+                  colors={dualAnalysis.classification === 'both_changed' ? ['#7C3AED', '#6366F1'] : ['#3B82F6', '#6366F1']}
+                  style={s.runNowGrad}
+                >
+                  {runNowLoading ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="play" size={14} color="#fff" />
+                      <Text style={s.runNowText}>Run Now</Text>
+                    </>
+                  )}
+                </LinearGradient>
+              </Pressable>
+            )}
+          </View>
+        )}
+        {dualAnalysisLoading && !dualAnalysis && (
+          <View style={[s.ciLoadingWrap, { marginTop: 8 }]}>
+            <ActivityIndicator size="small" color={colors.accent} />
+            <Text style={[s.ciLoadingText, { color: colors.textSecondary }]}>Loading dual analysis...</Text>
+          </View>
         )}
 
         <Text style={[s.sectionLabel, { color: colors.text, marginTop: 16 }]}>Average Selling Price ($)</Text>
@@ -3185,5 +3454,119 @@ const s = StyleSheet.create({
   profileIncompleteDesc: {
     fontSize: 12,
     marginTop: 2,
+  },
+  userChannelEditCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 8,
+    gap: 10,
+  },
+  userChannelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  userChannelInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 13,
+  },
+  userChannelBtnRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  userChannelCancelBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 9,
+    alignItems: 'center',
+  },
+  userChannelCancelText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  userChannelSaveBtn: {
+    flex: 2,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  userChannelSaveGrad: {
+    paddingVertical: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userChannelSaveText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  userChannelSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+    gap: 8,
+  },
+  dualAnalysisCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+    marginTop: 12,
+    marginBottom: 4,
+    gap: 8,
+  },
+  dualAnalysisHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  dualAnalysisTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  dualAnalysisSummary: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  dualAnalysisEngines: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  engineChip: {
+    borderRadius: 6,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  engineChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'capitalize',
+  },
+  runNowBtn: {
+    borderRadius: 8,
+    overflow: 'hidden',
+    alignSelf: 'flex-start',
+  },
+  runNowGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    gap: 6,
+  },
+  runNowText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

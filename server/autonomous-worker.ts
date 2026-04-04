@@ -772,6 +772,22 @@ async function processAccount(accountId: string) {
       console.error(`[Worker] Lead engine processing error for ${accountId}:`, leadErr);
     }
 
+    try {
+      const { needsUserChannelScrape, scrapeUserChannels } = await import("./user-channel-scraper");
+      const activeCampaignId = await getActiveCampaignId(accountId);
+      if (activeCampaignId) {
+        const shouldScrape = await needsUserChannelScrape(accountId, activeCampaignId);
+        if (shouldScrape) {
+          console.log(`[Worker] Triggering user channel scrape for account=${accountId} campaign=${activeCampaignId}`);
+          scrapeUserChannels(accountId, activeCampaignId).catch((err: any) =>
+            console.error(`[Worker] User channel scrape error for ${accountId}:`, err.message)
+          );
+        }
+      }
+    } catch (scrapeErr: any) {
+      console.error(`[Worker] User channel scrape check error for ${accountId}:`, scrapeErr.message);
+    }
+
     await db.update(accountState)
       .set({ lastWorkerRun: new Date(), updatedAt: new Date() })
       .where(eq(accountState.accountId, accountId));

@@ -1,6 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { db } from "./db";
-import { campaignSelections, adSpendEntries, performanceSnapshots, conversionEvents, manualCampaignMetrics, manualRetentionMetrics, iterationGateInputs, retentionGateInputs, strategyMemory } from "@shared/schema";
+import { campaignSelections, adSpendEntries, performanceSnapshots, conversionEvents, manualCampaignMetrics, manualRetentionMetrics, iterationGateInputs, retentionGateInputs, strategyMemory, userPublicProfiles, userChannelSnapshots } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { getCampaignMetrics, getRevenueSummary, detectPerformanceSignals, getDashboardMetrics, resolveDataMode, getManualMetrics } from "./campaign-data-layer";
 
@@ -872,6 +872,98 @@ export function registerCampaignRoutes(app: Express) {
     } catch (error: any) {
       console.error("[Campaigns] Strategy memory GET error:", error);
       res.status(500).json({ code: "STRATEGY_MEMORY_FAILED", message: "Failed to fetch strategy memory" });
+    }
+  });
+
+  app.get("/api/campaigns/:campaignId/user-channels", async (req: Request, res: Response) => {
+    try {
+      const { campaignId } = req.params;
+      const accountId = resolveAccountId(req);
+      const profiles = await db
+        .select()
+        .from(userPublicProfiles)
+        .where(
+          and(
+            eq(userPublicProfiles.campaignId, campaignId),
+            eq(userPublicProfiles.accountId, accountId),
+          )
+        );
+      res.json({ success: true, profiles });
+    } catch (error: any) {
+      console.error("[Campaigns] User channels GET error:", error);
+      res.status(500).json({ code: "USER_CHANNELS_FAILED", message: "Failed to fetch user channels" });
+    }
+  });
+
+  app.put("/api/campaigns/:campaignId/user-channels", async (req: Request, res: Response) => {
+    try {
+      const { campaignId } = req.params;
+      const accountId = resolveAccountId(req);
+      const { instagramHandle, websiteUrl } = req.body;
+
+      const channelsToUpsert: { platform: string; handle: string | null; url: string | null }[] = [];
+
+      if (instagramHandle !== undefined) {
+        channelsToUpsert.push({
+          platform: "instagram",
+          handle: instagramHandle ? instagramHandle.replace(/^@/, "").toLowerCase().trim() : null,
+          url: null,
+        });
+      }
+
+      if (websiteUrl !== undefined) {
+        channelsToUpsert.push({
+          platform: "website",
+          handle: null,
+          url: websiteUrl ? websiteUrl.trim() : null,
+        });
+      }
+
+      if (channelsToUpsert.length === 0) {
+        return res.status(400).json({ code: "MISSING_CHANNELS", message: "At least one channel (instagramHandle or websiteUrl) is required" });
+      }
+
+      const results = [];
+      for (const ch of channelsToUpsert) {
+        const existing = await db
+          .select()
+          .from(userPublicProfiles)
+          .where(
+            and(
+              eq(userPublicProfiles.accountId, accountId),
+              eq(userPublicProfiles.campaignId, campaignId),
+              eq(userPublicProfiles.platform, ch.platform),
+            )
+          )
+          .limit(1);
+
+        if (existing.length > 0) {
+          const updated = await db
+            .update(userPublicProfiles)
+            .set({ handle: ch.handle, url: ch.url, updatedAt: new Date() })
+            .where(
+              and(
+                eq(userPublicProfiles.accountId, accountId),
+                eq(userPublicProfiles.campaignId, campaignId),
+                eq(userPublicProfiles.platform, ch.platform),
+              )
+            )
+            .returning();
+          results.push(updated[0]);
+        } else {
+          const inserted = await db
+            .insert(userPublicProfiles)
+            .values({ accountId, campaignId, platform: ch.platform, handle: ch.handle, url: ch.url })
+            .returning();
+          results.push(inserted[0]);
+        }
+      }
+
+      console.log(`[Campaigns] User channels saved for campaign ${campaignId}: ${channelsToUpsert.map(c => c.platform).join(", ")}`);
+      res.json({ success: true, profiles: results });
+    } catch (error: any) {
+      console.error("[Campaigns] User channels PUT error:", error);
+      res.status(500).json({ code: "USER_CHANNELS_SAVE_FAILED", message: "Failed to save user channels" });
     }
   });
 

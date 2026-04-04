@@ -1,8 +1,10 @@
 import type { Express, Request, Response } from "express";
 import { AgentOperator } from "./index";
+import { registerDualAnalysisRoutes } from "./dual-analysis-routes";
 
 import { resolveAccountId } from "../auth";
 export function registerAgentRoutes(app: Express) {
+  registerDualAnalysisRoutes(app);
   app.post("/api/agent/run-stream", async (req: Request, res: Response) => {
     try {
       const { campaignId } = req.body;

@@ -2282,3 +2282,35 @@ export const strategyRoots = pgTable("strategy_roots", {
 });
 
 export type StrategyRoot = typeof strategyRoots.$inferSelect;
+
+// =============================================
+// USER CHANNEL SCRAPING (Task #10)
+// =============================================
+export const userPublicProfiles = pgTable("user_public_profiles", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  platform: text("platform").notNull(),
+  handle: text("handle"),
+  url: text("url"),
+  addedAt: timestamp("added_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const userChannelSnapshots = pgTable("user_channel_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  platform: text("platform").notNull(),
+  handle: text("handle"),
+  snapshotData: text("snapshot_data"),
+  deltaFromPrevious: text("delta_from_previous"),
+  scrapedAt: timestamp("scraped_at").defaultNow(),
+});
+
+export type UserPublicProfile = typeof userPublicProfiles.$inferSelect;
+export type UserChannelSnapshot = typeof userChannelSnapshots.$inferSelect;
