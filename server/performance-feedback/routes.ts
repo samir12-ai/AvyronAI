@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { db } from "../db";
 import { contentPerformanceSnapshots } from "@shared/schema";
-import { eq, and, desc, asc } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import {
   computeRawScore,
   applyVolumePenalty,
@@ -10,7 +10,12 @@ import {
 } from "./scoring";
 
 const CONTENT_TYPES = ["reel", "carousel", "story", "post"] as const;
+const VALID_SOURCES = ["manual", "meta-api"] as const;
 type ContentType = typeof CONTENT_TYPES[number];
+
+function clampRate(val: number): number {
+  return Math.max(0, Math.min(1, val));
+}
 
 export function registerPerformanceFeedbackRoutes(app: Express) {
   app.post("/api/performance/ingest", async (req: any, res) => {
@@ -39,14 +44,26 @@ export function registerPerformanceFeedbackRoutes(app: Express) {
     if (!CONTENT_TYPES.includes(contentType as ContentType)) {
       return res.status(400).json({ error: `contentType must be one of: ${CONTENT_TYPES.join(", ")}` });
     }
+    if (source && !VALID_SOURCES.includes(source)) {
+      return res.status(400).json({ error: `source must be one of: ${VALID_SOURCES.join(", ")}` });
+    }
 
-    const safeNum = (v: any, def = 0) => (typeof v === "number" && !isNaN(v) ? v : parseFloat(v) || def);
+    const toNum = (v: any, def = 0): number => {
+      const n = typeof v === "number" ? v : parseFloat(v);
+      return isNaN(n) ? def : n;
+    };
+    const toNonNeg = (v: any, def = 0) => Math.max(0, toNum(v, def));
+
+    const parsedSavesRate = clampRate(toNum(savesRate));
+    const parsedEngagementRate = clampRate(toNum(avgEngagementRate));
+    const parsedDecay = Math.max(0, Math.min(2, toNum(reachDecayFactor, 1.0)));
+    const parsedPublished = Math.round(toNonNeg(totalPublished));
 
     const rawInput = {
-      savesRate: safeNum(savesRate),
-      avgEngagementRate: safeNum(avgEngagementRate),
-      reachDecayFactor: safeNum(reachDecayFactor, 1.0),
-      totalPublished: safeNum(totalPublished),
+      savesRate: parsedSavesRate,
+      avgEngagementRate: parsedEngagementRate,
+      reachDecayFactor: parsedDecay,
+      totalPublished: parsedPublished,
     };
 
     const rawScore = computeRawScore(rawInput);
@@ -80,14 +97,14 @@ export function registerPerformanceFeedbackRoutes(app: Express) {
       periodLabel,
       periodStart: periodStart ? new Date(periodStart) : null,
       periodEnd: periodEnd ? new Date(periodEnd) : null,
-      avgReach: safeNum(avgReach),
-      avgSaves: safeNum(avgSaves),
-      savesRate: rawInput.savesRate,
-      avgEngagementRate: rawInput.avgEngagementRate,
-      avgLikes: safeNum(avgLikes),
-      avgComments: safeNum(avgComments),
-      reachDecayFactor: rawInput.reachDecayFactor,
-      totalPublished: rawInput.totalPublished,
+      avgReach: toNonNeg(avgReach),
+      avgSaves: toNonNeg(avgSaves),
+      savesRate: parsedSavesRate,
+      avgEngagementRate: parsedEngagementRate,
+      avgLikes: toNonNeg(avgLikes),
+      avgComments: toNonNeg(avgComments),
+      reachDecayFactor: parsedDecay,
+      totalPublished: parsedPublished,
       rawPerformanceScore: rawWithPenalty,
       smoothedPerformanceScore: smoothedScore,
       volumePenaltyApplied: penaltyApplied,
@@ -132,13 +149,15 @@ export function registerPerformanceFeedbackRoutes(app: Express) {
       const scores = snaps.map((s) => s.smoothedPerformanceScore ?? 0);
       const latest = snaps[0];
 
-      const recencyWeighted =
-        snaps.length === 1
-          ? scores[0]
-          : snaps.length === 2
-          ? (scores[0] * 3 + scores[1] * 1.5) / 4.5
-          : (scores[0] * 3 + scores[1] * 1.5 + scores.slice(2).reduce((a, b) => a + b, 0)) /
-            (3 + 1.5 + Math.max(0, snaps.length - 2));
+      let recencyWeighted: number;
+      if (snaps.length === 1) {
+        recencyWeighted = scores[0];
+      } else if (snaps.length === 2) {
+        recencyWeighted = (scores[0] * 3 + scores[1] * 1.5) / 4.5;
+      } else {
+        const olderSum = scores.slice(2).reduce((a, b) => a + b, 0);
+        recencyWeighted = (scores[0] * 3 + scores[1] * 1.5 + olderSum) / (3 + 1.5 + Math.max(0, snaps.length - 2));
+      }
 
       const stabilitySignal = computeStabilitySignal(scores);
 

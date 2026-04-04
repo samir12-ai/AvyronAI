@@ -158,7 +158,12 @@ function ContentPerformanceSection({ campaignId, colors, isDark }: { campaignId:
       }).filter(Boolean);
 
       if (promises.length === 0) { setError('Enter at least one format'); setSaving(false); return; }
-      await Promise.all(promises);
+      const responses = await Promise.all(promises);
+      const failed = (responses as any[]).filter((r) => r && !r.ok);
+      if (failed.length > 0) {
+        const firstErr = await failed[0].json().catch(() => ({}));
+        throw new Error(firstErr.error || 'One or more formats failed to save');
+      }
       setSaved(true);
       setLastLogged(new Date().toLocaleDateString());
       Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
