@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { strategyMemory, contentPerformanceSnapshots } from "@shared/schema";
-import { eq, and, lt, desc, isNotNull } from "drizzle-orm";
+import { eq, and, lt, gt, desc, isNotNull } from "drizzle-orm";
 import { makeStrategyFingerprint } from "../memory-system/manager";
 import { checkResultsOverrideMemory } from "../orchestrator/memory-context";
 import type { MemoryClass, MemoryDirection, MemorySlot, PerformanceSnapshot } from "../memory-system/types";
@@ -249,6 +249,20 @@ function countConsecutiveConfirmed(
   return count;
 }
 
+async function resolveIndustryBaseline(accountId: string, campaignId: string): Promise<number> {
+  try {
+    const { loadMemoryBlock } = await import("../memory-system/manager");
+    const block = await loadMemoryBlock(campaignId, accountId, null, null);
+    const bl = block.industryBaseline;
+    if (bl) {
+      const avg =
+        (bl.reelsPerWeek + bl.postsPerWeek + bl.storiesPerDay + bl.carouselsPerWeek) / 4;
+      return avg > 0 ? Math.min(1.0, avg / 10) : INDUSTRY_BASELINE_DEFAULT;
+    }
+  } catch {}
+  return INDUSTRY_BASELINE_DEFAULT;
+}
+
 export async function runMemoryMutation(
   accountId: string,
   campaignId: string,
@@ -281,42 +295,48 @@ export async function runMemoryMutation(
     totalProcessed: eligible.length,
   };
 
+  const industryBaseline = await resolveIndustryBaseline(accountId, campaignId);
+
   const validatedIds = new Set<string>();
+  const challengedEntryIds = new Set<string>();
 
   for (const row of eligible) {
     const fmt = detectContentFormat({ label: row.label, details: row.details ?? null });
     if (!fmt) continue;
 
-    const recentSnaps = await db
+    const sinceDate = row.lastValidatedAt ?? undefined;
+
+    const baseConditions = and(
+      eq(contentPerformanceSnapshots.accountId, accountId),
+      eq(contentPerformanceSnapshots.campaignId, campaignId),
+      eq(contentPerformanceSnapshots.contentType, fmt),
+      ...(sinceDate ? [gt(contentPerformanceSnapshots.createdAt, sinceDate)] : []),
+    );
+
+    const newSnaps = await db
       .select({
         smoothedPerformanceScore: contentPerformanceSnapshots.smoothedPerformanceScore,
         createdAt: contentPerformanceSnapshots.createdAt,
       })
       .from(contentPerformanceSnapshots)
-      .where(
-        and(
-          eq(contentPerformanceSnapshots.accountId, accountId),
-          eq(contentPerformanceSnapshots.campaignId, campaignId),
-          eq(contentPerformanceSnapshots.contentType, fmt),
-        ),
-      )
+      .where(baseConditions)
       .orderBy(desc(contentPerformanceSnapshots.createdAt))
       .limit(MAX_SNAPSHOTS);
 
-    if (recentSnaps.length < MIN_PERIODS_FOR_CONFIDENCE_MOVE) continue;
+    if (newSnaps.length < MIN_PERIODS_FOR_CONFIDENCE_MOVE) continue;
 
     validatedIds.add(row.id);
 
-    const scores = recentSnaps.map((s) => s.smoothedPerformanceScore ?? 0);
+    const scores = newSnaps.map((s) => s.smoothedPerformanceScore ?? 0);
     const currentDirection = (row.direction ?? "neutral") as MemoryDirection;
     const currentConfidence = row.confidenceScore ?? 0.5;
     const currentValidationCount = row.validationCount ?? 0;
 
     if (currentDirection === "reinforce") {
-      const consistentAbove = countConsecutiveConfirmed(scores, INDUSTRY_BASELINE_DEFAULT, "above");
+      const consistentAbove = countConsecutiveConfirmed(scores, industryBaseline, "above");
       const challengedPeriods = countConsecutiveConfirmed(
         scores,
-        INDUSTRY_BASELINE_DEFAULT,
+        industryBaseline,
         "below",
         BELOW_BASELINE_THRESHOLD,
       );
@@ -346,17 +366,19 @@ export async function runMemoryMutation(
           .where(eq(strategyMemory.id, row.id));
         summary.flipped.push({ label: row.label, from: "reinforce", to: "avoid" });
         summary.challenged++;
+        challengedEntryIds.add(row.id);
       } else if (challengedPeriods >= MIN_PERIODS_FOR_CONFIDENCE_MOVE) {
         summary.challenged++;
+        challengedEntryIds.add(row.id);
       }
     } else if (currentDirection === "avoid") {
-      const perfSnaps = toPerformanceSnapshots(recentSnaps, INDUSTRY_BASELINE_DEFAULT);
+      const perfSnaps = toPerformanceSnapshots(newSnaps, industryBaseline);
       const overrideResult = checkResultsOverrideMemory(
         row as unknown as MemorySlot,
         perfSnaps,
       );
 
-      const consistentBelow = countConsecutiveConfirmed(scores, INDUSTRY_BASELINE_DEFAULT, "below");
+      const consistentBelow = countConsecutiveConfirmed(scores, industryBaseline, "below");
 
       if (overrideResult.override) {
         await db
@@ -389,6 +411,9 @@ export async function runMemoryMutation(
 
   for (const row of eligible) {
     if (validatedIds.has(row.id)) continue;
+    const fmt = detectContentFormat({ label: row.label, details: row.details ?? null });
+    if (!fmt) continue;
+
     const currentConfidence = row.confidenceScore ?? 0.5;
     const decayRate = row.decayRate ?? 0.95;
     const effectiveConfidence = currentConfidence * decayRate;
@@ -416,6 +441,7 @@ export async function runMemoryMutation(
   const logDetails = JSON.stringify({
     confirmed: summary.confirmed,
     challenged: summary.challenged,
+    challengedIds: Array.from(challengedEntryIds),
     flipped: summary.flipped,
     decayed: summary.decayed,
     totalProcessed: summary.totalProcessed,
@@ -480,11 +506,15 @@ export async function getMemoryHealth(
     } catch {}
   }
 
-  const fourWeeksAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000);
-  const challengedCount = activeEntries.filter((r) => {
-    if (!r.lastValidatedAt) return false;
-    return r.lastValidatedAt < fourWeeksAgo;
-  }).length;
+  let challengedCount = 0;
+  if (logEntry) {
+    try {
+      const parsed =
+        typeof logEntry.details === "string" ? JSON.parse(logEntry.details) : logEntry.details;
+      const challengedIds: string[] = parsed?.challengedIds ?? [];
+      challengedCount = challengedIds.length;
+    } catch {}
+  }
 
   return {
     totalActive: activeEntries.length,
