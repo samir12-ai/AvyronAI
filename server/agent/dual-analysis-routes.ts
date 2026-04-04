@@ -50,13 +50,13 @@ const CLASSIFICATION_ENGINE_MAP: Record<DualAnalysisClassification, string[]> = 
   no_data:            [],
 };
 
-function getRecommendedEnginesForClassification(classification: DualAnalysisClassification): string[] {
+export function getRecommendedEnginesForClassification(classification: DualAnalysisClassification): string[] {
   return CLASSIFICATION_ENGINE_MAP[classification] ?? [];
 }
 
 // ── Classification guard (deterministic post-processing) ──────────────────────
 
-function applyClassificationGuard(
+export function applyClassificationGuard(
   raw: string,
   hasCompetitorData: boolean,
   hasUserData: boolean,
@@ -176,15 +176,33 @@ async function runDualAnalysis(
     ? buildUserContext(latestUserSnaps)
     : "USER CHANNEL DATA: No channels scraped yet.";
 
-  // Check if user snapshots have meaningful delta data
+  // Check if user snapshots have meaningful delta data (not first-scrape entries)
   const userSnapsHaveDeltas = latestUserSnaps.some(s => {
-    const delta = s.deltaFromPrevious ? JSON.parse(s.deltaFromPrevious) : null;
-    return delta && !delta.isFirstScrape;
+    try {
+      const delta = s.deltaFromPrevious ? JSON.parse(s.deltaFromPrevious) : null;
+      return delta && !delta.isFirstScrape;
+    } catch { return false; }
   });
 
   const competitorHasSignals = !!(mi?.threatSignals || mi?.opportunitySignals);
 
-  const prompt = `You are a dual-signal marketing strategy analyst. Your job is to compare competitor market intelligence with the user's own channel performance and produce a precise, data-grounded classification.
+  // ── Deterministic no_change pre-check ──────────────────────────────────────
+  // Avoids AI call when both sides are provably stable (data present but flat).
+  // This makes no_change reachable even when AI might over-classify.
+  if (hasCompetitorData && hasUserData && !competitorHasSignals && !userSnapsHaveDeltas) {
+    console.log(`[DualAnalysis] DETERMINISTIC_NO_CHANGE | account=${accountId} campaign=${campaignId} (no competitor signals, no user deltas)`);
+    return {
+      classification: "no_change",
+      recommendedEngines: [],
+      summary: "Both your channel performance and the competitive landscape are stable — no significant changes detected. No engine reruns are needed at this time.",
+      confidence: 85,
+      competitorSignals: null,
+      userSignals: null,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  const prompt = `You are a dual-signal marketing strategy analyst. Your job is to compare competitor market intelligence with the user's own channel performance and classify the situation.
 
 AVAILABLE DATA:
 ${competitorContext}
@@ -195,36 +213,32 @@ CLASSIFICATION RULES (apply deterministically):
 - both_changed: Competitor signals AND user metrics both show meaningful movement
 - market_shift_only: Competitor signals show movement, user metrics are stable
 - execution_gap_only: User metrics show gaps/drops, competitor landscape is stable
-- no_change: Neither side shows meaningful change (use this only if data is present but flat)
-
-ENGINE SELECTION RULES:
-- channel_selection: Use when user's content mix is imbalanced OR competitor platform strategy shifted
-- iteration: Use when engagement delta is negative OR post frequency dropped significantly
-- retention: Use when follower count is declining OR competitor is capturing retention-focused content
-- content_dna: Use when content type mix has changed dramatically OR competitor shifted creative format
-- objection_map: Use when competitor threat signals include pricing/value attacks
+- no_change: Neither side shows meaningful change (only if data is present but flat)
 
 MANDATORY REQUIREMENTS for the summary field:
-1. MUST reference at least one specific metric from the user's channel (e.g., "your engagement dropped from X to Y", "you posted N new pieces this week")
+1. MUST reference at least one specific metric from the user's channel (e.g., "your engagement dropped from X to Y")
 2. MUST reference at least one specific signal from the competitor data (e.g., "competitor threat signals show X")
-3. MUST explain WHY each recommended engine is needed (not just name it)
-4. 2-3 sentences only — no generic statements like "the market is shifting" without citing the specific data that shows this
+3. MUST explain the primary driver of the classification
+4. 2-3 sentences only — no generic statements without citing specific data
 
 Respond ONLY as valid JSON with no markdown:
 {
   "classification": "<one of: both_changed | market_shift_only | execution_gap_only | no_change>",
-  "recommendedEngines": ["<engine1>", "<engine2>"],
   "summary": "<2-3 sentences, citing actual data points from above>",
   "confidence": <integer 0-100 based on data completeness>
 }`;
 
   try {
-    const response = await aiChat([{ role: "user", content: prompt }], {
-      temperature: 0.1,
+    const response = await aiChat({
+      model: "gpt-5.2",
+      messages: [{ role: "user", content: prompt }],
       max_tokens: 600,
+      temperature: 0.1,
+      accountId,
+      endpoint: "dual-analysis",
     });
 
-    const raw = response.content.trim().replace(/```json|```/g, "").trim();
+    const raw = (response.choices[0]?.message?.content ?? "").trim().replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(raw);
 
     const classification = applyClassificationGuard(
