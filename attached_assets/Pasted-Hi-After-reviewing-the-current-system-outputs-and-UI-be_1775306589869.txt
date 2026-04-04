@@ -1,0 +1,142 @@
+Hi,
+
+After reviewing the current system outputs and UI behavior across the dashboard, pipeline, and plan views, we identified three critical alignment areas that need clarification and correction to ensure system consistency, credibility, and proper agent orchestration.
+
+---
+
+### 1) Content Rhythm Inconsistency (Critical Bug)
+
+We are seeing conflicting weekly content plans across different sections of the system:
+
+- Inside the profile/plan view → e.g. 3 reels/week  
+- Inside the dashboard / pipeline / Content DNA → different values (e.g. 4 reels, 2 carousels, 5 stories)
+
+This creates a system-level inconsistency where:
+- The same campaign outputs multiple conflicting execution rhythms
+- The agent cannot reliably execute or track performance against a single plan
+- The user loses trust in the system recommendations
+
+#### Required Fix:
+- Define a single source of truth for Content Rhythm (likely Content DNA or Plan Synthesis output)
+- All views (dashboard, pipeline, execution plan, agent) must read from this unified object
+- Ensure that any recalculation propagates globally (no duplicated logic per view)
+
+---
+
+### 2) Forecast / Simulation Logic (Reach, Funnel Numbers, Timeline)
+
+The plan currently outputs:
+- Reach
+- Clicks
+- Leads
+- Conversions
+- Growth scenarios (conservative / base / upside)
+
+However, the underlying calculation logic is not clear.
+
+#### Key Concerns:
+- What is the data source for these numbers?
+- Are these derived from:
+  - Market Intelligence benchmarks?
+  - User inputs (budget, AOV, etc.)?
+  - Assumed default conversion rates?
+
+Currently, the outputs risk being perceived as arbitrary if not grounded.
+
+#### Required Clarification + Fix:
+1. Define and document:
+   - Exact formula for each stage (Reach → Click → Lead → Conversion)
+   - Default assumptions (CTR, CVR, etc.)
+   - Where each variable comes from (MI vs user profile vs memory)
+
+2. Ensure:
+   - All projections are traceable and explainable
+   - Numbers are bounded and realistic (no hallucinated scaling)
+
+3. Agent Integration:
+   - The Agent must have access to the exact forecast model + assumptions
+   - So it can:
+     - Track execution vs projection
+     - Explain gaps
+     - Adjust strategy based on real performance
+
+---
+
+### 3) Engine Input / Output Contract (System Clarity Issue)
+
+Currently, the engine pipeline is visually clear (15 engines), but structurally unclear in terms of:
+
+- What each engine takes as input
+- What it produces as output
+- How outputs propagate downstream
+
+This makes:
+- Debugging difficult  
+- Agent orchestration less reliable  
+- System explainability weaker  
+
+#### Required Structure:
+
+For each engine, we need a clearly defined contract:
+
+For every engine:
+- Inputs:
+  - Market Intelligence (which fields exactly)
+  - Business Profile (product, price, audience, constraints)
+  - Memory / prior outcomes (if applicable)
+  - User-channel data (if relevant)
+
+- Outputs:
+  - Structured object (not just text)
+  - Must be reusable by downstream engines
+
+- Dependency:
+  - Which previous engine outputs it relies on
+
+---
+
+#### Example (Expected Format):
+
+Audience Engine
+- Inputs:
+  - MI audience clusters
+  - Business target segment
+- Output:
+  - Defined ICP (structured)
+
+Positioning Engine
+- Inputs:
+  - Audience output
+  - MI positioning gaps
+  - Business offer constraints
+- Output:
+  - Positioning statement
+
+… and so on for all engines.
+
+---
+
+### Summary
+
+To move forward cleanly, we need:
+
+1. Content Rhythm Unification
+   → One source of truth across all system layers
+
+2. Forecast Model Transparency
+   → Clear formulas + grounded assumptions + agent awareness
+
+3. Engine Contract Definition
+   → Explicit input/output structure for every engine
+
+---
+
+These are not feature requests — they are structural alignment requirements to ensure:
+- System consistency
+- Execution reliability
+- Agent correctness
+- User trust
+
+Let us know how you propose implementing these fixes within the current architecture.
+
+Thanks.

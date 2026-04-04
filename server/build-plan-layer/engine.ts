@@ -10,8 +10,26 @@ import {
   persuasionSnapshots,
   audienceSnapshots,
   miSnapshots,
+  businessDataLayer,
 } from "@shared/schema";
 import { eq, desc, and } from "drizzle-orm";
+
+export interface LockedContentRhythm {
+  reelsPerWeek: number;
+  carouselsPerWeek: number;
+  storiesPerDay: number;
+  postsPerWeek: number;
+}
+
+export function computeLockedRhythm(funnelObjective?: string): LockedContentRhythm {
+  const obj = (funnelObjective || "").toUpperCase().trim();
+  return {
+    reelsPerWeek: obj === "AWARENESS" || obj === "FOLLOWERS" ? 5 : 4,
+    carouselsPerWeek: obj === "SALES" || obj === "REVENUE" ? 3 : 2,
+    storiesPerDay: 2,
+    postsPerWeek: 1,
+  };
+}
 
 export interface BuildPlanOutput {
   positioning: string;
@@ -304,7 +322,7 @@ function buildEngineContext(snapshots: EngineSnapshot[]): string {
   return parts.join("\n");
 }
 
-function buildBuildPlanPrompt(engineContext: string, previousFailures?: string[]): string {
+function buildBuildPlanPrompt(engineContext: string, lockedRhythm: LockedContentRhythm, previousFailures?: string[]): string {
   let failureContext = "";
   if (previousFailures && previousFailures.length > 0) {
     failureContext = `\n\nPREVIOUS ATTEMPT FAILED ACTIONABILITY CHECK. These blocks were rejected for being vague/generic: ${previousFailures.join(", ")}.\nYou MUST make them more specific, concrete, and directly usable. No generic advice. Only clear, executable decisions.\n`;
@@ -317,6 +335,13 @@ CRITICAL RULES:
 - ONLY concrete, specific actions a person can follow without interpretation
 - Every output must answer: "What do I do RIGHT NOW?"
 - REJECT any urge to add context, caveats, alternatives, or meaningless projections
+
+LOCKED CONTENT RHYTHM — DO NOT CHANGE THESE VALUES (set by funnel objective):
+  reels: ${lockedRhythm.reelsPerWeek} per week
+  carousels: ${lockedRhythm.carouselsPerWeek} per week
+  stories: ${lockedRhythm.storiesPerDay} per day
+  posts: ${lockedRhythm.postsPerWeek} per week
+The weeklyStructure object in your JSON MUST use exactly these numbers.
 
 ENGINE DATA:
 ${engineContext}
@@ -337,7 +362,7 @@ Return EXACTLY this JSON structure:
     "bottom": "Specific conversion trigger: exact CTA and mechanism to close"
   },
   "contentDna": {
-    "weeklyStructure": { "reels": 4, "carousels": 2, "stories": 5 },
+    "weeklyStructure": { "reels": ${lockedRhythm.reelsPerWeek}, "carousels": ${lockedRhythm.carouselsPerWeek}, "stories": ${lockedRhythm.storiesPerDay} },
     "contentTypes": {
       "problems": "EXACT problem content to create (specific topics, not categories)",
       "proof": "EXACT proof content to create (what results/cases to show)",
@@ -376,7 +401,7 @@ Return EXACTLY this JSON structure:
 Return ONLY valid JSON. No markdown, no code blocks, no explanation.`;
 }
 
-function parseAIResponse(content: string): BuildPlanOutput | null {
+function parseAIResponse(content: string, lockedRhythm: LockedContentRhythm): BuildPlanOutput | null {
   try {
     let cleaned = content.trim();
     if (cleaned.startsWith("```")) {
@@ -410,9 +435,9 @@ function parseAIResponse(content: string): BuildPlanOutput | null {
       },
       contentDna: {
         weeklyStructure: {
-          reels: Number(parsed.contentDna?.weeklyStructure?.reels || 3),
-          carousels: Number(parsed.contentDna?.weeklyStructure?.carousels || 2),
-          stories: Number(parsed.contentDna?.weeklyStructure?.stories || 5),
+          reels: lockedRhythm.reelsPerWeek,
+          carousels: lockedRhythm.carouselsPerWeek,
+          stories: lockedRhythm.storiesPerDay,
         },
         contentTypes: {
           problems: String(parsed.contentDna?.contentTypes?.problems || ""),
@@ -476,12 +501,25 @@ export async function runBuildPlanLayer(
     };
   }
 
+  const [bizSnap] = await db
+    .select()
+    .from(businessDataLayer)
+    .where(and(eq(businessDataLayer.accountId, accountId), eq(businessDataLayer.campaignId, campaignId)))
+    .orderBy(desc(businessDataLayer.createdAt))
+    .limit(1);
+
+  const bizData = bizSnap ? safeParseSnapshot(bizSnap.data) : null;
+  const funnelObjective = bizData?.funnelObjective || bizData?.primaryGoal || "";
+  const lockedRhythm = computeLockedRhythm(funnelObjective);
+
+  console.log(`[BuildPlanLayer] Locked content rhythm for objective "${funnelObjective}": reels=${lockedRhythm.reelsPerWeek}/wk, carousels=${lockedRhythm.carouselsPerWeek}/wk, stories=${lockedRhythm.storiesPerDay}/day`);
+
   const engineContext = buildEngineContext(snapshots);
   let lastFailedBlocks: string[] = [];
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      const prompt = buildBuildPlanPrompt(engineContext, attempt > 1 ? lastFailedBlocks : undefined);
+      const prompt = buildBuildPlanPrompt(engineContext, lockedRhythm, attempt > 1 ? lastFailedBlocks : undefined);
 
       const response = await aiChat({
         model: "gpt-4o",
@@ -498,7 +536,7 @@ export async function runBuildPlanLayer(
         continue;
       }
 
-      const plan = parseAIResponse(content);
+      const plan = parseAIResponse(content, lockedRhythm);
       if (!plan) {
         console.warn(`[BuildPlanLayer] Attempt ${attempt}: Failed to parse response`);
         continue;

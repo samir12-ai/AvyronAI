@@ -527,7 +527,16 @@ export function buildSystemPrompt(context: SystemContext): string {
     lines.push(`  Type: ${gd.goalType} | Target: ${gd.goalTarget} | Time: ${gd.timeHorizonDays} days`);
     lines.push(`  Feasibility: ${gd.feasibility} (${gd.feasibilityScore}/100) | Confidence: ${gd.confidenceScore}/100`);
     if (gd.funnelMath) {
-      lines.push(`  Funnel: Reach ${gd.funnelMath.requiredReach?.toLocaleString()} → Leads ${gd.funnelMath.requiredLeads?.toLocaleString()} → Qualified ${gd.funnelMath.requiredQualifiedLeads?.toLocaleString()}`);
+      const fm = gd.funnelMath;
+      lines.push(`  Funnel: Reach ${fm.requiredReach?.toLocaleString()} → Clicks ${fm.requiredClicks?.toLocaleString()} → Conversations ${fm.requiredConversations?.toLocaleString()} → Leads ${fm.requiredLeads?.toLocaleString()} → Qualified ${fm.requiredQualifiedLeads?.toLocaleString()} → Clients ${fm.requiredClosedClients?.toLocaleString()}`);
+      lines.push(`  FORECAST MODEL ASSUMPTIONS (actual rates used to compute above):`);
+      lines.push(`    CTR (content-to-click): ${fm.ctr != null ? (fm.ctr * 100).toFixed(1) + "%" : "2.5% (default)"}`);
+      lines.push(`    Click-to-Conversation: ${fm.clickToConversationRate != null ? (fm.clickToConversationRate * 100).toFixed(0) + "%" : "30% (default)"}`);
+      lines.push(`    Conversation-to-Lead: ${fm.conversationToLeadRate != null ? (fm.conversationToLeadRate * 100).toFixed(0) + "%" : "50% (default)"}`);
+      lines.push(`    Lead Qualification Rate: 20% (fixed)`);
+      lines.push(`    Lead-to-Client (Close Rate): ${fm.closeRate != null ? (fm.closeRate * 100).toFixed(0) + "%" : "10% (default)"}`);
+      lines.push(`    Content-to-Lead Rate: ${fm.contentToLeadRate != null ? (fm.contentToLeadRate * 100).toFixed(1) + "%" : "2% (fixed)"}`);
+      lines.push(`  These assumptions come from the user's business profile (closeRate, ctr, conversionRate fields). If not set, defaults apply. Ask the user to update their Business Profile to improve forecast accuracy.`);
     }
   }
 
@@ -573,7 +582,28 @@ export function buildSystemPrompt(context: SystemContext): string {
   }
 
   lines.push("");
-  lines.push("Use this context to answer the user's questions accurately. Guide them toward their next action. When users ask about content creation, hooks, CTAs, or narrative style, reference the Content DNA rules. When users ask about plan integrity or staleness, reference the Root Bundle status.");
+  lines.push("CONTENT RHYTHM MODEL (canonical source — all UI views must agree):");
+  lines.push("  Content volume is computed deterministically from funnel objective, NOT by AI:");
+  lines.push("    AWARENESS/FOLLOWERS objective → 5 Reels/wk, 2 Carousels/wk");
+  lines.push("    SALES/REVENUE objective → 4 Reels/wk, 3 Carousels/wk");
+  lines.push("    All other objectives → 4 Reels/wk, 2 Carousels/wk");
+  lines.push("    Posts: always 1/wk | Stories: always 2/day");
+  lines.push("  The build-plan-layer enforces these exact numbers. The execution plan, strategy hub, and plan document all read from the same locked values.");
+
+  lines.push("");
+  lines.push("ENGINE PIPELINE CONTRACTS (8-engine sequential pipeline):");
+  lines.push("  1. Audience Engine → outputs: painMap, desireMap, objectionMap, awarenessLevel, maturityIndex, audienceSegments");
+  lines.push("  2. Positioning Engine → outputs: territories, contrastAxis, enemyDefinition, narrativeDirection");
+  lines.push("  3. Differentiation Engine → outputs: differentiationPillars, claimCollisionCheck, proofArchitecture, mechanismCandidate");
+  lines.push("  4. Mechanism Engine → outputs: primaryMechanism (name+steps), mechanismLogic (Cause→Intervention→Outcome), axisAlignment");
+  lines.push("  5. Offer Engine → outputs: transformationStatement, coreOutcome, deliveryStructure, riskReductionLayer");
+  lines.push("  6. Awareness Engine → outputs: marketEntryRoute, attentionTrigger, awarenessStageMapping");
+  lines.push("  7. Persuasion Engine → outputs: objectionMap (by type+stage), objectionProofLinks, persuasionMode, trustSequence");
+  lines.push("  8. Funnel Engine → outputs: funnelType, stageMap, trustPath, entryTriggerMechanism");
+  lines.push("  Each engine's output is a LOCK for the next. Positioning axis forces differentiation pillars. Mechanism name becomes the offer's 'how'. Awareness entry route forces funnel's first stage.");
+
+  lines.push("");
+  lines.push("Use this context to answer the user's questions accurately. Guide them toward their next action. When users ask about content creation, hooks, CTAs, or narrative style, reference the Content DNA rules. When users ask about plan integrity or staleness, reference the Root Bundle status. When users ask why forecast numbers are what they are, explain the FORECAST MODEL ASSUMPTIONS above and offer to help them update their Business Profile to improve accuracy.");
 
   return lines.join("\n");
 }

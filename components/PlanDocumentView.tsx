@@ -240,11 +240,14 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
     ];
 
     const rateItems = [
-      { label: 'CTR', value: funnel.ctr ? `${(funnel.ctr * 100).toFixed(1)}%` : null },
-      { label: 'Click→Conv', value: funnel.clickToConversationRate ? `${(funnel.clickToConversationRate * 100).toFixed(0)}%` : null },
-      { label: 'Conv→Lead', value: funnel.conversationToLeadRate ? `${(funnel.conversationToLeadRate * 100).toFixed(0)}%` : null },
-      { label: 'Close Rate', value: funnel.closeRate ? `${(funnel.closeRate * 100).toFixed(1)}%` : null },
-    ].filter(r => r.value != null);
+      { label: 'CTR', value: funnel.ctr != null ? `${(funnel.ctr * 100).toFixed(1)}%` : '2.5%', isDefault: funnel.ctr == null },
+      { label: 'Click→Conv', value: funnel.clickToConversationRate != null ? `${(funnel.clickToConversationRate * 100).toFixed(0)}%` : '30%', isDefault: funnel.clickToConversationRate == null },
+      { label: 'Conv→Lead', value: funnel.conversationToLeadRate != null ? `${(funnel.conversationToLeadRate * 100).toFixed(0)}%` : '50%', isDefault: funnel.conversationToLeadRate == null },
+      { label: 'Qualify', value: '20%', isDefault: true },
+      { label: 'Close Rate', value: funnel.closeRate != null ? `${(funnel.closeRate * 100).toFixed(1)}%` : '10%', isDefault: funnel.closeRate == null },
+    ];
+
+    const hasDefaults = rateItems.some(r => r.isDefault);
 
     return (
       <View style={[st.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
@@ -263,15 +266,21 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
             </View>
           ))}
         </View>
-        {rateItems.length > 0 && (
-          <View style={[st.rateRow, { borderTopColor: cardBorder }]}>
-            {rateItems.map((r, i) => (
-              <View key={i} style={st.rateItem}>
-                <Text style={[st.rateValue, { color: C.mint }]}>{r.value}</Text>
-                <Text style={[st.rateLabel, { color: textSecondary }]}>{r.label}</Text>
-              </View>
-            ))}
-          </View>
+        <View style={[st.rateRow, { borderTopColor: cardBorder }]}>
+          {rateItems.map((r, i) => (
+            <View key={i} style={st.rateItem}>
+              <Text style={[st.rateValue, { color: r.isDefault ? textSecondary : C.mint }]}>{r.value}</Text>
+              <Text style={[st.rateLabel, { color: textSecondary }]}>{r.label}</Text>
+              {r.isDefault && (
+                <Text style={{ fontSize: 8, color: textSecondary, textAlign: 'center' }}>default</Text>
+              )}
+            </View>
+          ))}
+        </View>
+        {hasDefaults && (
+          <Text style={{ fontSize: 11, color: textSecondary, marginTop: 8, fontStyle: 'italic' }}>
+            Rates marked "default" use industry averages. Update your Business Profile to refine these numbers.
+          </Text>
         )}
       </View>
     );
