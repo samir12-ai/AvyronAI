@@ -1,6 +1,17 @@
+/**
+ * Dual-Analysis Routes (Task #10)
+ *
+ * ARCHITECTURE INVARIANT:
+ * This route READS data (MI snapshots + user channel snapshots) and produces
+ * an AI-powered classification + recommendation.
+ * It does NOT trigger any engine, orchestrator, or worker directly.
+ * Engine execution only occurs when the user explicitly presses "Run Now" in the UI
+ * and the frontend calls POST /api/orchestrator/run.
+ */
+
 import type { Express, Request, Response } from "express";
 import { db } from "../db";
-import { miSnapshots, userChannelSnapshots, userPublicProfiles } from "@shared/schema";
+import { miSnapshots, userChannelSnapshots } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { resolveAccountId } from "../auth";
 import { aiChat } from "../ai-client";
@@ -21,6 +32,84 @@ export interface DualAnalysisResult {
   userSignals: string | null;
   generatedAt: string;
 }
+
+// ── Classification rules (deterministic guard) ────────────────────────────────
+
+function applyClassificationGuard(
+  parsed: { classification: string; recommendedEngines: string[]; summary: string; confidence: number },
+  hasCompetitorData: boolean,
+  hasUserData: boolean,
+  userSnapsHaveDeltas: boolean,
+  competitorHasSignals: boolean,
+): DualAnalysisClassification {
+  const raw = parsed.classification as DualAnalysisClassification;
+
+  // Validate the AI's classification against what data is actually present
+  const validClassifications: DualAnalysisClassification[] = [
+    "market_shift_only", "execution_gap_only", "both_changed", "no_change", "no_data",
+  ];
+  if (!validClassifications.includes(raw)) {
+    // Fallback: derive deterministically from data presence
+    if (hasCompetitorData && hasUserData) return "both_changed";
+    if (hasCompetitorData) return "market_shift_only";
+    if (hasUserData) return "execution_gap_only";
+    return "no_data";
+  }
+
+  // Guard: cannot return "no_data" when we have data
+  if (raw === "no_data" && (hasCompetitorData || hasUserData)) {
+    if (hasCompetitorData && hasUserData) return "both_changed";
+    return hasCompetitorData ? "market_shift_only" : "execution_gap_only";
+  }
+
+  // Guard: cannot return "market_shift_only" when there's no competitor data
+  if (raw === "market_shift_only" && !hasCompetitorData) return "execution_gap_only";
+
+  // Guard: cannot return "execution_gap_only" when there's no user data
+  if (raw === "execution_gap_only" && !hasUserData) return "market_shift_only";
+
+  return raw;
+}
+
+// ── Build data context strings ────────────────────────────────────────────────
+
+function buildCompetitorContext(mi: any): string {
+  const parts: string[] = ["COMPETITOR MARKET INTELLIGENCE:"];
+  if (mi.narrativeSynthesis) parts.push(`• Narrative: ${mi.narrativeSynthesis}`);
+  if (mi.marketDiagnosis) parts.push(`• Market Diagnosis: ${mi.marketDiagnosis}`);
+  if (mi.threatSignals) parts.push(`• Threat Signals: ${mi.threatSignals}`);
+  if (mi.opportunitySignals) parts.push(`• Opportunity Signals: ${mi.opportunitySignals}`);
+  return parts.join("\n");
+}
+
+function buildUserContext(snaps: any[]): string {
+  return snaps.map(snap => {
+    const delta = snap.deltaFromPrevious ? JSON.parse(snap.deltaFromPrevious) : null;
+    const data = snap.snapshotData ? JSON.parse(snap.snapshotData) : null;
+    if (!data) return `Platform: ${snap.platform} — data unavailable`;
+
+    const lines = [`USER CHANNEL — ${snap.platform.toUpperCase()} (${data.scrapeMode} scrape):`];
+    if (data.handle) lines.push(`• Handle: @${data.handle}`);
+    if (data.url) lines.push(`• URL: ${data.url}`);
+    lines.push(`• Posts in window: ${data.postCount}`);
+    if (data.followers != null) lines.push(`• Followers: ${data.followers.toLocaleString()}`);
+    if (data.avgEngagement != null) lines.push(`• Avg engagement per post: ${data.avgEngagement}`);
+    lines.push(`• Content types: ${JSON.stringify(data.recentPostTypes)}`);
+    lines.push(`• Scrape status: ${data.scrapeStatus}`);
+
+    if (delta) {
+      lines.push(`• Is first scrape: ${delta.isFirstScrape}`);
+      lines.push(`• New posts since last snapshot: ${delta.newPostsSinceLastSnapshot}`);
+      if (delta.avgEngagementDelta != null) lines.push(`• Engagement delta: ${delta.avgEngagementDelta > 0 ? "+" : ""}${delta.avgEngagementDelta}`);
+      if (delta.followersDelta != null) lines.push(`• Followers delta: ${delta.followersDelta > 0 ? "+" : ""}${delta.followersDelta}`);
+      if (delta.websiteChangeSummary) lines.push(`• Website changes: ${delta.websiteChangeSummary}`);
+      lines.push(`• Delta window: ${delta.deltaWindowDays} days`);
+    }
+    return lines.join("\n");
+  }).join("\n\n");
+}
+
+// ── Main analysis function ────────────────────────────────────────────────────
 
 async function runDualAnalysis(
   accountId: string,
@@ -48,7 +137,7 @@ async function runDualAnalysis(
       )
     )
     .orderBy(desc(userChannelSnapshots.scrapedAt))
-    .limit(3);
+    .limit(4);
 
   const hasCompetitorData = latestMi.length > 0;
   const hasUserData = latestUserSnaps.length > 0;
@@ -65,82 +154,91 @@ async function runDualAnalysis(
     };
   }
 
-  const mi = latestMi[0];
-
+  const mi = latestMi[0] ?? null;
   const competitorContext = hasCompetitorData
-    ? `
-COMPETITOR MARKET INTELLIGENCE (latest snapshot):
-- Narrative Synthesis: ${mi.narrativeSynthesis || "N/A"}
-- Market Diagnosis: ${mi.marketDiagnosis || "N/A"}
-- Threat Signals: ${mi.threatSignals || "N/A"}
-- Opportunity Signals: ${mi.opportunitySignals || "N/A"}
-`
+    ? buildCompetitorContext(mi)
     : "COMPETITOR DATA: Not yet available.";
 
   const userContext = hasUserData
-    ? latestUserSnaps.map(snap => {
-        const delta = snap.deltaFromPrevious ? JSON.parse(snap.deltaFromPrevious) : null;
-        const data = snap.snapshotData ? JSON.parse(snap.snapshotData) : null;
-        return `
-Platform: ${snap.platform} | Handle: ${snap.handle || snap.platform}
-- Posts/Pages Tracked: ${data?.postCount || 0}
-- Followers: ${data?.followers ?? "N/A"}
-- Avg Engagement: ${data?.avgEngagement?.toFixed(1) ?? "N/A"}
-- Scrape Status: ${data?.scrapeStatus || "UNKNOWN"}
-- New Posts Since Last Week: ${delta?.newPostsSinceLastSnapshot ?? "N/A"}
-- Engagement Delta: ${delta?.avgEngagementDelta?.toFixed(1) ?? "N/A"}
-- Followers Delta: ${delta?.followersDelta ?? "N/A"}
-- Website Change: ${delta?.websiteChangeSummary ?? "N/A"}
-- Content Mix: ${delta?.contentTypeMix ? JSON.stringify(delta.contentTypeMix) : "N/A"}`;
-      }).join("\n\n")
-    : "USER CHANNEL DATA: No channels configured.";
+    ? buildUserContext(latestUserSnaps)
+    : "USER CHANNEL DATA: No channels scraped yet.";
 
-  const prompt = `You are a dual-signal marketing strategy analyst. Analyze competitor market intelligence alongside the user's own channel performance to classify the current state and recommend strategic actions.
+  // Check if user snapshots have meaningful delta data
+  const userSnapsHaveDeltas = latestUserSnaps.some(s => {
+    const delta = s.deltaFromPrevious ? JSON.parse(s.deltaFromPrevious) : null;
+    return delta && !delta.isFirstScrape;
+  });
 
+  const competitorHasSignals = !!(mi?.threatSignals || mi?.opportunitySignals);
+
+  const prompt = `You are a dual-signal marketing strategy analyst. Your job is to compare competitor market intelligence with the user's own channel performance and produce a precise, data-grounded classification.
+
+AVAILABLE DATA:
 ${competitorContext}
 
-USER'S OWN CHANNELS (latest week):
 ${userContext}
 
-Instructions:
-1. Classify the situation as ONE of: market_shift_only, execution_gap_only, both_changed, no_change
-   - market_shift_only: competitors/market changed, but user's performance is stable
-   - execution_gap_only: market is stable, but user's own metrics show gaps (low engagement, stale content, etc.)
-   - both_changed: both competitor landscape AND user metrics show significant changes
-   - no_change: nothing meaningful has changed — maintain current strategy
+CLASSIFICATION RULES (apply deterministically):
+- both_changed: Competitor signals AND user metrics both show meaningful movement
+- market_shift_only: Competitor signals show movement, user metrics are stable
+- execution_gap_only: User metrics show gaps/drops, competitor landscape is stable
+- no_change: Neither side shows meaningful change (use this only if data is present but flat)
 
-2. Recommend 1-3 engines from this list: channel_selection, iteration, retention, content_dna, objection_map
-3. Write a 2-3 sentence plain-English summary for a non-technical marketer explaining what to do and why.
-4. Rate your confidence 0-100 based on data quality.
+ENGINE SELECTION RULES:
+- channel_selection: Use when user's content mix is imbalanced OR competitor platform strategy shifted
+- iteration: Use when engagement delta is negative OR post frequency dropped significantly
+- retention: Use when follower count is declining OR competitor is capturing retention-focused content
+- content_dna: Use when content type mix has changed dramatically OR competitor shifted creative format
+- objection_map: Use when competitor threat signals include pricing/value attacks
 
-Respond ONLY as valid JSON:
+MANDATORY REQUIREMENTS for the summary field:
+1. MUST reference at least one specific metric from the user's channel (e.g., "your engagement dropped from X to Y", "you posted N new pieces this week")
+2. MUST reference at least one specific signal from the competitor data (e.g., "competitor threat signals show X")
+3. MUST explain WHY each recommended engine is needed (not just name it)
+4. 2-3 sentences only — no generic statements like "the market is shifting" without citing the specific data that shows this
+
+Respond ONLY as valid JSON with no markdown:
 {
-  "classification": "...",
-  "recommendedEngines": ["..."],
-  "summary": "...",
-  "confidence": 80
+  "classification": "<one of: both_changed | market_shift_only | execution_gap_only | no_change>",
+  "recommendedEngines": ["<engine1>", "<engine2>"],
+  "summary": "<2-3 sentences, citing actual data points from above>",
+  "confidence": <integer 0-100 based on data completeness>
 }`;
 
   try {
     const response = await aiChat([{ role: "user", content: prompt }], {
-      temperature: 0.2,
-      max_tokens: 512,
+      temperature: 0.1,
+      max_tokens: 600,
     });
 
     const raw = response.content.trim().replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(raw);
 
+    const classification = applyClassificationGuard(
+      parsed, hasCompetitorData, hasUserData, userSnapsHaveDeltas, competitorHasSignals
+    );
+
+    const recommendedEngines = Array.isArray(parsed.recommendedEngines)
+      ? parsed.recommendedEngines.filter((e: string) =>
+          ["channel_selection", "iteration", "retention", "content_dna", "objection_map"].includes(e)
+        )
+      : [];
+
+    console.log(`[DualAnalysis] account=${accountId} campaign=${campaignId} classification=${classification} engines=${recommendedEngines.join(",")} confidence=${parsed.confidence}`);
+
     return {
-      classification: parsed.classification || "no_change",
-      recommendedEngines: Array.isArray(parsed.recommendedEngines) ? parsed.recommendedEngines : [],
+      classification,
+      recommendedEngines,
       summary: parsed.summary || "Analysis complete.",
-      confidence: typeof parsed.confidence === "number" ? parsed.confidence : 50,
+      confidence: typeof parsed.confidence === "number" ? Math.min(100, Math.max(0, parsed.confidence)) : 50,
       competitorSignals: hasCompetitorData ? (mi.threatSignals || mi.narrativeSynthesis || null) : null,
-      userSignals: hasUserData ? userContext.slice(0, 500) : null,
+      userSignals: hasUserData ? latestUserSnaps.map(s => `${s.platform}:${s.handle || s.platform}`).join(", ") : null,
       generatedAt: new Date().toISOString(),
     };
   } catch (err: any) {
     console.error("[DualAnalysis] AI call failed:", err.message);
+
+    // Deterministic fallback — never returns ambiguous classification
     const classification: DualAnalysisClassification =
       hasCompetitorData && hasUserData ? "both_changed" :
       hasCompetitorData ? "market_shift_only" :
@@ -150,13 +248,15 @@ Respond ONLY as valid JSON:
       classification,
       recommendedEngines: ["channel_selection"],
       summary: "Dual analysis encountered an issue. Review your channel data and competitor intelligence manually.",
-      confidence: 20,
-      competitorSignals: hasCompetitorData ? (mi.threatSignals || null) : null,
+      confidence: 10,
+      competitorSignals: hasCompetitorData ? (mi?.threatSignals || null) : null,
       userSignals: hasUserData ? `${latestUserSnaps.length} channel(s) tracked` : null,
       generatedAt: new Date().toISOString(),
     };
   }
 }
+
+// ── Route registration ────────────────────────────────────────────────────────
 
 export function registerDualAnalysisRoutes(app: Express) {
   app.get("/api/agent/dual-analysis/:campaignId", async (req: Request, res: Response) => {
