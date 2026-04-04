@@ -40,9 +40,9 @@ export interface DualAnalysisResult {
  * This is the authoritative mapping — AI output for engines is ignored.
  */
 const CLASSIFICATION_ENGINE_MAP: Record<DualAnalysisClassification, string[]> = {
-  market_shift_only:  ["channel_selection", "content_dna"],
+  market_shift_only:  ["channel_selection"],
   execution_gap_only: ["iteration", "retention"],
-  both_changed:       ["channel_selection", "iteration", "content_dna"],
+  both_changed:       ["channel_selection", "iteration", "retention"],
   no_change:          [],
   no_data:            [],
 };

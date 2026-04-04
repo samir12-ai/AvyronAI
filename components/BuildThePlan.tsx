@@ -1390,7 +1390,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
           </Pressable>
         )}
 
-        {dualAnalysis && !dualAnalysisDismissed && dualAnalysis.classification !== 'no_data' && (
+        {dualAnalysis && !dualAnalysisDismissed && dualAnalysis.classification !== 'no_data' && dualAnalysis.classification !== 'no_change' && (
           <View style={[s.dualAnalysisCard, {
             backgroundColor: dualAnalysis.classification === 'no_change'
               ? (isDark ? '#1F2937' : '#F9FAFB')

@@ -1490,20 +1490,31 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
   const ENGINE_TIMEOUT_MS = 120_000; // 2-minute hard ceiling per engine
 
-  // Engines that can be skipped when scopedEngines is set (dependency engines always run for context)
-  const SCOPED_SKIPPABLE_ENGINES = new Set(["channel_selection", "iteration", "retention"]);
+  // When scopedEngines is provided, jump directly to the earliest requested engine.
+  // Dependency engines are skipped intentionally — fortress engines read DB-stored context from
+  // the most recent full run, so a scoped rerun only re-executes the specific engines requested.
+  const scopedStartIndex = config.scopedEngines?.length
+    ? Math.min(
+        ...config.scopedEngines
+          .map(id => ENGINE_PRIORITY_ORDER.findIndex(e => e.id === id))
+          .filter(i => i >= 0),
+      )
+    : -1;
 
-  for (let i = startIndex >= 0 ? startIndex : 0; i < ENGINE_PRIORITY_ORDER.length; i++) {
+  const effectiveStartIndex = scopedStartIndex >= 0
+    ? scopedStartIndex
+    : startIndex >= 0 ? startIndex : 0;
+
+  const scopedEngineSet = config.scopedEngines?.length
+    ? new Set(config.scopedEngines)
+    : null;
+
+  for (let i = effectiveStartIndex; i < ENGINE_PRIORITY_ORDER.length; i++) {
     const engineDef = ENGINE_PRIORITY_ORDER[i];
 
-    // When scopedEngines is provided, skip scoppable engines that aren't in the requested scope
-    if (
-      config.scopedEngines &&
-      config.scopedEngines.length > 0 &&
-      SCOPED_SKIPPABLE_ENGINES.has(engineDef.id) &&
-      !config.scopedEngines.includes(engineDef.id)
-    ) {
-      console.log(`[Orchestrator] SCOPED_SKIP | Skipping ${engineDef.name} (not in scopedEngines: ${config.scopedEngines.join(",")})`);
+    // When scopedEngines is provided, skip any engine NOT in the requested scope
+    if (scopedEngineSet && !scopedEngineSet.has(engineDef.id)) {
+      console.log(`[Orchestrator] SCOPED_SKIP | Skipping ${engineDef.name} (not in scopedEngines)`);
       results.set(engineDef.id as EngineId, { engineId: engineDef.id as EngineId, status: "SKIPPED", output: null, durationMs: 0 });
       continue;
     }

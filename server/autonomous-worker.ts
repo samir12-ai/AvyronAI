@@ -639,7 +639,7 @@ async function processAccount(accountId: string) {
           console.log(`[Worker] Awaiting user channel scrape for account=${accountId} campaign=${activeCampaignId}`);
           await scrapeUserChannels(accountId, activeCampaignId);
         }
-        // Build delta context from last 2 snapshots per channel
+        // Build delta context from the latest snapshot per channel (uses deltaFromPrevious JSON)
         const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
         const recentSnaps = await db.select()
           .from(userChannelSnapshots)
@@ -650,20 +650,28 @@ async function processAccount(accountId: string) {
           .orderBy(desc(userChannelSnapshots.scrapedAt))
           .limit(20);
         if (recentSnaps.length > 0) {
-          const channelMap = new Map<string, typeof recentSnaps>();
-          for (const snap of recentSnaps) {
-            const key = snap.platform + ":" + snap.profileId;
-            if (!channelMap.has(key)) channelMap.set(key, []);
-            channelMap.get(key)!.push(snap);
-          }
           const lines: string[] = [];
-          for (const [key, snaps] of channelMap) {
-            if (snaps.length < 2) continue;
-            const [latest, prev] = snaps;
-            const followerDelta = (latest.followerCount ?? 0) - (prev.followerCount ?? 0);
-            const engDelta = ((latest.avgEngagementRate ?? 0) - (prev.avgEngagementRate ?? 0)).toFixed(2);
-            const newPosts = (latest.recentPostCount ?? 0) - (prev.recentPostCount ?? 0);
-            lines.push(`${key}: followers ${followerDelta >= 0 ? "+" : ""}${followerDelta}, engagement ${engDelta}%, new posts ${newPosts >= 0 ? "+" : ""}${newPosts}`);
+          // Deduplicate: take the most recent snapshot per platform+handle combination
+          const seen = new Set<string>();
+          for (const snap of recentSnaps) {
+            const key = `${snap.platform}:${snap.handle ?? "unknown"}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            if (!snap.deltaFromPrevious) continue;
+            try {
+              const delta = JSON.parse(snap.deltaFromPrevious) as {
+                isFirstScrape?: boolean;
+                newPostsSinceLastSnapshot?: number;
+                avgEngagementDelta?: number | null;
+                followersDelta?: number | null;
+                websiteChangeSummary?: string | null;
+              };
+              if (delta.isFirstScrape) continue; // skip first-scrape — no meaningful delta
+              const eng = delta.avgEngagementDelta != null ? `${delta.avgEngagementDelta >= 0 ? "+" : ""}${delta.avgEngagementDelta}%` : "N/A";
+              const followers = delta.followersDelta != null ? `${delta.followersDelta >= 0 ? "+" : ""}${delta.followersDelta}` : "N/A";
+              const posts = delta.newPostsSinceLastSnapshot ?? 0;
+              lines.push(`${key}: followers ${followers}, engagement ${eng}, new posts +${posts}`);
+            } catch { /* malformed JSON — skip */ }
           }
           if (lines.length > 0) userChannelDeltaContext = lines.join("\n");
         }
