@@ -31,7 +31,7 @@ export async function migrateMemoryConfidenceDirection() {
         WHEN is_winner = false AND score < 0 THEN 'avoid'
         ELSE 'neutral'
       END
-    WHERE confidence_score IS NULL OR confidence_score = 0.5
+    WHERE direction IS NULL
   `);
 
   console.log("[Migration-004] strategy_memory confidence_score and direction columns ready.");

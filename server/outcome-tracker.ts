@@ -96,8 +96,10 @@ export async function evaluatePendingOutcomes(accountId: string) {
     try {
       const score = outcome === "success" ? 1.0 : outcome === "failure" ? -1.0 : 0.0;
       const isWinner = outcome === "success";
+      const direction = isWinner ? "reinforce" : (outcome === "failure" ? "avoid" : "neutral");
+      const confidenceScore = isWinner ? 0.85 : (outcome === "failure" ? 0.15 : 0.5);
       await db.update(strategyMemory)
-        .set({ score, isWinner, updatedAt: new Date() })
+        .set({ score, isWinner, confidenceScore, direction, lastValidatedAt: new Date(), updatedAt: new Date() })
         .where(eq(strategyMemory.id, p.decisionId));
     } catch {
       // strategy_memory row may not exist for this decisionId — not an error
