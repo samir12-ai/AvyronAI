@@ -89,6 +89,7 @@ export async function computeExplorationBudget(
   memoryBlock: MemoryBlock,
   campaignId: string,
   accountId: string,
+  campaignExplorationBudgetPercent?: number | null,
 ): Promise<ExplorationBudget> {
   const highConfidenceEntries = memoryBlock.reinforceSlots.filter(
     (s) => s.confidenceScore > 0.7,
@@ -98,15 +99,16 @@ export async function computeExplorationBudget(
     (s) => s.confidenceScore < 0.6,
   ).length;
 
-  const rawPct =
-    BASE_EXPLORATION_PCT +
-    challengedEntries * 2 -
-    highConfidenceEntries * 1;
-
-  const explorationPercent = Math.min(
-    MAX_EXPLORATION_PCT,
-    Math.max(MIN_EXPLORATION_PCT, rawPct),
-  );
+  let explorationPercent: number;
+  if (campaignExplorationBudgetPercent != null) {
+    explorationPercent = Math.min(MAX_EXPLORATION_PCT, Math.max(MIN_EXPLORATION_PCT, campaignExplorationBudgetPercent));
+  } else {
+    const rawPct =
+      BASE_EXPLORATION_PCT +
+      challengedEntries * 2 -
+      highConfidenceEntries * 1;
+    explorationPercent = Math.min(MAX_EXPLORATION_PCT, Math.max(MIN_EXPLORATION_PCT, rawPct));
+  }
 
   const formatDist = formatFromDistribution(plan);
   const weeklyTotal = totalWeeklyVolume(formatDist);

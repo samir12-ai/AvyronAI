@@ -793,6 +793,7 @@ export async function synthesizePlan(
         memoryBlock,
         config.campaignId,
         config.accountId,
+        campaign?.explorationBudgetPercent ?? null,
       );
       explorationSlotList = expBudget.explorationSlots;
       synthesized.explorationPlan = {
@@ -803,16 +804,26 @@ export async function synthesizePlan(
       };
 
       const totalExplorationCount = expBudget.totalExplorationCount;
-      const reductionFactor = 1 - (expBudget.explorationPercent / 100);
-      synthesized.contentDistribution = {
-        ...synthesized.contentDistribution,
-        reelsPerWeek: Math.max(0, Math.round(synthesized.contentDistribution.reelsPerWeek * reductionFactor)),
-        postsPerWeek: Math.max(0, Math.round(synthesized.contentDistribution.postsPerWeek * reductionFactor)),
-        storiesPerDay: Math.max(0, Math.round(synthesized.contentDistribution.storiesPerDay * reductionFactor)),
-        carouselsPerWeek: Math.max(0, Math.round(synthesized.contentDistribution.carouselsPerWeek * reductionFactor)),
-        videosPerWeek: Math.max(0, Math.round(synthesized.contentDistribution.videosPerWeek * reductionFactor)),
-      };
-      console.log(`[PlanSynthesis] EXPLORATION_BUDGET_APPLIED | pct=${expBudget.explorationPercent}% totalExp=${totalExplorationCount} slots=${expBudget.explorationSlots.length}`);
+      const dist = { ...synthesized.contentDistribution };
+      let slotsStillToDeduct = totalExplorationCount;
+      const formatOrder: Array<keyof typeof dist> = [
+        "reelsPerWeek",
+        "postsPerWeek",
+        "carouselsPerWeek",
+        "storiesPerDay",
+        "videosPerWeek",
+      ];
+
+      for (const key of formatOrder) {
+        if (slotsStillToDeduct <= 0) break;
+        const current = (dist[key] as number) ?? 0;
+        const deduct = Math.min(current, slotsStillToDeduct);
+        (dist[key] as number) = Math.max(0, current - deduct);
+        slotsStillToDeduct -= deduct;
+      }
+
+      synthesized.contentDistribution = dist;
+      console.log(`[PlanSynthesis] EXPLORATION_BUDGET_APPLIED | pct=${expBudget.explorationPercent}% totalExp=${totalExplorationCount} slots=${expBudget.explorationSlots.length} deducted=${totalExplorationCount - slotsStillToDeduct}`);
     } catch (expErr: any) {
       console.warn(`[PlanSynthesis] Exploration budget computation failed (non-blocking):`, expErr.message);
     }

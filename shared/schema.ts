@@ -257,6 +257,7 @@ export const growthCampaigns = pgTable("growth_campaigns", {
   results: text("results"),
   isActive: boolean("is_active").default(true),
   goalMode: text("goal_mode").default("STRATEGY_MODE"),
+  explorationBudgetPercent: doublePrecision("exploration_budget_percent"),
   startedAt: timestamp("started_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { db } from "../db";
 
 export async function migrateCalendarExplorationFields() {
-  console.log("[Migration-005] Adding exploration fields to calendar_entries...");
+  console.log("[Migration-005] Adding exploration fields to calendar_entries and growth_campaigns...");
 
   await db.execute(sql`
     ALTER TABLE calendar_entries
@@ -11,5 +11,10 @@ export async function migrateCalendarExplorationFields() {
     ADD COLUMN IF NOT EXISTS exploration_hypothesis TEXT
   `);
 
-  console.log("[Migration-005] calendar_entries exploration fields ready.");
+  await db.execute(sql`
+    ALTER TABLE growth_campaigns
+    ADD COLUMN IF NOT EXISTS exploration_budget_percent DOUBLE PRECISION
+  `);
+
+  console.log("[Migration-005] Exploration fields ready.");
 }

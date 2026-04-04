@@ -249,8 +249,6 @@ function countConsecutiveConfirmed(
   return count;
 }
 
-const EXPLORATION_BASELINE_MULTIPLIER = 1.1;
-
 async function processExplorationResults(
   accountId: string,
   campaignId: string,
@@ -258,7 +256,11 @@ async function processExplorationResults(
 ): Promise<void> {
   try {
     const explorationEntries = await db
-      .select()
+      .select({
+        contentType: calendarEntries.contentType,
+        explorationHypothesis: calendarEntries.explorationHypothesis,
+        createdAt: calendarEntries.createdAt,
+      })
       .from(calendarEntries)
       .where(
         and(
@@ -267,19 +269,21 @@ async function processExplorationResults(
           eq(calendarEntries.isExploration, true),
         ),
       )
-      .limit(50);
+      .limit(100);
 
     if (explorationEntries.length === 0) return;
 
-    const formatGroups = new Map<string, typeof explorationEntries>();
+    const formatGroups = new Map<string, { explorationStart: Date; hypothesis: string | null }>();
     for (const entry of explorationEntries) {
       const fmt = entry.contentType.toLowerCase();
-      if (!formatGroups.has(fmt)) formatGroups.set(fmt, []);
-      formatGroups.get(fmt)!.push(entry);
+      const ts = entry.createdAt ?? new Date(0);
+      const existing = formatGroups.get(fmt);
+      if (!existing || ts < existing.explorationStart) {
+        formatGroups.set(fmt, { explorationStart: ts, hypothesis: entry.explorationHypothesis });
+      }
     }
 
-    for (const [fmt, entries] of formatGroups) {
-      const firstEntry = entries[0];
+    for (const [fmt, { explorationStart, hypothesis }] of formatGroups) {
       const snaps = await db
         .select({
           smoothedPerformanceScore: contentPerformanceSnapshots.smoothedPerformanceScore,
@@ -291,6 +295,7 @@ async function processExplorationResults(
             eq(contentPerformanceSnapshots.accountId, accountId),
             eq(contentPerformanceSnapshots.campaignId, campaignId),
             eq(contentPerformanceSnapshots.contentType, fmt),
+            gt(contentPerformanceSnapshots.createdAt, explorationStart),
           ),
         )
         .orderBy(desc(contentPerformanceSnapshots.createdAt))
@@ -298,12 +303,11 @@ async function processExplorationResults(
 
       if (snaps.length === 0) continue;
 
-      const aboveBaseline = industryBaseline * EXPLORATION_BASELINE_MULTIPLIER;
-      const strongPeriods = snaps.filter((s) => (s.smoothedPerformanceScore ?? 0) >= aboveBaseline);
+      const strongPeriods = snaps.filter((s) => (s.smoothedPerformanceScore ?? 0) >= industryBaseline);
 
       if (strongPeriods.length >= 1) {
         const existingProvisional = await db
-          .select()
+          .select({ id: strategyMemory.id, label: strategyMemory.label })
           .from(strategyMemory)
           .where(
             and(
@@ -319,7 +323,7 @@ async function processExplorationResults(
         );
 
         if (!alreadyExists) {
-          const hypothesis = firstEntry.explorationHypothesis || `${fmt} showed above-baseline performance during exploration.`;
+          const details = hypothesis || `${fmt} showed above-baseline performance during exploration (${strongPeriods.length} qualifying period(s)).`;
           const provId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
           await db.insert(strategyMemory).values({
             id: provId,
@@ -328,14 +332,14 @@ async function processExplorationResults(
             memoryType: "content_distribution",
             engineName: "exploration-result",
             label: `${fmt} exploration result — provisional reinforce`,
-            details: hypothesis,
+            details,
             score: 0.5,
             isWinner: true,
             confidenceScore: 0.5,
             direction: "reinforce",
             lastValidatedAt: new Date(),
           });
-          console.log(`[MemoryMutation] EXPLORATION_RESULT | format=${fmt} strongPeriods=${strongPeriods.length} → provisional reinforce created`);
+          console.log(`[MemoryMutation] EXPLORATION_RESULT | format=${fmt} baseline=${industryBaseline.toFixed(3)} strongPeriods=${strongPeriods.length} explorationStart=${explorationStart.toISOString()} → provisional reinforce created`);
         }
       }
     }
