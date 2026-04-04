@@ -95,6 +95,11 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
 
+  const [channels, setChannels] = useState({ instagram: '', website: '' });
+  const [channelsSaving, setChannelsSaving] = useState(false);
+  const [channelsSaved, setChannelsSaved] = useState(false);
+  const [channelsError, setChannelsError] = useState('');
+
   const campaignId = selectedCampaign?.selectedCampaignId;
 
   const CORE_FIELDS: (keyof BusinessData)[] = [
@@ -156,6 +161,54 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
   useEffect(() => {
     onDataChange?.(isComplete() && saved);
   }, [data, saved]);
+
+  useEffect(() => {
+    if (!campaignId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authFetch(getApiUrl(`/api/campaigns/${campaignId}/user-channels`));
+        const json = await safeApiJson(res);
+        if (!cancelled && json.profiles && Array.isArray(json.profiles)) {
+          const ig = json.profiles.find((p: any) => p.platform === 'instagram');
+          const web = json.profiles.find((p: any) => p.platform === 'website');
+          setChannels({
+            instagram: ig?.handle ? `@${ig.handle}` : '',
+            website: web?.url || '',
+          });
+          if (ig?.handle || web?.url) setChannelsSaved(true);
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [campaignId]);
+
+  const handleSaveChannels = useCallback(async () => {
+    if (!campaignId) return;
+    setChannelsSaving(true);
+    setChannelsError('');
+    try {
+      const res = await authFetch(getApiUrl(`/api/campaigns/${campaignId}/user-channels`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instagramHandle: channels.instagram.replace(/^@/, '').trim() || null,
+          websiteUrl: channels.website.trim() || null,
+        }),
+      });
+      const json = await safeApiJson(res);
+      if (!res.ok || !json.success) {
+        setChannelsError(json.message || json.error || 'Failed to save');
+        return;
+      }
+      setChannelsSaved(true);
+      Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err: any) {
+      setChannelsError(err.message || 'Network error');
+    } finally {
+      setChannelsSaving(false);
+    }
+  }, [campaignId, channels]);
 
   const updateField = useCallback((field: keyof BusinessData, value: string) => {
     setData(prev => ({ ...prev, [field]: value }));
@@ -364,6 +417,82 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
         {renderTextField('goalDescription', 'Goal Description', 'e.g. Get 50 new coaching clients in 90 days through Instagram', 'document-text-outline', true)}
       </View>
 
+      <View style={[s.channelsSection, { borderColor: '#3B82F630', backgroundColor: isDark ? '#0A1628' : '#EFF6FF' }]}>
+        <View style={s.goalSectionHeader}>
+          <Ionicons name="analytics-outline" size={16} color="#3B82F6" />
+          <Text style={[s.goalSectionTitle, { color: colors.text }]}>Your Channels</Text>
+          {channelsSaved && (channels.instagram || channels.website) && (
+            <Ionicons name="checkmark-circle" size={14} color={colors.success} />
+          )}
+        </View>
+        <Text style={[s.goalSectionSubtitle, { color: colors.textSecondary }]}>
+          Avyron will scrape your own Instagram and website weekly to compare your performance against market shifts
+        </Text>
+
+        <View style={s.channelInputRow}>
+          <View style={[s.channelIconWrap, { backgroundColor: '#E1306C15' }]}>
+            <Ionicons name="logo-instagram" size={16} color="#E1306C" />
+          </View>
+          <TextInput
+            style={[s.channelInput, { color: colors.text, borderColor: isDark ? '#3B82F630' : '#CBD5E1', backgroundColor: isDark ? '#0F1E30' : '#FFFFFF' }]}
+            placeholder="@yourhandle"
+            placeholderTextColor={colors.textMuted}
+            value={channels.instagram}
+            onChangeText={(t) => { setChannels(prev => ({ ...prev, instagram: t })); setChannelsSaved(false); }}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </View>
+
+        <View style={s.channelInputRow}>
+          <View style={[s.channelIconWrap, { backgroundColor: '#3B82F615' }]}>
+            <Ionicons name="globe-outline" size={16} color="#3B82F6" />
+          </View>
+          <TextInput
+            style={[s.channelInput, { color: colors.text, borderColor: isDark ? '#3B82F630' : '#CBD5E1', backgroundColor: isDark ? '#0F1E30' : '#FFFFFF' }]}
+            placeholder="https://yourwebsite.com"
+            placeholderTextColor={colors.textMuted}
+            value={channels.website}
+            onChangeText={(t) => { setChannels(prev => ({ ...prev, website: t })); setChannelsSaved(false); }}
+            autoCapitalize="none"
+            keyboardType="url"
+            autoCorrect={false}
+          />
+        </View>
+
+        {channelsError ? (
+          <View style={[s.errorWrap, { backgroundColor: colors.error + '12', borderColor: colors.error + '30', marginTop: 8 }]}>
+            <Ionicons name="warning-outline" size={14} color={colors.error} />
+            <Text style={[s.errorText, { color: colors.error }]}>{channelsError}</Text>
+          </View>
+        ) : null}
+
+        <Pressable
+          onPress={handleSaveChannels}
+          disabled={channelsSaving || (!channels.instagram && !channels.website)}
+          style={[s.channelsSaveBtn, { opacity: (channelsSaving || (!channels.instagram && !channels.website)) ? 0.5 : 1 }]}
+        >
+          <LinearGradient
+            colors={channelsSaved && (channels.instagram || channels.website) ? ['#10B981', '#059669'] : ['#3B82F6', '#6366F1']}
+            style={s.channelsSaveBtnGrad}
+          >
+            {channelsSaving ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : channelsSaved && (channels.instagram || channels.website) ? (
+              <>
+                <Ionicons name="checkmark-circle" size={16} color="#fff" />
+                <Text style={s.channelsSaveBtnText}>Channels Saved</Text>
+              </>
+            ) : (
+              <>
+                <Ionicons name="save-outline" size={16} color="#fff" />
+                <Text style={s.channelsSaveBtnText}>Save Channels</Text>
+              </>
+            )}
+          </LinearGradient>
+        </Pressable>
+      </View>
+
       {error ? (
         <View style={[s.errorWrap, { backgroundColor: colors.error + '12', borderColor: colors.error + '30' }]}>
           <Ionicons name="warning-outline" size={14} color={colors.error} />
@@ -553,5 +682,49 @@ const s = StyleSheet.create({
   emptyText: {
     fontSize: 14,
     textAlign: 'center' as const,
+  },
+  channelsSection: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 14,
+    marginTop: 16,
+    marginBottom: 4,
+  },
+  channelInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  channelIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  channelInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === 'ios' ? 11 : 9,
+    fontSize: 14,
+  },
+  channelsSaveBtn: {
+    marginTop: 6,
+  },
+  channelsSaveBtnGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 11,
+    borderRadius: 10,
+  },
+  channelsSaveBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700' as const,
   },
 });

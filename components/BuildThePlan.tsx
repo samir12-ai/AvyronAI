@@ -170,10 +170,6 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
   const [dualAnalysisDismissed, setDualAnalysisDismissed] = useState(false);
   const [runNowLoading, setRunNowLoading] = useState(false);
 
-  const [userChannels, setUserChannels] = useState<{ instagram: string; website: string }>({ instagram: '', website: '' });
-  const [userChannelsEditing, setUserChannelsEditing] = useState(false);
-  const [userChannelsSaving, setUserChannelsSaving] = useState(false);
-  const [userChannelsLoaded, setUserChannelsLoaded] = useState(false);
 
   const prevBlueprintStatus = useRef<string | null>(null);
 
@@ -300,32 +296,6 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     fetchCICompetitors();
   }, [fetchCICompetitors]);
 
-  const fetchUserChannels = useCallback(async () => {
-    if (!profileCampaignId) return;
-    try {
-      const res = await authFetch(getApiUrl(`/api/campaigns/${profileCampaignId}/user-channels`));
-      if (res.ok) {
-        const data = await safeApiJson(res);
-        if (data.profiles && Array.isArray(data.profiles)) {
-          const ig = data.profiles.find((p: any) => p.platform === 'instagram');
-          const web = data.profiles.find((p: any) => p.platform === 'website');
-          setUserChannels({
-            instagram: ig?.handle ? `@${ig.handle}` : '',
-            website: web?.url || '',
-          });
-        }
-      }
-    } catch (err) {
-      console.error('[BuildThePlan] Failed to fetch user channels:', err);
-    } finally {
-      setUserChannelsLoaded(true);
-    }
-  }, [profileCampaignId]);
-
-  useEffect(() => {
-    fetchUserChannels();
-  }, [fetchUserChannels]);
-
   const fetchDualAnalysis = useCallback(async () => {
     if (!profileCampaignId) return;
     setDualAnalysisLoading(true);
@@ -368,29 +338,6 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
       setRunNowLoading(false);
     }
   }, [profileCampaignId, dualAnalysis]);
-
-  const saveUserChannels = useCallback(async () => {
-    if (!profileCampaignId) return;
-    setUserChannelsSaving(true);
-    try {
-      const res = await authFetch(getApiUrl(`/api/campaigns/${profileCampaignId}/user-channels`), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          instagramHandle: userChannels.instagram.replace(/^@/, '').trim() || null,
-          websiteUrl: userChannels.website.trim() || null,
-        }),
-      });
-      if (res.ok) {
-        setUserChannelsEditing(false);
-        fetchDualAnalysis();
-      }
-    } catch (err) {
-      console.error('[BuildThePlan] Failed to save user channels:', err);
-    } finally {
-      setUserChannelsSaving(false);
-    }
-  }, [profileCampaignId, userChannels, fetchDualAnalysis]);
 
   const toggleCompetitor = useCallback((id: string) => {
     Haptics.selectionAsync();
@@ -1305,85 +1252,6 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
               )}
             </View>
           </>
-        )}
-
-        <Text style={[s.sectionLabel, { color: colors.text, marginTop: 16 }]}>Your Channels</Text>
-        {userChannelsEditing ? (
-          <View style={[s.userChannelEditCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <View style={s.userChannelRow}>
-              <Ionicons name="logo-instagram" size={18} color="#E1306C" />
-              <TextInput
-                style={[s.userChannelInput, { color: colors.text, borderColor: colors.cardBorder, backgroundColor: colors.background }]}
-                placeholder="@yourhandle"
-                placeholderTextColor={colors.textMuted}
-                value={userChannels.instagram}
-                onChangeText={(t) => setUserChannels(prev => ({ ...prev, instagram: t }))}
-                autoCapitalize="none"
-              />
-            </View>
-            <View style={s.userChannelRow}>
-              <Ionicons name="globe-outline" size={18} color="#3B82F6" />
-              <TextInput
-                style={[s.userChannelInput, { color: colors.text, borderColor: colors.cardBorder, backgroundColor: colors.background }]}
-                placeholder="https://yoursite.com"
-                placeholderTextColor={colors.textMuted}
-                value={userChannels.website}
-                onChangeText={(t) => setUserChannels(prev => ({ ...prev, website: t }))}
-                autoCapitalize="none"
-                keyboardType="url"
-              />
-            </View>
-            <View style={s.userChannelBtnRow}>
-              <Pressable
-                onPress={() => setUserChannelsEditing(false)}
-                style={[s.userChannelCancelBtn, { borderColor: colors.cardBorder }]}
-              >
-                <Text style={[s.userChannelCancelText, { color: colors.textSecondary }]}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={saveUserChannels}
-                disabled={userChannelsSaving}
-                style={[s.userChannelSaveBtn, { opacity: userChannelsSaving ? 0.6 : 1 }]}
-              >
-                <LinearGradient colors={['#6366F1', '#8B5CF6']} style={s.userChannelSaveGrad}>
-                  {userChannelsSaving ? (
-                    <ActivityIndicator color="#fff" size="small" />
-                  ) : (
-                    <Text style={s.userChannelSaveText}>Save Channels</Text>
-                  )}
-                </LinearGradient>
-              </Pressable>
-            </View>
-          </View>
-        ) : (
-          <Pressable
-            onPress={() => setUserChannelsEditing(true)}
-            style={[s.userChannelSummary, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
-          >
-            <View style={{ flex: 1 }}>
-              {userChannels.instagram || userChannels.website ? (
-                <View style={{ gap: 4 }}>
-                  {userChannels.instagram ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Ionicons name="logo-instagram" size={14} color="#E1306C" />
-                      <Text style={[{ fontSize: 13, color: colors.text }]}>{userChannels.instagram}</Text>
-                    </View>
-                  ) : null}
-                  {userChannels.website ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Ionicons name="globe-outline" size={14} color="#3B82F6" />
-                      <Text style={[{ fontSize: 13, color: colors.text }]} numberOfLines={1}>{userChannels.website}</Text>
-                    </View>
-                  ) : null}
-                </View>
-              ) : (
-                <Text style={[{ fontSize: 13, color: colors.textMuted }]}>
-                  Add your Instagram & website for weekly self-analysis
-                </Text>
-              )}
-            </View>
-            <Ionicons name="pencil" size={16} color={colors.textSecondary} />
-          </Pressable>
         )}
 
         {dualAnalysis && !dualAnalysisDismissed && dualAnalysis.classification !== 'no_data' && dualAnalysis.classification !== 'no_change' && (
@@ -3457,66 +3325,6 @@ const s = StyleSheet.create({
   profileIncompleteDesc: {
     fontSize: 12,
     marginTop: 2,
-  },
-  userChannelEditCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 12,
-    marginBottom: 8,
-    gap: 10,
-  },
-  userChannelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  userChannelInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontSize: 13,
-  },
-  userChannelBtnRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 4,
-  },
-  userChannelCancelBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingVertical: 9,
-    alignItems: 'center',
-  },
-  userChannelCancelText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  userChannelSaveBtn: {
-    flex: 2,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  userChannelSaveGrad: {
-    paddingVertical: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  userChannelSaveText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  userChannelSummary: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 8,
-    gap: 8,
   },
   dualAnalysisCard: {
     borderRadius: 12,
